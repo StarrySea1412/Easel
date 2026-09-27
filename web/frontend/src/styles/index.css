@@ -1312,3 +1312,34 @@ textarea.field { resize: vertical; min-height: 90px; }
   padding: 1px 8px; cursor: pointer; white-space: nowrap;
 }
 .settings-overlay .adv-btn:hover { color: var(--text); border-color: var(--text); }
+
+/* ---- 技能抽屉 · 新手导读（feat/skill-guide） ---- */
+/* overflow-wrap 可继承：面板内长英文 token（/images/generations、base_url）窄屏必须能断行 */
+.guide-panel { overflow-wrap: anywhere; }
+.guide-panel .guide-block { margin-bottom: 12px; }
+.guide-panel .guide-block:last-child { margin-bottom: 0; }
+.guide-label { font-size: 12.5px; font-weight: 650; color: var(--text-secondary); margin-bottom: 5px; }
+.guide-text { font-size: 13.5px; line-height: 1.65; }
+.guide-missing { font-size: 13px; color: var(--text-tertiary); font-style: italic; }
+.guide-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.guide-chip {
+  font: inherit; font-size: 12.5px; line-height: 1.5; padding: 2px 10px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-secondary);
+}
+.guide-chip-btn { cursor: pointer; transition: all 0.15s ease; }
+.guide-chip-btn:hover { border-color: var(--accent-start); color: var(--accent-end); background: var(--accent-soft); }
+.guide-list { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.7; }
+.guide-list li { margin-bottom: 3px; }
+.guide-badge { margin-left: 6px; }
+.guide-sub { margin-left: 6px; font-size: 12px; color: var(--text-tertiary); }
+.guide-more { margin-top: 10px; }
+.guide-more summary { cursor: pointer; font-size: 12.5px; color: var(--text-secondary); list-style: none; }
+.guide-more summary::-webkit-details-marker { display: none; }
+.guide-more summary::before { content: '▸ '; color: var(--text-tertiary); }
+.guide-more[open] summary::before { content: '▾ '; }
+.guide-more .guide-list { margin-top: 8px; font-size: 13px; }
+.guide-terms { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+.guide-raw > summary.panel-title { cursor: pointer; margin-bottom: 0; list-style: none; }
+.guide-raw > summary.panel-title::-webkit-details-marker { display: none; }
+.guide-raw > summary.panel-title::after { content: '▾'; margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
+.guide-raw[open] > summary.panel-title::after { content: '▴'; }

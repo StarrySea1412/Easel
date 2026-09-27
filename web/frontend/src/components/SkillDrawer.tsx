@@ -26,6 +26,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
   const [running, setRunning] = useState(false);
   const [runErr, setRunErr] = useState('');
   const reqSeq = useRef(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const loadDetail = () => {
     let ignore = false;
@@ -39,6 +40,17 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
 
   const bodyHtml = useMemo(() => renderMarkdown(detail?.body || ''), [detail?.body]);
   const resultHtml = useMemo(() => renderMarkdown(result), [result]);
+
+  // 新手导读：media（如 AI 生图）与 api 标签重复时只留 api 那条（后者带配置入口）
+  const guide = detail?.guide;
+  const guideMedia = guide
+    ? guide.needs.media.filter((m) => !(guide.needs.api && guide.needs.api.label.includes(m.label.replace(/^AI\s*/, ''))))
+    : [];
+  const hasNeeds = !!guide && (
+    guide.needs.inputs.length > 0 || !!guide.needs.api || guideMedia.length > 0
+    || guide.needs.accounts.length > 0 || guide.needs.tools.length > 0
+    || guide.needs.os.length > 0 || guide.needs.prep.length > 0
+  );
 
   const handleSaveEnv = async () => {
     const updates = Object.fromEntries(
@@ -104,6 +116,122 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
 
         <div className="drawer-body">
           {loadErr && <div style={{ color: 'var(--red)', fontSize: 14 }}>{loadErr}</div>}
+
+          {/* 新手导读：按 SKILL.md 原文静态整理，不需要先配模型 */}
+          {guide && (
+            <div className="panel guide-panel">
+              <div className="panel-title">🧭 新手导读
+                <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 12 }}>
+                  （按原文整理，原文没写的会标明）
+                </span>
+              </div>
+
+              <div className="guide-block">
+                <div className="guide-label">能做什么</div>
+                {guide.what
+                  ? <div className="guide-text">{guide.what}</div>
+                  : <div className="guide-missing">原文未说明</div>}
+              </div>
+
+              <div className="guide-block">
+                <div className="guide-label">适合谁 · 什么时候用</div>
+                {guide.whenToUse.length > 0 ? (
+                  <div className="guide-chips">
+                    {guide.whenToUse.map((t) => <span key={t} className="guide-chip">{t}</span>)}
+                  </div>
+                ) : <div className="guide-missing">原文未说明</div>}
+              </div>
+
+              <div className="guide-block">
+                <div className="guide-label">需要什么</div>
+                {hasNeeds ? (
+                  <ul className="guide-list">
+                    {guide.needs.inputs.length > 0 && (
+                      <li>要准备：{guide.needs.inputs.join('、')}。</li>
+                    )}
+                    {guide.needs.api && (
+                      <li>
+                        要配「{guide.needs.api.label}」的 API Key：
+                        {guide.needs.api.configured
+                          ? <span className="badge badge-ok guide-badge">已配置</span>
+                          : <span className="badge badge-warn guide-badge">未配置</span>}
+                        <span className="guide-sub">费用以所选服务商为准</span>
+                      </li>
+                    )}
+                    {guideMedia.map((m) => (
+                      <li key={m.label}>
+                        {m.label}：
+                        {m.configured
+                          ? <span className="badge badge-ok guide-badge">已配置</span>
+                          : <span className="badge badge-warn guide-badge">未配置</span>}
+                        {!m.configured && <span className="guide-sub">去「设置 → 生图」配置</span>}
+                      </li>
+                    ))}
+                    {guide.needs.accounts.length > 0 && (
+                      <li>要登录：{guide.needs.accounts.join(' / ')} 平台账号。</li>
+                    )}
+                    {guide.needs.tools.length > 0 && (
+                      <li>额外工具：{guide.needs.tools.join('、')}。</li>
+                    )}
+                    {guide.needs.os.length > 0 && (
+                      <li>系统限制：仅 {guide.needs.os.join(' / ')}。</li>
+                    )}
+                    {guide.needs.prep.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                ) : <div className="guide-missing">原文未说明</div>}
+              </div>
+
+              <div className="guide-block">
+                <div className="guide-label">怎么开始</div>
+                <ol className="guide-list">
+                  {guide.howToStart.map((t, i) => <li key={i}>{t}</li>)}
+                </ol>
+              </div>
+
+              <div className="guide-block">
+                <div className="guide-label">会得到什么</div>
+                {guide.whatYouGet.length > 0 ? (
+                  <ul className="guide-list">
+                    {guide.whatYouGet.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                ) : <div className="guide-missing">原文未说明</div>}
+              </div>
+
+              {guide.examples.length > 0 && (
+                <div className="guide-block">
+                  <div className="guide-label">试试这样说（点一下填入运行框）</div>
+                  <div className="guide-chips">
+                    {guide.examples.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className="guide-chip guide-chip-btn"
+                        title="点击填入下方运行框"
+                        onClick={() => { setInput(t); inputRef.current?.focus(); }}
+                      >{t}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {guide.steps.length > 0 && (
+                <details className="guide-more">
+                  <summary>它内部怎么做（摘自原文）</summary>
+                  <ol className="guide-list">
+                    {guide.steps.map((t, i) => <li key={i}>{t}</li>)}
+                  </ol>
+                </details>
+              )}
+
+              {guide.terms.length > 0 && (
+                <div className="guide-terms">
+                  {guide.terms.map((t) => (
+                    <div key={t.term}><strong>{t.term}</strong>：{t.explain}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* API 配置 */}
           {detail?.needsApi && detail.apiSpec && (
@@ -202,6 +330,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
               </div>
             )}
             <textarea
+              ref={inputRef}
               className="field"
               placeholder="输入内容，例如主题 / 素材 / 要求…"
               value={input}
@@ -221,13 +350,13 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
             )}
           </div>
 
-          {/* 描述 */}
-          <div className="panel">
-            <div className="panel-title">📖 说明</div>
+          {/* 原文入口：默认折叠，保留完整 SKILL.md 与运行命令 */}
+          <details className="panel guide-raw">
+            <summary className="panel-title">📖 原始 SKILL.md 全文（完整步骤与命令）</summary>
             {detail
-              ? <div className="skill-body-md" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+              ? <div className="skill-body-md" style={{ marginTop: 10 }} dangerouslySetInnerHTML={{ __html: bodyHtml }} />
               : !loadErr && <div className="loading"><div className="spinner" />加载中…</div>}
-          </div>
+          </details>
         </div>
       </div>
     </div>
