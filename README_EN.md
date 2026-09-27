@@ -53,6 +53,10 @@ Easel follows five connected workflows: **Discover** relevant trends and opportu
 > - **Be cautious with automated Xiaohongshu publishing:** automation may trigger verification, reach restrictions, or account risk. Use preview and preflight checks, and prefer human-confirmed publishing.
 > - **Research applied to real life:** Easel brings our research into real social media workflows. We will continue exploring social intelligence for AI in social media, including a deeper understanding of creators, audiences, and authentic interaction.
 
+## 🧭 Tech Stack Overview
+
+![Easel tech stack overview](assets/readme/tech-stack.png)
+
 ## ✨ Why Easel?
 
 - **One Agent across the entire workflow:** discover trends, evaluate topics, plan calendars, generate copy and visuals, produce video, publish, and analyze results in one continuous flow.
