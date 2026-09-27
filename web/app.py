@@ -1627,6 +1627,218 @@ async def api_models_selftest(req: SelftestRequest):
     return {"channel": channel, "results": results, "testedAt": int(time.time())}
 
 
+# ---- 服务商预设与模型发现（docs/secondary-development-plan.md 功能 C 第一步）----
+# 预设只放公开的端点与协议，不附带任何 Key；模型列表一律现场向服务商查询，不预置猜测。
+# 目标地址与跳转沿用自测那套闸（_valid_base_url / _ssrf_safe / 不跟随重定向），
+# 报错文案统一脱敏，Key 不落盘、不入日志、不进缓存。
+
+_MODEL_PRESETS: dict[str, list[dict]] = {
+    "chat": [
+        {"id": "deepseek", "name": "DeepSeek 官方", "protocol": "openai",
+         "baseUrl": "https://api.deepseek.com/v1", "note": "官方直连"},
+        {"id": "siliconflow", "name": "硅基流动 SiliconFlow", "protocol": "openai",
+         "baseUrl": "https://api.siliconflow.cn/v1", "note": "国内聚合"},
+        {"id": "dashscope", "name": "阿里云百炼（通义千问）", "protocol": "openai",
+         "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1", "note": "OpenAI 兼容模式"},
+        {"id": "ark", "name": "火山引擎方舟", "protocol": "openai",
+         "baseUrl": "https://ark.cn-beijing.volces.com/api/v3", "note": "豆包 / Seed 系"},
+        {"id": "moonshot", "name": "月之暗面 Kimi", "protocol": "openai",
+         "baseUrl": "https://api.moonshot.cn/v1", "note": "官方直连"},
+        {"id": "zhipu", "name": "智谱 GLM", "protocol": "openai",
+         "baseUrl": "https://open.bigmodel.cn/api/paas/v4", "note": "官方直连"},
+        {"id": "openrouter", "name": "OpenRouter", "protocol": "openai",
+         "baseUrl": "https://openrouter.ai/api/v1", "note": "海外聚合"},
+        {"id": "anthropic", "name": "Anthropic 官方", "protocol": "anthropic",
+         "baseUrl": "https://api.anthropic.com", "note": "官方协议（x-api-key）"},
+    ],
+    "transcribe": [
+        {"id": "siliconflow", "name": "硅基流动 SiliconFlow", "protocol": "openai",
+         "baseUrl": "https://api.siliconflow.cn/v1", "note": "SenseVoice 等"},
+    ],
+    "image": [
+        {"id": "openai", "name": "OpenAI 官方", "protocol": "openai",
+         "baseUrl": "https://api.openai.com/v1", "note": "gpt-image 等"},
+        {"id": "apimart", "name": "apimart（异步任务）", "protocol": "openai",
+         "baseUrl": "https://api.apimart.ai/v1", "note": "异步轮询出图"},
+    ],
+}
+
+_PRESET_NOTE = "端点为公开信息；是否支持模型枚举因服务商而异，不支持时请手动填写模型名。"
+
+
+@app.get("/api/models/presets")
+async def api_models_presets(channel: str = ""):
+    """服务商预设（公开端点/协议/说明，不含任何密钥）。channel 省略时返回全部通道。"""
+    if channel:
+        return {"channel": channel, "presets": [dict(p) for p in _MODEL_PRESETS.get(channel, [])],
+                "note": _PRESET_NOTE}
+    return {"presets": {ch: [dict(p) for p in ps] for ch, ps in _MODEL_PRESETS.items()},
+            "note": _PRESET_NOTE}
+
+
+class ModelDiscoverRequest(BaseModel):
+    channel: str = "chat"
+    slot: str = ""
+    baseUrl: str = ""
+    apiKey: str = ""
+    protocol: str = ""   # openai | anthropic；留空按 slot 推断
+
+
+_ANTHROPIC_VERSION = "2023-06-01"
+
+
+def _is_loopback_url(u: str) -> bool:
+    """地址主机是否就是回环（配合仅冒烟用的本地放行开关）。"""
+    try:
+        host = urllib.parse.urlparse(u).hostname or ""
+        return host in ("127.0.0.1", "localhost", "::1")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _saved_key_for(channel: str, slot: str) -> str:
+    """该通道/槽位已保存的 Key（供「不重填也能获取模型」）；没有给空串。"""
+    env = _read_env()
+    if channel == "chat":
+        return {"openai": env.get("OPENAI_API_KEY", ""),
+                "relay": env.get("EASEL_LLM_API_KEY", ""),
+                "anthropic": env.get("ANTHROPIC_API_KEY", "")}.get(slot, "") or ""
+    if channel == "transcribe":
+        return env.get("SILICONFLOW_API_KEY", "") or ""
+    if channel == "image":
+        for name in ("IMG_API_KEY", "OPENAI_API_KEY", "API_KEY"):
+            if (env.get(name) or "").strip():
+                return env[name]
+    return ""
+
+
+def _redact(text: object, secret: str) -> str:
+    """异常/响应体里可能回显 Key，统一抹掉再回给前端（也避免写进日志）。"""
+    t = str(text or "")
+    if secret and secret in t:
+        t = t.replace(secret, "••••")
+    return t[:180]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """发现请求不跟随跳转：跟了等于绕过前面的地址闸。"""
+
+    def redirect_request(self, *_a, **_kw):  # noqa: D102
+        return None
+
+
+def _ssrf_safe_allow_local() -> bool:
+    """仅本机冒烟（EASEL_ALLOW_DISCOVER_LOCAL=1）：127.0.0.1 假服务验证成功态用。
+    绝不能默认开启——开着等于把「拿真 Key 打内网」的闸拆了。"""
+    return os.environ.get("EASEL_ALLOW_DISCOVER_LOCAL", "").strip() == "1"
+
+
+def _discover_models(base: str, key: str, protocol: str = "openai",
+                     timeout: float = 10.0) -> dict:
+    """向服务商查询可用模型列表 → {ok, kind, message, models, elapsedMs}。
+    OpenAI 兼容：GET {base}/models（Bearer）；Anthropic：GET {base}/v1/models（x-api-key）。"""
+    base = (base or "").strip().rstrip("/")
+    if not _valid_base_url(base):
+        return {"ok": False, "kind": "invalid_url", "models": [],
+                "message": "地址需是合法的 http(s):// 根地址"}
+    local_ok = _ssrf_safe_allow_local()
+    if not _ssrf_safe(base) and not (local_ok and _is_loopback_url(base)):
+        return {"ok": False, "kind": "blocked_target", "models": [],
+                "message": "目标指向本机/内网地址，已拒绝（避免服务端被当作内网跳板）"}
+    url = base + ("/v1/models" if protocol == "anthropic" else "/models")
+    headers = {"Accept": "application/json"}
+    if key:
+        if protocol == "anthropic":
+            headers["x-api-key"] = key
+            headers["anthropic-version"] = _ANTHROPIC_VERSION
+        else:
+            headers["Authorization"] = f"Bearer {key}"
+    opener = urllib.request.build_opener(_NoRedirect)
+    t0 = time.time()
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=timeout) as resp:
+            raw = resp.read(512 * 1024)
+    except urllib.error.HTTPError as e:
+        kinds = {401: "unauthorized", 403: "unauthorized", 404: "not_found", 429: "rate_limited"}
+        kind = kinds.get(e.code, "server_error" if e.code >= 500 else "http_error")
+        if 300 <= e.code < 400:
+            kind, msg = "redirect_blocked", "接口发生了跳转，已按安全策略拒绝跟随"
+        elif kind == "unauthorized":
+            msg = "Key 无效或没有权限（401/403）"
+        elif kind == "not_found":
+            msg = "该地址没有模型列表接口（404），请手动填写模型名"
+        elif kind == "rate_limited":
+            msg = "请求过于频繁（429），稍后再试"
+        else:
+            msg = f"服务商返回 HTTP {e.code}"
+        return {"ok": False, "kind": kind, "message": msg, "models": [],
+                "elapsedMs": int((time.time() - t0) * 1000)}
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+        reason = getattr(e, "reason", e)
+        if isinstance(reason, (socket.timeout, TimeoutError)):
+            return {"ok": False, "kind": "timeout", "models": [],
+                    "message": f"请求超时（{int(timeout)} 秒），请检查网络或代理",
+                    "elapsedMs": int((time.time() - t0) * 1000)}
+        return {"ok": False, "kind": "network", "models": [],
+                "message": f"网络错误：{_redact(reason, key)}",
+                "elapsedMs": int((time.time() - t0) * 1000)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "kind": "network", "models": [],
+                "message": f"请求失败：{_redact(e, key)}",
+                "elapsedMs": int((time.time() - t0) * 1000)}
+    try:
+        payload = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "kind": "unsupported", "models": [],
+                "message": "响应不是模型列表（该服务商可能不支持枚举），请手动填写模型名",
+                "elapsedMs": int((time.time() - t0) * 1000)}
+    items = payload.get("data") if isinstance(payload, dict) else payload
+    if not items and isinstance(payload, dict):
+        items = payload.get("models")
+    models: list[str] = []
+    for it in (items or []):
+        mid = it.get("id") if isinstance(it, dict) else (it if isinstance(it, str) else "")
+        mid = str(mid or "").strip()[:120]
+        if mid and mid not in models:
+            models.append(mid)
+        if len(models) >= 500:
+            break
+    if not models:
+        return {"ok": False, "kind": "empty", "models": [],
+                "message": "接口可用但没返回任何模型，请手动填写",
+                "elapsedMs": int((time.time() - t0) * 1000)}
+    return {"ok": True, "kind": "ok", "models": models,
+            "message": f"获取到 {len(models)} 个模型",
+            "elapsedMs": int((time.time() - t0) * 1000)}
+
+
+@app.post("/api/models/discover")
+async def api_models_discover(req: ModelDiscoverRequest):
+    """按已填或已保存的地址与 Key 拉取可用模型列表；远端结果原样返回，不落盘、不缓存 Key。"""
+    channel = (req.channel or "chat").strip()
+    if channel not in ("chat", "transcribe", "image", "video", "music", "speech"):
+        raise HTTPException(400, "未知通道")
+    base = (req.baseUrl or "").strip().rstrip("/")
+    if not base:
+        raise HTTPException(400, "请先填写或选择 Base URL")
+    slot = (req.slot or "").strip()
+    typed = (req.apiKey or "").strip()
+    key = typed or _saved_key_for(channel, slot)
+    proto = (req.protocol or "").strip().lower()
+    if proto not in ("openai", "anthropic"):
+        proto = "anthropic" if (channel == "chat" and slot == "anthropic") else "openai"
+    result = await asyncio.to_thread(_discover_models, base, key, proto)
+    result.update({
+        "channel": channel,
+        "slot": slot,
+        "protocol": proto,
+        "source": base,
+        "fetchedAt": int(time.time()),
+        "keySource": "input" if typed else ("saved" if key else "none"),
+    })
+    return result
+
+
 class AttachmentRef(BaseModel):
     id: str
     name: str

@@ -763,6 +763,45 @@ export interface ModelRow {
   baseOptional?: boolean;
   adv?: boolean;
   deletable?: boolean;
+  /** 预设带出的协议（仅本地态；缺省按 slot 推断）。 */
+  protocol?: string;
+}
+
+// ── 服务商预设与模型发现（对应方案功能 C 第一步） ──
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  protocol: string;   // openai | anthropic
+  baseUrl: string;
+  note: string;
+}
+
+export interface DiscoverResult {
+  ok: boolean;
+  kind: string;       // ok | invalid_url | blocked_target | unauthorized | not_found | unsupported | empty | timeout | network | ...
+  message: string;
+  models: string[];
+  channel: string;
+  slot: string;
+  source: string;     // 实际查询的根地址（不含 Key）
+  fetchedAt: number;
+  keySource: 'input' | 'saved' | 'none';
+  elapsedMs?: number;
+}
+
+export function fetchModelPresets(): Promise<{ presets: Record<string, ModelPreset[]>; note: string }> {
+  return request('/api/models/presets');
+}
+
+export function discoverModels(payload: {
+  channel: string; slot?: string; baseUrl: string; apiKey?: string; protocol?: string;
+}): Promise<DiscoverResult> {
+  return request('/api/models/discover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface ModelSaveRow {

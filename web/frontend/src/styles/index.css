@@ -1312,3 +1312,23 @@ textarea.field { resize: vertical; min-height: 90px; }
   padding: 1px 8px; cursor: pointer; white-space: nowrap;
 }
 .settings-overlay .adv-btn:hover { color: var(--text); border-color: var(--text); }
+
+/* ---- 设置面板 · 服务商预设与「获取模型」（feat/model-discovery） ---- */
+.settings-overlay select.mock {
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px; font: inherit;
+  font-size: 12.5px; background: var(--bg); color: var(--text); width: 100%; min-width: 0;
+}
+.settings-overlay select.mock:disabled { background: var(--surface-2); color: var(--text-tertiary); }
+.settings-overlay .model-fetch { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.settings-overlay .model-fetch .mock { flex: 1; min-width: 0; }
+.settings-overlay .model-fetch .adv-btn { flex: none; }
+.settings-overlay .discover-row {
+  grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 9px;
+  margin-top: 7px; padding: 7px 11px; border-radius: 8px; font-size: 12.5px;
+  background: var(--surface-hover); color: var(--text-secondary);
+}
+.settings-overlay .discover-row.ok { background: var(--green-soft); color: #15803d; }
+.settings-overlay .discover-row.bad { background: var(--amber-soft); color: #b45309; }
+.settings-overlay .discover-row .dr-src { color: var(--text-tertiary); margin-left: 6px; }
+.settings-overlay .discover-row .dr-pick { display: flex; align-items: center; gap: 7px; min-width: 220px; }
+.settings-overlay .discover-row .dr-pick .mock { min-width: 160px; }
