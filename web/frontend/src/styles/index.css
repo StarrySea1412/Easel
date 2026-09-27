@@ -1332,3 +1332,30 @@ textarea.field { resize: vertical; min-height: 90px; }
 .settings-overlay .discover-row .dr-src { color: var(--text-tertiary); margin-left: 6px; }
 .settings-overlay .discover-row .dr-pick { display: flex; align-items: center; gap: 7px; min-width: 220px; }
 .settings-overlay .discover-row .dr-pick .mock { min-width: 160px; }
+
+/* ---- 设置面板 · 从本机配置导入（feat/model-config-import） ---- */
+.settings-overlay .import-block { margin-top: 10px; }
+.settings-overlay .import-body {
+  margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-2);
+}
+.settings-overlay .import-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.settings-overlay .import-row select.mock, .settings-overlay .import-row input.mock { flex: 1; min-width: 180px; }
+.settings-overlay .import-msg { margin-top: 9px; font-size: 12.5px; color: var(--text-secondary); }
+.settings-overlay .import-list { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow-y: auto; }
+.settings-overlay .import-item {
+  display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--bg); cursor: pointer;
+}
+.settings-overlay .import-item.on { border-color: var(--accent-start); background: var(--accent-soft); }
+.settings-overlay .import-item.off { opacity: .55; cursor: not-allowed; }
+.settings-overlay .import-item input[type="radio"] { margin-top: 3px; }
+.settings-overlay .ii-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.settings-overlay .ii-name { font-weight: 650; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+.settings-overlay .ii-name .badge { font-size: 11px; padding: 1px 7px; font-weight: 500; }
+.settings-overlay .ii-app { color: var(--text-tertiary); font-weight: 400; font-size: 11.5px; }
+.settings-overlay .ii-base { font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+.settings-overlay .ii-meta { font-size: 11.5px; color: var(--text-tertiary); }
+.settings-overlay .ii-ov { font-size: 11.5px; color: #b45309; word-break: break-all; }
+.settings-overlay .import-foot { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+.settings-overlay .import-foot .hint { font-size: 11.5px; color: var(--text-tertiary); }

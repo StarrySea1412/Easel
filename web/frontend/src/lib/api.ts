@@ -804,6 +804,73 @@ export function discoverModels(payload: {
   });
 }
 
+// ── 从本机配置导入（方案功能 C 第二步） ──
+
+export interface ImportSource {
+  id: string;          // openclaw | cc-switch
+  label: string;
+  note: string;
+  available: boolean;
+  path: string;
+  detail: string;      // 不可用时的原因
+}
+
+export interface ImportOverwrite {
+  field: string;
+  current: string;
+  incoming: string;
+}
+
+export interface ImportCandidate {
+  id: string;
+  source: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  protocol: string;
+  appType: string;
+  note: string;
+  keyPresent: boolean;
+  keyMasked: string;   // 只回脱敏值，明文不出后端
+  compatible: boolean;
+  skipReason: string;
+  overwrites: ImportOverwrite[];
+}
+
+export interface ImportPreview {
+  source: string;
+  path: string;
+  slot: string;
+  candidates: ImportCandidate[];
+  errors: string[];
+  readAt: number;
+  note: string;
+}
+
+export interface ImportSlot { id: string; env: string[] }
+
+export function fetchImportSources(): Promise<{ sources: ImportSource[]; slots: ImportSlot[] }> {
+  return request('/api/models/import/sources');
+}
+
+export function previewImport(source: string, slot: string, path = ''): Promise<ImportPreview> {
+  return request('/api/models/import/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, slot, path }),
+  });
+}
+
+export function applyImport(source: string, id: string, slot: string, path = ''): Promise<{
+  ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
+}> {
+  return request('/api/models/import/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, id, slot, path }),
+  });
+}
+
 export interface ModelSaveRow {
   slot: string;
   name?: string;

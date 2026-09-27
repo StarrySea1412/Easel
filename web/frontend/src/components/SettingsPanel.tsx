@@ -6,8 +6,12 @@ import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchModelPresets, discoverModels,
+  fetchImportSources, previewImport, applyImport,
 } from '../lib/api';
-import type { EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult } from '../lib/api';
+import type {
+  EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
+  ImportSource, ImportPreview,
+} from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
 
 interface Props { onClose: () => void; }
@@ -192,6 +196,73 @@ export default function SettingsPanel({ onClose }: Props) {
       setDiscovering('');
     }
   }, []);
+
+  // ── 从本机配置导入（方案功能 C 第二步） ────────────────────
+  const [impOpen, setImpOpen] = useState(false);
+  const [impSources, setImpSources] = useState<ImportSource[]>([]);
+  const [impSource, setImpSource] = useState('');
+  const [impPath, setImpPath] = useState('');
+  const [impSlot, setImpSlot] = useState('openai');
+  const [impPreview, setImpPreview] = useState<ImportPreview | null>(null);
+  const [impPick, setImpPick] = useState('');
+  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply'>('');
+  const [impMsg, setImpMsg] = useState('');
+
+  const openImport = useCallback(async () => {
+    setImpOpen(true);
+    if (impSources.length) return;
+    try {
+      const d = await fetchImportSources();
+      setImpSources(d.sources);
+      const first = d.sources.find((s) => s.available) || d.sources[0];
+      if (first) setImpSource(first.id);
+    } catch (e) {
+      setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+    }
+  }, [impSources.length]);
+
+  const loadImportPreview = useCallback(async () => {
+    if (!impSource) { setImpMsg('先选择一个来源'); return; }
+    setImpBusy('preview');
+    setImpMsg('');
+    setImpPreview(null);
+    setImpPick('');
+    try {
+      const d = await previewImport(impSource, impSlot, impPath.trim());
+      setImpPreview(d);
+      const first = d.candidates.find((c) => c.compatible);
+      setImpPick(first ? first.id : '');
+      if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
+    } catch (e) {
+      setImpMsg(e instanceof Error ? e.message : '预览失败');
+    } finally {
+      setImpBusy('');
+    }
+  }, [impSource, impSlot, impPath]);
+
+  const applyImportPick = useCallback(async () => {
+    if (!impPick) return;
+    setImpBusy('apply');
+    setImpMsg('');
+    try {
+      const r = await applyImport(impSource, impPick, impSlot, impPath.trim());
+      setImpMsg(`✓ 已导入「${r.applied.name}」→ ${impSlot}${r.note ? `（${r.note}）` : ''}`);
+      const d = await fetchModelChannels();
+      setChatRows(d.channels.chat.rows || []);
+      setTransRows(d.channels.transcribe.rows || []);
+      setMediaRows({
+        image: d.channels.image?.rows || [],
+        video: d.channels.video?.rows || [],
+        music: d.channels.music?.rows || [],
+        speech: d.channels.speech?.rows || [],
+      });
+      void loadImportPreview();
+    } catch (e) {
+      setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
+    } finally {
+      setImpBusy('');
+    }
+  }, [impSource, impPick, impSlot, impPath, loadImportPreview]);
 
   useEffect(() => {
     let alive = true;
@@ -620,6 +691,98 @@ export default function SettingsPanel({ onClose }: Props) {
                       }),
                     })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
+                    <div className="import-block">
+                      <button className="adv-btn" onClick={() => void openImport()}>
+                        {impOpen ? '收起「从本机配置导入」' : '⬇ 从本机配置导入（CC Switch / OpenClaw）'}
+                      </button>
+                      {impOpen && (
+                        <div className="import-body">
+                          <div className="import-row">
+                            <select
+                              className="mock"
+                              value={impSource}
+                              onChange={(e) => { setImpSource(e.target.value); setImpPreview(null); }}
+                            >
+                              {impSources.length === 0 && <option value="">读取来源中…</option>}
+                              {impSources.map((s) => (
+                                <option key={s.id} value={s.id} disabled={!s.available}>
+                                  {s.label}{s.available ? '' : `（不可用：${s.detail}）`}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="mock"
+                              value={impSlot}
+                              onChange={(e) => { setImpSlot(e.target.value); setImpPreview(null); }}
+                            >
+                              <option value="openai">写入：对话主通道（OPENAI_*）</option>
+                              <option value="relay">写入：对话备用 relay（EASEL_LLM_*）</option>
+                              <option value="anthropic">写入：Anthropic 槽位（ANTHROPIC_*）</option>
+                            </select>
+                            <input
+                              className="mock"
+                              value={impPath}
+                              placeholder="自定义路径（可留空）"
+                              onChange={(e) => setImpPath(e.target.value)}
+                            />
+                            <button className="btn btn-sm" onClick={() => void loadImportPreview()} disabled={impBusy === 'preview'}>
+                              {impBusy === 'preview' ? '读取中…' : '读取并预览'}
+                            </button>
+                          </div>
+                          {impMsg && <div className="import-msg">{impMsg}</div>}
+                          {impPreview && impPreview.candidates.length > 0 && (
+                            <>
+                              <div className="import-list">
+                                {impPreview.candidates.map((c) => (
+                                  <label
+                                    key={c.id}
+                                    className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="imp-pick"
+                                      disabled={!c.compatible}
+                                      checked={impPick === c.id}
+                                      onChange={() => setImpPick(c.id)}
+                                    />
+                                    <span className="ii-main">
+                                      <span className="ii-name">
+                                        {c.name}
+                                        <span className="badge">{c.protocol}</span>
+                                        {c.appType && <span className="ii-app">{c.appType}</span>}
+                                      </span>
+                                      <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
+                                      <span className="ii-meta">
+                                        {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
+                                        {!c.compatible && ` · ${c.skipReason}`}
+                                      </span>
+                                      {c.compatible && c.overwrites.length > 0 && (
+                                        <span className="ii-ov">
+                                          将覆盖：{c.overwrites.map((o) => `${o.field}（${o.current} → ${o.incoming}）`).join('；')}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="import-foot">
+                                <button
+                                  className="btn btn-sm btn-primary"
+                                  onClick={() => void applyImportPick()}
+                                  disabled={!impPick || impBusy === 'apply'}
+                                >
+                                  {impBusy === 'apply' ? '导入中…' : '导入选中项'}
+                                </button>
+                                <span className="hint">{impPreview.note}</span>
+                              </div>
+                            </>
+                          )}
+                          {impPreview && impPreview.errors.length > 0 && (
+                            <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；预设只填公开端点，模型列表现场向服务商查询，不做猜测。</div>
                   </section>
                 )}

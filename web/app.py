@@ -1839,6 +1839,136 @@ async def api_models_discover(req: ModelDiscoverRequest):
     return result
 
 
+# ---- 从本机配置导入（方案功能 C 第二步）----
+# 只读用户主动选择的来源；预览不回明文密钥；导入时重新读取源文件、只写所选槽位的几项，
+# 其余配置（其它槽位、其它通道、openclaw 自定义供应商）保持不动。
+
+import local_config_import  # noqa: E402  （web/ 在 sys.path 上）
+
+_IMPORT_SLOT_ENV: dict[str, tuple[str, str, str]] = {
+    "openai": ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"),
+    "anthropic": ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_MODEL"),
+    "relay": ("EASEL_LLM_BASE_URL", "EASEL_LLM_API_KEY", "CLAUDE_MODEL"),
+}
+
+
+@app.get("/api/models/import/sources")
+async def api_import_sources():
+    """可导入的本机配置来源与可用性（只报路径是否存在，不读内容）。"""
+    out = []
+    for sid, meta in local_config_import.SOURCES.items():
+        path, err = local_config_import.resolve_source(sid)
+        out.append({
+            "id": sid,
+            "label": meta["label"],
+            "note": meta["note"],
+            "available": path is not None,
+            "path": str(path) if path else "",
+            "detail": err,
+        })
+    return {"sources": out,
+            "slots": [{"id": k, "env": list(v)} for k, v in _IMPORT_SLOT_ENV.items()]}
+
+
+class ImportPreviewRequest(BaseModel):
+    source: str = "cc-switch"
+    path: str = ""
+    slot: str = "openai"
+
+
+def _import_overwrites(slot: str, cand: dict, env: dict[str, str]) -> list[dict]:
+    """覆盖预览：目标槽位各 env 的现值 vs 拟写入值（密钥只给脱敏）。"""
+    base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
+    out: list[dict] = []
+    cur_base = (env.get(base_env) or "").strip()
+    if cand.get("baseUrl") and cand["baseUrl"] != cur_base:
+        out.append({"field": base_env, "current": cur_base or "（空）", "incoming": cand["baseUrl"]})
+    cur_key = (env.get(key_env) or "").strip()
+    if cand.get("keyPresent"):
+        out.append({"field": key_env,
+                    "current": _mask_key(cur_key) if cur_key else "（空）",
+                    "incoming": cand["keyMasked"]})
+    cur_model = (env.get(model_env) or "").strip()
+    if cand.get("model") and cand["model"] != cur_model:
+        out.append({"field": model_env, "current": cur_model or "（空）", "incoming": cand["model"]})
+    return out
+
+
+@app.post("/api/models/import/preview")
+async def api_import_preview(req: ImportPreviewRequest):
+    """读取来源 → 候选列表（脱敏）+ 覆盖预览。只读，不改任何配置。"""
+    slot = req.slot if req.slot in _IMPORT_SLOT_ENV else "openai"
+    path, err = local_config_import.resolve_source(req.source, req.path)
+    if path is None:
+        raise HTTPException(404, err or "来源不可用")
+    cands, errors = await asyncio.to_thread(local_config_import.read_source, req.source, path)
+    env = _read_env()
+    for c in cands:
+        c["overwrites"] = _import_overwrites(slot, c, env) if c["compatible"] else []
+        c.pop("key", None)              # 明文密钥不出网
+    return {
+        "source": req.source, "path": str(path), "slot": slot,
+        "candidates": cands, "errors": errors, "readAt": int(time.time()),
+        "note": "只读预览；导入只会写入所选槽位的那几项，其余配置不动。",
+    }
+
+
+class ImportApplyRequest(BaseModel):
+    source: str = "cc-switch"
+    path: str = ""
+    id: str = ""
+    slot: str = "openai"
+
+
+@app.post("/api/models/import/apply")
+async def api_import_apply(req: ImportApplyRequest):
+    """把选中候选写入指定槽位：先全部校验，再 .env 原子写 + chat 同步 openclaw。"""
+    slot = (req.slot or "openai").strip()
+    if slot not in _IMPORT_SLOT_ENV:
+        raise HTTPException(400, "目标槽位不认识")
+    if not (req.id or "").strip():
+        raise HTTPException(400, "没有选择要导入的配置")
+    path, err = local_config_import.resolve_source(req.source, req.path)
+    if path is None:
+        raise HTTPException(404, err or "来源不可用")
+    cands, _errors = await asyncio.to_thread(local_config_import.read_source, req.source, path)
+    hit = next((c for c in cands if c["id"] == req.id), None)
+    if hit is None:
+        raise HTTPException(404, "来源内容已变化，请重新预览")
+    if not hit["compatible"]:
+        raise HTTPException(400, f'该配置不可导入：{hit["skipReason"]}')
+    base, key = hit["baseUrl"], hit["key"]
+    if not _valid_base_url(base):
+        raise HTTPException(400, "Base URL 不合法")
+    if any(ch.isspace() for ch in key):
+        raise HTTPException(400, "密钥不能包含空白字符")
+    base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
+    updates = {base_env: base, key_env: key}
+    if hit.get("model"):
+        updates[model_env] = hit["model"]
+    _write_env_direct(updates)          # 内部先过 _guard_env_values，原子写
+    note = ""
+    if slot in ("openai", "relay"):
+        # 保留现有全部自定义 provider（keep=现有键集合），只更新目标槽位；网关模式地址由
+        # _sync_openclaw_chat 内部保护，不会被改回直连。
+        try:
+            oc = Path.home() / '.openclaw-easel' / 'openclaw.json'
+            keep: set[str] = set()
+            if oc.is_file():
+                provs = ((json.loads(oc.read_text(encoding='utf-8')).get('models') or {})
+                         .get('providers') or {})
+                keep = set(provs.keys())
+            note = _sync_openclaw_chat(
+                {slot: {'model': hit.get('model', ''), 'base': base, 'key': key}}, keep, '')
+        except Exception as e:  # noqa: BLE001
+            note = f'openclaw 同步失败：{e}'
+    resp = {"ok": True, "note": note,
+            "applied": {"name": hit["name"], "slot": slot, "source": req.source,
+                        "fields": sorted(updates.keys())}}
+    resp.update(_model_channels())
+    return resp
+
+
 class AttachmentRef(BaseModel):
     id: str
     name: str
