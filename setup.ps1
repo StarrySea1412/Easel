@@ -120,14 +120,17 @@ function OpenClaw-ConfigBatch($Operations) {
 # 原子写入 anthropic provider。部分 OpenClaw 版本（如 2026.3.x）的 schema 要求 provider 一次性带齐
 # baseUrl + models，逐字段 config set 会因中间态缺字段而整体校验失败（baseUrl/models: received undefined）。
 # 用 venv Python 生成 JSON，避开 ConvertTo-Json 对空数组的序列化坑；整块替换也会顺带清掉旧的残留 header。
-function Write-AnthropicProvider($BaseUrl, $ApiKey, $ApiKeyHeader, $AnthropicVersion) {
+function Write-AnthropicProvider($BaseUrl, $ApiKey, $ApiKeyHeader, $AnthropicVersion, $Provider = 'anthropic', $Model = '') {
     $env:A_BASE_URL = $BaseUrl
     $env:A_API_KEY = $ApiKey
     $env:A_HDR = $ApiKeyHeader
     $env:A_VER = $AnthropicVersion
+    $env:A_MODEL = $Model
     $seed = @'
 import json, os
-p = {"baseUrl": os.environ["A_BASE_URL"], "apiKey": os.environ["A_API_KEY"], "models": []}
+p = {"baseUrl": os.environ["A_BASE_URL"], "apiKey": os.environ["A_API_KEY"], "api": "anthropic-messages", "models": []}
+if os.environ.get("A_MODEL"):
+    p["models"] = [{"id": os.environ["A_MODEL"], "name": os.environ["A_MODEL"], "input": ["text", "image"]}]
 hdr = os.environ.get("A_HDR"); ver = os.environ.get("A_VER")
 if hdr or ver:
     h = {}
@@ -136,10 +139,22 @@ if hdr or ver:
     p["headers"] = h
 print(json.dumps(p))
 '@ | & $Python -
-    Remove-Item Env:A_BASE_URL, Env:A_API_KEY, Env:A_HDR, Env:A_VER -ErrorAction SilentlyContinue
-    OpenClaw-ConfigBatch @(@{ path = 'models.providers.anthropic'; value = ($seed | ConvertFrom-Json) })
+    Remove-Item Env:A_BASE_URL, Env:A_API_KEY, Env:A_HDR, Env:A_VER, Env:A_MODEL -ErrorAction SilentlyContinue
+    OpenClaw-ConfigBatch @(@{ path = "models.providers.$Provider"; value = ($seed | ConvertFrom-Json) })
 }
 
+function Resolve-SetupModel($Values, $Key, $Provider) {
+    $model = ([string]$Values[$Key]).Trim()
+    if (-not $model) {
+        $legacy = ([string]$Values['CLAUDE_MODEL']).Trim()
+        if ($legacy -notmatch '/') { $model = $legacy }
+        elseif ($legacy.StartsWith($Provider + '/')) { $model = $legacy.Substring($Provider.Length + 1) }
+        elseif ($Key -eq 'EASEL_LLM_MODEL' -and $legacy.StartsWith('anthropic/')) { $model = $legacy.Substring(10) }
+    }
+    if ($model.StartsWith($Provider + '/')) { $model = $model.Substring($Provider.Length + 1) }
+    if (-not $model) { $model = 'claude-sonnet-4-6' }
+    return $model
+}
 
 function Invoke-system {
 
@@ -322,6 +337,7 @@ $envValues = Read-EnvFile $envPath
 # 仅当真正写了 anthropic provider 时，才补设它的 provider 级超时（见文末 timeoutSeconds）；
 # 否则会给 OpenAI/MAAS 用户凭空造出一个只有 timeoutSeconds、缺 baseUrl/models 的残缺 anthropic provider。
 $anthropicSynced = $false
+$syncedProvider = 'anthropic'
 # 注意函数调用外面这对括号不能省：`if (Is-UsableKey $x -and $y)` 会让解析器进入命令模式，
 # 把 `-and` 当成 Is-UsableKey 的参数名（简单函数会把它静默吞进 $args），
 # 于是 ContainsKey 那半边守卫被丢掉且不报错。加括号才让 -and 回到运算符语义。
@@ -345,21 +361,25 @@ if ((Is-UsableKey $envValues['OPENAI_MAAS_API_KEY']) -and $envValues.ContainsKey
     # 原子写入整块 provider（含 header 与 anthropic-version）；整块替换会顺带清掉旧的专用 header。
     $hdr = if ($envValues.ContainsKey('EASEL_LLM_API_KEY_HEADER')) { $envValues['EASEL_LLM_API_KEY_HEADER'] } else { 'api-key' }
     $ver = if ($envValues.ContainsKey('EASEL_LLM_ANTHROPIC_VERSION')) { $envValues['EASEL_LLM_ANTHROPIC_VERSION'] } else { '2023-06-01' }
-    Write-AnthropicProvider $envValues['EASEL_LLM_BASE_URL'] $envValues['EASEL_LLM_API_KEY'] $hdr $ver
+    $syncedProvider = if ([string]::IsNullOrWhiteSpace($envValues['EASEL_LLM_MODEL'])) { 'anthropic' } else { 'relay' }
+    $model = Resolve-SetupModel $envValues 'EASEL_LLM_MODEL' $syncedProvider
+    Write-AnthropicProvider $envValues['EASEL_LLM_BASE_URL'] $envValues['EASEL_LLM_API_KEY'] $hdr $ver $syncedProvider $model
     $anthropicSynced = $true
-    OpenClaw-Config 'agents.defaults.model.primary' $(if ($envValues.ContainsKey('CLAUDE_MODEL')) { $envValues['CLAUDE_MODEL'] } else { 'anthropic/claude-sonnet-4-6' })
+    OpenClaw-Config 'agents.defaults.model.primary' "$syncedProvider/$model"
 } elseif ((Is-UsableKey $envValues['ANTHROPIC_AUTH_TOKEN']) -and $envValues.ContainsKey('ANTHROPIC_BASE_URL')) {
-    Write-AnthropicProvider $envValues['ANTHROPIC_BASE_URL'] $envValues['ANTHROPIC_AUTH_TOKEN'] '' ''
+    $model = Resolve-SetupModel $envValues 'ANTHROPIC_MODEL' 'anthropic'
+    Write-AnthropicProvider $envValues['ANTHROPIC_BASE_URL'] $envValues['ANTHROPIC_AUTH_TOKEN'] '' '' 'anthropic' $model
     $anthropicSynced = $true
-    OpenClaw-Config 'agents.defaults.model.primary' $(if ($envValues.ContainsKey('CLAUDE_MODEL')) { $envValues['CLAUDE_MODEL'] } else { 'anthropic/claude-sonnet-4-6' })
+    OpenClaw-Config 'agents.defaults.model.primary' "anthropic/$model"
 } elseif (Is-UsableKey $envValues['ANTHROPIC_API_KEY']) {
     # 官方 ANTHROPIC_API_KEY 可搭配 ANTHROPIC_BASE_URL 指向自定义代理/网关；未指定时显式指向官方端点，
     # 否则请求会发往默认的 api.anthropic.com，代理网络下会直接超时。provider 由 Write-AnthropicProvider 原子写入，
     # 避免逐字段写入时 baseUrl/models 缺失导致 2026.3.x 报 expected string/array, received undefined。
     $baseUrl = if (-not [string]::IsNullOrWhiteSpace($envValues['ANTHROPIC_BASE_URL'])) { $envValues['ANTHROPIC_BASE_URL'] } else { 'https://api.anthropic.com' }
-    Write-AnthropicProvider $baseUrl $envValues['ANTHROPIC_API_KEY'] '' ''
+    $model = Resolve-SetupModel $envValues 'ANTHROPIC_MODEL' 'anthropic'
+    Write-AnthropicProvider $baseUrl $envValues['ANTHROPIC_API_KEY'] '' '' 'anthropic' $model
     $anthropicSynced = $true
-    OpenClaw-Config 'agents.defaults.model.primary' $(if ($envValues.ContainsKey('CLAUDE_MODEL')) { $envValues['CLAUDE_MODEL'] } else { 'anthropic/claude-sonnet-4-6' })
+    OpenClaw-Config 'agents.defaults.model.primary' "anthropic/$model"
 }
 $embeddingKeyNames = @('EASEL_EMBEDDING_API_KEY', 'EASEL_EMBEDDINGS_API_KEY', 'OPENAI_EMBEDDING_API_KEY', 'EMBEDDING_API_KEY', 'EMBEDDINGS_API_KEY')
 $embeddingUrlNames = @('EASEL_EMBEDDING_BASE_URL', 'EASEL_EMBEDDINGS_BASE_URL', 'OPENAI_EMBEDDING_BASE_URL', 'EMBEDDING_BASE_URL', 'EMBEDDINGS_BASE_URL')
@@ -396,7 +416,7 @@ if (-not (Try-OpenClawConfig 'gateway.http.endpoints.chatCompletions.enabled' 't
 # timeoutSeconds，会报 Unrecognized key 并拒绝写入。这里吞掉这条噪音、绝不让它中断安装；
 # 新版本 OpenClaw 才会真正把它调到 600s。想彻底拿到更长超时，请 npm i -g openclaw@latest 升级。
 if ($anthropicSynced) {
-    $null = Try-OpenClawConfig 'models.providers.anthropic.timeoutSeconds' '600'
+    $null = Try-OpenClawConfig "models.providers.$syncedProvider.timeoutSeconds" '600'
 }
 & openclaw --profile easel config validate
 if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置校验失败。' }

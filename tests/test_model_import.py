@@ -44,7 +44,7 @@ CCSWITCH_JSON_FIXTURE = {
     }}}}},
     "codex": {"providers": {"p2": {"name": "Codex B", "settingsConfig": {
         "auth": {"OPENAI_API_KEY": "sk-codex-key-1234567890"},
-        "config": 'model = "gpt-5-codex"\nbase_url = "https://codex.example.com/v1"\n',
+        "config": 'model = "gpt-5-codex"\nbase_url = "https://codex.example.com/v1"\nwire_api = "chat"\n',
     }}}},
 }
 
@@ -78,13 +78,19 @@ def _write_ccswitch_db(home: Path) -> Path:
     return p
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def cc_home(tmp_path, monkeypatch):
     """把两个来源的家目录都指到 tmp。"""
     oc_home = tmp_path / ".openclaw-easel"
     cc_home = tmp_path / ".cc-switch"
     monkeypatch.setattr(lci, "HOME_OPENCLAW", oc_home)
     monkeypatch.setattr(lci, "HOME_CCSWITCH", cc_home)
+    monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(oc_home))
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
+    monkeypatch.setenv('EASEL_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setattr(web, 'ENV_FILE', tmp_path / '.env')
+    web._IMPORT_PREVIEWS.clear()
     return oc_home, cc_home
 
 
@@ -197,7 +203,7 @@ def test_apply_writes_only_target_slot(cc_home, fake_env):
     preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source="cc-switch", slot="openai")))
     cand = next(c for c in preview["candidates"] if c["name"] == "Codex B")
     d = asyncio.run(web.api_import_apply(web.ImportApplyRequest(
-        source="cc-switch", id=cand["id"], slot="openai")))
+        source="cc-switch", id=cand["id"], slot="openai", previewToken=cand['previewToken'])))
     assert d["ok"] and d["applied"]["slot"] == "openai"
     text = env_file.read_text(encoding="utf-8")
     assert "OPENAI_BASE_URL=https://codex.example.com/v1" in text
@@ -211,9 +217,10 @@ def test_apply_keeps_custom_providers(cc_home, fake_env):
     _, synced = fake_env
     _write_ccswitch_json(cc_home[1])
     # 用真实 openclaw.json 时 keep 应包含既有 provider；这里只验证传入的 keep 不为空白逻辑：
-    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source="cc-switch")))
-    cand = next(c for c in preview["candidates"] if c["name"] == "Codex B")
-    asyncio.run(web.api_import_apply(web.ImportApplyRequest(source="cc-switch", id=cand["id"], slot="relay")))
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source="cc-switch", slot='relay')))
+    cand = next(c for c in preview["candidates"] if c["name"] == "Relay A")
+    asyncio.run(web.api_import_apply(web.ImportApplyRequest(source="cc-switch", id=cand["id"], slot="relay",
+                                                           previewToken=cand['previewToken'])))
     assert synced and synced[-1][0].get("relay")               # relay 槽位同步
     assert isinstance(synced[-1][1], set)                      # keep 是集合（现有键）
 
@@ -251,5 +258,5 @@ def test_apply_failure_keeps_env_untouched(cc_home, fake_env, monkeypatch):
     monkeypatch.setattr(web, "_write_env_direct", boom)
     with pytest.raises(web.HTTPException):
         asyncio.run(web.api_import_apply(web.ImportApplyRequest(
-            source="cc-switch", id=cand["id"], slot="openai")))
+            source="cc-switch", id=cand["id"], slot="openai", previewToken=cand['previewToken'])))
     assert env_file.read_text(encoding="utf-8") == before

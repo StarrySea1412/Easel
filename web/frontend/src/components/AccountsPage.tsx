@@ -6,6 +6,7 @@ import {
 } from '../lib/api';
 import type { AccountItem, AccountWhoami } from '../lib/api';
 import { getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
+import XhsInsightsPanel from './XhsInsightsPanel';
 
 type QRState = {
   platform: string;
@@ -39,7 +40,7 @@ function Avatar({ url, name }: { url?: string; name: string }) {
   return <div className="account-avatar account-avatar-fallback">{initial}</div>;
 }
 
-export default function AccountsPage() {
+export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () => void }) {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
   const [qr, setQr] = useState<QRState | null>(null);
@@ -47,6 +48,7 @@ export default function AccountsPage() {
   const [terminalMsg, setTerminalMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [logoutBusy, setLogoutBusy] = useState('');
+  const [analysisRevision, setAnalysisRevision] = useState(0);
   const [smsCode, setSmsCode] = useState('');
   const [smsBusy, setSmsBusy] = useState(false);
   const [smsErr, setSmsErr] = useState('');
@@ -71,7 +73,9 @@ export default function AccountsPage() {
   const runWhoami = useCallback((platform: string) => {
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
     accountWhoami(platform)
-      .then((r) => { if (aliveRef.current) { setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r); } })
+      .then((r) => { if (aliveRef.current) { setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
+        if (platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
+      } })
       .catch(() => {
         if (aliveRef.current) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
       });
@@ -183,6 +187,7 @@ export default function AccountsPage() {
     setQrNonce((n) => n + 1);
     try {
       const res = await startLogin(a.platform);
+      if (a.platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
       if (res.mode === 'terminal') {
         setTerminalMsg(res.message || '请在终端登录');
         return;
@@ -206,7 +211,7 @@ export default function AccountsPage() {
     } finally {
       setBusy('');
     }
-  }, [stopPoll, runWhoami]);
+  }, [stopPoll, runWhoami, openCred]);
 
   // 公众号后台扫码登录（数据中心取数用，独立于 AppID 凭证）
   const handleMpLogin = useCallback(async (a: AccountItem) => {
@@ -248,6 +253,7 @@ export default function AccountsPage() {
     setLogoutBusy(a.platform);
     try {
       await logoutAccount(a.platform);
+      if (a.platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
       // 内存态立即翻未登录（同登录路径），不等 load() 回来
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false } : x));
       setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
@@ -340,10 +346,15 @@ export default function AccountsPage() {
                   </button>
                 )}
               </div>
+              {a.platform === 'xiaohongshu' && <button className="btn btn-sm btn-ghost xhs-account-entry"
+                onClick={() => document.getElementById('xhs-insights')?.scrollIntoView({ behavior: 'smooth' })}>查看本人账号分析 ↓</button>}
             </div>
           );
         })}
       </div>
+
+      <XhsInsightsPanel key={analysisRevision} loggedIn={accounts.some((account) => account.platform === 'xiaohongshu' && effLoggedIn(account))}
+        onNavigateIdeas={onNavigateIdeas} />
 
       {qr && (
         <div className="overlay" onClick={closeQr}>

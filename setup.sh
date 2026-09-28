@@ -354,9 +354,11 @@ fi
 # 用法：oc_write_anthropic <baseUrl> <apiKey> [apiKeyHeader] [anthropicVersion]
 oc_write_anthropic() {
     local seed
-    seed="$(A_BASE_URL="$1" A_API_KEY="$2" A_HDR="${3:-}" A_VER="${4:-}" python3 -c '
+    seed="$(A_BASE_URL="$1" A_API_KEY="$2" A_HDR="${3:-}" A_VER="${4:-}" A_MODEL="${6:-}" python3 -c '
 import json, os
-p = {"baseUrl": os.environ["A_BASE_URL"], "apiKey": os.environ["A_API_KEY"], "models": []}
+p = {"baseUrl": os.environ["A_BASE_URL"], "apiKey": os.environ["A_API_KEY"], "api": "anthropic-messages", "models": []}
+if os.environ.get("A_MODEL"):
+    p["models"] = [{"id": os.environ["A_MODEL"], "name": os.environ["A_MODEL"], "input": ["text", "image"]}]
 hdr = os.environ.get("A_HDR"); ver = os.environ.get("A_VER")
 if hdr or ver:
     h = {}
@@ -364,7 +366,7 @@ if hdr or ver:
     if ver: h["anthropic-version"] = ver
     p["headers"] = h
 print(json.dumps(p))')"
-    $OC config set models.providers.anthropic "$seed" --json 2>&1 | sed '/^No change$/d'
+    $OC config set "models.providers.${5:-anthropic}" "$seed" --json 2>&1 | sed '/^No change$/d'
 }
 
 # 若用户已有默认 OpenClaw 配置，复用其模型名称；密钥不会从别的 profile 复制。
@@ -456,6 +458,21 @@ elif [ "$MODEL_CONFIGURED" = false ]; then
 fi
 
 DEFAULT_PRIMARY_MODEL="anthropic/claude-sonnet-4-6"
+# Each Web chat slot owns its model value. CLAUDE_MODEL is a legacy fallback.
+setup_chat_model() {
+    local explicit="$1" provider="$2" legacy="${CLAUDE_MODEL:-}"
+    if [ -n "$explicit" ]; then
+        printf '%s' "${explicit#"$provider/"}"
+    else
+        case "$legacy" in
+            "$provider/"*) printf '%s' "${legacy#*/}" ;;
+            */*) printf '%s' 'claude-sonnet-4-6' ;;
+            *) printf '%s' "${legacy:-claude-sonnet-4-6}" ;;
+        esac
+    fi
+}
+SETUP_PRIMARY_MODEL=""
+SETUP_ANTHROPIC_PROVIDER=anthropic
 STANDARD_LLM_CONFIGURED=false
 # 仅当真正写了 anthropic provider 时，才补设它的 provider 级超时（见下方 timeoutSeconds）；
 # 否则会给 OpenAI/MAAS 用户凭空造出一个只有 timeoutSeconds、缺 baseUrl/models 的残缺 anthropic provider。
@@ -566,18 +583,26 @@ elif [ "$STANDARD_LLM_CONFIGURED" = false ] && usable_key "${GEMINI_MAAS_API_KEY
     ok "Gemini-compatible 服务已通过本地适配器同步"
 elif usable_key "${EASEL_LLM_API_KEY:-}" && [ -n "${EASEL_LLM_BASE_URL:-}" ]; then
     # 原子写入整块 provider（含 header 与 anthropic-version）；整块替换会顺带清掉旧的 CodeWiz 专用 header。
+    if [ -n "${EASEL_LLM_MODEL:-}" ]; then SETUP_ANTHROPIC_PROVIDER=relay; fi
+    SETUP_CHAT_MODEL="$(setup_chat_model "${EASEL_LLM_MODEL:-}" "$SETUP_ANTHROPIC_PROVIDER")"
+    SETUP_PRIMARY_MODEL="$SETUP_ANTHROPIC_PROVIDER/$SETUP_CHAT_MODEL"
     oc_write_anthropic "$EASEL_LLM_BASE_URL" "$EASEL_LLM_API_KEY" \
-        "${EASEL_LLM_API_KEY_HEADER:-api-key}" "${EASEL_LLM_ANTHROPIC_VERSION:-2023-06-01}"
+        "${EASEL_LLM_API_KEY_HEADER:-api-key}" "${EASEL_LLM_ANTHROPIC_VERSION:-2023-06-01}" \
+        "$SETUP_ANTHROPIC_PROVIDER" "$SETUP_CHAT_MODEL"
     ANTHROPIC_PROVIDER_SYNCED=true
     ok "自定义 Anthropic 兼容 MaaS 认证已同步"
 elif usable_key "${ANTHROPIC_AUTH_TOKEN:-}" && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-    oc_write_anthropic "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN"
+    SETUP_CHAT_MODEL="$(setup_chat_model "${ANTHROPIC_MODEL:-}" anthropic)"
+    SETUP_PRIMARY_MODEL="anthropic/$SETUP_CHAT_MODEL"
+    oc_write_anthropic "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" '' '' anthropic "$SETUP_CHAT_MODEL"
     ANTHROPIC_PROVIDER_SYNCED=true
     ok "Anthropic 兼容服务认证已同步"
 elif usable_key "${ANTHROPIC_API_KEY:-}"; then
     # 官方 ANTHROPIC_API_KEY 可搭配 ANTHROPIC_BASE_URL 指向自定义代理/网关；未指定时显式指向官方端点，
     # 否则请求会发往默认的 api.anthropic.com，代理网络下会直接超时。provider 由 oc_write_anthropic 原子写入。
-    oc_write_anthropic "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" "$ANTHROPIC_API_KEY"
+    SETUP_CHAT_MODEL="$(setup_chat_model "${ANTHROPIC_MODEL:-}" anthropic)"
+    SETUP_PRIMARY_MODEL="anthropic/$SETUP_CHAT_MODEL"
+    oc_write_anthropic "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" "$ANTHROPIC_API_KEY" '' '' anthropic "$SETUP_CHAT_MODEL"
     ANTHROPIC_PROVIDER_SYNCED=true
     if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
         ok "API key + 自定义 Anthropic Base URL 已同步"
@@ -594,7 +619,7 @@ fi
 # CLAUDE_MODEL 保留旧变量名以兼容现有环境，值必须是 OpenClaw 的 provider/model。
 # 不要填内部 proxy 映射名（如 claude-4.6-opus-google），否则 OpenClaw 不认识。
 if [ "$AUTH_CONFIGURED" = true ]; then
-    $OC config set agents.defaults.model.primary "${CLAUDE_MODEL:-$DEFAULT_PRIMARY_MODEL}" 2>&1 | sed '/^No change$/d'
+    $OC config set agents.defaults.model.primary "${SETUP_PRIMARY_MODEL:-${CLAUDE_MODEL:-$DEFAULT_PRIMARY_MODEL}}" 2>&1 | sed '/^No change$/d'
 else
     # 上面一个 provider 都没写。这时还去写 primary 只会把 agent 指向一个不存在的
     # provider（CLAUDE_MODEL 直接来自 .env），对话时报 "No route-compatible
@@ -650,7 +675,7 @@ fi
 # 并拒绝该次写入。这里吞掉这条噪音、绝不让它中断安装（|| true）；新版本 OpenClaw 才会真正把它调到 600s。
 # 想彻底拿到更长的 provider 超时，请 npm i -g openclaw@latest 升级到支持该字段的版本。
 if [ "$ANTHROPIC_PROVIDER_SYNCED" = true ]; then
-    $OC config set models.providers.anthropic.timeoutSeconds 600 2>&1 \
+    $OC config set "models.providers.$SETUP_ANTHROPIC_PROVIDER.timeoutSeconds" 600 2>&1 \
         | sed -e '/^No change$/d' -e '/[Uu]nrecognized key/d' -e '/timeoutSeconds/d' || true
 fi
 $OC config set gateway.mode local 2>&1 | sed '/^No change$/d'

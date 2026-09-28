@@ -35,6 +35,8 @@ def analytics_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "ANALYTICS_DIR", tmp_path / "_analytics")
     monkeypatch.setattr(st, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(web, "OUTPUTS_DIR", tmp_path)
+    original_record = st.record_note_snapshot
+    monkeypatch.setattr(st, "record_note_snapshot", lambda platform, notes, now, **kwargs: original_record(platform, notes, now, account_id="account-one", **kwargs))
     return tmp_path
 
 
@@ -101,9 +103,12 @@ def test_record_note_snapshot_missing_fields_stay_none(analytics_tmp):
     assert recs[0]["tags"] == [] and recs[0]["publish"] == ""
 
 
-def test_record_note_snapshot_empty_input_writes_nothing(analytics_tmp):
+def test_record_note_snapshot_empty_input_does_not_claim_full_coverage(analytics_tmp):
     st.record_note_snapshot("xiaohongshu", [], int(time.time()))
-    assert not st._notes_path("xiaohongshu").exists()
+    assert st.load_note_snapshots("xiaohongshu") == []
+    data = asyncio.run(web.api_analytics_notes("xiaohongshu"))
+    assert data["coverage"]["observedNotes"] == 0
+    assert data["coverage"]["complete"] is False
 
 
 def test_clear_analytics(analytics_tmp):
@@ -152,8 +157,8 @@ def test_clear_endpoint_validates_and_clears(analytics_tmp):
         asyncio.run(web.api_analytics_clear(web.AnalyticsClearRequest(platform="nope")))
     now = int(time.time())
     st.record_note_snapshot("xiaohongshu", [_note()], now)
-    d = asyncio.run(web.api_analytics_clear(web.AnalyticsClearRequest(platform="xiaohongshu")))
-    assert d == {"ok": True, "cleared": "xiaohongshu"}
+    d = asyncio.run(web.api_analytics_clear(web.AnalyticsClearRequest(platform="xiaohongshu", accountId="live:account-one")))
+    assert d["ok"] and d["accountId"] == "live:account-one"
     assert not st._notes_path("xiaohongshu").exists()
 
 
@@ -182,7 +187,7 @@ def test_analytics_normalizes_notes_and_marks_stale(analytics_tmp, monkeypatch):
 
     class _Proc2:
         stdout = json.dumps({
-            "platform": "xiaohongshu", "loggedIn": True,
+            "platform": "xiaohongshu", "loggedIn": True, "accountId": "account-one",
             "notes": [{"title": "t", "note_id": "x"}],
             "followers": 1, "likes": 2, "posts": 3, "metrics": [], "growth": {},
         }, ensure_ascii=False)

@@ -715,7 +715,7 @@ export default function App() {
       case 'outputs':
         return <OutputsPage />;
       case 'accounts':
-        return <AccountsPage />;
+        return <AccountsPage onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       default:

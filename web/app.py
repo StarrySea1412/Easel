@@ -31,11 +31,14 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WEB_DIR = Path(__file__).resolve().parent
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 if str(PROJECT_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+if str(WEB_DIR) not in sys.path:
+    sys.path.insert(0, str(WEB_DIR))
 
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
@@ -984,9 +987,7 @@ def _write_env(updates: dict[str, str]) -> None:
         out.append('# ---- Easel API keys (added via Web) ----')
         out.extend(appended)
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ENV_FILE.with_suffix('.env.tmp')
-    tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
-    tmp.replace(ENV_FILE)
+    _atomic_model_bytes(ENV_FILE, ('\n'.join(out) + '\n').encode('utf-8'))
 
 
 def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
@@ -1451,26 +1452,52 @@ def _mask_key(v: str) -> str:
     return f"«{v[:5]}…{v[-4:]}»" if len(v) > 14 else "«已配置»"
 
 
+_CHAT_PROTOCOLS = {'openai': 'openai', 'anthropic': 'anthropic', 'relay': 'anthropic'}
+_CHAT_MODEL_KEYS = {'openai': 'OPENAI_MODEL', 'anthropic': 'ANTHROPIC_MODEL', 'relay': 'EASEL_LLM_MODEL'}
+_MODEL_CONFIG_LOCK = threading.RLock()
+
+
+def _chat_model(slot: str, env: dict, providers: dict | None = None) -> str:
+    configured = str(env.get(_CHAT_MODEL_KEYS[slot]) or '').strip()
+    if configured:
+        return configured
+    provider = providers.get(slot) if isinstance(providers, dict) else None
+    models = provider.get('models') if isinstance(provider, dict) else []
+    models = models if isinstance(models, list) else []
+    if models and isinstance(models[0], dict) and models[0].get('id'):
+        return str(models[0]['id'])
+    legacy = str(env.get('CLAUDE_MODEL') or '').strip()
+    if slot != 'openai' and legacy:
+        if '/' not in legacy:
+            return legacy
+        prefix, model = legacy.split('/', 1)
+        if prefix == slot or (slot == 'relay' and prefix == 'anthropic'):
+            return model
+    return 'deepseek-chat' if slot == 'openai' else 'claude-sonnet-4-6'
+
+
 def _model_channels() -> dict:
     env = _read_env()
     primary = ""
+    providers = {}
     try:
         oc = openclaw_state_dir() / "openclaw.json"
         if oc.is_file():
-            primary = str(json.loads(oc.read_text(encoding="utf-8"))
-                          .get("agents", {}).get("defaults", {}).get("model", {}).get("primary", ""))
+            config = json.loads(oc.read_text(encoding="utf-8"))
+            primary = str(config.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", ""))
+            configured_providers = config.get('models', {}).get('providers', {})
+            providers = configured_providers if isinstance(configured_providers, dict) else {}
     except Exception:  # noqa: BLE001
         pass
 
     chat_rows = []
     ob = (env.get("OPENAI_BASE_URL") or "").strip()
-    om = (env.get("OPENAI_MODEL") or "").strip()
     ok_key = bool((env.get("OPENAI_API_KEY") or "").strip())
     if ob or ok_key:
         chat_rows.append({
             "slot": "openai", "order": 1, "name": "deepseek",
             "sub": "官方直连",
-            "type": "openai", "model": om or "deepseek-chat",
+            "type": "openai", "protocol": "openai", "model": _chat_model('openai', env, providers),
             "baseUrl": ob, "keyMasked": _mask_key(env.get("OPENAI_API_KEY", "")),
             "role": "主" if primary.startswith("openai/") else "备",
             "result": "已配置" if ok_key else "缺 key",
@@ -1480,18 +1507,18 @@ def _model_channels() -> dict:
     if ab or ak:
         chat_rows.append({
             "slot": "anthropic", "order": len(chat_rows) + 1, "name": "anthropic", "sub": "官方直连",
-            "type": "anthropic", "model": (env.get("CLAUDE_MODEL") or "claude-sonnet-4-6").strip(),
-            "baseUrl": ab or "官方", "keyMasked": _mask_key(ak),
-            "role": "备", "result": "已配置" if ak else "缺 key",
+            "type": "anthropic", "protocol": "anthropic", "model": _chat_model('anthropic', env, providers),
+            "baseUrl": ab or "https://api.anthropic.com", "keyMasked": _mask_key(ak),
+            "role": "主" if primary.startswith('anthropic/') else "备", "result": "已配置" if ak else "缺 key",
         })
     lb = (env.get("EASEL_LLM_BASE_URL") or "").strip()
     lk = (env.get("EASEL_LLM_API_KEY") or "").strip()
     if lb or lk:
         chat_rows.append({
             "slot": "relay", "order": len(chat_rows) + 1, "name": "relay", "sub": "中转站",
-            "type": "openai", "model": (env.get("CLAUDE_MODEL") or "deepseek-chat").strip(),
+            "type": "anthropic", "protocol": "anthropic", "model": _chat_model('relay', env, providers),
             "baseUrl": lb or "（未配置）", "keyMasked": _mask_key(lk),
-            "role": "备", "result": "已配置" if lk else "缺 key",
+            "role": "主" if primary.startswith('relay/') else "备", "result": "已配置" if lk else "缺 key",
         })
 
     custom_rows = []
@@ -1507,7 +1534,9 @@ def _model_channels() -> dict:
                 mid = models[0].get("id", "") if models and isinstance(models[0], dict) else ""
                 custom_rows.append({
                     "slot": "custom", "order": 0, "name": pkey, "sub": "自定义",
-                    "type": "openai", "model": mid or "", "baseUrl": pv.get("baseUrl") or "",
+                    "type": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
+                    "protocol": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
+                    "model": mid or "", "baseUrl": pv.get("baseUrl") or "",
                     "keyMasked": _mask_key(str(pv.get("apiKey") or "")),
                     "role": "主" if primary == f"{pkey}/{mid}" else "备",
                     "result": "已配置" if str(pv.get("apiKey") or "").strip() else "缺 key",
@@ -1605,9 +1634,7 @@ def _write_env_direct(updates: dict[str, str]) -> None:
         out.append('# ---- Easel 模型配置（Web 设置面板写入）----')
         out.extend(appended)
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ENV_FILE.with_suffix('.env.tmp')
-    tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
-    tmp.replace(ENV_FILE)
+    _atomic_model_bytes(ENV_FILE, ('\n'.join(out) + '\n').encode('utf-8'))
 
 
 RESERVED_PROVIDER_KEYS = {"openai", "anthropic", "relay"}
@@ -1628,13 +1655,11 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
     """同步 chat 供应商到 ~/.openclaw-easel/openclaw.json：更新/新增 + 删除多余自定义 + 主模型。
 
     provider_updates: {pkey: {"model","base","key"}}；keep_custom: 保留的自定义键；primary_ref: 目标主模型（空=不改）。
-    只有确有差异才落盘（改前备份 .bak-web）。
+    只有确有差异才落盘；由外层配置事务恢复普通写入失败。
     """
     try:
         oc = openclaw_state_dir() / 'openclaw.json'
-        if not oc.is_file():
-            return ''
-        data = json.loads(oc.read_text(encoding='utf-8'))
+        data = json.loads(oc.read_text(encoding='utf-8')) if oc.is_file() else {}
         providers = data.setdefault('models', {}).setdefault('providers', {})
         changed = False
         for pkey in [k for k in list(providers.keys())
@@ -1644,6 +1669,28 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
         for pkey, vals in provider_updates.items():
             prov = providers.setdefault(pkey, {})
             base, key, model = vals.get('base', ''), vals.get('key', ''), vals.get('model', '')
+            local_gateway = _is_local_gateway_base(prov.get('baseUrl'))
+            if local_gateway and key and key != prov.get('apiKey'):
+                raise ValueError('gateway credentials require separate configuration')
+            if vals.get('replaceAuth'):
+                for field in ('headers', 'auth', 'authHeader'):
+                    if field in prov:
+                        prov.pop(field)
+                        changed = True
+            if pkey in _CHAT_MODEL_KEYS:
+                env = _read_env()
+                if not base and not prov.get('baseUrl'):
+                    base = env.get(_SLOT_ENV_KEYS[pkey][0], '') or (
+                        'https://api.anthropic.com' if pkey == 'anthropic' else
+                        'https://api.openai.com/v1' if pkey == 'openai' else '')
+                if not key and not prov.get('apiKey'):
+                    key = env.get(_SLOT_ENV_KEYS[pkey][1], '')
+                if not model and not prov.get('models'):
+                    model = _chat_model(pkey, env)
+            api = 'anthropic-messages' if vals.get('protocol', _CHAT_PROTOCOLS.get(pkey)) == 'anthropic' else 'openai-completions'
+            if not local_gateway and prov.get('api') != api:
+                prov['api'] = api
+                changed = True
             if base and prov.get('baseUrl') != base:
                 if _is_local_gateway_base(prov.get('baseUrl')):
                     pass  # 本地模型网关模式：保留网关地址（真实上游在 easel-models.yaml），勿改回直连
@@ -1651,6 +1698,11 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                     prov['baseUrl'] = base
                     changed = True
             if key and prov.get('apiKey') != key:
+                previous_key = str(prov.get('apiKey') or '')
+                if isinstance(prov.get('headers'), dict):
+                    for header, value in prov['headers'].items():
+                        if previous_key and isinstance(value, str) and previous_key in value:
+                            prov['headers'][header] = value.replace(previous_key, key)
                 prov['apiKey'] = key
                 changed = True
             if model:
@@ -1668,13 +1720,61 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 changed = True
         if not changed:
             return ''
-        shutil.copy2(oc, oc.parent / (oc.name + '.bak-web'))
-        tmp = oc.parent / (oc.name + '.tmp')
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-        tmp.replace(oc)
+        _atomic_model_bytes(oc, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
         return 'openclaw 已同步（下一条消息生效）'
     except Exception as e:  # noqa: BLE001
-        return f'openclaw 同步失败：{e}'
+        raise RuntimeError('OpenClaw 配置同步失败') from e
+
+
+def _atomic_model_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
+    try:
+        with temp.open('xb') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _model_file_snapshot() -> dict[Path, bytes | None]:
+    paths = (ENV_FILE, openclaw_state_dir() / 'openclaw.json')
+    return {p: p.read_bytes() if p.exists() else None for p in paths}
+
+
+def _commit_model_configuration(updates: dict[str, str], providers: dict[str, dict] | None = None,
+                                keep: set[str] | None = None, primary: str = '') -> str:
+    """Rollback ordinary write/sync failures. Each file is atomic; hard process termination is not a transaction."""
+    _guard_env_values(updates)
+    with _MODEL_CONFIG_LOCK:
+        try:
+            before = _model_file_snapshot()
+        except Exception:
+            raise HTTPException(500, '无法读取现有配置，未保存；请检查配置文件和访问权限') from None
+        try:
+            if updates:
+                _write_env_direct(updates)
+            note = _sync_openclaw_chat(providers, keep or set(), primary) if providers is not None else ''
+            if '失败' in note:
+                raise RuntimeError('sync failed')
+            return note
+        except Exception:
+            restored = True
+            for path, content in before.items():
+                try:
+                    current = path.read_bytes() if path.exists() else None
+                    if current != content:
+                        if content is None:
+                            path.unlink(missing_ok=True)
+                        else:
+                            _atomic_model_bytes(path, content)
+                except Exception:
+                    restored = False
+            if not restored:
+                raise HTTPException(500, '保存失败且未能完整恢复；请检查文件权限并核对配置后再重试') from None
+            raise HTTPException(500, '保存失败，原有配置已恢复；请检查文件权限或 OpenClaw 配置后重试') from None
 
 
 class ModelSaveRow(BaseModel):
@@ -1685,17 +1785,21 @@ class ModelSaveRow(BaseModel):
     key: str = ""
     key2: str = ""
     primary: bool = False
+    protocol: str = ""
 
 
 class ModelSaveRequest(BaseModel):
     channel: str = "chat"
     rows: list[ModelSaveRow] = Field(default_factory=list)
+    deletedProviders: list[str] = Field(default_factory=list)
 
 
 @app.post("/api/settings/models/save")
 async def api_settings_models_save(req: ModelSaveRequest):
     """保存模型通道：.env 就地更新（key 留空=不改）；chat 同步 openclaw；媒体通道写 provider 配置。"""
     ch0 = (req.channel or "").strip()
+    if ch0 not in ('chat', 'transcribe', 'speech', 'image', 'video', 'music'):
+        raise HTTPException(400, '未知模型通道')
     if ch0 in ("speech", "image", "video", "music"):
         import model_registry as _mr2
         _gid0 = {"speech": "voice", "image": "image", "video": "video", "music": "music"}[ch0]
@@ -1741,7 +1845,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
             _mupd[_setting0] = _primary0
         if not _mupd:
             raise HTTPException(400, "没有可保存的改动（key 留空表示不改）")
-        _write_env_direct(_mupd)
+        _commit_model_configuration(_mupd)
         _resp0 = {"ok": True, "note": ""}
         _resp0.update(_model_channels())
         return _resp0
@@ -1753,14 +1857,24 @@ async def api_settings_models_save(req: ModelSaveRequest):
     is_chat = (req.channel or '').strip() == 'chat'
     _cur_env = _read_env()
     _cur_prov = _openclaw_provider_creds() if is_chat else {}
+    if is_chat:
+        if any(name in RESERVED_PROVIDER_KEYS or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,23}', name)
+               for name in req.deletedProviders):
+            raise HTTPException(400, '只能显式删除自定义服务商')
+        keep_custom = set(_cur_prov) - set(req.deletedProviders)
     for row in req.rows:
         slot = (row.slot or '').strip()
         name = (row.name or '').strip().lower()
         model = (row.model or '').strip()
         base = (row.baseUrl or '').strip().rstrip('/')
         key = (row.key or '').strip()
+        protocol = (row.protocol or '').strip().lower()
+        if is_chat and slot in _CHAT_PROTOCOLS and protocol and protocol != _CHAT_PROTOCOLS[slot]:
+            raise HTTPException(400, '服务商协议与目标槽位不匹配，请选择同协议的服务商')
+        if is_chat and slot == 'custom' and protocol and protocol not in ('openai', 'anthropic'):
+            raise HTTPException(400, '自定义服务商仅支持 OpenAI Chat Completions 或 Anthropic 协议')
         if base and not _valid_base_url(base):
-            raise HTTPException(400, f'Base URL 需是合法的 http(s):// 地址：{base[:60]}')
+            raise HTTPException(400, 'Base URL 需是合法的 http(s):// 地址')
         if key and any(ch.isspace() for ch in key):
             raise HTTPException(400, 'API Key 不能包含空白字符')
         if len(model) > 120 or len(base) > 300 or len(key) > 400:
@@ -1768,7 +1882,10 @@ async def api_settings_models_save(req: ModelSaveRequest):
         # 改 Base URL 但把 Key 留空（留空=沿用旧 Key）＝ 把已存的真 Key 指向新地址，
         # 之后一次「连通性自测」就会把它当 Bearer 送到新地址去。换地址必须重填 Key。
         _be, _ke = _SLOT_ENV_KEYS.get(slot, ('', ''))
-        if base and _be and not key and base != (_cur_env.get(_be, '') or '').strip().rstrip('/') \
+        saved_base = (_cur_env.get(_be, '') or '').strip().rstrip('/') if _be else ''
+        if slot == 'anthropic' and not saved_base:
+            saved_base = 'https://api.anthropic.com'
+        if base and _be and not key and base != saved_base \
                 and (_cur_env.get(_ke, '') or '').strip():
             raise HTTPException(400, f'更换 Base URL 时必须重新填写 API Key（{slot}）')
         pkey = ''
@@ -1786,18 +1903,22 @@ async def api_settings_models_save(req: ModelSaveRequest):
             if base:
                 updates['EASEL_LLM_BASE_URL'] = base
             if model:
-                updates['CLAUDE_MODEL'] = model
+                updates['EASEL_LLM_MODEL'] = model
             if key:
                 updates['EASEL_LLM_API_KEY'] = key
             if is_chat:
                 pkey = 'relay'
+                provider_updates[pkey] = {'model': model, 'base': base, 'key': key, 'protocol': 'anthropic'}
         elif slot == 'anthropic':
             if model:
-                updates['CLAUDE_MODEL'] = model
+                updates['ANTHROPIC_MODEL'] = model
+            if base:
+                updates['ANTHROPIC_BASE_URL'] = base
             if key:
                 updates['ANTHROPIC_API_KEY'] = key
             if is_chat:
                 pkey = 'anthropic'
+                provider_updates[pkey] = {'model': model, 'base': base, 'key': key, 'protocol': 'anthropic'}
         elif slot == 'siliconflow':
             if base:
                 updates['SILICONFLOW_BASE_URL'] = base
@@ -1810,7 +1931,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
                 raise HTTPException(400, f'「{name}」是内置槽位名，请换一个')
             if not model or not base:
                 raise HTTPException(400, f'自定义供应商「{name}」需要同时填模型和 Base URL')
-            provider_updates[name] = {'model': model, 'base': base, 'key': key}
+            provider_updates[name] = {'model': model, 'base': base, 'key': key, 'protocol': protocol or 'openai'}
             keep_custom.add(name)
             pkey = name
         # 同一条规矩也得覆盖 openclaw.json 这一侧：_sync_openclaw_chat 只在 key 非空时改
@@ -1825,13 +1946,9 @@ async def api_settings_models_save(req: ModelSaveRequest):
                 raise HTTPException(400, f'更换 Base URL 时必须重新填写 API Key（{pkey}）')
         if is_chat and pkey and getattr(row, 'primary', False) and model:
             primary_ref = f'{pkey}/{model}'
-    if not updates and not provider_updates and not primary_ref:
+    if not updates and not provider_updates and not primary_ref and not req.deletedProviders:
         raise HTTPException(400, '没有可保存的改动（key 留空表示不改）')
-    if updates:
-        _write_env_direct(updates)
-    note = ''
-    if is_chat:
-        note = _sync_openclaw_chat(provider_updates, keep_custom, primary_ref)
+    note = _commit_model_configuration(updates, provider_updates if is_chat else None, keep_custom, primary_ref)
     resp = {"ok": True, "note": note}
     resp.update(_model_channels())
     return resp
@@ -1969,6 +2086,18 @@ def _saved_key_for(channel: str, slot: str) -> str:
     return ""
 
 
+def _saved_base_for(channel: str, slot: str) -> str:
+    env = _read_env()
+    if channel == 'chat':
+        field = _SLOT_ENV_KEYS.get(slot, ('', ''))[0]
+        return env.get(field, '') or ('https://api.anthropic.com' if slot == 'anthropic' else '')
+    if channel == 'transcribe' and slot == 'siliconflow':
+        return env.get('SILICONFLOW_BASE_URL') or 'https://api.siliconflow.cn/v1'
+    if channel == 'image':
+        return env.get('IMG_BASE_URL') or env.get('OPENAI_BASE_URL') or ''
+    return ''
+
+
 def _redact(text: object, secret: str) -> str:
     """异常/响应体里可能回显 Key，统一抹掉再回给前端（也避免写进日志）。"""
     t = str(text or "")
@@ -2002,7 +2131,8 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
     if not _ssrf_safe(base) and not (local_ok and _is_loopback_url(base)):
         return {"ok": False, "kind": "blocked_target", "models": [],
                 "message": "目标指向本机/内网地址，已拒绝（避免服务端被当作内网跳板）"}
-    url = base + ("/v1/models" if protocol == "anthropic" else "/models")
+    suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
+    url = base + suffix
     headers = {"Accept": "application/json"}
     if key:
         if protocol == "anthropic":
@@ -2052,6 +2182,10 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
     items = payload.get("data") if isinstance(payload, dict) else payload
     if not items and isinstance(payload, dict):
         items = payload.get("models")
+    if items is not None and not isinstance(items, list):
+        return {'ok': False, 'kind': 'unsupported', 'models': [],
+                'message': '响应不是模型列表，请手动填写模型名',
+                'elapsedMs': int((time.time() - t0) * 1000)}
     models: list[str] = []
     for it in (items or []):
         mid = it.get("id") if isinstance(it, dict) else (it if isinstance(it, str) else "")
@@ -2080,10 +2214,18 @@ async def api_models_discover(req: ModelDiscoverRequest):
         raise HTTPException(400, "请先填写或选择 Base URL")
     slot = (req.slot or "").strip()
     typed = (req.apiKey or "").strip()
+    if typed and any(c.isspace() for c in typed):
+        raise HTTPException(400, 'API Key 不能包含空白字符')
     key = typed or _saved_key_for(channel, slot)
     proto = (req.protocol or "").strip().lower()
-    if proto not in ("openai", "anthropic"):
-        proto = "anthropic" if (channel == "chat" and slot == "anthropic") else "openai"
+    expected = _CHAT_PROTOCOLS.get(slot) if channel == 'chat' else 'openai'
+    if proto and proto not in ('openai', 'anthropic'):
+        raise HTTPException(400, '不支持的模型协议')
+    if expected and proto and expected != proto:
+        raise HTTPException(400, '协议与目标槽位不匹配')
+    proto = proto or expected or 'openai'
+    if key and not typed and base != _saved_base_for(channel, slot).strip().rstrip('/'):
+        raise HTTPException(400, '更换 Base URL 时必须重新填写 API Key，未向新地址发送已保存的密钥')
     result = await asyncio.to_thread(_discover_models, base, key, proto)
     result.update({
         "channel": channel,
@@ -2104,9 +2246,39 @@ import local_config_import  # noqa: E402  （web/ 在 sys.path 上）
 
 _IMPORT_SLOT_ENV: dict[str, tuple[str, str, str]] = {
     "openai": ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"),
-    "anthropic": ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_MODEL"),
-    "relay": ("EASEL_LLM_BASE_URL", "EASEL_LLM_API_KEY", "CLAUDE_MODEL"),
+    "anthropic": ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"),
+    "relay": ("EASEL_LLM_BASE_URL", "EASEL_LLM_API_KEY", "EASEL_LLM_MODEL"),
 }
+_IMPORT_PREVIEWS: dict[str, dict] = {}
+
+
+def _import_digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _import_target_digest() -> str:
+    return _import_digest({str(p): hashlib.sha256(b).hexdigest() if b is not None else None
+                           for p, b in _model_file_snapshot().items()})
+
+
+def _import_compatible(slot: str, candidate: dict) -> str:
+    if not candidate['compatible']:
+        return candidate['skipReason']
+    if candidate['protocol'] != _CHAT_PROTOCOLS[slot]:
+        return f'协议不匹配：{slot} 槽位需要 {_CHAT_PROTOCOLS[slot]}'
+    base, _ = _openclaw_provider_creds().get(slot, ('', ''))
+    if _is_local_gateway_base(base):
+        return '此槽位由本地模型网关管理，请在网关配置中修改上游'
+    return ''
+
+
+def _import_source_path(source: str, supplied_path: str) -> Path:
+    if source not in local_config_import.SOURCES:
+        raise HTTPException(400, '不认识的配置来源')
+    path, _ = local_config_import.resolve_source(source, supplied_path)
+    if path is None:
+        raise HTTPException(404, '来源配置不可用，请检查来源和路径')
+    return path.resolve()
 
 
 @app.get("/api/models/import/sources")
@@ -2154,19 +2326,46 @@ def _import_overwrites(slot: str, cand: dict, env: dict[str, str]) -> list[dict]
 @app.post("/api/models/import/preview")
 async def api_import_preview(req: ImportPreviewRequest):
     """读取来源 → 候选列表（脱敏）+ 覆盖预览。只读，不改任何配置。"""
-    slot = req.slot if req.slot in _IMPORT_SLOT_ENV else "openai"
-    path, err = local_config_import.resolve_source(req.source, req.path)
-    if path is None:
-        raise HTTPException(404, err or "来源不可用")
+    slot = req.slot
+    if slot not in _IMPORT_SLOT_ENV:
+        raise HTTPException(400, '目标槽位不认识')
+    path = _import_source_path(req.source, req.path)
     cands, errors = await asyncio.to_thread(local_config_import.read_source, req.source, path)
-    env = _read_env()
-    for c in cands:
-        c["overwrites"] = _import_overwrites(slot, c, env) if c["compatible"] else []
-        c.pop("key", None)              # 明文密钥不出网
+    with _MODEL_CONFIG_LOCK:
+        try:
+            target = _import_target_digest()
+        except Exception:
+            raise HTTPException(500, '无法读取当前配置，请检查访问权限') from None
+        env = _read_env()
+        now = time.monotonic()
+        for token, record in list(_IMPORT_PREVIEWS.items()):
+            if record['expires'] <= now:
+                _IMPORT_PREVIEWS.pop(token, None)
+        for c in cands:
+            reason = _import_compatible(slot, c)
+            fingerprint = _import_digest(c)
+            c['compatible'], c['skipReason'] = not reason, reason
+            c["overwrites"] = _import_overwrites(slot, c, env) if not reason else []
+            if not reason:
+                token = uuid.uuid4().hex
+                target_oc = openclaw_state_dir() / 'openclaw.json'
+                try:
+                    target_providers = json.loads(target_oc.read_text(encoding='utf-8')).get('models', {}).get('providers', {}) if target_oc.is_file() else {}
+                except (ValueError, TypeError, AttributeError):
+                    raise HTTPException(500, 'OpenClaw 配置格式不正确，请修复后重新预览') from None
+                _IMPORT_PREVIEWS[token] = {'source': req.source, 'path': str(path), 'slot': slot,
+                    'id': c['id'], 'candidate': fingerprint, 'target': target, 'expires': now + 600,
+                    'model': c.get('model') or _chat_model(slot, env, target_providers)}
+                if not c.get('model'):
+                    c['note'] = f'未提供模型名，保留目标模型 {_IMPORT_PREVIEWS[token]["model"]}；导入后可手动修改'
+                c['previewToken'] = token
+            c.pop("key", None)
+        while len(_IMPORT_PREVIEWS) > 128:
+            _IMPORT_PREVIEWS.pop(next(iter(_IMPORT_PREVIEWS)))
     return {
         "source": req.source, "path": str(path), "slot": slot,
         "candidates": cands, "errors": errors, "readAt": int(time.time()),
-        "note": "只读预览；导入只会写入所选槽位的那几项，其余配置不动。",
+        "note": "预览不写入；确认后仅更新所选槽位。预览十分钟内有效，源或现有配置变化须重新预览。",
     }
 
 
@@ -2175,6 +2374,7 @@ class ImportApplyRequest(BaseModel):
     path: str = ""
     id: str = ""
     slot: str = "openai"
+    previewToken: str = ""
 
 
 @app.post("/api/models/import/apply")
@@ -2185,40 +2385,42 @@ async def api_import_apply(req: ImportApplyRequest):
         raise HTTPException(400, "目标槽位不认识")
     if not (req.id or "").strip():
         raise HTTPException(400, "没有选择要导入的配置")
-    path, err = local_config_import.resolve_source(req.source, req.path)
-    if path is None:
-        raise HTTPException(404, err or "来源不可用")
-    cands, _errors = await asyncio.to_thread(local_config_import.read_source, req.source, path)
-    hit = next((c for c in cands if c["id"] == req.id), None)
-    if hit is None:
-        raise HTTPException(404, "来源内容已变化，请重新预览")
-    if not hit["compatible"]:
-        raise HTTPException(400, f'该配置不可导入：{hit["skipReason"]}')
-    base, key = hit["baseUrl"], hit["key"]
-    if not _valid_base_url(base):
-        raise HTTPException(400, "Base URL 不合法")
-    if any(ch.isspace() for ch in key):
-        raise HTTPException(400, "密钥不能包含空白字符")
-    base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
-    updates = {base_env: base, key_env: key}
-    if hit.get("model"):
-        updates[model_env] = hit["model"]
-    _write_env_direct(updates)          # 内部先过 _guard_env_values，原子写
-    note = ""
-    if slot in ("openai", "relay"):
-        # 保留现有全部自定义 provider（keep=现有键集合），只更新目标槽位；网关模式地址由
-        # _sync_openclaw_chat 内部保护，不会被改回直连。
+    path = _import_source_path(req.source, req.path)
+    with _MODEL_CONFIG_LOCK:
+        preview = _IMPORT_PREVIEWS.get(req.previewToken)
+        if not preview or preview['expires'] <= time.monotonic():
+            raise HTTPException(409, '请先读取并确认预览；预览已过期或不存在')
+        if any(preview[k] != value for k, value in
+               (('source', req.source), ('path', str(path)), ('slot', slot), ('id', req.id))):
+            raise HTTPException(409, '来源、候选或目标槽位已变化，请重新预览')
+        cands, _errors = local_config_import.read_source(req.source, path)
+        hits = [c for c in cands if c['id'] == req.id]
+        if len(hits) != 1 or _import_digest(hits[0]) != preview['candidate']:
+            raise HTTPException(409, '来源内容已变化，请重新预览')
+        hit = hits[0]
+        reason = _import_compatible(slot, hit)
+        if reason:
+            raise HTTPException(400, f'该配置不可导入：{reason}')
         try:
-            oc = Path.home() / '.openclaw-easel' / 'openclaw.json'
-            keep: set[str] = set()
-            if oc.is_file():
-                provs = ((json.loads(oc.read_text(encoding='utf-8')).get('models') or {})
-                         .get('providers') or {})
-                keep = set(provs.keys())
-            note = _sync_openclaw_chat(
-                {slot: {'model': hit.get('model', ''), 'base': base, 'key': key}}, keep, '')
-        except Exception as e:  # noqa: BLE001
-            note = f'openclaw 同步失败：{e}'
+            if _import_target_digest() != preview['target']:
+                raise HTTPException(409, '当前配置已变化，请重新预览覆盖内容')
+            oc = openclaw_state_dir() / 'openclaw.json'
+            data = json.loads(oc.read_text(encoding='utf-8')) if oc.is_file() else {}
+            keep = set(data.get('models', {}).get('providers', {}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(500, '无法读取 OpenClaw 配置，未导入；请检查配置后重试') from None
+        base, key = hit['baseUrl'], hit['key']
+        if not _valid_base_url(base):
+            raise HTTPException(400, 'Base URL 不合法')
+        base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
+        updates = {base_env: base, key_env: key}
+        if hit.get('model'):
+            updates[model_env] = hit['model']
+        note = _commit_model_configuration(updates, {slot: {
+            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep)
+        _IMPORT_PREVIEWS.pop(req.previewToken, None)
     resp = {"ok": True, "note": note,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,
                         "fields": sorted(updates.keys())}}
@@ -3521,6 +3723,8 @@ async def api_login_start(platform: str):
         # 公众号不走扫码：前端应改用凭证表单提交到 /api/accounts/{platform}/credentials。
         return {'mode': 'credentials', 'configured': _wechat_has_credentials(),
                 'message': '微信公众号请填写 AppID / AppSecret'}
+    if platform == 'xiaohongshu':
+        invalidate_account_context(platform)
     LOGIN_DIR.mkdir(parents=True, exist_ok=True)
     qr = LOGIN_DIR / f'{platform}.png'
     status = LOGIN_DIR / f'{platform}.json'
@@ -3748,6 +3952,7 @@ async def api_account_whoami(platform: str):
         hit = _WHOAMI_CACHE.get(platform)
     if hit and (time.time() - hit[0]) < WHOAMI_TTL:
         return hit[1]
+    account_generation = account_context_generation(platform) if platform == 'xiaohongshu' else None
     if backend == 'biliup':
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'whoami',
                '--cookie', str(DATA_DIR / 'cookies.json')]
@@ -3763,6 +3968,8 @@ async def api_account_whoami(platform: str):
                                        capture_output=True, text=True, timeout=150)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, '校验超时（浏览器起不来或网络慢）')
+    if account_generation is not None and account_generation != account_context_generation(platform):
+        raise HTTPException(409, '账号状态已变化，已丢弃旧校验结果，请重新校验')
     data = {'loggedIn': False, 'name': '', 'avatar': ''}
     confident = False   # 是否拿到「可信」校验结论（子进程正常跑出 JSON 且无 error 字段）
     for line in reversed((proc.stdout or '').strip().splitlines()):
@@ -3780,6 +3987,8 @@ async def api_account_whoami(platform: str):
         # 校验失败/无有效输出 → **不缓存、不删标记**，返回「上次已知」登录态（读标记）。
         # 避免一次校验抖动就把已登录卡片翻成「未登录」并缓存 10 分钟；下次校验(缓存未写)会自动重试恢复。
         return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': ''}
+    if platform == 'xiaohongshu' and not data['loggedIn']:
+        invalidate_account_context(platform, live_only=True)
     with _WHOAMI_LOCK:
         _WHOAMI_CACHE[platform] = (time.time(), data)
     # 回写标记：确认已登录 → 快速路径（/api/accounts、/api/analytics/platforms）此后也正确；
@@ -3801,6 +4010,8 @@ async def api_logout(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
+    if platform == 'xiaohongshu':
+        invalidate_account_context(platform)
     deleted = []
     if cfg['backend'] == 'wechat-oa':
         # 1) 清 AppID 凭证（旧配置兜底）
@@ -3861,11 +4072,35 @@ ANALYTICS_PLATFORMS = {"xiaohongshu", "douyin", "kuaishou", "zhihu", "weixin-cha
 
 
 def _notes_snapshot_file(platform: str) -> Path:
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        account = ae.active_account(OUTPUTS_DIR / "_analytics")
+        if account:
+            return ae.account_dir(OUTPUTS_DIR / "_analytics", account["id"]) / "notes.jsonl"
     return OUTPUTS_DIR / "_analytics" / f"{platform}-notes.jsonl"
+
+
+def invalidate_account_context(platform: str, *, live_only: bool = False) -> None:
+    """Invalidate ownership immediately on login/logout without deleting retained evidence."""
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        if live_only and (ae.active_account(OUTPUTS_DIR / "_analytics") or {}).get("source") != "live":
+            return
+        ae.invalidate(OUTPUTS_DIR / "_analytics")
+
+
+def account_context_generation(platform: str) -> str:
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        return ae.generation(OUTPUTS_DIR / "_analytics")
+    return ""
 
 
 def _last_note_snapshot_at(platform: str) -> int | None:
     """逐篇快照流里最近一次采集时间（文件不存在 → None）。"""
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        return ae.context(OUTPUTS_DIR / "_analytics")["lastFetchedAt"]
     p = _notes_snapshot_file(platform)
     if not p.is_file():
         return None
@@ -3897,6 +4132,14 @@ async def api_analytics_notes(platform: str):
     返回规范化记录 + 数据覆盖窗口（首末采集时间、条数），供「选题建议」追溯证据用。"""
     if platform not in ANALYTICS_PLATFORMS:
         raise HTTPException(404, "该平台暂不支持数据抓取")
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        context = ae.context(OUTPUTS_DIR / "_analytics")
+        records = ae.load(OUTPUTS_DIR / "_analytics")
+        first, last = context["firstFetchedAt"], context["lastFetchedAt"]
+        return {"platform": platform, "records": records, "count": len(records), **context,
+                "window": {"from": first, "to": last} if first else None,
+                "note": "逐篇快照保留 365 天、每篇最近两次；无账号旧数据隔离。已入库选题及其引用需在选题库单独删除。"}
     p = _notes_snapshot_file(platform)
     recs: list[dict] = []
     if p.is_file():
@@ -3925,7 +4168,9 @@ async def api_analytics_notes(platform: str):
 
 
 class AnalyticsClearRequest(BaseModel):
-    platform: str = ""
+    platform: str = "xiaohongshu"
+    accountId: str = ""
+    scope: str = "account"
 
 
 @app.post("/api/analytics/clear")
@@ -3934,6 +4179,23 @@ async def api_analytics_clear(req: AnalyticsClearRequest):
     pf = (req.platform or "").strip()
     if pf and pf not in ANALYTICS_PLATFORMS:
         raise HTTPException(400, "未知平台")
+    if req.scope not in {"account", "platform"}:
+        raise HTTPException(400, "未知清除范围")
+    if pf == "xiaohongshu":
+        import account_evidence as ae
+        key = None
+        if req.scope == "account":
+            if not req.accountId:
+                raise HTTPException(400, "请提供要清除的账号 ID")
+            current = ae.active_account(OUTPUTS_DIR / "_analytics")
+            if not current or current["id"] != req.accountId:
+                raise HTTPException(409, "账号已切换，请刷新后再清除")
+            key = req.accountId
+        count = ae.clear(OUTPUTS_DIR / "_analytics", key)
+        return {"ok": True, "cleared": pf, "accountId": key, "deletedCount": count,
+                "note": "已清除分析快照；登录态及已入库选题保留。"}
+    if req.scope != "platform":
+        raise HTTPException(400, "该平台仅支持显式指定 scope=platform 清除")
     import account_stats as _as  # skills/shared/scripts 已在 sys.path 上
     _as.clear_analytics(pf or None)
     return {"ok": True, "cleared": pf or "all"}
@@ -3941,6 +4203,9 @@ async def api_analytics_clear(req: AnalyticsClearRequest):
 
 def _load_note_snapshot_records(platform: str) -> list[dict]:
     """读逐篇快照流里的规范化记录（坏行跳过），供 insights 与选题写入共用。"""
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        return ae.load(OUTPUTS_DIR / "_analytics")
     p = _notes_snapshot_file(platform)
     recs: list[dict] = []
     if not p.is_file():
@@ -3962,23 +4227,57 @@ def _load_note_snapshot_records(platform: str) -> list[dict]:
 async def api_analytics_insights(platform: str):
     """基于本人账号逐篇快照的热词建议（只读快照，不联网）。
     每条建议可追溯到原笔记（refs）+ 样本量 + 指标 + 可信度分级。"""
-    if platform not in ANALYTICS_PLATFORMS:
-        raise HTTPException(404, "该平台暂不支持数据抓取")
+    if platform != "xiaohongshu":
+        raise HTTPException(404, "探索建议目前仅支持小红书")
     import xhs_insights as xi   # web/ 在 sys.path 上
-    return xi.keyword_insights(_load_note_snapshot_records(platform))
+    import account_evidence as ae
+    result = xi.keyword_insights(_load_note_snapshot_records(platform))
+    return {**result, **ae.context(OUTPUTS_DIR / "_analytics")}
+
+
+class AnalyticsImportRequest(BaseModel):
+    platform: str = "xiaohongshu"
+    accountId: str
+    accountName: str = ""
+    records: list[dict]
+
+
+@app.post("/api/analytics/import")
+async def api_analytics_import(req: AnalyticsImportRequest):
+    """Import user-supplied evidence; it never establishes a platform login identity."""
+    if req.platform != "xiaohongshu":
+        raise HTTPException(400, "离线导入目前仅支持小红书")
+    if not req.records or len(req.records) > 2000:
+        raise HTTPException(400, "每次请导入 1–2000 条笔记")
+    if len(req.model_dump_json().encode("utf-8")) > 5 * 1024 * 1024:
+        raise HTTPException(413, "导入文件不能超过 5 MB")
+    import account_evidence as ae
+    try:
+        rows = ae.ingest(OUTPUTS_DIR / "_analytics", req.records, req.accountId.strip(), int(time.time()),
+                         source="import", name=req.accountName)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**await api_analytics_notes("xiaohongshu"), "importedCount": len(rows)}
 
 
 class InsightIdeaRequest(BaseModel):
     platform: str = "xiaohongshu"
     word: str = ""
+    accountId: str = ""
 
 
 @app.post("/api/analytics/insights/idea")
 async def api_insights_idea(req: InsightIdeaRequest):
     """把一条热词建议写入选题库（复用选题创建格式；按来源+标题查重）。"""
     pf = (req.platform or "xiaohongshu").strip()
-    if pf not in ANALYTICS_PLATFORMS:
-        raise HTTPException(400, "未知平台")
+    if pf != "xiaohongshu":
+        raise HTTPException(400, "探索建议目前仅支持小红书")
+    import account_evidence as ae
+    if not req.accountId:
+        raise HTTPException(400, "缺少分析账号 ID，请刷新后重试")
+    context = ae.context(OUTPUTS_DIR / "_analytics")
+    if not context["account"] or context["account"]["id"] != req.accountId:
+        raise HTTPException(409, "账号已切换，请刷新后再加入选题库")
     word = (req.word or "").strip()
     if not word:
         raise HTTPException(400, "没有要加入的候选词")
@@ -3988,11 +4287,15 @@ async def api_insights_idea(req: InsightIdeaRequest):
     if hit is None:
         raise HTTPException(404, f"候选词「{word}」不在当前建议列表（可能快照已更新），请刷新后重试")
     idea = xi.idea_from_suggestion(hit, insights.get("window"))
+    if context["account"]["source"] == "import":
+        idea["source"] = "小红书导入数据分析"
+        idea["note"] = "用户提供的账号 ID 与导出文件，账号归属未经平台验证。\n" + idea["note"]
     existing = _read_ideas()
     title = idea["title"]
-    if any((it.get("title") or "").strip() == title and it.get("source") == idea["source"]
+    if any((it.get("analysisEvidence") or {}).get("word") == word
+           and (it.get("analysisEvidence") or {}).get("account", {}).get("id") == req.accountId
            for it in existing):
-        raise HTTPException(409, f"选题「{title}」已存在（来自同一次分析），不重复添加")
+        raise HTTPException(409, f"选题「{title}」已在选题库，不重复添加")
     item = {
         "id": uuid.uuid4().hex[:12],
         "title": title,
@@ -4000,6 +4303,10 @@ async def api_insights_idea(req: InsightIdeaRequest):
         "source": idea["source"],
         "status": "pending",
         "created": int(time.time()),
+        "analysisEvidence": {"account": context["account"], "word": word,
+                             "coverage": context["coverage"], "window": insights.get("window"),
+                             "confidence": hit["confidence"], "refs": hit["refs"],
+                             "sampleSize": hit["sampleSize"], "evidence": hit["evidence"]},
     }
     existing.insert(0, item)
     _write_ideas(existing)
@@ -4011,6 +4318,9 @@ async def api_analytics(platform: str):
     """抓取某平台已登录账号的创作数据（粉丝/获赞/作品 + 与上次快照的增长）。起 headless 浏览器，数秒。"""
     if platform not in ANALYTICS_PLATFORMS:
         raise HTTPException(404, "该平台暂不支持数据抓取")
+    import account_evidence as ae
+    evidence_root = OUTPUTS_DIR / "_analytics"
+    expected_generation = ae.generation(evidence_root) if platform == "xiaohongshu" else None
     # B站用 cookie 调 API（无浏览器 profile）、公众号走 mp 后台会话（Playwright 拦截数据 XHR，见下），单独分支；其余走 account_stats（Playwright）
     if platform == "bilibili":
         cmd = [sys.executable, str(SHARED_SCRIPTS / "bili_login.py"), "stats",
@@ -4026,6 +4336,9 @@ async def api_analytics(platform: str):
         # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
         cmd = [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch", "--platform", platform]
     ana_env = _proxy_env()
+    if platform == "xiaohongshu":
+        # Keep persistence in this process so a pending scrape cannot restore cleared/switched data.
+        ana_env["EASEL_ANALYTICS_MANAGED"] = "1"
     try:
         proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=ana_env,
                                        capture_output=True, text=True, timeout=180)
@@ -4041,8 +4354,33 @@ async def api_analytics(platform: str):
             except Exception:
                 continue
     if data is not None:
+        if platform == "xiaohongshu":
+            if expected_generation != ae.generation(evidence_root):
+                raise HTTPException(409, "账号或分析数据已切换，请刷新后重新采集")
+            external_id = str(data.get("accountId") or "")
+            if data.get("loggedIn") and external_id:
+                try:
+                    rows = ae.ingest(evidence_root, data.get("notes") or [], external_id, int(time.time()),
+                                     source="live", name=data.get("nickname") or "")
+                except ValueError as exc:
+                    invalidate_account_context(platform)
+                    raise HTTPException(502, f"采集数据无法确认归属：{exc}") from exc
+                data["noteSnapshotCount"] = len(rows)
+                import account_stats as stats
+                snapshot = {"ts": int(time.time()), **{key: data.get(key) for key in ("followers", "likes", "posts")}}
+                if any(snapshot[key] is not None for key in ("followers", "likes", "posts")):
+                    # The standalone script and web share EASEL_DATA_DIR in production.
+                    stats.record_snapshot(platform, snapshot)
+            else:
+                previous = _last_note_snapshot_at(platform)
+                invalidate_account_context(platform)
+                data["lastGoodAt"] = previous
+                data["stale"] = bool(previous)
+                data["analysisNote"] = "未确认当前账号 ID，历史数据已隔离；重新采集或导入数据后再分析"
+            context = ae.context(evidence_root)
+            data.update({key: value for key, value in context.items() if key != "stale"})
         # 登录失效时附上次成功时间与过期标记：不拿空列表冒充「没有笔记」
-        if data.get("loggedIn") is False:
+        if data.get("loggedIn") is False and platform != "xiaohongshu":
             prev = _last_note_snapshot_at(platform)
             data["stale"] = bool(prev)
             data["lastGoodAt"] = prev

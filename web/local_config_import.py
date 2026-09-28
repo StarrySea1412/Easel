@@ -15,6 +15,8 @@ import hashlib
 import json
 import re
 import sqlite3
+import os
+from urllib.parse import urlsplit
 from pathlib import Path
 
 HOME_CCSWITCH = Path.home() / ".cc-switch"
@@ -31,7 +33,23 @@ def _mask(key: str) -> str:
 
 def _valid_base(base: str) -> bool:
     b = (base or "").strip()
-    return bool(re.match(r"^https?://[^\s@]+$", b))
+    try:
+        url = urlsplit(b)
+        return (url.scheme in ("http", "https") and bool(url.hostname)
+                and url.port != 0 and not url.username and not url.password
+                and not url.query and not url.fragment and not any(c.isspace() for c in b))
+    except ValueError:
+        return False
+
+
+def _cc_protocol(app_type: str, cfg: dict) -> str:
+    if app_type == "claude":
+        return "anthropic"
+    if app_type == "codex":
+        # Responses and Chat Completions have different request contracts.
+        wire = _codex_options(str(cfg.get("config") or "")).get('wire_api')
+        return "openai" if wire == "chat" else "openai-responses" if wire == "responses" else "unknown"
+    return "unknown"
 
 
 def _pick_base(obj: object) -> str:
@@ -92,6 +110,26 @@ def _toml_field(config: str, field: str) -> str:
     return m[-1].strip() if m else ""
 
 
+def _codex_options(config: str) -> dict:
+    """Only import the active provider; never mix endpoints from different TOML tables."""
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10: accept the unambiguous legacy flat form only.
+        if '[' in config:
+            return {}
+        return {field: _toml_field(config, field) for field in ('base_url', 'wire_api', 'model')}
+    try:
+        data = tomllib.loads(config)
+    except ValueError:
+        return {}
+    active = data.get('model_provider')
+    provider = data.get('model_providers', {}).get(active, {}) if active else data
+    if not isinstance(provider, dict):
+        return {}
+    return {'model': data.get('model', ''), 'base_url': provider.get('base_url', ''),
+            'wire_api': provider.get('wire_api', '')}
+
+
 def _model_hint(app_type: str, cfg: dict) -> str:
     """从配置里取一个模型名提示（取不到就空着，让用户用「获取模型」或手填）。"""
     env = cfg.get("env") if isinstance(cfg.get("env"), dict) else {}
@@ -100,7 +138,7 @@ def _model_hint(app_type: str, cfg: dict) -> str:
             if isinstance(v, str) and re.match(r"ANTHROPIC_(DEFAULT_\w+_)?MODEL(_NAME)?$", k) and v.strip():
                 return re.sub(r"\[.*?\]$", "", v).strip()
     if app_type == "codex":
-        got = _toml_field(str(cfg.get("config") or ""), "model")
+        got = _codex_options(str(cfg.get("config") or "")).get('model', '')
         if got:
             return got
     return ""
@@ -111,8 +149,8 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
     """归一成导入候选。密钥明文只放在 `key` 里，出网前由端点删除。"""
     cfg = cfg if isinstance(cfg, dict) else {}
     base = (base or "").strip().rstrip("/")
-    if not base and isinstance(cfg.get("config"), str):
-        base = _toml_field(cfg["config"], "base_url").strip().rstrip("/")   # codex 型配置把地址写在 TOML 文本里
+    if app_type == 'codex' and isinstance(cfg.get('config'), str):
+        base = str(_codex_options(cfg['config']).get('base_url') or '').strip().rstrip('/')
     key = (key or "").strip()
     cid = hashlib.sha1(f"{source}|{name}|{base}".encode("utf-8")).hexdigest()[:12]
     skip = ""
@@ -124,13 +162,17 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         skip = "Base URL 不是合法的 http(s) 地址"
     elif not key:
         skip = "没有可用的密钥（可能只存了 OAuth 登录态）"
+    elif protocol not in ("openai", "anthropic"):
+        skip = "协议未明确或为 Responses，不能导入 Chat Completions / Anthropic 槽位"
+    elif any(c.isspace() for c in key):
+        skip = "密钥包含空白字符"
     return {
         "id": cid,
         "source": source,
         "name": (name or base or "未命名").strip()[:80],
         "baseUrl": base,
         "model": _model_hint(app_type, cfg) if cfg else "",
-        "protocol": "anthropic" if protocol == "anthropic" else "openai",
+        "protocol": protocol,
         "appType": app_type,
         "note": note,
         "keyPresent": bool(key),
@@ -144,7 +186,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
 # ---- OpenClaw（本应用自己的配置） ----
 
 def openclaw_path() -> Path:
-    return HOME_OPENCLAW / "openclaw.json"
+    return Path(os.environ.get("EASEL_OPENCLAW_STATE_DIR") or HOME_OPENCLAW) / "openclaw.json"
 
 
 def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
@@ -155,7 +197,11 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         return [], [f"配置解析失败：{type(e).__name__}"]
-    provs = ((data or {}).get("models") or {}).get("providers") or {}
+    if not isinstance(data, dict) or not isinstance(data.get("models", {}), dict):
+        return [], ["配置结构不兼容"]
+    provs = data.get("models", {}).get("providers") or {}
+    if not isinstance(provs, dict):
+        return [], ["服务商列表结构不兼容"]
     out: list[dict] = []
     for pkey, pv in provs.items():
         if not isinstance(pv, dict):
@@ -166,7 +212,11 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
         mid = ""
         if models and isinstance(models[0], dict):
             mid = str(models[0].get("id") or "").strip()
-        protocol = "anthropic" if str(pkey).lower().startswith("anthropic") else "openai"
+        api = str(pv.get("api") or "")
+        protocol = {"anthropic-messages": "anthropic", "openai-completions": "openai",
+                    "openai-responses": "openai-responses"}.get(api, "unknown")
+        if not api:
+            protocol = {"openai": "openai", "anthropic": "anthropic", "relay": "anthropic"}.get(pkey, "unknown")
         cand = _candidate("openclaw", str(pkey), base, key, protocol,
                           app_type="openclaw", cfg=pv, note="来自本机 OpenClaw 配置")
         if mid:
@@ -194,17 +244,20 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
     errors: list[str] = []
     try:
         rows = con.execute("SELECT app_type, name, settings_config FROM providers").fetchall()
-    except sqlite3.OperationalError as e:
+    except sqlite3.OperationalError:
         con.close()
-        return [], [f"数据库结构不兼容：{e}"]
+        return [], ["数据库结构不兼容"]
     for r in rows:
         raw = r["settings_config"]
         try:
             cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except Exception:  # noqa: BLE001
-            errors.append(f"{r['name']}: settings_config 不是 JSON，已跳过")
+            errors.append("settings_config 不是 JSON，已跳过")
             continue
-        protocol = "anthropic" if str(r["app_type"]).lower().startswith("claude") else "openai"
+        if not isinstance(cfg, dict):
+            errors.append("settings_config 结构不兼容，已跳过")
+            continue
+        protocol = _cc_protocol(str(r["app_type"]), cfg)
         cand = _candidate("cc-switch", str(r["name"]), _pick_base(cfg), _pick_key(cfg),
                           protocol, app_type=str(r["app_type"]), cfg=cfg)
         out.append(cand)
@@ -219,20 +272,26 @@ def _read_ccswitch_json(path: Path) -> tuple[list[dict], list[str]]:
         return [], [f"配置解析失败：{type(e).__name__}"]
     out: list[dict] = []
     errors: list[str] = []
+    if not isinstance(data, dict):
+        return [], ["配置结构不兼容"]
     for app_type, section in (data or {}).items():
         if not isinstance(section, dict):
             continue
-        for pid, p in (section.get("providers") or {}).items():
+        providers = section.get("providers") or {}
+        if not isinstance(providers, dict):
+            errors.append("服务商列表结构不兼容，已跳过")
+            continue
+        for pid, p in providers.items():
             if not isinstance(p, dict):
                 continue
             cfg = p.get("settingsConfig") if isinstance(p.get("settingsConfig"), dict) else {}
-            protocol = "anthropic" if str(app_type).lower().startswith("claude") else "openai"
+            protocol = _cc_protocol(str(app_type), cfg)
             name = str(p.get("name") or pid)
             try:
                 out.append(_candidate("cc-switch", name, _pick_base(cfg), _pick_key(cfg),
                                       protocol, app_type=str(app_type), cfg=cfg))
             except Exception as e:  # noqa: BLE001  单条坏了不影响整体
-                errors.append(f"{app_type}/{name}: {type(e).__name__}")
+                errors.append(f"条目解析失败：{type(e).__name__}")
     return out, errors
 
 
@@ -265,8 +324,11 @@ def resolve_source(source: str, explicit_path: str = "") -> tuple[Path | None, s
 
 
 def read_source(source: str, path: Path) -> tuple[list[dict], list[str]]:
-    if source == "openclaw":
-        return read_openclaw(path)
-    if source == "cc-switch":
-        return read_ccswitch(path)
+    try:
+        if source == "openclaw":
+            return read_openclaw(path)
+        if source == "cc-switch":
+            return read_ccswitch(path)
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return [], ["无法读取来源配置，请检查文件格式和访问权限"]
     return [], [f"不认识的来源：{source}"]

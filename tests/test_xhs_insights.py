@@ -77,7 +77,7 @@ def test_insights_refs_traceable_to_notes():
     assert {r["noteId"] for r in cof["refs"]} == {"n1", "n2", "n3"}   # 可追溯
     assert cof["sampleSize"] == 3
     assert cof["metric"] == round((120 + 340 + 90) / 3, 1)
-    assert cof["confidence"] == "strong"
+    assert cof["confidence"] == "exploratory"
     assert "篇笔记" in cof["evidence"]
 
 
@@ -104,7 +104,7 @@ def test_insights_small_sample_is_weak():
     recs = [_rec("only", "小众冷门体验", ["冷门"], 10)]
     d = xi.keyword_insights(recs)
     s = next(s for s in d["suggestions"] if s["word"] == "冷门")
-    assert s["confidence"] == "weak" and "样本较少" in s["evidence"]
+    assert s["confidence"] == "exploratory" and "样本较少" in s["evidence"]
 
 
 def test_insights_uses_latest_snapshot_per_note():
@@ -151,7 +151,7 @@ def snapshot_env(tmp_path, monkeypatch):
 
 def _seed_snapshot(root: Path, records: list[dict]):
     st.ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
-    st.record_note_snapshot("xiaohongshu", records, int(time.time()))
+    st.record_note_snapshot("xiaohongshu", records, int(time.time()), account_id="account-one")
 
 
 def test_insights_endpoint_returns_suggestions(snapshot_env):
@@ -168,24 +168,24 @@ def test_insights_endpoint_unknown_platform():
 
 def test_insights_idea_endpoint_creates_and_dedupes(snapshot_env):
     _seed_snapshot(snapshot_env, _records())
-    d = asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(word="咖啡")))
+    d = asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(accountId="live:account-one", word="咖啡")))
     assert d["ok"] and d["idea"]["title"] == "选题：咖啡"
     assert d["idea"]["source"] == "本人小红书分析"
     ideas = web._read_ideas()
     assert len(ideas) == 1
     # 再写同一条 → 409
     with pytest.raises(web.HTTPException) as e:
-        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(word="咖啡")))
+        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(accountId="live:account-one", word="咖啡")))
     assert e.value.status_code == 409
 
 
 def test_insights_idea_endpoint_unknown_word_404(snapshot_env):
     _seed_snapshot(snapshot_env, _records())
     with pytest.raises(web.HTTPException) as e:
-        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(word="不存在的词")))
+        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(accountId="live:account-one", word="不存在的词")))
     assert e.value.status_code == 404
     with pytest.raises(web.HTTPException):
-        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(word="")))
+        asyncio.run(web.api_insights_idea(web.InsightIdeaRequest(accountId="live:account-one", word="")))
 
 
 def test_insights_idea_endpoint_survives_bad_jsonl(snapshot_env):

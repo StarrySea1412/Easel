@@ -199,6 +199,8 @@ CLAUDE_MODEL=anthropic/claude-sonnet-4-6
 
 `.env.example` also documents optional video, music, voice, and Anthropic-compatible provider settings. Configure only the capabilities you use. Missing media-provider credentials do not prevent chat, planning, or text creation.
 
+The Web settings page stores model names separately for OpenAI, Anthropic, and Anthropic-compatible relay channels as `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `EASEL_LLM_MODEL`. The legacy `CLAUDE_MODEL` remains a compatibility fallback; saving one channel does not overwrite the others.
+
 | Capability | Configuration | Additional dependency |
 |---|---|---|
 | AI video | `VIDEO_PROVIDER` plus the provider key, URL, and model | A supported video service |

@@ -207,9 +207,17 @@ export default function SettingsPanel({ onClose }: Props) {
   const [impPick, setImpPick] = useState('');
   const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply'>('');
   const [impMsg, setImpMsg] = useState('');
+  const [impConfirmed, setImpConfirmed] = useState(false);
+
+  const clearImportPreview = useCallback(() => {
+    setImpPreview(null);
+    setImpPick('');
+    setImpConfirmed(false);
+    setImpMsg('');
+  }, []);
 
   const openImport = useCallback(async () => {
-    setImpOpen(true);
+    setImpOpen((open) => !open);
     if (impSources.length) return;
     try {
       const d = await fetchImportSources();
@@ -227,11 +235,10 @@ export default function SettingsPanel({ onClose }: Props) {
     setImpMsg('');
     setImpPreview(null);
     setImpPick('');
+    setImpConfirmed(false);
     try {
       const d = await previewImport(impSource, impSlot, impPath.trim());
       setImpPreview(d);
-      const first = d.candidates.find((c) => c.compatible);
-      setImpPick(first ? first.id : '');
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
     } catch (e) {
       setImpMsg(e instanceof Error ? e.message : '预览失败');
@@ -241,28 +248,30 @@ export default function SettingsPanel({ onClose }: Props) {
   }, [impSource, impSlot, impPath]);
 
   const applyImportPick = useCallback(async () => {
-    if (!impPick) return;
+    const selected = impPreview?.candidates.find((c) => c.id === impPick && c.compatible);
+    if (!selected?.previewToken || !impConfirmed || impBusy) return;
     setImpBusy('apply');
     setImpMsg('');
     try {
-      const r = await applyImport(impSource, impPick, impSlot, impPath.trim());
+      const r = await applyImport(impSource, impPick, impSlot, impPath.trim(), selected.previewToken);
       setImpMsg(`✓ 已导入「${r.applied.name}」→ ${impSlot}${r.note ? `（${r.note}）` : ''}`);
-      const d = await fetchModelChannels();
-      setChatRows(d.channels.chat.rows || []);
-      setTransRows(d.channels.transcribe.rows || []);
-      setMediaRows({
-        image: d.channels.image?.rows || [],
-        video: d.channels.video?.rows || [],
-        music: d.channels.music?.rows || [],
-        speech: d.channels.speech?.rows || [],
-      });
-      void loadImportPreview();
+      setImpPreview(null);
+      setImpPick('');
+      setImpConfirmed(false);
+      try {
+        const d = await fetchModelChannels();
+        const imported = d.channels.chat.rows.find((row) => row.slot === impSlot);
+        if (imported) setChatRows((rows) => rows.some((row) => row.slot === impSlot)
+          ? rows.map((row) => row.slot === impSlot ? imported : row) : [...rows, imported]);
+      } catch {
+        setImpMsg('✓ 配置已导入，但刷新失败；请关闭后重新打开设置核对。');
+      }
     } catch (e) {
       setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
     } finally {
       setImpBusy('');
     }
-  }, [impSource, impPick, impSlot, impPath, loadImportPreview]);
+  }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy]);
 
   useEffect(() => {
     let alive = true;
@@ -304,6 +313,7 @@ export default function SettingsPanel({ onClose }: Props) {
   // ── 模型配置可编辑（v2）：保存到 .env / openclaw ──────────
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState('');
+  const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
 
   const saveCurrent = useCallback(async () => {
     const rows = chan === 'chat' ? chatRows : chan === 'transcribe' ? transRows : (mediaRows[chan] || []);
@@ -319,6 +329,7 @@ export default function SettingsPanel({ onClose }: Props) {
         key: r.keyNew || '',
         key2: r.keyNew2 || '',
         primary: r.role === '主',
+        protocol: chan === 'chat' ? r.protocol || r.type : undefined,
       }));
     if (!payload.length) {
       setSavedNote('当前通道没有可保存的配置');
@@ -327,15 +338,14 @@ export default function SettingsPanel({ onClose }: Props) {
     setSaving(true);
     setSavedNote('');
     try {
-      const d = await fetchWithRetry(() => saveModelConfig(chan, payload), 3, 20000);
-      setChatRows(d.channels.chat.rows || []);
-      setTransRows(d.channels.transcribe.rows || []);
-      setMediaRows({
-        image: d.channels.image?.rows || [],
-        video: d.channels.video?.rows || [],
-        music: d.channels.music?.rows || [],
-        speech: d.channels.speech?.rows || [],
-      });
+      const d = await saveModelConfig(chan, payload, chan === 'chat' ? deletedProviders : []);
+      if (chan === 'chat') {
+        setChatRows(d.channels.chat.rows || []);
+        setDeletedProviders([]);
+      }
+      else if (chan === 'transcribe') setTransRows(d.channels.transcribe.rows || []);
+      else setMediaRows((rows) => ({ ...rows, [chan]: d.channels[chan]?.rows || [] }));
+      clearImportPreview();
       setSavedNote(d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
     } catch (e) {
@@ -344,7 +354,7 @@ export default function SettingsPanel({ onClose }: Props) {
       setSaving(false);
       setTimeout(() => setSavedNote(''), 6000);
     }
-  }, [chan, chatRows, transRows, mediaRows, refreshEnv]);
+  }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders]);
 
   // Esc 关闭
   useEffect(() => {
@@ -374,7 +384,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const SLOT_EDIT: Record<string, { model: boolean; base: boolean }> = {
     openai: { model: true, base: true },
     relay: { model: true, base: true },
-    anthropic: { model: true, base: false },
+    anthropic: { model: true, base: true },
     siliconflow: { model: false, base: true },
     custom: { model: true, base: true },
   };
@@ -389,7 +399,9 @@ export default function SettingsPanel({ onClose }: Props) {
   const setPrimaryRow = (i: number) =>
     setChatRows((rs) => rs.map((r, j) => (r.slot ? { ...r, role: j === i ? '主' : '备' } : r)));
 
-  const removeRow = (i: number) =>
+  const removeRow = (i: number) => {
+    const removed = chatRows[i];
+    if (removed?.deletable && removed.name) setDeletedProviders((names) => [...new Set([...names, removed.name])]);
     setChatRows((rs) => {
       const gone = rs[i];
       const left = rs.filter((_, j) => j !== i);
@@ -399,6 +411,7 @@ export default function SettingsPanel({ onClose }: Props) {
       }
       return left;
     });
+  };
 
   const updateRow = (
     setRows: Dispatch<SetStateAction<ModelRow[]>>,
@@ -468,7 +481,7 @@ export default function SettingsPanel({ onClose }: Props) {
                   <select
                     className="mock"
                     value=""
-                    title="服务商预设：选中即填入模型名"
+                    title="服务商预设：选中后填入同协议服务商地址"
                     disabled={!(ops?.presets || []).length}
                     onChange={(e) => {
                       const p = (ops?.presets || []).find((x) => x.baseUrl === e.target.value);
@@ -479,7 +492,11 @@ export default function SettingsPanel({ onClose }: Props) {
                       {(ops?.presets || []).length ? '服务商预设…' : '暂无预设（手动填写）'}
                     </option>
                     {(ops?.presets || []).map((p) => (
-                      <option key={p.id} value={p.baseUrl}>{p.name} · {p.note}</option>
+                      <option key={p.id} value={p.baseUrl}
+                        disabled={ops?.channel === 'chat' && r.slot !== 'custom'
+                          && p.protocol !== (r.slot === 'openai' ? 'openai' : 'anthropic')}>
+                        {p.name} · {p.note}
+                      </option>
                     ))}
                   </select>
                   <span className="model-fetch">
@@ -627,7 +644,7 @@ export default function SettingsPanel({ onClose }: Props) {
             <button
               className="btn btn-sm btn-primary"
               onClick={() => void saveCurrent()}
-              disabled={saving || sec !== 'model'}
+              disabled={saving || Boolean(impBusy) || sec !== 'model'}
             >
               {saving ? '保存中…' : '保存配置'}
             </button>
@@ -701,11 +718,12 @@ export default function SettingsPanel({ onClose }: Props) {
                             <select
                               className="mock"
                               value={impSource}
-                              onChange={(e) => { setImpSource(e.target.value); setImpPreview(null); }}
+                              disabled={Boolean(impBusy)}
+                              onChange={(e) => { setImpSource(e.target.value); clearImportPreview(); }}
                             >
                               {impSources.length === 0 && <option value="">读取来源中…</option>}
                               {impSources.map((s) => (
-                                <option key={s.id} value={s.id} disabled={!s.available}>
+                                <option key={s.id} value={s.id}>
                                   {s.label}{s.available ? '' : `（不可用：${s.detail}）`}
                                 </option>
                               ))}
@@ -713,19 +731,21 @@ export default function SettingsPanel({ onClose }: Props) {
                             <select
                               className="mock"
                               value={impSlot}
-                              onChange={(e) => { setImpSlot(e.target.value); setImpPreview(null); }}
+                              disabled={Boolean(impBusy)}
+                              onChange={(e) => { setImpSlot(e.target.value); clearImportPreview(); }}
                             >
-                              <option value="openai">写入：对话主通道（OPENAI_*）</option>
-                              <option value="relay">写入：对话备用 relay（EASEL_LLM_*）</option>
+                              <option value="openai">写入：OpenAI 兼容槽位（OPENAI_*）</option>
+                              <option value="relay">写入：Anthropic 兼容中转（EASEL_LLM_*）</option>
                               <option value="anthropic">写入：Anthropic 槽位（ANTHROPIC_*）</option>
                             </select>
                             <input
                               className="mock"
                               value={impPath}
                               placeholder="自定义路径（可留空）"
-                              onChange={(e) => setImpPath(e.target.value)}
+                              disabled={Boolean(impBusy)}
+                              onChange={(e) => { setImpPath(e.target.value); clearImportPreview(); }}
                             />
-                            <button className="btn btn-sm" onClick={() => void loadImportPreview()} disabled={impBusy === 'preview'}>
+                            <button className="btn btn-sm" onClick={() => void loadImportPreview()} disabled={Boolean(impBusy) || saving}>
                               {impBusy === 'preview' ? '读取中…' : '读取并预览'}
                             </button>
                           </div>
@@ -741,9 +761,9 @@ export default function SettingsPanel({ onClose }: Props) {
                                     <input
                                       type="radio"
                                       name="imp-pick"
-                                      disabled={!c.compatible}
+                                      disabled={!c.compatible || Boolean(impBusy)}
                                       checked={impPick === c.id}
-                                      onChange={() => setImpPick(c.id)}
+                                      onChange={() => { setImpPick(c.id); setImpConfirmed(false); }}
                                     />
                                     <span className="ii-main">
                                       <span className="ii-name">
@@ -755,6 +775,7 @@ export default function SettingsPanel({ onClose }: Props) {
                                       <span className="ii-meta">
                                         {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
                                         {!c.compatible && ` · ${c.skipReason}`}
+                                        {c.note && ` · ${c.note}`}
                                       </span>
                                       {c.compatible && c.overwrites.length > 0 && (
                                         <span className="ii-ov">
@@ -765,11 +786,17 @@ export default function SettingsPanel({ onClose }: Props) {
                                   </label>
                                 ))}
                               </div>
+                              <label className="import-msg">
+                                <input type="checkbox" checked={impConfirmed}
+                                  disabled={!impPick || Boolean(impBusy)}
+                                  onChange={(e) => setImpConfirmed(e.target.checked)} />
+                                我已核对覆盖内容，确认立即写入所选槽位（替换此槽位尚未保存的编辑）
+                              </label>
                               <div className="import-foot">
                                 <button
                                   className="btn btn-sm btn-primary"
                                   onClick={() => void applyImportPick()}
-                                  disabled={!impPick || impBusy === 'apply'}
+                                  disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
                                 >
                                   {impBusy === 'apply' ? '导入中…' : '导入选中项'}
                                 </button>

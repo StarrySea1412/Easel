@@ -295,6 +295,9 @@ EASEL_LLM_BASE_URL=https://你的服务地址/v1
 CLAUDE_MODEL=你的模型名
 ```
 
+Web 设置页分别保存 OpenAI、Anthropic 官方和 Anthropic-compatible 中转通道的模型名，分别使用
+`OPENAI_MODEL`、`ANTHROPIC_MODEL` 和 `EASEL_LLM_MODEL`。旧配置中的 `CLAUDE_MODEL` 仍作为兼容回退值；新设置不会互相覆盖。
+
 安装器会把这些标准配置同步到 OpenClaw。OpenClaw 支持但 Easel 没有预设环境变量映射的其他 provider，
 可以按 OpenClaw 自身的 provider/auth 配置方式配置；Easel 不会覆盖这些自定义配置。
 

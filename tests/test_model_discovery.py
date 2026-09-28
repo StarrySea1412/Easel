@@ -25,6 +25,14 @@ sys.path.insert(0, str(PROJECT_ROOT / "web"))
 import app as web  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, 'ENV_FILE', tmp_path / '.env')
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
+    monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(tmp_path / 'state'))
+
+
 class _FakeResp:
     def __init__(self, body: bytes, status: int = 200):
         self._body, self.status = body, status
@@ -206,6 +214,7 @@ def test_endpoint_key_source_input(monkeypatch):
 
 def test_endpoint_falls_back_to_saved_key(monkeypatch):
     monkeypatch.setattr(web, "_saved_key_for", lambda ch, slot: "sk-saved")
+    monkeypatch.setattr(web, '_saved_base_for', lambda ch, slot: 'https://api.deepseek.com/v1')
     captured: dict = {}
 
     def fake(base, key, protocol="openai", timeout=10.0):
@@ -216,3 +225,39 @@ def test_endpoint_falls_back_to_saved_key(monkeypatch):
     d = asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
         channel="chat", slot="openai", baseUrl="https://api.deepseek.com/v1")))
     assert captured["key"] == "sk-saved" and d["keySource"] == "saved"
+
+
+def test_endpoint_does_not_send_saved_key_to_changed_address(monkeypatch):
+    monkeypatch.setattr(web, '_saved_key_for', lambda ch, slot: 'sk-saved')
+    monkeypatch.setattr(web, '_saved_base_for', lambda ch, slot: 'https://trusted.example/v1')
+    monkeypatch.setattr(web, '_discover_models', lambda *args: pytest.fail('must not send request'))
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+            channel='chat', slot='openai', baseUrl='https://changed.example/v1')))
+    assert caught.value.status_code == 400 and '重新填写' in caught.value.detail
+    assert 'sk-saved' not in caught.value.detail
+
+
+@pytest.mark.parametrize('slot,protocol', [('relay', 'openai'), ('anthropic', 'openai'), ('openai', 'anthropic')])
+def test_discovery_rejects_slot_protocol_mismatch(monkeypatch, slot, protocol):
+    monkeypatch.setattr(web, '_discover_models', lambda *args: pytest.fail('must not send request'))
+    with pytest.raises(web.HTTPException):
+        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+            channel='chat', slot=slot, protocol=protocol, apiKey='sk-typed', baseUrl='https://api.example/v1')))
+
+
+def test_anthropic_base_with_v1_does_not_duplicate_path(monkeypatch):
+    seen = []
+    def fake(req, timeout):
+        seen.append(req.full_url)
+        return _FakeResp(b'{"data":[{"id":"model"}]}')
+    _patch_open(monkeypatch, fake)
+    assert web._discover_models('https://api.example/v1', 'sk-test', 'anthropic')['ok']
+    assert seen == ['https://api.example/v1/models']
+
+
+@pytest.mark.parametrize('payload', [{'data': 12}, {'data': {'error': 'bad'}}, {'data': 'model'}])
+def test_malformed_discovery_list_degrades(monkeypatch, payload):
+    _patch_open(monkeypatch, lambda req, timeout: _FakeResp(json.dumps(payload).encode()))
+    result = web._discover_models('https://api.example/v1', 'sk-test')
+    assert result['kind'] == 'unsupported' and result['models'] == []

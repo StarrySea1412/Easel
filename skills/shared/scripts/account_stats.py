@@ -19,6 +19,8 @@ import sys
 import time
 from pathlib import Path
 
+import account_evidence as evidence
+
 PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 ANALYTICS_DIR = PROJECT_ROOT / "outputs" / "_analytics"
 # 分层保留：近 KEEP_FULL_DAYS 天全部变化一条不丢；90~DAILY_DAYS 天每天≤1条；更老每周≤1条。
@@ -256,12 +258,18 @@ def growth_windows(history: list[dict], current: dict) -> dict:
     return out
 
 
-def _history_path(platform: str) -> Path:
+def _history_path(platform: str, account_id: str | None = None) -> Path:
+    if platform == "xiaohongshu":
+        account_id = account_id or (evidence.active_account(ANALYTICS_DIR) or {}).get("id")
+        if account_id:
+            return evidence.account_dir(ANALYTICS_DIR, account_id) / "overview.jsonl"
     return ANALYTICS_DIR / f"{platform}.jsonl"
 
 
-def load_history(platform: str) -> list[dict]:
-    p = _history_path(platform)
+def load_history(platform: str, account_id: str | None = None) -> list[dict]:
+    if platform == "xiaohongshu" and not account_id and not evidence.active_account(ANALYTICS_DIR):
+        return []
+    p = _history_path(platform, account_id)
     if not p.is_file():
         return []
     out = []
@@ -276,7 +284,9 @@ def load_history(platform: str) -> list[dict]:
 
 
 def append_snapshot(platform: str, snap: dict) -> None:
-    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    if platform == "xiaohongshu" and not evidence.active_account(ANALYTICS_DIR):
+        return
+    _history_path(platform).parent.mkdir(parents=True, exist_ok=True)
     with _history_path(platform).open("a", encoding="utf-8") as f:
         f.write(json.dumps(snap, ensure_ascii=False) + "\n")
 
@@ -317,14 +327,20 @@ def should_record(history: list[dict], snap: dict) -> bool:
 
 
 # ---- 逐篇笔记快照（web 端小红书分析用；其它平台沿用 notes 原样返回不动） ----
-NOTE_SNAPSHOT_VERSION = 2
+NOTE_SNAPSHOT_VERSION = evidence.VERSION
 
 
-def _notes_path(platform: str) -> Path:
+def _notes_path(platform: str, account_id: str | None = None) -> Path:
+    if platform == "xiaohongshu":
+        account_id = account_id or (evidence.active_account(ANALYTICS_DIR) or {}).get("id")
+        if account_id:
+            return evidence.account_dir(ANALYTICS_DIR, account_id) / "notes.jsonl"
     return ANALYTICS_DIR / f"{platform}-notes.jsonl"
 
 
-def load_note_snapshots(platform: str) -> list[dict]:
+def load_note_snapshots(platform: str, account_id: str | None = None) -> list[dict]:
+    if platform == "xiaohongshu":
+        return evidence.load(ANALYTICS_DIR, account_id)
     p = _notes_path(platform)
     if not p.is_file():
         return []
@@ -339,12 +355,17 @@ def load_note_snapshots(platform: str) -> list[dict]:
     return out
 
 
-def record_note_snapshot(platform: str, notes: list[dict], now: int) -> list[dict]:
+def record_note_snapshot(platform: str, notes: list[dict], now: int, account_id: str | None = None,
+                         *, source="live", account_name="") -> list[dict]:
     """把一次 fetch 的逐篇笔记写进快照流。规范化记录（方案 A 的数据契约）：
     每条含 version/账号归属键 note_id/标题/标签/发布时间/采集时间/指标/来源。
     去重与保留：同一 note_id 只保留「最近两次采集」里的最新值（既保得住上一次的
     历史，又不无限堆行）；超过 12 个月未再出现的 note_id 整体裁掉（随每次写入 compaction）。
     只落本机 outputs/_analytics/（该目录被 .gitignore 忽略），绝不进 Git。"""
+    if platform == "xiaohongshu":
+        if not account_id:
+            return []  # A browser profile or nickname is not proof of account identity.
+        return evidence.ingest(ANALYTICS_DIR, notes, account_id, now, source=source, name=account_name)
     if not notes:
         return []
     ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
@@ -386,8 +407,13 @@ def record_note_snapshot(platform: str, notes: list[dict], now: int) -> list[dic
 def clear_analytics(platform: str | None = None) -> None:
     """「清除分析历史」入口：删掉某平台（缺省=全部）的概览与逐篇快照文件。"""
     targets = [platform] if platform else ["xiaohongshu", "douyin", "kuaishou", "zhihu",
-                                            "bilibili", "weixin-channels", "weixin-oa"]
+                                            "bilibili", "weixin-channels", "wechat-oa"]
     for pf in targets:
+        if pf not in {*PLATFORMS, "bilibili", "wechat-oa"}:
+            raise ValueError("未知平台")
+        if pf == "xiaohongshu":
+            evidence.clear(ANALYTICS_DIR)
+            continue
         for path in (_history_path(pf), _notes_path(pf)):
             try:
                 path.unlink()
@@ -397,12 +423,16 @@ def clear_analytics(platform: str | None = None) -> None:
 
 def record_snapshot(platform: str, snap: dict) -> None:
     """数据较上一条有变化才追加；写入前做分层保留 compaction（老数据自动稀疏化，文件永不膨胀）。"""
+    if platform == "xiaohongshu" and not evidence.active_account(ANALYTICS_DIR):
+        return
     h = load_history(platform)
     if not should_record(h, snap):
         return
     h.append(snap)
     h = compact(h, snap["ts"])
-    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    if platform == "xiaohongshu":
+        h = [row for row in h if row.get("ts", 0) >= snap["ts"] - evidence.RETENTION_DAYS * 86400]
+    _history_path(platform).parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join(json.dumps(x, ensure_ascii=False) for x in h)
     _history_path(platform).write_text(body + ("\n" if body else ""), encoding="utf-8")
 
@@ -473,6 +503,8 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
             r["posts"] = num_by_label(lines, cfg.get("posts_labels", ["笔记数", "作品数", "内容数", "视频数"]), d)
             r["metrics"] = metrics_with_vs(lines, cfg.get("metrics", []), manchor)[:8]
             r["nickname"] = extract_nickname(lines, ov, cfg.get("uid_anchor", ""))
+            if platform == "xiaohongshu":
+                r["account_id"] = extract_xhs_account_id(lines)
             # 昵称优先用专用选择器（视频号文本锚点不稳：概览是「关注者1」同行，锚不到昵称）
             nsel = cfg.get("nickname_selector")
             if nsel:
@@ -484,11 +516,15 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                             r["nickname"] = t[0][:40]
                 except Exception:
                     pass
-            if os.environ.get("EASEL_STATS_DEBUG"):
-                ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
-                (ANALYTICS_DIR / f"{platform}-page.txt").write_text("\n".join(lines)[:20000], encoding="utf-8")
+            if os.environ.get("EASEL_STATS_DEBUG") and (platform != "xiaohongshu" or r.get("account_id")) \
+                    and not (platform == "xiaohongshu" and os.environ.get("EASEL_ANALYTICS_MANAGED") == "1"):
+                debug_dir = (evidence.account_dir(ANALYTICS_DIR, evidence.account_key(r["account_id"], "live"))
+                             if platform == "xiaohongshu" else ANALYTICS_DIR)
+                debug_name = "page" if platform == "xiaohongshu" else f"{platform}-page"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                (debug_dir / f"{debug_name}.txt").write_text("\n".join(lines)[:20000], encoding="utf-8")
                 try:
-                    page.screenshot(path=str(ANALYTICS_DIR / f"{platform}-page.png"))
+                    page.screenshot(path=str(debug_dir / f"{debug_name}.png"))
                 except Exception:
                     pass
             # 粉丝数在单独子页时（如知乎「关注者分析」），主页抓完再来这里取
@@ -508,6 +544,13 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
         finally:
             ctx.close()
     return r
+
+
+def extract_xhs_account_id(lines: list[str]) -> str:
+    """Only the creator-home account label identifies its owner; never a nickname."""
+    text = "\n".join(lines)
+    found = re.findall(r"(?:^|\n)小红书(?:账号|号)\s*[:：]?\s*([A-Za-z0-9_-]{3,128})(?=\s*(?:\n|$))", text)
+    return found[0] if len(set(found)) == 1 else ""
 
 
 def _has_body(page) -> bool:
@@ -558,9 +601,9 @@ _XHS_NOTES_JS = """() => {
       // 兜底：从卡片文本里找「N赞 N藏 N评」这类紧凑写法（数字含万/亿由 parse_num 归一）
       const t = (c.textContent || '').replace(/\\s+/g, ' ');
       const grab = (re) => { const m = t.match(re); return m ? m[1] : ''; };
-      like = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*赞)/) || grab(/赞\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
-      fav = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*[藏收])/) || grab(/[藏收]\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
-      cmt = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*评[论]?)/) || grab(/评[论]?\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
+      like = grab(/(\\d[\\d.,]*\\s*[万亿wWkK千]?)\\s*赞/) || grab(/赞\\s*(\\d[\\d.,]*\\s*[万亿wWkK千]?)/);
+      fav = grab(/(\\d[\\d.,]*\\s*[万亿wWkK千]?)\\s*[藏收]/) || grab(/[藏收]\\s*(\\d[\\d.,]*\\s*[万亿wWkK千]?)/);
+      cmt = grab(/(\\d[\\d.,]*\\s*[万亿wWkK千]?)\\s*评[论]?/) || grab(/评[论]?\\s*(\\d[\\d.,]*\\s*[万亿wWkK千]?)/);
     }
     let publish = '';
     const pt = c.querySelector('.publish-time, [class*="publish"], [class*="date"]');
@@ -733,9 +776,9 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                        else "https://creator.xiaohongshu.com/new/note-manager")
                 # 逐篇指标归一：原始展示串（可含 万/亿）转 int；取不到=None（缺字段不造零）。
                 # stat 保持人类可读串（兼容旧消费方 likes=…/collects=… 的约定）。
-                like = parse_num(n.get("like") or "")
-                fav = parse_num(n.get("fav") or "")
-                cmt = parse_num(n.get("cmt") or "")
+                like = evidence.metric_value(n.get("like"))
+                fav = evidence.metric_value(n.get("fav"))
+                cmt = evidence.metric_value(n.get("cmt"))
                 parts = []
                 if like is not None: parts.append(f"赞{like}")
                 if fav is not None: parts.append(f"藏{fav}")
@@ -748,6 +791,7 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                     "tags": [t for t in (n.get("tags") or []) if t][:8],
                     "publish": (n.get("publish") or "").strip()[:20],
                     "metrics": {"likes": like, "collects": fav, "comments": cmt},
+                    "metrics_raw": {"likes": n.get("like"), "collects": n.get("fav"), "comments": n.get("cmt")},
                     "stat": " · ".join(parts),
                 })
             try:
@@ -850,18 +894,28 @@ def cmd_fetch(a) -> int:
 
     now = int(time.time())
     snap = {"ts": now, "followers": s["followers"], "likes": s["likes"], "posts": s["posts"]}
-    history = load_history(a.platform)
+    external_id = s.get("account_id") or ""
+    managed = a.platform == "xiaohongshu" and os.environ.get("EASEL_ANALYTICS_MANAGED") == "1"
+    key = evidence.account_key(external_id, "live") if external_id else None
+    history = load_history(a.platform, key) if (a.platform != "xiaohongshu" or key) else []
     growth = growth_windows(history, snap)
-    if any(snap[k] is not None for k in ("followers", "likes", "posts")):
-        record_snapshot(a.platform, snap)
     # 逐篇快照：登录有效才落盘（登录失效时不写，防止把空列表当成「笔记都没了」）
     note_recs: list[dict] = []
-    if s["logged_in"] and s.get("notes"):
-        note_recs = record_note_snapshot(a.platform, s["notes"], now)
+    if not managed and s["logged_in"]:
+        if a.platform != "xiaohongshu" or external_id:
+            note_recs = record_note_snapshot(a.platform, s["notes"], now, external_id,
+                                             account_name=s["nickname"])
+            if any(snap[k] is not None for k in ("followers", "likes", "posts")):
+                record_snapshot(a.platform, snap)
+        else:
+            evidence.invalidate(ANALYTICS_DIR)
+    elif a.platform == "xiaohongshu" and not managed:
+        evidence.invalidate(ANALYTICS_DIR)
 
     out = {
         "platform": a.platform, "name": PLATFORMS[a.platform]["name"],
         "nickname": s["nickname"], "loggedIn": s["logged_in"],
+        "accountId": external_id,
         "followers": s["followers"], "likes": s["likes"],
         "following": s["following"], "posts": s["posts"],
         "metrics": s["metrics"], "notes": s["notes"],

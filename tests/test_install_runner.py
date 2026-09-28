@@ -340,3 +340,22 @@ def test_gateway_restarts_when_installation_changes_and_reuses_same_version(inst
     result = _ps_functions(body)
     assert result.returncode == 0, result.stdout + result.stderr
     assert actions.read_text().splitlines() == ["restart", "start", "restart"]
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="Windows PowerShell required")
+def test_chat_slot_models_and_relay_provider_are_separate(tmp_path):
+    import sys
+    result_file = tmp_path / "provider.json"
+    body = f"$Python={_ps_literal(sys.executable)}\n$script:resultFile={_ps_literal(result_file)}\n"
+    body += "$values=@{ANTHROPIC_MODEL='official-model'; EASEL_LLM_MODEL='relay-model'; CLAUDE_MODEL='openai/legacy'}\n"
+    body += "if ((Resolve-SetupModel $values 'ANTHROPIC_MODEL' 'anthropic') -ne 'official-model') { exit 3 }\n"
+    body += "if ((Resolve-SetupModel $values 'EASEL_LLM_MODEL' 'relay') -ne 'relay-model') { exit 4 }\n"
+    body += "if ((Resolve-SetupModel @{CLAUDE_MODEL='anthropic/legacy'} 'EASEL_LLM_MODEL' 'anthropic') -ne 'legacy') { exit 5 }\n"
+    body += "function OpenClaw-ConfigBatch($Operations) { ConvertTo-Json -InputObject @($Operations) -Depth 20 | Set-Content -LiteralPath $script:resultFile -Encoding UTF8 }\n"
+    body += "Write-AnthropicProvider 'https://relay.example.com' 'fixture-secret' 'api-key' '2023-06-01' 'relay' 'relay-model'\n"
+    result = _ps_functions(body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    operations = json.loads(result_file.read_text(encoding="utf-8-sig"))
+    assert operations[0]["path"] == "models.providers.relay"
+    assert operations[0]["value"]["api"] == "anthropic-messages"
+    assert operations[0]["value"]["models"][0]["id"] == "relay-model"

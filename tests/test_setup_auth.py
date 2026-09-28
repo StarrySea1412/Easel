@@ -185,6 +185,29 @@ def test_anthropic_takes_priority_over_openai(tmp_path):
     assert "models.providers.anthropic.baseUrl" in written
 
 
+@needs_bash
+def test_anthropic_slot_model_overrides_legacy_other_provider(tmp_path):
+    _, written = _run_auth(tmp_path, ANTHROPIC_API_KEY="fixture-key",
+                          ANTHROPIC_MODEL="claude-custom", CLAUDE_MODEL="openai/old")
+    assert written["agents.defaults.model.primary"] == "anthropic/claude-custom"
+
+
+@needs_bash
+def test_relay_slot_model_uses_its_provider_without_shared_model(tmp_path):
+    _, written = _run_auth(tmp_path, EASEL_LLM_API_KEY="fixture-key",
+                          EASEL_LLM_BASE_URL="https://relay.example.com",
+                          EASEL_LLM_MODEL="relay-custom", CLAUDE_MODEL="anthropic/old")
+    assert written["agents.defaults.model.primary"] == "relay/relay-custom"
+
+
+@needs_bash
+def test_legacy_relay_keeps_anthropic_provider(tmp_path):
+    _, written = _run_auth(tmp_path, EASEL_LLM_API_KEY="fixture-key",
+                          EASEL_LLM_BASE_URL="https://relay.example.com",
+                          CLAUDE_MODEL="anthropic/legacy-custom")
+    assert written["agents.defaults.model.primary"] == "anthropic/legacy-custom"
+
+
 @pytest.mark.parametrize("value", [
     "REPLACE_ME", "sk-ant-REPLACE_ME", "replace_me",
     "your-api-key", "YOUR_API_KEY", "your api key", "",

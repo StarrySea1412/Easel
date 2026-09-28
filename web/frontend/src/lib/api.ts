@@ -15,11 +15,15 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     let detail = '';
     try {
       const j = await res.json();
-      detail = (j && (j.detail || j.message)) || '';
+      const returned = j && (j.detail || j.message);
+      detail = typeof returned === 'string' ? returned : Array.isArray(returned)
+        ? returned.map((item: { msg?: string }) => item.msg || '请求字段不符合要求').join('；') : '';
     } catch {
       /* 响应体不是 JSON，忽略 */
     }
-    throw new Error(detail || `请求失败（${res.status} ${res.statusText}）`);
+    const error = new Error(detail || `请求失败（${res.status} ${res.statusText}）`) as Error & { status: number };
+    error.status = res.status;
+    throw error;
   }
   return res.json() as Promise<T>;
 }
@@ -549,6 +553,92 @@ export function fetchAccountAnalytics(platform: string): Promise<AccountAnalytic
   return request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}`);
 }
 
+export interface XhsAnalysisAccount {
+  id: string;
+  externalId: string;
+  name: string;
+  source: 'live' | 'import';
+  verified: boolean;
+}
+
+export interface XhsNoteEvidence {
+  noteId: string;
+  title: string;
+  url: string;
+  tags: string[];
+  publishedAt: string | null;
+  publish: string;
+  fetchedAt: number | null;
+  importedAt: number | null;
+  metrics: { likes: number | null; collects: number | null; comments: number | null };
+  missingFields: Record<string, string>;
+  source: string;
+}
+
+export interface XhsSuggestion {
+  word: string;
+  refs: XhsNoteEvidence[];
+  sampleSize: number;
+  metric: number | null;
+  evidence: string;
+  confidence: 'exploratory';
+  tagsOnly: boolean;
+}
+
+export interface XhsInsights {
+  account: XhsAnalysisAccount | null;
+  accountRequired: boolean;
+  coverage: {
+    scope: 'visible_page' | 'imported'; complete: boolean;
+    observedNotes: number; storedNotes: number; pagesFetched: number | null; pageLimit: number | null;
+    reason: string;
+    omittedNotes?: number;
+  } | null;
+  retention: { days: number; snapshotsPerNote: number };
+  stale: boolean;
+  window: { from: number | null; to: number | null } | null;
+  sampleSize: number;
+  suggestions: XhsSuggestion[];
+  note: string;
+}
+
+export interface XhsImportPayload {
+  platform?: 'xiaohongshu';
+  accountId: string;
+  accountName?: string;
+  records: {
+    account_id?: string; accountId?: string;
+    note_id?: string; title: string; tags?: string[]; publish?: string; url?: string;
+    fetched_at?: number | null;
+    metrics?: { likes?: number | null; collects?: number | null; comments?: number | null };
+  }[];
+}
+
+export function fetchXhsInsights(): Promise<XhsInsights> {
+  return request('/api/analytics/insights/xiaohongshu');
+}
+
+export function importXhsRecords(payload: XhsImportPayload): Promise<{ importedCount: number }> {
+  return request('/api/analytics/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...payload, platform: 'xiaohongshu' }),
+  });
+}
+
+export function clearXhsAnalysis(accountId: string): Promise<{ ok: boolean; deletedCount: number }> {
+  return request('/api/analytics/clear', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform: 'xiaohongshu', scope: 'account', accountId }),
+  });
+}
+
+export function addXhsSuggestion(word: string, accountId: string): Promise<{ ok: boolean; idea: Idea }> {
+  return request('/api/analytics/insights/idea', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform: 'xiaohongshu', word, accountId }),
+  });
+}
+
 /** 回填短信验证码（登录风控短信墙）：提交后 runner 读走填码继续登录。 */
 export function submitLoginSms(platform: string, code: string): Promise<{ ok: boolean }> {
   return request(`/api/login/${encodeURIComponent(platform)}/sms`, {
@@ -858,6 +948,7 @@ export interface ImportCandidate {
   compatible: boolean;
   skipReason: string;
   overwrites: ImportOverwrite[];
+  previewToken?: string;
 }
 
 export interface ImportPreview {
@@ -884,13 +975,13 @@ export function previewImport(source: string, slot: string, path = ''): Promise<
   });
 }
 
-export function applyImport(source: string, id: string, slot: string, path = ''): Promise<{
+export function applyImport(source: string, id: string, slot: string, path = '', previewToken = ''): Promise<{
   ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
 }> {
   return request('/api/models/import/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, id, slot, path }),
+    body: JSON.stringify({ source, id, slot, path, previewToken }),
   });
 }
 
@@ -902,6 +993,7 @@ export interface ModelSaveRow {
   key: string;
   key2?: string;
   primary?: boolean;
+  protocol?: string;
 }
 
 export interface ModelSaveResponse extends ModelChannelsResponse {
@@ -909,11 +1001,11 @@ export interface ModelSaveResponse extends ModelChannelsResponse {
   note?: string;
 }
 
-export function saveModelConfig(channel: string, rows: ModelSaveRow[]): Promise<ModelSaveResponse> {
+export function saveModelConfig(channel: string, rows: ModelSaveRow[], deletedProviders: string[] = []): Promise<ModelSaveResponse> {
   return request('/api/settings/models/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel, rows }),
+    body: JSON.stringify({ channel, rows, deletedProviders }),
   });
 }
 

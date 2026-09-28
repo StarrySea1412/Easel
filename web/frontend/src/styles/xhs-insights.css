@@ -1,0 +1,84 @@
+.xhs-panel { margin-top: 28px; padding: 28px 0; scroll-margin-top: 20px; border-top: 1px solid var(--border); }
+.xhs-panel h2 { font-size: 21px; line-height: 1.4; letter-spacing: 0; margin: 4px 0 9px; }
+.xhs-panel h3 { font-size: 16px; }
+.xhs-panel p { font-size: 13px; line-height: 1.7; }
+.xhs-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.xhs-panel-head > div { max-width: 700px; }
+.xhs-panel-head > button { flex-shrink: 0; margin-top: 8px; }
+.xhs-panel-actions { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.xhs-eyebrow { color: var(--accent-start); font-size: 11px !important; font-weight: 700; letter-spacing: 0; }
+.xhs-muted { color: var(--text-secondary); font-size: 12px !important; }
+.xhs-connection-hint { padding: 12px 0; color: var(--text-secondary); }
+.xhs-message { padding: 12px 14px; border-radius: var(--radius); background: var(--accent-soft); margin-top: 14px; font-size: 13px; }
+.xhs-message-error { color: var(--red); background: var(--red-soft); }
+.xhs-message-error button { margin-left: 12px; }
+.xhs-message-warning { color: #865617; background: var(--amber-soft); }
+.xhs-account-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 0 14px; }
+.xhs-account-strip > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; overflow-wrap: anywhere; }
+.xhs-account-strip .badge { white-space: normal; flex-shrink: 0; }
+.xhs-coverage { background: var(--surface-2); border: 1px solid var(--border); padding: 16px; border-radius: var(--radius); }
+.xhs-coverage dl { display: flex; gap: 36px; flex-wrap: wrap; margin: 0 0 12px; }
+.xhs-coverage dt { color: var(--text-secondary); font-size: 11px; margin-bottom: 4px; }
+.xhs-coverage dd { font-size: 14px; font-weight: 600; margin: 0; }
+.xhs-coverage p + p { margin-top: 5px; }
+.xhs-loading, .xhs-empty { padding: 24px 0; color: var(--text-secondary); }
+.xhs-empty strong { display: block; font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.xhs-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 25px 0 6px; }
+.xhs-method-note { margin-bottom: 16px; }
+.xhs-suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.xhs-suggestion { border: 1px solid var(--border); border-radius: 8px; padding: 18px; min-width: 0; }
+.xhs-suggestion-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.xhs-suggestion-head h4 { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.xhs-suggestion-head .badge { flex-shrink: 0; }
+.xhs-suggestion > p + p { margin-top: 7px; }
+.xhs-evidence { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.xhs-panel summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text); }
+.xhs-panel summary:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 4px; }
+.xhs-evidence > ol { list-style: none; padding: 0; margin: 4px 0 0; max-height: 480px; overflow-y: auto; }
+.xhs-evidence-note { padding: 13px 0; border-bottom: 1px solid var(--border); }
+.xhs-evidence-note:last-child { border-bottom: 0; padding-bottom: 0; }
+.xhs-more-evidence { margin-top: 12px; }
+.xhs-evidence-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; margin-bottom: 8px; }
+.xhs-evidence-title a { color: var(--accent-end); text-decoration: none; }
+.xhs-evidence-title a:hover { text-decoration: underline; }
+.xhs-note-metrics { display: flex; gap: 24px; margin-bottom: 8px; }
+.xhs-note-metrics > div { display: flex; align-items: baseline; gap: 6px; }
+.xhs-note-metrics dt { font-size: 11px; color: var(--text-secondary); }
+.xhs-note-metrics dd { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.xhs-tags { color: var(--accent-start); overflow-wrap: anywhere; margin-top: 5px; }
+.xhs-missing-fields { font-size: 11px; color: var(--text-secondary); padding-left: 16px; margin-top: 7px; }
+.xhs-suggestion-action { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
+.xhs-suggestion-action > p { width: 100%; }
+.xhs-error-text { color: var(--red); font-size: 12px !important; }
+.xhs-import { margin-top: 24px; padding: 16px; background: var(--surface-2); border-radius: 8px; }
+.xhs-import > summary { font-size: 13px; }
+.xhs-import > p { color: var(--text-secondary); margin-top: 10px; }
+.xhs-file-label { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; margin-top: 14px; }
+.xhs-file-label input { max-width: 100%; font: inherit; }
+.xhs-import-preview { margin: 16px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-wrap: anywhere; }
+.xhs-import-preview > strong { font-size: 13px; }
+.xhs-import-preview > button { margin-top: 10px; }
+.xhs-import-format { margin-top: 16px; }
+.xhs-import-format > p { margin-top: 10px; color: var(--text-secondary); }
+.xhs-import-format pre { overflow-x: auto; font-size: 11px; line-height: 1.6; padding: 12px; margin: 10px 0 0; background: var(--code-bg); border-radius: var(--radius-sm); }
+.xhs-data-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 18px; }
+.xhs-data-controls > button { color: var(--text-secondary); }
+.xhs-clear-confirm { border: 1px solid var(--red); border-radius: var(--radius); padding: 14px; margin-top: 12px; background: var(--red-soft); }
+.xhs-clear-confirm > div { display: flex; gap: 10px; margin-top: 12px; }
+.xhs-danger-button { color: var(--red); border-color: var(--red); }
+.xhs-account-entry { margin-top: 10px; width: 100%; }
+@media (max-width: 920px) {
+  .xhs-panel { padding: 20px; }
+  .xhs-panel-head { flex-wrap: wrap; gap: 6px; }
+  .xhs-suggestions { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .xhs-panel { padding: 16px; }
+  .xhs-panel h2 { font-size: 18px; }
+  .xhs-account-strip, .xhs-section-title { align-items: flex-start; flex-direction: column; }
+  .xhs-coverage dl { gap: 16px; }
+  .xhs-suggestion { padding: 14px; }
+  .xhs-note-metrics { flex-wrap: wrap; gap: 14px; }
+  .xhs-message-error button { display: block; margin: 8px 0 0; }
+  .xhs-data-controls > button { padding-left: 0; }
+}
