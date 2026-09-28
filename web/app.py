@@ -3261,6 +3261,27 @@ async def api_logout(platform: str):
 ANALYTICS_PLATFORMS = {"xiaohongshu", "douyin", "kuaishou", "zhihu", "weixin-channels", "bilibili", "wechat-oa"}
 
 
+def _notes_snapshot_file(platform: str) -> Path:
+    return OUTPUTS_DIR / "_analytics" / f"{platform}-notes.jsonl"
+
+
+def _last_note_snapshot_at(platform: str) -> int | None:
+    """逐篇快照流里最近一次采集时间（文件不存在 → None）。"""
+    p = _notes_snapshot_file(platform)
+    if not p.is_file():
+        return None
+    last = None
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            d = json.loads(line)
+            ts = d.get("fetched_at")
+            if isinstance(ts, int) and (last is None or ts > last):
+                last = ts
+        except Exception:  # noqa: BLE001
+            continue
+    return last
+
+
 @app.get("/api/analytics/platforms")
 async def api_analytics_platforms():
     """列出支持抓数据的平台 + 各自登录态（前端据此渲染平台选择器）。"""
@@ -3269,6 +3290,54 @@ async def api_analytics_platforms():
          "loggedIn": _account_logged_in(pf, LOGIN_RUNNERS.get(pf, {}))}
         for pf in LOGIN_RUNNERS if pf in ANALYTICS_PLATFORMS
     ]
+
+
+@app.get("/api/analytics/notes/{platform}")
+async def api_analytics_notes(platform: str):
+    """读逐篇笔记快照流（本机 outputs/_analytics/<platform>-notes.jsonl），只读不抓取。
+    返回规范化记录 + 数据覆盖窗口（首末采集时间、条数），供「选题建议」追溯证据用。"""
+    if platform not in ANALYTICS_PLATFORMS:
+        raise HTTPException(404, "该平台暂不支持数据抓取")
+    p = _notes_snapshot_file(platform)
+    recs: list[dict] = []
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(d, dict) and d.get("version"):
+                recs.append(d)
+    recs.sort(key=lambda x: (x.get("fetched_at", 0), x.get("note_id") or ""))
+    first = min((r.get("fetched_at") for r in recs), default=None)
+    last = max((r.get("fetched_at") for r in recs), default=None)
+    return {
+        "platform": platform,
+        "records": recs,
+        "count": len(recs),
+        "firstFetchedAt": first,
+        "lastFetchedAt": last,
+        "window": {"from": first, "to": last} if first else None,
+        "note": "快照仅保最近两次采集且按 12 个月保留期裁剪；清除入口为 POST /api/analytics/clear",
+    }
+
+
+class AnalyticsClearRequest(BaseModel):
+    platform: str = ""
+
+
+@app.post("/api/analytics/clear")
+async def api_analytics_clear(req: AnalyticsClearRequest):
+    """清除分析历史（概览快照 + 逐篇快照）。用户明确触发才执行；不动登录态。"""
+    pf = (req.platform or "").strip()
+    if pf and pf not in ANALYTICS_PLATFORMS:
+        raise HTTPException(400, "未知平台")
+    import account_stats as _as  # skills/shared/scripts 已在 sys.path 上
+    _as.clear_analytics(pf or None)
+    return {"ok": True, "cleared": pf or "all"}
 
 
 @app.get("/api/analytics/{platform}")
@@ -3296,13 +3365,33 @@ async def api_analytics(platform: str):
                                        capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "抓取超时（浏览器起不来或网络慢）")
+    data = None
     for line in reversed((proc.stdout or "").strip().splitlines()):
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                data = json.loads(line)
+                break
             except Exception:
                 continue
+    if data is not None:
+        # 登录失效时附上次成功时间与过期标记：不拿空列表冒充「没有笔记」
+        if data.get("loggedIn") is False:
+            prev = _last_note_snapshot_at(platform)
+            data["stale"] = bool(prev)
+            data["lastGoodAt"] = prev
+        data.setdefault("notes", [])
+        for n in data.get("notes") or []:
+            # 逐篇字段归一（旧字段兼容）：缺指标保持 None，缺 tags/publish 保持空值
+            m = n.setdefault("metrics", {})
+            if not isinstance(m, dict):
+                n["metrics"] = m = {}
+            m.setdefault("likes", None)
+            m.setdefault("collects", None)
+            m.setdefault("comments", None)
+            n.setdefault("tags", [])
+            n.setdefault("publish", "")
+        return data
     detail = (proc.stderr or "").strip().splitlines()[-1:] or ["未取到数据"]
     raise HTTPException(502, f"未取到数据（可能未登录或平台改版）：{detail[0][:120]}")
 
