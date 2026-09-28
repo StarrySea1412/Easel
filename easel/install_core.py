@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -100,14 +101,23 @@ def should_run(state: dict, pid: str) -> bool:
     return v.get("status") not in ("ok", "skipped")
 
 
-def mark_running(state: dict, pid: str, detail: str = "") -> None:
+def bind_installation(state: dict, root: Path, version: str) -> dict:
+    """成功状态只属于同一发行版本和安装目录；旧版无 identity 也必须重验。"""
+    identity = {"root": os.path.normcase(str(root.resolve())), "version": version}
+    if state.get("installation") != identity:
+        return {"version": STATE_VERSION, "installation": identity, "phases": {}}
+    return state
+
+
+def mark_running(state: dict, pid: str, detail: str = "", base: Path | None = None) -> None:
     v = _phase_view(state, pid)
     v.update({"status": "running", "lastRun": int(time.time()), "detail": detail})
-    save_state(state)
+    save_state(state, base)
 
 
 def mark_result(state: dict, pid: str, ok: bool, detail: str = "",
-                auto_retry: bool = False) -> dict:
+                auto_retry: bool = False, base: Path | None = None,
+                run_attempt: int | None = None) -> dict:
     """记录阶段结果。瞬时失败（网络/超时，由 transient_failure 判定）在重试预算内置
     retry 并逐次退避；预算耗尽或非瞬时错误 → failed 停住（保留可恢复状态，等用户动作）。
     auto_retry 只是「允许自动重试」的开关，是否真重试还看失败原因是否瞬时。
@@ -119,11 +129,11 @@ def mark_result(state: dict, pid: str, ok: bool, detail: str = "",
     retriable = transient_failure(detail)
     if ok:
         v["status"] = "ok"
-    elif auto_retry and retriable and v["attempts"] <= MAX_AUTO_RETRY:
+    elif auto_retry and retriable and (run_attempt or v["attempts"]) <= MAX_AUTO_RETRY:
         v["status"] = "retry"
     else:
         v["status"] = "failed"
-    save_state(state)
+    save_state(state, base)
     return v
 
 
@@ -138,11 +148,18 @@ def transient_failure(detail: str) -> bool:
     """瞬时故障判据：网络/超时/暂时不可用（自动重试只认这些）；
     权限/版本不兼容/配置无效/路径冲突不在此列 → 直接 failed。"""
     d = (detail or "").lower()
+    # npm/pip 的版本、权限及配置错误可能也含 network/timeout 字眼，永久错误优先。
+    if any(k in d for k in ("access denied", "permission denied", "eacces", "eperm",
+                            "ebadengine", "unsupported engine", "unrecognized key",
+                            "invalid configuration", "no matching distribution",
+                            "could not find a version", "erresolve", "eresolve",
+                            "版本不兼容", "配置无效", "权限不足", "路径冲突")):
+        return False
     return any(k in d for k in (
         "timed out", "timeout", "etimedout", "econnreset", "econnrefused",
-        "enotfound", "eai_again", "network", "暂时", "econnaborted", "epipe",
-        "socket hang up", "502", "503", "504",
-    ))
+        "eai_again", "network is unreachable", "network error", "暂时", "econnaborted", "epipe",
+        "socket hang up",
+    )) or bool(re.search(r"\b(?:502|503|504)\b", d))
 
 
 def winget_allowed(allow_flag: bool | None = None) -> bool:

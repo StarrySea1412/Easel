@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 import urllib.parse
@@ -31,7 +32,7 @@ UA = "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 BiliDroid/7.0.
 GEN_URL = "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code"
 POLL_URL = "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or Path(__file__).resolve().parents[3])
 DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "bilibili.png"
 DEFAULT_COOKIE = PROJECT_ROOT / "cookies.json"
 

@@ -5,6 +5,7 @@ Integration tests for config resolution across script entrypoints.
 from __future__ import annotations
 
 import os
+import functools
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,35 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+
+def _child_env(home: Path, **values: str) -> dict[str, str]:
+    """Isolate user/provider settings without dropping Windows loader variables."""
+    required = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"}
+    env = {
+        **{k: v for k, v in os.environ.items() if k.upper() in required},
+        "HOME": str(home), "USERPROFILE": str(home), "PYTHONUTF8": "1",
+        "EASEL_PYTHON": sys.executable, **values,
+    }
+    return env
+
+
+@functools.lru_cache(maxsize=1)
+def _bun_executable() -> str | None:
+    """Avoid Windows npm .cmd/.ps1 shims; subprocess gets the real executable."""
+    candidates = []
+    if os.name == "nt":
+        for folder in os.get_exec_path():
+            candidates.extend((Path(folder) / "bun.exe", Path(folder) / "node_modules/bun/bin/bun.exe"))
+        candidates.append(Path.home() / ".bun/bin/bun.exe")
+    else:
+        found = shutil.which("bun")
+        if found:
+            candidates.append(Path(found))
+    return next((str(p.resolve()) for p in candidates if p.is_file()), None)
+
+
+needs_bun = pytest.mark.skipif(_bun_executable() is None, reason="bun executable is not installed")
 
 
 def _prepare_isolated_skill_root(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -110,7 +140,7 @@ def test_generate_image_print_command_uses_skill_root_yaml_only(tmp_path):
             "--print-command",
         ],
         cwd=cwd_dir,
-        env={**os.environ, "HOME": str(home_dir)},
+        env=_child_env(home_dir),
         capture_output=True,
         text=True,
         check=True,
@@ -119,7 +149,7 @@ def test_generate_image_print_command_uses_skill_root_yaml_only(tmp_path):
     assert "generator: baoyu-danger-gemini-web" in result.stdout
 
 
-@pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
+@needs_bun
 def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
     """baoyu_image_gen_core.loadEnv() should ignore cwd/home YAML and export from its own skill root."""
     _, scripts_dir, cwd_dir = _prepare_isolated_skill_root(tmp_path)
@@ -155,9 +185,9 @@ def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
     )
 
     result = subprocess.run(
-        ["bun", "--eval", code],
+        [_bun_executable(), "--eval", code],
         cwd=tmp_path / "skill",
-        env={"PATH": os.environ["PATH"], "HOME": str(home_dir)},
+        env=_child_env(home_dir),
         capture_output=True,
         text=True,
         check=True,
@@ -169,7 +199,7 @@ def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
     )
 
 
-@pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
+@needs_bun
 def test_bun_load_env_prefers_canonical_yaml_over_ambient_provider_env(tmp_path):
     """baoyu_image_gen_core.loadEnv() should let canonical YAML override conflicting shell provider env."""
     skill_root = tmp_path / "skill"
@@ -217,13 +247,9 @@ def test_bun_load_env_prefers_canonical_yaml_over_ambient_provider_env(tmp_path)
     )
 
     result = subprocess.run(
-        ["bun", "--eval", code],
+        [_bun_executable(), "--eval", code],
         cwd=skill_root,
-        env={
-            "PATH": os.environ["PATH"],
-            "HOME": str(tmp_path / "home"),
-            "GEMINI_PROXY_API_KEY": "ambient-proxy-key",
-        },
+        env=_child_env(tmp_path / "home", GEMINI_PROXY_API_KEY="ambient-proxy-key"),
         capture_output=True,
         text=True,
         check=True,
@@ -261,7 +287,7 @@ def test_generate_image_uses_global_generator_when_accounts_are_incomplete(tmp_p
             "--print-command",
         ],
         cwd=skill_root,
-        env={**os.environ, "HOME": str(tmp_path / "home")},
+        env=_child_env(tmp_path / "home"),
         capture_output=True,
         text=True,
         check=True,
@@ -278,7 +304,7 @@ def test_generate_image_uses_global_generator_when_accounts_are_incomplete(tmp_p
         "{}\n",
     ],
 )
-@pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
+@needs_bun
 def test_bun_load_env_does_not_mask_invalid_skill_root_yaml(tmp_path, yaml_text):
     """baoyu_image_gen_core.loadEnv() should fail on invalid or empty skill-root YAML even if shell provider env exists."""
     skill_root = tmp_path / "skill"
@@ -316,13 +342,9 @@ def test_bun_load_env_does_not_mask_invalid_skill_root_yaml(tmp_path, yaml_text)
     )
 
     result = subprocess.run(
-        ["bun", "--eval", code],
+        [_bun_executable(), "--eval", code],
         cwd=skill_root,
-        env={
-            "PATH": os.environ["PATH"],
-            "HOME": str(tmp_path / "home"),
-            "OPENAI_API_KEY": "sk-test",
-        },
+        env=_child_env(tmp_path / "home", OPENAI_API_KEY="sk-test"),
         capture_output=True,
         text=True,
         check=False,

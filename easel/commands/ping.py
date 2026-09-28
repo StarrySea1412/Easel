@@ -6,8 +6,10 @@ import os
 import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from easel.openclaw_cmd import openclaw_base_cmd
+from easel.paths import child_env
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -16,7 +18,7 @@ NC = "\033[0m"
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
+    env = child_env(Path(__file__).resolve().parents[2])
     env.setdefault("http_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("https_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("no_proxy", "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*")

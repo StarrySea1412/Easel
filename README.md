@@ -197,7 +197,7 @@ README 的品牌图、海报、案例图片和视频统一保存在 `assets/read
 
 ## 🚀 快速开始
 
-环境要求：Linux、macOS 或 Windows 10/11、Python 3.10 及以上、Python `venv` 模块和 `git`。安装向导会检查 Node.js 22.19+、FFmpeg、Playwright/Chromium；缺少 Node.js 时会按系统给出安装引导。
+环境要求：Linux、macOS 或 Windows 10/11、Python 3.10 及以上、Python `venv` 模块和 `git`。Windows 安装向导要求 Node.js 24.16+（24.x）或 26.1+，并检查 FFmpeg、Playwright/Chromium；发行包固定使用 Python 3.12 与 OpenClaw 2026.9.6。
 
 ```bash
 git clone https://github.com/ZJU-REAL/Easel.git
@@ -214,7 +214,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\setup.ps1
 ```
 
-Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、Node.js 22.19+、Git 和 FFmpeg；如果系统没有 `winget`，再使用官方安装器安装并加入 PATH。随后安装器会创建项目内 `.venv`，安装 Python/Node 依赖、前端生产包和 Playwright Chromium，并使用独立的 `easel` OpenClaw profile。安装完成后可运行 `.venv\Scripts\easel.exe doctor` 检查环境。
+Windows 安装器默认检查系统依赖并提示缺失项；使用 `.\setup.ps1 -AllowWinget` 可显式允许通过 `winget` 安装缺失工具。它创建项目内 `.venv`，按八个阶段安装依赖、准备前端与 Chromium、配置独立的 `easel` profile 并验证 Gateway 和 Web 首页。失败后重跑可继续，`-NonInteractive` 跳过模型提问，模型可在 Web 设置中配置。运行 `.venv\Scripts\easel.exe doctor` 可进一步检查模型配置。
+
+EXE 在线安装器与发行候选构建说明见 [Windows 安装器](docs/windows-installer.md)。EXE 内嵌固定发行版本和 SHA-256，代码按版本放在 `%LOCALAPPDATA%\Easel\versions`，用户数据保存在 `%LOCALAPPDATA%\Easel\data`。本地候选包仍需上传对应 Release 并完成干净 Windows 验收后才能作为正式下载入口。
 
 `bash setup.sh` 是可重复运行的引导式安装器，直接执行即可，不需要先手动安装 Easel 依赖。安装过程中会：
 

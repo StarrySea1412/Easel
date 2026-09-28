@@ -12,6 +12,7 @@ import urllib.error
 from pathlib import Path
 
 from easel.openclaw_cmd import openclaw_base_cmd
+from easel.paths import data_root
 
 # 项目根目录（Easel/）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -150,7 +151,7 @@ def _env_key_valid() -> bool:
 
     ping 才是权威连通性测试；这里只做静态配置存在性检查。
     """
-    env_file = PROJECT_ROOT / ".env"
+    env_file = data_root(PROJECT_ROOT) / ".env"
     if not env_file.is_file():
         return False
 
@@ -243,6 +244,7 @@ def _primary_model_routable() -> tuple[bool, str]:
 def cmd_doctor(_args) -> int:
     print("Easel — 环境检查\n")
     all_ok = True
+    install_mode = bool(getattr(_args, "install_mode", False))
 
     # 1. Runtime prerequisites
     all_ok &= _check("Python >= 3.10", _python_version_ok(),
@@ -287,13 +289,15 @@ def cmd_doctor(_args) -> int:
                       "运行 python3 -m playwright install chromium")
 
     # 3. .env file with valid key
-    env_ok = _env_key_valid()
-    all_ok &= _check(".env (API Key)", env_ok,
-                      "填 ANTHROPIC_API_KEY，或 EASEL_LLM_API_KEY + EASEL_LLM_BASE_URL")
-
-    # .env 填了 ≠ setup 真的把 provider 写进了 openclaw；不对账就会「doctor 全绿但对话报错」。
-    route_ok, route_detail = _primary_model_routable()
-    all_ok &= _check("OpenClaw model routing", route_ok, route_detail)
+    if install_mode:
+        print(f"  {YELLOW}待配置{NC} 模型 API Key / 路由：安装后请在 Web 设置中填写，并运行 easel ping 验证。")
+    else:
+        env_ok = _env_key_valid()
+        all_ok &= _check(".env (API Key)", env_ok,
+                          "填 ANTHROPIC_API_KEY，或 EASEL_LLM_API_KEY + EASEL_LLM_BASE_URL")
+        # .env 填了不代表 OpenClaw 已配置同一 provider；正常诊断仍需对账。
+        route_ok, route_detail = _primary_model_routable()
+        all_ok &= _check("OpenClaw model routing", route_ok, route_detail)
 
     # 4. OpenClaw gateway running
     gw_ok = _gateway_healthy()
@@ -318,7 +322,10 @@ def cmd_doctor(_args) -> int:
 
     print()
     if all_ok:
-        print(f"{GREEN}✓ 环境就绪{NC} — 运行 python -m easel ping 验证连通性")
+        if install_mode:
+            print(f"{GREEN}✓ 安装环境就绪{NC} — 请在 Web 设置中完成模型配置")
+        else:
+            print(f"{GREEN}✓ 环境就绪{NC} — 运行 python -m easel ping 验证连通性")
     else:
         print(f"{YELLOW}⚠ 有未满足项{NC} — 请按上述提示修复后重试")
 

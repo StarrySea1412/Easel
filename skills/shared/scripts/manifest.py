@@ -58,7 +58,7 @@ from pathlib import Path
 # PROJECT_ROOT：优先 EASEL_ROOT env（gateway/CLI 注入），否则按 __file__ 上溯。
 # ⚠️ 本脚本会被 sync.sh 拍平复制到 workspace/shared/scripts/，那里 __file__ 上溯会
 # 算成 ~/.openclaw（少一层 skills/），产物会写错地方——故 env 兜底不可省。
-PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 MANIFEST_NAME = ".easel.json"
 CST = timezone(timedelta(hours=8))

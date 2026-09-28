@@ -21,6 +21,8 @@ import functools
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -39,24 +41,44 @@ from easel.commands import doctor  # noqa: E402
 # ── setup.sh：把真代码切出来在沙箱里跑 ────────────────────────────────
 
 
-@functools.lru_cache(maxsize=1)
-def _bash_works() -> bool:
-    """有没有能真跑 POSIX 脚本的 bash。
+def _shell_env(**values: str) -> dict[str, str]:
+    """Isolate provider credentials while retaining Windows loader variables."""
+    required = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"}
+    return {**{k: v for k, v in os.environ.items() if k.upper() in required}, **values}
 
-    不能只看 `shutil.which("bash")`：Windows 上 System32\\bash.exe 是 WSL 的入口，
-    没装发行版时它照样在 PATH 里，跑起来却只会打印「has no installed distributions」，
-    于是断言拿到一串 UTF-16 的错误提示、报得莫名其妙。跑一下才算数。
-    """
-    try:
-        p = subprocess.run(["bash", "-c", "echo ok"], capture_output=True, text=True,
-                           timeout=30, errors="replace")
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return p.returncode == 0 and p.stdout.strip() == "ok"
+
+@functools.lru_cache(maxsize=1)
+def _bash_executable() -> str | None:
+    """Resolve and probe the exact native Bash executable used by every test."""
+    candidates = []
+    if os.name == "nt":
+        # Git Bash may live outside PATH; System32's WSL launcher cannot read
+        # Windows fixture paths and must never be selected for these tests.
+        git = shutil.which("git.exe")
+        if git:
+            git_root = Path(git).resolve().parent.parent
+            candidates.extend((git_root / "bin/bash.exe", git_root / "usr/bin/bash.exe"))
+        candidates.extend(Path(p) / "bash.exe" for p in os.get_exec_path())
+    else:
+        found = shutil.which("bash")
+        if found:
+            candidates.append(Path(found))
+    for candidate in dict.fromkeys(candidates):
+        if not candidate.is_file() or candidate.parent.name.lower() in ("system32", "windowsapps"):
+            continue
+        try:
+            p = subprocess.run([str(candidate), "--noprofile", "--norc", "-c", "printf ok"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=30, env=_shell_env())
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if p.returncode == 0 and p.stdout == "ok":
+            return str(candidate)
+    return None
 
 
 # setup.sh 是 Linux/macOS 的安装路径，Windows 走 setup.ps1（另有静态用例守着）。
-needs_bash = pytest.mark.skipif(not _bash_works(), reason="没有可用的 bash，跳过 setup.sh 用例")
+needs_bash = pytest.mark.skipif(_bash_executable() is None, reason="没有可用的 bash，跳过 setup.sh 用例")
 
 
 def _slice(lines: list[str], start: str, end: str, *, keep_end: bool) -> str:
@@ -79,8 +101,8 @@ def _run_auth(tmp_path: Path, **env: str) -> tuple[str, dict[str, str]]:
     calls = tmp_path / "oc-calls.log"
     script = textwrap.dedent(f"""
         set -u
-        PROJECT_ROOT={tmp_path}
-        CFG={calls}
+        PROJECT_ROOT={shlex.quote(tmp_path.as_posix())}
+        CFG={shlex.quote(calls.as_posix())}
         : > "$CFG"
         ok()   {{ echo "OK|$*"; }}
         warn() {{ echo "WARN|$*"; }}
@@ -94,8 +116,12 @@ def _run_auth(tmp_path: Path, **env: str) -> tuple[str, dict[str, str]]:
         OC=_oc
     """) + "\n" + _auth_block()
 
-    proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                          timeout=60, env={"PATH": os.environ["PATH"], **env})
+    # A file preserves the original nested quotes across Win32/MSYS argv parsing.
+    script_path = tmp_path / "auth-under-test.sh"
+    script_path.write_text(script, encoding="utf-8", newline="\n")
+    proc = subprocess.run([_bash_executable(), "--noprofile", "--norc", script_path.as_posix()],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=60, env=_shell_env(**env))
     assert proc.returncode == 0, f"认证段执行失败：{proc.stderr}"
     written: dict[str, str] = {}
     if calls.is_file():
@@ -168,9 +194,11 @@ def test_usable_key_rejects_placeholders(tmp_path, value):
     lines = SETUP_SH.read_text(encoding="utf-8").splitlines()
     helper = _slice(lines, "usable_key() {", "}", keep_end=True)
     proc = subprocess.run(
-        ["bash", "-c", helper + '\nif usable_key "$1"; then echo YES; else echo NO; fi',
+        [_bash_executable(), "--noprofile", "--norc", "-c", helper + '\nif usable_key "$1"; then echo YES; else echo NO; fi',
          "_", value],
-        capture_output=True, text=True, timeout=30)
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        env=_shell_env())
+    assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "NO", f"{value!r} 不该被当成可用 key"
 
 
@@ -180,9 +208,11 @@ def test_usable_key_accepts_real_keys(tmp_path, value):
     lines = SETUP_SH.read_text(encoding="utf-8").splitlines()
     helper = _slice(lines, "usable_key() {", "}", keep_end=True)
     proc = subprocess.run(
-        ["bash", "-c", helper + '\nif usable_key "$1"; then echo YES; else echo NO; fi',
+        [_bash_executable(), "--noprofile", "--norc", "-c", helper + '\nif usable_key "$1"; then echo YES; else echo NO; fi',
          "_", value],
-        capture_output=True, text=True, timeout=30)
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        env=_shell_env())
+    assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "YES", f"{value!r} 该被当成可用 key"
 
 

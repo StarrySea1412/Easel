@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from easel.paths import data_root
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROFILES_DIR = PROJECT_ROOT / "profiles"
+PROFILES_DIR = data_root(PROJECT_ROOT) / "profiles"
 
 # 六维画像文件的固定顺序（identity/style/... 先，其余 .md 追加在后）
 _FILE_ORDER = [

@@ -1,16 +1,74 @@
-﻿# 注意：本文件为 UTF-8 with BOM。Windows PowerShell 5.1 需 BOM 才能正确解析中文字符串（否则报「语法错误」）；请勿移除。
+﻿# UTF-8 BOM is required by Windows PowerShell 5.1.
+[CmdletBinding()]
+param(
+    [ValidateSet('', 'system', 'openclaw', 'pydeps', 'frontend', 'chromium', 'profile', 'skills', 'gateway')]
+    [string]$Phase = '',
+    [switch]$NonInteractive,
+    [switch]$AllowWinget,
+    [string]$DataDir = $env:EASEL_DATA_DIR
+)
 $ErrorActionPreference = 'Stop'
-$Root = (Resolve-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
+$Root = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+if (-not $DataDir) { $DataDir = $Root }
+$DataDir = [System.IO.Path]::GetFullPath($DataDir)
+$env:EASEL_DATA_DIR = $DataDir
+$env:EASEL_ROOT = $Root
+if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR }
+$env:PYTHONUTF8 = '1'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $Venv = Join-Path $Root '.venv'
 $Python = Join-Path $Venv 'Scripts\python.exe'
-$env:PYTHONUTF8 = '1'
+$Manifest = $null
+$manifestPath = Join-Path $Root 'release-manifest.json'
+if (Test-Path -LiteralPath $manifestPath) {
+    $Manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($Manifest.schemaVersion -ne 1 -or -not $Manifest.dependencies.openclaw -or -not $Manifest.dependencies.pythonLock) {
+        throw '发行包 release-manifest.json 缺少锁定依赖信息。'
+    }
+}
+New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+
+function Save-SystemBootstrap($Status, $Detail) {
+    # This path must work before Python exists. Keep the same identity/state schema
+    # as install_core and write UTF-8 without BOM for Python json.loads.
+    $version = if ($Manifest) { [string]$Manifest.version } else {
+        $project = Get-Content -LiteralPath (Join-Path $Root 'pyproject.toml') -Raw
+        if ($project -match '(?m)^version\s*=\s*"([^"]+)"') { 'source-' + $matches[1] } else { 'source-unknown' }
+    }
+    $stateFile = Join-Path $DataDir 'install-state.json'
+    $logDir = Join-Path $DataDir 'logs'
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $logFile = Join-Path $logDir 'install.log'
+    $state = $null
+    try {
+        if (Test-Path -LiteralPath $stateFile) { $state = Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json }
+    } catch { $state = $null }
+    if (-not $state -or $state.version -ne 1 -or $state.installation.root -ne $Root.ToLowerInvariant() -or $state.installation.version -ne $version -or -not $state.phases) {
+        $state = [pscustomobject]@{ version=1; installation=@{ root=$Root.ToLowerInvariant(); version=$version }; phases=[pscustomobject]@{} }
+    }
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+        foreach ($dependent in @('pydeps', 'chromium', 'gateway')) { $state.phases.PSObject.Properties.Remove($dependent) }
+    }
+    $attempts = 0
+    if ($state.phases.system -and $state.phases.system.attempts -match '^\d+$') { $attempts = [int]$state.phases.system.attempts }
+    if ($Status -ne 'running') { $attempts += 1 }
+    $result = @{ status=$Status; lastRun=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); attempts=$attempts; detail=$Detail }
+    $state.phases | Add-Member -NotePropertyName system -NotePropertyValue $result -Force
+    $state | Add-Member -NotePropertyName logPath -NotePropertyValue $logFile -Force
+    $encoding = New-Object System.Text.UTF8Encoding $false
+    $temporary = $stateFile + '.tmp'
+    [System.IO.File]::WriteAllText($temporary, ($state | ConvertTo-Json -Depth 30), $encoding)
+    Move-Item -LiteralPath $temporary -Destination $stateFile -Force
+    [System.IO.File]::AppendAllText($logFile, "[system] $Status $Detail`n", $encoding)
+}
 
 function Info($Message) { Write-Host "[easel] $Message" -ForegroundColor Cyan }
 function Ok($Message) { Write-Host "  [OK] $Message" -ForegroundColor Green }
-function Fail($Message) { Write-Error $Message; exit 1 }
+function Fail($Message) { throw $Message }
 function Require-Command($Name, $Hint) { if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { Fail "$Name 未找到。$Hint" } }
 function Ensure-Command($Name, $PackageId, $Hint) {
     if (Get-Command $Name -ErrorAction SilentlyContinue) { return }
+    if (-not $AllowWinget) { Fail "$Name 未找到。$Hint 使用 -AllowWinget 显式允许安装系统依赖后可重试。" }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Fail "$Name 未找到。$Hint`n也可以先安装 Windows App Installer（winget）后重试。" }
     Info "未找到 $Name，使用 winget 安装 $PackageId..."
     & winget install --id $PackageId --exact --accept-source-agreements --accept-package-agreements
@@ -28,13 +86,15 @@ function Read-Secret($Prompt) {
     return [System.Net.NetworkCredential]::new('', $secure).Password
 }
 function OpenClaw-Config($Key, $Value, [switch]$Json) {
+    $ErrorActionPreference = 'Continue'
     $arguments = @('--profile','easel','config','set',$Key,$Value)
     if ($Json) { $arguments += '--strict-json' }
-    & openclaw @arguments 2>&1 | Where-Object { $_ -notmatch '^No change$' }
+    & openclaw @arguments 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "OpenClaw 配置失败：$Key" }
 }
 # 尽力而为版：写入失败不 Fail，只返回是否成功，用于探测不同 OpenClaw 版本接受哪套配置 key。
 function Try-OpenClawConfig($Key, $Value, [switch]$Json) {
+    $ErrorActionPreference = 'Continue'
     $arguments = @('--profile','easel','config','set',$Key,$Value)
     if ($Json) { $arguments += '--strict-json' }
     & openclaw @arguments 2>&1 | Out-Null
@@ -44,10 +104,11 @@ function Try-OpenClawConfig($Key, $Value, [switch]$Json) {
 # 双引号：任何含 JSON 的 config set 都会变成裸键值、--strict-json 解析失败（见 issue #41）。
 # 这里改走 --batch-file：argv 里只出现临时文件路径（无引号字符），JSON 从文件读，5.1/7 行为一致。
 function OpenClaw-ConfigBatch($Operations) {
+    $ErrorActionPreference = 'Continue'
     $batchPath = Join-Path ([System.IO.Path]::GetTempPath()) "easel-config-set-$(Get-Random).json"
     try {
         [System.IO.File]::WriteAllText($batchPath, (ConvertTo-Json -InputObject $Operations -Depth 40 -Compress))
-        & openclaw --profile easel config set --batch-file $batchPath 2>&1 | Where-Object { $_ -notmatch '^No change$' }
+        & openclaw --profile easel config set --batch-file $batchPath 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { return }
         # 老版本 openclaw 不认 --batch-file：退回逐条写入（PS7 可用；Windows PS5.1 下请升级 openclaw）
         Write-Warning '当前 OpenClaw 不支持 --batch-file，退回逐条写入；建议 npm i -g openclaw@latest 升级。'
@@ -79,166 +140,184 @@ print(json.dumps(p))
     OpenClaw-ConfigBatch @(@{ path = 'models.providers.anthropic'; value = ($seed | ConvertFrom-Json) })
 }
 
-Write-Host "`nEasel · Windows 安装向导" -ForegroundColor Magenta
+
+function Invoke-system {
+
 Info '检查系统环境...'
 Ensure-Command 'git' 'Git.Git' '请安装 Git for Windows 并加入 PATH。'
 Ensure-Command 'node' 'OpenJS.NodeJS.LTS' '请安装 Node.js 24.16+ 并加入 PATH。'
 Ensure-Command 'npm' 'OpenJS.NodeJS.LTS' '请安装 Node.js 24.16+ 并加入 PATH。'
-if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command py -ErrorAction SilentlyContinue)) { Ensure-Command 'python' 'Python.Python.3.12' '请安装 Python 3.10+ 并勾选 Add Python to PATH。' }
 Ensure-Command 'ffmpeg' 'Gyan.FFmpeg' '请安装 FFmpeg 并加入 PATH。'
-# 跟随 openclaw@latest 的引擎要求（当前 2026.9.x 需要 Node >=24.16.0 <25 || >=26.1.0，25.x/26.0 被排除）。
-$nodeParts = (& node -p 'process.versions.node').Split('.') | ForEach-Object { [int]$_ }
-$nodeOk = ($nodeParts[0] -eq 24 -and $nodeParts[1] -ge 16) -or ($nodeParts[0] -eq 26 -and $nodeParts[1] -ge 1) -or ($nodeParts[0] -ge 27)
-if (-not $nodeOk) { Fail 'Node.js 24.16+（24.x）或 26.1+ 是必需依赖（openclaw@latest 要求）；winget 的 LTS 若仍是 22.x，请手动安装 Node 24。' }
-$pythonCommand = (Get-Command python -ErrorAction SilentlyContinue).Source
-if ($pythonCommand) { & $pythonCommand --version *> $null; if ($LASTEXITCODE -ne 0) { $pythonCommand = $null } }
-if (-not $pythonCommand -and (Get-Command py -ErrorAction SilentlyContinue)) { $pythonCommand = (Get-Command py).Source; $pythonArgs = @('-3') } else { $pythonArgs = @() }
-if (-not $pythonCommand) { Fail '未找到可运行的 Python 3；请安装 Python 3.10+。' }
-& $pythonCommand @pythonArgs -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
-if ($LASTEXITCODE -ne 0) { Fail 'Python 3.10+ 是必需依赖。' }
-if (-not (Test-Path $Venv)) { Info '创建 Python 虚拟环境...'; & $pythonCommand @pythonArgs -m venv $Venv }
-if (-not (Test-Path $Python)) { Fail 'Python venv 创建失败。' }
+$nodeVersion = & node -p 'process.versions.node'
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^(\d+)\.(\d+)\.') { Fail '无法读取 Node.js 版本。' }
+$major = [int]$matches[1]; $minor = [int]$matches[2]
+if (-not (($major -eq 24 -and $minor -ge 16) -or ($major -eq 26 -and $minor -ge 1) -or $major -ge 27)) {
+    Fail 'Node.js 版本不兼容：需要 24.16+（24.x）或 26.1+；请手动更新后重试。'
+}
+$pythonCommand = $null
+$pythonArgs = @()
+$versionCheck = if ($Manifest) { 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' } else { 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' }
+# Prefer py for release Python 3.12; ignore the non-working Microsoft Store alias.
+$candidates = @()
+if (Get-Command py -ErrorAction SilentlyContinue) {
+    $selector = if ($Manifest) { '-3.12' } else { '-3' }
+    $candidates += @{ command = (Get-Command py).Source; arguments = @($selector) }
+}
+if (Get-Command python -ErrorAction SilentlyContinue) { $candidates += @{ command = (Get-Command python).Source; arguments = @() } }
+if (Get-Command py -ErrorAction SilentlyContinue) {
+    $registered = & py -0p
+    foreach ($entry in $registered) {
+        if ($entry -match '([A-Za-z]:\\.*python(?:\d+(?:\.\d+)?)?\.exe)\s*$') {
+            $registeredPython = $matches[1].Trim()
+            if (Test-Path -LiteralPath $registeredPython) { $candidates += @{ command=$registeredPython; arguments=@() } }
+        }
+    }
+}
+
+foreach ($candidate in $candidates) {
+    $candidateArgs = $candidate.arguments
+    & $candidate.command @candidateArgs -c $versionCheck
+    if ($LASTEXITCODE -eq 0) { $pythonCommand = $candidate.command; $pythonArgs = $candidateArgs; break }
+}
+if (-not $pythonCommand) {
+    if (-not $AllowWinget) { Fail '没有符合要求的 Python（发行版需要 3.12，源码需要 3.10+）；手动安装或用 -AllowWinget 重试。' }
+    Require-Command 'winget' '请安装 Windows App Installer。'
+    & winget install --id Python.Python.3.12 --exact --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) { Fail 'Python 3.12 安装失败。' }
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (Get-Command py -ErrorAction SilentlyContinue) { $pythonCommand = (Get-Command py).Source; $pythonArgs = @('-3.12') }
+    elseif (Get-Command python -ErrorAction SilentlyContinue) { $pythonCommand = (Get-Command python).Source; $pythonArgs = @() }
+    else { Fail 'Python 已安装，但当前环境未找到；重新运行安装器。' }
+}
+& $pythonCommand @pythonArgs -c $versionCheck
+if ($LASTEXITCODE -ne 0) { Fail 'Python 版本不兼容。' }
+if (-not (Test-Path -LiteralPath $Python)) {
+    Info '创建 Python 虚拟环境...'
+    & $pythonCommand @pythonArgs -m venv $Venv
+    if ($LASTEXITCODE -ne 0) { Fail 'Python venv 创建失败。' }
+}
+& $Python -c $versionCheck
+if ($LASTEXITCODE -ne 0) { Fail '已有虚拟环境 Python 版本不兼容；请为本版本使用新的安装目录。' }
 Ok '系统环境检查完成'
 
+}
+
+function Invoke-openclaw {
+
 Info '安装 OpenClaw...'
-if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) { & npm install -g openclaw@latest --loglevel warn; if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 安装失败。' } }
+$wantedVersion = if ($Manifest) { [string]$Manifest.dependencies.openclaw } else { 'latest' }
+if ($Manifest -and $wantedVersion -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { Fail '发行包 OpenClaw 版本没有精确锁定。' }
+if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+    $installedVersion = (& openclaw --version | Out-String)
+    if ($LASTEXITCODE -ne 0) { Fail '已有 OpenClaw 无法运行。' }
+    if ($Manifest -and ($installedVersion -notmatch '(?<!\d)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)' -or $matches[1] -ne $wantedVersion)) {
+        Fail "OpenClaw 版本不兼容：此发行版要求 $wantedVersion，请手动确认更新已有全局安装后重试。"
+    }
+} else {
+    & npm install -g "openclaw@$wantedVersion" --loglevel warn
+    if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 安装失败。' }
+}
 Require-Command 'openclaw' '请确认 npm 全局 bin 已加入 PATH。'
+& openclaw --version
+if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 安装后验证失败。' }
+
+}
+
+function Invoke-pydeps {
+
 Info '安装 Easel Python 依赖...'
-& $Python -m pip install --upgrade pip --progress-bar on
-if ($LASTEXITCODE -ne 0) { Fail 'pip 升级失败。' }
-& $Python -m pip install -e $Root --progress-bar on
+if ($Manifest) {
+    $lockPath = [System.IO.Path]::GetFullPath((Join-Path $Root ([string]$Manifest.dependencies.pythonLock)))
+    if (-not $lockPath.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { Fail '发行包 Python 锁文件缺失或路径无效。' }
+    & $Python -m pip install -r $lockPath --progress-bar on
+    if ($LASTEXITCODE -ne 0) { Fail '锁定的 Python 依赖安装失败。' }
+    & $Python -m pip install --no-deps --no-build-isolation -e $Root --progress-bar on
+} else {
+    & $Python -m pip install -e $Root --progress-bar on
+}
 if ($LASTEXITCODE -ne 0) { Fail 'Easel Python 依赖安装失败。' }
-Info '构建 Web 前端...'
+& $Python -m pip check
+if ($LASTEXITCODE -ne 0) { Fail 'Python 依赖版本不兼容。' }
+
+}
+
+function Invoke-frontend {
+
+Info '准备 Web 前端...'
 $Frontend = Join-Path $Root 'web\frontend'
-Push-Location $Frontend
+if ($Manifest -and (Test-Path -LiteralPath (Join-Path $Frontend 'dist\index.html'))) { Ok '使用发行包预构建前端'; return }
+if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'package-lock.json'))) { Fail 'Web 前端缺少 package-lock.json。' }
+Push-Location -LiteralPath $Frontend
 try {
-    & npm install
+    & npm ci
     if ($LASTEXITCODE -ne 0) { Fail 'Web 前端依赖安装失败。' }
     & npm run build
     if ($LASTEXITCODE -ne 0) { Fail 'Web 前端构建失败。' }
 } finally { Pop-Location }
+if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'dist\index.html'))) { Fail 'Web 前端构建没有产出 index.html。' }
+
+}
+
+function Invoke-chromium {
+
 Info '安装 Playwright Chromium...'
 & $Python -m playwright install chromium
 if ($LASTEXITCODE -ne 0) { Fail 'Playwright Chromium 安装失败。' }
 
+}
+
+function Invoke-profile {
+    $envPath = Join-Path $DataDir '.env'
+    if (-not (Test-Path -LiteralPath $envPath)) { Copy-Item -LiteralPath (Join-Path $Root '.env.example') -Destination $envPath }
+    $profileDir = if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:EASEL_OPENCLAW_STATE_DIR } else { Join-Path $HOME '.openclaw-easel' }
+    $configPath = Join-Path $profileDir 'openclaw.json'
+    $previousConfigPath = $env:OPENCLAW_CONFIG_PATH
+    try {
+        if (Test-Path -LiteralPath $configPath) {
+            $env:OPENCLAW_CONFIG_PATH = $configPath
+            Info '保留已有 OpenClaw profile；模型配置请在 Web 设置中修改。'
+            & openclaw --profile easel config validate
+            if ($LASTEXITCODE -ne 0) { Fail '已有 OpenClaw 配置无效，请修复后继续；安装器不会覆盖它。' }
+            return
+        }
+        # Publish a new config only once all writes/validation have succeeded.
+        # A crash leaves only our pending file; the next run repeats initialization.
+        # OPENCLAW_CONFIG_PATH is the OpenClaw-supported explicit config override.
+        New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+        $pendingConfig = Join-Path $profileDir 'openclaw.easel-install-pending.json'
+        $env:OPENCLAW_CONFIG_PATH = $pendingConfig
+        Invoke-profile-content
+        if (-not (Test-Path -LiteralPath $pendingConfig)) { Fail 'OpenClaw 未生成待提交配置。' }
+        # File.Move deliberately fails if another process created the final file.
+        [System.IO.File]::Move($pendingConfig, $configPath)
+    } finally {
+        if ($null -eq $previousConfigPath) { Remove-Item Env:OPENCLAW_CONFIG_PATH -ErrorAction SilentlyContinue }
+        else { $env:OPENCLAW_CONFIG_PATH = $previousConfigPath }
+    }
+}
+
+function Invoke-profile-content {
 Info '准备 Easel OpenClaw profile...'
-$onboardHelp = (& openclaw onboard --help 2>&1 | Out-String)
+$onboardHelp = (& openclaw onboard --help | Out-String)
+if ($LASTEXITCODE -ne 0) { Fail '无法读取 OpenClaw 初始化选项。' }
 $onboardArgs = @('--profile','easel','onboard','--non-interactive','--mode','local','--accept-risk')
 foreach ($flag in @('--skip-health','--skip-channels','--skip-skills','--skip-ui','--skip-hooks','--skip-search','--skip-daemon')) {
     if ($onboardHelp -match [regex]::Escape($flag)) { $onboardArgs += $flag }
 }
 if ($onboardHelp -match '--no-install-daemon' -and $onboardHelp -notmatch '--skip-daemon') { $onboardArgs += '--no-install-daemon' }
-& openclaw @onboardArgs 2>&1 | Where-Object { $_ -notmatch '^No change$' }
+& openclaw @onboardArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw profile 初始化失败，请检查上方输出。' }
 
-Info '同步 skills 与 workspace...'
-# workspace 目标不能写死：OpenClaw 的默认布局变过（2026.6.x 是 ~\.openclaw\workspace-easel，
-# 2026.9.x 起是 ~\.openclaw-easel\workspace）。写死其一就会在另一个版本上装到 agent 不读的
-# 目录里，而这里和 doctor 都照样报成功（issue #19）。统一问 easel\openclaw_workspace.py。
-#
-# 这段有两个 Windows 专属的坑，改动前请先看明白：
-#   1. 顶上是 $ErrorActionPreference='Stop'。此时只要对原生命令做任何 stderr 重定向
-#      （2>$null / 2>&1 / *>），PowerShell 5.1 会把 stderr 的每一行包成 ErrorRecord 抛出
-#      NativeCommandError —— 脚本级终止，下面的回退分支根本轮不到。所以这里**不重定向**，
-#      让 Python 的报错原样显示给用户，只用 $LASTEXITCODE 判成败。
-#   2. PS 5.1 按 [Console]::OutputEncoding（中文系统是 OEM 936）解码原生命令的 stdout，
-#      而 Python 那边输出的是 UTF-8（开头设了 PYTHONUTF8=1，模块里也显式 reconfigure）。
-#      路径含中文时两边对不上就是乱码。把 OutputEncoding 临时钉成 UTF-8，用完还原。
-$workspace = ''
-$prevOutEnc = [Console]::OutputEncoding
-try {
-    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-    $wsOut = & $Python (Join-Path $Root 'easel\openclaw_workspace.py')
-    if ($LASTEXITCODE -eq 0) { $workspace = ($wsOut | Select-Object -Last 1) }
-} catch {
-    Write-Warning "解析 workspace 时出错：$($_.Exception.Message)"
-} finally {
-    [Console]::OutputEncoding = $prevOutEnc
-}
-$workspace = "$workspace".Trim()
-if ([string]::IsNullOrWhiteSpace($workspace)) {
-    # 走到这里说明 Python 压根没跑起来（解析器内部的逐级退化没机会执行）。先认用户的显式覆盖。
-    if ($env:EASEL_OPENCLAW_WORKSPACE) {
-        $workspace = $env:EASEL_OPENCLAW_WORKSPACE
-    } else {
-        $workspace = Join-Path $HOME '.openclaw-easel\workspace'
-    }
-    Write-Warning "无法向 openclaw 问出 workspace，回退到 $workspace；若 agent 读不到技能，请设 EASEL_OPENCLAW_WORKSPACE 后重跑。"
-}
-Info "  workspace → $workspace"
-$skills = Join-Path $workspace 'skills'
-New-Item -ItemType Directory -Force -Path $skills | Out-Null
-if (Test-Path (Join-Path $Root 'skills\openclaw')) { Copy-Item (Join-Path $Root 'skills\openclaw\*') $skills -Recurse -Force }
-Copy-Item (Join-Path $Root 'openclaw\workspace\*.md') $workspace -Force -ErrorAction SilentlyContinue
-$context = Join-Path $workspace 'CONTEXT.md'
-@"
-# Easel 项目路径
-
-项目根目录：$Root
-产物输出到：$(Join-Path $Root 'outputs')
-用户素材在：$(Join-Path $Root 'assets')
-用户画像在：$(Join-Path $Root 'profiles')
-"@ | Set-Content -Path $context -Encoding UTF8
-$shared = Join-Path $workspace 'shared'
-if (Test-Path $shared) { Remove-Item $shared -Recurse -Force }
-if (Test-Path (Join-Path $Root 'skills\shared')) { Copy-Item (Join-Path $Root 'skills\shared') $shared -Recurse -Force }
-$profilesLink = Join-Path $workspace 'easel-profiles'
-if (Test-Path $profilesLink) {
-    $profileItem = Get-Item $profilesLink -Force
-    if ($profileItem.LinkType -ne 'Junction') { Fail "$profilesLink 已存在但不是项目 profiles Junction，请移走后重试。" }
-} else { New-Item -ItemType Junction -Path $profilesLink -Target (Join-Path $Root 'profiles') | Out-Null }
-$outputs = Join-Path $workspace 'outputs'
-New-Item -ItemType Directory -Force -Path (Join-Path $Root 'outputs') | Out-Null
-if (Test-Path $outputs) {
-    $outputsItem = Get-Item $outputs -Force
-    if ($outputsItem.LinkType -ne 'Junction') { Fail "$outputs 已存在但不是项目 outputs Junction，请移走后重试。" }
-} else { New-Item -ItemType Junction -Path $outputs -Target (Join-Path $Root 'outputs') | Out-Null }
-
-$envPath = Join-Path $Root '.env'
+$envPath = Join-Path $DataDir '.env'
 if (-not (Test-Path $envPath)) { Copy-Item (Join-Path $Root '.env.example') $envPath }
 $envValues = Read-EnvFile $envPath
 function Is-UsableKey($Value) { return -not [string]::IsNullOrWhiteSpace($Value) -and $Value -notmatch 'REPLACE_ME|your[-_ ]?api[-_ ]?key' }
-if (-not (Is-UsableKey $envValues['ANTHROPIC_API_KEY']) -and -not (Is-UsableKey $envValues['OPENAI_API_KEY']) -and -not (Is-UsableKey $envValues['ANTHROPIC_AUTH_TOKEN']) -and -not (Is-UsableKey $envValues['EASEL_LLM_API_KEY']) -and -not (Is-UsableKey $envValues['OPENAI_MAAS_API_KEY'])) {
+if (-not $NonInteractive -and -not (Is-UsableKey $envValues['ANTHROPIC_API_KEY']) -and -not (Is-UsableKey $envValues['OPENAI_API_KEY']) -and -not (Is-UsableKey $envValues['ANTHROPIC_AUTH_TOKEN']) -and -not (Is-UsableKey $envValues['EASEL_LLM_API_KEY']) -and -not (Is-UsableKey $envValues['OPENAI_MAAS_API_KEY'])) {
     $choice = Read-Host '模型服务：1 Anthropic / 2 OpenAI-compatible / 0 稍后配置 [1]'
     if ($choice -eq '2') { $key = Read-Secret 'OpenAI API Key（不会回显）'; $url = Read-Host 'Base URL [https://api.openai.com/v1]'; $model = Read-Host '模型 [gpt-4o]'; Add-Content $envPath "`nOPENAI_API_KEY=$key`nOPENAI_BASE_URL=$url`nOPENAI_MODEL=$model" }
     elseif ($choice -eq '1' -or [string]::IsNullOrWhiteSpace($choice)) { $key = Read-Secret 'Anthropic API Key（不会回显）'; $model = Read-Host '模型 [anthropic/claude-sonnet-4-6]'; Add-Content $envPath "`nANTHROPIC_API_KEY=$key`nCLAUDE_MODEL=$model" }
 }
 $envValues = Read-EnvFile $envPath
-
-# 部分 OpenClaw 版本执行 config unset 后会把字段留成 null 而非真正删除该键，
-# 一旦落盘就再也无法通过 config set/doctor --fix 修复（每次校验都先失败）。
-# 这里在写入任何配置前，先把 models.providers.* 下残留的 null 叶子节点原地清空。
-$openclawJson = Join-Path $HOME '.openclaw-easel\openclaw.json'
-if (Test-Path $openclawJson) {
-    @'
-import json, sys
-
-path = sys.argv[1]
-with open(path) as f:
-    config = json.load(f)
-
-
-def strip_nulls(node):
-    if isinstance(node, dict):
-        changed = False
-        for key in list(node.keys()):
-            value = node[key]
-            if value is None:
-                del node[key]
-                changed = True
-            elif strip_nulls(value):
-                changed = True
-        return changed
-    return False
-
-
-providers = config.get("models", {}).get("providers", {})
-if strip_nulls(providers):
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-'@ | & $Python - $openclawJson
-}
 
 # 仅当真正写了 anthropic provider 时，才补设它的 provider 级超时（见文末 timeoutSeconds）；
 # 否则会给 OpenAI/MAAS 用户凭空造出一个只有 timeoutSeconds、缺 baseUrl/models 的残缺 anthropic provider。
@@ -317,13 +396,134 @@ if (-not (Try-OpenClawConfig 'gateway.http.endpoints.chatCompletions.enabled' 't
 # timeoutSeconds，会报 Unrecognized key 并拒绝写入。这里吞掉这条噪音、绝不让它中断安装；
 # 新版本 OpenClaw 才会真正把它调到 600s。想彻底拿到更长超时，请 npm i -g openclaw@latest 升级。
 if ($anthropicSynced) {
-    & openclaw --profile easel config set models.providers.anthropic.timeoutSeconds 600 2>&1 |
-        Where-Object { $_ -notmatch '^No change$' -and $_ -notmatch '[Uu]nrecognized key' -and $_ -notmatch 'timeoutSeconds' } | Out-Null
+    $null = Try-OpenClawConfig 'models.providers.anthropic.timeoutSeconds' '600'
 }
 & openclaw --profile easel config validate
 if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置校验失败。' }
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'scripts\gateway.ps1') start
+
+}
+
+function Ensure-WorkspaceLink($LinkPath, $TargetPath, $Folder, $WorkspacePath) {
+    $absoluteLink = [System.IO.Path]::GetFullPath($LinkPath)
+    $absoluteWorkspace = [System.IO.Path]::GetFullPath($WorkspacePath).TrimEnd('\') + '\'
+    if (-not $absoluteLink.StartsWith($absoluteWorkspace, [StringComparison]::OrdinalIgnoreCase)) { Fail '数据链接超出目标 workspace。' }
+    if (-not (Test-Path -LiteralPath $LinkPath)) {
+        New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
+        return
+    }
+    $item = Get-Item -LiteralPath $LinkPath -Force
+    $oldTarget = if ($item.LinkType -eq 'Junction') { [System.IO.Path]::GetFullPath([string]$item.Target[0]) } else { '' }
+    if ($oldTarget -eq $TargetPath) { return }
+    $migrationRoot = $env:EASEL_INSTALL_MIGRATE_FROM
+    $allowedOld = if ($migrationRoot) { [System.IO.Path]::GetFullPath((Join-Path $migrationRoot $Folder)) } else { '' }
+    if (-not $oldTarget -or -not $allowedOld -or $oldTarget -ne $allowedOld) {
+        Fail "$LinkPath 路径冲突：现有目录不指向 $TargetPath；请先迁移，安装器不会覆盖用户文件。"
+    }
+    # bootstrap passes this source only after copying missing data successfully.
+    # Delete the junction itself non-recursively; never delete its old contents.
+    Info "迁移 workspace 数据链接：$LinkPath → $TargetPath（保留旧数据）"
+    [System.IO.Directory]::Delete($absoluteLink)
+    try {
+        New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop | Out-Null
+    } catch {
+        if (-not (Test-Path -LiteralPath $LinkPath)) {
+            New-Item -ItemType Junction -Path $LinkPath -Target $oldTarget -ErrorAction Stop | Out-Null
+        }
+        throw
+    }
+}
+
+function Invoke-skills {
+
+Info '同步 skills 与 workspace...'
+$workspace = $env:EASEL_OPENCLAW_WORKSPACE
+if (-not $workspace) {
+    $workspace = (& $Python (Join-Path $Root 'easel\openclaw_workspace.py') | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0) { Fail '无法确定 OpenClaw workspace。' }
+}
+if ([string]::IsNullOrWhiteSpace($workspace)) { Fail '无法确定 OpenClaw workspace。' }
+$workspace = [System.IO.Path]::GetFullPath($workspace.Trim())
+$skillsPath = Join-Path $workspace 'skills'
+New-Item -ItemType Directory -Force -Path $skillsPath | Out-Null
+Copy-Item (Join-Path $Root 'skills\openclaw\*') -Destination $skillsPath -Recurse -Force
+# Workspace personal instructions are never overwritten during upgrades.
+Get-ChildItem -LiteralPath (Join-Path $Root 'openclaw\workspace') -Filter '*.md' | ForEach-Object {
+    $destination = Join-Path $workspace $_.Name
+    if (-not (Test-Path -LiteralPath $destination)) { Copy-Item -LiteralPath $_.FullName -Destination $destination }
+}
+$context = Join-Path $workspace 'CONTEXT.md'
+@"
+# Easel 项目路径
+
+项目根目录：$Root
+持久数据目录：$DataDir
+产物输出到：$(Join-Path $DataDir 'outputs')
+用户素材在：$(Join-Path $DataDir 'assets')
+用户画像在：$(Join-Path $DataDir 'profiles')
+"@ | Set-Content -LiteralPath $context -Encoding UTF8
+$shared = Join-Path $workspace 'shared'
+New-Item -ItemType Directory -Force -Path $shared | Out-Null
+Copy-Item (Join-Path $Root 'skills\shared\*') -Destination $shared -Recurse -Force
+foreach ($mapping in @(@{ name='easel-profiles'; folder='profiles' }, @{ name='outputs'; folder='outputs' }, @{ name='assets'; folder='assets' })) {
+    $targetPath = Join-Path $DataDir $mapping.folder
+    New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+    $linkPath = Join-Path $workspace $mapping.name
+    Ensure-WorkspaceLink $linkPath $targetPath $mapping.folder $workspace
+}
+
+}
+
+function Invoke-gateway {
+
+Info '验证配置并启动 Gateway...'
+& openclaw --profile easel config validate
+if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置无效。' }
+$identityFile = Join-Path $DataDir 'gateway-installation.json'
+$currentIdentity = @{ root=$Root.ToLowerInvariant(); version=$(if ($Manifest) { [string]$Manifest.version } else { (Get-Content -LiteralPath (Join-Path $Root 'pyproject.toml') -Raw) }) }
+$previousIdentity = $null
+try { if (Test-Path -LiteralPath $identityFile) { $previousIdentity = Get-Content -LiteralPath $identityFile -Raw -Encoding UTF8 | ConvertFrom-Json } } catch { $previousIdentity = $null }
+# An existing Gateway carries the environment of the previous install. Restart
+# only the Easel-owned process (gateway.ps1 verifies ownership) on a new version.
+$action = if ($previousIdentity -and $previousIdentity.root -eq $currentIdentity.root -and $previousIdentity.version -eq $currentIdentity.version) { 'start' } else { 'restart' }
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'scripts\gateway.ps1') $action
 if ($LASTEXITCODE -ne 0) { Fail 'Easel Gateway 启动失败。' }
-Ok 'Easel Windows 安装完成'
-Write-Host "启动 Web：$Venv\Scripts\easel.exe web" -ForegroundColor Cyan
-Write-Host "检查环境：$Venv\Scripts\easel.exe doctor" -ForegroundColor Cyan
+& $Python -m easel doctor --install-mode
+if ($LASTEXITCODE -ne 0) { Fail '安装环境检查失败；请按 doctor 提示修复。' }
+& $Python (Join-Path $Root 'easel\install_runner.py') --root $Root --data-dir $DataDir --verify-web
+if ($LASTEXITCODE -ne 0) { Fail 'Web 页面启动验证失败。' }
+$identityTemp = $identityFile + '.tmp'
+[System.IO.File]::WriteAllText($identityTemp, ($currentIdentity | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+Move-Item -LiteralPath $identityTemp -Destination $identityFile -Force
+
+}
+
+$setupLock = $null
+try {
+    if ($Phase) {
+        & ('Invoke-' + $Phase)
+        exit 0
+    }
+    # Serialize the pre-Python bootstrap too, before touching its checkpoint.
+    try { $setupLock = [System.IO.File]::Open((Join-Path $DataDir 'setup.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None) }
+    catch { Fail '另一个 Easel 安装正在使用此数据目录，请等待它完成。' }
+    Write-Host "`nEasel · Windows 安装向导" -ForegroundColor Magenta
+    # Python must exist before the stdlib runner can persist and execute phases.
+    Save-SystemBootstrap 'running' '检查系统环境并准备 Python'
+    try {
+        Invoke-system
+        Save-SystemBootstrap 'ok' '系统环境检查完成'
+    } catch {
+        Save-SystemBootstrap 'failed' $_.Exception.Message
+        throw
+    }
+    $runnerArgs = @((Join-Path $Root 'easel\install_runner.py'), '--root', $Root, '--data-dir', $DataDir)
+    if ($NonInteractive) { $runnerArgs += '--non-interactive' }
+    if ($AllowWinget) { $runnerArgs += '--allow-winget' }
+    & $Python @runnerArgs
+    exit $LASTEXITCODE
+} catch {
+    Write-Host "[easel] $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+} finally {
+    if ($setupLock) { $setupLock.Dispose() }
+}

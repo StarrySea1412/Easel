@@ -23,19 +23,19 @@ from easel.commands.install import register as register_install
 from easel.commands.ping import cmd_ping
 from easel.commands.skill import cmd_skill
 from easel.openclaw_cmd import openclaw_base_cmd
+from easel.paths import child_env, data_root
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
 from easel.timeouts import TIMEOUT_CHAT
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROFILES_DIR = PROJECT_ROOT / "profiles"
+PROFILES_DIR = data_root(PROJECT_ROOT) / "profiles"
 PROFILE = "easel"
 
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
-    env.setdefault("EASEL_ROOT", str(PROJECT_ROOT))
+    env = child_env(PROJECT_ROOT)
     env.setdefault("http_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("https_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("no_proxy", "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*")
@@ -176,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # doctor
     p_doctor = sub.add_parser("doctor", help="检查环境")
+    p_doctor.add_argument("--install-mode", action="store_true",
+                          help="安装验收：模型认证留待 Web 设置，仍检查所有运行依赖")
     p_doctor.set_defaults(func=cmd_doctor)
 
     # gateway

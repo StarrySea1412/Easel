@@ -6,6 +6,8 @@ import subprocess
 import os
 from pathlib import Path
 
+from easel.paths import child_env
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATEWAY_SCRIPT = PROJECT_ROOT / "scripts" / ("gateway.ps1" if os.name == "nt" else "gateway.sh")
 
@@ -17,5 +19,5 @@ def cmd_gateway(args) -> int:
         if os.name == "nt"
         else ["bash", str(GATEWAY_SCRIPT), action]
     )
-    result = subprocess.run(command, cwd=PROJECT_ROOT)
+    result = subprocess.run(command, cwd=PROJECT_ROOT, env=child_env(PROJECT_ROOT))
     return result.returncode

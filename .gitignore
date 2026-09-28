@@ -48,6 +48,10 @@ assets/**/*
 # Logs
 *.log
 logs/
+install-state.json
+install.lock
+bootstrap.lock
+setup.lock
 
 # Build artifacts
 *.egg-info/

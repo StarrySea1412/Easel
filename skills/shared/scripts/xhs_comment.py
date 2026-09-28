@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content_guard  # noqa: E402  出站内容安全闸门
 
 PROFILE_NAME = "XiaohongshuProfile"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 NOTE_URL = "https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}&xsec_source=pc_creatormng"
 
 # 选择器/脚本集中维护（小红书改版时单点更新）。

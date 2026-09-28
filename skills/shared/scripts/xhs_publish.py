@@ -74,7 +74,7 @@ SELECTORS = {
 }
 
 PROFILE_NAME = "XiaohongshuProfile"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "xhs-login-qrcode.png"
 
 # Chromium 启动性能参数（提速冷启动；勿禁用图片——二维码是图片）

@@ -141,12 +141,15 @@ def _snippet(text: str, start: int, end: int, ctx: int = 12) -> str:
 def load_env_literals(root: str | Path | None = None) -> set[str]:
     """读项目 .env，把敏感键的**字面值**收进扫描集——精确命中泄露的真值，与格式无关。
 
-    root 缺省依次探测：EASEL_ROOT env → 从本文件向上找含 .env 的目录。
+    root 缺省依次探测：EASEL_DATA_DIR / EASEL_ROOT env → 从本文件向上找含 .env 的目录。
     找不到 .env 返回空集（selftest 不依赖 .env）。
     """
     candidates: list[Path] = []
     if root:
         candidates.append(Path(root))
+    data_root = os.environ.get("EASEL_DATA_DIR")
+    if data_root:
+        candidates.append(Path(data_root))
     env_root = os.environ.get("EASEL_ROOT")
     if env_root:
         candidates.append(Path(env_root))

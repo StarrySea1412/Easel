@@ -19,13 +19,15 @@ import sys
 import time
 from pathlib import Path
 
+from easel.paths import child_env, data_root
+
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import persona_prefix, profile_exists
 from easel.timeouts import TIMEOUT_PRODUCE
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = PROJECT_ROOT / "skills" / "openclaw"
-PROFILES_DIR = PROJECT_ROOT / "profiles"
+PROFILES_DIR = data_root(PROJECT_ROOT) / "profiles"
 OPENCLAW_PROFILE = "easel"
 
 
@@ -87,8 +89,7 @@ def _check_profile_exists(name: str) -> bool:
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
-    env.setdefault("EASEL_ROOT", str(PROJECT_ROOT))
+    env = child_env(PROJECT_ROOT)
     env.setdefault("http_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("https_proxy", os.environ.get("EASEL_PROXY", ""))
     env.setdefault("no_proxy", "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*")

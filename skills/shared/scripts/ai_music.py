@@ -86,6 +86,10 @@ def strip_env_value(value: str) -> str:
 
 
 def find_default_env_file() -> Path | None:
+    configured = os.environ.get("EASEL_DATA_DIR", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser() / ".env"
+        return candidate if candidate.is_file() else None
     for directory in (Path.cwd(), *Path.cwd().parents):
         env_file = directory / ".env"
         if env_file.is_file():

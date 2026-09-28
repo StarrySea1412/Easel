@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def _discover_root() -> Path:
-    configured = os.environ.get("EASEL_ROOT", "").strip()
+    configured = (os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT", "")).strip()
     if configured:
         return Path(configured).expanduser().resolve()
     for parent in (Path(__file__).resolve().parent, *Path(__file__).resolve().parents):

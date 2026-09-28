@@ -10,6 +10,13 @@ OC="openclaw --profile $PROFILE"
 LOGFILE="/tmp/easel-gateway.log"
 ADAPTER_LOGFILE="/tmp/easel-openai-maas-adapter.log"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export EASEL_DATA_DIR="${EASEL_DATA_DIR:-$PROJECT_ROOT}"
+if [ -z "${EASEL_PYTHON:-}" ] && [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+    export EASEL_PYTHON="$PROJECT_ROOT/.venv/bin/python"
+fi
+if [ -n "${EASEL_OPENCLAW_STATE_DIR:-}" ]; then
+    export OPENCLAW_STATE_DIR="$EASEL_OPENCLAW_STATE_DIR"
+fi
 
 # ---- 跨平台兼容（macOS 没有 ss/setsid/procfs）--------------------------
 # ss/setsid 属 iproute2/util-linux，/proc 是 Linux 专属；macOS/BSD 三者都没有。
@@ -60,7 +67,7 @@ gateway_pid() {
 
 adapter_port() {
     # .env 不存在（未安装/首次运行）时 sed 会失败 → 加 || true，不让 set -e 掐断 stop/status。
-    sed -n 's/^OPENAI_MAAS_ADAPTER_PORT=//p' "$PROJECT_ROOT/.env" 2>/dev/null | tail -n 1 || true
+    sed -n 's/^OPENAI_MAAS_ADAPTER_PORT=//p' "$EASEL_DATA_DIR/.env" 2>/dev/null | tail -n 1 || true
 }
 
 adapter_pid() {
@@ -69,7 +76,7 @@ adapter_pid() {
 }
 
 start_adapter() {
-    grep -q '^OPENAI_MAAS_API_KEY=' "$PROJECT_ROOT/.env" 2>/dev/null || return 0
+    grep -q '^OPENAI_MAAS_API_KEY=' "$EASEL_DATA_DIR/.env" 2>/dev/null || return 0
     local port pid
     port="$(adapter_port)"
     port="${port:-18791}"
@@ -78,7 +85,7 @@ start_adapter() {
         return 0
     fi
     _detach /usr/bin/python3 "$PROJECT_ROOT/scripts/openai_maas_adapter.py" \
-        --env-file "$PROJECT_ROOT/.env" --port "$port" >"$ADAPTER_LOGFILE" 2>&1
+        --env-file "$EASEL_DATA_DIR/.env" --port "$port" >"$ADAPTER_LOGFILE" 2>&1
     for _ in $(seq 1 20); do
         curl -sf --max-time 1 "http://127.0.0.1:${port}/health" >/dev/null && return 0
         sleep 0.25

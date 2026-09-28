@@ -1,9 +1,17 @@
 ﻿$ErrorActionPreference = 'Stop'
 $Profile = 'easel'
 $Root = Split-Path -Parent $PSScriptRoot
+$env:EASEL_ROOT = $Root
+if (-not $env:EASEL_DATA_DIR) { $env:EASEL_DATA_DIR = $Root }
+$VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
+if (-not $env:EASEL_PYTHON -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+    $env:EASEL_PYTHON = $VenvPython
+}
+if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR }
 $LogFile = Join-Path $env:TEMP 'easel-gateway.log'
 $ErrorLogFile = Join-Path $env:TEMP 'easel-gateway.error.log'
 $ConfigDir = Join-Path $HOME ".openclaw-$Profile"
+if ($env:EASEL_OPENCLAW_STATE_DIR) { $ConfigDir = $env:EASEL_OPENCLAW_STATE_DIR }
 $Port = 18789
 
 function Test-Gateway {
@@ -12,8 +20,11 @@ function Test-Gateway {
 }
 
 function Get-GatewayProcess {
+    # Match the complete profile argument; easel-other belongs to another user
+    # profile and must never be stopped by Easel's restart command.
+    $commandPattern = 'openclaw.*(?:^|\s)--profile\s+(?:"{0}"|''{0}''|{0})\s+gateway(?:\s|$)' -f [regex]::Escape($Profile)
     Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-        Where-Object { $_.CommandLine -match "openclaw.*--profile\s+$Profile.*gateway" } |
+        Where-Object { $_.CommandLine -match $commandPattern } |
         Select-Object -First 1
 }
 
@@ -25,10 +36,17 @@ function Stop-Gateway {
 
 switch ($args[0]) {
     'start' {
-        if (Test-Gateway) { Write-Host '[easel] Gateway already running'; break }
+        if (Test-Gateway) {
+            if (-not (Get-GatewayProcess)) {
+                Write-Error "端口 $Port 已被其他服务占用；未找到 Easel profile 的 Gateway，请先处理端口冲突。"
+                exit 1
+            }
+            Write-Host '[easel] Gateway already running'
+            break
+        }
         New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
         Write-Host "[easel] Starting Easel gateway (profile: $Profile)..."
-        $command = "openclaw --profile $Profile gateway run --force --allow-unconfigured --bind loopback"
+        $command = "openclaw --profile $Profile gateway run --allow-unconfigured --bind loopback"
         Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $command `
             -WorkingDirectory $Root -RedirectStandardOutput $LogFile -RedirectStandardError $ErrorLogFile -WindowStyle Hidden | Out-Null
         $ready = $false

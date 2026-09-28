@@ -212,6 +212,8 @@ _PLACEHOLDER_RE = re.compile(r"replace_me|your[-_]?api[-_]?key|xxx|^\.{3}$|^<.*>
 
 def read_env_file(path: Path | None = None) -> dict[str, str]:
     """Read KEY=value without evaluating shell syntax; process env takes precedence."""
+    if path is None and os.environ.get("EASEL_DATA_DIR", "").strip():
+        path = Path(os.environ["EASEL_DATA_DIR"]).expanduser() / ".env"
     if path is None:
         for directory in (Path.cwd(), *Path.cwd().parents):
             candidate = directory / ".env"

@@ -72,7 +72,7 @@ SELECTORS = {
     "toast": 'span[class*="semi-toast-content-text"]',
 }
 PROFILE_NAME = "DouyinProfile"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "douyin.png"
 
 # 短信验证墙的多步流程选择器（跨引擎，逐个 query_selector 尝试；真机首次跑后据 dump 校准）。

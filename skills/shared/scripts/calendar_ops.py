@@ -47,7 +47,7 @@ def _find_root() -> Path:
 
 
 PROJECT_ROOT = _find_root()
-DEFAULT_DATA = PROJECT_ROOT / "outputs" / "_schedule.json"
+DEFAULT_DATA = Path(os.environ.get("EASEL_DATA_DIR") or PROJECT_ROOT) / "outputs" / "_schedule.json"
 CST = timezone(timedelta(hours=8))
 
 CONTENT_STATUSES = {"idea", "draft", "scheduled", "published"}

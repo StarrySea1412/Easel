@@ -97,7 +97,7 @@ print(json.dumps({key: os.environ.get(key) for key in keys}))
 `.trim();
 
   const result = Bun.spawnSync({
-    cmd: ["python3", "-c", python],
+    cmd: [process.env.EASEL_PYTHON || (process.platform === "win32" ? "python" : "python3"), "-c", python],
     cwd: SKILL_ROOT,
     env: process.env,
     stdout: "pipe",

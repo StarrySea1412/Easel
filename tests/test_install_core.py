@@ -118,6 +118,31 @@ def test_transient_failure_classifier():
     assert ic.transient_failure("权限不足（Access denied）") is False
     assert ic.transient_failure("版本不兼容") is False
     assert ic.transient_failure("") is False
+    assert ic.transient_failure("Access denied while opening network config") is False
+    assert ic.transient_failure("EBADENGINE; timeout retry suggested") is False
+    assert ic.transient_failure("build failed at line 1503") is False
+
+
+def test_identity_invalidates_old_success(tmp_state):
+    state = ic.load_state()
+    ic.mark_result(state, "system", ok=True)
+    state = ic.bind_installation(state, tmp_state / "v1", "1.0")
+    assert ic.should_run(state, "system")
+    ic.mark_result(state, "system", ok=True)
+    assert not ic.should_run(ic.bind_installation(state, tmp_state / "v1", "1.0"), "system")
+    assert ic.should_run(ic.bind_installation(state, tmp_state / "v1", "1.1"), "system")
+    assert ic.should_run(ic.bind_installation(state, tmp_state / "v2", "1.0"), "system")
+
+
+def test_explicit_state_base_and_retry_budget_for_manual_resume(tmp_path):
+    state = ic.load_state(tmp_path)
+    for _ in range(3):
+        ic.mark_result(state, "pydeps", False, "timeout", base=tmp_path)
+    result = ic.mark_result(state, "pydeps", False, "timeout", auto_retry=True,
+                            base=tmp_path, run_attempt=1)
+    assert result["attempts"] == 4
+    assert result["status"] == "retry"
+    assert ic.load_state(tmp_path)["phases"]["pydeps"]["status"] == "retry"
 
 
 # ---- winget 门禁 ----

@@ -38,6 +38,8 @@ if str(PROJECT_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from easel.openclaw_cmd import openclaw_base_cmd
+from easel.openclaw_workspace import state_dir as openclaw_state_dir
+from easel.paths import child_env, data_root
 from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, _FILE_ORDER
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
 try:
@@ -65,9 +67,10 @@ def _qbridge_warn_once(key: str, message: str) -> None:
     _QBRIDGE_WARNED.add(key)
     print(message, file=sys.stderr, flush=True)
 
-PROFILES_DIR = PROJECT_ROOT / "profiles"
+DATA_DIR = data_root(PROJECT_ROOT)
+PROFILES_DIR = DATA_DIR / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+OUTPUTS_DIR = DATA_DIR / "outputs"
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 REACT_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -85,7 +88,7 @@ CHAT_TRANSPORT = os.environ.get("EASEL_CHAT_TRANSPORT", "http").strip().lower()
 # <state 目录>/workspace（issue #19）。要用 workspace 路径请走 easel.openclaw_workspace.workspace_dir()，
 # 它直接问 openclaw 要运行时真值，不猜版本。
 # OpenClaw 会话历史（transcript）目录：<profile 配置目录>/agents/main/sessions/<session-id>.jsonl
-OPENCLAW_SESSIONS_DIR = Path.home() / f".openclaw-{OPENCLAW_PROFILE}" / "agents" / "main" / "sessions"
+OPENCLAW_SESSIONS_DIR = openclaw_state_dir() / "agents" / "main" / "sessions"
 
 # 思考档位（每轮 --thinking）。前后端已完整支持展示思考：后端把 thinking_delta 转成 SSE
 # `thinking` 事件，前端 MessageBubble 渲染「💭 思考过程」并在流式结束后持久保留。面板里有没有
@@ -406,7 +409,7 @@ for _spec in SKILL_API_REQUIREMENTS.values():
             _ENV_ALLOWLIST.add(_key["env"])
             _ENV_ALLOWLIST.update(_key.get("aliases", []))
 
-ENV_FILE = PROJECT_ROOT / ".env"
+ENV_FILE = DATA_DIR / ".env"
 _PLACEHOLDER_RE = re.compile(r"replace_me|your[-_]?api[-_]?key|xxx|^\.{3}$|^<.*>$", re.I)
 
 TEXT_EXTS = {".txt", ".md", ".json", ".csv", ".log", ".py", ".js", ".ts", ".html", ".htm", ".css", ".xml", ".yaml", ".yml", ".srt", ".vtt"}
@@ -533,8 +536,7 @@ def clean_agent_output(raw: str) -> str:
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
-    env.setdefault('EASEL_ROOT', str(PROJECT_ROOT))
+    env = child_env(PROJECT_ROOT)
     env.setdefault('http_proxy', os.environ.get('EASEL_PROXY', ''))
     env.setdefault('https_proxy', os.environ.get('EASEL_PROXY', ''))
     env.setdefault('no_proxy', 'localhost,127.0.0.1,10.*,*.xiaohongshu.com,*.devops.xiaohongshu.com,*.douyin.com,*.kuaishou.com,*.zhihu.com,*.bilibili.com,*.weixin.qq.com,*.qq.com')
@@ -730,6 +732,7 @@ def _write_env(updates: dict[str, str]) -> None:
             out.append('')
         out.append('# ---- Easel API keys (added via Web) ----')
         out.extend(appended)
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = ENV_FILE.with_suffix('.env.tmp')
     tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
     tmp.replace(ENV_FILE)
@@ -1199,7 +1202,7 @@ def _model_channels() -> dict:
     env = _read_env()
     primary = ""
     try:
-        oc = Path.home() / ".openclaw-easel" / "openclaw.json"
+        oc = openclaw_state_dir() / "openclaw.json"
         if oc.is_file():
             primary = str(json.loads(oc.read_text(encoding="utf-8"))
                           .get("agents", {}).get("defaults", {}).get("model", {}).get("primary", ""))
@@ -1240,7 +1243,7 @@ def _model_channels() -> dict:
 
     custom_rows = []
     try:
-        oc = Path.home() / ".openclaw-easel" / "openclaw.json"
+        oc = openclaw_state_dir() / "openclaw.json"
         if oc.is_file():
             provs = (json.loads(oc.read_text(encoding="utf-8"))
                      .get("models", {}).get("providers", {})) or {}
@@ -1348,6 +1351,7 @@ def _write_env_direct(updates: dict[str, str]) -> None:
             out.append('')
         out.append('# ---- Easel 模型配置（Web 设置面板写入）----')
         out.extend(appended)
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = ENV_FILE.with_suffix('.env.tmp')
     tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
     tmp.replace(ENV_FILE)
@@ -1359,7 +1363,7 @@ RESERVED_PROVIDER_KEYS = {"openai", "anthropic", "relay"}
 def _openclaw_provider_creds() -> dict[str, tuple[str, str]]:
     """读 openclaw.json 里每个 chat 供应商现存的 (baseUrl, apiKey)。读不到就当空表（不阻断保存）。"""
     try:
-        oc = Path.home() / '.openclaw-easel' / 'openclaw.json'
+        oc = openclaw_state_dir() / 'openclaw.json'
         provs = json.loads(oc.read_text(encoding='utf-8')).get('models', {}).get('providers', {})
         return {k: (str(v.get('baseUrl') or ''), str(v.get('apiKey') or ''))
                 for k, v in provs.items() if isinstance(v, dict)}
@@ -1374,7 +1378,7 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
     只有确有差异才落盘（改前备份 .bak-web）。
     """
     try:
-        oc = Path.home() / '.openclaw-easel' / 'openclaw.json'
+        oc = openclaw_state_dir() / 'openclaw.json'
         if not oc.is_file():
             return ''
         data = json.loads(oc.read_text(encoding='utf-8'))
@@ -2850,7 +2854,7 @@ def _account_logged_in(platform: str, cfg: dict) -> bool:
     if backend == 'unsupported':
         return False
     if backend == 'biliup':
-        return (PROJECT_ROOT / 'cookies.json').is_file()
+        return (DATA_DIR / 'cookies.json').is_file()
     if backend == 'wechat-oa':
         # 发布+数据都走「后台会话」→ 以 mp 后台登录成功为准；AppID 凭证作为兜底（旧配置）
         try:
@@ -2937,7 +2941,7 @@ async def api_login_start(platform: str):
         # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
                '--qr-out', str(qr), '--status-file', str(status),
-               '--cookie', str(PROJECT_ROOT / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
+               '--cookie', str(DATA_DIR / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
     elif backend == 'douyin':
         code_file = LOGIN_DIR / f'{platform}.code'
         try:
@@ -3151,7 +3155,7 @@ async def api_account_whoami(platform: str):
         return hit[1]
     if backend == 'biliup':
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'whoami',
-               '--cookie', str(PROJECT_ROOT / 'cookies.json')]
+               '--cookie', str(DATA_DIR / 'cookies.json')]
     elif backend == 'xhs':
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'whoami', '--no-proxy']
     elif backend == 'douyin':
@@ -3239,7 +3243,7 @@ async def api_logout(platform: str):
             shutil.rmtree(pdir, ignore_errors=True)
             deleted.append(prof_name)
     if cfg['backend'] == 'biliup':
-        ck = PROJECT_ROOT / 'cookies.json'
+        ck = DATA_DIR / 'cookies.json'
         if ck.is_file():
             ck.unlink()
             deleted.append('cookies.json')
@@ -3279,7 +3283,7 @@ async def api_analytics(platform: str):
     # B站用 cookie 调 API（无浏览器 profile）、公众号走 mp 后台会话（Playwright 拦截数据 XHR，见下），单独分支；其余走 account_stats（Playwright）
     if platform == "bilibili":
         cmd = [sys.executable, str(SHARED_SCRIPTS / "bili_login.py"), "stats",
-               "--cookie", str(PROJECT_ROOT / "cookies.json")]
+               "--cookie", str(DATA_DIR / "cookies.json")]
     elif platform == "wechat-oa":
         # 公众号数据走「后台网页端」(mp.weixin.qq.com 管理员会话 + Playwright 拦截数据 XHR)：
         # 开发者 datacube 接口需认证+群发+接口权限，多数号取不到；后台端有登录态即可看到发表记录/数据。
@@ -3456,7 +3460,7 @@ async def api_publish(platform: str, req: PublishRequest):
         # B站投稿：直接调 biliup CLI（需 cookies.json，PATH 上有 biliup）。必须视频；
         # tid=36「知识」；B站投稿必须≥1 标签，无则兜底「日常」。
         bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
-        cmd = ['biliup', '-u', str(PROJECT_ROOT / 'cookies.json'), 'upload', vids[0],
+        cmd = ['biliup', '-u', str(DATA_DIR / 'cookies.json'), 'upload', vids[0],
                '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag]
         if req.body.strip():
             cmd += ['--desc', req.body[:2000]]
@@ -3671,7 +3675,7 @@ def _write_baseline_profile(name: str, form: dict) -> None:
 @app.delete("/api/session/{session_key}")
 async def api_delete_session(session_key: str):
     """删除 OpenClaw 本地的 session 记录。"""
-    sessions_file = Path.home() / '.openclaw-easel' / 'agents' / 'main' / 'sessions' / 'sessions.json'
+    sessions_file = openclaw_state_dir() / 'agents' / 'main' / 'sessions' / 'sessions.json'
     if not sessions_file.is_file():
         return {'deleted': False, 'reason': 'sessions file not found'}
     data = json.loads(sessions_file.read_text(encoding="utf-8"))
