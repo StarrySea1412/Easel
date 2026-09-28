@@ -3340,6 +3340,73 @@ async def api_analytics_clear(req: AnalyticsClearRequest):
     return {"ok": True, "cleared": pf or "all"}
 
 
+def _load_note_snapshot_records(platform: str) -> list[dict]:
+    """读逐篇快照流里的规范化记录（坏行跳过），供 insights 与选题写入共用。"""
+    p = _notes_snapshot_file(platform)
+    recs: list[dict] = []
+    if not p.is_file():
+        return recs
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(d, dict) and d.get("version"):
+            recs.append(d)
+    return recs
+
+
+@app.get("/api/analytics/insights/{platform}")
+async def api_analytics_insights(platform: str):
+    """基于本人账号逐篇快照的热词建议（只读快照，不联网）。
+    每条建议可追溯到原笔记（refs）+ 样本量 + 指标 + 可信度分级。"""
+    if platform not in ANALYTICS_PLATFORMS:
+        raise HTTPException(404, "该平台暂不支持数据抓取")
+    import xhs_insights as xi   # web/ 在 sys.path 上
+    return xi.keyword_insights(_load_note_snapshot_records(platform))
+
+
+class InsightIdeaRequest(BaseModel):
+    platform: str = "xiaohongshu"
+    word: str = ""
+
+
+@app.post("/api/analytics/insights/idea")
+async def api_insights_idea(req: InsightIdeaRequest):
+    """把一条热词建议写入选题库（复用选题创建格式；按来源+标题查重）。"""
+    pf = (req.platform or "xiaohongshu").strip()
+    if pf not in ANALYTICS_PLATFORMS:
+        raise HTTPException(400, "未知平台")
+    word = (req.word or "").strip()
+    if not word:
+        raise HTTPException(400, "没有要加入的候选词")
+    import xhs_insights as xi
+    insights = xi.keyword_insights(_load_note_snapshot_records(pf))
+    hit = next((s for s in insights["suggestions"] if s["word"] == word), None)
+    if hit is None:
+        raise HTTPException(404, f"候选词「{word}」不在当前建议列表（可能快照已更新），请刷新后重试")
+    idea = xi.idea_from_suggestion(hit, insights.get("window"))
+    existing = _read_ideas()
+    title = idea["title"]
+    if any((it.get("title") or "").strip() == title and it.get("source") == idea["source"]
+           for it in existing):
+        raise HTTPException(409, f"选题「{title}」已存在（来自同一次分析），不重复添加")
+    item = {
+        "id": uuid.uuid4().hex[:12],
+        "title": title,
+        "note": idea["note"],
+        "source": idea["source"],
+        "status": "pending",
+        "created": int(time.time()),
+    }
+    existing.insert(0, item)
+    _write_ideas(existing)
+    return {"ok": True, "idea": item}
+
+
 @app.get("/api/analytics/{platform}")
 async def api_analytics(platform: str):
     """抓取某平台已登录账号的创作数据（粉丝/获赞/作品 + 与上次快照的增长）。起 headless 浏览器，数秒。"""
