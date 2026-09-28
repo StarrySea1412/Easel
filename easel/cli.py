@@ -19,6 +19,7 @@ from pathlib import Path
 
 from easel.commands.doctor import cmd_doctor
 from easel.commands.gateway import cmd_gateway
+from easel.commands.install import register as register_install
 from easel.commands.ping import cmd_ping
 from easel.commands.skill import cmd_skill
 from easel.openclaw_cmd import openclaw_base_cmd
@@ -198,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     p_web = sub.add_parser("web", help="启动 Web UI")
     p_web.add_argument("--port", type=int, default=7860, help="端口（默认 7860）")
     p_web.set_defaults(func=cmd_web)
+
+    # install（安装状态查看/管理；阶段执行走 setup 向导与发行版引导器）
+    register_install(sub)
 
     args = parser.parse_args(argv)
     return args.func(args)

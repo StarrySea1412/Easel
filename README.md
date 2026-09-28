@@ -235,6 +235,7 @@ easel doctor                 # 检查运行环境
 easel ping                   # 实际测试 gateway 和 Agent
 easel web                    # 启动 Web 工作台
 # 或：easel chat              # 启动终端对话
+easel install status         # 查看分阶段安装状态（哪一步没装完一目了然）
 ```
 
 > 如果提示 `easel: command not found`，就是虚拟环境没激活。也可以不激活、直接用完整路径运行，例如 `.venv/bin/easel doctor`（Windows：`.venv\Scripts\easel.exe doctor`）。
