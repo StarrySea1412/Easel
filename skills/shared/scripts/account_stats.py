@@ -316,6 +316,85 @@ def should_record(history: list[dict], snap: dict) -> bool:
     return any(last.get(k) != snap.get(k) for k in ("followers", "likes", "posts"))
 
 
+# ---- 逐篇笔记快照（web 端小红书分析用；其它平台沿用 notes 原样返回不动） ----
+NOTE_SNAPSHOT_VERSION = 2
+
+
+def _notes_path(platform: str) -> Path:
+    return ANALYTICS_DIR / f"{platform}-notes.jsonl"
+
+
+def load_note_snapshots(platform: str) -> list[dict]:
+    p = _notes_path(platform)
+    if not p.is_file():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def record_note_snapshot(platform: str, notes: list[dict], now: int) -> list[dict]:
+    """把一次 fetch 的逐篇笔记写进快照流。规范化记录（方案 A 的数据契约）：
+    每条含 version/账号归属键 note_id/标题/标签/发布时间/采集时间/指标/来源。
+    去重与保留：同一 note_id 只保留「最近两次采集」里的最新值（既保得住上一次的
+    历史，又不无限堆行）；超过 12 个月未再出现的 note_id 整体裁掉（随每次写入 compaction）。
+    只落本机 outputs/_analytics/（该目录被 .gitignore 忽略），绝不进 Git。"""
+    if not notes:
+        return []
+    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    recs: list[dict] = []
+    for n in notes:
+        nid = (n.get("note_id") or "").strip()
+        m = n.get("metrics") or {}
+        recs.append({
+            "version": NOTE_SNAPSHOT_VERSION,
+            "note_id": nid,
+            "title": (n.get("title") or "").strip()[:100],
+            "tags": [t for t in (n.get("tags") or []) if str(t).strip()][:8],
+            "publish": (n.get("publish") or "").strip()[:20],
+            "fetched_at": now,
+            "metrics": {"likes": m.get("likes"), "collects": m.get("collects"),
+                        "comments": m.get("comments")},   # 缺字段保持 None，不造零
+            "source": f"account_stats:{platform}",
+        })
+    # 与旧快照合并：note_id 分组，各保留最近两条（按 fetched_at）
+    merged: dict[str, list[dict]] = {}
+    for r in load_note_snapshots(platform) + recs:
+        merged.setdefault(r.get("note_id") or r.get("title", ""), []).append(r)
+    cutoff = now - 365 * 86400
+    rows = []
+    for _, group in merged.items():
+        group.sort(key=lambda x: x.get("fetched_at", 0))
+        for r in group[-2:]:
+            if r.get("fetched_at", now) >= cutoff:
+                rows.append(r)
+    rows.sort(key=lambda x: (x.get("fetched_at", 0), x.get("note_id") or ""))
+    p = _notes_path(platform)
+    tmp = p.with_suffix(".jsonl.tmp")
+    tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + ("\n" if rows else ""),
+                   encoding="utf-8")
+    tmp.replace(p)
+    return recs
+
+
+def clear_analytics(platform: str | None = None) -> None:
+    """「清除分析历史」入口：删掉某平台（缺省=全部）的概览与逐篇快照文件。"""
+    targets = [platform] if platform else ["xiaohongshu", "douyin", "kuaishou", "zhihu",
+                                            "bilibili", "weixin-channels", "weixin-oa"]
+    for pf in targets:
+        for path in (_history_path(pf), _notes_path(pf)):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def record_snapshot(platform: str, snap: dict) -> None:
     """数据较上一条有变化才追加；写入前做分层保留 compaction（老数据自动稀疏化，文件永不膨胀）。"""
     h = load_history(platform)
@@ -470,13 +549,37 @@ _XHS_NOTES_JS = """() => {
     const a = c.querySelector("a[href*='xsec_token'], a[href*='/explore/'], a[href*='/item/']");
     if (a) href = a.href || '';
     const img = c.querySelector('.note-card__cover img, img');
+    // 逐篇指标：note-manager 卡片把「点赞/收藏/评论」写在 data-* 属性里（改版风险区，
+    // 取不到就留空串，绝不猜）；发布日期在 .publish-time 或 title/aria 里。
+    const attr = (n) => (c.getAttribute(n) || '').trim();
+    let like = attr('data-like') || attr('data-likes'), fav = attr('data-collect') || attr('data-favs'),
+        cmt = attr('data-comment') || attr('data-comments');
+    if (!like && !fav && !cmt) {
+      // 兜底：从卡片文本里找「N赞 N藏 N评」这类紧凑写法（数字含万/亿由 parse_num 归一）
+      const t = (c.textContent || '').replace(/\\s+/g, ' ');
+      const grab = (re) => { const m = t.match(re); return m ? m[1] : ''; };
+      like = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*赞)/) || grab(/赞\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
+      fav = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*[藏收])/) || grab(/[藏收]\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
+      cmt = grab(/(\\d[\\d.,]*\\s*[万wW]?\\s*评[论]?)/) || grab(/评[论]?\\s*(\\d[\\d.,]*\\s*[万wW]?)/);
+    }
+    let publish = '';
+    const pt = c.querySelector('.publish-time, [class*="publish"], [class*="date"]');
+    if (pt) publish = (pt.textContent || '').trim().slice(0, 20);
+    if (!publish) {
+      const m = (c.textContent || '').match(/(\\d{4}-\\d{2}-\\d{2}|\\d+\\s*天前|\\d+\\s*小时前|昨天|今天|\\d{1,2}-\\d{1,2})/);
+      publish = m ? m[1] : '';
+    }
+    // 标签（话题）在卡片内 .tag / channel 容器，多个用空格连
+    const tags = [...c.querySelectorAll("[class*='tag'], [class*='channel'] a")]
+      .map(e => (e.textContent || '').replace(/^#/, '').trim()).filter(Boolean).slice(0, 8);
     out.push({
-      title: (titleEl ? titleEl.textContent : '').trim().slice(0, 60),
-      noteId, href,
+      title: (titleEl ? titleEl.textContent : '').trim().slice(0, 100),
+      noteId, href, tags,
+      like, fav, cmt, publish,
       cover: img ? (img.src || '') : '',
     });
   });
-  return out.slice(0, 8);
+  return out.slice(0, 20);
 }"""
 
 _ZHIHU_NOTES_JS = r"""() => {
@@ -628,11 +731,24 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                        if nid and tok else
                        f"https://www.xiaohongshu.com/explore/{nid}" if nid
                        else "https://creator.xiaohongshu.com/new/note-manager")
+                # 逐篇指标归一：原始展示串（可含 万/亿）转 int；取不到=None（缺字段不造零）。
+                # stat 保持人类可读串（兼容旧消费方 likes=…/collects=… 的约定）。
+                like = parse_num(n.get("like") or "")
+                fav = parse_num(n.get("fav") or "")
+                cmt = parse_num(n.get("cmt") or "")
+                parts = []
+                if like is not None: parts.append(f"赞{like}")
+                if fav is not None: parts.append(f"藏{fav}")
+                if cmt is not None: parts.append(f"评{cmt}")
                 out.append({
                     "title": n.get("title") or "(无标题)",
                     "note_id": nid, "xsec_token": tok,   # 供 xhs_comment.py 直接抓评论（统一入口）
                     "url": url,
-                    "cover": n.get("cover") or "", "stat": "",
+                    "cover": n.get("cover") or "",
+                    "tags": [t for t in (n.get("tags") or []) if t][:8],
+                    "publish": (n.get("publish") or "").strip()[:20],
+                    "metrics": {"likes": like, "collects": fav, "comments": cmt},
+                    "stat": " · ".join(parts),
                 })
             try:
                 page.remove_listener("response", _on_resp)
@@ -738,6 +854,10 @@ def cmd_fetch(a) -> int:
     growth = growth_windows(history, snap)
     if any(snap[k] is not None for k in ("followers", "likes", "posts")):
         record_snapshot(a.platform, snap)
+    # 逐篇快照：登录有效才落盘（登录失效时不写，防止把空列表当成「笔记都没了」）
+    note_recs: list[dict] = []
+    if s["logged_in"] and s.get("notes"):
+        note_recs = record_note_snapshot(a.platform, s["notes"], now)
 
     out = {
         "platform": a.platform, "name": PLATFORMS[a.platform]["name"],
@@ -746,6 +866,8 @@ def cmd_fetch(a) -> int:
         "following": s["following"], "posts": s["posts"],
         "metrics": s["metrics"], "notes": s["notes"],
         "growth": growth, "fetched_at": now,
+        "noteSnapshotCount": len(note_recs),
+        "lastSnapshotAt": (note_recs[0]["fetched_at"] if note_recs else None),
     }
     print(json.dumps(out, ensure_ascii=False))
     return 0
@@ -839,6 +961,14 @@ def cmd_selftest(_a) -> int:
     return 0
 
 
+def cmd_clear(a) -> int:
+    """清除分析历史（概览快照 + 逐篇快照）。只删 outputs/_analytics/ 下的文件，不动登录态。"""
+    clear_analytics(a.platform)
+    scope = a.platform or "全部平台"
+    print(json.dumps({"ok": True, "cleared": scope}, ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="归因层：抓取已登录账号创作数据（Playwright）")
     sub = ap.add_subparsers(dest="cmd")
@@ -850,6 +980,9 @@ def main() -> int:
     pf.add_argument("--no-proxy", action="store_true", help="强制直连")
     pf.add_argument("--headed", action="store_true", help="有头模式（首次校准）")
     pf.set_defaults(func=cmd_fetch)
+    pc = sub.add_parser("clear", help="清除分析历史（--platform 可选，缺省=全部）")
+    pc.add_argument("--platform", help="只清某平台；缺省清全部")
+    pc.set_defaults(func=cmd_clear)
     sub.add_parser("selftest", help="离线自检").set_defaults(func=cmd_selftest)
     a = ap.parse_args()
     if not getattr(a, "func", None):

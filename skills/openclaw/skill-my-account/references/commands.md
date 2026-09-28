@@ -42,13 +42,17 @@ python skills/shared/scripts/web_publisher.py whoami --platform weixin-channels
   "logged_in": true,
   "nickname": "昵称",
   "followers": 12345, "likes": 67890, "following": 200, "posts": 42,
-  "notes": [ {"title": "帖子标题", "url": "https://...", "cover": "封面URL", "stat": "赞/评/播放",
+  "notes": [ {"title": "帖子标题", "url": "https://...", "cover": "封面URL", "stat": "赞123 · 藏45 · 评6",
+              "tags": ["标签"], "publish": "2026-09-01",
+              "metrics": {"likes": 123, "collects": 45, "comments": 6},
               "note_id": "小红书笔记id", "xsec_token": "从接口拦截取的token"} ]
 }
 ```
 
 > 小红书的 `notes` 每条带 `note_id` 和 `xsec_token`（token 从 note-manager 接口响应拦截取，通常可靠）——
 > 想接着看某条笔记的**评论**时，把它的 `url` 直接喂给 **skill-xhs-comment-reply** 的 `fetch --url`，不用再手动拆 token。
+> 小红书笔记的 `metrics` 为逐篇点赞/收藏/评论（取不到的项是 `null`，不是 0）；`tags`/`publish` 可能为空串或空表（页面没给就如实为空）。
+> `notes` 逐篇快照会在每次 fetch 后写入 `outputs/_analytics/xiaohongshu-notes.jsonl`（含采集时间，仅本机），供 Web 端分析用。
 
 ```bash
 # 小红书：粉丝/获赞/关注 + 笔记列表（带 explore 链接、封面、每条数据）
@@ -65,7 +69,19 @@ python skills/shared/scripts/account_stats.py fetch --platform weixin-channels
 - "我多少粉丝 / 获赞" → `followers` / `likes`（拿不到显示"—"，不编）。
 - "我最近发了什么 / 最近的帖子是什么" → `notes[0]`（列表通常按时间倒序），给标题 + 链接。
 - "我有哪些帖子 / 都发过什么" → 遍历 `notes`，列标题 + 链接（+ 每条 `stat`）。
+- "哪篇数据最好" → 用小红书 `metrics`（点赞/收藏/评论）排序；某项为 `null` 就明说缺数据，别当 0。
 - `logged_in=false` → 提示去账号页扫码，别继续硬答。
+
+## 2b. 清除分析历史 account_stats clear
+
+用户要求"删掉我的数据快照 / 清除分析历史"时用（只删 `outputs/_analytics/` 下的概览与逐篇快照，**不动登录态、不动其它文件**）：
+
+```bash
+python skills/shared/scripts/account_stats.py clear                    # 全部平台
+python skills/shared/scripts/account_stats.py clear --platform xiaohongshu   # 只清小红书
+```
+
+执行前向用户确认一次范围（全部 / 单平台）；执行后告知已删的内容。
 
 ## 3. 各平台数据完整度（真机现状，如实告知用户）
 
