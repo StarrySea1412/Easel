@@ -504,6 +504,257 @@ def _parse_skill_md(path: Path) -> tuple[str, str, str]:
     return desc, layer, body
 
 
+# ---- 小白版 SKILL 导读：用 frontmatter + 正文标题做结构化提取 ----
+# 原则（见 docs/secondary-development-plan.md 功能 B）：只归纳原文里有的内容；缺哪个字段就留空，
+# 由前端显示「原文未说明」，不补造步骤、费用或平台权限。
+
+_GUIDE_H2_INPUT = ("输入", "最小输入", "Inputs", "素材清单")
+_GUIDE_H2_OUTPUT = ("输出", "产物", "结果怎么用")
+_GUIDE_H2_STEP = ("执行步骤", "执行流程", "执行", "工作流", "Workflow", "步骤", "核心流程")
+_GUIDE_H2_PREP = ("前置", "配置", "环境依赖", "Requirements", "工具依赖", "依赖")
+_GUIDE_H2_EXAMPLE = ("示例",)
+
+_GUIDE_ACCOUNTS = (
+    ("小红书", ("小红书", "xiaohongshu", "redbook")),
+    ("抖音", ("抖音", "douyin")),
+    ("快手", ("快手", "kuaishou")),
+    ("B站", ("bilibili", "B站", "B 站")),
+    ("视频号", ("视频号",)),
+    ("公众号", ("公众号",)),
+    ("知乎", ("知乎", "zhihu")),
+)
+
+# 外部生成能力：只认脚本名/环境变量这类硬标记，正文顺口提到（如能力对比表）不算依赖。
+_GUIDE_MEDIA = (
+    ("AI 生图", "image", ("IMG_BASE_URL", "IMG_API_KEY", "ai_image.py", "generate_image.py")),
+)
+
+_GUIDE_TERMS = (
+    ("SKILL", "一张技能卡＝一项独立能力：看说明、就地配置、直接运行。"),
+    ("Profile", "账号画像（定位/人设/受众）。技能会参考它来贴合你的风格，在「画像」页维护。"),
+    ("API Key", "外部服务商发给你的密钥，填进本机设置后技能才能调用对应 AI 能力。"),
+    ("生图", "用 AI 生成图片。需要先在「设置 → 生图」里配置好渠道。"),
+    ("登录态", "浏览器里保持登录的凭证；发布/抓取类技能首次使用要扫码登录对应平台。"),
+    ("ffmpeg", "音视频处理命令行工具，「设置 → 环境安装」可一键安装。"),
+)
+
+
+def _split_h2(body: str) -> list[tuple[str, str]]:
+    """正文按二级标题切块 → [(标题, 内容)]；首个标题前的引言块标题为空字符串。"""
+    out: list[tuple[str, str]] = []
+    head, buf = "", []
+    for line in body.splitlines():
+        m = re.match(r'^##\s+(.+?)\s*$', line)
+        if m:
+            out.append((head, "\n".join(buf).strip()))
+            head, buf = m.group(1), []
+        else:
+            buf.append(line)
+    out.append((head, "\n".join(buf).strip()))
+    return out
+
+
+def _find_h2(sections: list[tuple[str, str]], keys: tuple[str, ...], default: str = "") -> str:
+    """找标题命中 keys 的小节内容：优先完全同名，再前缀，最后包含（容忍标题前 emoji）。
+    三轮扫描避免「配置（执行前必读）」被误当成执行步骤这类包含匹配事故。"""
+    norm = [(re.sub(r'^[^0-9A-Za-z\u4e00-\u9fff]+', '', h), t) for h, t in sections if h]
+    for pick in (lambda h, k: h == k, lambda h, k: h.startswith(k), lambda h, k: k in h):
+        for h, text in norm:
+            if any(pick(h, k) for k in keys):
+                return text
+    return default
+
+
+def _plain(text: str, width: int = 160) -> str:
+    """markdown → 单行纯文本（去围栏行/强调/链接/引用符），按 width 截断。
+    围栏内的内容保留（CLI 技能的流程图/命令就写在代码块里），只去掉 ``` 标记行。"""
+    t = re.sub(r'^\s*```.*$', '', text, flags=re.M)
+    t = re.sub(r'`([^`]*)`', r'\1', t)
+    t = re.sub(r'\*\*([^*]+)\*\*', r'\1', t)
+    t = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', t)
+    t = re.sub(r'^\s*(?:[-*•>]+|\|)\s*', '', t, flags=re.M)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t[:width].strip()
+
+
+def _table_items(text: str, limit: int = 6, width: int = 60) -> list[str]:
+    """markdown 表格 → 「首列：次列」短句（跳过表头/分隔行）。「输入」「参数」节常用字段表。"""
+    rows = [l.strip() for l in text.splitlines() if l.strip().startswith('|')]
+    if len(rows) < 3:
+        return []
+    out: list[str] = []
+    after_sep = False
+    for r in rows:
+        if re.fullmatch(r'\|[\s:|-]+\|', r):
+            after_sep = True
+            continue
+        if not after_sep:
+            continue
+        cells = [_plain(c, width).strip() for c in r.strip('|').split('|')]
+        first = cells[0] if cells else ''
+        if not first:
+            continue
+        # 末列取说明文字（两列表＝次列；三列表如「字段|必填|说明」跳过中间的必填列）
+        rest = next((c for c in reversed(cells[1:]) if c), '')
+        item = f'{first}：{rest}' if rest and rest != first else first
+        out.append(item[:width])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _items(text: str, limit: int = 6, width: int = 60) -> list[str]:
+    """小节里的要点 → 短句列表：列表项优先，其次表格行，最后整段首句。"""
+    out: list[str] = []
+    for line in text.splitlines():
+        m = re.match(r'^\s*(?:\d+[.、)]|[-*•])\s+(.+)$', line)
+        if m:
+            s = _plain(m.group(1), width).strip('；;，,。')
+            if len(s) >= 2:
+                out.append(s)
+        if len(out) >= limit:
+            break
+    if not out:
+        out = _table_items(text, limit, width)
+    if not out:
+        first = _plain(text, width)
+        if first:
+            out = [first]
+    return out
+
+
+def _guide_what(desc: str) -> str:
+    """能做什么：description 中触发语/适用场景之前的能力描述。"""
+    seg = re.split(r'当用户|适用场景|适用于|使用场景', desc)[0]
+    out = ""
+    for s in (x.strip() for x in re.split(r'(?<=[。！？])', seg) if x.strip()):
+        out += s
+        if len(out) >= 12:
+            break
+    return _plain(out, 140).strip('。；; ')
+
+
+def _guide_triggers(desc: str) -> list[str]:
+    """什么时候用：description 里「当用户说…时使用」「适用场景：…」的原文说法。"""
+    found: list[str] = []
+    for m in re.finditer(r'当用户(?:说|提到|要求|询问|想要)?\s*[“"「]?(.+?)[”"」]?\s*(?:时)?(?:使用|触发)', desc):
+        seg = m.group(1).strip().strip('“”"「」').strip('：: ')
+        seg = re.sub(r'[“”"「」]{1,}', '、', seg)   # 相邻引号（说"A""B"）视作分隔
+        parts = [p.strip() for p in re.split(r'[、;；]', seg) if p.strip()]
+        found.extend(parts if 1 <= len(parts) <= 16 else [seg])
+    m2 = re.search(r'适用场景[：:]\s*(.+?)(?:。|$)', desc)
+    if m2:
+        parts = [p.strip() for p in re.split(r'[、，,]', m2.group(1)) if p.strip()]
+        found.extend(parts if 1 <= len(parts) <= 10 else [m2.group(1).strip()])
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in found:
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out[:14]
+
+
+def _guide_accounts(desc: str, body: str) -> list[str]:
+    """需要哪个平台账号：正文提到登录态类关键词时，列出同时出现的平台名（原文依据）。"""
+    text = f'{desc}\n{body}'
+    if not re.search(r'登录态|扫码登录|持久化登录|已登录', text):
+        return []
+    low = text.lower()
+    return [name for name, pats in _GUIDE_ACCOUNTS if any(p.lower() in low for p in pats)][:4]
+
+
+def _guide_group_ready(group: str, env: dict[str, str]) -> bool:
+    """模型分组是否已配好：任一 provider 的必需 key 齐全（含别名），语义与设置页一致。"""
+    try:
+        spec = model_group(group)
+    except Exception:  # noqa: BLE001
+        return False
+    return any(all(_key_configured(k, env) for k in prov['keys'] if k.get('required'))
+               for prov in spec['providers'])
+
+
+def _guide_media(body: str, env: dict[str, str]) -> list[dict]:
+    """技能正文硬引用的外部生成能力（脚本/环境变量标记），附当前配置状态。"""
+    out = []
+    for label, group, markers in _GUIDE_MEDIA:
+        if any(marker in body for marker in markers):
+            out.append({'label': label, 'configured': _guide_group_ready(group, env)})
+    return out
+
+
+def _guide_runtime(path: Path) -> dict:
+    """frontmatter.metadata.openclaw 的运行时要求（额外命令/系统）；读不到给空表。"""
+    empty: dict = {'bins': [], 'os': []}
+    try:
+        parts = path.read_text(encoding='utf-8').replace('\r\n', '\n').split('---', 2)
+        if len(parts) < 3 or parts[0].strip():
+            return empty
+        import yaml
+        fm = yaml.safe_load(parts[1]) or {}
+        oc = ((fm.get('metadata') or {}).get('openclaw') or {}) if isinstance(fm, dict) else {}
+        req = oc.get('requires') or {}
+        return {
+            'bins': [b for b in (req.get('bins') or []) if isinstance(b, str)],
+            'os': [o for o in (oc.get('os') or []) if isinstance(o, str)],
+        }
+    except Exception:  # noqa: BLE001
+        return empty
+
+
+def _skill_guide(skill: str, desc: str, body: str, path: Path,
+                 env: dict[str, str] | None = None) -> dict:
+    """小白版技能导读：能做什么/适合谁/需要什么/怎么开始/会得到什么 + 示例与术语。
+    纯静态提取（不需要模型配置）；缺字段留空，前端显示「原文未说明」。"""
+    env = _read_env() if env is None else env
+    sections = _split_h2(body)
+    inputs = _items(_find_h2(sections, _GUIDE_H2_INPUT), limit=6, width=50)
+    gets_section = _find_h2(sections, _GUIDE_H2_OUTPUT)
+    what_you_get = _items(gets_section, limit=4, width=70) if gets_section else []
+    examples = _items(_find_h2(sections, _GUIDE_H2_EXAMPLE), limit=3, width=90)
+    if examples:
+        examples = [e.strip('“”"「」') for e in examples]
+    else:
+        examples = _guide_triggers(desc)[:3]
+    runtime = _guide_runtime(path)
+    media = _guide_media(body, env)
+    accounts = _guide_accounts(desc, body)
+    spec = SKILL_API_REQUIREMENTS.get(skill)
+    api = {'label': spec['label'], 'configured': _skill_api_configured(skill, env)} if spec else None
+
+    how_to: list[str] = ['点下方「运行」，用一句话描述你要做的事，再点「执行」。']
+    if inputs:
+        how_to.append('先把这些说清楚：' + '、'.join(inputs[:4]) + '。')
+    if api and not api['configured']:
+        how_to.append(f'本技能要调用外部 AI（{api["label"]}），请先在下方「API 配置」填好 Key。')
+    for m in media:
+        if not m['configured']:
+            how_to.append(f'会用到「{m["label"]}」，需要先到「设置 → 生图」配置好渠道。')
+
+    corpus = f'{desc}\n{body}'
+    terms = [{'term': t, 'explain': e} for t, e in _GUIDE_TERMS
+             if t.lower() in corpus.lower()][:5]
+
+    return {
+        'what': _guide_what(desc),
+        'whenToUse': _guide_triggers(desc),
+        'needs': {
+            'inputs': inputs,
+            'api': api,
+            'media': media,
+            'accounts': accounts,
+            'tools': runtime['bins'],
+            'os': runtime['os'],
+            'prep': _items(_find_h2(sections, _GUIDE_H2_PREP), limit=2, width=80),
+        },
+        'howToStart': how_to,
+        'steps': _items(_find_h2(sections, _GUIDE_H2_STEP), limit=4, width=80),
+        'whatYouGet': what_you_get,
+        'examples': examples,
+        'terms': terms,
+    }
+
+
 def get_skills() -> list[dict]:
     env = _read_env()
     result = []
@@ -1030,11 +1281,12 @@ async def api_skills():
 
 @app.get("/api/skill/{name}")
 async def api_skill_detail(name: str):
-    """单个 SKILL 详情：描述 + 正文 + API 需求与当前配置状态（脱敏）。"""
+    """单个 SKILL 详情：描述 + 正文 + API 需求与当前配置状态（脱敏）+ 小白版导读。"""
     full = find_skill(name)
     if full is None:
         raise HTTPException(404, f"SKILL '{name}' 不存在")
-    desc, layer, body = _parse_skill_md(SKILLS_DIR / "openclaw" / full / "SKILL.md")
+    md_path = SKILLS_DIR / "openclaw" / full / "SKILL.md"
+    desc, layer, body = _parse_skill_md(md_path)
     needs_api = full in SKILL_API_REQUIREMENTS
     env = _read_env()
     return {
@@ -1045,6 +1297,7 @@ async def api_skill_detail(name: str):
         "needsApi": needs_api,
         "apiConfigured": _skill_api_configured(full, env) if needs_api else True,
         "apiSpec": _api_spec_status(full, env) if needs_api else None,
+        "guide": _skill_guide(full, desc, body, md_path, env),
     }
 
 

@@ -82,7 +82,7 @@ Easel follows five connected workflows: **Discover** relevant trends and opportu
 
 ## 🖥️ Workspace Examples
 
-These are four representative examples, not the complete feature set. Explore the Skill library in the Web workspace or the [capability map](docs/skill-function-mapping.md) for more.
+These are four representative examples, not the complete feature set. Explore the Skill library in the Web workspace or the [capability map](docs/skill-function-mapping.md) for more. Opening a skill starts with a beginner guide (what it does / when to use it / what you need / how to start / what you get, summarized from SKILL.md), with the full original text one click away.
 
 <table>
   <tr>

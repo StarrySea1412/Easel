@@ -70,6 +70,28 @@ export interface ApiSpec {
   providers: ApiProviderSpec[];
 }
 
+/** 小白版导读（后端按 SKILL.md 原文静态提取；缺的字段是空值，不补造）。 */
+export interface SkillGuideNeeds {
+  inputs: string[];                 // 要准备的材料
+  api: { label: string; configured: boolean } | null;
+  media: { label: string; configured: boolean }[];   // 会调用的外部生成能力（如 AI 生图）
+  accounts: string[];               // 需要登录的平台
+  tools: string[];                  // metadata.openclaw 要求的额外命令
+  os: string[];                     // 系统限制
+  prep: string[];                   // 「前置/配置」节原文要点
+}
+
+export interface SkillGuide {
+  what: string;                     // 能做什么
+  whenToUse: string[];              // 适合谁 / 什么时候用（原文触发说法）
+  needs: SkillGuideNeeds;
+  howToStart: string[];             // 怎么开始
+  steps: string[];                  // 原文执行步骤（折叠展示）
+  whatYouGet: string[];             // 会得到什么
+  examples: string[];               // 可复制的示例输入
+  terms: { term: string; explain: string }[];
+}
+
 export interface SkillDetail {
   name: string;
   layer: string;
@@ -78,6 +100,7 @@ export interface SkillDetail {
   needsApi: boolean;
   apiConfigured: boolean;
   apiSpec: ApiSpec | null;
+  guide: SkillGuide;
 }
 
 export type FileKind = 'text' | 'image' | 'video' | 'audio' | 'binary';
