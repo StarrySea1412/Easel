@@ -5,8 +5,13 @@ import type { JobView } from './EnvBoard';
 import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
+  fetchModelPresets, discoverModels,
+  fetchImportSources, previewImport, applyImport,
 } from '../lib/api';
-import type { EnvTool, ModelRow, SelftestResult } from '../lib/api';
+import type {
+  EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
+  ImportSource, ImportPreview,
+} from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
 
 interface Props { onClose: () => void; }
@@ -151,6 +156,113 @@ export default function SettingsPanel({ onClose }: Props) {
   const [selftest, setSelftest] = useState<{ testedAt: number; byBase: Record<string, SelftestResult> } | null>(null);
   const [testing, setTesting] = useState(false);
   const [selftestNote, setSelftestNote] = useState('');
+
+  // ── 服务商预设与「获取模型」（方案功能 C 第一步） ──────────
+  const [presets, setPresets] = useState<Record<string, ModelPreset[]>>({});
+  const [discover, setDiscover] = useState<Record<string, DiscoverResult | 'loading'>>({});
+  const [discovering, setDiscovering] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    fetchModelPresets()
+      .then((d) => { if (alive) setPresets(d.presets || {}); })
+      .catch(() => { /* 预设拿不到就只剩手动填写，不打断设置页 */ });
+    return () => { alive = false; };
+  }, []);
+
+  const runDiscover = useCallback(async (ch: string, i: number, row: ModelRow) => {
+    const key = `${ch}:${i}`;
+    setDiscovering(key);
+    setDiscover((m) => ({ ...m, [key]: 'loading' }));
+    try {
+      const r = await discoverModels({
+        channel: ch,
+        slot: row.slot || '',
+        baseUrl: row.baseUrl || '',
+        apiKey: row.keyNew || '',
+        protocol: row.protocol || '',
+      });
+      setDiscover((m) => ({ ...m, [key]: r }));
+    } catch (e) {
+      setDiscover((m) => ({
+        ...m,
+        [key]: {
+          ok: false, kind: 'client_error', models: [], channel: ch, slot: row.slot || '',
+          source: row.baseUrl || '', fetchedAt: Math.floor(Date.now() / 1000), keySource: 'none',
+          message: e instanceof Error ? e.message : '获取失败',
+        },
+      }));
+    } finally {
+      setDiscovering('');
+    }
+  }, []);
+
+  // ── 从本机配置导入（方案功能 C 第二步） ────────────────────
+  const [impOpen, setImpOpen] = useState(false);
+  const [impSources, setImpSources] = useState<ImportSource[]>([]);
+  const [impSource, setImpSource] = useState('');
+  const [impPath, setImpPath] = useState('');
+  const [impSlot, setImpSlot] = useState('openai');
+  const [impPreview, setImpPreview] = useState<ImportPreview | null>(null);
+  const [impPick, setImpPick] = useState('');
+  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply'>('');
+  const [impMsg, setImpMsg] = useState('');
+
+  const openImport = useCallback(async () => {
+    setImpOpen(true);
+    if (impSources.length) return;
+    try {
+      const d = await fetchImportSources();
+      setImpSources(d.sources);
+      const first = d.sources.find((s) => s.available) || d.sources[0];
+      if (first) setImpSource(first.id);
+    } catch (e) {
+      setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+    }
+  }, [impSources.length]);
+
+  const loadImportPreview = useCallback(async () => {
+    if (!impSource) { setImpMsg('先选择一个来源'); return; }
+    setImpBusy('preview');
+    setImpMsg('');
+    setImpPreview(null);
+    setImpPick('');
+    try {
+      const d = await previewImport(impSource, impSlot, impPath.trim());
+      setImpPreview(d);
+      const first = d.candidates.find((c) => c.compatible);
+      setImpPick(first ? first.id : '');
+      if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
+    } catch (e) {
+      setImpMsg(e instanceof Error ? e.message : '预览失败');
+    } finally {
+      setImpBusy('');
+    }
+  }, [impSource, impSlot, impPath]);
+
+  const applyImportPick = useCallback(async () => {
+    if (!impPick) return;
+    setImpBusy('apply');
+    setImpMsg('');
+    try {
+      const r = await applyImport(impSource, impPick, impSlot, impPath.trim());
+      setImpMsg(`✓ 已导入「${r.applied.name}」→ ${impSlot}${r.note ? `（${r.note}）` : ''}`);
+      const d = await fetchModelChannels();
+      setChatRows(d.channels.chat.rows || []);
+      setTransRows(d.channels.transcribe.rows || []);
+      setMediaRows({
+        image: d.channels.image?.rows || [],
+        video: d.channels.video?.rows || [],
+        music: d.channels.music?.rows || [],
+        speech: d.channels.speech?.rows || [],
+      });
+      void loadImportPreview();
+    } catch (e) {
+      setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
+    } finally {
+      setImpBusy('');
+    }
+  }, [impSource, impPick, impSlot, impPath, loadImportPreview]);
 
   useEffect(() => {
     let alive = true;
@@ -304,7 +416,18 @@ export default function SettingsPanel({ onClose }: Props) {
 
   const renderBoard = (
     rows: ModelRow[],
-    ops?: { onRow?: (i: number, patch: Partial<ModelRow>) => void; onPrimary?: (i: number) => void; onRemove?: (i: number) => void; media?: boolean },
+    ops?: {
+      onRow?: (i: number, patch: Partial<ModelRow>) => void;
+      onPrimary?: (i: number) => void;
+      onRemove?: (i: number) => void;
+      media?: boolean;
+      channel?: string;                    // 用于「获取模型」的通道标识
+      presets?: ModelPreset[];             // 服务商预设（公开端点）
+      discovery?: (i: number) => DiscoverResult | 'loading' | undefined;
+      onDiscover?: (i: number) => void;
+      onPickPreset?: (i: number, p: ModelPreset) => void;
+      busyKey?: string;
+    },
   ) => (
     modelLoading && rows.length === 0 ? (
       <div className="board"><div className="empty"><span className="spin" /> 正在读取配置…<span className="hint">（后台繁忙时可能稍慢，会自动重试）</span></div></div>
@@ -341,7 +464,41 @@ export default function SettingsPanel({ onClose }: Props) {
               )}
               <span>{r.type}</span>
               {ed && ed.model && (!ops?.media || r.adv) ? (
-                <input className="mock" value={r.model} placeholder={isCustom ? '模型名' : ''} onChange={(e) => ops?.onRow?.(i, { model: e.target.value })} />
+                <>
+                  <select
+                    className="mock"
+                    value=""
+                    title="服务商预设：选中即填入模型名"
+                    disabled={!(ops?.presets || []).length}
+                    onChange={(e) => {
+                      const p = (ops?.presets || []).find((x) => x.baseUrl === e.target.value);
+                      if (p) ops?.onPickPreset?.(i, p);
+                    }}
+                  >
+                    <option value="">
+                      {(ops?.presets || []).length ? '服务商预设…' : '暂无预设（手动填写）'}
+                    </option>
+                    {(ops?.presets || []).map((p) => (
+                      <option key={p.id} value={p.baseUrl}>{p.name} · {p.note}</option>
+                    ))}
+                  </select>
+                  <span className="model-fetch">
+                    <input
+                      className="mock"
+                      value={r.model}
+                      placeholder={isCustom ? '模型名' : ''}
+                      onChange={(e) => ops?.onRow?.(i, { model: e.target.value })}
+                    />
+                    <button
+                      className="adv-btn"
+                      title="向该服务商获取可用模型列表（用地址 + 已保存或刚填的 Key）"
+                      disabled={ops?.busyKey === `${ops?.channel}:${i}`}
+                      onClick={() => ops?.onDiscover?.(i)}
+                    >
+                      {ops?.busyKey === `${ops?.channel}:${i}` ? '获取中…' : '获取模型'}
+                    </button>
+                  </span>
+                </>
               ) : (
                 <span className={`cell-text${ops?.media && !r.model ? ' dim' : ''}`} title={r.model || '内建默认'}>
                   {r.model || (ops?.media ? '默认（内建）' : '')}
@@ -410,6 +567,41 @@ export default function SettingsPanel({ onClose }: Props) {
               ) : (
                 <span />
               )}
+              {(() => {
+                if (!ops?.discovery) return null;
+                const d = ops.discovery(i);
+                if (!d) return null;
+                if (d === 'loading') {
+                  return <div className="discover-row"><span className="spin" /> 正在向 {r.baseUrl || '该地址'} 查询可用模型…</div>;
+                }
+                return (
+                  <div className={`discover-row${d.ok ? ' ok' : ' bad'}`}>
+                    <span className="dr-txt">
+                      {d.ok ? '✓' : '✗'} {d.message}
+                      {d.ok && <span className="dr-src">· 来源 {d.source} · {hhmm(d.fetchedAt)}
+                        {d.keySource === 'saved' ? ' · 用已保存的 Key' : d.keySource === 'input' ? ' · 用刚填的 Key' : ' · 未带 Key'}
+                      </span>}
+                    </span>
+                    {!d.ok && <span className="dr-src">可继续手动填写模型名</span>}
+                    {d.ok && (() => {
+                      const hit = d.models.includes(r.model);
+                      return (
+                        <span className="dr-pick">
+                          <select
+                            className="mock"
+                            value={hit ? r.model : ''}
+                            onChange={(e) => { if (e.target.value) ops?.onRow?.(i, { model: e.target.value }); }}
+                          >
+                            <option value="">{hit ? '已选' : `选择模型（${d.models.length} 个）…`}</option>
+                            {d.models.map((m) => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                          {!hit && <button className="adv-btn" onClick={() => ops?.onRow?.(i, { model: d.models[0] })}>填入第一个</button>}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -484,9 +676,114 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing}>自测本通道</button>
                     </div>
-                    {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow })}
+                    {renderBoard(chatRows, {
+                      onRow: (i, p) => updateRow(setChatRows, i, p),
+                      onPrimary: setPrimaryRow,
+                      onRemove: removeRow,
+                      channel: 'chat',
+                      presets: presets.chat,
+                      discovery: (i) => discover[`chat:${i}`],
+                      onDiscover: (i) => void runDiscover('chat', i, chatRows[i]),
+                      busyKey: discovering,
+                      onPickPreset: (i, p) => updateRow(setChatRows, i, {
+                        baseUrl: p.baseUrl, protocol: p.protocol,
+                        name: p.id, sub: p.note || '预设', type: p.protocol,
+                      }),
+                    })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
-                    <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；自动降级链随统一网关接入开放。</div>
+                    <div className="import-block">
+                      <button className="adv-btn" onClick={() => void openImport()}>
+                        {impOpen ? '收起「从本机配置导入」' : '⬇ 从本机配置导入（CC Switch / OpenClaw）'}
+                      </button>
+                      {impOpen && (
+                        <div className="import-body">
+                          <div className="import-row">
+                            <select
+                              className="mock"
+                              value={impSource}
+                              onChange={(e) => { setImpSource(e.target.value); setImpPreview(null); }}
+                            >
+                              {impSources.length === 0 && <option value="">读取来源中…</option>}
+                              {impSources.map((s) => (
+                                <option key={s.id} value={s.id} disabled={!s.available}>
+                                  {s.label}{s.available ? '' : `（不可用：${s.detail}）`}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="mock"
+                              value={impSlot}
+                              onChange={(e) => { setImpSlot(e.target.value); setImpPreview(null); }}
+                            >
+                              <option value="openai">写入：对话主通道（OPENAI_*）</option>
+                              <option value="relay">写入：对话备用 relay（EASEL_LLM_*）</option>
+                              <option value="anthropic">写入：Anthropic 槽位（ANTHROPIC_*）</option>
+                            </select>
+                            <input
+                              className="mock"
+                              value={impPath}
+                              placeholder="自定义路径（可留空）"
+                              onChange={(e) => setImpPath(e.target.value)}
+                            />
+                            <button className="btn btn-sm" onClick={() => void loadImportPreview()} disabled={impBusy === 'preview'}>
+                              {impBusy === 'preview' ? '读取中…' : '读取并预览'}
+                            </button>
+                          </div>
+                          {impMsg && <div className="import-msg">{impMsg}</div>}
+                          {impPreview && impPreview.candidates.length > 0 && (
+                            <>
+                              <div className="import-list">
+                                {impPreview.candidates.map((c) => (
+                                  <label
+                                    key={c.id}
+                                    className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="imp-pick"
+                                      disabled={!c.compatible}
+                                      checked={impPick === c.id}
+                                      onChange={() => setImpPick(c.id)}
+                                    />
+                                    <span className="ii-main">
+                                      <span className="ii-name">
+                                        {c.name}
+                                        <span className="badge">{c.protocol}</span>
+                                        {c.appType && <span className="ii-app">{c.appType}</span>}
+                                      </span>
+                                      <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
+                                      <span className="ii-meta">
+                                        {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
+                                        {!c.compatible && ` · ${c.skipReason}`}
+                                      </span>
+                                      {c.compatible && c.overwrites.length > 0 && (
+                                        <span className="ii-ov">
+                                          将覆盖：{c.overwrites.map((o) => `${o.field}（${o.current} → ${o.incoming}）`).join('；')}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="import-foot">
+                                <button
+                                  className="btn btn-sm btn-primary"
+                                  onClick={() => void applyImportPick()}
+                                  disabled={!impPick || impBusy === 'apply'}
+                                >
+                                  {impBusy === 'apply' ? '导入中…' : '导入选中项'}
+                                </button>
+                                <span className="hint">{impPreview.note}</span>
+                              </div>
+                            </>
+                          )}
+                          {impPreview && impPreview.errors.length > 0 && (
+                            <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；预设只填公开端点，模型列表现场向服务商查询，不做猜测。</div>
                   </section>
                 )}
 
@@ -498,7 +795,17 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('transcribe')} disabled={testing}>自测本通道</button>
                     </div>
-                    {renderBoard([...transRows, localRow], { onRow: (i, p) => updateRow(setTransRows, i, p) })}
+                    {renderBoard([...transRows, localRow], {
+                      onRow: (i, p) => updateRow(setTransRows, i, p),
+                      channel: 'transcribe',
+                      presets: presets.transcribe,
+                      discovery: (i) => discover[`transcribe:${i}`],
+                      onDiscover: (i) => void runDiscover('transcribe', i, transRows[i]),
+                      busyKey: discovering,
+                      onPickPreset: (i, p) => updateRow(setTransRows, i, {
+                        baseUrl: p.baseUrl, protocol: p.protocol, sub: p.note || '预设',
+                      }),
+                    })}
                     <div className="foot-note">有字幕不下模型；API 通道缺 key 自动落到本地 whisper（本地组件在「环境安装」页装）。保存即写入 .env 生效。</div>
                   </section>
                 )}
@@ -522,8 +829,19 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.image || [], { onRow: (i, p) => updateMediaRow('image', i, p), media: true })}
-                    <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。</div>
+                    {renderBoard(mediaRows.image || [], {
+                      onRow: (i, p) => updateMediaRow('image', i, p),
+                      media: true,
+                      channel: 'image',
+                      presets: presets.image,
+                      discovery: (i) => discover[`image:${i}`],
+                      onDiscover: (i) => void runDiscover('image', i, (mediaRows.image || [])[i]),
+                      busyKey: discovering,
+                      onPickPreset: (i, p) => updateMediaRow('image', i, {
+                        baseUrl: p.baseUrl, protocol: p.protocol, adv: true,
+                      }),
+                    })}
+                    <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。预设只提供公开端点，能否枚举模型取决于服务商。</div>
                   </section>
                 )}
 

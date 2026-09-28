@@ -786,6 +786,112 @@ export interface ModelRow {
   baseOptional?: boolean;
   adv?: boolean;
   deletable?: boolean;
+  /** 预设带出的协议（仅本地态；缺省按 slot 推断）。 */
+  protocol?: string;
+}
+
+// ── 服务商预设与模型发现（对应方案功能 C 第一步） ──
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  protocol: string;   // openai | anthropic
+  baseUrl: string;
+  note: string;
+}
+
+export interface DiscoverResult {
+  ok: boolean;
+  kind: string;       // ok | invalid_url | blocked_target | unauthorized | not_found | unsupported | empty | timeout | network | ...
+  message: string;
+  models: string[];
+  channel: string;
+  slot: string;
+  source: string;     // 实际查询的根地址（不含 Key）
+  fetchedAt: number;
+  keySource: 'input' | 'saved' | 'none';
+  elapsedMs?: number;
+}
+
+export function fetchModelPresets(): Promise<{ presets: Record<string, ModelPreset[]>; note: string }> {
+  return request('/api/models/presets');
+}
+
+export function discoverModels(payload: {
+  channel: string; slot?: string; baseUrl: string; apiKey?: string; protocol?: string;
+}): Promise<DiscoverResult> {
+  return request('/api/models/discover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+// ── 从本机配置导入（方案功能 C 第二步） ──
+
+export interface ImportSource {
+  id: string;          // openclaw | cc-switch
+  label: string;
+  note: string;
+  available: boolean;
+  path: string;
+  detail: string;      // 不可用时的原因
+}
+
+export interface ImportOverwrite {
+  field: string;
+  current: string;
+  incoming: string;
+}
+
+export interface ImportCandidate {
+  id: string;
+  source: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  protocol: string;
+  appType: string;
+  note: string;
+  keyPresent: boolean;
+  keyMasked: string;   // 只回脱敏值，明文不出后端
+  compatible: boolean;
+  skipReason: string;
+  overwrites: ImportOverwrite[];
+}
+
+export interface ImportPreview {
+  source: string;
+  path: string;
+  slot: string;
+  candidates: ImportCandidate[];
+  errors: string[];
+  readAt: number;
+  note: string;
+}
+
+export interface ImportSlot { id: string; env: string[] }
+
+export function fetchImportSources(): Promise<{ sources: ImportSource[]; slots: ImportSlot[] }> {
+  return request('/api/models/import/sources');
+}
+
+export function previewImport(source: string, slot: string, path = ''): Promise<ImportPreview> {
+  return request('/api/models/import/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, slot, path }),
+  });
+}
+
+export function applyImport(source: string, id: string, slot: string, path = ''): Promise<{
+  ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
+}> {
+  return request('/api/models/import/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, id, slot, path }),
+  });
 }
 
 export interface ModelSaveRow {
