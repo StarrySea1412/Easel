@@ -36,15 +36,15 @@ async function readResponse(response: Response) {
   return result;
 }
 
-export default function SkillAuditPanel({ sessionId, refreshKey, isStreaming = false, embedded = false }: {
-  sessionId: string; refreshKey?: number; isStreaming?: boolean; embedded?: boolean;
+export default function SkillAuditPanel({ sessionId, refreshKey, isStreaming = false, embedded = false, targetTurnId }: {
+  sessionId: string; refreshKey?: number; isStreaming?: boolean; embedded?: boolean; targetTurnId?:string;
 }) {
   // Keying the inner panel also isolates in-flight reviews and expanded rows on session changes.
-  return <SessionAuditPanel key={sessionId} sessionId={sessionId} refreshKey={refreshKey} isStreaming={isStreaming} embedded={embedded} />;
+  return <SessionAuditPanel key={sessionId} sessionId={sessionId} refreshKey={refreshKey} isStreaming={isStreaming} embedded={embedded} targetTurnId={targetTurnId} />;
 }
 
-function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded }: {
-  sessionId: string; refreshKey?: number; isStreaming: boolean; embedded: boolean;
+function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded, targetTurnId }: {
+  sessionId: string; refreshKey?: number; isStreaming: boolean; embedded: boolean; targetTurnId?:string;
 }) {
   const [expanded, setOpen] = useState(false);
   const open = embedded || expanded;
@@ -62,7 +62,7 @@ function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded }: {
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    fetch(`${apiBase()}/api/skill-audits?${new URLSearchParams({ sessionId })}`, {
+    fetch(`${apiBase()}/api/skill-audits?${new URLSearchParams({ sessionId, ...(targetTurnId ? {turnId:targetTurnId} : {}) })}`, {
       cache: 'no-store', signal: controller.signal,
     }).then(readResponse).then((result: { records: AuditRecord[] }) => {
       if (!Array.isArray(result.records)) throw new Error('Skill 核验记录格式不正确');
@@ -71,8 +71,9 @@ function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded }: {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : '核验记录读取失败');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [sessionId, open, refreshKey, isStreaming, revision]);
+  }, [sessionId, targetTurnId, open, refreshKey, isStreaming, revision]);
 
+  useEffect(()=>{if(!isStreaming||!open||loading)return;const timer=setTimeout(()=>setRevision(value=>value+1),3000);return()=>clearTimeout(timer);},[isStreaming,open,loading,revision]);
   async function review(turnId: string) {
     if (reviewController.current) return;
     const controller = new AbortController();
@@ -111,10 +112,10 @@ function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded }: {
       {error && <p className="skill-audit-error" role="alert">{error}{records ? '；下方保留上次读取结果。' : ''}</p>}
       {isStreaming && <p className="skill-audit-note">对话进行中，证据尚可能不完整；本轮结束后自动刷新。</p>}
       {loading && !records && <p className="skill-audit-note" role="status">正在读取核验记录…</p>}
-      {records?.length === 0 && <p className="skill-audit-empty">本会话暂无核验记录。没有记录不代表 Skill 未执行，也不能据此判断效果通过。</p>}
+      {records?.length === 0 && <p className="skill-audit-empty">{targetTurnId ? '未找到指定轮次的持久核验记录，无法确认其执行情况。' : '本会话暂无核验记录。没有记录不代表 Skill 未执行，也不能据此判断效果通过。'}</p>}
       {records?.map((record) => {
         const critique = critiques[record.turnId] || record.critique;
-        return <details className="skill-audit-turn" key={record.turnId}>
+        return <details className="skill-audit-turn" key={record.turnId} open={record.turnId===targetTurnId?true:undefined}>
           <summary><span>{timeLabel(record.started)}</span><span>{label(record.status)}</span><span>查看本轮核验</span></summary>
           <p className="skill-audit-note">轮次：{record.turnId}</p>
           <h3>调用证据</h3>

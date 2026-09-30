@@ -335,3 +335,9 @@
   .settings-page .settings-field-horizontal { grid-template-columns: minmax(0, 1fr); }
   .settings-page .settings-field-horizontal .settings-field-label { padding-top: 0; }
 }
+.storage-settings-card { padding:25px; border:1px solid var(--border); background:var(--surface); border-radius:12px; max-width:900px; }
+.storage-settings-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }.storage-settings-heading h2 { margin:0 0 9px; font-size:20px; font-weight:550; }.storage-settings-heading p,.storage-help { color:var(--text-secondary); font-size:12px; line-height:1.9; }
+.storage-location-list { margin:24px 0; border-top:1px solid var(--border); }.storage-location-list>div { display:grid; grid-template-columns:125px minmax(0,1fr); gap:16px; padding:15px 0; border-bottom:1px solid var(--border); font-size:12px; line-height:1.8; }.storage-location-list dt { color:var(--text-secondary); }.storage-location-list dd { margin:0; overflow-wrap:anywhere; }
+.storage-settings-card form label { display:block; margin:20px 0 9px; font-size:13px; }.storage-settings-card form input { box-sizing:border-box; width:100%; padding:12px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; font:inherit; font-size:13px; }.storage-settings-card form input:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
+.storage-pending { background:var(--surface-2); padding:17px; border-radius:8px; }.storage-pending strong { font-size:13px; font-weight:550; }.storage-pending p { color:var(--text-secondary); font-size:12px; line-height:1.8; }.storage-notice { background:var(--surface-2); padding:12px; border-radius:7px; font-size:12px; }
+@media(max-width:650px) { .storage-settings-card { padding:18px; }.storage-settings-heading { flex-direction:column; }.storage-location-list>div { grid-template-columns:1fr;gap:6px; } }

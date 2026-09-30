@@ -19,3 +19,6 @@
 .skill-audit-critique { white-space: pre-wrap; line-height: 1.8; padding: 0 10px 12px; }
 .skill-audit-critique small { color: var(--text-tertiary); }
 .skill-audit-toggle:focus-visible, .skill-audit-turn > summary:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }
+.chat-skill-evidence { margin:0 0 20px 0; max-width:760px; border:1px solid var(--border); border-radius:9px; padding:12px 15px; background:var(--surface); }
+.chat-skill-heading { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:11px; }.chat-skill-heading strong { font-weight:550; }.chat-skill-heading>span { color:var(--text-tertiary);font-size:10px; }.chat-skill-heading>button { margin-left:auto;font-size:11px; }
+.chat-skill-row { margin-top:10px; border-top:1px solid var(--border); padding-top:10px; }.chat-skill-row summary { display:flex; justify-content:space-between; gap:12px; cursor:pointer; font-size:11px; color:var(--text-secondary); line-height:1.7; }.chat-skill-row ul { font-size:11px; color:var(--text-secondary); line-height:1.9; overflow-wrap:anywhere; padding-left:18px; }.skill-state { font-size:10px; white-space:nowrap; }.skill-state.success { color:#517253; }.skill-state.error { color:#b45342; }.skill-state.pending { color:#9a7538; }.skill-state.loaded,.skill-state.unknown { color:var(--text-tertiary); }

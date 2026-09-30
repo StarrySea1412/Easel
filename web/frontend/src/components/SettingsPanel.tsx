@@ -1,4 +1,5 @@
 import '../styles/settings.css';
+import StorageSettingsCard from './settings/StorageSettingsCard';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import Select from './ui/Select';
@@ -627,7 +628,7 @@ export default function SettingsPanel({ initialSection = 'model' }: { initialSec
               <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
             </button>
             <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />更多
+              <IconEllipsis size={16} />保存位置
             </button>
           </nav>
 
@@ -1002,19 +1003,7 @@ export default function SettingsPanel({ initialSection = 'model' }: { initialSec
               </section>
             )}
 
-            {sec === 'more' && (
-              <section className="st-sec active">
-                <div className="panel-top">
-                  <span className="pill off"><span className="dot" />可扩展位</span>
-                  <span className="desc">同一个面板，以后放更多设置</span>
-                </div>
-                <div className="board">
-                  <div className="stub-row"><span className="tag2">预留</span>网关参数（端口 / 绑定 / 会话）<span className="future">就挂在这页旁边</span></div>
-                  <div className="stub-row"><span className="tag2">预留</span>通用设置（语言 / 更新 / 数据目录）<span className="future">按需加</span></div>
-                </div>
-                <div className="foot-note">扩展方式：在这个面板里加标签即可——模型、环境已各就位，其余按需加。</div>
-              </section>
-            )}
+            {sec === 'more' && <section className="st-sec active"><StorageSettingsCard /></section>}
           </div>
         </div>
 

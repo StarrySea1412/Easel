@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { startImagegen, fetchImagegenJob, fetchImagegenGallery } from '../lib/api';
-import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel } from '../lib/api';
+import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference } from '../lib/api';
+import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel, ImagegenReference } from '../lib/api';
+import { restoreReference, validateReferenceFile, validateMaskFile } from '../lib/imageReferences';
 import { useImageReverse } from './useImageReverse';
 
 export const IMAGE_SIZES: { id: string; label: string; ratio: string; use: string }[] = [
@@ -23,11 +24,11 @@ function imageSize(value: unknown): string {
   return IMAGE_SIZES.find((item) => item.id === value)?.id || IMAGE_SIZES[0].id;
 }
 
-function restoreImageDraft(): { prompt: string; size: string } {
+function restoreImageDraft(): { prompt: string; size: string; mode: 'generate'|'img2img'|'reverse'; reference:ImagegenReference|null; mask:ImagegenReference|null } {
   try {
     const draft = JSON.parse(sessionStorage.getItem(IMAGE_DRAFT_KEY) || 'null');
-    return { prompt: typeof draft?.prompt === 'string' ? draft.prompt : '', size: imageSize(draft?.size) };
-  } catch { return { prompt: '', size: IMAGE_SIZES[0].id }; }
+    return { prompt: typeof draft?.prompt === 'string' ? draft.prompt : '', size: imageSize(draft?.size), mode: draft?.mode==='img2img'?'img2img':draft?.mode==='reverse'?'reverse':'generate', reference:restoreReference(draft?.reference), mask:restoreReference(draft?.mask) };
+  } catch { return { prompt: '', size: IMAGE_SIZES[0].id, mode:'generate',reference:null,mask:null }; }
 }
 
 function restoreImageJob(): ImageStudioJob | null {
@@ -42,7 +43,11 @@ function restoreImageJob(): ImageStudioJob | null {
 
 export function useImageStudio(active: boolean) {
   const reverse = useImageReverse(active);
-  const [mode, setMode] = useState<'generate' | 'reverse'>('generate');
+  const [mode, setMode] = useState<'generate' | 'img2img' | 'reverse'>(()=>restoreImageDraft().mode);
+  const [reference, setReference] = useState<ImagegenReference|null>(()=>restoreImageDraft().reference);
+  const [mask, setMask] = useState<ImagegenReference|null>(()=>restoreImageDraft().mask);
+  const [referenceBusy,setReferenceBusy] = useState(false);
+  const referencePending = useRef(false);
   const mounted = useRef(false);
   const activePage = useRef(active);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -77,9 +82,9 @@ export function useImageStudio(active: boolean) {
   }, [active, refreshGallery]);
   // 控制器驻留 App；草稿与任务保留到当前标签页，切页和刷新均可恢复。
   useEffect(() => {
-    try { sessionStorage.setItem(IMAGE_DRAFT_KEY, JSON.stringify({ prompt: imgPrompt, size: imgSize })); }
+    try { sessionStorage.setItem(IMAGE_DRAFT_KEY, JSON.stringify({ prompt: imgPrompt, size: imgSize, mode, reference, mask })); }
     catch { /* 隐私模式下仍保留当前 App 内的草稿。 */ }
-  }, [imgPrompt, imgSize]);
+  }, [imgPrompt, imgSize, mode, reference, mask]);
   useEffect(() => {
     try {
       if (imgJob) sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(imgJob));
@@ -129,12 +134,15 @@ export function useImageStudio(active: boolean) {
   const fireImagegen = useCallback(async () => {
     const p = imgPrompt.trim();
     if (!p || p.length > 2000 || !imgChannel?.configured || imgJob?.state === 'running' || imgSubmitPending.current) return;
+    if(referencePending.current)return;
+    if(mode==='img2img'&&!reference){setImgErr('请先上传参考图。');return;}
     imgSubmitPending.current = true;
     setImgSubmitting(true);
     setImgErr('');
     try {
-      const { jobId } = await startImagegen(p, imgSize);
-      const job: ImageStudioJob = { jobId, state: 'running', prompt: p, size: imgSize, url: null, error: null, started: Date.now() / 1000 };
+      const options = mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const};
+      const { jobId } = await startImagegen(p, imgSize, 1, options);
+      const job: ImageStudioJob = { jobId, state: 'running', prompt: p, size: imgSize, url: null, error: null, started: Date.now() / 1000, ...options };
       try { sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(job)); } catch { /* optional */ }
       if (mounted.current) setImgJob(job);
     } catch (e) {
@@ -143,9 +151,34 @@ export function useImageStudio(active: boolean) {
       imgSubmitPending.current = false;
       if (mounted.current) setImgSubmitting(false);
     }
-  }, [imgPrompt, imgSize, imgJob, imgChannel]);
+  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask]);
 
-  return { imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
+  const uploadReference = useCallback(async (file:File, isMask=false) => {
+    if(referencePending.current || imgSubmitPending.current || imgJob?.state==='running')return;
+    referencePending.current=true;setReferenceBusy(true);setImgErr('');
+    try {
+      validateReferenceFile(file,isMask);
+      if(isMask){if(!reference)throw new Error('请先上传参考图，再上传同尺寸蒙版。');await validateMaskFile(file,reference);}
+      const uploaded=await uploadImagegenReference(file);
+      if(!mounted.current)return;
+      if(isMask)setMask(uploaded);else{setReference(uploaded);setMask(null);}
+    } catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'图片上传失败。');}
+    finally{referencePending.current=false;if(mounted.current)setReferenceBusy(false);}
+  },[imgJob,reference]);
+  const useGalleryReference = useCallback(async (item:ImagegenGalleryItem) => {
+    if(referencePending.current || imgSubmitPending.current || imgJob?.state==='running')return;
+    setMode('img2img');setImgErr('');referencePending.current=true;setReferenceBusy(true);
+    try {
+      const url=new URL(item.url,window.location.href);
+      if(url.origin!==window.location.origin)throw new Error('仅支持使用本地图库图片作为参考。');
+      const response=await fetch(url.href);if(!response.ok)throw new Error('历史图片读取失败，请重新上传。');
+      const blob=await response.blob();const file=new File([blob],item.name,{type:blob.type});validateReferenceFile(file);const uploaded=await uploadImagegenReference(file);if(mounted.current){setReference(uploaded);setMask(null);}
+    }catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'读取参考图失败。');}
+    finally{referencePending.current=false;if(mounted.current)setReferenceBusy(false);}
+  },[imgJob]);
+  const clearReference = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running'){setReference(null);setMask(null);}};
+  const clearMask = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running')setMask(null);};
+  return { reference,mask,referenceBusy,uploadReference,useGalleryReference,clearReference,clearMask,imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
     imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode };
 }
 

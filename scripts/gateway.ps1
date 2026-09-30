@@ -3,6 +3,10 @@ $Profile = 'easel'
 $Root = Split-Path -Parent $PSScriptRoot
 $env:EASEL_ROOT = $Root
 if (-not $env:EASEL_DATA_DIR) { $env:EASEL_DATA_DIR = $Root }
+$StreamLogDir = Join-Path $env:EASEL_DATA_DIR 'logs'
+New-Item -ItemType Directory -Path $StreamLogDir -Force | Out-Null
+$env:OPENCLAW_RAW_STREAM = '1'
+$env:OPENCLAW_RAW_STREAM_PATH = Join-Path $StreamLogDir 'raw-stream.jsonl'
 $VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
 if (-not $env:EASEL_PYTHON -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     $env:EASEL_PYTHON = $VenvPython
@@ -84,7 +88,7 @@ switch ($args[0]) {
         Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $command `
             -WorkingDirectory $Root -RedirectStandardOutput $LogFile -RedirectStandardError $ErrorLogFile -WindowStyle Hidden | Out-Null
         $ready = $false
-        $deadline = [DateTime]::UtcNow.AddSeconds(120)
+        $deadline = [DateTime]::UtcNow.AddSeconds(300)
         while (-not $ready -and [DateTime]::UtcNow -lt $deadline) {
             if (Test-Gateway) { $ready = $true }
             else { Start-Sleep -Seconds 1 }

@@ -44,7 +44,7 @@ def begin(outputs: Path, sessions_dir: Path, session_id: str, turn_id: str,
                 sources[str(path)] = None
     record = {'sessionId': session_id, 'turnId': turn_id, 'started': started,
               'status': 'running', 'invocation': [], 'quality': {},
-              '_request': request, '_specs': specs, '_response': ''}
+              '_request': request, '_specs': specs, '_response': '', '_sources': sources}
     save(outputs / '_skill_audits', record)
     return {'record': record, 'before': snapshot(outputs), 'sources': sources}
 
@@ -67,8 +67,8 @@ def _recent(event: dict, started: float) -> bool:
         return False
 
 
-def finish(outputs: Path, sessions_dir: Path, context: dict, response: str, status: str) -> dict:
-    """Persist evidence from this session's appended transcript bytes only."""
+def _turn_events(sessions_dir: Path, context: dict) -> list[dict]:
+    """Read only the owning session's bytes appended after its turn boundary."""
     from usage_stats import _sources
     record = dict(context['record'])
     events = []
@@ -97,6 +97,13 @@ def finish(outputs: Path, sessions_dir: Path, context: dict, response: str, stat
         else:
             # A new transcript can contain copied history after compaction.
             events.extend(e for e in read_new([path], {}) if _recent(e, record['started']))
+    return events
+
+
+def finish(outputs: Path, sessions_dir: Path, context: dict, response: str, status: str) -> dict:
+    """Persist evidence from this session's appended transcript bytes only."""
+    record = dict(context['record'])
+    events = _turn_events(sessions_dir, context)
     invocation, references = invocation_evidence(events, record['_specs'])
     record.update(status=status, invocation=invocation, _response=response,
                   quality=assess(outputs, context['before'], response, references,
@@ -119,13 +126,30 @@ def save(directory: Path, record: dict) -> None:
     temp.replace(path)
 
 
-def records(directory: Path, session: str) -> list[dict]:
+def records(directory: Path, session: str, sessions_dir: Path | None = None,
+            active_turn_id: str | None = None, turn_id: str | None = None) -> list[dict]:
     parent = audit_path(directory, session, 'index').parent
     result = []
-    for path in parent.glob('*.json'):
+    paths = [audit_path(directory, session, turn_id)] if turn_id is not None else parent.glob('*.json')
+    for path in paths:
         try:
+            if path.is_symlink() or not path.resolve().is_relative_to(directory.resolve()):
+                continue
             item = json.loads(path.read_text(encoding='utf-8'))
-            if item.get('sessionId') == session:
+            if item.get('sessionId') == session and (turn_id is None or item.get('turnId') == turn_id):
+                if item.get('status') == 'running':
+                    item['live'] = False
+                    if sessions_dir is not None and isinstance(item.get('_sources'), dict) and (
+                            active_turn_id is None or item.get('turnId') == active_turn_id):
+                        events = _turn_events(sessions_dir, {'record': item, 'sources': item['_sources']})
+                        invocation, _ = invocation_evidence(events, item.get('_specs', {}))
+                        for evidence in invocation:
+                            # Live failure is a returned tool result, never a
+                            # guess from activity prose or missing final output.
+                            if evidence['status'] == 'attempted' and any(
+                                    e['kind'] == 'executed' and e['success'] is False for e in evidence['evidence']):
+                                evidence['status'] = 'failed'
+                        item.update(invocation=invocation, live=True, lastObservedAt=time.time())
                 # Raw response/spec snapshots stay on the server for grounded review.
                 result.append({k: v for k, v in item.items() if not k.startswith('_')})
         except (OSError, ValueError, AttributeError):

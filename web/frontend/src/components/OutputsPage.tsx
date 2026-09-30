@@ -91,10 +91,11 @@ function imageDimensions(node: OutputNode): string {
 
 interface OutputsPageProps {
   initialFilter?: string;
+  onReferenceImage?: (image: {name:string;url:string;mtime:number}) => void;
   onReuseImage?: (prompt: string, size?: string) => void;
 }
 
-export default function OutputsPage({ initialFilter = 'all', onReuseImage }: OutputsPageProps) {
+export default function OutputsPage({ initialFilter = 'all', onReuseImage, onReferenceImage }: OutputsPageProps) {
   const [roots, setRoots] = useState<OutputNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState('');
@@ -380,7 +381,7 @@ export default function OutputsPage({ initialFilter = 'all', onReuseImage }: Out
             <div className="drawer-body">
               {preview()}
               {selected.kind === 'image' && <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 14, lineHeight: 1.7 }}>
-                <div>{imageDimensions(selected)}{selected.mtime ? ` · 保存于 ${new Date(selected.mtime * 1000).toLocaleString('zh-CN')}` : ''}</div>
+                {onReferenceImage&&<button className="btn btn-sm" onClick={()=>onReferenceImage({name:selected.name,url:mediaUrl(selected.path),mtime:selected.mtime||0})}>用作参考图 · 图生图</button>}<div>{imageDimensions(selected)}{selected.mtime ? ` · 保存于 ${new Date(selected.mtime * 1000).toLocaleString('zh-CN')}` : ''}</div>
                 {selected.generation?.size && <div>请求尺寸：{selected.generation.size}{selected.generation.model ? ` · 模型：${selected.generation.model}` : ''}</div>}
                 {selected.generation?.prompt ? <>
                   <div style={{ fontWeight: 600, marginTop: 12 }}>生成提示词</div>

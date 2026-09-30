@@ -45,6 +45,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
+from easel.reasoning_stream import ReasoningStream, provider_reasoning, visible_text
 try:
     sys.path.insert(0, str(PROJECT_ROOT / "mcp" / "easel-notify"))
     from notify_hook import notify_completion as _notify_email_completion, \
@@ -118,7 +119,8 @@ THINKING_LEVEL = (os.environ.get("EASEL_THINKING_LEVEL", "").strip() or "medium"
 # 关键：`openclaw agent` 只是瘦客户端，没有 --raw-stream 标志——只有常驻 gateway 按它自己
 # 的 OPENCLAW_RAW_STREAM/OPENCLAW_RAW_STREAM_PATH 写这个文件（见 scripts/gateway.sh）。
 # web 侧 tail 它做流式；默认值必须与 gateway.sh 里 EASEL_RAW_STREAM_PATH 的默认一致。
-SHARED_RAW_STREAM = Path(os.environ.get("EASEL_RAW_STREAM_PATH", "/tmp/easel-raw-stream.jsonl"))
+SHARED_RAW_STREAM = Path(os.environ.get("EASEL_RAW_STREAM_PATH") or
+                         (str(DATA_DIR / "logs" / "raw-stream.jsonl") if os.name == "nt" else "/tmp/easel-raw-stream.jsonl"))
 
 
 class _GatewayHttpProc:
@@ -229,6 +231,9 @@ LOGIN_PROCESSES: dict[str, subprocess.Popen] = {}
 WHOAMI_TTL = 600  # 秒
 _WHOAMI_CACHE: dict[str, tuple[float, dict, str | None]] = {}
 _WHOAMI_LOCK = threading.Lock()
+_ACCOUNT_GENERATIONS: dict[str, str] = {}
+_ACCOUNT_CLEARING: set[str] = set()
+_WHOAMI_PROCESSES: dict[str, list[subprocess.Popen]] = {}
 
 LOGIN_RUNNERS: dict[str, dict] = {
     "xiaohongshu": {"name": "小红书", "backend": "xhs", "profile": "XiaohongshuProfile"},
@@ -303,24 +308,28 @@ def _wechat_save_credentials(app_id: str, app_secret: str, name: str = "", autho
 def _wechat_clear_credentials() -> None:
     """删除 accounts.web 及其 token 缓存。"""
     import yaml
-    cfg = _wechat_load_yaml()
+    try:
+        cfg = yaml.safe_load(WECHAT_CONFIG_YAML.read_text(encoding='utf-8')) if WECHAT_CONFIG_YAML.is_file() else {}
+    except yaml.YAMLError as exc:
+        raise OSError('公众号凭据配置无法解析，未执行清理') from exc
+    if cfg is None:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        raise OSError('公众号凭据配置格式无效，未执行清理')
+    owned_default = cfg.get('default') == WECHAT_WEB_ACCOUNT
     accts = cfg.get("accounts")
     if isinstance(accts, dict) and WECHAT_WEB_ACCOUNT in accts:
         accts.pop(WECHAT_WEB_ACCOUNT, None)
         if cfg.get("default") == WECHAT_WEB_ACCOUNT:
             cfg["default"] = next(iter(accts), "") if accts else ""
-        try:
-            tmp = WECHAT_CONFIG_YAML.with_suffix(".yaml.tmp")
-            tmp.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
-            os.replace(tmp, WECHAT_CONFIG_YAML)
-        except Exception:
-            pass
-    for cache in (WECHAT_SKILL_SCRIPTS / f".token_cache_{WECHAT_WEB_ACCOUNT}.json",
-                  WECHAT_SKILL_SCRIPTS / ".token_cache.json"):
-        try:
-            cache.unlink()
-        except OSError:
-            pass
+        tmp = WECHAT_CONFIG_YAML.with_suffix(".yaml.tmp")
+        tmp.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        os.replace(tmp, WECHAT_CONFIG_YAML)
+    caches = [WECHAT_SKILL_SCRIPTS / f".token_cache_{WECHAT_WEB_ACCOUNT}.json"]
+    if owned_default:
+        caches.append(WECHAT_SKILL_SCRIPTS / '.token_cache.json')
+    for cache in caches:
+        cache.unlink(missing_ok=True)
 
 
 def _wechat_verify_token() -> tuple[bool, str]:
@@ -457,6 +466,8 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
+    from easel.storage_location import apply_pending
+    await asyncio.to_thread(apply_pending, DATA_DIR)
     yield
     _stop_mp_login_on_shutdown()
 
@@ -2802,14 +2813,15 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     return events
 
 
-def _raw_event_for_run(line: str, expected_run_id: str | None) -> dict | None:
+def _raw_event_for_run(line: str, expected_run_id: str | None,
+                       expected_session_id: str | None = None) -> dict | None:
     """Parse one OpenClaw raw event and reject events from other runs.
 
-    The gateway multiplexes every run into one shared raw-stream file, and its
-    events carry `runId` (not `sessionId`). A turn latches onto its own runId —
-    the first event seen after the turn starts — and must ignore any event with
-    a different runId. `expected_run_id=None` means not-yet-latched → accept, so
-    the caller can latch from `event['runId']`.
+    Modern OpenClaw events carry both runId and runtime sessionId. The live
+    supervisor always supplies its sessionId; an unbound turn accepts only that
+    exact session, then pins the run. A trusted HTTP completion id can also pin
+    the run before raw events arrive. The two-argument form remains for legacy
+    parser callers; it must not be used to bind a live shared stream.
     """
     line = line.strip()
     if not line:
@@ -2820,9 +2832,17 @@ def _raw_event_for_run(line: str, expected_run_id: str | None) -> dict | None:
         return None
     if not isinstance(event, dict):
         return None
+    if expected_session_id is not None:
+        session_id = event.get('sessionId')
+        if session_id is not None and session_id != expected_session_id:
+            return None
+        # Before a trusted HTTP run id is known, only the exact runtime session
+        # can establish ownership. Never latch the first unrelated shared event.
+        if expected_run_id is None and session_id != expected_session_id:
+            return None
     if expected_run_id is not None:
         rid = event.get("runId")
-        if rid is not None and rid != expected_run_id:
+        if rid != expected_run_id:
             return None
     return event
 
@@ -2851,6 +2871,7 @@ _BG_TASKS: set = set()
 
 # 正在跑的对话 openclaw 进程（sk→proc），供用户**显式「停止」**终止；断线**不**经此路径（断线不杀）。
 _RUNNING_CHAT: dict = {}
+_ACTIVE_SKILL_TURNS: dict[str, str] = {}
 # 被用户显式停止的会话 key：supervisor 据此把本轮当作正常「已停止」收尾（不报「被中断」、释放会话锁）。
 _STOPPED_CHAT: set = set()
 
@@ -2938,6 +2959,8 @@ async def api_chat_stream(req: ChatRequest):
         turn_id = req.turnId or uuid.uuid4().hex
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
+        full_thinking: list[str] = []
+        reasoning_stream = ReasoningStream()
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
@@ -3008,21 +3031,28 @@ async def api_chat_stream(req: ChatRequest):
                                 d = json.loads(payload)
                             except ValueError:
                                 continue
+                            if not isinstance(d, dict):
+                                continue
                             if isinstance(d.get("error"), dict):   # 200 里夹错误对象：不能当正常流吞掉
                                 to_client("error", f"❌ 网关返回错误：{str(d['error'])[:160]}")
                                 return
-                            delta = (d.get("choices") or [{}])[0].get("delta") or {}
-                            # 思考流的两个可能来源，先到先得（`sse_thinking` 闩锁，防两路都来时重复）：
-                            # ① 这里的 reasoning 增量 —— openclaw 2026.6.11 的 chat/completions
-                            #    实现里 reasoning/thinking 出现 0 次，**不会**给；留着是给别的网关/
-                            #    以后的版本用。② 常驻 gateway 写的共享 raw 流（见下面 _tail），
-                            #    它按自己的 env 写，跟这一轮是谁触发的无关，所以 HTTP 模式照样能读到。
-                            rc = delta.get("reasoning_content") or delta.get("reasoning")
-                            if rc:
-                                run_info["sse_thinking"] = True
-                                run_info["thinking_chars"] += len(rc)
-                                _emit("thinking", rc)
-                            c = delta.get("content")
+                            # OpenClaw 2026.9.x emits the actual runId as the
+                            # chat completion id, allowing exact raw correlation.
+                            response_id = d.get('id')
+                            if isinstance(response_id, str) and response_id.startswith('chatcmpl_'):
+                                run_info['run_id'] = response_id
+                            for reasoning, snapshot, block, event_id in provider_reasoning(d):
+                                rc = reasoning_stream.push('http', reasoning, snapshot=snapshot, block=block, event_id=event_id)
+                                if rc:
+                                    run_info['thinking_chars'] += len(rc)
+                                    _emit('thinking', rc)
+                            choices = d.get('choices')
+                            delta = choices[0].get('delta') if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+                            if not isinstance(delta, dict):
+                                delta = {}
+                            # 正文来自当前 HTTP 响应。公开 reasoning/summary 字段
+                            # 已在上方独立映射，单轮只选一个来源以防 raw/HTTP 重叠。
+                            c = visible_text(delta.get("content"))
                             if c:
                                 got_text = True
                                 _emit("token", c)
@@ -3093,9 +3123,16 @@ async def api_chat_stream(req: ChatRequest):
             try:
                 audit_context = await asyncio.to_thread(skill_audit.begin, OUTPUTS_DIR, OPENCLAW_SESSIONS_DIR,
                                                          sk, turn_id, specs, req.message)
+                _ACTIVE_SKILL_TURNS[sk] = turn_id
             except Exception:
                 to_client('activity', '执行核验暂不可用；创作任务继续运行。')
             is_http = (await asyncio.to_thread(_resolve_transport, sk)) == "http"
+            # A queued turn must begin after the preceding turn's raw output.
+            # The earlier pre-lock offset may belong to an entirely older run.
+            try:
+                raw_start_offset = SHARED_RAW_STREAM.stat().st_size
+            except OSError:
+                raw_start_offset = 0
             if is_http:
                 # HTTP 直连常驻网关：无进程冷启动（agent 在 gateway 进程里跑）
                 proc = _GatewayHttpProc()
@@ -3217,7 +3254,7 @@ async def api_chat_stream(req: ChatRequest):
                 loop.run_in_executor(None, _question_poll)
 
             def _handle(line: str):
-                o = _raw_event_for_run(line, run_info["run_id"])
+                o = _raw_event_for_run(line, run_info["run_id"], _openclaw_session_id(sk))
                 if o is None:
                     # 属其它并发 run 的事件（或无法解析）：绝不混入本轮可见流/收尾诊断，仅计数。
                     try:
@@ -3228,19 +3265,29 @@ async def api_chat_stream(req: ChatRequest):
                     except Exception:
                         pass
                     return
-                # 首个带 runId 的事件闩锁本轮 run（之后 _raw_event_for_run 只放行这个 run）。
+                # 仅当前 runtime session 的事件能建立本轮 run 归属。
                 if run_info["run_id"] is None:
                     rid = o.get("runId")
                     if rid is None:
                         return          # 还没拿到 runId，等下一条带 runId 的事件再闩锁
                     run_info["run_id"] = rid
-                ev, et, delta = o.get("event"), o.get("evtType"), o.get("delta") or ""
+                ev, et, delta = o.get("event"), o.get("evtType"), visible_text(o.get("delta"))
                 # 记录最后一个 raw 事件：正常收尾 last_ev == assistant_message_end；
                 # 若停在 text_delta/thinking_delta 说明输出或思考流被中断、没正常收尾（本次排查关键信号）。
                 if ev:
                     run_info["last_ev"] = ev
                 if ev == "assistant_message_end":
                     run_info["saw_message_end"] = True
+                if ev == 'assistant_thinking_stream':
+                    if et == 'thinking_start':
+                        reasoning_stream.reset('raw')
+                    chunk = reasoning_stream.push('raw', delta) if delta else ''
+                    if et == 'thinking_end':
+                        chunk += reasoning_stream.push('raw', visible_text(o.get('content')), snapshot=True)
+                    if chunk:
+                        run_info['thinking_chars'] += len(chunk)
+                        _emit('thinking', chunk)
+                    return
                 if not delta:
                     return
                 if ev == "assistant_text_stream" and et == "text_delta":
@@ -3251,12 +3298,6 @@ async def api_chat_stream(req: ChatRequest):
                     run_info["token_chars"] += len(delta)
                     run_info["text_tail"] = (run_info.get("text_tail", "") + delta)[-160:]
                     _emit("token", delta)
-                    return
-                if ev == "assistant_thinking_stream" and et == "thinking_delta":
-                    if run_info.get("sse_thinking"):
-                        return      # SSE 已经在供思考流了，别叠第二份
-                    run_info["thinking_chars"] += len(delta)
-                    _emit("thinking", delta)
                     return
 
             def _tail():
@@ -3308,12 +3349,13 @@ async def api_chat_stream(req: ChatRequest):
             emitted = False
             # 两条路径都靠「队列里读到 SENTINEL」收尾。HTTP 模式若改用带外标志（一开始就置 True），
             # 最后一批还排在 q 里没被消费的 token 会随 poll() 转为已完成而被直接丢掉——答案尾巴被截。
-            tail_finished = False
+            finished_producers = 0
+            expected_producers = 2 if is_http else 1
             try:
                 while True:
                     # A raw-stream reader failure must not be mistaken for model
                     # completion. Keep the session lock until the process exits.
-                    if tail_finished and proc.poll() is not None:
+                    if finished_producers >= expected_producers and proc.poll() is not None and q.empty():
                         break
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -3325,15 +3367,14 @@ async def api_chat_stream(req: ChatRequest):
                     except asyncio.TimeoutError:
                         continue
                     if item is SENTINEL:
-                        tail_finished = True
-                        if proc.poll() is not None:
-                            break
+                        finished_producers += 1
                         continue
                     if item["t"] == "token":
                         emitted = True
                         full_text.append(item["text"])
                         to_client("token", item["text"])
                     elif item["t"] == "thinking":
+                        full_thinking.append(item['text'])
                         to_client("thinking", item["text"])
                     elif item["t"] == "activity":
                         to_client("activity", item["text"])
@@ -3433,6 +3474,9 @@ async def api_chat_stream(req: ChatRequest):
                 # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
                 _save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
+                    "thinking": ''.join(full_thinking),
+                    "thinkingStatus": 'available' if full_thinking else 'unavailable',
+                    "thinkingSource": reasoning_stream.source,
                     "clean_end": run_info.get("last_ev") == "assistant_message_end",
                     "stop_reason": "user_stopped" if user_stopped else run_info.get("stop_reason"),
                 })
@@ -3460,6 +3504,7 @@ async def api_chat_stream(req: ChatRequest):
             xlock.release()
             lock.release()
             _RUNNING_CHAT.pop(sk, None)
+            _ACTIVE_SKILL_TURNS.pop(sk, None)
             to_client("done", sessionKey=sk)
             client_q.put_nowait(CLIENT_DONE)
 
@@ -3901,9 +3946,106 @@ async def api_accounts():
         {'platform': pf, 'name': cfg['name'], 'backend': cfg['backend'],
          'supported': cfg['backend'] != 'unsupported',
          'loggedIn': _account_logged_in(pf, cfg),
-         'note': cfg.get('note', '')}
+         'note': cfg.get('note', ''), **_account_local_metadata(pf, cfg)}
         for pf, cfg in LOGIN_RUNNERS.items()
     ]
+
+
+def _account_local_metadata(platform: str, cfg: dict) -> dict:
+    markers = [LOGIN_DIR / f'{platform}.json']
+    backend = cfg['backend']
+    if backend == 'biliup':
+        paths, storage = [DATA_DIR / 'cookies.json'], 'cookie_file'
+    elif backend == 'wechat-oa':
+        paths = [BROWSER_PROFILES / 'WeixinMpProfile']
+        markers.append(LOGIN_DIR / 'wechat-oa-mp.json')
+        storage = 'browser_profile' if paths[0].exists() else 'app_credentials'
+    else:
+        paths = [BROWSER_PROFILES / cfg['profile']] if cfg.get('profile') else []
+        storage = 'browser_profile'
+    has_local = any(p.exists() for p in paths) or any(p.exists() for p in markers)
+    login_names = [platform] + (['wechat-oa-mp'] if backend == 'wechat-oa' else [])
+    has_local = has_local or any((LOGIN_DIR / (name + suffix)).exists()
+                                 for name in login_names for suffix in ('.code', '.png', '-me.png'))
+    if backend == 'wechat-oa':
+        has_local = has_local or _wechat_has_credentials()
+    timestamps = []
+    for marker in markers:
+        try:
+            value = json.loads(marker.read_text(encoding='utf-8')).get('ts')
+            if type(value) in (int, float) and 0 < value <= time.time() + 60:
+                timestamps.append(value)
+        except (OSError, ValueError, AttributeError):
+            pass
+    return {'hasLocalSession': has_local, 'lastStateAt': max(timestamps) if timestamps else None,
+            'credentialStorage': storage}
+
+
+def _account_check_generation(platform: str) -> str:
+    with _WHOAMI_LOCK:
+        generation = _ACCOUNT_GENERATIONS.get(platform, '')
+    return generation + ':' + (account_context_generation(platform) if platform == 'xiaohongshu' else '')
+
+
+def _invalidate_account_check(platform: str) -> None:
+    with _WHOAMI_LOCK:
+        _ACCOUNT_GENERATIONS[platform] = uuid.uuid4().hex
+        _WHOAMI_CACHE.pop(platform, None)
+
+
+def _require_account_available(platform: str) -> None:
+    if platform in _ACCOUNT_CLEARING:
+        raise HTTPException(409, '该账号正在退出，请完成后重试')
+
+
+def _stop_owned_login(platform: str) -> None:
+    key = 'wechat-oa-mp' if platform == 'wechat-oa' else platform
+    with _WHOAMI_LOCK:
+        processes = list(_WHOAMI_PROCESSES.get(platform, []))
+    login = LOGIN_PROCESSES.get(key)
+    if login is not None:
+        processes.append(login)
+    for process in processes:
+        if process.poll() is None:
+            from easel.install_runner import terminate_phase_tree
+            try:
+                terminate_phase_tree(process)
+                process.wait(timeout=5)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                raise HTTPException(500, '登录或账号核验进程未能停止，退出未完成；请关闭该平台窗口后重试') from exc
+    LOGIN_PROCESSES.pop(key, None)
+
+
+def _run_owned_whoami(platform: str, command: list[str], expected_generation: str):
+    """Register the browser owner before launch so logout can stop every writer."""
+    import tempfile
+    from easel.install_runner import terminate_phase_tree
+    with tempfile.TemporaryFile(mode='w+b') as output:
+        with _WHOAMI_LOCK:
+            if platform in _ACCOUNT_CLEARING or _ACCOUNT_GENERATIONS.get(platform, '') != expected_generation.partition(':')[0]:
+                raise HTTPException(409, '账号状态已变化，已取消旧核验请求')
+            process = subprocess.Popen(command, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                       stdout=output, stderr=subprocess.STDOUT,
+                                       start_new_session=os.name != 'nt',
+                                       creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            _WHOAMI_PROCESSES.setdefault(platform, []).append(process)
+        try:
+            try:
+                process.wait(timeout=150)
+            except subprocess.TimeoutExpired:
+                terminate_phase_tree(process)
+                process.wait(timeout=5)
+                raise
+            output.seek(0)
+            return subprocess.CompletedProcess(command, process.returncode,
+                                               output.read(2 * 1024 * 1024).decode('utf-8', errors='replace'), '')
+        finally:
+            with _WHOAMI_LOCK:
+                remaining = [p for p in _WHOAMI_PROCESSES.get(platform, []) if p is not process]
+                if remaining:
+                    _WHOAMI_PROCESSES[platform] = remaining
+                else:
+                    _WHOAMI_PROCESSES.pop(platform, None)
 
 
 @app.post("/api/login/{platform}")
@@ -3912,6 +4054,7 @@ async def api_login_start(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
+    _require_account_available(platform)
     backend = cfg['backend']
     if backend == 'unsupported':
         raise HTTPException(400, f"{cfg['name']} 暂不可用：{cfg.get('note', '')}")
@@ -3919,8 +4062,14 @@ async def api_login_start(platform: str):
         # 公众号不走扫码：前端应改用凭证表单提交到 /api/accounts/{platform}/credentials。
         return {'mode': 'credentials', 'configured': _wechat_has_credentials(),
                 'message': '微信公众号请填写 AppID / AppSecret'}
+    existing = LOGIN_PROCESSES.get(platform)
+    if existing is not None and existing.poll() is None:
+        return {'mode': 'qr', **_login_status(platform)}
+    _invalidate_account_check(platform)
+    login_generation = _account_check_generation(platform)
     if platform == 'xiaohongshu':
         invalidate_account_context(platform)
+        login_generation = _account_check_generation(platform)
     LOGIN_DIR.mkdir(parents=True, exist_ok=True)
     qr = LOGIN_DIR / f'{platform}.png'
     status = LOGIN_DIR / f'{platform}.json'
@@ -3956,11 +4105,15 @@ async def api_login_start(platform: str):
     log_path = LOGIN_DIR / f'{platform}.log'
     log_file = log_path.open('a', encoding='utf-8')
     proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                            stdout=log_file, stderr=subprocess.STDOUT)
+                            stdout=log_file, stderr=subprocess.STDOUT,
+                            start_new_session=os.name != 'nt',
+                            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     log_file.close()
     LOGIN_PROCESSES[platform] = proc
     for _ in range(50):
         await asyncio.sleep(0.5)
+        if _account_check_generation(platform) != login_generation:
+            raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
         s = _login_status(platform)
         if s['qr'] or s['state'] in ('qr_ready', 'success', 'error', 'expired'):
             return {'mode': 'qr', **s}
@@ -4032,10 +4185,12 @@ async def api_save_credentials(platform: str, req: WechatCredentials):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get('backend') != 'wechat-oa':
         raise HTTPException(404, '该平台不使用凭证登录')
+    _require_account_available(platform)
     app_id = (req.appId or '').strip()
     app_secret = (req.appSecret or '').strip()
     if not app_id or not app_secret:
         raise HTTPException(400, 'AppID 和 AppSecret 都不能为空')
+    _invalidate_account_check(platform)
     _wechat_save_credentials(app_id, app_secret, name=req.name.strip(), author=req.author.strip())
     ok, msg = _wechat_verify_token()
     with _WHOAMI_LOCK:
@@ -4093,10 +4248,13 @@ async def api_mp_login_start(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get("backend") != "wechat-oa":
         raise HTTPException(404, "该平台不使用公众号后台登录")
+    _require_account_available(platform)
     # 重复点击复用正在进行的登录，不能删除其二维码或启动第二个 Chromium。
     proc = LOGIN_PROCESSES.get("wechat-oa-mp")
     if proc is not None and proc.poll() is None:
         return {"mode": "qr", **_mp_login_status()}
+    _invalidate_account_check(platform)
+    login_generation = _account_check_generation(platform)
     LOGIN_DIR.mkdir(parents=True, exist_ok=True)
     for f in (LOGIN_DIR / "wechat-oa-mp.png", LOGIN_DIR / "wechat-oa-mp.json"):
         try:
@@ -4109,11 +4267,15 @@ async def api_mp_login_start(platform: str):
            "--status-file", str(LOGIN_DIR / "wechat-oa-mp.json"), "--timeout", "240"]
     log_file = (LOGIN_DIR / "wechat-oa-mp.log").open("a", encoding="utf-8")
     proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                            stdout=log_file, stderr=subprocess.STDOUT)
+                            stdout=log_file, stderr=subprocess.STDOUT,
+                            start_new_session=os.name != 'nt',
+                            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     log_file.close()
     LOGIN_PROCESSES["wechat-oa-mp"] = proc
     for _ in range(60):
         await asyncio.sleep(0.5)
+        if _account_check_generation(platform) != login_generation:
+            raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
         s = _mp_login_status()
         if s["qr"] or s["state"] in ("qr_ready", "success", "error", "expired"):
             return {"mode": "qr", **s}
@@ -4135,6 +4297,7 @@ async def api_account_whoami(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
+    _require_account_available(platform)
     backend = cfg['backend']
     if backend == 'unsupported':
         return {'loggedIn': False, 'name': '', 'avatar': ''}
@@ -4144,7 +4307,7 @@ async def api_account_whoami(platform: str):
         return {'loggedIn': _account_logged_in(platform, cfg),
                 'name': acc.get('name', '') or '微信公众号', 'avatar': ''}
     # 小红书账号数据切换后，旧缓存的昵称和登录结论不再属于当前上下文。
-    account_generation = account_context_generation(platform) if platform == 'xiaohongshu' else None
+    account_generation = _account_check_generation(platform)
     with _WHOAMI_LOCK:
         hit = _WHOAMI_CACHE.get(platform)
     if hit and hit[2] == account_generation and (time.time() - hit[0]) < WHOAMI_TTL:
@@ -4160,11 +4323,10 @@ async def api_account_whoami(platform: str):
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'web_publisher.py'), 'whoami',
                '--platform', cfg['wp']]
     try:
-        proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                                       capture_output=True, text=True, timeout=150)
+        proc = await asyncio.to_thread(_run_owned_whoami, platform, cmd, account_generation)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, '校验超时（浏览器起不来或网络慢）')
-    if account_generation is not None and account_generation != account_context_generation(platform):
+    if account_generation != _account_check_generation(platform) or platform in _ACCOUNT_CLEARING:
         raise HTTPException(409, '账号状态已变化，已丢弃旧校验结果，请重新校验')
     data = {'loggedIn': False, 'name': '', 'avatar': ''}
     confident = False   # 是否拿到「可信」校验结论（子进程正常跑出 JSON 且无 error 字段）
@@ -4185,9 +4347,9 @@ async def api_account_whoami(platform: str):
         return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': ''}
     if platform == 'xiaohongshu' and not data['loggedIn']:
         invalidate_account_context(platform, live_only=True)
+    current_generation = _account_check_generation(platform)
     with _WHOAMI_LOCK:
-        _WHOAMI_CACHE[platform] = (time.time(), data,
-                                  account_context_generation(platform) if platform == 'xiaohongshu' else None)
+        _WHOAMI_CACHE[platform] = (time.time(), data, current_generation)
     # 回写标记：确认已登录 → 快速路径（/api/accounts、/api/analytics/platforms）此后也正确；
     # biliup 走 cookies.json 判定，不用标记文件。
     if backend != 'biliup':
@@ -4203,64 +4365,58 @@ async def api_account_whoami(platform: str):
 
 @app.post("/api/logout/{platform}")
 async def api_logout(platform: str):
-    """退出登录：删持久化浏览器 profile + 登录状态/二维码/头像文件（biliup 删 cookies.json）。"""
+    """Stop the selected login writer before removing only its local credentials."""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
-    if platform == 'xiaohongshu':
-        invalidate_account_context(platform)
+    _require_account_available(platform)
+    _ACCOUNT_CLEARING.add(platform)
+    _invalidate_account_check(platform)
+    try:
+        await asyncio.to_thread(_stop_owned_login, platform)
+        if platform == 'xiaohongshu':
+            invalidate_account_context(platform)
+        return await asyncio.to_thread(_clear_account_files, platform, cfg)
+    finally:
+        _ACCOUNT_CLEARING.discard(platform)
+
+
+def _clear_account_files(platform: str, cfg: dict) -> dict:
     deleted = []
-    if cfg['backend'] == 'wechat-oa':
-        # 1) 清 AppID 凭证（旧配置兜底）
-        _wechat_clear_credentials()
-        deleted.append('wechat-publisher.yaml:accounts.web')
-        # 2) 停掉可能仍在跑的后台登录进程（避免它又写回 success 标记）
-        proc = LOGIN_PROCESSES.pop('wechat-oa-mp', None)
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-        # 3) 删 AppID 标记 + mp 后台会话标记/二维码/日志（登录态判定看的就是 wechat-oa-mp.json）
-        for name in (f'{platform}.json', f'{platform}.png',
-                     'wechat-oa-mp.json', 'wechat-oa-mp.png', 'wechat-oa-mp.log'):
-            f = LOGIN_DIR / name
-            try:
-                if f.is_file():
-                    f.unlink()
-                    deleted.append(f.name)
-            except OSError:
-                pass
-        # 4) 删 mp 后台浏览器持久化会话（真正退出登录）
-        mpdir = (BROWSER_PROFILES / 'WeixinMpProfile').resolve()
-        if BROWSER_PROFILES.resolve() in mpdir.parents and mpdir.is_dir():
-            shutil.rmtree(mpdir, ignore_errors=True)
-            deleted.append('WeixinMpProfile')
-        with _WHOAMI_LOCK:
-            _WHOAMI_CACHE.pop(platform, None)
-        return {'ok': True, 'deleted': deleted}
-    prof_name = cfg.get('profile')
-    if prof_name:
-        pdir = (BROWSER_PROFILES / prof_name).resolve()
-        if BROWSER_PROFILES.resolve() in pdir.parents and pdir.is_dir():
-            shutil.rmtree(pdir, ignore_errors=True)
-            deleted.append(prof_name)
-    if cfg['backend'] == 'biliup':
-        ck = DATA_DIR / 'cookies.json'
-        if ck.is_file():
-            ck.unlink()
-            deleted.append('cookies.json')
-    for suffix in ('.json', '.png', '-me.png', '.code'):
-        f = LOGIN_DIR / f'{platform}{suffix}'
-        try:
-            if f.is_file():
-                f.unlink()
-                deleted.append(f.name)
-        except OSError:
-            pass
-    with _WHOAMI_LOCK:
-        _WHOAMI_CACHE.pop(platform, None)
-    return {'ok': True, 'deleted': deleted}
+    try:
+        prof_name = 'WeixinMpProfile' if cfg['backend'] == 'wechat-oa' else cfg.get('profile')
+        if prof_name:
+            parent = BROWSER_PROFILES.resolve()
+            profile = BROWSER_PROFILES / prof_name
+            resolved = profile.resolve()
+            # A profile symlink/junction must not redirect this deletion into a
+            # different account or outside the explicitly configured root.
+            if resolved != parent / prof_name or resolved.parent != parent:
+                raise HTTPException(409, '账号会话目录指向其他位置，未执行删除；请检查本地目录链接')
+            if profile.exists():
+                shutil.rmtree(profile)
+                if profile.exists():
+                    raise OSError('profile still exists')
+                deleted.append(prof_name)
+        if cfg['backend'] == 'wechat-oa':
+            _wechat_clear_credentials()
+            deleted.append('wechat-publisher.yaml:accounts.web')
+        if cfg['backend'] == 'biliup':
+            cookie = DATA_DIR / 'cookies.json'
+            if cookie.is_file():
+                cookie.unlink()
+                deleted.append('cookies.json')
+        names = [f'{platform}{suffix}' for suffix in ('.json', '.png', '-me.png', '.code', '.log')]
+        if cfg['backend'] == 'wechat-oa':
+            names.extend('wechat-oa-mp' + suffix for suffix in ('.json', '.png', '.code', '.log'))
+        for name in names:
+            path = LOGIN_DIR / name
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+                deleted.append(name)
+    except OSError as exc:
+        raise HTTPException(500, '退出未完成：部分本地登录资料仍被占用或无删除权限；请关闭该平台浏览器后重试。其他平台资料未清理。') from exc
+    return {'ok': True, 'deleted': deleted, 'scope': platform}
 
 
 # 归因层：可抓创作数据的平台（多数走 Playwright 登录态；bilibili 用 biliup cookies 不起浏览器、
@@ -4620,6 +4776,9 @@ async def api_analytics(platform: str):
 from content_analysis_routes import create_router as _content_analysis_router
 
 app.include_router(_content_analysis_router(lambda: OUTPUTS_DIR / "_analytics" / "workbench", api_analytics, _image_reverse_providers))
+
+from storage_location_routes import create_router as _storage_location_router
+app.include_router(_storage_location_router(lambda: DATA_DIR))
 
 
 MEDIA_REQUIRED = {"xiaohongshu", "douyin", "kuaishou", "weixin-channels", "bilibili"}
@@ -5217,6 +5376,7 @@ IDEA_STATUSES = {"pending", "doing", "done"}
 # 配置只认 .env 的 IMG_BASE_URL / IMG_MODEL / IMG_API_KEY（生图专用通道，不借聊天的 OPENAI_*，
 # 避免把 chat 中转误当生图端点）。聚合站生成可能要几分钟 → 任务化：POST 起线程，GET 轮询。
 IMAGEGEN_DIR = OUTPUTS_DIR / "AI生图"
+IMAGEGEN_INPUT_DIR = OUTPUTS_DIR / "_image_references"
 _IMAGEGEN_JOBS: dict[str, dict] = {}
 _IMAGEGEN_TIMEOUT = 900   # 秒；聚合站实测单张可到分钟级
 _IMAGEGEN_SIZES = {
@@ -5248,7 +5408,7 @@ def _read_imagegen_metadata(path: Path) -> dict:
         if not isinstance(data, dict) or not isinstance(data.get('prompt'), str):
             return {}
         result = {'prompt': data['prompt'][:2000]}
-        for key in ('size', 'model', 'jobId'):
+        for key in ('size', 'model', 'jobId', 'mode', 'referenceId', 'maskId'):
             if isinstance(data.get(key), str):
                 result[key] = data[key][:200]
         if isinstance(data.get('created'), (int, float)):
@@ -5272,11 +5432,36 @@ class ImagegenRequest(BaseModel):
     prompt: str
     size: str = "1024x1024"
     n: int = 1
+    mode: str = "text2img"
+    referenceId: str | None = None
+    maskId: str | None = None
+
+
+@app.post("/api/imagegen/references")
+async def api_imagegen_reference(file: UploadFile = File(...)):
+    from image_inputs import MAX_BYTES, store_reference
+    try:
+        data = await file.read(MAX_BYTES + 1)
+        return await asyncio.to_thread(store_reference, IMAGEGEN_INPUT_DIR, data, file.filename or "参考图")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
+
+
+@app.get("/api/imagegen/references/{reference_id}")
+async def api_imagegen_reference_file(reference_id: str):
+    from image_inputs import reference_path
+    try:
+        path = reference_path(IMAGEGEN_INPUT_DIR, reference_id)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.post("/api/imagegen")
 async def api_imagegen_start(req: ImagegenRequest):
-    """发起一张文生图任务：立即返回 jobId，前端轮询 /api/imagegen/{id} 取进度与结果。"""
+    """发起文生图或参考图编辑任务，沿用同一任务/图库持久化链路。"""
     prompt = (req.prompt or "").strip()
     if not prompt:
         raise HTTPException(400, "prompt 不能为空")
@@ -5285,6 +5470,22 @@ async def api_imagegen_start(req: ImagegenRequest):
     size = req.size.strip().lower()
     if size not in _IMAGEGEN_SIZES:
         raise HTTPException(400, "不支持的画面尺寸，请从生图工坊的画面比例中选择")
+    if req.mode not in {"text2img", "img2img"}:
+        raise HTTPException(400, "不支持的生图模式")
+    reference = mask = None
+    if req.mode == "text2img" and (req.referenceId or req.maskId):
+        raise HTTPException(400, "使用参考图时请选择图生图模式")
+    if req.mode == "img2img":
+        from image_inputs import reference_path, validate_mask
+        try:
+            reference = reference_path(IMAGEGEN_INPUT_DIR, req.referenceId)
+            if req.maskId:
+                mask = reference_path(IMAGEGEN_INPUT_DIR, req.maskId)
+                validate_mask(reference, mask)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if mask and "apimart" in _read_env().get("IMG_BASE_URL", "").lower():
+            raise HTTPException(400, "当前异步生图通道不支持蒙版局部编辑；请移除蒙版或切换支持 Images edits 的服务")
     ok, hint = _imagegen_channel_ready()
     if not ok:
         raise HTTPException(400, hint)
@@ -5296,16 +5497,22 @@ async def api_imagegen_start(req: ImagegenRequest):
     _IMAGEGEN_JOBS[job_id] = {
         "jobId": job_id, "state": "running", "prompt": prompt[:120], "size": size,
         "started": time.time(), "url": None, "error": None,
+        "mode": req.mode, "referenceId": req.referenceId, "maskId": req.maskId,
     }
     IMAGEGEN_DIR.mkdir(parents=True, exist_ok=True)
     out = IMAGEGEN_DIR / f"{time.strftime('%m%d-%H%M%S')}-{job_id[:4]}.png"
     generation = {'prompt': prompt, 'size': size, 'model': _read_env().get('IMG_MODEL', '').strip(),
-                  'created': _IMAGEGEN_JOBS[job_id]['started'], 'jobId': job_id}
+                  'created': _IMAGEGEN_JOBS[job_id]['started'], 'jobId': job_id,
+                  'mode': req.mode, 'referenceId': req.referenceId, 'maskId': req.maskId}
 
     def _run() -> None:
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "ai_image.py"), "text2img",
+        cmd = [sys.executable, str(SHARED_SCRIPTS / "ai_image.py"), req.mode,
                "--prompt", prompt, "--output", str(out),
                "--size", size, "--n", str(max(1, min(4, req.n)))]
+        if reference:
+            cmd += ["--image", str(reference)]
+        if mask:
+            cmd += ["--mask", str(mask)]
         try:
             proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=child_env(PROJECT_ROOT),
                                   capture_output=True, text=True, timeout=_IMAGEGEN_TIMEOUT)
@@ -5461,10 +5668,11 @@ async def api_ideas_delete(iid: str):
 
 
 @app.get('/api/skill-audits')
-async def api_skill_audits(sessionId: str):
+async def api_skill_audits(sessionId: str, turnId: str | None = None):
     import skill_audit
     try:
-        return {'records': await asyncio.to_thread(skill_audit.records, OUTPUTS_DIR / '_skill_audits', sessionId)}
+        return {'records': await asyncio.to_thread(skill_audit.records, OUTPUTS_DIR / '_skill_audits', sessionId,
+                                                   OPENCLAW_SESSIONS_DIR, _ACTIVE_SKILL_TURNS.get(sessionId, ''), turnId)}
     except OSError:
         raise HTTPException(503, '技能核验记录暂不可读，请稍后重试') from None
 

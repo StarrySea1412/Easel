@@ -1418,3 +1418,17 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+/* Model-returned reasoning has its own disclosure, separate from tool progress. */
+.model-thinking { margin:10px 0 15px; border:1px solid var(--border); border-radius:9px; background:var(--surface); overflow:hidden; }
+.model-thinking-toggle { display:flex; align-items:center; gap:9px; width:100%; border:0; padding:11px 13px; background:transparent; color:var(--text-secondary); cursor:pointer; text-align:left; font:inherit; font-size:12px; }
+.model-thinking-toggle:hover { background:var(--surface-2); }
+.model-thinking-toggle:focus-visible { outline:2px solid var(--accent-start); outline-offset:-3px; border-radius:8px; }
+.model-thinking-chevron { font-size:20px; line-height:1; transition:transform .15s; }
+.model-thinking-chevron.is-open { transform:rotate(90deg); }
+.model-thinking-state { font-size:10px; color:var(--text-tertiary); }
+.model-thinking-count { margin-left:auto; color:var(--text-tertiary); font-size:10px; }
+.model-thinking-body { padding:0 15px 15px; }
+.model-thinking-note { font-size:10px!important; color:var(--text-tertiary); margin:0 0 9px!important; }
+.model-thinking-text { font-size:12px; color:var(--text-secondary); white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; max-height:360px; overflow-y:auto; }
+.model-thinking-wait { color:var(--text-secondary); font-size:12px; }
+@media(prefers-reduced-motion:reduce) { .model-thinking-chevron { transition:none; } }

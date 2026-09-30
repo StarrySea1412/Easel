@@ -295,8 +295,8 @@ def _ps_literal(value: str | Path) -> str:
 def link_data_dirs(root: Path, dd: Path) -> None:
     """Junctions support legacy skills that resolve data relative to their source."""
     for name in ("profiles", "outputs", "assets"):
-        link, target = root / name, (dd / name).resolve()
-        if link.resolve() == target:
+        link, target = root / name, (dd / name).absolute()
+        if link.resolve() == target.resolve():
             continue
         if is_link(link):
             raise RuntimeError(f"数据链接指向意外目录：{link}")
@@ -328,18 +328,47 @@ def run_setup(project_root: Path, dd: Path, allow_winget: bool,
            "-File", str(project_root / "setup.ps1"), "-NonInteractive", "-DataDir", str(dd)]
     if allow_winget:
         cmd.append("-AllowWinget")
-    if _LOG_HOOK is None:
-        return subprocess.run(cmd, cwd=str(project_root), env=env).returncode
-    # A windowed PyInstaller process has no console. Stream the phase output
-    # into the GUI queue while the worker thread owns the child process.
+    # Both GUI and --yes are windowed EXE paths: always drain the child output.
+    # Inheriting invalid console handles can stall print() after a verbose phase.
     proc = subprocess.Popen(cmd, cwd=str(project_root), env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            text=True, encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert proc.stdout is not None
     for line in proc.stdout:
         if line.strip():
             log(redact_install_output(line.rstrip(), dd))
     return proc.wait()
+
+
+def write_gui_launcher(root: Path, dd: Path) -> Path:
+    """Publish a Unicode Windows Script Host entry; pythonw keeps consoles hidden."""
+    pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
+    script = root / "scripts" / "desktop_launcher.py"
+    command = subprocess.list2cmdline([str(pythonw), str(script), "--root", str(root), "--data-dir", str(dd)])
+
+    def vb_string(value: str | Path) -> str:
+        return '"' + str(value).replace('"', '""') + '"'
+
+    content = (
+        'Option Explicit\r\nDim shell, files, result\r\n'
+        'Set shell = CreateObject("WScript.Shell")\r\n'
+        'Set files = CreateObject("Scripting.FileSystemObject")\r\n'
+        f'If Not files.FileExists({vb_string(pythonw)}) Or Not files.FileExists({vb_string(script)}) Then\r\n'
+        '  MsgBox "启动文件缺失，请重新运行 Easel 安装器修复。", 16, "Easel"\r\n'
+        '  WScript.Quit 1\r\nEnd If\r\n'
+        f'shell.CurrentDirectory = {vb_string(root)}\r\n'
+        'On Error Resume Next\r\n'
+        f'result = shell.Run({vb_string(command)}, 0, False)\r\n'
+        'If Err.Number <> 0 Then\r\n'
+        '  MsgBox "无法启动 Easel，请重新运行安装器修复。", 16, "Easel"\r\n'
+        '  WScript.Quit 1\r\nEnd If\r\n')
+    destination = USER_DIR / "打开 Easel.vbs"
+    temporary = destination.with_suffix(".vbs.tmp")
+    # WSH understands UTF-16 BOM; ANSI would corrupt Chinese install paths.
+    temporary.write_text(content, encoding="utf-16")
+    temporary.replace(destination)
+    return destination
 
 
 def activate(root: Path, dd: Path) -> Path:
@@ -381,6 +410,7 @@ def activate(root: Path, dd: Path) -> Path:
     (USER_DIR / "Start-Easel.cmd").write_text(
         '@echo off\r\nsetlocal\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Easel.ps1" %*\r\n'
         'set "EASEL_EXIT=%ERRORLEVEL%"\r\nif not "%EASEL_EXIT%"=="0" pause\r\nexit /b %EASEL_EXIT%\r\n', encoding="ascii")
+    write_gui_launcher(root, dd)
     return launcher
 
 
@@ -518,7 +548,7 @@ def _install(version: str, allow_winget: bool, zip_url: str = "", sha256: str = 
         _report_setup_failure(dd)
         return rc
     launcher = activate(root, dd)
-    log(f'安装完成。启动：powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher}" web')
+    log(f"安装完成。日常使用请双击：{USER_DIR / '打开 Easel.vbs'}")
     log("首次打开工作台后可在设置页配置模型。")
     return 0
 
@@ -681,7 +711,8 @@ def launch_gui(version: str, release: dict, archive: Path | None,
                 result = subprocess.run([str(python), str(root / 'scripts/start_workspace.py'),
                     '--root', str(root), '--data-dir', str(data_root()), '--no-browser'],
                     cwd=root, capture_output=True, text=True, encoding='utf-8', errors='replace',
-                    timeout=210, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                    env=dict(os.environ, PYTHONUTF8='1'),
+                    timeout=480, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 if result.returncode:
                     events.put(('opened', result.stderr.strip() or '启动失败，请查看 data/logs/launch.log'))
                     return
@@ -744,7 +775,7 @@ def launch_gui(version: str, release: dict, archive: Path | None,
                     progress_value.set(len(PHASE_TITLES))
                     phase_value.set("安装完成。点击“打开工作台”启动本地服务。")
                     start_button.configure(text="打开工作台", command=open_workspace, state="normal")
-                    append_line(f"启动脚本：{USER_DIR / 'Easel.ps1'}")
+                    append_line(f"日常启动入口：{USER_DIR / '打开 Easel.vbs'}")
                 else:
                     phase_value.set("安装未完成。问题处理后点击“重试安装”，会从失败阶段继续。")
                     start_button.configure(text="重试安装", state="normal")

@@ -100,6 +100,16 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       {section === 'method' && <section className="ca-method" aria-labelledby="ca-method-title">
         <div className="ca-section-intro"><p className="ca-kicker">02 / DATA NOTES</p><h2 id="ca-method-title">看懂数据，也看懂它的边界</h2><p>数值、来源和观察时间一起，才构成可靠的复盘依据。</p></div>
         <dl className="ca-source-list"><div><dt>所选平台</dt><dd><PlatformIcon platform={platform} name={selected.name} />{selected.name}</dd></div><div><dt>读取来源</dt><dd>{selected.source}</dd></div><div><dt>当前能力</dt><dd>{selected.scope}</dd></div><div><dt>使用范围</dt><dd>{selected.limit}</dd></div></dl>
+        <details className="ca-method-sources">
+          <summary>分析方法与来源 <span>产品参考、官方指标与本地检查的区别</span></summary>
+          <p>当前自动诊断采用本地编辑检查：统计字数与段落、识别提问或步骤标记，并引用实际提供的文字作为依据。编辑提醒的阈值不是平台标准；尚未通过真实账号的效果研究验证这些建议。</p>
+          <ul>
+            <li><a href="https://buffer.com/insights" target="_blank" rel="noreferrer">Buffer Insights ↗</a><span>参考概览、作品下钻、指标解释与下一步行动的组织方式，不能作为建议有效的证明。</span></li>
+            <li><a href="https://sproutsocial.com/features/social-media-analytics/" target="_blank" rel="noreferrer">Sprout Social Analytics ↗</a><span>参考分析报告与内容复盘的产品设计，不代表本工具的诊断方法已被其验证。</span></li>
+            <li><a href="https://developers.weixin.qq.com/doc/service/guide/product/analysis_data/analysis_data.html" target="_blank" rel="noreferrer">微信官方数据统计接口说明 ↗</a><span>用于核对相应官方接口的指标、权限与更新时间；仅适用于对应接口，不泛化到七个平台或所有微信账号。</span></li>
+          </ul>
+          <p>AI 深度解释是可选的模型解读，原文引用校验只确认引用来自已有材料，不证明解释正确或能提升表现。实验回收保存真实观测，结论仍需结合样本、统计窗口与其他影响因素判断。</p>
+        </details>
         <div className="ca-method-grid">
           <article><span>01</span><h3>缺失与 0 分开</h3><p>未返回、解析失败或没有权限的指标显示为缺失。只有平台明确返回 0，才代表没有观测到该项活动。</p></article>
           <article><span>02</span><h3>先对齐时间，再比较</h3><p>发布一小时与发布一个月的累计点赞不能直接评优劣。没有可靠的发布时间和快照时，保留原始数值，不推算增长趋势。</p></article>

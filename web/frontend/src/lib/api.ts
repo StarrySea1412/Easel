@@ -402,6 +402,9 @@ export interface AccountItem {
   supported: boolean;
   loggedIn: boolean;
   note: string;
+  hasLocalSession?: boolean;
+  lastStateAt?: number | null;
+  credentialStorage?: 'browser_profile' | 'cookie_file' | 'app_credentials';
 }
 
 export interface LoginStart {
@@ -712,7 +715,9 @@ export function streamChat(
         if (currentEvent === 'token') {
           try { onToken(JSON.parse(data) as string); } catch { onToken(data); }
         } else if (currentEvent === 'thinking' && onThinking) {
-          try { onThinking(JSON.parse(data) as string); } catch { onThinking(data); }
+          let thinkingChunk: unknown;
+          try { thinkingChunk = JSON.parse(data); } catch { thinkingChunk = data; }
+          if (typeof thinkingChunk === 'string' && thinkingChunk) onThinking(thinkingChunk);
         } else if (currentEvent === 'activity' && onActivity) {
           try { onActivity(JSON.parse(data) as string); } catch { onActivity(data); }
         } else if (currentEvent === 'question' && onQuestion) {
@@ -803,7 +808,7 @@ export function streamChat(
 }
 
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; turn_id?: string }> {
+export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; turn_id?: string }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }
@@ -1059,6 +1064,14 @@ export interface ImagegenJob {
   size?: string;
   width?: number | null;
   height?: number | null;
+  mode?: 'text2img' | 'img2img';
+  referenceId?: string;
+  maskId?: string;
+}
+export interface ImagegenReference { id: string; url: string; name: string; width: number; height: number }
+export function uploadImagegenReference(file: File): Promise<ImagegenReference> {
+  const data = new FormData(); data.append('file', file);
+  return request('/api/imagegen/references', { method: 'POST', body: data });
 }
 export interface ImagegenGalleryItem { name: string; url: string; mtime: number; width?: number | null; height?: number | null }
 export interface ImagegenChannel { configured: boolean; baseUrl: string; keyMasked: string; model: string }
@@ -1081,11 +1094,11 @@ export function reverseImage(image: File, provider: string, instruction: string,
   return request('/api/image-reverse', { method: 'POST', body: data, signal });
 }
 
-export function startImagegen(prompt: string, size = '1024x1024', n = 1): Promise<ImagegenStart> {
+export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string } = {}): Promise<ImagegenStart> {
   return request('/api/imagegen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, size, n }),
+    body: JSON.stringify({ prompt, size, n, ...options }),
   });
 }
 
@@ -1096,6 +1109,17 @@ export function fetchImagegenJob(jobId: string): Promise<ImagegenJob> {
 export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[]; channel: ImagegenChannel }> {
   return request('/api/imagegen');
 }
+
+export interface StorageLocation {
+  logicalPath:string; currentPath:string; pendingPath:string|null;
+  status:'ready'|'pending_restart'|'failed'; error:string|null; requiresRestart:boolean;
+  backupPath:string|null; fileCount:number; byteCount:number;
+}
+export function fetchStorageLocation():Promise<StorageLocation> { return request('/api/storage/location'); }
+export function scheduleStorageLocation(path:string):Promise<StorageLocation> {
+  return request('/api/storage/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
+}
+export function cancelStorageLocation():Promise<StorageLocation> { return request('/api/storage/location',{method:'DELETE'}); }
 
 // 保存生图通道（IMG_*；IMG_MODEL 走 .env 默认 gpt-image-2）
 export function saveImagegenChannel(baseUrl: string, apiKey: string): Promise<{ ok: boolean }> {

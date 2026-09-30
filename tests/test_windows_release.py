@@ -92,3 +92,18 @@ def test_checked_in_lock_has_exact_versions_and_build_requirements():
     assert all("==" in line and "://" not in line and " @ " not in line for line in requirements)
     assert any(line.startswith("setuptools==") for line in requirements)
     assert any(line.startswith("wheel==") for line in requirements)
+
+
+def test_user_zip_contains_only_gui_delivery_and_verified_checksum(tmp_path):
+    exe = tmp_path / "Easel-Setup-0.2.3.exe"
+    exe.write_bytes(b"test executable fixture")
+    exe.with_suffix(".exe.sha256").write_text(f"{bootstrapper.sha256_of(exe)}  {exe.name}\n")
+    (tmp_path / ".env").write_text("SECRET=must-not-ship")
+    package = release.build_user_bundle(tmp_path, "0.2.3")
+    with zipfile.ZipFile(package) as archive:
+        assert set(archive.namelist()) == {exe.name, exe.name + ".sha256", "开始使用.txt"}
+        assert archive.read(exe.name) == exe.read_bytes()
+        assert "图形安装器" in archive.read("开始使用.txt").decode("utf-8-sig")
+    exe.write_bytes(b"changed")
+    with pytest.raises(RuntimeError, match="checksum"):
+        release.build_user_bundle(tmp_path, "0.2.3")

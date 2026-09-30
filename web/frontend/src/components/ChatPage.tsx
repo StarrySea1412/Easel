@@ -1,4 +1,6 @@
-import { useRef, useEffect } from 'react';
+import { Fragment, useRef, useEffect } from 'react';
+import ChatSkillEvidence from './ChatSkillEvidence';
+import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
@@ -17,6 +19,7 @@ interface ChatPageProps {
     attachments?: UploadedFile[],
     legacyAgentText?: string,
   ) => void; // 重试：仅对最后一轮
+  onOpenAudit?: (turnId:string)=>void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
 }
 
@@ -34,9 +37,10 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
+export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit }: ChatPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isStreaming = !!stream;
+  const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length);
   const isEmpty = session.messages.length === 0 && !isStreaming;
 
   useEffect(() => {
@@ -109,8 +113,11 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
                 };
               }
             }
+            const auditTurn=live?session.pendingTurnId:msg.turnId;
+            const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
+            const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
             return (
-              <MessageBubble
+              <Fragment key={`${i}-${msg.role}`}><MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
                 isStreaming={live}
@@ -118,7 +125,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-              />
+              />{msg.role==='assistant'&&(auditTurn||auditRecord)&&<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>}</Fragment>
             );
           })}
           {isStreaming && (stream!.questions?.length ?? 0) > 0 && (

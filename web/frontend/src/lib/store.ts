@@ -7,7 +7,7 @@ export interface ChatMessage {
   attachments?: UploadedFile[]; // 结构化附件引用；仅用于请求/重试，不在消息气泡展示
   selectedSkills?: string[];
   turnId?: string;
-  thinking?: string;   // 模型思考过程（隐思考），流式结束后持久保留
+  thinking?: string;   // 模型服务实际返回的思考内容或摘要，流式结束后持久保留
   activity?: string;   // 工具/执行活动步骤（换行分隔），持久保留
 }
 

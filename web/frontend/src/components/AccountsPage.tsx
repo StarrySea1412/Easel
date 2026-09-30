@@ -50,6 +50,12 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [terminalMsg, setTerminalMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [logoutBusy, setLogoutBusy] = useState('');
+  const [managedPlatform, setManagedPlatform] = useState<string | null>(null);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [logoutMessage, setLogoutMessage] = useState('');
+  const [hideIdentity, setHideIdentity] = useState(() => { try { return localStorage.getItem('easel_account_privacy') === '1'; } catch { return false; } });
+  const accountDialog = useRef<HTMLDialogElement>(null);
+  const identityEpoch = useRef<Record<string, number>>({});
   const [filter, setFilter] = useState<'all' | 'connected' | 'attention'>('all');
   const [loaded, setLoaded] = useState(false);
   const [smsCode, setSmsCode] = useState('');
@@ -74,14 +80,15 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
 
   // 真校验某平台登录态 + 拉昵称/头像（后端起浏览器，数秒）；手动「校验账号」或登录成功后调
   const runWhoami = useCallback(async (platform: string) => {
+    const epoch = identityEpoch.current[platform] || 0;
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
     try {
       const r = await accountWhoami(platform);
-      if (!aliveRef.current) return null;
+      if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0)) return null;
       setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
       return r;
     } catch {
-      if (aliveRef.current) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
+      if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0)) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
       return null;
     }
   }, []);
@@ -259,14 +266,18 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   }, [stopPoll, runWhoami, load]);
 
   const handleLogout = useCallback(async (a: AccountItem) => {
-    if (!window.confirm(`确定退出「${a.name}」的登录？登录态将被清除，下次发布需重新扫码。`)) return;
+    identityEpoch.current[a.platform] = (identityEpoch.current[a.platform] || 0) + 1;
+    setWhoamiCache(a.platform, null);
+    setErr(''); setLogoutMessage('');
     setLogoutBusy(a.platform);
     try {
       await logoutAccount(a.platform);
       // 内存态立即翻未登录（同登录路径），不等 load() 回来
-      setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false } : x));
+      setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false, hasLocalSession: false, lastStateAt: null } : x));
       setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
       setWhoamiCache(a.platform, null);
+      setLogoutMessage(`已退出 ${a.name}，此平台的本地登录态已清理。已保存的作品和分析记录仍保留。`);
+      setManagedPlatform(null); setConfirmLogout(false);
       load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : '退出登录失败');
@@ -274,6 +285,20 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       setLogoutBusy('');
     }
   }, [load]);
+
+  useEffect(() => {
+    const dialog = accountDialog.current;
+    if (!dialog) return;
+    if (managedPlatform && !dialog.open) dialog.showModal();
+    else if (!managedPlatform && dialog.open) dialog.close();
+  }, [managedPlatform]);
+
+  const togglePrivacy = () => {
+    setHideIdentity((value) => {
+      try { localStorage.setItem('easel_account_privacy', value ? '0' : '1'); } catch { /* optional */ }
+      return !value;
+    });
+  };
 
   // 卡片真实登录态：whoami 权威（已返回则以它为准，自愈假阳性），否则用后端 last-known。
   // 公众号(wechat-oa)例外：后端查 mp 会话即真值(快且权威)，直接用它，避免浏览器里过期的 whoami 缓存把已登录盖成未登录。
@@ -296,13 +321,15 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const visibleAccounts = accounts.filter((account) => filter === 'all'
     || (filter === 'connected' ? account.supported && effLoggedIn(account) : account.supported && !effLoggedIn(account)));
   const openAnalysis = onNavigateAnalysis;
+  const managedAccount = accounts.find((account) => account.platform === managedPlatform);
+  const managedInfo = managedPlatform ? whoami[managedPlatform] : null;
 
   return (
     <div className="accounts-page accounts-center">
       <div className="accounts-heading">
         <div><p className="accounts-eyebrow">创作渠道</p><h1>账号中心</h1>
           <p className="accounts-intro">连接发布平台，管理登录状态，了解自己的内容表现。</p></div>
-        <button className="btn btn-sm" onClick={load}>刷新状态</button>
+        <div className="account-heading-actions"><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button><button className="btn btn-sm" onClick={load}>刷新状态</button></div>
       </div>
       <div className="accounts-summary" aria-live="polite">
         <span className="accounts-summary-dot" aria-hidden="true" />
@@ -310,7 +337,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         <span>每个平台使用一个当前登录账号</span>
       </div>
       {err && <div className="notice-error" role="alert">{err}</div>}
+      {logoutMessage && <div className="accounts-message" role="status">{logoutMessage}</div>}
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
+      <div className="accounts-protection"><div><strong>登录凭据留在本机</strong><p>连接状态用于创作与发布；Cookie 和授权码不会在账号卡片中显示。共享屏幕时可隐藏昵称与头像。</p></div><span>可单独管理与退出</span></div>
 
       <section id="accounts-connections" aria-label="账号连接">
         <div className="accounts-section-heading"><div><h2>连接你的平台</h2><p>选择平台完成登录，之后可直接用于创作发布。</p></div>
@@ -330,7 +359,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             return <article key={a.platform} className={`card account-card${!a.supported ? ' account-unavailable' : ''}`}>
               <div className="account-card-head"><div className="account-platform"><span className="account-platform-mark"><PlatformIcon platform={a.platform} name={a.name} /></span><h3>{a.name}</h3></div>{badge(a)}</div>
               <div className="account-identity">
-                {logged ? <><Avatar url={info?.avatar} name={info?.name || a.name} /><div><strong className="account-nick">{info?.name || '已连接的账号'}</strong><p>{w === 'loading' ? '正在核实账号身份' : info ? '当前登录账号' : '身份信息待校验'}</p></div></>
+                {logged ? <><Avatar url={hideIdentity ? undefined : info?.avatar} name={hideIdentity ? a.name : info?.name || a.name} /><div><strong className="account-nick">{hideIdentity ? '账号身份已隐藏' : info?.name || '已连接的账号'}</strong><p>{w === 'loading' ? '正在核实账号身份' : info ? '当前登录账号' : '身份信息待校验'}</p></div></>
                   : <p className="account-connection-copy">{a.supported ? '连接后，在这里查看当前账号与登录状态。' : '此平台暂不可用，请先使用其他平台。'}</p>}
               </div>
               <p className="account-login-method">{a.backend === 'wechat-oa' ? '使用微信扫码连接公众号' : a.backend === 'biliup' ? '按登录引导完成账号连接' : '使用手机 App 扫码连接'}</p>
@@ -341,7 +370,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                 </button>
                 <div className="account-secondary-actions">
                   {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden="true">→</span></button>}
-                  {logged && <button type="button" disabled={logoutBusy === a.platform} onClick={() => void handleLogout(a)}>{logoutBusy === a.platform ? '退出中…' : '退出登录'}</button>}
+                  {a.supported && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>{logoutBusy === a.platform ? '退出中…' : '管理账号'}</button>}
+                  {a.supported && (logged || a.hasLocalSession) && <button type="button" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(true); }}>退出登录</button>}
                 </div>
               </div>
             </article>;
@@ -354,6 +384,27 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
           {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
         </details>
       </section>
+
+      <dialog ref={accountDialog} className="account-management-dialog" aria-labelledby="account-management-title"
+        onCancel={(event) => { if (logoutBusy) event.preventDefault(); else { setManagedPlatform(null); setConfirmLogout(false); } }}>
+        {managedAccount && <>
+          <div className="account-management-heading"><PlatformIcon platform={managedAccount.platform} name={managedAccount.name} /><div><p>ACCOUNT MANAGEMENT</p><h2 id="account-management-title">管理 {managedAccount.name}</h2></div></div>
+          <dl className="account-management-facts">
+            <div><dt>当前账号</dt><dd>{hideIdentity ? '身份已隐藏' : managedInfo && managedInfo !== 'loading' && managedInfo.name || '尚未核实昵称'}</dd></div>
+            <div><dt>连接状态</dt><dd>{effLoggedIn(managedAccount) ? '已连接（可重新校验）' : '未连接或已失效'}</dd></div>
+            <div><dt>本地登录资料</dt><dd>{managedAccount.hasLocalSession == null ? '状态未上报' : managedAccount.hasLocalSession ? '存在，可主动清理' : '未检测到'}</dd></div>
+            <div><dt>凭据保存方式</dt><dd>{managedAccount.credentialStorage ? {browser_profile:'本机浏览器会话目录',cookie_file:'本机 Cookie 文件',app_credentials:'本机应用凭据配置'}[managedAccount.credentialStorage] : '接口未上报'}</dd></div><div><dt>最近状态记录</dt><dd>{managedAccount.lastStateAt ? new Date(managedAccount.lastStateAt * 1000).toLocaleString() : '尚无记录'}<small>状态记录时间不等于刚刚在线验证。</small></dd></div>
+          </dl>
+          <div className="account-management-note"><strong>你可以控制本机登录态</strong><p>退出会清理此平台在 Easel 中保存的会话、扫码缓存及相关发布凭据。已保存的作品与分析记录保留，其他平台不受影响。</p><p>这不会退出你手机或其他设备上的账号，也不等同于撤销平台侧全部授权。请保护本机系统账户，不要分享应用数据目录。</p></div>
+          {confirmLogout && <div className="account-logout-confirm" role="alert"><strong>确认退出 {managedAccount.name}？</strong><p>正在进行的登录会被停止；再次发布前需要重新登录。</p></div>}
+          {err && <p className="notice-error" role="alert">{err}</p>}
+          <div className="account-management-buttons">
+            <button className="btn" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(null); setConfirmLogout(false); }}>关闭</button>
+            {!confirmLogout && <button className="btn" disabled={!!logoutBusy || managedInfo === 'loading'} onClick={() => void runWhoami(managedAccount.platform)}>{managedInfo === 'loading' ? '正在校验…' : '校验连接'}</button>}
+            {(managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn account-logout-button" disabled={!!logoutBusy} onClick={() => confirmLogout ? void handleLogout(managedAccount) : setConfirmLogout(true)}>{logoutBusy ? '正在退出…' : confirmLogout ? '确认退出并清理登录态' : '退出此账号'}</button>}
+          </div>
+        </>}
+      </dialog>
 
       {qr && (
         <div className="overlay" onClick={closeQr}>

@@ -496,7 +496,7 @@ def cmd_img2img(args: argparse.Namespace) -> None:
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
     else:
-        # OpenAI 兼容 /images/edits：优先 multipart，失败时回退 JSON data-uri
+        # OpenAI 兼容 /images/edits：使用 multipart 上传参考图和可选蒙版。
         result = _post_edits_multipart(base_url, api_key, model, prompt, args)
         paths = save_sync_data(result, args.output, args.format)
 

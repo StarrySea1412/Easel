@@ -18,6 +18,20 @@ interface MessageBubbleProps {
   actions?: BubbleActions;
 }
 
+function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }) {
+  // Preserve the user's expanded/collapsed choice as new chunks and the final
+  // answer arrive; binding `open` to answer emptiness used to override it.
+  const [expanded, setExpanded] = useState(streaming);
+  return <section className="model-thinking" aria-label="模型返回的思考内容">
+    <button type="button" className="model-thinking-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      <span className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} aria-hidden="true">›</span>
+      <span>模型思考</span><span className="model-thinking-state">{streaming ? '接收中' : '已保留'}</span>
+      <span className="model-thinking-count">{text.length.toLocaleString()} 字符</span>
+    </button>
+    {expanded && <div className="model-thinking-body"><p className="model-thinking-note">模型服务实际返回的思考内容或摘要</p><div className="model-thinking-text">{text}</div></div>}
+  </section>;
+}
+
 function ActionBar({ actions }: { actions: BubbleActions }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -77,15 +91,12 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       ) : null}
       {doneSteps && (
         <details className="thinking-block">
-          <summary>🧠 执行过程（{doneSteps.split('\n').length} 步）</summary>
+          <summary>执行记录（{doneSteps.split('\n').length} 步）</summary>
           <div className="thinking-text">{doneSteps}</div>
         </details>
       )}
       {effThinking && (
-        <details className="thinking-block" open={isStreaming && !message.content}>
-          <summary>💭 思考过程</summary>
-          <div className="thinking-text">{effThinking}</div>
-        </details>
+        <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} />
       )}
     </div>
   ) : null;
@@ -100,6 +111,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
             <span className="typing-dot" />
             <span className="typing-dot" />
           </div>
+          <span className="model-thinking-wait">等待模型响应…</span>
         </div>
       </div>
     );

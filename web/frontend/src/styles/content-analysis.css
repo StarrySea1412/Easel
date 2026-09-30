@@ -175,3 +175,15 @@
 .ca-import-preview { border-color:var(--accent-start); }
 .ca-bench .ca-paper.ca-entry { margin-top:0; }
 .ca-bench .ca-diagnostic > label { display:block; }
+.ca-method-sources { margin:0 0 24px; padding:18px 22px; border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+.ca-method-sources summary { cursor:pointer; font-size:14px; font-weight:550; line-height:1.8; }
+.ca-method-sources summary > span { margin-left:12px; color:var(--text-secondary); font-size:11px; font-weight:400; }
+.ca-method-sources summary:focus-visible { outline:2px solid var(--accent-start); outline-offset:4px; }
+.ca-method-sources p,.ca-method-sources li { font-size:12px; color:var(--text-secondary); line-height:1.9; }
+.ca-method-sources p { margin:15px 0 0; }
+.ca-method-sources ul { list-style:none; padding:0; margin:16px 0; }
+.ca-method-sources li { padding:10px 0; border-bottom:1px solid var(--border); }
+.ca-method-sources li > a { display:block; color:var(--accent-start); font-weight:550; text-decoration:none; }
+.ca-method-sources li > a:hover { text-decoration:underline; }
+.ca-method-sources li > span { display:block; margin-top:3px; }
+@media(max-width:600px) { .ca-method-sources { padding:16px; } .ca-method-sources summary > span { display:block; margin-left:0; } }

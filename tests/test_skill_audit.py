@@ -56,6 +56,58 @@ def test_lifecycle_only_appended_current_session_and_private_fields(setup):
     assert stored['_request'] == 'private request' and stored['_response'] == 'reply'
 
 
+def test_live_invocation_tracks_real_calls_without_mutating_final_audit(setup):
+    outputs, sessions, path = setup
+    append(path, evidence(ident='old'))
+    context = audit.begin(outputs, sessions, 'chat', 'live', SPECS, 'request')
+    stored_path = audit.audit_path(outputs / '_skill_audits', 'chat', 'live')
+    original = stored_path.read_bytes()
+    def current():
+        result = audit.records(outputs / '_skill_audits', 'chat', sessions)[0]
+        assert result['status'] == 'running' and result['live'] is True
+        assert not any(k.startswith('_') for k in result)
+        assert stored_path.read_bytes() == original
+        return result['invocation'][0]
+    assert current()['status'] == 'not_observed'
+    append(sessions / 'foreign.jsonl', evidence(ident='foreign'))
+    assert current()['status'] == 'not_observed'
+    loading = evidence(ident='read')
+    loading[0]['message']['content'][0].update(name='read', arguments={'path': '/skills/demo/SKILL.md'})
+    append(path, loading)
+    assert current()['status'] == 'loaded'
+    append(path, evidence(ident='live-run')[:1])
+    assert current()['status'] == 'attempted'
+    append(path, evidence(ident='live-run', success=False)[1:])
+    assert current()['status'] == 'failed'
+    append(path, evidence(ident='retry', success=True))
+    assert current()['status'] == 'executed'
+    final = audit.finish(outputs, sessions, context, 'reply', 'completed')
+    before_get = stored_path.read_bytes()
+    append(path, evidence(ident='after-turn', success=False))
+    read_final = audit.records(outputs / '_skill_audits', 'chat', sessions)[0]
+    assert read_final['invocation'] == final['invocation']
+    assert 'live' not in read_final
+    assert stored_path.read_bytes() == before_get
+
+
+def test_legacy_running_record_without_boundary_does_not_claim_live_execution(setup):
+    outputs, sessions, path = setup
+    append(path, evidence())
+    audit.save(outputs / '_skill_audits', {'sessionId': 'chat', 'turnId': 'old-version',
+               'status': 'running', 'invocation': [], 'started': time.time(), '_specs': SPECS})
+    result = audit.records(outputs / '_skill_audits', 'chat', sessions)[0]
+    assert result['live'] is False and result['invocation'] == []
+
+
+def test_stale_running_record_is_not_reinterpreted_as_current_turn(setup):
+    outputs, sessions, path = setup
+    append(path, [])
+    audit.begin(outputs, sessions, 'chat', 'stale', SPECS, 'old request')
+    append(path, evidence())
+    result = audit.records(outputs / '_skill_audits', 'chat', sessions, active_turn_id='new-turn')[0]
+    assert result['live'] is False and result['invocation'] == []
+
+
 @pytest.mark.parametrize('mode', ['truncate', 'rewrite', 'late_mapping', 'partial'])
 def test_replaced_or_late_mapped_history_is_not_evidence(setup, mode):
     outputs, sessions, path = setup
@@ -133,3 +185,21 @@ def test_invalid_identifiers_rejected_before_write(setup):
         audit.begin(outputs, sessions, '../escape', 'turn', SPECS, '')
     assert caught.value.status_code == 400
     assert not (outputs / '_skill_audits').exists()
+
+
+def test_exact_turn_lookup_finds_older_evidence_without_leaking_private_fields(setup):
+    outputs, _, _ = setup
+    directory = outputs / '_skill_audits'
+    for number in range(55):
+        audit.save(directory, {'sessionId': 'chat', 'turnId': f'turn-{number}',
+            'started': number, 'status': 'completed', '_request': 'private',
+            'invocation': [{'skill': 'demo', 'status': 'executed', 'evidence': []}]})
+    assert 'turn-0' not in [r['turnId'] for r in audit.records(directory, 'chat')]
+    result = audit.records(directory, 'chat', turn_id='turn-0')
+    assert len(result) == 1 and result[0]['invocation'][0]['status'] == 'executed'
+    assert '_request' not in result[0]
+    assert audit.records(directory, 'another-chat', turn_id='turn-0') == []
+    assert audit.records(directory, 'chat', turn_id='missing') == []
+    with pytest.raises(Exception) as invalid:
+        audit.records(directory, 'chat', turn_id='../escape')
+    assert invalid.value.status_code == 400

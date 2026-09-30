@@ -61,3 +61,26 @@
   .accounts-summary { gap: 8px; }
   .accounts-summary > :last-child { flex-basis: 100%; padding-left: 14px; }
 }
+.account-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.accounts-protection { margin-top: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); font-size: 12px; }
+.accounts-protection strong { font-weight: 600; }
+.accounts-protection p { color: var(--text-secondary); margin: 6px 0 0; line-height: 1.7; }
+.accounts-protection > span { flex-shrink: 0; color: var(--text-secondary); }
+.account-management-dialog { width: min(540px, calc(100vw - 36px)); max-height: calc(100vh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); color: var(--text); box-shadow: 0 24px 90px #0003; }
+.account-management-dialog::backdrop { background: #26241c66; }
+.account-management-heading { display: flex; align-items: center; gap: 12px; }
+.account-management-heading img { width: 36px; height: 36px; }
+.account-management-heading p { margin: 0 0 5px; font-size: 10px; color: var(--text-tertiary); letter-spacing: .12em; }
+.account-management-heading h2 { margin: 0; font-size: 22px; }
+.account-management-facts { margin: 24px 0; font-size: 13px; }
+.account-management-facts > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.account-management-facts dt { color: var(--text-secondary); }
+.account-management-facts dd { margin: 0; overflow-wrap: anywhere; }
+.account-management-facts small { display: block; color: var(--text-tertiary); line-height: 1.6; margin-top: 4px; }
+.account-management-note, .account-logout-confirm { padding: 14px; border-radius: 10px; background: var(--bg-secondary); font-size: 12px; line-height: 1.75; }
+.account-management-note p { margin: 6px 0 0; color: var(--text-secondary); }
+.account-logout-confirm { margin-top: 16px; border: 1px solid var(--red); }
+.account-logout-confirm p { margin: 4px 0 0; }
+.account-management-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 24px; }
+.account-logout-button { color: var(--red); border-color: var(--red); }
+@media (max-width: 600px) { .accounts-protection { align-items: flex-start; flex-direction: column; gap: 8px; } .account-management-dialog { padding: 20px; } }

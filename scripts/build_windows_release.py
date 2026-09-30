@@ -154,6 +154,37 @@ def build_exe(output: Path, release: Path, archive: Path, version: str) -> None:
     exe.with_suffix(".exe.sha256").write_text(f"{sha256_of(exe)}  {exe.name}\n", encoding="ascii")
 
 
+def build_user_bundle(output: Path, version: str) -> Path:
+    """The user ZIP opens the same GUI installer, without a console bootstrap."""
+    exe = output / f"Easel-Setup-{version}.exe"
+    checksum = exe.with_suffix(".exe.sha256")
+    if not exe.is_file() or not checksum.is_file():
+        raise RuntimeError("GUI installer and checksum must exist before user packaging")
+    if checksum.read_text(encoding="ascii").split()[0] != sha256_of(exe):
+        raise RuntimeError("GUI installer checksum does not match")
+    package = output / f"Easel-{version}-Windows-GUI.zip"
+    instructions = (
+        f"Easel {version} — 图形安装器 + 网页工作台\n\n"
+        f"1. 将压缩包完整解压到一个文件夹。\n2. 双击 {exe.name}。\n"
+        "3. 在安装向导中选择安装位置，点击“开始安装”，查看各阶段进度。\n"
+        "4. 安装成功后点击“打开工作台”，浏览器会自动打开。\n"
+        "5. 以后双击安装目录里的“打开 Easel.vbs”启动；失败时会显示重试提示。\n\n"
+        "首次安装需要联网下载运行依赖；这个包不是完全离线运行时包。\n"
+        "账号和模型服务由你在工作台中连接，包内不含预置账号、密码或 API Key。\n"
+        "升级请选择原安装目录；个人资料保存在 data 子目录。\n"
+        "本测试版未作代码签名，SHA-256 校验文件随包提供。\n"
+    )
+    with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        archive.write(exe, exe.name)
+        archive.write(checksum, checksum.name)
+        archive.writestr("开始使用.txt", instructions.encode("utf-8-sig"))
+        licenses = output / "THIRD_PARTY_BOOTSTRAPPER_LICENSES.txt"
+        if licenses.is_file():
+            archive.write(licenses, licenses.name)
+    package.with_suffix(".zip.sha256").write_text(f"{sha256_of(package)}  {package.name}\n", encoding="ascii")
+    return package
+
+
 def main() -> None:
     import tomllib  # The release build runs on Python 3.12; runtime supports 3.10+.
     ap = argparse.ArgumentParser(description=__doc__)
@@ -179,6 +210,7 @@ def main() -> None:
         "sha256": sha256_of(archive)}, indent=2), encoding="utf-8")
     if not args.skip_exe:
         build_exe(output, release, archive, version)
+        build_user_bundle(output, version)
     print(f"Release artifacts ready for review: {output}")
 
 

@@ -317,16 +317,29 @@ def test_setup_noninteractive_and_winget_explicit(tmp_path, monkeypatch, allowed
     monkeypatch.setenv("EASEL_INSTALL_ALLOW_WINGET", "1")
     captured = {}
 
-    def fake(cmd, cwd=None, env=None):
-        captured.update(cmd=cmd, cwd=cwd, env=env)
-        return SimpleNamespace(returncode=7)
+    def fake(cmd, cwd=None, env=None, **kwargs):
+        captured.update(cmd=cmd, cwd=cwd, env=env, **kwargs)
+        return SimpleNamespace(stdout=iter(["phase output\n"]), wait=lambda: 7)
 
-    monkeypatch.setattr(bt.subprocess, "run", fake)
+    monkeypatch.setattr(bt.subprocess, "Popen", fake)
     assert bt.run_setup(tmp_path, tmp_path / "data", allowed) == 7
     assert captured["env"]["EASEL_DATA_DIR"] == str(tmp_path / "data")
     assert captured["env"]["EASEL_INSTALL_ALLOW_WINGET"] == ("1" if allowed else "0")
     assert "-NonInteractive" in captured["cmd"] and "-DataDir" in captured["cmd"]
     assert ("-AllowWinget" in captured["cmd"]) is allowed
+    assert captured["stdout"] == bt.subprocess.PIPE
+    assert captured["stdin"] == bt.subprocess.DEVNULL
+    assert captured["creationflags"] == getattr(bt.subprocess, "CREATE_NO_WINDOW", 0)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process output")
+def test_setup_drains_verbose_output_without_gui_hook(tmp_path, monkeypatch, capsys):
+    (tmp_path / "setup.ps1").write_text(
+        "param([switch]$NonInteractive,[string]$DataDir)\n1..3000 | ForEach-Object { Write-Output ('phase-line-' + $_) }\nexit 0\n",
+        encoding="utf-8-sig")
+    monkeypatch.setattr(bt, "_LOG_HOOK", None)
+    assert bt.run_setup(tmp_path, tmp_path / "data", False) == 0
+    assert "phase-line-3000" in capsys.readouterr().out
 
 
 def verified_root():
@@ -486,6 +499,29 @@ def test_migration_rejects_destination_junction(tmp_path):
     bt.link_data_dirs(dd, outside)
     with pytest.raises(RuntimeError, match="链接|link|junction"):
         bt.init_data_dir(source)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows junction indirection')
+def test_new_version_keeps_logical_data_link_across_second_migration(tmp_path):
+    data, version = tmp_path / 'data', tmp_path / 'version'
+    first, second = tmp_path / 'first location', tmp_path / 'second location'
+    for directory in (data, version, first, second):
+        directory.mkdir()
+    for outside in (first, second):
+        for name in ('profiles', 'outputs', 'assets'):
+            (outside / name).mkdir()
+    (first / 'outputs/marker.txt').write_text('first')
+    (second / 'outputs/marker.txt').write_text('second')
+    bt.link_data_dirs(data, first)
+    bt.link_data_dirs(version, data)
+    assert (version / 'outputs/marker.txt').read_text() == 'first'
+    # Remove only the data junctions, never their content, then migrate again.
+    for name in ('profiles', 'outputs', 'assets'):
+        assert bt.is_link(data / name)
+        (data / name).rmdir()
+    bt.link_data_dirs(data, second)
+    assert (version / 'outputs/marker.txt').read_text() == 'second'
+    assert (first / 'outputs/marker.txt').read_text() == 'first'
     assert not (outside / "outputs" / "new.txt").exists()
 
 
