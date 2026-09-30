@@ -28,6 +28,28 @@ def _ps(value) -> str:
     return str(value).replace("'", "''")
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows frozen DLL search isolation')
+@pytest.mark.parametrize('method', ['external_popen', 'external_run'])
+@pytest.mark.parametrize('fails', [False, True])
+def test_frozen_external_children_do_not_inherit_temporary_dll_search(monkeypatch, method, fails):
+    changes = []
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, '_MEIPASS', r'C:\temporary\_MEI-test', raising=False)
+    monkeypatch.setattr(bt, '_set_dll_directory', changes.append)
+    def child(*args, **kwargs):
+        assert changes == [None]
+        if fails:
+            raise OSError('injected launch failure')
+        return 'started'
+    monkeypatch.setattr(bt.subprocess, 'Popen' if method == 'external_popen' else 'run', child)
+    if fails:
+        with pytest.raises(OSError, match='injected'):
+            getattr(bt, method)(['external-program'])
+    else:
+        assert getattr(bt, method)(['external-program']) == 'started'
+    assert changes == [None, r'C:\temporary\_MEI-test']
+
+
 def test_gui_install_output_redacts_env_bearer_and_url_credentials(tmp_path, monkeypatch):
     base = tmp_path / "data"
     base.mkdir()

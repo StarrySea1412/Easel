@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +30,42 @@ RETRY_BACKOFF = (5, 15)
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MARKER = ".easel-release.json"
 _LOG_HOOK = None
+_DLL_SEARCH_LOCK = threading.RLock()
+
+
+def _set_dll_directory(path: str | None) -> None:
+    import ctypes
+    if not ctypes.windll.kernel32.SetDllDirectoryW(path):
+        raise ctypes.WinError()
+
+
+@contextmanager
+def system_dll_search():
+    """External programs must not inherit the frozen installer's temporary DLLs.
+
+    Windows propagates SetDllDirectory to child processes. A long-lived Node
+    Gateway otherwise loads VCRUNTIME140.dll from _MEI, preventing the one-file
+    bootloader from cleaning up and leaving a modal warning on installer exit.
+    """
+    if os.name != 'nt' or not getattr(sys, 'frozen', False):
+        yield
+        return
+    with _DLL_SEARCH_LOCK:
+        _set_dll_directory(None)
+        try:
+            yield
+        finally:
+            _set_dll_directory(str(sys._MEIPASS))
+
+
+def external_popen(*args, **kwargs):
+    with system_dll_search():
+        return subprocess.Popen(*args, **kwargs)
+
+
+def external_run(*args, **kwargs):
+    with system_dll_search():
+        return subprocess.run(*args, **kwargs)
 
 
 def log(msg: str) -> None:
@@ -308,7 +345,7 @@ def link_data_dirs(root: Path, dd: Path) -> None:
             link.rename(backup)
         if os.name == "nt":
             command = f"$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path {_ps_literal(link)} -Target {_ps_literal(target)} | Out-Null"
-            result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command], check=False)
+            result = external_run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command], check=False)
             if result.returncode:
                 raise RuntimeError(f"创建数据目录链接失败：{link}")
         else:
@@ -330,7 +367,7 @@ def run_setup(project_root: Path, dd: Path, allow_winget: bool,
         cmd.append("-AllowWinget")
     # Both GUI and --yes are windowed EXE paths: always drain the child output.
     # Inheriting invalid console handles can stall print() after a verbose phase.
-    proc = subprocess.Popen(cmd, cwd=str(project_root), env=env, stdout=subprocess.PIPE,
+    proc = external_popen(cmd, cwd=str(project_root), env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                             text=True, encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -708,7 +745,7 @@ def launch_gui(version: str, release: dict, archive: Path | None,
             root = install_root(version)
             python = root / '.venv/Scripts/python.exe'
             try:
-                result = subprocess.run([str(python), str(root / 'scripts/start_workspace.py'),
+                result = external_run([str(python), str(root / 'scripts/start_workspace.py'),
                     '--root', str(root), '--data-dir', str(data_root()), '--no-browser'],
                     cwd=root, capture_output=True, text=True, encoding='utf-8', errors='replace',
                     env=dict(os.environ, PYTHONUTF8='1'),

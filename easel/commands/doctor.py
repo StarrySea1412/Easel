@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -117,12 +118,17 @@ def _chromium_available() -> bool:
 
 
 def _gateway_healthy() -> bool:
-    """Check OpenClaw gateway is running via healthz endpoint."""
-    try:
-        with urllib.request.urlopen(healthz_url(), timeout=5) as response:
-            return response.status == 200
-    except (OSError, urllib.error.URLError):
-        return False
+    """Allow a brief gateway cold-start hiccup, but require an actual HTTP 200."""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(healthz_url(), timeout=5) as response:
+                if response.status == 200:
+                    return True
+        except (OSError, urllib.error.URLError):
+            pass
+        if attempt < 2:
+            time.sleep(1)
+    return False
 
 
 def _skills_synced() -> tuple[bool, str]:
