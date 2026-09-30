@@ -4,6 +4,9 @@ All notable changes to Easel are documented in this file.
 
 ## [Unreleased]
 
+- Search filenames and paths within the current bounded output snapshot, combine type filters, and sort by modification time, name, or size without clearing unread indicators outside the visible list.
+- Add explicit image and media loading, failure and retry states; isolate old resource events, release closed previews, and preserve playback while sorting. Real browser checks cover image recovery, video/audio playback and narrow layouts. See [media and search verification](docs/office-media-search-2026-10-01.md).
+
 - Highlight newly observed and updated workspace outputs since the first successful snapshot; acknowledge individual files or only the current filtered list, with observation scope and reset behavior made explicit.
 - Export the currently filtered employee call/receipt records as JSON with exact identity, source, pairing and snapshot limits; exclude hidden payloads and handle download failures without discarding records.
 - Use the supported Three.js shadow-map mode. See [observation and export verification](docs/office-observation-export-2026-10-01.md).
@@ -28,7 +31,7 @@ All notable changes to Easel are documented in this file.
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Latest implementation and exact validation scope: [professional office iteration](docs/professional-office-2026-10-01.md). Browser checks use an isolated local workspace; model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
+Latest implementation and exact validation scope: [media and search iteration](docs/office-media-search-2026-10-01.md), with earlier features in [professional office iteration](docs/professional-office-2026-10-01.md). Browser checks use an isolated local workspace; model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 

@@ -1,0 +1,6 @@
+.office-media-preview { min-width: 0; }
+.office-media-preview:focus-visible { outline: 3px solid #99b76c; outline-offset: 4px; border-radius: 7px; }
+.office-media-status { margin: 0 0 10px; color: #637752; font-size: 12px; line-height: 1.8; }
+.office-media-failure .office-output-error { margin-top: 0; }
+.office-media-retry { padding: 8px 11px; border: 1px solid #bdcda9; border-radius: 8px; background: #fffef9; color: #546e3e; font: inherit; font-size: 12px; cursor: pointer; }
+.office-media-retry:focus-visible { outline: 3px solid #99b76c; outline-offset: 3px; }
