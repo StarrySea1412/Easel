@@ -217,7 +217,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Windows 安装器默认检查系统依赖并提示缺失项；使用 `.\setup.ps1 -AllowWinget` 可显式允许通过 `winget` 安装缺失工具。它创建项目内 `.venv`，按八个阶段安装依赖、准备前端与 Chromium、配置独立的 `easel` profile 并验证 Gateway 和 Web 首页。失败后重跑可继续，`-NonInteractive` 跳过模型提问，模型可在 Web 设置中配置。运行 `.venv\Scripts\easel.exe doctor` 可进一步检查模型配置。
 
-EXE 在线安装器与发行候选构建说明见 [Windows 安装器](docs/windows-installer.md)。EXE 内嵌固定发行版本和 SHA-256，代码按版本放在 `%LOCALAPPDATA%\Easel\versions`，用户数据保存在 `%LOCALAPPDATA%\Easel\data`。本地候选包仍需上传对应 Release 并完成干净 Windows 验收后才能作为正式下载入口。
+Windows 自包含 EXE 安装器与发行候选构建说明见 [Windows 安装器](docs/windows-installer.md)。双击 EXE 可在原生窗口选择目录并查看安装进度；同版本 ZIP 和 SHA-256 已内嵌，无需先上传 GitHub Release。Python 依赖、OpenClaw 和 Chromium 仍需联网。代码按版本放在 `%LOCALAPPDATA%\Easel\versions`，用户数据保存在 `%LOCALAPPDATA%\Easel\data`。当前候选仍需完成干净 Windows 验收和代码签名。
 
 `bash setup.sh` 是可重复运行的引导式安装器，直接执行即可，不需要先手动安装 Easel 依赖。安装过程中会：
 

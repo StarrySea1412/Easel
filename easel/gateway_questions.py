@@ -37,9 +37,8 @@ PROFILE_DIR = Path(os.environ.get("EASEL_OPENCLAW_STATE_DIR") or (HOME / ".openc
 PROFILE_STATE_DIR = PROFILE_DIR / "state"
 PROFILE_DB = PROFILE_STATE_DIR / "openclaw.sqlite"
 
-# Gateway loopback endpoint (default port 18789; overridable when reconfigured).
-GATEWAY_HOST = os.environ.get("EASEL_GATEWAY_HOST", "127.0.0.1")
-GATEWAY_PORT = int(os.environ.get("EASEL_GATEWAY_PORT", "18789"))
+# Resolve on each connection so configuration changes use the same endpoint as Web/doctor.
+from easel.gateway_endpoint import websocket_url
 
 # Gateway WS handshake constants. Kept here as a single source of truth rather
 # than buried in the connect payload — bump these to track OpenClaw's gateway
@@ -266,7 +265,7 @@ class GatewayClient:
         # header, which the gateway reads as a browser request and refuses to
         # silent-local-pair (NOT_PAIRED). A CLI operator must present no Origin.
         ws = self._ws_lib.create_connection(
-            f"ws://{GATEWAY_HOST}:{GATEWAY_PORT}", timeout=self.timeout,
+            websocket_url(), timeout=self.timeout,
             suppress_origin=True)
         try:
             first = json.loads(ws.recv())

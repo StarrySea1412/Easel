@@ -1,0 +1,25 @@
+.image-reverse-workspace { align-items: start; }
+.image-upload-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; margin-top: 22px; padding: 26px 18px; border: 1px dashed var(--border-strong); border-radius: 12px; background: var(--surface-2); color: var(--text-secondary); text-align: center; }
+.image-upload-zone:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
+.image-upload-zone > img { display: block; max-width: 100%; max-height: 240px; border-radius: 8px; object-fit: contain; }
+.image-upload-zone > p { margin: 0; max-width: 100%; font-size: 12px; overflow-wrap: anywhere; }
+.image-upload-zone > span { font-size: 11px; }
+.image-upload-button { cursor: pointer; }
+.image-file-input { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; white-space: nowrap; border: 0; }
+.image-upload-zone:focus-within .image-upload-button { border-color: var(--accent-start); }
+.image-reverse-fields { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; margin-top: 22px; }
+.image-reverse-fields > div { min-width: 0; }
+.image-reverse-fields label { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 600; }
+.image-reverse-fields .easel-select { height: calc(100% - 31px); }
+.image-optional { margin-left: 5px; color: var(--text-tertiary); font-size: 11px; font-weight: 400; }
+.image-controls #reverse-instruction { min-height: 92px; margin-bottom: 18px; }
+.image-reverse-result { min-height: 480px; }
+.image-reverse-result .image-empty { min-height: 360px; }
+.image-source { display: inline-flex; flex: none; padding: 4px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-end) !important; font-size: 11px; }
+.image-reverse-result #reverse-prompt { min-height: 260px; }
+.image-reverse-result #reverse-negative { min-height: 90px; }
+.image-controls > .image-match-ratio { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.image-match-ratio input { flex: none; margin-top: 3px; accent-color: var(--accent-start); }
+.image-reverse-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.image-reverse-actions .btn { flex: 1 1 140px; }
+@media (max-width: 600px) { .image-reverse-fields { grid-template-columns: 1fr; }.image-reverse-fields .easel-select { height: auto; }.image-upload-zone { padding: 22px 14px; }.image-reverse-result { min-height: 360px; } }

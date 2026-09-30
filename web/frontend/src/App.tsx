@@ -1,10 +1,14 @@
+import ImageStudioPage from './components/ImageStudioPage';
+import { useImageStudio } from './hooks/useImageStudio';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
 import ChatPage from './components/ChatPage';
 import SkillPage from './components/SkillPage';
 import OutputsPage from './components/OutputsPage';
+import ActivityPage from './components/ActivityPage';
 import AccountsPage from './components/AccountsPage';
+import ContentAnalysisPage from './components/ContentAnalysisPage';
 import ProfilePage from './components/ProfilePage';
 import DashboardPage from './components/DashboardPage';
 import TrendsPage from './components/TrendsPage';
@@ -15,6 +19,7 @@ import BreakdownPage from './components/BreakdownPage';
 import SubNav from './components/SubNav';
 import OnboardingWizard from './components/OnboardingWizard';
 import SettingsPanel from './components/SettingsPanel';
+import type { SettingsSection } from './components/SettingsPanel';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
 import { questionStatus } from './lib/api';
@@ -46,6 +51,11 @@ function onboardingSeen(): boolean {
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const imageStudio = useImageStudio(currentPage === 'image');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
+  const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
+  const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
+  const [outputFilter, setOutputFilter] = useState('');
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState('');
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
@@ -53,7 +63,6 @@ export default function App() {
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 挂载时决定进哪个会话。规则：
   //  - 同一标签刷新（sessionStorage 记着本标签的会话）→ 直接续上（同标签不算冲突）。
@@ -236,6 +245,7 @@ export default function App() {
     text: string,
     persona: string | undefined,
     attachments: UploadedFile[] = [],
+    selectedSkills: string[] = [],
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -266,7 +276,7 @@ export default function App() {
           }
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '',
+            role: 'assistant', content: a?.content || '', turnId,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -284,6 +294,7 @@ export default function App() {
           appendAssistant(sessionId, {
             role: 'assistant',
             content: (a?.content ? a.content + '\n\n' : '') + `Error: ${err.message}`,
+            turnId,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           });
           clearStream(sessionId);
@@ -332,6 +343,7 @@ export default function App() {
       },
       // onHeartbeat：防呆心跳（30s 静默）。只设独立的「未卡住」提示，绝不写 activity/thinking → 不顶掉真实状态。
       (note) => setStreams((p) => (p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
+      selectedSkills,
     );
   }, [appendAssistant, clearStream]);
 
@@ -369,7 +381,7 @@ export default function App() {
           }
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '（无输出）',
+            role: 'assistant', content: a?.content || '（无输出）', turnId,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -404,7 +416,7 @@ export default function App() {
         // completed per-session snapshot; otherwise terminate stale recovery.
         void fetchLastTurn(sessionId, turnId).then((r) => {
           if (r.status === 'done') {
-            appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）' });
+            appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）', turnId });
           } else {
             appendAssistant(sessionId, {
               role: 'assistant',
@@ -456,6 +468,7 @@ export default function App() {
     attachments: UploadedFile[] = [],
     legacyAgentText?: string,
     truncateAt?: number,
+    selectedSkills: string[] = [],
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -471,6 +484,7 @@ export default function App() {
           messages: [...base, {
             role: 'user',
             content: visible,
+            selectedSkills,
             ...(attachments.length ? { attachments } : {}),
             ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
           } as ChatMessage],
@@ -481,11 +495,11 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments);
+    startStream(sessionId, agentMessage, persona, attachments, selectedSkills);
   }, [selectedPersona, startStream]);
 
-  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[]) => {
-    sendUserAndStream(sessionId, displayText, attachments);
+  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = []) => {
+    sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -496,7 +510,8 @@ export default function App() {
     attachments?: UploadedFile[],
     legacyAgentText?: string,
   ) => {
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex);
+    const selectedSkills = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.selectedSkills || [];
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills);
   }, [sendUserAndStream]);
 
   // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
@@ -507,6 +522,17 @@ export default function App() {
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
     sendUserAndStream(ns.id, prompt);
+  }, [selectedPersona, sendUserAndStream]);
+
+  // 工作台「一句话开干」：用户输入什么就发什么，不再替用户编排指令（v2 直达创作入口）。
+  const handleQuickPrompt = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    const ns = createSession(selectedPersona || undefined);
+    setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
+    setActiveSessionId(ns.id);
+    setCurrentPage('chat');
+    sendUserAndStream(ns.id, t);
   }, [selectedPersona, sendUserAndStream]);
 
   const handleStopStream = useCallback((sessionId: string) => {
@@ -668,15 +694,18 @@ export default function App() {
             gatewayStatus={gatewayStatus}
             onNavigate={setCurrentPage}
             onUseTopic={handleUseTopic}
+            onQuickPrompt={handleQuickPrompt}
           />
         );
+      case 'image':
+        return <ImageStudioPage studio={imageStudio} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('imagegen'); setCurrentPage('outputs'); }} />;
       case 'chat':
         return activeSession ? (
           <ChatPage
             key={activeSession.id}
             session={activeSession}
             stream={streams[activeSession.id]}
-            onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
+            onSend={(displayText, attachments, selectedSkills) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills)}
             onStop={() => handleStopStream(activeSession.id)}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -713,11 +742,17 @@ export default function App() {
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
       case 'outputs':
-        return <OutputsPage />;
+        return <OutputsPage initialFilter={outputFilter} onReuseImage={(prompt, size) => { imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
-        return <AccountsPage onNavigateIdeas={() => setCurrentPage('ideas')} />;
+        return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
+      case 'analysis':
+        return <ContentAnalysisPage initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
+      case 'activity':
+        return <ActivityPage sessions={sessions} activeSessionId={activeSessionId} streams={streams} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
+      case 'settings':
+        return <SettingsPanel initialSection={settingsSection} />;
       default:
         return null;
     }
@@ -748,7 +783,7 @@ export default function App() {
     <div className="app-layout">
       <Sidebar
         currentPage={currentPage}
-        onPageChange={setCurrentPage}
+        onPageChange={(page) => { if (page === 'settings') setSettingsSection('model'); setCurrentPage(page); }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}
@@ -762,7 +797,6 @@ export default function App() {
         onSessionArchive={handleSessionArchive}
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
-        onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main-content">
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
@@ -795,9 +829,6 @@ export default function App() {
       {showWizard && (
         <OnboardingWizard onClose={() => setShowWizard(false)} onCreated={handleProfileCreated} />
       )}
-
-      {/* 设置（统一入口：模型配置 · 环境安装 · 更多设置） */}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

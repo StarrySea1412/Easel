@@ -211,8 +211,7 @@ def cmd_stats(a) -> int:
     r = {"platform": "bilibili", "name": "B站", "nickname": "", "loggedIn": False,
          "followers": None, "likes": None, "following": None, "posts": None,
          "metrics": [], "notes": [],
-         "growth": {"last": {"followers": 0, "likes": 0, "posts": None, "since_days": 0.0},
-                    "day": None, "week": None, "month": None, "year": None},
+         "growth": {"last": None, "day": None, "week": None, "month": None, "year": None},
          "fetched_at": int(time.time())}
     if not cookie:
         print(json.dumps(r, ensure_ascii=False)); return 0
@@ -254,11 +253,17 @@ def cmd_stats(a) -> int:
             av = it.get("Archive") or it.get("archive") or it
             sv = it.get("stat") or {}
             bvid = av.get("bvid") or ""
+            metrics = {key: sv[field] for key, field in
+                       (("views", "view"), ("likes", "like"), ("comments", "reply"),
+                        ("collects", "favorite"), ("shares", "share"))
+                       if type(sv.get(field)) is int and sv[field] >= 0}
+            summary = ' · '.join(f'{label}{_fmt(metrics[key])}' for key, label in
+                                 (("views", "▶"), ("likes", "👍"), ("comments", "💬")) if key in metrics)
             notes.append({
                 "title": av.get("title") or "(无标题)",
                 "url": f"https://www.bilibili.com/video/{bvid}" if bvid else "",
                 "cover": _https(av.get("cover") or ""),
-                "stat": f"▶{_fmt(sv.get('view', 0))} 👍{_fmt(sv.get('like', 0))} 💬{_fmt(sv.get('reply', 0))}",
+                "stat": summary, "metrics": metrics,
             })
         r["notes"] = notes
     except Exception as e:  # noqa: BLE001

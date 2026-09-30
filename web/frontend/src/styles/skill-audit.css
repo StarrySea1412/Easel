@@ -1,0 +1,21 @@
+.skill-audit-panel { flex: none; min-width: 0; margin: 4px clamp(14px, 3vw, 28px) 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.skill-audit-toggle { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 13px; border: 0; border-radius: inherit; background: transparent; color: var(--text-secondary); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.skill-audit-toggle > :last-child { margin-left: auto; }
+.skill-audit-body { padding: 4px 14px 14px; max-height: min(60vh, 600px); overflow: auto; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.skill-audit-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.skill-audit-note, .skill-audit-empty { margin: 10px 0; color: var(--text-tertiary); font-size: 11.5px; line-height: 1.7; }
+.skill-audit-empty { padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.skill-audit-error { color: #b91c1c; font-size: 12px; line-height: 1.6; }
+.skill-audit-turn { border-top: 1px solid var(--border); }
+.skill-audit-turn > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 12px 2px; cursor: pointer; font-size: 11.5px; }
+.skill-audit-turn > summary > :last-child { margin-left: auto; color: var(--accent-end); }
+.skill-audit-body h3 { margin: 18px 0 8px; font-size: 13px; color: var(--text); }
+.skill-audit-body h4 { margin: 12px 0 6px; font-size: 12px; }
+.skill-audit-item { background: var(--surface-2); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.skill-audit-item-heading { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+.skill-audit-item-heading > span { color: var(--text-tertiary); }
+.skill-audit-body ul { padding-left: 20px; line-height: 1.7; }
+.skill-audit-item p { line-height: 1.7; margin-bottom: 0; }
+.skill-audit-critique { white-space: pre-wrap; line-height: 1.8; padding: 0 10px 12px; }
+.skill-audit-critique small { color: var(--text-tertiary); }
+.skill-audit-toggle:focus-visible, .skill-audit-turn > summary:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }

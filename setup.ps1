@@ -11,6 +11,68 @@ $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 if (-not $DataDir) { $DataDir = $Root }
 $DataDir = [System.IO.Path]::GetFullPath($DataDir)
+$NpmPrefix = Join-Path $Root '.tools\npm'
+
+function Test-NodeCompatible($Version) {
+    if ($Version -notmatch '^(\d+)\.(\d+)\.') { return $false }
+    $major = [int]$matches[1]; $minor = [int]$matches[2]
+    return ($major -eq 24 -and $minor -ge 16) -or ($major -eq 26 -and $minor -ge 1) -or $major -ge 27
+}
+
+function Get-NodeInfo {
+    # 扫描全部候选目录里的 node.exe：当前 PATH、注册表 Machine/User PATH，以及
+    # winget 的便携包目录。多个 Node 共存时（旧版在 Program Files、新版在 winget
+    # 目录但尚未进 PATH），按 PATH 顺序拿到的可能是旧版；这里优先返回满足版本
+    # 要求的那个。返回 @{ dir; version } 或 $null。
+    $dirs = @()
+    foreach ($entry in (($env:Path -split ';') +
+            ([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') +
+            ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';'))) {
+        $dir = $entry.Trim()
+        if (-not $dir) { continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $dir 'node.exe') -PathType Leaf)) { continue }
+        if ($dirs -notcontains $dir) { $dirs += $dir }
+    }
+    $wingetRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    $wingetNode = Get-ChildItem -Path $wingetRoot -Directory -Filter 'OpenJS.NodeJS*' -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-ChildItem -Path $_.FullName -Recurse -Filter 'node.exe' -File -ErrorAction SilentlyContinue } |
+        Select-Object -First 1
+    if ($wingetNode -and $dirs -notcontains $wingetNode.DirectoryName) { $dirs += $wingetNode.DirectoryName }
+    $fallback = $null
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        foreach ($dir in $dirs) {
+            # PS5.1 下 EAP=Stop + stderr 重定向可能把原生命令的报错升级为终止错误，这里先放宽。
+            $ver = & (Join-Path $dir 'node.exe') -p 'process.versions.node' 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
+            if (Test-NodeCompatible $ver) { return @{ dir = $dir; version = $ver } }
+            if (-not $fallback) { $fallback = @{ dir = $dir; version = $ver } }
+        }
+    } finally { $ErrorActionPreference = $oldPreference }
+    return $fallback
+}
+
+function Use-NodeDir($Info) {
+    # 把选中的 Node 目录提到 PATH 最前，并记录到 .tools\node-dir.txt，供启动器
+    # （bootstrapper.activate）固定运行时。写入失败只影响启动器回退，不阻断安装。
+    if (-not $Info) { return }
+    $env:Path = $Info.dir + ';' + $env:Path
+    try {
+        New-Item -ItemType Directory -Path (Join-Path $Root '.tools') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root '.tools\node-dir.txt'), $Info.dir,
+            (New-Object System.Text.UTF8Encoding $false))
+    } catch { }
+}
+
+# The release owns its OpenClaw version. Never replace another app's global copy.
+$env:Path = "$NpmPrefix;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+    [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+# 每个 phase 都由 install_runner 在独立的 PowerShell 进程里执行，而进程顶部的
+# PATH 重置把注册表 Machine/User PATH 排在继承值之前；这里统一选定兼容 Node 并
+# 前置，保证本进程与后续 npm/openclaw 都解析到同一个运行时。
+$script:NodeInfo = Get-NodeInfo
+if ($script:NodeInfo -and (Test-NodeCompatible $script:NodeInfo.version)) { Use-NodeDir $script:NodeInfo }
 $env:EASEL_DATA_DIR = $DataDir
 $env:EASEL_ROOT = $Root
 if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR }
@@ -27,6 +89,35 @@ if (Test-Path -LiteralPath $manifestPath) {
     }
 }
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+# ZIP and EXE installations own their state and port; do not edit another
+# application's ~/.openclaw-easel profile. Persist the choice across launches.
+$runtimeFile = Join-Path $DataDir 'runtime-launch.json'
+if (Test-Path -LiteralPath $runtimeFile) {
+    $runtimeSettings = Get-Content -LiteralPath $runtimeFile -Raw -Encoding UTF8 | ConvertFrom-Json
+} else {
+    $stateDirectory = if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:EASEL_OPENCLAW_STATE_DIR } else { Join-Path $DataDir 'openclaw' }
+    $candidatePort = if ($env:OPENCLAW_GATEWAY_PORT -match '^\d+$') { [int]$env:OPENCLAW_GATEWAY_PORT } elseif ($env:EASEL_GATEWAY_PORT -match '^\d+$') { [int]$env:EASEL_GATEWAY_PORT } else { 37289 }
+    $listener = $null
+    try {
+        try {
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $candidatePort)
+            $listener.Start()
+        } catch {
+            if ($listener) { $listener.Stop() }
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+        }
+        $candidatePort = $listener.LocalEndpoint.Port
+    } finally { if ($listener) { $listener.Stop() } }
+    $runtimeSettings = @{ stateDir=$stateDirectory; gatewayPort=$candidatePort }
+    [IO.File]::WriteAllText($runtimeFile, ($runtimeSettings | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+}
+$env:EASEL_OPENCLAW_STATE_DIR = [string]$runtimeSettings.stateDir
+$env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR
+$env:OPENCLAW_GATEWAY_PORT = [string]$runtimeSettings.gatewayPort
+$env:EASEL_GATEWAY_PORT = $env:OPENCLAW_GATEWAY_PORT
+$env:OPENCLAW_HOME = Join-Path $DataDir 'openclaw-home'
+New-Item -ItemType Directory -Path $env:OPENCLAW_HOME -Force | Out-Null
 
 function Save-SystemBootstrap($Status, $Detail) {
     # This path must work before Python exists. Keep the same identity/state schema
@@ -163,12 +254,29 @@ Ensure-Command 'git' 'Git.Git' '请安装 Git for Windows 并加入 PATH。'
 Ensure-Command 'node' 'OpenJS.NodeJS.LTS' '请安装 Node.js 24.16+ 并加入 PATH。'
 Ensure-Command 'npm' 'OpenJS.NodeJS.LTS' '请安装 Node.js 24.16+ 并加入 PATH。'
 Ensure-Command 'ffmpeg' 'Gyan.FFmpeg' '请安装 FFmpeg 并加入 PATH。'
-$nodeVersion = & node -p 'process.versions.node'
-if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^(\d+)\.(\d+)\.') { Fail '无法读取 Node.js 版本。' }
-$major = [int]$matches[1]; $minor = [int]$matches[2]
-if (-not (($major -eq 24 -and $minor -ge 16) -or ($major -eq 26 -and $minor -ge 1) -or $major -ge 27)) {
-    Fail 'Node.js 版本不兼容：需要 24.16+（24.x）或 26.1+；请手动更新后重试。'
+$nodeInfo = Get-NodeInfo
+if (-not $nodeInfo) { Fail '无法读取 Node.js 版本。' }
+$nodeVersion = $nodeInfo.version
+if (-not (Test-NodeCompatible $nodeVersion)) {
+    if (-not $AllowWinget) { Fail 'Node.js 版本不兼容：需要 24.16+（24.x）或 26.1+；允许 winget 自动升级后可重试。' }
+    Require-Command 'winget' '请安装 Windows App Installer 后重试。'
+    Info "Node.js $nodeVersion 不兼容，尝试用 winget 升级 LTS..."
+    & winget upgrade --id OpenJS.NodeJS.LTS --exact --accept-source-agreements --accept-package-agreements
+    # winget 退出码 0 = 已升级；43 =「没有可用的升级」（已是最新），两者都算成功。
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 43) {
+        & winget install --id OpenJS.NodeJS.LTS --exact --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -ne 0) { Fail 'Node.js 自动升级失败；请检查 winget 输出后重试。' }
+    }
+    # winget 装的是便携包，可能尚未进 PATH；重新扫描全盘候选目录。
+    $nodeInfo = Get-NodeInfo
+    if (-not $nodeInfo) { Fail 'Node.js 升级后无法读取版本。' }
+    $nodeVersion = $nodeInfo.version
+    if (-not (Test-NodeCompatible $nodeVersion)) {
+        Fail "Node.js 自动升级后仍不兼容（$nodeVersion）；请检查 PATH 中的旧版本。"
+    }
 }
+# 固定兼容 Node 目录（写入 .tools\node-dir.txt，PATH 前置对当前进程立即生效）。
+Use-NodeDir $nodeInfo
 $pythonCommand = $null
 $pythonArgs = @()
 $versionCheck = if ($Manifest) { 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' } else { 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' }
@@ -222,19 +330,23 @@ function Invoke-openclaw {
 Info '安装 OpenClaw...'
 $wantedVersion = if ($Manifest) { [string]$Manifest.dependencies.openclaw } else { 'latest' }
 if ($Manifest -and $wantedVersion -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') { Fail '发行包 OpenClaw 版本没有精确锁定。' }
-if (Get-Command openclaw -ErrorAction SilentlyContinue) {
-    $installedVersion = (& openclaw --version | Out-String)
-    if ($LASTEXITCODE -ne 0) { Fail '已有 OpenClaw 无法运行。' }
-    if ($Manifest -and ($installedVersion -notmatch '(?<!\d)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)' -or $matches[1] -ne $wantedVersion)) {
-        Fail "OpenClaw 版本不兼容：此发行版要求 $wantedVersion，请手动确认更新已有全局安装后重试。"
-    }
-} else {
-    & npm install -g "openclaw@$wantedVersion" --loglevel warn
+$localOpenClaw = Join-Path $NpmPrefix 'openclaw.cmd'
+$installLocal = -not (Test-Path -LiteralPath $localOpenClaw -PathType Leaf)
+if (-not $installLocal) {
+    $installedVersion = (& $localOpenClaw --version | Out-String)
+    if ($LASTEXITCODE -ne 0) { $installLocal = $true }
+    elseif ($Manifest -and ($installedVersion -notmatch '(?<!\d)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)' -or $matches[1] -ne $wantedVersion)) { $installLocal = $true }
+}
+if ($installLocal) {
+    New-Item -ItemType Directory -Path $NpmPrefix -Force | Out-Null
+    Info "安装隔离的 OpenClaw $wantedVersion（不修改全局版本）..."
+    & npm install --global --prefix $NpmPrefix "openclaw@$wantedVersion" --no-audit --no-fund --loglevel warn
     if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 安装失败。' }
 }
-Require-Command 'openclaw' '请确认 npm 全局 bin 已加入 PATH。'
-& openclaw --version
-if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 安装后验证失败。' }
+if (-not (Test-Path -LiteralPath $localOpenClaw -PathType Leaf)) { Fail '隔离的 OpenClaw 安装后未找到启动入口。' }
+$installedVersion = (& $localOpenClaw --version | Out-String)
+if ($LASTEXITCODE -ne 0) { Fail '隔离的 OpenClaw 安装后验证失败。' }
+if ($Manifest -and ($installedVersion -notmatch '(?<!\d)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)' -or $matches[1] -ne $wantedVersion)) { Fail '隔离的 OpenClaw 版本验证失败。' }
 
 }
 
@@ -457,6 +569,12 @@ function Invoke-skills {
 
 Info '同步 skills 与 workspace...'
 $workspace = $env:EASEL_OPENCLAW_WORKSPACE
+if (-not $workspace) {
+    # Onboard records the exact workspace. Read that first: a stopped Gateway's
+    # status probe may spawn descendants that outlive subprocess timeouts on Windows.
+    $workspace = (& $Python -c "from easel.openclaw_workspace import _from_config; print(_from_config() or '')" | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0) { Fail '无法读取配置中的 workspace。' }
+}
 if (-not $workspace) {
     $workspace = (& $Python (Join-Path $Root 'easel\openclaw_workspace.py') | Select-Object -Last 1)
     if ($LASTEXITCODE -ne 0) { Fail '无法确定 OpenClaw workspace。' }

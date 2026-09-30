@@ -18,6 +18,11 @@ if [ -n "${EASEL_OPENCLAW_STATE_DIR:-}" ]; then
     export OPENCLAW_STATE_DIR="$EASEL_OPENCLAW_STATE_DIR"
 fi
 
+# Resolve and pass the same port to OpenClaw and health checks.
+GATEWAY_PORT="$(PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${EASEL_PYTHON:-python3}" -c 'from easel.gateway_endpoint import resolve_gateway_port; print(resolve_gateway_port())')"
+export OPENCLAW_GATEWAY_PORT="$GATEWAY_PORT"
+GATEWAY_HEALTH="http://127.0.0.1:${GATEWAY_PORT}/healthz"
+
 # ---- 跨平台兼容（macOS 没有 ss/setsid/procfs）--------------------------
 # ss/setsid 属 iproute2/util-linux，/proc 是 Linux 专属；macOS/BSD 三者都没有。
 # 按可用性回退，让 gateway.sh 在 Linux 与 macOS 上都能起停。
@@ -58,11 +63,11 @@ _cmdline() {
 }
 
 gateway_live() {
-    curl -sf --max-time 2 http://localhost:18789/healthz > /dev/null 2>&1
+    curl -sf --max-time 2 "$GATEWAY_HEALTH" > /dev/null 2>&1
 }
 
 gateway_pid() {
-    _port_pid 18789
+    _port_pid "$GATEWAY_PORT"
 }
 
 adapter_port() {
@@ -151,7 +156,7 @@ case "${1:-status}" in
         ;;
     stop)
         PID="$(gateway_pid)"
-        if [ -n "$PID" ] && kill "$PID" 2>/dev/null; then
+        if [ -n "$PID" ] && [[ "$(_cmdline "$PID")" == *"openclaw"* ]] && [[ "$(_cmdline "$PID")" == *"--profile easel"* ]] && kill "$PID" 2>/dev/null; then
             echo "[easel] Gateway stopped"
         else
             echo "[easel] Gateway was not running"
@@ -166,7 +171,7 @@ case "${1:-status}" in
     status)
         if gateway_live; then
             PID="$(gateway_pid)"
-            HEALTH=$(curl -sf http://localhost:18789/healthz 2>&1 || echo '{"ok":false}')
+            HEALTH=$(curl -sf "$GATEWAY_HEALTH" 2>&1 || echo '{"ok":false}')
             echo "[easel] Gateway running${PID:+ (PID $PID)}, profile: $PROFILE"
             echo "  health: $HEALTH"
         else

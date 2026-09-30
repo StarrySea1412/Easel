@@ -130,18 +130,29 @@ def _codex_options(config: str) -> dict:
             'wire_api': provider.get('wire_api', '')}
 
 
-def _model_hint(app_type: str, cfg: dict) -> str:
-    """从配置里取一个模型名提示（取不到就空着，让用户用「获取模型」或手填）。"""
+def _model_hints(app_type: str, cfg: dict) -> list[str]:
+    """保留配置里明确给出的全部模型，供用户选择，而不是只取第一项。"""
     env = cfg.get("env") if isinstance(cfg.get("env"), dict) else {}
+    models: list[str] = []
     if app_type == "claude":
         for k, v in env.items():
             if isinstance(v, str) and re.match(r"ANTHROPIC_(DEFAULT_\w+_)?MODEL(_NAME)?$", k) and v.strip():
-                return re.sub(r"\[.*?\]$", "", v).strip()
+                models.append(re.sub(r"\[.*?\]$", "", v).strip())
     if app_type == "codex":
         got = _codex_options(str(cfg.get("config") or "")).get('model', '')
-        if got:
-            return got
-    return ""
+        if isinstance(got, str) and got.strip():
+            models.append(got.strip())
+    return list(dict.fromkeys(m for m in models if m))
+
+
+def _expand_models(candidate: dict, models: list[str]) -> list[dict]:
+    """每个模型拥有可重复读取的候选 ID，导入时仍校验完整候选指纹。"""
+    unique = list(dict.fromkeys(m.strip() for m in models if isinstance(m, str) and m.strip()))
+    if not unique:
+        return [candidate]
+    return [{**candidate, "model": model,
+             "id": hashlib.sha1(f'{candidate["id"]}|{model}'.encode('utf-8')).hexdigest()[:12]
+             if len(unique) > 1 else candidate["id"]} for model in unique]
 
 
 def _candidate(source: str, name: str, base: str, key: str, protocol: str,
@@ -171,7 +182,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         "source": source,
         "name": (name or base or "未命名").strip()[:80],
         "baseUrl": base,
-        "model": _model_hint(app_type, cfg) if cfg else "",
+        "model": next(iter(_model_hints(app_type, cfg)), "") if cfg else "",
         "protocol": protocol,
         "appType": app_type,
         "note": note,
@@ -190,7 +201,7 @@ def openclaw_path() -> Path:
 
 
 def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
-    """读 openclaw.json 的 models.providers → 候选列表（跳过 app 自身保留的槽位）。"""
+    """读 openclaw.json 的 models.providers，将每个明确配置的模型作为候选。"""
     if not path.is_file():
         return [], [f"未找到 {path}"]
     try:
@@ -209,9 +220,7 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
         base = str(pv.get("baseUrl") or "").strip()
         key = str(pv.get("apiKey") or "").strip()
         models = pv.get("models") if isinstance(pv.get("models"), list) else []
-        mid = ""
-        if models and isinstance(models[0], dict):
-            mid = str(models[0].get("id") or "").strip()
+        model_ids = [str(model.get("id") or "").strip() for model in models if isinstance(model, dict)]
         api = str(pv.get("api") or "")
         protocol = {"anthropic-messages": "anthropic", "openai-completions": "openai",
                     "openai-responses": "openai-responses"}.get(api, "unknown")
@@ -219,9 +228,7 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
             protocol = {"openai": "openai", "anthropic": "anthropic", "relay": "anthropic"}.get(pkey, "unknown")
         cand = _candidate("openclaw", str(pkey), base, key, protocol,
                           app_type="openclaw", cfg=pv, note="来自本机 OpenClaw 配置")
-        if mid:
-            cand["model"] = mid
-        out.append(cand)
+        out.extend(_expand_models(cand, model_ids))
     return out, []
 
 
@@ -260,7 +267,7 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
         protocol = _cc_protocol(str(r["app_type"]), cfg)
         cand = _candidate("cc-switch", str(r["name"]), _pick_base(cfg), _pick_key(cfg),
                           protocol, app_type=str(r["app_type"]), cfg=cfg)
-        out.append(cand)
+        out.extend(_expand_models(cand, _model_hints(str(r["app_type"]), cfg)))
     con.close()
     return out, errors
 
@@ -288,8 +295,9 @@ def _read_ccswitch_json(path: Path) -> tuple[list[dict], list[str]]:
             protocol = _cc_protocol(str(app_type), cfg)
             name = str(p.get("name") or pid)
             try:
-                out.append(_candidate("cc-switch", name, _pick_base(cfg), _pick_key(cfg),
-                                      protocol, app_type=str(app_type), cfg=cfg))
+                cand = _candidate("cc-switch", name, _pick_base(cfg), _pick_key(cfg),
+                                  protocol, app_type=str(app_type), cfg=cfg)
+                out.extend(_expand_models(cand, _model_hints(str(app_type), cfg)))
             except Exception as e:  # noqa: BLE001  单条坏了不影响整体
                 errors.append(f"条目解析失败：{type(e).__name__}")
     return out, errors

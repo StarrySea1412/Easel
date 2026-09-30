@@ -233,3 +233,75 @@ def test_managed_scraper_returns_data_without_mutating_account_files(local, monk
     data = json.loads(capsys.readouterr().out)
     assert data["accountId"] == "bob" and data["noteSnapshotCount"] == 0
     assert {path: path.read_bytes() for path in local.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("changes,returncode", [
+    ({"error": "browser unavailable"}, 0), ({}, 1), ({"loggedIn": "false"}, 0),
+    ({"notes": None}, 0), ({"notes": [None]}, 0),
+])
+def test_failed_or_malformed_scrape_keeps_existing_evidence(local, monkeypatch, changes, returncode):
+    import_notes()
+    before = {path: path.read_bytes() for path in local.rglob("*") if path.is_file()}
+    payload = {"loggedIn": True, "accountId": "bob", "notes": [note()], **changes}
+    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        stdout=json.dumps(payload), stderr="", returncode=returncode))
+    with pytest.raises(web.HTTPException) as failure:
+        asyncio.run(web.api_analytics("xiaohongshu"))
+    assert failure.value.status_code == 502
+    assert {path: path.read_bytes() for path in local.rglob("*") if path.is_file()} == before
+
+
+def test_scrape_missing_notes_is_not_a_successful_empty_list(local, monkeypatch):
+    import_notes()
+    before = {path: path.read_bytes() for path in local.rglob("*") if path.is_file()}
+    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        stdout=json.dumps({"loggedIn": True, "accountId": "bob"}), stderr="", returncode=0))
+    with pytest.raises(web.HTTPException) as failure:
+        asyncio.run(web.api_analytics("xiaohongshu"))
+    assert failure.value.status_code == 502
+    assert {path: path.read_bytes() for path in local.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("current,baseline", [(None, 2), (2, None), (True, 2), (2, False)])
+def test_growth_requires_numeric_evidence(current, baseline):
+    now = int(time.time())
+    growth = st.growth_windows([{"ts": now - 86400, "followers": baseline}],
+                               {"ts": now, "followers": current})
+    assert growth["last"]["followers"] is None and growth["day"]["followers"] is None
+    assert growth["week"] is None and growth["month"] is None and growth["year"] is None
+
+
+def test_failed_platform_login_does_not_discard_imported_analysis(local, monkeypatch):
+    import_notes(records=[note(fetched_at=int(time.time()))])
+    before = ae.generation(local)
+    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        stdout=json.dumps({"loggedIn": False, "notes": []}), stderr="", returncode=0))
+    data = asyncio.run(web.api_analytics("xiaohongshu"))
+    assert ae.generation(local) == before and data["account"]["id"] == "import:alice"
+    assert data["stale"] is False and data["lastGoodAt"] is None
+    assert asyncio.run(web.api_analytics_insights("xiaohongshu"))["sampleSize"] == 1
+
+
+@pytest.mark.parametrize("body,url,valid_empty", [
+    ("暂无笔记", "https://creator.xiaohongshu.com/new/note-manager", True),
+    ("正在加载", "https://creator.xiaohongshu.com/new/note-manager", False),
+    ("暂无笔记", "https://creator.xiaohongshu.com/login", False),
+])
+def test_empty_scrape_requires_an_explicit_empty_state(body, url, valid_empty):
+    page = SimpleNamespace(on=lambda *args: None, goto=lambda *args, **kwargs: None,
+        wait_for_selector=lambda *args, **kwargs: None, wait_for_timeout=lambda *args: None,
+        evaluate=lambda *args: [], inner_text=lambda *args: body, url=url,
+        remove_listener=lambda *args: None)
+    if valid_empty:
+        assert st._scrape_notes("xiaohongshu", page, {}) == []
+    else:
+        with pytest.raises(RuntimeError, match="未保存本次快照"):
+            st._scrape_notes("xiaohongshu", page, {})
+
+
+def test_scrape_navigation_failure_is_not_an_empty_success():
+    def fail(*args, **kwargs):
+        raise TimeoutError("mock page timeout")
+    page = SimpleNamespace(on=lambda *args: None, goto=fail)
+    with pytest.raises(RuntimeError, match="未保存本次快照"):
+        st._scrape_notes("xiaohongshu", page, {})

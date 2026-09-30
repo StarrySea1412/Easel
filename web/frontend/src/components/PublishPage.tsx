@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
   fetchAccounts, publishNow, publishStatus, submitPublishSms, fetchOutputs, mediaUrl,
@@ -7,6 +7,8 @@ import type { AccountItem, OutputFile } from '../lib/api';
 import { loadPublishDraft, savePublishDraft } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconPublish, IconCopy, IconCheck, IconCalendar, IconSkills, IconEdit, IconStop, IconTrash } from './icons';
+import '../styles/publish.css';
+import PlatformIcon from './PlatformIcon';
 
 interface PublishPageProps {
   persona: string;
@@ -58,7 +60,11 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
   // 发布相关
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountsError, setAccountsError] = useState('');
   const [mediaFiles, setMediaFiles] = useState<OutputFile[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(true);
+  const [mediaError, setMediaError] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [pub, setPub] = useState<Record<string, PubState>>({});
@@ -76,8 +82,9 @@ export default function PublishPage({ persona }: PublishPageProps) {
   useEffect(() => () => adaptCtl.current?.abort(), []);   // 离开页面中止流
 
   // 登录态 + 可选媒体列表
-  useEffect(() => {
-    fetchAccounts().then(setAccounts).catch(() => { /* 忽略 */ });
+  const loadAssets = useCallback(() => {
+    setAccountsLoading(true); setAccountsError(''); setMediaLoading(true); setMediaError('');
+    fetchAccounts().then(setAccounts).catch(() => setAccountsError('账号状态加载失败，请重试。')).finally(() => setAccountsLoading(false));
     fetchOutputs().then((roots) => {
       const files: OutputFile[] = [];
       const walk = (n: OutputFile) => {
@@ -87,8 +94,9 @@ export default function PublishPage({ persona }: PublishPageProps) {
       roots.forEach(walk);
       files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
       setMediaFiles(files);
-    }).catch(() => { /* 忽略 */ });
+    }).catch(() => setMediaError('媒体列表加载失败，请重试。')).finally(() => setMediaLoading(false));
   }, []);
+  useEffect(() => { loadAssets(); }, [loadAssets]);
 
   const loginOf = (key: string) => accounts.find((a) => a.platform === key)?.loggedIn ?? false;
 
@@ -176,6 +184,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
   // D. 一键发布（真发布，二次确认）
   const publishAll = async () => {
     if (empty || publishing || checking) return;
+    if (accountsLoading || accountsError) { showToast('请先刷新并确认账号状态，再发布。'); return; }
     const targets = PLATFORMS.filter((p) => platforms.includes(p.key) && PUBLISHABLE.has(p.key));
     if (targets.length === 0) {
       showToast('所选平台暂不支持一键发布（B站请用「复制」或终端 biliup）');
@@ -293,89 +302,113 @@ export default function PublishPage({ persona }: PublishPageProps) {
   const canPublish = platforms.some((k) => PUBLISHABLE.has(k));
 
   return (
-    <div className="publish-page">
+    <div className="publish-page publish-studio">
+      <header className="publish-heading">
+        <div><span className="publish-eyebrow">PUBLISH STUDIO</span>
+          <h1 className="page-title">让好内容，抵达每个平台</h1>
+          <p className="page-subtitle">编辑母版，准备素材，再为不同平台打磨合适的表达。</p>
+        </div>
+        <span className="publish-save-status"><IconCheck size={14} /> 母版自动保存到本机</span>
+      </header>
+      <div className="publish-workspace">
       <div className="publish-editor">
-        <h1 className="page-title"><IconPublish size={21} /> 发布中心</h1>
-        <p className="page-subtitle">一次编辑 → AI 一键改写成各平台版本 → 预检 → 附媒体 → 一键真发布。</p>
+        {(accountsError || mediaError) && <div className="notice-error" role="alert">
+          {[accountsError, mediaError].filter(Boolean).join(' ')}
+          <button className="btn btn-sm" onClick={loadAssets} disabled={accountsLoading || mediaLoading}>重试</button>
+        </div>}
 
-        <label className="field-label">标题</label>
-        <input className="field" value={title} placeholder="标题（部分平台需要）"
+        <section className="publish-section">
+        <div className="publish-section-heading"><div><span className="publish-step">01</span><h2>内容母版</h2></div><span>所有平台的创作起点</span></div>
+        <label className="field-label" htmlFor="publish-title">标题</label>
+        <input id="publish-title" className="field" value={title} placeholder="给这篇内容一个清晰的标题"
           onChange={(e) => setTitle(e.target.value)} />
-        <label className="field-label">正文（母版）</label>
-        <textarea className="field" style={{ minHeight: 180 }} value={body}
-          placeholder="写下你的内容，右侧按各平台规则实时预览；点「一键适配」让 AI 分平台改写…"
+        <label className="field-label publish-body-label" htmlFor="publish-body">正文 <span>{body.length} 字</span></label>
+        <textarea id="publish-body" className="field publish-master-body" value={body}
+          placeholder="写下你的内容，在平台预览中查看效果；点「一键适配」让 AI 分平台改写…"
           onChange={(e) => setBody(e.target.value)} />
 
-        <label className="field-label">话题标签 <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: 12 }}>（逗号分隔，如「AI,职场,干货」；小红书会用 # 联想真正绑定话题）</span></label>
-        <input className="field" value={tags} placeholder="AI,职场,干货"
+        <label className="field-label" htmlFor="publish-tags">话题标签</label>
+        <input id="publish-tags" className="field" value={tags} placeholder="AI,职场,干货"
           onChange={(e) => setTags(e.target.value)} />
+        <p className="publish-field-help">用逗号分隔；小红书会通过 # 联想绑定话题。</p>
+        </section>
 
-        <label className="field-label">发布平台</label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <section className="publish-section">
+        <div className="publish-section-heading"><div><span className="publish-step">02</span><h2>选择平台</h2></div><span>已选 {platforms.length} 个</span></div>
+        <div className="publish-platform-list" aria-label="发布平台">
           {PLATFORMS.map((p) => (
-            <button key={p.key} className={`chip ${platforms.includes(p.key) ? 'active' : ''}`}
-              onClick={() => toggle(p.key)}>{p.label}</button>
+            <button key={p.key} className={`publish-platform ${platforms.includes(p.key) ? 'active' : ''}`} aria-pressed={platforms.includes(p.key)}
+              onClick={() => toggle(p.key)}><span className="publish-platform-name"><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span><span className="publish-platform-check">{platforms.includes(p.key) ? <IconCheck size={13} /> : '+'}</span></button>
           ))}
         </div>
+        <p className="publish-field-help">勾选后查看专属预览。发布前请在账号页完成登录。</p>
+        </section>
 
-        <label className="field-label" style={{ marginTop: 14 }}>
-          媒体附件 {selectedMedia.length > 0 && <span className="pv-badge">{selectedMedia.length} 个</span>}
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: 12 }}>（小红书/抖音/快手/微信视频号/B站必需，从内容库选；抖音、视频号、B站须为视频）</span>
-        </label>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-sm" onClick={() => setShowPicker((v) => !v)}>
+        <section className="publish-section">
+        <div className="publish-section-heading"><div><span className="publish-step">03</span><h2>媒体素材</h2></div><span>{selectedMedia.length ? `已选 ${selectedMedia.length} 个` : '从内容库选取'}</span></div>
+        <div className="publish-media-selection">
+          <button className="btn btn-sm" aria-expanded={showPicker} onClick={() => setShowPicker((v) => !v)}>
             <IconSkills size={13} /> {showPicker ? '收起' : '选择媒体'}
           </button>
           {selectedMedia.map((path) => (
-            <div key={path} className="media-chip" onClick={() => toggleMedia(path)} title="点击移除">
+            <button key={path} className="media-chip" onClick={() => toggleMedia(path)} title="点击移除" aria-label={`移除素材 ${mediaFiles.find((f) => f.path === path)?.name || path}`}>
               {mediaFiles.find((f) => f.path === path)?.kind === 'image'
                 ? <img src={mediaUrl(path)} alt="" /> : <span className="media-vid">🎬</span>}
               <span className="media-x">×</span>
-            </div>
+            </button>
           ))}
         </div>
         {showPicker && (
           <div className="media-grid">
-            {mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频</div>}
+            {mediaLoading && <div className="dash-empty">正在加载媒体…</div>}
+            {!mediaLoading && mediaError && <div className="dash-empty">媒体列表暂不可用，请重试。</div>}
+            {!mediaLoading && !mediaError && mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频</div>}
             {mediaFiles.slice(0, 40).map((f) => (
-              <div key={f.path}
+              <button key={f.path} aria-pressed={selectedMedia.includes(f.path)} aria-label={`选择素材 ${f.name}`}
                 className={`media-cell ${selectedMedia.includes(f.path) ? 'sel' : ''}`}
                 onClick={() => toggleMedia(f.path)} title={f.path}>
                 {f.kind === 'image'
                   ? <img src={mediaUrl(f.path)} alt={f.name} loading="lazy" />
                   : <span className="media-vid">🎬<br />{f.name.slice(0, 12)}</span>}
                 {selectedMedia.includes(f.path) && <span className="media-check">✓</span>}
-              </div>
+              </button>
             ))}
           </div>
         )}
+        <p className="publish-field-help">图片与视频不可混选。抖音、视频号、B站需要视频；公众号需要封面图。</p>
+        </section>
 
-        <div className="publish-actions">
+        <section className="publish-action-panel" aria-label="发布操作">
+        <div className="publish-section-heading"><div><h2>准备好，就出发</h2></div></div>
+        <div className="publish-assist-actions">
           {adapting ? (
             <button className="btn btn-sm" onClick={stopAdapt}><IconStop size={13} /> 停止生成</button>
           ) : (
-            <button className="btn btn-sm btn-primary" disabled={empty || platforms.length === 0} onClick={adapt}>
+            <button className="btn btn-sm" disabled={empty || platforms.length === 0} onClick={adapt}>
               <IconSkills size={14} /> 一键适配各平台
             </button>
           )}
           <button className="btn btn-sm" disabled={empty || checking || adapting} onClick={check}>
             <IconCheck size={14} /> {checking ? '预检中…' : '发布前预检'}
           </button>
+          <button className="btn btn-sm btn-ghost publish-clear" disabled={empty || adapting}
+            onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setCheckResult(''); setPub({}); showToast('已清空'); }}>
+            <IconTrash size={13} /> 清空内容
+          </button>
+        </div>
+        <div className="publish-actions">
           <button className="btn btn-sm" disabled={empty} onClick={() => addToCalendar(platforms[0] || 'xiaohongshu')}>
-            <IconCalendar size={14} /> 存草稿并排期
+            <IconCalendar size={14} /> 存入今日日历
           </button>
           <button className="btn btn-sm btn-primary" disabled={empty || publishing || checking || !canPublish}
             title={canPublish ? '真实发布到已登录平台' : '所选平台无一键发布（B站走终端 biliup）'}
             onClick={publishAll}>
-            <IconPublish size={14} /> {publishing ? '发布中…' : '一键发布'}
-          </button>
-          <button className="btn btn-sm btn-ghost" disabled={empty || adapting}
-            onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setCheckResult(''); setPub({}); showToast('已清空'); }}>
-            <IconTrash size={13} /> 清空
+            <IconPublish size={14} /> {publishing ? '发布中…' : `发布到 ${platforms.length} 个平台`}
           </button>
         </div>
         {adapting && <div className="adapt-hint"><span className="live-pulse" />AI 正在逐字改写各平台版本…可随时停止。</div>}
-        <p className="publish-saved-note">草稿已自动保存，切换页面/刷新回来内容都在。一键发布仅对「已登录 + 媒体齐全」的平台生效。</p>
+        <p className="publish-saved-note">发布会先执行预检，再由你确认。仅已登录且媒体齐全的平台可发布；公众号内容进入草稿箱。</p>
+        </section>
         {checkResult && (
           <div className="panel" style={{ marginTop: 14 }}>
             <div className="panel-title"><IconCheck size={14} /> 发布前预检</div>
@@ -385,6 +418,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
       </div>
 
       <div className="publish-previews">
+        <div className="publish-preview-heading"><div><span className="publish-eyebrow">PLATFORM PREVIEW</span><h2>平台预览 <span>{platforms.length}</span></h2></div><p>独立编辑各平台版本，不影响母版。</p></div>
         {platforms.length === 0 && <div className="dash-empty">选择至少一个平台查看预览</div>}
         {PLATFORMS.filter((p) => platforms.includes(p.key)).map((p) => {
           const text = effective(p.key);
@@ -398,9 +432,10 @@ export default function PublishPage({ persona }: PublishPageProps) {
             <div key={p.key} className={`card pv-card pv-${p.key}`}>
               <div className="pv-head">
                 <span className="pv-plat">
+                  <PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />
                   {p.label}
-                  {overrides[p.key] != null && <span className="pv-badge">AI 版</span>}
-                  {publishable && (logged
+                  {overrides[p.key] != null && <span className="pv-badge">独立版本</span>}
+                  {publishable && (accountsLoading ? <span className="pv-badge">状态加载中…</span> : accountsError ? <span className="pv-badge">状态未知</span> : logged
                     ? <span className="pv-badge pv-badge-ok">已登录</span>
                     : <span className="pv-badge">未登录</span>)}
                 </span>
@@ -411,7 +446,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
                   <div className={`pv-title ${titleOver ? 'over' : ''}`}>{title || <span className="pv-ph">标题…</span>}</div>
                 )}
                 {isEdit
-                  ? <textarea className="field" style={{ minHeight: 120 }} value={text} autoFocus
+                  ? <textarea className="field" aria-label={`编辑${p.label}正文`} style={{ minHeight: 120 }} value={text} autoFocus
                       onChange={(e) => setOverrides((o) => ({ ...o, [p.key]: e.target.value }))} />
                   : <div className="pv-text">{text || <span className="pv-ph">正文预览…</span>}{adapting && overrides[p.key] != null && <span className="streaming-cursor" />}</div>}
               </div>
@@ -423,7 +458,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
               )}
               <div className="pv-foot">
                 <span className="pv-hint">{p.hint}{over ? ' · 已超字数' : ''}</span>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className="pv-card-actions">
                   <button className="pv-copy" onClick={() => setEditing(isEdit ? null : p.key)}>
                     <IconEdit size={13} />{isEdit ? '完成' : '编辑'}
                   </button>
@@ -435,6 +470,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
             </div>
           );
         })}
+      </div>
       </div>
 
       {toast && <div className="toast ok"><span className="toast-icon">✓</span>{toast}</div>}

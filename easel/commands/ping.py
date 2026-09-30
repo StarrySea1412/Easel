@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.paths import child_env
 
@@ -55,11 +56,11 @@ def cmd_ping(_args) -> int:
 
     # Step 1: Gateway healthz
     try:
-        with urllib.request.urlopen("http://127.0.0.1:18789/healthz", timeout=10) as response:
+        with urllib.request.urlopen(healthz_url(), timeout=10) as response:
             gateway_ok = response.status == 200
     except (OSError, urllib.error.URLError):
         gateway_ok = False
-    print(f"  {'Step 1: Gateway healthz (localhost:18789)':<50s} "
+    print(f"  {('Step 1: Gateway healthz ' + describe()):<50s} "
           f"{GREEN if gateway_ok else RED}{'OK' if gateway_ok else 'FAIL'}{NC}")
     all_ok &= gateway_ok
 

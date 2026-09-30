@@ -11,6 +11,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.paths import data_root
 
@@ -118,7 +119,7 @@ def _chromium_available() -> bool:
 def _gateway_healthy() -> bool:
     """Check OpenClaw gateway is running via healthz endpoint."""
     try:
-        with urllib.request.urlopen("http://127.0.0.1:18789/healthz", timeout=5) as response:
+        with urllib.request.urlopen(healthz_url(), timeout=5) as response:
             return response.status == 200
     except (OSError, urllib.error.URLError):
         return False
@@ -301,7 +302,7 @@ def cmd_doctor(_args) -> int:
 
     # 4. OpenClaw gateway running
     gw_ok = _gateway_healthy()
-    all_ok &= _check("OpenClaw gateway (localhost:18789)", gw_ok,
+    all_ok &= _check(f"OpenClaw gateway ({describe()})", gw_ok,
                       "运行 python -m easel gateway start")
 
     # 5. Skills synced

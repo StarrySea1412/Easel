@@ -46,6 +46,16 @@
 
 规划/选题/排期前用 `calendar_ops.py context --days 14` 读日历；发布成功会自动写日历和 publish-log，不重复记录。值得长期跟踪的节日、大促和平台活动通过 `skill-event-calendar` 查询，再用 `calendar_ops.py import-events` 导入。具体命令按对应 SKILL 执行。
 
+## 邮箱通知
+
+用户明确要求"完成后发邮件/邮箱通知"的任务，收尾时发一封摘要邮件（状态 + 标题 + 产物）：
+
+- 优先调用 easel-notify MCP 工具 `notify_email`（subject + body 必填）；发之前可用 `notify_status` 查是否已配置，或 `dry_run` 预览。
+- MCP 不可用时兜底 `python skills/openclaw/skill-email-notify/scripts/mailer.py send --subject ... --body ...`（先 `--dry-run`）。
+- 未配置邮箱（.env 缺 EASEL_NOTIFY_EMAIL / EASEL_NOTIFY_SMTP_HOST）就提示用户填配置，不报裸错、不空等。
+- SMTP 凭证从项目根 .env 读取，不写死、不外泄；正文只带状态/标题/产物，不带敏感信息。
+- 生成/发布完成的自动邮件（web 对话收尾、一键发布成功、manifest 登记）由钩子自动发，不需要重复手动发。
+
 ## 媒体模型选择
 
 调用视频、音乐或云 TTS 前，从项目根用 `model_registry.py configured --group ... --env-file .env` 脱敏查询。用户点名且已配置就使用；只有一个可用就显式选择；多个可用就列出并询问，不按默认值擅选；零个则提示配置且不发付费请求。选定后整条任务保持同一 provider/model，具体命令按对应 SKILL 执行。

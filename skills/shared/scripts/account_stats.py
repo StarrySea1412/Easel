@@ -232,7 +232,7 @@ def metrics_with_vs(lines: list[str], labels: list[str], anchor: str | None = No
 
 
 def _delta(cur, base):
-    return (cur - base) if (isinstance(cur, int) and isinstance(base, int)) else None
+    return (cur - base) if (type(cur) is int and type(base) is int) else None
 
 
 def growth_windows(history: list[dict], current: dict) -> dict:
@@ -540,7 +540,7 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                 except Exception:
                     pass
             # 最新笔记放最后抓——小红书会跳转到笔记管理页，之后不再读首页
-            r["notes"] = _scrape_notes(platform, page, cfg)
+            r["notes"] = _scrape_notes(platform, page, cfg) if r["logged_in"] else []
         finally:
             ctx.close()
     return r
@@ -756,7 +756,12 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                 page.wait_for_timeout(1500)
             page.wait_for_timeout(800)  # 等列表接口回来
             out = []
-            for n in (page.evaluate(_XHS_NOTES_JS) or []):
+            cards = page.evaluate(_XHS_NOTES_JS) or []
+            if not cards:
+                body = page.inner_text("body")
+                if re.search(r"(passport|/login)", page.url or "") or not re.search(r"暂无笔记|还没有发布|暂无内容|暂无作品", body):
+                    raise RuntimeError("笔记列表未加载或登录已失效，未确认空列表")
+            for n in cards:
                 href = n.get("href") or ""
                 h_tok = h_nid = ""
                 if href:
@@ -799,8 +804,8 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
             except Exception:
                 pass
             return out
-        except Exception:
-            return []
+        except Exception as exc:
+            raise RuntimeError("小红书笔记列表采集失败，未保存本次快照") from exc
     if platform == "zhihu":
         try:
             page.goto("https://www.zhihu.com/creator/manage/creation/all",

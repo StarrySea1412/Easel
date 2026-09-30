@@ -4,6 +4,7 @@ import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
 import SkillDrawer from './SkillDrawer';
 import { displayName } from '../lib/skillDisplayNames';
+import { Sk } from './Skeleton';
 import {
   IconSearch, IconCompass, IconSkills, IconSend, IconChart, IconLayers,
   IconVideo, IconImage, IconMusic, IconMic, IconText, IconLayout, IconProfile, IconOutputs,
@@ -54,20 +55,20 @@ const LAYER_DESC: Record<string, string> = {
 };
 
 export default function SkillPage({ persona }: SkillPageProps) {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [skills, setSkills] = useState<SkillItem[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = () => {
-    fetchSkills().then(setSkills).catch(() => setError('加载 SKILL 列表失败'));
+    fetchSkills().then(setSkills).catch(() => { setSkills([]); setError('加载 SKILL 列表失败'); });
   };
   useEffect(load, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return skills;
-    return skills.filter((s) =>
+    if (!q) return skills || [];
+    return (skills || []).filter((s) =>
       s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q) || displayName(s.name).toLowerCase().includes(q));
   }, [skills, query]);
 
@@ -81,14 +82,14 @@ export default function SkillPage({ persona }: SkillPageProps) {
   }, [filtered]);
 
   const orderedLayers = [...LAYERS, OTHER].filter((l) => grouped[l.key]?.length);
-  const needApiCount = skills.filter((s) => s.needsApi && !s.apiConfigured).length;
+  const needApiCount = (skills || []).filter((s) => s.needsApi && !s.apiConfigured).length;
 
   return (
     <div className="skills-page">
       <div className="skills-page-head">
         <h1 className="page-title">技能库</h1>
         <p className="page-subtitle">
-          共 {skills.length} 个技能，按流水线层分区浏览。点卡片查看说明、就地运行；
+          共 {skills === null ? '…' : skills.length} 个技能，按流水线层分区浏览。点卡片查看说明、就地运行；
           标 <span className="badge badge-warn" style={{ padding: '1px 7px' }}>需 API</span> 的需先配置密钥
           {needApiCount > 0 && `（当前 ${needApiCount} 个待配置）`}。
         </p>
@@ -107,7 +108,23 @@ export default function SkillPage({ persona }: SkillPageProps) {
       {error && <div style={{ color: 'var(--red)', maxWidth: 1100, margin: '16px auto' }}>{error}</div>}
 
       <div className="skills-body">
-        {orderedLayers.length === 0 && !error && (
+        {skills === null && !error && (
+          <section>
+            <div className="section-title"><Sk w={90} h={14} /></div>
+            <div className="skill-grid">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="card skill-card">
+                  <Sk w={38} h={38} r={10} style={{ marginBottom: 12 }} />
+                  <Sk w="55%" h={14} style={{ marginBottom: 8 }} />
+                  <Sk w="40%" h={10} style={{ marginBottom: 12 }} />
+                  <Sk w="95%" h={11} style={{ marginBottom: 7 }} />
+                  <Sk w="70%" h={11} />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {skills !== null && orderedLayers.length === 0 && !error && (
           <div className="empty-state" style={{ height: 240 }}>
             <div className="empty-icon"><IconSearch size={40} /></div>
             <p>没有匹配「{query}」的技能</p>

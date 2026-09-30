@@ -72,9 +72,12 @@ function SuggestionEvidence({ suggestion }: { suggestion: XhsSuggestion }) {
 type ImportPreview = { name: string; payload: XhsImportPayload };
 type AddResult = { status: 'saving' | 'saved' | 'duplicate' | 'changed' | 'error'; message: string };
 
-export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
+export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas, autoCollectSignal = 0, onAutoCollectHandled }: {
   loggedIn: boolean;
   onNavigateIdeas: () => void;
+  /** 账号页在小红书登录成功后会自增此信号：面板收到即自动开始抓取本人数据（小白零操作动线） */
+  autoCollectSignal?: number;
+  onAutoCollectHandled?: () => void;
 }) {
   const [data, setData] = useState<XhsInsights | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +122,7 @@ export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
     try {
       const result = await fetchAccountAnalytics('xiaohongshu');
       if (!result.loggedIn) failure = '未能核验小红书登录状态，请先重新登录，再采集本人数据。';
+      else if (result.accountRequired) failure = result.analysisNote || '未能确认当前账号 ID，本次数据未用于账号分析。';
     } catch (reason) { failure = errorText(reason, '采集失败，已有样本会保留。'); }
     if (!alive.current) return;
     await load();
@@ -127,6 +131,20 @@ export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
     else setNotice('已读取当前登录账号的数据。请按下方实际覆盖范围查看。');
     setAction('');
   };
+
+  // 信号由父组件持有，等待账号校验和首次读数完成再消费；重挂载不会丢失待采集请求。
+  const collectRef = useRef(collect);
+  collectRef.current = collect;
+  const lastAutoSignal = useRef(0);
+  useEffect(() => {
+    const signal = autoCollectSignal || 0;
+    if (!signal) lastAutoSignal.current = 0;
+    if (signal > 0 && signal !== lastAutoSignal.current && loggedIn && !busy) {
+      lastAutoSignal.current = signal;
+      onAutoCollectHandled?.();
+      void collectRef.current();
+    }
+  }, [autoCollectSignal, loggedIn, busy, onAutoCollectHandled]);
 
   const chooseFile = (file?: File) => {
     if (!file) return;
@@ -214,7 +232,7 @@ export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
           {action === 'collect' ? '正在读取本人账号…' : '采集当前登录账号'}</button>
       </div>
     </div>
-    {!loggedIn && <p className="xhs-connection-hint">先在上方登录小红书，再采集本人账号；也可以导入自己导出的笔记记录。</p>}
+    {!loggedIn && <p className="xhs-connection-hint">先到「账号中心」登录小红书，再回本页采集本人账号；也可以导入自己导出的笔记记录。</p>}
     {error && <div className="xhs-message xhs-message-error" role="alert">{error}
       <button className="btn btn-sm" disabled={busy} onClick={() => { setError(''); void load(); }}>重新读取已存数据</button></div>}
     {notice && <p className="xhs-message" role="status">{notice}</p>}
@@ -240,6 +258,12 @@ export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
     {!loading && suggestions.length === 0 && <div className="xhs-empty">
       <strong>{data?.accountRequired ? '还没有可核验的本人分析账号' : '暂时没有足够的候选词证据'}</strong>
       <p>{data?.note || '采集本人账号，或导入自己的标题与标签记录后，再查看探索建议。'}</p>
+      {loggedIn && (
+        <button className="btn btn-primary" disabled={busy} onClick={() => void collect()}
+          style={{ marginTop: 10 }}>
+          {action === 'collect' ? '正在抓取…' : '立即抓取我的笔记数据'}
+        </button>
+      )}
     </div>}
     {suggestions.length > 0 && <>
       <div className="xhs-section-title"><h3>可继续探索的主题</h3><span className="xhs-muted">{data?.sampleSize} 篇样本 · {suggestions.length} 个候选词</span></div>
@@ -268,7 +292,7 @@ export default function XhsInsightsPanel({ loggedIn, onNavigateIdeas }: {
     </>}
 
     <details className="xhs-import">
-      <summary>导入自己导出的笔记 JSON</summary>
+      <summary>高级：导入自己导出的笔记 JSON（新手用上方「采集当前登录账号」即可，无需导入）</summary>
       <p>文件先在本机预览，点击确认后才写入本地分析。最多 5 MB / 2000 条。导入数据与登录采集分开保存；请仅导入自己的账号。</p>
       <label className="xhs-file-label">选择导出文件<input ref={fileInput} type="file" accept=".json,application/json" disabled={busy}
         onChange={(event) => chooseFile(event.target.files?.[0])} /></label>

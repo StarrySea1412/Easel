@@ -159,7 +159,7 @@ For faster browsing, each cover opens a lightweight preview of up to one minute.
 
 Requirements: Linux or macOS, Python 3.10+, and Git. The installer checks Node.js 22.19+, FFmpeg, and Playwright/Chromium, and provides a platform-specific guide when Node.js is missing.
 
-Native Windows 10/11 uses `.\setup.ps1` (no WSL). Windows requires Node.js 24.16+ on 24.x or 26.1+, with explicit `-AllowWinget` consent to install missing system tools. `-NonInteractive` defers model configuration to Web settings. The online EXE candidate embeds a fixed payload SHA-256 and keeps user data under `%LOCALAPPDATA%\Easel\data`; see the [Windows installer guide](docs/windows-installer.md) for building, recovery, and remaining release validation. Candidate packages have not been published or signed.
+Native Windows 10/11 uses `.\setup.ps1` (no WSL). Windows requires Node.js 24.16+ on 24.x or 26.1+, with explicit `-AllowWinget` consent to install missing system tools. `-NonInteractive` defers model configuration to Web settings. The self-contained EXE candidate embeds its release ZIP and SHA-256, opens a native install window on double-click, and keeps user data under `%LOCALAPPDATA%\Easel\data`. Python dependencies, OpenClaw, and Chromium still require network access. See the [Windows installer guide](docs/windows-installer.md) for building, recovery, and remaining release validation. Candidate packages have not been signed or validated on a clean Windows machine.
 
 ```bash
 git clone git@github.com:ZJU-REAL/Easel.git

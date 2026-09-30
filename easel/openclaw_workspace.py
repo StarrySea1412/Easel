@@ -21,10 +21,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
 PROFILE = "easel"
+STATUS_TIMEOUT = 20
 
 
 def state_dir() -> Path:
@@ -52,14 +54,46 @@ def _ask_openclaw() -> Path | None:
     try:
         # 实测 2026.6.11：冷启 1.1s、gateway 在跑时 3.0s，且 status 的探测预算自带上限，
         # 没有走网络的慢路径。给 20s 足够宽；再长只是让装不上的机器多干等。
-        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=20)
-        if proc.returncode != 0:
-            return None
-        agents = json.loads(proc.stdout).get("agents") or {}
+        # A Windows cmd/node descendant can inherit PIPE handles. subprocess.run
+        # kills only its direct child on timeout, then waits for those pipes to
+        # close; a nominal 20-second probe can consequently take minutes. File
+        # redirection and wait() have no pipe-reader thread or unbounded drain.
+        with tempfile.TemporaryFile(mode="w+b") as output:
+            proc = subprocess.Popen(argv, stdout=output, stderr=subprocess.DEVNULL,
+                                    creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0,
+                                    start_new_session=os.name != "nt")
+            try:
+                proc.wait(timeout=STATUS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                from easel.install_runner import terminate_phase_tree
+                try:
+                    terminate_phase_tree(proc)
+                except (OSError, RuntimeError):
+                    # Probe failure must still allow configuration fallback.
+                    # The spawned root is the only process we may kill here.
+                    if proc.poll() is None:
+                        proc.kill()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    pass
+                return None
+            if proc.returncode != 0:
+                return None
+            output.seek(0)
+            raw = output.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                return None
+            decoded = json.loads(raw.decode("utf-8", errors="replace"))
+            if not isinstance(decoded, dict):
+                return None
+            agents = decoded.get("agents") or {}
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
+    if not isinstance(agents, dict):
+        return None
     entries = agents.get("agents")
     if not isinstance(entries, list):
         return None

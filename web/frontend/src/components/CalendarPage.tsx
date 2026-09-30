@@ -39,10 +39,14 @@ export default function CalendarPage() {
   const [ctx, setCtx] = useState<ScheduleContext | null>(null);
   const [showSuggest, setShowSuggest] = useState(true);
   const [dayView, setDayView] = useState<string | null>(null);   // 展开查看某天全部（date，null=关闭）
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [contextError, setContextError] = useState('');
 
   const load = useCallback(() => {
-    fetchSchedule().then(setItems).catch(() => {});
-    fetchScheduleContext(14).then(setCtx).catch(() => {});
+    setLoading(true); setError(''); setContextError('');
+    fetchSchedule().then(setItems).catch(() => setError('日历加载失败，请重试。')).finally(() => setLoading(false));
+    fetchScheduleContext(14).then(setCtx).catch(() => setContextError('日历建议暂时无法加载，可点击刷新重试。'));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -71,11 +75,12 @@ export default function CalendarPage() {
   }, [cursor]);
 
   const openNew = (date: string) => {
+    setError('');
     setDayView(null);
     setEditing(null);
     setForm({ ...EMPTY, date, kind: filter === 'event' ? 'event' : 'content' });
   };
-  const openEdit = (it: ScheduleItem) => { setDayView(null); setEditing(it); setForm({ ...EMPTY, ...it }); };
+  const openEdit = (it: ScheduleItem) => { setError(''); setDayView(null); setEditing(it); setForm({ ...EMPTY, ...it }); };
   const close = () => { setForm(null); setEditing(null); };
 
   // 单条 chip（活动=色条，内容=按状态上色的圆点），日历格与当天详情共用
@@ -105,17 +110,20 @@ export default function CalendarPage() {
 
   const save = async () => {
     if (!form || !form.title.trim() || !form.date) return;
-    setSaving(true);
+    setSaving(true); setError('');
     try {
       if (editing) await updateSchedule(editing.id, form);
       else await createSchedule(form);
       close(); load();
-    } finally { setSaving(false); }
+    } catch { setError('日历保存失败，内容已保留，请重试。'); }
+    finally { setSaving(false); }
   };
   const remove = async () => {
     if (!editing) return;
     setSaving(true);
-    try { await deleteSchedule(editing.id); close(); load(); } finally { setSaving(false); }
+    try { await deleteSchedule(editing.id); close(); load(); }
+    catch { setError('删除排期失败，请重试。'); }
+    finally { setSaving(false); }
   };
 
   const monthLabel = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
@@ -132,12 +140,16 @@ export default function CalendarPage() {
           <p className="page-subtitle">每天各平台发什么一目了然——发布自动落库，可记录排期与平台活动。</p>
         </div>
         <div className="cal-nav">
-          <button className="btn btn-sm" onClick={() => shift(-1)}><span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={14} /></span></button>
+          <button className="btn btn-sm" onClick={load} disabled={loading}>{loading ? '加载中…' : '刷新'}</button>
+          <button className="btn btn-sm" aria-label="上个月" onClick={() => shift(-1)}><span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={14} /></span></button>
           <button className="btn btn-sm" onClick={() => setCursor(new Date(today.getFullYear(), today.getMonth(), 1))}>本月</button>
           <span className="cal-month">{monthLabel}</span>
-          <button className="btn btn-sm" onClick={() => shift(1)}><IconChevron size={14} /></button>
+          <button className="btn btn-sm" aria-label="下个月" onClick={() => shift(1)}><IconChevron size={14} /></button>
         </div>
       </div>
+
+      {error && !form && <div className="notice-error" role="alert">{error}</div>}
+      {contextError && <div className="notice-error" role="status">{contextError}</div>}
 
       {showSuggest && suggestions.length > 0 && (
         <div className="cal-suggest">
@@ -219,6 +231,7 @@ export default function CalendarPage() {
       {form && (
         <div className="overlay" onClick={close}>
           <div className="modal" style={{ width: 440, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
+            {error && <div className="notice-error" role="alert">{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <h3 style={{ margin: 0 }}>{editing ? '编辑' : '新增'}{isEvent ? '平台活动' : '排期'}</h3>
               <button className="icon-btn" onClick={close}>×</button>

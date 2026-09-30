@@ -126,3 +126,33 @@ export const IconEllipsis = ({ size, className, strokeWidth }: P) => (
   <circle cx="5" cy="12" r="1" />
   </svg>
 );
+
+export const IconUpload = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+export const IconImage = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21 15 16 10 5 21" />
+  </svg>
+);
+
+export const IconBell = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+);
+
+export const IconSend = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </svg>
+);

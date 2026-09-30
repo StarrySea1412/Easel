@@ -18,7 +18,15 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timedelta
+from html import unescape
 from pathlib import Path
+from urllib.parse import unquote, urlsplit, parse_qs
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
@@ -35,9 +43,12 @@ TOKEN_RE = re.compile(r"[?&]token=(\d+)")
 
 EMPTY = {
     "platform": "wechat-oa", "name": "微信公众号", "nickname": "",
-    "loggedIn": False, "followers": 0, "likes": 0, "following": 0, "posts": 0,
-    "metrics": [], "notes": [],
-    "growth": {"last": {}, "day": {}, "week": {}, "month": {}, "year": {}},
+    "loggedIn": False, "followers": None, "likes": None, "following": None, "posts": None,
+    "reads": None, "metrics": [], "notes": [], "overview": [],
+    "period_metrics": {},
+    "period_windows": {},
+    "unmatched_article_evidence": [],
+    "growth": {"last": None, "day": None, "week": None, "month": None, "year": None},
     "fetched_at": "",
 }
 
@@ -52,6 +63,83 @@ def _profile_dir(base):
     return root / PROFILE_NAME
 
 
+_IMG_OK = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+_API_MEDIA = re.compile(
+    r"(?:https?://(?:127\.0\.0\.1|localhost)(?::\d+)?)?/api/media/",
+    re.IGNORECASE,
+)
+
+
+def resolve_content_image(src, html_path):
+    """Turn preview /api/media/ or relative src into a local file, else None."""
+    src = unquote(str(src or "").strip())
+    if not src:
+        return None
+    media = _API_MEDIA.search(src)
+    if media:
+        parts = Path(src[media.end():]).parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            return None
+        if str(parts[0]).startswith(("_", ".")) or str(parts[0]).lower() in {"analytics", "wechat"}:
+            return None
+        candidate = (PROJECT_ROOT / "outputs").joinpath(*parts).resolve()
+        try:
+            candidate.relative_to((PROJECT_ROOT / "outputs").resolve())
+        except ValueError:
+            return None
+        if candidate.suffix.lower() in _IMG_OK and candidate.is_file():
+            return candidate
+        return None
+    if src.lower().startswith("http://") or src.lower().startswith("https://") or src.startswith("//"):
+        return None
+    img = Path(src)
+    if not img.is_absolute() and not img.is_file():
+        img = Path(html_path).resolve().parent / src
+    if img.is_file() and img.suffix.lower() in _IMG_OK:
+        return img
+    return None
+
+
+def _lock_profile(prof):
+    lock_path = Path(prof) / ".easel.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() == 0:
+                fh.write(b"0")
+                fh.flush()
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            fh.close()
+        except OSError:
+            pass
+        raise RuntimeError("公众号后台会话正被占用，请等当前登录、数据同步或另一篇草稿结束后再试。")
+    return fh
+
+
+def _unlock_profile(fh):
+    if fh is None:
+        return
+    try:
+        if os.name == "nt":
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        fh.close()
+    except OSError:
+        pass
+
+
 def _proxy(explicit, disable):
     # mp 默认直连（domestic）；仅当显式 --proxy 才走代理
     if disable:
@@ -64,13 +152,28 @@ def _proxy(explicit, disable):
 def _launch(p, headed, base, proxy):
     prof = _profile_dir(base)
     prof.mkdir(parents=True, exist_ok=True)
+    lock = _lock_profile(prof)
     kw = dict(headless=not headed, locale="zh-CN", args=LAUNCH_ARGS,
               viewport={"width": 1440, "height": 900})
     # mp 为国内站，直连即可。仅显式 --proxy 时才走代理；否则不传 proxy，
     # 并靠进程环境已清空 http(s)_proxy（见启动命令的 env -u）让 Chromium 直连。
     if proxy:
         kw["proxy"] = {"server": proxy}
-    return p.chromium.launch_persistent_context(str(prof), **kw)
+    try:
+        ctx = p.chromium.launch_persistent_context(str(prof), **kw)
+    except Exception:
+        _unlock_profile(lock)
+        raise
+    original_close = ctx.close
+
+    def close(*args, **kwargs):
+        try:
+            return original_close(*args, **kwargs)
+        finally:
+            _unlock_profile(lock)
+
+    ctx.close = close
+    return ctx
 
 
 def _now():
@@ -139,7 +242,13 @@ def _run_login(a):
                 return 0
             if not _capture_qr(page, qr_out):
                 raise RuntimeError("二维码截图失败")
-            login_state.write_status(status, "qr_ready", "请用公众号管理员微信扫码", qr=str(qr_out))
+            if a.headed:
+                login_state.write_status(
+                    status, "window_login",
+                    "请在弹出的浏览器窗口里用管理员微信扫码，不要关掉那个窗口。也可以扫下面这张图。",
+                    qr=str(qr_out))
+            else:
+                login_state.write_status(status, "qr_ready", "请用公众号管理员微信扫码", qr=str(qr_out))
             deadline = time.time() + a.timeout
             while time.time() < deadline:
                 page.wait_for_timeout(2000)
@@ -233,6 +342,10 @@ def cmd_stats(a):
                         Path(a.dump_dir, f"{k}.json").write_text(v, encoding="utf-8")
             _parse_publish(cap["publish"], result)
             _parse_analytics(cap, result)
+            if result.get("followers") is None:
+                _fetch_followers(page, token, result)
+            _apply_nickname(page, result)
+            _attach_growth(result)
             print(json.dumps(result, ensure_ascii=False))
             return 0
         finally:
@@ -250,6 +363,42 @@ def _deep_find(obj, keys, out):
             _deep_find(x, keys, out)
 
 
+def _count(value):
+    """Missing or invalid counters remain unknown; an explicit zero is data."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(value)
+        return number if number >= 0 and str(value).strip() == str(number) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _first_count(info, *keys):
+    for key in keys:
+        value = _count(info.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _article_key(info):
+    """Only stable article identity, never a title or session-bearing URL."""
+    raw = info.get("url") or info.get("link") or info.get("content_url") or ""
+    try:
+        url = urlsplit(unescape(raw))
+        if url.scheme != "https" or url.hostname != "mp.weixin.qq.com" or url.username or url.password:
+            return ""
+        if url.path.startswith("/s/") and len(url.path) > 3:
+            return "wechat:" + url.path
+        query = parse_qs(url.query)
+        if url.path == "/s" and all(query.get(key) for key in ("__biz", "mid", "idx")):
+            return "wechat:" + ":".join(query[key][0] for key in ("__biz", "mid", "idx"))
+    except (ValueError, TypeError):
+        pass
+    return ""
+
+
 def _parse_publish(raw, result):
     """解析 appmsgpublish 数据 XHR 的 JSON → notes[] / posts / metrics。
     结构：外层 JSON.publish_page 是转义 JSON 字符串，内含 total_count/publish_count/
@@ -260,10 +409,10 @@ def _parse_publish(raw, result):
     try:
         d = json.loads(raw)
         page = json.loads(d.get("publish_page", "{}")) if isinstance(d.get("publish_page"), str) else (d.get("publish_page") or {})
-        total = int(page.get("total_count", 0) or 0)
-        pub_cnt = int(page.get("publish_count", 0) or 0)
-        mass_cnt = int(page.get("masssend_count", 0) or 0)
-        notes, total_read = [], 0
+        total = _count(page.get("total_count"))
+        pub_cnt = _count(page.get("publish_count"))
+        mass_cnt = _count(page.get("masssend_count"))
+        notes, reads, likes = [], [], []
         for it in (page.get("publish_list") or []):
             info = it.get("publish_info")
             info = json.loads(info) if isinstance(info, str) else (info or {})
@@ -274,57 +423,117 @@ def _parse_publish(raw, result):
                 if found:
                     arts = [found]
             for am in arts:
-                rn = int(am.get("read_num", 0) or 0)
-                total_read += rn
+                rn = _count(am.get("read_num"))
+                ln = _count(am.get("like_num"))
+                if rn is not None:
+                    reads.append(rn)
+                if ln is not None:
+                    likes.append(ln)
+                metrics = {key: value for key, value in (("views", rn), ("likes", ln)) if value is not None}
                 notes.append({
+                    "content_id": _article_key(am),
                     "title": am.get("title", ""),
                     "url": am.get("link") or am.get("content_url", ""),
                     "cover": am.get("cover", ""),
-                    "stat": (f"阅读 {rn} · 赞 {am.get('like_num', 0)}" if rn else ""),
+                    "stat": " · ".join(text for text in (f"阅读 {rn}" if rn is not None else "", f"赞 {ln}" if ln is not None else "") if text),
+                    "metrics": metrics,
                 })
         result["notes"] = notes[:20]
-        result["posts"] = pub_cnt or len(notes)
+        published = pub_cnt if pub_cnt is not None else total
+        result["posts"] = published
+        # A fetched page is only a sample, not the account's cumulative total.
+        result["likes"] = None
+        result["reads"] = None
         result["metrics"] = [
-            {"label": "已发表", "value": pub_cnt, "vs": ""},
+            {"label": "已发表", "value": published, "vs": ""},
             {"label": "群发次数", "value": mass_cnt, "vs": ""},
             {"label": "发表记录总数", "value": total, "vs": ""},
         ]
-        if total_read:
-            result["metrics"].append({"label": "累计阅读", "value": total_read, "vs": ""})
-            result["likes"] = total_read
-        result["nickname"] = result["name"]
+        result["metrics"] = [metric for metric in result["metrics"] if metric["value"] is not None]
+        for label, values in (("已获取列表阅读合计", reads), ("已获取列表点赞合计", likes)):
+            if values:
+                result["metrics"].append({"label": label, "value": sum(values), "vs": "",
+                    "coverage": {"known_records": len(values), "sample_records": len(notes),
+                                 "complete": len(values) == len(notes)},
+                    "window": {"kind": "returned_publish_records", "actual_from": None,
+                               "actual_to": None, "account_complete": False}})
     except Exception as e:
         result["error"] = f"发表记录解析失败：{e}"
 
 
+def _daily_totals(lst):
+    """后台趋势按 scene 拆行，scene=9999 才是当天合计。按行去尾会把「近 30 日」算成最近几条分场景。"""
+    by_date = {}
+    undated = []
+    for x in lst:
+        scene = _count(x.get("scene"))
+        if x.get("scene") is not None and scene != 9999:
+            continue
+        if x.get("date") is None:
+            undated.append(x)
+            continue
+        day = str(x["date"])
+        prev = by_date.get(day)
+        if prev is None:
+            by_date[day] = dict(x)
+        else:
+            # Conflicting duplicate totals have no defensible "largest wins" rule.
+            for field in ("read_uv", "share_uv"):
+                if _count(prev.get(field)) != _count(x.get(field)):
+                    prev[field] = None
+    return [by_date[k] for k in sorted(by_date, key=lambda value: (0, int(value)) if value.isdigit() else (1, value))] + undated
+
+
 def _parse_analytics(cap, result):
     """解析数据分析页的 XHR：阅读/分享趋势、单篇文章数据、粉丝数。数据为 0 属新号真实值。"""
-    # 阅读 / 分享趋势（近 ~30 天 read_uv / share_uv 求和）
     try:
         if cap.get("tendency"):
             d = json.loads(cap["tendency"])
-            lst = (d.get("all_article_stat_tendency") or {}).get("list") or []
-            read = sum(int(x.get("read_uv", 0) or 0) for x in lst)
-            share = sum(int(x.get("share_uv", 0) or 0) for x in lst)
-            result["metrics"].append({"label": "阅读人数(近30天)", "value": read, "vs": ""})
-            result["metrics"].append({"label": "分享人数(近30天)", "value": share, "vs": ""})
-            if read:
-                result["likes"] = read
+            daily = _daily_totals((d.get("all_article_stat_tendency") or {}).get("list") or [])
+            result["period_metrics"] = {
+                "day": _tendency_metrics(daily, 1),
+                "week": _tendency_metrics(daily, 7),
+                "month": _tendency_metrics(daily, 30),
+                "year": _tendency_metrics(daily, 365),
+                "last": _tendency_metrics(daily, 7),
+            }
+            result["metrics"] = result["period_metrics"]["week"]
+            result["period_windows"] = {
+                key: _tendency_window(daily, days)[1]
+                for key, days in (("day", 1), ("week", 7), ("month", 30), ("year", 365), ("last", 7))
+            }
     except Exception:
         pass
-    # 单篇文章数据 → 合并进 notes 的 stat（按标题匹配）
     try:
         if cap.get("article_list"):
             d = json.loads(cap["article_list"])
-            by_title = {}
+            extras = []
             for a in (d.get("article_list") or []):
                 info = a.get("appmsg_info") or a
-                t = info.get("title") or a.get("title")
-                if t:
-                    by_title[t] = f"阅读 {info.get('read_num', info.get('int_page_read_uv', 0))} · 分享 {info.get('share_num', 0)}"
-            for n in result.get("notes", []):
-                if n.get("title") in by_title and not n.get("stat"):
-                    n["stat"] = by_title[n["title"]]
+                title = info.get("title") or a.get("title")
+                if not title:
+                    continue
+                uv = _first_count(info, "total_read_uv", "read_num", "int_page_read_uv")
+                share = _first_count(info, "share_num", "share_uv")
+                stat = " · ".join(text for text in (
+                    f"阅读 {uv}" if uv is not None else "",
+                    f"分享 {share}" if share is not None else "") if text)
+                extras.append({"title": title, "content_id": _article_key(info),
+                    "url": info.get("link") or info.get("content_url") or "", "cover": info.get("cover") or "", "stat": stat,
+                    "source": "appmsganalysis.article_list", "window": "unknown",
+                    "metrics": {key: value for key, value in (("views", uv), ("shares", share)) if value is not None}})
+            notes = result.get("notes", [])
+            for evidence in extras:
+                key = evidence["content_id"]
+                matches = [note for note in notes if key and _article_key(note) == key]
+                unique_source = sum(item["content_id"] == key for item in extras) == 1
+                if len(matches) == 1 and unique_source:
+                    # Retain source/window boundaries: do not overwrite publish-page stats.
+                    matches[0].setdefault("analytics_evidence", []).append(evidence)
+                else:
+                    result.setdefault("unmatched_article_evidence", []).append(evidence)
+            if not result.get("notes"):
+                result["notes"] = extras[:20]
     except Exception:
         pass
     # 粉丝数（尽力：从用户汇总的累计关注取；新号为 0）
@@ -334,9 +543,123 @@ def _parse_analytics(cap, result):
             found = {}
             _deep_find(d, {"cumulate_user", "user_cumulate", "total_user", "cur_user"}, found)
             if found:
-                result["followers"] = int(next(iter(found.values())) or 0)
+                value = _first_count(found, "cumulate_user", "user_cumulate", "total_user", "cur_user")
+                if value is not None:
+                    result["followers"] = value
     except Exception:
         pass
+
+
+def _trend_date(value):
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(str(value), fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _tendency_window(lst, days):
+    dated = [(row, _trend_date(row.get("date"))) for row in lst]
+    valid = [(row, day) for row, day in dated if day is not None]
+    end = max((day for _, day in valid), default=None)
+    start = end - timedelta(days=days - 1) if end else None
+    chunk = [row for row, day in valid if start <= day <= end] if end else lst[-days:]
+    dates = sorted({_trend_date(row.get("date")) for row in chunk} - {None})
+    window = {"kind": "rolling_observed_dates" if end else "last_records_unknown_dates",
+        "anchor": "latest_returned_date", "timezone": "platform_unspecified",
+        "actual_from": dates[0].isoformat() if dates else None,
+        "actual_to": dates[-1].isoformat() if dates else None,
+        "expected_from": start.isoformat() if start else None,
+        "expected_days": days, "observed_days": len(dates),
+        "missing_days": days - len(dates) if end else None,
+        "undated_records": sum(day is None for _, day in dated),
+        "calendar_complete": bool(end and len(dates) == days),
+        "aggregation": "sum_daily_uv_not_period_unique", "metric_coverage": {}}
+    for field in ("read_uv", "share_uv"):
+        known = sum(_count(row.get(field)) is not None for row in chunk)
+        window["metric_coverage"][field] = {"known_records": known, "sample_records": len(chunk),
+            "complete": bool(window["calendar_complete"] and known == days)}
+    return chunk, window
+
+
+def _tendency_metrics(lst, days):
+    chunk, window = _tendency_window(lst, days)
+    metrics = []
+    for field, label in (("read_uv", "每日阅读人数合计"), ("share_uv", "每日分享人数合计")):
+        values = [_count(row.get(field)) for row in chunk]
+        known = [value for value in values if value is not None]
+        if known:
+            metrics.append({"label": label, "value": sum(known), "vs": "",
+                "coverage": window["metric_coverage"][field], "window": window})
+    # Undated rows cannot establish a number of days or a calendar period.
+    dates = {_trend_date(row.get("date")) for row in chunk} - {None}
+    if metrics and dates and len(dates) == len(chunk):
+        metrics.append({"label": "统计天数", "value": len(dates), "vs": ""})
+    return metrics
+
+
+def _fetch_followers(page, token, result):
+    for path in (
+        f"https://mp.weixin.qq.com/misc/useranalysis?token={token}&lang=zh_CN",
+        f"https://mp.weixin.qq.com/cgi-bin/home?t=home/index&token={token}&lang=zh_CN",
+    ):
+        try:
+            page.goto(path, wait_until="commit", timeout=30000)
+            page.wait_for_timeout(1500)
+            html = page.content()
+            m = re.search(r"(累计关注|关注用户|粉丝数)[^\d%]{0,12}(\d[\d,]*)", html)
+            if m and "%" not in html[m.end(): m.end() + 2]:
+                result["followers"] = int(m.group(2).replace(",", ""))
+                return
+            txt = page.inner_text("body")
+            for label in ("累计关注", "关注用户", "粉丝数"):
+                mm = re.search(rf"{label}\s*[:：]?\s*([\d,]+)", txt)
+                if mm:
+                    result["followers"] = int(mm.group(1).replace(",", ""))
+                    return
+        except Exception:
+            continue
+
+
+def _apply_nickname(page, result):
+    if result.get("nickname") and result["nickname"] != result.get("name"):
+        return
+    for sel in (".weui-desktop-account__nickname", ".account_nickname", "#nickname", ".weui-desktop-account__info"):
+        try:
+            el = page.query_selector(sel)
+            if el:
+                text = (el.inner_text() or "").strip().splitlines()[0].strip()
+                if text and text not in ("微信公众号", result.get("name")):
+                    result["nickname"] = text
+                    return
+        except Exception:
+            continue
+    if not result.get("nickname"):
+        result["nickname"] = result.get("name") or "微信公众号"
+
+
+def _attach_growth(result):
+    import account_stats
+    now = int(time.time())
+    snap = {
+        "ts": now,
+        "followers": result.get("followers"),
+        "likes": result.get("likes"),
+        "posts": result.get("posts"),
+        "reads": result.get("reads"),
+    }
+    history = account_stats.load_history("wechat-oa")
+    result["growth"] = account_stats.growth_windows(history, snap)
+    if not result.get("error") and any(snap.get(k) is not None for k in ("followers", "likes", "posts")):
+        account_stats.record_snapshot("wechat-oa", snap)
+    result["overview"] = [
+        {"key": "followers", "label": "粉丝", "value": result.get("followers")},
+        {"key": "posts", "label": "已发表", "value": result.get("posts")},
+        {"key": "likes", "label": "点赞", "value": result.get("likes")},
+    ]
+    result["fetched_at"] = now
+    result["following"] = None
 
 
 def _editor_ctx(page, token):
@@ -432,13 +755,10 @@ def cmd_publish(a):
                 out["error"] = f"封面上传失败: {json.dumps(up, ensure_ascii=False)[:200]}"
                 print(json.dumps(out, ensure_ascii=False)); return 1
 
-            # 1.5) 正文内嵌本地图片 → 同一 upload_material 接口，取响应 cdn_url 替换 src
-            base_dir = Path(a.html).resolve().parent
+            # 1.5) 正文内嵌图片 → 同一 upload_material 接口，取响应 cdn_url 替换 src
             def _upload_content_img(path):
-                img = Path(path)
-                if not img.is_absolute() and not img.is_file():
-                    img = base_dir / path            # 相对路径按 HTML 所在目录解析
-                if not img.is_file():
+                img = Path(path) if path else None
+                if img is None or not img.is_file():
                     return None
                 mime = "image/png" if img.suffix.lower() == ".png" else "image/jpeg"
                 jj = _upload_material(img, mime)
@@ -448,9 +768,12 @@ def cmd_publish(a):
 
             def _repl(m):
                 src = m.group(1)
-                if src.startswith("http"):
+                if src.startswith("http") and "/api/media/" not in src:
                     return m.group(0)
-                url = _upload_content_img(src)
+                local = resolve_content_image(src, a.html)
+                if local is None:
+                    return m.group(0)
+                url = _upload_content_img(local)
                 return m.group(0).replace(src, url) if url else m.group(0)
             html = re.sub(r'<img[^>]*\bsrc=["\']([^"\']+)["\']', _repl, html)
 
@@ -482,14 +805,46 @@ def cmd_publish(a):
                 out["error"] = f"建草稿返回非JSON: {r2.text()[:200]}"; print(json.dumps(out, ensure_ascii=False)); return 1
             ret = res.get("ret", res.get("base_resp", {}).get("ret", -1))
             if str(ret) == "0":
+                media_id = str(res.get("appMsgId") or res.get("appmsgid") or res.get("app_id") or "").strip()
+                if not media_id:
+                    out["error"] = "建草稿成功但未返回草稿 ID"
+                    print(json.dumps(out, ensure_ascii=False)); return 1
                 out["success"] = True
-                out["media_id"] = str(res.get("appMsgId") or res.get("app_id") or "")
+                out["media_id"] = media_id
                 out["thumb_media_id"] = thumb_media_id
                 print(json.dumps(out, ensure_ascii=False)); return 0
             out["error"] = f"建草稿失败 ret={ret}: {json.dumps(res, ensure_ascii=False)[:250]}"
             print(json.dumps(out, ensure_ascii=False)); return 1
         finally:
             ctx.close()
+
+
+def cmd_selftest(_a=None):
+    raw = json.dumps({
+        "publish_page": json.dumps({
+            "total_count": 37, "publish_count": 0, "masssend_count": 12,
+            "publish_list": [{
+                "publish_info": json.dumps({
+                    "appmsgex": [{"title": "a", "link": "https://mp.weixin.qq.com/s/x", "read_num": 80, "like_num": 3}],
+                }, ensure_ascii=False),
+            }],
+        }, ensure_ascii=False),
+    }, ensure_ascii=False)
+    result = dict(EMPTY)
+    result["metrics"] = []
+    _parse_publish(raw, result)
+    assert result["posts"] == 0, result["posts"]
+    assert result["likes"] is None and result["reads"] is None
+    assert result["notes"][0]["metrics"] == {"views": 80, "likes": 3}
+    lst = [{"date": i, "scene": 9999, "read_uv": 10, "share_uv": 1} for i in range(30)]
+    noisy = lst + [{"date": 29, "scene": 1, "read_uv": 99, "share_uv": 9}]
+    daily = _daily_totals(noisy)
+    week = _tendency_metrics(daily, 7)
+    month = _tendency_metrics(daily, 30)
+    assert len(daily) == 30, len(daily)
+    assert week[0]["value"] == 70 and month[0]["value"] == 300
+    print("weixin_mp_stats selftest ok")
+    return 0
 
 
 def cmd_whoami(a):
@@ -533,6 +888,9 @@ def main():
 
     wp = sub.add_parser("whoami"); common(wp)
     wp.set_defaults(func=cmd_whoami)
+
+    tp = sub.add_parser("selftest")
+    tp.set_defaults(func=cmd_selftest)
 
     pp = sub.add_parser("publish"); common(pp)
     pp.add_argument("--html", required=True, help="已排版的公众号 HTML 文件")

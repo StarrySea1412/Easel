@@ -5,11 +5,11 @@ import type { ComponentType } from 'react';
 import {
   IconChat, IconSkills, IconOutputs, IconAccounts, IconProfile,
   IconNewChat, IconEdit, IconArchive, IconUnarchive, IconTrash, IconChevron,
-  IconDashboard,
+  IconDashboard, IconChart,
 } from './icons';
-import { IconGear } from './settingsIcons';
+import { IconGear, IconImage } from './settingsIcons';
 
-export type Page = 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'accounts' | 'profile';
+export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
@@ -27,17 +27,20 @@ interface SidebarProps {
   onSessionArchive: (id: string, archived: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
-  onOpenSettings: () => void;
 }
 
 // 主导航（精简）；热点雷达/选题库/内容日历/发布中心 收进「工作台」，不占侧栏
 const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }[] = [
   { page: 'dashboard', Icon: IconDashboard, label: '工作台' },
   { page: 'chat', Icon: IconChat, label: '对话' },
+  { page: 'image', Icon: IconImage, label: '生图工坊' },
   { page: 'skills', Icon: IconSkills, label: '技能库' },
   { page: 'outputs', Icon: IconOutputs, label: '内容库' },
+  { page: 'analysis', Icon: IconChart, label: '内容分析' },
+  { page: 'activity', Icon: IconChart, label: '运行记录' },
   { page: 'accounts', Icon: IconAccounts, label: '账号' },
   { page: 'profile', Icon: IconProfile, label: '画像' },
+  { page: 'settings', Icon: IconGear, label: '设置' },
 ];
 
 export default function Sidebar({
@@ -56,7 +59,6 @@ export default function Sidebar({
   onSessionArchive,
   onNewChat,
   gatewayStatus,
-  onOpenSettings,
 }: SidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -96,7 +98,7 @@ export default function Sidebar({
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => onSessionSelect(s.id)}
       >
-        <span className="session-item-title">{s.title}</span>
+        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onClick={(e) => { e.stopPropagation(); onSessionSelect(s.id); }}>{s.title}</button>
         <div className="session-actions">
           <button className="session-act" title="重命名"
             onClick={(e) => { e.stopPropagation(); startRename(s); }}><IconEdit size={14} /></button>
@@ -112,21 +114,23 @@ export default function Sidebar({
   };
 
   return (
-    <div className="sidebar">
+    <aside className="sidebar" aria-label="工作空间导航">
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <img className="sidebar-logo-icon" src="./static/easel-icon-transparent.png" alt="" />
           <h1>Easel</h1>
+          <span className="sidebar-edition">STUDIO</span>
         </div>
         <select
           className="persona-select"
+          aria-label="创作画像"
           value={selectedPersona}
           onChange={(e) => {
             if (e.target.value === '__new__') { onNewProfile(); return; }
             onPersonaChange(e.target.value);
           }}
           disabled={activeSessionHasMessages}
-          title={activeSessionHasMessages ? '当前对话已绑定画像，切换画像将新建对话' : '选择用户画像'}
+          title={activeSessionHasMessages ? '当前对话已绑定画像，请先新建对话再切换画像' : '选择用户画像'}
         >
           <option value="">通用模式</option>
           {personas.map((p) => (
@@ -136,11 +140,12 @@ export default function Sidebar({
         </select>
       </div>
 
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="主导航">
         {NAV.map(({ page, Icon, label }) => (
           <button
             key={page}
             className={`nav-item ${currentPage === page ? 'active' : ''}`}
+            aria-current={currentPage === page ? 'page' : undefined}
             onClick={() => onPageChange(page)}
           >
             <span className="nav-icon"><Icon size={18} /></span>
@@ -151,19 +156,20 @@ export default function Sidebar({
 
       <div className="sidebar-section">
         <div className="sidebar-section-header">
-          <span className="sidebar-section-title">对话</span>
+          <span className="sidebar-section-title">最近对话</span>
           <button className="new-chat-btn" onClick={onNewChat} title="新建对话">
             <IconNewChat size={13} /> 新对话
           </button>
         </div>
         {active.map((s) => renderItem(s, false))}
+        {active.length === 0 && <p className="sidebar-empty">想法从一段对话开始。<br />新建对话，开启今天的创作。</p>}
 
         {archived.length > 0 && (
           <>
-            <div className="archived-header" onClick={() => setShowArchived((v) => !v)}>
+            <button className="archived-header" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
               <span className={`archived-chevron ${showArchived ? 'open' : ''}`}><IconChevron size={12} /></span>
               已归档 · {archived.length}
-            </div>
+            </button>
             {showArchived && archived.map((s) => renderItem(s, true))}
           </>
         )}
@@ -176,11 +182,7 @@ export default function Sidebar({
           : gatewayStatus === 'disconnected'
             ? '网关离线'
             : '连接中…'}
-        <button className="settings-gear" onClick={onOpenSettings} title="设置（模型 · 环境 · 更多）">
-          <IconGear size={13} /> 设置
-        </button>
-        <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-tertiary)' }}>subnav-1</span>
       </div>
-    </div>
+    </aside>
   );
 }

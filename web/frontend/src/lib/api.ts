@@ -124,6 +124,10 @@ export interface OutputMeta {
 
 /** 产物树节点：文件或目录（目录带 children，可无限嵌套点开）。 */
 export interface OutputNode {
+  source?: 'imagegen';
+  width?: number;
+  height?: number;
+  generation?: { prompt: string; size?: string; model?: string; created?: number; jobId?: string };
   name: string;
   type: 'dir' | 'file';
   path: string;              // outputs 下的相对路径，如 "short-drama/监控诡影/episodes/ep01"
@@ -528,10 +532,13 @@ export interface AnalyticsPlatform {
 }
 
 export interface AccountAnalytics {
+  analysis?: import('./accountAnalysis').AccountAnalysis;
   platform: string;
   name: string;
   nickname: string;
   loggedIn: boolean;
+  accountRequired?: boolean;
+  analysisNote?: string;
   followers: number | null;
   likes: number | null;
   following: number | null;
@@ -673,6 +680,7 @@ export function streamChat(
   attachments: UploadedFile[] = [],
   onQuestion?: (q: ChatQuestion) => void,
   onHeartbeat?: (note: string) => void,
+  selectedSkills: string[] = [],
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -760,7 +768,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -1036,5 +1044,76 @@ export function runChannelSelftest(channel: string): Promise<{ channel: string; 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ channel }),
+  });
+}
+
+// ── AI 生图直通车（工作台生图工坊） ─────────────────────────
+export interface ImagegenStart { jobId: string; state: string }
+export interface ImagegenJob {
+  jobId: string;
+  state: 'running' | 'done' | 'error';
+  prompt: string;
+  url: string | null;
+  error: string | null;
+  started: number;
+  size?: string;
+  width?: number | null;
+  height?: number | null;
+}
+export interface ImagegenGalleryItem { name: string; url: string; mtime: number; width?: number | null; height?: number | null }
+export interface ImagegenChannel { configured: boolean; baseUrl: string; keyMasked: string; model: string }
+
+export interface ImageReverseProvider { id: string; name: string; model: string; protocol: string; configured: boolean }
+export interface ImageReverseResult {
+  prompt: string; negativePrompt?: string; source: 'metadata' | 'vision';
+  model?: string; metadataFormat?: string; width: number; height: number;
+}
+export function fetchImageReverseConfig(): Promise<{ providers: ImageReverseProvider[] }> {
+  return request('/api/image-reverse/config');
+}
+export function reverseImage(image: File, provider: string, instruction: string, mode: 'auto' | 'vision', language: 'zh' | 'en', signal: AbortSignal): Promise<ImageReverseResult> {
+  const data = new FormData();
+  data.append('image', image);
+  data.append('provider', provider);
+  data.append('instruction', instruction);
+  data.append('mode', mode);
+  data.append('language', language);
+  return request('/api/image-reverse', { method: 'POST', body: data, signal });
+}
+
+export function startImagegen(prompt: string, size = '1024x1024', n = 1): Promise<ImagegenStart> {
+  return request('/api/imagegen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, size, n }),
+  });
+}
+
+export function fetchImagegenJob(jobId: string): Promise<ImagegenJob> {
+  return request(`/api/imagegen/${encodeURIComponent(jobId)}`);
+}
+
+export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[]; channel: ImagegenChannel }> {
+  return request('/api/imagegen');
+}
+
+// 保存生图通道（IMG_*；IMG_MODEL 走 .env 默认 gpt-image-2）
+export function saveImagegenChannel(baseUrl: string, apiKey: string): Promise<{ ok: boolean }> {
+  const updates: Record<string, string> = { IMG_BASE_URL: baseUrl };
+  // 空 key 表示沿用已保存的密钥，不能把它写回 .env，否则后端会删掉原值。
+  if (apiKey.trim()) updates.IMG_API_KEY = apiKey;
+  return request('/api/env', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  });
+}
+
+// ── 通知中心（邮箱通知可视化配置） ─────────────────────────
+export function testNotifyEmail(subject = 'Easel 通知测试'): Promise<{ ok: boolean; detail: string; to: string[]; from: string }> {
+  return request('/api/notify/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject }),
   });
 }

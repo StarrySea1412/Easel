@@ -20,8 +20,14 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
   const [form, setForm] = useState<IdeaInput | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const load = useCallback(() => { fetchIdeas().then(setIdeas).catch(() => {}); }, []);
+  const load = useCallback(() => {
+    setLoading(true); setError('');
+    fetchIdeas().then(setIdeas).catch(() => setError('选题加载失败，请重试。')).finally(() => setLoading(false));
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2200); };
@@ -31,19 +37,32 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
     return g;
   }, [ideas]);
 
-  const openNew = () => { setEditId(null); setForm({ ...EMPTY }); };
-  const openEdit = (it: Idea) => { setEditId(it.id); setForm({ title: it.title, note: it.note, source: it.source, status: it.status }); };
+  const openNew = () => { setError(''); setEditId(null); setForm({ ...EMPTY }); };
+  const openEdit = (it: Idea) => { setError(''); setEditId(it.id); setForm({ title: it.title, note: it.note, source: it.source, status: it.status }); };
   const save = async () => {
-    if (!form || !form.title.trim()) return;
-    if (editId) await updateIdea(editId, form); else await createIdea(form);
-    setForm(null); setEditId(null); load();
+    if (!form || !form.title.trim() || saving) return;
+    setSaving(true); setError('');
+    try {
+      if (editId) await updateIdea(editId, form); else await createIdea(form);
+      setForm(null); setEditId(null); load();
+    } catch { setError('选题保存失败，内容已保留，请重试。'); }
+    finally { setSaving(false); }
   };
-  const advance = async (it: Idea) => { await updateIdea(it.id, { ...it, status: NEXT[it.status] }); load(); };
-  const remove = async (it: Idea) => { await deleteIdea(it.id); load(); };
+  const advance = async (it: Idea) => {
+    try { await updateIdea(it.id, { ...it, status: NEXT[it.status] || 'doing' }); load(); }
+    catch { setError('更新选题状态失败，请重试。'); }
+  };
+  const remove = async (it: Idea) => {
+    try { await deleteIdea(it.id); load(); }
+    catch { setError('删除选题失败，请重试。'); }
+  };
   const schedule = async (it: Idea) => {
     const d = new Date();
-    await createSchedule({ title: it.title, date: d.toISOString().slice(0, 10), platform: '', time: '', status: 'idea', note: it.note });
-    showToast('已加入日历（今天）');
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      await createSchedule({ title: it.title, date, platform: '', time: '', status: 'idea', note: it.note });
+      showToast('已加入日历（今天）');
+    } catch { setError('加入日历失败，请重试。'); }
   };
 
   return (
@@ -53,8 +72,13 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
           <h1 className="page-title"><IconIdea size={21} /> 选题库</h1>
           <p className="page-subtitle">攒住每一个灵感——从热点收藏或手动新增，推进到「做内容」再进日历。</p>
         </div>
-        <button className="btn btn-sm btn-primary" onClick={openNew}>+ 新建选题</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-sm" onClick={load} disabled={loading}>{loading ? '加载中…' : '刷新'}</button>
+          <button className="btn btn-sm btn-primary" onClick={openNew}>+ 新建选题</button>
+        </div>
       </div>
+
+      {error && !form && <div className="notice-error" role="alert">{error}</div>}
 
       <div className="kanban">
         {COLUMNS.map((col) => (
@@ -64,7 +88,7 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
               {col.label}<span className="kanban-count">{byStatus[col.key].length}</span>
             </div>
             <div className="kanban-list">
-              {byStatus[col.key].length === 0 && <div className="kanban-empty">拖点选题进来吧</div>}
+              {byStatus[col.key].length === 0 && <div className="kanban-empty">{loading ? '正在加载选题…' : error ? '选题尚未加载' : '暂无选题，可新建或从热点收藏'}</div>}
               {byStatus[col.key].map((it) => (
                 <div key={it.id} className="card idea-card">
                   <div className="idea-card-actions">
@@ -95,6 +119,7 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
               <h3 style={{ margin: 0 }}>{editId ? '编辑选题' : '新建选题'}</h3>
               <button className="icon-btn" onClick={() => setForm(null)}>×</button>
             </div>
+            {error && <div className="notice-error" role="alert">{error}</div>}
             <label className="field-label">选题 *</label>
             <input className="field" value={form.title} autoFocus placeholder="想做的内容 / 角度"
               onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -113,7 +138,7 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
               <button className="btn btn-sm" onClick={() => setForm(null)}>取消</button>
-              <button className="btn btn-sm btn-primary" onClick={save} disabled={!form.title.trim()}>保存</button>
+              <button className="btn btn-sm btn-primary" onClick={save} disabled={saving || !form.title.trim()}>{saving ? '保存中…' : '保存'}</button>
             </div>
           </div>
         </div>

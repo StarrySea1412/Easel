@@ -1,4 +1,4 @@
-"""Build a Windows online installer and its verified payload (does not publish).
+"""Build a self-contained Windows installer and its verified payload (does not publish).
 
 Run with Windows CPython 3.12. Resolve the runtime lock once per release, then
 retain it with the release artifacts. Only Git-indexed files and frontend dist
@@ -51,7 +51,7 @@ def resolve_lock(dest: Path) -> None:
 
 def allowed_source(name: str) -> bool:
     parts = Path(name).parts
-    if not parts or parts[0] in (".git", ".github", ".scratch", ".venv", "tests", "dist", "build"):
+    if not parts or parts[0] in (".git", ".github", ".scratch", ".venv", ".tools", "data", "tests", "dist", "build"):
         return False
     if any(p in ("node_modules", "__pycache__", ".pytest_cache") for p in parts):
         return False
@@ -66,6 +66,8 @@ def allowed_source(name: str) -> bool:
         return False
     if parts[:3] == ("assets", "readme", "videos"):
         return False  # Hundreds of MB of documentation demos are not runtime dependencies.
+    if parts[:3] == ("web", "static", "showcase"):
+        return False  # README-only demo videos; the app never serves this tree.
     if parts[0] == "assets" and not (len(parts) > 1 and parts[1] == "readme") and leaf not in (
             "icon.png", "icon-transparent.png", "icon-noword.png", ".gitkeep"):
         return False
@@ -93,7 +95,11 @@ def build_archive(root: Path, archive: Path, version: str, lock: Path) -> None:
         raise RuntimeError("Prebuilt frontend missing; run npm ci && npm run build")
     listed = subprocess.check_output(["git", "ls-files", "--cached", "-z"], cwd=root).decode("utf-8").split("\0")
     files = sorted({name for name in listed if name and allowed_source(name)})
-    manifest = {"schemaVersion": 1, "version": version, "dependencies": {
+    source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root).decode("ascii").strip()
+    source_dirty = bool(subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=root).strip())
+    manifest = {"schemaVersion": 1, "version": version,
+        "sourceCommit": source_commit, "sourceDirty": source_dirty, "sourceIndexedOnly": True,
+        "dependencies": {
         "openclaw": OPENCLAW_VERSION, "python": "3.12", "pythonLock": "requirements-windows.lock"}}
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
         for name in files:
@@ -112,7 +118,9 @@ def build_archive(root: Path, archive: Path, version: str, lock: Path) -> None:
     archive.with_suffix(".zip.sha256").write_text(f"{sha256_of(archive)}  {archive.name}\n", encoding="ascii")
 
 
-def build_exe(output: Path, release: Path, version: str) -> None:
+def build_exe(output: Path, release: Path, archive: Path, version: str) -> None:
+    if not archive.is_file() or not archive.with_suffix(".zip.sha256").is_file():
+        raise RuntimeError("Windows payload or its SHA-256 file is missing")
     notices = []
     for package in ("pyinstaller", "pyinstaller-hooks-contrib", "altgraph", "pefile", "pywin32-ctypes", "packaging"):
         dist = importlib.metadata.distribution(package)
@@ -133,19 +141,23 @@ def build_exe(output: Path, release: Path, version: str) -> None:
     env["PATH"] = os.pathsep.join(map(str, (Path(sys.prefix) / "Scripts", Path(sys.base_prefix),
         Path(sys.base_prefix) / "DLLs", system_root / "System32", system_root)))
     with tempfile.TemporaryDirectory(prefix="easel-pyinstaller-") as temp:
+        frozen_dir = Path(temp) / "frozen"
         subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
-                        "--console", "--noupx", "--name", f"Easel-Setup-{version}", "--distpath", str(output),
+                        "--windowed", "--noupx", "--name", f"Easel-Setup-{version}", "--distpath", str(frozen_dir),
                         "--workpath", str(Path(temp) / "work"), "--specpath", temp,
                         "--add-data", f"{release}{os.pathsep}.",
+                        "--add-data", f"{archive}{os.pathsep}.",
+                        "--add-data", f"{archive.with_suffix('.zip.sha256')}{os.pathsep}.",
                         "--add-data", f"{license_file}{os.pathsep}.", str(ROOT / "scripts/bootstrapper.py")], check=True, env=env)
-    exe = output / f"Easel-Setup-{version}.exe"
+        exe = output / f"Easel-Setup-{version}.exe"
+        os.replace(frozen_dir / exe.name, exe)
     exe.with_suffix(".exe.sha256").write_text(f"{sha256_of(exe)}  {exe.name}\n", encoding="ascii")
 
 
 def main() -> None:
     import tomllib  # The release build runs on Python 3.12; runtime supports 3.10+.
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--output", type=Path, default=ROOT / "dist/windows-installer")
+    ap.add_argument("--output", type=Path, default=ROOT / "dist")
     ap.add_argument("--lock-file", type=Path, help="Reuse this release's previously resolved Windows 3.12 lock")
     ap.add_argument("--lock-only", action="store_true", help="Resolve and save dependencies; do not package yet")
     ap.add_argument("--skip-exe", action="store_true", help="Build payload only")
@@ -162,11 +174,11 @@ def main() -> None:
     archive = output / f"Easel-{version}-windows.zip"
     build_archive(ROOT, archive, version, lock)
     release = output / "release.json"
-    release.write_text(json.dumps({"version": version,
+    release.write_text(json.dumps({"version": version, "archive": archive.name,
         "url": f"https://github.com/ZJU-REAL/Easel/releases/download/v{version}/{archive.name}",
         "sha256": sha256_of(archive)}, indent=2), encoding="utf-8")
     if not args.skip_exe:
-        build_exe(output, release, version)
+        build_exe(output, release, archive, version)
     print(f"Release artifacts ready for review: {output}")
 
 

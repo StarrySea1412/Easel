@@ -151,6 +151,57 @@ def test_read_ccswitch_sqlite(cc_home):
     assert cands[0]["name"] == "DB Relay" and cands[0]["protocol"] == "anthropic"
 
 
+def test_openclaw_all_models_are_selectable_and_apply_exact_choice(cc_home, fake_env):
+    path = _write_openclaw(cc_home[0])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['models']['providers']['openai']['models'] = [
+        {'id': 'deepseek-chat'}, {'id': 'deepseek-reasoner'}, {'id': 'deepseek-chat'}, {},
+    ]
+    path.write_text(json.dumps(data), encoding='utf-8')
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='openclaw')))
+    candidates = [c for c in preview['candidates'] if c['name'] == 'openai']
+    assert [c['model'] for c in candidates] == ['deepseek-chat', 'deepseek-reasoner']
+    assert len({c['id'] for c in candidates}) == 2
+    assert all(c['compatible'] and 'key' not in c for c in candidates)
+    selected = candidates[1]
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(
+        source='openclaw', id=selected['id'], previewToken=selected['previewToken'])))
+    assert result['ok']
+    assert 'OPENAI_MODEL=deepseek-reasoner' in fake_env[0].read_text(encoding='utf-8')
+    assert fake_env[1][-1][0]['openai']['model'] == 'deepseek-reasoner'
+
+
+def test_ccswitch_claude_all_model_aliases_are_selectable(cc_home):
+    path = _write_ccswitch_json(cc_home[1])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['claude']['providers']['p1']['settingsConfig']['env'].update({
+        'ANTHROPIC_DEFAULT_SONNET_MODEL': 'claude-sonnet-4-6[1m]',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL': 'claude-opus-4-6',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'claude-haiku-4-5',
+    })
+    path.write_text(json.dumps(data), encoding='utf-8')
+    candidates, errors = lci.read_ccswitch(path)
+    models = [candidate for candidate in candidates if candidate['name'] == 'Relay A']
+    assert not errors
+    assert [candidate['model'] for candidate in models] == [
+        'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5']
+    assert len({candidate['id'] for candidate in models}) == 3
+    assert lci.read_ccswitch(path)[0] == candidates
+
+
+def test_large_model_list_keeps_first_choice_preview_valid(cc_home, fake_env):
+    path = _write_openclaw(cc_home[0])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['models']['providers']['openai']['models'] = [{'id': f'model-{i}'} for i in range(140)]
+    path.write_text(json.dumps(data), encoding='utf-8')
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='openclaw')))
+    candidate = next(c for c in preview['candidates'] if c['model'] == 'model-0')
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(
+        source='openclaw', id=candidate['id'], previewToken=candidate['previewToken'])))
+    assert result['ok']
+    assert 'OPENAI_MODEL=model-0' in fake_env[0].read_text(encoding='utf-8')
+
+
 def test_ccswitch_path_prefers_db_then_json(cc_home):
     assert lci.ccswitch_path() is None
     _write_ccswitch_json(cc_home[1])

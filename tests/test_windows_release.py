@@ -61,7 +61,13 @@ def test_packaged_archive_excludes_secrets_includes_dist_and_roundtrips(tmp_path
     license_path.write_text("MIT License")
     lock = tmp_path / "lock.txt"
     lock.write_text("setuptools==84.0.0\nwheel==0.48.0\n")
-    monkeypatch.setattr(release.subprocess, "check_output", lambda *a, **k: "\0".join(files).encode())
+    def git_output(command, **kwargs):
+        if command[1] == "rev-parse":
+            return b"1234567890123456789012345678901234567890\n"
+        if command[1] == "diff":
+            return b""
+        return "\0".join(files).encode()
+    monkeypatch.setattr(release.subprocess, "check_output", git_output)
     archive = tmp_path / "Easel-0.2.1-windows.zip"
     release.build_archive(tmp_path, archive, "0.2.1", lock)
     with zipfile.ZipFile(archive) as z:
@@ -71,6 +77,8 @@ def test_packaged_archive_excludes_secrets_includes_dist_and_roundtrips(tmp_path
         assert "LICENSE" in names and "web/frontend/dist/index.html" in names
         assert "MIT License" in z.read("THIRD_PARTY_FRONTEND_LICENSES.txt").decode()
         assert json.loads(z.read("release-manifest.json"))["dependencies"]["openclaw"] == "2026.9.6"
+        assert json.loads(z.read("release-manifest.json"))["sourceCommit"] == "1234567890123456789012345678901234567890"
+        assert json.loads(z.read("release-manifest.json"))["sourceDirty"] is False
     digest = bootstrapper.sha256_of(archive)
     assert archive.with_suffix(".zip.sha256").read_text().startswith(digest)
     installed = bootstrapper.extract_to(archive, tmp_path / "installed", "0.2.1", digest)

@@ -91,7 +91,7 @@ def keyword_insights(records: list[dict], top_k: int = 30) -> dict:
     suggestions.sort(key=lambda row: (row["metric"] is None, -(row["metric"] or 0), -row["sampleSize"], row["word"]))
     note = "基于选定账号标题与标签的探索性建议；样本不代表全部笔记，不构成增长承诺"
     if not latest:
-        note = "还没有可归属的笔记数据：先在「账号」页采集一次，或导入本人导出的 JSON 文件"
+        note = "还没有可归属的笔记数据：连接账号后在本页采集一次，或导入本人导出的 JSON 文件"
     return {"window": window, "sampleSize": len(latest), "suggestions": suggestions[:max(0, min(top_k, 100))], "note": note}
 
 

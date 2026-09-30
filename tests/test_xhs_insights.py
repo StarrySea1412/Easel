@@ -119,7 +119,7 @@ def test_insights_uses_latest_snapshot_per_note():
 
 def test_insights_empty_data_gives_readable_note():
     d = xi.keyword_insights([])
-    assert d["suggestions"] == [] and "先在「账号」页" in d["note"]
+    assert d["suggestions"] == [] and "连接账号后在本页" in d["note"]
 
 
 def test_insights_window_and_sample_size():

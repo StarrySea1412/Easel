@@ -89,3 +89,10 @@ skills/openclaw/video-production/vendor/**/node_modules/
 skills/openclaw/video-production/vendor/**/.remotion/
 skills/openclaw/video-production/vendor/**/models/
 skills/openclaw/video-production/vendor/**/*large-v3*
+
+# 本机运行/测试产物（不入库，不进发行包）
+.venv/
+gui-test-screenshots/
+
+# Local build runtimes
+.tools/

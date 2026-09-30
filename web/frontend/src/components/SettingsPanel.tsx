@@ -1,22 +1,28 @@
+import '../styles/settings.css';
+import { ProviderBoard } from './settings/ProviderBoard';
+import { ModelConfigPicker } from './settings/ModelConfigPicker';
+import Select from './ui/Select';
+import type { ProviderBoardOptions } from './settings/ProviderBoard';
+import { SettingsField } from './settings/SettingsField';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import EnvBoard from './EnvBoard';
 import type { JobView } from './EnvBoard';
+import { Sk as Skeleton, SkeletonCard } from './Skeleton';
 import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchModelPresets, discoverModels,
   fetchImportSources, previewImport, applyImport,
+  saveImagegenChannel, fetchImagegenGallery, fetchSkillDetail, saveEnv, testNotifyEmail,
 } from '../lib/api';
 import type {
   EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
   ImportSource, ImportPreview,
 } from '../lib/api';
-import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
+import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
 
-interface Props { onClose: () => void; }
-
-type Sec = 'model' | 'env' | 'more';
+export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'notify' | 'more';
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string }[] = [
@@ -51,15 +57,24 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, tries = 4, timeoutMs = 18
 /** 后端放在 model/baseUrl 里的展示占位串——提交前要清掉，它们不是真实配置值。 */
 const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内建默认']);
 
-const hhmm = (ts: number) => {
-  const d = new Date(ts * 1000);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
+const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-/** 设置（统一入口）：竖＝功能分类（模型配置 / 环境安装 / 更多设置），横＝模型六通道。 */
-export default function SettingsPanel({ onClose }: Props) {
-  const [sec, setSec] = useState<Sec>('model');
+/** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
+export default function SettingsPanel({ initialSection = 'model' }: { initialSection?: SettingsSection }) {
+  const [sec, setSec] = useState<SettingsSection>(initialSection);
+  useEffect(() => { setSec(initialSection); }, [initialSection]);
   const [chan, setChan] = useState<Chan>('chat');
+  const mounted = useRef(false);
+  const jobCleanups = useRef(new Set<() => void>());
+  useEffect(() => {
+    mounted.current = true;
+    const cleanups = jobCleanups.current;
+    return () => {
+      mounted.current = false;
+      cleanups.forEach((cleanup) => cleanup());
+      cleanups.clear();
+    };
+  }, []);
 
   // ── 环境安装（引擎真实数据） ──────────────────────────────
   const [tools, setTools] = useState<EnvTool[]>([]);
@@ -74,12 +89,13 @@ export default function SettingsPanel({ onClose }: Props) {
     setEnvError('');
     try {
       const d = await fetchWithRetry(() => fetchEnvTools(force));
+      if (!mounted.current) return;
       setTools(d.tools || []);
       setPython(d.python || '');
     } catch (e) {
-      setEnvError(e instanceof Error ? `环境体检失败：${e.message}` : '环境体检失败');
+      if (mounted.current) setEnvError(e instanceof Error ? `环境体检失败：${e.message}` : '环境体检失败');
     } finally {
-      setEnvLoading(false);
+      if (mounted.current) setEnvLoading(false);
     }
   }, []);
 
@@ -90,6 +106,7 @@ export default function SettingsPanel({ onClose }: Props) {
   // 装完统一收尾：刷新体检（期间卡片显示「校验中」），然后清掉成功的 job 记录、保留失败（带原因）
   const settleJobs = useCallback(async () => {
     await refreshEnv(true);
+    if (!mounted.current) return;
     setJobs((j) => {
       const n: Record<string, JobView> = {};
       Object.entries(j).forEach(([k, v]) => { if (v.state === 'fail') n[k] = v; });
@@ -99,30 +116,50 @@ export default function SettingsPanel({ onClose }: Props) {
 
   const pollJob = useCallback((id: string, jobId: string) => new Promise<void>((resolve) => {
     let fails = 0;
-    const timer = setInterval(async () => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      jobCleanups.current.delete(stop);
+      resolve();
+    };
+    jobCleanups.current.add(stop);
+    const poll = async () => {
       try {
         const st = await fetchEnvJob(jobId);
+        if (stopped || !mounted.current) return;
+        fails = 0;
         const last = (st.lines || [])[st.lines.length - 1] || '';
         setJobs((j) => ({
           ...j,
           [id]: { state: st.state, line: last.trim().slice(0, 140), detail: st.result?.detail || null },
         }));
-        if (st.state !== 'running') { clearInterval(timer); resolve(); }
-      } catch {
+        if (st.state !== 'running') { stop(); return; }
+      } catch (e) {
+        if (stopped || !mounted.current) return;
         fails += 1;
-        if (fails >= 3) { clearInterval(timer); resolve(); }   // 服务重启/任务丢失：放弃轮询
+        if (fails >= 3) {
+          setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: `无法读取安装结果：${e instanceof Error ? e.message : '连接失败'}。请刷新环境状态核对。` } }));
+          stop();
+          return;
+        }
       }
-    }, 1500);
+      timer = setTimeout(() => void poll(), 1500);
+    };
+    timer = setTimeout(() => void poll(), 1500);
   }), []);
 
   const installOne = useCallback(async (id: string) => {
     setJobs((j) => ({ ...j, [id]: { state: 'running', line: '启动中…' } }));
     try {
       const { jobId } = await startEnvInstall(id);
+      if (!mounted.current) return;
       await pollJob(id, jobId);
     } catch (e) {
-      setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: e instanceof Error ? e.message : '启动失败' } }));
+      if (mounted.current) setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: e instanceof Error ? e.message : '启动失败' } }));
     }
+    if (!mounted.current) return;
     if (!batchMode.current) await settleJobs();   // 单卡装完立即收尾刷新
   }, [pollJob, settleJobs]);
 
@@ -135,12 +172,13 @@ export default function SettingsPanel({ onClose }: Props) {
       return n;
     });
     for (const id of ids) {
+      if (!mounted.current) break;
       // eslint-disable-next-line no-await-in-loop
       await installOne(id);
     }
     batchMode.current = false;
     runningRef.current = false;
-    await settleJobs();
+    if (mounted.current) await settleJobs();
   }, [installOne, settleJobs]);
 
   const anyRunning = runningRef.current || Object.values(jobs).some((j) => j.state === 'running');
@@ -182,8 +220,10 @@ export default function SettingsPanel({ onClose }: Props) {
         apiKey: row.keyNew || '',
         protocol: row.protocol || '',
       });
+      if (!mounted.current) return;
       setDiscover((m) => ({ ...m, [key]: r }));
     } catch (e) {
+      if (!mounted.current) return;
       setDiscover((m) => ({
         ...m,
         [key]: {
@@ -193,12 +233,11 @@ export default function SettingsPanel({ onClose }: Props) {
         },
       }));
     } finally {
-      setDiscovering('');
+      if (mounted.current) setDiscovering('');
     }
   }, []);
 
-  // ── 从本机配置导入（方案功能 C 第二步） ────────────────────
-  const [impOpen, setImpOpen] = useState(false);
+  // ── 从本机配置导入（方案功能 C 第二步；独立页里为一级分区） ──
   const [impSources, setImpSources] = useState<ImportSource[]>([]);
   const [impSource, setImpSource] = useState('');
   const [impPath, setImpPath] = useState('');
@@ -217,15 +256,15 @@ export default function SettingsPanel({ onClose }: Props) {
   }, []);
 
   const openImport = useCallback(async () => {
-    setImpOpen((open) => !open);
     if (impSources.length) return;
     try {
       const d = await fetchImportSources();
+      if (!mounted.current) return;
       setImpSources(d.sources);
       const first = d.sources.find((s) => s.available) || d.sources[0];
       if (first) setImpSource(first.id);
     } catch (e) {
-      setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+      if (mounted.current) setImpMsg(e instanceof Error ? e.message : '读取来源失败');
     }
   }, [impSources.length]);
 
@@ -238,12 +277,13 @@ export default function SettingsPanel({ onClose }: Props) {
     setImpConfirmed(false);
     try {
       const d = await previewImport(impSource, impSlot, impPath.trim());
+      if (!mounted.current) return;
       setImpPreview(d);
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
     } catch (e) {
-      setImpMsg(e instanceof Error ? e.message : '预览失败');
+      if (mounted.current) setImpMsg(e instanceof Error ? e.message : '预览失败');
     } finally {
-      setImpBusy('');
+      if (mounted.current) setImpBusy('');
     }
   }, [impSource, impSlot, impPath]);
 
@@ -254,22 +294,24 @@ export default function SettingsPanel({ onClose }: Props) {
     setImpMsg('');
     try {
       const r = await applyImport(impSource, impPick, impSlot, impPath.trim(), selected.previewToken);
+      if (!mounted.current) return;
       setImpMsg(`✓ 已导入「${r.applied.name}」→ ${impSlot}${r.note ? `（${r.note}）` : ''}`);
       setImpPreview(null);
       setImpPick('');
       setImpConfirmed(false);
       try {
         const d = await fetchModelChannels();
+        if (!mounted.current) return;
         const imported = d.channels.chat.rows.find((row) => row.slot === impSlot);
         if (imported) setChatRows((rows) => rows.some((row) => row.slot === impSlot)
-          ? rows.map((row) => row.slot === impSlot ? imported : row) : [...rows, imported]);
+          ? rows.map((row) => row.slot === impSlot ? { ...imported, role: row.role } : row) : [...rows, imported]);
       } catch {
-        setImpMsg('✓ 配置已导入，但刷新失败；请关闭后重新打开设置核对。');
+        if (mounted.current) setImpMsg('✓ 配置已导入，但刷新失败；请重新打开设置核对。');
       }
     } catch (e) {
-      setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
+      if (mounted.current) setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
     } finally {
-      setImpBusy('');
+      if (mounted.current) setImpBusy('');
     }
   }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy]);
 
@@ -298,20 +340,22 @@ export default function SettingsPanel({ onClose }: Props) {
     setSelftestNote('');
     try {
       const r = await runChannelSelftest(channel);
+      if (!mounted.current) return;
       const byBase: Record<string, SelftestResult> = {};
       r.results.forEach((x) => { byBase[x.baseUrl] = x; });
       setSelftest({ testedAt: r.testedAt, byBase });
       if (!r.results.length) setSelftestNote('没有可自测的通道（未配置 key）');
       void refreshEnv();
     } catch (e) {
-      setSelftestNote(e instanceof Error ? `自测失败：${e.message}` : '自测失败');
+      if (mounted.current) setSelftestNote(e instanceof Error ? `自测失败：${e.message}` : '自测失败');
     } finally {
-      setTesting(false);
+      if (mounted.current) setTesting(false);
     }
   }, [refreshEnv]);
 
   // ── 模型配置可编辑（v2）：保存到 .env / openclaw ──────────
   const [saving, setSaving] = useState(false);
+  const [modelImportBusy, setModelImportBusy] = useState(false);
   const [savedNote, setSavedNote] = useState('');
   const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
 
@@ -339,6 +383,7 @@ export default function SettingsPanel({ onClose }: Props) {
     setSavedNote('');
     try {
       const d = await saveModelConfig(chan, payload, chan === 'chat' ? deletedProviders : []);
+      if (!mounted.current) return;
       if (chan === 'chat') {
         setChatRows(d.channels.chat.rows || []);
         setDeletedProviders([]);
@@ -349,19 +394,123 @@ export default function SettingsPanel({ onClose }: Props) {
       setSavedNote(d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
     } catch (e) {
-      setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
+      if (mounted.current) setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
     } finally {
-      setSaving(false);
-      setTimeout(() => setSavedNote(''), 6000);
+      if (mounted.current) {
+        setSaving(false);
+        setTimeout(() => { if (mounted.current) setSavedNote(''); }, 6000);
+      }
     }
   }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders]);
 
-  // Esc 关闭
+  // ── 通知中心（邮箱通知可视化配置 + 测试发送） ──────────────
+  const [ntf, setNtf] = useState({ email: '', host: '', port: '465', user: '', pass: '', onDone: false });
+  const [ntfLoading, setNtfLoading] = useState(true);
+  const [ntfSaved, setNtfSaved] = useState('');
+  const [ntfTesting, setNtfTesting] = useState(false);
+  const [ntfTestMsg, setNtfTestMsg] = useState('');
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    let alive = true;
+    fetchWithRetry(() => fetchSkillDetail('skill-email-notify'), 3, 12000)
+      .then((d) => {
+        if (!alive) return;
+        const vals: Record<string, string> = {};
+        (d.apiSpec?.providers || []).forEach((p) =>
+          p.keys.forEach((k) => { if (k.env) vals[k.env] = k.masked || ''; }));
+        setNtf({
+          email: vals.EASEL_NOTIFY_EMAIL || '',
+          host: vals.EASEL_NOTIFY_SMTP_HOST || '',
+          port: vals.EASEL_NOTIFY_SMTP_PORT || '465',
+          user: vals.EASEL_NOTIFY_SMTP_USER || '',
+          pass: '',
+          onDone: vals.EASEL_NOTIFY_ON_DONE === '1',
+        });
+      })
+      .catch((e: unknown) => { if (alive) setNtfSaved(`读取通知配置失败：${e instanceof Error ? e.message : '请稍后重试'}`); })
+      .finally(() => { if (alive) setNtfLoading(false); });
+    return () => { alive = false; };
+  }, []);
+  const saveNotify = useCallback(async () => {
+    setNtfSaved('');
+    try {
+      await saveEnv({
+        EASEL_NOTIFY_EMAIL: ntf.email.trim(),
+        EASEL_NOTIFY_SMTP_HOST: ntf.host.trim(),
+        EASEL_NOTIFY_SMTP_PORT: ntf.port.trim() || '465',
+        EASEL_NOTIFY_SMTP_USER: ntf.user.trim(),
+        ...(ntf.pass.trim() ? { EASEL_NOTIFY_SMTP_PASS: ntf.pass.trim() } : {}),
+        EASEL_NOTIFY_ON_DONE: ntf.onDone ? '1' : '0',
+      });
+      if (!mounted.current) return;
+      setNtfSaved('✓ 已保存；对话/发布收尾会按这里的配置自动发邮件');
+    } catch (e) {
+      if (mounted.current) setNtfSaved(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
+    }
+  }, [ntf]);
+  const testNotify = useCallback(async () => {
+    setNtfTesting(true); setNtfTestMsg('');
+    try {
+      const r = await testNotifyEmail();
+      if (!mounted.current) return;
+      setNtfTestMsg(r.ok ? `✅ ${r.detail}（收件人 ${r.to.join('、')}）` : `❌ ${r.detail}`);
+    } catch (e) {
+      if (mounted.current) setNtfTestMsg(`❌ ${e instanceof Error ? e.message : '发送失败'}`);
+    } finally { if (mounted.current) setNtfTesting(false); }
+  }, []);
+
+  // ── 生图通道（工作台生图工坊用；IMG_*，OpenAI 协议） ──────
+  const [imgBase, setImgBase] = useState('');
+  const [imgBaseSaved, setImgBaseSaved] = useState('');
+  const [imgKey, setImgKey] = useState('');
+  const [imgKeyMasked, setImgKeyMasked] = useState('');
+  const [imgModel, setImgModel] = useState('');
+  const [imgLoading, setImgLoading] = useState(true);
+  const [imgLoadError, setImgLoadError] = useState('');
+  const [imgSaved, setImgSaved] = useState('');
+  const [imgSaving, setImgSaving] = useState(false);
+  const imgSavePending = useRef(false);
+  const imgBaseChanged = imgBase.trim() !== imgBaseSaved.trim();
+  useEffect(() => {
+    let alive = true;
+    fetchImagegenGallery().then(({ channel }) => {
+      if (!alive) return;
+      setImgBase(channel.baseUrl);
+      setImgBaseSaved(channel.baseUrl);
+      setImgKeyMasked(channel.keyMasked);
+      setImgModel(channel.model);
+    }).catch((e: unknown) => {
+      if (alive) setImgLoadError(`生图配置读取失败：${e instanceof Error ? e.message : '请重新打开设置'}`);
+    }).finally(() => { if (alive) setImgLoading(false); });
+    return () => { alive = false; };
+  }, []);
+  const saveImgChannel = useCallback(async () => {
+    if (imgSavePending.current) return;
+    setImgSaved('');
+    if (imgBaseChanged && !imgKey.trim()) {
+      setImgSaved('Base URL 已更改，请重新填写对应服务商的 API Key');
+      return;
+    }
+    imgSavePending.current = true;
+    setImgSaving(true);
+    try {
+      await saveImagegenChannel(imgBase.trim(), imgKey.trim());
+      if (!mounted.current) return;
+      setImgBaseSaved(imgBase.trim());
+      if (imgKey.trim()) {
+        setImgKey('');
+        setImgKeyMasked('已保存');
+      }
+      setImgSaved('✓ 已保存；可到生图工坊尝试生图，尚未验证服务可用性');
+    } catch (e) {
+      if (mounted.current) setImgSaved(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
+    } finally {
+      imgSavePending.current = false;
+      if (mounted.current) setImgSaving(false);
+    }
+  }, [imgBase, imgBaseChanged, imgKey]);
+
+  // Esc 不再关闭：设置已是独立页面，Esc 留给页面内控件
+
 
   // 本地兜底 whisper：从环境工具状态推出来（fw + 模型都在才算就绪）
   const fw = tools.find((t) => t.id === 'fw');
@@ -381,14 +530,6 @@ export default function SettingsPanel({ onClose }: Props) {
     return { text: row.result, cls: '' };
   };
 
-  const SLOT_EDIT: Record<string, { model: boolean; base: boolean }> = {
-    openai: { model: true, base: true },
-    relay: { model: true, base: true },
-    anthropic: { model: true, base: true },
-    siliconflow: { model: false, base: true },
-    custom: { model: true, base: true },
-  };
-
   const addProvider = () => {
     setChatRows((rs) => [...rs, {
       slot: 'custom', order: 0, name: '', sub: '自定义', type: 'openai',
@@ -396,8 +537,10 @@ export default function SettingsPanel({ onClose }: Props) {
     }]);
   };
 
-  const setPrimaryRow = (i: number) =>
+  const setPrimaryRow = (i: number) => {
     setChatRows((rs) => rs.map((r, j) => (r.slot ? { ...r, role: j === i ? '主' : '备' } : r)));
+    setSavedNote('已选择主模型，点击「保存配置」生效。');
+  };
 
   const removeRow = (i: number) => {
     const removed = chatRows[i];
@@ -427,271 +570,211 @@ export default function SettingsPanel({ onClose }: Props) {
 
   const mediaOk = (ch: string) => (mediaRows[ch] || []).some((r) => r.result === '已配置');
 
-  const renderBoard = (
-    rows: ModelRow[],
-    ops?: {
-      onRow?: (i: number, patch: Partial<ModelRow>) => void;
-      onPrimary?: (i: number) => void;
-      onRemove?: (i: number) => void;
-      media?: boolean;
-      channel?: string;                    // 用于「获取模型」的通道标识
-      presets?: ModelPreset[];             // 服务商预设（公开端点）
-      discovery?: (i: number) => DiscoverResult | 'loading' | undefined;
-      onDiscover?: (i: number) => void;
-      onPickPreset?: (i: number, p: ModelPreset) => void;
-      busyKey?: string;
-    },
-  ) => (
-    modelLoading && rows.length === 0 ? (
-      <div className="board"><div className="empty"><span className="spin" /> 正在读取配置…<span className="hint">（后台繁忙时可能稍慢，会自动重试）</span></div></div>
-    ) : rows.length === 0 ? (
-      <div className="board"><div className="empty">还没有配置。<span className="hint">可在「环境安装」先补齐本地能力。</span></div></div>
-    ) : (
-      <div className="board">
-        <div className="prow head">
-          <span>顺序</span><span>供应商</span><span>类型</span><span>模型</span>
-          <span>Base URL</span><span>API Key</span><span>角色</span><span>上次结果</span>
-          <span />
-        </div>
-        {rows.map((r, i) => {
-          const rt = resultText(r);
-          const ed = SLOT_EDIT[r.slot || '']
-            || (ops?.media && r.slot
-              ? { model: r.modelEditable !== false, base: r.baseEditable !== false }
-              : undefined);
-          const isCustom = r.slot === 'custom';
-          return (
-            <div className="prow" key={i}>
-              <span className={`step${r.order === 0 ? ' ghost' : ''}`}>{isCustom ? i + 1 : r.order}</span>
-              {isCustom ? (
-                <span className="pname">
-                  <input
-                    className="mock"
-                    value={r.name}
-                    placeholder="名称"
-                    onChange={(e) => ops?.onRow?.(i, { name: e.target.value.toLowerCase() })}
-                  />
-                </span>
-              ) : (
-                <span className="pname">{r.name}<small>{r.sub}</small></span>
-              )}
-              <span>{r.type}</span>
-              {ed && ed.model && (!ops?.media || r.adv) ? (
-                <>
-                  <select
-                    className="mock"
-                    value=""
-                    title="服务商预设：选中后填入同协议服务商地址"
-                    disabled={!(ops?.presets || []).length}
-                    onChange={(e) => {
-                      const p = (ops?.presets || []).find((x) => x.baseUrl === e.target.value);
-                      if (p) ops?.onPickPreset?.(i, p);
-                    }}
-                  >
-                    <option value="">
-                      {(ops?.presets || []).length ? '服务商预设…' : '暂无预设（手动填写）'}
-                    </option>
-                    {(ops?.presets || []).map((p) => (
-                      <option key={p.id} value={p.baseUrl}
-                        disabled={ops?.channel === 'chat' && r.slot !== 'custom'
-                          && p.protocol !== (r.slot === 'openai' ? 'openai' : 'anthropic')}>
-                        {p.name} · {p.note}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="model-fetch">
-                    <input
-                      className="mock"
-                      value={r.model}
-                      placeholder={isCustom ? '模型名' : ''}
-                      onChange={(e) => ops?.onRow?.(i, { model: e.target.value })}
-                    />
-                    <button
-                      className="adv-btn"
-                      title="向该服务商获取可用模型列表（用地址 + 已保存或刚填的 Key）"
-                      disabled={ops?.busyKey === `${ops?.channel}:${i}`}
-                      onClick={() => ops?.onDiscover?.(i)}
-                    >
-                      {ops?.busyKey === `${ops?.channel}:${i}` ? '获取中…' : '获取模型'}
-                    </button>
-                  </span>
-                </>
-              ) : (
-                <span className={`cell-text${ops?.media && !r.model ? ' dim' : ''}`} title={r.model || '内建默认'}>
-                  {r.model || (ops?.media ? '默认（内建）' : '')}
-                </span>
-              )}
-              {ed && ed.base && (!ops?.media || r.adv) ? (
-                <input className="mock" value={r.baseUrl} placeholder="https://…" onChange={(e) => ops?.onRow?.(i, { baseUrl: e.target.value })} />
-              ) : (
-                <span className={`cell-text${ops?.media && !r.baseUrl ? ' dim' : ''}`} title={r.baseUrl || '内建默认'}>
-                  {r.baseUrl
-                    || (ops?.media
-                      ? r.baseOptional === false
-                        ? '需填写（点「高级」）'
-                        : '默认（内建）'
-                      : '')}
-                </span>
-              )}
-              {ed ? (
-                r.key2Label ? (
-                  <span className="key-stack">
-                    <input
-                      className="mock key-input"
-                      type="password"
-                      value={r.keyNew || ''}
-                      placeholder={r.keyMasked || 'Key'}
-                      onChange={(e) => ops?.onRow?.(i, { keyNew: e.target.value })}
-                    />
-                    <input
-                      className="mock key-input"
-                      type="password"
-                      value={r.keyNew2 || ''}
-                      placeholder={r.key2Masked || r.key2Label}
-                      onChange={(e) => ops?.onRow?.(i, { keyNew2: e.target.value })}
-                    />
-                  </span>
-                ) : (
-                  <input
-                    className="mock key-input"
-                    type="password"
-                    value={r.keyNew || ''}
-                    placeholder={r.keyMasked || '粘贴 Key'}
-                    onChange={(e) => ops?.onRow?.(i, { keyNew: e.target.value })}
-                  />
-                )
-              ) : (
-                <span className="cell-text key-mask" title="密钥不显示明文">{r.keyMasked || '—'}</span>
-              )}
-              {r.slot && ops?.onPrimary ? (
-                <button
-                  className={`tag ${r.role === '主' ? 'main' : 'backup'}`}
-                  onClick={() => ops.onPrimary?.(i)}
-                  title="设为主通道"
-                >
-                  {r.role}
-                </button>
-              ) : (
-                <span className={`tag ${r.role === '主' ? 'main' : 'backup'}`}>{r.role}</span>
-              )}
-              <span className={`stt ${rt.cls}`}>{rt.text}</span>
-              {isCustom && ops?.onRemove ? (
-                <button className="row-del" onClick={() => ops.onRemove?.(i)} title="删除该供应商">✕</button>
-              ) : ops?.media && r.slot ? (
-                <button className="adv-btn" onClick={() => ops?.onRow?.(i, { adv: !r.adv })}>
-                  {r.adv ? '收起' : '高级'}
-                </button>
-              ) : (
-                <span />
-              )}
-              {(() => {
-                if (!ops?.discovery) return null;
-                const d = ops.discovery(i);
-                if (!d) return null;
-                if (d === 'loading') {
-                  return <div className="discover-row"><span className="spin" /> 正在向 {r.baseUrl || '该地址'} 查询可用模型…</div>;
-                }
-                return (
-                  <div className={`discover-row${d.ok ? ' ok' : ' bad'}`}>
-                    <span className="dr-txt">
-                      {d.ok ? '✓' : '✗'} {d.message}
-                      {d.ok && <span className="dr-src">· 来源 {d.source} · {hhmm(d.fetchedAt)}
-                        {d.keySource === 'saved' ? ' · 用已保存的 Key' : d.keySource === 'input' ? ' · 用刚填的 Key' : ' · 未带 Key'}
-                      </span>}
-                    </span>
-                    {!d.ok && <span className="dr-src">可继续手动填写模型名</span>}
-                    {d.ok && (() => {
-                      const hit = d.models.includes(r.model);
-                      return (
-                        <span className="dr-pick">
-                          <select
-                            className="mock"
-                            value={hit ? r.model : ''}
-                            onChange={(e) => { if (e.target.value) ops?.onRow?.(i, { model: e.target.value }); }}
-                          >
-                            <option value="">{hit ? '已选' : `选择模型（${d.models.length} 个）…`}</option>
-                            {d.models.map((m) => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                          {!hit && <button className="adv-btn" onClick={() => ops?.onRow?.(i, { model: d.models[0] })}>填入第一个</button>}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })}
-      </div>
-    )
+  const renderBoard = (rows: ModelRow[], ops?: ProviderBoardOptions) => (
+    <ProviderBoard rows={rows} ops={ops} modelLoading={modelLoading} resultText={resultText} />
   );
 
-  const chatOk = chatRows.length > 0 && !chatRows[0].result.includes('缺');
+  const chatOk = chatRows.some((r) => r.role === '主' && (r.result.includes('已配置') || r.result.includes('✓')))
+    || chatRows.some((r) => r.result.includes('已配置'));
+  const chatLive = chatOk && !!selftest && Object.values(selftest.byBase).some((r) => r.ok);
   const transOk = transRows.length > 1 && transRows[1].result.includes('已配置');
 
   return (
-    <div
-      className="settings-overlay"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <div className="page-scroll settings-page">
+      <div className="settings-panel page">
         <div className="settings-head">
           <div>
             <h2 className="settings-title">设置</h2>
-            <div className="settings-sub">模型配置 · 环境安装 · 更多设置</div>
+            <div className="settings-sub">配置导入 · 模型配置 · 环境安装 · 生图通道 · 更多</div>
           </div>
           <div className="settings-actions">
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => void saveCurrent()}
-              disabled={saving || Boolean(impBusy) || sec !== 'model'}
-            >
-              {saving ? '保存中…' : '保存配置'}
-            </button>
-            <button
-              className="btn btn-sm"
-              onClick={() => void doSelftest(sec === 'model' ? chan : 'all')}
-              disabled={testing}
-            >
-              {testing ? '自测中…' : '全部自测'}
-            </button>
-            <button className="settings-close" onClick={onClose} title="关闭（Esc）">✕</button>
+            {sec === 'model' && (
+              <>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => void saveCurrent()}
+                  disabled={saving || Boolean(impBusy) || modelImportBusy}
+                >
+                  {saving ? '保存中…' : '保存配置'}
+                </button>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => void doSelftest(chan)}
+                  disabled={testing}
+                >
+                  {testing ? '自测中…' : '自测本通道'}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         <div className="settings-body">
           <nav className="settings-nav">
-            <button className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
+            <button aria-current={sec === 'import' ? 'page' : undefined} className={`snav${sec === 'import' ? ' active' : ''}`} onClick={() => { setSec('import'); void openImport(); }}>
+              <IconUpload size={16} />配置导入<small>CC Switch 一键迁移</small>
+            </button>
+            <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型配置<small>六个通道</small>
             </button>
-            <button className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
+            <button aria-current={sec === 'env' ? 'page' : undefined} className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
               <IconPackage size={16} />环境安装<small>{total ? (okCount === total ? '全就绪' : `${okCount}/${total}`) : '…'}</small>
             </button>
-            <button className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />更多设置
+            <button aria-current={sec === 'image' ? 'page' : undefined} className={`snav${sec === 'image' ? ' active' : ''}`} onClick={() => setSec('image')}>
+              <IconImage size={16} />生图通道<small>工作台直出</small>
+            </button>
+            <button aria-current={sec === 'notify' ? 'page' : undefined} className={`snav${sec === 'notify' ? ' active' : ''}`} onClick={() => setSec('notify')}>
+              <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
+            </button>
+            <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
+              <IconEllipsis size={16} />更多
             </button>
           </nav>
 
           <div className="settings-main">
+          {/* ── 配置导入：CC Switch / OpenClaw 一键迁移（一级分区） ── */}
+          {sec === 'import' && (
+            <section className="st-sec active">
+              <div className="panel-top">
+                <span className="desc">
+                  读取本机 CC Switch / OpenClaw 里已配好的模型（密钥脱敏展示），选中一条一键写入 Easel 对话通道。
+                </span>
+              </div>
+              <div className="imp-cards">
+                {impSources.length === 0 && (
+                  <div className="board"><div className="empty"><Skeleton w="70%" h={14} style={{ marginBottom: 10 }} /><Skeleton w="45%" h={12} /></div></div>
+                )}
+                {impSources.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`imp-card${impSource === s.id ? ' on' : ''}${s.available ? '' : ' off'}`}
+                    onClick={() => { setImpSource(s.id); clearImportPreview(); }}
+                    disabled={Boolean(impBusy)}
+                  >
+                    <span className="imp-name">{s.label}</span>
+                    <span className="imp-detail">{s.available ? (s.detail || '本机已检测到') : `不可用：${s.detail}`}</span>
+                    <span className={`pill ${s.available ? 'ok' : 'off'}`}><span className="dot" />{s.available ? '可导入' : '未检测到'}</span>
+                  </button>
+                ))}
+              </div>
+              {impSources.length > 0 && (
+                <>
+                  <div className="import-row">
+                    <Select
+                      aria-label="导入目标槽位"
+                      value={impSlot}
+                      disabled={Boolean(impBusy)}
+                      onChange={(value) => { setImpSlot(value); clearImportPreview(); }}
+                      options={[
+                        { value: 'openai', label: '写入：OpenAI 兼容槽位（OPENAI_*）' },
+                        { value: 'relay', label: '写入：Anthropic 兼容中转（EASEL_LLM_*）' },
+                        { value: 'anthropic', label: '写入：Anthropic 槽位（ANTHROPIC_*）' },
+                      ]}
+                    />
+                    <input
+                      className="mock"
+                      value={impPath}
+                      placeholder="自定义配置路径（可留空）"
+                      disabled={Boolean(impBusy)}
+                      onChange={(e) => { setImpPath(e.target.value); clearImportPreview(); }}
+                    />
+                    <button className="btn btn-sm btn-primary" onClick={() => void loadImportPreview()} disabled={Boolean(impBusy) || saving}>
+                      {impBusy === 'preview' ? '读取中…' : '读取候选'}
+                    </button>
+                  </div>
+                  {impMsg && <div className="import-msg">{impMsg}</div>}
+                  {impBusy === 'preview' && <SkeletonCard rows={3} />}
+                  {impPreview && impPreview.candidates.length > 0 && (
+                    <>
+                      <div className="import-list">
+                        {impPreview.candidates.map((c) => (
+                          <label
+                            key={c.id}
+                            className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name="imp-pick"
+                              disabled={!c.compatible || Boolean(impBusy)}
+                              checked={impPick === c.id}
+                              onChange={() => { setImpPick(c.id); setImpConfirmed(false); }}
+                            />
+                            <span className="ii-main">
+                              <span className="ii-name">
+                                {c.name}
+                                <span className="badge">{c.protocol}</span>
+                                {c.appType && <span className="ii-app">{c.appType}</span>}
+                              </span>
+                              <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
+                              <span className="ii-meta">
+                                {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
+                                {!c.compatible && ` · ${c.skipReason}`}
+                                {c.note && ` · ${c.note}`}
+                              </span>
+                              {c.compatible && c.overwrites.length > 0 && (
+                                <span className="ii-ov">
+                                  将覆盖：{c.overwrites.map((o) => `${o.field}（${o.current} → ${o.incoming}）`).join('；')}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <label className="import-msg">
+                        <input type="checkbox" checked={impConfirmed}
+                          disabled={!impPick || Boolean(impBusy)}
+                          onChange={(e) => setImpConfirmed(e.target.checked)} />
+                        我已核对覆盖内容，确认立即写入所选槽位（替换此槽位尚未保存的编辑）
+                      </label>
+                      <div className="import-foot">
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => void applyImportPick()}
+                          disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
+                        >
+                          {impBusy === 'apply' ? '导入中…' : '⚡ 一键导入'}
+                        </button>
+                        <span className="hint">{impPreview.note}</span>
+                      </div>
+                    </>
+                  )}
+                  {impPreview && impPreview.errors.length > 0 && (
+                    <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
+                  )}
+                  <div className="foot-note">导入后可在「模型配置 → 对话与脚本」里核对主备顺序；导入会同步写入 .env 与 OpenClaw 配置，失败自动回滚。</div>
+                </>
+              )}
+            </section>
+          )}
+
             {sec === 'model' && (
               <section className="st-sec active">
-                <div className="tabbar">
+                  <div className="tabbar" role="tablist" aria-label="模型能力通道">
                   {CHANNELS.map((c) => (
-                    <button key={c.id} className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
+                    <button key={c.id} role="tab" aria-selected={chan === c.id} className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
                       <span className="cdot" />{c.label}
                     </button>
                   ))}
                 </div>
-                {savedNote ? <div className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
+                {savedNote ? <div role="status" aria-live="polite" className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
 
                 {chan === 'chat' && (
                   <section className="st-panel active">
+                    <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
+                      onPrimary={setPrimaryRow} onBusyChange={setModelImportBusy}
+                      onApplied={(imported) => {
+                        if (!mounted.current) return;
+                        setChatRows((rows) => rows.some((row) => row.slot === imported.slot)
+                          ? rows.map((row) => row.slot === imported.slot ? { ...imported, role: row.role } : row) : [...rows, imported]);
+                        clearImportPreview();
+                        setSelftest(null);
+                      }}
+                      onOpenImport={() => { setSec('import'); void openImport(); }} />
                     <div className="panel-top">
-                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '主通道在线' : '未配置'}</span>
+                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatLive ? '主通道在线' : chatOk ? '主通道已配置' : '未配置'}</span>
                       <span className="desc">经本地网关路由（主备自动降级）</span>
                       {selftest && <span className="desc">上次自测 {hhmm(selftest.testedAt)}</span>}
                       <span className="spacer" />
-                      <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing}>自测本通道</button>
                     </div>
                     {renderBoard(chatRows, {
                       onRow: (i, p) => updateRow(setChatRows, i, p),
@@ -709,106 +792,9 @@ export default function SettingsPanel({ onClose }: Props) {
                     })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
                     <div className="import-block">
-                      <button className="adv-btn" onClick={() => void openImport()}>
-                        {impOpen ? '收起「从本机配置导入」' : '⬇ 从本机配置导入（CC Switch / OpenClaw）'}
+                      <button className="adv-btn" onClick={() => { setSec('import'); void openImport(); }}>
+                        ⬇ 从本机配置导入（CC Switch / OpenClaw）→ 去「配置导入」页
                       </button>
-                      {impOpen && (
-                        <div className="import-body">
-                          <div className="import-row">
-                            <select
-                              className="mock"
-                              value={impSource}
-                              disabled={Boolean(impBusy)}
-                              onChange={(e) => { setImpSource(e.target.value); clearImportPreview(); }}
-                            >
-                              {impSources.length === 0 && <option value="">读取来源中…</option>}
-                              {impSources.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.label}{s.available ? '' : `（不可用：${s.detail}）`}
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              className="mock"
-                              value={impSlot}
-                              disabled={Boolean(impBusy)}
-                              onChange={(e) => { setImpSlot(e.target.value); clearImportPreview(); }}
-                            >
-                              <option value="openai">写入：OpenAI 兼容槽位（OPENAI_*）</option>
-                              <option value="relay">写入：Anthropic 兼容中转（EASEL_LLM_*）</option>
-                              <option value="anthropic">写入：Anthropic 槽位（ANTHROPIC_*）</option>
-                            </select>
-                            <input
-                              className="mock"
-                              value={impPath}
-                              placeholder="自定义路径（可留空）"
-                              disabled={Boolean(impBusy)}
-                              onChange={(e) => { setImpPath(e.target.value); clearImportPreview(); }}
-                            />
-                            <button className="btn btn-sm" onClick={() => void loadImportPreview()} disabled={Boolean(impBusy) || saving}>
-                              {impBusy === 'preview' ? '读取中…' : '读取并预览'}
-                            </button>
-                          </div>
-                          {impMsg && <div className="import-msg">{impMsg}</div>}
-                          {impPreview && impPreview.candidates.length > 0 && (
-                            <>
-                              <div className="import-list">
-                                {impPreview.candidates.map((c) => (
-                                  <label
-                                    key={c.id}
-                                    className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
-                                  >
-                                    <input
-                                      type="radio"
-                                      name="imp-pick"
-                                      disabled={!c.compatible || Boolean(impBusy)}
-                                      checked={impPick === c.id}
-                                      onChange={() => { setImpPick(c.id); setImpConfirmed(false); }}
-                                    />
-                                    <span className="ii-main">
-                                      <span className="ii-name">
-                                        {c.name}
-                                        <span className="badge">{c.protocol}</span>
-                                        {c.appType && <span className="ii-app">{c.appType}</span>}
-                                      </span>
-                                      <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
-                                      <span className="ii-meta">
-                                        {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
-                                        {!c.compatible && ` · ${c.skipReason}`}
-                                        {c.note && ` · ${c.note}`}
-                                      </span>
-                                      {c.compatible && c.overwrites.length > 0 && (
-                                        <span className="ii-ov">
-                                          将覆盖：{c.overwrites.map((o) => `${o.field}（${o.current} → ${o.incoming}）`).join('；')}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </label>
-                                ))}
-                              </div>
-                              <label className="import-msg">
-                                <input type="checkbox" checked={impConfirmed}
-                                  disabled={!impPick || Boolean(impBusy)}
-                                  onChange={(e) => setImpConfirmed(e.target.checked)} />
-                                我已核对覆盖内容，确认立即写入所选槽位（替换此槽位尚未保存的编辑）
-                              </label>
-                              <div className="import-foot">
-                                <button
-                                  className="btn btn-sm btn-primary"
-                                  onClick={() => void applyImportPick()}
-                                  disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
-                                >
-                                  {impBusy === 'apply' ? '导入中…' : '导入选中项'}
-                                </button>
-                                <span className="hint">{impPreview.note}</span>
-                              </div>
-                            </>
-                          )}
-                          {impPreview && impPreview.errors.length > 0 && (
-                            <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；预设只填公开端点，模型列表现场向服务商查询，不做猜测。</div>
                   </section>
@@ -820,7 +806,6 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '主通道在线' : (localReady ? '本地兜底生效' : '备用待安装')}</span>
                       <span className="desc">三级链：自带字幕 → API → 本地兜底</span>
                       <span className="spacer" />
-                      <button className="btn btn-sm" onClick={() => void doSelftest('transcribe')} disabled={testing}>自测本通道</button>
                     </div>
                     {renderBoard([...transRows, localRow], {
                       onRow: (i, p) => updateRow(setTransRows, i, p),
@@ -897,6 +882,107 @@ export default function SettingsPanel({ onClose }: Props) {
 
                 {modelErr && <div className="env-error">{modelErr}</div>}
                 {selftestNote && <div className="foot-note">{selftestNote}</div>}
+              </section>
+            )}
+
+            {/* ── 生图通道：工作台「生图工坊」直出图的专用 OpenAI 协议通道 ── */}
+            {sec === 'image' && (
+              <section className="st-sec active">
+                <div className="panel-top">
+                  <span className={`pill ${!imgBaseChanged && imgBaseSaved && imgKeyMasked ? 'ok' : 'off'}`}><span className="dot" />{imgLoading ? '读取中…' : imgLoadError ? '读取失败' : imgBaseChanged || imgKey ? '尚未保存' : imgBaseSaved && imgKeyMasked ? '已配置 · 未验证' : '未配置'}</span>
+                  <span className="desc">OpenAI 协议（/v1/images/generations）；聚合站出图可能需要 1-8 分钟</span>
+                  <span className="spacer" />
+                </div>
+                {imgLoadError && <div className="env-error" role="alert">{imgLoadError}</div>}
+                <div className="board img-chan">
+                  <SettingsField label="Base URL" horizontal>
+                    <input
+                      className="mock"
+                      value={imgBase}
+                      aria-label="生图 Base URL"
+                      disabled={imgLoading || imgSaving}
+                      placeholder="https://api.example.com/v1"
+                      onChange={(e) => setImgBase(e.target.value)}
+                    />
+                  </SettingsField>
+                  <SettingsField label="API Key" horizontal>
+                    <input
+                      className="mock"
+                      type="password"
+                      value={imgKey}
+                      aria-label="生图 API Key"
+                      disabled={imgLoading || imgSaving}
+                      placeholder={imgBaseChanged ? 'Base URL 已更改，请填写新服务商的 Key' : imgKeyMasked || '粘贴生图服务的 Key（QQ/聚合站的专属 Key，不是聊天 Key）'}
+                      onChange={(e) => setImgKey(e.target.value)}
+                    />
+                  </SettingsField>
+                  <SettingsField label="模型" horizontal>
+                    <span className="cell-text">{imgLoading ? '读取中…' : imgModel || '未读取到模型配置'}</span>
+                  </SettingsField>
+                  {imgSaved && <div className={`save-note${imgSaved.startsWith('保存失败') ? ' err' : ''}`}>{imgSaved}</div>}
+                  <div className="img-chan-foot">
+                    <button className="btn btn-sm btn-primary" onClick={() => void saveImgChannel()} disabled={imgSaving || imgLoading || Boolean(imgLoadError) || !imgBase.trim() || (!imgKey.trim() && (!imgKeyMasked || imgBaseChanged))}>
+                      {imgSaving ? '保存中…' : '保存生图通道'}
+                    </button>
+                    <span className="hint">已有 Key 时留空会保留原值；保存后到「生图工坊」直接出图。</span>
+                  </div>
+                </div>
+                <div className="foot-note">与「模型配置 → 生图」的技能通道共享 IMG_* 配置：这里改了，技能生图也用同一通道。</div>
+              </section>
+            )}
+
+            {/* ── 通知中心：生成/发布完成后邮箱推送（可视化配置 + 测试发送） ── */}
+            {sec === 'notify' && (
+              <section className="st-sec active">
+                <div className="panel-top">
+                  <span className={`pill ${ntf.email && ntf.host ? 'ok' : 'off'}`}><span className="dot" />{ntf.email && ntf.host ? '已配置' : '未配置'}</span>
+                  <span className="desc">图文/视频/文案生成完成、发布成功后，自动把结果发到你的邮箱</span>
+                  <span className="spacer" />
+                </div>
+                {ntfLoading ? (
+                  <div className="board img-chan"><SkeletonCard rows={3} title={false} /></div>
+                ) : (
+                  <div className="board img-chan">
+                    <SettingsField label="收件人" horizontal>
+                      <input className="mock" value={ntf.email} placeholder="you@qq.com（多个用逗号分隔）"
+                        onChange={(e) => setNtf((f) => ({ ...f, email: e.target.value }))} />
+                    </SettingsField>
+                    <SettingsField label="SMTP 主机" horizontal>
+                      <input className="mock" value={ntf.host} placeholder="smtp.qq.com / smtp.163.com / smtp.exmail.qq.com"
+                        onChange={(e) => setNtf((f) => ({ ...f, host: e.target.value }))} />
+                    </SettingsField>
+                    <SettingsField label="端口" horizontal>
+                      <input className="mock" style={{ maxWidth: 120 }} value={ntf.port} placeholder="465"
+                        onChange={(e) => setNtf((f) => ({ ...f, port: e.target.value }))} />
+                      <span className="hint">465=SSL（默认）；587=STARTTLS</span>
+                    </SettingsField>
+                    <SettingsField label="认证账号" horizontal>
+                      <input className="mock" value={ntf.user} placeholder="缺省=首个收件人"
+                        onChange={(e) => setNtf((f) => ({ ...f, user: e.target.value }))} />
+                    </SettingsField>
+                    <SettingsField label="授权码" horizontal>
+                      <input className="mock" type="password" value={ntf.pass} placeholder="留空=不修改已保存的密码（QQ/163 用授权码，不是登录密码）"
+                        onChange={(e) => setNtf((f) => ({ ...f, pass: e.target.value }))} />
+                    </SettingsField>
+                    <SettingsField label="自动通知" horizontal>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13 }}>
+                        <input type="checkbox" checked={ntf.onDone}
+                          onChange={(e) => setNtf((f) => ({ ...f, onDone: e.target.checked }))} />
+                        任务完成自动发邮件（关闭则只在 Agent 主动通知时发）
+                      </label>
+                    </SettingsField>
+                    {ntfSaved && <div className={`save-note${ntfSaved.startsWith('保存失败') ? ' err' : ''}`}>{ntfSaved}</div>}
+                    <div className="img-chan-foot">
+                      <button className="btn btn-sm btn-primary" onClick={() => void saveNotify()}
+                        disabled={!ntf.email.trim() || !ntf.host.trim()}>保存通知配置</button>
+                      <button className="btn btn-sm" onClick={() => void testNotify()} disabled={ntfTesting || !ntf.email.trim() || !ntf.host.trim()}>
+                        <IconSend size={13} /> {ntfTesting ? '发送中…' : '发测试邮件'}
+                      </button>
+                      {ntfTestMsg && <span className="hint" style={{ color: ntfTestMsg.startsWith('✅') ? 'var(--green, #1a9e5c)' : 'var(--red)' }}>{ntfTestMsg}</span>}
+                    </div>
+                  </div>
+                )}
+                <div className="foot-note">Agent 也会收到 notify_email 工具：让它「完成后发我邮箱」即可主动推送；配置与本页共享。IM 群机器人推送见技能 skill-publish-notify。</div>
               </section>
             )}
 

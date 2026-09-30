@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   fetchTrends, fetchSchedule, fetchOutputs, fetchAccounts, fetchIdeas,
   fetchAnalyticsPlatforms, fetchAccountAnalytics,
@@ -8,7 +8,11 @@ import type {
   AnalyticsPlatform, AccountAnalytics, AccountWhoami,
 } from '../lib/api';
 import type { Page } from './Sidebar';
-import { getWhoamiCache, verifyStale } from '../lib/whoami';
+import { verifyStale } from '../lib/whoami';
+import { SkeletonCard } from './Skeleton';
+import DashboardCard from './ui/DashboardCard';
+import DashboardEmpty from './ui/DashboardEmpty';
+import { IconImage } from './settingsIcons';
 import {
   IconFire, IconCalendar, IconOutputs, IconChat, IconSkills, IconAccounts,
   IconIdea, IconPublish,
@@ -16,14 +20,15 @@ import {
 
 /** 大数格式化：12000 → 1.2万。 */
 function fmtNum(n: number | null): string {
-  if (n == null) return '—';
+  if (n == null || !Number.isFinite(n)) return '—';
   const a = Math.abs(n);
   if (a >= 10000) return (n / 10000).toFixed(a >= 100000 ? 0 : 1) + '万';
   return String(n);
 }
-/** 增长量渲染信息：正=绿↑，负=红↓，0/缺失=不显示。 */
+/** 增长量渲染信息：正=绿↑，负=红↓，0=持平，缺失=不显示。 */
 function growthInfo(n: number | null): { text: string; color: string } | null {
-  if (n == null || n === 0) return null;
+  if (n == null || !Number.isFinite(n)) return null;
+  if (n === 0) return { text: '持平', color: 'var(--text-secondary)' };
   return n > 0
     ? { text: `▲+${fmtNum(n)}`, color: 'var(--trend-up)' }
     : { text: `▼${fmtNum(Math.abs(n))}`, color: 'var(--trend-down)' };
@@ -34,69 +39,115 @@ interface DashboardProps {
   gatewayStatus: string;
   onNavigate: (page: Page) => void;
   onUseTopic: (title: string) => void;
+  /** 工作台输入框直达创作：新开会话把这句话发给 Agent */
+  onQuickPrompt: (text: string) => void;
 }
 
 const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', scheduled: '待发', published: '已发' };
 
-export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUseTopic }: DashboardProps) {
-  const [trends, setTrends] = useState<TrendGroup[]>([]);
-  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
-  const [outputs, setOutputs] = useState<OutputNode[]>([]);
+export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUseTopic, onQuickPrompt }: DashboardProps) {
+  const mounted = useRef(false);
+  const dataVersion = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const [trends, setTrends] = useState<TrendGroup[] | null>(null);
+  const [schedule, setSchedule] = useState<ScheduleItem[] | null>(null);
+  const [outputs, setOutputs] = useState<OutputNode[] | null>(null);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState<Record<string, boolean>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
   // 归因层：账号创作数据
   const [anaPlats, setAnaPlats] = useState<AnalyticsPlatform[]>([]);
   const [anaSel, setAnaSel] = useState('');
-  const [anaData, setAnaData] = useState<Record<string, AccountAnalytics | 'loading' | 'error'>>(() => {
-    try { return JSON.parse(localStorage.getItem('easel_analytics') || '{}'); } catch { return {}; }
-  });
+  // Account identity can change between visits. Never restore a platform-only cache.
+  const [anaData, setAnaData] = useState<Record<string, AccountAnalytics | 'loading' | 'error'>>({});
+  const [anaErrors, setAnaErrors] = useState<Record<string, string>>({});
+  const anaPending = useRef(new Set<string>());
   const [anaWin, setAnaWin] = useState<'last' | 'day' | 'week' | 'month' | 'year'>('week');
   // whoami 自愈：登录态以真实 profile 为准（与账号页共享 localStorage 缓存）
-  const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>(() => getWhoamiCache());
+  const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>({});
+
+  // ── 直达创作 ──
+  const [quickText, setQuickText] = useState('');
 
   useEffect(() => {
-    fetchTrends('weibo,douyin', 6).then((d) => setTrends(d.trends)).catch(() => {});
-    fetchSchedule().then(setSchedule).catch(() => {});
-    fetchOutputs().then(setOutputs).catch(() => {});
-    fetchAccounts().then(setAccounts).catch(() => {});
-    fetchIdeas().then(setIdeas).catch(() => {});
+    let alive = true;
+    dataVersion.current += 1;
+    setLoadErrors({});
+    setLoaded({});
+    setTrends(null);
+    setSchedule(null);
+    setOutputs(null);
+    setAccounts([]);
+    setIdeas([]);
+    setAnaData({});
+    setAnaErrors({});
+    setWhoamiMap({});
+    anaPending.current.clear();
+    const load = <T,>(key: string, request: Promise<T>, apply: (data: T) => void) => {
+      request.then((data) => { if (alive) apply(data); })
+        .catch((e: unknown) => { if (alive) setLoadErrors((old) => ({ ...old, [key]: e instanceof Error ? e.message : '请求失败' })); })
+        .finally(() => { if (alive) setLoaded((old) => ({ ...old, [key]: true })); });
+    };
+    load('热点', fetchTrends('weibo,douyin', 6), (d) => setTrends(d.trends));
+    load('排期', fetchSchedule(), setSchedule);
+    load('内容', fetchOutputs(), setOutputs);
+    load('账号', fetchAccounts(), setAccounts);
+    load('选题', fetchIdeas(), setIdeas);
     fetchAnalyticsPlatforms().then((ps) => {
+      if (!alive) return;
       setAnaPlats(ps);
-      const cache = getWhoamiCache();
-      const isLog = (p: AnalyticsPlatform) => p.loggedIn || !!cache[p.platform]?.loggedIn;
-      const first = ps.find(isLog);
+      const first = ps.find((p) => p.loggedIn);
       if (first) setAnaSel((s) => s || first.platform);
       // 开页后台自愈：对非 API 式的归因平台真校验（whoami），刷新登录态；
       // B 站走 cookie、公众号走凭证/官方 API 判定，都不起浏览器。
       const API_BASED = new Set(['bilibili', 'wechat-oa']);
       verifyStale(ps.filter((p) => !API_BASED.has(p.platform)).map((p) => p.platform), {
+        alive: () => alive,
         onUpdate: (platform, r) => {
           setWhoamiMap((m) => ({ ...m, [platform]: r }));
           if (r.loggedIn) setAnaSel((s) => s || platform);
         },
       });
-    }).catch(() => {});
-  }, []);
+    }).catch((e: unknown) => { if (alive) setLoadErrors((old) => ({ ...old, '分析': e instanceof Error ? e.message : '请求失败' })); })
+      .finally(() => { if (alive) setLoaded((old) => ({ ...old, '分析': true })); });
+    return () => { alive = false; };
+  }, [refreshKey]);
 
   const runAna = (platform: string) => {
     setAnaSel(platform);
+    if (anaPending.current.has(platform)) return;
+    const version = dataVersion.current;
+    const isCurrent = () => mounted.current && version === dataVersion.current;
+    anaPending.current.add(platform);
     setAnaData((d) => ({ ...d, [platform]: 'loading' }));
     fetchAccountAnalytics(platform)
-      .then((r) => setAnaData((d) => {
-        const next = { ...d, [platform]: r };
-        try { localStorage.setItem('easel_analytics', JSON.stringify(next)); } catch { /* quota */ }
-        return next;
-      }))
-      .catch(() => setAnaData((d) => ({ ...d, [platform]: 'error' as const })));
+      .then((r) => { if (isCurrent()) setAnaData((d) => ({ ...d, [platform]: r })); })
+      .catch((e: unknown) => {
+        if (!isCurrent()) return;
+        setAnaErrors((old) => ({ ...old, [platform]: e instanceof Error ? e.message : '请求失败' }));
+        setAnaData((d) => ({ ...d, [platform]: 'error' as const }));
+      }).finally(() => { if (isCurrent()) anaPending.current.delete(platform); });
+  };
+
+  const submitQuick = () => {
+    const t = quickText.trim();
+    if (t) { onQuickPrompt(t); setQuickText(''); }
   };
 
   const hour = new Date().getHours();
   const greet = hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const upcoming = [...schedule]
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const schedList = schedule || [];
+  const upcoming = [...schedList]
     .filter((s) => s.date >= todayStr && s.status !== 'published')
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).slice(0, 5);
-  const recent = outputs.slice(0, 5);
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const recent = (outputs || []).slice(0, 5);
   const pendingIdeas = ideas.filter((i) => i.status === 'pending');
   const loggedIn = accounts.filter((a) => a.loggedIn).length;
 
@@ -110,21 +161,42 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   ];
 
   const stats: { label: string; value: string; page: Page; Icon: typeof IconChat }[] = [
-    { label: '待做选题', value: String(pendingIdeas.length), page: 'ideas', Icon: IconIdea },
-    { label: '待发排期', value: String(upcoming.length), page: 'calendar', Icon: IconCalendar },
-    { label: '内容项目', value: String(outputs.length), page: 'outputs', Icon: IconOutputs },
-    { label: '已登录账号', value: `${loggedIn}/${accounts.length}`, page: 'accounts', Icon: IconAccounts },
+    { label: '待做选题', value: loadErrors['选题'] ? '—' : !loaded['选题'] ? '…' : String(pendingIdeas.length), page: 'ideas', Icon: IconIdea },
+    { label: '待发排期', value: loadErrors['排期'] ? '—' : !loaded['排期'] ? '…' : String(upcoming.length), page: 'calendar', Icon: IconCalendar },
+    { label: '内容项目', value: loadErrors['内容'] ? '—' : !loaded['内容'] ? '…' : String(outputs?.length ?? 0), page: 'outputs', Icon: IconOutputs },
+    { label: '已登录账号', value: loadErrors['账号'] ? '—' : !loaded['账号'] ? '…' : `${loggedIn}/${accounts.length}`, page: 'accounts', Icon: IconAccounts },
   ];
+
 
   return (
     <div className="page-scroll dash-page">
       <div className="dash-hero">
-        <h1 className="page-title" style={{ fontSize: 26 }}>{greet} 👋</h1>
-        <p className="page-subtitle">
-          {gatewayStatus === 'connected' ? '一切就绪。' : '⚠ 网关未连接。'}
-          {persona ? ` 当前画像「${persona}」。` : ' 通用模式——指定画像效果更好。'}
-          从热点到发布，一站式搞定今天的内容。
-        </p>
+        <div className="dash-heading">
+          <div>
+            <p className="dash-eyebrow">你的创作工作室 / OVERVIEW</p>
+            <h1 className="page-title">{greet}，让灵感成为作品。</h1>
+            <p className="page-subtitle">从发现一个好选题，到发布下一篇内容，在这里开始。</p>
+          </div>
+          <span className="dash-date">{today.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</span>
+        </div>
+        <div className="dash-composer">
+        <label className="dash-launch-label" htmlFor="quick-create">今天，你想创作什么？</label>
+        {/* 直达创作：一句话开干，不用先想「该去哪个页面」 */}
+        <div className="dash-launch">
+          <input
+            className="dash-launch-input"
+            id="quick-create"
+            value={quickText}
+            placeholder="例如：帮我策划一组秋日咖啡探店笔记…"
+            onChange={(e) => setQuickText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submitQuick(); }}
+          />
+          <button className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
+            开始创作 →
+          </button>
+        </div>
+        <p className="dash-composer-note">{persona ? `当前画像 · ${persona}` : '通用创作模式'}<span> · {gatewayStatus === 'connected' ? '创作助手已连接' : gatewayStatus === 'connecting' ? '正在连接创作助手' : '网关离线，请先检查设置'}</span></p>
+        </div>
         <div className="dash-quick">
           {quick.map((q) => (
             <button key={q.page} className="dash-quick-btn" onClick={() => onNavigate(q.page)}>
@@ -133,6 +205,11 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
           ))}
         </div>
       </div>
+
+      {Object.keys(loadErrors).length > 0 && <div className="dash-load-error" role="alert">
+        <span>部分数据未能加载：{Object.entries(loadErrors).map(([key, message]) => `${key}（${message}）`).join('；')}。相关数据暂不可用。</span>
+        <button className="btn btn-sm" onClick={() => setRefreshKey((v) => v + 1)}>重新加载</button>
+      </div>}
 
       {/* 概览数字 */}
       <div className="dash-stats">
@@ -146,87 +223,89 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       </div>
 
       <div className="dash-grid">
+        <DashboardCard variant="studio" Icon={IconImage} title="生图工坊" ariaLabel="生图工坊入口">
+          <DashboardEmpty Icon={IconImage} title="给想象一块独立画布" description="描述画面、选择比例，生成封面与配图。任务进度和历史图片都在工坊里。" action="打开生图工坊" onAction={() => onNavigate('image')} />
+        </DashboardCard>
+
         {/* 今日热点 */}
-        <div className="card dash-card">
-          <div className="dash-card-head">
-            <span><IconFire size={16} /> 今日热点</span>
-            <button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>
-          </div>
-          {trends.length === 0 && <div className="dash-empty">热点加载中 / 需配置代理</div>}
-          {trends.map((g) => (
+        <DashboardCard variant="summary" Icon={IconFire} title="今日热点"
+          actions={<button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>}>
+          {trends === null && !loadErrors['热点'] && <SkeletonCard rows={6} title={false} />}
+          {loadErrors['热点'] && <DashboardEmpty Icon={IconFire} title="热点暂未加载" description="请检查网络连接后重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {trends && !trends.some((g) => g.items.length > 0) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
+          {trends?.map((g) => (
             <div key={g.platform} className="dash-trend-group">
               <div className="dash-trend-plat">{g.label}</div>
               {g.items.slice(0, 3).map((it, i) => (
                 <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
-                  <span className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</span>
+                  <button className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</button>
                 </div>
               ))}
             </div>
           ))}
-        </div>
+        </DashboardCard>
 
         {/* 选题库 */}
-        <div className="card dash-card">
-          <div className="dash-card-head">
-            <span><IconIdea size={16} /> 选题库 · 待做</span>
-            <button className="dash-more" onClick={() => onNavigate('ideas')}>全部 →</button>
-          </div>
-          {pendingIdeas.length === 0 && <div className="dash-empty">还没攒选题，去热点雷达收藏几个吧</div>}
+        <DashboardCard variant="summary" Icon={IconIdea} title="选题库 · 待做" ariaLabel="待做选题"
+          actions={<button className="dash-more" onClick={() => onNavigate('ideas')}>全部 →</button>}>
+          {!loaded['选题'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['选题'] && <DashboardEmpty Icon={IconIdea} title="选题暂未加载" description="已有选题保留在选题库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {loaded['选题'] && !loadErrors['选题'] && pendingIdeas.length === 0 && <DashboardEmpty Icon={IconIdea} title="为下一篇攒点灵感" description="记录一个想法，或从热点中收藏选题。" action="添加选题" onAction={() => onNavigate('ideas')} />}
           {pendingIdeas.slice(0, 5).map((it) => (
-            <div key={it.id} className="dash-idea" onClick={() => onUseTopic(it.title)} title="点击做成内容">
+            <button key={it.id} className="dash-idea"
+              onClick={() => onUseTopic(it.title)} title="点击做成内容">
               <span className="dash-idea-title">{it.title}</span>
               {it.source && <span className="badge">{it.source}</span>}
-            </div>
+            </button>
           ))}
-        </div>
+        </DashboardCard>
 
         {/* 近期排期 */}
-        <div className="card dash-card">
-          <div className="dash-card-head">
-            <span><IconCalendar size={16} /> 近期排期</span>
-            <button className="dash-more" onClick={() => onNavigate('calendar')}>日历 →</button>
-          </div>
-          {upcoming.length === 0 && <div className="dash-empty">暂无排期，去日历安排一条吧</div>}
-          {upcoming.map((s) => (
-            <div key={s.id} className="dash-sched" onClick={() => onNavigate('calendar')}>
+        <DashboardCard variant="summary" Icon={IconCalendar} title="近期排期"
+          actions={<button className="dash-more" onClick={() => onNavigate('calendar')}>日历 →</button>}>
+          {schedule === null && !loadErrors['排期'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['排期'] && <DashboardEmpty Icon={IconCalendar} title="排期暂未加载" description="暂时无法读取日历，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {schedule !== null && upcoming.length === 0 && <DashboardEmpty Icon={IconCalendar} title="给创作一个时间" description="安排下一篇内容，让发布更有节奏。" action="安排日历" onAction={() => onNavigate('calendar')} />}
+          {upcoming.slice(0, 5).map((s) => (
+            <button key={s.id} className="dash-sched"
+              onClick={() => onNavigate('calendar')}>
               <span className="dash-sched-date">{s.date.slice(5)}</span>
               <span className="dash-sched-title">{s.platform ? `[${s.platform}] ` : ''}{s.title}</span>
               <span className="badge">{STATUS_LABEL[s.status] || s.status}</span>
-            </div>
+            </button>
           ))}
-        </div>
+        </DashboardCard>
 
         {/* 最近产物 */}
-        <div className="card dash-card dash-card-top">
-          <div className="dash-card-head">
-            <span><IconOutputs size={16} /> 最近产物</span>
-            <button className="dash-more" onClick={() => onNavigate('outputs')}>内容库 →</button>
-          </div>
-          {recent.length === 0 && <div className="dash-empty">还没有产物，去对话生成第一条吧</div>}
+        <DashboardCard variant="summary" Icon={IconOutputs} title="最近产物"
+          actions={<button className="dash-more" onClick={() => onNavigate('outputs')}>内容库 →</button>}>
+          {outputs === null && !loadErrors['内容'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['内容'] && <DashboardEmpty Icon={IconOutputs} title="内容暂未加载" description="暂时无法读取内容库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {outputs !== null && recent.length === 0 && <DashboardEmpty Icon={IconOutputs} title="作品从这里积累" description="开始一段创作，生成的内容会保存到这里。" action="开始对话" onAction={() => onNavigate('chat')} />}
           {recent.map((g) => (
-            <div key={g.name} className="dash-output" onClick={() => onNavigate('outputs')}>
+            <button key={g.name} className="dash-output"
+              onClick={() => onNavigate('outputs')}>
               <span className="dash-output-name">{g.meta?.title || g.name}</span>
               <span className="badge">{g.meta?.platform || (g.type === 'dir' ? `${g.fileCount ?? 0} 文件` : '单文件')}</span>
-            </div>
+            </button>
           ))}
-        </div>
+        </DashboardCard>
 
         {/* 创作数据（归因层）：选平台自动拉取登录账号的粉丝/获赞/关注 + 多窗口增长 + 近7日环比 + 最新笔记 */}
-        <div className="card dash-card dash-card-wide">
-          <div className="dash-card-head">
-            <span><IconAccounts size={16} /> 创作数据</span>
+        <DashboardCard variant="wide" Icon={IconAccounts} title="账号分析"
+          actions={<div className="dash-card-actions">
+            <button className="dash-more" onClick={() => onNavigate('analysis')}>内容分析 →</button>
             {anaSel && anaData[anaSel] && anaData[anaSel] !== 'loading' && (
               <button className="dash-more" onClick={() => runAna(anaSel)}>刷新 →</button>
             )}
-          </div>
+            </div>}>
           {(() => {
-            const logged = anaPlats.filter((p) => p.loggedIn || whoamiMap[p.platform]?.loggedIn);
-            if (anaPlats.length === 0) return <div className="dash-empty">加载中 / 需配置代理</div>;
+            const logged = anaPlats.filter((p) => whoamiMap[p.platform]?.loggedIn ?? p.loggedIn);
+            if (!loaded['分析']) return <SkeletonCard rows={3} title={false} />;
+            if (loadErrors['分析']) return <div className="dash-empty">分析服务暂不可用，请点击上方「重新加载」。</div>;
             if (logged.length === 0) {
               return (
-                <div className="dash-empty" onClick={() => onNavigate('accounts')} style={{ cursor: 'pointer' }}>
-                  去账号页登录后，这里看各平台粉丝 / 获赞 / 关注、增长趋势与最新笔记 →
-                </div>
+                <DashboardEmpty Icon={IconAccounts} title="让每一次发布都有反馈" description="连接平台账号，查看粉丝、内容表现和基于真实数据的创作建议。" action="连接账号" onAction={() => onNavigate('accounts')} />
               );
             }
             const d = anaSel ? anaData[anaSel] : undefined;
@@ -246,21 +325,25 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
                   <div className="loading" style={{ padding: '28px 0' }}><div className="spinner" />抓取中…（起浏览器，约数秒）</div>
                 )}
                 {d === 'error' && (
-                  <div className="dash-empty" style={{ color: 'var(--red)' }}>抓取失败（未登录 / 需真机校准），点平台重试</div>
+                  <div className="dash-empty" role="alert" style={{ color: 'var(--red)' }}>抓取失败：{anaErrors[anaSel] || '请稍后重试'}。点击平台重试。</div>
                 )}
-                {d && d !== 'loading' && d !== 'error' && (!d.loggedIn ? (
-                  <div className="dash-empty" onClick={() => onNavigate('accounts')} style={{ cursor: 'pointer' }}>
-                    该平台登录态已失效，去账号页重登 →
+                {d && d !== 'loading' && d !== 'error' && (d.accountRequired ? (
+                  <div className="dash-empty">
+                    {d.analysisNote || '请先选择账号，再查看该账号的真实数据。'}{' '}
+                    <button className="link-btn" onClick={() => onNavigate('analysis')}>查看内容分析 →</button>
                   </div>
+                ) : !d.loggedIn ? (
+                  <DashboardEmpty Icon={IconAccounts} title="账号需要重新登录" description="登录状态已失效，请前往账号页重新连接。" action="前往账号页" onAction={() => onNavigate('accounts')} />
                 ) : (
                   <div className="ana-body">
                     {/* 概览 + 增长对比 */}
                     <div className="ana-col ana-col-main">
                       <div className="ana-id">{d.nickname ? `@${d.nickname}` : d.name}</div>
+                      <p className="ana-wins-note">采集时间：{d.fetched_at ? new Date(d.fetched_at * 1000).toLocaleString('zh-CN') : '平台未提供'} · 平台返回数据，非实时监控</p>
                       <div className="ana-overview">
-                        {([['粉丝', 'followers'], ['获赞', 'likes'], ['关注', 'following']] as const).map(([label, key]) => {
+                        {([['粉丝', 'followers'], ['获赞', 'likes'], ['作品', 'posts']] as const).map(([label, key]) => {
                           const w = d.growth?.[anaWin] ?? null;
-                          const g = w ? growthInfo(w[key as 'followers' | 'likes']) : null;
+                          const g = w ? growthInfo(w[key]) : null;
                           return (
                             <div key={key} className="ana-stat">
                               <div className="ana-stat-val">{fmtNum(d[key])}</div>
@@ -280,7 +363,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
                       <div className="ana-wins-note">
                         {d.growth?.[anaWin]?.since_days != null
                           ? `对比 ${d.growth[anaWin]!.since_days} 天前的快照`
-                          : '暂无该时段历史快照，多刷新几次即可积累对比'}
+                          : '缺少该时段的历史快照。需跨对应时间段采集，短时间重复刷新不会生成历史增长。'}
                       </div>
                     </div>
 
@@ -334,7 +417,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
               </>
             );
           })()}
-        </div>
+        </DashboardCard>
       </div>
     </div>
   );

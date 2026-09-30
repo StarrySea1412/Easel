@@ -55,6 +55,15 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+# 邮箱通知钩子（mcp/easel-notify）：record --status done / meta --status ready|published
+# 发一封摘要邮件。钩子自带全部条件门禁与异常吞噬（未配置零开销、失败不影响登记），
+# 拿不到模块就降级为空操作，绝不影响 manifest 本身。
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "mcp" / "easel-notify"))
+    from notify_hook import notify_completion as _notify_completion  # noqa: E402
+except Exception:  # noqa: BLE001
+    _notify_completion = None
+
 # PROJECT_ROOT：优先 EASEL_ROOT env（gateway/CLI 注入），否则按 __file__ 上溯。
 # ⚠️ 本脚本会被 sync.sh 拍平复制到 workspace/shared/scripts/，那里 __file__ 上溯会
 # 算成 ~/.openclaw（少一层 skills/），产物会写错地方——故 env 兜底不可省。
@@ -153,6 +162,15 @@ def cmd_record(args) -> None:
     data["steps"].append(step)
     data["updated"] = now
     atomic_write(path, data)
+    # 邮箱通知钩子：登记成功步发一封摘要邮件（失败步不发；未配置零开销）。
+    if args.status == "done" and _notify_completion is not None:
+        try:
+            _notify_completion(topic=data.get("topic", ""), title=data.get("title", ""),
+                               platform=data.get("platform", ""), kind=data.get("kind", ""),
+                               summary=step.get("summary", ""), source="generate",
+                               deliverables=step.get("outputs") or [])
+        except Exception:  # noqa: BLE001
+            pass
     print(json.dumps({"ok": True, "topic": data.get("topic"),
                       "step_index": len(data["steps"]) - 1, "step": step,
                       "path": str(path)},
@@ -197,6 +215,15 @@ def cmd_meta(args) -> None:
 
     data["updated"] = now
     atomic_write(path, data)
+    # 邮箱通知钩子：项目标记 ready/published 发一封摘要邮件（draft 不发；未配置零开销）。
+    if data.get("status") in ("ready", "published") and _notify_completion is not None:
+        try:
+            _notify_completion(topic=data.get("topic", ""), title=data.get("title", ""),
+                               platform=data.get("platform", ""), kind=data.get("kind", ""),
+                               summary=data.get("summary", ""), source="publish",
+                               deliverables=data.get("deliverables") or [])
+        except Exception:  # noqa: BLE001
+            pass
     header = {k: data.get(k) for k in
               ("title", "summary", "platform", "kind", "status", "tags", "cover", "deliverables")
               if k in data}

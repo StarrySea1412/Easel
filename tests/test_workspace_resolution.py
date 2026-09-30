@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import sys
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -113,9 +115,11 @@ def test_ask_openclaw_picks_default_agent(monkeypatch):
 
     class _Proc:
         returncode = 0
-        stdout = payload
+        def __init__(self, *args, **kwargs):
+            kwargs['stdout'].write(payload.encode('utf-8'))
+        def wait(self, timeout): return 0
 
-    monkeypatch.setattr(ws.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(ws.subprocess, "Popen", _Proc)
     monkeypatch.setattr("easel.openclaw_cmd.openclaw_base_cmd", lambda: ["openclaw"])
     assert ws._ask_openclaw() == Path("/ws/main")
 
@@ -124,11 +128,45 @@ def test_ask_openclaw_survives_garbage(monkeypatch):
     """openclaw 吐了非 JSON / 非零退出时必须返回 None 走退化，不能抛。"""
     class _Bad:
         returncode = 0
-        stdout = "not json at all"
+        def __init__(self, *args, **kwargs):
+            kwargs['stdout'].write(b'not json at all')
+        def wait(self, timeout): return 0
 
-    monkeypatch.setattr(ws.subprocess, "run", lambda *a, **k: _Bad())
+    monkeypatch.setattr(ws.subprocess, "Popen", _Bad)
     monkeypatch.setattr("easel.openclaw_cmd.openclaw_base_cmd", lambda: ["openclaw"])
     assert ws._ask_openclaw() is None
+
+
+def test_status_timeout_cleans_tree_without_pipe_drain(monkeypatch):
+    waits, cleaned = [], []
+    class Stuck:
+        returncode = None
+        pid = 9876
+        def __init__(self, *args, **kwargs):
+            assert kwargs['stdout'] is not subprocess.PIPE
+            assert kwargs['stderr'] is subprocess.DEVNULL
+        def wait(self, timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                raise subprocess.TimeoutExpired('status', timeout)
+            return 0
+    monkeypatch.setattr(ws.subprocess, 'Popen', Stuck)
+    monkeypatch.setattr('easel.openclaw_cmd.openclaw_base_cmd', lambda: ['openclaw'])
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', lambda p: cleaned.append(p.pid))
+    assert ws._ask_openclaw() is None
+    assert cleaned == [9876]
+    assert waits == [ws.STATUS_TIMEOUT, 3]
+
+
+def test_real_status_descendant_inherits_stdout_but_probe_stays_bounded(monkeypatch, tmp_path):
+    # This recreates the Windows handle inheritance bug without OpenClaw/network.
+    helper = tmp_path / 'status_descendant.py'
+    helper.write_text('import subprocess,sys,time\nsubprocess.Popen([sys.executable,"-c","import time; time.sleep(15)"])\ntime.sleep(15)\n', encoding='utf-8')
+    monkeypatch.setattr('easel.openclaw_cmd.openclaw_base_cmd', lambda: [sys.executable, str(helper)])
+    monkeypatch.setattr(ws, 'STATUS_TIMEOUT', 0.3)
+    started = time.monotonic()
+    assert ws._ask_openclaw() is None
+    assert time.monotonic() - started < 6
 
 
 def test_doctor_uses_resolver(isolated, monkeypatch):

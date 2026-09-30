@@ -79,6 +79,51 @@ def test_whoami_browser_failure_keeps_last_known_identity(isolated, monkeypatch)
     assert (web.LOGIN_DIR / "xiaohongshu.json").exists()
 
 
+@pytest.mark.parametrize("payload,returncode", [({}, 0), ({"loggedIn": "false"}, 0), ({"loggedIn": False}, 1)])
+def test_unreliable_whoami_reply_does_not_invalidate_identity(isolated, monkeypatch, payload, returncode):
+    root = seed("live")
+    before = ae.generation(root)
+    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        stdout=json.dumps(payload), stderr="", returncode=returncode))
+    result = asyncio.run(web.api_account_whoami("xiaohongshu"))
+    assert result["loggedIn"] is True and ae.generation(root) == before
+    assert "xiaohongshu" not in web._WHOAMI_CACHE
+    assert (web.LOGIN_DIR / "xiaohongshu.json").exists()
+
+
+def test_whoami_cache_is_scoped_to_account_generation(isolated, monkeypatch):
+    root = seed("live")
+    calls = []
+
+    def reply(*args, **kwargs):
+        calls.append(True)
+        return SimpleNamespace(stdout=json.dumps({"loggedIn": True, "name": f"Account {len(calls)}"}),
+                               stderr="", returncode=0)
+
+    monkeypatch.setattr(web.subprocess, "run", reply)
+    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["name"] == "Account 1"
+    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["name"] == "Account 1"
+    assert len(calls) == 1
+    ae.ingest(root, [{"note_id": "other-note", "title": "另一账号"}],
+              "other-account", int(time.time()), source="live")
+    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["name"] == "Account 2"
+    assert len(calls) == 2
+
+
+def test_confirmed_logout_cache_uses_invalidated_generation(isolated, monkeypatch):
+    seed("live")
+    calls = []
+
+    def reply(*args, **kwargs):
+        calls.append(True)
+        return SimpleNamespace(stdout=json.dumps({"loggedIn": False}), stderr="", returncode=0)
+
+    monkeypatch.setattr(web.subprocess, "run", reply)
+    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"] is False
+    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"] is False
+    assert len(calls) == 1
+
+
 def test_logout_endpoint_clears_only_temporary_login_and_active_context(isolated):
     root = seed("live")
     profile = web.BROWSER_PROFILES / web.LOGIN_RUNNERS["xiaohongshu"]["profile"]

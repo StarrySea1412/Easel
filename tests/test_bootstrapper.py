@@ -23,6 +23,25 @@ URL = "https://github.com/ZJU-REAL/Easel/releases/download/v0.2.1/Easel-0.2.1-wi
 VERSION, DIGEST = "0.2.1", "a" * 64
 
 
+def _ps(value) -> str:
+    """Mirror bootstrapper._ps_literal for launcher-content assertions."""
+    return str(value).replace("'", "''")
+
+
+def test_gui_install_output_redacts_env_bearer_and_url_credentials(tmp_path, monkeypatch):
+    base = tmp_path / "data"
+    base.mkdir()
+    (base / ".env").write_text("OPENAI_API_KEY=fake_api_secret_123\n", encoding="utf-8")
+    monkeypatch.setenv("EASEL_NOTIFY_SMTP_PASSWORD", "fake_smtp_secret_456")
+    text = ("Bearer fake_api_secret_123; api_key=fake_api_secret_123 "
+            "https://user:pass@example.test/v1 password=fake_smtp_secret_456")
+    result = bt.redact_install_output(text, base)
+    assert "fake_api_secret_123" not in result
+    assert "fake_smtp_secret_456" not in result
+    assert "user:pass@" not in result
+    assert "Bearer [REDACTED]" in result
+
+
 class Response(io.BytesIO):
     def __init__(self, content: bytes, url: str = URL):
         super().__init__(content)
@@ -320,7 +339,7 @@ def verified_root():
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer entry")
 @pytest.mark.parametrize("returncode", [0, 9])
-def test_verified_resume_only_activates_after_success(monkeypatch, returncode):
+def test_verified_resume_only_activates_after_success(tmp_path, monkeypatch, returncode):
     root = verified_root()
     launcher = bt.USER_DIR / "Easel.ps1"
     launcher.write_bytes(b"old launcher")
@@ -334,8 +353,25 @@ def test_verified_resume_only_activates_after_success(monkeypatch, returncode):
         assert not (bt.USER_DIR / "Easel.previous.ps1").exists()
     else:
         assert (bt.USER_DIR / "Easel.previous.ps1").read_bytes() == b"old launcher"
-        assert str(root) in launcher.read_text(encoding="utf-8-sig")
-        assert "EASEL_DATA_DIR" in launcher.read_text(encoding="utf-8-sig")
+        text = launcher.read_text(encoding="utf-8-sig")
+        assert str(root) in text
+        assert "EASEL_DATA_DIR" in text
+        assert "$env:EASEL_HOST = '127.0.0.1'" in text
+        # npm prefix and pinned Node dir are prepended only when they exist.
+        assert str(root / ".tools" / "npm") not in text
+        node_marker = root / ".tools" / "node-dir.txt"
+        node_marker.parent.mkdir(parents=True, exist_ok=True)
+        node_dir = tmp_path / "compat node"
+        node_dir.mkdir()
+        node_marker.write_text(str(node_dir), encoding="utf-8")
+        bt.activate(root, bt.data_root())
+        text = launcher.read_text(encoding="utf-8-sig")
+        assert f"$env:Path = '{_ps(node_dir)}' + ';' + $env:Path" in text
+        (root / ".tools" / "npm").mkdir(parents=True)
+        bt.activate(root, bt.data_root())
+        text = launcher.read_text(encoding="utf-8-sig")
+        assert (f"$env:Path = '{_ps(root / '.tools' / 'npm')}' + ';' + "
+                f"'{_ps(node_dir)}' + ';' + $env:Path") in text
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer entry")

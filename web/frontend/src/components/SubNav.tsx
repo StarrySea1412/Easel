@@ -17,7 +17,7 @@ const TOOLS: { page: Page; Icon: ComponentType<{ size?: number }>; label: string
 
 export default function SubNav({ current, onNavigate }: SubNavProps) {
   return (
-    <div className="subnav">
+    <nav className="subnav" aria-label="创作工具导航">
       <button className="subnav-back" onClick={() => onNavigate('dashboard')} title="返回工作台">
         <IconDashboard size={15} /> 工作台
       </button>
@@ -25,11 +25,12 @@ export default function SubNav({ current, onNavigate }: SubNavProps) {
       <div className="subnav-tabs">
         {TOOLS.map(({ page, Icon, label }) => (
           <button key={page} className={`subnav-tab ${current === page ? 'active' : ''}`}
+            aria-current={current === page ? 'page' : undefined}
             onClick={() => onNavigate(page)}>
             <Icon size={14} />{label}
           </button>
         ))}
       </div>
-    </div>
+    </nav>
   );
 }

@@ -6,7 +6,9 @@ import {
 } from '../lib/api';
 import type { AccountItem, AccountWhoami } from '../lib/api';
 import { getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
-import XhsInsightsPanel from './XhsInsightsPanel';
+import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
+import PlatformIcon from './PlatformIcon';
+import '../styles/accounts.css';
 
 type QRState = {
   platform: string;
@@ -40,7 +42,7 @@ function Avatar({ url, name }: { url?: string; name: string }) {
   return <div className="account-avatar account-avatar-fallback">{initial}</div>;
 }
 
-export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () => void }) {
+export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { onNavigateAnalysis: (platform: string) => void; onAnalysisLogin: () => void }) {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
   const [qr, setQr] = useState<QRState | null>(null);
@@ -48,7 +50,8 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
   const [terminalMsg, setTerminalMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [logoutBusy, setLogoutBusy] = useState('');
-  const [analysisRevision, setAnalysisRevision] = useState(0);
+  const [filter, setFilter] = useState<'all' | 'connected' | 'attention'>('all');
+  const [loaded, setLoaded] = useState(false);
   const [smsCode, setSmsCode] = useState('');
   const [smsBusy, setSmsBusy] = useState(false);
   const [smsErr, setSmsErr] = useState('');
@@ -70,15 +73,17 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
   }, []);
 
   // 真校验某平台登录态 + 拉昵称/头像（后端起浏览器，数秒）；手动「校验账号」或登录成功后调
-  const runWhoami = useCallback((platform: string) => {
+  const runWhoami = useCallback(async (platform: string) => {
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
-    accountWhoami(platform)
-      .then((r) => { if (aliveRef.current) { setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
-        if (platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
-      } })
-      .catch(() => {
-        if (aliveRef.current) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
-      });
+    try {
+      const r = await accountWhoami(platform);
+      if (!aliveRef.current) return null;
+      setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
+      return r;
+    } catch {
+      if (aliveRef.current) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
+      return null;
+    }
   }, []);
 
   // 打开页面：拉「快」状态（读 status.json，不起浏览器），随后后台自愈——对缓存缺失/过期的
@@ -89,12 +94,15 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
       .then((list) => {
         if (!aliveRef.current) return;
         setAccounts(list);
+        setLoaded(true);
         const targets = list
           .filter((a) => a.supported && a.backend !== 'biliup')
           .map((a) => a.platform);
         verifyStale(targets, {
           alive: () => aliveRef.current,
-          onUpdate: (platform, r) => setWhoami((w) => ({ ...w, [platform]: r })),
+          onUpdate: (platform, r) => {
+            setWhoami((w) => ({ ...w, [platform]: r }));
+          },
         });
       })
       .catch(() => setErr('加载账号状态失败'));
@@ -187,7 +195,6 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
     setQrNonce((n) => n + 1);
     try {
       const res = await startLogin(a.platform);
-      if (a.platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
       if (res.mode === 'terminal') {
         setTerminalMsg(res.message || '请在终端登录');
         return;
@@ -202,7 +209,10 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
           setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs }));
           if (['success', 'expired', 'error'].includes(s.state)) {
             stopPoll();
-            if (s.state === 'success') runWhoami(a.platform);   // 登录成功即拉账号信息
+            if (s.state === 'success') {
+              const identity = await runWhoami(a.platform);
+              if (aliveRef.current && a.platform === 'xiaohongshu' && identity?.loggedIn) onAnalysisLogin();
+            }
           }
         } catch { /* 忽略单次轮询失败 */ }
       }, 2000);
@@ -211,7 +221,7 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
     } finally {
       setBusy('');
     }
-  }, [stopPoll, runWhoami, openCred]);
+  }, [stopPoll, runWhoami, openCred, onAnalysisLogin]);
 
   // 公众号后台扫码登录（数据中心取数用，独立于 AppID 凭证）
   const handleMpLogin = useCallback(async (a: AccountItem) => {
@@ -253,7 +263,6 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
     setLogoutBusy(a.platform);
     try {
       await logoutAccount(a.platform);
-      if (a.platform === 'xiaohongshu') setAnalysisRevision((revision) => revision + 1);
       // 内存态立即翻未登录（同登录路径），不等 load() 回来
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false } : x));
       setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
@@ -276,85 +285,75 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
   };
 
   const badge = (a: AccountItem) => {
-    if (!a.supported) return <span className="badge">待重写</span>;
+    if (!a.supported) return <span className="badge">暂不可连接</span>;
     if (whoami[a.platform] === 'loading') return <span className="badge">校验中…</span>;
-    if (effLoggedIn(a)) return <span className="badge badge-ok">✓ 已登录</span>;
-    return <span className="badge">未登录</span>;
+    if (effLoggedIn(a)) return <span className="badge badge-ok">已连接</span>;
+    return <span className="badge">未连接</span>;
   };
 
+  const connectedCount = accounts.filter((account) => account.supported && effLoggedIn(account)).length;
+  const supportedCount = accounts.filter((account) => account.supported).length;
+  const visibleAccounts = accounts.filter((account) => filter === 'all'
+    || (filter === 'connected' ? account.supported && effLoggedIn(account) : account.supported && !effLoggedIn(account)));
+  const openAnalysis = onNavigateAnalysis;
+
   return (
-    <div className="accounts-page">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-        <div>
-          <h1 className="page-title">账号登录 Accounts</h1>
-          <p className="page-subtitle">
-            用手机 App 扫码登录，登录态本地持久化，之后发布免登。<br />
-            ⚠️ 平台可能对机房/代理 IP 判风险导致二维码弹不出，需干净/家宽 IP，或在正常网络登录后拷贝登录态目录。
-          </p>
+    <div className="accounts-page accounts-center">
+      <div className="accounts-heading">
+        <div><p className="accounts-eyebrow">创作渠道</p><h1>账号中心</h1>
+          <p className="accounts-intro">连接发布平台，管理登录状态，了解自己的内容表现。</p></div>
+        <button className="btn btn-sm" onClick={load}>刷新状态</button>
+      </div>
+      <div className="accounts-summary" aria-live="polite">
+        <span className="accounts-summary-dot" aria-hidden="true" />
+        <strong>{loaded ? `${connectedCount} / ${supportedCount} 个平台已连接` : err ? '连接状态暂不可用' : '正在读取连接状态…'}</strong>
+        <span>每个平台使用一个当前登录账号</span>
+      </div>
+      {err && <div className="notice-error" role="alert">{err}</div>}
+      {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
+
+      <section id="accounts-connections" aria-label="账号连接">
+        <div className="accounts-section-heading"><div><h2>连接你的平台</h2><p>选择平台完成登录，之后可直接用于创作发布。</p></div>
+          <div className="accounts-filters" role="group" aria-label="连接状态筛选">
+            {([{ key: 'all', text: '全部' }, { key: 'connected', text: '已连接' }, { key: 'attention', text: '待连接' }] as const).map((item) =>
+              <button type="button" key={item.key} aria-pressed={filter === item.key} onClick={() => setFilter(item.key)}>{item.text}</button>)}
+          </div>
         </div>
-        <button className="btn btn-sm" onClick={load}>⟳ 刷新</button>
-      </div>
-
-      {err && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{err}</div>}
-      {terminalMsg && (
-        <div className="card" style={{ padding: 13, fontSize: 13, marginTop: 14 }}>{terminalMsg}</div>
-      )}
-
-      <div className="accounts-grid">
-        {accounts.map((a) => {
-          const w = whoami[a.platform];
-          const info = w && w !== 'loading' ? w : null;
-          const logged = effLoggedIn(a);
-          return (
-            <div key={a.platform} className="card account-card" style={{ opacity: a.supported ? 1 : 0.6 }}>
-              <div className="account-card-head">
-                <span className="account-card-name">{a.name}</span>
-                {badge(a)}
+        {!loaded && !err && <p className="accounts-empty" role="status">正在读取平台…</p>}
+        {loaded && !visibleAccounts.length && <p className="accounts-empty">{filter === 'connected' ? '还没有已连接的平台。切换到「全部」，选择一个平台开始。' : filter === 'attention' ? '当前没有等待连接的平台。' : '暂未获取到可用平台，请刷新状态。'}</p>}
+        <div className="accounts-grid">
+          {visibleAccounts.map((a) => {
+            const w = whoami[a.platform];
+            const info = w && w !== 'loading' ? w : null;
+            const logged = effLoggedIn(a);
+            const pending = busy === a.platform || busy === a.platform + ':mp';
+            return <article key={a.platform} className={`card account-card${!a.supported ? ' account-unavailable' : ''}`}>
+              <div className="account-card-head"><div className="account-platform"><span className="account-platform-mark"><PlatformIcon platform={a.platform} name={a.name} /></span><h3>{a.name}</h3></div>{badge(a)}</div>
+              <div className="account-identity">
+                {logged ? <><Avatar url={info?.avatar} name={info?.name || a.name} /><div><strong className="account-nick">{info?.name || '已连接的账号'}</strong><p>{w === 'loading' ? '正在核实账号身份' : info ? '当前登录账号' : '身份信息待校验'}</p></div></>
+                  : <p className="account-connection-copy">{a.supported ? '连接后，在这里查看当前账号与登录状态。' : '此平台暂不可用，请先使用其他平台。'}</p>}
               </div>
-
-              {logged && info && (
-                <div className="account-identity">
-                  <Avatar url={info.avatar} name={info.name || a.name} />
-                  <span className="account-nick">{info.name || '（已登录）'}</span>
+              <p className="account-login-method">{a.backend === 'wechat-oa' ? '使用微信扫码连接公众号' : a.backend === 'biliup' ? '按登录引导完成账号连接' : '使用手机 App 扫码连接'}</p>
+              <div className="account-actions">
+                <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} disabled={!a.supported || pending || w === 'loading'}
+                  onClick={() => logged ? void runWhoami(a.platform) : void (a.backend === 'wechat-oa' ? handleMpLogin(a) : handleLogin(a))}>
+                  {pending ? '正在启动…' : w === 'loading' ? '正在校验…' : logged ? '校验连接' : a.supported ? '连接账号' : '暂不可连接'}
+                </button>
+                <div className="account-secondary-actions">
+                  {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden="true">→</span></button>}
+                  {logged && <button type="button" disabled={logoutBusy === a.platform} onClick={() => void handleLogout(a)}>{logoutBusy === a.platform ? '退出中…' : '退出登录'}</button>}
                 </div>
-              )}
-              {!logged && (
-                <div className="account-card-note">{a.note ? a.note : `后端：${a.name}`}</div>
-              )}
-
-              <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-                {logged ? (
-                  <>
-                    <button className="btn btn-sm" style={{ flex: 1 }}
-                      disabled={busy === a.platform || busy === a.platform + ':mp' || w === 'loading'}
-                      onClick={() => runWhoami(a.platform)}>
-                      {w === 'loading' ? '校验中…' : '校验账号'}
-                    </button>
-                    <button className="btn btn-sm btn-ghost" style={{ flex: 1 }}
-                      disabled={logoutBusy === a.platform}
-                      onClick={() => handleLogout(a)}>
-                      {logoutBusy === a.platform ? '退出中…' : '退出登录'}
-                    </button>
-                  </>
-                ) : (
-                  // 公众号与其它平台统一：都走扫码登录（公众号扫的是后台会话，用于发布+数据）
-                  <button
-                    className={`btn btn-block ${a.supported ? 'btn-primary' : ''}`}
-                    disabled={!a.supported || busy === a.platform || busy === a.platform + ':mp'}
-                    onClick={() => (a.backend === 'wechat-oa' ? handleMpLogin(a) : handleLogin(a))}>
-                    {(busy === a.platform || busy === a.platform + ':mp') ? '启动中…' : '登录'}
-                  </button>
-                )}
               </div>
-              {a.platform === 'xiaohongshu' && <button className="btn btn-sm btn-ghost xhs-account-entry"
-                onClick={() => document.getElementById('xhs-insights')?.scrollIntoView({ behavior: 'smooth' })}>查看本人账号分析 ↓</button>}
-            </div>
-          );
-        })}
-      </div>
-
-      <XhsInsightsPanel key={analysisRevision} loggedIn={accounts.some((account) => account.platform === 'xiaohongshu' && effLoggedIn(account))}
-        onNavigateIdeas={onNavigateIdeas} />
+            </article>;
+          })}
+        </div>
+        <details className="accounts-help"><summary>连接遇到问题？</summary>
+          <p>二维码未出现或已过期时，请关闭登录窗口后重试。平台可能要求短信验证，请按登录窗口中的提示完成。</p>
+          <p>更换网络、代理或服务器环境可能触发平台验证。优先在稳定的正常网络中重新连接；具体失败原因以平台返回结果为准。</p>
+          <p>连接状态会在打开页面时检查，也可使用「校验连接」重新核实。当前每个平台仅保留一个登录会话，不支持同时切换多个账号。</p>
+          {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
+        </details>
+      </section>
 
       {qr && (
         <div className="overlay" onClick={closeQr}>
@@ -394,7 +393,14 @@ export default function AccountsPage({ onNavigateIdeas }: { onNavigateIdeas: () 
             ) : qr.state === 'verifying' ? (
               <div className="loading" style={{ padding: 40 }}><div className="spinner" />正在验证验证码，登录中…</div>
             ) : qr.state === 'success' ? (
-              <div style={{ fontSize: 48, padding: 40 }}>✅</div>
+              <div style={{ padding: '20px 8px' }}>
+                <div style={{ fontSize: 44 }}>✅</div>
+                {qr.platform === 'xiaohongshu' && (
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>
+                    登录成功！正在为你自动抓取本人笔记数据…<br />关闭此窗后，进入「内容分析」查看进度。
+                  </p>
+                )}
+              </div>
             ) : ['error', 'expired'].includes(qr.state) ? (
               <div style={{ fontSize: 13, color: 'var(--red)', padding: 30 }}>
                 {qr.message || '登录失败'}<br />可关闭后重试（或换干净 IP）。

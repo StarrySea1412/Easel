@@ -39,7 +39,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_openclaw_provider_creds",
                         lambda: {"myproxy": ("https://good.example.com/v1", "sk-fake-custom")})
     monkeypatch.setattr(web, "_sync_openclaw_chat", lambda *a, **k: "")
-    with TestClient(web.app) as c:
+    # Exercise route validation after the same trusted-host/loopback checks as
+    # local callers; TestClient's default peer is the non-IP string 'testclient'.
+    with TestClient(web.app, base_url="http://127.0.0.1:7860", client=("127.0.0.1", 51234)) as c:
         c.env_file = env_file          # 用例里用来断言「.env 一个字节都没变」
         yield c
 
@@ -270,14 +272,16 @@ def test_http_path_falls_back_without_httpx(monkeypatch):
     assert web._gateway_http_ready(force=True) is False
 
 
-def test_ready_probe_hits_chat_completions_not_models():
-    """探针不能打 /v1/models：那个路径会被网关控制台 SPA 的 catch-all 接走，端点没开也返回
-    200（body 是 HTML 首页），于是只要网关活着就恒为 True —— 等于没探，每轮对话直接撞 404。"""
-    import inspect
-    # 去掉 docstring 再比 —— 注释里本来就要写清为什么不能探 /v1/models
-    body = inspect.getsource(web._gateway_http_ready).split('"""')[-1]
-    assert "/v1/chat/completions" in body
-    assert "/v1/models" not in body
+def test_ready_probe_hits_chat_completions_not_models(monkeypatch):
+    """Probe the real resolved endpoint rather than the SPA /models fallback."""
+    urls = []
+    def capture(request, **kwargs):
+        urls.append(request.full_url)
+        raise web.urllib.error.HTTPError(request.full_url, 400, 'missing messages', None, None)
+    monkeypatch.setenv('OPENCLAW_GATEWAY_PORT', '19019')
+    monkeypatch.setattr(web.urllib.request, 'urlopen', capture)
+    assert web._gateway_http_ready(force=True)
+    assert urls == ['http://127.0.0.1:19019/v1/chat/completions']
 
 
 @pytest.mark.parametrize("code,expected", [(400, True), (404, False), (500, False)])

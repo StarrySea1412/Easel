@@ -201,11 +201,12 @@ function Stop-Process {{ throw 'Must not stop a process during this check' }}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows gateway PowerShell entry point")
-@pytest.mark.parametrize("profile_argument, owned", [
-    ("easel", True), ('"easel"', True), ("'easel'", True),
-    ("easel-other", False), ('"easel-other"', False), ("other", False),
+@pytest.mark.parametrize("profile_argument, command_port, owned", [
+    ("easel", 37289, True), ('"easel"', 37289, True), ("'easel'", 37289, True),
+    ("easel-other", 37289, False), ('"easel-other"', 37289, False), ("other", 37289, False),
+    ("easel", 37290, False), ("easel", None, False),
 ])
-def test_gateway_restart_only_stops_exact_easel_profile(tmp_path, profile_argument, owned):
+def test_gateway_restart_only_stops_exact_easel_profile(tmp_path, profile_argument, command_port, owned):
     source = (PROJECT_ROOT / "scripts/gateway.ps1").read_text(encoding="utf-8-sig")
     mocks = '''
 function Test-Gateway { return $true }
@@ -223,9 +224,9 @@ function Stop-Process {
     source = source.replace("switch ($args[0]) {", mocks + "\nswitch ($args[0]) {")
     script = tmp_path / "gateway-restart-check.ps1"
     script.write_text(source, encoding="utf-8-sig")
-    env = dict(os.environ, EASEL_TEST_GATEWAY_COMMAND=(
+    env = dict(os.environ, OPENCLAW_GATEWAY_PORT="37289", EASEL_TEST_GATEWAY_COMMAND=(
         'node "C:\\synthetic\\openclaw\\openclaw.mjs" --profile '
-        + profile_argument + ' gateway run --bind loopback'))
+        + profile_argument + ' gateway run --bind loopback' + (f' --port {command_port}' if command_port else '')))
     result = subprocess.run(["powershell.exe", "-NoProfile", "-File", str(script), "restart"],
                             env=env, capture_output=True, timeout=15)
     assert (b"STOPPED_MOCK_123" in result.stdout) is owned

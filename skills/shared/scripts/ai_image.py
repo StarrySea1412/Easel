@@ -185,6 +185,8 @@ def detect_mode(base_url: str, explicit_mode: str | None) -> str:
 
 
 def size_to_ratio(size: str) -> str:
+    if size.strip().lower() == "auto":
+        fail("当前异步生图服务不支持自动尺寸（auto），请选择固定画面比例。")
     if ":" in size:
         return size
     lower = size.lower()
@@ -679,7 +681,7 @@ def _add_common_output(sp: argparse.ArgumentParser) -> None:
                     help="输出路径：目录（多张自动编号）或含扩展名的单文件；必须位于 outputs/<人类可读主题>/。")
     sp.add_argument("--n", type=int, default=1, help="生成数量，默认 1。")
     sp.add_argument("--size", default="1024x1024",
-                    help="尺寸。同步用像素（1024x1024 等），异步用比例（1:1、16:9 等）。默认 1024x1024。")
+                    help="尺寸。同步用像素或 auto（需模型支持），异步用比例（1:1、16:9 等）。默认 1024x1024。")
     sp.add_argument("--mode", choices=("sync", "async"),
                     help="API 模式。默认按 base_url 自动检测（含 apimart → async）。")
     sp.add_argument("--resolution", default="2k", choices=VALID_RESOLUTIONS,
