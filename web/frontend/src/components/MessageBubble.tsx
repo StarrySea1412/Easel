@@ -17,19 +17,20 @@ interface MessageBubbleProps {
   activity?: string;
   stillWorking?: string;   // 防呆心跳提示（未卡住）；仅流式时的独立提示，不替代思考/活动
   actions?: BubbleActions;
+  backupSnapshot?: boolean;
 }
 
-function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }) {
+function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; streaming: boolean; backupSnapshot?: boolean }) {
   // Preserve the user's expanded/collapsed choice as new chunks and the final
   // answer arrive; binding `open` to answer emptiness used to override it.
   const [expanded, setExpanded] = useState(streaming);
   return <section className="model-thinking" aria-label="模型返回的思考内容">
     <button type="button" className="model-thinking-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
       <span className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} aria-hidden="true">›</span>
-      <span>模型思考</span><span className="model-thinking-state">{streaming ? '接收中' : '已保留'}</span>
+      <span>模型思考</span><span className="model-thinking-state">{backupSnapshot ? '来自备份' : streaming ? '接收中' : '已保留'}</span>
       <span className="model-thinking-count">{text.length.toLocaleString()} 字符</span>
     </button>
-    {expanded && <div className="model-thinking-body"><p className="model-thinking-note">模型服务实际返回的思考内容或摘要</p><div className="model-thinking-text">{text}</div></div>}
+    {expanded && <div className="model-thinking-body"><p className="model-thinking-note">{backupSnapshot ? '备份保留的思考文字，未经本机后台核验' : '模型服务实际返回的思考内容或摘要'}</p><div className="model-thinking-text">{text}</div></div>}
   </section>;
 }
 
@@ -61,14 +62,14 @@ function ActionBar({ actions }: { actions: BubbleActions }) {
   );
 }
 
-export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions }: MessageBubbleProps) {
+export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions, backupSnapshot }: MessageBubbleProps) {
   const historicalError=message.role==='assistant'&&!message.error?historicalGatewayAuthError(message.content):undefined;
   const displayedError=message.error||historicalError;
   const displayedContent=historicalError?'':message.content;
   const html = useMemo(() => {
     if (message.role === 'user') return '';
-    return renderMarkdown(displayedContent);
-  }, [displayedContent, message.role]);
+    return renderMarkdown(displayedContent, { allowMedia: !backupSnapshot });
+  }, [displayedContent, message.role, backupSnapshot]);
 
   // ---- 用户消息 ----
   if (message.role === 'user') {
@@ -104,12 +105,13 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       ) : null}
       {doneSteps && (
         <details className="thinking-block">
-          <summary>执行记录（{doneSteps.split('\n').length} 步）</summary>
+          <summary>{backupSnapshot ? '备份活动文字' : '执行记录'}（{doneSteps.split('\n').length} 步）</summary>
+          {backupSnapshot && <p className="model-thinking-note">以下文字来自备份，未经本机后台核验。</p>}
           <div className="thinking-text">{doneSteps}</div>
         </details>
       )}
       {effThinking && (
-        <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} />
+        <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} backupSnapshot={backupSnapshot} />
       )}
     </div>
   ) : null;
@@ -136,7 +138,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
         <div className="message-bubble assistant">
           {livePanel}
           {displayedContent && <div dangerouslySetInnerHTML={{ __html: html }} />}
-          {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</section>}
+          {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
         {actions && !isStreaming && <ActionBar actions={actions} />}

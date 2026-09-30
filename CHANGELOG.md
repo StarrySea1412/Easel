@@ -4,11 +4,13 @@ All notable changes to Easel are documented in this file.
 
 ## [Unreleased]
 
-- Load secondary workbench pages on demand and retry failed pages locally without remounting background chat or image controllers. Initial JavaScript including static dependencies is 59.23% smaller than 0.2.6.
+- Add local conversation backups with validation previews and additive read-only imports. Preserve unsaved and in-progress text, keep corrupt storage untouched, and export raw recovery evidence separately.
+- Keep imported transcripts detached from backend jobs and usage evidence, disable automatic media loading, and preserve literal attachment markers on reload. Repeated backup navigation and save retries retain the correct state.
+- Load secondary workbench pages on demand and retry failed pages locally without remounting background chat or image controllers, reducing the initial resources loaded by the workbench.
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Validated with 57 frontend regressions, build/lint, and 33 real HTTP resource comparisons. Details and boundaries: [frontend iteration verification](docs/frontend-performance-persistence-2026-09-30.md). These source changes are not included in the existing 0.2.6 installers.
+Latest source validated with 103 frontend regressions, build/lint, and 33 real HTTP resource comparisons. Initial JavaScript including static dependencies is now 58.36% smaller than 0.2.6 after adding backups. Details: [backup verification](docs/conversation-backup-2026-09-30.md), [earlier performance baseline](docs/frontend-performance-persistence-2026-09-30.md), and [iteration plan](docs/secondary-development-plan.md). Browser clicks and actual downloads remain unverified. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 

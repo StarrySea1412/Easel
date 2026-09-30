@@ -23,6 +23,8 @@ import {
   saveActiveId,
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
+import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
+import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
@@ -64,6 +66,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const imageStudio = useImageStudio(currentPage === 'image');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
+  const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
   const [outputFilter, setOutputFilter] = useState('');
@@ -354,6 +357,7 @@ export default function App() {
   const resumePendingTurn = useCallback((sessionId: string) => {
     if (streamCtl.current[sessionId] || streamAcc.current[sessionId]) return;  // 本标签正在跑，不插手
     const s = sessionsRef.current.find((x) => x.id === sessionId);
+    if (s?.importedFromBackup) return;
     const last = s?.messages[s.messages.length - 1];
     if (!last || last.role !== 'user') return;   // 没有悬空的用户消息 = 无需恢复
     let turnId = s.pendingTurnId;
@@ -475,6 +479,7 @@ export default function App() {
     const agentMessage = (legacyAgentText || displayText).trim();
     if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId]) return;
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
+    if (cur?.importedFromBackup) return;
     const persona = cur?.persona || selectedPersona || undefined;
     setSessions((prev) => {
       const next = prev.map((s) => {
@@ -537,6 +542,7 @@ export default function App() {
   }, [selectedPersona, sendUserAndStream]);
 
   const handleStopStream = useCallback((sessionId: string) => {
+    if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return;
     streamCtl.current[sessionId]?.abort();
     // 告诉后端**真正终止**这一轮 agent 并释放会话锁——否则后端进程还在跑、占着锁，下一句会被拦
     void stopChat(sessionId).catch(() => { /* 后端可能已结束，忽略 */ });
@@ -623,7 +629,7 @@ export default function App() {
     clearStream(id);
     try { sessionStorage.removeItem(`easel_pending_turn:${id}`); } catch { /* ignore */ }
 
-    if (target?.sessionKey) {
+    if (target?.sessionKey && !target.importedFromBackup) {
       // Do not delete OpenClaw's session record while its agent is still
       // writing to it; the stop endpoint waits for backend cleanup first.
       void stopped.then(() => deleteRemoteSession(target.sessionKey as string)).catch(() => {});
@@ -687,6 +693,25 @@ export default function App() {
   }, []);
 
   // 流式生命周期在 App，页面切换随意——ChatPage 可自由卸载/重挂，回来从 props 读流式态即可。
+  const handleExportConversations = () => createConversationBackup(sessionsRef.current,
+    Object.fromEntries(Object.entries(streamAcc.current).map(([id, run]) => [id, {
+      content: run.content + (typingBuf.current[id] || ''),
+      thinking: run.thinking,
+      activity: run.steps.join('\n'),
+    }])));
+
+  const handleImportConversations = (backup: ConversationBackup) => {
+    const imported = createImportedSessions(backup, sessionsRef.current.map(session => session.id));
+    // Apply to the latest React state, not the state captured when the file was previewed.
+    // Keep active selection and all live controllers untouched.
+    setSessions(previous => {
+      const next = [...imported, ...previous];
+      saveSessions(next);
+      return next;
+    });
+    return { count: imported.length, firstSessionId: imported[0]?.id };
+  };
+
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
@@ -709,6 +734,7 @@ export default function App() {
             stream={streams[activeSession.id]}
             onSend={(displayText, attachments, selectedSkills) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills)}
             onStop={() => handleStopStream(activeSession.id)}
+            onNewChat={handleNewChat}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -755,7 +781,12 @@ export default function App() {
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':
-        return <SettingsPanel initialSection={settingsSection} />;
+        return <SettingsPanel initialSection={settingsSection} navigationKey={settingsNavigationKey} conversationBackup={{
+          onExport: handleExportConversations,
+          onExportRaw: exportRawConversationStorage,
+          onImport: handleImportConversations,
+          onOpenSession: handleSessionSelect,
+        }} />;
       default:
         return null;
     }
@@ -802,7 +833,7 @@ export default function App() {
         gatewayStatus={gatewayStatus}
       />
       <main className="main-content">
-        <StorageNotice />
+        <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}

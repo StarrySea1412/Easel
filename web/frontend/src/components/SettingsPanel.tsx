@@ -1,5 +1,7 @@
 import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
+import ConversationBackupCard from './settings/ConversationBackupCard';
+import type { ComponentProps } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import Select from './ui/Select';
@@ -61,9 +63,13 @@ const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'model' }: { initialSection?: SettingsSection }) {
+export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, conversationBackup }: {
+  initialSection?: SettingsSection;
+  navigationKey?: number;
+  conversationBackup: ComponentProps<typeof ConversationBackupCard>;
+}) {
   const [sec, setSec] = useState<SettingsSection>(initialSection);
-  useEffect(() => { setSec(initialSection); }, [initialSection]);
+  useEffect(() => { setSec(initialSection); }, [initialSection, navigationKey]);
   const [chan, setChan] = useState<Chan>('chat');
   const mounted = useRef(false);
   const jobCleanups = useRef(new Set<() => void>());
@@ -628,7 +634,7 @@ export default function SettingsPanel({ initialSection = 'model' }: { initialSec
               <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
             </button>
             <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />保存位置
+              <IconEllipsis size={16} />更多设置<small>保存位置与备份</small>
             </button>
           </nav>
 
@@ -1003,7 +1009,7 @@ export default function SettingsPanel({ initialSection = 'model' }: { initialSec
               </section>
             )}
 
-            {sec === 'more' && <section className="st-sec active"><StorageSettingsCard /></section>}
+            {sec === 'more' && <section className="st-sec active"><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
           </div>
         </div>
 

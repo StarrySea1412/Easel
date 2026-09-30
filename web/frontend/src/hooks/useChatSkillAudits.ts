@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { fetchSkillRecords, type LiveSkillAudit } from '../lib/skillEvidence';
-export function useChatSkillAudits(sessionId:string,streaming:boolean,refreshKey:number) {
+export function useChatSkillAudits(sessionId:string,streaming:boolean,refreshKey:number,disabled=false) {
  const [records,setRecords]=useState<LiveSkillAudit[]>([]);
  const [error,setError]=useState('');
  useEffect(()=>{
+  if(disabled||!sessionId)return;
   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
   const read=async()=>{
    try {
@@ -13,6 +14,6 @@ export function useChatSkillAudits(sessionId:string,streaming:boolean,refreshKey
    finally{if(streaming&&!controller.signal.aborted)timer=setTimeout(()=>void read(),3000);}
   };
   void read();return()=>{controller.abort();if(timer)clearTimeout(timer);};
- },[sessionId,streaming,refreshKey]);
- return {records:records.filter(r=>r.sessionId===sessionId),error};
+ },[sessionId,streaming,refreshKey,disabled]);
+ return {records:disabled?[]:records.filter(r=>r.sessionId===sessionId),error:disabled?'':error};
 }

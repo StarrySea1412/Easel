@@ -233,6 +233,20 @@ test('clearing the active ID cannot resurrect an obsolete legacy ID', async () =
   assert.equal(reloaded.store.loadActiveId(), null);
 });
 
+test('imported read-only records preserve literal attachment markers and remain inert after save and reload', async () => {
+  const original = { ...session('backup-copy', '解释【附件素材】标记后的原文也必须保留'), importedFromBackup: true, backupIncomplete: true,
+    sessionKey: 'old-backend-session', pendingTurnId: 'old-job', persona: 'old-profile' };
+  original.messages[0] = { ...original.messages[0], turnId: 'old-turn', agentContent: 'hidden command',
+    attachments: [{ id: 'old-file', name: 'file', path: 'outputs/file' }], selectedSkills: ['old-skill'] };
+  const storage = memoryStorage({ easel_sessions: JSON.stringify([original]) });
+  const { store } = await isolatedStore(storage);
+  const loaded = store.loadSessions();
+  assert.deepEqual(loaded, [{ ...session('backup-copy', '解释【附件素材】标记后的原文也必须保留'), importedFromBackup: true, backupIncomplete: true }]);
+  assert.equal(store.saveSessions(loaded), true);
+  const reloaded = await isolatedStore(storage);
+  assert.deepEqual(reloaded.store.loadSessions(), loaded);
+});
+
 test('subscriptions expose stable snapshots and notify after save callers finish', async () => {
   const storage = memoryStorage();
   const { persistence } = await isolatedStore(storage);

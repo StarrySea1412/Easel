@@ -15,3 +15,11 @@
 .chat-response-error { margin:18px 0 4px;border:1px solid color-mix(in srgb,var(--red,#b45342) 30%,var(--border));border-radius:9px;padding:15px 17px;background:var(--surface);color:var(--text);font-size:12px; }.chat-response-error>strong { color:var(--red,#b45342);font-size:13px;font-weight:550; }.chat-response-error p { margin:9px 0!important;line-height:1.8!important;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px!important; }.chat-response-error small,.chat-response-error-hint { color:var(--text-secondary);font-size:10px; }
 @media(max-width:1100px){.chat-turn-navigation{flex-basis:140px;margin-right:12px;padding:12px 8px;}.chat-conversation-body .chat-messages{padding-left:18px;padding-right:16px;}}
 @media(max-width:800px){.chat-conversation-body{flex-direction:column;}.chat-turn-navigation{order:-1;flex:none;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin:0;padding:10px 16px;border:0;border-bottom:1px solid var(--border);border-radius:0;}.chat-turn-nav-title{gap:6px;}.chat-turn-nav-title>span{display:none;}.chat-turn-nav-controls{margin:0;grid-column:3;grid-row:1;}.chat-turn-nav-controls button{padding:6px 8px;}.chat-turn-node-list{display:none;}.chat-turn-mobile-picker{display:block;font-size:0;grid-column:2;grid-row:1;min-width:0;}.chat-turn-mobile-picker select{width:100%;font-size:11px;padding:7px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);background:var(--surface);}.chat-conversation-body .chat-messages{padding:22px 16px 8px;}}
+.chat-backup-notice { display:flex;flex:none;align-items:center;flex-wrap:wrap;gap:12px 20px;padding:16px 24px;border-bottom:1px solid var(--border);background:var(--surface); }
+.chat-backup-notice>div { flex:1 1 260px;min-width:0; }
+.chat-backup-notice strong { font-size:13px;font-weight:550;color:var(--text); }
+.chat-backup-notice p { margin:6px 0 0;font-size:12px;line-height:1.75;color:var(--text-secondary);overflow-wrap:anywhere; }
+.chat-backup-notice .chat-backup-incomplete { color:var(--text); }
+.chat-backup-notice .btn { flex:none; }
+.chat-backup-empty { padding:20px 0;color:var(--text-secondary);font-size:13px;line-height:1.8;text-align:center; }
+@media(max-width:800px){.chat-backup-notice{padding:14px 16px;}}

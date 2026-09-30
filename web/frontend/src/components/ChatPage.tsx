@@ -24,6 +24,7 @@ interface ChatPageProps {
     legacyAgentText?: string,
   ) => void; // 重试：仅对最后一轮
   onOpenAudit?: (turnId:string)=>void;
+  onNewChat?: () => void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
 }
 
@@ -41,7 +42,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit }: ChatPageProps) {
+export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat }: ChatPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef=useRef<HTMLDivElement>(null);
   const turnRefs=useRef(new Map<number,HTMLDivElement>());
@@ -70,8 +71,9 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
     element.scrollTo({top:anchor.getBoundingClientRect().top-element.getBoundingClientRect().top+element.scrollTop-22,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
     anchor.focus({preventScroll:true});
   };
-  const isStreaming = !!stream;
-  const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length);
+  const isImported = session.importedFromBackup === true;
+  const isStreaming = !isImported && !!stream;
+  const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported);
   const isEmpty = session.messages.length === 0 && !isStreaming;
 
   useLayoutEffect(()=>{
@@ -89,7 +91,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
   },[isEmpty,syncPosition]);
 
   // ---- 空态：居中欢迎页 ----
-  if (isEmpty) {
+  if (isEmpty && !isImported) {
     return (
       <div className="chat-page chat-welcome-page">
         <div className="chat-hero">
@@ -123,12 +125,22 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
 
   return (
     <div className="chat-page chat-conversation-page">
+      {isImported && <section className="chat-backup-notice" aria-label="导入记录说明">
+        <div>
+          <strong>备份导入的只读记录</strong>
+          <p>这是本地备份副本，不会恢复后台上下文、未完成任务或 Skill 核验。你可以复制内容，在新对话中继续。</p>
+          <p>图片和附件文件不在备份中，媒体不会自动载入；活动文字仅来自备份，未经本机核验。</p>
+          {session.backupIncomplete && <p className="chat-backup-incomplete">备份时对话尚未结束，以下内容可能不完整；不会自动续传或恢复执行。</p>}
+        </div>
+        {onNewChat && <button type="button" className="btn" onClick={onNewChat}>新建对话继续</button>}
+      </section>}
       <div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
         onWheel={event=>{if(event.deltaY)navigationTarget.current=null;if(event.deltaY<0){followLatest.current=false;setFollowing(false);}}}
         onTouchMove={()=>{navigationTarget.current=null;}}
         onPointerDown={event=>{if(event.target===event.currentTarget)navigationTarget.current=null;}}
         onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)&&!(event.target as HTMLElement).closest('button,input,textarea,select,a,[contenteditable="true"]'))navigationTarget.current=null;}}>
         <div className="chat-thread">
+          {isImported && isEmpty && <p className="chat-backup-empty">这份备份没有可显示的消息。</p>}
           {displayMessages.map((msg, i) => {
             const isLast = i === displayMessages.length - 1;
             const live = isStreaming && isLast && msg.role === 'assistant';
@@ -141,20 +153,20 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
               if (msg.role === 'user') {
                 actions = {
                   onCopy: copy,
-                  onRetry: isLastFinal
+                  onRetry: !isImported && isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
-                  canModify: !isStreaming,
+                  canModify: !isImported && !isStreaming,
                 };
               } else {
                 const pi = i - 1;
                 const prevUser = pi >= 0 && session.messages[pi]?.role === 'user' ? session.messages[pi] : null;
                 actions = {
                   onCopy: copy,
-                  onRetry: (isLastFinal && prevUser)
+                  onRetry: (!isImported && isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,
-                  canModify: !isStreaming,
+                  canModify: !isImported && !isStreaming,
                 };
               }
             }
@@ -165,12 +177,13 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
               <Fragment key={`${i}-${msg.role}`}>{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
+                backupSnapshot={isImported}
                 isStreaming={live}
                 thinking={live ? stream!.thinking : ''}
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-              />{msg.role==='assistant'&&(auditTurn||auditRecord)&&<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>}</Fragment>
+              />{!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)&&<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>}</Fragment>
             );
           })}
           {isStreaming && (stream!.questions?.length ?? 0) > 0 && (
@@ -180,9 +193,9 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
         </div>
       </div>{nodes.length>0&&<ChatTurnNavigation nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
-      <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
-        <div className="chat-input-inner"><ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} onSend={onSend} onStop={onStop} /></div>
-      </div>
+      {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
+        {!isImported && <div className="chat-input-inner"><ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} onSend={onSend} onStop={onStop} /></div>}
+      </div>}
     </div>
   );
 }

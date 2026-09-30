@@ -3,7 +3,7 @@ import { getLocalPersistenceStatus, retryPendingLocalWrites, subscribeLocalPersi
 import type { LocalPersistenceStatus } from '../lib/localPersistence';
 
 /** Lives outside page boundaries so unsaved history remains visible on navigation. */
-export default function StorageNotice() {
+export default function StorageNotice({ onOpenBackup }: { onOpenBackup?: () => void }) {
   const status = useSyncExternalStore(subscribeLocalPersistence, getLocalPersistenceStatus);
   const [failedSnapshot, setFailedSnapshot] = useState<LocalPersistenceStatus | null>(null);
   if (!status.message) return null;
@@ -13,6 +13,7 @@ export default function StorageNotice() {
       {status.unsaved && <button type="button" className="btn" onClick={() => {
         setFailedSnapshot(retryPendingLocalWrites() ? null : getLocalPersistenceStatus());
       }}>重试保存</button>}
+      {onOpenBackup && <button type="button" className="btn" onClick={onOpenBackup}>备份会话</button>}
     </div>
   );
 }

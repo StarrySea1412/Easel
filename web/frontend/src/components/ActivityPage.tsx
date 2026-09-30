@@ -34,7 +34,9 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
   const [selectedId, setSelectedId] = useState(target?.sessionId || activeSessionId || '');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ActivityFilter>('all');
-  const { visible, session, missingTarget, targetTurnId } = selectActivitySessions(sessions, streams, {
+  const importedIds = new Set(sessions.filter((item) => item.importedFromBackup).map((item) => item.id));
+  const liveStreams = Object.fromEntries(Object.entries(streams).filter(([id]) => !importedIds.has(id)));
+  const { visible, session, missingTarget, targetTurnId } = selectActivitySessions(sessions, liveStreams, {
     search, filter, selectedId, activeSessionId, target,
   });
   const titles = Object.fromEntries(sessions.map((item) => [item.id, item.title]));
@@ -56,7 +58,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
             <h1>运行记录</h1>
             <p>看清用量，回到调用证据，定位需要关注的运行。</p>
           </div>
-          <span className="activity-live-count">{Object.keys(streams).length} 个会话正在运行</span>
+          <span className="activity-live-count">{Object.keys(liveStreams).length} 个会话正在运行</span>
         </header>
 
         <div className="activity-layout">
@@ -94,7 +96,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                 >
                   <strong>{item.title}</strong>
                   <span>
-                    {streams[item.id] ? '运行中' : item.archived ? '已归档' : '已保存'}
+                    {item.importedFromBackup ? '备份副本' : liveStreams[item.id] ? '运行中' : item.archived ? '已归档' : '已保存'}
                     {' · '}{item.messages.filter((message) => message.role === 'user').length} 轮对话
                   </span>
                 </button>
@@ -110,14 +112,20 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
               <div>
                 <p className="activity-kicker">SELECTED SESSION</p>
                 <h2>{session?.title || emptyTitle}</h2>
-                {session && <p>模型用量与 Skill 执行证据分开核验。</p>}
+                {session && <p>{session.importedFromBackup ? '备份内容仅供阅读，不作为执行证据。' : '模型用量与 Skill 执行证据分开核验。'}</p>}
               </div>
               {session && (
-                <span className="activity-session-state">{streams[session.id] ? '运行中' : '历史记录'}</span>
+                <span className="activity-session-state">{session.importedFromBackup ? '备份副本' : liveStreams[session.id] ? '运行中' : '历史记录'}</span>
               )}
             </div>
 
-            {session ? (
+            {session?.importedFromBackup ? (
+              <div className="activity-start" role="status">
+                <h3>备份记录不包含真实后台用量或 Skill 证据</h3>
+                <p>这里不会查询原会话的后台记录，也不会将导入内容当作真实调用、Token 用量或 Skill 执行结果。</p>
+                {session.backupIncomplete && <p>这是一份未完成的对话快照，不表示任务仍在执行。</p>}
+              </div>
+            ) : session ? (
               <>
                 <div
                   className="activity-section-tabs"
@@ -152,7 +160,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                       key={session.id}
                       sessionId={session.id}
                       refreshKey={session.messages.length}
-                      isStreaming={Boolean(streams[session.id])}
+                      isStreaming={Boolean(liveStreams[session.id])}
                       embedded
                       sessionTitles={titles}
                     />
@@ -160,7 +168,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                     <SkillAuditPanel
                       sessionId={session.id}
                       refreshKey={session.messages.length}
-                      isStreaming={Boolean(streams[session.id])}
+                      isStreaming={Boolean(liveStreams[session.id])}
                       embedded
                       targetTurnId={targetTurnId}
                     />

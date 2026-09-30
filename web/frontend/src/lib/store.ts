@@ -24,6 +24,8 @@ export interface ChatSession {
   sessionKey?: string;  // OpenClaw 的 session key，用于后端删除
   pendingTurnId?: string; // 进行中的可重连 job；浏览器重开后继续按 eventId 续流
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
+  importedFromBackup?: boolean; // 只读备份记录，不关联后台上下文或恢复任务
+  backupIncomplete?: boolean; // 备份时仍在进行，仅保留已收到的内容
 }
 
 /** 进行中的流式状态（存于 App，不随页面切换/ChatPage 卸载而丢失）。 */
@@ -118,7 +120,7 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function normalizeMessage(value: unknown): ChatMessage | null {
+function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMessage | null {
   if (!record(value) || (value.role !== 'user' && value.role !== 'assistant')) return null;
   const message: ChatMessage = { role: value.role, content: typeof value.content === 'string' ? value.content : '' };
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
@@ -130,7 +132,7 @@ function normalizeMessage(value: unknown): ChatMessage | null {
       && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
   }
   if (typeof value.error === 'string' || (record(value.error) && typeof value.error.message === 'string')) message.error = chatErrorDetail(value.error);
-  if (message.role === 'user' && !message.agentContent && message.content.includes('【附件素材】')) {
+  if (migrateAttachmentText && message.role === 'user' && !message.agentContent && message.content.includes('【附件素材】')) {
     message.agentContent = message.content;
     message.content = message.content.split('【附件素材】', 1)[0].trim();
   }
@@ -144,7 +146,9 @@ function decodeSessions(raw: string): ChatSession[] {
   const usedIds = new Set<string>();
   for (const [index, value] of values.entries()) {
     if (!record(value)) continue;
-    const messages = Array.isArray(value.messages) ? value.messages.map(normalizeMessage).filter((message): message is ChatMessage => message !== null) : [];
+    const messages = Array.isArray(value.messages)
+      ? value.messages.map(message => normalizeMessage(message, value.importedFromBackup !== true)).filter((message): message is ChatMessage => message !== null)
+      : [];
     let id = typeof value.id === 'string' && value.id.trim() ? value.id : `recovered-${index}`;
     while (usedIds.has(id)) id += '-recovered';
     usedIds.add(id);
@@ -155,6 +159,19 @@ function decodeSessions(raw: string): ChatSession[] {
     };
     for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
     if (typeof value.archived === 'boolean') session.archived = value.archived;
+    if (value.importedFromBackup === true) {
+      session.importedFromBackup = true;
+      session.backupIncomplete = value.backupIncomplete === true;
+      delete session.sessionKey;
+      delete session.pendingTurnId;
+      delete session.persona;
+      for (const message of session.messages) {
+        delete message.turnId;
+        delete message.agentContent;
+        delete message.attachments;
+        delete message.selectedSkills;
+      }
+    }
     sessions.push(session);
   }
   return sessions;
