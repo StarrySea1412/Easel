@@ -2,6 +2,14 @@
 
 All notable changes to Easel are documented in this file.
 
+## [Unreleased]
+
+- Load secondary workbench pages on demand and retry failed pages locally without remounting background chat or image controllers. Initial JavaScript including static dependencies is 59.23% smaller than 0.2.6.
+- Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
+- Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
+
+Validated with 57 frontend regressions, build/lint, and 33 real HTTP resource comparisons. Details and boundaries: [frontend iteration verification](docs/frontend-performance-persistence-2026-09-30.md). These source changes are not included in the existing 0.2.6 installers.
+
 ## [0.2.6] - 2026-09-30
 
 ### Improved

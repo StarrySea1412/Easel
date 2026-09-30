@@ -1,26 +1,14 @@
 import { chatErrorDetail } from './lib/chatErrors';
 import { drainStreamRun } from './lib/streamLifecycle';
-import ImageStudioPage from './components/ImageStudioPage';
+import { createLazyPage } from './lib/lazyPage';
+import StorageNotice from './components/StorageNotice';
 import { useImageStudio } from './hooks/useImageStudio';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
-import ChatPage from './components/ChatPage';
-import SkillPage from './components/SkillPage';
-import OutputsPage from './components/OutputsPage';
-import ActivityPage from './components/ActivityPage';
-import AccountsPage from './components/AccountsPage';
-import ContentAnalysisPage from './components/ContentAnalysisPage';
-import ProfilePage from './components/ProfilePage';
 import DashboardPage from './components/DashboardPage';
-import TrendsPage from './components/TrendsPage';
-import CalendarPage from './components/CalendarPage';
-import IdeasPage from './components/IdeasPage';
-import PublishPage from './components/PublishPage';
-import BreakdownPage from './components/BreakdownPage';
 import SubNav from './components/SubNav';
 import OnboardingWizard from './components/OnboardingWizard';
-import SettingsPanel from './components/SettingsPanel';
 import type { SettingsSection } from './components/SettingsPanel';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
@@ -36,19 +24,40 @@ import {
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 
+const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
+const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
+const SkillPage = createLazyPage('技能库', () => import('./components/SkillPage'));
+const OutputsPage = createLazyPage('内容库', () => import('./components/OutputsPage'));
+const ActivityPage = createLazyPage('运行记录', () => import('./components/ActivityPage'));
+const AccountsPage = createLazyPage('账号', () => import('./components/AccountsPage'));
+const ContentAnalysisPage = createLazyPage('内容分析', () => import('./components/ContentAnalysisPage'));
+const ProfilePage = createLazyPage('画像', () => import('./components/ProfilePage'));
+const TrendsPage = createLazyPage('热点雷达', () => import('./components/TrendsPage'));
+const CalendarPage = createLazyPage('内容日历', () => import('./components/CalendarPage'));
+const IdeasPage = createLazyPage('选题库', () => import('./components/IdeasPage'));
+const PublishPage = createLazyPage('发布中心', () => import('./components/PublishPage'));
+const BreakdownPage = createLazyPage('爆款拆解', () => import('./components/BreakdownPage'));
+const SettingsPanel = createLazyPage('设置', () => import('./components/SettingsPanel'));
+
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
 
 function onboardingSeen(): boolean {
-  const current = localStorage.getItem(ONBOARDING_SEEN_KEY);
-  if (current) return true;
-  const previousKey = `${['post', 'craft'].join('')}_onboarding_seen`;
-  const previous = localStorage.getItem(previousKey);
-  if (previous) {
-    localStorage.setItem(ONBOARDING_SEEN_KEY, previous);
-    localStorage.removeItem(previousKey);
+  try {
+    const current = localStorage.getItem(ONBOARDING_SEEN_KEY);
+    if (current) return true;
+    const previousKey = `${['post', 'craft'].join('')}_onboarding_seen`;
+    const previous = localStorage.getItem(previousKey);
+    if (!previous) return false;
+    try {
+      localStorage.setItem(ONBOARDING_SEEN_KEY, previous);
+      localStorage.removeItem(previousKey);
+    } catch { /* Keep the previous marker if migration cannot be saved. */ }
     return true;
-  }
-  return false;
+  } catch { return false; }
+}
+
+function markOnboardingSeen() {
+  try { localStorage.setItem(ONBOARDING_SEEN_KEY, '1'); } catch { /* Optional preference. */ }
 }
 
 export default function App() {
@@ -640,7 +649,7 @@ export default function App() {
 
   // 首次引导：跳过（用通用模式）
   const dismissRecommend = useCallback(() => {
-    localStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+    markOnboardingSeen();
     setShowRecommend(false);
   }, []);
 
@@ -652,7 +661,7 @@ export default function App() {
 
   // 画像创建完成
   const handleProfileCreated = useCallback((name: string) => {
-    localStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+    markOnboardingSeen();
     setShowWizard(false);
     fetchPersonas().then((list) => {
       setPersonas(list);
@@ -793,6 +802,7 @@ export default function App() {
         gatewayStatus={gatewayStatus}
       />
       <main className="main-content">
+        <StorageNotice />
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}

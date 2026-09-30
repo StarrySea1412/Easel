@@ -1,5 +1,7 @@
 import type { ChatErrorDetail } from './chatErrors';
 import type { UploadedFile, ChatQuestion } from './api';
+import { chatErrorDetail } from './chatErrors';
+import { readLocalValue, writeLocalValue, removeMigratedLocalValue, reportLocalPersistenceFailure } from './localPersistence';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -44,117 +46,158 @@ export interface PublishDraft {
 const PUBLISH_KEY = 'easel_publish_draft';
 const PREVIOUS_BRAND = ['post', 'craft'].join('');
 
-// One-time reset after clearing the server-side OpenClaw session store.
-const CHAT_RESET_KEY = 'easel_chat_reset_20260902';
-if (!localStorage.getItem(CHAT_RESET_KEY)) {
-  for (const key of [
-    'easel_sessions',
-    'easel-sessions',
-    'easel_active_session',
-    `${PREVIOUS_BRAND}_sessions`,
-    `${PREVIOUS_BRAND}_active_session`,
-  ]) {
-    localStorage.removeItem(key);
-  }
-  for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
-    const key = sessionStorage.key(i);
-    if (key === 'easel_tab_session' || key?.startsWith('easel_pending_turn:')) {
-      sessionStorage.removeItem(key);
+// Importing this module must not inspect or reset a user's browser storage.
+// Decode before migration, and keep the source unless its replacement commits.
+function readMigrated<T>(key: string, previousKeys: string[], decode: (raw: string) => T): { value?: T; readable: boolean } {
+  let readable = true;
+  for (const source of [key, ...previousKeys]) {
+    const result = readLocalValue(source);
+    if (!result.ok) return { readable: false };
+    if (result.value === null) continue;
+    try {
+      const value = decode(result.value);
+      // A valid fallback can recover the UI, but it cannot establish that an
+      // earlier unreadable source is safe to overwrite or remove.
+      if (readable && source !== key && writeLocalValue(key, result.value)) removeMigratedLocalValue(source);
+      return { value, readable };
+    } catch {
+      readable = false;
+      reportLocalPersistenceFailure(source, 'read', 'invalid');
     }
   }
-  localStorage.setItem(CHAT_RESET_KEY, '1');
+  return { readable };
 }
 
-function readMigratedLocalValue(key: string, suffix: string): string | null {
-  const current = localStorage.getItem(key);
-  if (current !== null) return current;
-  const previousKey = `${PREVIOUS_BRAND}_${suffix}`;
-  const previous = localStorage.getItem(previousKey);
-  if (previous !== null) {
-    localStorage.setItem(key, previous);
-    localStorage.removeItem(previousKey);
-  }
-  return previous;
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 const PUBLISH_DEFAULT: PublishDraft = {
   title: '', body: '', platforms: ['xiaohongshu', 'douyin'], overrides: {}, tags: '',
 };
 export function loadPublishDraft(): PublishDraft {
-  try {
-    const raw = readMigratedLocalValue(PUBLISH_KEY, 'publish_draft');
-    if (!raw) return { ...PUBLISH_DEFAULT };
-    return { ...PUBLISH_DEFAULT, ...(JSON.parse(raw) as PublishDraft) };
-  } catch {
-    return { ...PUBLISH_DEFAULT };
-  }
+  if (draftInMemory) return draftInMemory;
+  const loaded = readMigrated(PUBLISH_KEY, [`${PREVIOUS_BRAND}_publish_draft`], raw => {
+    const value: unknown = JSON.parse(raw);
+    if (!record(value)) throw new Error('Invalid draft');
+    return {
+      title: typeof value.title === 'string' ? value.title : '',
+      body: typeof value.body === 'string' ? value.body : '',
+      tags: typeof value.tags === 'string' ? value.tags : '',
+      platforms: Array.isArray(value.platforms) ? value.platforms.filter((p): p is string => typeof p === 'string') : [...PUBLISH_DEFAULT.platforms],
+      overrides: record(value.overrides) ? Object.fromEntries(Object.entries(value.overrides).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {},
+    };
+  });
+  draftUnreadable = !loaded.readable;
+  return loaded.value || { ...PUBLISH_DEFAULT, platforms: [...PUBLISH_DEFAULT.platforms], overrides: {} };
 }
-export function savePublishDraft(d: PublishDraft): void {
-  try { localStorage.setItem(PUBLISH_KEY, JSON.stringify(d)); } catch { /* quota */ }
+let draftInMemory: PublishDraft | undefined;
+let draftUnreadable = false;
+export function savePublishDraft(d: PublishDraft): boolean {
+  draftInMemory = d;
+  return saveJson(PUBLISH_KEY, d, draftUnreadable);
 }
 
 const STORAGE_KEY = 'easel_sessions';
 const ACTIVE_KEY = 'easel_active_session';
-const MAX_SESSIONS = 100;
 const TITLE_MAX_CHARS = 24;
 
 /** 上次活跃会话 id：重开网页时据此续接上次对话（而不是丢进新空会话）。 */
 export function loadActiveId(): string | null {
-  try { return readMigratedLocalValue(ACTIVE_KEY, 'active_session'); } catch { return null; }
+  if (activeInMemory !== undefined) return activeInMemory;
+  return readMigrated(ACTIVE_KEY, [`${PREVIOUS_BRAND}_active_session`], raw => raw.trim() || null).value ?? null;
 }
-export function saveActiveId(id: string | null): void {
-  try {
-    if (id) localStorage.setItem(ACTIVE_KEY, id);
-    else localStorage.removeItem(ACTIVE_KEY);
-  } catch { /* quota */ }
+let activeInMemory: string | null | undefined;
+export function saveActiveId(id: string | null): boolean {
+  activeInMemory = id;
+  // An empty current value also prevents a retained legacy ID from resurfacing.
+  return writeLocalValue(ACTIVE_KEY, id || '');
 }
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-export function loadSessions(): ChatSession[] {
-  try {
-    const raw = readMigratedLocalValue(STORAGE_KEY, 'sessions');
-    if (!raw) return [];
-    const sessions = (JSON.parse(raw) as ChatSession[]).filter((s) => s && typeof s === 'object' && s.id);
-    // 兼容旧版本：附件内部指令曾被直接存进用户消息，加载时拆出并隐藏。
-    // 防御：损坏/缺字段的会话（旧版写入或写中断）恢复成可用形态，绝不让渲染期崩。
-    return sessions.map((session) => ({
-      ...session,
-      messages: Array.isArray(session.messages)
-        ? session.messages.map((message) => {
-            if (message?.role !== 'user' || message.agentContent || !message.content?.includes('【附件素材】')) {
-              return message;
-            }
-            const [visible = ''] = message.content.split('【附件素材】', 1);
-            return {
-              ...message,
-              content: visible.trim(),
-              agentContent: message.content,
-            };
-          })
-        : [],
-    }));
-  } catch {
-    return [];
+function normalizeMessage(value: unknown): ChatMessage | null {
+  if (!record(value) || (value.role !== 'user' && value.role !== 'assistant')) return null;
+  const message: ChatMessage = { role: value.role, content: typeof value.content === 'string' ? value.content : '' };
+  for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
+    if (typeof value[key] === 'string') message[key] = value[key];
   }
+  if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');
+  if (Array.isArray(value.attachments)) {
+    message.attachments = value.attachments.filter((file): file is UploadedFile => record(file)
+      && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
+  }
+  if (typeof value.error === 'string' || (record(value.error) && typeof value.error.message === 'string')) message.error = chatErrorDetail(value.error);
+  if (message.role === 'user' && !message.agentContent && message.content.includes('【附件素材】')) {
+    message.agentContent = message.content;
+    message.content = message.content.split('【附件素材】', 1)[0].trim();
+  }
+  return message;
 }
 
-/** 保存前清理：只保留最新 1 个空会话（避免空会话无限堆积），并封顶总数。 */
+function decodeSessions(raw: string): ChatSession[] {
+  const values: unknown = JSON.parse(raw);
+  if (!Array.isArray(values)) throw new Error('Invalid session list');
+  const sessions: ChatSession[] = [];
+  const usedIds = new Set<string>();
+  for (const [index, value] of values.entries()) {
+    if (!record(value)) continue;
+    const messages = Array.isArray(value.messages) ? value.messages.map(normalizeMessage).filter((message): message is ChatMessage => message !== null) : [];
+    let id = typeof value.id === 'string' && value.id.trim() ? value.id : `recovered-${index}`;
+    while (usedIds.has(id)) id += '-recovered';
+    usedIds.add(id);
+    const session: ChatSession = {
+      id, messages,
+      title: typeof value.title === 'string' && value.title.trim() ? value.title : 'New Chat',
+      created: typeof value.created === 'number' && Number.isFinite(value.created) ? value.created : 0,
+    };
+    for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
+    if (typeof value.archived === 'boolean') session.archived = value.archived;
+    sessions.push(session);
+  }
+  return sessions;
+}
+
+let sessionsInMemory: ChatSession[] | undefined;
+let sessionsUnreadable = false;
+export function loadSessions(): ChatSession[] {
+  if (sessionsInMemory) return sessionsInMemory;
+  const loaded = readMigrated(STORAGE_KEY, ['easel-sessions', `${PREVIOUS_BRAND}_sessions`], decodeSessions);
+  sessionsUnreadable = !loaded.readable;
+  return loaded.value || [];
+}
+
+/** Prune duplicate empty placeholders only; never silently truncate real history. */
 function prune(sessions: ChatSession[]): ChatSession[] {
   let keptEmpty = false;
   const pruned = sessions.filter((s) => {
-    if (s.messages.length > 0) return true;
+    if (s.messages.length > 0 || s.pendingTurnId) return true;
     if (keptEmpty) return false;
     keptEmpty = true;
     return true;
   });
-  return pruned.slice(0, MAX_SESSIONS);
+  return pruned;
 }
 
-export function saveSessions(sessions: ChatSession[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prune(sessions)));
+function saveJson(key: string, value: unknown, unreadable: boolean): boolean {
+  // A failed initial read is not an empty history. Keep it untouched rather
+  // than replacing it when the UI creates its first in-memory placeholder.
+  if (unreadable) {
+    reportLocalPersistenceFailure(key, 'write', 'unreadable');
+    return false;
+  }
+  try { return writeLocalValue(key, JSON.stringify(value)); }
+  catch {
+    reportLocalPersistenceFailure(key, 'write', 'invalid');
+    return false;
+  }
+}
+
+export function saveSessions(sessions: ChatSession[]): boolean {
+  sessionsInMemory = sessions;
+  return saveJson(STORAGE_KEY, prune(sessions), sessionsUnreadable);
 }
 
 export function createSession(persona?: string): ChatSession {
