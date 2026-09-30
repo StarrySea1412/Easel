@@ -4,6 +4,8 @@ All notable changes to Easel are documented in this file.
 
 ## [Unreleased]
 
+- Refine animal shoulder/elbow/wrist articulation, tool contact, staged work gestures and restrained secondary motion, while keeping actions tied to observed evidence and terminal poses static. All 270 frontend tests, lint, build and HTTP resource checks pass; real WebGL checks cover sampled demo poses, controls and narrow layouts. See [animal motion iteration](docs/office-animal-motion-2026-10-01.md).
+
 - Search filenames and paths within the current bounded output snapshot, combine type filters, and sort by modification time, name, or size without clearing unread indicators outside the visible list.
 - Add explicit image and media loading, failure and retry states; isolate old resource events, release closed previews, and preserve playback while sorting. Real browser checks cover image recovery, video/audio playback and narrow layouts. See [media and search verification](docs/office-media-search-2026-10-01.md).
 
@@ -31,7 +33,7 @@ All notable changes to Easel are documented in this file.
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Latest implementation and exact validation scope: [media and search iteration](docs/office-media-search-2026-10-01.md), with earlier features in [professional office iteration](docs/professional-office-2026-10-01.md). Browser checks use an isolated local workspace; model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
+Latest implementation and exact validation scope: [animal motion iteration](docs/office-animal-motion-2026-10-01.md), with earlier features in [professional office iteration](docs/professional-office-2026-10-01.md). Browser checks use an isolated local workspace and simulated employee demonstrations; sampled poses do not establish collision-free motion at every instant or measured frame rates. Model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 

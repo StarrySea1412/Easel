@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { OfficeAgent } from '../../lib/agentOffice';
+import { applyOfficeAvatarMotion } from './officeAvatarMotion';
 
 type AgentState = OfficeAgent['state'];
 
@@ -172,7 +173,7 @@ function desk(resources: OfficeResources, parent: THREE.Object3D, slot: DeskSlot
   box(resources, root, resources.color(slot.index % 2 ? 0xd5aa86 : 0xb3c0a7), [0.23, 0.035, 0.3], [-0.57, 0.965, 0.19]);
 
   // A real chair with cushion, back, pedestal and casters.
-  const seatX = -0.32, seatZ = 0.7;
+  const seatX = -0.10, seatZ = 0.7;
   const fabric = resources.color(slot.index % 3 ? 0xbac3b9 : 0xd7b28f);
   box(resources, root, fabric, [0.6, 0.13, 0.56], [seatX, 0.53, seatZ]);
   box(resources, root, fabric, [0.59, 0.51, 0.11], [seatX, 0.85, seatZ + 0.28]);
@@ -313,7 +314,15 @@ export function createOfficeWorld(resources: OfficeResources, count: number): Of
 
 export interface OfficeAvatar {
   root: THREE.Group;
+  body: THREE.Group;
   head: THREE.Group;
+  leftElbow: THREE.Group;
+  rightElbow: THREE.Group;
+  leftWrist: THREE.Group;
+  rightWrist: THREE.Group;
+  ears: THREE.Group[];
+  eyes: THREE.Group;
+  tail: THREE.Group;
   leftArm: THREE.Group;
   rightArm: THREE.Group;
   document: THREE.Group;
@@ -331,7 +340,7 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   const root = new THREE.Group();
   root.name = `employee:${id}`;
   root.userData.agentId = id;
-  root.position.set(desk.slot.x - 0.32, 0.61, desk.slot.z + 0.56);
+  root.position.set(desk.slot.x - 0.10, 0.61, desk.slot.z + 0.56);
   const species = appearance?.species || 'cat';
   root.userData.species = species;
   // Saved skin/hair keys stay compatible, but now color animal fur and markings.
@@ -339,22 +348,24 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   const shirt = resources.material(`shirt:${appearance?.shirtColor}`, { color: appearance?.shirtColor || '#8E9B9D' });
   const markings = resources.material(`markings:${appearance?.hairColor}`, { color: appearance?.hairColor || '#806B58' });
   const cream = resources.color(0xfff4df), ink = resources.color(0x363b3a);
-  const torso = sphere(resources, root, shirt, 0.25, 0, 0.26, 0, 16);
+  const body = new THREE.Group(); body.name = 'employee-body'; root.add(body);
+  const torso = sphere(resources, body, shirt, 0.25, 0, 0.26, 0, 16);
   torso.scale.set(0.96, 1.04, 0.76); torso.name = 'employee-shirt';
   for (const x of [-0.067, 0.067]) {
-    const collar = box(resources, root, cream, [0.11, 0.075, 0.035], [x, 0.46, -0.15]);
+    const collar = box(resources, body, cream, [0.11, 0.075, 0.035], [x, 0.46, -0.15]);
     collar.rotation.z = x < 0 ? -0.32 : 0.32;
   }
-  box(resources, root, cream, [0.067, 0.087, 0.012], [0.11, 0.31, -0.187]);
-  box(resources, root, markings, [0.042, 0.015, 0.014], [0.11, 0.329, -0.197], false);
+  box(resources, body, cream, [0.067, 0.087, 0.012], [0.11, 0.31, -0.187]);
+  box(resources, body, markings, [0.042, 0.015, 0.014], [0.11, 0.329, -0.197], false);
   const head = new THREE.Group(); head.name = 'employee-head'; head.position.set(0, 0.79, 0);
-  head.userData.species = species; head.rotation.y = -1.18;
-  root.add(head);
+  head.userData.species = species;
+  body.add(head);
   const face = sphere(resources, head, fur, 0.305, 0, 0, 0, 20);
   face.name = 'animal-face'; face.scale.set(1.04, 1, 0.92);
+  const ears: THREE.Group[] = [];
   for (const x of [-0.2, 0.2]) {
     const ear = new THREE.Group(); ear.name = x < 0 ? 'animal-ear-left' : 'animal-ear-right';
-    ear.position.set(x, 0.22, 0); head.add(ear);
+    ear.position.set(x, 0.22, 0); head.add(ear); ears.push(ear);
     if (species === 'rabbit') {
       const outer = sphere(resources, ear, fur, 0.11, 0, 0.18, 0, 16); outer.scale.set(0.85, 2.6, 0.74);
       const inner = sphere(resources, ear, markings, 0.069, 0, 0.2, -0.069, 12); inner.scale.set(0.78, 3.1, 0.23);
@@ -380,9 +391,10 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   }
   const nose = sphere(resources, muzzle, ink, 0.03, 0, -0.057, species === 'fox' ? -0.371 : -0.337, 12);
   nose.name = 'animal-nose'; nose.scale.set(1.2, 0.75, 0.7);
+  const eyes = new THREE.Group(); eyes.name = 'animal-eyes'; eyes.position.y = 0.033; head.add(eyes);
   for (const x of [-0.116, 0.116]) {
-    sphere(resources, head, ink, 0.032, x, 0.033, -0.265, 12).scale.set(0.78, 1.07, 0.56);
-    sphere(resources, head, cream, 0.009, x - 0.008, 0.045, -0.282, 8);
+    sphere(resources, eyes, ink, 0.032, x, 0, -0.265, 12).scale.set(0.78, 1.07, 0.56);
+    sphere(resources, eyes, cream, 0.009, x - 0.008, 0.012, -0.282, 8);
   }
   for (const x of [-0.212, 0.212]) {
     sphere(resources, head, resources.color(0xdba69a), 0.045, x, -0.073, -0.212, 12).scale.set(1, 0.48, 0.25);
@@ -417,15 +429,22 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
     const brush = sphere(resources, tail, fur, 0.17, 0.17, 0.08, 0.09, 16); brush.scale.set(1.8, 0.9, 0.9); brush.rotation.z = 0.45;
     sphere(resources, tail, cream, 0.11, 0.38, 0.18, 0.09, 14).scale.set(1.2, 0.9, 0.85);
   } else sphere(resources, tail, species === 'rabbit' ? cream : fur, 0.12, 0.06, 0.06, 0.11, 16);
+  // The upper arm, forearm and paw form a real shoulder → elbow → wrist chain.
+  // Both limb lengths are fixed; the motion solver rotates joints to reach desk contacts.
   const arms = [-0.245, 0.245].map(x => {
-    const arm = new THREE.Group(); arm.name = x < 0 ? 'left-arm' : 'right-arm';
-    arm.position.set(x, 0.44, 0); root.add(arm);
-    sphere(resources, arm, shirt, 0.1, 0, -0.055, -0.01, 14).scale.set(0.95, 1.25, 0.95);
-    const forearm = sphere(resources, arm, fur, 0.075, 0, -0.12, -0.135, 14); forearm.scale.set(0.85, 0.85, 1.55);
-    const paw = sphere(resources, arm, fur, 0.089, 0, -0.12, -0.27, 16);
-    paw.name = x < 0 ? 'animal-paw-left' : 'animal-paw-right'; paw.scale.set(1, 0.65, 1.08);
-    for (const offset of [-0.029, 0.029]) box(resources, arm, markings, [0.006, 0.006, 0.034], [offset, -0.174, -0.285], false);
-    return arm;
+    const side = x < 0 ? 'left' : 'right';
+    const arm = new THREE.Group(); arm.name = `${side}-arm`;
+    arm.position.set(x, 0.44, 0); body.add(arm);
+    const sleeve = sphere(resources, arm, shirt, 0.1, 0, 0, -0.11, 14);
+    sleeve.scale.set(0.9, 0.9, 1.3);
+    const elbow = new THREE.Group(); elbow.name = `${side}-elbow`; elbow.position.z = -0.25; arm.add(elbow);
+    sphere(resources, elbow, fur, 0.075, 0, 0, 0, 12);
+    const forearm = sphere(resources, elbow, fur, 0.075, 0, 0, -0.125, 14); forearm.scale.set(0.83, 0.83, 1.75);
+    const wrist = new THREE.Group(); wrist.name = `${side}-wrist`; wrist.position.z = -0.27; elbow.add(wrist);
+    const paw = sphere(resources, wrist, fur, 0.079, 0, 0, 0, 16);
+    paw.name = `animal-paw-${side}`; paw.scale.set(1, 0.65, 1.08);
+    for (const offset of [-0.029, 0.029]) box(resources, wrist, markings, [0.006, 0.006, 0.034], [offset, 0.045, -0.04], false);
+    return { arm, elbow, wrist };
   });
   for (const x of [-0.115, 0.115]) {
     sphere(resources, root, resources.color(0x687779), 0.125, x, -0.085, -0.11, 14).scale.set(0.9, 1.05, 1.6);
@@ -445,8 +464,8 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   box(resources, tablet, resources.color(0x8cae9a), [0.18, 0.3, 0.009], [-0.17, 0, 0.035]);
   sphere(resources, tablet, resources.color(0xe5b577), 0.065, 0.03, 0.08, 0.046, 12).scale.z = 0.1;
   box(resources, tablet, resources.color(0xb08079), [0.2, 0.11, 0.012], [0.105, -0.09, 0.043]);
-  const pen = cylinder(resources, arms[1], ink, 0.018, 0.018, 0.3, 0, 0.035, -0.315, 8);
-  pen.name = 'drawing-stylus'; pen.rotation.x = -0.28;
+  const pen = cylinder(resources, arms[1].wrist, ink, 0.013, 0.013, 0.22, 0.034, 0.06, 0, 8);
+  pen.name = 'drawing-stylus';
   const statusMaterial = resources.material(`status:${desk.slot.index}`, { color: 0x99a2aa, emissive: 0x99a2aa, emissiveIntensity: 0.24 });
   const beacon = sphere(resources, root, statusMaterial, 0.055, 0.28, 1.07, 0.04, 8);
   const selection = mesh(root, resources.geometry('selected-ring', () => new THREE.TorusGeometry(0.42, 0.022, 5, 28)),
@@ -455,7 +474,8 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   document.visible = tablet.visible = pen.visible = false;
-  return { root, head, leftArm: arms[0], rightArm: arms[1], document, tablet, pen, beacon, selection,
+  return { root, body, head, ears, eyes, tail, leftArm: arms[0].arm, rightArm: arms[1].arm,
+    leftElbow: arms[0].elbow, rightElbow: arms[1].elbow, leftWrist: arms[0].wrist, rightWrist: arms[1].wrist, document, tablet, pen, beacon, selection,
     statusMaterial, screen: desk.screen, label: new THREE.Vector3(root.position.x, species === 'rabbit' ? 2.18 : 2.04, root.position.z), phase: (hash % 1000) / 100 };
 }
 
@@ -464,42 +484,7 @@ export function poseOfficeAvatar(avatar: OfficeAvatar, state: AgentState, time: 
   avatar.statusMaterial.color.setHex(color); avatar.statusMaterial.emissive.setHex(color);
   avatar.screen.color.setHex(avatar.screen.map ? 0xffffff : state === 'error' ? 0xd9a59d : ['waiting', 'stopped', 'unknown'].includes(state) ? 0xb8c3bd : 0xb4d1c6);
   avatar.screen.emissiveIntensity = avatar.screen.map ? 0.08 : state === 'working' ? 0.46 : state === 'thinking' ? 0.29 : 0.08;
-  const phase = time + avatar.phase;
-  avatar.head.rotation.set(0, -1.18, 0);
-  avatar.head.position.y = 0.79;
-  avatar.leftArm.rotation.set(0, 0, 0); avatar.rightArm.rotation.set(0, 0, 0);
-  const active = state === 'working';
-  avatar.document.visible = active && (action === 'reading' || action === 'writing');
-  avatar.tablet.visible = active && action === 'designing';
-  avatar.pen.visible = active && (action === 'writing' || action === 'designing');
-  avatar.document.position.y = action === 'writing' ? 0.47 : 0.54;
-  avatar.document.rotation.x = action === 'writing' ? -1.12 : -0.8;
-  if (active && action === 'executing') {
-    avatar.leftArm.rotation.x = 0.15 + Math.sin(phase * 9) * 0.13;
-    avatar.rightArm.rotation.x = 0.15 + Math.sin(phase * 9 + Math.PI) * 0.13;
-  } else if (active && (action === 'writing' || action === 'designing')) {
-    avatar.rightArm.rotation.y = Math.sin(phase * 3) * 0.18;
-    avatar.leftArm.rotation.x = 0.36;
-    avatar.rightArm.rotation.x = 0.4 + Math.sin(phase * 4) * 0.04;
-    avatar.head.rotation.x = -0.12;
-  } else if (active && action === 'reading') {
-    avatar.leftArm.rotation.x = 0.75;
-    avatar.rightArm.rotation.x = 0.75;
-    avatar.head.rotation.x = -0.12 + Math.sin(phase) * 0.035;
-  } else if (active && action === 'delegating') {
-    avatar.rightArm.rotation.z = -0.75 + Math.sin(phase * 2) * 0.22;
-    avatar.head.rotation.y = -1.18 + Math.sin(phase) * 0.25;
-  }
-  if (state === 'thinking') {
-    avatar.rightArm.rotation.x = 1.15;
-    avatar.head.rotation.z = Math.sin(phase) * 0.05;
-  }
-  if (state === 'done') {
-    avatar.rightArm.rotation.x = 1.5;
-    avatar.rightArm.rotation.z = 0.3 + Math.sin(phase * 3.2) * 0.12;
-    avatar.head.rotation.x = Math.sin(phase * 2) * 0.05;
-  }
-  if (state === 'error') avatar.head.rotation.z = 0.13;
-  avatar.beacon.scale.setScalar(state === 'error' ? 1 + Math.sin(phase * 3) * 0.13 : 1);
+  applyOfficeAvatarMotion(avatar, state, time, action);
+  avatar.beacon.scale.setScalar(1);
   avatar.selection.visible = selected;
 }

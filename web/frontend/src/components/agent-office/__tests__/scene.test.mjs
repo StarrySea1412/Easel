@@ -11,6 +11,12 @@ const { createSceneScheduler } = await loadTsModule('../sceneScheduler.ts', impo
 const { createOfficeSceneRuntime } = await loadTsModule('../OfficeSceneRuntime.ts', import.meta.url);
 const { default: AgentOfficeScene } = await loadTsModule('../AgentOfficeScene.tsx', import.meta.url);
 
+function transforms(root) {
+  const result = [];
+  root.traverse((node) => result.push([...node.position, ...node.quaternion, ...node.scale]));
+  return result;
+}
+
 test('four distinct animal employees have ears, muzzles, tails and paws without human hair', () => {
   const resources = new OfficeResources();
   const world = createOfficeWorld(resources, 1);
@@ -56,7 +62,9 @@ test('evidence-specific large props sit above the desk and disappear when work i
   assert.ok(tabletBounds.max.x - tabletBounds.min.x >= 0.63, 'drawing tablet is large enough to recognize');
   poseOfficeAvatar(avatar, 'working', 3, false, 'unreported');
   assert.equal(avatar.tablet.visible, false); assert.equal(avatar.pen.visible, false);
-  assert.equal(avatar.rightArm.rotation.x, 0);
+  const unreported = transforms(avatar.root);
+  poseOfficeAvatar(avatar, 'working', 30, false, 'unreported');
+  assert.deepEqual(transforms(avatar.root), unreported, 'missing evidence does not invent work motion');
   for (const state of ['waiting', 'stopped', 'done', 'error', 'unknown']) {
     poseOfficeAvatar(avatar, state, 4, false, 'designing');
     assert.equal(avatar.tablet.visible, false); assert.equal(avatar.document.visible, false); assert.equal(avatar.pen.visible, false);
@@ -107,20 +115,26 @@ test('agent state changes drive real transforms, independent screens and selecti
   const second = createOfficeAvatar(resources, world.desks[1], 'agent-2');
   assert.equal(avatar.root.userData.agentId, 'agent-1');
   poseOfficeAvatar(avatar, 'working', 0, true, 'executing');
-  const firstPaw = avatar.leftArm.rotation.x;
+  const firstPaw = transforms(avatar.leftArm);
   poseOfficeAvatar(avatar, 'working', 0.1, false, 'executing');
-  assert.notEqual(avatar.leftArm.rotation.x, firstPaw);
+  assert.notDeepEqual(transforms(avatar.leftArm), firstPaw, 'reported execution moves articulated limbs');
   assert.equal(avatar.selection.visible, false);
   assert.equal(avatar.screen.emissiveIntensity, 0.46);
   poseOfficeAvatar(avatar, 'thinking', 2, false);
-  assert.equal(avatar.rightArm.rotation.x, 1.15);
-  assert.notEqual(avatar.head.rotation.z, 0);
+  const thinking = transforms(avatar.root);
+  poseOfficeAvatar(avatar, 'thinking', 2.4, false);
+  assert.notDeepEqual(transforms(avatar.root), thinking, 'thinking has its own active pose');
   poseOfficeAvatar(avatar, 'done', 4, true);
   assert.equal(avatar.tablet.visible, false);
-  assert.equal(avatar.rightArm.rotation.x, 1.5);
+  const done = transforms(avatar.root);
+  poseOfficeAvatar(avatar, 'done', 40, true);
+  assert.deepEqual(transforms(avatar.root), done, 'completed work settles instead of looping');
   assert.equal(avatar.statusMaterial.color.getHex(), 0x67a877);
   assert.equal(avatar.selection.visible, true);
   poseOfficeAvatar(second, 'error', 3, false);
+  const error = transforms(second.root);
+  poseOfficeAvatar(second, 'error', 30, false);
+  assert.deepEqual(transforms(second.root), error, 'errors remain a stable visible state');
   assert.equal(second.statusMaterial.color.getHex(), 0xd66d64);
   assert.equal(avatar.statusMaterial.color.getHex(), 0x67a877, 'other desks do not share mutable agent status materials');
   poseOfficeAvatar(avatar, 'waiting', 0, false);
@@ -217,7 +231,7 @@ function runtimeHarness({ throwOnRender = false } = {}) {
   document.body.append(host);
   const label = document.createElement('button');
   host.append(label);
-  const agents = [{ id: 'agent-1', name: 'Scout', role: '研究', task: '核对资料', state: 'working', source: 'demo' }];
+  const agents = [{ id: 'agent-1', name: 'Scout', role: '研究', task: '核对资料', state: 'working', source: 'demo', action: { kind: 'executing', evidence: 'demo', label: '演示检查' } }];
   const unavailable = [];
   const calls = { render: 0, disposed: 0, lost: 0, made: 0, scene: null, camera: null };
   const canvas = document.createElement('canvas');
@@ -303,7 +317,7 @@ test('simulated reduced motion stops recurring frames and context loss reports a
   harness.window.happyDOM.abort();
 });
 
-test('stopped agents repaint their final state once without keeping an animation loop alive', () => {
+test('terminal agents repaint their final state once without keeping an animation loop alive', () => {
   const harness = runtimeHarness();
   const runtime = createOfficeSceneRuntime(harness.options, harness.make);
   harness.clock.tick(0);
@@ -313,6 +327,69 @@ test('stopped agents repaint their final state once without keeping an animation
   assert.equal(harness.clock.pending.size, 0);
   const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
   assert.ok(avatar.children.some((child) => child instanceof THREE.Mesh && child.material.color.getHex() === 0x899397));
+  for (const state of ['done', 'error', 'waiting', 'unknown']) {
+    runtime.update({ agents: [{ ...harness.agents[0], state }], selectedId: null, paused: false });
+    const before = harness.calls.render;
+    harness.clock.tick(32);
+    assert.equal(harness.calls.render, before + 1, `${state} repaints immediately`);
+    assert.equal(harness.clock.pending.size, 0, `${state} does not leave recurring frames`);
+  }
+  runtime.dispose();
+  harness.window.happyDOM.abort();
+});
+
+test('motion resumes without accumulating paused, hidden, unfocused or reduced-motion wall time', () => {
+  const harness = runtimeHarness();
+  const { clock, calls, window, media, observers, agents } = harness;
+  const runtime = createOfficeSceneRuntime(harness.options, harness.make);
+  let time = 0;
+  clock.tick(time);
+  clock.tick(time += 16);
+  const avatar = calls.scene.getObjectByName('employee:agent-1');
+  const changeVisibility = (hidden) => {
+    Object.defineProperty(window.document, 'hidden', { value: hidden, configurable: true });
+    window.document.dispatchEvent(new window.Event('visibilitychange'));
+  };
+  const changeMotion = (matches) => { media.matches = matches; media.dispatchEvent(new window.Event('change')); };
+  const modes = [
+    [() => runtime.update({ agents, selectedId: null, paused: true }), () => runtime.update({ agents, selectedId: null, paused: false })],
+    [() => window.dispatchEvent(new window.Event('blur')), () => window.dispatchEvent(new window.Event('focus'))],
+    [() => changeVisibility(true), () => changeVisibility(false)],
+    [() => changeMotion(true), () => changeMotion(false)],
+    [() => observers[1].callback([{ isIntersecting: false }]), () => observers[1].callback([{ isIntersecting: true }])],
+  ];
+  for (const [freeze, resume] of modes) {
+    const before = transforms(avatar);
+    freeze();
+    clock.tick(time += 10000);
+    assert.equal(clock.pending.size, 0);
+    assert.deepEqual(transforms(avatar), before, 'suspended time does not advance joints');
+    resume();
+    clock.tick(time += 10000);
+    assert.deepEqual(transforms(avatar), before, 'first resumed frame keeps the frozen pose');
+    clock.tick(time += 16);
+    assert.notDeepEqual(transforms(avatar), before, 'subsequent active frames move normally');
+  }
+  runtime.dispose();
+  window.happyDOM.abort();
+});
+
+test('unreported evidence suppresses a claimed tool action and paused action changes repaint immediately', () => {
+  const harness = runtimeHarness();
+  const runtime = createOfficeSceneRuntime(harness.options, harness.make);
+  const agent = { ...harness.agents[0], source: 'session', action: { kind: 'designing', evidence: 'unreported', label: 'untrusted claim' } };
+  runtime.update({ agents: [agent], selectedId: null, paused: false });
+  harness.clock.tick(0);
+  assert.equal(harness.clock.pending.size, 0, 'no active loop without reported operation');
+  const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
+  const before = transforms(avatar);
+  runtime.update({ agents: [agent], selectedId: null, paused: false });
+  harness.clock.tick(10000);
+  assert.deepEqual(transforms(avatar), before);
+  runtime.update({ agents: [{ ...agent, action: { kind: 'designing', evidence: 'observed', label: 'draw' } }], selectedId: null, paused: true });
+  harness.clock.tick(10016);
+  assert.notDeepEqual(transforms(avatar), before, 'new evidence updates pose even while motion is paused');
+  assert.equal(harness.clock.pending.size, 0);
   runtime.dispose();
   harness.window.happyDOM.abort();
 });

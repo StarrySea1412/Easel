@@ -102,6 +102,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   let layoutKey = officeLayout(input.agents.length).key;
   let avatarIds = '';
   let avatars = new Map<string, OfficeAvatar>();
+  const workSurfaces = new Map<string, ReturnType<typeof officeWorkSurface>>();
   let width = 1, height = 1;
   let focused = document.hasFocus();
   let intersecting = true;
@@ -111,7 +112,8 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const visible = () => !document.hidden && intersecting && !contextLost;
   const animate = () => visible() && focused && !input.paused && !reducedMotion?.matches
-    && input.agents.some((agent) => ['working', 'thinking', 'done', 'error'].includes(agent.state));
+    && input.agents.some((agent) => ['working', 'thinking'].includes(agent.state)
+      && workSurfaces.get(agent.id)?.kind !== 'unreported');
   const projected = new THREE.Vector3();
   const labelSizes = new Map<string, { width: number; height: number }>();
   let labelLayoutKey = '';
@@ -145,6 +147,9 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       const p = avatar.root.position;
       // Reserve the employee, hands and working props, plus the monitor face.
       protect([p.x - .46, p.x + .46], [.74, 2.12], [p.z - .62, p.z + .3]);
+      // The mouse and articulated forearms extend sideways at desk height only.
+      // Keep that workspace clear without hiding labels across the whole body.
+      protect([p.x - .46, p.x + .86], [.94, 1.18], [p.z - .7, p.z - .2]);
     }
     // Empty stations are still visible; their monitors must remain unobstructed too.
     for (const desk of world.desks) {
@@ -197,7 +202,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       lastFrame = time;
       for (const agent of input.agents) {
         const avatar = avatars.get(agent.id);
-        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId, agent.action?.kind);
+        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId, workSurfaces.get(agent.id)?.kind);
       }
       camera.updateMatrixWorld();
       try { renderer.render(scene, camera); }
@@ -239,6 +244,8 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   }
 
   function synchronizeAgents() {
+    workSurfaces.clear();
+    for (const agent of input.agents) workSurfaces.set(agent.id, officeWorkSurface(agent));
     const nextLayout = officeLayout(input.agents.length).key;
     if (nextLayout !== layoutKey) {
       clearScreenTextures();
@@ -290,7 +297,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
         desk.screen.color.setHex(0xffffff);
         desk.screen.needsUpdate = true;
       }
-      surface.update(agent ? officeWorkSurface(agent) : null);
+      surface.update(workSurfaces.get(agent.id) || null);
     }
     refresh();
   }
