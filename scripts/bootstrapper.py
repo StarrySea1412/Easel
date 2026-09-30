@@ -313,14 +313,39 @@ def copy_missing(src: Path, dest: Path) -> None:
             temp.unlink(missing_ok=True)
 
 
+def seed_destination(dd: Path, name: str) -> Path:
+    """Resolve only a storage-location junction explicitly recorded by Easel.
+
+    Content relocation owns this root link; arbitrary links and all nested
+    links remain rejected by copy_missing. Never overwrite existing content.
+    """
+    logical = dd / name
+    if not is_link(logical):
+        return logical
+    if name == 'outputs':
+        try:
+            config = json.loads((dd / '.storage-location.json').read_text(encoding='utf-8'))
+            active = config.get('activePath') if isinstance(config, dict) else None
+            target = Path(active) if isinstance(active, str) and active else None
+            if (target is not None and target.is_absolute() and target.is_dir()
+                    and not is_link(target) and logical.resolve() == target.resolve()
+                    and not target.resolve().is_relative_to(dd.resolve())
+                    and not dd.resolve().is_relative_to(target.resolve())):
+                return target.resolve()
+        except (OSError, ValueError, RuntimeError):
+            pass
+    raise RuntimeError(f'数据目录链接与已记录保存位置不一致，未写入：{logical}')
+
+
 def init_data_dir(src_root: Path) -> Path:
     dd = data_root()
     dd.mkdir(parents=True, exist_ok=True)
     if src_root.resolve() == dd.resolve():
         return dd
     for name in ("profiles", "outputs", "assets"):
-        (dd / name).mkdir(exist_ok=True)
-        copy_missing(src_root / name, dd / name)
+        destination = seed_destination(dd, name)
+        destination.mkdir(exist_ok=True)
+        copy_missing(src_root / name, destination)
     copy_missing(src_root / ".env", dd / ".env")
     return dd
 

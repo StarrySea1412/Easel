@@ -334,6 +334,65 @@ def test_data_migration_recurses_without_overwrite(tmp_path):
     assert bt.init_data_dir(dd) == dd
 
 
+def test_upgrade_after_content_relocation_preserves_files_and_logical_link(tmp_path):
+    from easel import storage_location as storage
+    dd = bt.data_root()
+    (dd / 'outputs').mkdir(parents=True)
+    (dd / 'outputs' / 'keep.md').write_text('user content')
+    target = tmp_path / 'relocated content'
+    storage.schedule(dd, str(target))
+    assert storage.apply_pending(dd)['status'] == 'ready'
+    source = tmp_path / 'new-version'
+    (source / 'outputs').mkdir(parents=True)
+    (source / 'outputs' / 'keep.md').write_text('do not overwrite')
+    (source / 'outputs' / '.gitkeep').touch()
+    bt.init_data_dir(source)
+    assert (target / 'keep.md').read_text() == 'user content'
+    assert (target / '.gitkeep').exists()
+    bt.link_data_dirs(source, dd)
+    second = tmp_path / 'second content'
+    storage.schedule(dd, str(second))
+    assert storage.apply_pending(dd)['status'] == 'ready'
+    assert (source / 'outputs').resolve() == second
+    assert (second / 'keep.md').read_text() == 'user content'
+
+
+@pytest.mark.parametrize('record', [None, 'different-target'])
+def test_upgrade_rejects_unregistered_or_mismatched_storage_link(tmp_path, record):
+    from easel import storage_location as storage
+    dd = bt.data_root()
+    dd.mkdir(parents=True)
+    target = tmp_path / 'unrelated'
+    target.mkdir()
+    storage._make_link(dd / 'outputs', target)
+    if record:
+        (dd / '.storage-location.json').write_text(json.dumps({'activePath': str(tmp_path / record)}))
+    source = tmp_path / 'new-version'
+    (source / 'outputs').mkdir(parents=True)
+    (source / 'outputs' / 'seed').touch()
+    with pytest.raises(RuntimeError, match='已记录保存位置'):
+        bt.init_data_dir(source)
+    assert not (target / 'seed').exists()
+
+
+def test_registered_storage_does_not_allow_nested_link_writes(tmp_path):
+    from easel import storage_location as storage
+    dd = bt.data_root()
+    (dd / 'outputs').mkdir(parents=True)
+    target = tmp_path / 'relocated'
+    storage.schedule(dd, str(target))
+    assert storage.apply_pending(dd)['status'] == 'ready'
+    unrelated = tmp_path / 'private'
+    unrelated.mkdir()
+    storage._make_link(target / 'child', unrelated)
+    source = tmp_path / 'new-version'
+    (source / 'outputs' / 'child').mkdir(parents=True)
+    (source / 'outputs' / 'child' / 'seed').touch()
+    with pytest.raises(RuntimeError, match='迁移目标不能是目录链接'):
+        bt.init_data_dir(source)
+    assert not (unrelated / 'seed').exists()
+
+
 @pytest.mark.parametrize("allowed", [True, False])
 def test_setup_noninteractive_and_winget_explicit(tmp_path, monkeypatch, allowed):
     monkeypatch.setenv("EASEL_INSTALL_ALLOW_WINGET", "1")
