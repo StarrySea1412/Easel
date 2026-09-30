@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -144,18 +146,70 @@ def test_phase_timeout_cleans_owned_tree_before_returning(installation, monkeypa
     class Child:
         returncode = 1
 
-        def communicate(self, timeout):
-            events.append(("communicate", timeout))
+        def wait(self, timeout):
+            events.append(("wait", timeout))
             if timeout == 3600:
                 raise subprocess.TimeoutExpired("test", timeout)
-            return "last child output", None
+            return 1
 
     child = Child()
-    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: child)
+    def launch(*args, **kwargs):
+        assert kwargs['stdout'] is not subprocess.PIPE
+        kwargs['stdout'].write(b'last child output')
+        return child
+    monkeypatch.setattr(runner.subprocess, "Popen", launch)
     monkeypatch.setattr(runner, "terminate_phase_tree", lambda process: events.append(("cleanup", process)))
     ok, detail = runner.execute_phase(root, base, "pydeps", non_interactive=True, allow_winget=False)
     assert not ok and "timeout" in detail and "last child output" in detail
-    assert events == [("communicate", 3600), ("cleanup", child), ("communicate", 10)]
+    assert events == [("wait", 3600), ("cleanup", child), ("wait", 10)]
+
+
+def test_successful_phase_returns_while_background_child_keeps_stdout(installation, monkeypatch, tmp_path):
+    root, base = installation
+    # Launch a real descendant inheriting stdout, like Start-Process Gateway.
+    # It waits for the test's explicit release file rather than sleeping for a
+    # guessed duration; the parent phase has already exited successfully.
+    release = tmp_path / 'release-child'
+    alive = tmp_path / 'child-alive'
+    finished = tmp_path / 'child-finished'
+    child = tmp_path / 'background.py'
+    child.write_text('import pathlib,sys,time\na,r,f=map(pathlib.Path,sys.argv[1:])\na.write_text("alive")\nlimit=time.monotonic()+12\nwhile not r.exists() and time.monotonic()<limit: time.sleep(.05)\nf.write_text("finished")\n', encoding='utf-8')
+    parent = tmp_path / 'phase.py'
+    parent.write_text('import subprocess,sys\nsubprocess.Popen(sys.argv[1:])\nprint("phase complete API_KEY=test-sensitive-value",flush=True)\n', encoding='utf-8')
+    monkeypatch.setattr(runner, 'phase_command', lambda *args, **kwargs: [sys.executable, str(parent), sys.executable, str(child), str(alive), str(release), str(finished)])
+    monkeypatch.setattr(runner, 'terminate_phase_tree', lambda p: pytest.fail('successful phase must not kill Gateway'))
+    started = time.monotonic()
+    try:
+        ok, detail = runner.execute_phase(root, base, 'baseline', non_interactive=True, allow_winget=False)
+        assert ok and 'phase complete' in detail
+        assert 'test-sensitive-value' not in detail and '[REDACTED]' in detail
+        assert time.monotonic() - started < 5
+        deadline = time.monotonic() + 2
+        while not alive.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert alive.exists() and not finished.exists()
+    finally:
+        release.touch()
+        deadline = time.monotonic() + 3
+        while not finished.exists() and time.monotonic() < deadline:
+            time.sleep(.05)
+
+
+def test_phase_interrupt_cleans_tree_and_preserves_interrupt(installation, monkeypatch):
+    root, base = installation
+    events = []
+    class Child:
+        def wait(self, timeout):
+            events.append(timeout)
+            if timeout == 3600:
+                raise KeyboardInterrupt()
+            return 1
+    child = Child()
+    monkeypatch.setattr(runner.subprocess, 'Popen', lambda *args, **kwargs: child)
+    monkeypatch.setattr(runner, 'terminate_phase_tree', lambda process: events.append('cleanup'))
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute_phase(root, base, 'pydeps', non_interactive=True, allow_winget=False)
+    assert events == [3600, 'cleanup', 10]
 
 
 def test_parallel_installation_cannot_take_lock(installation):

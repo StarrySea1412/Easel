@@ -215,9 +215,9 @@ function Get-CimInstance {
 }
 function Start-Process { throw 'Must not launch a real process' }
 function Start-Sleep { }
-function Stop-Process {
-    param([int]$Id, [switch]$Force)
-    if ($Id -ne 123) { throw 'Must not stop another process' }
+function Stop-OwnedGatewayTree {
+    param([int]$ProcessId)
+    if ($ProcessId -ne 123) { throw 'Must not stop another process' }
     Write-Output 'STOPPED_MOCK_123'
 }
 '''

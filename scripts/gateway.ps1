@@ -54,9 +54,17 @@ function Get-GatewayProcess {
         Where-Object { $_.CommandLine -match $commandPattern -and $_.CommandLine -match ('--port\s+' + $Port + '(?:\s|$)') }
 }
 
+function Stop-OwnedGatewayTree([int]$ProcessId) {
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+    & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $ProcessId /T /F | Out-Null
+    if ($LASTEXITCODE -ne 0 -and (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+        throw 'Unable to stop the owned Gateway process tree.'
+    }
+}
+
 function Stop-Gateway {
     $process = Get-GatewayProcess
-    if ($process) { $process | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Write-Host '[easel] Gateway stopped' }
+    if ($process) { $process | ForEach-Object { Stop-OwnedGatewayTree $_.ProcessId }; Write-Host '[easel] Gateway stopped' }
     else { Write-Host '[easel] Gateway was not running' }
 }
 

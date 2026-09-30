@@ -67,24 +67,35 @@ def execute_phase(root: Path, base: Path, phase: str, *,
     # entered there pass through the installer log stream.
     interactive = phase == "profile" and not non_interactive
     try:
-        process = subprocess.Popen(command, cwd=root, env=env,
-                                   stdout=None if interactive else subprocess.PIPE,
-                                   stderr=None if interactive else subprocess.STDOUT,
-                                   text=True, encoding="utf-8", errors="replace",
-                                   creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                                                  | (getattr(subprocess, "CREATE_NO_WINDOW", 0) if non_interactive else 0)),
-                                   start_new_session=os.name != "nt")
-        try:
-            output, _ = process.communicate(timeout=3600)
-            return process.returncode == 0, output or f"{phase}: exit code {process.returncode}"
-        except subprocess.TimeoutExpired:
-            terminate_phase_tree(process)
-            output, _ = process.communicate(timeout=10)
-            return False, (output or "") + "\nphase timeout after 3600 seconds"
-        except KeyboardInterrupt:
-            terminate_phase_tree(process)
-            process.communicate(timeout=10)
-            raise
+        # A successful phase may launch the long-lived Gateway. Its inherited
+        # stdout must not keep communicate() waiting after PowerShell exits.
+        # A temporary file lets wait() observe only the phase root; successful
+        # phases deliberately leave their background services running.
+        with tempfile.TemporaryFile(mode="w+b") as captured:
+            process = subprocess.Popen(command, cwd=root, env=env,
+                                       stdout=None if interactive else captured,
+                                       stderr=None if interactive else subprocess.STDOUT,
+                                       creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                                      | (getattr(subprocess, "CREATE_NO_WINDOW", 0) if non_interactive else 0)),
+                                       start_new_session=os.name != "nt")
+
+            def output_text():
+                if interactive:
+                    return ""
+                captured.seek(0)
+                return redact(captured.read().decode("utf-8", errors="replace"), base)
+
+            try:
+                process.wait(timeout=3600)
+                return process.returncode == 0, output_text() or f"{phase}: exit code {process.returncode}"
+            except subprocess.TimeoutExpired:
+                terminate_phase_tree(process)
+                process.wait(timeout=10)
+                return False, output_text() + "\nphase timeout after 3600 seconds"
+            except KeyboardInterrupt:
+                terminate_phase_tree(process)
+                process.wait(timeout=10)
+                raise
     except OSError as exc:
         return False, str(exc)
 
