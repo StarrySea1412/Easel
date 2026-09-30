@@ -25,6 +25,7 @@ import {
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
+import { clearChatDraft } from './lib/chatDrafts';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
@@ -78,6 +79,9 @@ export default function App() {
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const stopRequests = useRef<Record<string, object>>({});
+  const [stoppingSessions, setStoppingSessions] = useState<Record<string, boolean>>({});
+  const [stopErrors, setStopErrors] = useState<Record<string, string>>({});
 
   // 挂载时决定进哪个会话。规则：
   //  - 同一标签刷新（sessionStorage 记着本标签的会话）→ 直接续上（同标签不算冲突）。
@@ -248,6 +252,12 @@ export default function App() {
     flushTyping(sessionId);
     delete streamCtl.current[sessionId];
     delete streamAcc.current[sessionId];
+    setStopErrors((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     setStreams((prev) => {
       const next = { ...prev };
       delete next[sessionId];
@@ -478,9 +488,9 @@ export default function App() {
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
-    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId]) return;
+    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || stopRequests.current[sessionId]) return false;
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
-    if (cur?.importedFromBackup) return;
+    if (cur?.importedFromBackup) return false;
     const persona = cur?.persona || selectedPersona || undefined;
     setSessions((prev) => {
       const next = prev.map((s) => {
@@ -503,10 +513,12 @@ export default function App() {
       return next;
     });
     startStream(sessionId, agentMessage, persona, attachments, selectedSkills);
+    return true;
   }, [selectedPersona, startStream]);
 
   const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = []) => {
-    sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills);
+    if (!sessionsRef.current.some(session => session.id === sessionId)) return false;
+    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -542,30 +554,53 @@ export default function App() {
     sendUserAndStream(ns.id, t);
   }, [selectedPersona, sendUserAndStream]);
 
-  const handleStopStream = useCallback((sessionId: string) => {
+  const handleStopStream = useCallback(async (sessionId: string) => {
     if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return;
-    streamCtl.current[sessionId]?.abort();
-    // 告诉后端**真正终止**这一轮 agent 并释放会话锁——否则后端进程还在跑、占着锁，下一句会被拦
-    void stopChat(sessionId).catch(() => { /* 后端可能已结束，忽略 */ });
-    flushTyping(sessionId);   // 停止时立刻把队列余字吐完，保证已到内容不丢
-    const a = streamAcc.current[sessionId];
-    if (a) {
-      appendAssistant(sessionId, {
-        role: 'assistant',
-        content: (a.content || '') + '\n\n_（已停止）_',
-        turnId:a.turnId,
-        thinking: a.thinking || undefined,
-        activity: a.steps.join('\n') || undefined,
-      });
-    }
-    clearStream(sessionId);
-    // 关键：清掉「本轮进行中」标记，否则下一句被判为「上一条还没跑完」拦下
-    setSessions((prev) => {
-      const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: undefined } : s));
-      saveSessions(next);
+    const run = streamAcc.current[sessionId];
+    if (!run || stopRequests.current[sessionId]) return;
+    const request = {};
+    stopRequests.current[sessionId] = request;
+    setStoppingSessions((prev) => ({ ...prev, [sessionId]: true }));
+    setStopErrors((prev) => {
+      const next = { ...prev };
+      delete next[sessionId];
       return next;
     });
-    try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
+    try {
+      // Keep receiving/reconnecting until the backend confirms termination.
+      // A network failure must not discard the only durable job identifier.
+      const result = await stopChat(sessionId);
+      if (streamAcc.current[sessionId] !== run || stopRequests.current[sessionId] !== request) return;
+      if (!result.stopped) {
+        setStopErrors((prev) => ({ ...prev, [sessionId]: '后端尚未确认本轮已停止。已保留连接和恢复记录，等待结果或重试停止。' }));
+        return;
+      }
+      streamCtl.current[sessionId]?.abort();
+      flushTyping(sessionId);
+      appendAssistant(sessionId, {
+        role: 'assistant',
+        content: (run.content || '') + '\n\n_（已停止）_',
+        turnId: run.turnId,
+        thinking: run.thinking || undefined,
+        activity: run.steps.join('\n') || undefined,
+      });
+      clearStream(sessionId);
+      try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
+    } catch (error) {
+      if (streamAcc.current[sessionId] === run && stopRequests.current[sessionId] === request) {
+        const detail = error instanceof Error ? error.message : '连接失败';
+        setStopErrors((prev) => ({ ...prev, [sessionId]: `停止请求失败：${detail}。任务可能仍在运行，已保留连接和恢复记录，请重试停止。` }));
+      }
+    } finally {
+      if (stopRequests.current[sessionId] === request) {
+        delete stopRequests.current[sessionId];
+        setStoppingSessions((prev) => {
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        });
+      }
+    }
   }, [appendAssistant, clearStream]);
 
   const handleSessionRename = useCallback((id: string, title: string) => {
@@ -622,6 +657,7 @@ export default function App() {
     if (!window.confirm('确定删除这条对话？')) return;
 
     const target = sessionsRef.current.find((s) => s.id === id);
+    if (target && !target.importedFromBackup) clearChatDraft(id);
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
       ? stopChat(id).catch(() => ({ stopped: false }))
@@ -733,6 +769,8 @@ export default function App() {
             key={activeSession.id}
             session={activeSession}
             stream={streams[activeSession.id]}
+            stopping={Boolean(stoppingSessions[activeSession.id])}
+            stopError={stopErrors[activeSession.id]}
             onSend={(displayText, attachments, selectedSkills) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills)}
             onStop={() => handleStopStream(activeSession.id)}
             onNewChat={handleNewChat}
@@ -780,7 +818,7 @@ export default function App() {
       case 'activity':
         return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} />;
       case 'agent-office':
-        return <AgentOfficePage sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
+        return <AgentOfficePage onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':

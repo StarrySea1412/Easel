@@ -34,13 +34,15 @@ async function fixture(t, initial) {
   t.mock.method(globalThis, 'clearInterval', id => harness.intervals.delete(id));
   const persistenceBase = await tsModuleUrl(new URL('lib/localPersistence.ts', base));
   const persistence = `${persistenceBase}#backup-app-${++fixtureId}`;
+  const draftsBase = await tsModuleUrl(new URL('lib/chatDrafts.ts', base));
+  const drafts = url(Buffer.from(draftsBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
   const storeBase = await tsModuleUrl(new URL('lib/store.ts', base));
-  const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
+  const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts)) + `#${fixtureId}`;
   const api = url(`
     export const fetchStatus = async () => ({gateway: true, personas: [{name:'fixture'}]});
     export const fetchPersonas = async () => [];
     export const fetchLastTurn = async (...args) => {globalThis.__backupApp.calls.push(['fetchLastTurn',...args]);return {status:'missing'};};
-    export const stopChat = async (...args) => {globalThis.__backupApp.calls.push(['stopChat',...args]);return {stopped:true};};
+    export const stopChat = async (...args) => {globalThis.__backupApp.calls.push(['stopChat',...args]);return globalThis.__backupApp.stopResponse ? globalThis.__backupApp.stopResponse(...args) : {stopped:true};};
     export const deleteSession = async (...args) => {globalThis.__backupApp.calls.push(['deleteSession',...args]);};
     export const questionStatus = async () => ({});
     export const streamChat = (...args) => {const controller=new AbortController();globalThis.__backupApp.streams.push({args,controller});return controller;};
@@ -60,6 +62,7 @@ async function fixture(t, initial) {
     let target;
     if (!specifier.startsWith('.')) target = import.meta.resolve(specifier);
     else if (specifier === './lib/store') target = store;
+    else if (specifier === './lib/chatDrafts') target = drafts;
     else if (specifier === './lib/api') target = api;
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
@@ -87,6 +90,133 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
 const backup = { format: 'easel-conversation-backup', version: 1, exportedAt: '2026-09-30T00:00:00.000Z', sessions: [
   { title: '待导入记录', created: 2, incomplete: true, messages: [{ role: 'user', content: '导入提问' }] },
 ] };
+
+function deferredStop() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('send callbacks explicitly accept one draft and reject busy, read-only or deleted sessions', async t => {
+  const imported = { id: 'readonly', title: '备份', created: 1, importedFromBackup: true, messages: [] };
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, imported]), easel_active_session: 'original' });
+  const previousConfirm = window.confirm;
+  window.confirm = () => true;
+  t.after(() => { window.confirm = previousConfirm; });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  const originalSend = harness.pages['对话'].onSend;
+  let accepted, busy, readonly, deleted;
+  await act(async () => { accepted = originalSend('已接受草稿'); busy = originalSend('不应再接收'); });
+  assert.equal(accepted, true); assert.equal(busy, false);
+  assert.equal(harness.streams.length, 1);
+  await act(async () => harness.sidebar.onSessionSelect('readonly'));
+  await act(async () => { readonly = harness.pages['对话'].onSend('只读草稿不可发送'); });
+  assert.equal(readonly, false);
+  await act(async () => harness.sidebar.onSessionDelete('original'));
+  await act(async () => { deleted = originalSend('已删除会话的晚到发送'); });
+  assert.equal(deleted, false);
+  assert.equal(harness.streams.length, 1);
+});
+
+test('failed stop preserves the live connection and durable recovery identifiers, accepts more output and can retry', async t => {
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('持续运行'));
+  const run = harness.streams[0];
+  const pending = harness.sidebar.sessions.find(s => s.id === 'original').pendingTurnId;
+  const response = deferredStop();
+  harness.stopResponse = () => response.promise;
+  let stopping;
+  await act(async () => {
+    run.args[3]('停止请求前'); run.args[6]('保留思考'); run.args[7]('保留活动');
+    stopping = harness.pages['对话'].onStop();
+    void harness.pages['对话'].onStop();
+  });
+  assert.equal(harness.calls.filter(call => call[0] === 'stopChat').length, 1);
+  assert.equal(harness.pages['对话'].stopping, true);
+  assert.equal(run.controller.signal.aborted, false);
+  assert.equal(JSON.parse(values.get('easel_sessions')).find(s => s.id === 'original').pendingTurnId, pending);
+  assert.equal(sessionStorage.getItem('easel_pending_turn:original'), pending);
+  await act(async () => { response.reject(new Error('网络连接中断')); await stopping; });
+  assert.equal(harness.pages['对话'].stopping, false);
+  assert.match(harness.pages['对话'].stopError, /停止请求失败.*网络连接中断/);
+  assert.equal(run.controller.signal.aborted, false);
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').pendingTurnId, pending);
+  assert.equal(sessionStorage.getItem('easel_pending_turn:original'), pending);
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1).role, 'user');
+  await act(async () => {
+    run.args[3]('，失败后继续接收');
+    for (let i = 0; i < 40; i++) for (const pump of [...harness.intervals.values()]) pump();
+  });
+  assert.equal(harness.pages['对话'].stream.content, '停止请求前，失败后继续接收');
+  harness.stopResponse = async () => ({ stopped: true });
+  await act(async () => harness.pages['对话'].onStop());
+  assert.equal(run.controller.signal.aborted, true);
+  assert.equal(harness.pages['对话'].stream, undefined);
+  assert.equal(harness.pages['对话'].stopError, undefined);
+  assert.equal(harness.pages['对话'].stopping, false);
+  const session = harness.sidebar.sessions.find(s => s.id === 'original');
+  assert.equal(session.pendingTurnId, undefined);
+  assert.equal(sessionStorage.getItem('easel_pending_turn:original'), null);
+  assert.equal(JSON.parse(values.get('easel_sessions')).find(s => s.id === 'original').pendingTurnId, undefined);
+  assert.equal(session.messages.at(-1).content, '停止请求前，失败后继续接收\n\n_（已停止）_');
+  assert.equal(session.messages.at(-1).thinking, '保留思考');
+  assert.equal(session.messages.at(-1).activity, '保留活动');
+  await act(async () => harness.pages['对话'].onSend('确认停止后的新任务'));
+  assert.equal(harness.streams.length, 2);
+});
+
+test('an unconfirmed stop keeps receiving the final result instead of fabricating a stopped response', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('等待结束'));
+  const run = harness.streams[0];
+  const pending = harness.sidebar.sessions.find(s => s.id === 'original').pendingTurnId;
+  harness.stopResponse = async () => ({ stopped: false });
+  await act(async () => harness.pages['对话'].onStop());
+  assert.equal(run.controller.signal.aborted, false);
+  assert.match(harness.pages['对话'].stopError, /尚未确认/);
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').pendingTurnId, pending);
+  await act(async () => {
+    run.args[3]('真实完成结果');
+    for (let i = 0; i < 30; i++) for (const pump of [...harness.intervals.values()]) pump();
+    run.args[4]('server-session');
+  });
+  assert.equal(harness.pages['对话'].stopError, undefined);
+  assert.equal(harness.pages['对话'].stream, undefined);
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1).content, '真实完成结果');
+});
+
+test('natural completion wins a stop race and prevents a delayed stop response from touching the next run', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('自然结束竞态'));
+  const run = harness.streams[0];
+  const response = deferredStop();
+  harness.stopResponse = () => response.promise;
+  let stopping;
+  await act(async () => { stopping = harness.pages['对话'].onStop(); });
+  await act(async () => {
+    run.args[3]('自然完成');
+    for (let i = 0; i < 30; i++) for (const pump of [...harness.intervals.values()]) pump();
+    run.args[4]('server-session');
+  });
+  assert.equal(harness.pages['对话'].stream, undefined);
+  assert.equal(harness.pages['对话'].stopping, true);
+  let acceptedWhileStopping;
+  await act(async () => { acceptedWhileStopping = harness.pages['对话'].onSend('停止请求尚未收尾'); });
+  assert.equal(acceptedWhileStopping, false);
+  assert.equal(harness.streams.length, 1, 'do not start a new run while a session-wide stop is still in flight');
+  await act(async () => { response.resolve({ stopped: true }); await stopping; });
+  const session = harness.sidebar.sessions.find(s => s.id === 'original');
+  assert.equal(session.messages.length, sourceSession.messages.length + 2);
+  assert.equal(session.messages.at(-1).content, '自然完成');
+  assert.equal(harness.pages['对话'].stopping, false);
+  assert.equal(harness.pages['对话'].stopError, undefined);
+  await act(async () => harness.pages['对话'].onSend('下一轮'));
+  assert.equal(harness.streams.length, 2);
+  assert.equal(harness.streams[1].controller.signal.aborted, false);
+});
 
 test('office navigation opens the selected session and its activity without cancelling an ongoing chat', async t => {
   const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });

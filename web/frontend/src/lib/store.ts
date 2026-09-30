@@ -2,6 +2,7 @@ import type { ChatErrorDetail } from './chatErrors';
 import type { UploadedFile, ChatQuestion } from './api';
 import { chatErrorDetail } from './chatErrors';
 import { readLocalValue, writeLocalValue, removeMigratedLocalValue, reportLocalPersistenceFailure } from './localPersistence';
+import { hasChatDraft } from './chatDrafts';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -190,7 +191,7 @@ export function loadSessions(): ChatSession[] {
 function prune(sessions: ChatSession[]): ChatSession[] {
   let keptEmpty = false;
   const pruned = sessions.filter((s) => {
-    if (s.messages.length > 0 || s.pendingTurnId) return true;
+    if (s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && hasChatDraft(s.id))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;
     return true;

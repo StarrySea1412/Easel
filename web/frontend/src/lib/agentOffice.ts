@@ -1,4 +1,7 @@
+import type { EmployeeAppearance } from './employeeAppearance';
 export type OfficeAgentState = 'working' | 'thinking' | 'waiting' | 'done' | 'error' | 'stopped' | 'unknown';
+export type OfficeActionKind = 'reading' | 'writing' | 'designing' | 'executing' | 'delegating' | 'thinking' | 'waiting' | 'completed' | 'error' | 'stopped' | 'unreported';
+export interface OfficeAction { kind: OfficeActionKind; label: string; evidence: 'demo' | 'observed' | 'unreported'; toolName?: string }
 export interface OfficeAgent {
   id: string;
   name: string;
@@ -9,9 +12,12 @@ export interface OfficeAgent {
   source: 'live' | 'demo';
   updatedAt?: string;
   evidence?: string;
+  action?: OfficeAction;
+  appearance?: EmployeeAppearance;
 }
 
 export interface OfficeSnapshot {
+  turnId: string | null;
   agents: OfficeAgent[];
   events: OfficeEvent[];
   observedAt: string | null;
@@ -27,6 +33,8 @@ export interface OfficeEvent {
   at?: string;
   elapsedSeconds?: number;
   source: 'live' | 'demo';
+  toolName?: string;
+  operationId?: string;
 }
 
 export const DEMO_DURATION_SECONDS = 48;
@@ -82,10 +90,13 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
       id: item.id, agentId: item.agentId, kind: item.kind as OfficeEvent['kind'], title: shortText(item.title, '已观察到调用记录'),
       status: ['called', 'returned', 'failed', 'observed'].includes(String(item.status)) ? item.status as OfficeEvent['status'] : 'observed',
       source: 'live', ...(typeof item.at === 'string' && Number.isFinite(Date.parse(item.at)) ? { at: item.at } : {}),
+      ...(typeof item.toolName === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(item.toolName) ? { toolName: item.toolName } : {}),
+      ...(typeof item.operationId === 'string' && /^[a-f0-9]{24}$/.test(item.operationId) ? { operationId: item.operationId } : {}),
     });
   }
   return {
     agents, events,
+    turnId: typeof value.turnId === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(value.turnId) ? value.turnId : null,
     observedAt: typeof value.observedAt === 'string' && Number.isFinite(Date.parse(value.observedAt)) ? value.observedAt : null,
     coverage: [coverage || '仅展示已观察到的 Agent 身份；没有记录不代表未发生调用。', ...warnings].join(' '),
   };

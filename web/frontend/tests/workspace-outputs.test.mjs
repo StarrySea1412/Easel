@@ -1,0 +1,44 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Window } from 'happy-dom';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { loadTsModule } from './load-ts.mjs';
+globalThis.window = new Window({url:'http://127.0.0.1:7864/'});
+globalThis.document = window.document;
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { decodeWorkspaceOutputs, safeWorkspaceOutputHref } = await loadTsModule('../src/components/agent-office/workspaceOutputData.ts', import.meta.url);
+const { default: Monitor } = await loadTsModule('../src/components/agent-office/OfficeOutputMonitor.tsx', import.meta.url);
+const item = {id:'a',name:'设计.png',path:'project/设计.png',kind:'image',size:3,modifiedAt:'2026-10-01T00:00:00Z',href:'/api/media/project/%E8%AE%BE%E8%AE%A1.png'};
+const payload = {scope:'workspace',source:'local_output_metadata',observedAt:item.modifiedAt,items:[item],truncated:false,warnings:[]};
+test('output links require exact matching local media paths and workspace scope', () => {
+  assert.equal(decodeWorkspaceOutputs(payload).items.length,1);
+  assert.throws(()=>decodeWorkspaceOutputs({...payload,scope:'agent'}));
+  for (const href of ['https://evil.test/a','/api/media/other.png','/api/media/project/%ZZ','/api/media/project/a.png#x']) assert.equal(safeWorkspaceOutputHref(item.path,href),null);
+  assert.equal(safeWorkspaceOutputHref('../secret','/api/media/../secret'),null);
+  assert.throws(()=>decodeWorkspaceOutputs({...payload,items:[item,item]}));
+});
+test('demo monitor never reads real files or advertises a real download', async t => {
+  let calls = 0;
+  t.mock.method(globalThis,'fetch',async()=>{ calls++; throw Error('unexpected'); });
+  const node = document.createElement('div');document.body.append(node);
+  const root = createRoot(node);
+  await act(async()=>root.render(React.createElement(Monitor,{mode:'demo'})));
+  await act(async()=>node.querySelector('.office-output-file').click());
+  assert.match(node.textContent,/模拟产出示例/);
+  assert.equal(node.querySelectorAll('a').length,0); assert.equal(calls,0);
+  await act(async()=>root.unmount());node.remove();
+});
+test('live media displays only confirmed files and handles a missing preview honestly', async t => {
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>payload}));
+  const node = document.createElement('div');document.body.append(node);
+  const root = createRoot(node);
+  await act(async()=>root.render(React.createElement(Monitor,{mode:'live'})));
+  assert.match(node.textContent,/不代表由当前会话或某位员工生成/);
+  await act(async()=>node.querySelector('.office-output-file').click());
+  assert.equal(node.querySelector('img').alt,item.name);
+  await act(async()=>node.querySelector('img').dispatchEvent(new window.Event('error')));
+  assert.match(node.textContent,/文件无法预览/);
+  assert.equal(node.querySelector('a[download]').getAttribute('href'),item.href);
+  await act(async()=>root.unmount());node.remove();
+});

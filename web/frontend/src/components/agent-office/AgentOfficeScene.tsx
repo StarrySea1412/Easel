@@ -7,6 +7,8 @@ export interface AgentOfficeSceneProps {
   agents: OfficeAgent[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onOpenProcess?: (id: string) => void;
+  focusId?: string | null;
   paused: boolean;
   resetKey: number;
   onUnavailable?: (message: string) => void;
@@ -16,6 +18,7 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
   const host = useRef<HTMLDivElement>(null);
   const sign = useRef<HTMLSpanElement>(null);
   const labels = useRef(new Map<string, HTMLButtonElement>());
+  const stems = useRef(new Map<string, SVGLineElement>());
   const runtime = useRef<OfficeSceneRuntime | null>(null);
   const latest = useRef(props);
   latest.current = props;
@@ -39,6 +42,7 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
         host: host.current,
         sign: sign.current,
         labels: labels.current,
+        stems: stems.current,
         onSelect: (id) => latest.current.onSelect(id),
         onUnavailable: report,
       });
@@ -57,9 +61,11 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
   }, [props.agents, props.selectedId, props.paused]);
 
   useEffect(() => { runtime.current?.reset(); }, [props.resetKey]);
+  useEffect(() => { if (props.focusId) runtime.current?.focus(props.focusId); else runtime.current?.reset(); }, [props.focusId, retryKey]);
 
   return <div className={`agent-office-scene${unavailable ? ' agent-office-scene--unavailable' : ''}`} ref={host}>
     <div className="agent-office-scene__labels" aria-label="办公室中的 Agent" hidden={Boolean(unavailable)}>
+      <svg className="office-label-connectors" aria-hidden="true">{props.agents.map(agent => <line key={agent.id} ref={element => { if (element) stems.current.set(agent.id, element); else stems.current.delete(agent.id); }} />)}</svg>
       <span className="agent-office-scene__sign" ref={sign} aria-hidden="true">EASEL STUDIO</span>
       {props.agents.map((agent) => <button
         key={agent.id}
@@ -69,10 +75,10 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
         aria-pressed={props.selectedId === agent.id}
         aria-label={`${agent.name}，${OFFICE_STATE_LABELS[agent.state]}，${agent.task}`}
         title={`${agent.name} · ${agent.role}\n${agent.task}`}
-        onClick={() => props.onSelect(agent.id)}
+        onClick={() => { props.onSelect(agent.id); props.onOpenProcess?.(agent.id); }}
       >
-        <span className="office-nameplate__heading"><span className="office-nameplate__dot" /><strong>{agent.name}</strong><span>{OFFICE_STATE_LABELS[agent.state]}</span></span>
-        <span className="office-nameplate__task">{agent.task || '等待任务说明'}</span>
+        <span className="office-nameplate__heading"><span className="office-nameplate__dot" /><strong>{agent.appearance?.id === 'generic' ? agent.name : agent.appearance?.name || agent.name}</strong><span>{OFFICE_STATE_LABELS[agent.state]}</span></span>
+        <span className="office-nameplate__task">{agent.action?.label || agent.task || '等待任务说明'}</span>
       </button>)}
     </div>
     {unavailable ? <div className="agent-office-scene__fallback" role="status">
@@ -80,6 +86,6 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
       <strong>三维场景暂不可用</strong>
       <p>{unavailable}</p>
       <button type="button" onClick={() => { setUnavailable(null); setRetryKey((value) => value + 1); }}>重新加载场景</button>
-    </div> : <div className="agent-office-scene__hint" aria-hidden="true"><span>拖动旋转</span><i />滚动缩放<i /><span>点击 Agent 查看任务</span></div>}
+    </div> : <div className="agent-office-scene__hint" aria-hidden="true"><span>拖动旋转</span><i />滚动缩放<i /><span>点击状态查看过程</span></div>}
   </div>;
 }

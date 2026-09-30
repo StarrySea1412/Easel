@@ -4,6 +4,12 @@ import { createDemoOfficeAgents, createDemoOfficeEvents, DEMO_DURATION_SECONDS, 
 import type { OfficeAgent } from '../lib/agentOffice';
 import { useAgentOffice } from '../hooks/useAgentOffice';
 import AgentOfficeScene from './agent-office/AgentOfficeScene';
+import OfficeProcessPanel from './agent-office/OfficeProcessPanel';
+import OfficeOutputMonitor from './agent-office/OfficeOutputMonitor';
+import OfficeAgentControls from './agent-office/OfficeAgentControls';
+import OfficeWorkPreview from './agent-office/OfficeWorkPreview';
+import { describeOfficeAction } from '../lib/officeActions';
+import { useEmployeeAppearances, useEmployeeAssignments, assignEmployeeAppearance, type EmployeeAppearanceId } from '../lib/employeeAppearance';
 import '../styles/agent-office.css';
 
 interface AgentOfficePageProps {
@@ -12,6 +18,9 @@ interface AgentOfficePageProps {
   streams: Record<string, StreamState>;
   onOpenChat: (sessionId: string) => void;
   onOpenActivity?: (sessionId: string) => void;
+  onOpenSettings?: () => void;
+  onOpenModels?: () => void;
+  onOpenOutputs?: () => void;
 }
 
 function clock(seconds: number) {
@@ -28,7 +37,7 @@ function StateBadge({ state, stale = false }: { state: OfficeAgent['state']; sta
   return <span className={`office-state office-state-${state}`}><i aria-hidden="true" />{stale ? '快照 · ' : ''}{OFFICE_STATE_LABELS[state]}</span>;
 }
 
-export default function AgentOfficePage({ sessions, activeSessionId, streams, onOpenChat, onOpenActivity }: AgentOfficePageProps) {
+export default function AgentOfficePage({ sessions, activeSessionId, streams, onOpenChat, onOpenActivity, onOpenSettings, onOpenModels, onOpenOutputs }: AgentOfficePageProps) {
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [sessionChoice, setSessionChoice] = useState<string | null>(activeSessionId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -36,17 +45,35 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const [resetKey, setResetKey] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [eventFilter, setEventFilter] = useState<'selected' | 'all'>('selected');
+  const [processTarget, setProcessTarget] = useState<{ id: string; scope: string } | null>(null);
+  const [bindingNotice, setBindingNotice] = useState('');
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ scope: string; message: string } | null>(null);
+  const previousStates = useRef<{ scope: string; states: Map<string, OfficeAgent['state']> } | null>(null);
+  const appearances = useEmployeeAppearances();
+  const assignments = useEmployeeAssignments();
   const elapsedRef = useRef(0);
   const availableSessions = useMemo(() => sessions.filter((session) => !session.importedFromBackup), [sessions]);
   const sessionId = availableSessions.find((session) => session.id === sessionChoice)?.id
     ?? availableSessions.find((session) => session.id === activeSessionId)?.id
     ?? availableSessions[0]?.id ?? null;
   const live = useAgentOffice(mode === 'live' ? sessionId : null, mode === 'live' && sessionId !== null);
-  const agents = useMemo(() => mode === 'demo'
+  const rawAgents = useMemo(() => mode === 'demo'
     ? createDemoOfficeAgents(elapsed)
     : live.agents.filter((agent) => agent.source === 'live'), [mode, elapsed, live.agents]);
+  const allEvents = useMemo(() => mode === 'demo' ? createDemoOfficeEvents(elapsed) : live.events || [], [mode, elapsed, live.events]);
+  const agents = useMemo(() => rawAgents.map(agent => {
+    const cardId = assignments[agent.id] || (agent.source === 'demo' ? agent.id : 'generic');
+    const appearance = appearances.find(card => card.id === cardId) || appearances[6];
+    return { ...agent, appearance, action: describeOfficeAction(agent, allEvents) };
+  }), [rawAgents, appearances, assignments, allEvents]);
   const selected = agents.find((agent) => agent.id === selectedId) ?? agents[0];
-  const events = (mode === 'demo' ? createDemoOfficeEvents(elapsed) : live.events || [])
+  const scope = `${mode}:${mode === 'live' ? sessionId : ''}:${mode === 'live' ? live.turnId || '' : resetKey}`;
+  const processAgent = processTarget?.scope === scope ? agents.find(agent => agent.id === processTarget.id) : undefined;
+  const selectAgent = (id: string) => { setSelectedId(id); if (focusId) setFocusId(id); };
+  const openProcess = (id: string) => { selectAgent(id); setProcessTarget({ id, scope }); };
+  const displayName = (agent: OfficeAgent) => agent.source === 'demo' || assignments[agent.id] ? agent.appearance?.name || agent.name : agent.name;
+  const events = allEvents
     .filter(event => event.source === mode && agents.some(agent => agent.id === event.agentId))
     .filter(event => eventFilter === 'all' || event.agentId === selected?.id).slice(-40).reverse();
   const parent = selected?.parentId ? agents.find((agent) => agent.id === selected.parentId) : undefined;
@@ -55,6 +82,21 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const waiting = agents.filter((agent) => agent.state === 'waiting').length;
   const done = agents.filter((agent) => agent.state === 'done').length;
   const failed = agents.filter((agent) => agent.state === 'error').length;
+
+  useEffect(() => {
+    if (focusId && !agents.some(agent => agent.id === focusId)) setFocusId(null);
+  }, [agents, focusId]);
+
+  useEffect(() => {
+    if (stale) return;
+    const previous = previousStates.current;
+    if (previous?.scope === scope) {
+      const changes = agents.filter(agent => previous.states.has(agent.id) && previous.states.get(agent.id) !== agent.state
+        && ['done', 'error', 'stopped'].includes(agent.state));
+      if (changes.length) setFeedback({ scope, message: changes.map(agent => `${agent.name}：${OFFICE_STATE_LABELS[agent.state]}`).join('；') });
+    }
+    previousStates.current = { scope, states: new Map(agents.map(agent => [agent.id, agent.state])) };
+  }, [agents, scope, stale]);
 
   useEffect(() => {
     if (mode !== 'demo' || paused) return;
@@ -87,11 +129,14 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const changeMode = (next: 'demo' | 'live') => {
     setMode(next);
     setSelectedId(null);
+    setProcessTarget(null);
+    setFocusId(null);
     setPaused(next === 'demo' && elapsedRef.current >= DEMO_DURATION_SECONDS);
   };
   const replay = () => {
     elapsedRef.current = 0;
     setElapsed(0);
+    setFocusId(null);
     setSelectedId(null);
     setPaused(false);
     setResetKey((value) => value + 1);
@@ -108,7 +153,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
           <div>
             <p className="office-eyebrow">EASEL / COLLABORATIVE STUDIO</p>
             <h1>Agent 办公室<span className="office-heading-mark" aria-hidden="true">✳</span></h1>
-            <p className="office-description">走进协作现场，看见每个角色正在做什么。</p>
+            <p className="office-description">小动物同事的协作现场，任务、屏幕与工作过程一目了然。</p>
           </div>
           <div className="office-mode-controls" role="group" aria-label="办公室数据模式">
             <button type="button" aria-pressed={mode === 'demo'} onClick={() => changeMode('demo')}>演示模式</button>
@@ -122,12 +167,14 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             <p>{mode === 'demo' ? '六个角色的协作演示，不代表真实 Agent 调用或执行结果。' : live.coverage || '仅展示当前会话可观察到的后台记录，不补全未上报的角色。'}</p>
           </div>
           {mode === 'live' && <label className="office-session-select">观察会话
-            <select value={sessionId ?? ''} disabled={!availableSessions.length} onChange={(event) => { setSessionChoice(event.target.value); setSelectedId(null); }}>
+            <select value={sessionId ?? ''} disabled={!availableSessions.length} onChange={(event) => { setSessionChoice(event.target.value); setSelectedId(null); setFocusId(null); }}>
               {!availableSessions.length && <option value="">暂无普通会话</option>}
               {availableSessions.map((session) => <option key={session.id} value={session.id}>{session.title || '未命名会话'}{streams[session.id] ? ' · 对话接收中' : ''}</option>)}
             </select>
           </label>}
         </section>
+
+        <div className="office-feedback" role="status" aria-live="polite" aria-atomic="true">{feedback?.scope === scope ? `${mode === 'demo' ? '演示反馈' : '最新记录'} · ${feedback.message}` : '点击员工上方状态，查看对应的思考与工作过程。'}</div>
 
         {mode === 'live' && live.error && <div className="office-observation-error" role="alert">
           <div><strong>更新已中断{agents.length ? '，保留上次快照' : ''}</strong><p>{live.error}{agents.length ? '；下方状态并非当前实时执行状态。' : '；未填入模拟角色。'}</p></div>
@@ -139,19 +186,21 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             <div className="office-stage-toolbar">
               <div className="office-floor-label"><span aria-hidden="true">⌘</span><div><strong>协作工作室</strong><small>{mode === 'demo' ? 'DEMO FLOOR / 模拟协作' : 'OBSERVATION FLOOR / 记录快照'}</small></div></div>
               <div className="office-stage-actions">
+                <button type="button" className="office-button" disabled={!selected} aria-pressed={Boolean(focusId)} onClick={() => setFocusId(focusId ? null : selected?.id || null)}>{focusId ? '查看全办公室' : '近看选中员工'}</button>
                 <button type="button" className="office-button" aria-pressed={paused || stale} disabled={stale} onClick={togglePlayback}><span aria-hidden="true">{paused && !stale ? '▶' : 'Ⅱ'}</span>{stale ? '快照已暂停' : paused ? '播放动画' : '暂停动画'}</button>
                 {mode === 'demo' && <button type="button" className="office-button" onClick={replay}><span aria-hidden="true">↺</span>重播演示</button>}
-                <button type="button" className="office-button office-view-reset" onClick={() => setResetKey((value) => value + 1)}><span aria-hidden="true">⌖</span>视角复位</button>
+                <button type="button" className="office-button office-view-reset" onClick={() => { setFocusId(null); setResetKey((value) => value + 1); }}><span aria-hidden="true">⌖</span>视角复位</button>
               </div>
             </div>
             <div className="office-stage-viewport">
-              <AgentOfficeScene agents={agents} selectedId={selected?.id ?? null} onSelect={setSelectedId} paused={paused || stale} resetKey={resetKey} />
+              <AgentOfficeScene agents={agents} selectedId={selected?.id ?? null} onSelect={selectAgent} onOpenProcess={openProcess} focusId={focusId} paused={paused || stale} resetKey={resetKey} />
               <div className="office-stage-stamp" aria-hidden="true"><strong>E.</strong><span>{mode === 'demo' ? 'SIMULATION' : 'OBSERVATION'}</span></div>
               {mode === 'live' && !agents.length && <div className="office-scene-notice" role="status">
                 <strong>{!sessionId ? '还没有可观察的会话' : live.loading ? '正在读取后台记录' : live.error ? '暂时无法读取协作记录' : '当前没有可观察的 Agent'}</strong>
                 <p>{!sessionId ? '备份副本不连接后台。创建普通对话后，可以在这里选择会话。' : live.loading ? '角色只会在收到对应记录后出现。' : '后台尚未提供可核验的角色状态；空工位不会填入模拟任务。'}</p>
               </div>}
             </div>
+            {selected && <OfficeWorkPreview agent={selected} stale={stale} onOpen={() => openProcess(selected.id)} />}
             <div className="office-stage-footer">
               {mode === 'demo' ? <div className="office-demo-timeline">
                 <div><span>{elapsed >= DEMO_DURATION_SECONDS ? '演示完成 · 可重播' : paused ? '演示已暂停' : '模拟协作进行中'}</span><time>{clock(elapsed)} / {clock(DEMO_DURATION_SECONDS)}</time></div>
@@ -161,14 +210,25 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             </div>
           </section>
 
+          <OfficeOutputMonitor mode={mode} onOpenOutputs={onOpenOutputs} />
           <aside className="office-inspector" aria-label="Agent 任务详情">
             <div className="office-inspector-heading"><div><p className="office-eyebrow">TEAM / 协作成员</p><h2>{agents.length} 个角色<span>{mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观测'}</span></h2></div><span className="office-inspector-symbol" aria-hidden="true">↗</span></div>
             <dl className="office-stats" aria-label={stale ? '上次快照统计' : '角色状态统计'}><div><dt>运行</dt><dd>{running}</dd></div><div><dt>等待</dt><dd>{waiting}</dd></div><div><dt>完成</dt><dd>{done}</dd></div></dl>
             {failed > 0 && <p className="office-failure-count">{failed} 个角色{stale ? '在上次快照中' : ''}记录了错误</p>}
             {selected ? <section className="office-agent-detail" aria-label="选中成员当前任务">
-              <div className="office-selected-person"><div className="office-mini-person" aria-hidden="true"><i /><span /></div><div><span className="office-seat-label">工位 {String(agents.indexOf(selected) + 1).padStart(2, '0')}</span><h3>{selected.name || '未命名 Agent'}</h3></div><StateBadge state={selected.state} stale={stale} /></div>
+              <div className="office-selected-person"><div className="office-mini-person" aria-hidden="true"><i style={{ background: selected.appearance?.skinColor }} /><span style={{ background: selected.appearance?.shirtColor }} /></div><div><span className="office-seat-label">工位 {String(agents.indexOf(selected) + 1).padStart(2, '0')}</span><h3>{displayName(selected) || '未命名 Agent'}</h3></div><button type="button" className="office-status-button" onClick={() => openProcess(selected.id)} aria-label={`查看${displayName(selected)}的思考与工作过程`}><StateBadge state={selected.state} stale={stale} /><span>查看过程 ↗</span></button></div>
+              <p className="office-action-summary" aria-live="polite">{selected.action?.label}<small>{selected.action?.evidence === 'demo' ? '模拟动作' : selected.action?.evidence === 'observed' ? '依据后台记录' : '等待具体操作记录'}</small></p>
               <div className="office-current-task"><span>{stale ? '快照中的任务' : '当前任务'}</span><p>{selected.task || '当前记录未提供任务描述。'}</p></div>
               <dl className="office-agent-meta"><div><dt>角色</dt><dd>{selected.role || '未提供'}</dd></div><div><dt>协作上级</dt><dd>{parent?.name || (selected.parentId ? '未包含在当前记录中' : '未提供')}</dd></div><div><dt>记录来源</dt><dd>{selected.source === 'demo' ? '模拟任务脚本' : '后台观察记录'}</dd></div></dl>
+              <div className="office-appearance-binding"><label>员工角色卡<select value={selected.appearance?.id || 'generic'} onChange={event => {
+                try { const saved = assignEmployeeAppearance(selected.id, event.target.value as EmployeeAppearanceId); setBindingNotice(saved ? '员工角色卡已保存。' : '已在当前窗口应用，但尚未保存到本地。'); }
+                catch (error) { setBindingNotice(error instanceof Error ? error.message : '员工绑定未保存。'); }
+              }}>{appearances.map(card => <option value={card.id} key={card.id}>{card.name} · {card.role}</option>)}</select></label>
+                {onOpenSettings && <button type="button" className="office-button" onClick={onOpenSettings}>编辑角色卡</button>}
+                <small>角色卡修改外观与显示名；真实 Agent 身份：{selected.name}（{selected.id}）</small>
+                {bindingNotice && <p role="status">{bindingNotice}</p>}
+              </div>
+              <OfficeAgentControls agent={selected} sessionId={mode === 'live' ? sessionId : null} turnId={mode === 'live' ? live.turnId : null} stale={stale} onChanged={live.refresh} onOpenModelSettings={onOpenModels} />
             </section> : <div className="office-no-selection"><span aria-hidden="true">○</span><p>等待可观察的成员</p><small>任务与状态将在这里显示。</small></div>}
             <section className="office-call-history" aria-label="Agent 调用记录">
               <div className="office-calls-heading"><h3>调用记录 <small>{mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观察'}</small></h3>
@@ -183,8 +243,8 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             </section>
             <div className="office-members-heading"><h3>所有工位</h3><span>点击查看任务</span></div>
             <ul className="office-member-list" aria-label="办公室成员">
-              {agents.map((agent, index) => <li key={agent.id}><button type="button" aria-pressed={selected?.id === agent.id} onClick={() => setSelectedId(agent.id)}>
-                <span className="office-member-number">{String(index + 1).padStart(2, '0')}</span><span className="office-member-name"><strong>{agent.name}</strong><small>{agent.role || '角色未提供'}</small></span><StateBadge state={agent.state} stale={stale} />
+              {agents.map((agent, index) => <li key={agent.id}><button type="button" aria-pressed={selected?.id === agent.id} onClick={() => selectAgent(agent.id)}>
+                <span className="office-member-number" style={{ borderColor: agent.appearance?.shirtColor }}>{String(index + 1).padStart(2, '0')}</span><span className="office-member-name"><strong>{displayName(agent)}</strong><small>{agent.action?.label || agent.role || '角色未提供'}</small></span><StateBadge state={agent.state} stale={stale} />
               </button></li>)}
             </ul>
             <div className="office-inspector-footer">{mode === 'demo' ? <p><span aria-hidden="true">◇</span>演示中的角色、任务和状态均为模拟。</p> : <><button type="button" className="office-open-chat" disabled={!sessionId} onClick={() => { if (sessionId) onOpenChat(sessionId); }}>查看所选会话<span aria-hidden="true">↗</span></button>{onOpenActivity && <button type="button" className="office-open-chat" disabled={!sessionId} onClick={() => { if (sessionId) onOpenActivity(sessionId); }}>查看运行记录<span aria-hidden="true">↗</span></button>}</>}</div>
@@ -192,6 +252,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
         </div>
         <footer className="office-page-footnote"><span>EASEL OFFICE · 一起把想法变成作品</span><span>{mode === 'demo' ? '当前为演示空间，不触发模型任务' : '观测已有任务，不在此创建或分派后台任务'}</span></footer>
       </div>
+      {processAgent && <OfficeProcessPanel agent={processAgent} events={allEvents} session={mode === 'live' ? availableSessions.find(item => item.id === sessionId) : undefined} stream={mode === 'live' && sessionId ? streams[sessionId] : undefined} turnId={mode === 'live' ? live.turnId : null} stale={stale} onClose={() => setProcessTarget(null)} onOpenChat={mode === 'live' && sessionId ? () => onOpenChat(sessionId) : undefined} />}
     </div>
   );
 }

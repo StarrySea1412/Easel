@@ -1,6 +1,7 @@
 import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
 import ConversationBackupCard from './settings/ConversationBackupCard';
+import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
 import type { ComponentProps } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
@@ -25,7 +26,7 @@ import type {
 } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
 
-export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'notify' | 'more';
+export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'notify' | 'employees' | 'more';
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string }[] = [
@@ -633,12 +634,16 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             <button aria-current={sec === 'notify' ? 'page' : undefined} className={`snav${sec === 'notify' ? ' active' : ''}`} onClick={() => setSec('notify')}>
               <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
             </button>
+            <button aria-current={sec === 'employees' ? 'page' : undefined} className={`snav${sec === 'employees' ? ' active' : ''}`} onClick={() => setSec('employees')}>
+              <IconSlidersHorizontal size={16} />员工角色卡<small>办公室展示形象</small>
+            </button>
             <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
               <IconEllipsis size={16} />更多设置<small>保存位置与备份</small>
             </button>
           </nav>
 
           <div className="settings-main">
+          {sec === 'employees' && <EmployeeAppearanceSettings />}
           {/* ── 配置导入：CC Switch / OpenClaw 一键迁移（一级分区） ── */}
           {sec === 'import' && (
             <section className="st-sec active">

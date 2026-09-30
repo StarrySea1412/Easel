@@ -5,12 +5,16 @@ import { tsModuleUrl } from './load-ts.mjs';
 const prefix = 'data:text/javascript;base64,';
 const storeUrl = await tsModuleUrl(new URL('../src/lib/store.ts', import.meta.url));
 const persistenceUrl = await tsModuleUrl(new URL('../src/lib/localPersistence.ts', import.meta.url));
+const draftsUrl = await tsModuleUrl(new URL('../src/lib/chatDrafts.ts', import.meta.url));
 let sequence = 0;
 
 async function isolatedStore(storage) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   const uniquePersistence = `${persistenceUrl}#fixture-${++sequence}`;
-  const code = Buffer.from(storeUrl.slice(prefix.length), 'base64').toString().replaceAll(persistenceUrl, uniquePersistence);
+  const draftCode = Buffer.from(draftsUrl.slice(prefix.length), 'base64').toString().replaceAll(persistenceUrl, uniquePersistence);
+  const uniqueDrafts = `${prefix}${Buffer.from(draftCode).toString('base64')}#fixture-${sequence}`;
+  const code = Buffer.from(storeUrl.slice(prefix.length), 'base64').toString()
+    .replaceAll(persistenceUrl, uniquePersistence).replaceAll(draftsUrl, uniqueDrafts);
   return {
     store: await import(`${prefix}${Buffer.from(code).toString('base64')}#fixture-${sequence}`),
     persistence: await import(uniquePersistence),

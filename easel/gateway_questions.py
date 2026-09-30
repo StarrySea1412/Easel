@@ -249,13 +249,16 @@ def _sign(payload: str) -> str:
 class GatewayClient:
     """Minimal Gateway WS RPC client (operator role, v2 device auth)."""
 
-    def __init__(self, timeout: float = 12.0):
+    def __init__(self, timeout: float = 12.0, *, scopes: list[str] | None = None):
         import websocket  # local import: keep module import cheap
 
         self._ws_lib = websocket
         self.ws = None
         self.timeout = timeout
         self._seq = 0
+        self.scopes = list(scopes) if scopes is not None else ["operator.admin", "operator.read", "operator.write"]
+        self.methods: set[str] = set()
+        self.granted_scopes: set[str] = set()
 
     def connect(self) -> None:
         import websocket  # noqa: F401
@@ -278,7 +281,7 @@ class GatewayClient:
             ws.close()
             raise
 
-        scopes = ["operator.admin", "operator.read", "operator.write"]
+        scopes = self.scopes
         payload = "|".join([
             "v2", dev["device_id"], "cli", "cli", "operator",
             ",".join(scopes), str(ts), dev["token"], nonce,
@@ -312,8 +315,14 @@ class GatewayClient:
             if msg.get("id") == "1":
                 ok = msg.get("ok", False)
                 if not ok:
+                    ws.close()
                     raise GatewayQuestionError(
                         f"gateway connect failed: {json.dumps(msg.get('error'))[:200]}")
+                hello = msg.get("payload") or {}
+                features = hello.get("features") or {}
+                auth = hello.get("auth") or {}
+                self.methods = {m for m in features.get("methods", []) if isinstance(m, str)}
+                self.granted_scopes = {s for s in auth.get("scopes", []) if isinstance(s, str)}
                 break
         if not ok:
             ws.close()

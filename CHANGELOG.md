@@ -4,6 +4,14 @@ All notable changes to Easel are documented in this file.
 
 ## [Unreleased]
 
+- Redraw office employees as 3D cats, rabbits, foxes and bears with editable appearance cards, evidence-driven work gestures, focused camera views, and labels that avoid employees and monitors.
+- Show task and tool records on desk screens and a readable selected-workstation panel; synchronize close-up selection and restore it after WebGL retry.
+- Open exact-turn thinking and work details from employee status, and monitor real workspace outputs with safe previews and explicit attribution limits.
+- Add session-level configured model selection and exact-run Agent interruption with confirmed receipts, limited existing permissions, and distinct child/whole-session scopes.
+- Preserve per-session composer drafts and accepted-send semantics; retain pending streams until stop confirmation.
+- Protect idea/calendar records against corrupt reads and concurrent writes; validate frontend builds before Windows packaging and in CI.
+- Replace the inherited repository homepages with current fork documentation, target installer discovery and release metadata at StarrySea1412/Easel, and run CI on the maintained development branches.
+
 - Add a real Three.js Agent office with animated characters, selectable desks, camera controls, a clearly labeled six-agent demonstration, and session-scoped observation of existing backend evidence.
 - Show recent tool calls and returns with Agent filtering and links to conversations and activity. Keep unknown and stopped states distinct, discard observations that cross execution turns, and freeze stale snapshots on refresh failures.
 - Release 3D resources when Agent identities change or the page closes; respect visibility and reduced motion, pause hidden demo time, and offer an honest WebGL failure/retry view.
@@ -13,7 +21,7 @@ All notable changes to Easel are documented in this file.
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Latest source validated with 135 frontend regressions, 1091 backend passes / 1 skip, build/lint, 35 real HTTP resource comparisons, and four isolated API requests using synthetic traces. Initial JavaScript including static dependencies is 58.27% smaller than 0.2.6; the 602 kB office module loads on demand and retains the build size warning. Details: [3D office verification](docs/agent-office-2026-09-30.md), [backup verification](docs/conversation-backup-2026-09-30.md), and [iteration plan](docs/secondary-development-plan.md). Real browser/WebGL interactions and real multi-agent execution remain unverified. These source changes are not included in the existing 0.2.6 installers.
+Latest implementation and exact validation scope: [professional office iteration](docs/professional-office-2026-10-01.md). Browser checks use an isolated local workspace; model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 

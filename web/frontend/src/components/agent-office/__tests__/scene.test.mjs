@@ -11,6 +11,59 @@ const { createSceneScheduler } = await loadTsModule('../sceneScheduler.ts', impo
 const { createOfficeSceneRuntime } = await loadTsModule('../OfficeSceneRuntime.ts', import.meta.url);
 const { default: AgentOfficeScene } = await loadTsModule('../AgentOfficeScene.tsx', import.meta.url);
 
+test('four distinct animal employees have ears, muzzles, tails and paws without human hair', () => {
+  const resources = new OfficeResources();
+  const world = createOfficeWorld(resources, 1);
+  const earHeights = new Map();
+  for (const species of ['cat', 'rabbit', 'fox', 'bear']) {
+    const avatar = createOfficeAvatar(resources, world.desks[0], species, { species, shirtColor:'#AA3355', skinColor:'#D8AD8C', hairColor:'#423833', hairStyle:'bun', accessory:'glasses' });
+    assert.equal(avatar.root.userData.species, species);
+    assert.equal(avatar.root.getObjectByName('employee-shirt').material.color.getHex(), 0xaa3355);
+    assert.equal(avatar.root.getObjectByName('animal-face').material.color.getHex(), 0xd8ad8c);
+    for (const name of ['animal-ear-left', 'animal-ear-right', 'animal-muzzle', 'animal-nose', 'animal-tail', 'animal-paw-left', 'animal-paw-right']) assert.ok(avatar.root.getObjectByName(name), `${species} has ${name}`);
+    assert.equal(avatar.root.getObjectByName('employee-hair'), undefined);
+    const bounds = new THREE.Box3().setFromObject(avatar.root.getObjectByName('animal-ear-left'));
+    earHeights.set(species, bounds.max.y - bounds.min.y);
+  }
+  assert.ok(earHeights.get('rabbit') > earHeights.get('cat') * 1.4, 'rabbit ears remain visibly longer than cat ears');
+  assert.ok(earHeights.get('bear') < earHeights.get('cat'), 'bear ears have a compact round silhouette');
+  resources.dispose();
+});
+
+test('evidence-specific large props sit above the desk and disappear when work is not reported', () => {
+  const resources = new OfficeResources();
+  const world = createOfficeWorld(resources, 1);
+  const avatar = createOfficeAvatar(resources, world.desks[0], 'designer', { species:'rabbit', shirtColor:'#AA3355', skinColor:'#D8AD8C', hairColor:'#423833', hairStyle:'bun', accessory:'glasses' });
+  assert.equal(avatar.root.getObjectByName('employee-shirt').material.color.getHex(), 0xaa3355);
+  assert.ok(avatar.root.getObjectByName('employee-head'));
+  assert.ok(avatar.root.getObjectByName('right-arm'));
+  poseOfficeAvatar(avatar, 'working', 1, false, 'reading');
+  assert.equal(avatar.document.visible, true); assert.equal(avatar.tablet.visible, false);
+  avatar.root.updateMatrixWorld(true);
+  const readingBounds = new THREE.Box3().setFromObject(avatar.document);
+  assert.ok(readingBounds.min.y >= 0.952, 'reading board clears the desktop');
+  assert.ok(readingBounds.max.x - readingBounds.min.x >= 0.58, 'reading board has a visible desk-scale width');
+  const paw = avatar.root.getObjectByName('animal-paw-left').getWorldPosition(new THREE.Vector3());
+  assert.ok(Math.abs(paw.y - avatar.document.getWorldPosition(new THREE.Vector3()).y) < 0.08, 'reading paw reaches the board');
+  poseOfficeAvatar(avatar, 'working', 1, false, 'writing');
+  avatar.root.updateMatrixWorld(true);
+  assert.ok(new THREE.Box3().setFromObject(avatar.document).min.y >= 0.952, 'writing board clears the desktop');
+  poseOfficeAvatar(avatar, 'working', 2, false, 'designing');
+  assert.equal(avatar.document.visible, false); assert.equal(avatar.tablet.visible, true); assert.equal(avatar.pen.visible, true);
+  avatar.root.updateMatrixWorld(true);
+  const tabletBounds = new THREE.Box3().setFromObject(avatar.tablet);
+  assert.ok(tabletBounds.min.y >= 0.952, 'drawing tablet clears the desktop');
+  assert.ok(tabletBounds.max.x - tabletBounds.min.x >= 0.63, 'drawing tablet is large enough to recognize');
+  poseOfficeAvatar(avatar, 'working', 3, false, 'unreported');
+  assert.equal(avatar.tablet.visible, false); assert.equal(avatar.pen.visible, false);
+  assert.equal(avatar.rightArm.rotation.x, 0);
+  for (const state of ['waiting', 'stopped', 'done', 'error', 'unknown']) {
+    poseOfficeAvatar(avatar, state, 4, false, 'designing');
+    assert.equal(avatar.tablet.visible, false); assert.equal(avatar.document.visible, false); assert.equal(avatar.pen.visible, false);
+  }
+  resources.dispose();
+});
+
 test('real Three office geometry includes every station and batches furniture without changing bounds', () => {
   const resources = new OfficeResources();
   const world = createOfficeWorld(resources, 20);
@@ -23,7 +76,7 @@ test('real Three office geometry includes every station and batches furniture wi
       before++;
       assert.ok(object.geometry.getAttribute('position').count > 0);
       assert.equal(object.material.map, null, 'scene is actual geometry without a background image');
-      assert.equal(object.castShadow, !object.material.transparent);
+      assert.equal(object.castShadow, !object.material.transparent && object.name !== 'office-work-screen');
     }
   });
   assert.ok(before > 1000);
@@ -53,35 +106,35 @@ test('agent state changes drive real transforms, independent screens and selecti
   const avatar = createOfficeAvatar(resources, world.desks[0], 'agent-1');
   const second = createOfficeAvatar(resources, world.desks[1], 'agent-2');
   assert.equal(avatar.root.userData.agentId, 'agent-1');
-  poseOfficeAvatar(avatar, 'working', 0, true);
-  const firstPaw = avatar.leftPaw.rotation.x;
-  poseOfficeAvatar(avatar, 'working', 0.1, false);
-  assert.notEqual(avatar.leftPaw.rotation.x, firstPaw);
+  poseOfficeAvatar(avatar, 'working', 0, true, 'executing');
+  const firstPaw = avatar.leftArm.rotation.x;
+  poseOfficeAvatar(avatar, 'working', 0.1, false, 'executing');
+  assert.notEqual(avatar.leftArm.rotation.x, firstPaw);
   assert.equal(avatar.selection.visible, false);
   assert.equal(avatar.screen.emissiveIntensity, 0.46);
   poseOfficeAvatar(avatar, 'thinking', 2, false);
-  assert.equal(avatar.halo.visible, true);
+  assert.equal(avatar.rightArm.rotation.x, 1.15);
   assert.notEqual(avatar.head.rotation.z, 0);
   poseOfficeAvatar(avatar, 'done', 4, true);
-  assert.equal(avatar.halo.visible, false);
-  assert.ok(avatar.rightPaw.rotation.z < -1);
+  assert.equal(avatar.tablet.visible, false);
+  assert.equal(avatar.rightArm.rotation.x, 1.5);
   assert.equal(avatar.statusMaterial.color.getHex(), 0x67a877);
   assert.equal(avatar.selection.visible, true);
   poseOfficeAvatar(second, 'error', 3, false);
   assert.equal(second.statusMaterial.color.getHex(), 0xd66d64);
   assert.equal(avatar.statusMaterial.color.getHex(), 0x67a877, 'other desks do not share mutable agent status materials');
   poseOfficeAvatar(avatar, 'waiting', 0, false);
-  const waiting = [avatar.head.position.y, avatar.head.rotation.y, avatar.leftPaw.rotation.x, avatar.rightPaw.rotation.z, avatar.beacon.scale.x];
+  const waiting = [avatar.head.position.y, avatar.head.rotation.y, avatar.leftArm.rotation.x, avatar.rightArm.rotation.z, avatar.beacon.scale.x];
   poseOfficeAvatar(avatar, 'waiting', 20, false);
-  assert.deepEqual([avatar.head.position.y, avatar.head.rotation.y, avatar.leftPaw.rotation.x, avatar.rightPaw.rotation.z, avatar.beacon.scale.x], waiting);
-  assert.equal(avatar.halo.visible, false);
+  assert.deepEqual([avatar.head.position.y, avatar.head.rotation.y, avatar.leftArm.rotation.x, avatar.rightArm.rotation.z, avatar.beacon.scale.x], waiting);
+  assert.equal(avatar.tablet.visible, false);
   poseOfficeAvatar(avatar, 'stopped', 0, false);
-  const stopped = [avatar.head.position.y, avatar.head.rotation.y, avatar.leftPaw.rotation.x, avatar.rightPaw.rotation.z, avatar.beacon.scale.x];
+  const stopped = [avatar.head.position.y, avatar.head.rotation.y, avatar.leftArm.rotation.x, avatar.rightArm.rotation.z, avatar.beacon.scale.x];
   poseOfficeAvatar(avatar, 'stopped', 20, false);
-  assert.deepEqual([avatar.head.position.y, avatar.head.rotation.y, avatar.leftPaw.rotation.x, avatar.rightPaw.rotation.z, avatar.beacon.scale.x], stopped);
+  assert.deepEqual([avatar.head.position.y, avatar.head.rotation.y, avatar.leftArm.rotation.x, avatar.rightArm.rotation.z, avatar.beacon.scale.x], stopped);
   assert.equal(avatar.statusMaterial.color.getHex(), 0x899397);
   assert.equal(avatar.screen.color.getHex(), 0xb8c3bd);
-  assert.equal(avatar.halo.visible, false);
+  assert.equal(avatar.tablet.visible, false);
   resources.dispose();
 });
 
@@ -206,7 +259,7 @@ test('simulated DOM with real Three/OrbitControls preserves renderer on selectio
   assert.equal(calls.camera, camera);
   assert.equal(calls.scene.getObjectByName('warm-isometric-office'), world);
   assert.equal(clock.pending.size, 0);
-  assert.equal(calls.scene.getObjectByName('agent:agent-1').children.find((child) => child.geometry?.type === 'TorusGeometry' && child.position.y < 0).visible, true);
+  assert.equal(calls.scene.getObjectByName('employee:agent-1').children.find((child) => child.geometry?.type === 'TorusGeometry' && child.position.y < 0).visible, true);
   runtime.update({ agents, selectedId: null, paused: false });
   clock.tick(32);
   assert.equal(clock.pending.size, 1);
@@ -258,7 +311,7 @@ test('stopped agents repaint their final state once without keeping an animation
   runtime.update({ agents: [{ ...harness.agents[0], state: 'stopped' }], selectedId: null, paused: false });
   harness.clock.tick(16);
   assert.equal(harness.clock.pending.size, 0);
-  const avatar = harness.calls.scene.getObjectByName('agent:agent-1');
+  const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
   assert.ok(avatar.children.some((child) => child instanceof THREE.Mesh && child.material.color.getHex() === 0x899397));
   runtime.dispose();
   harness.window.happyDOM.abort();
@@ -275,7 +328,7 @@ test('replacing agent identities within the same layout releases old avatars whi
   const disposalCounts = new Map();
   let currentId = 'agent-1';
   for (let index = 0; index < 5; index++) {
-    const oldAvatar = harness.calls.scene.getObjectByName(`agent:${currentId}`);
+    const oldAvatar = harness.calls.scene.getObjectByName(`employee:${currentId}`);
     const exclusive = new Set();
     oldAvatar.traverse((object) => {
       if (object instanceof THREE.Mesh) { exclusive.add(object.geometry); exclusive.add(object.material); }
@@ -289,7 +342,7 @@ test('replacing agent identities within the same layout releases old avatars whi
     harness.clock.tick(16 + index * 16);
     assert.equal(harness.calls.scene.getObjectByName('warm-isometric-office'), world);
     assert.equal(oldAvatar.parent, null);
-    assert.ok(harness.calls.scene.getObjectByName(`agent:${currentId}`));
+    assert.ok(harness.calls.scene.getObjectByName(`employee:${currentId}`));
     assert.ok([...exclusive].every((asset) => disposalCounts.get(asset) === 1), 'every replaced avatar asset is released immediately');
     assert.equal(screenDisposals, 0, 'shared desk display remains owned by the world');
     assert.equal(screen.color.getHex(), 0xd9a59d, 'new agent still animates the surviving display');

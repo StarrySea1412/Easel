@@ -1,5 +1,8 @@
 import { readSelectedSkills } from '../lib/selectedSkills';
-import { useState, useRef, useEffect, useId, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useId, useLayoutEffect, useCallback, useSyncExternalStore } from 'react';
+import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAttachment,
+  dismissMissingDraftAttachments, setChatDraftError, beginChatDraftUpload,
+  appendChatDraftUploads, finishChatDraftUpload, clearChatDraft } from '../lib/chatDrafts';
 import BrushEntry from './BrushEntry';
 import { uploadFiles, adoptOversize, fetchSkills } from '../lib/api';
 import type { UploadedFile } from '../lib/api';
@@ -11,25 +14,27 @@ interface ChatComposerProps {
   sessionId: string;
   hero?: boolean;
   isStreaming: boolean;
-  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[]) => void;
+  stopping?: boolean;
+  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[]) => boolean;
   onStop: () => void;
 }
 
 
 /** Shared multiline composer for the welcome and conversation views. */
-export default function ChatComposer({ sessionId, hero = false, isStreaming, onSend, onStop }: ChatComposerProps) {
-  const [input, setInput] = useState('');
-  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
-  const [uploading, setUploading] = useState(false);
+export default function ChatComposer({ sessionId, hero = false, isStreaming, stopping = false, onSend, onStop }: ChatComposerProps) {
+  const draft = useSyncExternalStore(
+    useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
+    useCallback(() => getChatDraft(sessionId), [sessionId]),
+  );
+  const { text: input, attachments, uploading, error: uploadError } = draft;
+  const setInput = (value: string | ((current: string) => string)) => setChatDraftText(sessionId, value);
   const [dragOver, setDragOver] = useState(false);
-  const [uploadError, setUploadError] = useState('');
   const [maxMb, setMaxMb] = useState(50);
   const skillStorageKey = `easel:selected-skills:${sessionId}`;
   const [selectedSkills, setSelectedSkills] = useState<string[]>(() => readSelectedSkills(sessionId));
   const [skillNotice, setSkillNotice] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadingRef = useRef(false);
   const composingRef = useRef(false);
   const dragDepthRef = useRef(0);
   const inputId = useId();
@@ -57,10 +62,9 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
 
   const doUpload = async (fs: FileList | File[]) => {
     const arr = Array.from(fs);
-    if (!arr.length || uploadingRef.current || isStreaming) return;
-    uploadingRef.current = true;
-    setUploading(true);
-    setUploadError('');
+    if (!arr.length || isStreaming || stopping) return;
+    const token = beginChatDraftUpload(sessionId);
+    if (!token) return;
     const cap = maxMb * 1024 * 1024;
     const big = arr.filter((f) => f.size > cap);
     const small = arr.filter((f) => f.size <= cap);
@@ -69,7 +73,7 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
       if (big.length) {
         try {
           const saved = await adoptOversize(big, sessionId);
-          setAttachments((a) => [...a, ...saved]);
+          appendChatDraftUploads(sessionId, token, saved);
         } catch (err) {
           errors.push(err instanceof Error ? err.message : '大文件添加失败，请重试');
         }
@@ -77,15 +81,13 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
       if (small.length) {
         try {
           const saved = await uploadFiles(small, sessionId);
-          setAttachments((a) => [...a, ...saved]);
+          appendChatDraftUploads(sessionId, token, saved);
         } catch (err) {
           errors.push(err instanceof Error ? err.message : '素材上传失败，请重试');
         }
       }
-      setUploadError(errors.join('；'));
     } finally {
-      uploadingRef.current = false;
-      setUploading(false);
+      finishChatDraftUpload(sessionId, token, errors.join('；'));
     }
   };
   const onDrop = (e: React.DragEvent) => {
@@ -98,7 +100,7 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
   const onPaste = (e: React.ClipboardEvent) => {
     if (e.clipboardData.files?.length) { e.preventDefault(); void doUpload(e.clipboardData.files); }
   };
-  const removeAttachment = (path: string) => setAttachments((a) => a.filter((x) => x.path !== path));
+  const removeAttachment = (path: string) => removeChatDraftAttachment(sessionId, path);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -120,13 +122,17 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
   }, [input]);
 
   const handleSend = () => {
-    const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming || uploadingRef.current || composingRef.current) return;
+    const submitted = getChatDraft(sessionId);
+    const trimmed = submitted.text.trim();
+    if ((!trimmed && submitted.attachments.length === 0) || isStreaming || stopping || submitted.uploading
+      || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
-    onSend(trimmed, attachments, selectedSkills);
-    setInput('');
-    setAttachments([]);
-    setUploadError('');
+    try {
+      if (onSend(trimmed, submitted.attachments, selectedSkills) === true) clearChatDraft(sessionId, submitted);
+      else setChatDraftError(sessionId, '当前消息未被接收，草稿已保留，请稍后重试。');
+    } catch {
+      setChatDraftError(sessionId, '消息暂时无法发送，草稿已保留，请稍后重试。');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -142,12 +148,12 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
         dragDepthRef.current += 1;
-        if (!isStreaming && !uploadingRef.current) setDragOver(true);
+        if (!isStreaming && !uploading) setDragOver(true);
       }}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = isStreaming || uploadingRef.current ? 'none' : 'copy';
+        e.dataTransfer.dropEffect = isStreaming || uploading ? 'none' : 'copy';
       }}
       onDragLeave={(e) => {
         e.preventDefault();
@@ -188,6 +194,11 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
         </div>
       )}
       {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
+      {draft.missingAttachments.length > 0 && <div className="composer-skills-note" role="status">
+        <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
+        <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
+      </div>}
+      {attachments.length > 0 && <p className="composer-skills-note">素材会随会话切换保留；刷新页面后需要重新添加。</p>}
       {skillNotice && <p className="composer-skills-note" role="status">{skillNotice}</p>}
       <input ref={fileInputRef} type="file" multiple hidden
         onChange={(e) => { if (e.target.files) void doUpload(e.target.files); e.target.value = ''; }} />
@@ -204,12 +215,12 @@ export default function ChatComposer({ sessionId, hero = false, isStreaming, onS
         </div>
         <span className="composer-hint" id={hintId}>
           <span className="composer-file-hint">可拖入或粘贴图片、文档</span>
-          <span>{isStreaming ? '正在生成，可随时停止' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}</span>
+          <span>{stopping ? '正在等待停止确认' : isStreaming ? '正在生成，可随时停止' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}</span>
         </span>
         {isStreaming ? (
-          <button type="button" className="send-btn" onClick={onStop} title="停止生成" aria-label="停止生成"><IconStop size={15} /></button>
+          <button type="button" className="send-btn" onClick={onStop} disabled={stopping} title={stopping ? '等待停止确认' : '停止生成'} aria-label={stopping ? '等待停止确认' : '停止生成'}><IconStop size={15} /></button>
         ) : (
-          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading} title="发送" aria-label="发送消息"><IconArrowUp size={18} /></button>
+          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || stopping || draft.missingAttachments.length > 0} title="发送" aria-label="发送消息"><IconArrowUp size={18} /></button>
         )}
       </div>
     </div>

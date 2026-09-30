@@ -155,15 +155,13 @@ function desk(resources: OfficeResources, parent: THREE.Object3D, slot: DeskSlot
   box(resources, root, resources.color(0xa99d8b), [0.12, 0.02, 0.02], [0.56, 0.7, 0.335]);
   box(resources, root, metal, [0.29, 0.025, 0.2], [0.37, 0.97, -0.12]);
   box(resources, root, metal, [0.045, 0.22, 0.04], [0.37, 1.08, -0.17]);
-  box(resources, root, resources.color(0x424b50), [0.72, 0.47, 0.065], [0.37, 1.34, -0.18]);
+  box(resources, root, resources.color(0x424b50), [0.98, 0.67, 0.065], [0.45, 1.42, -0.18]);
   const screen = resources.material(`screen:${slot.index}`, {
     color: 0xaec9c3, emissive: 0x79aaa2, emissiveIntensity: 0.15, roughness: 0.35,
   });
-  box(resources, root, screen, [0.65, 0.39, 0.008], [0.37, 1.34, -0.143], false);
-  for (let line = 0; line < 5; line++) {
-    box(resources, root, resources.color(line % 2 ? 0x6f9298 : 0xe4f0dd),
-      [0.2 + (line % 3) * 0.1, 0.017, 0.01], [0.3, 1.46 - line * 0.054, -0.134], false);
-  }
+  const display = mesh(root, resources.geometry('office-screen-plane', () => new THREE.PlaneGeometry(0.92, 0.61)), screen, 0.45, 1.42, -0.143);
+  display.castShadow = false;
+  display.name = 'office-work-screen';
   box(resources, root, resources.color(0xd1d5d0), [0.5, 0.027, 0.2], [0.02, 0.969, 0.2]);
   for (let row = 0; row < 3; row++) for (let column = 0; column < 6; column++) {
     box(resources, root, cream, [0.055, 0.009, 0.037], [-0.175 + column * 0.071, 0.987, 0.14 + row * 0.05], false);
@@ -316,9 +314,11 @@ export function createOfficeWorld(resources: OfficeResources, count: number): Of
 export interface OfficeAvatar {
   root: THREE.Group;
   head: THREE.Group;
-  leftPaw: THREE.Group;
-  rightPaw: THREE.Group;
-  halo: THREE.Mesh;
+  leftArm: THREE.Group;
+  rightArm: THREE.Group;
+  document: THREE.Group;
+  tablet: THREE.Group;
+  pen: THREE.Mesh;
   beacon: THREE.Mesh;
   selection: THREE.Mesh;
   statusMaterial: THREE.MeshStandardMaterial;
@@ -327,71 +327,179 @@ export interface OfficeAvatar {
   phase: number;
 }
 
-export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk, id: string): OfficeAvatar {
+export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk, id: string, appearance?: OfficeAgent['appearance']): OfficeAvatar {
   const root = new THREE.Group();
-  root.name = `agent:${id}`;
+  root.name = `employee:${id}`;
   root.userData.agentId = id;
   root.position.set(desk.slot.x - 0.32, 0.61, desk.slot.z + 0.56);
-  const fur = resources.material('cat-fur', { color: 0x293333, flatShading: true, roughness: 0.93 });
-  const cream = resources.color(0xf3eddd);
-  const capsule = resources.geometry('cat-body', () => new THREE.CapsuleGeometry(0.22, 0.35, 3, 8));
-  mesh(root, capsule, fur, 0, 0.32, 0);
-  const head = new THREE.Group();
-  head.position.set(0, 0.77, 0.035);
-  head.rotation.y = -0.16;
-  root.add(head);
-  sphere(resources, head, fur, 0.285, 0, 0, 0, 9).scale.set(1, 0.95, 0.9);
-  for (const x of [-0.19, 0.19]) {
-    const ear = mesh(head, resources.geometry('cat-ear', () => new THREE.ConeGeometry(0.125, 0.24, 3)), fur, x, 0.22, 0);
-    ear.rotation.z = -x * 0.65;
-    sphere(resources, head, cream, 0.048, x * 0.56, 0.018, 0.232, 8).scale.set(0.68, 1.12, 0.36);
-    sphere(resources, head, resources.color(0xd3a59a), 0.027, x * 0.87, -0.075, 0.212, 6).scale.set(1.2, 0.45, 0.4);
+  const species = appearance?.species || 'cat';
+  root.userData.species = species;
+  // Saved skin/hair keys stay compatible, but now color animal fur and markings.
+  const fur = resources.material(`fur:${appearance?.skinColor}`, { color: appearance?.skinColor || '#D9C5A6' });
+  const shirt = resources.material(`shirt:${appearance?.shirtColor}`, { color: appearance?.shirtColor || '#8E9B9D' });
+  const markings = resources.material(`markings:${appearance?.hairColor}`, { color: appearance?.hairColor || '#806B58' });
+  const cream = resources.color(0xfff4df), ink = resources.color(0x363b3a);
+  const torso = sphere(resources, root, shirt, 0.25, 0, 0.26, 0, 16);
+  torso.scale.set(0.96, 1.04, 0.76); torso.name = 'employee-shirt';
+  for (const x of [-0.067, 0.067]) {
+    const collar = box(resources, root, cream, [0.11, 0.075, 0.035], [x, 0.46, -0.15]);
+    collar.rotation.z = x < 0 ? -0.32 : 0.32;
   }
-  sphere(resources, head, resources.color(0xb9c7b8), 0.025, 0, -0.068, 0.25, 5);
-  const pawGeometry = resources.geometry('cat-paw', () => new THREE.CapsuleGeometry(0.074, 0.18, 2, 6));
-  const paws = [-0.21, 0.21].map((x) => {
-    const paw = new THREE.Group();
-    paw.position.set(x, 0.42, 0.07);
-    mesh(paw, pawGeometry, fur, 0, -0.055, -0.1).rotation.x = -0.55;
-    root.add(paw);
-    return paw;
+  box(resources, root, cream, [0.067, 0.087, 0.012], [0.11, 0.31, -0.187]);
+  box(resources, root, markings, [0.042, 0.015, 0.014], [0.11, 0.329, -0.197], false);
+  const head = new THREE.Group(); head.name = 'employee-head'; head.position.set(0, 0.79, 0);
+  head.userData.species = species; head.rotation.y = -1.18;
+  root.add(head);
+  const face = sphere(resources, head, fur, 0.305, 0, 0, 0, 20);
+  face.name = 'animal-face'; face.scale.set(1.04, 1, 0.92);
+  for (const x of [-0.2, 0.2]) {
+    const ear = new THREE.Group(); ear.name = x < 0 ? 'animal-ear-left' : 'animal-ear-right';
+    ear.position.set(x, 0.22, 0); head.add(ear);
+    if (species === 'rabbit') {
+      const outer = sphere(resources, ear, fur, 0.11, 0, 0.18, 0, 16); outer.scale.set(0.85, 2.6, 0.74);
+      const inner = sphere(resources, ear, markings, 0.069, 0, 0.2, -0.069, 12); inner.scale.set(0.78, 3.1, 0.23);
+      ear.rotation.z = x < 0 ? 0.14 : -0.14;
+    } else if (species === 'bear') {
+      sphere(resources, ear, fur, 0.13, 0, 0.025, 0, 16);
+      sphere(resources, ear, markings, 0.076, 0, 0.025, -0.09, 12).scale.z = 0.3;
+    } else {
+      const geometry = resources.geometry('rounded-animal-ear', () => {
+        const shape = new THREE.Shape(); shape.moveTo(-0.115, 0); shape.lineTo(0, 0.26); shape.lineTo(0.115, 0); shape.closePath();
+        return new THREE.ExtrudeGeometry(shape, { depth: 0.085, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.025, bevelThickness: 0.025 });
+      });
+      mesh(ear, geometry, species === 'fox' ? markings : fur, 0, 0, -0.04);
+      const inset = mesh(ear, geometry, species === 'fox' ? fur : markings, 0, 0.025, -0.063);
+      inset.scale.set(0.55, 0.65, 0.3);
+      ear.rotation.z = x < 0 ? 0.15 : -0.15;
+    }
+  }
+  const muzzle = new THREE.Group(); muzzle.name = 'animal-muzzle'; head.add(muzzle);
+  for (const x of [-0.064, 0.064]) {
+    const cheek = sphere(resources, muzzle, cream, species === 'fox' ? 0.115 : 0.094, x, -0.072, -0.249, 16);
+    cheek.scale.set(1.08, 0.82, species === 'fox' ? 1.18 : 0.88);
+  }
+  const nose = sphere(resources, muzzle, ink, 0.03, 0, -0.057, species === 'fox' ? -0.371 : -0.337, 12);
+  nose.name = 'animal-nose'; nose.scale.set(1.2, 0.75, 0.7);
+  for (const x of [-0.116, 0.116]) {
+    sphere(resources, head, ink, 0.032, x, 0.033, -0.265, 12).scale.set(0.78, 1.07, 0.56);
+    sphere(resources, head, cream, 0.009, x - 0.008, 0.045, -0.282, 8);
+  }
+  for (const x of [-0.212, 0.212]) {
+    sphere(resources, head, resources.color(0xdba69a), 0.045, x, -0.073, -0.212, 12).scale.set(1, 0.48, 0.25);
+  }
+  if (species === 'cat') {
+    for (const x of [-0.065, 0, 0.065]) {
+      const stripe = box(resources, head, markings, [0.028, 0.095, 0.018], [x, 0.18, -0.236]);
+      stripe.rotation.x = -0.3;
+    }
+    for (const direction of [-1, 1]) for (const offset of [-1, 1]) {
+      const whisker = box(resources, head, markings, [0.13, 0.008, 0.008], [direction * 0.26, -0.083 + offset * 0.029, -0.216], false);
+      whisker.rotation.z = direction * offset * 0.16;
+    }
+  }
+  if (appearance?.accessory === 'glasses') {
+    for (const x of [-0.119, 0.119]) mesh(head, resources.geometry('animal-glasses', () => new THREE.TorusGeometry(0.075, 0.012, 6, 18)), ink, x, 0.027, -0.278);
+    box(resources, head, ink, [0.084, 0.015, 0.012], [0, 0.03, -0.288], false);
+  }
+  if (appearance?.accessory === 'headset') {
+    for (const x of [-0.302, 0.302]) box(resources, head, ink, [0.052, 0.15, 0.12], [x, 0.015, 0]);
+    const band = mesh(head, resources.geometry('animal-headset-band', () => new THREE.TorusGeometry(0.32, 0.018, 6, 22, Math.PI)), ink, 0, 0.015, 0.04);
+    box(resources, head, ink, [0.015, 0.015, 0.24], [-0.305, -0.06, -0.1], false);
+    band.name = 'animal-headset';
+  }
+  const tail = new THREE.Group(); tail.name = 'animal-tail'; tail.position.set(0.16, 0.02, 0.14); root.add(tail);
+  if (species === 'cat') {
+    for (let n = 0; n < 9; n++) {
+      const angle = n / 8 * Math.PI * 1.2;
+      sphere(resources, tail, n > 6 ? markings : fur, 0.056 - n * 0.0014, Math.sin(angle) * 0.22, (1 - Math.cos(angle)) * 0.13, 0.06 + n * 0.014, 12);
+    }
+  } else if (species === 'fox') {
+    const brush = sphere(resources, tail, fur, 0.17, 0.17, 0.08, 0.09, 16); brush.scale.set(1.8, 0.9, 0.9); brush.rotation.z = 0.45;
+    sphere(resources, tail, cream, 0.11, 0.38, 0.18, 0.09, 14).scale.set(1.2, 0.9, 0.85);
+  } else sphere(resources, tail, species === 'rabbit' ? cream : fur, 0.12, 0.06, 0.06, 0.11, 16);
+  const arms = [-0.245, 0.245].map(x => {
+    const arm = new THREE.Group(); arm.name = x < 0 ? 'left-arm' : 'right-arm';
+    arm.position.set(x, 0.44, 0); root.add(arm);
+    sphere(resources, arm, shirt, 0.1, 0, -0.055, -0.01, 14).scale.set(0.95, 1.25, 0.95);
+    const forearm = sphere(resources, arm, fur, 0.075, 0, -0.12, -0.135, 14); forearm.scale.set(0.85, 0.85, 1.55);
+    const paw = sphere(resources, arm, fur, 0.089, 0, -0.12, -0.27, 16);
+    paw.name = x < 0 ? 'animal-paw-left' : 'animal-paw-right'; paw.scale.set(1, 0.65, 1.08);
+    for (const offset of [-0.029, 0.029]) box(resources, arm, markings, [0.006, 0.006, 0.034], [offset, -0.174, -0.285], false);
+    return arm;
   });
-  const tail = mesh(root, resources.geometry('cat-tail', () => new THREE.TorusGeometry(0.18, 0.044, 5, 9, Math.PI * 1.3)),
-    fur, 0.23, 0.1, -0.1);
-  tail.rotation.y = -0.4;
+  for (const x of [-0.115, 0.115]) {
+    sphere(resources, root, resources.color(0x687779), 0.125, x, -0.085, -0.11, 14).scale.set(0.9, 1.05, 1.6);
+    sphere(resources, root, fur, 0.107, x, -0.29, -0.255, 14).scale.set(1.05, 0.88, 1.5);
+  }
+  // Raised, camera-facing surfaces and large geometric marks make the tool legible at desk scale.
+  const document = new THREE.Group(); document.name = 'reading-document'; root.add(document);
+  document.position.set(0.01, 0.54, -0.36); document.rotation.x = -0.8;
+  box(resources, document, resources.color(0xc8ab7e), [0.59, 0.43, 0.03], [0, 0, 0]);
+  box(resources, document, cream, [0.54, 0.38, 0.012], [0, 0, 0.023]);
+  box(resources, document, resources.color(0x648fa1), [0.25, 0.026, 0.008], [-0.075, 0.137, 0.035], false);
+  for (let n = 0; n < 4; n++) box(resources, document, resources.color(0x8d9a9e), [0.38 - n % 2 * 0.09, 0.018, 0.008], [-0.015, 0.07 - n * 0.06, 0.035], false);
+  const tablet = new THREE.Group(); tablet.name = 'design-tablet'; root.add(tablet);
+  tablet.position.set(0.09, 0.45, -0.39); tablet.rotation.x = -Math.PI / 2 + 0.34;
+  box(resources, tablet, ink, [0.64, 0.42, 0.033], [0, 0, 0]);
+  box(resources, tablet, resources.color(0xd4e7df), [0.57, 0.35, 0.01], [0, 0, 0.024]);
+  box(resources, tablet, resources.color(0x8cae9a), [0.18, 0.3, 0.009], [-0.17, 0, 0.035]);
+  sphere(resources, tablet, resources.color(0xe5b577), 0.065, 0.03, 0.08, 0.046, 12).scale.z = 0.1;
+  box(resources, tablet, resources.color(0xb08079), [0.2, 0.11, 0.012], [0.105, -0.09, 0.043]);
+  const pen = cylinder(resources, arms[1], ink, 0.018, 0.018, 0.3, 0, 0.035, -0.315, 8);
+  pen.name = 'drawing-stylus'; pen.rotation.x = -0.28;
   const statusMaterial = resources.material(`status:${desk.slot.index}`, { color: 0x99a2aa, emissive: 0x99a2aa, emissiveIntensity: 0.24 });
-  const halo = mesh(root, resources.geometry('thinking-ring', () => new THREE.TorusGeometry(0.19, 0.015, 5, 20, Math.PI * 1.65)),
-    statusMaterial, 0, 1.25, 0);
-  halo.rotation.x = Math.PI / 2;
   const beacon = sphere(resources, root, statusMaterial, 0.055, 0.28, 1.07, 0.04, 8);
   const selection = mesh(root, resources.geometry('selected-ring', () => new THREE.TorusGeometry(0.42, 0.022, 5, 28)),
     resources.color(0x619a84), 0, -0.55, 0.08);
-  selection.rotation.x = -Math.PI / 2;
-  selection.visible = false;
+  selection.rotation.x = -Math.PI / 2; selection.visible = false;
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return {
-    root, head, leftPaw: paws[0], rightPaw: paws[1], halo, beacon, selection,
-    statusMaterial, screen: desk.screen,
-    label: new THREE.Vector3(root.position.x, 2.05, root.position.z), phase: (hash % 1000) / 100,
-  };
+  document.visible = tablet.visible = pen.visible = false;
+  return { root, head, leftArm: arms[0], rightArm: arms[1], document, tablet, pen, beacon, selection,
+    statusMaterial, screen: desk.screen, label: new THREE.Vector3(root.position.x, species === 'rabbit' ? 2.18 : 2.04, root.position.z), phase: (hash % 1000) / 100 };
 }
 
-export function poseOfficeAvatar(avatar: OfficeAvatar, state: AgentState, time: number, selected: boolean) {
+export function poseOfficeAvatar(avatar: OfficeAvatar, state: AgentState, time: number, selected: boolean, action: NonNullable<OfficeAgent['action']>['kind'] = 'unreported') {
   const color = OFFICE_STATE_COLORS[state];
-  avatar.statusMaterial.color.setHex(color);
-  avatar.statusMaterial.emissive.setHex(color);
-  avatar.screen.color.setHex(state === 'error' ? 0xd9a59d : state === 'waiting' || state === 'stopped' || state === 'unknown' ? 0xb8c3bd : 0xb4d1c6);
-  avatar.screen.emissiveIntensity = state === 'working' ? 0.46 : state === 'thinking' ? 0.29 : 0.08;
+  avatar.statusMaterial.color.setHex(color); avatar.statusMaterial.emissive.setHex(color);
+  avatar.screen.color.setHex(avatar.screen.map ? 0xffffff : state === 'error' ? 0xd9a59d : ['waiting', 'stopped', 'unknown'].includes(state) ? 0xb8c3bd : 0xb4d1c6);
+  avatar.screen.emissiveIntensity = avatar.screen.map ? 0.08 : state === 'working' ? 0.46 : state === 'thinking' ? 0.29 : 0.08;
   const phase = time + avatar.phase;
-  avatar.head.rotation.y = -0.16 + (state === 'thinking' ? Math.sin(phase * 1.2) * 0.17 : 0);
-  avatar.head.rotation.z = state === 'thinking' ? Math.sin(phase) * 0.07 : 0;
-  avatar.head.position.y = 0.77 + (state === 'working' ? Math.sin(phase * 2) * 0.012 : 0);
-  avatar.leftPaw.rotation.x = state === 'working' ? -0.2 + Math.sin(phase * 9) * 0.17 : 0;
-  avatar.rightPaw.rotation.x = state === 'working' ? -0.2 + Math.sin(phase * 9 + Math.PI) * 0.17 : 0;
-  avatar.rightPaw.rotation.z = state === 'done' ? -1.9 + Math.sin(phase * 3.2) * 0.18 : 0;
-  avatar.halo.visible = state === 'thinking';
-  avatar.halo.rotation.z = phase * 0.65;
+  avatar.head.rotation.set(0, -1.18, 0);
+  avatar.head.position.y = 0.79;
+  avatar.leftArm.rotation.set(0, 0, 0); avatar.rightArm.rotation.set(0, 0, 0);
+  const active = state === 'working';
+  avatar.document.visible = active && (action === 'reading' || action === 'writing');
+  avatar.tablet.visible = active && action === 'designing';
+  avatar.pen.visible = active && (action === 'writing' || action === 'designing');
+  avatar.document.position.y = action === 'writing' ? 0.47 : 0.54;
+  avatar.document.rotation.x = action === 'writing' ? -1.12 : -0.8;
+  if (active && action === 'executing') {
+    avatar.leftArm.rotation.x = 0.15 + Math.sin(phase * 9) * 0.13;
+    avatar.rightArm.rotation.x = 0.15 + Math.sin(phase * 9 + Math.PI) * 0.13;
+  } else if (active && (action === 'writing' || action === 'designing')) {
+    avatar.rightArm.rotation.y = Math.sin(phase * 3) * 0.18;
+    avatar.leftArm.rotation.x = 0.36;
+    avatar.rightArm.rotation.x = 0.4 + Math.sin(phase * 4) * 0.04;
+    avatar.head.rotation.x = -0.12;
+  } else if (active && action === 'reading') {
+    avatar.leftArm.rotation.x = 0.75;
+    avatar.rightArm.rotation.x = 0.75;
+    avatar.head.rotation.x = -0.12 + Math.sin(phase) * 0.035;
+  } else if (active && action === 'delegating') {
+    avatar.rightArm.rotation.z = -0.75 + Math.sin(phase * 2) * 0.22;
+    avatar.head.rotation.y = -1.18 + Math.sin(phase) * 0.25;
+  }
+  if (state === 'thinking') {
+    avatar.rightArm.rotation.x = 1.15;
+    avatar.head.rotation.z = Math.sin(phase) * 0.05;
+  }
+  if (state === 'done') {
+    avatar.rightArm.rotation.x = 1.5;
+    avatar.rightArm.rotation.z = 0.3 + Math.sin(phase * 3.2) * 0.12;
+    avatar.head.rotation.x = Math.sin(phase * 2) * 0.05;
+  }
+  if (state === 'error') avatar.head.rotation.z = 0.13;
   avatar.beacon.scale.setScalar(state === 'error' ? 1 + Math.sin(phase * 3) * 0.13 : 1);
   avatar.selection.visible = selected;
 }

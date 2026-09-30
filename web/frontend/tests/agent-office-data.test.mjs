@@ -119,10 +119,10 @@ test('demo and empty selection make no requests; changing live sessions aborts a
 test('failed polling retains the last snapshot and stale warning until a successful response', async t => {
   const f = await fixture(t);
   await f.render('one'); await f.reply(0, payload());
-  await f.tick(4000); await f.fail(1);
+  await f.tick(2000); await f.fail(1);
   assert.equal(f.state().agents[0].state, 'working');
   assert.match(f.state().error, /网络/);
-  await f.tick(4000); assert.equal(f.requests.length, 3);
+  await f.tick(2000); assert.equal(f.requests.length, 3);
   assert.match(f.state().error, /网络/, 'starting another request cannot erase stale-data warning');
   await f.reply(2, payload('one', 'completed'));
   assert.equal(f.state().error, null); assert.equal(f.state().agents[0].state, 'done');

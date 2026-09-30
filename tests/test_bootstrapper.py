@@ -19,8 +19,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 import bootstrapper as bt  # noqa: E402
 
-URL = "https://github.com/ZJU-REAL/Easel/releases/download/v0.2.1/Easel-0.2.1-windows.zip"
+URL = "https://github.com/StarrySea1412/Easel/releases/download/v0.2.1/Easel-0.2.1-windows.zip"
 VERSION, DIGEST = "0.2.1", "a" * 64
+
+
+def test_release_discovery_uses_maintained_fork(monkeypatch):
+    requests = []
+    metadata = {"tag_name": "v0.2.1", "draft": False, "assets": [
+        {"name": "Easel-0.2.1-windows.zip", "browser_download_url": URL, "size": 42}]}
+    def request(url, read):
+        requests.append(url)
+        return read(io.BytesIO(json.dumps(metadata).encode()))
+    monkeypatch.setattr(bt, "_request", request)
+    found = bt.fetch_release(VERSION)
+    assert requests == ["https://api.github.com/repos/StarrySea1412/Easel/releases/tags/v0.2.1"]
+    assert bt.pick_archive(found["assets"], VERSION)["url"] == URL
 
 
 def _ps(value) -> str:

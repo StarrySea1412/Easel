@@ -1,7 +1,8 @@
 """Build a self-contained Windows installer and its verified payload (does not publish).
 
-Run with Windows CPython 3.12. Resolve the runtime lock once per release, then
-retain it with the release artifacts. Only Git-indexed files and frontend dist
+Run with Windows CPython 3.12. Every package build runs npm ci, test, lint and
+build first. Resolve the runtime lock once per release, then retain it with
+the release artifacts. Only Git-indexed files and freshly built frontend dist
 are packaged; local credentials, profiles, caches and outputs cannot leak in.
 """
 from __future__ import annotations
@@ -11,13 +12,14 @@ import importlib.metadata
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-from bootstrapper import normalize_version, sha256_of
+from bootstrapper import RELEASE_REPOSITORY, normalize_version, sha256_of
 
 ROOT = Path(__file__).resolve().parents[1]
 OPENCLAW_VERSION = "2026.9.6"
@@ -90,9 +92,19 @@ def frontend_notices(root: Path) -> str:
     return "Third-party frontend dependency notices\n" + "\n".join(sorted(notices))
 
 
+def build_frontend(root: Path) -> None:
+    """Build this checkout from its lockfile; an existing dist is never reused."""
+    npm = shutil.which("npm.cmd" if sys.platform == "win32" else "npm")
+    if npm is None:
+        raise RuntimeError("npm is required to verify and rebuild the release frontend")
+    frontend = root / "web/frontend"
+    for args in (("ci",), ("test",), ("run", "lint"), ("run", "build")):
+        subprocess.run([npm, *args], cwd=frontend, check=True)
+
+
 def build_archive(root: Path, archive: Path, version: str, lock: Path) -> None:
     if not (root / "web/frontend/dist/index.html").is_file():
-        raise RuntimeError("Prebuilt frontend missing; run npm ci && npm run build")
+        raise RuntimeError("Release frontend build did not produce dist/index.html")
     listed = subprocess.check_output(["git", "ls-files", "--cached", "-z"], cwd=root).decode("utf-8").split("\0")
     files = sorted({name for name in listed if name and allowed_source(name)})
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root).decode("ascii").strip()
@@ -191,7 +203,7 @@ def main() -> None:
     ap.add_argument("--output", type=Path, default=ROOT / "dist")
     ap.add_argument("--lock-file", type=Path, help="Reuse this release's previously resolved Windows 3.12 lock")
     ap.add_argument("--lock-only", action="store_true", help="Resolve and save dependencies; do not package yet")
-    ap.add_argument("--skip-exe", action="store_true", help="Build payload only")
+    ap.add_argument("--skip-exe", action="store_true", help="Build payload only; frontend checks and build still run")
     args = ap.parse_args()
     version = normalize_version(tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
     output = args.output.resolve()
@@ -202,11 +214,14 @@ def main() -> None:
         return
     if not lock.is_file():
         raise RuntimeError("Windows Python lock missing; generate it with --lock-only and review it")
+    # Both full and payload-only releases must rebuild. Do not offer a stale-dist
+    # shortcut: sourceCommit describes the checkout that produced this frontend.
+    build_frontend(ROOT)
     archive = output / f"Easel-{version}-windows.zip"
     build_archive(ROOT, archive, version, lock)
     release = output / "release.json"
     release.write_text(json.dumps({"version": version, "archive": archive.name,
-        "url": f"https://github.com/ZJU-REAL/Easel/releases/download/v{version}/{archive.name}",
+        "url": f"https://github.com/{RELEASE_REPOSITORY}/releases/download/v{version}/{archive.name}",
         "sha256": sha256_of(archive)}, indent=2), encoding="utf-8")
     if not args.skip_exe:
         build_exe(output, release, archive, version)

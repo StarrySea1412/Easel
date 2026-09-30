@@ -11,6 +11,9 @@ import { tsModuleUrl } from './load-ts.mjs';
 // backend polling or real browser interactions.
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
+globalThis.Node = window.Node;
+globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const moduleUrl = (code) => `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
@@ -61,10 +64,10 @@ async function fixture(t, overrides = {}) {
       replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' });
       continue;
     }
-    const target = specifier === '../hooks/useAgentOffice' ? hook
+    const target = ['./agent-office/OfficeOutputMonitor', './agent-office/OfficeAgentControls'].includes(specifier) ? moduleUrl('export default function EmbeddedPanel(){return null;}') : specifier === '../hooks/useAgentOffice' ? hook
       : specifier === './agent-office/AgentOfficeScene' ? scene
         : specifier === '../lib/agentOffice' ? await tsModuleUrl(new URL('../src/lib/agentOffice.ts', import.meta.url))
-          : import.meta.resolve(specifier);
+          : specifier.startsWith('.') ? await tsModuleUrl(new URL('../src/components/' + specifier + (specifier.includes('/lib/') ? '.ts' : '.tsx'), import.meta.url)) : import.meta.resolve(specifier);
     replacements.push({ start: statement.moduleSpecifier.getStart(parsed), end: statement.moduleSpecifier.end, text: JSON.stringify(target) });
   }
   for (const item of replacements.reverse()) code = code.slice(0, item.start) + item.text + code.slice(item.end);
@@ -91,6 +94,18 @@ function session(id, extra = {}) { return { id, title: `会话 ${id}`, created: 
 function snapshot(agents, extra = {}) { return { agents, loading: false, error: null, observedAt: '2026-09-30T08:00:00Z', coverage: '来自本轮结构化执行记录，未上报角色不补全', ...extra }; }
 function agent(id, extra = {}) { return { id, name: `Agent ${id}`, role: '协作角色', task: `正在处理任务 ${id}`, state: 'working', source: 'live', ...extra }; }
 
+test('status opens exact employee process and changing the observed session closes it', async t => {
+  const view = await fixture(t, { sessions:[session('one'), session('two')] });
+  view.harness.snapshots.one = snapshot([agent('root:one')], {turnId:'turn-one',events:[]});
+  view.harness.snapshots.two = snapshot([agent('root:two')], {turnId:'turn-two',events:[]});
+  await view.click(view.button('实时观测'));
+  await view.click(view.container.querySelector('.office-status-button'));
+  assert.match(document.querySelector('[role="dialog"]').textContent,/turn-one/);
+  assert.doesNotMatch(document.querySelector('[role="dialog"]').textContent,/turn-two/);
+  await view.select('two');
+  assert.equal(document.querySelector('[role="dialog"]'),null);
+});
+
 test('the office defaults to a conspicuously simulated six-agent scene and selection updates the detail panel', async (t) => {
   const view = await fixture(t);
   const { harness: h } = view;
@@ -111,6 +126,49 @@ test('the office defaults to a conspicuously simulated six-agent scene and selec
   await view.click(view.container.querySelector('[data-scene-agent="researcher"]'));
   assert.equal(view.container.querySelector('.office-agent-detail h3').textContent, 'Scout');
   assert.equal(rows.find((button) => button.textContent.includes('Scout')).getAttribute('aria-pressed'), 'true');
+});
+
+test('close-up follows roster and scene selections while keeping the detail panel on the same employee', async t => {
+  const view = await fixture(t);
+  await view.click(view.button('近看选中员工'));
+  assert.equal(view.harness.scene.focusId, view.harness.scene.selectedId);
+  const writer = [...view.container.querySelectorAll('.office-member-list button')].find(button => button.textContent.includes('Quill'));
+  await view.click(writer);
+  assert.equal(view.harness.scene.selectedId, 'writer');
+  assert.equal(view.harness.scene.focusId, 'writer');
+  assert.equal(view.container.querySelector('.office-agent-detail h3').textContent, 'Quill');
+  assert.equal(view.button('查看全办公室').getAttribute('aria-pressed'), 'true');
+  await view.click(view.container.querySelector('[data-scene-agent="researcher"]'));
+  assert.equal(view.harness.scene.selectedId, 'researcher');
+  assert.equal(view.harness.scene.focusId, 'researcher');
+  assert.equal(view.container.querySelector('.office-agent-detail h3').textContent, 'Scout');
+  await view.click(view.button('查看全办公室'));
+  assert.equal(view.harness.scene.focusId, null);
+});
+
+test('a focused live employee disappearing resets close-up and does not restore it if that identity returns', async t => {
+  const view = await fixture(t);
+  const root = agent('root:one');
+  const child = agent('child', { parentId: root.id });
+  view.harness.snapshots.one = snapshot([root, child], { turnId: 'turn-old' });
+  await view.click(view.button('实时观测'));
+  await view.click(view.container.querySelector('[data-scene-agent="child"]'));
+  await view.click(view.button('近看选中员工'));
+  assert.equal(view.harness.scene.focusId, 'child');
+  view.harness.snapshots.one = snapshot([root], { turnId: 'turn-next' });
+  await view.render();
+  assert.equal(view.harness.scene.focusId, null);
+  assert.equal(view.harness.scene.selectedId, root.id);
+  assert.equal(view.button('近看选中员工').getAttribute('aria-pressed'), 'false');
+  assert.equal(view.container.querySelector('.office-agent-detail h3').textContent, root.name);
+  view.harness.snapshots.one = snapshot([root, child], { turnId: 'turn-next' });
+  await view.render();
+  assert.equal(view.harness.scene.focusId, null, 'removed focus is cleared, not merely hidden');
+  await view.click(view.button('近看选中员工'));
+  view.harness.snapshots.one = snapshot([], { turnId: 'turn-empty' });
+  await view.render();
+  assert.equal(view.harness.scene.focusId, null);
+  assert.equal(view.button('近看选中员工').disabled, true);
 });
 
 test('demo playback, replay, camera reset and unmount clean up the animation frame', async (t) => {

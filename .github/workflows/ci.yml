@@ -2,13 +2,35 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  frontend:
+    name: Frontend contracts and production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.16.0'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm ci
+      - name: Run frontend regression tests
+        run: npm test
+      - name: Lint frontend
+        run: npm run lint
+      - name: Build production frontend
+        run: npm run build
+
   validate-skills:
     name: Skill contracts
     runs-on: ubuntu-latest

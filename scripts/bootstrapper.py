@@ -22,7 +22,8 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 
-RELEASE_API = "https://api.github.com/repos/ZJU-REAL/Easel/releases"
+RELEASE_REPOSITORY = "StarrySea1412/Easel"
+RELEASE_API = f"https://api.github.com/repos/{RELEASE_REPOSITORY}/releases"
 USER_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Easel"
 DOWNLOAD_TIMEOUT = 120
 MAX_DOWNLOAD_RETRY = 3

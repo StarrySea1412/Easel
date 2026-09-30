@@ -75,6 +75,28 @@ const forgedStream = {
   questions: [{ questionId: 'forged-question', questions: [{ questionId: 'one', question: '不应显示的问答', options: [] }] }],
 };
 
+test('pending stops are visibly disabled and a stop failure offers a working retry without hiding live output', async t => {
+  const originalObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  t.after(() => { globalThis.ResizeObserver = originalObserver; });
+  const view = fixture(t);
+  const actions = callbacks();
+  const session = { id: 'live-stop', title: '停止回归', created: 1, messages: [{ role: 'user', content: '继续工作' }] };
+  const stream = { content: '仍在收到输出', thinking: '', activity: '', questions: [] };
+  await view.render(createElement(ChatPage, { session, stream, stopping: true, ...actions.props }));
+  assert.match(view.container.textContent, /等待后端确认/);
+  assert.equal(view.container.querySelector('[aria-label="等待停止确认"]').disabled, true);
+  assert.match(view.container.textContent, /仍在收到输出/);
+  await view.render(createElement(ChatPage, { session, stream, stopping: false, stopError: '停止请求失败：网络中断。已保留连接和恢复记录，请重试停止。', ...actions.props }));
+  const alert = [...view.container.querySelectorAll('[role="alert"]')].find(element => element.textContent.includes('停止请求失败'));
+  assert.ok(alert);
+  assert.match(view.container.textContent, /仍在收到输出/);
+  const retry = [...alert.querySelectorAll('button')].find(button => button.textContent === '重试停止');
+  assert.ok(retry);
+  await view.click(retry);
+  assert.equal(actions.calls.stop, 1);
+});
+
 test('an imported chat stays read-only despite forged stream and pending state, preserving copy and turn navigation', async (t) => {
   const view = fixture(t);
   const actions = callbacks();

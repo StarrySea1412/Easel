@@ -15,7 +15,9 @@ import type { UploadedFile } from '../lib/api';
 interface ChatPageProps {
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
-  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[]) => void;
+  stopping?: boolean;
+  stopError?: string;
+  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[]) => boolean;
   onStop: () => void;
   onResend: (
     userIndex: number,
@@ -42,7 +44,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat }: ChatPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef=useRef<HTMLDivElement>(null);
   const turnRefs=useRef(new Map<number,HTMLDivElement>());
@@ -101,11 +103,11 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
           </div>
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从选题到发布，一站式帮你把想法做成能发的内容。</p>
-          <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} onSend={onSend} onStop={onStop} />
+          <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="card card-hover suggestion-card"
-                onClick={() => { if (!isStreaming) onSend(s.prompt, undefined, readSelectedSkills(session.id)); }}>
+                onClick={() => { if (!isStreaming && !stopping) onSend(s.prompt, undefined, readSelectedSkills(session.id)); }}>
                 <span className="suggestion-icon">{s.icon}</span>
                 <span className="suggestion-body">
                   <span className="suggestion-title">{s.title}</span>
@@ -156,7 +158,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
                   onRetry: !isImported && isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
-                  canModify: !isImported && !isStreaming,
+                  canModify: !isImported && !isStreaming && !stopping,
                 };
               } else {
                 const pi = i - 1;
@@ -166,7 +168,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
                   onRetry: (!isImported && isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,
-                  canModify: !isImported && !isStreaming,
+                  canModify: !isImported && !isStreaming && !stopping,
                 };
               }
             }
@@ -194,7 +196,11 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
       </div>{nodes.length>0&&<ChatTurnNavigation nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
       {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
-        {!isImported && <div className="chat-input-inner"><ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} onSend={onSend} onStop={onStop} /></div>}
+        {!isImported && <div className="chat-input-inner">
+          {stopping && <p className="composer-skills-note" role="status">正在请求停止，等待后端确认…</p>}
+          {stopError && <div className="composer-upload-error" role="alert">{stopError}{isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
+          <ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} />
+        </div>}
       </div>}
     </div>
   );

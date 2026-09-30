@@ -1,0 +1,16 @@
+.office-agent-controls { padding: 18px 20px; border-top: 1px solid #e8ece7; }
+.office-controls-heading { display:flex;align-items:center;justify-content:space-between;gap:8px; }
+.office-controls-heading h3 { margin:0;font-size:13px; }
+.office-agent-controls h4 { font-size:12px;margin:13px 0 7px; }
+.office-control-note { font-size:11px;line-height:1.65;color:#77817a;margin:8px 0;overflow-wrap:anywhere; }
+.office-model-router { display:flex;flex-direction:column;gap:5px; }
+.office-model-router label { font-size:11px;color:#66756c; }
+.office-model-router select { min-width:0;width:100%;padding:8px 9px;border:1px solid #dfe5df;border-radius:7px;background:#fff;color:#42564a;font:inherit;font-size:11px; }
+.office-model-router .office-button { margin-top:5px; }
+.office-control-link { border:0;background:transparent;color:#567c67;font:inherit;font-size:10px;cursor:pointer;padding:5px 0;text-align:left; }
+.office-control-link:disabled,.office-agent-controls button:disabled,.office-model-router select:disabled { opacity:.5;cursor:default; }
+.office-agent-stop { margin-top:15px;padding-top:2px;border-top:1px solid #edf0eb; }
+.office-control-stop { color:#a16b5d; }
+.office-control-error,.office-control-message { font-size:11px;line-height:1.65;overflow-wrap:anywhere;padding:9px 10px;border-radius:7px;margin:12px 0 0; }
+.office-control-error { color:#9b5f4b;background:#faf0e9; }
+.office-control-message { color:#46765c;background:#edf5ef; }

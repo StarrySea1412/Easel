@@ -47,6 +47,10 @@ def _find_root() -> Path:
 
 
 PROJECT_ROOT = _find_root()
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from easel import local_records
+
 DEFAULT_DATA = Path(os.environ.get("EASEL_DATA_DIR") or PROJECT_ROOT) / "outputs" / "_schedule.json"
 CST = timezone(timedelta(hours=8))
 
@@ -64,26 +68,11 @@ PLATFORM_NAMES = {
 # I/O
 # --------------------------------------------------------------------------- #
 def load(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data if isinstance(data, list) else []
+    return local_records.read(path, '排期')
 
 
 def atomic_write(path: Path, items: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    local_records.write(path, items, '排期')
 
 
 def _today() -> datetime:
@@ -168,6 +157,9 @@ def record_publish(platform: str, title: str, url: str = "", ptype: str = "",
         items = load(path)
         items.append(item)
         atomic_write(path, items)
+    except local_records.RecordError as exc:
+        print(str(exc), file=sys.stderr)
+        return False
     except Exception:
         return False  # 记录失败绝不影响发布
     if forward_log:
@@ -184,9 +176,10 @@ def cmd_record_publish(args) -> None:
                         ptype=args.type or "", tags=args.tags or "",
                         note=args.note or "", source=args.source or "chat",
                         data_path=Path(args.data), forward_log=not args.no_log)
-    print(json.dumps({"ok": ok, "skipped": not ok and
-                      os.environ.get("EASEL_CALENDAR_AUTORECORD") == "0"},
-                     ensure_ascii=False))
+    skipped = not ok and os.environ.get("EASEL_CALENDAR_AUTORECORD") == "0"
+    print(json.dumps({"ok": ok, "skipped": skipped}, ensure_ascii=False))
+    if not ok and not skipped:
+        raise SystemExit(1)
 
 
 def cmd_add_event(args) -> None:
@@ -588,7 +581,10 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    args.func(args)
+    try:
+        args.func(args)
+    except local_records.RecordError as exc:
+        sys.exit(str(exc))
 
 
 if __name__ == "__main__":

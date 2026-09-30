@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { officeWorkSurface } from './officeWorkSurface';
+import { createOfficeScreenTexture } from './officeScreenTexture';
 import type { OfficeAgent } from '../../lib/agentOffice';
 import {
   OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, officeLayout, poseOfficeAvatar,
   type OfficeAvatar, type OfficeWorld,
 } from './officeGeometry';
 import { createSceneScheduler } from './sceneScheduler';
+import { layoutOfficeLabels, type OfficeLabelAnchor, type OfficeLabelPlacement, type OfficeProtectedArea } from './labelLayout';
 
 export interface OfficeSceneInput {
   agents: OfficeAgent[];
@@ -16,6 +19,7 @@ export interface OfficeSceneInput {
 interface RuntimeOptions extends OfficeSceneInput {
   host: HTMLDivElement;
   labels: Map<string, HTMLButtonElement>;
+  stems?: Map<string, SVGLineElement>;
   sign: HTMLSpanElement;
   onSelect: (id: string) => void;
   onUnavailable: (message: string) => void;
@@ -65,7 +69,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   controls.minAzimuthAngle = -Math.PI / 12;
   controls.maxAzimuthAngle = Math.PI / 1.85;
   controls.minZoom = 0.65;
-  controls.maxZoom = 2.7;
+  controls.maxZoom = 4.5;
   controls.target.set(0, 0.65, 0);
   controls.update();
 
@@ -90,6 +94,9 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   let avatarResources = new OfficeResources();
   cleanups.push(() => avatarResources.dispose());
   let world: OfficeWorld = createOfficeWorld(resources, input.agents.length);
+  const screenTextures = new Map<number, ReturnType<typeof createOfficeScreenTexture>>();
+  const clearScreenTextures = () => { for (const screen of screenTextures.values()) screen?.dispose(); screenTextures.clear(); };
+  cleanups.push(clearScreenTextures);
   batchOfficeArchitecture(resources, world);
   scene.add(world.root);
   let layoutKey = officeLayout(input.agents.length).key;
@@ -106,6 +113,68 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   const animate = () => visible() && focused && !input.paused && !reducedMotion?.matches
     && input.agents.some((agent) => ['working', 'thinking', 'done', 'error'].includes(agent.state));
   const projected = new THREE.Vector3();
+  const labelSizes = new Map<string, { width: number; height: number }>();
+  let labelLayoutKey = '';
+  let labelPlacements: OfficeLabelPlacement[] = [];
+  let focusedAgentId: string | null = null;
+
+  function measureLabels() {
+    labelSizes.clear();
+    for (const [id, element] of labels) labelSizes.set(id, {
+      width: element.offsetWidth || 126, height: element.offsetHeight || 42,
+    });
+    labelLayoutKey = '';
+  }
+
+  function positionAgentLabels() {
+    const anchors: OfficeLabelAnchor[] = [];
+    const protectedAreas: OfficeProtectedArea[] = [];
+    const protect = (xs: number[], ys: number[], zs: number[]) => {
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      for (const x of xs) for (const y of ys) for (const z of zs) {
+        projected.set(x, y, z).project(camera);
+        if (projected.z <= -1 || projected.z >= 1) continue;
+        const px = (projected.x * 0.5 + 0.5) * width, py = (-projected.y * 0.5 + 0.5) * height;
+        left = Math.min(left, px); right = Math.max(right, px); top = Math.min(top, py); bottom = Math.max(bottom, py);
+      }
+      if (Number.isFinite(left)) protectedAreas.push({ left, top, width: right - left, height: bottom - top });
+    };
+    for (const [index, agent] of input.agents.entries()) {
+      const avatar = avatars.get(agent.id), desk = world.desks[index];
+      if (!avatar || !desk) continue;
+      const p = avatar.root.position;
+      // Reserve the employee, hands and working props, plus the monitor face.
+      protect([p.x - .46, p.x + .46], [.74, 2.12], [p.z - .62, p.z + .3]);
+      protect([desk.slot.x - .05, desk.slot.x + .96], [1.06, 1.78], [desk.slot.z - .24, desk.slot.z - .12]);
+    }
+    for (const [id, avatar] of avatars) {
+      if (!labels.has(id) || focusedAgentId && id !== focusedAgentId) continue;
+      projected.copy(avatar.label).project(camera);
+      if (projected.z <= -1 || projected.z >= 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) continue;
+      anchors.push({ id, x: (projected.x * 0.5 + 0.5) * width, y: (-projected.y * 0.5 + 0.5) * height,
+        ...(labelSizes.get(id) || { width: 126, height: 42 }), selected: id === input.selectedId });
+    }
+    const key = JSON.stringify([width, height, anchors, protectedAreas]);
+    if (key !== labelLayoutKey) { labelPlacements = layoutOfficeLabels(anchors, width, height, protectedAreas); labelLayoutKey = key; }
+    const shown = new Set(labelPlacements.map(item => item.id));
+    for (const [id, element] of labels) {
+      element.style.visibility = shown.has(id) ? 'visible' : 'hidden';
+      const stem = options.stems?.get(id);
+      if (stem) stem.style.visibility = shown.has(id) ? 'visible' : 'hidden';
+    }
+    for (const item of labelPlacements) {
+      const element = labels.get(item.id)!;
+      element.style.transform = `translate(${item.left}px, ${item.top}px)`;
+      element.style.zIndex = item.selected ? '3' : '2';
+      const stem = options.stems?.get(item.id);
+      if (stem) {
+        stem.setAttribute('x1', String(item.left + item.width / 2));
+        stem.setAttribute('y1', String(item.top + item.height));
+        stem.setAttribute('x2', String(item.x));
+        stem.setAttribute('y2', String(item.y));
+      }
+    }
+  }
 
   function projectLabel(element: HTMLElement, position: THREE.Vector3) {
     projected.copy(position).project(camera);
@@ -125,7 +194,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       lastFrame = time;
       for (const agent of input.agents) {
         const avatar = avatars.get(agent.id);
-        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId);
+        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId, agent.action?.kind);
       }
       camera.updateMatrixWorld();
       try { renderer.render(scene, camera); }
@@ -134,10 +203,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
         options.onUnavailable('三维画面暂时无法继续绘制。Agent 状态仍可在列表中查看，请重试加载场景。');
         return;
       }
-      for (const [id, avatar] of avatars) {
-        const label = labels.get(id);
-        if (label) projectLabel(label, avatar.label);
-      }
+      positionAgentLabels();
       projectLabel(sign, world.sign);
     },
   });
@@ -172,6 +238,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   function synchronizeAgents() {
     const nextLayout = officeLayout(input.agents.length).key;
     if (nextLayout !== layoutKey) {
+      clearScreenTextures();
       scene.remove(world.root);
       for (const avatar of avatars.values()) scene.remove(avatar.root);
       avatars.clear();
@@ -184,7 +251,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       avatarIds = '';
       fitCamera(false);
     }
-    const ids = JSON.stringify(input.agents.map((agent) => agent.id));
+    const ids = JSON.stringify(input.agents.map((agent) => [agent.id, agent.appearance]));
     if (avatarIds !== ids) {
       for (const avatar of avatars.values()) scene.remove(avatar.root);
       // Agent identities can churn while desk capacity stays unchanged. Release
@@ -192,7 +259,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       avatarResources.dispose();
       avatarResources = new OfficeResources();
       avatars = new Map(input.agents.map((agent, index) => {
-        const avatar = createOfficeAvatar(avatarResources, world.desks[index], agent.id);
+        const avatar = createOfficeAvatar(avatarResources, world.desks[index], agent.id, agent.appearance);
         scene.add(avatar.root);
         return [agent.id, avatar];
       }));
@@ -203,6 +270,25 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
         desk.screen.emissiveIntensity = 0.15;
       }
     }
+    for (const [index, desk] of world.desks.entries()) {
+      const agent = input.agents[index];
+      if (!agent) {
+        const old = screenTextures.get(index);
+        if (old) { desk.screen.map = null; desk.screen.needsUpdate = true; old.dispose(); }
+        screenTextures.delete(index);
+        continue;
+      }
+      if (!screenTextures.has(index)) screenTextures.set(index, createOfficeScreenTexture());
+      const surface = screenTextures.get(index);
+      if (!surface) continue;
+      if (desk.screen.map !== surface.texture) {
+        desk.screen.map = surface.texture;
+        desk.screen.emissive.setHex(0x000000);
+        desk.screen.color.setHex(0xffffff);
+        desk.screen.needsUpdate = true;
+      }
+      surface.update(agent ? officeWorkSurface(agent) : null);
+    }
     refresh();
   }
 
@@ -211,6 +297,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
     const bounds = host.getBoundingClientRect();
     width = Math.max(1, bounds.width);
     height = Math.max(1, bounds.height);
+    measureLabels();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     renderer.setSize(width, height, false);
     fitCamera(false);
@@ -298,9 +385,19 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
     update(next: OfficeSceneInput) {
       if (disposed) return;
       input = next;
+      measureLabels();
       synchronizeAgents();
     },
-    reset() { if (!disposed) fitCamera(true); },
+    reset() { if (!disposed) { focusedAgentId = null; fitCamera(true); } },
+    focus(id: string) {
+      const avatar = avatars.get(id);
+      if (disposed || !avatar) return;
+      focusedAgentId = id;
+      controls.target.set(avatar.root.position.x, 1, avatar.root.position.z - 0.15);
+      camera.position.copy(controls.target).add(new THREE.Vector3(7, 5, 8));
+      camera.zoom = 3.6;
+      camera.updateProjectionMatrix(); controls.update(); refresh();
+    },
     dispose,
   };
   } catch (error) {

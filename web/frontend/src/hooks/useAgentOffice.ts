@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { fetchAgentOffice, type OfficeSnapshot } from '../lib/agentOffice';
 
 interface Observation extends OfficeSnapshot { sessionId: string | null; loading: boolean; error: string | null }
-const EMPTY: OfficeSnapshot = { agents: [], events: [], observedAt: null, coverage: '选择会话后，仅展示该会话中已观察到的 Agent。' };
+const EMPTY: OfficeSnapshot = { turnId: null, agents: [], events: [], observedAt: null, coverage: '选择会话后，仅展示该会话中已观察到的 Agent。' };
 
 /** Bounded, non-overlapping polling, with identity isolation and stale-result protection. */
 export function useAgentOffice(sessionId: string | null, enabled: boolean) {
@@ -37,7 +37,7 @@ export function useAgentOffice(sessionId: string | null, enabled: boolean) {
         clearTimeout(timeout);
         if (deadline === timeout) deadline = undefined;
         if (request === currentRequest) request = undefined;
-        if (!disposed && !document.hidden) timer = setTimeout(() => void read(), 4000);
+        if (!disposed && !document.hidden) timer = setTimeout(() => void read(), 2000);
       }
     };
     const visibility = () => {

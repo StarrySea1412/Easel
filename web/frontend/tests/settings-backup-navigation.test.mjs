@@ -33,6 +33,9 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   } else if (specifier === './settings/StorageSettingsCard') {
     target = moduleUrl(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
       export default function StorageCard() {return createElement('section',{'data-testid':'storage-card'},'保存位置桩');}`);
+  } else if (specifier === './settings/EmployeeAppearanceSettings') {
+    target = moduleUrl(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
+      export default function EmployeeSettings() {return createElement('section',{'data-testid':'employee-settings'},'员工角色卡桩');}`);
   } else {
     const named = statement.importClause?.namedBindings;
     const names = named && ts.isNamedImports(named) ? named.elements.map(item => (item.propertyName || item.name).text) : [];
@@ -122,6 +125,21 @@ test('a fresh navigation key restores the same more section with latest props wi
   assert.equal(view.container.querySelector('.tab.active')?.textContent, '配音', 'channel state survives the external navigation');
   assert.equal(view.harness.calls.length, callsBeforeNavigation, 'settings initialization effects did not remount');
   await view.render(2, latest);
+  assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
+});
+
+test('employee appearance is a reachable independent settings section without additional server requests', async t => {
+  const view = await fixture(t);
+  const before = view.harness.calls.length;
+  const entry = view.nav('员工角色卡');
+  assert.ok(entry);
+  await view.click(entry);
+  assert.equal(entry.getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('[data-testid="employee-settings"]'));
+  assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
+  assert.equal(view.harness.calls.length, before);
+  await view.click(view.nav('更多设置'));
+  assert.equal(view.container.querySelector('[data-testid="employee-settings"]'), null);
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
 });
 

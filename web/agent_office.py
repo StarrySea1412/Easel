@@ -292,7 +292,9 @@ def _public_events(events: list[dict], root_id: str, turn_id: str) -> list[dict]
     def add(call_id: str, kind: str, name: str, status: str, event: dict, message: dict):
         ident = hashlib.sha256(f'{root_id}\0{turn_id}\0{call_id}\0{kind}'.encode()).hexdigest()[:24]
         prefix = '调用工具' if kind == 'call' else '工具返回错误' if status == 'failed' else '工具返回'
-        record = {'id': ident, 'agentId': root_id, 'kind': kind, 'title': f'{prefix}：{name}', 'status': status}
+        operation_id = hashlib.sha256(f'{root_id}\0{turn_id}\0{call_id}'.encode()).hexdigest()[:24]
+        record = {'id': ident, 'agentId': root_id, 'kind': kind, 'title': f'{prefix}：{name}', 'status': status,
+                  'toolName': name, 'operationId': operation_id}
         stamp = _timestamp(event.get('timestamp') or message.get('timestamp'))
         if stamp is not None:
             try:

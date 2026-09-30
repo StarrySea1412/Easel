@@ -45,6 +45,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
+from easel import local_records
 from easel.reasoning_stream import ReasoningStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
@@ -3057,6 +3058,7 @@ async def api_chat_stream(req: ChatRequest):
                             response_id = d.get('id')
                             if isinstance(response_id, str) and response_id.startswith('chatcmpl_'):
                                 run_info['run_id'] = response_id
+                                hproc._office_run_id = response_id
                             for reasoning, snapshot, block, event_id in provider_reasoning(d):
                                 rc = reasoning_stream.push('http', reasoning, snapshot=snapshot, block=block, event_id=event_id)
                                 if rc:
@@ -3283,6 +3285,7 @@ async def api_chat_stream(req: ChatRequest):
                     if rid is None:
                         return          # 还没拿到 runId，等下一条带 runId 的事件再闩锁
                     run_info["run_id"] = rid
+                    proc._office_run_id = rid
                 ev, et, delta = o.get("event"), o.get("evtType"), visible_text(o.get("delta"))
                 # 记录最后一个 raw 事件：正常收尾 last_ev == assistant_message_end；
                 # 若停在 text_delta/thinking_delta 说明输出或思考流被中断、没正常收尾（本次排查关键信号）。
@@ -3491,6 +3494,7 @@ async def api_chat_stream(req: ChatRequest):
                 # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
                 _save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
+                    "gateway_run_id": run_info.get('run_id'),
                     "thinking": ''.join(full_thinking),
                     "thinkingStatus": 'available' if full_thinking else 'unavailable',
                     "thinkingSource": reasoning_stream.source,
@@ -3732,6 +3736,13 @@ def api_outputs():
 
         enrich(node.get('children', []))
     return nodes
+
+
+@app.get('/api/workspace-outputs')
+def api_workspace_outputs():
+    """Recent public output metadata; sync handler runs in FastAPI's worker pool."""
+    import office_outputs
+    return office_outputs.snapshot(OUTPUTS_DIR)
 
 
 @app.get("/api/output/{path:path}")
@@ -4869,15 +4880,11 @@ def _run_publish_bg(platform: str, cmd: list, title: str, body: str, cfg: dict,
     except OSError:
         pass
     if ok:
-        try:
-            items = _read_schedule()
-            items.append({'id': uuid.uuid4().hex[:12], 'title': title,
-                          'date': time.strftime('%Y-%m-%d'), 'platform': cfg['name'],
-                          'time': time.strftime('%H:%M'), 'status': 'published', 'note': body[:200],
-                          'kind': 'content', 'source': 'publish-page'})
-            _write_schedule(items)
-        except Exception:
-            pass
+        calendar_warning = _record_published_schedule(title, body, cfg['name'])
+        if calendar_warning:
+            current = _read_publish_status(platform)
+            state = current['state'] if current['state'] in ('success', 'error') else 'success'
+            _write_publish_status(status_file, state, '\n'.join(filter(None, [current.get('message'), calendar_warning])))
         # 邮箱通知钩子：发布成功发一封摘要邮件（异步路径）。未配置零开销，失败不影响结果。
         if _notify_email_completion is not None:
             try:
@@ -5029,16 +5036,9 @@ async def api_publish(platform: str, req: PublishRequest):
             lf.write('STDERR:\n' + (proc.stderr or '')[-2000:] + '\n')
     except Exception:
         pass
+    calendar_warning = ''
     if ok:
-        try:
-            items = _read_schedule()
-            items.append({'id': uuid.uuid4().hex[:12], 'title': title,
-                          'date': time.strftime('%Y-%m-%d'), 'platform': cfg['name'],
-                          'time': time.strftime('%H:%M'), 'status': 'published',
-                          'note': req.body[:200], 'kind': 'content', 'source': 'publish-page'})
-            _write_schedule(items)
-        except Exception:
-            pass
+        calendar_warning = _record_published_schedule(title, req.body, cfg['name'])
         # 邮箱通知钩子：发布成功发一封摘要邮件（同步路径）。未配置零开销，失败不影响结果。
         if _notify_email_completion is not None:
             try:
@@ -5046,7 +5046,7 @@ async def api_publish(platform: str, req: PublishRequest):
                                          summary=(req.body or '')[:300], source='publish')
             except Exception:
                 pass
-    return {'ok': ok, 'message': '发布成功' if ok else '发布失败（见 detail）', 'detail': detail}
+    return {'ok': ok, 'message': calendar_warning or ('发布成功' if ok else '发布失败（见 detail）'), 'detail': detail}
 
 
 class ProfileBuildRequest(BaseModel):
@@ -5285,20 +5285,31 @@ SCHEDULE_KINDS = {"content", "event"}
 
 
 def _read_schedule() -> list[dict]:
-    if not SCHEDULE_FILE.is_file():
-        return []
     try:
-        d = json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
-        return d if isinstance(d, list) else []
-    except Exception:
-        return []
+        return local_records.read(SCHEDULE_FILE, '排期')
+    except local_records.RecordError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 def _write_schedule(items: list[dict]) -> None:
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = SCHEDULE_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(SCHEDULE_FILE)
+    try:
+        local_records.write(SCHEDULE_FILE, items, '排期')
+    except local_records.RecordError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
+
+
+def _record_published_schedule(title: str, body: str, platform: str) -> str:
+    """Keep a completed publish successful, but make failed calendar saving visible."""
+    try:
+        items = _read_schedule()
+        items.append({'id': uuid.uuid4().hex[:12], 'title': title,
+                      'date': time.strftime('%Y-%m-%d'), 'platform': platform,
+                      'time': time.strftime('%H:%M'), 'status': 'published', 'note': body[:200],
+                      'kind': 'content', 'source': 'publish-page'})
+        _write_schedule(items)
+    except HTTPException as exc:
+        return f'发布已完成，但排期记录未保存：{exc.detail}'
+    return ''
 
 
 class ScheduleItem(BaseModel):
@@ -5373,22 +5384,27 @@ async def api_schedule_delete(sid: str):
     new = [it for it in items if it.get("id") != sid]
     if len(new) == len(items):
         raise HTTPException(404, "排期不存在")
-    _write_schedule(new)
+    items[:] = new
+    _write_schedule(items)
     return {"ok": True, "deleted": sid}
 
 
 @app.get("/api/schedule/context")
 async def api_schedule_context(days: int = 14):
     """规划摘要（发布节奏/断更缺口 + 待发排期 + 临近节点 + 建议）——薄封装 calendar_ops，
-    前端页头「近期节点/建议」与 Agent 读回共用同一逻辑。失败返回空摘要不抛错。"""
+    前端页头「近期节点/建议」与 Agent 读回共用同一逻辑，失败明确报错。"""
     cmd = [sys.executable, str(SHARED_SCRIPTS / "calendar_ops.py"),
            "--data", str(SCHEDULE_FILE), "context", "--days", str(max(1, min(days, 90)))]
     try:
         proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
                               capture_output=True, text=True, timeout=20)
-        return json.loads(proc.stdout) if proc.returncode == 0 and proc.stdout.strip() else {}
-    except Exception:
-        return {}
+        if proc.returncode == 0 and proc.stdout.strip():
+            value = json.loads(proc.stdout)
+            if isinstance(value, dict):
+                return value
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    raise HTTPException(503, '排期摘要读取失败；请检查排期文件和运行环境后重试。')
 
 
 IDEAS_FILE = OUTPUTS_DIR / "_ideas.json"
@@ -5620,20 +5636,17 @@ async def api_imagegen_gallery():
 
 
 def _read_ideas() -> list[dict]:
-    if not IDEAS_FILE.is_file():
-        return []
     try:
-        d = json.loads(IDEAS_FILE.read_text(encoding="utf-8"))
-        return d if isinstance(d, list) else []
-    except Exception:
-        return []
+        return local_records.read(IDEAS_FILE, '选题')
+    except local_records.RecordError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 def _write_ideas(items: list[dict]) -> None:
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = IDEAS_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(IDEAS_FILE)
+    try:
+        local_records.write(IDEAS_FILE, items, '选题')
+    except local_records.RecordError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 class IdeaItem(BaseModel):
@@ -5687,7 +5700,8 @@ async def api_ideas_delete(iid: str):
     new = [it for it in items if it.get("id") != iid]
     if len(new) == len(items):
         raise HTTPException(404, "选题不存在")
-    _write_ideas(new)
+    items[:] = new
+    _write_ideas(items)
     return {"ok": True, "deleted": iid}
 
 
@@ -5722,7 +5736,57 @@ async def api_agent_office(sessionId: str):
     # on. A boolean alone cannot distinguish two successive live processes.
     if current_process is not process or current_turn_id != turn_id or current_live != live:
         return agent_office.updating_snapshot(sessionId)
+    import office_controls
+    result = await asyncio.to_thread(office_controls.confirmed_stop_snapshot, sys.modules[__name__], result)
+    current_process, current_turn_id, current_live = execution_state()
+    if current_process is not process or current_turn_id != turn_id or current_live != live:
+        return agent_office.updating_snapshot(sessionId)
     return result
+
+
+class OfficeControlRequest(BaseModel):
+    sessionId: str = Field(min_length=1, max_length=120)
+    turnId: str = Field(min_length=1, max_length=120)
+    agentId: str = Field(min_length=1, max_length=140)
+
+
+class OfficeModelRequest(OfficeControlRequest):
+    modelRef: str = Field(min_length=1, max_length=300)
+
+
+@app.get('/api/agent-office/controls')
+async def api_office_controls(sessionId: str, turnId: str, agentId: str):
+    import office_controls
+    return await asyncio.to_thread(office_controls.operate, sys.modules[__name__], sessionId, turnId, agentId)
+
+
+@app.post('/api/agent-office/model')
+async def api_office_model(req: OfficeModelRequest):
+    import office_controls
+    async def apply():
+        return await asyncio.to_thread(office_controls.operate, sys.modules[__name__], req.sessionId,
+                                       req.turnId, req.agentId, 'model', req.modelRef)
+    if req.agentId != f'root:{req.sessionId}':
+        return await apply()
+    # A root-model save cannot race the next locally initiated chat turn.
+    lock = _session_lock(req.sessionId)
+    if lock.locked():
+        raise HTTPException(409, '请先停止当前会话并等待收尾完成，再分配模型。')
+    async with lock:
+        xlock = _CrossProcLock(req.sessionId)
+        try:
+            if not await asyncio.to_thread(xlock.acquire, 0):
+                raise HTTPException(409, '当前会话正在使用中，请稍后重试。')
+            return await apply()
+        finally:
+            xlock.release()
+
+
+@app.post('/api/agent-office/stop')
+async def api_office_stop(req: OfficeControlRequest):
+    import office_controls
+    return await asyncio.to_thread(office_controls.operate, sys.modules[__name__], req.sessionId,
+                                   req.turnId, req.agentId, 'stop')
 
 
 class SkillCritiqueRequest(BaseModel):

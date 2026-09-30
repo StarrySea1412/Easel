@@ -23,20 +23,19 @@ jobs:
         run: python -m pip install pyinstaller==6.16.0 pytest
       - name: Installer contract tests
         run: python -m pytest tests/test_install_core.py tests/test_install_runner.py tests/test_bootstrapper.py tests/test_windows_release.py -q
-      - name: Build frontend from lockfile
-        working-directory: web/frontend
-        run: |
-          npm ci
-          npm run lint
-          npm run build
-      - name: Build EXE and payload with reviewed dependency lock
-        run: python scripts/build_windows_release.py
-      - name: Frozen entry point smoke test
+      # The release entry point runs npm ci, npm test, lint and a fresh build
+      # before packaging, so local and CI releases share the same checks.
+      - name: Verify frontend and build EXE with reviewed dependency lock
+        run: python scripts/build_windows_release.py --output dist/windows-installer
+      - name: Verify the unique frozen installer and embedded payload
         shell: pwsh
         run: |
-          $candidate = Get-ChildItem dist/windows-installer/Easel-Setup-*.exe | Select-Object -First 1
-          & $candidate.FullName --help
-          if ($LASTEXITCODE -ne 0) { throw 'Frozen installer failed to start' }
+          $candidates = @(Get-ChildItem -Path 'dist/windows-installer' -Filter 'Easel-Setup-*.exe' -File)
+          if ($candidates.Count -ne 1) { throw "Expected exactly one installer; found $($candidates.Count)" }
+          $release = Get-Content -LiteralPath 'dist/windows-installer/release.json' -Raw | ConvertFrom-Json
+          if ($candidates[0].Name -ne "Easel-Setup-$($release.version).exe") { throw 'Installer filename does not match release.json' }
+          $selfTest = Start-Process -FilePath $candidates[0].FullName -ArgumentList '--self-test' -WindowStyle Hidden -Wait -PassThru
+          if ($selfTest.ExitCode -ne 0) { throw "Frozen installer self-test failed with exit code $($selfTest.ExitCode)" }
       - uses: actions/upload-artifact@v7
         with:
           name: windows-installer-candidate
