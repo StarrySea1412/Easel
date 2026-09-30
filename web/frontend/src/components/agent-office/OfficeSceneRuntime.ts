@@ -50,7 +50,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.25;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   const canvas = renderer.domElement;
   canvas.setAttribute('aria-label', '可旋转和缩放的三维 Agent 办公室');
   canvas.setAttribute('role', 'img');

@@ -290,4 +290,77 @@ test('ambiguous calls remain unmatched in the status filters even when a receipt
   assert.equal(view.dialog().querySelector('.office-process-result'), null);
 });
 
+test('export downloads exactly the current filtered pair and retains focus without exposing thinking or raw arguments', async t => {
+  const blobs = [], downloads = [], revoked = [], timers = [];
+  t.mock.method(URL, 'createObjectURL', blob => { blobs.push(blob); return 'blob:office-export'; });
+  t.mock.method(URL, 'revokeObjectURL', url => revoked.push(url));
+  t.mock.method(window, 'setTimeout', (callback, delay) => { timers.push({ callback, delay }); return 1; });
+  t.mock.method(window.HTMLAnchorElement.prototype, 'click', function () { downloads.push({ name: this.download, href: this.href, connected: this.isConnected }); });
+  const view = await fixture(t, { stale: true, events: [event('call'), event('failed', { kind: 'result', status: 'failed', title: '读取失败', rawOutput: 'DO_NOT_EXPORT' }), event('other', { operationId: op2, toolName: 'write' })] });
+  await view.click(recordFilter(view, '已报告失败'));
+  await searchRecords(view, '读取失败');
+  const button = view.dialog().querySelector('.office-process-export button');
+  button.focus();
+  await view.click(button);
+  assert.equal(document.activeElement, button);
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].connected, true);
+  assert.match(downloads[0].name, /^easel-office-live-records-[\dTZ-]+\.json$/);
+  assert.equal(document.querySelector('a[download]'), null);
+  assert.equal(blobs[0].type, 'application/json;charset=utf-8');
+  const text = await blobs[0].text();
+  const value = JSON.parse(text);
+  assert.equal(value.exportedRecords, 1);
+  assert.equal(value.totalRecords, 2);
+  assert.equal(value.turnId, 'turn-current');
+  assert.equal(value.stale, true);
+  assert.equal(value.records[0].result.status, 'failed');
+  assert.deepEqual(value.filter, { status: 'failed', query: '读取失败' });
+  assert.doesNotMatch(text, /DO_NOT_EXPORT|模型实际返回的当前思考|已上报当前活动/);
+  assert.match(view.dialog().textContent, /已发起 1 条记录的下载/);
+  assert.doesNotMatch(view.dialog().textContent, /已保存到/);
+  assert.deepEqual(revoked, []);
+  assert.equal(timers.at(-1).delay, 60_000);
+  await view.unmount();
+  timers.at(-1).callback();
+  assert.deepEqual(revoked, ['blob:office-export']);
+});
+
+test('export failure preserves records, permits retry, disables empty exports and resets feedback for a new turn', async t => {
+  let fail = true, attempts = 0;
+  t.mock.method(URL, 'createObjectURL', () => { attempts++; if (fail) throw new Error('private browser detail'); return 'blob:retry'; });
+  t.mock.method(URL, 'revokeObjectURL', () => {});
+  t.mock.method(window, 'setTimeout', () => 1);
+  t.mock.method(window.HTMLAnchorElement.prototype, 'click', () => {});
+  const view = await fixture(t, { events: [event('call')] });
+  const button = () => view.dialog().querySelector('.office-process-export button');
+  await view.click(button());
+  assert.match(view.dialog().querySelector('[role="alert"]').textContent, /未能发起记录下载/);
+  assert.doesNotMatch(view.dialog().textContent, /private browser detail/);
+  assert.equal(view.dialog().querySelectorAll('.office-process-step').length, 1);
+  fail = false; await view.click(button());
+  assert.equal(attempts, 2);
+  assert.match(view.dialog().textContent, /已发起 1 条记录/);
+  await searchRecords(view, 'no match');
+  assert.equal(button().disabled, true);
+  await view.render({ turnId: 'turn-next' });
+  assert.doesNotMatch(view.dialog().textContent, /已发起 1 条记录/);
+  assert.equal(button().disabled, false);
+});
+
+test('a failed browser click still cleans up the temporary download URL and anchor', async t => {
+  let cleanup;
+  const revoked = [];
+  t.mock.method(URL, 'createObjectURL', () => 'blob:failed-click');
+  t.mock.method(URL, 'revokeObjectURL', url => revoked.push(url));
+  t.mock.method(window, 'setTimeout', callback => { cleanup = callback; return 1; });
+  t.mock.method(window.HTMLAnchorElement.prototype, 'click', () => { throw new Error('blocked'); });
+  const view = await fixture(t, { events: [event('call')] });
+  await view.click(view.dialog().querySelector('.office-process-export button'));
+  assert.equal(document.querySelector('a[download]'), null);
+  assert.match(view.dialog().textContent, /未能发起记录下载/);
+  cleanup();
+  assert.deepEqual(revoked, ['blob:failed-click']);
+});
+
 test.after(() => window.close());

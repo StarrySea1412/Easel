@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { OFFICE_STATE_LABELS, type OfficeAgent, type OfficeEvent } from '../../lib/agentOffice';
 import type { ChatSession, StreamState } from '../../lib/store';
 import { selectOfficeProcess, selectOfficeEventSteps } from './officeProcessData';
+import { createOfficeRecordExport, downloadOfficeRecordExport, type OfficeRecordExportInput, type OfficeRecordFilter } from './officeProcessExport';
 import './office-process-panel.css';
 
 export interface OfficeProcessPanelProps {
@@ -50,9 +51,10 @@ const RECORD_FILTERS = [
 ] as const;
 
 /** Filter complete paired records; search only the text already visible to the user. */
-function ProcessRecords({ steps }: { steps: ReturnType<typeof selectOfficeEventSteps> }) {
+function ProcessRecords({ steps, agent, turnId, stale }: Pick<OfficeRecordExportInput, 'steps' | 'agent' | 'turnId' | 'stale'>) {
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<(typeof RECORD_FILTERS)[number]['id']>('all');
+  const [filter, setFilter] = useState<OfficeRecordFilter>('all');
+  const [exportFeedback, setExportFeedback] = useState<{ error: boolean; message: string } | null>(null);
   const searchId = useId();
   const searchInput = useRef<HTMLInputElement>(null);
   const records = useMemo(() => steps.map(step => ({ ...step, state: eventState(step.event, step.result) })), [steps]);
@@ -62,6 +64,15 @@ function ProcessRecords({ steps }: { steps: ReturnType<typeof selectOfficeEventS
     return (filter === 'all' || state.category === filter) && terms.every(term => text.includes(term));
   });
   const clear = () => { setQuery(''); setFilter('all'); searchInput.current?.focus(); };
+  const exportRecords = () => {
+    try {
+      const value = createOfficeRecordExport({ agent, turnId, stale, query, filter, totalRecords: records.length, steps: visible });
+      downloadOfficeRecordExport(value);
+      setExportFeedback({ error: false, message: `已发起 ${value.exportedRecords} 条记录的下载，请在浏览器下载列表确认保存。` });
+    } catch {
+      setExportFeedback({ error: true, message: '未能发起记录下载，请检查浏览器下载支持后重试。当前记录仍保留。' });
+    }
+  };
   return <>
     <div className="office-process-record-controls">
       <label htmlFor={searchId}>搜索工具或过程摘要</label>
@@ -75,6 +86,8 @@ function ProcessRecords({ steps }: { steps: ReturnType<typeof selectOfficeEventS
         <span role="status">显示 {visible.length} / {records.length} 条记录</span>
         {(query || filter !== 'all') && <button type="button" onClick={clear}>清除筛选</button>}
       </div>
+      <div className="office-process-export"><button type="button" disabled={!visible.length} onClick={exportRecords}>导出当前记录</button><span>JSON · 仅调用与回执，不包含思考正文</span></div>
+      {exportFeedback && <p className={exportFeedback.error ? 'office-process-warning' : 'office-process-export-notice'} role={exportFeedback.error ? 'alert' : 'status'}>{exportFeedback.message}</p>}
     </div>
     <p className="office-process-note">无匹配回执不代表仍在运行；收到回执也不代表执行成功。状态数量按完整记录统计，包含未配对回执。</p>
     {visible.length ? <ol className="office-process-timeline">{visible.map(({ event, result, state }) =>
@@ -164,7 +177,7 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
         <section className="office-process-section" aria-labelledby={`${titleId}-tools`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-tools`}>调用与回执</h3><span>{steps.length} 条{agent.source === 'demo' ? '模拟记录' : '可见记录'}</span></div>
           <p className="office-process-note">{agent.source === 'demo' ? '以下记录来自预设演示。' : '仅展示当前快照提供的工具名称、过程摘要与回执状态；未上报的工具输出正文不可见。'}</p>
-          {steps.length ? <ProcessRecords key={JSON.stringify([agent.source, agent.id, session?.id, turnId])} steps={steps} /> : <p className="office-process-empty">{agent.source === 'live' && !turnId ? '当前快照没有轮次标识，调用过程暂时无法归属到本轮。' : '尚未收到属于该员工、本轮的调用或回执记录。这不代表它没有工作。'}</p>}
+          {steps.length ? <ProcessRecords key={JSON.stringify([agent.source, agent.id, session?.id, turnId])} steps={steps} agent={agent} turnId={turnId} stale={stale} /> : <p className="office-process-empty">{agent.source === 'live' && !turnId ? '当前快照没有轮次标识，调用过程暂时无法归属到本轮。' : '尚未收到属于该员工、本轮的调用或回执记录。这不代表它没有工作。'}</p>}
         </section>
       </div>
       <footer className="office-process-footer"><span>{agent.source === 'demo' ? '演示内容与真实会话数据分开显示' : '仅显示已经取得的记录，不补写未提供的过程'}</span>{onOpenChat && agent.source === 'live' && <button type="button" className="office-process-open-chat" onClick={() => { onClose(); onOpenChat(); }}>在对话中查看</button>}</footer>

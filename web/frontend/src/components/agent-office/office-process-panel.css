@@ -46,6 +46,12 @@
 .office-process-filters button span { min-width: 16px; font-variant-numeric: tabular-nums; font-size: 11px; opacity: .8; }
 .office-process-record-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; color: #7c8974; font-size: 12px; }
 .office-process-record-summary button { padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: #526d47; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.office-process-export { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 2px; }
+.office-process-export button { padding: 7px 11px; border: 1px solid #bdceac; border-radius: 9px; background: #fbfdf5; color: #526d47; font: inherit; font-size: 12px; cursor: pointer; }
+.office-process-export button:hover { background: #edf4e0; }
+.office-process-export button:disabled { opacity: .5; cursor: not-allowed; }
+.office-process-export > span, .office-process-export-notice { color: #728564; font-size: 11px; }
+.office-process-export-notice { margin: 0; }
 .office-process-step { position: relative; padding: 14px 16px; border: 1px solid #e0e6d8; border-left: 3px solid #9fac8f; border-radius: 0 11px 11px 0; background: #fffefa; }
 .office-process-step--done { border-left-color: #87a477; }
 .office-process-step--error { border-left-color: #ce8b75; }
