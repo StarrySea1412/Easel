@@ -5,11 +5,11 @@ import type { ComponentType } from 'react';
 import {
   IconChat, IconSkills, IconOutputs, IconAccounts, IconProfile,
   IconNewChat, IconEdit, IconArchive, IconUnarchive, IconTrash, IconChevron,
-  IconDashboard, IconChart, IconHistory,
+  IconDashboard, IconChart, IconHistory, IconAgentOffice,
 } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 
-export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'accounts' | 'analysis' | 'profile' | 'settings';
+export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
   currentPage: Page;
@@ -38,6 +38,7 @@ const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }
   { page: 'outputs', Icon: IconOutputs, label: '内容库' },
   { page: 'analysis', Icon: IconChart, label: '内容分析' },
   { page: 'activity', Icon: IconHistory, label: '运行记录' },
+  { page: 'agent-office', Icon: IconAgentOffice, label: 'Agent 办公室' },
   { page: 'accounts', Icon: IconAccounts, label: '账号' },
   { page: 'profile', Icon: IconProfile, label: '画像' },
   { page: 'settings', Icon: IconGear, label: '设置' },

@@ -4,13 +4,16 @@ All notable changes to Easel are documented in this file.
 
 ## [Unreleased]
 
+- Add a real Three.js Agent office with animated characters, selectable desks, camera controls, a clearly labeled six-agent demonstration, and session-scoped observation of existing backend evidence.
+- Show recent tool calls and returns with Agent filtering and links to conversations and activity. Keep unknown and stopped states distinct, discard observations that cross execution turns, and freeze stale snapshots on refresh failures.
+- Release 3D resources when Agent identities change or the page closes; respect visibility and reduced motion, pause hidden demo time, and offer an honest WebGL failure/retry view.
 - Add local conversation backups with validation previews and additive read-only imports. Preserve unsaved and in-progress text, keep corrupt storage untouched, and export raw recovery evidence separately.
 - Keep imported transcripts detached from backend jobs and usage evidence, disable automatic media loading, and preserve literal attachment markers on reload. Repeated backup navigation and save retries retain the correct state.
 - Load secondary workbench pages on demand and retry failed pages locally without remounting background chat or image controllers, reducing the initial resources loaded by the workbench.
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Latest source validated with 103 frontend regressions, build/lint, and 33 real HTTP resource comparisons. Initial JavaScript including static dependencies is now 58.36% smaller than 0.2.6 after adding backups. Details: [backup verification](docs/conversation-backup-2026-09-30.md), [earlier performance baseline](docs/frontend-performance-persistence-2026-09-30.md), and [iteration plan](docs/secondary-development-plan.md). Browser clicks and actual downloads remain unverified. These source changes are not included in the existing 0.2.6 installers.
+Latest source validated with 135 frontend regressions, 1091 backend passes / 1 skip, build/lint, 35 real HTTP resource comparisons, and four isolated API requests using synthetic traces. Initial JavaScript including static dependencies is 58.27% smaller than 0.2.6; the 602 kB office module loads on demand and retains the build size warning. Details: [3D office verification](docs/agent-office-2026-09-30.md), [backup verification](docs/conversation-backup-2026-09-30.md), and [iteration plan](docs/secondary-development-plan.md). Real browser/WebGL interactions and real multi-agent execution remain unverified. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 

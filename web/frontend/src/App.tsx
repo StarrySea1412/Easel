@@ -31,6 +31,7 @@ const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'))
 const SkillPage = createLazyPage('技能库', () => import('./components/SkillPage'));
 const OutputsPage = createLazyPage('内容库', () => import('./components/OutputsPage'));
 const ActivityPage = createLazyPage('运行记录', () => import('./components/ActivityPage'));
+const AgentOfficePage = createLazyPage('Agent 办公室', () => import('./components/AgentOfficePage'));
 const AccountsPage = createLazyPage('账号', () => import('./components/AccountsPage'));
 const ContentAnalysisPage = createLazyPage('内容分析', () => import('./components/ContentAnalysisPage'));
 const ProfilePage = createLazyPage('画像', () => import('./components/ProfilePage'));
@@ -778,6 +779,8 @@ export default function App() {
         return <ContentAnalysisPage initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
         return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} />;
+      case 'agent-office':
+        return <AgentOfficePage sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':

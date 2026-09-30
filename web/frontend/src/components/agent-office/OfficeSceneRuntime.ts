@@ -1,0 +1,312 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import type { OfficeAgent } from '../../lib/agentOffice';
+import {
+  OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, officeLayout, poseOfficeAvatar,
+  type OfficeAvatar, type OfficeWorld,
+} from './officeGeometry';
+import { createSceneScheduler } from './sceneScheduler';
+
+export interface OfficeSceneInput {
+  agents: OfficeAgent[];
+  selectedId: string | null;
+  paused: boolean;
+}
+
+interface RuntimeOptions extends OfficeSceneInput {
+  host: HTMLDivElement;
+  labels: Map<string, HTMLButtonElement>;
+  sign: HTMLSpanElement;
+  onSelect: (id: string) => void;
+  onUnavailable: (message: string) => void;
+}
+
+/** React owns accessible labels; this runtime owns the camera, geometry and GPU. */
+export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer = () => new THREE.WebGLRenderer({
+  antialias: true, alpha: false, powerPreference: 'low-power',
+})) {
+  const { host, labels, sign } = options;
+  const renderer = createRenderer();
+  const cleanups: (() => void)[] = [];
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const cleanup of cleanups.reverse()) {
+      // Continue releasing the rest even if a lost GPU context rejects one step.
+      try { cleanup(); } catch { /* Best effort during teardown. */ }
+    }
+    cleanups.length = 0;
+  };
+  cleanups.push(() => renderer.forceContextLoss(), () => renderer.dispose());
+  try {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.setClearColor(0xf4f1ea);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const canvas = renderer.domElement;
+  canvas.setAttribute('aria-label', '可旋转和缩放的三维 Agent 办公室');
+  canvas.setAttribute('role', 'img');
+  host.prepend(canvas);
+  cleanups.push(() => canvas.remove());
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-10, 10, 8, -8, 0.1, 120);
+  camera.position.set(13, 13, 17);
+  const controls = new OrbitControls(camera, canvas);
+  cleanups.push(() => controls.dispose());
+  controls.enableDamping = false;
+  controls.enablePan = false;
+  controls.minPolarAngle = Math.PI / 8;
+  controls.maxPolarAngle = Math.PI / 2.25;
+  controls.minAzimuthAngle = -Math.PI / 12;
+  controls.maxAzimuthAngle = Math.PI / 1.85;
+  controls.minZoom = 0.65;
+  controls.maxZoom = 2.7;
+  controls.target.set(0, 0.65, 0);
+  controls.update();
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb6a48b, 2.45));
+  const sun = new THREE.DirectionalLight(0xfff0d4, 3.8);
+  sun.position.set(4, 13, 7);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.normalBias = 0.045;
+  sun.shadow.bias = -0.0002;
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 50;
+  scene.add(sun, sun.target);
+  cleanups.push(() => sun.shadow.dispose());
+  const fill = new THREE.DirectionalLight(0xe5efed, 1.1);
+  fill.position.set(-7, 6, -4);
+  scene.add(fill);
+
+  let input: OfficeSceneInput = options;
+  let resources = new OfficeResources();
+  cleanups.push(() => resources.dispose());
+  let avatarResources = new OfficeResources();
+  cleanups.push(() => avatarResources.dispose());
+  let world: OfficeWorld = createOfficeWorld(resources, input.agents.length);
+  batchOfficeArchitecture(resources, world);
+  scene.add(world.root);
+  let layoutKey = officeLayout(input.agents.length).key;
+  let avatarIds = '';
+  let avatars = new Map<string, OfficeAvatar>();
+  let width = 1, height = 1;
+  let focused = document.hasFocus();
+  let intersecting = true;
+  let contextLost = false;
+  let animationTime = 0;
+  let lastFrame: number | undefined;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const visible = () => !document.hidden && intersecting && !contextLost;
+  const animate = () => visible() && focused && !input.paused && !reducedMotion?.matches
+    && input.agents.some((agent) => ['working', 'thinking', 'done', 'error'].includes(agent.state));
+  const projected = new THREE.Vector3();
+
+  function projectLabel(element: HTMLElement, position: THREE.Vector3) {
+    projected.copy(position).project(camera);
+    const shown = projected.z > -1 && projected.z < 1 && Math.abs(projected.x) < 1.12 && Math.abs(projected.y) < 1.12;
+    element.style.visibility = shown ? 'visible' : 'hidden';
+    element.style.transform = `translate(-50%, -100%) translate(${(projected.x * 0.5 + 0.5) * width}px, ${(-projected.y * 0.5 + 0.5) * height}px)`;
+    element.style.zIndex = String(Math.round((1 - projected.z) * 1000));
+  }
+
+  const scheduler = createSceneScheduler({
+    request: (callback) => window.requestAnimationFrame(callback),
+    cancel: (id) => window.cancelAnimationFrame(id),
+    visible,
+    animate,
+    draw: (time) => {
+      if (animate() && lastFrame !== undefined) animationTime += Math.min((time - lastFrame) / 1000, 0.06);
+      lastFrame = time;
+      for (const agent of input.agents) {
+        const avatar = avatars.get(agent.id);
+        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId);
+      }
+      camera.updateMatrixWorld();
+      try { renderer.render(scene, camera); }
+      catch {
+        contextLost = true;
+        options.onUnavailable('三维画面暂时无法继续绘制。Agent 状态仍可在列表中查看，请重试加载场景。');
+        return;
+      }
+      for (const [id, avatar] of avatars) {
+        const label = labels.get(id);
+        if (label) projectLabel(label, avatar.label);
+      }
+      projectLabel(sign, world.sign);
+    },
+  });
+  cleanups.push(() => scheduler.dispose());
+
+  function refresh() {
+    lastFrame = undefined;
+    scheduler.refresh();
+  }
+
+  function fitCamera(reset: boolean) {
+    const aspect = width / height;
+    const radius = Math.hypot(world.width, world.depth) / 2;
+    const halfHeight = Math.max(radius * 0.74, radius / Math.max(aspect, 0.1) * 1.07);
+    camera.left = -halfHeight * aspect;
+    camera.right = halfHeight * aspect;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
+    if (reset) {
+      camera.zoom = 1;
+      camera.position.set(radius * 1.15, radius * 1.1, radius * 1.45);
+      controls.target.set(0, 0.65, 0);
+      controls.update();
+    }
+    camera.updateProjectionMatrix();
+    const shadowSize = Math.max(world.width, world.depth) * 0.75;
+    Object.assign(sun.shadow.camera, { left: -shadowSize, right: shadowSize, top: shadowSize, bottom: -shadowSize });
+    sun.shadow.camera.updateProjectionMatrix();
+    refresh();
+  }
+
+  function synchronizeAgents() {
+    const nextLayout = officeLayout(input.agents.length).key;
+    if (nextLayout !== layoutKey) {
+      scene.remove(world.root);
+      for (const avatar of avatars.values()) scene.remove(avatar.root);
+      avatars.clear();
+      resources.dispose();
+      resources = new OfficeResources();
+      world = createOfficeWorld(resources, input.agents.length);
+      batchOfficeArchitecture(resources, world);
+      scene.add(world.root);
+      layoutKey = nextLayout;
+      avatarIds = '';
+      fitCamera(false);
+    }
+    const ids = JSON.stringify(input.agents.map((agent) => agent.id));
+    if (avatarIds !== ids) {
+      for (const avatar of avatars.values()) scene.remove(avatar.root);
+      // Agent identities can churn while desk capacity stays unchanged. Release
+      // their exclusive GPU assets without touching the world's monitor screens.
+      avatarResources.dispose();
+      avatarResources = new OfficeResources();
+      avatars = new Map(input.agents.map((agent, index) => {
+        const avatar = createOfficeAvatar(avatarResources, world.desks[index], agent.id);
+        scene.add(avatar.root);
+        return [agent.id, avatar];
+      }));
+      avatarIds = ids;
+      // An unoccupied station must not retain a previous agent's active display.
+      for (const desk of world.desks.slice(input.agents.length)) {
+        desk.screen.color.setHex(0xaec9c3);
+        desk.screen.emissiveIntensity = 0.15;
+      }
+    }
+    refresh();
+  }
+
+  function resize() {
+    if (disposed) return;
+    const bounds = host.getBoundingClientRect();
+    width = Math.max(1, bounds.width);
+    height = Math.max(1, bounds.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.setSize(width, height, false);
+    fitCamera(false);
+  }
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+  cleanups.push(() => resizeObserver?.disconnect());
+  resizeObserver?.observe(host);
+  window.addEventListener('resize', resize);
+  cleanups.push(() => window.removeEventListener('resize', resize));
+  const intersectionObserver = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+    intersecting = entries[0]?.isIntersecting ?? true;
+    refresh();
+  });
+  cleanups.push(() => intersectionObserver?.disconnect());
+  intersectionObserver?.observe(host);
+
+  const focus = () => { focused = true; refresh(); };
+  const blur = () => { focused = false; refresh(); };
+  const visibility = () => { focused = document.hasFocus(); refresh(); };
+  window.addEventListener('focus', focus);
+  window.addEventListener('blur', blur);
+  document.addEventListener('visibilitychange', visibility);
+  reducedMotion?.addEventListener('change', refresh);
+  controls.addEventListener('change', scheduler.invalidate);
+  cleanups.push(() => {
+    window.removeEventListener('focus', focus);
+    window.removeEventListener('blur', blur);
+    document.removeEventListener('visibilitychange', visibility);
+    reducedMotion?.removeEventListener('change', refresh);
+    controls.removeEventListener('change', scheduler.invalidate);
+  });
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  let pointerDown: { x: number; y: number; id: number } | undefined;
+  let moved = false;
+  function onPointerDown(event: PointerEvent) {
+    if (!event.isPrimary || event.button !== 0) { pointerDown = undefined; return; }
+    pointerDown = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    moved = false;
+  }
+  function onPointerMove(event: PointerEvent) {
+    if (pointerDown && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 5) moved = true;
+  }
+  function onPointerUp(event: PointerEvent) {
+    const down = pointerDown;
+    pointerDown = undefined;
+    if (!down || moved || down.id !== event.pointerId || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) return;
+    const bounds = canvas.getBoundingClientRect();
+    pointer.set((event.clientX - bounds.left) / Math.max(bounds.width, 1) * 2 - 1,
+      -(event.clientY - bounds.top) / Math.max(bounds.height, 1) * 2 + 1);
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(Array.from(avatars.values(), (avatar) => avatar.root), true);
+    for (const hit of hits) {
+      let node: THREE.Object3D | null = hit.object;
+      while (node && typeof node.userData.agentId !== 'string') node = node.parent;
+      if (node) { options.onSelect(node.userData.agentId); return; }
+    }
+  }
+  const cancelPointer = () => { pointerDown = undefined; };
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', cancelPointer);
+  cleanups.push(() => {
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', cancelPointer);
+  });
+  const onContextLost = (event: Event) => {
+    event.preventDefault();
+    contextLost = true;
+    refresh();
+    options.onUnavailable('三维画面连接已中断。Agent 状态仍可在列表中查看，请重试加载场景。');
+  };
+  canvas.addEventListener('webglcontextlost', onContextLost);
+  cleanups.push(() => canvas.removeEventListener('webglcontextlost', onContextLost));
+  cleanups.push(() => { scene.clear(); avatars.clear(); });
+
+  synchronizeAgents();
+  resize();
+  fitCamera(true);
+  return {
+    update(next: OfficeSceneInput) {
+      if (disposed) return;
+      input = next;
+      synchronizeAgents();
+    },
+    reset() { if (!disposed) fitCamera(true); },
+    dispose,
+  };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+}
+
+export type OfficeSceneRuntime = ReturnType<typeof createOfficeSceneRuntime>;

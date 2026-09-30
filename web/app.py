@@ -5701,6 +5701,30 @@ async def api_skill_audits(sessionId: str, turnId: str | None = None):
         raise HTTPException(503, '技能核验记录暂不可读，请稍后重试') from None
 
 
+@app.get('/api/agent-office')
+async def api_agent_office(sessionId: str):
+    import agent_office
+    def execution_state():
+        process = _RUNNING_CHAT.get(sessionId)
+        turn_id = _ACTIVE_SKILL_TURNS.get(sessionId, '')
+        try:
+            live = process is not None and process.poll() is None
+        except OSError:
+            live = False
+        return process, turn_id, live
+
+    process, turn_id, live = execution_state()
+    result = await asyncio.to_thread(agent_office.snapshot, sessionId, SESSIONS_DIR,
+                                     OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR,
+                                     live=live, active_turn_id=turn_id)
+    current_process, current_turn_id, current_live = execution_state()
+    # to_thread may wait behind other work or read while the supervisor moves
+    # on. A boolean alone cannot distinguish two successive live processes.
+    if current_process is not process or current_turn_id != turn_id or current_live != live:
+        return agent_office.updating_snapshot(sessionId)
+    return result
+
+
 class SkillCritiqueRequest(BaseModel):
     sessionId: str
     turnId: str

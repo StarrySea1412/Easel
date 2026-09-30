@@ -88,6 +88,28 @@ const backup = { format: 'easel-conversation-backup', version: 1, exportedAt: '2
   { title: '待导入记录', created: 2, incomplete: true, messages: [{ role: 'user', content: '导入提问' }] },
 ] };
 
+test('office navigation opens the selected session and its activity without cancelling an ongoing chat', async t => {
+  const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  const { harness } = view;
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('持续执行中的任务'));
+  const run = harness.streams[0];
+  await act(async () => harness.sidebar.onPageChange('agent-office'));
+  const office = harness.pages['Agent 办公室'];
+  assert.equal(office.activeSessionId, 'original');
+  assert.ok(office.streams.original);
+  await act(async () => office.onOpenActivity('original'));
+  assert.equal(harness.sidebar.currentPage, 'activity');
+  assert.equal(harness.pages['运行记录'].target.sessionId, 'original');
+  assert.equal(harness.pages['运行记录'].target.turnId, '');
+  await act(async () => office.onOpenChat('original'));
+  assert.equal(harness.sidebar.currentPage, 'chat');
+  assert.equal(harness.sidebar.activeSessionId, 'original');
+  assert.equal(run.controller.signal.aborted, false);
+  assert.equal(harness.streams.length, 1);
+  assert.deepEqual(harness.calls, []);
+});
+
 test('import uses latest queued state, preserves live controllers and exports all received tokens despite quota failure', async t => {
   const original = JSON.stringify([sourceSession]);
   const view = await fixture(t, { easel_sessions: original, easel_active_session: 'original' });
