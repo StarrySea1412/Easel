@@ -38,5 +38,11 @@
 .office-output-footer > span { color: #9aa982; font-size: 11px; }
 .office-output-footer button { padding: 0; border: 0; background: transparent; color: #7c9a54; font: inherit; font-size: 12px; cursor: pointer; }
 .office-output-detail { margin: 11px 0 0; color: #a1ae8c; font-size: 11px; line-height: 1.8; }
+.office-text-preview { min-width: 0; }
+.office-text-preview-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: #576d46; font-size: 12px; }
+.office-text-preview-heading span { color: #778568; font-size: 11px; }
+.office-text-preview pre { max-height: 320px; margin: 0; padding: 13px; overflow: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #dce4d0; border-radius: 7px; background: #fffef9; color: #354331; font: 12px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
+.office-text-preview pre:focus-visible { outline: 3px solid #99b76c; outline-offset: 3px; }
+.office-text-preview-retry { padding: 7px 10px; border: 1px solid #bdcda9; border-radius: 7px; background: #fffef9; color: #546e3e; font: inherit; font-size: 12px; cursor: pointer; }
 .office-output-monitor button:focus-visible, .office-output-monitor a:focus-visible, .office-output-monitor select:focus-visible { outline: 3px solid #99b76c; outline-offset: 3px; }
 @media (max-width: 600px) { .office-output-monitor { padding: 16px; } .office-output-heading { flex-wrap: wrap; } .office-output-refresh { padding: 7px 10px; } .office-output-file { padding: 11px; gap: 10px; } }

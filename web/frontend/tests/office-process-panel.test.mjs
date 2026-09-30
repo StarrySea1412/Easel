@@ -195,4 +195,99 @@ test('modal focuses its close action, traps keyboard focus, handles Escape and r
   assert.equal(view.calls.closed, 2, 'keyboard listener is removed after unmount');
 });
 
+async function searchRecords(view, value) {
+  const input = view.dialog().querySelector('input[type="search"]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, value);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+}
+
+function recordFilter(view, label) {
+  return [...view.dialog().querySelectorAll('.office-process-filters button')].find(button => button.textContent.startsWith(label));
+}
+
+test('process filters classify complete pairs, failures, unmatched calls and orphan receipts without implying success', async t => {
+  const view = await fixture(t, { events: [
+    event('read-call', { title: '打开项目说明' }),
+    event('read-return', { kind: 'result', status: 'returned', title: '项目说明已返回' }),
+    event('write-call', { operationId: op2, toolName: 'write_file', title: '保存草稿' }),
+    event('write-fail', { operationId: op2, toolName: 'write_file', kind: 'result', status: 'failed', title: '文件不存在' }),
+    event('pending', { operationId: 'c'.repeat(24), title: '查找参考文档' }),
+    event('orphan', { operationId: 'd'.repeat(24), kind: 'result', status: 'returned', title: '未配对回执' }),
+    event('spawn', { kind: 'spawn', status: 'observed', title: '已观察到委派', operationId: undefined, toolName: undefined }),
+  ] });
+  assert.match(view.dialog().textContent, /显示 5 \/ 5 条记录/);
+  assert.equal(recordFilter(view, '全部').textContent, '全部5');
+  assert.equal(recordFilter(view, '已收到回执').textContent, '已收到回执2');
+  assert.equal(recordFilter(view, '已报告失败').textContent, '已报告失败1');
+  await view.click(recordFilter(view, '已报告失败'));
+  assert.equal(view.dialog().querySelectorAll('.office-process-step').length, 1);
+  assert.match(view.dialog().querySelector('.office-process-timeline').textContent, /保存草稿.*文件不存在/s);
+  assert.equal(recordFilter(view, '已报告失败').getAttribute('aria-pressed'), 'true');
+  await view.click(recordFilter(view, '无匹配回执'));
+  assert.match(view.dialog().querySelector('.office-process-timeline').textContent, /查找参考文档/);
+  assert.doesNotMatch(view.dialog().querySelector('.office-process-timeline').textContent, /未配对回执|保存草稿/);
+  await view.click(recordFilter(view, '已收到回执'));
+  assert.equal(view.dialog().querySelectorAll('.office-process-step').length, 2);
+  assert.match(view.dialog().textContent, /收到回执也不代表执行成功/);
+});
+
+test('search matches visible tool and receipt summaries together, handles empty results and never searches raw fields', async t => {
+  const view = await fixture(t, { events: [
+    event('call', { title: '查阅文档', rawArguments: { secret: 'HIDDEN_SECRET' } }),
+    event('return', { kind: 'result', status: 'returned', title: '未找到目标段落', rawOutput: 'HIDDEN_OUTPUT' }),
+    event('other', { operationId: op2, toolName: 'write_file', title: '写入文本' }),
+  ] });
+  await searchRecords(view, ' READ_FILE  目标段落 ');
+  assert.match(view.dialog().textContent, /显示 1 \/ 2 条记录/);
+  assert.match(view.dialog().querySelector('.office-process-timeline').textContent, /查阅文档.*未找到目标段落/s);
+  assert.equal(view.dialog().querySelectorAll('.office-process-result').length, 1, 'matching receipt retains its call');
+  await view.click(recordFilter(view, '无匹配回执'));
+  assert.match(view.dialog().textContent, /没有匹配当前关键词和状态/);
+  assert.equal(view.dialog().querySelector('.office-process-timeline'), null);
+  const clear = view.dialog().querySelector('.office-process-record-summary button');
+  clear.focus();
+  await view.click(clear);
+  assert.equal(document.activeElement, view.dialog().querySelector('input'), 'removing the clear button returns focus to search within the dialog');
+  assert.equal(view.dialog().querySelector('input').value, '');
+  assert.equal(recordFilter(view, '全部').getAttribute('aria-pressed'), 'true');
+  assert.equal(view.dialog().querySelectorAll('.office-process-step').length, 2);
+  for (const hidden of ['HIDDEN_SECRET', 'HIDDEN_OUTPUT']) {
+    await searchRecords(view, hidden);
+    assert.match(view.dialog().textContent, /显示 0 \/ 2 条记录/);
+  }
+});
+
+test('record filters update with new receipts but reset for a different employee, session, source or turn', async t => {
+  const events = [event('call')];
+  const view = await fixture(t, { events });
+  await view.click(recordFilter(view, '无匹配回执'));
+  await searchRecords(view, 'read_file');
+  await view.render({ events: [...events, event('return', { kind: 'result', status: 'returned' })] });
+  assert.equal(recordFilter(view, '无匹配回执').getAttribute('aria-pressed'), 'true');
+  assert.match(view.dialog().textContent, /显示 0 \/ 1 条记录/);
+  for (const patch of [
+    { turnId: 'turn-next', events },
+    { session: { ...session, id: 'session-next' } },
+    { agent: childAgent, events: [event('child', { agentId: childAgent.id })] },
+    { agent: { ...childAgent, source: 'demo' }, events: [event('demo', { agentId: childAgent.id, source: 'demo' })] },
+  ]) {
+    await view.render(patch);
+    assert.equal(view.dialog().querySelector('input').value, '');
+    assert.equal(recordFilter(view, '全部').getAttribute('aria-pressed'), 'true');
+    assert.match(view.dialog().textContent, /显示 1 \/ 1 条记录/);
+    await searchRecords(view, 'unmatched query');
+    await view.click(recordFilter(view, '已报告失败'));
+  }
+});
+
+test('ambiguous calls remain unmatched in the status filters even when a receipt exists', async t => {
+  const view = await fixture(t, { events: [event('duplicate-a'), event('duplicate-b'), event('result', { kind: 'result', status: 'returned' })] });
+  await view.click(recordFilter(view, '无匹配回执'));
+  assert.equal(view.dialog().querySelectorAll('.office-process-step').length, 2);
+  assert.match(view.dialog().textContent, /显示 2 \/ 3 条记录/);
+  assert.equal(view.dialog().querySelector('.office-process-result'), null);
+});
+
 test.after(() => window.close());

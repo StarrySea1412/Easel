@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { OFFICE_STATE_LABELS, type OfficeAgent, type OfficeEvent } from '../../lib/agentOffice';
 import type { ChatSession, StreamState } from '../../lib/store';
@@ -35,11 +35,57 @@ function timeLabel(event: OfficeEvent) {
 }
 function eventState(event: OfficeEvent, result?: OfficeEvent) {
   const reported = result || event;
-  if (reported.status === 'failed') return { tone: 'error', text: '已报告失败' };
-  if (reported.kind === 'result' && reported.status === 'returned') return { tone: 'done', text: '已收到回执' };
-  if (event.kind === 'call') return { tone: 'working', text: '已调用 · 尚无匹配回执' };
-  if (event.kind === 'spawn') return { tone: 'neutral', text: '已观察到委派' };
-  return { tone: 'neutral', text: '已观察到' };
+  if (reported.status === 'failed') return { tone: 'error', category: 'failed', text: '已报告失败' };
+  if (reported.kind === 'result' && reported.status === 'returned') return { tone: 'done', category: 'returned', text: '已收到回执' };
+  if (event.kind === 'call' && !result) return { tone: 'working', category: 'unmatched', text: '已调用 · 尚无匹配回执' };
+  if (event.kind === 'spawn') return { tone: 'neutral', category: 'observed', text: '已观察到委派' };
+  return { tone: 'neutral', category: 'observed', text: '已观察到' };
+}
+
+const RECORD_FILTERS = [
+  { id: 'all', label: '全部' },
+  { id: 'unmatched', label: '无匹配回执' },
+  { id: 'returned', label: '已收到回执' },
+  { id: 'failed', label: '已报告失败' },
+] as const;
+
+/** Filter complete paired records; search only the text already visible to the user. */
+function ProcessRecords({ steps }: { steps: ReturnType<typeof selectOfficeEventSteps> }) {
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<(typeof RECORD_FILTERS)[number]['id']>('all');
+  const searchId = useId();
+  const searchInput = useRef<HTMLInputElement>(null);
+  const records = useMemo(() => steps.map(step => ({ ...step, state: eventState(step.event, step.result) })), [steps]);
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const visible = records.filter(({ event, result, state }) => {
+    const text = [event.toolName, event.title, result?.toolName, result?.title].filter(Boolean).join(' ').toLocaleLowerCase();
+    return (filter === 'all' || state.category === filter) && terms.every(term => text.includes(term));
+  });
+  const clear = () => { setQuery(''); setFilter('all'); searchInput.current?.focus(); };
+  return <>
+    <div className="office-process-record-controls">
+      <label htmlFor={searchId}>搜索工具或过程摘要</label>
+      <input ref={searchInput} id={searchId} type="search" value={query} maxLength={160} placeholder="例如：read_file、文件不存在" onChange={event => setQuery(event.target.value)} />
+      <div className="office-process-filters" role="group" aria-label="调用记录状态筛选">
+        {RECORD_FILTERS.map(({ id, label }) => <button type="button" key={id} aria-pressed={filter === id} onClick={() => setFilter(id)}>
+          {label}<span>{id === 'all' ? records.length : records.filter(record => record.state.category === id).length}</span>
+        </button>)}
+      </div>
+      <div className="office-process-record-summary">
+        <span role="status">显示 {visible.length} / {records.length} 条记录</span>
+        {(query || filter !== 'all') && <button type="button" onClick={clear}>清除筛选</button>}
+      </div>
+    </div>
+    <p className="office-process-note">无匹配回执不代表仍在运行；收到回执也不代表执行成功。状态数量按完整记录统计，包含未配对回执。</p>
+    {visible.length ? <ol className="office-process-timeline">{visible.map(({ event, result, state }) =>
+      <li className={`office-process-step office-process-step--${state.tone}`} key={event.id}>
+        <div className="office-process-step-meta"><span>{timeLabel(event)}</span><span>{state.text}</span></div>
+        {event.toolName && <code className="office-process-tool">{event.toolName}</code>}
+        <p>{event.title}</p>
+        {result && <div className="office-process-result"><span>{timeLabel(result)} · {result.status === 'failed' ? '失败回执' : '工具回执'}</span><p>{result.title}</p></div>}
+      </li>,
+    )}</ol> : <p className="office-process-empty">没有匹配当前关键词和状态的记录。可以清除筛选查看全部已收到的记录。</p>}
+  </>;
 }
 
 export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
@@ -118,15 +164,7 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
         <section className="office-process-section" aria-labelledby={`${titleId}-tools`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-tools`}>调用与回执</h3><span>{steps.length} 条{agent.source === 'demo' ? '模拟记录' : '可见记录'}</span></div>
           <p className="office-process-note">{agent.source === 'demo' ? '以下记录来自预设演示。' : '仅展示当前快照提供的工具名称、过程摘要与回执状态；未上报的工具输出正文不可见。'}</p>
-          {steps.length ? <ol className="office-process-timeline">{steps.map(({ event, result }) => {
-            const state = eventState(event, result);
-            return <li className={`office-process-step office-process-step--${state.tone}`} key={event.id}>
-              <div className="office-process-step-meta"><span>{timeLabel(event)}</span><span>{state.text}</span></div>
-              {event.toolName && <code className="office-process-tool">{event.toolName}</code>}
-              <p>{event.title}</p>
-              {result && <div className="office-process-result"><span>{timeLabel(result)} · {result.status === 'failed' ? '失败回执' : '工具回执'}</span><p>{result.title}</p></div>}
-            </li>;
-          })}</ol> : <p className="office-process-empty">{agent.source === 'live' && !turnId ? '当前快照没有轮次标识，调用过程暂时无法归属到本轮。' : '尚未收到属于该员工、本轮的调用或回执记录。这不代表它没有工作。'}</p>}
+          {steps.length ? <ProcessRecords key={JSON.stringify([agent.source, agent.id, session?.id, turnId])} steps={steps} /> : <p className="office-process-empty">{agent.source === 'live' && !turnId ? '当前快照没有轮次标识，调用过程暂时无法归属到本轮。' : '尚未收到属于该员工、本轮的调用或回执记录。这不代表它没有工作。'}</p>}
         </section>
       </div>
       <footer className="office-process-footer"><span>{agent.source === 'demo' ? '演示内容与真实会话数据分开显示' : '仅显示已经取得的记录，不补写未提供的过程'}</span>{onOpenChat && agent.source === 'live' && <button type="button" className="office-process-open-chat" onClick={() => { onClose(); onOpenChat(); }}>在对话中查看</button>}</footer>

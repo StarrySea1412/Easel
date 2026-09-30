@@ -36,6 +36,16 @@
 .office-process-error p { margin: 7px 0; white-space: pre-wrap; }
 .office-process-error code { font-size: 12px; }
 .office-process-timeline { display: grid; gap: 13px; margin: 15px 0 0; padding: 0; list-style: none; }
+.office-process-record-controls { display: grid; gap: 9px; margin-top: 16px; }
+.office-process-record-controls > label { color: #637451; font-size: 12px; }
+.office-process-record-controls input { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #cedac3; border-radius: 10px; background: #fffefa; color: #455641; font: inherit; font-size: 13px; }
+.office-process-record-controls input:focus-visible { outline: 3px solid #78a17c; outline-offset: 2px; }
+.office-process-filters { display: flex; flex-wrap: wrap; gap: 7px; }
+.office-process-filters button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #dce3d2; border-radius: 9px; background: #f6f8f1; color: #647555; font: inherit; font-size: 12px; cursor: pointer; }
+.office-process-filters button[aria-pressed="true"] { border-color: #819a72; background: #e9f0df; color: #395731; }
+.office-process-filters button span { min-width: 16px; font-variant-numeric: tabular-nums; font-size: 11px; opacity: .8; }
+.office-process-record-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; color: #7c8974; font-size: 12px; }
+.office-process-record-summary button { padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: #526d47; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .office-process-step { position: relative; padding: 14px 16px; border: 1px solid #e0e6d8; border-left: 3px solid #9fac8f; border-radius: 0 11px 11px 0; background: #fffefa; }
 .office-process-step--done { border-left-color: #87a477; }
 .office-process-step--error { border-left-color: #ce8b75; }
