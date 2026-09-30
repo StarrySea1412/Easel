@@ -145,6 +145,9 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       const p = avatar.root.position;
       // Reserve the employee, hands and working props, plus the monitor face.
       protect([p.x - .46, p.x + .46], [.74, 2.12], [p.z - .62, p.z + .3]);
+    }
+    // Empty stations are still visible; their monitors must remain unobstructed too.
+    for (const desk of world.desks) {
       protect([desk.slot.x - .05, desk.slot.x + .96], [1.06, 1.78], [desk.slot.z - .24, desk.slot.z - .12]);
     }
     for (const [id, avatar] of avatars) {
