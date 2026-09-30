@@ -1,11 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
-const compile = async (path) => {
-  const js=ts.transpileModule(fs.readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
-};
+import {loadTsModule} from './load-ts.mjs';
+const compile=(path)=>loadTsModule(path,import.meta.url);
 const {validateReferenceFile,restoreReference,validateMaskFile}=await compile('../src/lib/imageReferences.ts');
 globalThis.window={location:{pathname:'/'}};
 const {startImagegen,uploadImagegenReference}=await compile('../src/lib/api.ts');

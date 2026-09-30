@@ -1,3 +1,4 @@
+import { chatErrorDetail } from './lib/chatErrors';
 import { drainStreamRun } from './lib/streamLifecycle';
 import ImageStudioPage from './components/ImageStudioPage';
 import { useImageStudio } from './hooks/useImageStudio';
@@ -287,7 +288,7 @@ export default function App() {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
             role: 'assistant',
-            content: (a?.content ? a.content + '\n\n' : '') + `Error: ${err.message}`,
+            content: a?.content || '', error:chatErrorDetail(err),
             turnId,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           });
@@ -356,7 +357,7 @@ export default function App() {
     if (!turnId) {
       void fetchLastTurn(sessionId).then((r) => {
         if (streamAcc.current[sessionId] !== runAcc) return;
-        if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）', thinking: r.thinking || undefined, turnId:r.turn_id });
+        if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id });
         clearStream(sessionId);
       }).catch(() => {if(streamAcc.current[sessionId]===runAcc)clearStream(sessionId);});
       return;
@@ -382,7 +383,7 @@ export default function App() {
       (err) => {
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
-          appendAssistant(sessionId, { role: 'assistant', content: (a?.content || '') + `\n\nError: ${err.message}`, turnId, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
+          appendAssistant(sessionId, { role: 'assistant', content: a?.content || '', error:chatErrorDetail(err), turnId, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
           clearStream(sessionId);
         });
       },
@@ -406,7 +407,7 @@ export default function App() {
         void fetchLastTurn(sessionId, turnId).then((r) => {
           if(streamAcc.current[sessionId]!==runAcc)return;
           if (r.status === 'done') {
-            appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）', thinking: r.thinking || undefined, turnId });
+            appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId });
           } else {
             appendAssistant(sessionId, {
               role: 'assistant',

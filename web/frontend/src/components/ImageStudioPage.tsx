@@ -1,7 +1,8 @@
 import { IMAGE_SIZES } from '../hooks/useImageStudio';
 import type { ImageStudioController } from '../hooks/useImageStudio';
 import ImageReversePanel from './ImageReversePanel';
-import { IconImage } from './settingsIcons';
+import { IconOutputs } from './icons';
+import { IconGear, IconImage } from './settingsIcons';
 import { SkeletonImage } from './Skeleton';
 import '../styles/image-studio.css';
 
@@ -21,7 +22,17 @@ export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs,
   const ratioMismatch = !automatic && actual && requestedWidth > 0 && requestedHeight > 0
     && Math.abs(actual.width / actual.height - requestedWidth / requestedHeight) > .01;
   return <div className="page-scroll image-page">
-    <header className="image-page-heading"><div><p className="image-eyebrow">创作工作室 / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">文生图、图生图与图片反推，作品统一保存在内容库。</p></div><div className="image-heading-actions"><button className="btn" onClick={onOpenOutputs}>查看历史作品</button><button className="btn" onClick={onOpenSettings}>生图通道设置</button></div></header>
+    <header className="image-page-heading">
+      <div><p className="image-eyebrow">创作工作室 / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">文生图、图生图与图片反推，作品统一保存在内容库。</p></div>
+      <div className="image-heading-actions" role="group" aria-label="生图工坊快捷入口">
+        <button type="button" className="btn image-heading-icon" title="查看历史作品" aria-label="查看历史作品" onClick={onOpenOutputs}>
+          <span aria-hidden="true"><IconOutputs size={20} /></span>
+        </button>
+        <button type="button" className="btn image-heading-icon" title="生图通道设置" aria-label="生图通道设置" onClick={onOpenSettings}>
+          <span aria-hidden="true"><IconGear size={20} /></span>
+        </button>
+      </div>
+    </header>
     <div className="image-mode-tabs" role="group" aria-label="创作方式"><button className={studio.mode === 'generate' ? 'selected' : ''} aria-pressed={studio.mode === 'generate'} onClick={() => studio.setMode('generate')}>文生图</button><button className={studio.mode === 'img2img' ? 'selected' : ''} aria-pressed={studio.mode === 'img2img'} onClick={() => studio.setMode('img2img')}>图生图</button><button className={studio.mode === 'reverse' ? 'selected' : ''} aria-pressed={studio.mode === 'reverse'} onClick={() => studio.setMode('reverse')}>图片反推</button></div>
     {studio.mode === 'reverse' ? <ImageReversePanel studio={studio} onOpenSettings={onOpenModels} /> : <div className="image-workspace">
       <section className="card image-controls" aria-label="生图参数">

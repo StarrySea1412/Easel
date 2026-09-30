@@ -1,3 +1,4 @@
+import { makeChatError, type ChatErrorDetail } from './chatErrors';
 function getBasePath(): string {
   const path = window.location.pathname;
   const cleaned = path.replace(/\/index\.html$/, '').replace(/\/$/, '');
@@ -690,14 +691,12 @@ export function streamChat(
 
   const consume = async (res: Response): Promise<boolean> => {
       if (!res.ok) {
-        let detail = `Stream error: ${res.status}`;
+        let detail: unknown = `请求失败（HTTP ${res.status}）`;
         try {
-          const payload = await res.json() as { detail?: string };
-          if (payload.detail) detail = payload.detail;
+          const payload = await res.json() as { detail?: unknown };
+          detail = payload.detail || payload;
         } catch { /* non-JSON error */ }
-        const error = new Error(detail) as Error & { status?: number };
-        error.status = res.status;
-        throw error;
+        throw makeChatError(detail,res.status);
       }
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No response body');
@@ -726,9 +725,9 @@ export function streamChat(
           // 防呆心跳：独立于 activity/thinking，仅作「未卡住」提示，不覆盖真实状态。
           if (onHeartbeat) { try { onHeartbeat(JSON.parse(data) as string); } catch { onHeartbeat(data); } }
         } else if (currentEvent === 'error') {
-          let msg = '执行失败';
-          try { msg = JSON.parse(data) as string; } catch { msg = data; }
-          onError(new Error(msg));
+          let detail:unknown;
+          try { detail = JSON.parse(data); } catch { detail = data; }
+          onError(makeChatError(detail));
           return true;
         } else if (currentEvent === 'done') {
           try { onDone((JSON.parse(data) as { sessionKey?: string }).sessionKey); } catch { onDone(); }
@@ -737,6 +736,7 @@ export function streamChat(
         return false;
       };
 
+      try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -763,6 +763,12 @@ export function streamChat(
         }
       }
       return dispatch();
+      } finally {
+        // A terminal SSE event may arrive before the server closes its body.
+        // Cancel the remaining response so completed/error runs release it.
+        await reader.cancel().catch(() => { /* disconnected or aborted body */ });
+        reader.releaseLock();
+      }
   };
 
   void (async () => {
@@ -787,7 +793,8 @@ export function streamChat(
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return;
         const status = (err as Error & { status?: number })?.status;
-        if (first && status && status >= 400 && status < 500) {
+        const detail = (err as Error & {detail?:ChatErrorDetail})?.detail;
+        if (detail?.category==='authentication'||detail?.retryable===false||(status && status >= 400 && status < 500)) {
           onError(err instanceof Error ? err : new Error('请求失败'));
           return;
         }
@@ -796,7 +803,7 @@ export function streamChat(
       // Backend chat runs may spend 5 minutes waiting for a session lock and then
       // run for 2 hours. Keep reconnecting for the same end-to-end budget.
       if (!turnId || Date.now() - started >= 130 * 60 * 1000) {
-        onError(new Error('连接中断，自动重连超时'));
+        onError(makeChatError({message:turnId?'连接持续中断，已停止自动续接。':'连接中断，无法恢复当前请求。',category:'connection',code:'stream_connection_lost',retryable:true}));
         return;
       }
       onInterrupted?.();
@@ -808,7 +815,7 @@ export function streamChat(
 }
 
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; turn_id?: string }> {
+export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }

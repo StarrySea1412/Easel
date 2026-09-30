@@ -2,6 +2,22 @@
 
 All notable changes to Easel are documented in this file.
 
+## [0.2.6] - 2026-09-30
+
+### Improved
+
+- Added per-turn conversation navigation with previous/next controls, keyboard navigation, a compact selector on narrow screens, and explicit return-to-latest behavior. Reading earlier turns pauses automatic scrolling.
+- Replaced image history and channel settings actions with labeled icon buttons; content analysis and activity now use distinct icons.
+- Message copy actions report clipboard failures and remain accessible with a keyboard or touch screen.
+
+### Fixed
+
+- Pass configured gateway credentials consistently to HTTP and CLI chat transports. Recheck credentials after queued requests and invalidate endpoint probes when the gateway address or credentials change.
+- Preserve structured authentication, timeout, connection, and execution failures through streaming and recovery instead of guessing that every failed process timed out. Incomplete HTTP streams retain partial output and report interruption; length-limited responses remain marked as truncated.
+- Release streaming readers after terminal events, and prevent programmatic turn navigation from accidentally resuming automatic scrolling.
+
+Windows artifacts and the exact verification scope are tracked in [the delivery checklist](docs/secondary-development-progress.md).
+
 ## [0.2.1] - 2026-09-24
 
 ### Added

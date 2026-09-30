@@ -1,8 +1,10 @@
+import type { ChatErrorDetail } from './chatErrors';
 import type { UploadedFile, ChatQuestion } from './api';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  error?:ChatErrorDetail;
   agentContent?: string; // 仅发给 Agent 的增强消息（如附件路径），不在对话页面展示
   attachments?: UploadedFile[]; // 结构化附件引用；仅用于请求/重试，不在消息气泡展示
   selectedSkills?: string[];

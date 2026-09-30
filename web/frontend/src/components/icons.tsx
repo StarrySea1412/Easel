@@ -126,6 +126,12 @@ export const IconChart = ({ size, className, strokeWidth }: P) => (
     <path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />
   </svg>
 );
+export const IconHistory = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M3 12a9 9 0 1 0 2.64-6.36L3 8" /><path d="M3 3v5h5" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
 export const IconSend = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />

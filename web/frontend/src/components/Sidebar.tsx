@@ -5,7 +5,7 @@ import type { ComponentType } from 'react';
 import {
   IconChat, IconSkills, IconOutputs, IconAccounts, IconProfile,
   IconNewChat, IconEdit, IconArchive, IconUnarchive, IconTrash, IconChevron,
-  IconDashboard, IconChart,
+  IconDashboard, IconChart, IconHistory,
 } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 
@@ -37,7 +37,7 @@ const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }
   { page: 'skills', Icon: IconSkills, label: '技能库' },
   { page: 'outputs', Icon: IconOutputs, label: '内容库' },
   { page: 'analysis', Icon: IconChart, label: '内容分析' },
-  { page: 'activity', Icon: IconChart, label: '运行记录' },
+  { page: 'activity', Icon: IconHistory, label: '运行记录' },
   { page: 'accounts', Icon: IconAccounts, label: '账号' },
   { page: 'profile', Icon: IconProfile, label: '画像' },
   { page: 'settings', Icon: IconGear, label: '设置' },
@@ -144,11 +144,14 @@ export default function Sidebar({
         {NAV.map(({ page, Icon, label }) => (
           <button
             key={page}
+            type="button"
             className={`nav-item ${currentPage === page ? 'active' : ''}`}
+            title={label}
+            aria-label={label}
             aria-current={currentPage === page ? 'page' : undefined}
             onClick={() => onPageChange(page)}
           >
-            <span className="nav-icon"><Icon size={18} /></span>
+            <span className="nav-icon" aria-hidden="true"><Icon size={18} /></span>
             {label}
           </button>
         ))}

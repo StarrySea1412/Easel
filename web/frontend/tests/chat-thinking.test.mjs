@@ -1,12 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import ts from 'typescript';
-
+import {loadTsModule} from './load-ts.mjs';
 globalThis.window = { location: { pathname: '/' } };
-const source = fs.readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8');
-const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const { streamChat } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const {streamChat}=await loadTsModule('../src/lib/api.ts',import.meta.url);
 const event = (name, value) => `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
 async function consume(chunks) {
   const thinking = [], content = [], activity = [];

@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { chatErrorTitle, historicalGatewayAuthError } from '../lib/chatErrors';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconCopy, IconCheck, IconRetry } from './icons';
 
 export interface BubbleActions {
-  onCopy: () => void;
+  onCopy: () => void | Promise<void>;
   onRetry?: () => void;    // 仅最后一轮可用（append-only：不改写历史）
   canModify: boolean;      // 流式中禁用 retry
 }
@@ -33,29 +34,41 @@ function ThinkingPanel({ text, streaming }: { text: string; streaming: boolean }
 }
 
 function ActionBar({ actions }: { actions: BubbleActions }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    actions.onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+  const [copyStatus, setCopyStatus] = useState<'idle'|'copying'|'copied'|'failed'>('idle');
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+  const copy = async () => {
+    clearTimeout(resetTimer.current);
+    setCopyStatus('copying');
+    try {
+      await actions.onCopy();
+      setCopyStatus('copied');
+      resetTimer.current = setTimeout(() => setCopyStatus('idle'), 1200);
+    } catch {
+      setCopyStatus('failed');
+    }
   };
   return (
     <div className="msg-actions">
-      <button className="msg-action" onClick={copy} title="复制">
-        {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}<span>{copied ? '已复制' : '复制'}</span>
+      <button type="button" className="msg-action" onClick={copy} disabled={copyStatus==='copying'} title="复制">
+        {copyStatus==='copied' ? <IconCheck size={14} /> : <IconCopy size={14} />}<span>{copyStatus==='copied' ? '已复制' : copyStatus==='copying' ? '复制中…' : '复制'}</span>
       </button>
+      {copyStatus==='failed'&&<span className="msg-copy-error" role="status">复制失败，请允许剪贴板访问后重试。</span>}
       {actions.onRetry && actions.canModify && (
-        <button className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
+        <button type="button" className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}
     </div>
   );
 }
 
 export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions }: MessageBubbleProps) {
+  const historicalError=message.role==='assistant'&&!message.error?historicalGatewayAuthError(message.content):undefined;
+  const displayedError=message.error||historicalError;
+  const displayedContent=historicalError?'':message.content;
   const html = useMemo(() => {
     if (message.role === 'user') return '';
-    return renderMarkdown(message.content);
-  }, [message.content, message.role]);
+    return renderMarkdown(displayedContent);
+  }, [displayedContent, message.role]);
 
   // ---- 用户消息 ----
   if (message.role === 'user') {
@@ -122,7 +135,8 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       <div className="msg-col assistant">
         <div className="message-bubble assistant">
           {livePanel}
-          {message.content && <div dangerouslySetInnerHTML={{ __html: html }} />}
+          {displayedContent && <div dangerouslySetInnerHTML={{ __html: html }} />}
+          {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
         {actions && !isStreaming && <ActionBar actions={actions} />}

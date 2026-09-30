@@ -2,6 +2,11 @@
 .image-page-heading,.image-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .image-page-heading { margin-bottom: 26px; flex-wrap: wrap; }
 .image-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.image-heading-actions .image-heading-icon { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 11px; color: var(--text-secondary); }
+.image-heading-icon svg { display: block; }
+.image-heading-actions .image-heading-icon:hover, .image-heading-actions .image-heading-icon:focus-visible { color: var(--accent-start); background: var(--accent-soft); border-color: var(--accent-start); }
+.image-heading-actions .image-heading-icon:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
+.image-heading-actions .image-heading-icon:active { box-shadow: inset 0 1px 3px #00000014; }
 .image-mode-tabs { display: flex; gap: 6px; padding: 5px; border: 1px solid var(--border); background: var(--surface-2); width: fit-content; border-radius: 12px; margin-bottom: 22px; }
 .image-mode-tabs button { background: transparent; border: 0; color: var(--text-secondary); padding: 10px 22px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
 .image-mode-tabs button.selected { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px #0000000a; }

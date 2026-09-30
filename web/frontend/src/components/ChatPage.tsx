@@ -1,4 +1,8 @@
-import { Fragment, useRef, useEffect } from 'react';
+import {historicalGatewayAuthError} from '../lib/chatErrors';
+import ChatTurnNavigation from './ChatTurnNavigation';
+import { chatTurnNodes,activeTurnFromOffsets,isChatAtBottom,shouldFollowChatScroll } from '../lib/chatNavigation';
+import '../styles/chat-navigation.css';
+import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
@@ -39,13 +43,50 @@ function greeting(): string {
 
 export default function ChatPage({ session, stream, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit }: ChatPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef=useRef<HTMLDivElement>(null);
+  const turnRefs=useRef(new Map<number,HTMLDivElement>());
+  const followLatest=useRef(true);
+  const navigationTarget=useRef<number|null>(null);
+  const lastScrollTop=useRef(0);
+  const [following,setFollowing]=useState(true);
+  const [currentTurn,setCurrentTurn]=useState(0);
+  const nodes=useMemo(()=>chatTurnNodes(session.messages),[session.messages]);
+  const previousCount=useRef(nodes.length);
+  const syncPosition=useCallback(()=>{
+    const element=scrollRef.current;if(!element)return;
+    const atBottom=isChatAtBottom(element.scrollTop,element.scrollHeight,element.clientHeight);
+    followLatest.current=shouldFollowChatScroll(followLatest.current,lastScrollTop.current,element.scrollTop,element.scrollHeight,element.clientHeight,navigationTarget.current!==null);
+    lastScrollTop.current=element.scrollTop;setFollowing(followLatest.current);
+    if(navigationTarget.current!==null){setCurrentTurn(navigationTarget.current);return;}
+    const origin=element.getBoundingClientRect().top;
+    const offsets=nodes.map(node=>(turnRefs.current.get(node.messageIndex)?.getBoundingClientRect().top??origin)-origin+element.scrollTop);
+    setCurrentTurn(Math.max(0,activeTurnFromOffsets(offsets,element.scrollTop,atBottom)));
+  },[nodes]);
+  const goLatest=()=>{navigationTarget.current=null;followLatest.current=true;setFollowing(true);const element=scrollRef.current;if(element){element.scrollTo({top:element.scrollHeight,behavior:'instant'});lastScrollTop.current=element.scrollTop;}setCurrentTurn(Math.max(0,nodes.length-1));};
+  const jumpTo=(index:number)=>{
+    if(index<0||index>=nodes.length)return;
+    const element=scrollRef.current,anchor=turnRefs.current.get(nodes[index].messageIndex);if(!element||!anchor)return;
+    navigationTarget.current=index;followLatest.current=false;setFollowing(false);setCurrentTurn(index);
+    element.scrollTo({top:anchor.getBoundingClientRect().top-element.getBoundingClientRect().top+element.scrollTop-22,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+    anchor.focus({preventScroll:true});
+  };
   const isStreaming = !!stream;
   const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length);
   const isEmpty = session.messages.length === 0 && !isStreaming;
 
-  useEffect(() => {
-    if (!isEmpty) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session.messages, stream?.content, stream?.thinking, stream?.activity, stream?.stillWorking, isEmpty]);
+  useLayoutEffect(()=>{
+    if(nodes.length>previousCount.current){navigationTarget.current=null;followLatest.current=true;}
+    previousCount.current=nodes.length;
+    if(!isEmpty&&followLatest.current){const element=scrollRef.current;if(element){element.scrollTop=element.scrollHeight;lastScrollTop.current=element.scrollTop;}setFollowing(true);setCurrentTurn(Math.max(0,nodes.length-1));}
+  },[session.messages,stream?.content,stream?.thinking,stream?.activity,stream?.stillWorking,isEmpty,nodes.length]);
+  useEffect(()=>{
+    const thread=messagesEndRef.current?.parentElement,element=scrollRef.current;if(!thread||!element||typeof ResizeObserver==='undefined')return;
+    const observer=new ResizeObserver(()=>{
+      if(followLatest.current){element.scrollTop=element.scrollHeight;lastScrollTop.current=element.scrollTop;}
+      else syncPosition();
+    });
+    observer.observe(thread);observer.observe(element);return()=>observer.disconnect();
+  },[isEmpty,syncPosition]);
 
   // ---- 空态：居中欢迎页 ----
   if (isEmpty) {
@@ -82,7 +123,11 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
 
   return (
     <div className="chat-page chat-conversation-page">
-      <div className="chat-messages">
+      <div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
+        onWheel={event=>{if(event.deltaY)navigationTarget.current=null;if(event.deltaY<0){followLatest.current=false;setFollowing(false);}}}
+        onTouchMove={()=>{navigationTarget.current=null;}}
+        onPointerDown={event=>{if(event.target===event.currentTarget)navigationTarget.current=null;}}
+        onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)&&!(event.target as HTMLElement).closest('button,input,textarea,select,a,[contenteditable="true"]'))navigationTarget.current=null;}}>
         <div className="chat-thread">
           {displayMessages.map((msg, i) => {
             const isLast = i === displayMessages.length - 1;
@@ -90,7 +135,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
             const isFinal = !live && i < session.messages.length;
             let actions;
             if (isFinal) {
-              const copy = () => navigator.clipboard?.writeText(msg.content);
+              const copy = () => {if(!navigator.clipboard?.writeText)throw new Error('剪贴板不可用');const historical=msg.role==='assistant'&&!msg.error?historicalGatewayAuthError(msg.content):undefined;return navigator.clipboard.writeText(historical?['历史失败记录',historical.message,historical.code].join('\n\n'):msg.error?[msg.content,msg.error.message,msg.error.code].filter(Boolean).join('\n\n'):msg.content);};
               // 只允许对「最后一轮」重试，契合 OpenClaw append-only 模型（不改写历史）；已移除编辑
               const isLastFinal = i === session.messages.length - 1;
               if (msg.role === 'user') {
@@ -117,7 +162,7 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
             const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
             const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
             return (
-              <Fragment key={`${i}-${msg.role}`}><MessageBubble
+              <Fragment key={`${i}-${msg.role}`}>{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
                 isStreaming={live}
@@ -133,9 +178,9 @@ export default function ChatPage({ session, stream, onSend, onStop, onResend, on
           )}
           <div ref={messagesEndRef} />
         </div>
-      </div>
+      </div>{nodes.length>0&&<ChatTurnNavigation nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
-      <div className="chat-input-area">
+      <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
         <div className="chat-input-inner"><ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} onSend={onSend} onStop={onStop} /></div>
       </div>
     </div>
