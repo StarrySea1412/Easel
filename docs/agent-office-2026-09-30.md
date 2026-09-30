@@ -41,7 +41,7 @@
 | 新接口真实 HTTP | 4 次 GET 通过：合成双角色/6 条调用、重复读取稳定、其他会话隔离、非法 ID 返回 400 | 真实 FastAPI + 文件 I/O，数据来自独立测试目录；没有真实多 Agent 任务 |
 | 构建资源真实 HTTP | 35 项资源逐字节一致；15 条动态导入、117 条本地资源引用目标存在 | HTTP 可达性与文件一致性，不是菜单点击或浏览器性能测量 |
 | 新入口交互 | 模拟 DOM 检查演示/实时切换、会话选择、成员选择、暂停/重播/复位、刷新重试、记录筛选及会话/运行记录跳转；App 集成检查跳转不中断对话 | 用户此前停止电脑控制，真实浏览器逐项点击、旋转/缩放手感、窄屏和 GPU 画面尚未验收 |
-| 真实服务与发行 | 未执行模型、平台发布、安装器重打包或远端 push | 不将源码与模拟验证称为完整上线验收 |
+| 真实服务与发行 | 未执行模型、平台发布或安装器重打包；功能源码已 push | 不将源码与模拟验证称为完整上线验收 |
 
 证据保存在本机 `.scratch/agent-office-qa/`：`frontend-tests.log`、`build.log`、`pytest.log`、`api.json`、`http.json`、`new-build.json`、`comparison.json`。这些是本机诊断资料，不纳入发行物。
 
@@ -63,4 +63,6 @@
 
 实际 `git fetch --all --no-tags` 后，`origin/main` 从 `0cab7ca` 到 `4b9c03c`，只新增微信群二维码变更，已单独 cherry-pick 为 `e6e5df2`；`starry/codex/creator-workflow` 未更新。没有把既有分叉历史说成此次新增，也没有完整合并上游。
 
-源码、回归和文档纳入本轮本地提交。后续先补真实浏览器与真实多 Agent 后台链路验证，再按 [计划](secondary-development-plan.md) 处理草稿备份和新版本候选包。现有 0.2.6 EXE / ZIP 来自 `38e728c`，不含本轮办公室功能。
+源码、回归和文档已提交为 `ac6ad97`，并已推送至 `https://github.com/StarrySea1412/Easel` 的 `codex/creator-workflow` 分支；`git ls-remote` 核对功能提交为 `ac6ad97e8586b3c32fb16cf63b1d39f15dacb3d4`。本次恢复浏览器操作仅用于完成 GitHub 账号授权，不代表办公室画面已验收。
+
+后续先补工作台真实浏览器与真实多 Agent 后台链路验证，再按 [计划](secondary-development-plan.md) 处理草稿备份和新版本候选包。现有 0.2.6 EXE / ZIP 来自 `38e728c`，不含本轮办公室功能。
