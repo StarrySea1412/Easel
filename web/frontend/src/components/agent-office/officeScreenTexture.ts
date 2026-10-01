@@ -55,7 +55,7 @@ export function createOfficeScreenTexture() {
       } else {
         c.fillStyle = '#e5eadf'; c.fillRect(30, 221, 708, 143);
         c.fillStyle = '#41594d'; c.font = '28px "Microsoft YaHei", sans-serif';
-        wrap(surface.tool ? `正在调用：${surface.tool}` : surface.detail, 268, 2);
+        wrap(surface.toolLabel || `${surface.stale ? '上次记录：' : ''}${surface.detail}`, 268, 2);
       }
       c.fillStyle = '#63746b'; c.font = '23px "Microsoft YaHei", sans-serif';
       c.fillText(surface.source, 30, 423);

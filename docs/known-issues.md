@@ -1,6 +1,6 @@
 # 已知问题
 
-本页记录目前已知、且与 Easel 使用相关的问题，以及推荐的规避方式。遇到未列出的问题，欢迎提交 [Issue](https://github.com/ZJU-REAL/Easel/issues)。
+本页记录目前已知、且与 Easel 使用相关的问题，以及推荐的规避方式。遇到未列出的问题，欢迎向本二次开发仓库提交 [Issue](https://github.com/StarrySea1412/Easel/issues)。
 
 ---
 

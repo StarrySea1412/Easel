@@ -7,7 +7,11 @@ const TERMINAL: Partial<Record<OfficeAgent['state'], [OfficeActionKind, string]>
 
 function toolAction(name: string): [OfficeActionKind, string] {
   const tool = name.split('.').at(-1) || name;
-  if (['sessions_spawn','spawn_agent','subagents','sessions_list'].includes(tool)) return ['delegating', '协调协作'];
+  if (['sessions_spawn','spawn_agent'].includes(tool)) return ['delegating', '协调协作'];
+  if (tool === 'sessions_list') return ['reading', '查看协作状态'];
+  // The public receipt omits arguments, so `subagents` does not establish
+  // whether the operation lists, steers or stops an existing child.
+  if (tool === 'subagents') return ['executing', '执行协作工具'];
   if (['read','read_file','search','web_search','web_fetch','fetch','browser'].includes(tool)) return ['reading', '读取与查阅'];
   if (['write','write_file','edit','apply_patch'].includes(tool)) return ['writing', '编写与编辑'];
   if (['imagegen','image_generate','generate_image','image','canvas'].includes(tool)) return ['designing', '处理视觉内容'];

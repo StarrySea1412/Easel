@@ -96,3 +96,6 @@ gui-test-screenshots/
 
 # Local build runtimes
 .tools/
+
+# Local workbench state, gateway databases and credentials
+/data/

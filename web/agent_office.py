@@ -24,8 +24,9 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_TRACE_BYTES = 8 * 1024 * 1024
 MAX_LINE_BYTES = 256 * 1024
 MAX_EVENTS = 10000
-MAX_AGENTS = 32
 MAX_PUBLIC_EVENTS = 40
+TRACE_LIMIT_WARNING = '会话日志超过读取上限，子 Agent 身份可能未完整捕获。'
+RECORD_LIMIT_WARNING = '部分记录超过读取上限，展示可能不完整。'
 
 
 def _read_json(path: Path, root: Path, warnings: set[str]) -> dict | None:
@@ -38,7 +39,7 @@ def _read_json(path: Path, root: Path, warnings: set[str]) -> dict | None:
         with path.open('rb') as stream:
             data = stream.read(MAX_JSON_BYTES + 1)
         if len(data) > MAX_JSON_BYTES:
-            warnings.add('部分记录超过读取上限，展示可能不完整。')
+            warnings.add(RECORD_LIMIT_WARNING)
             return None
         value = json.loads(data)
         if isinstance(value, dict):
@@ -122,7 +123,7 @@ def _events(directory: Path, session: str, audit: dict | None, live: bool,
                 continue
             offset = previous['offset'] if known else 0
             if offset > remaining:
-                warnings.add('会话日志超过读取上限，子 Agent 身份可能未完整捕获。')
+                warnings.add(TRACE_LIMIT_WARNING)
                 continue
             with path.open('rb') as stream:
                 prefix = stream.read(offset)
@@ -137,7 +138,7 @@ def _events(directory: Path, session: str, audit: dict | None, live: bool,
                         break
                     remaining -= len(line)
                     if len(line) > MAX_LINE_BYTES or remaining < 0:
-                        warnings.add('会话日志超过读取上限，子 Agent 身份可能未完整捕获。')
+                        warnings.add(TRACE_LIMIT_WARNING)
                         break
                     if not line.endswith(b'\n'):
                         break  # A writer's unfinished JSON line is not evidence.
@@ -168,7 +169,7 @@ def _events(directory: Path, session: str, audit: dict | None, live: bool,
         except OSError:
             warnings.add('当前会话日志暂不可读，未据此推断子 Agent。')
     if remaining <= 0 or len(events) >= MAX_EVENTS:
-        warnings.add('会话日志超过读取上限，子 Agent 身份可能未完整捕获。')
+        warnings.add(TRACE_LIMIT_WARNING)
     return events
 
 
@@ -244,9 +245,8 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                     continue
                 ident = next((identities[key] for key in raw_ids if key in identities), None)
                 if ident is None:
-                    if len(children) >= MAX_AGENTS - 1:
-                        warnings.add('已达到 Agent 展示上限，部分身份未展示。')
-                        continue
+                    # Identities belong to the bounded trace, not to the number
+                    # of desks visible in the current office region.
                     ident = 'subagent:' + hashlib.sha256(raw_ids[0].encode()).hexdigest()[:20]
                     children[ident] = {
                         'id': ident, 'parentId': root_id, 'role': 'subagent',
@@ -264,7 +264,7 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                     items = payload.get(field)
                     if not isinstance(items, list):
                         continue
-                    for item in items[:MAX_AGENTS * 2]:
+                    for item in items:
                         if not isinstance(item, dict):
                             continue
                         ident = next((identities[key] for key in _identities(item) if key in identities), None)
@@ -342,7 +342,8 @@ def updating_snapshot(session_id: str, turn_id: str = '') -> dict:
         'agents': [{'id': f'root:{session_id}', 'parentId': None, 'role': 'root', 'name': '主 Agent',
                     'task': '', 'status': 'unknown', 'evidence': '会话轮次正在更新，暂不展示未确认的执行状态。'}],
         'links': [], 'events': [],
-        'coverage': {'subagents': 'not_observed', 'detail': '轮次边界暂未稳定，等待下一次读取确认。'},
+        'coverage': {'subagents': 'not_observed', 'observedAgentCount': 1, 'identityScanLimited': False,
+                     'detail': '轮次边界暂未稳定，等待下一次读取确认。'},
         'warnings': ['会话轮次正在更新，本次未展示可能跨轮的调用记录。'],
     }
 
@@ -367,27 +368,30 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
         return updating_snapshot(session_id, turn_id)
     audit = _audit_record(audits, session_id, turn_id, warnings)
     turn_id = turn_id or (audit['turnId'] if audit else '')
-    finished_at = revision[3] / 1e9 if revision and marker.get('status') == 'done' else None
+    terminal_marker = bool(turn_id) and marker.get('turn_id') == turn_id and marker.get('status') == 'done'
+    finished_at = revision[3] / 1e9 if revision and terminal_marker else None
     # A terminal marker already supplies an end boundary, even when the
     # supervisor's process registration has not been cleared yet.
-    events = _events(transcripts, session_id, audit, live and marker.get('status') != 'done', finished_at, warnings)
+    events = _events(transcripts, session_id, audit, live and not terminal_marker, finished_at, warnings)
     # The reader can overlap a terminal save, queueing, or the next execution.
     # Invalidate the whole sample even when a replacement repeats the turn ID.
     if _marker_revision(marker_path) != revision:
         return updating_snapshot(session_id, turn_id)
     state = 'unknown'
     evidence = '尚无可确认的当前会话执行状态。'
-    if live:
+    # The same turn's saved ending outranks a process still exiting. A marker
+    # from a different turn was rejected above and cannot end the active run.
+    if terminal_marker:
+        evidence = '当前会话最近轮次的已保存执行状态。'
+        state = ('stopped' if marker.get('stop_reason') == 'user_stopped' else 'failed' if marker.get('error')
+                 else 'completed' if marker.get('clean_end') is True else 'unknown')
+    elif live:
         state, evidence = 'running', '当前会话的 Agent 执行进程仍在运行。'
         if events:
             message = events[-1].get('message', events[-1])
             blocks = message.get('content') if isinstance(message, dict) else None
             if isinstance(blocks, list) and blocks and isinstance(blocks[-1], dict) and blocks[-1].get('type') in ('thinking', 'reasoning'):
                 state, evidence = 'thinking', '当前会话的运行进程与最近思考事件。'
-    elif marker.get('status') == 'done':
-        evidence = '当前会话最近轮次的已保存执行状态。'
-        state = ('stopped' if marker.get('stop_reason') == 'user_stopped' else 'failed' if marker.get('error')
-                 else 'completed' if marker.get('clean_end') is True else 'unknown')
     elif audit and audit.get('status') in ('completed', 'stopped', 'interrupted', 'failed'):
         state = {'completed': 'completed', 'stopped': 'stopped', 'interrupted': 'failed', 'failed': 'failed'}[audit['status']]
         evidence = '当前会话最近轮次的执行审计状态。'
@@ -395,12 +399,23 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
     root = {'id': root_id, 'parentId': None, 'role': 'root', 'name': '主 Agent',
             'task': _safe_text(audit.get('_request')) if audit else '', 'status': state, 'evidence': evidence}
     children = _child_agents(events, root_id, warnings)
+    if not live or terminal_marker:
+        # Parent-turn history is not a current observation of a child process.
+        # Keep explicit child endings, but never animate an old active receipt
+        # or infer that the child finished/stopped with its parent.
+        active_labels = {'running': '工作中', 'thinking': '思考中', 'waiting': '等待中'}
+        for child in children:
+            previous = active_labels.get(child['status'])
+            if previous:
+                child.update(status='unknown', evidence=f'本轮观测已结束；该子 Agent 最近上报为“{previous}”，当前状态未确认。')
     return {
         'sessionId': session_id, 'turnId': turn_id or None, 'observedAt': datetime.now(timezone.utc).isoformat(),
         'source': 'local_session_trace' if events else 'local_session_state',
         'agents': [root, *children], 'links': [{'from': child['parentId'], 'to': child['id']} for child in children],
         'events': _public_events(events, root_id, turn_id),
         'coverage': {'subagents': 'observed' if children else 'not_observed',
+                     'observedAgentCount': len(children) + 1,
+                     'identityScanLimited': bool(warnings.intersection({TRACE_LIMIT_WARNING, RECORD_LIMIT_WARNING})),
                      'detail': '仅展示当前会话明确回执中的身份及最近状态，未读取子会话，不能保证完整拓扑。' if children
                      else '未捕获可核验的子 Agent 身份；技能调用和文字描述不代表独立 Agent。'},
         'warnings': sorted(warnings),

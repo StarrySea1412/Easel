@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { officeWorkSurface } from './officeWorkSurface';
 import { createOfficeScreenTexture } from './officeScreenTexture';
+import { createOfficeMotionPlayer } from './officeMotionPlayer';
 import type { OfficeAgent } from '../../lib/agentOffice';
 import {
-  OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, officeLayout, poseOfficeAvatar,
+  OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, officeWorkstationLayoutKey,
   type OfficeAvatar, type OfficeWorld,
 } from './officeGeometry';
 import { createSceneScheduler } from './sceneScheduler';
@@ -14,6 +15,9 @@ export interface OfficeSceneInput {
   agents: OfficeAgent[];
   selectedId: string | null;
   paused: boolean;
+  stale?: boolean;
+  observedAt?: string | null;
+  demoSeek?: { seconds: number; revision: number };
 }
 
 interface RuntimeOptions extends OfficeSceneInput {
@@ -48,7 +52,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   renderer.setClearColor(0xf4f1ea);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.25;
+  renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   const canvas = renderer.domElement;
@@ -73,8 +77,8 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   controls.target.set(0, 0.65, 0);
   controls.update();
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb6a48b, 2.45));
-  const sun = new THREE.DirectionalLight(0xfff0d4, 3.8);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb6a48b, 1.85));
+  const sun = new THREE.DirectionalLight(0xfff0e1, 3.2);
   sun.position.set(4, 13, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
@@ -93,27 +97,29 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   cleanups.push(() => resources.dispose());
   let avatarResources = new OfficeResources();
   cleanups.push(() => avatarResources.dispose());
-  let world: OfficeWorld = createOfficeWorld(resources, input.agents.length);
+  let world: OfficeWorld = createOfficeWorld(resources, input.agents.length, input.agents);
   const screenTextures = new Map<number, ReturnType<typeof createOfficeScreenTexture>>();
   const clearScreenTextures = () => { for (const screen of screenTextures.values()) screen?.dispose(); screenTextures.clear(); };
   cleanups.push(clearScreenTextures);
   batchOfficeArchitecture(resources, world);
   scene.add(world.root);
-  let layoutKey = officeLayout(input.agents.length).key;
+  let layoutKey = officeWorkstationLayoutKey(input.agents);
   let avatarIds = '';
   let avatars = new Map<string, OfficeAvatar>();
+  const motionPlayers = new Map<string, ReturnType<typeof createOfficeMotionPlayer>>();
   const workSurfaces = new Map<string, ReturnType<typeof officeWorkSurface>>();
   let width = 1, height = 1;
   let focused = document.hasFocus();
   let intersecting = true;
   let contextLost = false;
-  let animationTime = 0;
+  let animationTime = Number.isFinite(input.demoSeek?.seconds) ? Math.max(0, input.demoSeek!.seconds) : 0;
   let lastFrame: number | undefined;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const visible = () => !document.hidden && intersecting && !contextLost;
-  const animate = () => visible() && focused && !input.paused && !reducedMotion?.matches
-    && input.agents.some((agent) => ['working', 'thinking'].includes(agent.state)
-      && workSurfaces.get(agent.id)?.kind !== 'unreported');
+  const motionAllowed = () => visible() && focused && !input.paused && !input.stale && !reducedMotion?.matches;
+  const animate = () => motionAllowed() && (Array.from(motionPlayers.values()).some(player => player.pending)
+    || input.agents.some((agent) => ['working', 'thinking'].includes(agent.state)
+      && workSurfaces.get(agent.id)?.kind !== 'unreported'));
   const projected = new THREE.Vector3();
   const labelSizes = new Map<string, { width: number; height: number }>();
   let labelLayoutKey = '';
@@ -131,10 +137,12 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   function positionAgentLabels() {
     const anchors: OfficeLabelAnchor[] = [];
     const protectedAreas: OfficeProtectedArea[] = [];
-    const protect = (xs: number[], ys: number[], zs: number[]) => {
+    const protect = (xs: number[], ys: number[], zs: number[], space?: THREE.Object3D) => {
       let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
       for (const x of xs) for (const y of ys) for (const z of zs) {
-        projected.set(x, y, z).project(camera);
+        projected.set(x, y, z);
+        if (space) projected.applyMatrix4(space.matrixWorld);
+        projected.project(camera);
         if (projected.z <= -1 || projected.z >= 1) continue;
         const px = (projected.x * 0.5 + 0.5) * width, py = (-projected.y * 0.5 + 0.5) * height;
         left = Math.min(left, px); right = Math.max(right, px); top = Math.min(top, py); bottom = Math.max(bottom, py);
@@ -144,16 +152,20 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
     for (const [index, agent] of input.agents.entries()) {
       const avatar = avatars.get(agent.id), desk = world.desks[index];
       if (!avatar || !desk) continue;
-      const p = avatar.root.position;
       // Reserve the employee, hands and working props, plus the monitor face.
-      protect([p.x - .46, p.x + .46], [.74, 2.12], [p.z - .62, p.z + .3]);
+      // Work in avatar-local space so station rotation also rotates the protected region.
+      protect([-.46, .46], [.13, 1.51], [-.62, .3], avatar.root);
       // The mouse and articulated forearms extend sideways at desk height only.
       // Keep that workspace clear without hiding labels across the whole body.
-      protect([p.x - .46, p.x + .86], [.94, 1.18], [p.z - .7, p.z - .2]);
+      protect([-.46, .86], [.33, .57], [-.7, -.2], avatar.root);
     }
     // Empty stations are still visible; their monitors must remain unobstructed too.
     for (const desk of world.desks) {
-      protect([desk.slot.x - .05, desk.slot.x + .96], [1.06, 1.78], [desk.slot.z - .24, desk.slot.z - .12]);
+      const screen = desk.root.getObjectByName('office-work-screen');
+      if (!(screen instanceof THREE.Mesh)) continue;
+      if (!screen.geometry.boundingBox) screen.geometry.computeBoundingBox();
+      const bounds = screen.geometry.boundingBox;
+      if (bounds) protect([bounds.min.x - .02, bounds.max.x + .02], [bounds.min.y - .02, bounds.max.y + .02], [-.035, .035], screen);
     }
     for (const [id, avatar] of avatars) {
       if (!labels.has(id) || focusedAgentId && id !== focusedAgentId) continue;
@@ -198,11 +210,12 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
     visible,
     animate,
     draw: (time) => {
-      if (animate() && lastFrame !== undefined) animationTime += Math.min((time - lastFrame) / 1000, 0.06);
+      const delta = motionAllowed() && lastFrame !== undefined ? Math.max(0, Math.min((time - lastFrame) / 1000, 0.06)) : 0;
+      if (animate()) animationTime += delta;
       lastFrame = time;
       for (const agent of input.agents) {
-        const avatar = avatars.get(agent.id);
-        if (avatar) poseOfficeAvatar(avatar, agent.state, animationTime, agent.id === input.selectedId, workSurfaces.get(agent.id)?.kind);
+        motionPlayers.get(agent.id)?.draw(agent.state, workSurfaces.get(agent.id)?.kind || 'unreported',
+          animationTime, agent.id === input.selectedId, delta, motionAllowed());
       }
       camera.updateMatrixWorld();
       try { renderer.render(scene, camera); }
@@ -232,7 +245,9 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
     camera.bottom = -halfHeight;
     if (reset) {
       camera.zoom = 1;
-      camera.position.set(radius * 1.15, radius * 1.1, radius * 1.45);
+      // A higher three-quarter view exposes hands and desk surfaces instead of
+      // stacking monitor backs over the characters' faces in the default view.
+      camera.position.set(radius * 1.15, radius * 1.5, radius * 1.45);
       controls.target.set(0, 0.65, 0);
       controls.update();
     }
@@ -245,16 +260,17 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
 
   function synchronizeAgents() {
     workSurfaces.clear();
-    for (const agent of input.agents) workSurfaces.set(agent.id, officeWorkSurface(agent));
-    const nextLayout = officeLayout(input.agents.length).key;
+    for (const agent of input.agents) workSurfaces.set(agent.id, officeWorkSurface(agent, { stale: input.stale, observedAt: input.observedAt }));
+    const nextLayout = officeWorkstationLayoutKey(input.agents);
     if (nextLayout !== layoutKey) {
       clearScreenTextures();
       scene.remove(world.root);
       for (const avatar of avatars.values()) scene.remove(avatar.root);
       avatars.clear();
+      motionPlayers.clear();
       resources.dispose();
       resources = new OfficeResources();
-      world = createOfficeWorld(resources, input.agents.length);
+      world = createOfficeWorld(resources, input.agents.length, input.agents);
       batchOfficeArchitecture(resources, world);
       scene.add(world.root);
       layoutKey = nextLayout;
@@ -268,9 +284,11 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       // their exclusive GPU assets without touching the world's monitor screens.
       avatarResources.dispose();
       avatarResources = new OfficeResources();
+      motionPlayers.clear();
       avatars = new Map(input.agents.map((agent, index) => {
         const avatar = createOfficeAvatar(avatarResources, world.desks[index], agent.id, agent.appearance);
         scene.add(avatar.root);
+        motionPlayers.set(agent.id, createOfficeMotionPlayer(avatar));
         return [agent.id, avatar];
       }));
       avatarIds = ids;
@@ -386,7 +404,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   };
   canvas.addEventListener('webglcontextlost', onContextLost);
   cleanups.push(() => canvas.removeEventListener('webglcontextlost', onContextLost));
-  cleanups.push(() => { scene.clear(); avatars.clear(); });
+  cleanups.push(() => { scene.clear(); avatars.clear(); motionPlayers.clear(); });
 
   synchronizeAgents();
   resize();
@@ -394,6 +412,10 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   return {
     update(next: OfficeSceneInput) {
       if (disposed) return;
+      if (next.demoSeek && (next.demoSeek.revision !== input.demoSeek?.revision || next.demoSeek.seconds !== input.demoSeek?.seconds)) {
+        animationTime = Number.isFinite(next.demoSeek.seconds) ? Math.max(0, next.demoSeek.seconds) : 0;
+        for (const player of motionPlayers.values()) player.reset();
+      }
       input = next;
       measureLabels();
       synchronizeAgents();
@@ -403,8 +425,8 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       const avatar = avatars.get(id);
       if (disposed || !avatar) return;
       focusedAgentId = id;
-      controls.target.set(avatar.root.position.x, 1, avatar.root.position.z - 0.15);
-      camera.position.copy(controls.target).add(new THREE.Vector3(7, 5, 8));
+      controls.target.copy(avatar.root.position).add(new THREE.Vector3(0, .44, -.17).applyQuaternion(avatar.root.quaternion));
+      camera.position.copy(controls.target).add(new THREE.Vector3(-7, 6.4, -8).applyQuaternion(avatar.root.quaternion));
       camera.zoom = 3.6;
       camera.updateProjectionMatrix(); controls.update(); refresh();
     },

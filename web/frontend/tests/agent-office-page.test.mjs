@@ -85,6 +85,11 @@ async function fixture(t, overrides = {}) {
     harness, container, render, unmount,
     button: (text) => [...container.querySelectorAll('button')].find((button) => button.textContent.replace(/[▶Ⅱ↺⌖↗]/g, '').trim() === text),
     click: async (button) => act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
+    async input(element, value) {
+      const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+      await act(async () => element.dispatchEvent(new window.Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })));
+    },
     async advance(ms) { await act(async () => { harness.now += ms; const callbacks = [...harness.frames.values()]; harness.frames.clear(); for (const callback of callbacks) callback(harness.now); }); },
     async select(id) { const select = container.querySelector('.office-session-select select'); await act(async () => { select.value = id; select.dispatchEvent(new window.Event('change', { bubbles: true })); }); },
   };
@@ -177,7 +182,7 @@ test('demo playback, replay, camera reset and unmount clean up the animation fra
   assert.equal(h.frames.size, 1);
   await view.advance(0);
   await view.advance(1200);
-  assert.equal(Number(view.container.querySelector('progress').value), 1.2);
+  assert.equal(Number(view.container.querySelector('.office-demo-seek').value), 1.2);
   await view.click(view.button('暂停动画'));
   assert.equal(h.scene.paused, true);
   assert.equal(h.frames.size, 0);
@@ -187,7 +192,7 @@ test('demo playback, replay, camera reset and unmount clean up the animation fra
   await view.click(view.button('视角复位'));
   assert.equal(h.scene.resetKey, beforeReset + 1);
   await view.click(view.button('重播演示'));
-  assert.equal(Number(view.container.querySelector('progress').value), 0);
+  assert.equal(Number(view.container.querySelector('.office-demo-seek').value), 0);
   assert.equal(h.scene.paused, false);
   await view.advance(0);
   await view.advance(48_000);
@@ -196,7 +201,7 @@ test('demo playback, replay, camera reset and unmount clean up the animation fra
   assert.equal(h.frames.size, 0);
   assert.match(view.container.textContent, /演示完成 · 可重播/);
   await view.click(view.button('播放动画'));
-  assert.equal(Number(view.container.querySelector('progress').value), 0);
+  assert.equal(Number(view.container.querySelector('.office-demo-seek').value), 0);
   await view.unmount();
   assert.equal(h.frames.size, 0);
   assert.equal(h.sceneUnmounts, 1);
@@ -253,6 +258,10 @@ test('observation errors retain and freeze the last snapshot while labeling it s
   assert.equal(h.scene.agents.length, 1);
   assert.equal(h.scene.paused, true);
   assert.match(view.container.querySelector('[role="alert"]').textContent, /保留上次快照/);
+  assert.equal(h.scene.stale, true);
+  assert.equal(h.scene.observedAt, '2026-09-30T08:00:00Z');
+  assert.match(view.container.querySelector('.office-action-summary').textContent, /上次记录：/);
+  assert.match(view.container.querySelector('.office-work-preview').textContent, /上次快照/);
   assert.match(view.container.querySelector('[role="alert"]').textContent, /并非当前实时执行状态/);
   assert.match(view.container.querySelector('.office-agent-detail').textContent, /快照中的任务/);
   assert.ok(view.container.querySelector('[aria-label="上次快照统计"]'));
@@ -264,6 +273,7 @@ test('observation errors retain and freeze the last snapshot while labeling it s
   assert.equal(view.container.querySelector('[role="alert"]'), null);
   assert.equal(h.scene.agents[0].id, 'new');
   assert.equal(h.scene.paused, false);
+  assert.equal(h.scene.stale, false);
   await view.unmount();
   assert.equal(h.leases, 0);
   assert.equal(h.releases, 1);
@@ -306,15 +316,15 @@ test('hidden time does not advance the demo or skip its call sequence on return'
   t.after(() => { delete document.hidden; });
   const view = await fixture(t);
   await view.advance(0); await view.advance(3000);
-  const before = view.container.querySelector('progress').value;
+  const before = Number(view.container.querySelector('.office-demo-seek').value);
   await act(async () => { hidden = true; document.dispatchEvent(new window.Event('visibilitychange')); });
   assert.equal(view.harness.frames.size, 0);
   await view.advance(120000);
   await act(async () => { hidden = false; document.dispatchEvent(new window.Event('visibilitychange')); });
   await view.advance(0);
-  assert.equal(view.container.querySelector('progress').value, before);
+  assert.equal(Number(view.container.querySelector('.office-demo-seek').value), before);
   await view.advance(1000);
-  assert.equal(view.container.querySelector('progress').value, before + 1);
+  assert.equal(Number(view.container.querySelector('.office-demo-seek').value), before + 1);
 });
 
 test('stopped tasks show their terminal state and are not counted as waiting', async t => {
@@ -324,6 +334,135 @@ test('stopped tasks show their terminal state and are not counted as waiting', a
   assert.match(view.container.querySelector('.office-agent-detail').textContent, /已停止/);
   const waiting = [...view.container.querySelectorAll('.office-stats>div')].find(row => row.querySelector('dt').textContent === '等待');
   assert.equal(waiting.querySelector('dd').textContent, '0');
+});
+
+for (const count of [9, 12, 20, 50]) test(`${count} live members have complete roster, bounded scene and cross-zone focus`, async t => {
+  const view = await fixture(t);
+  const agents = Array.from({ length: count }, (_, index) => agent(`live-${index + 1}`));
+  view.harness.snapshots.one = snapshot(agents, { observedAgentCount: count, identityScanLimited: count === 50 });
+  await view.click(view.button('实时观测'));
+  assert.equal(view.harness.scene.agents.length, 8);
+  assert.equal(view.container.querySelectorAll('.office-member-list button').length, count);
+  assert.match(view.container.querySelector('.office-zone-summary').textContent, new RegExp(`已观测 ${count} 人`));
+  if (count === 50) assert.match(view.container.querySelector('.office-coverage-note').textContent, /实际参与人数可能更多/);
+  await view.click([...view.container.querySelectorAll('.office-member-list button')].at(-1));
+  assert.equal(view.harness.scene.selectedId, agents.at(-1).id);
+  assert.equal(view.harness.scene.focusId, agents.at(-1).id);
+  assert.ok(view.harness.scene.agents.some(agent => agent.id === agents.at(-1).id));
+  assert.equal(view.harness.scene.agents.length, count % 8 || 8);
+  assert.equal(view.button('下一分区').disabled, true);
+  assert.match(view.container.querySelector('.office-agent-detail').textContent, new RegExp(agents.at(-1).name));
+  await view.click(view.button('上一分区'));
+  assert.equal(view.harness.scene.selectedId, view.harness.scene.agents[0].id);
+  assert.equal(view.harness.scene.focusId, view.harness.scene.selectedId);
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.deepEqual(view.harness.fetches, []);
+});
+
+test('all fifty simulated members can be searched and selected across zones, including editing a shared card', async t => {
+  const view = await fixture(t);
+  await view.input(view.container.querySelector('.office-demo-team-select select'), '50');
+  assert.equal(view.container.querySelectorAll('.office-member-list button').length, 50);
+  assert.equal(view.harness.scene.agents.length, 8);
+  assert.match(view.container.querySelector('.office-source-copy').textContent, /50 个角色的协作演示/);
+  await view.advance(0); await view.advance(15000);
+  assert.equal(view.harness.scene.agents.find(agent => agent.id === 'researcher:demo:07').action.kind, 'reading');
+  assert.equal(view.harness.scene.agents.find(agent => agent.id === 'designer:demo:08').action.kind, 'designing');
+  await view.input(view.container.querySelector('.office-member-search input'), ':demo:50');
+  const rows = view.container.querySelectorAll('.office-member-list button');
+  assert.equal(rows.length, 1);
+  await view.click(rows[0]);
+  assert.match(view.harness.scene.selectedId, /:demo:50$/);
+  assert.equal(view.harness.scene.focusId, view.harness.scene.selectedId);
+  assert.equal(view.harness.scene.agents.length, 2);
+  assert.equal(view.container.querySelector('[aria-label="切换办公室分区"]').value, '6');
+  const selected = view.harness.scene.selectedId;
+  await view.click(view.button('编辑角色卡'));
+  assert.ok(document.querySelector('[role="dialog"]'));
+  assert.equal(view.harness.scene.selectedId, selected);
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(view.harness.scene.selectedId, selected);
+  await view.click(view.button('清空搜索'));
+  assert.equal(view.container.querySelectorAll('.office-member-list button').length, 50);
+  await view.input(view.container.querySelector('.office-member-search input'), '不存在的名字');
+  assert.equal(view.container.querySelectorAll('.office-member-list button').length, 0);
+  assert.match(view.container.querySelector('.office-member-empty').textContent, /没有匹配成员/);
+  assert.equal(view.harness.scene.selectedId, selected, 'filtering the roster must not discard the selection');
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.deepEqual(view.harness.fetches, []);
+});
+
+test('live reorder or shrinking roster keeps the selected identity in its visible zone and clears vanished focus', async t => {
+  const view = await fixture(t);
+  const agents = Array.from({ length: 20 }, (_, index) => agent(`member-${index}`));
+  view.harness.snapshots.one = snapshot(agents);
+  await view.click(view.button('实时观测'));
+  await view.click([...view.container.querySelectorAll('.office-member-list button')].at(-1));
+  view.harness.snapshots.one = snapshot([...agents].reverse());
+  await view.render();
+  assert.equal(view.harness.scene.selectedId, 'member-19');
+  assert.equal(view.harness.scene.agents[0].id, 'member-19');
+  assert.equal(view.harness.scene.focusId, 'member-19');
+  view.harness.snapshots.one = snapshot(agents.slice(0, 3));
+  await view.render();
+  assert.equal(view.harness.scene.selectedId, 'member-0');
+  assert.equal(view.harness.scene.focusId, null);
+  assert.equal(view.harness.scene.agents.length, 3);
+});
+
+test('demo stage navigation synchronizes task, events and scene time without losing selection or camera', async t => {
+  const view = await fixture(t);
+  await view.click([...view.container.querySelectorAll('.office-member-list button')].find(button => button.textContent.includes('Quill')));
+  const resetKey = view.harness.scene.resetKey;
+  const range = view.container.querySelector('.office-demo-seek');
+  await view.click(view.button('并行协作'));
+  assert.equal(range.value, '18');
+  assert.equal(view.harness.scene.demoSeek.seconds, 18);
+  assert.equal(view.harness.scene.paused, true);
+  assert.equal(view.harness.frames.size, 0);
+  assert.equal(view.harness.scene.selectedId, 'writer');
+  assert.equal(view.harness.scene.focusId, 'writer');
+  assert.equal(view.harness.scene.agents.find(a => a.id === 'writer').action.kind, 'writing');
+  assert.match(range.getAttribute('aria-valuetext'), /并行协作.*暂停/);
+  const revision = view.harness.scene.demoSeek.revision;
+  await view.click(view.button('完成'));
+  assert.ok(view.harness.scene.agents.every(agent => agent.state === 'done'));
+  assert.equal(view.harness.scene.demoSeek.seconds, 48);
+  await view.click(view.button('任务分工'));
+  assert.equal(view.harness.scene.demoSeek.seconds, 0);
+  assert.ok(view.harness.scene.demoSeek.revision > revision);
+  assert.doesNotMatch(view.container.querySelector('.office-event-list').textContent, /演示 00:(1[89]|[234]\d)/);
+  assert.doesNotMatch(view.container.querySelector('.office-feedback').textContent, /已完成/);
+  await view.input(range, '28.5');
+  assert.equal(view.harness.scene.demoSeek.seconds, 28.5);
+  assert.equal(view.harness.scene.paused, true);
+  await view.click(view.button('播放动画'));
+  await view.advance(0); await view.advance(1000);
+  assert.equal(Number(range.value), 29.5, 'play resumes from the chosen time');
+  await view.click(view.button('重播演示'));
+  assert.equal(view.harness.scene.demoSeek.seconds, 0);
+  assert.equal(view.harness.scene.selectedId, 'writer');
+  assert.equal(view.harness.scene.focusId, 'writer');
+  assert.equal(view.harness.scene.resetKey, resetKey);
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.deepEqual(view.harness.fetches, []);
+});
+
+test('demo time is resynchronized after team and mode changes without leaking seek into live observation', async t => {
+  const view = await fixture(t);
+  await view.click(view.button('检查与审阅'));
+  const revision = view.harness.scene.demoSeek.revision;
+  await view.input(view.container.querySelector('.office-demo-team-select select'), '50');
+  assert.equal(view.harness.scene.demoSeek.seconds, 28);
+  assert.ok(view.harness.scene.demoSeek.revision > revision);
+  assert.equal(view.harness.scene.paused, true);
+  await view.click(view.button('实时观测'));
+  assert.equal(view.harness.scene.demoSeek, undefined);
+  await view.click(view.button('演示模式'));
+  assert.equal(view.harness.scene.demoSeek.seconds, 28);
+  assert.equal(view.container.querySelectorAll('.office-member-list button').length, 50);
+  assert.equal(view.harness.sceneMounts, 1);
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

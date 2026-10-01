@@ -22,7 +22,36 @@ test('live decoding requires exact session identity and unique explicit agent id
   const duplicate = payload(); duplicate.agents.push(duplicate.agents[0]);
   assert.throws(() => decodeOfficeSnapshot(duplicate, 'one'), /身份数据无效/);
   assert.throws(() => decodeOfficeSnapshot({ ...payload(), agents: [{ id: 'skill', role: 'skill' }] }, 'one'), /身份数据无效/);
-  assert.throws(() => decodeOfficeSnapshot({ ...payload(), agents: Array.from({ length: 65 }, (_, id) => ({ id: String(id), role: 'subagent' })) }, 'one'));
+  for (const id of ['', 'bad identity', 'bad\nidentity', 'x'.repeat(161), {}, null]) {
+    assert.throws(() => decodeOfficeSnapshot({ ...payload(), agents: [{ id, role: 'subagent' }] }, 'one'), /身份数据无效/);
+  }
+});
+
+function teamPayload(count) {
+  const raw = payload();
+  raw.agents.push(...Array.from({ length: count - 1 }, (_, index) => ({ id: `child-${index}`, parentId: 'root', role: 'subagent', status: 'running' })));
+  raw.coverage.observedAgentCount = count;
+  return raw;
+}
+
+for (const count of [9, 12, 20, 50, 65, 100]) test(`all ${count} confirmed identities are decoded independently of the visible room capacity`, () => {
+  const result = decodeOfficeSnapshot(teamPayload(count), 'one');
+  assert.equal(result.agents.length, count);
+  assert.equal(new Set(result.agents.map(agent => agent.id)).size, count);
+  assert.equal(result.agents.at(-1).parentId, 'root');
+  assert.equal(result.observedAgentCount, count);
+  assert.equal(result.identityScanLimited, false);
+});
+
+test('partial identity coverage remains explicit and counts only decoded identities', () => {
+  const raw = teamPayload(50);
+  raw.coverage.identityScanLimited = true;
+  raw.coverage.observedAgentCount = 9000;
+  raw.warnings = ['会话日志超过读取上限，子 Agent 身份可能未完整捕获。'];
+  const result = decodeOfficeSnapshot(raw, 'one');
+  assert.equal(result.observedAgentCount, 50);
+  assert.equal(result.identityScanLimited, true);
+  assert.match(result.coverage, /超过读取上限/);
 });
 
 test('unknown statuses are never promoted to completion and unproven relationships are omitted', () => {
@@ -126,6 +155,22 @@ test('failed polling retains the last snapshot and stale warning until a success
   assert.match(f.state().error, /网络/, 'starting another request cannot erase stale-data warning');
   await f.reply(2, payload('one', 'completed'));
   assert.equal(f.state().error, null); assert.equal(f.state().agents[0].state, 'done');
+});
+
+test('large and limited identity snapshots survive polling errors and clear on session changes', async t => {
+  const f = await fixture(t);
+  const raw = teamPayload(100); raw.coverage.identityScanLimited = true;
+  await f.render('one'); await f.reply(0, raw);
+  assert.equal(f.state().agents.length, 100);
+  assert.equal(f.state().observedAgentCount, 100);
+  assert.equal(f.state().identityScanLimited, true);
+  await f.tick(2000); await f.fail(1);
+  assert.equal(f.state().agents.length, 100);
+  assert.equal(f.state().identityScanLimited, true);
+  await f.render('two');
+  assert.equal(f.state().agents.length, 0);
+  assert.equal(f.state().observedAgentCount, 0);
+  assert.equal(f.state().identityScanLimited, false);
 });
 
 test('visibility, manual refresh and unmount do not leave overlapping polls or listeners', async t => {

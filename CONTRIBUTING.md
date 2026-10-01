@@ -1,9 +1,17 @@
 # 贡献指南
 
-感谢参与 Easel。项目以 Apache-2.0 开源，欢迎 Issue 和 PR。
+感谢参与 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel)。这是我们基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 维护的二次开发仓库，沿用 Apache-2.0 许可证；第三方来源见 [ACKNOWLEDGMENTS](docs/ACKNOWLEDGMENTS.md)。
+
+当前定制功能在 [`codex/creator-workflow`](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) 分支。`main` 的代码仍是上游基线；开发、验证和提交本版本的改动时，请使用 `codex/creator-workflow`，并将 PR 的目标分支设为该分支。
+
+```bash
+git clone --branch codex/creator-workflow https://github.com/StarrySea1412/Easel.git
+cd Easel
+```
 
 ## 反馈 Issue
 
+- 在本仓库的 [Issues](https://github.com/StarrySea1412/Easel/issues) 反馈问题；提交改动见 [Pull requests](https://github.com/StarrySea1412/Easel/pulls)。
 - **环境问题**：附上 OS、Python、Node.js、`openclaw --version` 版本、`easel doctor` 输出和 `easel gateway logs` 相关片段。先查 [已知问题](docs/known-issues.md)。
 - **功能建议 / 新技能**：先开 Issue 说明场景与预期产物，确认方向后再动手，避免大改撞车。
 
@@ -12,8 +20,10 @@
 ```bash
 python scripts/validate_skills.py            # SKILL frontmatter、目录结构、发布契约
 python scripts/validate_skill_commands.py    # 文档中的 python 命令与脚本真实 argparse 对齐
-python -m pytest tests/                      # 核心单测（不会调用真实模型或平台）
+python -m pytest -q                          # 根目录全量，包含 skills 内的测试
 ```
+
+前端有改动时，在 `web/frontend` 运行 `npm test`、`npm run lint` 和 `npm run build`。交付时同步项目说明与进度，提交并推送本仓库后核对远端 SHA；首页介绍需与开发分支的实际功能和安装包边界一致。
 
 ## Skill 约定
 

@@ -9,6 +9,8 @@ export interface OfficeWorkSurface {
   source: string;
   state: string;
   sample: boolean;
+  stale: boolean;
+  toolLabel: string | null;
 }
 
 const TITLES: Record<OfficeActionKind, string> = {
@@ -25,17 +27,22 @@ const SAMPLE: Partial<Record<OfficeActionKind, string>> = {
 };
 
 /** Every live word comes from this employee's observed state/task/action. */
-export function officeWorkSurface(agent: OfficeAgent): OfficeWorkSurface {
+export function officeWorkSurface(agent: OfficeAgent, snapshot: { stale?: boolean; observedAt?: string | null } = {}): OfficeWorkSurface {
   const terminal: Partial<Record<OfficeAgent['state'], OfficeActionKind>> = { done: 'completed', error: 'error', stopped: 'stopped', waiting: 'waiting', thinking: 'thinking' };
   const kind: OfficeActionKind = terminal[agent.state]
     || (agent.action?.evidence !== 'unreported' ? agent.action?.kind : undefined) || 'unreported';
   const sample = agent.source === 'demo';
+  const stale = !sample && Boolean(snapshot.stale);
+  const observed = snapshot.observedAt ? new Date(snapshot.observedAt) : null;
+  const time = observed && Number.isFinite(observed.getTime()) ? observed.toLocaleTimeString('zh-CN', { hour12: false }) : '时间未记录';
   const tool = agent.state === 'working' && agent.action?.evidence === 'observed' ? agent.action.toolName || null : null;
   return {
     kind, title: TITLES[kind], task: agent.task || '尚未上报任务说明',
     detail: sample && SAMPLE[kind] ? SAMPLE[kind]! : kind === 'unreported'
       ? '具体操作未上报，等待该员工的工作记录。'
       : agent.action?.label || OFFICE_STATE_LABELS[agent.state],
-    tool, sample, source: sample ? '模拟屏幕 · 演示内容' : '观测记录 · 非远程桌面', state: OFFICE_STATE_LABELS[agent.state],
+    tool, sample, stale, toolLabel: tool ? `${stale ? '上次记录调用' : '正在调用'}：${tool}` : null,
+    source: sample ? '模拟屏幕 · 演示内容' : stale ? `上次快照 · ${time}` : '观测记录 · 非远程桌面',
+    state: `${stale ? '上次记录：' : ''}${OFFICE_STATE_LABELS[agent.state]}`,
   };
 }

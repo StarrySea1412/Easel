@@ -18,6 +18,17 @@ export const IMAGE_SIZES: { id: string; label: string; ratio: string; use: strin
 ];
 const IMAGE_JOB_KEY = 'easel_imagegen_job';
 const IMAGE_DRAFT_KEY = 'easel_imagegen_draft';
+
+/** Choose a supported ratio; 'auto' is not a promise to preserve source size. */
+export function closestImageSize(width: number, height: number): string {
+  if (!(width > 0) || !(height > 0) || !Number.isFinite(width / height)) return IMAGE_SIZES[0].id;
+  const choices = IMAGE_SIZES.filter(item => item.id !== 'auto');
+  const distance = (id: string) => {
+    const [w, h] = id.split('x').map(Number);
+    return Math.abs(Math.log((w / h) / (width / height)));
+  };
+  return choices.reduce((best, item) => distance(item.id) < distance(best.id) ? item : best).id;
+}
 type ImageStudioJob = ImagegenJob & { size: string };
 
 function imageSize(value: unknown): string {
@@ -161,22 +172,22 @@ export function useImageStudio(active: boolean) {
       if(isMask){if(!reference)throw new Error('请先上传参考图，再上传同尺寸蒙版。');await validateMaskFile(file,reference);}
       const uploaded=await uploadImagegenReference(file);
       if(!mounted.current)return;
-      if(isMask)setMask(uploaded);else{setReference(uploaded);setMask(null);}
+      if(isMask)setMask(uploaded);else{setReference(uploaded);setMask(null);setMode('img2img');setImgSize(closestImageSize(uploaded.width,uploaded.height));}
     } catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'图片上传失败。');}
     finally{referencePending.current=false;if(mounted.current)setReferenceBusy(false);}
   },[imgJob,reference]);
   const useGalleryReference = useCallback(async (item:ImagegenGalleryItem) => {
     if(referencePending.current || imgSubmitPending.current || imgJob?.state==='running')return;
-    setMode('img2img');setImgErr('');referencePending.current=true;setReferenceBusy(true);
+    setImgErr('');referencePending.current=true;setReferenceBusy(true);
     try {
       const url=new URL(item.url,window.location.href);
       if(url.origin!==window.location.origin)throw new Error('仅支持使用本地图库图片作为参考。');
       const response=await fetch(url.href);if(!response.ok)throw new Error('历史图片读取失败，请重新上传。');
-      const blob=await response.blob();const file=new File([blob],item.name,{type:blob.type});validateReferenceFile(file);const uploaded=await uploadImagegenReference(file);if(mounted.current){setReference(uploaded);setMask(null);}
+      const blob=await response.blob();const file=new File([blob],item.name,{type:blob.type});validateReferenceFile(file);const uploaded=await uploadImagegenReference(file);if(mounted.current){setReference(uploaded);setMask(null);setMode('img2img');setImgSize(closestImageSize(uploaded.width,uploaded.height));}
     }catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'读取参考图失败。');}
     finally{referencePending.current=false;if(mounted.current)setReferenceBusy(false);}
   },[imgJob]);
-  const clearReference = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running'){setReference(null);setMask(null);}};
+  const clearReference = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running'){setReference(null);setMask(null);setMode('generate');}};
   const clearMask = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running')setMask(null);};
   return { reference,mask,referenceBusy,uploadReference,useGalleryReference,clearReference,clearMask,imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
     imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode };

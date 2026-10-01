@@ -22,3 +22,15 @@ test('demo actions are explicitly synthetic and live prose never selects a gestu
   assert.equal(describeOfficeAction({ ...worker, id: 'designer', source: 'demo' }, []).kind, 'designing');
   assert.equal(describeOfficeAction({ ...worker, task: 'design image', role: 'designer' }, []).kind, 'unreported');
 });
+test('member queries and generic collaboration tools never imply a task was assigned', () => {
+  for (const [toolName, kind] of [['sessions_list', 'reading'], ['subagents', 'executing']]) {
+    const action = describeOfficeAction(worker, [{ ...call, toolName }]);
+    assert.equal(action.kind, kind);
+    assert.equal(action.evidence, 'observed');
+    assert.equal(action.toolName, toolName);
+    assert.doesNotMatch(action.label, /分配|分派|协调协作/);
+  }
+  for (const toolName of ['sessions_spawn', 'collaboration.spawn_agent']) {
+    assert.equal(describeOfficeAction(worker, [{ ...call, toolName }]).kind, 'delegating');
+  }
+});

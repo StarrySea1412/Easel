@@ -69,7 +69,7 @@ export function readLocalValue(key: string): { ok: boolean; value: string | null
   }
 }
 
-export function writeLocalValue(key: string, value: string): boolean {
+export function writeLocalValue(key: string, value: string, options: { queueOnFailure?: boolean } = {}): boolean {
   try {
     localStorage.setItem(key, value);
     pendingWrites.delete(key);
@@ -77,6 +77,9 @@ export function writeLocalValue(key: string, value: string): boolean {
     clearFailure(key, 'write');
     return true;
   } catch (error) {
+    // Transactional editors retain their own draft and surface the failure.
+    // Do not queue an uncommitted value that could be written after Cancel.
+    if (options.queueOnFailure === false) return false;
     pendingWrites.set(key, value);
     const name = error && typeof error === 'object' && 'name' in error ? error.name : '';
     reportLocalPersistenceFailure(key, 'write', name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' ? 'quota' : 'unavailable');

@@ -4,6 +4,7 @@ import PlatformIcon from './PlatformIcon';
 import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
 import XhsInsightsPanel from './XhsInsightsPanel';
+import ContentAnalysisDemo from './ContentAnalysisDemo';
 import '../styles/content-analysis.css';
 
 const PLATFORMS = [
@@ -23,6 +24,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   autoCollectSignal?: number; onAutoCollectHandled?: () => void;
 }) {
   const [platform, setPlatform] = useState(() => validPlatform(initialPlatform));
+  const [dataSource, setDataSource] = useState<'demo' | 'mine'>(() => autoCollectSignal > 0 ? 'mine' : 'demo');
   const [section, setSection] = useState<AnalysisSection>('review');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +43,8 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
     } finally { if (sequence === request.current) setLoading(false); }
   }, []);
 
-  useEffect(() => { void refresh(); return () => { request.current += 1; }; }, [refresh]);
+  useEffect(() => { if (dataSource === 'mine') void refresh(); return () => { request.current += 1; }; }, [refresh, dataSource]);
+  useEffect(() => { if (autoCollectSignal > 0) { setDataSource('mine'); setSection('review'); } }, [autoCollectSignal]);
   useEffect(() => { setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
   const selected = PLATFORMS.find((item) => item.id === platform)!;
   const account = accounts.find((item) => item.platform === platform);
@@ -54,11 +57,13 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   return <div className="content-analysis-page">
     <div className="ca-workspace">
       <header className="ca-heading">
-        <div><p className="ca-kicker">CONTENT INSIGHTS / 创作复盘</p><h1>内容分析</h1><p className="ca-subtitle">从作品里找到线索，让下一次创作更有依据。</p></div>
+        <div><p className="ca-kicker">CONTENT INSIGHTS / 创作复盘</p><h1>内容分析</h1><p className="ca-subtitle">看懂哪篇做得好，知道下一篇怎么改。</p></div>
         <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden="true">↗</span></button></div>
       </header>
 
-      <section className="ca-platform-picker" aria-label="选择分析平台">
+      <div className="ca-data-source"><div role="group" aria-label="分析数据来源"><button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button><button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '这里读取你保存的作品。没有记录时，可连接账号或导入作品。'}</p></div>
+
+      {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'ca-platform is-selected' : 'ca-platform'} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
           <PlatformIcon platform={item.id} name={item.name} /><span>{item.name}</span>
         </button>)}
@@ -68,20 +73,22 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         <div className="ca-context-main"><span className="ca-context-format">{selected.format}</span><strong>{selected.name} · 本人内容</strong><span className={`ca-session ${available ? 'is-connected' : ''}`}>{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已保存登录状态 · 采集时核验' : '需要连接账号'}</span></div>
         <button type="button" className="ca-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '刷新账号状态'}</button>
       </div>
-      {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}
+      {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}</>}
 
       <nav className="ca-view-nav" aria-label="分析视图">
-        <button type="button" aria-current={section === 'review' ? 'page' : undefined} onClick={() => setSection('review')}>复盘总览</button>
-        <button type="button" aria-current={section === 'works' ? 'page' : undefined} onClick={() => setSection('works')}>作品分析</button>
-        <button type="button" aria-current={section === 'themes' ? 'page' : undefined} onClick={() => setSection('themes')}>主题与形式</button>
-        <button type="button" aria-current={section === 'experiments' ? 'page' : undefined} onClick={() => setSection('experiments')}>行动与实验</button>
-        <button type="button" aria-current={section === 'method' ? 'page' : undefined} onClick={() => setSection('method')}>数据与口径</button>
-        <span>仅分析实际返回的数据</span>
+        <button type="button" aria-current={section === 'review' ? 'page' : undefined} onClick={() => setSection('review')}>先看结论</button>
+        <button type="button" aria-current={section === 'works' ? 'page' : undefined} onClick={() => setSection('works')}>逐篇看作品</button>
+        <button type="button" aria-current={section === 'themes' ? 'page' : undefined} onClick={() => setSection('themes')}>找内容方向</button>
+        <button type="button" aria-current={section === 'experiments' ? 'page' : undefined} onClick={() => setSection('experiments')}>下一步怎么做</button>
+        <button type="button" aria-current={section === 'method' ? 'page' : undefined} onClick={() => setSection('method')}>数据说明</button>
+        <span>{dataSource === 'demo' ? '虚构样例 · 不写入我的数据' : '仅分析实际返回的数据'}</span>
       </nav>
 
+      {dataSource === 'demo' ? <ContentAnalysisDemo section={section} onSection={setSection} onUseMyData={() => { setDataSource('mine'); setSection('review'); }} /> : <>
       <ContentAnalysisWorkbench key={platform} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas} />
 
       <div hidden={section !== 'review'}>
+        <details className="ca-collection-tools" open={autoCollectSignal > 0 || undefined}><summary>连接平台与采集数据 <span>已有账号？展开读取最新作品</span></summary>
         <div className="ca-review-layout">
           <section className="ca-review-main" aria-label="内容复盘">
             <div className="ca-section-intro"><p className="ca-kicker">01 / REVIEW</p><h2>平台采集与实时概览</h2><p>{selected.scope}</p></div>
@@ -95,6 +102,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
             <div className="ca-scope-card"><h3>本平台的分析边界</h3><p>{selected.limit}</p><button type="button" className="ca-text-button" onClick={() => setSection('method')}>查看完整数据口径 <span aria-hidden="true">→</span></button></div>
           </aside>
         </div>
+        </details>
       </div>
 
       {section === 'method' && <section className="ca-method" aria-labelledby="ca-method-title">
@@ -120,6 +128,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         </div>
         <div className="ca-method-footer"><p>上方工作台保存作品材料与观测记录，支持主题复盘、实验基线和手动回收。跨平台排名、因果归因和没有材料的视觉判断不作为结论。</p><button type="button" className="btn btn-sm" onClick={() => setSection('review')}>回到内容复盘</button></div>
       </section>}
+      </>}
     </div>
   </div>;
 }

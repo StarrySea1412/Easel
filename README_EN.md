@@ -2,21 +2,27 @@
 
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.
 
-[简体中文](README.md) · [Development branch](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [Changelog](CHANGELOG.md) · [Implementation and verification](docs/professional-office-2026-10-01.md)
+[简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-> This is a maintained customization of [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Development happens on `codex/creator-workflow`. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later office and reliability changes. No new installer containing these features has been released.
+> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-01**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
 
 ## Current features
 
-- A real Three.js / WebGL office with cats, rabbits, foxes and bears. Appearance cards customize clothing, fur, accents and accessories; live Agent bindings are explicit.
-- Evidence-driven reading, writing, drawing and execution gestures. Desk screens show the task and reported tool; a readable screen panel and work history explain the selected Agent's activity.
+- A Three.js / WebGL office with continuous character surfaces for cats, rabbits, foxes and bears. Preview, save or cancel appearance edits in the office; live Agent bindings are explicit.
+- Search the full member list and locate employees across zones of up to eight visible workstations. Six role layouts have different equipment, seated poses and gestures.
+- Reading, writing, drawing and keyboard gestures, pen pickup/return and pose transitions. Desk screens show observed tasks and tools; a readable screen panel and work history explain activity. The labeled demo supports seeking, pausing and replay.
 - Exact-session, exact-turn visible reasoning and tool receipts. Completion, errors, stops and stale observations remain distinct. Unreported reasoning or output is never invented.
 - Recent workspace output monitoring, media previews, downloads and content-library navigation. Files are not falsely attributed to an employee or conversation.
 - Configured model selection for subsequent calls in a verified Agent session, plus distinct child-Agent and whole-session interruption. Controls remain unavailable without verified gateway capability, permissions and identity.
 - Per-conversation drafts, careful upload ownership, local history backups, additive read-only imports, and protection against corrupt or conflicting local records.
-- The upstream discovery, planning, image creation, account, profile, content-library and publishing workflows remain available and are being iterated on.
+- A canvas-focused image workspace with uploads, editing descriptions, expandable advanced controls and preserved drafts. Actual generation requires a configured image model.
+- An approachable content-analysis entry point and a separate example with filtering, sorting, evidence and action checklists. Example works are labeled fictional; real analysis requires user data.
+- Per-source trends, errors, timestamps and retry controls, plus top-of-page conversation navigation, search and status filters in activity records.
+- Planning, account, profile, content-library and publishing workflows remain available and are being iterated on.
 
-Appearance does not change prompts or execution permissions. Demo tasks and artwork are labeled synthetic. Live screens summarize observed task records; they do not stream a remote desktop. Model assignment does not rerun completed work. Stopping a child can stop its descendants, but not its parent or siblings. See the [verification record](docs/professional-office-2026-10-01.md) for limitations.
+Appearance does not change prompts or execution permissions. Demo tasks and artwork are labeled synthetic. Live screens summarize observed task records; they do not stream a remote desktop. Model assignment does not rerun completed work. Stopping a child can stop its descendants, but not its parent or siblings. See the [office verification record](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md) for limitations.
+
+Natural prop handling, complete motion and handoffs remain in progress. Role/capability configuration, real output attribution, full motion collision checks and performance are not fully verified. The latest recorded live HTTP check returned content from seven trend sources; Zhihu and Toutiao were rate-limited and are reported separately. This does not establish long-term availability. See the [current workspace verification](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md).
 
 ## Run the current source
 
@@ -32,7 +38,7 @@ Windows 10/11, in PowerShell:
 .\.venv\Scripts\easel.exe web --port 7860
 ```
 
-The installer checks prerequisites and prepares an isolated environment. System-tool installation through winget requires the explicit `-AllowWinget` option. `-NonInteractive` defers model configuration to Web settings. First installation needs network access. Read the [Windows installer guide](docs/windows-installer.md).
+The installer checks prerequisites and prepares an isolated environment. System-tool installation through winget requires the explicit `-AllowWinget` option. `-NonInteractive` defers model configuration to Web settings. First installation needs network access. Read the [Windows installer guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md).
 
 macOS / Linux retain the upstream entry point:
 
@@ -42,7 +48,7 @@ source .venv/bin/activate
 easel web --port 7860
 ```
 
-Open the local URL printed by the server and configure your own model channels in Settings. Animal appearance cards are also in Settings. Keep API keys, platform sessions and personal outputs outside Git.
+Open the local URL printed by the server and configure your own model channels in Settings. Select an employee in the Agent office to edit their appearance in place. Keep API keys, platform sessions and personal outputs outside Git.
 
 ## Development
 
@@ -64,10 +70,10 @@ python -m pytest -q
 
 CI runs for `main` and `codex/**` branches. Windows installer builds are manual and do not publish releases automatically. New installer discovery and release metadata use this repository and do not fall back to an upstream package when a release is missing.
 
-[Progress](docs/secondary-development-progress.md), [roadmap](docs/secondary-development-plan.md), and [verification evidence](docs/professional-office-2026-10-01.md) separate source changes, browser checks, isolated HTTP fixtures, gateway mocks, and installer validation. Real model calls, full multi-Agent runs, all publishing platforms and a new installer upgrade have not been verified in this iteration.
+[Progress](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md), [workspace action plan](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-action-plan-2026-10-01.md), [roadmap](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-plan.md), and [verification evidence](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md) separate source changes, browser checks, isolated HTTP fixtures, gateway mocks, and installer validation. Real model calls, full multi-Agent runs, all publishing platforms and a new installer upgrade have not been verified in this iteration. The current local workspace has no administrator login system.
 
 ## Attribution and license
 
 Based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel), with thanks to its authors and contributors. This repository maintains its own workspace experience, office interactions and reliability changes; it is not an official upstream release.
 
-[Apache License 2.0](LICENSE). OpenClaw, frontend libraries and third-party skill components retain their respective licenses and required notices.
+[Apache License 2.0](LICENSE), with the [original acknowledgments](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/ACKNOWLEDGMENTS.md) retained. OpenClaw, frontend libraries and third-party skill components retain their respective licenses and required notices.

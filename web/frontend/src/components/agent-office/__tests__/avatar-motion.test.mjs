@@ -8,6 +8,19 @@ function fixture() {
   const desk = createOfficeWorld(resources, 1).desks[0];
   return { resources, desk, avatar: createOfficeAvatar(resources, desk, '') };
 }
+const roles = ['coordinator', 'researcher', 'designer', 'writer', 'tester', 'reviewer'];
+const tempos = { coordinator: .86, researcher: .78, designer: 1.10, writer: .91, tester: 1.02, reviewer: .69 };
+function roleFixture(role, id = role) {
+  const resources = new OfficeResources();
+  const desk = createOfficeWorld(resources, 1, [{ id, role, appearance: { id: role } }]).desks[0];
+  return { resources, desk, avatar: createOfficeAvatar(resources, desk, id) };
+}
+function atCycle(avatar, cycle) { return (12 + cycle - avatar.phase) / (tempos[avatar.workstationRole] * (1 + avatar.postureVariation * .12)); }
+function joints(avatar) {
+  const values = [];
+  avatar.root.traverse(object => values.push(object.visible, ...object.position, ...object.quaternion, ...object.scale));
+  return values;
+}
 function local(avatar, object) {
   avatar.root.updateMatrixWorld(true);
   return avatar.root.worldToLocal(object.getWorldPosition(new THREE.Vector3()));
@@ -33,13 +46,15 @@ test('fixed length shoulder/elbow/wrist chains reach real keyboard and mouse wit
   const left = avatar.leftWrist.getWorldPosition(new THREE.Vector3());
   avatar.root.updateMatrixWorld(true);
   left.copy(avatar.leftWrist.getWorldPosition(new THREE.Vector3()));
-  assert.ok(Math.abs(left.x - (desk.slot.x - .17)) < 1e-8);
-  assert.ok(Math.abs(left.z - (desk.slot.z + .2)) < 1e-8);
+  const keyboardContact = desk.root.localToWorld(new THREE.Vector3(-.17, 1.043, .2));
+  assert.ok(Math.abs(left.x - keyboardContact.x) < 1e-8);
+  assert.ok(Math.abs(left.z - keyboardContact.z) < 1e-8);
   poseOfficeAvatar(avatar, 'working', 5, false, 'executing');
   avatar.root.updateMatrixWorld(true);
   const mouse = avatar.rightWrist.getWorldPosition(new THREE.Vector3());
-  assert.ok(Math.abs(mouse.x - (desk.slot.x + .41)) < 1e-8);
-  assert.ok(Math.abs(mouse.z - (desk.slot.z + .25)) < 1e-8);
+  const mouseContact = desk.root.localToWorld(new THREE.Vector3(.41, 1.047, .25));
+  assert.ok(Math.abs(mouse.x - mouseContact.x) < 1e-8);
+  assert.ok(Math.abs(mouse.z - mouseContact.z) < 1e-8);
   assert.equal(avatar.root.userData.motionStage, 'mouse');
   resources.dispose();
 });
@@ -95,7 +110,7 @@ test('switching to stopped, error or completed clears work and freezes all joint
   for (const state of ['waiting', 'unknown', 'stopped', 'error', 'done']) {
     poseOfficeAvatar(avatar, 'working', 2, false, 'designing');
     poseOfficeAvatar(avatar, state, 3, false, 'designing');
-    assert.equal(avatar.pen.visible, false); assert.equal(avatar.tablet.visible, false);
+    assert.equal(avatar.pen.userData.held, false); assert.equal(avatar.tablet.visible, false);
     const before = snapshot();
     poseOfficeAvatar(avatar, state, 120, false, 'designing');
     assert.deepEqual(snapshot(), before);
@@ -118,4 +133,103 @@ test('work cycle boundaries ease paws and gaze instead of teleporting back to th
     }
   }
   resources.dispose();
+});
+
+test('six roles have different seated weight and torso orientation under the same reported action', () => {
+  const rotations = new Set(), positions = new Set(), lean = {};
+  for (const role of roles) {
+    const { resources, avatar } = roleFixture(role);
+    avatar.phase = 0;
+    poseOfficeAvatar(avatar, 'working', 1, false, 'executing');
+    rotations.add(JSON.stringify(avatar.body.quaternion.toArray()));
+    positions.add(JSON.stringify(avatar.body.position.toArray()));
+    lean[role] = avatar.body.rotation.x;
+    assert.equal(avatar.workstationRole, role);
+    resources.dispose();
+  }
+  assert.equal(rotations.size, 6);
+  assert.equal(positions.size, 6);
+  assert.ok(lean.writer < -.1, 'writer leans into the work surface');
+  assert.ok(lean.reviewer > .05, 'reviewer rests back while inspecting');
+});
+
+test('same-role identity affects posture as well as phase and remains deterministic when paused', () => {
+  const first = roleFixture('designer', 'design-alpha'), second = roleFixture('designer', 'design-beta');
+  first.avatar.phase = second.avatar.phase = 0;
+  poseOfficeAvatar(first.avatar, 'working', 2, false, 'designing');
+  poseOfficeAvatar(second.avatar, 'working', 2, false, 'designing');
+  assert.notDeepEqual(first.avatar.body.position.toArray(), second.avatar.body.position.toArray());
+  assert.notDeepEqual(first.avatar.body.quaternion.toArray(), second.avatar.body.quaternion.toArray());
+  const paused = joints(first.avatar);
+  poseOfficeAvatar(first.avatar, 'working', 2, false, 'designing');
+  assert.deepEqual(joints(first.avatar), paused);
+  first.resources.dispose(); second.resources.dispose();
+});
+
+test('role postures retain actual keyboard, mouse and stylus contact without stretching or sliding', () => {
+  for (const role of roles) {
+    const { resources, avatar, desk } = roleFixture(role);
+    const position = avatar.root.position.clone();
+    for (const [cycle, side, contact] of [[0, 'left', [-.17, 1.043, .2]], [5, 'right', [.41, 1.047, .25]]]) {
+      poseOfficeAvatar(avatar, 'working', atCycle(avatar, cycle), false, 'executing');
+      avatar.root.updateMatrixWorld(true);
+      const expected = desk.root.localToWorld(new THREE.Vector3(...contact));
+      const actual = avatar[`${side}Wrist`].getWorldPosition(new THREE.Vector3());
+      assert.ok(actual.distanceTo(expected) < 1e-8, `${role}: ${side} input contact is maintained (${actual.distanceTo(expected)})`);
+    }
+    for (const action of ['writing', 'designing']) {
+      poseOfficeAvatar(avatar, 'working', atCycle(avatar, 0), false, action);
+      avatar.root.updateMatrixWorld(true);
+      const prop = action === 'writing' ? avatar.document : avatar.tablet;
+      const tip = avatar.pen.localToWorld(new THREE.Vector3(0, -.11, 0));
+      const contact = prop.localToWorld(new THREE.Vector3(-.08, 0, .042));
+      assert.ok(tip.distanceTo(contact) < 1e-8, `${role}: ${action} stylus touches the surface`);
+    }
+    for (const action of ['executing', 'reading', 'writing', 'designing', 'delegating']) for (let time = 0; time < 15; time += .23) {
+      poseOfficeAvatar(avatar, 'working', time, false, action);
+      avatar.root.updateMatrixWorld(true);
+      for (const side of ['left', 'right']) {
+        const shoulder = avatar[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+        const elbow = avatar[`${side}Elbow`].getWorldPosition(new THREE.Vector3());
+        const wrist = avatar[`${side}Wrist`].getWorldPosition(new THREE.Vector3());
+        assert.ok(Math.abs(shoulder.distanceTo(elbow) - .25) < 1e-8);
+        assert.ok(Math.abs(elbow.distanceTo(wrist) - .27) < 1e-8);
+        assert.ok(wrist.y - .079 * .65 > .9525, `${role}/${action}: paw clears desktop`);
+      }
+      assert.deepEqual(avatar.root.position, position);
+    }
+    resources.dispose();
+  }
+});
+
+test('role habits preserve reported-action boundaries and freeze unreported and terminal work', () => {
+  for (const role of roles) {
+    const { resources, avatar } = roleFixture(role);
+    for (const state of ['waiting', 'unknown', 'stopped', 'error', 'done', 'working']) {
+      const action = state === 'working' ? 'unreported' : 'designing';
+      poseOfficeAvatar(avatar, 'working', 1, false, 'designing');
+      poseOfficeAvatar(avatar, state, 3, false, action);
+      const before = joints(avatar);
+      poseOfficeAvatar(avatar, state, 130, false, action);
+      assert.deepEqual(joints(avatar), before, `${role}/${state} remains static`);
+      assert.equal(avatar.pen.userData.held, false); assert.equal(avatar.tablet.visible, false);
+      assert.equal(avatar.document.visible, true); assert.equal(avatar.document.userData.engaged, false);
+      assert.equal(avatar.root.userData.motionStage, 'rest');
+    }
+    resources.dispose();
+  }
+});
+
+test('tester compares the two physical displays and coordinator gestures toward the planning board', () => {
+  const tester = roleFixture('tester');
+  poseOfficeAvatar(tester.avatar, 'working', atCycle(tester.avatar, 1), false, 'executing');
+  const primary = tester.avatar.head.rotation.y;
+  poseOfficeAvatar(tester.avatar, 'working', atCycle(tester.avatar, 4), false, 'executing');
+  assert.ok(tester.avatar.head.rotation.y > primary + .5, 'comparison glance visibly changes side');
+  const coordinator = roleFixture('coordinator');
+  poseOfficeAvatar(coordinator.avatar, 'working', 1, false, 'delegating');
+  assert.ok(local(coordinator.avatar, coordinator.avatar.leftWrist).x < -.3);
+  assert.ok(local(coordinator.avatar, coordinator.avatar.rightWrist).y < .45);
+  assert.ok(coordinator.avatar.head.rotation.y > 0, 'looks toward the left planning board');
+  tester.resources.dispose(); coordinator.resources.dispose();
 });

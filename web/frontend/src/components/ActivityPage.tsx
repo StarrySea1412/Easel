@@ -62,7 +62,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
         </header>
 
         <div className="activity-layout">
-          <aside className="activity-session-list" aria-label="运行会话筛选">
+          <section className="activity-session-list" aria-label="运行会话筛选">
+            <div className="activity-session-toolbar">
             <div className="activity-list-heading">
               <h2>会话</h2>
               <span aria-label={`匹配 ${visible.length} 个，共 ${sessions.length} 个会话`}>
@@ -85,7 +86,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                 </button>
               ))}
             </div>
-            <div className="activity-session-rows">
+            </div>
+            <nav className="activity-session-rows" aria-label="运行会话导航">
               {visible.map((item) => (
                 <button
                   type="button"
@@ -104,8 +106,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
               {!visible.length && (
                 <p className="usage-empty">{sessions.length ? '没有匹配会话，请调整筛选。' : '还没有会话记录。'}</p>
               )}
-            </div>
-          </aside>
+            </nav>
+          </section>
 
           <main className="activity-detail">
             <div className="activity-detail-heading">
@@ -180,7 +182,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                 <h3>{missingTarget ? '无法打开指定会话的运行记录' : sessions.length ? '请调整会话筛选' : '从第一轮对话开始'}</h3>
                 <p>
                   {missingTarget
-                    ? '该会话已删除或不在当前记录中。请从左侧选择其他会话。'
+                    ? '该会话已删除或不在当前记录中。请从顶部选择其他会话。'
                     : sessions.length
                       ? '当前搜索或状态筛选没有匹配项，请清除筛选后重试。'
                       : '完成对话后，这里会展示服务实际记录的 Token 与执行证据。未上报数据不会替换成 0。'}

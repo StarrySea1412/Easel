@@ -126,7 +126,7 @@ def test_finished_turn_filters_later_and_undated_same_session_events(sandbox, li
     sandbox['marker'].write_text(json.dumps({'status': 'done', 'turn_id': 'turn1', 'clean_end': True}), encoding='utf-8')
     os.utime(sandbox['marker'], (ended, ended))
     output = snapshot(sandbox, live=live)
-    assert output['agents'][0]['status'] == ('running' if live else 'completed')
+    assert output['agents'][0]['status'] == 'completed'
     assert len(output['agents']) == 2 and output['agents'][1]['status'] == 'unknown'
 
 
@@ -222,16 +222,54 @@ def test_trace_size_budget_returns_explicit_limited_coverage(sandbox, monkeypatc
     append(sandbox['trace'], [call(), result()])
     output = snapshot(sandbox, live=True)
     assert len(output['agents']) == 1 and output['warnings']
+    assert output['coverage']['identityScanLimited'] is True
+    assert output['coverage']['observedAgentCount'] == 1
 
 
-def test_agent_count_limit_is_explicit_and_does_not_turn_skills_into_agents(sandbox, monkeypatch):
-    monkeypatch.setattr(office, 'MAX_AGENTS', 3)
-    for index in range(4):
+@pytest.mark.parametrize('total', [9, 12, 20, 50, 65, 100])
+def test_all_confirmed_identities_survive_office_capacity_and_recent_event_limits(sandbox, total):
+    for index in range(total - 1):
+        append(sandbox['trace'], [call(f'spawn-{index}'), result(f'spawn-{index}', {
+            'status': 'accepted', 'childSessionKey': f'child-{index}'})])
+    append(sandbox['trace'], [call('list', 'subagents', {}), result('list', {
+        'active': [{'sessionKey': f'child-{index}', 'status': 'running'} for index in range(total - 1)]})])
+    output = snapshot(sandbox, live=True)
+    assert len(output['agents']) == total and len(output['links']) == total - 1
+    assert len({agent['id'] for agent in output['agents']}) == total
+    assert all(agent['status'] == 'running' for agent in output['agents'][1:])
+    assert output['coverage']['observedAgentCount'] == total
+    assert output['coverage']['identityScanLimited'] is False
+    assert not output['warnings']
+    assert len(output['events']) <= office.MAX_PUBLIC_EVENTS
+
+
+def test_large_team_still_rejects_invalid_and_unproven_identities_and_deduplicates_receipts(sandbox):
+    for index in range(99):
+        append(sandbox['trace'], [call(f'spawn-{index}'), result(f'spawn-{index}', {
+            'status': 'accepted', 'childSessionKey': f'child-{index}'})])
+    for index, invalid in enumerate(['', 'bad identity', 'bad\nidentity', 'x' * 201, [], {}]):
+        append(sandbox['trace'], [call(f'invalid-{index}'), result(f'invalid-{index}', {
+            'status': 'accepted', 'childSessionKey': invalid})])
+    append(sandbox['trace'], [call('duplicate'), result('duplicate', {'status': 'accepted', 'childSessionKey': 'child-98'}),
+        result('unmatched', {'status': 'accepted', 'childSessionKey': 'unproven-child'}),
+        call('list', 'subagents', {}), result('list', {'active': [
+            {'sessionKey': f'foreign-{index}', 'status': 'running'} for index in range(100)
+        ] + [{'sessionKey': 'child-98', 'status': 'failed'}]})])
+    output = snapshot(sandbox, live=True)
+    assert len(output['agents']) == 100
+    assert output['agents'][-1]['status'] == 'failed', 'the final known member is updated even after 100 unrelated list items'
+
+
+def test_trace_event_budget_exposes_partial_identity_count_without_fabricating_missing_members(sandbox, monkeypatch):
+    monkeypatch.setattr(office, 'MAX_EVENTS', 10)
+    for index in range(20):
         append(sandbox['trace'], [call(f'spawn-{index}'), result(f'spawn-{index}', {
             'status': 'accepted', 'childSessionKey': f'child-{index}'})])
     output = snapshot(sandbox, live=True)
-    assert len(output['agents']) == 3 and len(output['links']) == 2
-    assert output['warnings']
+    assert len(output['agents']) == 6
+    assert output['coverage']['observedAgentCount'] == 6
+    assert output['coverage']['identityScanLimited'] is True
+    assert office.TRACE_LIMIT_WARNING in output['warnings']
 
 
 @pytest.mark.parametrize('extra,status', [
@@ -240,11 +278,57 @@ def test_agent_count_limit_is_explicit_and_does_not_turn_skills_into_agents(sand
     ({'stop_reason': 'user_stopped'}, 'stopped'),
     ({'clean_end': False}, 'unknown'),
 ])
-def test_root_terminal_states_use_snapshot_evidence_without_repeating_error_text(sandbox, extra, status):
+@pytest.mark.parametrize('live', [False, True])
+def test_root_terminal_states_use_snapshot_evidence_without_repeating_error_text(sandbox, extra, status, live):
     sandbox['marker'].write_text(json.dumps({'status': 'done', 'turn_id': 'turn1', **extra}), encoding='utf-8')
-    output = snapshot(sandbox)
+    output = snapshot(sandbox, live=live, active_turn_id='turn1' if live else '')
     assert output['agents'][0]['status'] == status
     assert 'PRIVATE_FAILURE' not in json.dumps(output)
+
+
+def test_old_terminal_marker_cannot_finish_a_new_active_turn(sandbox):
+    sandbox['marker'].write_text(json.dumps({'status': 'done', 'turn_id': 'turn1', 'clean_end': True}), encoding='utf-8')
+    output = snapshot(sandbox, live=True, active_turn_id='turn2')
+    assert output['turnId'] == 'turn2'
+    assert output['agents'][0]['status'] == 'unknown'
+    assert output['events'] == [] and len(output['agents']) == 1
+    assert '会话轮次正在更新' in output['agents'][0]['evidence']
+    sandbox['marker'].write_text(json.dumps({'status': 'running', 'turn_id': 'turn2'}), encoding='utf-8')
+    assert snapshot(sandbox, live=True, active_turn_id='turn2')['agents'][0]['status'] == 'running'
+
+
+@pytest.mark.parametrize('live', [False, True])
+@pytest.mark.parametrize('reported,expected,label', [
+    ('running', 'unknown', '工作中'), ('thinking', 'unknown', '思考中'), ('waiting', 'unknown', '等待中'),
+    ('completed', 'completed', ''), ('failed', 'failed', ''), ('stopped', 'stopped', ''),
+])
+def test_finished_parent_retains_child_receipt_but_not_unconfirmed_active_state(sandbox, live, reported, expected, label):
+    ended = time.time() - 10
+    append(sandbox['trace'], [call(stamp=ended - 4), result(stamp=ended - 3),
+        call('list', 'subagents', {'action': 'list'}, stamp=ended - 2), result('list', {
+            'agents': [{'sessionKey': 'agent:main:subagent:child1', 'status': reported}]}, stamp=ended - 1)])
+    sandbox['marker'].write_text(json.dumps({'status': 'done', 'turn_id': 'turn1', 'clean_end': True}), encoding='utf-8')
+    os.utime(sandbox['marker'], (ended, ended))
+    output = snapshot(sandbox, live=live, active_turn_id='turn1' if live else '')
+    root, child = output['agents']
+    assert root['status'] == 'completed' and child['status'] == expected
+    assert child['name'] == '核对员' and child['task'] == '核对当前任务'
+    if label:
+        assert f'最近上报为“{label}”' in child['evidence']
+        assert '当前状态未确认' in child['evidence']
+    else:
+        assert '工具回执明确上报' in child['evidence']
+
+
+def test_finished_parent_does_not_keep_a_running_spawn_receipt_active(sandbox):
+    ended = time.time() - 10
+    append(sandbox['trace'], [call(stamp=ended - 2), result(payload={
+        'status': 'running', 'childSessionKey': 'agent:main:subagent:child1'}, stamp=ended - 1)])
+    sandbox['marker'].write_text(json.dumps({'status': 'done', 'turn_id': 'turn1', 'stop_reason': 'user_stopped'}), encoding='utf-8')
+    os.utime(sandbox['marker'], (ended, ended))
+    root, child = snapshot(sandbox, live=True, active_turn_id='turn1')['agents']
+    assert root['status'] == 'stopped' and child['status'] == 'unknown'
+    assert '最近上报为“工作中”' in child['evidence']
 
 
 def test_live_thinking_requires_a_trace_event_and_stale_running_marker_is_unknown(sandbox):

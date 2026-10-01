@@ -10,6 +10,9 @@ export interface AgentOfficeSceneProps {
   onOpenProcess?: (id: string) => void;
   focusId?: string | null;
   paused: boolean;
+  stale?: boolean;
+  observedAt?: string | null;
+  demoSeek?: { seconds: number; revision: number };
   resetKey: number;
   onUnavailable?: (message: string) => void;
 }
@@ -57,8 +60,9 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
   }, [retryKey]);
 
   useEffect(() => {
-    runtime.current?.update({ agents: props.agents, selectedId: props.selectedId, paused: props.paused });
-  }, [props.agents, props.selectedId, props.paused]);
+    runtime.current?.update({ agents: props.agents, selectedId: props.selectedId, paused: props.paused,
+      stale: props.stale, observedAt: props.observedAt, demoSeek: props.demoSeek });
+  }, [props.agents, props.selectedId, props.paused, props.stale, props.observedAt, props.demoSeek]);
 
   useEffect(() => { runtime.current?.reset(); }, [props.resetKey]);
   useEffect(() => { if (props.focusId) runtime.current?.focus(props.focusId); else runtime.current?.reset(); }, [props.focusId, retryKey]);
@@ -73,12 +77,12 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
         className={`office-nameplate office-nameplate--${agent.state}${props.selectedId === agent.id ? ' is-selected' : ''}`}
         ref={(element) => { if (element) labels.current.set(agent.id, element); else labels.current.delete(agent.id); }}
         aria-pressed={props.selectedId === agent.id}
-        aria-label={`${agent.name}，${OFFICE_STATE_LABELS[agent.state]}，${agent.task}`}
+        aria-label={`${agent.name}，${props.stale ? '上次记录：' : ''}${OFFICE_STATE_LABELS[agent.state]}，${agent.task}`}
         title={`${agent.name} · ${agent.role}\n${agent.task}`}
         onClick={() => { props.onSelect(agent.id); props.onOpenProcess?.(agent.id); }}
       >
-        <span className="office-nameplate__heading"><span className="office-nameplate__dot" /><strong>{agent.appearance?.id === 'generic' ? agent.name : agent.appearance?.name || agent.name}</strong><span>{OFFICE_STATE_LABELS[agent.state]}</span></span>
-        <span className="office-nameplate__task">{agent.action?.label || agent.task || '等待任务说明'}</span>
+        <span className="office-nameplate__heading"><span className="office-nameplate__dot" /><strong>{agent.appearance?.id === 'generic' ? agent.name : agent.appearance?.name || agent.name}</strong><span>{props.stale ? '上次 · ' : ''}{OFFICE_STATE_LABELS[agent.state]}</span></span>
+        <span className="office-nameplate__task">{props.stale ? '上次记录：' : ''}{agent.action?.label || agent.task || '等待任务说明'}</span>
       </button>)}
     </div>
     {unavailable ? <div className="agent-office-scene__fallback" role="status">

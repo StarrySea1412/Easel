@@ -22,6 +22,9 @@ export interface OfficeSnapshot {
   events: OfficeEvent[];
   observedAt: string | null;
   coverage: string;
+  /** Confirmed identities in this snapshot, not a claim about all backend agents. */
+  observedAgentCount?: number;
+  identityScanLimited?: boolean;
 }
 
 export interface OfficeEvent {
@@ -55,12 +58,12 @@ function shortText(value: unknown, fallback = '', limit = 500): string {
 
 /** Only structured server observations create live agents; prose never does. */
 export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeSnapshot {
-  if (!record(value) || value.sessionId !== sessionId || !Array.isArray(value.agents) || value.agents.length > 64) {
+  if (!record(value) || value.sessionId !== sessionId || !Array.isArray(value.agents)) {
     throw new Error('Agent 观测数据不完整或不属于当前会话。');
   }
   const ids = new Set<string>();
   const agents = value.agents.map((item): OfficeAgent => {
-    if (!record(item) || typeof item.id !== 'string' || !item.id || ids.has(item.id)
+    if (!record(item) || typeof item.id !== 'string' || !/^[A-Za-z0-9_.:-]{1,160}$/.test(item.id) || ids.has(item.id)
       || (item.role !== 'root' && item.role !== 'subagent')) throw new Error('Agent 身份数据无效。');
     ids.add(item.id);
     return {
@@ -96,6 +99,8 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
   }
   return {
     agents, events,
+    observedAgentCount: agents.length,
+    identityScanLimited: record(value.coverage) && value.coverage.identityScanLimited === true,
     turnId: typeof value.turnId === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(value.turnId) ? value.turnId : null,
     observedAt: typeof value.observedAt === 'string' && Number.isFinite(Date.parse(value.observedAt)) ? value.observedAt : null,
     coverage: [coverage || '仅展示已观察到的 Agent 身份；没有记录不代表未发生调用。', ...warnings].join(' '),

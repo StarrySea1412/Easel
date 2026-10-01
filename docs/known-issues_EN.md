@@ -1,6 +1,6 @@
 # Known Issues
 
-This page tracks known issues relevant to using Easel, along with recommended workarounds. If you hit something not listed here, please open an [Issue](https://github.com/ZJU-REAL/Easel/issues).
+This page tracks known issues relevant to using Easel, along with recommended workarounds. If you hit something not listed here, please open an [Issue in this fork](https://github.com/StarrySea1412/Easel/issues).
 
 ---
 

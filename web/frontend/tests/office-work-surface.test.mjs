@@ -45,6 +45,22 @@ test('screen expansion is plain text with explicit stale/source boundaries', () 
   assert.match(markup,/展开工作过程/);
 });
 
+test('interrupted observation labels the same last call as historical on both work screens', () => {
+  const working = { ...agent, action: { kind: 'executing', label: '正在执行工具', evidence: 'observed', toolName: 'exec' } };
+  const snapshot = { stale: true, observedAt: '2026-10-01T08:23:00Z' };
+  const work = officeWorkSurface(working, snapshot);
+  assert.equal(work.toolLabel, '上次记录调用：exec');
+  assert.match(work.state, /^上次记录：/);
+  assert.match(work.source, /上次快照/);
+  assert.doesNotMatch(work.source, /时间未记录/);
+  const markup = renderToStaticMarkup(React.createElement(OfficeWorkPreview, { agent: working, ...snapshot, onOpen() {} }));
+  assert.match(markup, /上次记录调用：exec/);
+  assert.doesNotMatch(markup, /正在调用/);
+  assert.equal(officeWorkSurface(working).toolLabel, '正在调用：exec');
+  assert.equal(officeWorkSurface({ ...working, source: 'demo' }, snapshot).stale, false);
+  assert.match(officeWorkSurface(working, { stale: true, observedAt: 'invalid' }).source, /时间未记录/);
+});
+
 test('monitor canvas updates on content changes and releases its GPU texture', () => {
   const saved = globalThis.document;
   const texts=[];

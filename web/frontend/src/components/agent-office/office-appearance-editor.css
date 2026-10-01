@@ -1,0 +1,45 @@
+.office-appearance-overlay { position:fixed; inset:0; z-index:1100; background:rgb(24 31 29 / 8%); display:flex; justify-content:flex-end; padding:18px; box-sizing:border-box; }
+.office-appearance-editor { width:380px; max-width:100%; height:100%; overflow-y:auto; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:16px; box-shadow:0 20px 80px #172a2133; padding:24px; box-sizing:border-box; outline:0; }
+.office-appearance-editor >header { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+.office-appearance-editor >header p { font-size:11px; color:var(--accent-start); font-weight:600; margin:0 0 8px; }
+.office-appearance-editor h2 { font-size:20px; font-weight:550; line-height:1.5; margin:0; }
+.office-appearance-editor >header button { border:0; border-radius:8px; width:30px; height:30px; font-size:24px; line-height:1; background:var(--surface-2); color:var(--text-secondary); flex-shrink:0; cursor:pointer; }
+.office-editor-preview-note { font-size:12px; color:var(--text-secondary); line-height:1.85; padding:13px 15px; background:var(--surface-2); border-radius:8px; margin:20px 0; }
+.office-editor-fields { display:grid; gap:15px; }
+.office-appearance-editor label { font-size:12px; color:var(--text-secondary); }
+.office-appearance-editor input:not([type=color]),.office-appearance-editor select { display:block; width:100%; box-sizing:border-box; font:inherit; font-size:13px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-top:7px; }
+.office-appearance-editor fieldset { border:0; padding:0; margin:24px 0; }
+.office-appearance-editor legend { font-size:12px; color:var(--text-secondary); margin-bottom:11px; }
+.office-editor-species { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; }
+.office-editor-species button { border:1px solid var(--border); border-radius:9px; padding:12px 4px; background:var(--surface); color:var(--text); font:inherit; cursor:pointer; }
+.office-editor-species button[aria-pressed=true] { border-color:var(--accent-start); color:var(--accent-start); background:var(--accent-soft); }
+.office-editor-species strong { font-size:12px; font-weight:550; display:block; }
+.office-editor-species small { display:block; font-size:9px; margin-top:5px; color:var(--text-secondary); }
+.office-editor-colors { display:flex; flex-wrap:wrap; gap:15px; }
+.office-editor-colors label { display:flex; align-items:center; gap:8px; }
+.office-editor-colors input { width:34px; height:37px; border:0; border-radius:7px; padding:0; background:transparent; cursor:pointer; }
+.office-editor-colors span { font-size:11px; }
+.office-editor-colors small { display:block; margin-top:4px; font-size:9px; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
+.office-editor-accessory { display:block; }
+.office-editor-scope { border-top:1px solid var(--border); padding-top:19px; margin:24px 0 0; }
+.office-editor-scope strong { font-size:11px; font-weight:550; }
+.office-editor-scope p { font-size:11px; color:var(--text-secondary); line-height:1.8; margin:8px 0; overflow-wrap:anywhere; }
+.office-appearance-editor footer { border-top:1px solid var(--border); margin-top:22px; padding-top:18px; }
+.office-editor-reset { border:0; background:transparent; padding:0; font:inherit; font-size:12px; cursor:pointer; color:var(--text-secondary); }
+.office-appearance-editor footer >p { font-size:11px; color:var(--text-secondary); margin:15px 0 12px; }
+.office-appearance-editor footer >div { display:flex; gap:10px; justify-content:flex-end; }
+.office-appearance-editor footer .btn { min-height:40px; }
+.office-editor-error { color:var(--red); background:var(--red-soft); padding:12px; border-radius:8px; font-size:12px; line-height:1.7; }
+.office-appearance-editor button:focus-visible,.office-appearance-editor input:focus-visible,.office-appearance-editor select:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; }
+.agent-office-page.is-editing-appearance { overflow-anchor:none; scroll-behavior:auto; }
+.is-editing-appearance > .office-workspace { padding-right:418px; }
+.is-editing-appearance .office-stage-card { min-height:0; height:auto; }
+.is-editing-appearance .office-stage-toolbar,.is-editing-appearance .office-demo-navigation,.is-editing-appearance .office-stage-card > .office-work-preview,.is-editing-appearance .office-stage-footer { display:none; }
+.is-editing-appearance .office-stage-viewport { height:clamp(280px,calc(100dvh - 88px),680px); min-height:0; }
+@media(max-width:760px) { .office-appearance-overlay { padding:12px; align-items:flex-end; background:rgb(24 31 29 / 22%); }.office-appearance-editor { width:100%; height:70dvh; padding:20px; border-radius:16px; }.office-appearance-editor h2 { font-size:18px; }.office-editor-fields { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }.office-editor-colors { gap:20px; } }
+@media(max-width:760px) {
+  .is-editing-appearance > .office-workspace { padding-right:12px; padding-left:12px; }
+  /* Keep the existing canvas above the sheet, independent of the mobile app header. */
+  .is-editing-appearance .office-stage-card { position:fixed; top:12px; left:12px; right:12px; z-index:1101; border-radius:10px; }
+  .is-editing-appearance .office-stage-viewport { height:calc(30dvh - 36px); min-height:0; }
+}

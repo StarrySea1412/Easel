@@ -1,0 +1,54 @@
+{
+  "format": "glTF 2.0",
+  "generator": "make-character.mjs",
+  "bytes": 1911956,
+  "vertices": 24191,
+  "triangles": 44116,
+  "skinnedMeshes": 72,
+  "bones": [
+    "Root",
+    "Hips",
+    "Spine",
+    "Chest",
+    "Head",
+    "Ear_L",
+    "Ear_R",
+    "UpperArm_L",
+    "Forearm_L",
+    "Hand_L",
+    "Finger_L_0",
+    "Finger_L_1",
+    "Finger_L_2",
+    "Thumb_L",
+    "Thigh_L",
+    "Shin_L",
+    "Foot_L",
+    "UpperArm_R",
+    "Forearm_R",
+    "Hand_R",
+    "Finger_R_0",
+    "Finger_R_1",
+    "Finger_R_2",
+    "Thumb_R",
+    "Thigh_R",
+    "Shin_R",
+    "Foot_R",
+    "TailBase",
+    "TailTip"
+  ],
+  "animations": [
+    "Read",
+    "Type",
+    "Review"
+  ],
+  "morphTargets": [
+    "Blink"
+  ],
+  "anchors": [
+    "Grip_L",
+    "Grip_R",
+    "Gaze",
+    "Paper_support_L"
+  ],
+  "thirdPartyAssets": []
+}

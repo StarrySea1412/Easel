@@ -102,12 +102,12 @@ function readProtected<T>(key: string, decode: (value: unknown) => T, fallback: 
     return fallback;
   }
 }
-function persist(key: string, value: unknown): boolean {
+function persist(key: string, value: unknown, queueOnFailure = true): boolean {
   if (blocked.has(key)) {
     reportLocalPersistenceFailure(key, 'write', 'unreadable');
     return false;
   }
-  return writeLocalValue(key, JSON.stringify({ version: 1, value }));
+  return writeLocalValue(key, JSON.stringify({ version: 1, value }), { queueOnFailure });
 }
 function notify() {
   for (const listener of listeners) {
@@ -126,9 +126,15 @@ export function subscribeEmployeeAppearances(listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 /** Returns false when applied in this window but not durably saved. */
-export function saveEmployeeAppearances(cards: readonly EmployeeAppearance[]): boolean {
+export function saveEmployeeAppearances(cards: readonly EmployeeAppearance[], options: { requirePersistence?: boolean } = {}): boolean {
   const next = validateEmployeeAppearances(cards);
   readEmployeeAppearances(); // Establish protection before any write, even without a prior read.
+  if (options.requirePersistence) {
+    if (!persist(APPEARANCE_KEY, next, false)) return false;
+    appearances = next;
+    notify();
+    return true;
+  }
   appearances = next;
   const saved = persist(APPEARANCE_KEY, next);
   notify();

@@ -6,7 +6,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { loadTsModule } from '../../../../tests/load-ts.mjs';
 
-const { OfficeResources, createOfficeWorld, createOfficeAvatar, poseOfficeAvatar, batchOfficeArchitecture } = await loadTsModule('../officeGeometry.ts', import.meta.url);
+const { OfficeResources, createOfficeWorld, createOfficeAvatar, poseOfficeAvatar, batchOfficeArchitecture, officeWorkstationRole, officeWorkstationLayoutKey } = await loadTsModule('../officeGeometry.ts', import.meta.url);
 const { createSceneScheduler } = await loadTsModule('../sceneScheduler.ts', import.meta.url);
 const { createOfficeSceneRuntime } = await loadTsModule('../OfficeSceneRuntime.ts', import.meta.url);
 const { default: AgentOfficeScene } = await loadTsModule('../AgentOfficeScene.tsx', import.meta.url);
@@ -24,8 +24,10 @@ test('four distinct animal employees have ears, muzzles, tails and paws without 
   for (const species of ['cat', 'rabbit', 'fox', 'bear']) {
     const avatar = createOfficeAvatar(resources, world.desks[0], species, { species, shirtColor:'#AA3355', skinColor:'#D8AD8C', hairColor:'#423833', hairStyle:'bun', accessory:'glasses' });
     assert.equal(avatar.root.userData.species, species);
-    assert.equal(avatar.root.getObjectByName('employee-shirt').material.color.getHex(), 0xaa3355);
-    assert.equal(avatar.root.getObjectByName('animal-face').material.color.getHex(), 0xd8ad8c);
+    assert.equal(avatar.root.getObjectByName('employee-shirt').material[0].color.getHex(), 0xaa3355);
+    const face = avatar.root.getObjectByName('animal-face');
+    assert.equal(face.material.vertexColors, true);
+    assert.equal(new THREE.Color().fromBufferAttribute(face.geometry.getAttribute('color'), 0).getHex(), 0xd8ad8c, 'unmarked fur retains the saved palette on the continuous face');
     for (const name of ['animal-ear-left', 'animal-ear-right', 'animal-muzzle', 'animal-nose', 'animal-tail', 'animal-paw-left', 'animal-paw-right']) assert.ok(avatar.root.getObjectByName(name), `${species} has ${name}`);
     assert.equal(avatar.root.getObjectByName('employee-hair'), undefined);
     const bounds = new THREE.Box3().setFromObject(avatar.root.getObjectByName('animal-ear-left'));
@@ -40,7 +42,7 @@ test('evidence-specific large props sit above the desk and disappear when work i
   const resources = new OfficeResources();
   const world = createOfficeWorld(resources, 1);
   const avatar = createOfficeAvatar(resources, world.desks[0], 'designer', { species:'rabbit', shirtColor:'#AA3355', skinColor:'#D8AD8C', hairColor:'#423833', hairStyle:'bun', accessory:'glasses' });
-  assert.equal(avatar.root.getObjectByName('employee-shirt').material.color.getHex(), 0xaa3355);
+  assert.equal(avatar.root.getObjectByName('employee-shirt').material[0].color.getHex(), 0xaa3355);
   assert.ok(avatar.root.getObjectByName('employee-head'));
   assert.ok(avatar.root.getObjectByName('right-arm'));
   poseOfficeAvatar(avatar, 'working', 1, false, 'reading');
@@ -55,19 +57,19 @@ test('evidence-specific large props sit above the desk and disappear when work i
   avatar.root.updateMatrixWorld(true);
   assert.ok(new THREE.Box3().setFromObject(avatar.document).min.y >= 0.952, 'writing board clears the desktop');
   poseOfficeAvatar(avatar, 'working', 2, false, 'designing');
-  assert.equal(avatar.document.visible, false); assert.equal(avatar.tablet.visible, true); assert.equal(avatar.pen.visible, true);
+  assert.equal(avatar.document.visible, true); assert.equal(avatar.document.userData.engaged, false); assert.equal(avatar.tablet.visible, true); assert.equal(avatar.pen.visible, true);
   avatar.root.updateMatrixWorld(true);
   const tabletBounds = new THREE.Box3().setFromObject(avatar.tablet);
   assert.ok(tabletBounds.min.y >= 0.952, 'drawing tablet clears the desktop');
   assert.ok(tabletBounds.max.x - tabletBounds.min.x >= 0.63, 'drawing tablet is large enough to recognize');
   poseOfficeAvatar(avatar, 'working', 3, false, 'unreported');
-  assert.equal(avatar.tablet.visible, false); assert.equal(avatar.pen.visible, false);
+  assert.equal(avatar.tablet.visible, false); assert.equal(avatar.pen.userData.held, false);
   const unreported = transforms(avatar.root);
   poseOfficeAvatar(avatar, 'working', 30, false, 'unreported');
   assert.deepEqual(transforms(avatar.root), unreported, 'missing evidence does not invent work motion');
   for (const state of ['waiting', 'stopped', 'done', 'error', 'unknown']) {
     poseOfficeAvatar(avatar, state, 4, false, 'designing');
-    assert.equal(avatar.tablet.visible, false); assert.equal(avatar.document.visible, false); assert.equal(avatar.pen.visible, false);
+    assert.equal(avatar.tablet.visible, false); assert.equal(avatar.document.visible, true); assert.equal(avatar.document.userData.engaged, false); assert.equal(avatar.pen.userData.held, false);
   }
   resources.dispose();
 });
@@ -106,6 +108,70 @@ test('empty office keeps eight desks, while larger populations are never truncat
     assert.equal(world.desks.length, expected);
     resources.dispose();
   }
+});
+
+test('six stable employee roles have distinct physical workstations, while live surfaces survive batching', () => {
+  const roles = ['coordinator', 'researcher', 'designer', 'writer', 'tester', 'reviewer'];
+  const landmarks = [
+    ['coordination-planning-board', 'coordination-side-wing'],
+    ['research-reference-library', 'research-open-reference'],
+    ['design-display-dock', 'design-colour-swatches', 'design-sample-rail'],
+    ['writing-manuscript-stack', 'writing-pen-cup'],
+    ['quality-comparison-display', 'quality-device-rack'],
+    ['review-two-level-document-trays', 'review-annotated-folio'],
+  ];
+  const agents = roles.map((id) => ({ id, role: 'custom display title', name: id, state: 'waiting', task: '', source: 'demo' }));
+  const resources = new OfficeResources();
+  const world = createOfficeWorld(resources, agents.length, agents);
+  const shapes = new Set();
+  for (const [index, role] of roles.entries()) {
+    const desk = world.desks[index];
+    assert.equal(desk.workstationRole, role);
+    for (const name of landmarks[index]) {
+      const landmark = desk.root.getObjectByName(name);
+      assert.ok(landmark, `${role}: ${name} exists in the main office`);
+      let meshCount = 0; landmark.traverse((object) => { if (object instanceof THREE.Mesh) meshCount++; });
+      assert.ok(meshCount >= 2, `${name} has physical equipment/materials, not an empty tag`);
+    }
+    desk.root.updateWorldMatrix(true, true);
+    const localGeometries = [];
+    desk.root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.computeBoundingBox();
+      localGeometries.push([...object.position, ...object.quaternion, ...object.geometry.boundingBox.min, ...object.geometry.boundingBox.max]);
+    });
+    shapes.add(JSON.stringify(localGeometries));
+    const display = desk.root.getObjectByName('office-work-screen');
+    assert.equal(display.material, desk.screen);
+    const texture = new THREE.Texture(); desk.screen.map = texture;
+    const avatar = createOfficeAvatar(resources, desk, role);
+    const faceDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(avatar.root.quaternion);
+    assert.ok(faceDirection.z > .99, 'the actor faces the open room with its rotated workstation');
+  }
+  assert.equal(shapes.size, roles.length, 'equipment differences survive comparison with all material colors removed');
+  const beforeBounds = new THREE.Box3().setFromObject(world.root);
+  const surfaces = world.desks.map((desk) => desk.root.getObjectByName('office-work-screen'));
+  batchOfficeArchitecture(resources, world);
+  const afterBounds = new THREE.Box3().setFromObject(world.root);
+  assert.ok(beforeBounds.min.distanceTo(afterBounds.min) < 1e-6 && beforeBounds.max.distanceTo(afterBounds.max) < 1e-6);
+  world.desks.forEach((desk, index) => {
+    assert.equal(desk.root.getObjectByName('office-work-screen'), surfaces[index]);
+    if (index < 6) assert.ok(desk.screen.map, 'observed display texture remains attached');
+  });
+  let batches = 0; world.root.traverse((node) => { if (node instanceof THREE.Mesh) batches++; });
+  assert.ok(batches < 110, `six role layouts still batch efficiently (${batches} meshes)`);
+  world.desks.forEach((desk) => desk.screen.map?.dispose());
+  resources.dispose();
+});
+
+test('workstation identity follows assigned role/card, never changing task text, color or transient state', () => {
+  const agent = { id: 'runtime-42', role: '协作 Agent', task: '设计一份研究报告', state: 'working', source: 'live' };
+  assert.equal(officeWorkstationRole(agent), 'generic', 'task prose cannot invent an assigned role');
+  assert.equal(officeWorkstationRole({ ...agent, role: '资料研究' }), 'researcher');
+  assert.equal(officeWorkstationRole({ ...agent, role: '任务协调', appearance: { id: 'writer', role: '自定义名称' } }), 'writer');
+  const assigned = { ...agent, appearance: { id: 'designer', role: '视觉设计', shirtColor: '#ffffff' } };
+  assert.equal(officeWorkstationLayoutKey([assigned]), officeWorkstationLayoutKey([{ ...assigned, task: 'other work', state: 'error', name: 'new label', appearance: { ...assigned.appearance, shirtColor: '#000000' } }]));
+  assert.notEqual(officeWorkstationLayoutKey([assigned]), officeWorkstationLayoutKey([{ ...assigned, appearance: { ...assigned.appearance, id: 'reviewer' } }]));
 });
 
 test('agent state changes drive real transforms, independent screens and selection', () => {
@@ -264,7 +330,7 @@ test('simulated DOM with real Three/OrbitControls preserves renderer on selectio
   const camera = calls.camera;
   const world = calls.scene.getObjectByName('warm-isometric-office');
   const geometries = new Set(), materials = new Set();
-  calls.scene.traverse((item) => { if (item instanceof THREE.Mesh) { geometries.add(item.geometry); materials.add(item.material); } });
+  calls.scene.traverse((item) => { if (item instanceof THREE.Mesh) { geometries.add(item.geometry); for (const material of Array.isArray(item.material) ? item.material : [item.material]) materials.add(material); } });
   let disposals = 0;
   for (const item of [...geometries, ...materials]) item.addEventListener('dispose', () => disposals++);
   runtime.update({ agents, selectedId: 'agent-1', paused: true });
@@ -317,25 +383,82 @@ test('simulated reduced motion stops recurring frames and context loss reports a
   harness.window.happyDOM.abort();
 });
 
-test('terminal agents repaint their final state once without keeping an animation loop alive', () => {
+test('main office close-up shows the face and preserves camera during palette/role updates', () => {
+  const harness = runtimeHarness();
+  const runtime = createOfficeSceneRuntime(harness.options, harness.make);
+  harness.clock.tick(0);
+  const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
+  const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(avatar.quaternion);
+  assert.ok(facing.dot(harness.calls.camera.position.clone().sub(avatar.position).normalize()) > .45, 'default view sees the open face side');
+  runtime.focus('agent-1'); harness.clock.tick(16);
+  assert.ok(facing.dot(harness.calls.camera.position.clone().sub(avatar.position).normalize()) > .60, 'close-up is in front of the face instead of behind the head');
+  const position = harness.calls.camera.position.clone(), quaternion = harness.calls.camera.quaternion.clone(), zoom = harness.calls.camera.zoom;
+  const originalWorld = harness.calls.scene.getObjectByName('warm-isometric-office');
+  const originalScreen = originalWorld.getObjectByName('desk-1').getObjectByName('office-work-screen').material;
+  let screenDisposals = 0; originalScreen.addEventListener('dispose', () => screenDisposals++);
+  const edited = { ...harness.agents[0], appearance: { id: 'researcher', species: 'fox', shirtColor: '#123456', skinColor: '#bbaa99' } };
+  runtime.update({ agents: [edited], selectedId: 'agent-1', paused: true }); harness.clock.tick(32);
+  assert.equal(harness.calls.scene.getObjectByName('warm-isometric-office'), originalWorld, 'palette edit preserves physical workstation and screen');
+  assert.equal(screenDisposals, 0);
+  runtime.update({ agents: [{ ...edited, appearance: { ...edited.appearance, id: 'designer' } }], selectedId: 'agent-1', paused: true }); harness.clock.tick(48);
+  const newWorld = harness.calls.scene.getObjectByName('warm-isometric-office');
+  assert.notEqual(newWorld, originalWorld, 'a real role assignment rebuilds the matching equipment');
+  assert.equal(newWorld.getObjectByName('desk-1').userData.workstationRole, 'designer');
+  assert.equal(screenDisposals, 1, 'old world surface is released exactly once');
+  assert.deepEqual(harness.calls.camera.position, position); assert.deepEqual(harness.calls.camera.quaternion.toArray(), quaternion.toArray()); assert.equal(harness.calls.camera.zoom, zoom);
+  assert.equal(harness.calls.made, 1, 'role changes reuse the renderer');
+  runtime.dispose(); assert.equal(screenDisposals, 1);
+  harness.window.happyDOM.abort();
+});
+
+test('terminal agents update state immediately, settle briefly and then stop scheduling frames', () => {
   const harness = runtimeHarness();
   const runtime = createOfficeSceneRuntime(harness.options, harness.make);
   harness.clock.tick(0);
   assert.equal(harness.clock.pending.size, 1);
   runtime.update({ agents: [{ ...harness.agents[0], state: 'stopped' }], selectedId: null, paused: false });
   harness.clock.tick(16);
-  assert.equal(harness.clock.pending.size, 0);
+  assert.equal(harness.clock.pending.size, 1, 'one brief body transition may finish');
   const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
   assert.ok(avatar.children.some((child) => child instanceof THREE.Mesh && child.material.color.getHex() === 0x899397));
+  let time = 16;
+  for (let i = 0; i < 9; i++) harness.clock.tick(time += 60);
+  assert.equal(harness.clock.pending.size, 0, 'settling terminates after 420ms');
   for (const state of ['done', 'error', 'waiting', 'unknown']) {
     runtime.update({ agents: [{ ...harness.agents[0], state }], selectedId: null, paused: false });
     const before = harness.calls.render;
-    harness.clock.tick(32);
+    harness.clock.tick(time += 16);
     assert.equal(harness.calls.render, before + 1, `${state} repaints immediately`);
+    for (let i = 0; i < 9; i++) harness.clock.tick(time += 60);
     assert.equal(harness.clock.pending.size, 0, `${state} does not leave recurring frames`);
   }
   runtime.dispose();
   harness.window.happyDOM.abort();
+});
+
+test('demo seeking replaces the pose at the selected time while retaining renderer, identity and close-up', () => {
+  const harness = runtimeHarness();
+  const runtime = createOfficeSceneRuntime(harness.options, harness.make);
+  harness.clock.tick(0);
+  runtime.focus('agent-1'); harness.clock.tick(16);
+  const avatar = harness.calls.scene.getObjectByName('employee:agent-1');
+  const camera = harness.calls.camera;
+  const position = camera.position.clone(), rotation = camera.quaternion.clone(), zoom = camera.zoom;
+  const seek = (seconds, revision) => {
+    runtime.update({ agents: harness.agents, selectedId: 'agent-1', paused: true, demoSeek: { seconds, revision } });
+    harness.clock.tick(revision * 1000);
+    assert.equal(harness.calls.scene.getObjectByName('employee:agent-1'), avatar);
+    assert.equal(harness.clock.pending.size, 0);
+    return transforms(avatar);
+  };
+  const first = seek(18, 1);
+  const second = seek(28, 2);
+  assert.notDeepEqual(first, second);
+  assert.deepEqual(seek(18, 3), first, 'same time has identical posture even after seeking backward');
+  assert.equal(harness.calls.camera, camera);
+  assert.deepEqual(camera.position, position); assert.deepEqual(camera.quaternion.toArray(), rotation.toArray()); assert.equal(camera.zoom, zoom);
+  assert.equal(harness.calls.made, 1);
+  runtime.dispose(); harness.window.happyDOM.abort();
 });
 
 test('motion resumes without accumulating paused, hidden, unfocused or reduced-motion wall time', () => {
@@ -408,7 +531,7 @@ test('replacing agent identities within the same layout releases old avatars whi
     const oldAvatar = harness.calls.scene.getObjectByName(`employee:${currentId}`);
     const exclusive = new Set();
     oldAvatar.traverse((object) => {
-      if (object instanceof THREE.Mesh) { exclusive.add(object.geometry); exclusive.add(object.material); }
+      if (object instanceof THREE.Mesh) { exclusive.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) exclusive.add(material); }
     });
     for (const asset of exclusive) {
       disposalCounts.set(asset, 0);

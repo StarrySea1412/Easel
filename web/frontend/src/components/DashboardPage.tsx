@@ -235,7 +235,10 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
           {trends && !trends.some((g) => g.items.length > 0) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
           {trends?.map((g) => (
             <div key={g.platform} className="dash-trend-group">
-              <div className="dash-trend-plat">{g.label}</div>
+              <div className="dash-trend-plat">{g.label}
+                {g.fetchedAt && <span> · {g.status === 'stale' ? '上次可用' : g.status === 'cached' ? '缓存' : '获取于'} {new Date(g.fetchedAt * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+              </div>
+              {g.error && <div className="dash-empty">{g.error.message}</div>}
               {g.items.slice(0, 3).map((it, i) => (
                 <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
                   <button className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</button>

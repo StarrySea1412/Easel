@@ -201,10 +201,17 @@ export function deletePersona(name: string): Promise<{ ok: boolean; deleted: str
 }
 
 // ---- 热点雷达 ----
-export interface TrendItem { title: string; hot: string; url: string; }
-export interface TrendGroup { platform: string; label: string; items: TrendItem[]; }
-export function fetchTrends(platforms: string, limit = 12): Promise<{ trends: TrendGroup[]; updated: number }> {
-  return request(`/api/trends?platforms=${encodeURIComponent(platforms)}&limit=${limit}`);
+export interface TrendItem { title: string; hot: string; url: string; linkKind?: 'article' | 'search'; publishedAt?: number | null; }
+export interface TrendGroup {
+  platform: string; label: string; items: TrendItem[];
+  status?: 'fresh' | 'cached' | 'stale' | 'error';
+  fetchedAt?: number | null; checkedAt?: number | null; sourceUpdatedAt?: number | null;
+  source?: { name: string; url: string; kind: string };
+  error?: { code: string; message: string } | null;
+  attempts?: { source: string; code: string; message: string }[];
+}
+export function fetchTrends(platforms: string, limit = 12, options: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<{ trends: TrendGroup[]; updated: number }> {
+  return request(`/api/trends?platforms=${encodeURIComponent(platforms)}&limit=${limit}${options.refresh ? '&refresh=true' : ''}`, { signal: options.signal });
 }
 
 // ---- 内容排期 ----

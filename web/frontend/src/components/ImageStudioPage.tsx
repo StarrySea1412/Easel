@@ -1,66 +1,118 @@
+import { useRef, useState } from 'react';
 import { IMAGE_SIZES } from '../hooks/useImageStudio';
 import type { ImageStudioController } from '../hooks/useImageStudio';
 import ImageReversePanel from './ImageReversePanel';
 import { IconOutputs } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
-import { SkeletonImage } from './Skeleton';
 import '../styles/image-studio.css';
 
-const EXAMPLES = ['极简产品摄影，奶白色背景上的咖啡杯，柔和晨光，留白构图', '秋日城市漫步封面，暖色手绘插画，银杏与街角咖啡店', '未来植物温室，透明玻璃与绿色植被，电影感光影'];
+const EXAMPLES = [
+  ['产品摄影', '一杯咖啡放在窗边，清晨柔光，奶白色背景，产品摄影'],
+  ['封面插画', '秋日城市漫步，银杏与街角咖啡店，暖色手绘封面插画'],
+  ['场景概念', '未来植物温室，透明玻璃与绿色植被，电影感光影'],
+];
+const EDIT_EXAMPLES = [
+  ['换背景', '保留主体，把背景换成干净的奶白色，添加自然柔和的阴影。'],
+  ['调整光线', '保留构图和主体，把光线调整为温暖的傍晚阳光。'],
+  ['转为插画', '保留主体和构图，改成细腻的手绘插画风格。'],
+];
 
 export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs, onOpenModels }: {
   studio: ImageStudioController; onOpenSettings: () => void; onOpenOutputs: () => void; onOpenModels: () => void;
 }) {
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [previewChoice, setPreviewChoice] = useState({ scope: '', original: false });
+  const returnMode = useRef<'generate' | 'img2img'>(studio.mode === 'img2img' ? 'img2img' : 'generate');
   const busy = studio.imgSubmitting || studio.imgJob?.state === 'running';
-  const previewSize = studio.imgSubmitting ? studio.imgSize : studio.imgJob?.size || studio.imgSize;
-  const size = IMAGE_SIZES.find((item) => item.id === previewSize) || IMAGE_SIZES[0];
-  const result = studio.imgJob?.state === 'done' ? studio.imgJob.url : null;
-  const actual = result && studio.imgJob?.width && studio.imgJob?.height
-    ? { width: studio.imgJob.width, height: studio.imgJob.height } : null;
-  const automatic = previewSize === 'auto';
-  const [requestedWidth, requestedHeight] = automatic ? [0, 0] : previewSize.split('x').map(Number);
-  const ratioMismatch = !automatic && actual && requestedWidth > 0 && requestedHeight > 0
-    && Math.abs(actual.width / actual.height - requestedWidth / requestedHeight) > .01;
+  const locked = busy || studio.referenceBusy;
+  const editing = studio.mode === 'img2img';
+  const reference = editing ? studio.reference : null;
+  const job = studio.imgJob;
+  // Do not present a previous result as an edit of a newly uploaded image.
+  const belongsToDraft = editing ? Boolean(reference && job?.mode === 'img2img' && job.referenceId === reference.id) : job?.mode !== 'img2img';
+  const result = belongsToDraft && job?.state === 'done' ? job.url : null;
+  const actual = result && job?.width && job?.height ? { width: job.width, height: job.height } : null;
+  const previewScope = `${reference?.id || 'text'}:${job?.jobId || ''}`;
+  const original = Boolean(reference && (!result || (previewChoice.scope === previewScope && previewChoice.original)));
+  const previewUrl = original ? reference?.url : result;
+  const sizeId = (result || busy) && job && !studio.imgSubmitting ? job.size : studio.imgSize;
+  const size = IMAGE_SIZES.find(item => item.id === sizeId) || IMAGE_SIZES[0];
+  const [width, height] = size.id.split('x').map(Number);
+  const ratioMismatch = size.id !== 'auto' && actual && Math.abs(actual.width / actual.height - width / height) > .01;
+  const canGenerate = !locked && !studio.loading && studio.imgChannel?.configured && (!editing || reference)
+    && studio.imgPrompt.trim().length > 0 && studio.imgPrompt.trim().length <= 2000;
+  const receiveFile = (file?: File) => { if (file && !locked) void studio.uploadReference(file); };
+
   return <div className="page-scroll image-page">
     <header className="image-page-heading">
-      <div><p className="image-eyebrow">创作工作室 / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">文生图、图生图与图片反推，作品统一保存在内容库。</p></div>
+      <div><p className="image-eyebrow">EASEL / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">描述一个想法，或放入图片继续修改。</p></div>
       <div className="image-heading-actions" role="group" aria-label="生图工坊快捷入口">
-        <button type="button" className="btn image-heading-icon" title="查看历史作品" aria-label="查看历史作品" onClick={onOpenOutputs}>
-          <span aria-hidden="true"><IconOutputs size={20} /></span>
-        </button>
-        <button type="button" className="btn image-heading-icon" title="生图通道设置" aria-label="生图通道设置" onClick={onOpenSettings}>
-          <span aria-hidden="true"><IconGear size={20} /></span>
-        </button>
+        <button type="button" className="btn image-heading-action" onClick={onOpenOutputs}><IconOutputs size={17} />作品</button>
+        <button type="button" className="btn image-heading-action" aria-label="生图通道设置" onClick={onOpenSettings}><IconGear size={17} /><span>设置</span></button>
       </div>
     </header>
-    <div className="image-mode-tabs" role="group" aria-label="创作方式"><button className={studio.mode === 'generate' ? 'selected' : ''} aria-pressed={studio.mode === 'generate'} onClick={() => studio.setMode('generate')}>文生图</button><button className={studio.mode === 'img2img' ? 'selected' : ''} aria-pressed={studio.mode === 'img2img'} onClick={() => studio.setMode('img2img')}>图生图</button><button className={studio.mode === 'reverse' ? 'selected' : ''} aria-pressed={studio.mode === 'reverse'} onClick={() => studio.setMode('reverse')}>图片反推</button></div>
-    {studio.mode === 'reverse' ? <ImageReversePanel studio={studio} onOpenSettings={onOpenModels} /> : <div className="image-workspace">
-      <section className="card image-controls" aria-label="生图参数">
-        <div className="image-section-heading"><h2>描述你的画面</h2><span className={`image-channel ${studio.imgChannel?.configured ? 'ready' : ''}`}>{studio.loading ? '读取配置中' : studio.imgChannel?.configured ? '通道已配置' : '待配置'}</span></div>
-        {studio.mode === 'img2img' && <section className="image-reference-panel" aria-label="图生图参考图片"><div className="image-section-heading"><h3>参考图</h3><span>{studio.referenceBusy?'正在上传…':'PNG / JPEG / WebP · ≤10 MB'}</span></div>{studio.reference?<div className="image-reference-preview"><img src={studio.reference.url} alt={`参考图：${studio.reference.name}`} /><div><strong>{studio.reference.name}</strong><p>{studio.reference.width} × {studio.reference.height}</p><button className="link-btn" disabled={busy||studio.referenceBusy} onClick={studio.clearReference}>清除参考图</button></div></div>:<p className="image-field-hint">上传需要修改的原图，再描述希望保留与改变的部分。</p>}<label className="image-upload-label">{studio.reference?'替换参考图':'上传参考图'}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy||studio.referenceBusy} onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void studio.uploadReference(file);}}/></label><details className="image-mask"><summary>局部编辑蒙版（可选）</summary><p className="image-field-hint">使用与参考图同尺寸的 PNG。完全透明区域代表需要编辑的部分，不透明区域用于保留；最终效果由服务支持决定。</p>{studio.mask&&<div className="image-reference-preview"><img src={studio.mask.url} alt="局部编辑蒙版"/><div><strong>{studio.mask.name}</strong><button className="link-btn" disabled={busy||studio.referenceBusy} onClick={studio.clearMask}>清除蒙版</button></div></div>}<label className="image-upload-label">{studio.mask?'替换蒙版':'上传 PNG 蒙版'}<input type="file" accept="image/png" disabled={busy||studio.referenceBusy||!studio.reference} onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void studio.uploadReference(file,true);}}/></label></details></section>}
-        <label htmlFor="image-prompt">{studio.mode==='img2img'?'希望怎样修改画面':'画面描述'}</label>
-        <textarea id="image-prompt" value={studio.imgPrompt} placeholder="写下画面主体、场景、风格与光线，例如：一杯咖啡放在窗边，清晨柔光，胶片摄影质感…" onChange={(event) => studio.setImgPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void studio.fireImagegen(); } }} />
-        <p className="image-field-hint">Enter 换行 · Ctrl / ⌘ + Enter 生成 · {studio.imgPrompt.length} / 2000 字</p>
-        <div className="image-examples"><span>试试这些灵感</span>{EXAMPLES.map((prompt, index) => <button className="btn btn-sm" key={prompt} onClick={() => studio.setImgPrompt(prompt)}>{['产品摄影', '封面插画', '场景概念'][index]}</button>)}</div>
-        <fieldset className="image-size-options" disabled={busy}><legend>画面比例</legend>{IMAGE_SIZES.map((item) => <button type="button" key={item.id} className={studio.imgSize === item.id ? 'selected' : ''} aria-pressed={studio.imgSize === item.id} onClick={() => studio.setImgSize(item.id)}><span className="image-ratio-icon" style={{ aspectRatio: item.ratio }} /><strong>{item.label}</strong><small>{item.id === 'auto' ? '由模型决定' : item.id.replace('x', ' × ')}</small></button>)}</fieldset>
-        {studio.imgChannel?.configured ? <p className="image-field-hint">当前模型：{studio.imgChannel.model || '服务默认模型'}</p> : <p className="image-field-hint">先在生图通道设置中填写服务地址和 API Key，再开始生成。</p>}
-        <p className="image-field-hint">自动尺寸由模型决定；服务不支持时会提示错误，请改选固定比例。生成后显示实际尺寸，预览保留完整画面。</p>
-        {studio.galleryError && <p className="image-error" role="alert">配置读取失败：{studio.galleryError}<button className="link-btn" onClick={() => void studio.refreshGallery()}>重试</button></p>}
-        <button className="btn btn-primary image-generate" disabled={busy || studio.referenceBusy || (studio.mode==='img2img'&&!studio.reference) || !studio.imgChannel?.configured || !studio.imgPrompt.trim() || studio.imgPrompt.trim().length > 2000} onClick={() => { void studio.fireImagegen(); }}>{studio.imgSubmitting ? '正在提交…' : busy ? '正在生成…' : studio.mode==='img2img'?'按参考图生成 →':'生成图片 →'}</button>
-        {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
-      </section>
-      <section className="card image-preview" aria-label="生成预览">
-        <div className="image-section-heading"><h2>画布预览</h2><span>{actual ? `实际 ${actual.width} × ${actual.height}` : size.label}</span></div>
-        <div className="image-preview-stage">
-          {busy ? <div className="image-progress" role="status"><SkeletonImage ratio={size.ratio} label={`正在生成 · 已等待 ${studio.imgTick} 秒`} /><p>可以切换页面，返回后会继续读取任务进度。</p></div>
-            : result ? <a href={result} target="_blank" rel="noreferrer"><img src={result} alt={studio.imgJob?.prompt || '历史生成图片'} /></a>
-              : <div className="image-empty"><IconImage size={42} /><strong>你的下一张作品</strong><p>在左侧描述画面，选择比例后开始生成。</p><span>产品图 / 封面插画 / 场景概念</span></div>}
+    <div className="image-local-toolbar">
+      <span>{studio.mode === 'reverse' ? '从图片提取提示词' : reference ? '修改图片' : '图片创作'}</span>
+      {studio.mode === 'reverse'
+        ? <button className="link-btn" disabled={studio.reverse.busy} onClick={() => studio.setMode(returnMode.current)}>← 返回图片创作</button>
+        : <button className="link-btn" disabled={locked} onClick={() => { returnMode.current = studio.mode === 'img2img' ? 'img2img' : 'generate'; studio.setMode('reverse'); }}>提取提示词 ↗</button>}
+    </div>
+    {studio.mode === 'reverse' ? <ImageReversePanel studio={studio} onOpenSettings={onOpenModels} /> : <>
+      <section className={`image-creation${dragging ? ' is-dragging' : ''}`} aria-label="图片创作工作区"
+        onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!locked) setDragging(true); } }}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
+        onDrop={event => { event.preventDefault(); setDragging(false); receiveFile(event.dataTransfer.files[0]); }}
+        onPaste={event => { const file = Array.from(event.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { event.preventDefault(); receiveFile(file); } }}>
+        <div className="image-canvas-toolbar">
+          <span>{reference ? original ? '原图' : '生成结果' : result ? '生成结果' : '画布'}{original && reference ? <small>{reference.width} × {reference.height}</small> : actual ? <small>{actual.width} × {actual.height}</small> : null}</span>
+          {reference && <button type="button" className="link-btn" disabled={locked} onClick={studio.clearReference}>移除图片</button>}
+          {result && reference && <div className="image-compare" role="group" aria-label="原图与结果对比">
+            <button disabled={locked} aria-pressed={original} onClick={() => setPreviewChoice({ scope: previewScope, original: true })}>原图</button>
+            <button disabled={locked} aria-pressed={!original} onClick={() => setPreviewChoice({ scope: previewScope, original: false })}>结果</button>
+          </div>}
+          {result && <div className="image-result-actions"><a href={result} target="_blank" rel="noreferrer">打开图片 ↗</a><a href={result} download>下载</a>
+            <button className="link-btn" disabled={locked} onClick={() => void studio.useGalleryReference({ url: result, name: result.split('/').at(-1) || '生成图片.png', mtime: Date.now() / 1000, width: actual?.width, height: actual?.height })}>继续修改</button>
+          </div>}
         </div>
-        {studio.imgJob?.state === 'error' && <p className="image-error" role="alert">生成失败：{studio.imgJob.error || '请稍后重试'}</p>}
-        {ratioMismatch && <p className="image-field-hint" role="status">服务返回的比例与所选 {size.label} 不同。当前显示完整原图，可更换支持该比例的模型后重试。</p>}
-        <div className="image-preview-footer"><span>生成成功后自动保存到内容库 · AI 生图</span><button className="link-btn" onClick={onOpenOutputs}>前往内容库 →</button></div>
+        <div className={`image-canvas${busy ? ' is-busy' : ''}`} aria-label="图片画布">
+          {previewUrl ? <img className="image-canvas-picture" src={previewUrl} alt={original ? `原图：${reference!.name}` : job?.prompt || '生成结果'} />
+            : !busy && <div className="image-canvas-empty"><span className="image-empty-symbol"><IconImage size={30} /></span>
+              <h2>{studio.referenceBusy ? '正在放入图片…' : '从一张图片，或一个想法开始'}</h2><p>拖入图片，描述你想改什么。<br />也可以直接在下方写下想法，生成新图片。</p>
+              <button className="btn" disabled={locked} onClick={() => uploadInput.current?.click()}>选择图片</button><small>支持 PNG、JPG、WebP · 最大 10 MB</small>
+            </div>}
+          {busy && <div className="image-progress" role="status"><span className="image-progress-spinner" aria-hidden="true" /><strong>{studio.imgSubmitting ? '正在提交…' : `正在生成 · 已等待 ${studio.imgTick} 秒`}</strong><p>可以离开此页，回来继续查看。</p></div>}
+          {dragging && <div className="image-drop-overlay">松开放入图片</div>}
+        </div>
+        <form className="image-composer" onSubmit={event => { event.preventDefault(); if (canGenerate) void studio.fireImagegen(); }}>
+          <label className="image-prompt-label" htmlFor="image-prompt">{reference ? '这张图，你想怎么改？' : '你想生成什么？'}</label>
+          <textarea id="image-prompt" rows={2} value={studio.imgPrompt} placeholder={reference ? '例如：保留这只猫，把背景换成阳光下的咖啡馆。' : '例如：窗边的一杯咖啡，清晨柔光，胶片摄影质感。'}
+            onChange={event => studio.setImgPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); if (canGenerate) void studio.fireImagegen(); } }} />
+          {!studio.imgPrompt && <div className="image-prompt-suggestions">{(reference ? EDIT_EXAMPLES : EXAMPLES).map(([label, prompt]) => <button type="button" key={label} disabled={locked} onClick={() => studio.setImgPrompt(prompt)}>{label}</button>)}</div>}
+          <div className="image-composer-toolbar"><div className="image-composer-tools">
+            <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => uploadInput.current?.click()}><IconImage size={16} />{studio.referenceBusy ? '上传中…' : reference ? '换图' : '添加图片'}</button>
+            <input ref={uploadInput} aria-label="上传参考图" type="file" hidden accept="image/png,image/jpeg,image/webp" disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
+            <label className="image-ratio-select"><span>比例</span><select aria-label="画面比例" disabled={locked} value={studio.imgSize} onChange={event => studio.setImgSize(event.target.value)}>{IMAGE_SIZES.map(item => <option key={item.id} value={item.id}>{item.id === 'auto' ? '自动尺寸' : item.label.split(' ').at(-1)}</option>)}</select></label>
+          </div><button type="submit" className="btn btn-primary image-generate" disabled={!canGenerate}>{studio.imgSubmitting ? '正在提交…' : busy ? '正在生成…' : reference ? '生成修改图 →' : '生成图片 →'}</button></div>
+          {studio.imgPrompt.length > 2000 && <p className="image-error" role="alert">描述最多 2000 字，当前 {studio.imgPrompt.length} 字，请稍作精简。</p>}
+          <details className="image-advanced"><summary>更多选项</summary><div className="image-advanced-body">
+            <p>输出尺寸：{studio.imgSize === 'auto' ? '由模型决定；部分服务可能不支持。' : studio.imgSize.replace('x', ' × ')}。当前模型：{studio.imgChannel?.model || '服务默认模型'}。</p>
+            {reference && <div className="image-mask"><label htmlFor="image-mask-upload">局部编辑蒙版</label><p>可上传与原图同尺寸的 PNG，用完全透明的区域指定修改位置；需生图服务支持。</p>
+              {studio.mask && <div className="image-mask-file"><span>{studio.mask.name}</span><button type="button" className="link-btn" disabled={locked} onClick={studio.clearMask}>移除蒙版</button></div>}
+              <input id="image-mask-upload" type="file" accept="image/png" disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void studio.uploadReference(file, true); }} />
+            </div>}<p>Ctrl / ⌘ + Enter 生成 · 描述最多 2000 字</p>
+          </div></details>
+          {studio.mask && reference && <p className="image-field-hint">已使用局部编辑蒙版，可在更多选项中移除。</p>}
+          {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
+          {belongsToDraft && job?.state === 'error' && <p className="image-error" role="alert">生成失败：{job.error || '请重试'}</p>}
+        </form>
       </section>
-    </div>}
-    {studio.gallery.length>0&&<section className="card image-gallery" aria-label="历史图片图库"><div className="image-section-heading"><h2>从已有作品继续创作</h2><button className="link-btn" onClick={onOpenOutputs}>全部历史作品 →</button></div><div className="image-gallery-grid">{studio.gallery.slice(0,12).map(item=><article className="image-gallery-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><img src={item.url} alt={item.name} loading="lazy"/></a><span>{item.name}</span><button className="btn btn-sm" disabled={busy||studio.referenceBusy} onClick={()=>void studio.useGalleryReference(item)}>用作参考图</button></article>)}</div></section>}
+      <div className="image-service-status" role="status">
+        {studio.loading ? <span>正在读取生图服务…</span> : studio.galleryError ? <><span>生图服务读取失败：{studio.galleryError}</span><button className="link-btn" onClick={() => void studio.refreshGallery()}>重试</button></>
+          : !studio.imgChannel?.configured ? <><span>首次使用，连接你的生图服务即可开始。</span><button className="link-btn" onClick={onOpenSettings}>连接生图服务 →</button></> : <span>生成的图片会自动保存到作品中。</span>}
+        {ratioMismatch && <span>服务返回的比例与所选 {size.label} 不同，画布已保留完整图片。</span>}
+      </div>
+      {studio.gallery.length > 0 && <section className="image-gallery" aria-label="历史图片图库"><div className="image-section-heading"><h2>最近作品</h2><button className="link-btn" onClick={onOpenOutputs}>查看全部 →</button></div><div className="image-gallery-grid">{studio.gallery.slice(0, 8).map(item => <button className="image-gallery-item" key={item.url} disabled={locked} aria-label={`用作参考图：${item.name}`} onClick={() => void studio.useGalleryReference(item)}><img src={item.url} alt={item.name} loading="lazy" /><span>{item.name}</span></button>)}</div></section>}
+    </>}
   </div>;
 }
