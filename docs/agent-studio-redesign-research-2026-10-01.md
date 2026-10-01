@@ -187,4 +187,4 @@
 
 大团队实施前审计：原前端工位最少 8 个并可扩展，旧后端最多返回 32 人，旧前端解码超过 64 人拒绝快照。当前已移除上述人数截断，完整名单支持跨区搜索定位，场景每区最多 8 人；保留日志读取预算和覆盖限制。桌面 12/20/50 人及手机第 50 人已用模拟演示做浏览器检查；受控数据测试包含 100 人，不代表真实 100 Agent 并发或浏览器性能达标。
 
-公开搜索中的 justaskmarvis.com 是另一个 Company Brain 产品，已排除出本次目标参考。腾讯来源及实际观察记录见上文；最终主场景截图见 [continuous-body-final.jpg](../.scratch/workspace-redesign-qa/continuous-body-final.jpg)。
+公开搜索中的 justaskmarvis.com 是另一个 Company Brain 产品，已排除出本次目标参考。腾讯来源及实际观察记录见上文；最终主场景截图见 continuous-body-final.jpg（本地证据：`../.scratch/workspace-redesign-qa/continuous-body-final.jpg`，未提交到 GitHub）。
