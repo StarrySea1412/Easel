@@ -1,54 +1,50 @@
 # Easel 创作工作台
 
-把想法、图片、内容和 AI 助手放在同一个本地工作空间里。
+面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
-本仓库是基于 **[ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)** 修改和持续开发的独立版本。我们保留原项目的创作流程与技能基础，重点改进日常工作台体验、Windows 使用体验、图片创作、内容复盘与可视化 Agent 工作室。它不是原项目的官方发行版。
+[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-[English](README_EN.md) · [查看开发分支](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [反馈问题](https://github.com/StarrySea1412/Easel/issues) · [版本发布](https://github.com/StarrySea1412/Easel/releases)
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-01**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 
-> 当前功能开发位于 `codex/creator-workflow`。`main` 的首页说明用于介绍本仓库；体验定制功能请使用开发分支，并以对应版本的发布说明为准。源码中的新功能不代表已经包含在旧安装包里。
+## 这一版有什么
 
-## 在这里可以做什么
-
-| 工作区 | 用途 |
+| 工作区 | 当前能力 |
 | --- | --- |
-| 对话与创作 | 和 AI 讨论想法，附上素材，持续修改内容，保留会话与草稿 |
-| 生图工坊 | 从文字生成图片，上传图片继续修改，提取图片描述，复用已有作品 |
-| 热点与选题 | 浏览可用来源的热榜，把感兴趣的话题收进选题库，安排创作日历 |
-| 内容库 | 按项目整理产物，预览图片、音视频和文本，下载后继续使用 |
-| 内容分析 | 查看已采集或导入的作品数据，寻找问题和下一步改进方向 |
-| Agent 工作室 | 观察任务、成员状态和工具记录，探索角色形象与不同岗位的工位体验 |
-| 账号与画像 | 管理平台连接、创作定位、受众和风格，让创作有自己的上下文 |
+| 小动物办公室 | Three.js / WebGL 3D 工位；猫、兔、狐狸和熊的连续角色表面；在办公室原位预览、保存或取消外观编辑；真实 Agent 显式绑定 |
+| 大团队与岗位 | 完整成员名单搜索、每区最多 8 个场景工位、选中成员自动定位分区；六类岗位的设备、坐姿与动作差异 |
+| 看得见的工作 | 阅读、书写、绘图与键鼠动作；持笔取放和阶段过渡；电脑显示已观测任务和工具名，可查看清晰屏幕与工作过程；演示支持定位、暂停和重播 |
+| 过程与反馈 | 点击状态查看精确会话、轮次对应的可见思考与工具回执；完成、错误和停止分别反馈；中断更新时明确保留旧快照 |
+| 产出监控 | 办公室查看整个工作区近期文件，筛选类型、预览媒体、下载并跳转内容库；不猜测文件属于哪位员工 |
+| 模型与执行 | 读取已配置渠道，在网关能力与身份通过核验时为目标 Agent 会话设置后续调用模型；主会话和单独子 Agent 停止范围分开 |
+| 对话与素材 | 按会话保存文字草稿，保护晚到的上传结果；提供历史备份与只读副本导入，损坏存储不会被静默覆盖 |
+| 图片工作台 | 围绕上传图片、编辑描述和画布组织界面，高级参数按需展开；页面切换保留编辑草稿，实际生成需要配置图片模型 |
+| 内容分析 | 面向新手的分析入口与独立示例，支持筛选、排序、依据展开和行动勾选；示例作品明确标为虚构，真实分析需要用户数据 |
+| 热点与运行记录 | 热点按来源展示内容、错误、更新时间与重试入口；运行记录页内顶部导航支持会话、搜索和状态筛选 |
+| 其他创作流程 | 保留选题、日历、账号、画像、内容库及发布入口，持续改进本地体验 |
 
-图片生成和 AI 对话需要配置自己的模型服务。平台数据与发布能力取决于实际登录状态、接口可用性和相应权限。工作室中的演示数据与后台记录分别标注。
+动物外观卡只改变展示，不修改提示词、权限或员工执行行为。真实模式只显示取得的证据；未上报的思考、工具输出和远程桌面不会被补写。演示模式中的角色、任务和画板始终标为模拟。
 
-## 这份定制版本在改什么
+模型控制依赖已配对的本地网关、准确的会话/运行身份以及相应权限。模型保存影响该 Agent 会话后续调用，不会重跑已完成任务。独立停止可能停止该员工派生的任务；不停止父级或同级。网关未核验时按钮保持不可用。完整边界见 [专业办公室实现与验证](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md)。
 
-- **操作更简单**：常用动作直接可见，专业参数按需展开，减少第一次使用时要理解的概念。
-- **图片更重要**：围绕当前图片、修改描述和结果继续创作。
-- **分析更容易看懂**：先说明发现和下一步，再查看作品表格、指标和依据。
-- **工作室更有辨识度**：持续改进角色建模、工作动作、岗位工位和角色编辑。美术样板与真实任务执行分别验收。
-- **本地体验更可靠**：改进草稿保留、历史备份、异常反馈、资源加载及 Windows 安装流程。
+角色自然持物、完整动作与任务交接仍在迭代；职责/能力配置、真实任务产出归属、逐帧碰撞与性能尚未完整验收。热点最近一轮真实 HTTP 检查有 7 个来源取得内容，知乎与头条返回限流，界面会分别提示；这不代表来源长期可用。逐项状态见 [工作台整改与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)。
 
-这些是本仓库的迭代重点，具体完成范围见[开发记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md)。不把演示画面当作真实模型执行，也不把可打开的页面当作所有功能均已验证。
-
-## 从源码开始
-
-获取定制版本：
+## 从本仓库源码开始
 
 ```bash
 git clone --branch codex/creator-workflow https://github.com/StarrySea1412/Easel.git
 cd Easel
 ```
 
-Windows 10/11：先准备 Git、Python 3.10+、Node.js 24.16+（24.x）和 FFmpeg，并加入 PATH，然后在 PowerShell 中运行：
+Windows 10/11 使用 PowerShell：
 
 ```powershell
 .\setup.ps1 -NonInteractive
 .\.venv\Scripts\easel.exe web --port 7860
 ```
 
-macOS / Linux：
+安装脚本会检查工具、建立本地环境和前端，并配置隔离的 OpenClaw profile。缺少系统工具时先按提示安装；只有显式使用 `-AllowWinget` 才允许脚本通过 winget 安装缺失工具。`-NonInteractive` 将模型配置留到网页设置。首次安装仍需网络，不能当作离线便携包。
+
+macOS / Linux 保留原有安装入口：
 
 ```bash
 bash setup.sh
@@ -56,19 +52,38 @@ source .venv/bin/activate
 easel web --port 7860
 ```
 
-打开终端显示的本地地址，在「设置」连接所需的模型服务。首次安装需要联网；Windows 安装、依赖与恢复步骤见[安装说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)。
+打开终端输出的本地地址，在「设置」配置自己的模型渠道；进入「Agent 办公室」选择成员后可原位编辑外观。Windows 构建、数据目录与恢复说明见 [安装器文档](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)。不要把密钥、平台登录态或个人产出提交到 Git。
 
-## 开发者入口
+## 开发与验证
 
-前端使用 React、TypeScript、Vite 和 Three.js，位于 `web/frontend/`；后端使用 Python / FastAPI，入口为 `web/app.py`；命令行工具位于 `easel/`。
+前端位于 `web/frontend`，使用 React、TypeScript、Vite 和 Three.js；本地后端入口是 `web/app.py`，Python CLI 位于 `easel/`。使用项目要求的 Node.js 24.16+（24.x）或 26.1+。
 
-- [开发分支 README](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/README.md)
-- [迭代计划](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-plan.md)
-- [技能与功能映射](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/skill-function-mapping.md)
-- [原项目](https://github.com/ZJU-REAL/Easel)
+```bash
+cd web/frontend
+npm ci
+npm test
+npm run lint
+npm run build
+```
 
-## 来源、致谢与许可证
+在项目根目录、已安装测试依赖的 Python 环境中运行：
 
-本项目由 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发而来。感谢原作者、贡献者以及 OpenClaw 和其他开源依赖的维护者。原项目的贡献与历史保留，原有致谢见 [ACKNOWLEDGMENTS](docs/ACKNOWLEDGMENTS.md)。本仓库的新改动由本仓库维护，不代表原作者或原机构的官方产品与承诺。
+```bash
+python -m pytest -q
+```
 
-沿用 [Apache License 2.0](LICENSE)。第三方组件、素材和技能遵循各自的许可证与归属说明。
+- [当前交付进度](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md)：源码、预览、安装包分别记录。
+- [工作台体验整改清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-action-plan-2026-10-01.md)：已完成内容、用户反馈与待办。
+- [本轮验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)：区分真实浏览器、隔离 HTTP、模拟记录和网关协议测试。
+- [开发计划](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-plan.md)：剩余真实模型链路与安装升级验收。
+- [技能功能映射](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/skill-function-mapping.md)：保留的技能与脚本能力。
+
+CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手动工作流，构建不会自动发布 Release。新版安装器的发现与下载元数据指向本仓库；没有已发布版本时不会回退安装上游包。
+
+当前本地验证不等于真实模型推理、多 Agent 联动、所有平台发布或新安装包升级已经验收。本轮没有自有管理员账号系统。
+
+## 来源与许可证
+
+本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)，感谢原作者及贡献者。原有功能、历史提交和必要资源保留；本仓库维护独立的创作工作台、办公室交互和可靠性改进，不代表上游官方发行。
+
+采用 [Apache License 2.0](LICENSE)，保留[原有致谢](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/ACKNOWLEDGMENTS.md)。OpenClaw、前端库及技能中的第三方组件继续遵循各自许可证；发布包保留所需许可证信息。
