@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import type { OfficeAvatar } from './officeGeometry';
 
-// Avatar-local coordinates. The stand sits in front of the mouse, clear of
-// the keyboard and inside even the narrowest workstation's front edge.
-export const OFFICE_PEN_DOCK = new THREE.Vector3(.53, .496, -.17);
-export const OFFICE_PEN_GRIP_OFFSET = new THREE.Vector3(.105, .06, 0);
+// Avatar-local coordinates. Keep the parked barrel outside the rendered
+// forearm/palm sweep, while the right paw can still reach and lift it from here.
+// The stand remains inside even the narrowest workstation's front edge.
+export const OFFICE_PEN_DOCK = new THREE.Vector3(.615, .496, -.17);
+export const OFFICE_PEN_GRIP_OFFSET = new THREE.Vector3(-.105, .06, 0);
 export const OFFICE_PEN_PICKUP = OFFICE_PEN_DOCK.clone().sub(OFFICE_PEN_GRIP_OFFSET);
 const inverseWrist = new THREE.Matrix4();
 

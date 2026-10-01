@@ -17,7 +17,8 @@ function point(avatar, object) {
 }
 function pose(avatar) {
   return [...avatar.body.position, ...avatar.body.quaternion, ...avatar.head.quaternion,
-    ...point(avatar, avatar.leftWrist), ...point(avatar, avatar.rightWrist)];
+    ...point(avatar, avatar.leftWrist), ...point(avatar, avatar.rightWrist),
+    ...avatar.leftWrist.getWorldQuaternion(new THREE.Quaternion()), ...avatar.rightWrist.getWorldQuaternion(new THREE.Quaternion())];
 }
 
 test('action changes settle from the displayed hands rather than teleporting, including interrupted transitions', () => {
@@ -104,4 +105,50 @@ test('thinking hands differ across all six roles, with terminal feedback remaini
     resources.dispose();
   }
   assert.equal(hands.size, 6);
+});
+
+test('restarting pickup preserves displayed fingers and establishes a full grip at the stand', () => {
+  for(const role of roles) {
+    const {avatar,resources,player}=fixture(role);
+    const hand=avatar.rightHand.mesh;
+    function fingers() {
+      avatar.root.updateWorldMatrix(true,true);
+      return Array.from({length:hand.geometry.attributes.position.count},(_,index)=>
+        avatar.root.worldToLocal(hand.localToWorld(hand.getVertexPosition(index,new THREE.Vector3()))));
+    }
+    for(const cancelledReturn of [false,true]) {
+      player.reset();
+      player.draw(cancelledReturn?'working':'waiting',cancelledReturn?'writing':'waiting',0,false,0,false);
+      player.draw(cancelledReturn?'done':'working',cancelledReturn?'completed':'writing',0,false,0,true);
+      const frames=cancelledReturn?50:16;
+      for(let i=0;i<frames;i++)player.draw(cancelledReturn?'done':'working',cancelledReturn?'completed':'writing',i/60,false,1/60,true);
+      const before=pose(avatar),weights=[...hand.morphTargetInfluences],vertices=fingers();
+      assert.ok(weights[0]>0 && weights[0]<1,'interruption occurs during finger curling');
+      const action=cancelledReturn?'writing':'designing';
+      player.draw('working',action,(frames-1)/60,false,0,true);
+      pose(avatar).forEach((value,index)=>assert.ok(Math.abs(value-before[index])<1e-8));
+      assert.deepEqual(hand.morphTargetInfluences,weights);
+      fingers().forEach((vertex,index)=>assert.ok(vertex.distanceTo(vertices[index])<1e-8,'visible finger surface stays continuous'));
+      for(let i=1;i<=80;i++) {
+        player.draw('working',action,(frames+i)/60,false,1/60,true);
+        if(avatar.pen.userData.held) {
+          assert.equal(hand.morphTargetInfluences[0],1,'held barrel has a full finger grip');
+          assert.equal(hand.morphTargetInfluences[1],0);
+        }
+      }
+      assert.equal(player.pending,false);
+    }
+    // Reading starts with a full page grip, which must clear before grasping a pen.
+    player.reset();player.draw('working','reading',0,false,0,false);
+    for(let i=0;i<80;i++) {
+      player.draw('working','writing',i/60,false,1/60,true);
+      if(avatar.pen.userData.held)assert.deepEqual(hand.morphTargetInfluences,[1,0]);
+    }
+    for(let i=0;i<80;i++) {
+      player.draw('working','reading',2+i/60,false,1/60,true);
+      if(avatar.pen.userData.held)assert.deepEqual(hand.morphTargetInfluences,[1,0]);
+    }
+    assert.deepEqual(hand.morphTargetInfluences,[0,1]);
+    resources.dispose();
+  }
 });

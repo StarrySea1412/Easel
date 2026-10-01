@@ -4,7 +4,7 @@ A local creative workspace combining conversations, assets, content projects, an
 
 [简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-01**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
+> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-02**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
 
 ## Current features
 
@@ -23,6 +23,8 @@ A local creative workspace combining conversations, assets, content projects, an
 Appearance does not change prompts or execution permissions. Demo tasks and artwork are labeled synthetic. Live screens summarize observed task records; they do not stream a remote desktop. Model assignment does not rerun completed work. Stopping a child can stop its descendants, but not its parent or siblings. See the [office verification record](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md) for limitations.
 
 Natural prop handling, complete motion and handoffs remain in progress. Role/capability configuration, real output attribution, full motion collision checks and performance are not fully verified. The latest recorded live HTTP check returned content from seven trend sources; Zhihu and Toutiao were rate-limited and are reported separately. This does not establish long-term availability. See the [current workspace verification](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md).
+
+Office characters are generated locally with Three.js surfaces and skinning; no Meshy account or generation credits are required. Species-specific bodies, faces, ear shells and a continuous fox tail have been refined. Thumb orientation, pen/paper contacts and workstation-facing poses are corrected; eyes, brows and mouth now reflect reported states while appearance editing remains available. See [local character modeling and verification](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md).
 
 ## Run the current source
 

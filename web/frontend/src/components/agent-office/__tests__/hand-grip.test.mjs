@@ -51,8 +51,34 @@ for (const species of ['cat', 'rabbit', 'fox', 'bear']) test(`${species}: all fi
   geometry.dispose();
 });
 
-test('fingers have closed topology and their roots stay buried in the continuous palm in every pose', () => {
-  const geometry = createOfficeHandGeometry();
+for (const species of ['cat', 'rabbit', 'fox', 'bear']) for (const side of ['right', 'left']) test(`${species}/${side}: three real finger pads support the pen without a visible floating gap`, () => {
+  const geometry = createOfficeHandGeometry(species, side);
+  geometry.setAttribute('position', geometry.morphAttributes.position[0]);
+  geometry.morphAttributes = {};
+  geometry.setDrawRange(geometry.groups[0].start, geometry.groups[0].count);
+  geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.updateMatrixWorld(true);
+  const mirror = side === 'left' ? -1 : 1, ray = new THREE.Raycaster();
+  // Probe a patch of each supporting pad from the barrel, not just an isolated
+  // tip vertex: the index and thumb oppose at one height, the middle supports
+  // below them. This catches a collision-free but visibly empty grip.
+  for (const [name, digit, height, z] of [['index', 0, .021, -1], ['thumb', 3, .024, 1], ['middle', 1, -.02, -1]]) {
+    for (const x of [-.4, -.3, -.2]) for (const dy of [-.001, 0, .001]) {
+      ray.set(new THREE.Vector3(OFFICE_HAND_PEN_AXIS.x * mirror, height + dy, OFFICE_HAND_PEN_AXIS.y), new THREE.Vector3(-x * mirror, 0, z).normalize());
+      const contact = ray.intersectObject(mesh, false)[0];
+      assert.ok(contact, `${name} provides a continuous supporting pad`);
+      assert.equal(Math.floor(contact.face.a / 203), digit, `${name} itself touches the grip area`);
+      assert.ok(contact.distance > .014 && contact.distance < .017, `${name} skin gap from barrel stays below .003 (actual ${contact.distance - .014})`);
+      assert.ok(contact.face.normal.dot(ray.ray.direction) < 0, `${name} presents its outward skin surface to the pen`);
+    }
+  }
+  geometry.dispose(); material.dispose();
+});
+
+for (const species of ['cat', 'rabbit', 'fox', 'bear']) test(`${species}: fingers have closed topology and roots stay buried in the continuous palm in every pose`, () => {
+  const geometry = createOfficeHandGeometry(species);
   const skinIndices = geometry.groups[0];
   const edges = new Map();
   for (let i = 0; i < skinIndices.count; i += 3) for (let edge = 0; edge < 3; edge++) {
@@ -60,7 +86,7 @@ test('fingers have closed topology and their roots stay buried in the continuous
     const key = [a, b].sort((x, y) => x - y).join(':'); edges.set(key, (edges.get(key) || 0) + 1);
   }
   assert.ok([...edges.values()].every(count => count === 2), 'no uncapped finger joints or split tube seams');
-  const palm = new THREE.Mesh(createOfficeBodyGeometry(), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  const palm = new THREE.Mesh(createOfficeBodyGeometry(species), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   palm.updateMatrixWorld(true);
   const ray = new THREE.Raycaster(), direction = new THREE.Vector3(0, 1, 0);
   let clearance = Infinity;
@@ -91,6 +117,9 @@ test('left and right hands mirror all three poses, with distinct flat and paper 
     }
   }
   const flat = right.attributes.position, paper = right.morphAttributes.position[1];
+  assert.ok(flat.getX(3 * 203 + 192) < 0, 'right thumb points inward toward the left hand');
+  assert.ok(left.attributes.position.getX(3 * 203 + 192) > 0, 'left thumb points inward toward the right hand');
+  assert.ok(OFFICE_HAND_PEN_AXIS.x < 0, 'right-hand pen grip lies on the anatomical thumb side');
   assert.ok(paper.getY(192) > flat.getY(192) + .01, 'pressing pads keep the tapered fingertip above the page');
   assert.ok(paper.getY(6 * 12) < flat.getY(6 * 12) - .005, 'middle finger pads lower to meet the page');
   right.dispose(); left.dispose();

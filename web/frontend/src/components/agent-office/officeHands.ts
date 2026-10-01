@@ -9,10 +9,12 @@ export interface OfficeHandWeights { pen?: number; paper?: number }
 export interface OfficeHandRig {
   mesh: THREE.Mesh;
   side: 'left' | 'right';
+  /** Lowest skin point of the relaxed middle finger, measured once for this species. */
+  keyContact: THREE.Vector3;
 }
 
 /** Wrist-local: +Y is the back of the paw, fingers point toward -Z. */
-export const OFFICE_HAND_PEN_AXIS = new THREE.Vector2(.105, 0);
+export const OFFICE_HAND_PEN_AXIS = new THREE.Vector2(-.105, 0);
 /** Page contact under the finger pads, before applying the wrist's orientation. */
 export const OFFICE_HAND_PAPER_CONTACT = new THREE.Vector3(0, -.025, -.08);
 
@@ -26,10 +28,10 @@ const paths: Record<OfficeHandPose, readonly DigitPath[]> = {
     [[.052,0,.013], [.079,-.001,.033], [.103,-.004,.037], [.119,-.007,.039]],
   ],
   pen: [
-    [[.037,0,-.043], [.058,.01,-.063], [.091,.018,-.051], [.111,.019,-.026]],
-    [[-.004,0,-.052], [.026,-.017,-.071], [.075,-.019,-.06], [.106,-.02,-.028]],
+    [[.037,0,-.043], [.055,.012,-.059], [.082,.023,-.033], [.114,.019,-.026]],
+    [[-.004,0,-.052], [.025,-.017,-.065], [.076,-.021,-.033], [.11,-.02,-.027]],
     [[-.042,0,-.043], [-.024,-.022,-.069], [.018,-.031,-.071], [.049,-.034,-.049]],
-    [[.052,0,.013], [.073,.02,.048], [.095,.025,.051], [.106,.023,.027]],
+    [[.052,0,.013], [.073,.013,.039], [.093,.024,.033], [.111,.023,.027]],
   ],
   paper: [
     [[.037,0,-.043], [.043,-.009,-.077], [.04,-.008,-.104], [.037,.006,-.12]],
@@ -41,11 +43,13 @@ const paths: Record<OfficeHandPose, readonly DigitPath[]> = {
 const radii = [.019, .021, .019, .02];
 const rings = 16, sides = 12;
 
-/** Four closed tapered digits; the embedded roots overlap the existing palm. */
+/** Four closed padded digits; embedded roots blend into the existing palm. */
 export function createOfficeHandGeometry(species: OfficeCharacterSpecies = 'cat', side: 'left' | 'right' = 'right') {
   const width = species === 'bear' ? 1.08 : species === 'rabbit' ? .9 : species === 'fox' ? .94 : 1;
   const length = species === 'rabbit' ? 1.09 : species === 'fox' ? 1.04 : species === 'bear' ? .96 : 1;
-  const mirror = side === 'left' ? -1 : 1;
+  // A right paw's thumb is on its inner (-X) side, toward the other hand.
+  // Reversing this forces its wrist across the page to reach a held pen.
+  const mirror = side === 'right' ? -1 : 1;
   const indices: number[] = [], clawIndices: number[] = [];
   const positions: Record<OfficeHandPose, number[]> = { flat: [], pen: [], paper: [] };
   const tangent = new THREE.Vector3(), across = new THREE.Vector3(), normal = new THREE.Vector3();
@@ -66,7 +70,15 @@ export function createOfficeHandGeometry(species: OfficeCharacterSpecies = 'cat'
         across.crossVectors(tangent, up).normalize();
         normal.crossVectors(across, tangent).normalize();
         const cap = t < .72 ? 1 : Math.sqrt(Math.max(0, 1 - ((t - .72) / .28) ** 2));
-        const radius = radii[digit] * width * (1 - t * .17) * cap + relief;
+        // A soft knuckle and a fuller distal pad keep the fingers rounded
+        // through a bend. The root radius stays fixed inside the palm and the
+        // pad tapers into a closed tip, without separate joint spheres.
+        const knuckle = Math.sin(Math.PI * Math.min(1, t / .58)) ** 2;
+        const pad = Math.exp(-(((t - .73) / .18) ** 2)) * THREE.MathUtils.smoothstep(t, 0, .35);
+        // All species hold the same barrel: their broad/narrow knuckles blend
+        // into a common grip pad, keeping both skin contact and tool clearance.
+        const gripWidth = pose === 'pen' ? THREE.MathUtils.lerp(width, 1, THREE.MathUtils.smoothstep(t, .45, .8)) : width;
+        const radius = radii[digit] * gripWidth * (1 - t * .17) * (1 + .11 * knuckle + .09 * pad) * cap + relief;
         point.addScaledVector(across, Math.sin(angle) * radius);
         point.addScaledVector(normal, Math.cos(angle) * radius * .81);
         output.push(point.x * mirror, point.y, point.z);
@@ -121,11 +133,17 @@ export function createOfficeHandGeometry(species: OfficeCharacterSpecies = 'cat'
 }
 
 export function createOfficeHand(resources: HandResources, wrist: THREE.Group, materials: THREE.Material[], species: OfficeCharacterSpecies, side: 'left' | 'right'): OfficeHandRig {
-  const mesh = new THREE.Mesh(resources.geometry(`office-fingers-v1:${species}:${side}`, () => createOfficeHandGeometry(species, side)), materials);
+  const mesh = new THREE.Mesh(resources.geometry(`office-fingers-v3:${species}:${side}`, () => createOfficeHandGeometry(species, side)), materials);
   mesh.name = `animal-paw-${side}`;
   mesh.castShadow = mesh.receiveShadow = true;
   wrist.add(mesh);
-  return { mesh, side };
+  const position = mesh.geometry.getAttribute('position');
+  const first = rings * sides + 2 + 9; // next digit after the first closed skin and nail
+  let lowest = first;
+  for (let vertex = first + 1; vertex < first + rings * sides; vertex++) {
+    if (position.getY(vertex) < position.getY(lowest)) lowest = vertex;
+  }
+  return { mesh, side, keyContact: new THREE.Vector3().fromBufferAttribute(position, lowest) };
 }
 
 /** Absolute blend weights: remainder is the relaxed flat paw, without allocations. */

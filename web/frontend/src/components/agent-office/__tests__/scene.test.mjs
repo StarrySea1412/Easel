@@ -51,8 +51,9 @@ test('evidence-specific large props sit above the desk and disappear when work i
   const readingBounds = new THREE.Box3().setFromObject(avatar.document);
   assert.ok(readingBounds.min.y >= 0.952, 'reading board clears the desktop');
   assert.ok(readingBounds.max.x - readingBounds.min.x >= 0.58, 'reading board has a visible desk-scale width');
-  const paw = avatar.root.getObjectByName('animal-paw-left').getWorldPosition(new THREE.Vector3());
-  assert.ok(Math.abs(paw.y - avatar.document.getWorldPosition(new THREE.Vector3()).y) < 0.08, 'reading paw reaches the board');
+  const pad = avatar.leftWrist.localToWorld(new THREE.Vector3(0, -.025, -.08));
+  const pageContact = avatar.document.localToWorld(new THREE.Vector3(-.22, avatar.document.userData.gripY, .042));
+  assert.ok(pad.distanceTo(pageContact) < 1e-8, 'the rotated finger pad reaches the actual reading surface');
   poseOfficeAvatar(avatar, 'working', 1, false, 'writing');
   avatar.root.updateMatrixWorld(true);
   assert.ok(new THREE.Box3().setFromObject(avatar.document).min.y >= 0.952, 'writing board clears the desktop');

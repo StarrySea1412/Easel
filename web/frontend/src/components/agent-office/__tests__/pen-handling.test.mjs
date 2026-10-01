@@ -29,6 +29,68 @@ function parked(avatar) {
   assert.equal(avatar.pen.userData.held,false);
 }
 
+function projectedTriangleDistance(a,b,c,x,z) {
+  const points=[a,b,c].map(p=>[p.x-x,p.z-z]);
+  const cross=(u,v)=>u[0]*v[1]-u[1]*v[0];
+  const signs=[cross(points[0],points[1]),cross(points[1],points[2]),cross(points[2],points[0])];
+  const area=cross([points[1][0]-points[0][0],points[1][1]-points[0][1]],[points[2][0]-points[0][0],points[2][1]-points[0][1]]);
+  if(Math.abs(area)>1e-12 && (signs.every(n=>n>=0)||signs.every(n=>n<=0)))return 0;
+  return Math.min(...points.map((p,i)=>{
+    const q=points[(i+1)%3],dx=q[0]-p[0],dz=q[1]-p[1];
+    const t=THREE.MathUtils.clamp(-(p[0]*dx+p[1]*dz)/(dx*dx+dz*dz||1),0,1);
+    return Math.hypot(p[0]+dx*t,p[1]+dz*t);
+  }));
+}
+
+/** Conservative cylinder clearance against every posed skin triangle, not joint centres. */
+function skinClearance(avatar,cylinders) {
+  avatar.root.updateWorldMatrix(true,true);
+  avatar.bodySkin.mesh.skeleton.update();
+  const inverseRoot=new THREE.Matrix4().copy(avatar.root.matrixWorld).invert();
+  const minima=cylinders.map(()=>Infinity);
+  for(const mesh of [avatar.bodySkin.mesh,avatar.leftHand.mesh,avatar.rightHand.mesh]) {
+    const matrix=new THREE.Matrix4().multiplyMatrices(inverseRoot,mesh.matrixWorld);
+    const points=Array.from({length:mesh.geometry.attributes.position.count},(_,i)=>mesh.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(matrix));
+    const indices=mesh.geometry.index;
+    for(let face=0;face<indices.count;face+=3) {
+      const [a,b,c]=[0,1,2].map(i=>points[indices.getX(face+i)]);
+      for(const [index,cylinder] of cylinders.entries()) {
+        if(Math.min(a.y,b.y,c.y)>cylinder.maxY || Math.max(a.y,b.y,c.y)<cylinder.minY)continue;
+        minima[index]=Math.min(minima[index],projectedTriangleDistance(a,b,c,cylinder.x,cylinder.z)-cylinder.radius);
+      }
+    }
+  }
+  return minima;
+}
+
+test('parked pen and stand clear actual animated forearm, palm and finger surfaces',()=>{
+  for(const species of ['cat','rabbit','fox','bear']) {
+    const {resources,avatar}=fixture('generic',species);
+    avatar.phase=0;avatar.postureVariation=0;
+    const stand=avatar.root.getObjectByName('office-pen-stand');
+    stand.geometry.computeBoundingBox();
+    const bounds=stand.geometry.boundingBox.clone().translate(stand.position);
+    const cylinders=[
+      {x:OFFICE_PEN_DOCK.x,z:OFFICE_PEN_DOCK.z,minY:OFFICE_PEN_DOCK.y-.11,maxY:OFFICE_PEN_DOCK.y+.11,radius:.014},
+      {x:stand.position.x,z:stand.position.z,minY:bounds.min.y,maxY:bounds.max.y,radius:.029},
+    ];
+    let oldDockGap=Infinity;
+    for(const time of [...Array.from({length:25},(_,i)=>i/4),2.3]) {
+      poseOfficeAvatar(avatar,'working',time,false,'executing');
+      const gaps=skinClearance(avatar,cylinders);
+      assert.ok(gaps[0]>.002,`${species}/${time}: parked barrel intersects or crowds posed skin (${gaps[0]})`);
+      assert.ok(gaps[1]>.002,`${species}/${time}: stand intersects posed skin (${gaps[1]})`);
+      if(species==='cat')oldDockGap=Math.min(oldDockGap,skinClearance(avatar,[{...cylinders[0],x:.53,z:-.17}])[0]);
+    }
+    // The old dock must fail during the keyboard/mouse cycle, proving this check
+    // detects the forearm penetration that a wrist-centre clearance missed.
+    if(species==='cat') {
+      assert.ok(oldDockGap<0,`old dock cuts the rendered forearm/palm (${oldDockGap})`);
+    }
+    resources.dispose();
+  }
+});
+
 test('one detailed pen parks upright in a real stand clear of the tablet, mouse, keyboard and shortest desk edge',()=>{
   for (const role of ['coordinator','researcher','designer','writer','tester','reviewer','generic']) {
     const {resources,avatar,desk}=fixture(role);

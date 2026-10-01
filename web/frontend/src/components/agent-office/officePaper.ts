@@ -7,6 +7,10 @@ export const OFFICE_PAPER_DOCK_ROTATION = new THREE.Quaternion().setFromEuler(ne
 export interface OfficePaperPose { position: THREE.Vector3; rotation: THREE.Quaternion; gripY: number }
 export interface OfficePaperBlend { kind: 'pickup' | 'stow' | 'adjust'; progress: number }
 const goalPosition = new THREE.Vector3(), goalRotation = new THREE.Quaternion();
+const palmToPage = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+const leftPageGrip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -.4);
+const rightPageGrip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), .4);
+const contactOffset = new THREE.Vector3(), handRotation = new THREE.Quaternion();
 const ease = (x: number) => THREE.MathUtils.smoothstep(x, 0, 1);
 
 export function captureOfficePaperPose(avatar: OfficeAvatar): OfficePaperPose {
@@ -41,10 +45,17 @@ export function placeOfficePaper(avatar: OfficeAvatar, engaged: boolean, writing
   return grip;
 }
 
+/** Palm normal follows the page; fingers point along its near-to-far edge. */
+export function officePaperWristRotation(paper: THREE.Group, side: 'left' | 'right', result: THREE.Quaternion) {
+  return result.copy(paper.quaternion).multiply(palmToPage).multiply(side === 'left' ? leftPageGrip : rightPageGrip);
+}
+
 export function officePaperHandTarget(paper: THREE.Group, side: 'left' | 'right', result: THREE.Vector3) {
   paper.updateMatrix();
   result.set(side === 'left' ? -.22 : .22, paper.userData.gripY ?? -.16, .042).applyMatrix4(paper.matrix);
-  // Fingers extend forward from the level wrist and curl over the near edge.
-  result.z += .08; result.y += .025;
+  // Solve from the actual rotated finger pad, not from a horizontal wrist.
+  officePaperWristRotation(paper, side, handRotation);
+  contactOffset.set(0, -.025, -.08).applyQuaternion(handRotation);
+  result.sub(contactOffset);
   return result;
 }
