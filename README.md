@@ -24,6 +24,8 @@
 
 办公室角色由本地 Three.js 曲面与蒙皮生成，无需 Meshy 账号或模型生成额度。本轮细化四物种的体型、脸型、耳壳与狐狸尾巴，修正拇指方向、握笔/持纸接触与工位朝向，并按状态切换眼睛、眉形和嘴部神态；保留外观换色与角色卡。方案与验收范围见 [本地建模优化](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md)。
 
+下一轮按模型厂商重建办公室角色，先核对官方形象并审核 14 家与通配角色的概念稿；实际模型识别方案和建模经验见 [设计审核稿](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md)。此方案尚未替换当前角色。
+
 动物外观卡只改变展示，不修改提示词、权限或员工执行行为。真实模式只显示取得的证据；未上报的思考、工具输出和远程桌面不会被补写。演示模式中的角色、任务和画板始终标为模拟。
 
 模型控制依赖已配对的本地网关、准确的会话/运行身份以及相应权限。模型保存影响该 Agent 会话后续调用，不会重跑已完成任务。独立停止可能停止该员工派生的任务；不停止父级或同级。网关未核验时按钮保持不可用。完整边界见 [专业办公室实现与验证](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md)。
