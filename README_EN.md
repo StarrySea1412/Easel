@@ -26,6 +26,8 @@ Natural prop handling, complete motion and handoffs remain in progress. Role/cap
 
 Office characters are generated locally with Three.js surfaces and skinning; no Meshy account or generation credits are required. Species-specific bodies, faces, ear shells and a continuous fox tail have been refined. Thumb orientation, pen/paper contacts and workstation-facing poses are corrected; eyes, brows and mouth now reflect reported states while appearance editing remains available. See [local character modeling and verification](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md).
 
+The next office character redesign covers 14 model brands plus an unknown-provider fallback, with official identity references and concept approval before implementation. See the [design review and model identity plan](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md); this proposal has not replaced the current characters.
+
 ## Run the current source
 
 ```bash
