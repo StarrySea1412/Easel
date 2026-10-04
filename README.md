@@ -4,7 +4,7 @@
 
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-02**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-04**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 
 ## 这一版有什么
 
@@ -18,13 +18,19 @@
 | 模型与执行 | 读取已配置渠道，在网关能力与身份通过核验时为目标 Agent 会话设置后续调用模型；主会话和单独子 Agent 停止范围分开 |
 | 对话与素材 | 按会话保存文字草稿，保护晚到的上传结果；提供历史备份与只读副本导入，损坏存储不会被静默覆盖 |
 | 图片工作台 | 围绕上传图片、编辑描述和画布组织界面，高级参数按需展开；页面切换保留编辑草稿，实际生成需要配置图片模型 |
+| 视频创作 | 生图工坊内一键切换图片/视频：文生视频与图生视频、画幅与时长选择、参考图可复用上传或图库图片；任务由本地脚本执行，同时最多两个，仅发布通过 MP4 结构与首帧解码校验的成品；需在设置中配置视频通道，生成按服务商计费，OpenAI 官方已下线的 Videos 入口会被明确拒绝 |
+| 协作工作流 | 办公室新增工作流面板：按状态分四个泳道展示成员与任务，按显式上级关系绘制协作连线；演示模式叠加脚本化交接与动态时间线，只展示当前模式已上报的记录 |
+| 模型身份 | 成员详情与名单展示调用记录观测到的模型品牌、型号、渠道和时间；配置不改变已观测身份，无法核验的别名显示通配形象；演示员工明确标注未调用真实模型 |
+| 厂商形象审核 | 内置 14 家厂商与通配角色的设计清单，首批三款（豆包、DeepSeek、通配）提供可旋转、可导出参考图的 3D 审核样板；样板尚未替换办公室员工，其余仍在设计方向 |
 | 内容分析 | 面向新手的分析入口与独立示例，支持筛选、排序、依据展开和行动勾选；示例作品明确标为虚构，真实分析需要用户数据 |
 | 热点与运行记录 | 热点按来源展示内容、错误、更新时间与重试入口；运行记录页内顶部导航支持会话、搜索和状态筛选 |
 | 其他创作流程 | 保留选题、日历、账号、画像、内容库及发布入口，持续改进本地体验 |
 
 办公室角色由本地 Three.js 曲面与蒙皮生成，无需 Meshy 账号或模型生成额度。本轮细化四物种的体型、脸型、耳壳与狐狸尾巴，修正拇指方向、握笔/持纸接触与工位朝向，并按状态切换眼睛、眉形和嘴部神态；保留外观换色与角色卡。方案与验收范围见 [本地建模优化](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md)。
 
-下一轮按模型厂商重建办公室角色，先核对官方形象并审核 14 家与通配角色的概念稿；实际模型识别方案和建模经验见 [设计审核稿](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md)。此方案尚未替换当前角色。
+下一轮按模型厂商重建办公室角色：14 家与通配角色的设计清单和识别方案已定稿（[设计审核稿](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md)）；办公室成员已按调用记录显示观测到的模型身份；首批豆包、DeepSeek 与通配三款 3D 审核样板可在办公室内旋转预览并导出参考图。正式 3D 资产仍在审核，尚未替换当前角色。
+
+视频创作的接口、协议与验证边界（六类适配器、参考图安全上传、MP4 校验、任务恢复与取消）见 [视频生成说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/video-generation-2026-10-01.md)。适配器代码存在不代表服务商已配置或已通过真实生成验收；本轮未发起付费生成。
 
 动物外观卡只改变展示，不修改提示词、权限或员工执行行为。真实模式只显示取得的证据；未上报的思考、工具输出和远程桌面不会被补写。演示模式中的角色、任务和画板始终标为模拟。
 
