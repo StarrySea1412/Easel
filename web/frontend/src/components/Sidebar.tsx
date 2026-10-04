@@ -29,20 +29,52 @@ interface SidebarProps {
   gatewayStatus: string;
 }
 
-// 主导航（精简）；热点雷达/选题库/内容日历/发布中心 收进「工作台」，不占侧栏
-const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }[] = [
-  { page: 'dashboard', Icon: IconDashboard, label: '工作台' },
-  { page: 'chat', Icon: IconChat, label: '对话' },
-  { page: 'image', Icon: IconImage, label: '生图工坊' },
-  { page: 'skills', Icon: IconSkills, label: '技能库' },
-  { page: 'outputs', Icon: IconOutputs, label: '内容库' },
-  { page: 'analysis', Icon: IconChart, label: '内容分析' },
-  { page: 'activity', Icon: IconHistory, label: '运行记录' },
-  { page: 'agent-office', Icon: IconAgentOffice, label: 'Agent 办公室' },
-  { page: 'accounts', Icon: IconAccounts, label: '账号' },
-  { page: 'profile', Icon: IconProfile, label: '画像' },
-  { page: 'settings', Icon: IconGear, label: '设置' },
+// 主导航按使用动线分组：创作放最上，对话永远第一眼可见；工具/观测/配置可折叠。
+// 热点雷达、选题库、内容日历、发布中心、拆爆款仍收进「工作台」，不占侧栏。
+type NavGroupKey = 'create' | 'tools' | 'observe' | 'config';
+const NAV_GROUPS: { key: NavGroupKey; label: string; items: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }[] }[] = [
+  {
+    key: 'create', label: '创作',
+    items: [
+      { page: 'dashboard', Icon: IconDashboard, label: '工作台' },
+      { page: 'chat', Icon: IconChat, label: '对话' },
+      { page: 'image', Icon: IconImage, label: '生图工坊' },
+    ],
+  },
+  {
+    key: 'tools', label: '工具',
+    items: [
+      { page: 'skills', Icon: IconSkills, label: '技能库' },
+      { page: 'outputs', Icon: IconOutputs, label: '内容库' },
+      { page: 'analysis', Icon: IconChart, label: '内容分析' },
+    ],
+  },
+  {
+    key: 'observe', label: '观测',
+    items: [
+      { page: 'activity', Icon: IconHistory, label: '运行记录' },
+      { page: 'agent-office', Icon: IconAgentOffice, label: 'Agent 办公室' },
+    ],
+  },
+  {
+    key: 'config', label: '配置',
+    items: [
+      { page: 'accounts', Icon: IconAccounts, label: '账号' },
+      { page: 'profile', Icon: IconProfile, label: '画像' },
+      { page: 'settings', Icon: IconGear, label: '设置' },
+    ],
+  },
 ];
+const COLLAPSE_KEY = 'easel_nav_collapsed';
+const DEFAULT_COLLAPSED: NavGroupKey[] = ['config'];
+
+function readCollapsed(): Set<NavGroupKey> {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(COLLAPSE_KEY) || 'null');
+    if (Array.isArray(raw) && raw.every(k => NAV_GROUPS.some(g => g.key === k))) return new Set(raw);
+  } catch { /* invalid stored state falls back to defaults */ }
+  return new Set(DEFAULT_COLLAPSED);
+}
 
 export default function Sidebar({
   currentPage,
@@ -64,6 +96,20 @@ export default function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<NavGroupKey>>(readCollapsed);
+
+  // The group containing the current page never hides its items.
+  const activeGroup = NAV_GROUPS.find(group => group.items.some(item => item.page === currentPage))?.key;
+  const isCollapsed = (key: NavGroupKey) => collapsed.has(key) && key !== activeGroup;
+  const toggleGroup = (key: NavGroupKey) => {
+    if (key === activeGroup) return;
+    setCollapsed(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try { sessionStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* optional persistence */ }
+      return next;
+    });
+  };
 
   const startRename = (s: ChatSession) => { setRenamingId(s.id); setRenameValue(s.title); };
   const commitRename = () => {
@@ -142,19 +188,32 @@ export default function Sidebar({
       </div>
 
       <nav className="sidebar-nav" aria-label="主导航">
-        {NAV.map(({ page, Icon, label }) => (
-          <button
-            key={page}
-            type="button"
-            className={`nav-item ${currentPage === page ? 'active' : ''}`}
-            title={label}
-            aria-label={label}
-            aria-current={currentPage === page ? 'page' : undefined}
-            onClick={() => onPageChange(page)}
-          >
-            <span className="nav-icon" aria-hidden="true"><Icon size={18} /></span>
-            {label}
-          </button>
+        {NAV_GROUPS.map(group => (
+          <div key={group.key} className="nav-group">
+            <button
+              type="button"
+              className="nav-group-toggle"
+              aria-expanded={!isCollapsed(group.key)}
+              onClick={() => toggleGroup(group.key)}
+            >
+              <span className="nav-group-label">{group.label}</span>
+              <span className={`nav-group-chevron ${isCollapsed(group.key) ? 'is-collapsed' : ''}`} aria-hidden="true"><IconChevron size={12} /></span>
+            </button>
+            {!isCollapsed(group.key) && group.items.map(({ page, Icon, label }) => (
+              <button
+                key={page}
+                type="button"
+                className={`nav-item ${currentPage === page ? 'active' : ''}`}
+                title={label}
+                aria-label={label}
+                aria-current={currentPage === page ? 'page' : undefined}
+                onClick={() => onPageChange(page)}
+              >
+                <span className="nav-icon" aria-hidden="true"><Icon size={18} /></span>
+                {label}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 
