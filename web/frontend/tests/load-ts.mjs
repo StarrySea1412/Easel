@@ -12,6 +12,13 @@ function relativeModule(specifier, parent) {
   throw new Error(`Cannot resolve ${specifier} from ${parent}`);
 }
 
+// Assets (svg/png/etc.) are imported as URLs at build time; in tests they are
+// opaque strings, never parsed as modules — otherwise bare SVG/XML attributes
+// would be compiled and throw on import.
+function isAsset(specifier) {
+  return /\.(svg|png|jpe?g|gif|webp|glb|mp3|mp4|wav|woff2?|ttf)$/i.test(specifier);
+}
+
 export async function tsModuleUrl(url) {
   const href = String(url);
   if (modules.has(href)) return modules.get(href);
@@ -33,6 +40,12 @@ export async function tsModuleUrl(url) {
     if (specifier.text.endsWith('.css')) {
       // Simulated DOM tests exercise component behavior, not CSS or layout.
       replacements.push({ start: statement.getStart(source), end: statement.end, text: '' });
+      continue;
+    }
+    if (isAsset(specifier.text)) {
+      // Assets surface as opaque URL strings after bundling; any plain data URL
+      // of a JS-compatible mimetype keeps that contract without parsing files.
+      replacements.push({ start: specifier.getStart(source), end: specifier.end, text: JSON.stringify(`data:text/javascript;base64,${Buffer.from(`export default ${JSON.stringify(specifier.text)}`).toString('base64')}`) });
       continue;
     }
     const target = specifier.text.startsWith('.')
