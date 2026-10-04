@@ -895,6 +895,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
                 {modelErr && <div className="env-error">{modelErr}</div>}
                 {selftestNote && <div className="foot-note">{selftestNote}</div>}
+                {selftest && !selftestNote && <div className="foot-note">自测仅验证模型 API 连通性（GET /models 并计时）；对话执行还需本地 OpenClaw 网关在线，两者不代表同一件事。</div>}
               </section>
             )}
 

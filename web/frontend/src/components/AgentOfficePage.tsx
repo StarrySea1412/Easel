@@ -60,7 +60,13 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const [showProviders, setShowProviders] = useState(false);
   const [sessionChoice, setSessionChoice] = useState<string | null>(activeSessionId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [demoTeamSize, setDemoTeamSize] = useState<OfficeDemoTeamSize>(6);
+  // Demo team size survives remounts like the studio drafts; invalid values fall back to 6.
+  const [demoTeamSize, setDemoTeamSize] = useState<OfficeDemoTeamSize>(() => {
+    try {
+      const stored = Number(sessionStorage.getItem('easel_office_demo_team'));
+      return (OFFICE_DEMO_TEAM_SIZES as readonly number[]).includes(stored) ? stored as OfficeDemoTeamSize : 6;
+    } catch { return 6; }
+  });
   const [memberQuery, setMemberQuery] = useState('');
   const [paused, setPaused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
@@ -258,6 +264,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             <select value={demoTeamSize} onChange={event => {
               const size = Number(event.target.value) as OfficeDemoTeamSize;
               if (!OFFICE_DEMO_TEAM_SIZES.includes(size)) return;
+              try { sessionStorage.setItem('easel_office_demo_team', String(size)); } catch { /* Optional tab persistence. */ }
               setDemoTeamSize(size); setSelectedId(null); setFocusId(null); setProcessTarget(null); setMemberQuery('');
               setDemoSeek(value => ({ seconds: elapsedRef.current, revision: value.revision + 1 }));
             }}>{OFFICE_DEMO_TEAM_SIZES.map(size => <option key={size} value={size}>{size} 人 · 模拟</option>)}</select>
