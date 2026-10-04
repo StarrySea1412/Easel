@@ -5,6 +5,7 @@ import type { ConversationBackup } from '../../lib/conversationBackup';
 import type { RawConversationStorageBackup } from '../../lib/conversationStorageBackup';
 import { getLocalPersistenceStatus, retryPendingLocalWrites, subscribeLocalPersistence } from '../../lib/localPersistence';
 import type { LocalPersistenceStatus } from '../../lib/localPersistence';
+import { inspectProtectedData, replaceProtectedValue, type RecoveryPlan, type ReplacementResult } from '../../lib/protectedRecovery';
 import '../../styles/conversation-backup.css';
 
 export interface ConversationBackupCardProps {
@@ -16,6 +17,7 @@ export interface ConversationBackupCardProps {
 
 type Preview = { filename: string; backup: ConversationBackup };
 type ImportResult = { count: number; firstSessionId?: string };
+type RecoveryState = { plan: RecoveryPlan; selectedKey: string; result: ReplacementResult | null };
 
 function downloadJson(value: ConversationBackup | RawConversationStorageBackup, name: string): void {
   // Use the same compact serialization as the portable backup's size limit.
@@ -46,6 +48,9 @@ export default function ConversationBackupCard({ onExport, onExportRaw, onImport
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [retrySnapshot, setRetrySnapshot] = useState<LocalPersistenceStatus | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryState | null>(null);
+  const recoveryValue = useRef<HTMLTextAreaElement>(null);
+  const recoveryAttempted = useRef(false);
   const storage = useSyncExternalStore(subscribeLocalPersistence, getLocalPersistenceStatus);
 
   useEffect(() => () => { readVersion.current++; }, []);
@@ -121,6 +126,23 @@ export default function ConversationBackupCard({ onExport, onExportRaw, onImport
     }
   };
 
+  const openRecovery = () => {
+    recoveryAttempted.current = false;
+    setRecovery({ plan: inspectProtectedData(), selectedKey: 'easel_sessions', result: null });
+  };
+
+  const closeRecovery = () => setRecovery(null);
+
+  const confirmRecovery = () => {
+    if (!recovery || recoveryAttempted.current) return;
+    const value = recoveryValue.current?.value ?? '';
+    if (!value.trim()) { setRecovery({ ...recovery, result: { status: 'rejected', message: '替换内容为空，已拒绝写入；受保护数据保持原样。' } }); return; }
+    recoveryAttempted.current = true;
+    const result = replaceProtectedValue(recovery.selectedKey, value);
+    setRecovery({ ...recovery, result });
+    if (result.status === 'failed') recoveryAttempted.current = false;
+  };
+
   const sessions = preview?.backup.sessions || [];
   const messages = sessions.reduce((count, session) => count + session.messages.length, 0);
   return (
@@ -141,6 +163,35 @@ export default function ConversationBackupCard({ onExport, onExportRaw, onImport
         <summary>原始存储备份（排障用）</summary>
         <p>原样导出浏览器中的会话存储，可能包含旧后台关联，仅用于排障。此排障文件不能通过会话导入入口直接导入，导出不会清除原始值。</p>
         <button type="button" className="btn btn-sm" onClick={() => exportBackup(true)}>导出原始存储</button>
+      </details>
+
+      <details className="conversation-backup-raw">
+        <summary>受保护数据恢复（第二阶段）</summary>
+        <p>损坏或不可读的会话存储一直被保护，不会被覆盖。这里可以先查看受保护键的内容摘要，再粘贴明确的替换 JSON；只有写入成功才解除保护，失败可重试，原数据在成功前保持不动。</p>
+        {!recovery && <button type="button" className="btn btn-sm" onClick={openRecovery}>查看受保护数据</button>}
+        {recovery && <div className="conversation-backup-recovery" aria-label="受保护数据恢复">
+          <ul className="conversation-backup-recovery-keys">
+            {recovery.plan.candidates.map(candidate => (
+              <li key={candidate.key}>
+                <label>
+                  <input type="radio" name="recovery-key" value={candidate.key} checked={recovery.selectedKey === candidate.key}
+                    onChange={() => { recoveryAttempted.current = false; setRecovery({ ...recovery, selectedKey: candidate.key, result: null }); }} />
+                  <span>{candidate.key}</span>
+                  <small>{candidate.readable ? (candidate.present ? `${candidate.size} 字符` : '当前不存在') : '不可读取（受保护）'}</small>
+                </label>
+                {candidate.sample && <code className="conversation-backup-recovery-sample">{candidate.sample}</code>}
+              </li>
+            ))}
+          </ul>
+          <textarea ref={recoveryValue} rows={4} aria-label="替换内容 JSON"
+            placeholder='粘贴将写入所选键的完整 JSON，例如从备份文件复制的 sessions 数组内容。' />
+          <div className="conversation-backup-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={confirmRecovery}>写入并解除保护</button>
+            <button type="button" className="btn btn-sm" onClick={closeRecovery}>关闭</button>
+          </div>
+          {recovery.result && <p className={recovery.result.status === 'written' ? 'conversation-backup-notice' : 'conversation-backup-error'}
+            role={recovery.result.status === 'written' ? 'status' : 'alert'}>{recovery.result.message}</p>}
+        </div>}
       </details>
 
       {reading && <div className="conversation-backup-reading" role="status" aria-busy="true">
