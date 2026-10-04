@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { OFFICE_STATE_LABELS, type OfficeAgent } from '../../lib/agentOffice';
+import { officeModelLabel } from '../../lib/modelProviders';
 import { createOfficeSceneRuntime, type OfficeSceneRuntime } from './OfficeSceneRuntime';
 import './agent-office-scene.css';
 
@@ -82,6 +83,7 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
         onClick={() => { props.onSelect(agent.id); props.onOpenProcess?.(agent.id); }}
       >
         <span className="office-nameplate__heading"><span className="office-nameplate__dot" /><strong>{agent.appearance?.id === 'generic' ? agent.name : agent.appearance?.name || agent.name}</strong><span>{props.stale ? '上次 · ' : ''}{OFFICE_STATE_LABELS[agent.state]}</span></span>
+        <span className="office-nameplate__task">{agent.source === 'demo' ? '模拟员工 · 未调用模型' : officeModelLabel(agent.observedModel)}</span>
         <span className="office-nameplate__task">{props.stale ? '上次记录：' : ''}{agent.action?.label || agent.task || '等待任务说明'}</span>
       </button>)}
     </div>

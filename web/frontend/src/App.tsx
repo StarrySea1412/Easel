@@ -3,6 +3,7 @@ import { drainStreamRun } from './lib/streamLifecycle';
 import { createLazyPage } from './lib/lazyPage';
 import StorageNotice from './components/StorageNotice';
 import { useImageStudio } from './hooks/useImageStudio';
+import { useVideoStudio } from './hooks/useVideoStudio';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
@@ -67,6 +68,7 @@ function markOnboardingSeen() {
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const imageStudio = useImageStudio(currentPage === 'image');
+  const videoStudio = useVideoStudio(currentPage === 'image');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
@@ -762,7 +764,7 @@ export default function App() {
           />
         );
       case 'image':
-        return <ImageStudioPage studio={imageStudio} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('imagegen'); setCurrentPage('outputs'); }} />;
+        return <ImageStudioPage studio={imageStudio} video={videoStudio} onOpenVideoSettings={() => { setSettingsSection('video'); setCurrentPage('settings'); }} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter(videoStudio.viewMode === 'video' ? 'video' : 'imagegen'); setCurrentPage('outputs'); }} />;
       case 'chat':
         return activeSession ? (
           <ChatPage
@@ -810,7 +812,7 @@ export default function App() {
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
       case 'outputs':
-        return <OutputsPage initialFilter={outputFilter} onReferenceImage={(image) => { setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
+        return <OutputsPage initialFilter={outputFilter} onReferenceImage={(image) => { videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':

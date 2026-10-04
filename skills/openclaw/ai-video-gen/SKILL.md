@@ -23,11 +23,13 @@ python skills/shared/scripts/ai_video.py check --provider dashscope
 | `dashscope` | 阿里通义万相 Wan | `DASHSCOPE_API_KEY`（可选 `DASHSCOPE_VIDEO_MODEL`/`DASHSCOPE_BASE_URL`；兼容旧名 `DASHSCOPE_MODEL`） |
 | `ark` | 火山引擎 Seedance | `ARK_API_KEY`（可选 `ARK_MODEL`/`ARK_BASE_URL`） |
 | `kling` | 快手可灵 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY`（JWT 鉴权） |
-| `openai-compatible` | 通用 /videos 端点 | `VIDEO_API_KEY` + `VIDEO_BASE_URL`（可选 `VIDEO_MODEL`） |
+| `openai-compatible` | 历史 Videos 协议兼容网关 | `VIDEO_API_KEY` + `VIDEO_BASE_URL` + `VIDEO_MODEL`；须填写网关实际提供的模型 |
 | `xhs-maas` | 小红书内网 MaaS（happyhorse 文/图生视频）| `XHS_MAAS_API_KEY`（可选 `XHS_MAAS_VIDEO_BASE`/`XHS_MAAS_T2V_MODEL`/`XHS_MAAS_I2V_MODEL`）。DashScope 风格异步 + api-key 头，内网直连 |
 | `agnes` | Agnes（agnes-video-2.5-flash）| `AGNES_API_KEY`（可选 `AGNES_BASE_URL`/`AGNES_MODEL`/`AGNES_SIZE`）。OpenAI Videos 兼容创建 + 自定义端点轮询；**默认带原生音频**（prompt 描述声音）；外网走代理 |
 
 也可设 `VIDEO_PROVIDER` 免去每次 `--provider`。
+
+截至 2026-10-01，OpenAI 官方 Sora 2 / Videos API 已于 2026-09-24 下线，且没有一对一替代 API（[官方下线说明](https://developers.openai.com/api/docs/deprecations)）。`openai-compatible` 仅保留供仍提供服务的兼容网关使用，不代表 OpenAI 官方入口或任意网关模型可用。适配器按历史协议发送像素尺寸、字符串时长和 `input_reference`；兼容横版/竖版、4/8/12 秒，不支持 1:1。本地参考图会等比缩放并补黑边到目标尺寸；实际能力、权限与费用由所选网关验证。
 
 执行前先跑 `model_registry.py configured --group video --env-file .env`：只有一个可用就显式选它；多个可用且用户没点名时，列出 provider/模型询问本次使用哪个，不按默认值擅自选择。
 

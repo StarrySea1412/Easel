@@ -77,7 +77,7 @@ async function fixture(t) {
     container.remove();
     delete globalThis.__settingsBackupNavigation;
   });
-  const render = async (navigationKey, conversationBackup = props) => act(async () => root.render(createElement(SettingsPanel, { initialSection: 'more', navigationKey, conversationBackup })));
+  const render = async (navigationKey, conversationBackup = props, initialSection = 'more') => act(async () => root.render(createElement(SettingsPanel, { initialSection, navigationKey, conversationBackup })));
   await render(0);
   return {
     container, harness, props, render,
@@ -85,6 +85,15 @@ async function fixture(t) {
     click: async button => act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
   };
 }
+
+test('the studio video configuration link opens the existing model video channel directly', async t => {
+  const view = await fixture(t);
+  await view.render(1, view.props, 'video');
+  const selected = view.container.querySelector('[role="tab"][aria-selected="true"]');
+  assert.equal(selected?.textContent, '视频');
+  assert.ok(view.container.querySelector('.snav[aria-current="page"]')?.textContent.includes('模型'));
+  assert.ok(view.harness.calls.some(call => call.name === 'fetchModelChannels'));
+});
 
 test('more settings initially exposes both cards and its menu returns to the backup entry', async t => {
   const view = await fixture(t);

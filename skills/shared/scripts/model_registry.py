@@ -76,7 +76,7 @@ MODEL_GROUPS: dict[str, dict[str, Any]] = {
                     _key("VIDEO_API_KEY", "API Key", aliases=("OPENAI_API_KEY", "API_KEY")),
                     _key("VIDEO_BASE_URL", "API 根地址", secret=False,
                          aliases=("OPENAI_BASE_URL", "BASE_URL")),
-                    _key("VIDEO_MODEL", "视频模型", required=False, secret=False,
+                    _key("VIDEO_MODEL", "视频模型", secret=False,
                          aliases=("VIDEO_MODEL_NAME",)),
                 ],
             },

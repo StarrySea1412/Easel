@@ -10,11 +10,15 @@ import OfficeOutputMonitor from './agent-office/OfficeOutputMonitor';
 import OfficeAgentControls from './agent-office/OfficeAgentControls';
 import OfficeWorkPreview from './agent-office/OfficeWorkPreview';
 import OfficeAppearanceEditor from './agent-office/OfficeAppearanceEditor';
+import { MODEL_PROVIDERS, officeModelLabel } from '../lib/modelProviders';
+import OfficeModelIdentity from './agent-office/OfficeModelIdentity';
+import OfficeWorkflowPanel from './agent-office/OfficeWorkflowPanel';
 import { describeOfficeAction } from '../lib/officeActions';
 import { useEmployeeAppearances, useEmployeeAssignments, assignEmployeeAppearance, readEmployeeAppearances, saveEmployeeAppearances, type EmployeeAppearance, type EmployeeAppearanceId } from '../lib/employeeAppearance';
 import '../styles/agent-office.css';
 
 const CharacterStudy = lazy(() => import('./agent-office/character-study/CharacterStudy'));
+const ProviderCharacterPreview = lazy(() => import('./agent-office/ProviderCharacterPreview').then(module => ({ default: module.ProviderCharacterPreview })));
 
 // These entry points follow the simulated task script: writing joins design at
 // 18s, and review joins checking at 28s. They never dispatch a real task.
@@ -53,6 +57,7 @@ function StateBadge({ state, stale = false }: { state: OfficeAgent['state']; sta
 export default function AgentOfficePage({ sessions, activeSessionId, streams, onOpenChat, onOpenActivity, onOpenModels, onOpenOutputs }: AgentOfficePageProps) {
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [showStudy, setShowStudy] = useState(false);
+  const [showProviders, setShowProviders] = useState(false);
   const [sessionChoice, setSessionChoice] = useState<string | null>(activeSessionId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [demoTeamSize, setDemoTeamSize] = useState<OfficeDemoTeamSize>(6);
@@ -80,7 +85,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const sessionId = availableSessions.find((session) => session.id === sessionChoice)?.id
     ?? availableSessions.find((session) => session.id === activeSessionId)?.id
     ?? availableSessions[0]?.id ?? null;
-  const live = useAgentOffice(mode === 'live' && !showStudy ? sessionId : null, mode === 'live' && sessionId !== null && !showStudy);
+  const live = useAgentOffice(mode === 'live' && !showStudy && !showProviders ? sessionId : null, mode === 'live' && sessionId !== null && !showStudy && !showProviders);
   const rawAgents = useMemo(() => mode === 'demo'
     ? createTeamDemoOfficeAgents(elapsed, demoTeamSize)
     : live.agents.filter((agent) => agent.source === 'live'), [mode, elapsed, demoTeamSize, live.agents]);
@@ -163,7 +168,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   }, [agents, scope, stale]);
 
   useEffect(() => {
-    if (mode !== 'demo' || paused || showStudy) return;
+    if (mode !== 'demo' || paused || showStudy || showProviders) return;
     let frame = 0;
     let previous: number | null = null;
     let lastPaint = 0;
@@ -188,7 +193,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
     document.addEventListener('visibilitychange', visibility);
     visibility();
     return () => { window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', visibility); };
-  }, [mode, paused, showStudy]);
+  }, [mode, paused, showStudy, showProviders]);
 
   const changeMode = (next: 'demo' | 'live') => {
     setMode(next);
@@ -224,6 +229,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
     else setPaused((value) => !value);
   };
 
+  if (showProviders) return <div className="agent-office-page"><div className="office-workspace"><Suspense fallback={<p role="status">正在打开模型厂商形象审核…</p>}><ProviderCharacterPreview onClose={() => { setShowProviders(false); setDemoSeek(value => ({ seconds: elapsedRef.current, revision: value.revision + 1 })); }} /></Suspense><section className="office-provider-registry" aria-label="模型厂商设计清单"><h2>14 家厂商 + 通配角色</h2><p>前三款为可旋转的程序建模审核样板；其余仍为设计方向。审核样板尚未替换办公室员工。</p><ul>{MODEL_PROVIDERS.map(provider => <li key={provider.id}><strong>{provider.name}</strong><span>{provider.motif}</span><small>{['doubao', 'deepseek', 'unknown'].includes(provider.id) ? '3D 样板待审核' : '待制作 3D 样板'}</small></li>)}</ul></section></div></div>;
   if (showStudy) return <div className="agent-office-page"><div className="office-workspace"><Suspense fallback={<p role="status">正在打开角色与工位样板…</p>}><CharacterStudy onClose={() => { setShowStudy(false); setDemoSeek(value => ({ seconds: elapsedRef.current, revision: value.revision + 1 })); }} /></Suspense></div></div>;
 
   return (
@@ -237,6 +243,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
           </div>
           <div className="office-mode-controls" role="group" aria-label="办公室数据模式">
             <button type="button" onClick={() => setShowStudy(true)}>角色与工位样板 ↗</button>
+            <button type="button" onClick={() => setShowProviders(true)}>模型厂商 3D 形象审核 ↗</button>
             <button type="button" aria-pressed={mode === 'demo'} onClick={() => changeMode('demo')}>演示模式</button>
             <button type="button" aria-pressed={mode === 'live'} onClick={() => changeMode('live')}>实时观测</button>
           </div>
@@ -313,6 +320,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             </div>
           </section>
 
+          <OfficeWorkflowPanel key={scope} agents={agents} events={allEvents} mode={mode} elapsed={elapsed} selectedId={selected?.id ?? null} stale={stale} onSelect={id => selectAgent(id, true)} onOpenProcess={openProcess} displayName={displayName} />
           <OfficeOutputMonitor mode={mode} onOpenOutputs={onOpenOutputs} />
           <aside className="office-inspector" aria-label="Agent 任务详情">
             <div className="office-inspector-heading"><div><p className="office-eyebrow">TEAM / 协作成员</p><h2>{agents.length} 个角色<span>{mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观测'}</span></h2></div><span className="office-inspector-symbol" aria-hidden="true">↗</span></div>
@@ -321,6 +329,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             {selected ? <section className="office-agent-detail" aria-label="选中成员当前任务">
               <div className="office-selected-person"><div className="office-mini-person" aria-hidden="true"><i style={{ background: selected.appearance?.skinColor }} /><span style={{ background: selected.appearance?.shirtColor }} /></div><div><span className="office-seat-label">工位 {String(agents.indexOf(selected) + 1).padStart(2, '0')}</span><h3>{displayName(selected) || '未命名 Agent'}</h3></div><button type="button" className="office-status-button" onClick={() => openProcess(selected.id)} aria-label={`查看${displayName(selected)}的思考与工作过程`}><StateBadge state={selected.state} stale={stale} /><span>查看过程 ↗</span></button></div>
               <p className="office-action-summary" aria-live="polite">{stale ? '上次记录：' : ''}{selected.action?.label}<small>{selected.action?.evidence === 'demo' ? '模拟动作' : stale ? '依据上次快照' : selected.action?.evidence === 'observed' ? '依据后台记录' : '等待具体操作记录'}</small></p>
+              <OfficeModelIdentity agent={selected} stale={stale} />
               <div className="office-current-task"><span>{stale ? '快照中的任务' : '当前任务'}</span><p>{selected.task || '当前记录未提供任务描述。'}</p></div>
               <dl className="office-agent-meta"><div><dt>角色</dt><dd>{selected.role || '未提供'}</dd></div><div><dt>协作上级</dt><dd>{parent?.name || (selected.parentId ? '未包含在当前记录中' : '未提供')}</dd></div><div><dt>记录来源</dt><dd>{selected.source === 'demo' ? '模拟任务脚本' : '后台观察记录'}</dd></div></dl>
               <div className="office-appearance-binding"><label>员工角色卡<select value={selected.appearance?.id || 'generic'} onChange={event => {
@@ -354,7 +363,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             <div className="office-members-heading"><div><h3>{mode === 'demo' ? '全部模拟成员' : '全部已观测成员'}</h3><span>{filteredMembers.length} / {agents.length} 人 · 点击跨区定位</span></div><label className="office-member-search">搜索完整名单<input type="search" value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="姓名、ID、任务或状态" /></label>{memberQuery && <button type="button" className="office-button" onClick={() => setMemberQuery('')}>清空搜索</button>}</div>
             <ul className="office-member-list" aria-label="办公室成员">
               {filteredMembers.map(agent => <li key={agent.id}><button type="button" aria-pressed={selected?.id === agent.id} onClick={() => selectAgent(agent.id, true)}>
-                <span className="office-member-number" style={{ borderColor: agent.appearance?.shirtColor }}>{String((memberPositions.get(agent.id) ?? 0) + 1).padStart(2, '0')}</span><span className="office-member-name"><strong>{displayName(agent)}</strong><small>第 {Math.floor((memberPositions.get(agent.id) ?? 0) / OFFICE_ZONE_CAPACITY) + 1} 区 · {agent.action?.label || agent.role || '角色未提供'}</small></span><StateBadge state={agent.state} stale={stale} />
+                <span className="office-member-number" style={{ borderColor: agent.appearance?.shirtColor }}>{String((memberPositions.get(agent.id) ?? 0) + 1).padStart(2, '0')}</span><span className="office-member-name"><strong>{displayName(agent)}</strong><small>{agent.source === 'demo' ? '模拟员工 · 未调用模型' : officeModelLabel(agent.observedModel)}</small><small>第 {Math.floor((memberPositions.get(agent.id) ?? 0) / OFFICE_ZONE_CAPACITY) + 1} 区 · {agent.action?.label || agent.role || '角色未提供'}</small></span><StateBadge state={agent.state} stale={stale} />
               </button></li>)}
               {!filteredMembers.length && <li className="office-member-empty">{agents.length ? '没有匹配成员；可尝试姓名、Agent ID 或任务关键词。' : '收到后台身份记录后，成员会显示在这里。'}</li>}
             </ul>

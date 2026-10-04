@@ -26,7 +26,7 @@ import type {
 } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
 
-export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'notify' | 'employees' | 'more';
+export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more';
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string }[] = [
@@ -69,9 +69,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   navigationKey?: number;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
 }) {
-  const [sec, setSec] = useState<SettingsSection>(initialSection);
-  useEffect(() => { setSec(initialSection); }, [initialSection, navigationKey]);
-  const [chan, setChan] = useState<Chan>('chat');
+  // 'video' is a direct link into the existing model channel, not a second settings page.
+  const [sec, setSec] = useState<SettingsSection>(initialSection === 'video' ? 'model' : initialSection);
+  const [chan, setChan] = useState<Chan>(initialSection === 'video' ? 'video' : 'chat');
+  useEffect(() => { setSec(initialSection === 'video' ? 'model' : initialSection); if (initialSection === 'video') setChan('video'); }, [initialSection, navigationKey]);
   const mounted = useRef(false);
   const jobCleanups = useRef(new Set<() => void>());
   useEffect(() => {

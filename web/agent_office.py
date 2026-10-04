@@ -16,6 +16,7 @@ import time
 import uuid
 
 from fastapi import HTTPException
+from model_identity import latest_observation, observation, unknown_model
 
 SAFE_ID = re.compile(r'^[A-Za-z0-9_.-]{1,120}$')
 IDENTITY = re.compile(r'^[A-Za-z0-9_.:@/-]{1,200}$')
@@ -150,6 +151,17 @@ def _events(directory: Path, session: str, audit: dict | None, live: bool,
                     if not isinstance(event, dict):
                         continue
                     message = event.get('message')
+                    # Explicit contradictory turn/run metadata invalidates an
+                    # event even if it landed inside the file/time boundary.
+                    mismatched = False
+                    for identity_key in ('turnId', 'runId'):
+                        expected = audit.get(identity_key)
+                        if expected is not None:
+                            for container in (event, message):
+                                if isinstance(container, dict) and container.get(identity_key) is not None and container[identity_key] != expected:
+                                    mismatched = True
+                    if mismatched:
+                        continue
                     event_session = event.get('sessionId') or (message.get('sessionId') if isinstance(message, dict) else None)
                     event_key = event.get('sessionKey') or (message.get('sessionKey') if isinstance(message, dict) else None)
                     if event_session is not None and event_session not in (session, f'web:{session}', path.stem):
@@ -219,7 +231,7 @@ def _identities(value: dict, tool: str = '') -> list[str]:
 
 
 def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[dict]:
-    calls, children, identities = {}, {}, {}
+    calls, children, identities, created_at = {}, {}, {}, {}
     for event in events:
         message = event.get('message', event)
         if not isinstance(message, dict):
@@ -254,7 +266,9 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                         'task': _safe_text(args.get('task') or args.get('prompt')),
                         'status': 'running' if status == 'running' else 'unknown',
                         'evidence': '当前会话的子 Agent 创建回执；后续状态未确认。',
+                        'observedModel': unknown_model(),
                     }
+                    created_at[ident] = _timestamp(event.get('timestamp') or message.get('timestamp'))
                 for key in raw_ids:
                     identities[key] = ident
             elif tool in ('subagents', 'sessions_list'):
@@ -277,6 +291,27 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                                  'stopped': 'stopped', 'cancelled': 'stopped', 'canceled': 'stopped'}.get(reported) if isinstance(reported, str) else None
                         if state:
                             children[ident].update(status=state, evidence='当前会话工具回执明确上报的子 Agent 最近状态。')
+                        # Bare list/spawn "model" fields can be configured
+                        # routing. Require a matching child's dated assistant
+                        # execution receipt, bounded by creation and this return.
+                        assistant = item.get('lastAssistantMessage')
+                        if isinstance(assistant, dict) and assistant.get('role') == 'assistant':
+                            # A nested receipt naming another session/run cannot
+                            # borrow the identity of its enclosing list item.
+                            receipt_keys = ('sessionKey', 'sessionId', 'runId', 'agentId', 'agent_id')
+                            if any(key in assistant and (
+                                    not isinstance(assistant[key], str)
+                                    or identities.get(assistant[key]) != ident)
+                                   for key in receipt_keys):
+                                continue
+                            stamp = _timestamp(assistant.get('timestamp'))
+                            end = _timestamp(event.get('timestamp') or message.get('timestamp'))
+                            start = created_at.get(ident)
+                            if stamp is not None and start is not None and end is not None and start <= stamp <= end:
+                                observed = observation(assistant, stamp)
+                                previous = children[ident]['observedModel']
+                                if observed['source'] == 'observed' and (not previous['observedAt'] or observed['observedAt'] >= previous['observedAt']):
+                                    children[ident]['observedModel'] = observed
     return list(children.values())
 
 
@@ -340,7 +375,8 @@ def updating_snapshot(session_id: str, turn_id: str = '') -> dict:
         'sessionId': session_id, 'turnId': turn_id or None, 'observedAt': datetime.now(timezone.utc).isoformat(),
         'source': 'local_session_state',
         'agents': [{'id': f'root:{session_id}', 'parentId': None, 'role': 'root', 'name': '主 Agent',
-                    'task': '', 'status': 'unknown', 'evidence': '会话轮次正在更新，暂不展示未确认的执行状态。'}],
+                    'task': '', 'status': 'unknown', 'evidence': '会话轮次正在更新，暂不展示未确认的执行状态。',
+                    'observedModel': unknown_model()}],
         'links': [], 'events': [],
         'coverage': {'subagents': 'not_observed', 'observedAgentCount': 1, 'identityScanLimited': False,
                      'detail': '轮次边界暂未稳定，等待下一次读取确认。'},
@@ -397,7 +433,8 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
         evidence = '当前会话最近轮次的执行审计状态。'
     root_id = f'root:{session_id}'
     root = {'id': root_id, 'parentId': None, 'role': 'root', 'name': '主 Agent',
-            'task': _safe_text(audit.get('_request')) if audit else '', 'status': state, 'evidence': evidence}
+            'task': _safe_text(audit.get('_request')) if audit else '', 'status': state, 'evidence': evidence,
+            'observedModel': latest_observation(events)}
     children = _child_agents(events, root_id, warnings)
     if not live or terminal_marker:
         # Parent-turn history is not a current observation of a child process.

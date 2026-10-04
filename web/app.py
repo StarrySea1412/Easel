@@ -5349,6 +5349,12 @@ _IMAGEGEN_SIZES = {
 }
 _IMAGEGEN_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
+# The video tab shares uploaded references, settings and the content library.
+from videogen import VideoService, create_router as _videogen_router
+_VIDEO_SERVICE = VideoService(PROJECT_ROOT, lambda: OUTPUTS_DIR, lambda: IMAGEGEN_INPUT_DIR,
+                              _read_env, _proxy_env)
+app.include_router(_videogen_router(_VIDEO_SERVICE))
+
 
 def _imagegen_dimensions(path: Path) -> dict[str, int]:
     """Expose actual image dimensions without resizing or assuming the provider obeyed size."""

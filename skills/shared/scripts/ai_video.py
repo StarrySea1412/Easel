@@ -32,6 +32,7 @@ import difflib
 import hashlib
 import hmac
 import http.client
+import io
 import json
 import os
 import subprocess
@@ -299,7 +300,7 @@ def resolve_model(provider: str, explicit: str | None = None, *, image: bool = F
     defaults = {
         "dashscope": DEFAULT_DASHSCOPE_MODEL,
         "ark": DEFAULT_ARK_MODEL,
-        "openai-compatible": "sora-1",
+        "openai-compatible": "",
         "xhs-maas": "happyhorse-1.0-i2v" if image else "happyhorse-1.0-t2v",
         "agnes": DEFAULT_AGNES_MODEL,
     }
@@ -338,14 +339,32 @@ def http_request(url: str, headers: dict[str, str], method: str = "GET",
     return parsed
 
 
-def download_video(url: str, output: Path, timeout: int = 300, direct: bool = False) -> Path:
+class _DownloadRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Signed CDN redirects must never receive the provider's credentials."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        original = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(newurl)
+        if redirected and (original.scheme, original.hostname, original.port) != (
+                target.scheme, target.hostname, target.port):
+            for header in ("Authorization", "Api-key", "X-api-key"):
+                redirected.remove_header(header)
+        return redirected
+
+
+def download_video(url: str, output: Path, timeout: int = 300, direct: bool = False,
+                   headers: dict[str, str] | None = None) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     if not output.suffix:
         suffix = Path(urllib.parse.urlparse(url).path).suffix or ".mp4"
         output = output.with_suffix(suffix)
     print(f"  下载视频：{url}", file=sys.stderr)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    open_fn = _NO_PROXY_OPENER.open if direct else urllib.request.urlopen
+    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+    handlers = [_DownloadRedirectHandler()]
+    if direct:
+        handlers.append(urllib.request.ProxyHandler({}))
+    open_fn = urllib.request.build_opener(*handlers).open
     try:
         with open_fn(req, timeout=timeout) as resp:
             output.write_bytes(resp.read())
@@ -393,7 +412,7 @@ def _image_to_data_or_url(image: str) -> str:
 def _poll(task_url: str, headers: dict[str, str], interval: int, timeout: int,
           status_path: tuple[str, ...] = ("output", "task_status"),
           done=("SUCCEEDED", "SUCCESS", "COMPLETED"),
-          bad=("FAILED", "CANCELED", "ERROR", "UNKNOWN"),
+          bad=("FAILED", "CANCELED", "CANCELLED", "ERROR", "UNKNOWN"),
           payload: dict[str, Any] | None = None, direct: bool = False) -> dict[str, Any]:
     start = time.time()
     while True:
@@ -425,8 +444,10 @@ def generate_dashscope(args: argparse.Namespace, image: str | None) -> Path:
         endpoint = f"{base}/services/aigc/text2video/video-synthesis"
         input_block = {"prompt": args.prompt}
     params: dict[str, Any] = {}
-    if args.ratio:
-        params["size"] = args.ratio.replace(":", "*")
+    if args.ratio and not image:
+        # Wan text-to-video expects pixel dimensions, not strings such as 16*9.
+        sizes = {"16:9": "1280*720", "9:16": "720*1280", "1:1": "960*960"}
+        params["size"] = sizes.get(args.ratio, args.ratio.replace("x", "*"))
     if args.duration:
         params["duration"] = args.duration
     payload = {"model": model, "input": input_block, "parameters": params}
@@ -504,7 +525,7 @@ def generate_kling(args: argparse.Namespace, image: str | None) -> Path:
         payload["model_name"] = args.model
     if args.duration:
         payload["duration"] = str(args.duration)
-    if args.ratio:
+    if args.ratio and not image:
         payload["aspect_ratio"] = args.ratio
     _put_audio(payload, None, args, "kling", args.model)
     print(f"[kling] 提交任务 {endpoint} ...", file=sys.stderr)
@@ -525,35 +546,78 @@ def generate_kling(args: argparse.Namespace, image: str | None) -> Path:
 
 
 # ── provider: openai-compatible ───────────────────────────
+def _openai_video_reference(image: str, size: str) -> dict[str, str]:
+    """JSON input_reference accepts image_url, including a base64 data URL.
+
+    Match the required resolution while preserving the entire local reference;
+    the studio explains that different ratios add black padding, never a crop.
+    """
+    if image.startswith(("https://", "http://")):
+        return {"image_url": image}
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(image) as source:
+            normalized = ImageOps.exif_transpose(source).convert("RGBA")
+            canvas = Image.new("RGBA", normalized.size, "black")
+            canvas.alpha_composite(normalized)
+            normalized = ImageOps.pad(canvas.convert("RGB"), tuple(int(value) for value in size.split("x")),
+                                      method=Image.Resampling.LANCZOS, color="black")
+            output = io.BytesIO()
+            normalized.save(output, format="PNG")
+    except (OSError, ValueError) as exc:
+        fail(f"参考图无法处理：{exc}")
+    return {"image_url": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")}
+
+
 def generate_openai_compatible(args: argparse.Namespace, image: str | None) -> Path:
+    """Historical Videos JSON protocol, retained for compatible gateways.
+
+    Official protocol: https://developers.openai.com/api/reference/resources/videos/methods/create
+    OpenAI shut this API down on 2026-09-24; never represent api.openai.com as live.
+    """
     api_key = require_env("VIDEO_API_KEY")
     base = require_env("VIDEO_BASE_URL").rstrip("/")
+    if urllib.parse.urlsplit(base).hostname == "api.openai.com":
+        fail("OpenAI 官方 Videos API 已于 2026-09-24 下线；请配置仍提供视频服务的兼容网关或选择其他服务。")
     model = resolve_model("openai-compatible", args.model, image=image is not None)
-    payload: dict[str, Any] = {"model": model, "prompt": args.prompt or ""}
+    if not model:
+        fail("请设置 VIDEO_MODEL 为视频服务商实际提供的模型，不再使用已下线的默认模型。")
+    sizes = {"16:9": "1280x720", "9:16": "720x1280"}
+    size = sizes.get(args.ratio or "9:16", args.ratio)
+    if size not in {"1280x720", "720x1280", "1024x1792", "1792x1024"}:
+        fail("Videos 协议只支持横版或竖版像素尺寸，不支持 1:1。")
+    if args.duration is not None and args.duration not in (4, 8, 12):
+        fail("Videos 协议时长只支持 4、8、12 秒。")
+    payload: dict[str, Any] = {"model": model, "prompt": args.prompt or "", "size": size}
     if image:
-        payload["image"] = _image_to_data_or_url(image)
+        payload["input_reference"] = _openai_video_reference(image, size)
     if args.duration:
-        payload["seconds"] = args.duration
-    if args.ratio:
-        payload["size"] = args.ratio
+        payload["seconds"] = str(args.duration)
     _put_audio(payload, None, args, "openai-compatible", model)
     headers = {"Authorization": f"Bearer {api_key}"}
     endpoint = f"{base}/videos"
     print(f"[openai-compatible] 提交任务 {endpoint}（model={model}）...", file=sys.stderr)
     result = http_request(endpoint, headers, method="POST", payload=payload)
-    # 同步返回 URL 则直接下载；否则轮询 /videos/{id}
-    url = _find_video_url(result)
-    if url:
-        return download_video(url, Path(args.output))
+    # A queued/failed response can also include an input or preview URL. Only
+    # synchronous responses without a status, or completed jobs, are results.
+    status = str(result.get("status", "")).upper()
+    if status in {"FAILED", "CANCELED", "CANCELLED", "ERROR", "UNKNOWN"}:
+        fail(f"任务失败：状态={status}")
     task_id = result.get("id") or (result.get("data") or {}).get("id")
+    url = _find_video_url(result)
+    if url and ((not status and not task_id) or status in {"SUCCEEDED", "SUCCESS", "COMPLETED"}):
+        return download_video(url, Path(args.output))
     if not task_id:
         fail(f"提交失败：{json.dumps(result)[:300]}")
-    task = _poll(f"{endpoint}/{task_id}", headers, args.poll_interval, args.timeout,
-                 status_path=("status",))
+    task_url = f"{endpoint}/{urllib.parse.quote(str(task_id), safe='')}"
+    task = result if status in {"SUCCEEDED", "SUCCESS", "COMPLETED"} else _poll(
+        task_url, headers, args.poll_interval, args.timeout, status_path=("status",))
     url = _find_video_url(task)
-    if not url:
-        fail(f"任务完成但未找到视频 URL：{json.dumps(task)[:300]}")
-    return download_video(url, Path(args.output))
+    if url:
+        # URL-returning gateways normally supply a signed CDN URL. Do not send
+        # VIDEO_API_KEY to arbitrary URLs embedded in their response.
+        return download_video(url, Path(args.output))
+    return download_video(f"{task_url}/content", Path(args.output), headers=headers)
 
 
 # ── provider: xhs-maas（小红书内网 happyhorse 文/图生视频）─────

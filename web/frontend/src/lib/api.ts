@@ -1124,6 +1124,29 @@ export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[];
   return request('/api/imagegen');
 }
 
+export type VideogenMode = 'text2video' | 'image2video';
+export interface VideogenProvider {
+  id: string; name: string; configured: boolean; model: string; imageModel: string;
+  modes: VideogenMode[]; ratios: string[]; durations: number[]; hint: string;
+}
+export interface VideogenJob {
+  jobId: string; state: 'running' | 'done' | 'error' | 'cancelled'; prompt: string;
+  mode: VideogenMode; provider: string; model: string; ratio: string; duration: number | null;
+  referenceId: string | null; started: number; url: string | null; error: string | null;
+  filename?: string | null; finished?: number;
+}
+export interface VideogenGalleryItem { name: string; url: string; mtime: number; generation: VideogenJob }
+export interface VideogenConfig {
+  providers: VideogenProvider[]; defaultProvider: string; videos: VideogenGalleryItem[];
+  jobs: VideogenJob[]; cancelHint: string; billingHint: string;
+}
+export function fetchVideogenConfig(): Promise<VideogenConfig> { return request('/api/videogen'); }
+export function startVideogen(options: { prompt: string; mode: VideogenMode; provider: string; ratio: string; duration: number | null; referenceId: string | null }): Promise<{ jobId: string; state: 'running' }> {
+  return request('/api/videogen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
+}
+export function fetchVideogenJob(jobId: string): Promise<VideogenJob> { return request(`/api/videogen/${encodeURIComponent(jobId)}`); }
+export function cancelVideogenJob(jobId: string): Promise<VideogenJob> { return request(`/api/videogen/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }); }
+
 export interface StorageLocation {
   logicalPath:string; currentPath:string; pendingPath:string|null;
   status:'ready'|'pending_restart'|'failed'; error:string|null; requiresRestart:boolean;

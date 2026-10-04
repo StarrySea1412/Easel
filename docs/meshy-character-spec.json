@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "project": "Easel office character study",
+  "api_base": "https://api.meshy.ai/openapi",
+  "ai_model": "meshy-6",
+  "preview": {
+    "mode": "preview",
+    "model_type": "standard",
+    "should_remesh": true,
+    "topology": "triangle",
+    "target_polycount": 12000,
+    "pose_mode": "a-pose",
+    "target_formats": ["glb"],
+    "auto_size": false
+  },
+  "refine": {
+    "mode": "refine",
+    "enable_pbr": true,
+    "texture_resolution": "2k",
+    "remove_lighting": true,
+    "target_formats": ["glb"],
+    "texture_prompt": "Soft stylized office mascot. Matte warm fur, cream muzzle and paw pads, sage green cloth shirt, charcoal trousers. Subtle woven cloth and roughness variation. Clean neutral base color without painted shadows, highlights, letters or logos. Clearly readable eyes and three separated rounded fingers plus thumb on each hand."
+  },
+  "rigging": {"height_meters": 1.2},
+  "prompt_template": "One full-body stylized anthropomorphic {species}, a bipedal office mascot. {features} Soft sculpted continuous anatomy, a rounded torso, clear shoulders, elbows, wrists, knees and ankles. Three separated rounded fingers and one opposable thumb per hand. Plain short-sleeved shirt and trousers. Neutral A-pose with arms away from torso, palms visible, feet apart, face forward. No chair, desk, pen, paper, accessories, pedestal, text or background geometry. Clean animation-friendly silhouette and joint deformation areas.",
+  "species": {
+    "cat": "Short triangular ears, short muzzle, rounded cheeks and a clear tail.",
+    "rabbit": "Two upright long ears, short muzzle, soft cheek volumes and a small tail.",
+    "fox": "Broad-based triangular ears, a tapered muzzle, cheek tufts and a full tail.",
+    "bear": "Round ears, a broad muzzle, compact limbs and a small tail."
+  },
+  "review_budget": {
+    "target_triangles": 12000,
+    "maximum_triangles": 18000,
+    "maximum_materials": 4,
+    "texture_max_dimension": 2048,
+    "maximum_glb_bytes": 67108864,
+    "maximum_visible_characters": 6
+  },
+  "compatibility": {
+    "current_runtime": "Easel procedural OfficeAvatar, custom seated-root IK and hand morphs",
+    "automatic_runtime_import": false,
+    "required_review": [
+      "Geometry, UVs, materials and licensing/provenance",
+      "Humanoid limb separation and A-pose; generated anatomy is not guaranteed",
+      "Rig joint names, rest transforms, axes, scale and explicit retarget mapping",
+      "Existing keyboard/mouse/pen/paper contact targets and seated-root transforms",
+      "Finger controls or replacement morphs for flat, pen and paper grips",
+      "Six-character browser frame time, draw calls and texture memory",
+      "Ear/tail secondary bones are not guaranteed by Meshy humanoid rigging"
+    ]
+  }
+}

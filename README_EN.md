@@ -4,7 +4,7 @@ A local creative workspace combining conversations, assets, content projects, an
 
 [简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-02**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
+> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-04**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
 
 ## Current features
 
@@ -16,6 +16,10 @@ A local creative workspace combining conversations, assets, content projects, an
 - Configured model selection for subsequent calls in a verified Agent session, plus distinct child-Agent and whole-session interruption. Controls remain unavailable without verified gateway capability, permissions and identity.
 - Per-conversation drafts, careful upload ownership, local history backups, additive read-only imports, and protection against corrupt or conflicting local records.
 - A canvas-focused image workspace with uploads, editing descriptions, expandable advanced controls and preserved drafts. Actual generation requires a configured image model.
+- Video creation inside the image studio with one-click image/video switching: text-to-video and image-to-video, ratio and duration choices, and references reused from uploads or the image gallery. Jobs run through the local script, at most two concurrently; only outputs passing MP4 structure and first-frame decoding checks are published. A configured video channel is required, generation is billed by the provider, and the retired official OpenAI Videos endpoint is explicitly rejected.
+- A workflow panel under the office: members and tasks grouped into four state lanes, collaboration links drawn from explicit parent identities, and a scripted handoff timeline in demo mode. Only records reported for the current mode are shown.
+- Observed model identity on member details and the roster: the brand, model id, channel and time seen in call records. Configuration never rewrites an observed identity; unverifiable aliases fall back to the neutral wildcard figure, and demo employees are explicitly labeled as not calling a real model.
+- A provider character registry covering 14 brands plus the wildcard role, with three first-batch rotatable 3D review studies (Doubao, DeepSeek, wildcard) that export white-background reference images. The studies have not replaced office characters, and the rest remain design directions.
 - An approachable content-analysis entry point and a separate example with filtering, sorting, evidence and action checklists. Example works are labeled fictional; real analysis requires user data.
 - Per-source trends, errors, timestamps and retry controls, plus top-of-page conversation navigation, search and status filters in activity records.
 - Planning, account, profile, content-library and publishing workflows remain available and are being iterated on.
@@ -26,7 +30,9 @@ Natural prop handling, complete motion and handoffs remain in progress. Role/cap
 
 Office characters are generated locally with Three.js surfaces and skinning; no Meshy account or generation credits are required. Species-specific bodies, faces, ear shells and a continuous fox tail have been refined. Thumb orientation, pen/paper contacts and workstation-facing poses are corrected; eyes, brows and mouth now reflect reported states while appearance editing remains available. See [local character modeling and verification](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md).
 
-The next office character redesign covers 14 model brands plus an unknown-provider fallback, with official identity references and concept approval before implementation. See the [design review and model identity plan](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md); this proposal has not replaced the current characters.
+The office character redesign around model providers is underway: the design list and identity plan for 14 brands plus the wildcard role are finalized (see the [design review and model identity plan](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/model-provider-characters-2026-10-02.md)); office members already display the model identity observed in call records; the first three 3D review studies (Doubao, DeepSeek, wildcard) can be rotated in the office and exported as reference images. Final 3D assets are still under review and have not replaced the current characters.
+
+Video creation interfaces, protocol decisions and verification boundaries (six adapters, safe reference uploads, MP4 checks, job recovery and cancellation) are documented in the [video generation notes](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/video-generation-2026-10-01.md). Adapter code does not imply a configured provider or verified real generation; no paid generation was run in this iteration.
 
 ## Run the current source
 

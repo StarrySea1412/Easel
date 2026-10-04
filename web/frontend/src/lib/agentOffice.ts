@@ -1,4 +1,5 @@
 import type { EmployeeAppearance } from './employeeAppearance';
+import { decodeObservedModel, type OfficeObservedModel } from './modelProviders';
 export type OfficeAgentState = 'working' | 'thinking' | 'waiting' | 'done' | 'error' | 'stopped' | 'unknown';
 export type OfficeActionKind = 'reading' | 'writing' | 'designing' | 'executing' | 'delegating' | 'thinking' | 'waiting' | 'completed' | 'error' | 'stopped' | 'unreported';
 export interface OfficeAction { kind: OfficeActionKind; label: string; evidence: 'demo' | 'observed' | 'unreported'; toolName?: string }
@@ -14,6 +15,7 @@ export interface OfficeAgent {
   evidence?: string;
   action?: OfficeAction;
   appearance?: EmployeeAppearance;
+  observedModel?: OfficeObservedModel;
 }
 
 export interface OfficeSnapshot {
@@ -73,6 +75,7 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
       task: shortText(item.task, '尚未观察到任务说明'),
       state: Object.hasOwn(STATUS_MAP, String(item.status)) ? STATUS_MAP[String(item.status)] : 'unknown',
       source: 'live',
+      observedModel: decodeObservedModel(item.observedModel),
       ...(typeof item.parentId === 'string' ? { parentId: item.parentId } : {}),
       ...(typeof item.updatedAt === 'string' && Number.isFinite(Date.parse(item.updatedAt)) ? { updatedAt: item.updatedAt } : {}),
       ...(typeof item.evidence === 'string' ? { evidence: shortText(item.evidence) } : {}),

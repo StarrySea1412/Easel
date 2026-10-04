@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { IMAGE_SIZES } from '../hooks/useImageStudio';
 import type { ImageStudioController } from '../hooks/useImageStudio';
+import type { VideoStudioController } from '../hooks/useVideoStudio';
 import ImageReversePanel from './ImageReversePanel';
+import VideoStudioPanel from './VideoStudioPanel';
 import { IconOutputs } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 import '../styles/image-studio.css';
@@ -17,8 +19,9 @@ const EDIT_EXAMPLES = [
   ['转为插画', '保留主体和构图，改成细腻的手绘插画风格。'],
 ];
 
-export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs, onOpenModels }: {
+export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings }: {
   studio: ImageStudioController; onOpenSettings: () => void; onOpenOutputs: () => void; onOpenModels: () => void;
+  video?: VideoStudioController; onOpenVideoSettings?: () => void;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -43,15 +46,23 @@ export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs,
   const canGenerate = !locked && !studio.loading && studio.imgChannel?.configured && (!editing || reference)
     && studio.imgPrompt.trim().length > 0 && studio.imgPrompt.trim().length <= 2000;
   const receiveFile = (file?: File) => { if (file && !locked) void studio.uploadReference(file); };
+  const videoMode = video?.viewMode === 'video';
+  const openVideoSettings = onOpenVideoSettings || onOpenModels;
 
   return <div className="page-scroll image-page">
     <header className="image-page-heading">
-      <div><p className="image-eyebrow">EASEL / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">描述一个想法，或放入图片继续修改。</p></div>
+      <div><p className="image-eyebrow">EASEL / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">描述一个想法，创作图片或视频。</p></div>
       <div className="image-heading-actions" role="group" aria-label="生图工坊快捷入口">
         <button type="button" className="btn image-heading-action" onClick={onOpenOutputs}><IconOutputs size={17} />作品</button>
-        <button type="button" className="btn image-heading-action" aria-label="生图通道设置" onClick={onOpenSettings}><IconGear size={17} /><span>设置</span></button>
+        <button type="button" className="btn image-heading-action" aria-label={videoMode ? '视频通道设置' : '生图通道设置'} onClick={videoMode ? openVideoSettings : onOpenSettings}><IconGear size={17} /><span>设置</span></button>
       </div>
     </header>
+    {video && <div className="studio-medium-switch" role="group" aria-label="创作类型">
+      <button type="button" aria-pressed={!videoMode} onClick={() => video.setViewMode('image')}>图片{busy && <span className="studio-running-dot" title="图片生成中" aria-label="图片生成中" />}</button>
+      <button type="button" aria-pressed={videoMode} onClick={() => video.setViewMode('video')}>视频{video.busy && <span className="studio-running-dot" title="视频生成中" aria-label="视频生成中" />}</button>
+      <span>草稿和任务分别保留</span>
+    </div>}
+    {videoMode && video ? <VideoStudioPanel video={video} images={studio.gallery} onOpenSettings={openVideoSettings} /> : <>
     <div className="image-local-toolbar">
       <span>{studio.mode === 'reverse' ? '从图片提取提示词' : reference ? '修改图片' : '图片创作'}</span>
       {studio.mode === 'reverse'
@@ -74,6 +85,10 @@ export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs,
           {result && <div className="image-result-actions"><a href={result} target="_blank" rel="noreferrer">打开图片 ↗</a><a href={result} download>下载</a>
             <button className="link-btn" disabled={locked} onClick={() => void studio.useGalleryReference({ url: result, name: result.split('/').at(-1) || '生成图片.png', mtime: Date.now() / 1000, width: actual?.width, height: actual?.height })}>继续修改</button>
           </div>}
+          {video && (previewUrl || result) && <button type="button" className="link-btn" disabled={locked || video.locked} onClick={() => {
+            if (original && reference) video.useReference(reference);
+            else if (result) void video.useGalleryReference({ url: result, name: result.split('/').at(-1) || '生成图片.png', mtime: Date.now() / 1000 });
+          }}>用这张图生成视频 →</button>}
         </div>
         <div className={`image-canvas${busy ? ' is-busy' : ''}`} aria-label="图片画布">
           {previewUrl ? <img className="image-canvas-picture" src={previewUrl} alt={original ? `原图：${reference!.name}` : job?.prompt || '生成结果'} />
@@ -113,6 +128,7 @@ export default function ImageStudioPage({ studio, onOpenSettings, onOpenOutputs,
         {ratioMismatch && <span>服务返回的比例与所选 {size.label} 不同，画布已保留完整图片。</span>}
       </div>
       {studio.gallery.length > 0 && <section className="image-gallery" aria-label="历史图片图库"><div className="image-section-heading"><h2>最近作品</h2><button className="link-btn" onClick={onOpenOutputs}>查看全部 →</button></div><div className="image-gallery-grid">{studio.gallery.slice(0, 8).map(item => <button className="image-gallery-item" key={item.url} disabled={locked} aria-label={`用作参考图：${item.name}`} onClick={() => void studio.useGalleryReference(item)}><img src={item.url} alt={item.name} loading="lazy" /><span>{item.name}</span></button>)}</div></section>}
+    </>}
     </>}
   </div>;
 }
