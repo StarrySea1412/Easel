@@ -3,6 +3,7 @@ import type { ChatSession, StreamState } from '../lib/store';
 import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from '../lib/activitySelection';
 import UsagePanel from './UsagePanel';
 import SkillAuditPanel from './SkillAuditPanel';
+import { IconHistory } from './icons';
 import '../styles/activity.css';
 
 type Tab = 'usage' | 'audit';
@@ -55,7 +56,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
         <header className="activity-heading">
           <div>
             <p className="activity-kicker">ACTIVITY / 运行观测</p>
-            <h1>运行记录</h1>
+            <h1><IconHistory size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />运行记录</h1>
             <p>看清用量，回到调用证据，定位需要关注的运行。</p>
           </div>
           <span className="activity-live-count">{Object.keys(liveStreams).length} 个会话正在运行</span>

@@ -8,6 +8,7 @@ import type { AccountItem, AccountWhoami } from '../lib/api';
 import { getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
+import { IconAccounts, IconEye, IconEyeOff, IconRefresh } from './icons';
 import '../styles/accounts.css';
 
 type QRState = {
@@ -327,12 +328,12 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   return (
     <div className="accounts-page accounts-center">
       <div className="accounts-heading">
-        <div><p className="accounts-eyebrow">创作渠道</p><h1>账号中心</h1>
+        <div><p className="accounts-eyebrow">创作渠道</p><h1><IconAccounts size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />账号中心</h1>
           <p className="accounts-intro">连接发布平台，管理登录状态，了解自己的内容表现。</p></div>
-        <div className="account-heading-actions"><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button><button className="btn btn-sm" onClick={load}>刷新状态</button></div>
+        <div className="account-heading-actions"><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? <IconEye size={15} /> : <IconEyeOff size={15} />}{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button><button className="btn btn-sm" onClick={load}><IconRefresh size={15} />刷新状态</button></div>
       </div>
       <div className="accounts-summary" aria-live="polite">
-        <span className="accounts-summary-dot" aria-hidden="true" />
+        <span className="accounts-summary-dot" aria-hidden={true} />
         <strong>{loaded ? `${connectedCount} / ${supportedCount} 个平台已连接` : err ? '连接状态暂不可用' : '正在读取连接状态…'}</strong>
         <span>每个平台使用一个当前登录账号</span>
       </div>
@@ -369,7 +370,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   {pending ? '正在启动…' : w === 'loading' ? '正在校验…' : logged ? '校验连接' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
                 <div className="account-secondary-actions">
-                  {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden="true">→</span></button>}
+                  {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden={true}>→</span></button>}
                   {a.supported && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>{logoutBusy === a.platform ? '退出中…' : '管理账号'}</button>}
                   {a.supported && (logged || a.hasLocalSession) && <button type="button" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(true); }}>退出登录</button>}
                 </div>
@@ -472,7 +473,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             <h3 style={{ margin: '0 0 4px' }}>配置 {cred.name}</h3>
             <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
               公众号用官方接口发布，需填开发者凭证（公众平台 → 设置与开发 → 开发接口管理）。<br />
-              ⚠️ 需把本服务器出口 IP 加入公众号「IP 白名单」，否则报 40164。文章发到<b>草稿箱</b>，群发请到 mp 后台确认。
+              需把本服务器出口 IP 加入公众号「IP 白名单」，否则报 40164。文章发到<b>草稿箱</b>，群发请到 mp 后台确认。
             </div>
             {credMsg && <div style={{ fontSize: 12.5, color: 'var(--green)', marginBottom: 10 }}>{credMsg}</div>}
             <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>AppID</label>

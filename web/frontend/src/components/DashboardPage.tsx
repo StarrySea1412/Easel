@@ -10,6 +10,7 @@ import type {
 import type { Page } from './Sidebar';
 import { verifyStale } from '../lib/whoami';
 import { SkeletonCard } from './Skeleton';
+import { IconText } from './icons';
 import DashboardCard from './ui/DashboardCard';
 import DashboardEmpty from './ui/DashboardEmpty';
 import { IconImage } from './settingsIcons';
@@ -404,7 +405,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
                             <a key={i} className="ana-note" href={n.url} target="_blank" rel="noreferrer" title={n.title}>
                               {n.cover
                                 ? <img className="ana-note-cover" src={n.cover} alt="" referrerPolicy="no-referrer" />
-                                : <span className="ana-note-cover ana-note-cover-ph">📝</span>}
+                                : <span className="ana-note-cover ana-note-cover-ph" aria-hidden={true}><IconText size={18} /></span>}
                               <span className="ana-note-main">
                                 <span className="ana-note-title">{n.title || '(无标题)'}</span>
                                 {n.stat && <span className="ana-note-stat">{n.stat}</span>}

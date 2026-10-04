@@ -5,6 +5,7 @@ import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysi
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
 import XhsInsightsPanel from './XhsInsightsPanel';
 import ContentAnalysisDemo from './ContentAnalysisDemo';
+import { IconChart } from './icons';
 import '../styles/content-analysis.css';
 
 const PLATFORMS = [
@@ -57,8 +58,8 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   return <div className="content-analysis-page">
     <div className="ca-workspace">
       <header className="ca-heading">
-        <div><p className="ca-kicker">CONTENT INSIGHTS / 创作复盘</p><h1>内容分析</h1><p className="ca-subtitle">看懂哪篇做得好，知道下一篇怎么改。</p></div>
-        <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden="true">↗</span></button></div>
+        <div><p className="ca-kicker">CONTENT INSIGHTS / 创作复盘</p><h1><IconChart size={26} aria-hidden={true} style={{ verticalAlign: '-5px', marginRight: 8, color: 'var(--accent-start)' }} />内容分析</h1><p className="ca-subtitle">看懂哪篇做得好，知道下一篇怎么改。</p></div>
+        <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden={true}>↗</span></button></div>
       </header>
 
       <div className="ca-data-source"><div role="group" aria-label="分析数据来源"><button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button><button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '这里读取你保存的作品。没有记录时，可连接账号或导入作品。'}</p></div>
@@ -99,7 +100,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
           </section>
           <aside className="ca-guide" aria-label="复盘指引">
             <div className="ca-guide-card"><p className="ca-kicker">REVIEW NOTES</p><h2>把数据变成下一步</h2><ol><li><span>01</span><div><strong>确认范围</strong><p>先看来源、时间和作品覆盖，确认正在分析谁的数据。</p></div></li><li><span>02</span><div><strong>回到作品</strong><p>打开作品和原始依据，寻找可复用的主题与值得改进的细节。</p></div></li><li><span>03</span><div><strong>带着问题创作</strong><p>把发现记录成选题，下一篇聚焦一项可验证的改动。</p></div></li></ol></div>
-            <div className="ca-scope-card"><h3>本平台的分析边界</h3><p>{selected.limit}</p><button type="button" className="ca-text-button" onClick={() => setSection('method')}>查看完整数据口径 <span aria-hidden="true">→</span></button></div>
+            <div className="ca-scope-card"><h3>本平台的分析边界</h3><p>{selected.limit}</p><button type="button" className="ca-text-button" onClick={() => setSection('method')}>查看完整数据口径 <span aria-hidden={true}>→</span></button></div>
           </aside>
         </div>
         </details>

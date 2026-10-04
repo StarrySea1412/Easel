@@ -106,7 +106,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                 {detail?.needsApi && (
                   detail.apiConfigured
                     ? <span className="badge badge-ok">✓ 已配置</span>
-                    : <span className="badge badge-warn">❗ 需配置 API</span>
+                    : <span className="badge badge-warn">需配置 API</span>
                 )}
               </div>
             </div>

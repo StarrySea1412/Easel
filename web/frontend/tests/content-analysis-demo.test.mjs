@@ -144,6 +144,7 @@ async function loadPage() {
     if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
     const target = specifier === '../lib/api' ? moduleUrl('export async function fetchAccounts(){globalThis.__demoAccountReads++;return [];}')
       : specifier === './ContentAnalysisDemo' ? await tsModuleUrl(new URL('../src/components/ContentAnalysisDemo.tsx', import.meta.url))
+      : specifier === './icons' ? await tsModuleUrl(new URL('../src/components/icons.tsx', import.meta.url))
       : specifier.startsWith('.') ? moduleUrl(`export default function Panel(){return ${JSON.stringify(specifier === './ContentAnalysisWorkbench' ? '真实作品工作台替身' : '')};}`)
       : import.meta.resolve(specifier);
     replacements.push({ start: statement.moduleSpecifier.getStart(parsed), end: statement.moduleSpecifier.end, text: JSON.stringify(target) });

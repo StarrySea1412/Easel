@@ -87,7 +87,7 @@ export default function SkillPage({ persona }: SkillPageProps) {
   return (
     <div className="skills-page">
       <div className="skills-page-head">
-        <h1 className="page-title">技能库</h1>
+        <h1 className="page-title"><IconSkills size={22} aria-hidden={true} />技能库</h1>
         <p className="page-subtitle">
           共 {skills === null ? '…' : skills.length} 个技能，按流水线层分区浏览。点卡片查看说明、就地运行；
           标 <span className="badge badge-warn" style={{ padding: '1px 7px' }}>需 API</span> 的需先配置密钥

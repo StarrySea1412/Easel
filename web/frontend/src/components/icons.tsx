@@ -1,6 +1,7 @@
 // 轻量线性图标（Lucide 风格，MIT 路径），stroke=currentColor，自适应色。
 // 用来替换廉价的 emoji 图标，参考 ChatGPT / Stepfun 的简洁线性风格。
-interface P { size?: number; className?: string; strokeWidth?: number; }
+import type { CSSProperties } from 'react';
+interface P { size?: number; className?: string; strokeWidth?: number; style?: CSSProperties; 'aria-hidden'?: boolean; }
 
 const svg = (size = 18, sw = 1.8) => ({
   width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
@@ -206,5 +207,80 @@ export const IconBookmark = ({ size, className, strokeWidth }: P) => (
 export const IconPublish = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </svg>
+);
+export const IconUserRound = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+  </svg>
+);
+export const IconUserPlus = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="10" cy="8" r="4" /><path d="M2 21a8 8 0 0 1 16 0" /><path d="M19 8v6" /><path d="M22 11h-6" />
+  </svg>
+);
+export const IconInfo = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />
+  </svg>
+);
+export const IconSpark = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" />
+  </svg>
+);
+export const IconKey = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.3-9.3" /><path d="m17 5 3 3" /><path d="m15 7 3 3" />
+  </svg>
+);
+export const IconEye = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+export const IconEyeOff = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M10.7 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.1 4" />
+    <path d="M6.6 6.6A17.6 17.6 0 0 0 2 12s3.5 7 10 7c1.9 0 3.5-.5 4.9-1.3" />
+    <path d="m2 2 20 20" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </svg>
+);
+export const IconPin = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M12 17v5" /><path d="M9 4h6l-1 7 3 3H7l3-3-1-7Z" />
+  </svg>
+);
+export const IconClock = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="12" r="10" /><path d="M12 7v5l3 2" />
+  </svg>
+);
+export const IconCoins = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="8" cy="8" r="6" /><path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+    <path d="M7 6h1v4" /><path d="m16.7 13.7.8.8" />
+  </svg>
+);
+export const IconSettings2 = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M12 3a9 9 0 0 1 9 9 9 9 0 0 1-9 9 9 9 0 0 1-9-9 9 9 0 0 1 9-9Z" />
+    <path d="M15.4 8.6 8.6 15.4" /><path d="M8.6 8.6l6.8 6.8" />
+  </svg>
+);
+export const IconDownload = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M12 3v12" /><path d="m7 11 5 5 5-5" /><path d="M4 21h16" />
+  </svg>
+);
+export const IconWarn = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    <path d="M12 9v4" /><path d="M12 17h.01" />
+  </svg>
+);
+export const IconPlay = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className} fill="currentColor" stroke="none">
+    <path d="M6 4.8v14.4c0 .8.9 1.3 1.6.9l11.2-7.2c.6-.4.6-1.4 0-1.8L7.6 3.9c-.7-.4-1.6.1-1.6.9Z" />
   </svg>
 );

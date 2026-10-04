@@ -30,12 +30,15 @@ interface ChatPageProps {
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
 }
 
-// 空态推荐（贴合 Easel 社媒创作场景）
-const SUGGESTIONS = [
-  { icon: '🔥', title: '蹭个热点', prompt: '看看现在微博和抖音有什么热搜，挑几个适合我做二创的选题' },
-  { icon: '✍️', title: '写小红书文案', prompt: '帮我写一条小红书种草文案，主题先问我' },
-  { icon: '🎴', title: '做金句卡片', prompt: '把一句走心的话做成一张适合发朋友圈的金句卡片' },
-  { icon: '🎬', title: '口播脚本', prompt: '帮我写一条 60 秒的口播短视频脚本，主题先问我' },
+// 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
+import { IconFire, IconEdit, IconLayout, IconVideo } from './icons';
+import type { ComponentType } from 'react';
+type Suggestion = { Icon: ComponentType<{ size?: number }>; title: string; prompt: string };
+const SUGGESTIONS: Suggestion[] = [
+  { Icon: IconFire, title: '蹭个热点', prompt: '看看现在微博和抖音有什么热搜，挑几个适合我做二创的选题' },
+  { Icon: IconEdit, title: '写小红书文案', prompt: '帮我写一条小红书种草文案，主题先问我' },
+  { Icon: IconLayout, title: '做金句卡片', prompt: '把一句走心的话做成一张适合发朋友圈的金句卡片' },
+  { Icon: IconVideo, title: '口播脚本', prompt: '帮我写一条 60 秒的口播短视频脚本，主题先问我' },
 ];
 
 function greeting(): string {
@@ -108,7 +111,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="card card-hover suggestion-card"
                 onClick={() => { if (!isStreaming && !stopping) onSend(s.prompt, undefined, readSelectedSkills(session.id)); }}>
-                <span className="suggestion-icon">{s.icon}</span>
+                <span className="suggestion-icon" aria-hidden="true"><s.Icon size={18} /></span>
                 <span className="suggestion-body">
                   <span className="suggestion-title">{s.title}</span>
                   <span className="suggestion-text">{s.prompt}</span>

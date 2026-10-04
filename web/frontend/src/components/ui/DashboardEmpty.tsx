@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { IconChevron } from '../icons';
 
 interface DashboardEmptyProps {
   Icon: ComponentType<{ size?: number }>;
@@ -15,7 +16,7 @@ export default function DashboardEmpty({ Icon, title, description, action, onAct
       <span className="dash-empty-icon" aria-hidden="true"><Icon size={22} /></span>
       <strong>{title}</strong>
       <p>{description}</p>
-      <button type="button" className="btn btn-sm btn-ghost" onClick={onAction}>{action} →</button>
+      <button type="button" className="btn btn-sm btn-ghost" onClick={onAction}>{action}<IconChevron size={13} /></button>
     </div>
   );
 }

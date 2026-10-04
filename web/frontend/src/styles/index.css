@@ -792,6 +792,7 @@ textarea.field { resize: vertical; min-height: 90px; }
 .profile-dim { margin-top: 16px; }
 .profile-dim-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .profile-dim-title { font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.profile-dim-title > .profile-dim-badge { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent-start); font-size: 10px; font-weight: 700; letter-spacing: .03em; }
 .profile-content { font-size: 14px; line-height: 1.7; }
 .profile-content h1, .profile-content h2, .profile-content h3 { margin: 18px 0 9px; font-weight: 600; }
 .profile-content h1 { font-size: 1.4em; }
