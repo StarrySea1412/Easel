@@ -370,20 +370,23 @@ def record_note_snapshot(platform: str, notes: list[dict], now: int, account_id:
         return []
     ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
     recs: list[dict] = []
+    metric_fields = ["likes", "collects", "comments"]
+    if platform == "bilibili":
+        # B站逐篇指标以播放为主：views 是主指标，shares 同为稿件级数据
+        metric_fields = ["views", "likes", "collects", "comments", "shares"]
     for n in notes:
-        nid = (n.get("note_id") or "").strip()
-        m = n.get("metrics") or {}
-        recs.append({
-            "version": NOTE_SNAPSHOT_VERSION,
-            "note_id": nid,
-            "title": (n.get("title") or "").strip()[:100],
-            "tags": [t for t in (n.get("tags") or []) if str(t).strip()][:8],
-            "publish": (n.get("publish") or "").strip()[:20],
-            "fetched_at": now,
-            "metrics": {"likes": m.get("likes"), "collects": m.get("collects"),
-                        "comments": m.get("comments")},   # 缺字段保持 None，不造零
-            "source": f"account_stats:{platform}",
-        })
+            nid = (n.get("note_id") or "").strip()
+            m = n.get("metrics") or {}
+            recs.append({
+                "version": NOTE_SNAPSHOT_VERSION,
+                "note_id": nid,
+                "title": (n.get("title") or "").strip()[:100],
+                "tags": [t for t in (n.get("tags") or []) if str(t).strip()][:8],
+                "publish": (n.get("publish") or "").strip()[:20],
+                "fetched_at": now,
+                "metrics": {field: m.get(field) for field in metric_fields},   # 缺字段保持 None，不造零
+                "source": f"account_stats:{platform}",
+            })
     # 与旧快照合并：note_id 分组，各保留最近两条（按 fetched_at）
     merged: dict[str, list[dict]] = {}
     for r in load_note_snapshots(platform) + recs:

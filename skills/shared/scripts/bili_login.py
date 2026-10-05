@@ -244,12 +244,12 @@ def cmd_stats(a) -> int:
             ]
 
         # 最近作品：创作中心稿件列表（cookie 鉴权、无需 wbi 签名）。
-        arc = (_api("https://member.bilibili.com/x/web/archives?status=pubed&pn=1&ps=6",
+        arc = (_api("https://member.bilibili.com/x/web/archives?status=pubed&pn=1&ps=20",
                     cookie).get("data") or {})
         items = arc.get("arc_audits") or arc.get("archives") or []
         r["posts"] = (arc.get("page") or {}).get("count", r["posts"])
         notes = []
-        for it in items[:6]:
+        for it in items[:20]:
             av = it.get("Archive") or it.get("archive") or it
             sv = it.get("stat") or {}
             bvid = av.get("bvid") or ""
@@ -261,6 +261,7 @@ def cmd_stats(a) -> int:
                                  (("views", "▶"), ("likes", "👍"), ("comments", "💬")) if key in metrics)
             notes.append({
                 "title": av.get("title") or "(无标题)",
+                "note_id": bvid,               # bvid 可直接当逐篇快照的稳定主键
                 "url": f"https://www.bilibili.com/video/{bvid}" if bvid else "",
                 "cover": _https(av.get("cover") or ""),
                 "stat": summary, "metrics": metrics,

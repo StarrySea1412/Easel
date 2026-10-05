@@ -4615,8 +4615,11 @@ def _load_note_snapshot_records(platform: str) -> list[dict]:
 async def api_analytics_insights(platform: str):
     """基于本人账号逐篇快照的热词建议（只读快照，不联网）。
     每条建议可追溯到原笔记（refs）+ 样本量 + 指标 + 可信度分级。"""
+    if platform == "bilibili":
+        import bili_insights as bi   # web/ 在 sys.path 上
+        return bi.keyword_insights(_load_note_snapshot_records(platform))
     if platform != "xiaohongshu":
-        raise HTTPException(404, "探索建议目前仅支持小红书")
+        raise HTTPException(404, "探索建议目前仅支持小红书与B站")
     import xhs_insights as xi   # web/ 在 sys.path 上
     import account_evidence as ae
     result = xi.keyword_insights(_load_note_snapshot_records(platform))
@@ -4658,8 +4661,47 @@ class InsightIdeaRequest(BaseModel):
 async def api_insights_idea(req: InsightIdeaRequest):
     """把一条热词建议写入选题库（复用选题创建格式；按来源+标题查重）。"""
     pf = (req.platform or "xiaohongshu").strip()
+    if pf == "bilibili":
+        # B站快照按平台保存（无账号目录），没有小红书式的账号核验链路：
+        # 只做候选词在当前建议列表内的原子校验，归属以快照窗口写进证据。
+        import bili_insights as bi
+        word = (req.word or "").strip()
+        if not word:
+            raise HTTPException(400, "没有要加入的候选词")
+        records = _load_note_snapshot_records(pf)
+        if not records:
+            raise HTTPException(409, "B站逐篇快照已更新或被清除，请刷新后重新采集")
+        try:
+            insights = bi.keyword_insights(records)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        hit = next((s for s in insights["suggestions"] if s["word"] == word), None)
+        if hit is None:
+            raise HTTPException(404, f"候选词「{word}」不在当前建议列表（可能快照已更新），请刷新后重试")
+        idea = bi.idea_from_suggestion(hit, insights.get("window"))
+        existing = _read_ideas()
+        if any((it.get("analysisEvidence") or {}).get("word") == word
+               and (it.get("analysisEvidence") or {}).get("platform") == pf
+               and (it.get("analysisEvidence") or {}).get("window") == insights.get("window")
+               for it in existing):
+            raise HTTPException(409, f"选题「{idea['title']}」已在选题库，不重复添加")
+        item = {
+            "id": uuid.uuid4().hex[:12],
+            "title": idea["title"],
+            "note": idea["note"],
+            "source": idea["source"],
+            "status": "pending",
+            "created": int(time.time()),
+            "analysisEvidence": {"platform": pf, "word": word,
+                                 "window": insights.get("window"),
+                                 "confidence": hit["confidence"], "refs": hit["refs"],
+                                 "sampleSize": hit["sampleSize"], "evidence": hit["evidence"]},
+        }
+        existing.insert(0, item)
+        _write_ideas(existing)
+        return {"ok": True, "idea": item}
     if pf != "xiaohongshu":
-        raise HTTPException(400, "探索建议目前仅支持小红书")
+        raise HTTPException(400, "探索建议目前仅支持小红书与B站")
     import account_evidence as ae
     if not req.accountId:
         raise HTTPException(400, "缺少分析账号 ID，请刷新后重试")
@@ -4713,6 +4755,8 @@ async def api_analytics(platform: str):
     if platform == "bilibili":
         cmd = [sys.executable, str(SHARED_SCRIPTS / "bili_login.py"), "stats",
                "--cookie", str(DATA_DIR / "cookies.json")]
+        # 逐篇快照复用 account_stats 的规范化流（bilibili-notes.jsonl），
+        # bvid 已作为 note_id 落进 notes；与其它非小红书平台同一契约。
     elif platform == "wechat-oa":
         # 公众号数据走「后台网页端」(mp.weixin.qq.com 管理员会话 + Playwright 拦截数据 XHR)：
         # 开发者 datacube 接口需认证+群发+接口权限，多数号取不到；后台端有登录态即可看到发表记录/数据。
@@ -4748,6 +4792,16 @@ async def api_analytics(platform: str):
             if not isinstance(data.get('loggedIn'), bool) or not isinstance(data.get('notes', []), list) \
                     or any(not isinstance(note, dict) for note in data.get('notes', [])):
                 raise HTTPException(502, '平台返回的数据格式无效，请重新采集')
+        if platform == "bilibili":
+            if data.get("loggedIn") and not data.get("error"):
+                # 与 account_stats fetch 相同的规范化落盘：bvid 作为 note_id 进
+                # bilibili-notes.jsonl（缺指标保持 None，不造零），insights 只读这个流。
+                import account_stats as stats
+                rows = stats.record_note_snapshot(platform, data.get("notes") or [], int(time.time()))
+                data["noteSnapshotCount"] = len(rows)
+                snapshot = {"ts": int(time.time()), **{key: data.get(key) for key in ("followers", "likes", "posts")}}
+                if any(snapshot[key] is not None for key in ("followers", "likes", "posts")):
+                    stats.record_snapshot(platform, snapshot)
         if platform == "xiaohongshu":
             if expected_generation != ae.generation(evidence_root):
                 raise HTTPException(409, "账号或分析数据已切换，请刷新后重新采集")

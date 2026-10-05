@@ -4,6 +4,7 @@ import PlatformIcon from './PlatformIcon';
 import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
 import XhsInsightsPanel from './XhsInsightsPanel';
+import BiliInsightsPanel from './BiliInsightsPanel';
 import ContentAnalysisDemo from './ContentAnalysisDemo';
 import { IconChart } from './icons';
 import '../styles/content-analysis.css';
@@ -12,7 +13,7 @@ const PLATFORMS = [
   { id: 'xiaohongshu', name: '小红书', format: '图文 · 短视频', source: '本人笔记管理页 / 用户导出记录', scope: '逐篇赞、藏、评与标题标签；可导入本人记录，查看建议依据并加入选题。', limit: '关键词结果来自已有标题与标签，不代表完整正文诊断；采集时间不等于发布时间。' },
   { id: 'douyin', name: '抖音', format: '短视频', source: '抖音创作者中心', scope: '账号概览、首页近 7 日指标与本次返回的作品摘要。', limit: '部分作品只有平台统计文案；作品发布时间和观察年龄不完整，不能直接做优劣排名。' },
   { id: 'kuaishou', name: '快手', format: '短视频', source: '快手创作者服务平台', scope: '当前页面概览与部分作品的播放、点赞、评论文案。', limit: '具体统计期间可能未提供，返回列表可能包含不同发布状态，不能当作全部已发布作品。' },
-  { id: 'bilibili', name: '哔哩哔哩', format: '视频', source: '哔哩哔哩创作中心', scope: '当前账号指标与部分作品的播放、点赞、评论、收藏、分享。', limit: '作品覆盖可能只有最近一页；首页增量的具体周期需以采集结果为准。' },
+  { id: 'bilibili', name: '哔哩哔哩', format: '视频', source: '哔哩哔哩创作中心', scope: '账号指标与最近稿件的播放、点赞、评论、收藏、分享；支持基于标题与标签的探索性选题建议。', limit: '稿件覆盖最近一页；快照按平台保存，历史批次未核验是否同一账号，不作为本人增长结论。' },
   { id: 'weixin-channels', name: '视频号', format: '视频', source: '微信视频号助手', scope: '首页返回的有限指标与可匹配的内容入口。', limit: '逐篇指标和日期支持有限；管理页入口不等于作品原文，暂不生成完整作品比较。' },
   { id: 'zhihu', name: '知乎', format: '文章 · 回答', source: '知乎创作中心', scope: '账号概览与部分文章、回答的阅读和赞同摘要。', limit: '文章与回答应分别观察；完整标题、发布日期和累计范围可能缺失。' },
   { id: 'wechat-oa', name: '公众号', format: '图文', source: '微信公众号后台扫码会话', scope: '已返回文章的阅读、点赞与平台概览；以实际采集字段为准。', limit: 'AppID 配置不等于已登录后台；完读率、阅读时长等官方详细接口尚未接入本页面。' },
@@ -95,7 +96,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
             <div className="ca-section-intro"><p className="ca-kicker">01 / REVIEW</p><h2>平台采集与实时概览</h2><p>{selected.scope}</p></div>
             {loading ? <div className="ca-loading" role="status">正在读取账号连接状态…</div> : error ? <div className="ca-loading">账号状态暂不可用，重试成功后即可查看分析。</div> : <>
               {!available && <div className="ca-connect-callout"><div><strong>连接{selected.name}，开始自己的内容复盘</strong><p>{platform === 'xiaohongshu' ? '连接后采集本人笔记；已有导出文件也可在下方查看导入方式。' : '登录并校验身份后，采集当前账号真实返回的指标与作品。'}</p></div><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateAccounts}>前往账号中心</button></div>}
-              {platform === 'xiaohongshu' ? <XhsInsightsPanel key={`xhs-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} autoCollectSignal={autoCollectSignal} onAutoCollectHandled={onAutoCollectHandled} /> : <PlatformAnalysisPanel showPlatformPicker={false} key={platform} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} />}
+              {platform === 'xiaohongshu' ? <XhsInsightsPanel key={`xhs-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} autoCollectSignal={autoCollectSignal} onAutoCollectHandled={onAutoCollectHandled} /> : platform === 'bilibili' ? <><BiliInsightsPanel key={`bili-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /><PlatformAnalysisPanel showPlatformPicker={false} key={`bili-platform-${revision}`} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} /></> : <PlatformAnalysisPanel showPlatformPicker={false} key={platform} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} />}
             </>}
           </section>
           <aside className="ca-guide" aria-label="复盘指引">

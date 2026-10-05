@@ -593,6 +593,20 @@ export interface XhsNoteEvidence {
   source: string;
 }
 
+export interface BiliNoteEvidence {
+  noteId: string;
+  title: string;
+  url: string;
+  tags: string[];
+  publishedAt: string | null;
+  publish: string;
+  fetchedAt: number | null;
+  importedAt: number | null;
+  metrics: { views: number | null; likes: number | null; collects: number | null; comments: number | null; shares: number | null };
+  missingFields: Record<string, string>;
+  source: string;
+}
+
 export interface XhsSuggestion {
   word: string;
   refs: XhsNoteEvidence[];
@@ -634,6 +648,35 @@ export interface XhsImportPayload {
 
 export function fetchXhsInsights(): Promise<XhsInsights> {
   return request('/api/analytics/insights/xiaohongshu');
+}
+
+export interface BiliSuggestion {
+  word: string;
+  refs: BiliNoteEvidence[];
+  sampleSize: number;
+  metric: number | null;
+  metricName: 'views';
+  evidence: string;
+  confidence: 'exploratory';
+  tagsOnly: boolean;
+}
+
+export interface BiliInsights {
+  window: { from: number | null; to: number | null } | null;
+  sampleSize: number;
+  suggestions: BiliSuggestion[];
+  note: string;
+}
+
+export function fetchBiliInsights(): Promise<BiliInsights> {
+  return request('/api/analytics/insights/bilibili');
+}
+
+export function addBiliSuggestion(word: string): Promise<{ ok: boolean; idea: Idea }> {
+  return request('/api/analytics/insights/idea', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform: 'bilibili', word }),
+  });
 }
 
 export function importXhsRecords(payload: XhsImportPayload): Promise<{ importedCount: number }> {
