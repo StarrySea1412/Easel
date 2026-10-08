@@ -3,15 +3,17 @@ import type { ReactNode } from 'react';
 import type { PublishReceipt } from '../lib/api';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { useModalFocus } from '../hooks/useModalFocus';
-import { isFinalPublishReceipt, publishNotificationLabel, publishPlatformLabel, publishReceiptStatus, receiptPublicUrl } from '../lib/publishReceipts';
+import { canVerifyPublishReceipt, isFinalPublishReceipt, publishNotificationLabel, publishPlatformLabel, publishReceiptStatus, receiptPublicUrl } from '../lib/publishReceipts';
 import { IconHistory, IconRefresh } from './icons';
 import PlatformIcon from './PlatformIcon';
 import '../styles/publish-receipts.css';
 
-export function PublishReceiptCard({ receipt, onConfigure, onVerify, children }: {
+export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, checkBusy = false, children }: {
   receipt: PublishReceipt;
   onConfigure?: () => void;
   onVerify?: () => void;
+  onCheck?: (automatic?: boolean) => Promise<void>;
+  checkBusy?: boolean;
   children?: ReactNode;
 }) {
   const status = publishReceiptStatus(receipt);
@@ -32,6 +34,7 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, children }:
       : receipt.outcome === 'published' && <p className="publish-receipt-message">平台未返回可验证的公开作品地址，请到平台核对。</p>}
     {receipt.contentId && final && <p className="publish-receipt-content-id">作品编号：{receipt.contentId}</p>}
     {receipt.state === 'sms_required' && !final && onVerify && <button className="btn btn-sm" onClick={onVerify}>处理短信验证</button>}
+    {canVerifyPublishReceipt(receipt) && onCheck && <PublishVerificationControls receipt={receipt} onCheck={onCheck} busy={checkBusy} />}
     {children}
     {final && <div className="publish-receipt-notification">
       <span className={receipt.notification?.state === 'failed' ? 'publish-receipt-mail-error' : ''}>{publishNotificationLabel(receipt.notification)}</span>
@@ -40,6 +43,37 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, children }:
         && <button className="publish-receipt-text-button" onClick={onConfigure}>通知设置</button>}
     </div>}
   </article>;
+}
+
+function PublishVerificationControls({ receipt, onCheck, busy }: {
+  receipt: PublishReceipt;
+  onCheck: (automatic?: boolean) => Promise<void>;
+  busy: boolean;
+}) {
+  const [error, setError] = useState('');
+  const verification = receipt.verification;
+  const checking = verification?.state === 'checking';
+  const nextTime = verification?.nextCheckAt && Number.isFinite(Date.parse(verification.nextCheckAt))
+    ? new Date(verification.nextCheckAt).toLocaleString('zh-CN') : '';
+  const check = async (automatic?: boolean) => {
+    setError('');
+    try { await onCheck(automatic); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '核实请求未完成，请稍后重试。'); }
+  };
+  return <div className="publish-receipt-verification">
+    <p role="status">{verification?.message || '可以核实本次发布结果，只查询已有内容。'}</p>
+    {verification?.automatic && nextTime && <p className="publish-receipt-message">下次自动核实：{nextTime}</p>}
+    <div className="publish-receipt-verification-actions">
+      <button className="btn btn-sm" disabled={busy || checking} onClick={() => { void check(); }}>
+        {checking ? '正在核实…' : busy ? '处理中…' : '核实发布结果'}
+      </button>
+      {verification?.automatic
+        ? <button className="publish-receipt-text-button" disabled={busy} onClick={() => { void check(false); }}>暂停自动核实</button>
+        : verification && !['exhausted', 'unsupported'].includes(verification.state)
+          && <button className="publish-receipt-text-button" disabled={busy || checking} onClick={() => { void check(true); }}>开启自动核实</button>}
+    </div>
+    {error && <p className="notice-error" role="alert">{error}</p>}
+  </div>;
 }
 
 function PublishSmsForm({ receipt, onSubmit }: { receipt: PublishReceipt; onSubmit: PublishReceiptsModel['submitSms'] }) {
@@ -89,7 +123,7 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
   const latest = model.notices[0];
   const latestUrl = latest ? receiptPublicUrl(latest) : null;
   const ordered = [...model.active, ...model.receipts.filter(isFinalPublishReceipt)];
-  const count = model.verification.length || model.notices.length || model.active.length;
+  const count = model.verification.length || model.notices.length || model.active.length || model.checking.length;
   const configure = () => { model.close(); onConfigure(); };
   return <>
     <div className="publish-receipts-bar" aria-label="发布回执与提醒">
@@ -105,6 +139,7 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
           : model.submissionIssues.length ? <><span>有 {model.submissionIssues.length} 项发布请求需要核对</span><button className="publish-receipt-text-button" onClick={model.open}>查看</button></>
           : model.submitting ? <span>正在提交：{model.submittingLabel || '发布内容'}</span>
           : model.active.length ? <span>{model.active.length} 项发布处理中，可切换页面</span>
+          : model.checking.length ? <span>{model.checking.length} 项发布正在核实平台结果</span>
           : model.error ? <><span>回执暂时无法更新</span><button className="publish-receipt-text-button" onClick={model.open}>查看详情</button></>
           : <span className="publish-receipts-idle">结果与作品地址保存在这里</span>}
       </div>
@@ -130,11 +165,12 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
           </div>}
           {!model.loaded && !model.error && <p className="dash-empty">正在读取发布回执…</p>}
           {model.loaded && ordered.length === 0 && <p className="dash-empty">还没有发布回执。确认发布后，平台结果和可用的作品地址会保存在这里。</p>}
-          {ordered.map(receipt => <PublishReceiptCard key={receipt.receiptId} receipt={receipt} onConfigure={configure}>
+          {ordered.map(receipt => <PublishReceiptCard key={receipt.receiptId} receipt={receipt} onConfigure={configure}
+            onCheck={automatic => model.verify(receipt.receiptId, automatic)} checkBusy={model.verificationBusyIds.includes(receipt.receiptId)}>
             {!isFinalPublishReceipt(receipt) && receipt.state === 'sms_required' && <PublishSmsForm receipt={receipt} onSubmit={model.submitSms} />}
           </PublishReceiptCard>)}
         </div>
-        <div className="publish-receipts-footer"><p>站内提醒在工作台打开时更新。已提交或草稿仍需到平台确认；邮件发送状态单独显示。</p>
+        <div className="publish-receipts-footer"><p>支持的平台会在服务运行时自动核实审核结果，最多 24 小时、12 次，可暂停或手动核实。草稿不会自动发布；邮件结果单独显示。</p>
           <button className="btn btn-sm" onClick={() => { model.close(); onOpenPublish(); }}>前往发布中心</button></div>
       </div>
     </div>}

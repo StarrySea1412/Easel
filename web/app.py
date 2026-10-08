@@ -46,7 +46,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
-from easel import local_records, publish_receipts
+from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
@@ -482,8 +482,13 @@ async def _lifespan(_app: FastAPI):
         await asyncio.to_thread(_publish_receipt_store().recover_interrupted)
     except local_records.RecordError as exc:
         print(str(exc), file=sys.stderr)
-    yield
-    _stop_mp_login_on_shutdown()
+    verification = _publish_verification_service()
+    verification.start()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(verification.stop)
+        _stop_mp_login_on_shutdown()
 
 
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
@@ -4098,17 +4103,31 @@ def _invalidate_account_check(platform: str) -> None:
 
 
 def _require_account_available(platform: str) -> None:
-    if platform in _ACCOUNT_CLEARING:
-        raise HTTPException(409, '该账号正在退出，请完成后重试')
+    with _PUBLISH_LOCK:
+        if platform in _ACCOUNT_CLEARING:
+            raise HTTPException(409, '该账号正在退出，请完成后重试')
+        if platform in _PUBLISH_ACTIVE:
+            raise HTTPException(409, '该平台正在发布或核实作品，请等待结束后再操作账号')
+
+
+def _account_browser_busy(platform: str) -> bool:
+    """Called with _PUBLISH_LOCK held; account locks are always acquired after it."""
+    key = 'wechat-oa-mp' if platform == 'wechat-oa' else platform
+    login = LOGIN_PROCESSES.get(key)
+    if login is not None and login.poll() is None:
+        return True
+    with _WHOAMI_LOCK:
+        return any(process.poll() is None for process in _WHOAMI_PROCESSES.get(platform, []))
 
 
 def _stop_owned_login(platform: str) -> None:
     key = 'wechat-oa-mp' if platform == 'wechat-oa' else platform
-    with _WHOAMI_LOCK:
-        processes = list(_WHOAMI_PROCESSES.get(platform, []))
-    login = LOGIN_PROCESSES.get(key)
-    if login is not None:
-        processes.append(login)
+    with _PUBLISH_LOCK:
+        with _WHOAMI_LOCK:
+            processes = list(_WHOAMI_PROCESSES.get(platform, []))
+        login = LOGIN_PROCESSES.get(key)
+        if login is not None:
+            processes.append(login)
     for process in processes:
         if process.poll() is None:
             from easel.install_runner import terminate_phase_tree
@@ -4117,7 +4136,8 @@ def _stop_owned_login(platform: str) -> None:
                 process.wait(timeout=5)
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                 raise HTTPException(500, '登录或账号核验进程未能停止，退出未完成；请关闭该平台窗口后重试') from exc
-    LOGIN_PROCESSES.pop(key, None)
+    with _PUBLISH_LOCK:
+        LOGIN_PROCESSES.pop(key, None)
 
 
 def _run_owned_whoami(platform: str, command: list[str], expected_generation: str):
@@ -4125,14 +4145,18 @@ def _run_owned_whoami(platform: str, command: list[str], expected_generation: st
     import tempfile
     from easel.install_runner import terminate_phase_tree
     with tempfile.TemporaryFile(mode='w+b') as output:
-        with _WHOAMI_LOCK:
-            if platform in _ACCOUNT_CLEARING or _ACCOUNT_GENERATIONS.get(platform, '') != expected_generation.partition(':')[0]:
-                raise HTTPException(409, '账号状态已变化，已取消旧核验请求')
-            process = subprocess.Popen(command, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                                       stdout=output, stderr=subprocess.STDOUT,
-                                       start_new_session=os.name != 'nt',
-                                       creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            _WHOAMI_PROCESSES.setdefault(platform, []).append(process)
+        with _PUBLISH_LOCK:
+            _require_account_available(platform)
+            if _account_browser_busy(platform):
+                raise HTTPException(409, '该平台正在登录或核验账号，请等待结束后重试')
+            with _WHOAMI_LOCK:
+                if _ACCOUNT_GENERATIONS.get(platform, '') != expected_generation.partition(':')[0]:
+                    raise HTTPException(409, '账号状态已变化，已取消旧核验请求')
+                process = subprocess.Popen(command, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                           stdout=output, stderr=subprocess.STDOUT,
+                                           start_new_session=os.name != 'nt',
+                                           creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                _WHOAMI_PROCESSES.setdefault(platform, []).append(process)
         try:
             try:
                 process.wait(timeout=150)
@@ -4158,62 +4182,66 @@ async def api_login_start(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
-    _require_account_available(platform)
-    backend = cfg['backend']
-    if backend == 'unsupported':
-        raise HTTPException(400, f"{cfg['name']} 暂不可用：{cfg.get('note', '')}")
-    if backend == 'wechat-oa':
-        # 公众号不走扫码：前端应改用凭证表单提交到 /api/accounts/{platform}/credentials。
-        return {'mode': 'credentials', 'configured': _wechat_has_credentials(),
-                'message': '微信公众号请填写 AppID / AppSecret'}
-    existing = LOGIN_PROCESSES.get(platform)
-    if existing is not None and existing.poll() is None:
-        return {'mode': 'qr', **_login_status(platform)}
-    _invalidate_account_check(platform)
-    login_generation = _account_check_generation(platform)
-    if platform == 'xiaohongshu':
-        invalidate_account_context(platform)
+    # Reserve the profile until the child is registered. No browser wait or
+    # await belongs inside this lock; logout can then stop the owned child.
+    with _PUBLISH_LOCK:
+        _require_account_available(platform)
+        backend = cfg['backend']
+        if backend == 'unsupported':
+            raise HTTPException(400, f"{cfg['name']} 暂不可用：{cfg.get('note', '')}")
+        if backend == 'wechat-oa':
+            # 公众号不走扫码：前端应改用凭证表单提交到 /api/accounts/{platform}/credentials。
+            return {'mode': 'credentials', 'configured': _wechat_has_credentials(),
+                    'message': '微信公众号请填写 AppID / AppSecret'}
+        existing = LOGIN_PROCESSES.get(platform)
+        if existing is not None and existing.poll() is None:
+            return {'mode': 'qr', **_login_status(platform)}
+        if _account_browser_busy(platform):
+            raise HTTPException(409, '该平台正在核验账号，请等待结束后再登录')
+        _invalidate_account_check(platform)
         login_generation = _account_check_generation(platform)
-    LOGIN_DIR.mkdir(parents=True, exist_ok=True)
-    qr = LOGIN_DIR / f'{platform}.png'
-    status = LOGIN_DIR / f'{platform}.json'
-    for f in (qr, status):
-        try:
-            f.unlink()
-        except OSError:
-            pass
-    if backend == 'xhs':
-        cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'login', '--no-proxy',
-               '--qr-out', str(qr), '--status-file', str(status), '--timeout', str(LOGIN_TIMEOUT)]
-    elif backend == 'biliup':
-        # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
-        cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
-               '--qr-out', str(qr), '--status-file', str(status),
-               '--cookie', str(DATA_DIR / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
-    elif backend == 'douyin':
-        code_file = LOGIN_DIR / f'{platform}.code'
-        try:
-            code_file.unlink()
-        except OSError:
-            pass
-        cmd = [sys.executable, str(SHARED_SCRIPTS / 'douyin_publish.py'), 'login',
-               '--qr-out', str(qr), '--status-file', str(status),
-               '--sms-code-file', str(code_file), '--timeout', str(LOGIN_TIMEOUT)]
-    else:
-        cmd = [sys.executable, str(SHARED_SCRIPTS / 'web_publisher.py'), 'login-qr',
-               '--platform', cfg['wp'], '--qr-out', str(qr), '--status-file', str(status),
-               '--timeout', str(LOGIN_TIMEOUT)]
-    # 新登录开始 → 清掉旧的 whoami 缓存（登录前可能缓存了「未登录」），避免登录成功后仍读到旧结果
-    with _WHOAMI_LOCK:
-        _WHOAMI_CACHE.pop(platform, None)
-    log_path = LOGIN_DIR / f'{platform}.log'
-    log_file = log_path.open('a', encoding='utf-8')
-    proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                            stdout=log_file, stderr=subprocess.STDOUT,
-                            start_new_session=os.name != 'nt',
-                            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    log_file.close()
-    LOGIN_PROCESSES[platform] = proc
+        if platform == 'xiaohongshu':
+            invalidate_account_context(platform)
+            login_generation = _account_check_generation(platform)
+        LOGIN_DIR.mkdir(parents=True, exist_ok=True)
+        qr = LOGIN_DIR / f'{platform}.png'
+        status = LOGIN_DIR / f'{platform}.json'
+        for f in (qr, status):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        if backend == 'xhs':
+            cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'login', '--no-proxy',
+                   '--qr-out', str(qr), '--status-file', str(status), '--timeout', str(LOGIN_TIMEOUT)]
+        elif backend == 'biliup':
+            # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
+            cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
+                   '--qr-out', str(qr), '--status-file', str(status),
+                   '--cookie', str(DATA_DIR / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
+        elif backend == 'douyin':
+            code_file = LOGIN_DIR / f'{platform}.code'
+            try:
+                code_file.unlink()
+            except OSError:
+                pass
+            cmd = [sys.executable, str(SHARED_SCRIPTS / 'douyin_publish.py'), 'login',
+                   '--qr-out', str(qr), '--status-file', str(status),
+                   '--sms-code-file', str(code_file), '--timeout', str(LOGIN_TIMEOUT)]
+        else:
+            cmd = [sys.executable, str(SHARED_SCRIPTS / 'web_publisher.py'), 'login-qr',
+                   '--platform', cfg['wp'], '--qr-out', str(qr), '--status-file', str(status),
+                   '--timeout', str(LOGIN_TIMEOUT)]
+        # 新登录开始 → 清掉旧的 whoami 缓存（登录前可能缓存了「未登录」），避免登录成功后仍读到旧结果
+        with _WHOAMI_LOCK:
+            _WHOAMI_CACHE.pop(platform, None)
+        log_path = LOGIN_DIR / f'{platform}.log'
+        with log_path.open('a', encoding='utf-8') as log_file:
+            proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                    stdout=log_file, stderr=subprocess.STDOUT,
+                                    start_new_session=os.name != 'nt',
+                                    creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        LOGIN_PROCESSES[platform] = proc
     for _ in range(50):
         await asyncio.sleep(0.5)
         if _account_check_generation(platform) != login_generation:
@@ -4352,30 +4380,32 @@ async def api_mp_login_start(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get("backend") != "wechat-oa":
         raise HTTPException(404, "该平台不使用公众号后台登录")
-    _require_account_available(platform)
-    # 重复点击复用正在进行的登录，不能删除其二维码或启动第二个 Chromium。
-    proc = LOGIN_PROCESSES.get("wechat-oa-mp")
-    if proc is not None and proc.poll() is None:
-        return {"mode": "qr", **_mp_login_status()}
-    _invalidate_account_check(platform)
-    login_generation = _account_check_generation(platform)
-    LOGIN_DIR.mkdir(parents=True, exist_ok=True)
-    for f in (LOGIN_DIR / "wechat-oa-mp.png", LOGIN_DIR / "wechat-oa-mp.json"):
-        try:
-            f.unlink()
-        except OSError:
-            pass
-    wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
-    cmd = [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "login",
-           "--proxy", wx_proxy, "--qr-out", str(LOGIN_DIR / "wechat-oa-mp.png"),
-           "--status-file", str(LOGIN_DIR / "wechat-oa-mp.json"), "--timeout", "240"]
-    log_file = (LOGIN_DIR / "wechat-oa-mp.log").open("a", encoding="utf-8")
-    proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                            stdout=log_file, stderr=subprocess.STDOUT,
-                            start_new_session=os.name != 'nt',
-                            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    log_file.close()
-    LOGIN_PROCESSES["wechat-oa-mp"] = proc
+    with _PUBLISH_LOCK:
+        _require_account_available(platform)
+        # 重复点击复用正在进行的登录，不能删除其二维码或启动第二个 Chromium。
+        proc = LOGIN_PROCESSES.get("wechat-oa-mp")
+        if proc is not None and proc.poll() is None:
+            return {"mode": "qr", **_mp_login_status()}
+        if _account_browser_busy(platform):
+            raise HTTPException(409, '该平台正在核验账号，请等待结束后再登录')
+        _invalidate_account_check(platform)
+        login_generation = _account_check_generation(platform)
+        LOGIN_DIR.mkdir(parents=True, exist_ok=True)
+        for f in (LOGIN_DIR / "wechat-oa-mp.png", LOGIN_DIR / "wechat-oa-mp.json"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
+        cmd = [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "login",
+               "--proxy", wx_proxy, "--qr-out", str(LOGIN_DIR / "wechat-oa-mp.png"),
+               "--status-file", str(LOGIN_DIR / "wechat-oa-mp.json"), "--timeout", "240"]
+        with (LOGIN_DIR / "wechat-oa-mp.log").open("a", encoding="utf-8") as log_file:
+            proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                    stdout=log_file, stderr=subprocess.STDOUT,
+                                    start_new_session=os.name != 'nt',
+                                    creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        LOGIN_PROCESSES["wechat-oa-mp"] = proc
     for _ in range(60):
         await asyncio.sleep(0.5)
         if _account_check_generation(platform) != login_generation:
@@ -4473,16 +4503,20 @@ async def api_logout(platform: str):
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
-    _require_account_available(platform)
-    _ACCOUNT_CLEARING.add(platform)
-    _invalidate_account_check(platform)
+    # Claim cleanup before leaving the event loop. A verification worker must
+    # see either the complete old profile or the completed logout, never both.
+    with _PUBLISH_LOCK:
+        _require_account_available(platform)
+        _ACCOUNT_CLEARING.add(platform)
+        _invalidate_account_check(platform)
     try:
         await asyncio.to_thread(_stop_owned_login, platform)
         if platform == 'xiaohongshu':
             invalidate_account_context(platform)
         return await asyncio.to_thread(_clear_account_files, platform, cfg)
     finally:
-        _ACCOUNT_CLEARING.discard(platform)
+        with _PUBLISH_LOCK:
+            _ACCOUNT_CLEARING.discard(platform)
 
 
 def _clear_account_files(platform: str, cfg: dict) -> dict:
@@ -4955,6 +4989,7 @@ _PUBLISH_ACTIVE: dict[str, str] = {}
 # Preserve a known result in the running process if a disk fails after the
 # platform has accepted it. Starting a new operation still requires durable IO.
 _PUBLISH_VOLATILE: dict[str, dict] = {}
+_PUBLISH_VERIFIER: publish_followup.VerificationService | None = None
 
 
 def _publish_receipt_store() -> publish_receipts.ReceiptStore:
@@ -4964,6 +4999,11 @@ def _publish_receipt_store() -> publish_receipts.ReceiptStore:
 def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
     with _PUBLISH_LOCK:
         base = _PUBLISH_VOLATILE.get(receipt_id, {})
+        if not base:
+            try:
+                base = _publish_receipt_store().get(receipt_id) or {}
+            except local_records.RecordError:
+                pass
         try:
             pending = {**base, **changes} if base.get('storageWarning') else dict(changes)
             pending.pop('storageWarning', None)
@@ -4980,6 +5020,10 @@ def _begin_publish(platform: str, title: str) -> dict:
     with _PUBLISH_LOCK:
         if platform in _PUBLISH_ACTIVE:
             raise HTTPException(409, '该平台已有发布任务，请先查看现有任务。')
+        if platform in _ACCOUNT_CLEARING:
+            raise HTTPException(409, '该账号正在退出，请完成后再发布。')
+        if _account_browser_busy(platform):
+            raise HTTPException(409, '该平台正在登录或核验账号，请等待结束后再发布。')
         try:
             receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title)
         except publish_receipts.ActivePublishError as exc:
@@ -5052,6 +5096,8 @@ def _get_publish_receipt(receipt_id: str) -> dict:
         raise HTTPException(exc.status_code, str(exc)) from None
     if receipt is None:
         raise HTTPException(404, '发布回执不存在')
+    with _PUBLISH_LOCK:
+        _PUBLISH_VOLATILE.setdefault(receipt_id, dict(receipt))
     return _refresh_publish_receipt(receipt)
 
 
@@ -5072,7 +5118,7 @@ def _recent_publish_receipts(limit: int = 50) -> list[dict]:
             if (saved is None or item.get('storageWarning')
                     or str(item.get('updatedAt', '')) >= str(saved.get('updatedAt', ''))):
                 combined[receipt_id] = item
-        ordered = sorted(combined.values(), key=lambda item: str(item.get('createdAt', '')), reverse=True)
+        ordered = sorted(combined.values(), key=lambda item: str(item.get('updatedAt') or item.get('createdAt') or ''), reverse=True)
         selected = ordered[:max(1, min(200, limit))]
         selected_ids = {item['receiptId'] for item in selected}
         selected += [item for item in ordered if item.get('outcome') not in publish_receipts.OUTCOMES
@@ -5083,6 +5129,44 @@ def _recent_publish_receipts(limit: int = 50) -> list[dict]:
     return [_refresh_publish_receipt(item) for item in selected]
 
 
+def _awaiting_publish_verification() -> list[dict]:
+    with _PUBLISH_LOCK:
+        items = _publish_receipt_store().awaiting_verification()
+        return [{**item, **_PUBLISH_VOLATILE.get(item['receiptId'], {})} for item in items]
+
+
+def _acquire_publish_verification(platform: str, receipt_id: str) -> bool:
+    with _PUBLISH_LOCK:
+        if (platform in _PUBLISH_ACTIVE or platform in _ACCOUNT_CLEARING
+                or _account_browser_busy(platform)):
+            return False
+        _PUBLISH_ACTIVE[platform] = receipt_id
+        return True
+
+
+def _run_publish_verification(receipt: dict, stop_event) -> dict:
+    command = publish_followup.verification_command(
+        receipt, python=sys.executable, root=PROJECT_ROOT, data_dir=DATA_DIR)
+    env = _publish_env()
+    env['EASEL_PUBLISH_RECEIPT_ID'] = receipt['receiptId']
+    env['EASEL_CALENDAR_AUTORECORD'] = '0'
+    process = publish_followup.run_process(command, cwd=PROJECT_ROOT, env=env, stop_event=stop_event)
+    return publish_receipts.parse_result(receipt['platform'], receipt['receiptId'],
+                                         process.stdout, process.returncode)
+
+
+def _publish_verification_service() -> publish_followup.VerificationService:
+    global _PUBLISH_VERIFIER
+    with _PUBLISH_LOCK:
+        if _PUBLISH_VERIFIER is None:
+            _PUBLISH_VERIFIER = publish_followup.VerificationService(
+                list_items=_awaiting_publish_verification, get_item=_get_publish_receipt,
+                save_item=_save_publish_receipt, acquire=_acquire_publish_verification,
+                release=_release_publish, run_check=_run_publish_verification,
+                on_confirmed=_complete_publish_receipt)
+        return _PUBLISH_VERIFIER
+
+
 @app.get("/api/publish/receipts")
 async def api_publish_receipts(limit: int = 50):
     return _recent_publish_receipts(limit)
@@ -5091,6 +5175,26 @@ async def api_publish_receipts(limit: int = 50):
 @app.get("/api/publish/receipts/{receipt_id}")
 async def api_publish_receipt(receipt_id: str):
     return _get_publish_receipt(receipt_id)
+
+
+class PublishVerificationRequest(BaseModel):
+    automatic: bool
+
+
+@app.post("/api/publish/receipts/{receipt_id}/verify")
+async def api_verify_publish_receipt(receipt_id: str):
+    try:
+        return _publish_verification_service().request(receipt_id)
+    except publish_followup.VerificationError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
+
+
+@app.post("/api/publish/receipts/{receipt_id}/verification")
+async def api_set_publish_verification(receipt_id: str, req: PublishVerificationRequest):
+    try:
+        return _publish_verification_service().request(receipt_id, automatic=req.automatic)
+    except publish_followup.VerificationError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 def _read_publish_status(platform: str) -> dict:
@@ -5105,15 +5209,39 @@ def _finish_publish(platform: str, receipt_id: str, title: str, body: str, cfg: 
     result = publish_receipts.parse_result(platform, receipt_id, out, returncode,
                                           failure_message=failure_message)
     result['notification'] = {'state': 'skipped', 'message': '仅在平台确认公开发布后发送成功提醒。'}
+    result['summary'] = body[:300]
+    result['submissionFinishedAt'] = publish_receipts._now()
+    result['completionPending'] = result['outcome'] == 'published'
+    result['verification'] = publish_followup.initial_verification({**_get_publish_receipt(receipt_id), **result})
     receipt = _save_publish_receipt(receipt_id, result)
     if result['outcome'] != 'published':
         return receipt
+    return _complete_publish_receipt(receipt)
+
+
+def _complete_publish_receipt(receipt: dict) -> dict:
+    """Claim effects durably before sending: verification cannot resend mail."""
+    receipt_id = receipt['receiptId']
+    with _PUBLISH_LOCK:
+        receipt = _get_publish_receipt(receipt_id)
+        if receipt.get('outcome') != 'published' or receipt.get('completionHandled'):
+            return receipt
+        receipt = _save_publish_receipt(receipt_id, {
+            'completionHandled': True, 'completionPending': False,
+            'notification': {'state': 'queued', 'message': '正在处理成功提醒，邮件投递结果尚未确认。'}})
+        if receipt.get('outcome') != 'published':
+            return receipt
+        if receipt.get('storageWarning'):
+            return _save_publish_receipt(receipt_id, {'notification': {
+                'state': 'failed', 'message': '提醒状态无法保存，本次未发送邮件；请检查数据目录。'}})
+    title, body = receipt['title'], receipt.get('summary') or ''
+    cfg = LOGIN_RUNNERS[receipt['platform']]
 
     calendar_warning = _record_published_schedule(title, body, cfg['name'],
-                                                   url=result['url'], receipt_id=receipt_id)
+                                                   url=receipt['url'], receipt_id=receipt_id)
     if calendar_warning:
         receipt = _save_publish_receipt(receipt_id, {
-            'message': result['message'] + '\n' + calendar_warning})
+            'message': receipt['message'] + '\n' + calendar_warning})
     notified = []
     def notification_changed(notification):
         if isinstance(notification, dict) and notification.get('state') in {
@@ -5126,7 +5254,7 @@ def _finish_publish(platform: str, receipt_id: str, title: str, body: str, cfg: 
         try:
             state = _notify_email_completion(
                 title=title, platform=cfg['name'], summary=body[:300], source='publish',
-                url=result['url'], receipt_id=receipt_id, outcome='published',
+                url=receipt['url'], receipt_id=receipt_id, outcome='published',
                 on_result=notification_changed)
             if not notified:
                 valid_state = isinstance(state, dict) and state.get('state') in {

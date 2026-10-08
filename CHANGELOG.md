@@ -4,6 +4,15 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-09 R27: moderation follow-up and portable browser verification
+
+- Read Xiaohongshu and WeChat Channels creator-page responses using status rules traced to public first-party JavaScript. Require explicit public visibility and completed publication; review, scheduled, restricted and unknown results remain distinct. Xiaohongshu can expose a validated explore URL; Channels retains its work ID without guessing a public URL. Authenticated live platform responses remain unverified.
+- Add a lifecycle-owned read-only worker for Xiaohongshu, Channels, Bilibili, Douyin and Kuaishou. Keep the original receipt, exact work ID or closed submission window; use increasing intervals bounded to 24 hours and 12 automatic attempts. Shared receipt cards offer manual checks and pause/resume. Querying a receipt never uploads or republishes content.
+- Recover interrupted checks and unclaimed completion work after restart. Claim calendar/mail handling durably, reject another receipt claiming the same platform work, and recheck ownership after storage recovery. Claimed but uncertain mail is not automatically resent.
+- Guard same-platform login, logout, identity checks, publication and moderation reads with a shared reservation; waiting and process cleanup remain outside the lock. Other platforms can still proceed.
+- Frontend tests **700/700**, lint, TypeScript and production build pass; Python full suite reports **2070 passed / 7 skipped**. A localized C# compiler-output warning was corrected in its test probe, then that test passed with warnings treated as errors. Real browser checks cover manual verification, pause/resume, reload, completion on another page, read state, navigation and 390px layout using isolated platform samples; no real posting or SMTP delivery was attempted. Git delivery and the new ZIP identity are recorded separately in the [requirements ledger](docs/user-requirements-2026-10-08.md).
+- Actually launch both bundled Chromium variants with the embedded Python in an isolated environment, interact with a local test page and verify executable hashes. Native launcher execution and service readiness were observed, but desktop capture/input failed and the ready label could not be confirmed. GUI interaction and clean Windows acceptance remain open. The earlier `20a709c-0b56` ZIP does not contain the R27 changes.
+
 ### 2026-10-08 R25: publication receipts and notifications
 
 - Keep Web publishing outcomes in the data directory with a persistent, shared receipt center across pages. A successful process exit no longer claims publication: pending review, draft, unknown, rejected and public results stay distinct. Only confirmed public outcomes enter the published calendar.

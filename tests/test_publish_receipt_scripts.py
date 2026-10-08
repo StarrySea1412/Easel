@@ -336,7 +336,12 @@ def test_xhs_script_never_records_ui_only_submission_as_published(browser, calen
     monkeypatch.setattr(xhs, "_query_safe", lambda *_a: object())
     monkeypatch.setattr(xhs, "_click_publish_tab", lambda *_a: None)
     monkeypatch.setattr(xhs, "_upload_images", lambda *_a: None)
-    monkeypatch.setattr(xhs, "_fill_and_submit", lambda *_a: signal)
+    def submit(*_args, **kwargs):
+        kwargs['before_submit']()
+        return signal
+    monkeypatch.setattr(xhs, "_fill_and_submit", submit)
+    monkeypatch.setattr(xhs.xhs_readback, "capture_xhs_snapshot", lambda *_a: None)
+    monkeypatch.setattr(xhs.xhs_readback, "verify_xhs_publish", lambda *_a, **_k: rb.ReadbackResult('unverified'))
     code = xhs.cmd_publish(publish_args(tmp_path))
     row = read_receipt(capsys)
     assert row["outcome"] == outcome and row["url"] == "" and calendar == []

@@ -41,7 +41,7 @@ async function fixture(t, initial = [], page = 'other') {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = {
     model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0,
-    list: null, detail: null, publish: null, sms: null, precheck: null,
+    list: null, detail: null, publish: null, sms: null, verify: null, precheck: null,
     accounts: [{ platform: 'zhihu', loggedIn: true }], schedule: [], confirm: true, confirmations: [],
   };
   t.mock.method(window, 'confirm', text => { h.confirmations.push(text); return h.confirm; });
@@ -51,7 +51,10 @@ async function fixture(t, initial = [], page = 'other') {
     h.requests.push(request);
     let result;
     if (path === '/api/publish/receipts') result = h.list ? await h.list(request) : h.items;
-    else if (path.startsWith('/api/publish/receipts/')) {
+    else if (/^\/api\/publish\/receipts\/[^/]+\/(?:verify|verification)$/.test(path)) {
+      if (!h.verify) throw new Error('No simulated verification handler configured');
+      result = await h.verify(path.split('/')[4], request);
+    } else if (path.startsWith('/api/publish/receipts/')) {
       const id = path.split('/').at(-1);
       result = h.detail ? await h.detail(id, request) : h.items.find(item => item.receiptId === id);
     } else if (/^\/api\/publish\/[^/]+\/sms$/.test(path)) {
@@ -102,6 +105,75 @@ async function fixture(t, initial = [], page = 'other') {
     posts: () => h.requests.filter(request => request.options.method === 'POST' && /^\/api\/publish\/[^/]+$/.test(request.path)),
   };
 }
+
+test('manual moderation check cannot republish and announces the later result once across pages', async t => {
+  const pending = completed({ platform: 'xiaohongshu', outcome: 'submitted', url: '',
+    contentId: '0123456789abcdef01234567', verification: { state: 'paused', automatic: false, attempts: 0 } });
+  const view = await fixture(t, [pending]);
+  await view.click(view.button('发布回执'));
+  const gate = deferred();
+  view.h.verify = async (id, request) => {
+    assert.equal(id, pending.receiptId);
+    assert.equal(request.options.method, 'POST');
+    assert.ok(request.path.endsWith('/verify'));
+    await gate.promise;
+    return { ...pending, updatedAt: '2026-10-08T01:02:00.000Z',
+      verification: { state: 'checking', automatic: false, attempts: 1 } };
+  };
+  await view.click(view.button('核实发布结果'));
+  assert.equal(view.button('处理中…').disabled, true);
+  await act(async () => { await view.model().verify(pending.receiptId); });
+  assert.equal(view.h.requests.filter(request => request.path.endsWith('/verify')).length, 1);
+  await act(async () => { gate.resolve(); });
+  assert.equal(view.button('正在核实…').disabled, true);
+  await view.render('calendar');
+  view.h.items = [completed({ ...pending, outcome: 'published',
+    url: 'https://www.xiaohongshu.com/explore/0123456789abcdef01234567',
+    updatedAt: '2026-10-08T01:03:00.000Z', verification: { state: 'complete', automatic: false, attempts: 1 } })];
+  await view.refresh();
+  assert.equal(view.model().notices.length, 1);
+  assert.ok([...view.container.querySelectorAll('a')].some(link => link.href.includes('/explore/0123456789abcdef01234567')));
+  await view.refresh();
+  assert.equal(view.model().notices.length, 1);
+  assert.equal(view.posts().length, 0);
+});
+
+test('automatic checks can be paused and resumed with persisted receipt state', async t => {
+  const pending = completed({ platform: 'weixin-channels', outcome: 'submitted', url: '',
+    verification: { state: 'waiting', automatic: true, attempts: 1,
+      nextCheckAt: '2026-10-08T01:03:00.000Z', message: '将自动核实' } });
+  const view = await fixture(t, [pending]);
+  view.h.verify = async (_id, request) => {
+    assert.ok(request.path.endsWith('/verification'));
+    assert.equal(typeof request.body.automatic, 'boolean');
+    view.h.items = [{ ...pending, updatedAt: '2026-10-08T01:02:00.000Z', verification: {
+      ...pending.verification, automatic: request.body.automatic,
+      state: request.body.automatic ? 'waiting' : 'paused', nextCheckAt: null,
+    } }];
+    return view.h.items[0];
+  };
+  await view.click(view.button('发布回执'));
+  await view.click(view.button('暂停自动核实'));
+  assert.ok(view.button('开启自动核实'));
+  await view.refresh();
+  assert.equal(view.model().receipts[0].verification.state, 'paused');
+  await view.click(view.button('开启自动核实'));
+  assert.ok(view.button('暂停自动核实'));
+  assert.equal(view.posts().length, 0);
+});
+
+test('failed verification request leaves the existing submission and enables a retry', async t => {
+  const pending = completed({ platform: 'bilibili', outcome: 'submitted', url: '',
+    verification: { state: 'paused', automatic: false, attempts: 1 } });
+  const view = await fixture(t, [pending]);
+  view.h.verify = async () => { throw new Error('模拟：请稍后再试'); };
+  await view.click(view.button('发布回执'));
+  await view.click(view.button('核实发布结果'));
+  assert.ok(view.container.querySelector('[role="alert"]').textContent.includes('请稍后再试'));
+  assert.equal(view.button('核实发布结果').disabled, false);
+  assert.equal(view.model().receipts[0].outcome, 'submitted');
+  assert.equal(view.posts().length, 0);
+});
 
 test('initial history restores silently, and its dialog supports keyboard navigation and safe links', async t => {
   const view = await fixture(t, [completed(), completed({ receiptId: 'b'.repeat(32), platform: 'wechat-oa', outcome: 'draft', url: 'https://mp.weixin.qq.com/cgi-bin/appmsg' })]);

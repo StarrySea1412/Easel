@@ -8,6 +8,14 @@
 
 源码入口：[当前开发分支](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [交付进度](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md) · [原联网安装器说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)
 
+## R27 补验与包版本边界
+
+2026-10-09 使用同组件装配副本的嵌入 Python，从 System32 和隔离环境分别实际启动默认 headless shell、完整 Chromium 的 headless 模式，版本均为 **153.0.8010.12**。两种浏览器访问本地 HTTP 页面，完成按钮交互和截图，执行文件 SHA-256 与旧分发清单一致；这补齐了原来的“只能导入 Playwright”边界，仍不代表真实平台登录通过。
+
+原生 `Easel.exe` 运行及其服务就绪已观测，但 Explorer 激活、Windows 桌面截图与坐标输入失败，界面文字仍观测为“正在启动工作台”。对相同源码的无窗口探针分别输入模拟成功、真实本地状态和模拟启动结果，回调在 197–395ms 内更新控件，未复现确定的产品缺陷；这些探针不能替代实际 GUI 交互，因此按钮、关闭窗口及双击流程仍未验收。当前主机是已有开发环境的 Windows 10，未取得干净 Windows 虚拟机验收条件。
+
+上述补验没有修改旧 `20a709c-0b56` ZIP。R27 审核后核实代码、最终前端 **700/700** 和 Python **2070 passed / 7 skipped** 属于后续源码；新包需要重新装配、完整校验和实际解压，完成后另记文件名与 SHA。旧包及 A65028／主7870保持原样，补验用 B 副本已停止。原始证据位于忽略的 `.scratch/portable-r27-qa/`。
+
 ## 当前候选文件与完整性校验
 
 以下为 2026-10-09 02:36:18（北京时间）完成的归档与实际解压校验结果。文件保存在构建机的 `dist/portable-preview/`，目前尚无公开 Release 下载入口。

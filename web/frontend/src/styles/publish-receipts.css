@@ -33,6 +33,10 @@
 .publish-receipt p { margin: 8px 0; }
 .publish-receipt .publish-receipt-message, .publish-receipt-content-id { color: var(--text-secondary); white-space: pre-wrap; }
 .publish-receipt-link { display: inline-flex; margin: 2px 0 8px; }
+.publish-receipt-verification { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.publish-receipt-verification-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.publish-receipt-verification button { max-width: 100%; white-space: normal; }
+.publish-receipt-verification button:disabled { cursor: default; opacity: .6; }
 .publish-receipt-notification { display: flex; flex-wrap: wrap; gap: 3px 8px; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
 .publish-receipt-notification > span:nth-child(2) { flex-basis: 100%; }
 .publish-receipt-mail-error { color: var(--red); }

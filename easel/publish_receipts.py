@@ -90,7 +90,7 @@ def _evidence(value) -> dict:
         return {}
     allowed = {'source', 'type', 'kind', 'readbackOutcome', 'status', 'platformStatus',
                'contentId', 'uiSignal', 'verification', 'verified', 'method', 'reason',
-               'matched', 'publicAccessChecked', 'urlSource', 'signal', 'submissionAttempted'}
+               'matched', 'publicAccessChecked', 'urlSource', 'signal', 'submissionAttempted', 'sinceMs'}
     return {key: (_text(val, 160) if isinstance(val, str) else val)
             for key, val in value.items()
             if key in allowed and isinstance(val, (str, bool, int))}
@@ -184,6 +184,8 @@ class ReceiptStore:
                         and (not isinstance(item['outcome'], str) or item['outcome'] not in OUTCOMES))
                     or not isinstance(item.get('notification'), dict)):
                 raise local_records.RecordError('发布回执格式不受支持，原文件已保留；请从备份恢复。')
+            if 'verification' in item and not isinstance(item['verification'], dict):
+                raise local_records.RecordError('发布核实状态格式不受支持，原文件已保留；请从备份恢复。')
         return items
 
     def _change(self, operation):
@@ -222,7 +224,7 @@ class ReceiptStore:
         return next((dict(item) for item in self._read() if item['receiptId'] == receipt_id), None)
 
     def recent(self, limit: int = 50) -> list[dict]:
-        items = list(reversed(self._read()))
+        items = sorted(self._read(), key=lambda item: str(item.get('updatedAt') or item.get('createdAt') or ''), reverse=True)
         selected = items[:max(1, min(200, limit))]
         selected_ids = {item['receiptId'] for item in selected}
         # Active operations remain discoverable even when other platforms have
@@ -231,12 +233,41 @@ class ReceiptStore:
                      and item['receiptId'] not in selected_ids]
         return selected
 
+    def awaiting_verification(self) -> list[dict]:
+        """Do not hide pending checks behind the UI's recent-history limit."""
+        return [dict(item) for item in self._read() if item.get('outcome') in {'submitted', 'unverified'}
+                or (item.get('outcome') == 'published' and item.get('completionPending') is True
+                    and not item.get('completionHandled'))]
+
     def update(self, receipt_id: str, changes: dict) -> dict:
         def operation(items):
             for item in items:
                 if item['receiptId'] == receipt_id:
-                    item.update({key: value for key, value in changes.items()
-                                 if key not in {'receiptId', 'platform', 'createdAt'}})
+                    update = {key: value for key, value in changes.items()
+                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt'}}
+                    # File-level optimistic retries make this claim atomic
+                    # even when two readers identify the same creator work.
+                    content_id = update.get('contentId') or item.get('contentId')
+                    if content_id and content_id != item.get('contentId'):
+                        previous_claim = max((other.get('contentClaimedAt') or '' for other in items), default='')
+                        update['contentClaimedAt'] = _now(previous_claim)
+                    if update.get('outcome') == 'published' and content_id:
+                        candidate = {**item, **update}
+                        owners = [other for other in items if other['receiptId'] != receipt_id
+                                  and other['platform'] == item['platform']
+                                  and other.get('contentId') == content_id]
+                        owners.append(candidate)
+                        first = min(owners, key=lambda other: (
+                            other.get('contentClaimedAt') or other['createdAt'], other['receiptId']))
+                        claimed = first if first['receiptId'] != receipt_id else None
+                        if claimed is not None:
+                            update.update(outcome='unverified', ok=False, url='', completionPending=False,
+                                          message='这条作品已关联另一份发布回执，当前任务仍需核对；不会重复发送成功提醒。',
+                                          notification={'state': 'skipped',
+                                                        'message': '这条作品已有对应回执，本次未重复发送提醒。'},
+                                          verification={'state': 'paused', 'automatic': False, 'attempts': 0,
+                                                        'message': '检测到重复的作品编号，请核对原发布回执。'})
+                    item.update(update)
                     item['updatedAt'] = _now(item.get('updatedAt'))
                     return dict(item)
             raise KeyError(receipt_id)
@@ -246,7 +277,8 @@ class ReceiptStore:
         """Called once at Web startup; do not resubmit or resend after a restart."""
         items = self._read()
         if not any(item.get('outcome') not in OUTCOMES
-                   or item.get('notification', {}).get('state') == 'queued' for item in items):
+                   or item.get('notification', {}).get('state') == 'queued'
+                   or item.get('verification', {}).get('state') == 'checking' for item in items):
             return
         def operation(records):
             for item in records:
@@ -258,4 +290,10 @@ class ReceiptStore:
                     item.update(notification={'state': 'failed', 'message': (
                         '服务已重启，邮件发送结果未确认；请检查邮箱。系统不会自动重发。')},
                                 updatedAt=_now())
+                verification = item.get('verification')
+                if isinstance(verification, dict) and verification.get('state') == 'checking':
+                    verification.update(state='waiting' if verification.get('automatic') else 'paused',
+                                        nextCheckAt=_now() if verification.get('automatic') else None,
+                                        message='服务已重启，将只读核实上次结果；不会再次发布内容。')
+                    item['updatedAt'] = _now(item.get('updatedAt'))
         self._change(operation)

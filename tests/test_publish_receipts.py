@@ -26,7 +26,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from easel import local_records, publish_receipts as receipts
+from easel import local_records, publish_receipts as receipts, publish_followup
 
 RID = 'a' * 32
 URL = 'https://zhuanlan.zhihu.com/p/123456'
@@ -154,12 +154,15 @@ def test_simultaneous_starts_on_same_platform_get_only_one_durable_reservation(t
 @pytest.fixture
 def api(tmp_path):
     names = {
-        'PublishRequest', 'PublishSmsRequest', '_publish_receipt_store', '_save_publish_receipt',
+        'PublishRequest', 'PublishSmsRequest', 'PublishVerificationRequest', '_publish_receipt_store', '_save_publish_receipt',
         '_begin_publish', '_release_publish', '_write_publish_status', '_refresh_publish_receipt',
         '_get_publish_receipt', '_recent_publish_receipts', 'api_publish_receipts', 'api_publish_receipt', '_read_publish_status',
         '_finish_publish', '_run_publish_job', '_run_publish_bg', '_start_async_publish',
         'api_publish_status', 'api_publish_sms', 'api_publish', '_record_published_schedule',
         '_read_schedule', '_write_schedule',
+        '_awaiting_publish_verification', '_acquire_publish_verification', '_run_publish_verification', '_account_browser_busy',
+        '_publish_verification_service', 'api_verify_publish_receipt', 'api_set_publish_verification',
+        '_complete_publish_receipt',
     }
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     nodes = [node for node in source.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -181,6 +184,8 @@ def api(tmp_path):
         'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel,
         'Path': Path, 'json': json, 'os': os, 'sys': sys, 'time': time, 'uuid': uuid,
         'asyncio': asyncio, 'local_records': local_records, 'publish_receipts': receipts,
+        'publish_followup': publish_followup, '_PUBLISH_VERIFIER': None, 'LOGIN_PROCESSES': {},
+        '_ACCOUNT_CLEARING': set(), '_WHOAMI_LOCK': threading.Lock(), '_WHOAMI_PROCESSES': {},
         'threading': SimpleNamespace(Thread=FakeThread),
         'subprocess': SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired),
         'PROJECT_ROOT': tmp_path, 'DATA_DIR': tmp_path, 'OUTPUTS_DIR': tmp_path / 'outputs',
@@ -200,6 +205,8 @@ def api(tmp_path):
                           'douyin': {'name': '抖音', 'backend': 'douyin'},
                           'xiaohongshu': {'name': '小红书', 'backend': 'xhs'},
                           'bilibili': {'name': 'B站', 'backend': 'biliup'},
+                          'weixin-channels': {'name': '视频号', 'backend': 'web', 'wp': 'weixin-channels'},
+                          'kuaishou': {'name': '快手', 'backend': 'web', 'wp': 'kuaishou'},
                           'wechat-oa': {'name': '微信公众号', 'backend': 'wechat-oa'}},
     }
     exec(compile(module, str(ROOT / 'web/app.py'), 'exec'), namespace)

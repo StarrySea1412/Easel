@@ -17,6 +17,7 @@ PREFIX = "EASEL_PUBLISH_RECEIPT="
 OUTCOMES = frozenset({"published", "submitted", "draft", "unverified", "failed"})
 _RUN: ContextVar[dict | None] = ContextVar("publish_receipt_run", default=None)
 _PUBLIC_PATHS = {
+    "xiaohongshu": ("www.xiaohongshu.com", r"/explore/([0-9a-fA-F]{24})"),
     "douyin": ("www.douyin.com", r"/(?:video|note)/([1-9][0-9]{5,23})"),
     "kuaishou": ("www.kuaishou.com", r"/short-video/([A-Za-z0-9_-]{8,32})"),
     "zhihu": ("zhuanlan.zhihu.com", r"/p/([1-9][0-9]{0,23})"),
@@ -56,6 +57,8 @@ def observed_public_work(platform: str, url: str, expected_id: str = "") -> tupl
 
 def public_work_url(platform: str, content_id: str, *, kind: str = "video") -> str:
     """Construct only documented public routes from a read-back canonical ID."""
+    if platform == "xiaohongshu" and re.fullmatch(r"[0-9a-fA-F]{24}", content_id):
+        return f"https://www.xiaohongshu.com/explore/{content_id}"
     if platform == "douyin" and re.fullmatch(r"[1-9][0-9]{5,23}", content_id):
         route = "video" if kind == "video" else "note"
         return f"https://www.douyin.com/{route}/{content_id}"
@@ -108,7 +111,10 @@ def from_readback(platform: str, result, *, kind: str = "video") -> dict:
     normalized = status.lower()
     content_id = str(getattr(matched, "platform_content_id", "") or "").strip()
     id_pattern = {"douyin": r"[1-9][0-9]{5,23}", "kuaishou": r"[A-Za-z0-9]{8,32}",
-                  "bilibili": r"BV[A-Za-z0-9]{10}"}.get(platform)
+                  "bilibili": r"BV[A-Za-z0-9]{10}", "xiaohongshu": r"[0-9a-fA-F]{24}",
+                  # The creator's objectId identifies the work, but is not a
+                  # documented public URL component. Never construct a URL.
+                  "weixin-channels": r"[A-Za-z0-9_-]{1,128}"}.get(platform)
     valid_id = bool(id_pattern and re.fullmatch(id_pattern, content_id))
     public_status = normalized in _PUBLISHED or (platform == "bilibili" and normalized == "开放浏览")
     url = ""

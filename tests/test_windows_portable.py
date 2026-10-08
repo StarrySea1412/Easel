@@ -409,10 +409,10 @@ internal static class ArgumentProbe {
   }
 }''')
     executable = tmp_path / "probe.exe"
-    subprocess.run([str(portable.compiler_path()), "/nologo", "/target:exe", "/main:ArgumentProbe",
+    subprocess.run([str(portable.compiler_path()), "/nologo", "/utf8output", "/target:exe", "/main:ArgumentProbe",
         "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll",
         "/out:" + str(executable), str(ROOT / "scripts/portable_entry.cs"), str(probe)], check=True,
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8")
     values = ["", "simple", "C:\\便携测试\\folder with spaces\\", 'C:\\quotes\\"x"\\', "a&b%PATH%!name!"]
     output = subprocess.check_output([str(executable), *values], text=True).splitlines()
     import base64
@@ -424,8 +424,8 @@ class EchoProbe { static void Main(string[] args) {
   foreach(string value in args) Console.WriteLine(Convert.ToBase64String(Encoding.UTF8.GetBytes(value)));
 } }''')
     echo_executable = tmp_path / "echo.exe"
-    subprocess.run([str(portable.compiler_path()), "/nologo", "/target:exe", "/out:" + str(echo_executable), str(echo_probe)],
-        check=True, capture_output=True, text=True)
+    subprocess.run([str(portable.compiler_path()), "/nologo", "/utf8output", "/target:exe", "/out:" + str(echo_executable), str(echo_probe)],
+        check=True, capture_output=True, text=True, encoding="utf-8")
     raw_command = subprocess.list2cmdline([str(echo_executable)]) + " " + " ".join(quoted)
     echoed = subprocess.check_output(raw_command, text=True).splitlines()
     assert [base64.b64decode(line).decode("utf-8") for line in echoed] == values

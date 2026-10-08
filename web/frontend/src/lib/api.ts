@@ -494,6 +494,15 @@ export interface PublishNotification {
   message?: string;
 }
 
+export interface PublishVerification {
+  state: 'waiting' | 'checking' | 'paused' | 'login_required' | 'exhausted' | 'complete' | 'unsupported';
+  automatic: boolean;
+  attempts: number;
+  lastCheckedAt?: string;
+  nextCheckAt?: string | null;
+  message?: string;
+}
+
 export interface PublishReceipt {
   receiptId: string;
   platform: string;
@@ -506,6 +515,7 @@ export interface PublishReceipt {
   url?: string;
   message: string;
   notification?: PublishNotification;
+  verification?: PublishVerification;
   storageWarning?: string;
   ok?: boolean;
   pending?: boolean;
@@ -541,6 +551,17 @@ export function fetchPublishReceipts(signal?: AbortSignal): Promise<PublishRecei
 
 export function fetchPublishReceipt(receiptId: string, signal?: AbortSignal): Promise<PublishReceipt> {
   return request(`/api/publish/receipts/${encodeURIComponent(receiptId)}`, { signal });
+}
+
+/** Query an existing submission; never retry its upload or publish operation. */
+export function verifyPublishReceipt(receiptId: string): Promise<PublishReceipt> {
+  return request(`/api/publish/receipts/${encodeURIComponent(receiptId)}/verify`, { method: 'POST' });
+}
+
+export function setPublishVerification(receiptId: string, automatic: boolean): Promise<PublishReceipt> {
+  return request(`/api/publish/receipts/${encodeURIComponent(receiptId)}/verification`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ automatic }),
+  });
 }
 
 export interface PublishStatus {

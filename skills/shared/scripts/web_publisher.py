@@ -5,9 +5,9 @@
 每个平台是一份「步骤配置」（登录页 / 发布页 / 选择器步骤），共用同一套 Playwright 引擎。
 登录态用持久化 user-data-dir 保存，扫码/登录一次后复用。
 
-发布结果判定：界面信号（URL/toast）只作旁证——已接入读回对账的平台（快手），发布后回作品
+发布结果判定：界面信号（URL/toast）只作旁证——已接入读回对账的平台（快手、视频号），发布后回作品
 管理页读本人作品列表对账（标题+时间窗）；`verified` 仅证明匹配到作品，还需核实公开状态。
-小红书/视频号式界面反馈至多表示已提交；知乎必须跳转精确的公开文章页才确认已发布。
+视频号须同时核实处理成功、公开可见及非定时状态；知乎须跳转精确公开文章页才确认已发布。
 
 ⚠️ 环境依赖（真实发布需具备，缺则不可用——同 skill-xhs-publisher 定位）：
     - playwright（`pip install playwright`）+ 浏览器内核（`playwright install chromium`）
@@ -24,6 +24,7 @@
     check      检查 playwright / 浏览器内核
     login      打开有头浏览器登录并持久化登录态
     publish    执行网页发布（按步骤自动化）
+    verify-publish 只读核实已有视频号投稿，不会重新提交
     selftest   自检（配置完整性 + 步骤解析，离线）
 """
 from __future__ import annotations
@@ -38,7 +39,8 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
-import platform_readback  # noqa: E402  发布读回对账（快手已接入，注册表见 _READBACK_VERIFIERS）
+import platform_readback  # noqa: E402  快手读回与共享结果类型；注册表见 _READBACK_VERIFIERS
+import channels_readback  # noqa: E402  视频号本人作品列表：只监听平台响应
 import publish_receipt  # noqa: E402
 import human_pace  # noqa: E402  人类节奏（提交前双停顿；EASEL_PACE_SKIP=1 跳过）
 
@@ -218,15 +220,17 @@ PLATFORMS: dict[str, dict] = {
             {"action": "wait", "value": "3000"},
             {"action": "click", "selector": "button:has-text('发表')"},
         ],
-        # 提交反馈：从创作页进入作品列表；暂无公开作品读回，至多标记已提交。
+        # 提交反馈只是旁证；公开结果以本人作品列表的状态和可见性为准。
         "publish_success": {"url_contains": "https://channels.weixin.qq.com/platform/post/list", "selector": "text=发表成功"},
+        "readback": True,
         "selector_caveat": "视频号需微信扫码登录，二维码在跨域 iframe（open.weixin.qq.com/connect/qrconnect）内，"
                            "已配 login_qr_iframe 直接截 iframe 元素本体（真机 2026-08 验证有效）。"
                            "登录判定/whoami 已真机校准（login_check=finder-nickname/唯一ID/桌面导航；昵称 .finder-nickname、头像 img.avatar）。"
                            "发布走专用函数 _publish_weixin_channels（真机 2026-08 打通）：goto /platform/post/list 点『发表视频』进创作页"
                            "（直接 goto create 会重定向回首页）→ 上传 → 等转码出创作器（在 OOPIF iframe /micro/content/post/create 内，"
                            "Playwright locator 解析不到、合成点击不被信任）→ evaluate 填描述(div.input-editor,execCommand) + 聚焦发表按钮 "
-                           "→ page.keyboard 按 Enter 可信提交，URL 跳 /post/list 即成功。下方 steps 已弃用（占位）。",
+                           "→ page.keyboard 按 Enter 单次提交，再读作品列表核对身份与公开状态；作品链接暂不拼接。"
+                           "下方 steps 已弃用（占位）。",
     },
     "zhihu": {
         "name": "知乎",
@@ -383,7 +387,7 @@ def _fill_first_visible(page, sel: str, val: str) -> None:
         el.fill(val)
 
 
-def _publish_weixin_channels(page, ctx: dict) -> None:
+def _publish_weixin_channels(page, ctx: dict) -> int:
     """视频号发布专用流程（与通用 steps 不同，真机 2026-08 校准）：
     - 直接 goto /platform/post/create 会被重定向回首页 → 必须 SPA 导航（首页→内容管理→发表视频）。
     - 创作器在同源 iframe /micro/content/post/create：描述框 div.input-editor、发表按钮
@@ -427,6 +431,7 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
     desc = "\n".join(x for x in (ctx.get("title"), ctx.get("desc"), ctx.get("tags")) if x)
     deadline = time.time() + 300
     published = False
+    submitted_at_ms: int | None = None
     last_err = None
     while time.time() < deadline and not published:
         fr = next((f for f in page.frames if "micro/content/post/create" in (f.url or "")), None)
@@ -475,6 +480,11 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
                 last_err = "未找到发表按钮"
                 page.wait_for_timeout(3000)
                 continue
+            if status != 'focused':
+                last_err = "发表按钮未取得焦点"
+                page.wait_for_timeout(3000)
+                continue
+            submitted_at_ms = int(time.time() * 1000)
             publish_receipt.mark_submitted()
             page.keyboard.press("Enter")   # 可信提交
             # 等提交后的导航反馈（真机 ~6s 跳 /post/list）；后续还要检查目标页面。
@@ -484,13 +494,20 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
                     published = True
                     break
             if not published:
-                last_err = "发表后未跳转（可能未提交），换新 frame 重试"
+                # A slow navigation cannot prove that the first submit failed.
+                # The caller will read back the list; never press Enter again.
+                print("  视频号：已尝试提交，页面暂未跳转，转入作品列表核实。", file=sys.stderr)
+                break
         except Exception as e:
+            if submitted_at_ms is not None:
+                # Submission may have reached the server before navigation or
+                # the browser context failed. Continue only with a readback.
+                break
             last_err = e
             page.wait_for_timeout(3000)   # 多半是 frame 刚重载，换新 frame 重试
-    if not published:
+    if submitted_at_ms is None:
         raise RuntimeError(f"视频号发表结果未确认（创作器反复重载或选择器失效）：{last_err}")
-    page.wait_for_timeout(3000)
+    return submitted_at_ms
 
 
 # ── 发布读回对账（platform_readback）──────────────────────────────────
@@ -499,6 +516,7 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
 # 新增平台：实现 platform_readback 的 capture_<平台>_snapshot / verify_<平台>_publish 后在此登记。
 _READBACK_VERIFIERS: dict[str, tuple[str, str]] = {
     "kuaishou": ("capture_kuaishou_snapshot", "verify_kuaishou_publish"),
+    "weixin-channels": ("capture_channels_snapshot", "verify_channels_publish"),
 }
 
 _READBACK_FAIL_HINTS = {
@@ -514,19 +532,21 @@ def _readback_fn(platform: str, which: int):  # noqa: ANN001
     entry = _READBACK_VERIFIERS.get(platform)
     if not entry:
         return None
-    return getattr(platform_readback, entry[which], None)
+    module = channels_readback if platform == "weixin-channels" else platform_readback
+    return getattr(module, entry[which], None)
 
 
-def _readback_capture(platform: str, page) -> set[str]:  # noqa: ANN001
-    """发前快照：读当前作品 id 集（读回时排除旧作品）。失败返回空集（退化为标题+时间窗）。"""
+def _readback_capture(platform: str, page) -> set[str] | None:  # noqa: ANN001
+    """发前快照排除旧作品；失败返回 None，不能冒充已读到空列表。"""
     fn = _readback_fn(platform, 0)
     if fn is None:
-        return set()
+        return None
     try:
-        return set(fn(page) or set())
+        snapshot = fn(page)
+        return None if snapshot is None else set(snapshot)
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ 发前快照失败（读回将只用标题+时间窗）：{e}", file=sys.stderr)
-        return set()
+        return None
 
 
 def _readback_verify(platform: str, page, *, title: str, since_ms: int | None,  # noqa: ANN001
@@ -609,7 +629,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
         if cfg.get("login_probe") and _probe_publish_auth(page, cfg) == "expired":
             _die(f"{cfg['name']}登录态已失效（发布子系统未授权）：外壳虽显示已登录，但发布上传鉴权已过期。请在账号页重新扫码登录后重试。", 6)
         # 读回平台：发前快照（读回时排除旧作品的硬证据；失败不影响发布）
-        snapshot_ids: set[str] = set()
+        snapshot_ids: set[str] | None = None
         if cfg.get("readback"):
             snapshot_ids = _readback_capture(a.platform, page)
         submitted_at_ms: int | None = None   # 「提交动作」时间戳（commit 标记步记录，读回时间窗基准）
@@ -617,7 +637,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
         try:
             if a.platform == "weixin-channels":
                 # 视频号走专用流程（SPA 导航 + iframe 创作器），通用 steps 不适用 → 跳过
-                _publish_weixin_channels(page, ctx)
+                submitted_at_ms = _publish_weixin_channels(page, ctx)
                 steps = []
             for i, s in enumerate(steps, 1):
                 act = s["action"]
@@ -754,8 +774,10 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 verdict = _readback_verify(a.platform, page, title=ctx.get("title") or "",
                                            since_ms=submitted_at_ms or flow_started_ms,
                                            snapshot_ids=snapshot_ids)
-                receipt = publish_receipt.from_readback(
-                    a.platform, verdict, kind="video" if a.media and Path(a.media).suffix.lower() in VIDEO_EXTS else "image")
+                receipt = (channels_readback.receipt_from_result(verdict, signal=ui_signal)
+                           if a.platform == "weixin-channels" else publish_receipt.from_readback(
+                               a.platform, verdict,
+                               kind="video" if a.media and Path(a.media).suffix.lower() in VIDEO_EXTS else "image"))
                 if verdict.outcome != "verified":
                     a._publish_receipt = publish_receipt.emit(receipt)
                     try:  # 失败留现场，供排错
@@ -1250,6 +1272,51 @@ def cmd_publish(a) -> int:
     return rc
 
 
+def cmd_verify_publish(a) -> int:
+    """Read an existing Channels submission; this path has no publish actions."""
+    result = platform_readback.ReadbackResult("readback_error")
+    until_ms = getattr(a, "until_ms", None)
+    valid = (a.platform == "weixin-channels" and channels_readback.valid_since_ms(a.since_ms)
+             and (a.content_id or channels_readback.normalize_title(a.title))
+             and isinstance(a.content_id, str)
+             and (not a.content_id or channels_readback.CONTENT_ID.fullmatch(a.content_id))
+             and (until_ms is None or (channels_readback.valid_since_ms(until_ms)
+                                       and until_ms >= a.since_ms)))
+    if not valid:
+        result = platform_readback.ReadbackResult("unverified", error="核实参数无效")
+    else:
+        try:
+            profile = _profile_dir(a.platform, a.profile_base)
+            if not profile.is_dir():
+                result = platform_readback.ReadbackResult("login_required")
+            else:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    proxy = getattr(a, "proxy", None) if not getattr(a, "no_proxy", False) else None
+                    options = {"headless": not a.headed, "locale": "zh-CN",
+                               "viewport": {"width": 1440, "height": 900},
+                               "args": LAUNCH_ARGS + ([] if proxy else ["--no-proxy-server"])}
+                    if proxy:
+                        options["proxy"] = {"server": proxy}
+                    browser = p.chromium.launch_persistent_context(str(profile), **options)
+                    try:
+                        page = browser.pages[0] if browser.pages else browser.new_page()
+                        result = channels_readback.verify_channels_publish(
+                            page, title=a.title, since_ms=a.since_ms, content_id=a.content_id,
+                            until_ms=until_ms)
+                    finally:
+                        browser.close()
+        except KeyboardInterrupt:
+            result = platform_readback.ReadbackResult("unverified")
+        except Exception:
+            # Browser errors cannot establish that an earlier submission
+            # failed. Do not print exceptions containing profile/session URLs.
+            result = platform_readback.ReadbackResult("readback_error")
+    receipt = publish_receipt.emit(channels_readback.receipt_from_result(result, read_only=True))
+    print(receipt["message"])
+    return 0 if receipt["outcome"] in {"published", "submitted"} else 5
+
+
 def cmd_whoami(a) -> int:
     """真校验登录态 + 读昵称/头像，输出单行 JSON（供 Web 后端解析）。
     走发布页判定（比 avatar 选择器可靠）：URL 落登录页 / 登出浮层可见 → 未登录。
@@ -1477,6 +1544,33 @@ def main() -> int:
     p.add_argument("--keep-open", action="store_true", help="发布后不关闭浏览器")
     p.set_defaults(func=cmd_publish)
 
+    def timestamp_ms_arg(value):
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("必须是毫秒时间戳整数") from exc
+        if not channels_readback.valid_since_ms(parsed):
+            raise argparse.ArgumentTypeError("必须是毫秒时间戳，不能使用秒或负数")
+        return parsed
+
+    def content_id_arg(value):
+        if value and not channels_readback.CONTENT_ID.fullmatch(value):
+            raise argparse.ArgumentTypeError("--content-id 编号格式暂不支持，请到视频号后台核对")
+        return value
+
+    p = sub.add_parser("verify-publish", help="只读核实已提交的视频号作品，不会重新上传或发布")
+    p.add_argument("--platform", required=True, choices=["weixin-channels"])
+    p.add_argument("--title", required=True, help="原投稿完整标题")
+    p.add_argument("--since-ms", required=True, type=timestamp_ms_arg, help="原投稿开始的毫秒时间戳")
+    p.add_argument("--until-ms", type=timestamp_ms_arg, help="原投稿结束的毫秒时间戳，避免匹配后来同标题重发的作品")
+    p.add_argument("--content-id", default="", type=content_id_arg, help="已知作品编号；填写后仅核实该作品")
+    p.add_argument("--profile-base", help="已有登录态根目录（默认 ~/.easel-browser-profiles）")
+    p.add_argument("--headed", action="store_true", help="有头模式")
+    proxy_group = p.add_mutually_exclusive_group()
+    proxy_group.add_argument("--proxy", help="核实时使用的代理服务器")
+    proxy_group.add_argument("--no-proxy", action="store_true", help="直接连接平台（默认）")
+    p.set_defaults(func=cmd_verify_publish)
+
     p = sub.add_parser("whoami", help="真校验登录态 + 读昵称/头像（输出 JSON）")
     add_common(p)
     p.set_defaults(func=cmd_whoami)
@@ -1484,6 +1578,8 @@ def main() -> int:
     sub.add_parser("selftest", help="自检").set_defaults(func=cmd_selftest)
 
     a = ap.parse_args()
+    if a.cmd == "verify-publish" and a.until_ms is not None and a.until_ms < a.since_ms:
+        ap.error("--until-ms 不能早于 --since-ms")
     if not getattr(a, "func", None):
         ap.print_help()
         return 1

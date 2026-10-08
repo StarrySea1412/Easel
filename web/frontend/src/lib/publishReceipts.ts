@@ -8,7 +8,7 @@ const PLATFORM_KEYS = Object.fromEntries(Object.entries(PLATFORM_LABELS).map(([k
 
 export const PUBLISH_OUTCOMES: Record<PublishOutcome, { label: string; tone: string; description: string }> = {
   published: { label: '已发布', tone: 'success', description: '平台已确认公开发布。' },
-  submitted: { label: '已提交', tone: 'pending', description: '尚未确认公开发布，请到平台查看审核结果。' },
+  submitted: { label: '已提交', tone: 'pending', description: '平台已接收内容，公开结果尚待核实。' },
   draft: { label: '已存草稿', tone: 'neutral', description: '内容在平台草稿箱，尚未公开发布。' },
   unverified: { label: '结果待核实', tone: 'warning', description: '请先到平台核对，避免重复发布。' },
   failed: { label: '发布失败', tone: 'error', description: '发布未完成，请查看平台状态和发布记录。' },
@@ -24,6 +24,12 @@ export function isPublishOutcome(value: unknown): value is PublishOutcome {
 
 export function isFinalPublishReceipt(receipt: Pick<PublishReceipt, 'outcome'>): boolean {
   return isPublishOutcome(receipt.outcome);
+}
+
+export function canVerifyPublishReceipt(receipt: PublishReceipt): boolean {
+  return ['xiaohongshu', 'weixin-channels', 'bilibili', 'douyin', 'kuaishou'].includes(receipt.platform)
+    && (receipt.outcome === 'submitted' || receipt.outcome === 'unverified')
+    && receipt.verification?.state !== 'unsupported';
 }
 
 export function isPublishReceipt(value: PublishResult | unknown): value is PublishReceipt {
@@ -89,5 +95,5 @@ export function mergePublishReceipts(current: PublishReceipt[], incoming: Publis
       || (isFinalPublishReceipt(old) && !isFinalPublishReceipt(item)))) continue;
     byId.set(item.receiptId, item);
   }
-  return [...byId.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 200);
+  return [...byId.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 200);
 }

@@ -398,7 +398,9 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                   : <div className="pv-text">{text || <span className="pv-ph">正文预览…</span>}{adapting && overrides[p.key] != null && <span className="streaming-cursor" />}</div>}
               </div>
               {blocked[p.key] && <div className="pv-pubstate fail" role="alert">{blocked[p.key]}</div>}
-              {receipt && <PublishReceiptCard receipt={receipt} onVerify={publishReceipts.open} />}
+              {receipt && <PublishReceiptCard receipt={receipt} onVerify={publishReceipts.open}
+                onCheck={automatic => publishReceipts.verify(receipt.receiptId, automatic)}
+                checkBusy={publishReceipts.verificationBusyIds.includes(receipt.receiptId)} />}
               <div className="pv-foot">
                 <span className="pv-hint">{p.hint}{over ? ' · 已超字数' : ''}</span>
                 <div className="pv-card-actions">

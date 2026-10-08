@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 from fastapi import HTTPException
@@ -14,11 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_web_functions():
     tree = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
-    names = {'api_mp_login_start', '_stop_mp_login_on_shutdown', '_require_account_available'}
+    names = {'api_mp_login_start', '_stop_mp_login_on_shutdown', '_require_account_available', '_account_browser_busy'}
     nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names]
     for node in nodes:
         node.decorator_list = []
-    env = {'subprocess': subprocess, 'HTTPException': HTTPException, '_ACCOUNT_CLEARING': set()}
+    env = {'subprocess': subprocess, 'HTTPException': HTTPException, '_ACCOUNT_CLEARING': set(),
+           '_PUBLISH_LOCK': threading.RLock(), '_PUBLISH_ACTIVE': {},
+           '_WHOAMI_LOCK': threading.Lock(), '_WHOAMI_PROCESSES': {}}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), 'web/app.py', 'exec'), env)
     return env
 

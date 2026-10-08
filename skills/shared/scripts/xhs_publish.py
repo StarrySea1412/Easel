@@ -11,7 +11,7 @@ xpzouying/xiaohongshu-mcp（Go/go-rod，成熟稳定）。确定性 IO 固化在
   - 逐图上传并等预览出现（≤60s）；视频等发布按钮可点击（≤10min = 处理完成）
   - 话题：输 # + 联想下拉点选，真绑话题
   - 发布按钮：新版 <xhs-publish-btn> + 旧版 .bg-red 双兼容
-  - 提交校验：成功提示/表单复位仅标记已提交；缺少作品读回时不声明公开发布
+  - 提交校验：发前快照 + 本人作品读回，分别确认作品身份、审核状态与公开权限
   - 反检测：--disable-blink-features=AutomationControlled + 逐字符输入 + zh-CN
 
 子命令:
@@ -20,6 +20,7 @@ xpzouying/xiaohongshu-mcp（Go/go-rod，成熟稳定）。确定性 IO 固化在
   plan           离线打印发布步骤与选择器（不启浏览器）
   publish        图文发布（--images 逗号分隔）
   publish-video  视频发布（--video）
+  verify-publish 只读核实已提交笔记（--title、--since-ms，可选 --content-id）
   selftest       离线自检（选择器字典 / 参数解析 / 标题长度算法）
 
 真实发布需：playwright + chromium 内核 + 已扫码登录 + 外网可达（默认走项目代理）。
@@ -40,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import publish_receipt  # noqa: E402
+import xhs_readback  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # 选择器集中维护（小红书改版时单点更新）。REF = xiaohongshu-mcp 对应源。
@@ -385,7 +387,7 @@ def _normalize_content(text: str) -> str:
     return text.strip("\n")
 
 
-def _fill_and_submit(page, title, content, tags):
+def _fill_and_submit(page, title, content, tags, *, before_submit=None):
     """标题→正文→话题→长度校验→提交→界面反馈校验。"""
     content = _normalize_content(content)         # 修连续空行导致的发布失败
     title_el = page.query_selector(SELECTORS["title_input"])
@@ -408,6 +410,8 @@ def _fill_and_submit(page, title, content, tags):
     btn.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
     box = btn.bounding_box()
+    if before_submit is not None:
+        before_submit()
     publish_receipt.mark_submitted()
     if kind == "new" and box:
         # xhs-publish-btn 是宽横条(闭合 Shadow DOM)，内含[暂存离开][发布]两个按钮；
@@ -603,7 +607,8 @@ def _plan_lines(kind: str, title: str, content: str, media: list[str], tags: lis
         "  4. 输标题/正文（逐字符）+ 话题联想点选",
         "  5. 平台 DOM 长度校验",
         "  6. 等发布按钮可点击（新版<xhs-publish-btn>/旧版.bg-red）→ 点击",
-        "  7. 提交校验：检查提交提示/表单复位；公开发布状态和作品链接仍需平台读回",
+        "  7. 提交校验：检查提交提示/表单复位，再读回本人作品列表",
+        "  8. 排除发前已有作品，精确核对标题、时间、审核状态与公开权限后生成回执",
     ]
     return lines
 
@@ -654,7 +659,15 @@ def _publish(a, kind: str) -> int:
         ctx = _launch(p, headed=a.headed, base=a.profile_base, proxy=_proxy(a.proxy, a.no_proxy))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.set_default_timeout(300000)
+        since_ms = None
+        signal = ""
+
+        def before_submit():
+            nonlocal since_ms
+            since_ms = int(time.time() * 1000)
+
         try:
+            snapshot_ids = xhs_readback.capture_xhs_snapshot(page)
             page.goto(PUBLISH_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(1500)
             # 登录态探测容忍导航竞态：发布页也可能仍在跳转，跳转瞬间裸 query 会抛
@@ -675,16 +688,26 @@ def _publish(a, kind: str) -> int:
                 _click_publish_tab(page, "上传视频")
                 page.wait_for_timeout(1000)
                 _upload_video(page, media[0])
-            signal = _fill_and_submit(page, a.title, a.content or "", tags)
+            try:
+                signal = _fill_and_submit(page, a.title, a.content or "", tags,
+                                          before_submit=before_submit)
+            except (Exception, SystemExit):
+                if since_ms is None:
+                    raise
+                # Submission can succeed even if the toast/navigation wait fails.
+                # Verify the work instead of clicking publish again.
+                print("提交界面反馈未确认，正在只读核对本人作品列表。", file=sys.stderr)
+            result = xhs_readback.verify_xhs_publish(page, title=a.title, since_ms=since_ms,
+                                                    snapshot_ids=snapshot_ids)
+            receipt = xhs_readback.receipt_from_result(result, signal=signal)
         except PWTimeout as e:
             _die(f"步骤超时（选择器可能已失效，检查 SELECTORS）：{e}")
         finally:
             if not a.keep_open:
                 ctx.close()
-    receipt = publish_receipt.emit(publish_receipt.from_ui("xiaohongshu", signal=signal))
+    publish_receipt.emit(receipt)
     print(receipt["message"])
-    # UI acknowledgement is not eligible for an already-published calendar row.
-    return 0 if receipt["outcome"] == "submitted" else 5
+    return 0 if receipt["outcome"] in {"published", "submitted"} else 5
 
 
 @publish_receipt.publishing_command("xiaohongshu")
@@ -695,6 +718,30 @@ def cmd_publish(a) -> int:
 @publish_receipt.publishing_command("xiaohongshu")
 def cmd_publish_video(a) -> int:
     return _publish(a, "video")
+
+
+def cmd_verify_publish(a) -> int:
+    """Recheck an existing submission; never upload, fill, or click publish."""
+    result = xhs_readback.ReadbackResult("readback_error")
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            ctx = _launch(p, headed=a.headed, base=a.profile_base, proxy=_proxy(a.proxy, a.no_proxy))
+            try:
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                result = xhs_readback.verify_xhs_publish(page, title=a.title, since_ms=a.since_ms,
+                                                        content_id=a.content_id or "",
+                                                        until_ms=getattr(a, "until_ms", None))
+            finally:
+                ctx.close()
+    except KeyboardInterrupt:
+        result = xhs_readback.ReadbackResult("unverified")
+    except Exception:
+        # A recheck error is not evidence that the earlier publish failed.
+        result = xhs_readback.ReadbackResult("readback_error")
+    receipt = publish_receipt.emit(xhs_readback.receipt_from_result(result, read_only=True))
+    print(receipt["message"])
+    return 0 if receipt["outcome"] in {"published", "submitted"} else 5
 
 
 def cmd_whoami(a) -> int:
@@ -828,6 +875,29 @@ def main() -> int:
     add_common(p); add_content(p)
     p.set_defaults(func=cmd_publish_video)
 
+    def millisecond_arg(value):
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("必须是毫秒时间戳整数") from exc
+        if not xhs_readback.valid_since_ms(parsed):
+            raise argparse.ArgumentTypeError("必须是毫秒时间戳，不能使用秒或负数")
+        return parsed
+
+    def content_id_arg(value):
+        if value and not xhs_readback.NOTE_ID.fullmatch(value):
+            raise argparse.ArgumentTypeError("--content-id 必须是 24 位小写十六进制笔记编号")
+        return value
+
+    p = sub.add_parser("verify-publish", help="只读核实已提交笔记，不会重新上传或发布")
+    add_common(p)
+    p.add_argument("--title", required=True, help="提交时的完整标题")
+    p.add_argument("--since-ms", required=True, type=millisecond_arg, help="提交开始的毫秒时间戳")
+    p.add_argument("--until-ms", type=millisecond_arg, help="原提交结束的毫秒时间戳，限制无编号笔记的匹配范围")
+    p.add_argument("--content-id", default="", type=content_id_arg, help="已知笔记编号；填写后仅核实该笔记")
+    p.add_argument("--headed", action="store_true", help="有头模式")
+    p.set_defaults(func=cmd_verify_publish)
+
     p = sub.add_parser("whoami", help="真校验登录态 + 读昵称/头像（输出 JSON）")
     add_common(p)
     p.set_defaults(func=cmd_whoami)
@@ -835,6 +905,8 @@ def main() -> int:
     sub.add_parser("selftest", help="离线自检").set_defaults(func=cmd_selftest)
 
     a = ap.parse_args()
+    if a.cmd == "verify-publish" and a.until_ms is not None and a.until_ms < a.since_ms:
+        ap.error("--until-ms 不能早于 --since-ms")
     if not getattr(a, "func", None):
         ap.print_help()
         return 1

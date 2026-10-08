@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms } from '../lib/api';
+import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification } from '../lib/api';
 import type { PublishReceipt, PublishRequest } from '../lib/api';
 import { isFinalPublishReceipt, isPublishReceipt, mergePublishReceipts, publishPlatformLabel } from '../lib/publishReceipts';
 
@@ -20,12 +20,14 @@ export function usePublishReceipts() {
   const [submitting, setSubmitting] = useState(false);
   const [submittingPlatforms, setSubmittingPlatforms] = useState<string[]>([]);
   const [submissionIssues, setSubmissionIssues] = useState<PublishSubmissionIssue[]>([]);
+  const [verificationBusyIds, setVerificationBusyIds] = useState<string[]>([]);
   const mounted = useRef(false);
   const current = useRef<PublishReceipt[]>([]);
   const initialized = useRef(false);
   const seenOutcomes = useRef(new Set<string>());
   const submittingRef = useRef(false);
   const smsRequests = useRef(new Set<string>());
+  const verificationRequests = useRef(new Set<string>());
   const refreshImpl = useRef<() => Promise<void>>(async () => {});
 
   const accept = useCallback((incoming: PublishReceipt[], quiet = false) => {
@@ -182,6 +184,21 @@ export function usePublishReceipts() {
     } finally { smsRequests.current.delete(receiptId); }
   }, [refresh]);
 
+  const verify = useCallback(async (receiptId: string, automatic?: boolean) => {
+    if (verificationRequests.current.has(receiptId) || !mounted.current) return;
+    verificationRequests.current.add(receiptId);
+    setVerificationBusyIds(ids => [...ids, receiptId]);
+    try {
+      const result = automatic === undefined ? await verifyPublishReceipt(receiptId)
+        : await setPublishVerification(receiptId, automatic);
+      if (!isPublishReceipt(result)) throw new Error('服务返回的核实状态不完整，请刷新回执。');
+      accept([result]);
+    } finally {
+      verificationRequests.current.delete(receiptId);
+      if (mounted.current) setVerificationBusyIds(ids => ids.filter(id => id !== receiptId));
+    }
+  }, [accept]);
+
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
   const dismissNotices = useCallback(() => setNoticeIds([]), []);
@@ -192,10 +209,11 @@ export function usePublishReceipts() {
   });
   const active = receipts.filter(item => !isFinalPublishReceipt(item));
   const verification = active.filter(item => item.state === 'sms_required');
+  const checking = receipts.filter(item => item.verification?.state === 'checking');
 
   return {
-    receipts, notices, active, verification, loaded, refreshing, error, isOpen,
-    submitting, submittingPlatforms, submissionIssues, refresh, submit, submitSms,
+    receipts, notices, active, verification, checking, loaded, refreshing, error, isOpen,
+    submitting, submittingPlatforms, submissionIssues, verificationBusyIds, refresh, submit, submitSms, verify,
     open, close, dismissNotices, dismissIssues,
     submittingLabel: submittingPlatforms.map(publishPlatformLabel).join('、'),
   };
