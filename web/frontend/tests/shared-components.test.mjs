@@ -52,7 +52,7 @@ test('platform icon uses brand image for known platforms and neutral svg for unk
   assert.equal(unknown.querySelector('img'), null, 'no invented brand file is used');
 });
 
-test('turn navigation disables bounds and reports jumps, latest and keyboard moves', async t => {
+test('turn directory opens at the current turn and preserves keyboard jumps and latest controls', async t => {
   const jumps = []; let latest = 0;
   const nodes = [
     { messageIndex: 0, number: 1, label: '第一轮' },
@@ -63,18 +63,74 @@ test('turn navigation disables bounds and reports jumps, latest and keyboard mov
     nodes, current: 1, following: false,
     onJump: index => jumps.push(index), onLatest: () => latest++,
   });
-  const buttons = [...container.querySelectorAll('button')];
-  assert.equal(buttons.find(b => b.getAttribute('aria-label') === '跳转上一轮对话').disabled, false);
-  assert.equal(buttons.find(b => b.getAttribute('aria-label') === '跳转下一轮对话').disabled, false);
-  await act(async () => buttons.find(b => b.getAttribute('aria-label') === '跳转上一轮对话').click());
-  await act(async () => buttons.find(b => b.getAttribute('aria-label') === '回到底部并跟随最新回复').click());
+  const trigger = container.querySelector('.chat-turn-nav-trigger');
+  const open = async () => act(async () => trigger.click());
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(container.querySelector('.chat-turn-popover'), null);
+  await open();
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.activeElement, container.querySelector('ol button[aria-current]'));
+  assert.equal(container.querySelector('[aria-label="跳转上一轮对话"]').disabled, false);
+  assert.equal(container.querySelector('[aria-label="跳转下一轮对话"]').disabled, false);
+  await act(async () => container.querySelector('[aria-label="跳转上一轮对话"]').click());
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, trigger);
+  await open();
+  await act(async () => container.querySelector('[aria-label="回到底部并跟随最新回复"]').click());
   assert.deepEqual(jumps, [0]);
   assert.equal(latest, 1);
   assert.ok(container.textContent.includes('2 / 3'), 'counter reflects current index');
 
-  // keyboard navigation moves focus and reports the target index
+  // Keyboard navigation remains open for browsing successive turns.
+  await open();
   const list = [...container.querySelectorAll('ol button')];
-  list[0].focus = list[0].focus.bind(list[0]); // ensure real focus call
   await act(async () => { list[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
   assert.equal(jumps.at(-1), 1, 'ArrowDown on node 0 jumps to node 1');
+  assert.equal(document.activeElement, list[1]);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  for (const [key, target] of [['End', 2], ['Home', 0], ['ArrowUp', 0]]) {
+    await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true })));
+    assert.equal(jumps.at(-1), target);
+    assert.equal(document.activeElement, list[target]);
+  }
+});
+
+test('turn directory dismisses with Escape or outside pointer and keeps outside focus intact', async t => {
+  const container = await mount(t, turnUrl, {
+    nodes: [{ messageIndex: 0, number: 1, label: '唯一轮次' }], current: 0, following: true,
+    onJump() {}, onLatest() {},
+  });
+  const trigger = container.querySelector('.chat-turn-nav-trigger');
+  await act(async () => trigger.click());
+  assert.equal(container.querySelector('[aria-label="跳转上一轮对话"]').disabled, true);
+  assert.equal(container.querySelector('[aria-label="跳转下一轮对话"]').disabled, true);
+  await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, trigger);
+
+  await act(async () => trigger.click());
+  const outside = document.createElement('input'); document.body.append(outside);
+  t.after(() => outside.remove());
+  await act(async () => {
+    outside.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true }));
+    outside.focus(); // Browsers focus the clicked control after pointerdown.
+  });
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, outside);
+});
+
+test('choosing a turn closes the directory without stealing destination focus', async t => {
+  const destination = document.createElement('div'); destination.tabIndex = -1; document.body.append(destination);
+  t.after(() => destination.remove());
+  let jumped;
+  const container = await mount(t, turnUrl, {
+    nodes: [{ messageIndex: 0, number: 1, label: '目标轮次' }], current: 0, following: false,
+    onJump(index) { jumped = index; destination.focus(); }, onLatest() {},
+  });
+  const trigger = container.querySelector('.chat-turn-nav-trigger');
+  await act(async () => trigger.click());
+  await act(async () => container.querySelector('ol button').click());
+  assert.equal(jumped, 0);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, destination);
 });

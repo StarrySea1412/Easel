@@ -1,7 +1,12 @@
+import { NativeSelect as Select } from './ui/Select';
 import { useRef, useState } from 'react';
 import type { VideoStudioController } from '../hooks/useVideoStudio';
 import type { ImagegenGalleryItem } from '../lib/api';
 import { IconImage } from './settingsIcons';
+import StudioMediaSource from './StudioMediaSource';
+import StudioModelControl from './StudioModelControl';
+import { useStudioMediaInput } from '../hooks/useStudioMediaInput';
+import { firstStudioMedia, STUDIO_MEDIA_ACCEPT } from '../lib/studioClipboard';
 
 const EXAMPLES = [
   ['电影镜头', '清晨薄雾中的森林，镜头缓慢向前推进，阳光穿过树叶，电影质感。'],
@@ -15,19 +20,22 @@ export default function VideoStudioPanel({ video, images, onOpenSettings }: {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [playbackError, setPlaybackError] = useState('');
-  const { reference, job, provider, busy, locked } = video;
+  const { reference, job, provider, busy } = video;
+  const media = useStudioMediaInput(video.uploadReference, video.locked, reference?.id ?? null);
+  const locked = video.locked || media.processing;
   const result = job?.state === 'done' ? job.url : null;
   const supported = provider?.modes.includes(video.mode);
   const canGenerate = !locked && !video.loading && !video.configError && provider?.configured && supported
     && video.prompt.trim().length > 0 && video.prompt.trim().length <= 2000;
-  const receiveFile = (file?: File) => { if (file && !locked) void video.uploadReference(file); };
+  const receiveFile = (file?: File) => { if (file && !locked) void media.receiveFile(file); };
 
   return <>
+    <StudioModelControl model={(busy && job?.model) || (reference ? provider?.imageModel : provider?.model) || ''} service={provider ? `${provider.name} · 当前视频模型` : '当前视频模型'} onSettings={onOpenSettings} />
     <section className={`image-creation video-creation${dragging ? ' is-dragging' : ''}`} aria-label="视频创作工作区"
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!locked) setDragging(true); } }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
       onDrop={event => { event.preventDefault(); setDragging(false); receiveFile(event.dataTransfer.files[0]); }}
-      onPaste={event => { const file = Array.from(event.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { event.preventDefault(); receiveFile(file); } }}>
+      onPaste={event => { const file = firstStudioMedia(event.clipboardData.files); if (file) { event.preventDefault(); receiveFile(file); } }}>
       <div className="image-canvas-toolbar"><span>{result ? '视频结果' : reference ? '视频首帧参考' : '视频画布'}{result && <small>{job?.ratio}{job?.duration ? ` · ${job.duration} 秒` : ''}</small>}</span>
         {result && <div className="image-result-actions"><a href={result} target="_blank" rel="noreferrer">打开视频 ↗</a><a href={result} download>下载视频</a></div>}
       </div>
@@ -51,12 +59,14 @@ export default function VideoStudioPanel({ video, images, onOpenSettings }: {
         {!video.prompt && <div className="image-prompt-suggestions">{(reference ? EXAMPLES.slice(2) : EXAMPLES.slice(0, 2)).map(([label, prompt]) => <button type="button" key={label} disabled={locked} onClick={() => video.setPrompt(prompt)}>{label}</button>)}</div>}
         <div className="image-composer-toolbar"><div className="image-composer-tools">
           <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => uploadInput.current?.click()}><IconImage size={16} />{video.referenceBusy ? '上传中…' : reference ? '换参考图' : '添加参考图'}</button>
-          <input ref={uploadInput} aria-label="上传视频参考图" type="file" hidden accept="image/png,image/jpeg,image/webp" disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
-          <label className="image-ratio-select"><span>比例</span><select aria-label="视频画面比例" disabled={locked || !provider} value={video.ratio} onChange={event => video.setRatio(event.target.value)}>{(provider?.ratios || ['16:9', '9:16', '1:1']).map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select></label>
-          <label className="image-ratio-select"><span>时长</span><select aria-label="视频时长" disabled={locked || !provider} value={video.duration ?? ''} onChange={event => video.setDuration(event.target.value ? Number(event.target.value) : null)}><option value="">默认</option>{provider?.durations.map(duration => <option key={duration} value={duration}>{duration} 秒</option>)}</select></label>
+          <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => void media.pasteClipboard()}>{media.processing ? '读取素材中…' : '从剪贴板粘贴'}</button>
+          <input ref={uploadInput} aria-label="上传视频参考图" type="file" hidden accept={STUDIO_MEDIA_ACCEPT} disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
+          <label className="image-ratio-select"><span>比例</span><Select aria-label="视频画面比例" disabled={locked || !provider} value={video.ratio} onChange={event => video.setRatio(event.target.value)}>{(provider?.ratios || ['16:9', '9:16', '1:1']).map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</Select></label>
+          <label className="image-ratio-select"><span>时长</span><Select aria-label="视频时长" disabled={locked || !provider} value={video.duration ?? ''} onChange={event => video.setDuration(event.target.value ? Number(event.target.value) : null)}><option value="">默认</option>{provider?.durations.map(duration => <option key={duration} value={duration}>{duration} 秒</option>)}</Select></label>
         </div><button type="submit" className="btn btn-primary image-generate" disabled={!canGenerate}>{video.submitting ? '正在提交…' : busy ? '正在生成…' : '生成视频 →'}</button></div>
         {video.prompt.length > 2000 && <p className="image-error" role="alert">描述最多 2000 字，当前 {video.prompt.length} 字，请稍作精简。</p>}
-        <div className="video-provider-row"><label className="image-ratio-select"><span>视频服务</span><select aria-label="视频服务" disabled={locked || video.loading} value={video.providerId} onChange={event => video.selectProvider(event.target.value)}>{!video.config?.providers.length && <option value="">尚未连接</option>}{video.config?.providers.map(item => <option key={item.id} value={item.id}>{item.name}{!item.configured ? ' · 未配置' : ''}</option>)}</select></label><button type="button" className="link-btn" onClick={onOpenSettings}>配置视频服务 ↗</button></div>
+        <StudioMediaSource media={media} locked={locked} />
+        <div className="video-provider-row"><label className="image-ratio-select"><span>视频服务</span><Select aria-label="视频服务" disabled={locked || video.loading} value={video.providerId} onChange={event => video.selectProvider(event.target.value)}>{!video.config?.providers.length && <option value="">尚未连接</option>}{video.config?.providers.map(item => <option key={item.id} value={item.id}>{item.name}{!item.configured ? ' · 未配置' : ''}</option>)}</Select></label><button type="button" className="link-btn" onClick={onOpenSettings}>配置视频服务 ↗</button></div>
         {provider && !supported && <p className="image-field-hint" role="status">当前模型仅支持{provider.modes.includes('image2video') ? '图生视频，请添加参考图' : '文生视频，请移除参考图或更换视频服务'}。</p>}
         <details className="image-advanced"><summary>模型与生成说明</summary><div className="image-advanced-body"><p>当前模型：{(reference ? provider?.imageModel : provider?.model) || '服务默认模型'}。{provider?.hint}</p><p>{video.config?.billingHint || '提交任务会调用已配置的视频服务，可能产生费用。'}</p><p>Ctrl / ⌘ + Enter 生成 · 描述最多 2000 字 · 生成结果保存到作品中</p></div></details>
         {video.error && <p className="image-error" role="alert">{video.error}</p>}

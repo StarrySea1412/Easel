@@ -1,3 +1,4 @@
+import { selectOption, optionValues } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -86,12 +87,13 @@ async function fixture(t, overrides = {}) {
     button: (text) => [...container.querySelectorAll('button')].find((button) => button.textContent.replace(/[▶Ⅱ↺⌖↗]/g, '').trim() === text),
     click: async (button) => act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
     async input(element, value) {
+      if (element.getAttribute('role') === 'combobox') return selectOption(element, value);
       const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
       await act(async () => element.dispatchEvent(new window.Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })));
     },
     async advance(ms) { await act(async () => { harness.now += ms; const callbacks = [...harness.frames.values()]; harness.frames.clear(); for (const callback of callbacks) callback(harness.now); }); },
-    async select(id) { const select = container.querySelector('.office-session-select select'); await act(async () => { select.value = id; select.dispatchEvent(new window.Event('change', { bubbles: true })); }); },
+    async select(id) { const select = container.querySelector('.office-session-select [role="combobox"]'); await selectOption(select, id); },
   };
 }
 
@@ -217,7 +219,7 @@ test('live mode excludes imported sessions, observes only the selection and does
   await view.click(view.button('实时观测'));
   assert.equal(h.frames.size, 0);
   assert.equal(h.leases, 1);
-  assert.deepEqual([...view.container.querySelectorAll('.office-session-select option')].map((item) => item.value), ['one', 'two']);
+  assert.deepEqual(await optionValues(view.container.querySelector('.office-session-select [role="combobox"]')), ['one', 'two']);
   assert.equal(h.scene.agents.length, 2);
   assert.ok(h.scene.agents.every((item) => item.source === 'live'));
   await view.click(view.button('暂停动画'));
@@ -246,7 +248,7 @@ test('no ordinary session leaves observation disabled with an honest empty offic
   assert.equal(view.harness.leases, 0);
   assert.deepEqual(view.harness.scene.agents, []);
   assert.match(view.container.textContent, /还没有可观察的会话/);
-  assert.equal(view.container.querySelector('.office-session-select select').disabled, true);
+  assert.equal(view.container.querySelector('.office-session-select [role="combobox"]').disabled, true);
   assert.equal(view.button('查看所选会话').disabled, true);
 });
 
@@ -361,7 +363,7 @@ for (const count of [9, 12, 20, 50]) test(`${count} live members have complete r
 
 test('all fifty simulated members can be searched and selected across zones, including editing a shared card', async t => {
   const view = await fixture(t);
-  await view.input(view.container.querySelector('.office-demo-team-select select'), '50');
+  await view.input(view.container.querySelector('.office-demo-team-select [role="combobox"]'), '50');
   assert.equal(view.container.querySelectorAll('.office-member-list button').length, 50);
   assert.equal(view.harness.scene.agents.length, 8);
   assert.match(view.container.querySelector('.office-source-copy').textContent, /50 个角色的协作演示/);
@@ -453,7 +455,7 @@ test('demo time is resynchronized after team and mode changes without leaking se
   const view = await fixture(t);
   await view.click(view.button('检查与审阅'));
   const revision = view.harness.scene.demoSeek.revision;
-  await view.input(view.container.querySelector('.office-demo-team-select select'), '50');
+  await view.input(view.container.querySelector('.office-demo-team-select [role="combobox"]'), '50');
   assert.equal(view.harness.scene.demoSeek.seconds, 28);
   assert.ok(view.harness.scene.demoSeek.revision > revision);
   assert.equal(view.harness.scene.paused, true);

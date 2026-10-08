@@ -19,11 +19,27 @@ test('draft restores only a local backend reference with known dimensions',()=>{
 test('mask validation enforces matching dimensions and actual transparent pixels',async()=>{
   let alpha=255,closed=0;
   globalThis.createImageBitmap=async()=>({width:1,height:1,close(){closed++;}});
-  globalThis.document={createElement:()=>({getContext:()=>({drawImage(){},getImageData:()=>({data:new Uint8ClampedArray([0,0,0,alpha])})})})};
+  globalThis.document={createElement:()=>({getContext:()=>({clearRect(){},drawImage(){},getImageData:()=>({data:new Uint8ClampedArray([0,0,0,alpha])})})})};
   const file={type:'image/png',size:10},ref={width:1,height:1};
   await assert.rejects(validateMaskFile(file,{width:2,height:1}),/同尺寸/);
   await assert.rejects(validateMaskFile(file,ref),/透明区域/);
   alpha=0;await validateMaskFile(file,ref);assert.equal(closed,3);
+});
+test('large masks scan every tile without creating full-size canvas or pixel buffers',async()=>{
+  const draws=[],reads=[];let closed=false,clears=0;
+  globalThis.createImageBitmap=async()=>({width:2500,height:1600,close(){closed=true;}});
+  const canvas={width:0,height:0,getContext:()=>({
+    clearRect(){clears++;},
+    drawImage(...args){draws.push(args.slice(1));},
+    getImageData(x,y,width,height){reads.push([width,height]);return {data:new Uint8ClampedArray([0,0,0,draws.length===6?0:255])};},
+  })};
+  globalThis.document={createElement:()=>canvas};
+  await validateMaskFile({type:'image/png',size:100},{width:2500,height:1600});
+  assert.equal(draws.length,6,'transparent pixels in the final partial tile must be found');
+  assert.deepEqual(draws.at(-1),[2048,1024,452,576,0,0,452,576]);
+  assert.ok(reads.every(([w,h])=>w<=1024&&h<=1024));
+  assert.equal(clears,6,'clear each tile so previous opaque pixels cannot hide transparency');
+  assert.equal(closed,true);assert.equal(canvas.width,0);assert.equal(canvas.height,0);
 });
 test('image editing sends reference IDs and auto size while upload stays multipart',async()=>{
   const calls=[];globalThis.fetch=async(url,options)=>{calls.push({url,options});return new Response(JSON.stringify({jobId:'job'}),{headers:{'Content-Type':'application/json'}});};

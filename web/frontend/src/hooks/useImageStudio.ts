@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference } from '../lib/api';
+import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference, saveImagegenModel } from '../lib/api';
 import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel, ImagegenReference } from '../lib/api';
 import { restoreReference, validateReferenceFile, validateMaskFile } from '../lib/imageReferences';
 import { useImageReverse } from './useImageReverse';
@@ -72,6 +72,9 @@ export function useImageStudio(active: boolean) {
   const [imgTick, setImgTick] = useState(0);
   const [gallery, setGallery] = useState<ImagegenGalleryItem[]>([]);
   const [imgChannel, setImgChannel] = useState<ImagegenChannel | null>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelError, setModelError] = useState('');
+  const modelPending = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [galleryError, setGalleryError] = useState('');
@@ -82,6 +85,7 @@ export function useImageStudio(active: boolean) {
     setGalleryError('');
     try {
       const data = await fetchImagegenGallery();
+      if (!data.channel || typeof data.channel.model !== 'string') throw new Error('未读取到生图模型，请刷新或重新保存模型。');
       if (mounted.current && request === galleryRequest.current) { setGallery(data.images || []); setImgChannel(data.channel); }
     } catch (e) {
       if (mounted.current && request === galleryRequest.current) setGalleryError(e instanceof Error ? e.message : '加载失败');
@@ -144,14 +148,14 @@ export function useImageStudio(active: boolean) {
 
   const fireImagegen = useCallback(async () => {
     const p = imgPrompt.trim();
-    if (!p || p.length > 2000 || !imgChannel?.configured || imgJob?.state === 'running' || imgSubmitPending.current) return;
+    if (!p || p.length > 2000 || loading || galleryError || !imgChannel?.configured || !imgChannel.model?.trim() || imgJob?.state === 'running' || imgSubmitPending.current || modelPending.current) return;
     if(referencePending.current)return;
     if(mode==='img2img'&&!reference){setImgErr('请先上传参考图。');return;}
     imgSubmitPending.current = true;
     setImgSubmitting(true);
     setImgErr('');
     try {
-      const options = mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const};
+      const options = { model: imgChannel.model, ...(mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const}) };
       const { jobId } = await startImagegen(p, imgSize, 1, options);
       const job: ImageStudioJob = { jobId, state: 'running', prompt: p, size: imgSize, url: null, error: null, started: Date.now() / 1000, ...options };
       try { sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(job)); } catch { /* optional */ }
@@ -162,18 +166,36 @@ export function useImageStudio(active: boolean) {
       imgSubmitPending.current = false;
       if (mounted.current) setImgSubmitting(false);
     }
-  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask]);
+  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask, loading, galleryError]);
 
-  const uploadReference = useCallback(async (file:File, isMask=false) => {
-    if(referencePending.current || imgSubmitPending.current || imgJob?.state==='running')return;
+  const saveModel = async (value: string): Promise<boolean> => {
+    if (modelPending.current || imgSubmitPending.current || referencePending.current || imgJob?.state === 'running') return false;
+    const model = value.trim();
+    if (!model || model.length > 200 || Array.from(model).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) { setModelError('请填写 1–200 个字符的有效模型名称。'); return false; }
+    modelPending.current = true; setModelSaving(true); setModelError('');
+    try {
+      await saveImagegenModel(model);
+      if (mounted.current) {
+        // Keep the saved name visible immediately; readiness still comes from the backend.
+        setImgChannel(current => current ? { ...current, model } : current);
+        await refreshGallery();
+      }
+      return true;
+    } catch (e) { if (mounted.current) setModelError(e instanceof Error ? e.message : '模型保存失败。'); return false; }
+    finally { modelPending.current = false; if (mounted.current) setModelSaving(false); }
+  };
+
+  const uploadReference = useCallback(async (file:File, isMask=false): Promise<ImagegenReference | null> => {
+    if(!mounted.current || referencePending.current || imgSubmitPending.current || imgJob?.state==='running')return null;
     referencePending.current=true;setReferenceBusy(true);setImgErr('');
     try {
       validateReferenceFile(file,isMask);
       if(isMask){if(!reference)throw new Error('请先上传参考图，再上传同尺寸蒙版。');await validateMaskFile(file,reference);}
       const uploaded=await uploadImagegenReference(file);
-      if(!mounted.current)return;
+      if(!mounted.current)return null;
       if(isMask)setMask(uploaded);else{setReference(uploaded);setMask(null);setMode('img2img');setImgSize(closestImageSize(uploaded.width,uploaded.height));}
-    } catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'图片上传失败。');}
+      return uploaded;
+    } catch(e){if(mounted.current)setImgErr(e instanceof Error?e.message:'图片上传失败。');return null;}
     finally{referencePending.current=false;if(mounted.current)setReferenceBusy(false);}
   },[imgJob,reference]);
   const useGalleryReference = useCallback(async (item:ImagegenGalleryItem) => {
@@ -190,7 +212,7 @@ export function useImageStudio(active: boolean) {
   const clearReference = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running'){setReference(null);setMask(null);setMode('generate');}};
   const clearMask = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running')setMask(null);};
   return { reference,mask,referenceBusy,uploadReference,useGalleryReference,clearReference,clearMask,imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
-    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode };
+    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode, saveModel, modelSaving, modelError };
 }
 
 export type ImageStudioController = ReturnType<typeof useImageStudio>;

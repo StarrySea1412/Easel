@@ -1,0 +1,7 @@
+.ca-account-insights { display: grid; gap: 16px; margin: 20px 0; }
+.ca-platform-profile ul { padding-left: 22px; line-height: 1.8; }
+.ca-platform-profile summary { cursor: pointer; }
+.ca-insight-facts { display: grid; gap: 10px; }
+.ca-insight-fact { padding: 12px 16px; background: var(--bg-secondary, #f5f6f8); border-radius: 8px; overflow-wrap: anywhere; }
+.ca-insight-fact p { white-space: pre-wrap; }
+.ca-account-insights .ca-card-heading { flex-wrap: wrap; gap: 12px; }

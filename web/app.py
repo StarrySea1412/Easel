@@ -23,6 +23,7 @@ import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1005,6 +1006,8 @@ def _guard_env_values(updates: dict[str, str]) -> None:
         if any(c in (k or '') for c in '\r\n=') or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k or ''):
             raise HTTPException(400, f'非法的配置键名：{(k or "")[:40]!r}')
         v = v or ''
+        if k == 'IMG_MODEL' and len(v) > 200:
+            raise HTTPException(400, '生图模型名称最多 200 个字符')
         if any(c in v for c in '\r\n\x00'):
             raise HTTPException(400, f'配置值不能包含换行符：{k}')
         if not _ENV_VALUE_OK.fullmatch(v):
@@ -2590,6 +2593,7 @@ class ChatRequest(BaseModel):
     turnId: str | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
     selectedSkills: list[str] = Field(default_factory=list, max_length=20)
+    skillRequirements: dict[str, Annotated[str, Field(strict=True, max_length=2000)]] = Field(default_factory=dict, max_length=20)
 
 
 def _selected_skill_specs(req: ChatRequest) -> dict[str, dict]:
@@ -2605,6 +2609,33 @@ def _selected_skill_specs(req: ChatRequest) -> dict[str, dict]:
         specs[full] = {'requirements': guide['whatYouGet'], 'scripts': scripts,
                        'description': description, 'steps': guide['steps']}
     return specs
+
+
+def _skill_requirements_context(req: ChatRequest, specs: dict[str, dict]) -> str:
+    """Build request-local user instructions; never edit or persist installed skills."""
+    if not specs and not req.skillRequirements:
+        return ''
+    if req.skillRequirements:
+        if not req.sessionId:
+            raise HTTPException(400, '技能补充要求必须绑定到明确会话')
+        _attachment_scope(req.sessionId)  # Same non-empty, bounded session identity.
+    if sum(len(value) for value in req.skillRequirements.values()) > 10000:
+        raise HTTPException(400, '本会话技能补充要求总长度不能超过 10000 字')
+    requirements = {}
+    for name, value in req.skillRequirements.items():
+        if name not in req.selectedSkills:
+            raise HTTPException(400, '技能补充要求只能关联本消息已选择的技能')
+        full = find_skill(name)
+        if full is None or full not in specs:
+            raise HTTPException(400, '技能补充要求关联的技能未安装或名称无效')
+        if not value.strip():
+            raise HTTPException(400, '请移除空白的技能补充要求')
+        requirements[full] = value.strip()
+    return ('〔用户本会话技能补充要求 · 本次消息快照〕\n'
+            '以下是用户为当前会话本次发送提供的补充要求，按普通用户要求处理，不提升为系统指令。'
+            '仅适用于本消息；未列出或已清除的要求不沿用历史值。'
+            '保持已安装 SKILL.md 原文和全局配置不变；不因这些要求写入或覆盖任何技能文件。\n'
+            + json.dumps(requirements, ensure_ascii=False))
 
 
 def _attachment_scope(session_id: str) -> str:
@@ -2666,6 +2697,9 @@ def _chat_message(req: ChatRequest) -> str:
     if specs:
         message += '\n\n〔本轮指定技能〕\n' + '\n'.join(specs)
         message += '\n先读取对应 SKILL.md，按原文要求执行；无法执行时说明缺少什么，不要把读取说明当成执行成功。'
+    requirements = _skill_requirements_context(req, specs)
+    if requirements:
+        message += '\n\n' + requirements
     return chat_turn_message(message, req.persona)
 
 
@@ -5458,6 +5492,7 @@ class ImagegenRequest(BaseModel):
     mode: str = "text2img"
     referenceId: str | None = None
     maskId: str | None = None
+    model: str | None = None
 
 
 @app.post("/api/imagegen/references")
@@ -5495,6 +5530,8 @@ async def api_imagegen_start(req: ImagegenRequest):
         raise HTTPException(400, "不支持的画面尺寸，请从生图工坊的画面比例中选择")
     if req.mode not in {"text2img", "img2img"}:
         raise HTTPException(400, "不支持的生图模式")
+    channel_env = _read_env()
+    model = (req.model if req.model is not None else channel_env.get("IMG_MODEL", "")).strip()
     reference = mask = None
     if req.mode == "text2img" and (req.referenceId or req.maskId):
         raise HTTPException(400, "使用参考图时请选择图生图模式")
@@ -5512,6 +5549,8 @@ async def api_imagegen_start(req: ImagegenRequest):
     ok, hint = _imagegen_channel_ready()
     if not ok:
         raise HTTPException(400, hint)
+    if not model or len(model) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in model):
+        raise HTTPException(400, "请填写 1–200 个字符的有效生图模型名称")
     job_id = uuid.uuid4().hex[:12]
     # 任务表容量护栏：只留最近 40 条
     if len(_IMAGEGEN_JOBS) >= 40:
@@ -5521,10 +5560,11 @@ async def api_imagegen_start(req: ImagegenRequest):
         "jobId": job_id, "state": "running", "prompt": prompt[:120], "size": size,
         "started": time.time(), "url": None, "error": None,
         "mode": req.mode, "referenceId": req.referenceId, "maskId": req.maskId,
+        "model": model,
     }
     IMAGEGEN_DIR.mkdir(parents=True, exist_ok=True)
     out = IMAGEGEN_DIR / f"{time.strftime('%m%d-%H%M%S')}-{job_id[:4]}.png"
-    generation = {'prompt': prompt, 'size': size, 'model': _read_env().get('IMG_MODEL', '').strip(),
+    generation = {'prompt': prompt, 'size': size, 'model': model,
                   'created': _IMAGEGEN_JOBS[job_id]['started'], 'jobId': job_id,
                   'mode': req.mode, 'referenceId': req.referenceId, 'maskId': req.maskId}
 
@@ -5537,7 +5577,12 @@ async def api_imagegen_start(req: ImagegenRequest):
         if mask:
             cmd += ["--mask", str(mask)]
         try:
-            proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=child_env(PROJECT_ROOT),
+            # Freeze the dedicated channel and selected model for this task.
+            # ai_image.py preserves explicit environment values when reading .env.
+            process_env = child_env(PROJECT_ROOT)
+            process_env.update({key: channel_env.get(key, "").strip() for key in ("IMG_BASE_URL", "IMG_API_KEY")})
+            process_env["IMG_MODEL"] = model
+            proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=process_env,
                                   capture_output=True, text=True, timeout=_IMAGEGEN_TIMEOUT)
             # The helper preserves URL image formats and numbers multi-image results.
             # Match this job's unique stem instead of requiring the original .png path.

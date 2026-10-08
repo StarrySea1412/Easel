@@ -114,7 +114,7 @@ test('only an accepted send clears its own draft and failed acceptance retains t
   assert.match(view.container.querySelector('[role=alert]').textContent, /草稿已保留/);
   view.h.accepted = true;
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent.at(-1), ['本轮文本', [file], []]);
+  assert.deepEqual(view.h.sent.at(-1), ['本轮文本', [file], [], {}]);
   assert.equal(view.container.querySelector('textarea').value, '');
   assert.equal(view.container.querySelector('.attach-chip'), null);
   assert.equal(JSON.parse(view.storage.values.get(draftKey('one'))).text, '');
@@ -152,7 +152,7 @@ test('refresh restores text but requires reattachment or an explicit dismissal b
   await view.reload();
   await view.click([...view.container.querySelectorAll('button')].find(button => button.textContent === '忽略这些素材'));
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent.at(-1), ['刷新后仍在', [], []]);
+  assert.deepEqual(view.h.sent.at(-1), ['刷新后仍在', [], [], {}]);
 });
 
 test('malformed draft storage is preserved even after edits, clearing and persistence retry', async t => {

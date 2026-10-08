@@ -1,3 +1,4 @@
+import { NativeSelect as Select } from './ui/Select';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchSkillDetail, executeSkill, saveEnv } from '../lib/api';
 import type { SkillDetail } from '../lib/api';
@@ -253,14 +254,14 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                         </span>}
                       </label>
                       {k.choices.length > 0 ? (
-                        <select
+                        <Select
                           className="field"
                           value={envInputs[k.env] ?? ''}
                           onChange={(e) => setEnvInputs((p) => ({ ...p, [k.env]: e.target.value }))}
                         >
                           <option value="">{k.configured ? `当前：${k.masked}` : `请选择 ${k.env}`}</option>
                           {k.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
-                        </select>
+                        </Select>
                       ) : (
                         <input
                           className="field"
@@ -293,11 +294,11 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                           </span>}
                         </label>
                         {k.choices.length > 0 ? (
-                          <select className="field" value={envInputs[k.env] ?? ''}
+                          <Select className="field" value={envInputs[k.env] ?? ''}
                             onChange={(e) => setEnvInputs((p) => ({ ...p, [k.env]: e.target.value }))}>
                             <option value="">{k.configured ? `当前：${k.masked}` : `请选择 ${k.env}`}</option>
                             {k.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
-                          </select>
+                          </Select>
                         ) : (
                           <input
                             className="field"

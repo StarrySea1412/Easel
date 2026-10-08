@@ -124,8 +124,23 @@ def create_router(root_getter, capture, providers_getter=lambda: []):
             raise HTTPException(404, '所选账号下未找到该作品')
         providers = await asyncio.to_thread(providers_getter)
         provider = next((p for p in providers if p.configured), None)
-        review = await asyncio.to_thread(interpret, content, provider)
+        review = await asyncio.to_thread(interpret, content, provider, platform)
         run(store().save_review, platform, account_id, content, review)
         return review
+
+    @router.post('/insights')
+    async def account_insights(request: Request):
+        from content_analysis_ai import insights
+        data = await payload(request)
+        platform, account_id = run(scope, data.get('platform'), data.get('accountId'))
+        source = run(store().report, platform, account_id)
+        providers = await asyncio.to_thread(providers_getter)
+        provider = next((p for p in providers if p.configured), None)
+        result = await asyncio.to_thread(insights, source, provider)
+        try:
+            store().save_insights(platform, account_id, source['contents'], result)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return result
 
     return router

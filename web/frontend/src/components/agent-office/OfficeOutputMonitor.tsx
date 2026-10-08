@@ -1,3 +1,4 @@
+import { NativeSelect as Select } from '../ui/Select';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useWorkspaceOutputs, type WorkspaceOutput, type WorkspaceOutputKind } from './workspaceOutputData';
 import OfficeOutputPreview from './OfficeOutputPreview';
@@ -48,10 +49,10 @@ function OfficeOutputSession({ mode, onOpenOutputs }: OfficeOutputMonitorProps) 
     <header className="office-output-heading"><div><span className="office-output-eyebrow">WORKSPACE OUTPUTS</span><h2 id={titleId}>工作区产出</h2><p>{mode === 'demo' ? '模拟文件示例，不会读取或链接真实产出。' : '展示整个工作区的近期文件，不代表由当前会话或某位员工生成。'}</p></div>
       {mode === 'live' && <button type="button" className="office-output-refresh" onClick={refresh} disabled={loading}>{loading ? '读取中…' : '刷新产出'}</button>}
     </header>
-    <div className="office-output-toolbar"><span className={`office-output-source${stale ? ' is-stale' : ''}`}>{mode === 'demo' ? '模拟示例' : stale ? '上次快照 · 更新中断' : snapshot ? '真实文件元数据' : '工作区文件'}</span><label>类型<select aria-label="筛选产出类型" value={filter} onChange={event => { setFilter(event.target.value); setSelectedId(null); }}><option value="all">全部</option>{Object.entries(KIND_LABEL).map(([kind, label]) => <option value={kind} key={kind}>{label}</option>)}</select></label></div>
+    <div className="office-output-toolbar"><span className={`office-output-source${stale ? ' is-stale' : ''}`}>{mode === 'demo' ? '模拟示例' : stale ? '上次快照 · 更新中断' : snapshot ? '真实文件元数据' : '工作区文件'}</span><label>类型<Select aria-label="筛选产出类型" value={filter} onChange={event => { setFilter(event.target.value); setSelectedId(null); }}><option value="all">全部</option>{Object.entries(KIND_LABEL).map(([kind, label]) => <option value={kind} key={kind}>{label}</option>)}</Select></label></div>
     <div className="office-output-searchbar">
       <label className="office-output-search">搜索文件名或路径<input ref={searchInput} type="search" maxLength={160} value={query} placeholder="例如：品牌、草稿、项目目录" onChange={event => { setQuery(event.target.value); setSelectedId(null); }} /></label>
-      <label className="office-output-sort">排序<select aria-label="产出排序方式" value={sort} onChange={event => setSort(event.target.value as OfficeOutputSort)}><option value="recent">最近修改</option><option value="name">文件名称</option><option value="size">文件大小</option></select></label>
+      <label className="office-output-sort">排序<Select aria-label="产出排序方式" value={sort} onChange={event => setSort(event.target.value as OfficeOutputSort)}><option value="recent">最近修改</option><option value="name">文件名称</option><option value="size">文件大小</option></Select></label>
     </div>
     <div className="office-output-search-summary"><span role="status">显示 {visible.length} / {items.length} 个文件 · 仅搜索当前清单</span>{(query || filter !== 'all') && <button type="button" onClick={() => { setQuery(''); setFilter('all'); setSelectedId(null); searchInput.current?.focus(); }}>清除筛选</button>}</div>
     {mode === 'live' && <div className="office-output-observation">

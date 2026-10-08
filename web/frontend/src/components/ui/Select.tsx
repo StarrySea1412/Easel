@@ -1,5 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { AriaAttributes, KeyboardEvent } from 'react';
+import { Children, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { AriaAttributes, KeyboardEvent, ReactNode, SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import './select.css';
 
@@ -20,10 +20,11 @@ export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-l
   disabled?: boolean;
   required?: boolean;
   className?: string;
+  title?: string;
 }
 
 /** Single-choice combobox. Focus stays on the trigger while navigating its listbox. */
-export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', ...aria }: SelectProps) {
+export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, ...aria }: SelectProps) {
   const generatedId = useId();
   const triggerId = id || `select-${generatedId}`;
   const listId = `${triggerId}-options`;
@@ -116,7 +117,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
-      const viewportWidth = document.documentElement.clientWidth;
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
       if (rect.bottom < 0 || rect.top > viewportHeight) { setOpen(false); return; }
       const margin = 8;
       const gap = 6;
@@ -133,13 +134,13 @@ export default function Select({ id, name, value, options, onChange, placeholder
       });
     }
     updatePosition();
-    const observer = new ResizeObserver(updatePosition);
-    if (triggerRef.current) observer.observe(triggerRef.current);
-    if (popupRef.current) observer.observe(popupRef.current);
+    const observer = typeof window.ResizeObserver === 'function' ? new window.ResizeObserver(updatePosition) : null;
+    if (triggerRef.current) observer?.observe(triggerRef.current);
+    if (popupRef.current) observer?.observe(popupRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
@@ -168,7 +169,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
   }, [expanded, activeIndex]);
 
   return <>
-    <button ref={triggerRef} id={triggerId} type="button" role="combobox"
+    <button ref={triggerRef} id={triggerId} type="button" role="combobox" value={value} title={title}
       className={`easel-select ${expanded ? 'is-open' : ''} ${className}`.trim()}
       aria-expanded={expanded} aria-haspopup="listbox" aria-controls={expanded ? listId : undefined}
       aria-activedescendant={expanded && options[activeIndex] ? `${listId}-${activeIndex}` : undefined}
@@ -183,7 +184,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       aria-label={aria['aria-label']} aria-labelledby={aria['aria-labelledby'] || (!aria['aria-label'] ? triggerId : undefined)}
       className="easel-select-popup" style={position}>
       {options.map((option, index) => <div key={option.value} ref={(node) => { optionRefs.current[index] = node; }}
-        id={`${listId}-${index}`} role="option" aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
+        id={`${listId}-${index}`} role="option" data-value={option.value} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
         className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
         onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
@@ -191,5 +192,40 @@ export default function Select({ id, name, value, options, onChange, placeholder
         {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
       </div>)}
     </div>, document.body)}
+  </>;
+}
+
+function optionText(node: ReactNode): string {
+  return Children.toArray(node).map(child => isValidElement<{children?:ReactNode}>(child) ? optionText(child.props.children) : String(child)).join('');
+}
+function childOptions(children: ReactNode, groupDisabled = false): SelectOption[] {
+  return Children.toArray(children).flatMap(child => {
+    if (!isValidElement<{children?:ReactNode;value?:string|number;disabled?:boolean}>(child)) return [];
+    if (child.type === 'option') return [{value:String(child.props.value ?? optionText(child.props.children)),label:optionText(child.props.children),disabled:groupDisabled || child.props.disabled}];
+    return childOptions(child.props.children,groupDisabled || child.props.disabled);
+  });
+}
+
+/** Native option/event compatibility; the visible control always uses our listbox. */
+export function NativeSelect({children,value,defaultValue,onChange,id,className,disabled,required,name,...props}: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple' | 'size'>) {
+  const nativeRef = useRef<HTMLSelectElement>(null);
+  const generatedId=useId();
+  const triggerId=id || `native-select-${generatedId}`;
+  const errorId=`${triggerId}-error`;
+  const [localValue,setLocalValue] = useState<string|undefined>(()=>defaultValue === undefined ? undefined : String(defaultValue));
+  const [validationMessage,setValidationMessage] = useState('');
+  const options=childOptions(children);
+  const selectedValue=value === undefined ? localValue ?? options.find(option=>!option.disabled)?.value ?? '' : String(value);
+  useEffect(()=>{
+    if(disabled || !required || nativeRef.current?.validity.valid) setValidationMessage('');
+  },[selectedValue,disabled,required]);
+  return <>
+    <Select id={triggerId} value={selectedValue} options={options} className={className} disabled={disabled} required={required} title={props.title}
+      aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby']} aria-describedby={[props['aria-describedby'],validationMessage?errorId:undefined].filter(Boolean).join(' ') || undefined} aria-invalid={validationMessage?true:props['aria-invalid']}
+      onChange={next=>{const native=nativeRef.current;if(native){native.value=next;native.dispatchEvent(new window.Event('change',{bubbles:true}));}}}/>
+    <select {...props} ref={nativeRef} name={name} value={selectedValue} disabled={disabled} required={required} aria-hidden="true" tabIndex={-1} style={{display:'none'}}
+      onInvalid={event=>{event.preventDefault();setValidationMessage('请选择一项。');document.getElementById(triggerId)?.focus({preventScroll:true});props.onInvalid?.(event);}}
+      onChange={event=>{setLocalValue(event.target.value);setValidationMessage('');onChange?.(event);}}>{children}</select>
+    {validationMessage&&<span id={errorId} role="alert">{validationMessage}</span>}
   </>;
 }

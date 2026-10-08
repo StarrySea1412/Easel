@@ -45,7 +45,7 @@ function imported(overrides = {}) {
     id: 'backup-copy', title: '导入的创作记录', created: 123,
     importedFromBackup: true,
     messages: [
-      { role: 'user', content: '第一轮问题', turnId: 'original-turn-a', selectedSkills: ['sample-skill'] },
+      { role: 'user', content: '第一轮问题', turnId: 'original-turn-a', selectedSkills: ['sample-skill'], skillRequirements: { 'sample-skill': '不得再次执行的补充要求' } },
       { role: 'assistant', content: '第一轮备份答复', turnId: 'original-turn-a' },
       { role: 'user', content: '第二轮问题', turnId: 'original-turn-b' },
       { role: 'assistant', content: '第二轮备份答复', turnId: 'original-turn-b' },
@@ -128,15 +128,21 @@ test('an imported chat stays read-only despite forged stream and pending state, 
 
   const scroller = view.container.querySelector('.chat-messages');
   t.mock.method(scroller, 'scrollTo', ({ top }) => { scroller.scrollTop = top; });
+  const directory = view.container.querySelector('.chat-turn-nav-trigger');
+  await view.click(directory);
   const nodes = [...view.container.querySelectorAll('.chat-turn-node-list button')];
   assert.equal(nodes.length, 2);
   await view.click(nodes[0]);
-  assert.equal(nodes[0].getAttribute('aria-current'), 'step');
+  assert.equal(directory.getAttribute('aria-expanded'), 'false');
+  assert.match(directory.textContent, /1 \/ 2/);
   assert.equal(document.activeElement?.getAttribute('aria-label'), '第 1 轮对话');
+  await view.click(directory);
+  assert.equal(view.container.querySelector('.chat-turn-node-list button').getAttribute('aria-current'), 'step');
   await view.click(view.container.querySelector('button[aria-label="跳转下一轮对话"]'));
-  assert.equal(nodes[1].getAttribute('aria-current'), 'step');
+  assert.match(directory.textContent, /2 \/ 2/);
+  await view.click(directory);
   await view.click(view.container.querySelector('button[aria-label="回到底部并跟随最新回复"]'));
-  assert.equal(nodes[1].getAttribute('aria-current'), 'step');
+  assert.match(directory.textContent, /2 \/ 2/);
 
   await view.click([...notice.querySelectorAll('button')].find((button) => button.textContent === '新建对话继续'));
   assert.deepEqual(actions.calls, { send: 0, stop: 0, resend: 0, question: 0, audit: 0, newChat: 1 });

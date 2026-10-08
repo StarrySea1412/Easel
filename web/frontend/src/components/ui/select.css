@@ -50,6 +50,10 @@
 .easel-select-option.is-disabled { color: var(--text-tertiary); cursor: not-allowed; }
 .easel-select-option.is-disabled .easel-select-option-description { color: var(--text-tertiary); }
 .easel-select-check { flex: none; }
+.ca-bench label > button.easel-select, .ca-demo-metric-label button.easel-select, .ca-demo-table-tools button.easel-select, .usage-request-filters button.easel-select { display: flex; }
+.ca-demo-metric-label .easel-select { min-height: 32px; }
+.image-ratio-select .easel-select { min-height: 36px; padding-right: 10px; width: auto; }
+.persona-select.easel-select { background-image: none; }
 @media (prefers-reduced-motion: reduce) { .easel-select, .easel-select-chevron { transition: none; } }
 @media (forced-colors: active) {
   .easel-select:focus-visible, .easel-select.is-open { outline: 2px solid Highlight; outline-offset: 2px; }

@@ -1,3 +1,4 @@
+import { selectOption } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
@@ -60,9 +61,7 @@ async function fixture(t) {
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, value);
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  const option = async (label, value) => act(async () => {
-    const input = container.querySelector(`select[aria-label="${label}"]`); input.value = value; input.dispatchEvent(new window.Event('change', { bubbles: true }));
-  });
+  const option = async (label, value) => selectOption(container.querySelector(`[role="combobox"][aria-label="${label}"]`), value);
   await render();
   return { h, container, render, click, button, query, option,
     rows: () => [...container.querySelectorAll('.office-output-file-main strong')].map(item => item.textContent),
@@ -78,7 +77,7 @@ test('search/type filters compose without network reads and clear restores focus
   await view.option('筛选产出类型', 'image');
   assert.deepEqual(view.rows(), []);
   assert.match(view.container.textContent, /没有同时匹配关键词和类型/);
-  const clear = view.button('清除筛选'); clear.focus(); await view.click(clear);
+  const clear = view.button('清除筛选'); await act(async () => clear.focus()); await view.click(clear);
   assert.equal(document.activeElement, view.container.querySelector('input'));
   assert.equal(view.container.querySelector('input').value, '');
   assert.equal(view.container.querySelector('[aria-label="筛选产出类型"]').value, 'all');

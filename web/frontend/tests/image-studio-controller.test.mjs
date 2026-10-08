@@ -29,12 +29,14 @@ async function fixture(t, initial = {}) {
   sessionStorage.clear();
   sessionStorage.setItem(draftKey, JSON.stringify(initial));
   const requests = [];
+  let serverModel = 'test-model';
+  let galleryFailure = '';
   t.mock.method(globalThis, 'fetch', (url, options = {}) => {
     const request = { url: String(url), options, method: options.method || 'GET' };
     requests.push(request);
     if (url === '/api/image-reverse/config') return Promise.resolve(json({ providers: [] }));
-    if (url === '/api/imagegen' && request.method === 'GET') return Promise.resolve(json({
-      images: [], channel: { configured: true, baseUrl: '', keyMasked: '', model: 'test-model' },
+    if (url === '/api/imagegen' && request.method === 'GET') return Promise.resolve(galleryFailure ? json({ detail: galleryFailure }, 503) : json({
+      images: [], channel: { configured: true, baseUrl: '', keyMasked: '', model: serverModel },
     }));
     return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
   });
@@ -47,6 +49,8 @@ async function fixture(t, initial = {}) {
   t.after(async () => { await act(async () => root.unmount()); container.remove(); sessionStorage.clear(); });
   return {
     requests, state: () => current,
+    serverModel: model => { serverModel = model; },
+    serverError: message => { galleryFailure = message; },
     stored: () => JSON.parse(sessionStorage.getItem(draftKey)),
     uploads: () => requests.filter(r => r.url === '/api/imagegen/references'),
     starts: () => requests.filter(r => r.url === '/api/imagegen' && r.method === 'POST'),
@@ -76,7 +80,7 @@ test('uploading a reference selects its closest supported ratio and sends a real
 
   await f.run(s => s.fireImagegen());
   assert.deepEqual(JSON.parse(f.starts()[0].options.body), {
-    prompt: '把背景改成黄昏', size: '1536x864', n: 1, mode: 'img2img', referenceId: 'wide',
+    prompt: '把背景改成黄昏', size: '1536x864', n: 1, mode: 'img2img', referenceId: 'wide', model: 'test-model',
   });
 });
 
@@ -90,7 +94,7 @@ test('clearing the reference clears its mask and the next generation sends no im
   assert.deepEqual(f.stored(), { ...draft(), mode: 'generate', reference: null, mask: null });
   await f.run(s => s.fireImagegen());
   assert.deepEqual(JSON.parse(f.starts()[0].options.body), {
-    prompt: draft().prompt, size: '1024x1024', n: 1, mode: 'text2img',
+    prompt: draft().prompt, size: '1024x1024', n: 1, mode: 'text2img', model: 'test-model',
   });
 });
 
@@ -205,6 +209,60 @@ test('upload, submission and running-job locks prevent duplicate requests and re
   assert.equal(f.state().reference, null, 'editing becomes available after generation completes');
   await f.run(s => s.uploadReference(file('after-done.png')));
   assert.equal(f.uploads().length, 2, 'a completed job does not leave the upload lock stuck');
+});
+
+test('saving a custom model persists only IMG_MODEL and freezes generation until the saved channel is refreshed', async t => {
+  const f = await fixture(t, { prompt: '自定义模型测试' });
+  await f.run(s => { void s.saveModel('  custom/image-v2  '); void s.saveModel('duplicate'); void s.fireImagegen(); });
+  assert.equal(f.state().modelSaving, true);
+  const writes = f.requests.filter(r => r.url === '/api/env');
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(writes[0].options.body), { updates: { IMG_MODEL: 'custom/image-v2' } });
+  assert.equal(f.starts().length, 0);
+  f.serverModel('custom/image-v2');
+  await f.reply(writes[0], json({ ok: true }));
+  assert.equal(f.state().modelSaving, false);
+  assert.equal(f.state().imgChannel.model, 'custom/image-v2');
+  await f.run(s => s.fireImagegen());
+  assert.equal(JSON.parse(f.starts()[0].options.body).model, 'custom/image-v2');
+});
+
+test('invalid or failed custom model updates preserve the usable saved model', async t => {
+  const f = await fixture(t, { prompt: '保留原模型' });
+  for (const model of ['', 'bad\nIMG_API_KEY=bad', 'a'.repeat(201)]) await f.run(s => s.saveModel(model));
+  assert.equal(f.requests.filter(r => r.url === '/api/env').length, 0);
+  assert.match(f.state().modelError, /有效模型名称/);
+  await f.run(s => s.saveModel('unavailable-model'));
+  await f.reply(f.requests.find(r => r.url === '/api/env'), json({ detail: '磁盘不可写' }, 503));
+  assert.equal(f.state().imgChannel.model, 'test-model');
+  assert.equal(f.state().modelSaving, false);
+  assert.match(f.state().modelError, /磁盘不可写/);
+});
+
+test('a saved model remains visible but cannot generate until a failed configuration refresh recovers', async t => {
+  const f = await fixture(t, { prompt: '确认模型后再生成' });
+  await f.run(s => s.saveModel('saved-model'));
+  f.serverError('无法重新读取配置');
+  await f.reply(f.requests.find(r => r.url === '/api/env'), json({ ok: true }));
+  assert.equal(f.state().imgChannel.model, 'saved-model');
+  assert.equal(f.state().modelSaving, false);
+  assert.match(f.state().galleryError, /无法重新读取配置/);
+  await f.run(s => s.fireImagegen());
+  assert.equal(f.starts().length, 0);
+  f.serverError(''); f.serverModel('saved-model');
+  await f.run(s => s.refreshGallery());
+  assert.equal(f.state().galleryError, '');
+  await f.run(s => s.fireImagegen());
+  assert.equal(JSON.parse(f.starts()[0].options.body).model, 'saved-model');
+});
+
+test('a legacy or malformed response with no model cannot authorize a generation using stale settings', async t => {
+  const f = await fixture(t, { prompt: '需要已知模型' });
+  f.serverModel(undefined);
+  await f.run(s => s.refreshGallery());
+  assert.match(f.state().galleryError, /未读取到生图模型/);
+  await f.run(s => s.fireImagegen());
+  assert.equal(f.starts().length, 0);
 });
 
 test.after(() => window.close());

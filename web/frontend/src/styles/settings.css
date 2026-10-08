@@ -266,7 +266,7 @@
 .settings-page .btn-fill { border-color: var(--accent-end); background: var(--accent-end); color: #fff; }
 .settings-page .btn-fill:hover:not(:disabled) { filter: brightness(.93); }
 .settings-page .btn-primary { border: 0; background: var(--text); color: #fff; box-shadow: none; }
-.settings-page .btn-primary:hover:not(:disabled) { background: #424039; box-shadow: none; filter: none; }
+.settings-page .btn-primary:hover:not(:disabled) { background: var(--button-hover); box-shadow: none; filter: none; }
 .settings-page .prog { display: flex; align-items: center; flex: 1 1 60px; gap: 7px; min-width: 0; }
 .settings-page .prog .bar { flex: 1; min-width: 20px; height: 5px; border-radius: 99px; background: var(--surface-hover); overflow: hidden; }
 .settings-page .prog .bar i { display: block; width: 40%; height: 100%; border-radius: 99px; background: var(--accent-gradient); animation: settings-slide 1.1s cubic-bezier(.22, 1, .36, 1) infinite; }

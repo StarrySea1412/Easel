@@ -5,16 +5,18 @@ import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillGuidePreview from './SkillGuidePreview';
+import { IconSpark } from './icons';
 import '../styles/skill-picker.css';
 
 interface BrushEntryProps {
+  compact?: boolean;
   selectedSkills: string[];
   onPick: (text: string, skill: string, example?: boolean) => void;
   onRemove: (skill: string) => void;
 }
 
 /** Choose installed skills while keeping their actual SKILL.md guide in view. */
-export default function BrushEntry({ selectedSkills, onPick, onRemove }: BrushEntryProps) {
+export default function BrushEntry({ selectedSkills, onPick, onRemove, compact = false }: BrushEntryProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState(0);
   const [q, setQ] = useState('');
@@ -85,9 +87,11 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove }: BrushEn
   }
 
   return <div className={`brush-entry${open ? ' open' : ''}`}>
-    <button ref={triggerRef} type="button" className="brush-btn" onClick={() => setOpen((value) => !value)} aria-label="选择创作技能" title="选择创作技能" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}>
+    <button ref={triggerRef} type="button" className={compact ? 'composer-skill-button' : 'brush-btn'} onClick={() => setOpen((value) => !value)} aria-label="选择创作技能" title={selectedSkills.length ? `已选 ${selectedSkills.length} 个创作技能，点击调整` : '选择创作技能'} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined}>
+      {compact ? <><IconSpark size={15} /><span className="composer-skill-label">技能</span>{selectedSkills.length > 0 && <span className="composer-skill-count" aria-label={`已选 ${selectedSkills.length} 个技能`}>{selectedSkills.length}</span>}<svg className="composer-skill-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></> : <>
       <svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#8adfce" /><stop offset="1" stopColor="#2f6fae" /></linearGradient></defs><g transform="rotate(45 12 12)"><rect x="11.15" y="1.6" width="1.7" height="10" rx=".85" fill={`url(#${gradientId})`} /><rect x="10.6" y="11.5" width="2.8" height="1.75" rx=".6" fill="#b9e3d9" /><path d="M10.7 13.2 C9.95 16.6 10.2 19.9 11.95 22.6 C13.7 19.9 13.95 16.6 13.2 13.2 Z" fill="#2f6fae" /></g></svg>
       <span className="brush-mark" aria-hidden="true" /><span className="brush-tip">看看能做什么</span>
+      </>}
     </button>
     {open && createPortal(<div ref={popupRef} id={panelId} className="brush-panel skill-picker" role="dialog" aria-label="选择创作技能" style={position}>
       <div className="brush-panel-head"><div className="brush-panel-headline"><div className="brush-panel-title">能做的都在这</div><div className="brush-panel-sub">可多选 · 悬停或聚焦看详细说明 · 已选技能会保留在创作框</div></div><button type="button" className="brush-close" onClick={close} aria-label="关闭技能选择">×</button></div>

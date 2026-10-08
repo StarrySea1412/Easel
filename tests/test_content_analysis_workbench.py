@@ -212,6 +212,20 @@ def test_ai_evidence_rejects_fabrication_numbers_and_causal_claims():
             validate_findings({'findings': [{**valid, **mutation}]}, evidence)
 
 
+@pytest.mark.parametrize('transcript', ['。', '！？!?\n。', ' \n ？！ \n '])
+def test_punctuation_only_transcript_remains_readable_after_import(store, transcript):
+    data = payload()
+    data['contents'][0]['transcript'] = transcript
+    imported = store.ingest(data)
+    reopened = store.report('xiaohongshu', 'account-a')
+    for report in (imported, reopened):
+        findings = report['contents'][0]['diagnostics']
+        assert any(finding['id'].endswith(':script-empty') for finding in findings)
+        assert not any(finding['id'].endswith(':script-opening') for finding in findings)
+        assert report['contents'][0]['transcript'] == transcript.strip()
+        assert '尚无可分析的语句' in markdown(report)
+
+
 @pytest.mark.parametrize('protocol', ['openai', 'anthropic'])
 def test_ai_provider_protocol_and_persisted_review_invalidation(store, monkeypatch, protocol):
     import content_analysis_ai as ai

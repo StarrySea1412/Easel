@@ -1,3 +1,4 @@
+import { selectOption } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -48,7 +49,7 @@ async function fixture(t, props = {}) {
     async choose(label, value) {
       const field = [...container.querySelectorAll('label')].find(item => item.textContent === label);
       const select = container.querySelector(`[id="${field.htmlFor}"]`);
-      await act(async () => { select.value = value; select.dispatchEvent(new window.Event('change', { bubbles: true })); });
+      await selectOption(select, value);
     },
   };
 }

@@ -16,8 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from content_analysis_platforms import platform_profile, platform_diagnostics, VERSION
+
 PLATFORMS = ('xiaohongshu', 'douyin', 'kuaishou', 'zhihu', 'weixin-channels', 'bilibili', 'wechat-oa')
 METRICS = ('views', 'likes', 'comments', 'collects', 'shares')
+REVIEW_RULE_VERSION = 2
 METHOD = '仅分析所选账号已导入的作品样本；指标不跨平台比较，不把缺失补零，不把相关性当因果。材料分析覆盖正文、真实评论、封面文字与逐字稿；只引用实际提供的文字，不推断图像、视频画面或算法偏好。'
 
 
@@ -75,7 +78,7 @@ def normalize(item, account_id, observed_at):
     comments = item.get('comments', [])
     if not isinstance(comments, list) or len(comments) > 1000:
         raise ValueError('comments 必须为最多 1000 条真实评论文字的数组')
-    comments = [text(comment, 5000) for comment in comments if comment]
+    comments = [value for value in (text(comment, 5000) for comment in comments if comment) if value]
     tags = item.get('tags', [])
     if not isinstance(tags, list) or len(tags) > 40:
         raise ValueError('tags 必须为最多 40 个文字标签的数组')
@@ -143,9 +146,13 @@ def diagnostics(content):
     transcript = content.get('transcript') or ''
     if transcript:
         segments = [segment.strip() for segment in re.split(r'\n|[。！？!?]', transcript) if segment.strip()]
-        add('script-opening', '视频逐字稿', f'逐字稿 {len(transcript)} 字，按句界识别 {len(segments)} 个片段。', segments[0][:260],
-            f'开场“{segments[0][:60]}”先明确对象和问题，再安排演示或证据；标记每句需要的镜头素材后交给人工核对。',
-            '未获取音频、画面或逐字时间码，不能计算时长、语速、前三秒留存或完播率。')
+        if segments:
+            add('script-opening', '视频逐字稿', f'逐字稿 {len(transcript)} 字，按句界识别 {len(segments)} 个片段。', segments[0][:260],
+                f'开场“{segments[0][:60]}”先明确对象和问题，再安排演示或证据；标记每句需要的镜头素材后交给人工核对。',
+                '未获取音频、画面或逐字时间码，不能计算时长、语速、前三秒留存或完播率。')
+        else:
+            add('script-empty', '材料完整性', '逐字稿只有标点或空白，尚无可分析的语句。', transcript[:260],
+                '补充实际口播文字后再检查开场与推进。', '不根据空白或标点推断视频内容、时长或表现。')
         if len(segments) >= 3:
             add('script-flow', '逐字稿推进', '可检查开场承诺在结尾是否得到回答。', f'开场：{segments[0][:120]}\n结尾：{segments[-1][:120]}',
                 '在中段放入关键证明或操作，结尾回到开场问题；删除与主问题无关的句子，保留支撑结论的限定条件。')
@@ -186,6 +193,8 @@ class Store:
             db.execute('CREATE TABLE IF NOT EXISTS snapshots (platform TEXT, account_id TEXT, content_id TEXT, hash TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id,content_id,hash))')
             db.execute('CREATE TABLE IF NOT EXISTS experiments (platform TEXT, account_id TEXT, id TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id,id))')
             db.execute('CREATE TABLE IF NOT EXISTS ai_reviews (platform TEXT, account_id TEXT, content_id TEXT, source_hash TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id,content_id))')
+
+            db.execute('CREATE TABLE IF NOT EXISTS account_insights (platform TEXT, account_id TEXT, source_hash TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id))')
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=15)
@@ -245,8 +254,11 @@ class Store:
             experiments = [json.loads(r[0]) for r in db.execute('SELECT data FROM experiments WHERE platform=? AND account_id=? ORDER BY id', (platform, account_id))]
             snapshots = [json.loads(r[0]) for r in db.execute('SELECT data FROM snapshots WHERE platform=? AND account_id=?', (platform, account_id))]
             reviews = {r[0]: (r[1], json.loads(r[2])) for r in db.execute('SELECT content_id,source_hash,data FROM ai_reviews WHERE platform=? AND account_id=?', (platform, account_id))}
+            insight_row = db.execute('SELECT source_hash,data FROM account_insights WHERE platform=? AND account_id=?', (platform, account_id)).fetchone()
+        source_hash = account_material_hash(contents)
+        account_insights = json.loads(insight_row[1]) if insight_row and insight_row[0] == source_hash else None
         for content in contents:
-            content['diagnostics'] = diagnostics(content)
+            content['diagnostics'] = diagnostics(content) + platform_diagnostics(platform, content)
             content['draft'] = draft(content)
             review = reviews.get(content['id'])
             content['aiReview'] = review[1] if review and review[0] == material_hash(content) else None
@@ -268,7 +280,7 @@ class Store:
                 warnings.append(f'{missing} 篇作品缺少{label}。')
         if any(c['period'] == 'unknown' for c in contents):
             warnings.append('部分作品统计窗口未知，不能做同龄效果比较。')
-        return {'account': account, 'contents': contents, 'overview': {'contentCount': len(contents), 'metricCoverage': coverage,
+        return {'account': account, 'platformProfile': platform_profile(platform), 'accountInsights': account_insights, 'contents': contents, 'overview': {'contentCount': len(contents), 'metricCoverage': coverage,
                 'totals': totals, 'lastImportedAt': account['lastImportedAt']}, 'themes': themes, 'experiments': experiments,
                 'quality': {'identity': account['identity'], 'warnings': warnings}, 'methodology': METHOD}
 
@@ -318,18 +330,38 @@ class Store:
         return experiment
 
     def save_review(self, platform, account_id, content, review):
-        scope(platform, account_id)
-        current = next((c for c in self.report(platform, account_id)['contents'] if c['id'] == content['id']), None)
-        if current is None or material_hash(current) != material_hash(content):
-            raise ValueError('作品材料已更改，请重新发起深度解释')
+        platform, account_id = scope(platform, account_id)
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT data FROM contents WHERE platform=? AND account_id=? AND id=?', (platform, account_id, content['id'])).fetchone()
+            if not row or material_hash(json.loads(row[0])) != material_hash(content):
+                raise ValueError('作品材料已更改，请重新发起深度解释')
             db.execute('INSERT OR REPLACE INTO ai_reviews VALUES(?,?,?,?,?)',
                        (platform, account_id, content['id'], material_hash(content), json.dumps(review, ensure_ascii=False)))
 
+    def save_insights(self, platform, account_id, contents, result):
+        platform, account_id = scope(platform, account_id)
+        expected = account_material_hash(contents)
+        with self.connect() as db:
+            # Compare and write under one lock: concurrent imports cannot slip in between.
+            db.execute('BEGIN IMMEDIATE')
+            current = [json.loads(row[0]) for row in db.execute('SELECT data FROM contents WHERE platform=? AND account_id=? ORDER BY id', (platform, account_id))]
+            if not current or account_material_hash(current) != expected:
+                raise ValueError('账号材料已更改，请重新请求跨作品解读')
+            db.execute('INSERT OR REPLACE INTO account_insights VALUES(?,?,?,?)',
+                       (platform, account_id, expected, json.dumps(result, ensure_ascii=False)))
+
+
+def account_material_hash(contents):
+    values = [(c['id'], material_hash(c)) for c in sorted(contents, key=lambda c: c['id'])]
+    return hashlib.sha256(json.dumps([VERSION, values], ensure_ascii=False).encode()).hexdigest()
+
 
 def material_hash(content):
-    selected = {k: content.get(k) for k in ('id', 'title', 'body', 'coverText', 'transcript', 'comments', 'metrics', 'period')}
-    return hashlib.sha256(json.dumps(selected, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    selected = {k: content.get(k) for k in ('id', 'title', 'body', 'coverText', 'transcript', 'comments', 'metrics', 'period', 'tags', 'format', 'paid', 'snapshotAt', 'publishedAt', 'identity')}
+    # Older stored interpretations did not pass the current material/quantity
+    # checks. Preserve them in SQLite, but never expose them as current reviews.
+    return hashlib.sha256(json.dumps([REVIEW_RULE_VERSION, selected], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
 def summarize(contents):
@@ -360,6 +392,16 @@ def markdown(report):
             for finding in content['aiReview']['findings']:
                 lines += [f'证据：{finding["evidenceId"]}', '> ' + finding['quote'].replace('\n', '\n> '),
                           finding['interpretation'], finding['action'], '']
+    profile = report.get('platformProfile')
+    if profile:
+        lines += ['', '## 平台编辑视角', '', profile['label'], *['- ' + v for v in profile['focus']], *profile['limitations']]
+    insight = report.get('accountInsights')
+    if insight:
+        lines += ['', '## 跨作品 AI 解读', '', insight['notice']]
+        for fact in insight['facts']:
+            lines += ['', f"[{fact['id']}] {fact['text']}"]
+        for item in insight['insights']:
+            lines += ['', '引用：' + '、'.join(item['factIds']), item['observation'], item['action']]
     lines += ['', '## 行动与实验', '']
     for experiment in report['experiments']:
         lines += [f'- {experiment["title"]} [{experiment["status"]}]：{experiment["hypothesis"]}；改动：{experiment["action"]}；主指标：{experiment["metric"]}',

@@ -77,6 +77,22 @@ test('one malformed record cannot hide healthy sessions or crash message renderi
   assert.equal(loaded[1].messages[2].error.category, 'connection');
 });
 
+test('message requirement snapshots survive reload with only valid selected skill entries', async () => {
+  const original = session('scoped-requirements');
+  original.messages[0].selectedSkills = ['card-quote', 'custom.skill', 'blank', 'oversize', '../bad'];
+  original.messages[0].skillRequirements = {
+    'card-quote': '  保留原始要求  ', 'custom.skill': '保留自定义技能要求', blank: '   ',
+    oversize: '字'.repeat(2001), '../bad': '非法名称', unselected: '不得附带',
+  };
+  const storage = memoryStorage({ easel_sessions: JSON.stringify([original]) });
+  const { store } = await isolatedStore(storage);
+  const loaded = store.loadSessions();
+  assert.deepEqual(loaded[0].messages[0].skillRequirements, { 'card-quote': '保留原始要求', 'custom.skill': '保留自定义技能要求' });
+  assert.equal(store.saveSessions(loaded), true);
+  const reloaded = await isolatedStore(storage);
+  assert.deepEqual(reloaded.store.loadSessions(), loaded);
+});
+
 test('missing or duplicate session identifiers retain all valid messages with distinct keys', async () => {
   const saved = [session('same', 'first'), session('same', 'second'), { messages: [{ role: 'assistant', content: 'recovered' }] }];
   const { store } = await isolatedStore(memoryStorage({ easel_sessions: JSON.stringify(saved) }));
@@ -241,7 +257,7 @@ test('imported read-only records preserve literal attachment markers and remain 
   const original = { ...session('backup-copy', '解释【附件素材】标记后的原文也必须保留'), importedFromBackup: true, backupIncomplete: true,
     sessionKey: 'old-backend-session', pendingTurnId: 'old-job', persona: 'old-profile' };
   original.messages[0] = { ...original.messages[0], turnId: 'old-turn', agentContent: 'hidden command',
-    attachments: [{ id: 'old-file', name: 'file', path: 'outputs/file' }], selectedSkills: ['old-skill'] };
+    attachments: [{ id: 'old-file', name: 'file', path: 'outputs/file' }], selectedSkills: ['old-skill'], skillRequirements: { 'old-skill': 'hidden extra action' } };
   const storage = memoryStorage({ easel_sessions: JSON.stringify([original]) });
   const { store } = await isolatedStore(storage);
   const loaded = store.loadSessions();

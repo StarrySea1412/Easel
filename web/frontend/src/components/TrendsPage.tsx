@@ -1,19 +1,15 @@
 import { useState, useRef } from 'react';
 import { createIdea } from '../lib/api';
 import { useTrends } from '../hooks/useTrends';
+import { useTrendSourceSelection } from '../hooks/useTrendSourceSelection';
+import { TREND_SOURCES } from '../lib/trendPreferences';
+import TrendSourcePicker from './TrendSourcePicker';
+import PlatformIcon from './PlatformIcon';
 import { Sk } from './Skeleton';
 import { IconFire, IconRefresh, IconBookmark, IconCheck } from './icons';
 import '../styles/trends.css';
 
 interface TrendsPageProps { onUseTopic: (title: string) => void; }
-
-const ALL_PLATFORMS = [
-  { key: 'weibo', label: '微博' }, { key: 'douyin', label: '抖音' },
-  { key: 'zhihu', label: '知乎' }, { key: 'bilibili', label: 'B站' },
-  { key: 'baidu', label: '百度' }, { key: 'toutiao', label: '头条' },
-  { key: 'ithome', label: 'IT之家' }, { key: 'v2ex', label: 'V2EX' },
-  { key: 'hackernews', label: 'Hacker News' },
-];
 
 function sourceUrl(value: string): string | undefined {
   try {
@@ -37,7 +33,8 @@ function TrendSkeleton({ label }: { label: string }) {
 }
 
 export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
-  const [selected, setSelected] = useState<string[]>(['weibo', 'douyin', 'zhihu']);
+  const selection = useTrendSourceSelection();
+  const { selected } = selection;
   const { entries, loading, refresh, retry } = useTrends(selected);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -54,8 +51,6 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
     finally { pendingSaves.current.delete(title); setSaving(new Set(pendingSaves.current)); }
   };
 
-  const toggle = (key: string) => setSelected(previous => previous.includes(key) ? previous.filter(item => item !== key) : [...previous, key]);
-
   return <div className="page-scroll trends-page">
     <div className="page-head">
       <div>
@@ -67,10 +62,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
       </button>
     </div>
 
-    <div className="trend-platforms" aria-label="选择热点来源">
-      {ALL_PLATFORMS.map(platform => <button key={platform.key} className={`chip ${selected.includes(platform.key) ? 'active' : ''}`}
-        aria-pressed={selected.includes(platform.key)} onClick={() => toggle(platform.key)}>{platform.label}</button>)}
-    </div>
+    <TrendSourcePicker selection={selection} />
     <p className="trend-explainer">各来源独立获取，正常结果缓存 5 分钟；获取时间不代表平台发布时间。来源异常时会标明原因及旧数据。</p>
     {saveError && <div className="notice-error" role="alert">{saveError}</div>}
     {!selected.length && <div className="empty-state">选择至少一个来源查看选题。</div>}
@@ -79,7 +71,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
       {selected.map(platform => {
         const state = entries[platform];
         const group = state?.group;
-        const label = group?.label || ALL_PLATFORMS.find(item => item.key === platform)!.label;
+        const label = group?.label || TREND_SOURCES.find(item => item.key === platform)!.label;
         const busy = state?.loading !== false;
         const issue = state?.error || group?.error?.message;
         const items = group?.items || [];
@@ -88,7 +80,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
         const sourceLink = source && sourceUrl(source.url);
         return <section key={platform} className="card trend-col" aria-label={`${label}来源`} aria-busy={busy}>
           <div className="trend-col-head">
-            <span>{label}</span>{items.length > 0 && <span className="trend-count">{items.length} 条</span>}
+            <span className="trend-source-heading"><span aria-hidden="true"><PlatformIcon platform={platform} name={label} className="trend-platform-icon" /></span>{label}</span>{items.length > 0 && <span className="trend-count">{items.length} 条</span>}
             <button className="trend-refresh" disabled={busy} onClick={() => retry(platform)} aria-label={`刷新${label}`}>
               <IconRefresh size={13} />{busy ? '获取中' : '刷新'}
             </button>
@@ -105,7 +97,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
             {issue && <div className="trend-source-error" role="status">
               <strong>{stale ? '暂时无法更新，保留上次结果' : '此来源暂不可用'}</strong>
               <p>{issue}</p>
-              {group?.checkedAt && <span>最近检查 {timestamp(group.checkedAt)} · 1 分钟内重试复用检查结果</span>}
+              {group?.checkedAt && <span>最近检查 {timestamp(group.checkedAt)}{group.nextRetryAt ? ` · 建议 ${timestamp(group.nextRetryAt)} 后重试` : ' · 短时间内重试复用检查结果'}</span>}
               <button className="btn btn-sm" disabled={busy} onClick={() => retry(platform)}>{busy ? '重试中…' : `重试${label}`}</button>
             </div>}
             {!items.length && !issue && <div className="trend-empty">此来源暂未返回条目，可稍后刷新。</div>}
@@ -116,8 +108,8 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
                   <span className={`trend-rank ${index < 3 ? 'top' : ''}`}>{index + 1}</span>
                   <div className="trend-main">
                     {url ? <a className="trend-title" href={url} target="_blank" rel="noopener noreferrer" title={item.title}>{item.title}</a> : <span className="trend-title">{item.title}</span>}
-                    {(item.hot || item.publishedAt || item.linkKind === 'search') && <span className="trend-hot">
-                      {[item.hot, item.publishedAt ? timestamp(item.publishedAt) : '', item.linkKind === 'search' ? '打开平台搜索' : ''].filter(Boolean).join(' · ')}
+                    {(item.hot || item.publishedAt || item.createdAt || item.linkKind === 'search') && <span className="trend-hot">
+                      {[item.hot, item.createdAt ? `提问于 ${timestamp(item.createdAt)}` : item.publishedAt ? `发布于 ${timestamp(item.publishedAt)}` : '', item.linkKind === 'search' ? '打开平台搜索' : ''].filter(Boolean).join(' · ')}
                     </span>}
                   </div>
                   <button className="trend-save" title={saved.has(item.title) ? '已收藏到选题库' : '收藏到选题库'}

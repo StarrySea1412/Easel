@@ -20,7 +20,7 @@ const resultJob = (patch = {}) => ({ jobId: 'job-one', state: 'done', mode: 'img
   error: null, started: 1, width: 1536, height: 1024, ...patch });
 
 async function fixture(t, patch = {}) {
-  const calls = { uploads: [], sizes: [], modes: [], prompts: [], reused: [], generated: 0, cleared: 0, settings: 0, models: 0, outputs: 0 };
+  const calls = { uploads: [], sizes: [], modes: [], prompts: [], reused: [], savedModels: [], generated: 0, cleared: 0, settings: 0, models: 0, outputs: 0 };
   const studio = {
     mode: 'generate', reference: null, mask: null, referenceBusy: false,
     imgPrompt: '', imgSize: '1024x1024', imgJob: null, imgSubmitting: false,
@@ -36,6 +36,7 @@ async function fixture(t, patch = {}) {
     setImgSize: size => { calls.sizes.push(size); studio.imgSize = size; },
     setImgPrompt: prompt => { calls.prompts.push(prompt); studio.imgPrompt = prompt; },
     fireImagegen: async () => { calls.generated++; },
+    saveModel: async model => { calls.savedModels.push(model); studio.imgChannel = { ...studio.imgChannel, model: model.trim() }; return true; },
     useGalleryReference: async item => { calls.reused.push(item); },
     ...patch,
   };
@@ -160,7 +161,8 @@ test('submit and keyboard shortcut generate only valid, configured descriptions'
     await view.dispatch(textarea(), new window.KeyboardEvent('keydown', { ...props, bubbles: true, cancelable: true }));
   }
   assert.equal(view.calls.generated, 2);
-  for (const patch of [{ imgPrompt: ' ' }, { imgPrompt: '字'.repeat(2001) }, { imgPrompt: '有效描述', imgChannel: { configured: false } }]) {
+  for (const patch of [{ imgPrompt: ' ' }, { imgPrompt: '字'.repeat(2001) }, { imgPrompt: '有效描述', imgChannel: { configured: true } },
+    { imgChannel: { configured: true, model: 'known-model' }, galleryError: '配置读取失败' }, { imgChannel: { configured: false }, galleryError: '' }]) {
     await view.render(patch);
     assert.equal(view.button('生成图片').disabled, true);
     await view.dispatch(textarea(), new window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
@@ -202,6 +204,39 @@ test('prompt extraction is an auxiliary round trip preserving the editing draft 
   assert.deepEqual(view.calls.modes, ['reverse', 'img2img']);
   assert.equal(view.container.querySelector('#image-prompt').value, '保留已有修改要求');
   assert.equal(view.container.querySelector('[aria-label="图片画布"] img').alt, `原图：${reference.name}`);
+});
+
+test('current model is visible outside collapsed options and can be edited without leaving the studio', async t => {
+  const view = await fixture(t);
+  assert.match(view.container.querySelector('.studio-model-current').textContent, /test-image-model/);
+  await view.click(view.button('自定义模型'));
+  const input = view.container.querySelector('#studio-image-model');
+  assert.equal(input.value, 'test-image-model');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, 'custom/image-v3');
+  await view.dispatch(input, new window.Event('input', { bubbles: true }));
+  await view.click(view.button('保存模型'));
+  assert.deepEqual(view.calls.savedModels, ['custom/image-v3']);
+  assert.match(view.container.querySelector('.studio-model-current').textContent, /custom\/image-v3/);
+  assert.equal(view.container.querySelector('#studio-image-model'), null);
+  assert.equal(view.calls.settings, 0);
+  assert.equal(view.calls.generated, 0);
+});
+
+test('clipboard button requests media only on click and uploads the actual clipboard image', async t => {
+  let reads = 0;
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read: async () => {
+    reads++; return [{ types: ['image/png'], getType: async () => new Blob(['clipboard-bytes'], { type: 'image/png' }) }];
+  } } });
+  t.after(() => { if (previous) Object.defineProperty(navigator, 'clipboard', previous); else delete navigator.clipboard; });
+  const view = await fixture(t);
+  assert.equal(reads, 0);
+  await view.click(view.button('从剪贴板粘贴'));
+  assert.equal(reads, 1);
+  assert.equal(view.calls.uploads.length, 1);
+  assert.equal(view.calls.uploads[0][0].type, 'image/png');
+  assert.equal(await view.calls.uploads[0][0].text(), 'clipboard-bytes');
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

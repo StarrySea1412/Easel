@@ -1,3 +1,4 @@
+import { NativeSelect as Select } from './ui/Select';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatSession, StreamState } from '../lib/store';
 import { DEMO_DURATION_SECONDS, OFFICE_STATE_LABELS } from '../lib/agentOffice';
@@ -261,19 +262,19 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
             <p>{mode === 'demo' ? `${demoTeamSize} 个角色的协作演示，不代表真实 Agent 调用或执行结果。` : live.coverage || '仅展示当前会话可观察到的后台记录，不补全未上报的角色。'}</p>
           </div>
           {mode === 'demo' && <label className="office-demo-team-select">模拟团队人数
-            <select value={demoTeamSize} onChange={event => {
+            <Select value={demoTeamSize} onChange={event => {
               const size = Number(event.target.value) as OfficeDemoTeamSize;
               if (!OFFICE_DEMO_TEAM_SIZES.includes(size)) return;
               try { sessionStorage.setItem('easel_office_demo_team', String(size)); } catch { /* Optional tab persistence. */ }
               setDemoTeamSize(size); setSelectedId(null); setFocusId(null); setProcessTarget(null); setMemberQuery('');
               setDemoSeek(value => ({ seconds: elapsedRef.current, revision: value.revision + 1 }));
-            }}>{OFFICE_DEMO_TEAM_SIZES.map(size => <option key={size} value={size}>{size} 人 · 模拟</option>)}</select>
+            }}>{OFFICE_DEMO_TEAM_SIZES.map(size => <option key={size} value={size}>{size} 人 · 模拟</option>)}</Select>
           </label>}
           {mode === 'live' && <label className="office-session-select">观察会话
-            <select value={sessionId ?? ''} disabled={!availableSessions.length} onChange={(event) => { setSessionChoice(event.target.value); setSelectedId(null); setFocusId(null); setMemberQuery(''); }}>
+            <Select value={sessionId ?? ''} disabled={!availableSessions.length} onChange={(event) => { setSessionChoice(event.target.value); setSelectedId(null); setFocusId(null); setMemberQuery(''); }}>
               {!availableSessions.length && <option value="">暂无普通会话</option>}
               {availableSessions.map((session) => <option key={session.id} value={session.id}>{session.title || '未命名会话'}{streams[session.id] ? ' · 对话接收中' : ''}</option>)}
-            </select>
+            </Select>
           </label>}
         </section>
 
@@ -281,7 +282,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
           <div className="office-zone-summary"><strong>{mode === 'demo' ? `模拟团队共 ${agents.length} 人` : `${stale ? '上次快照' : '已观测'} ${agents.length} 人`}</strong><span>{agents.length ? `第 ${zone.index + 1} / ${zone.count} 区 · 工位 ${zone.start + 1}–${zone.start + zone.agents.length}` : '暂无成员'}</span><small>每区最多 {OFFICE_ZONE_CAPACITY} 人，完整名单可跨区搜索与定位</small></div>
           <div className="office-zone-controls">
             <button type="button" className="office-button" disabled={!agents.length || zone.index === 0} onClick={() => changeZone(zone.index - 1)}>上一分区</button>
-            <label>当前分区<select aria-label="切换办公室分区" disabled={!agents.length} value={zone.index} onChange={event => changeZone(Number(event.target.value))}>{Array.from({ length: zone.count }, (_, index) => <option key={index} value={index}>第 {index + 1} 区{agents.length ? ` · ${index * OFFICE_ZONE_CAPACITY + 1}–${Math.min(agents.length, (index + 1) * OFFICE_ZONE_CAPACITY)} 号` : ''}</option>)}</select></label>
+            <label>当前分区<Select aria-label="切换办公室分区" disabled={!agents.length} value={zone.index} onChange={event => changeZone(Number(event.target.value))}>{Array.from({ length: zone.count }, (_, index) => <option key={index} value={index}>第 {index + 1} 区{agents.length ? ` · ${index * OFFICE_ZONE_CAPACITY + 1}–${Math.min(agents.length, (index + 1) * OFFICE_ZONE_CAPACITY)} 号` : ''}</option>)}</Select></label>
             <button type="button" className="office-button" disabled={!agents.length || zone.index + 1 === zone.count} onClick={() => changeZone(zone.index + 1)}>下一分区</button>
           </div>
         </nav>
@@ -339,10 +340,10 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
               <OfficeModelIdentity agent={selected} stale={stale} />
               <div className="office-current-task"><span>{stale ? '快照中的任务' : '当前任务'}</span><p>{selected.task || '当前记录未提供任务描述。'}</p></div>
               <dl className="office-agent-meta"><div><dt>角色</dt><dd>{selected.role || '未提供'}</dd></div><div><dt>协作上级</dt><dd>{parent?.name || (selected.parentId ? '未包含在当前记录中' : '未提供')}</dd></div><div><dt>记录来源</dt><dd>{selected.source === 'demo' ? '模拟任务脚本' : '后台观察记录'}</dd></div></dl>
-              <div className="office-appearance-binding"><label>员工角色卡<select value={selected.appearance?.id || 'generic'} onChange={event => {
+              <div className="office-appearance-binding"><label>员工角色卡<Select value={selected.appearance?.id || 'generic'} onChange={event => {
                 try { const saved = assignEmployeeAppearance(selected.id, event.target.value as EmployeeAppearanceId); setBindingNotice(saved ? '员工角色卡已保存。' : '已在当前窗口应用，但尚未保存到本地。'); }
                 catch (error) { setBindingNotice(error instanceof Error ? error.message : '员工绑定未保存。'); }
-              }}>{appearances.map(card => <option value={card.id} key={card.id}>{card.name} · {card.role}</option>)}</select></label>
+              }}>{appearances.map(card => <option value={card.id} key={card.id}>{card.name} · {card.role}</option>)}</Select></label>
                 <button type="button" className="office-button" onClick={() => {
                   if (!selected.appearance) return;
                   scrollBeforeEdit.current = pageElement.current?.scrollTop ?? null;

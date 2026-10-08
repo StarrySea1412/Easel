@@ -1,3 +1,4 @@
+import { NativeSelect as Select } from '../ui/Select';
 import { useId, useState } from 'react';
 import { OFFICE_MODEL_SCOPE_LABELS, type OfficeModelCapability } from '../../lib/officeControls';
 import '../agent-office/office-agent-controls.css';
@@ -29,17 +30,17 @@ function ModelRoutingForm({ capability, disabled = false, saving = false, onSave
     <p className="office-control-note">{OFFICE_MODEL_SCOPE_LABELS[capability.scope]}</p>
     {capability.available ? <>
       <label htmlFor={`${prefix}-provider`}>模型渠道</label>
-      <select id={`${prefix}-provider`} value={provider} disabled={locked} onChange={event => { setProvider(event.target.value); setSelected(''); }}>
+      <Select id={`${prefix}-provider`} value={provider} disabled={locked} onChange={event => { setProvider(event.target.value); setSelected(''); }}>
         <option value="">选择已配置渠道</option>
         {providers.map(value => <option key={value} value={value}>{value}</option>)}
-      </select>
+      </Select>
       <label htmlFor={`${prefix}-model`}>使用模型</label>
-      <select id={`${prefix}-model`} value={selected} disabled={locked || !provider} onChange={event => setSelected(event.target.value)}>
+      <Select id={`${prefix}-model`} value={selected} disabled={locked || !provider} onChange={event => setSelected(event.target.value)}>
         <option value="">选择模型</option>
         {capability.options.filter(option => option.provider === provider && option.configured).map(option => <option key={option.id} value={option.id}>
           {option.label || option.model}
         </option>)}
-      </select>
+      </Select>
       {capability.currentModelRef && <p className="office-control-note">已保存：{capability.options.find(option => option.id === capability.currentModelRef)?.label || capability.currentModelRef}</p>}
       {!capability.options.some(option => option.configured) && <p className="office-control-note">还没有可分配的模型，请先配置模型渠道。</p>}
       <button type="button" className="office-button" disabled={locked || !chosen?.configured || chosen.provider !== provider || selected === capability.currentModelRef}

@@ -144,11 +144,17 @@ export function useVideoStudio(active: boolean) {
     if (pending.current || referencePending.current || running) return;
     setViewMode('video'); applyReference(reference);
   };
-  const uploadReference = async (file: File) => {
-    if (pending.current || referencePending.current || running) return;
+  const uploadReference = async (file: File): Promise<ImagegenReference | null> => {
+    if (!mounted.current || pending.current || referencePending.current || running) return null;
     referencePending.current = true; setReferenceBusy(true); setError('');
-    try { validateReferenceFile(file); const reference = await uploadImagegenReference(file); if (mounted.current) applyReference(reference); }
-    catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '参考图上传失败'); }
+    try {
+      validateReferenceFile(file);
+      const reference = await uploadImagegenReference(file);
+      if (!mounted.current) return null;
+      applyReference(reference);
+      return reference;
+    }
+    catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : '参考图上传失败'); return null; }
     finally { referencePending.current = false; if (mounted.current) setReferenceBusy(false); }
   };
   const useGalleryReference = async (item: ImagegenGalleryItem) => {

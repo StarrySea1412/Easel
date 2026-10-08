@@ -3,6 +3,8 @@ import type { UploadedFile, ChatQuestion } from './api';
 import { chatErrorDetail } from './chatErrors';
 import { readLocalValue, writeLocalValue, removeMigratedLocalValue, reportLocalPersistenceFailure } from './localPersistence';
 import { hasChatDraft } from './chatDrafts';
+import { requirementsForSelection } from './selectedSkills';
+import type { SkillRequirements } from './selectedSkills';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -11,6 +13,7 @@ export interface ChatMessage {
   agentContent?: string; // 仅发给 Agent 的增强消息（如附件路径），不在对话页面展示
   attachments?: UploadedFile[]; // 结构化附件引用；仅用于请求/重试，不在消息气泡展示
   selectedSkills?: string[];
+  skillRequirements?: SkillRequirements; // Immutable requirements attached to this sent message, used on retry.
   turnId?: string;
   thinking?: string;   // 模型服务实际返回的思考内容或摘要，流式结束后持久保留
   activity?: string;   // 工具/执行活动步骤（换行分隔），持久保留
@@ -128,6 +131,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
     if (typeof value[key] === 'string') message[key] = value[key];
   }
   if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');
+  if (value.skillRequirements !== undefined) message.skillRequirements = requirementsForSelection(value.skillRequirements, message.selectedSkills || []);
   if (Array.isArray(value.attachments)) {
     message.attachments = value.attachments.filter((file): file is UploadedFile => record(file)
       && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
@@ -171,6 +175,7 @@ function decodeSessions(raw: string): ChatSession[] {
         delete message.agentContent;
         delete message.attachments;
         delete message.selectedSkills;
+        delete message.skillRequirements;
       }
     }
     sessions.push(session);

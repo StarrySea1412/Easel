@@ -118,5 +118,5 @@ export const SKILL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function displayName(raw: string): string {
-  return SKILL_DISPLAY_NAMES[raw] || raw;
+  return Object.hasOwn(SKILL_DISPLAY_NAMES, raw) ? SKILL_DISPLAY_NAMES[raw] : raw;
 }

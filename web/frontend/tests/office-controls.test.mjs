@@ -1,3 +1,4 @@
+import { selectOption, optionValues } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
@@ -48,7 +49,7 @@ async function fixture(t, props = {}) {
     button: label => [...container.querySelectorAll('button')].find(item => item.textContent === label),
     click: async element => act(async () => element.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
     async choose(label, value) {
-      await act(async () => { const field = select(label); field.value = value; field.dispatchEvent(new window.Event('change', { bubbles: true })); });
+      await selectOption(select(label), value);
     },
   };
 }
@@ -119,8 +120,8 @@ test('model controls expose configured channels and models only and reset when c
   const view = await fixture(t, { agent: { ...agent, state: 'done' } });
   view.h.post = async (_url, body) => response({ ...body, applied: true, scope: 'next_turn' });
   await view.render();
-  assert.deepEqual([...view.select('模型渠道').options].map(item => item.value), ['', 'configured', 'other']);
-  assert.deepEqual([...view.select('使用模型').options].map(item => item.value), ['', 'configured/old', 'configured/new']);
+  assert.deepEqual(await optionValues(view.select('模型渠道')), ['', 'configured', 'other']);
+  assert.deepEqual(await optionValues(view.select('使用模型')), ['', 'configured/old', 'configured/new']);
   await view.choose('使用模型', 'configured/new'); assert.equal(view.button('保存模型分配').disabled, false);
   await view.choose('模型渠道', 'other');
   assert.equal(view.select('使用模型').value, ''); assert.equal(view.button('保存模型分配').disabled, true);

@@ -1,4 +1,5 @@
 import { makeChatError, type ChatErrorDetail } from './chatErrors';
+import type { SkillRequirements } from './selectedSkills';
 function getBasePath(): string {
   const path = window.location.pathname;
   const cleaned = path.replace(/\/index\.html$/, '').replace(/\/$/, '');
@@ -201,11 +202,11 @@ export function deletePersona(name: string): Promise<{ ok: boolean; deleted: str
 }
 
 // ---- 热点雷达 ----
-export interface TrendItem { title: string; hot: string; url: string; linkKind?: 'article' | 'search'; publishedAt?: number | null; }
+export interface TrendItem { title: string; hot: string; url: string; linkKind?: 'article' | 'search'; publishedAt?: number | null; createdAt?: number | null; }
 export interface TrendGroup {
   platform: string; label: string; items: TrendItem[];
   status?: 'fresh' | 'cached' | 'stale' | 'error';
-  fetchedAt?: number | null; checkedAt?: number | null; sourceUpdatedAt?: number | null;
+  fetchedAt?: number | null; checkedAt?: number | null; sourceUpdatedAt?: number | null; nextRetryAt?: number | null;
   source?: { name: string; url: string; kind: string };
   error?: { code: string; message: string } | null;
   attempts?: { source: string; code: string; message: string }[];
@@ -735,6 +736,7 @@ export function streamChat(
   onQuestion?: (q: ChatQuestion) => void,
   onHeartbeat?: (note: string) => void,
   selectedSkills: string[] = [],
+  skillRequirements: SkillRequirements = {},
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -829,7 +831,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -1124,6 +1126,7 @@ export interface ImagegenJob {
   mode?: 'text2img' | 'img2img';
   referenceId?: string;
   maskId?: string;
+  model?: string;
 }
 export interface ImagegenReference { id: string; url: string; name: string; width: number; height: number }
 export function uploadImagegenReference(file: File): Promise<ImagegenReference> {
@@ -1151,7 +1154,7 @@ export function reverseImage(image: File, provider: string, instruction: string,
   return request('/api/image-reverse', { method: 'POST', body: data, signal });
 }
 
-export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string } = {}): Promise<ImagegenStart> {
+export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string; model?: string } = {}): Promise<ImagegenStart> {
   return request('/api/imagegen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1165,6 +1168,11 @@ export function fetchImagegenJob(jobId: string): Promise<ImagegenJob> {
 
 export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[]; channel: ImagegenChannel }> {
   return request('/api/imagegen');
+}
+
+export function saveImagegenModel(model: string): Promise<{ ok: boolean }> {
+  return request('/api/env', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates: { IMG_MODEL: model } }) });
 }
 
 export type VideogenMode = 'text2video' | 'image2video';

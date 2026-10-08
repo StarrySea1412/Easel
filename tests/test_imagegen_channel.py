@@ -218,3 +218,60 @@ def test_unreadable_gallery_image_does_not_break_listing(imagegen_stub):
     images = asyncio.run(web.api_imagegen_gallery())["images"]
     assert len(images) == 1
     assert "width" not in images[0] and "height" not in images[0]
+
+
+def test_custom_model_reaches_provider_environment_and_saved_job_metadata(imagegen_stub, monkeypatch):
+    calls = []
+    def generate(cmd, **kwargs):
+        calls.append(kwargs['env'])
+        Image.new('RGB', (40, 30)).save(Path(cmd[cmd.index('--output') + 1]))
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
+    monkeypatch.setattr(web.subprocess, 'run', generate)
+    result = asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt='custom image', model='custom/image-v2')))
+    job = asyncio.run(web.api_imagegen_status(result['jobId']))
+    assert calls[0]['IMG_MODEL'] == job['model'] == 'custom/image-v2'
+    assert calls[0]['IMG_BASE_URL'] == 'https://images.example.test/v1'
+    assert calls[0]['IMG_API_KEY'] == 'test-image-key'
+    metadata = web._read_imagegen_metadata(web.IMAGEGEN_DIR / Path(job['url']).name)
+    assert metadata['model'] == 'custom/image-v2'
+    assert 'test-image-key' not in str(job) + str(metadata)
+
+
+def test_queued_image_keeps_channel_snapshot_when_settings_change(imagegen_stub, monkeypatch):
+    pending, calls = [], []
+    class Deferred:
+        def __init__(self, *, target, **_): pending.append(target)
+        def start(self): pass
+    monkeypatch.setattr(web.threading, 'Thread', Deferred)
+    asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt='queued', model='chosen-model')))
+    monkeypatch.setattr(web, '_read_env', lambda: {'IMG_MODEL': 'new-model', 'IMG_BASE_URL': 'https://other.test', 'IMG_API_KEY': 'new-key'})
+    def generate(cmd, **kwargs):
+        calls.append(kwargs['env'])
+        return SimpleNamespace(returncode=1, stdout='', stderr='controlled')
+    monkeypatch.setattr(web.subprocess, 'run', generate)
+    pending[0]()
+    assert calls[0]['IMG_MODEL'] == 'chosen-model'
+    assert calls[0]['IMG_BASE_URL'] == 'https://images.example.test/v1'
+    assert calls[0]['IMG_API_KEY'] == 'test-image-key'
+
+
+@pytest.mark.parametrize('model', ['', 'a' * 201, 'bad\nIMG_API_KEY=x', 'bad\x00id'])
+def test_custom_model_validation_prevents_provider_jobs(imagegen_stub, model):
+    with pytest.raises(web.HTTPException):
+        asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt='test', model=model)))
+    assert not imagegen_stub and not web._IMAGEGEN_JOBS
+
+
+def test_image_model_save_persists_without_overwriting_channel_credentials(tmp_path, monkeypatch):
+    env_file = tmp_path / '.env'
+    env_file.write_text('IMG_MODEL=old\nIMG_API_KEY=test-secret\nIMG_BASE_URL=https://images.example.test/v1\n', encoding='utf-8')
+    monkeypatch.setattr(web, 'ENV_FILE', env_file)
+    result = asyncio.run(web.api_env_save(web.EnvUpdateRequest(updates={'IMG_MODEL': 'custom/model-v2'})))
+    assert result['ok']
+    content = env_file.read_text(encoding='utf-8')
+    assert 'IMG_MODEL=custom/model-v2\n' in content
+    assert 'IMG_API_KEY=test-secret\n' in content
+    for value in ['bad\nIMG_API_KEY=changed', 'x' * 201]:
+        with pytest.raises(web.HTTPException):
+            asyncio.run(web.api_env_save(web.EnvUpdateRequest(updates={'IMG_MODEL': value})))
+        assert env_file.read_text(encoding='utf-8') == content

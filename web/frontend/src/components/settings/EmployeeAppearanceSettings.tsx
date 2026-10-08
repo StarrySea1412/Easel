@@ -1,3 +1,4 @@
+import { NativeSelect as Select } from '../ui/Select';
 import { useId, useState } from 'react';
 import {
   DEFAULT_EMPLOYEE_APPEARANCES, readEmployeeAppearances, saveEmployeeAppearances,
@@ -82,8 +83,8 @@ export default function EmployeeAppearanceSettings() {
             ['shirtColor', '服装'], ['hairColor', '点缀色'], ['skinColor', '毛色'],
           ] as const).map(([key, label]) => <label key={key}><input type="color" value={card[key]} aria-label={`${card.name || card.id}${label}颜色`} onChange={event => change(card.id, { [key]: event.target.value })} /><span>{label}</span><code>{card[key].toUpperCase()}</code></label>)}</div>
           <div className="employee-card__fields">
-            <label>动物种类<select value={card.species} onChange={event => change(card.id, { species: event.target.value as EmployeeAppearance['species'] })}><option value="cat">小猫</option><option value="rabbit">兔子</option><option value="fox">狐狸</option><option value="bear">小熊</option></select></label>
-            <label>配饰<select value={card.accessory} onChange={event => change(card.id, { accessory: event.target.value as EmployeeAppearance['accessory'] })}><option value="none">无配饰</option><option value="glasses">眼镜</option><option value="headset">耳机</option></select></label>
+            <label>动物种类<Select value={card.species} onChange={event => change(card.id, { species: event.target.value as EmployeeAppearance['species'] })}><option value="cat">小猫</option><option value="rabbit">兔子</option><option value="fox">狐狸</option><option value="bear">小熊</option></Select></label>
+            <label>配饰<Select value={card.accessory} onChange={event => change(card.id, { accessory: event.target.value as EmployeeAppearance['accessory'] })}><option value="none">无配饰</option><option value="glasses">眼镜</option><option value="headset">耳机</option></Select></label>
           </div>
         </article>)}
       </div>

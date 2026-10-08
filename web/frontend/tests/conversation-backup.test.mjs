@@ -54,20 +54,20 @@ test('export whitelist excludes identities, secrets, attachments and action iden
   const exported = createConversationBackup([session({
     persona: 'PERSONA_SECRET', sessionKey: 'SESSION_SECRET', pendingTurnId: 'TURN_SECRET',
     messages: [
-      { role: 'user', content: '用户可见文本含 token 字样应原样保留', agentContent: 'INTERNAL_SECRET', attachments: [{ path: 'PRIVATE_PATH' }], selectedSkills: ['ACTION_SECRET'], turnId: 'TURN_SECRET' },
+      { role: 'user', content: '用户可见文本含 token 字样应原样保留', agentContent: 'INTERNAL_SECRET', attachments: [{ path: 'PRIVATE_PATH' }], selectedSkills: ['ACTION_SECRET'], skillRequirements: { ACTION_SECRET: 'REQUIREMENT_SECRET' }, turnId: 'TURN_SECRET' },
       { role: 'assistant', content: '回答', error: { message: '可见错误', code: 'ERROR_SECRET', category: 'authentication', retryable: false } },
     ],
   })]);
   assert.deepEqual(Object.keys(exported.sessions[0]).sort(), ['created', 'incomplete', 'messages', 'title']);
   const serialized = JSON.stringify(exported);
-  for (const marker of ['PERSONA_SECRET', 'SESSION_SECRET', 'TURN_SECRET', 'INTERNAL_SECRET', 'PRIVATE_PATH', 'ACTION_SECRET', 'ERROR_SECRET']) {
+  for (const marker of ['PERSONA_SECRET', 'SESSION_SECRET', 'TURN_SECRET', 'INTERNAL_SECRET', 'PRIVATE_PATH', 'ACTION_SECRET', 'REQUIREMENT_SECRET', 'ERROR_SECRET']) {
     assert.ok(!serialized.includes(marker), marker);
   }
   assert.equal(exported.sessions[0].messages[0].content, '用户可见文本含 token 字样应原样保留');
   const [imported] = createImportedSessions(exported, []);
   for (const field of ['persona', 'sessionKey', 'pendingTurnId']) assert.ok(!(field in imported));
   for (const message of imported.messages) {
-    for (const field of ['attachments', 'selectedSkills', 'turnId', 'agentContent']) assert.ok(!(field in message));
+    for (const field of ['attachments', 'selectedSkills', 'skillRequirements', 'turnId', 'agentContent']) assert.ok(!(field in message));
   }
 });
 
@@ -148,7 +148,7 @@ test('unknown fields cannot inject session links or action flags through parse/i
   const source = backup();
   source.id = 'top-level-secret';
   Object.assign(source.sessions[0], { id: 'attacker-id', sessionKey: 'backend-session', pendingTurnId: 'resume-me', persona: 'admin', importedFromBackup: false });
-  Object.assign(source.sessions[0].messages[0], { turnId: 'execute-turn', attachments: [{ path: '/private' }], agentContent: 'execute me', selectedSkills: ['publish'] });
+  Object.assign(source.sessions[0].messages[0], { turnId: 'execute-turn', attachments: [{ path: '/private' }], agentContent: 'execute me', selectedSkills: ['publish'], skillRequirements: { publish: 'extra action' } });
   const parsed = parseConversationBackup(JSON.stringify(source));
   assert.deepEqual(parsed, backup());
   const imported = createImportedSessions(source, []);

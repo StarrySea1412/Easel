@@ -11,7 +11,7 @@ function GuideList({ title, items, ordered = false }: { title: string; items: st
 }
 
 /** The API extracts this guide from the installed SKILL.md; no generated claims. */
-export default function SkillGuidePreview({ skillName, onPick }: { skillName: string | null; onPick: (text: string, skill: string) => void }) {
+export default function SkillGuidePreview({ skillName, onPick }: { skillName: string | null; onPick?: (text: string, skill: string) => void }) {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -51,7 +51,7 @@ export default function SkillGuidePreview({ skillName, onPick }: { skillName: st
         <GuideList title="需要准备" items={preparation} />
         <GuideList title="怎么开始" items={guide.howToStart} ordered />
         <GuideList title="会得到什么" items={guide.whatYouGet} />
-        {guide.examples.length > 0 && <section className="brush-guide-section"><h4>示例输入</h4>{guide.examples.map((example, index) => <button key={index} type="button" className="brush-guide-example" onClick={() => onPick(example, skillName)}>{example}<span>填入创作框 ↗</span></button>)}</section>}
+        {guide.examples.length > 0 && <section className="brush-guide-section"><h4>示例输入</h4>{guide.examples.map((example, index) => onPick ? <button key={index} type="button" className="brush-guide-example" onClick={() => onPick(example, skillName)}>{example}<span>填入创作框 ↗</span></button> : <p className="brush-guide-example" key={index}>{example}</p>)}</section>}
         {guide.steps.length > 0 && <details className="brush-guide-section"><summary>查看原文执行步骤</summary><ol>{guide.steps.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}
         {guide.terms.length > 0 && <details className="brush-guide-section"><summary>术语解释</summary>{guide.terms.map((term) => <p key={term.term}><strong>{term.term}</strong>：{term.explain}</p>)}</details>}
       </> : <p className="brush-guide-muted">暂未提取到导读，请到技能库查看原文。</p>}

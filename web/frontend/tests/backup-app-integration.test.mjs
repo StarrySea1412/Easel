@@ -18,7 +18,7 @@ const rawApp = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8
 const base = new URL('../src/', import.meta.url);
 let fixtureId = 0;
 
-async function fixture(t, initial) {
+async function fixture(t, initial, realSidebar = false) {
   const harness = { pages: {}, calls: [], streams: [], intervals: new Map(), nextTimer: 0 };
   globalThis.__backupApp = harness;
   const values = new Map(Object.entries(initial));
@@ -50,7 +50,10 @@ async function fixture(t, initial) {
   const lazy = url(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
     export function createLazyPage(label) {return function Page(props) {globalThis.__backupApp.pages[label]=props;return createElement('section',null,label);};}
   `);
-  const sidebar = url(`export default function Sidebar(props) {globalThis.__backupApp.sidebar=props;return null;}`);
+  const actualSidebar = realSidebar ? await tsModuleUrl(new URL('components/Sidebar.tsx', base)) : null;
+  const sidebar = realSidebar
+    ? url(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))}; import ActualSidebar from ${JSON.stringify(actualSidebar)}; export default function Sidebar(props){globalThis.__backupApp.sidebar=props;return createElement(ActualSidebar,props);}`)
+    : url(`export default function Sidebar(props) {globalThis.__backupApp.sidebar=props;return null;}`);
   const notice = url(`export default function StorageNotice(props) {globalThis.__backupApp.storageNotice=props;return null;}`);
   const empty = url('export default function Empty(){return null;}');
   const image = url(`export function useImageStudio(){return {};}`);
@@ -79,7 +82,7 @@ async function fixture(t, initial) {
   const root = createRoot(container);
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   await act(async () => root.render(createElement(StrictMode, null, createElement(App))));
-  return { harness, storage, values, persistence: await import(persistence),
+  return { harness, storage, values, container, persistence: await import(persistence),
     settings: async () => { await act(async () => harness.sidebar.onPageChange('settings')); return harness.pages['设置'].conversationBackup; },
   };
 }
@@ -110,12 +113,40 @@ test('send callbacks explicitly accept one draft and reject busy, read-only or d
   assert.equal(accepted, true); assert.equal(busy, false);
   assert.equal(harness.streams.length, 1);
   await act(async () => harness.sidebar.onSessionSelect('readonly'));
-  await act(async () => { readonly = harness.pages['对话'].onSend('只读草稿不可发送'); });
+  await act(async () => { readonly = harness.pages['对话'].onSend('只读草稿不可发送', [], ['card-quote'], { 'card-quote': '不得被只读备份触发' }); });
   assert.equal(readonly, false);
   await act(async () => harness.sidebar.onSessionDelete('original'));
   await act(async () => { deleted = originalSend('已删除会话的晚到发送'); });
   assert.equal(deleted, false);
   assert.equal(harness.streams.length, 1);
+});
+
+test('skill requirements reach the stream as independent message snapshots and retry uses the original requirements', async t => {
+  const other = { id: 'other', title: '另一会话', created: 1, messages: [] };
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, other]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  const requirements = { 'card-quote': '  原消息补充要求  ', unselected: '不应发送' };
+  await act(async () => harness.pages['对话'].onSend('本轮消息', [], ['card-quote'], requirements));
+  const run = harness.streams[0];
+  assert.deepEqual(run.args[15], ['card-quote']);
+  assert.deepEqual(run.args[16], { 'card-quote': '原消息补充要求' });
+  requirements['card-quote'] = '发送后修改调用者对象';
+  values.set('easel:skill-requirements:original', JSON.stringify({ 'card-quote': '后续轮次使用的新要求' }));
+  const sent = harness.sidebar.sessions.find(s => s.id === 'original').messages[2];
+  assert.deepEqual(sent.skillRequirements, { 'card-quote': '原消息补充要求' });
+  assert.deepEqual(JSON.parse(values.get('easel_sessions')).find(s => s.id === 'original').messages[2].skillRequirements, sent.skillRequirements);
+  await act(async () => run.args[4]('server-session'));
+  await act(async () => harness.pages['对话'].onResend(2, '本轮消息'));
+  assert.equal(harness.streams.length, 2);
+  assert.deepEqual(harness.streams[1].args[16], { 'card-quote': '原消息补充要求' });
+  await act(async () => harness.streams[1].args[4]('server-session'));
+  await act(async () => harness.pages['对话'].onSend('修改后的新消息', [], ['card-quote'], { 'card-quote': '后续轮次使用的新要求' }));
+  assert.deepEqual(harness.streams[2].args[16], { 'card-quote': '后续轮次使用的新要求' });
+  assert.deepEqual(harness.sidebar.sessions.find(s => s.id === 'original').messages[2].skillRequirements, { 'card-quote': '原消息补充要求' });
+  await act(async () => harness.sidebar.onSessionSelect('other'));
+  await act(async () => harness.pages['对话'].onSend('另一会话未设置要求', [], ['card-quote']));
+  assert.deepEqual(harness.streams[3].args[16], {});
+  assert.deepEqual(harness.sidebar.sessions.find(s => s.id === 'other').messages[0].skillRequirements, {});
 });
 
 test('failed stop preserves the live connection and durable recovery identifiers, accepts more output and can retry', async t => {
@@ -277,7 +308,7 @@ test('import uses latest queued state, preserves live controllers and exports al
   await act(async () => actions.onOpenSession(result.firstSessionId));
   const importedChat = harness.pages['对话'];
   await act(async () => {
-    importedChat.onSend('必须忽略');
+    importedChat.onSend('必须忽略', [], ['card-quote'], { 'card-quote': '也必须忽略' });
     importedChat.onResend(0, '必须忽略');
     importedChat.onStop();
   });
@@ -329,4 +360,36 @@ test('reopening a saved imported user-only snapshot never resumes its old job an
   assert.notEqual(newId, imported.id);
   assert.equal(view.harness.sidebar.sessions.find(s => s.id === newId).importedFromBackup, undefined);
   assert.deepEqual(view.harness.calls, []);
+});
+
+
+test('real Sidebar buttons select persisted sessions and create a separate empty conversation', async t => {
+  const second = { id: 'second-existing', title: '另一个真实会话', created: 11, messages: [{role: 'user', content: '独立历史'}] };
+  const { harness, container, values } = await fixture(t, {
+    easel_sessions: JSON.stringify([sourceSession, second]), easel_active_session: sourceSession.id,
+  }, true);
+  assert.ok(container.querySelector('.sidebar-conversations'), 'the new conversation column is expanded by default');
+  const existing = [...container.querySelectorAll('.session-select')].find(button => button.textContent === second.title);
+  assert.ok(existing);
+  await act(async () => existing.click());
+  assert.equal(harness.sidebar.activeSessionId, second.id);
+  assert.equal(values.get('easel_active_session'), second.id);
+  assert.equal(harness.pages['对话'].session.id, second.id);
+  assert.equal(harness.pages['对话'].session.messages[0].content, '独立历史');
+  await act(async () => container.querySelector('[aria-label="展开工具栏"]').click());
+  assert.equal(harness.sidebar.activeSessionId, second.id, 'expanding tools does not replace the selected conversation');
+  await act(async () => container.querySelector('[aria-label="收起对话列表"]').click());
+  assert.equal(harness.sidebar.activeSessionId, second.id);
+  assert.ok(container.querySelector('.sidebar-toolbar'));
+  await act(async () => container.querySelector('[aria-label="展开对话列表"]').click());
+  await act(async () => container.querySelector('.sidebar-new-chat').click());
+  const created = harness.sidebar.activeSessionId;
+  assert.notEqual(created, second.id);
+  assert.notEqual(created, sourceSession.id);
+  const persisted = JSON.parse(values.get('easel_sessions'));
+  assert.equal(persisted.length, 3);
+  assert.deepEqual(persisted.find(item => item.id === created).messages, []);
+  assert.deepEqual(persisted.find(item => item.id === second.id).messages, second.messages);
+  assert.equal(harness.pages['对话'].session.id, created);
+  assert.equal(harness.streams.length, 0, 'opening and selecting conversations never sends a model prompt');
 });

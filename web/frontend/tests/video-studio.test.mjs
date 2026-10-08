@@ -1,3 +1,4 @@
+import { optionValues } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
@@ -58,6 +59,7 @@ async function fixture(t, options = {}) {
     starts: () => requests.filter(item => item.url === '/api/videogen' && item.method === 'POST'),
     polls: () => requests.filter(item => /^\/api\/videogen\/[^/]+$/.test(item.url) && item.method === 'GET'),
     button: label => [...container.querySelectorAll('button')].find(item => item.textContent.replace(/[←→↗]/g, '').trim() === label),
+    radio: label => [...container.querySelectorAll('[role=radio]')].find(item => item.getAttribute('aria-label') === label),
     run: async action => act(async () => { action(current); }),
     click: async element => { assert.ok(element); await act(async () => element.click()); },
     reply: async (request, response) => { assert.ok(request); await act(async () => request.resolve(response)); },
@@ -68,12 +70,12 @@ async function fixture(t, options = {}) {
 test('image and video drafts stay separate while a video completes off-page and restores its real result links', async t => {
   const f = await fixture(t);
   assert.equal(f.container.querySelector('#image-prompt').value, imageDraft.prompt);
-  await f.click(f.button('视频'));
+  await f.click(f.radio('视频'));
   assert.equal(f.container.querySelector('#video-prompt').value, videoDraft.prompt);
   await f.click(f.button('生成视频'));
   assert.deepEqual(JSON.parse(f.starts()[0].init.body), { prompt: '镜头缓慢推进', mode: 'text2video', provider: 'text', ratio: '16:9', duration: null, referenceId: null });
   assert.equal(f.state().video.submitting, true);
-  await f.click(f.button('图片'));
+  await f.click(f.radio('图片'));
   assert.equal(f.container.querySelector('#image-prompt').value, imageDraft.prompt);
   assert.deepEqual(f.stored('easel_imagegen_draft'), imageDraft);
   await f.reply(f.starts()[0], json({ jobId: 'video-one', state: 'running' }));
@@ -85,13 +87,24 @@ test('image and video drafts stay separate while a video completes off-page and 
   await f.reply(f.polls()[0], json({ ...f.state().video.job, state: 'done', url: '/api/media/video.mp4' }));
   assert.equal(outputEvents, 1);
   assert.equal(f.stored('easel_videogen_job').state, 'done');
-  await f.active(true); await f.click(f.button('视频'));
+  await f.active(true); await f.click(f.radio('视频'));
   const player = f.container.querySelector('video[aria-label="生成视频预览"]');
   assert.equal(player.getAttribute('src'), '/api/media/video.mp4');
   assert.equal(player.controls, true);
   assert.equal(f.container.querySelector('a[download]').getAttribute('href'), '/api/media/video.mp4');
   await act(async () => player.dispatchEvent(new window.Event('error')));
   assert.match(f.container.textContent, /浏览器无法播放/);
+});
+
+test('creation radio keyboard navigation changes the real page while keeping both drafts',async t=>{
+  const f=await fixture(t);
+  const group=f.container.querySelector('[role=radiogroup][aria-label="创作类型"]');
+  assert.ok(group);assert.equal(f.radio('图片').getAttribute('aria-checked'),'true');
+  await act(async()=>{f.radio('图片').focus();f.radio('图片').dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));});
+  assert.equal(f.state().video.viewMode,'video');assert.equal(f.radio('视频').getAttribute('aria-checked'),'true');assert.equal(f.container.querySelector('#video-prompt').value,videoDraft.prompt);
+  await act(async()=>f.radio('视频').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Home',bubbles:true})));
+  assert.equal(f.state().video.viewMode,'image');assert.equal(f.container.querySelector('#image-prompt').value,imageDraft.prompt);
+  assert.deepEqual(f.stored('easel_imagegen_draft'),imageDraft);assert.deepEqual(f.stored('easel_videogen_draft'),videoDraft);
 });
 
 test('using the displayed image selects an image-capable provider without changing image edits; submission failures retain the video draft', async t => {
@@ -101,7 +114,7 @@ test('using the displayed image selects an image-capable provider without changi
   assert.deepEqual(f.state().video.reference, reference);
   assert.equal(f.state().video.providerId, 'both');
   assert.equal(f.state().video.ratio, '16:9');
-  assert.deepEqual([...f.container.querySelector('[aria-label="视频时长"]').options].map(item => item.value), ['', '5', '10']);
+  assert.deepEqual(await optionValues(f.container.querySelector('[role="combobox"][aria-label="视频时长"]')), ['', '5', '10']);
   await f.run(({ video }) => { void video.generate(); void video.generate(); video.clearReference(); });
   assert.equal(f.starts().length, 1, 'the synchronous pending guard prevents duplicate submits');
   assert.equal(JSON.parse(f.starts()[0].init.body).referenceId, reference.id);
@@ -114,7 +127,7 @@ test('using the displayed image selects an image-capable provider without changi
   assert.equal(f.state().video.prompt, videoDraft.prompt);
   assert.deepEqual(f.stored('easel_imagegen_draft'), imageDraft);
   await f.click(f.button('配置视频服务')); assert.equal(f.calls.settings, 1);
-  await f.click(f.button('图片')); assert.equal(f.container.querySelector('#image-prompt').value, imageDraft.prompt);
+  await f.click(f.radio('图片')); assert.equal(f.container.querySelector('#image-prompt').value, imageDraft.prompt);
 });
 
 test('a failed gallery import preserves the previous video reference and never copies or clears the image draft', async t => {
@@ -140,7 +153,7 @@ test('restored running jobs keep polling across mode switches, expose stop-waiti
   const job = { jobId: 'restored', state: 'running', prompt: '旧任务', provider: 'text', model: 'test-t2v', mode: 'text2video', ratio: '16:9', duration: null, referenceId: null, started: Date.now() / 1000, url: null, error: null };
   const f = await fixture(t, { job });
   assert.equal(f.polls().length, 1);
-  await f.click(f.button('视频'));
+  await f.click(f.radio('视频'));
   assert.match(f.container.textContent, /服务商可能继续计费/);
   await f.click(f.button('停止等待'));
   await f.run(({ video }) => { void video.cancel(); });
@@ -156,15 +169,15 @@ test('restored running jobs keep polling across mode switches, expose stop-waiti
 
 test('a reference upload finishes in the background without pulling the user out of image mode', async t => {
   const f = await fixture(t);
-  await f.click(f.button('视频'));
+  await f.click(f.radio('视频'));
   await f.run(({ video }) => { void video.uploadReference(new File(['image-bytes'], 'next.png', { type: 'image/png' })); });
-  await f.click(f.button('图片'));
+  await f.click(f.radio('图片'));
   const next = { ...reference, id: 'next', name: 'next.png', url: '/api/imagegen/references/next' };
   await f.reply(f.requests.find(item => item.url === '/api/imagegen/references'), json(next));
   assert.equal(f.state().video.viewMode, 'image');
   assert.deepEqual(f.state().video.reference, next);
   assert.equal(f.container.querySelector('#image-prompt').value, imageDraft.prompt);
-  await f.click(f.button('视频'));
+  await f.click(f.radio('视频'));
   assert.equal(f.container.querySelector('[alt="视频首帧参考"]').getAttribute('src'), next.url);
 });
 
@@ -207,7 +220,7 @@ test('cancellation failure for the current task remains visible and can be retri
 
 test('service errors and unsupported modes block submits and leave a reachable configuration path', async t => {
   const f = await fixture(t, { configError: true });
-  await f.click(f.button('视频'));
+  await f.click(f.radio('视频'));
   assert.match(f.container.textContent, /视频服务读取失败：读取服务失败/);
   assert.equal(f.button('生成视频').disabled, true);
   await f.run(({ video }) => { void video.generate(); });

@@ -5,9 +5,16 @@ import zhihu from '../assets/platforms/zhihu.svg';
 import bilibili from '../assets/platforms/bilibili.svg';
 import douyin from '../assets/platforms/douyin.png';
 import wechat from '../assets/platforms/wechat.svg';
+import weibo from '../assets/platforms/sinaweibo.svg';
+import baidu from '../assets/platforms/baidu.svg';
+import v2ex from '../assets/platforms/v2ex.svg';
+import hackernews from '../assets/platforms/ycombinator.svg';
+import ithome from '../assets/platforms/ithome.png';
+import toutiao from '../assets/platforms/toutiao.png';
 
 const PLATFORM_ICONS: Record<string, string> = {
   xiaohongshu, kuaishou, 'weixin-channels': channels, zhihu, bilibili, douyin, 'wechat-oa': wechat,
+  weibo, baidu, v2ex, hackernews, ithome, toutiao,
 };
 
 export default function PlatformIcon({ platform, name, className = 'platform-icon' }: {

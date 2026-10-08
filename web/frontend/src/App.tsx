@@ -27,6 +27,8 @@ import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { clearChatDraft } from './lib/chatDrafts';
+import { requirementsForSelection } from './lib/selectedSkills';
+import type { SkillRequirements } from './lib/selectedSkills';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
@@ -274,6 +276,7 @@ export default function App() {
     persona: string | undefined,
     attachments: UploadedFile[] = [],
     selectedSkills: string[] = [],
+    skillRequirements: SkillRequirements = {},
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -363,6 +366,7 @@ export default function App() {
       // onHeartbeat：防呆心跳（30s 静默）。只设独立的「未卡住」提示，绝不写 activity/thinking → 不顶掉真实状态。
       (note) => setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
       selectedSkills,
+      skillRequirements,
     );
   }, [appendAssistant, clearStream]);
 
@@ -487,6 +491,7 @@ export default function App() {
     legacyAgentText?: string,
     truncateAt?: number,
     selectedSkills: string[] = [],
+    skillRequirements: SkillRequirements = {},
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -494,6 +499,7 @@ export default function App() {
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
     if (cur?.importedFromBackup) return false;
     const persona = cur?.persona || selectedPersona || undefined;
+    const requirementSnapshot = requirementsForSelection(skillRequirements, selectedSkills);
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id !== sessionId) return s;
@@ -504,6 +510,7 @@ export default function App() {
             role: 'user',
             content: visible,
             selectedSkills,
+            skillRequirements: requirementSnapshot,
             ...(attachments.length ? { attachments } : {}),
             ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
           } as ChatMessage],
@@ -514,13 +521,13 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments, selectedSkills);
+    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot);
     return true;
   }, [selectedPersona, startStream]);
 
-  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = []) => {
+  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}) => {
     if (!sessionsRef.current.some(session => session.id === sessionId)) return false;
-    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills);
+    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -532,7 +539,8 @@ export default function App() {
     legacyAgentText?: string,
   ) => {
     const selectedSkills = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.selectedSkills || [];
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills);
+    const skillRequirements = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.skillRequirements || {};
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements);
   }, [sendUserAndStream]);
 
   // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
@@ -773,7 +781,7 @@ export default function App() {
             stream={streams[activeSession.id]}
             stopping={Boolean(stoppingSessions[activeSession.id])}
             stopError={stopErrors[activeSession.id]}
-            onSend={(displayText, attachments, selectedSkills) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills)}
+            onSend={(displayText, attachments, selectedSkills, skillRequirements) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements)}
             onStop={() => handleStopStream(activeSession.id)}
             onNewChat={handleNewChat}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
@@ -857,7 +865,7 @@ export default function App() {
   }, [activeSessionId]);
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <Sidebar
         currentPage={currentPage}
         onPageChange={(page) => { if (page === 'settings') setSettingsSection('model'); setCurrentPage(page); }}

@@ -1,3 +1,4 @@
+import { selectOption, optionValues } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -201,13 +202,13 @@ test('settings animal portraits preview species and fur colors, explicitly save,
   assert.match(container.textContent, /点缀色/);
   assert.match(container.textContent, /毛色/);
   assert.doesNotMatch(container.textContent, /发型|短发|长发|发髻|肤色|头发/);
-  const species = container.querySelector('.employee-card select');
-  assert.deepEqual([...species.options].map(option => option.value), ['cat', 'rabbit', 'fox', 'bear']);
+  const species = container.querySelector('.employee-card [role="combobox"]');
+  assert.deepEqual(await optionValues(species), ['cat', 'rabbit', 'fox', 'bear']);
   const portrait = container.querySelector('.employee-card__portrait');
   assert.equal(portrait.dataset.species, 'cat');
   const variants = new Set();
   for (const value of ['cat', 'rabbit', 'fox', 'bear']) {
-    await act(async () => { species.value = value; species.dispatchEvent(new window.Event('change', { bubbles: true })); });
+    await selectOption(species, value);
     assert.equal(portrait.dataset.species, value);
     variants.add(portrait.innerHTML);
   }

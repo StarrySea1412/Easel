@@ -1,3 +1,4 @@
+import { selectOption } from './select-helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -65,6 +66,7 @@ async function fixture(t) {
     button: label => [...document.querySelectorAll('button')].find(item => item.textContent.replace(/[▶Ⅱ↺⌖↗]/g, '').trim() === label),
     async click(element) { assert.ok(element, 'target exists'); await act(async () => { element.focus(); element.click(); }); },
     async input(element, value) {
+      if (element.getAttribute('role') === 'combobox') return selectOption(element, value);
       const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
       await act(async () => element.dispatchEvent(new window.Event(element.tagName === 'SELECT' || element.type === 'color' ? 'change' : 'input', { bubbles: true })));
@@ -240,3 +242,18 @@ test('opening the character study suspends the hidden demo clock and returning r
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
+
+
+test('Escape closes the custom accessory list before cancelling the appearance draft', async t => {
+  const view = await fixture(t);
+  await view.click(view.container.querySelector('[data-agent="researcher"]'));
+  await view.click(view.button('编辑角色卡'));
+  const trigger = view.dialog().querySelector('[role="combobox"]');
+  await view.click(trigger);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})));
+  assert.ok(view.dialog(), 'the draft stays open after closing the option list');
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})));
+  assert.equal(view.dialog(), null);
+});

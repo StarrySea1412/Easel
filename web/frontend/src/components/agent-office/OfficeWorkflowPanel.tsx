@@ -7,6 +7,11 @@ const LANES: [WorkflowLane, string, string][] = [
   ['active', '正在推进', '01'], ['waiting', '等待协作', '02'], ['attention', '需要关注', '03'], ['finished', '已经完成', '04'],
 ];
 const EVENT_LABELS = { call: '调用', result: '回执', spawn: '分派记录', status: '状态记录' };
+const ATTENTION_STATES = [
+  { state: 'error', label: '报告问题', note: '查看过程中的错误记录，确认原因和下一步。' },
+  { state: 'stopped', label: '已停止', note: '确认停止原因与是否需要继续；停止不一定代表失败。' },
+  { state: 'unknown', label: '状态待核对', note: '当前无法确认成员状态，请查看已记录的过程；不代表执行失败。' },
+] as const;
 export default function OfficeWorkflowPanel({ agents, events, mode, elapsed, selectedId, stale, onSelect, onOpenProcess, displayName }: {
   agents: OfficeAgent[]; events: OfficeEvent[]; mode: 'live' | 'demo'; elapsed: number;
   selectedId: string | null; stale: boolean; onSelect: (id: string) => void; onOpenProcess: (id: string) => void;
@@ -16,9 +21,23 @@ export default function OfficeWorkflowPanel({ agents, events, mode, elapsed, sel
   const flow = useMemo(() => deriveOfficeWorkflow(agents, events, mode, elapsed), [agents, events, mode, elapsed]);
   const name = (id: string) => { const agent = flow.members.find(item => item.id === id); return agent ? displayName(agent) : id; };
   const records = flow.records.filter(event => !onlySelected || event.agentId === selectedId).slice(-12).reverse();
+  const attentionCount = flow.members.filter(agent => ATTENTION_STATES.some(item => item.state === agent.state)).length;
   return <section className="office-workflow" aria-label="协作工作流">
     <header><div><p className="office-eyebrow">TEAM FLOW / 协作工作流</p><h2>谁在推进，下一棒交给谁。</h2></div><span className="workflow-source">{mode === 'demo' ? '模拟协作' : stale ? '上次快照 · 更新中断' : '已观测记录'}</span></header>
     <p className="workflow-note">{mode === 'demo' ? '与办公室同一条演示时间轴；阶段按钮可暂停查看分工、交接和返工。' : '只展示当前会话已上报的成员、任务与上级关系。工具返回不等于任务完成；未上报的依赖和成员通讯不会补写。'}</p>
+    <section className="workflow-attention" aria-label="需要处理">
+      <div className="workflow-attention-heading"><h3>{mode === 'demo' ? '模拟 · 需要处理' : stale ? '历史快照 · 需要核对' : '需要处理'} <span>{attentionCount} 位</span></h3><small>{mode === 'demo' ? '演示脚本状态，非真实告警' : stale ? '更新已中断，不代表当前状态' : '依据最近已观测状态'}</small></div>
+      <p className="workflow-note">仅汇总报告问题、已停止和状态未知的成员。缺少任务说明或上级关系不会计为故障。</p>
+      <div className="workflow-attention-groups">{ATTENTION_STATES.map(item => {
+        const members = flow.members.filter(agent => agent.state === item.state);
+        return members.length ? <section className="workflow-attention-group" key={item.state} aria-label={item.label}>
+          <h4>{item.label} · {members.length}</h4><p>{item.note}</p>
+          <ul>{members.map(agent => <li key={agent.id}><button type="button" onClick={() => onOpenProcess(agent.id)}><strong>{name(agent.id)}</strong><span>{agent.task || '任务说明未上报'}</span><small>{mode === 'demo' ? '模拟过程' : stale ? '已保留过程' : '查看过程'} ↗</small></button></li>)}</ul>
+        </section> : null;
+      })}</div>
+      {!attentionCount && <p className="workflow-empty">{mode === 'demo' ? '当前模拟阶段' : stale ? '这份历史快照' : '已观测成员中'}暂无上述状态；未观测到的成员不在统计范围内。</p>}
+      <details className="workflow-waiting-summary"><summary>等待中的成员 · {flow.lanes.waiting.length}</summary><p className="workflow-note">等待单独列出，不计入需要处理。等待原因未由状态说明，不能据此判断正在等待审批或出现阻塞；请查看过程。</p><ul>{flow.lanes.waiting.map(agent => <li key={agent.id}><button type="button" onClick={() => onOpenProcess(agent.id)}>{name(agent.id)} · {mode === 'demo' ? '模拟等待' : stale ? '历史等待状态' : '已观测等待'} · 查看过程 ↗</button></li>)}</ul>{!flow.lanes.waiting.length && <p className="workflow-empty">没有已记录为等待的成员。</p>}</details>
+    </section>
     <div className="workflow-lanes">{LANES.map(([key, title, number]) => <section key={key} className={`workflow-lane workflow-lane-${key}`} aria-label={`${title}任务`}>
       <h3><span>{number}</span>{title}<b>{flow.lanes[key].length}</b></h3>
       <div className="workflow-cards">{flow.lanes[key].map(agent => <button type="button" key={agent.id} className="workflow-task" aria-pressed={selectedId === agent.id} onClick={() => onSelect(agent.id)}>

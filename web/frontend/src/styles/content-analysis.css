@@ -103,12 +103,12 @@
 .ca-account-filter { display:flex; align-items:center; flex-wrap:wrap; gap:18px; padding:14px 0 22px; }
 .ca-account-filter label { display:flex; align-items:center; gap:10px; font-size:12px; }
 .ca-account-filter span { color:var(--text-secondary); font-size:11px; }
-.ca-account-filter select { max-width:300px; }
-.ca-bench input:not([type=checkbox]), .ca-bench select, .ca-bench textarea { width:100%; min-width:0; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); padding:10px 12px; font:inherit; font-size:13px; line-height:1.6; box-sizing:border-box; }
+.ca-account-filter :is(select, .easel-select) { max-width:300px; }
+.ca-bench input:not([type=checkbox]), .ca-bench :is(select, .easel-select), .ca-bench textarea { width:100%; min-width:0; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); padding:10px 12px; font:inherit; font-size:13px; line-height:1.6; box-sizing:border-box; }
 .ca-bench textarea { resize:vertical; }
-.ca-bench input:focus-visible, .ca-bench select:focus-visible, .ca-bench textarea:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
+.ca-bench input:focus-visible, .ca-bench :is(select, .easel-select):focus-visible, .ca-bench textarea:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
 .ca-bench label { font-size:12px; color:var(--text-secondary); }
-.ca-bench label > input:not([type=checkbox]), .ca-bench label > textarea, .ca-bench label > select { display:block; margin-top:7px; }
+.ca-bench label > input:not([type=checkbox]), .ca-bench label > textarea, .ca-bench label > :is(select, .easel-select) { display:block; margin-top:7px; }
 .ca-entry { padding:24px; background:var(--surface-2); border:1px solid var(--border); border-radius:11px; margin:18px 0 25px; display:grid; gap:17px; }
 .ca-entry h3 { margin:0; }
 .ca-entry details { border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:14px 0; }
@@ -220,9 +220,9 @@
 .ca-demo-chart h3 { font-size:18px; line-height:1.7; margin:0; font-weight:550; }
 .ca-demo-chart .ca-card-heading { align-items:flex-start; }
 .ca-demo .ca-demo-metric-label { width:116px; flex-shrink:0; font-size:10px; color:var(--text-secondary); }
-.ca-demo input:not([type=checkbox]), .ca-demo select { font:inherit; font-size:12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:9px 11px; box-sizing:border-box; max-width:100%; }
-.ca-demo input:focus-visible,.ca-demo select:focus-visible,.ca-demo summary:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; }
-.ca-demo-metric-label select { display:block; width:100%; margin-top:6px; padding:6px!important; font-size:11px!important; }
+.ca-demo input:not([type=checkbox]), .ca-demo :is(select, .easel-select) { font:inherit; font-size:12px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:9px 11px; box-sizing:border-box; max-width:100%; }
+.ca-demo input:focus-visible,.ca-demo :is(select, .easel-select):focus-visible,.ca-demo summary:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; }
+.ca-demo-metric-label :is(select, .easel-select) { display:block; width:100%; margin-top:6px; padding:6px!important; font-size:11px!important; }
 .ca-trend-bars { display:flex; gap:9px; align-items:flex-end; margin:28px 0 18px; }
 .ca-trend-bars >div { flex:1; min-width:0; text-align:center; }
 .ca-trend-bars strong { font-size:10px; font-weight:500; display:block; color:var(--text-secondary); margin-bottom:8px; font-variant-numeric:tabular-nums; }
@@ -251,7 +251,7 @@
 .ca-demo-table-tools { display:flex; align-items:flex-end; gap:14px; margin:0 0 18px; }
 .ca-demo-table-tools label { font-size:11px; color:var(--text-secondary); }
 .ca-demo-table-tools label:first-child { flex:1; max-width:420px; }
-.ca-demo-table-tools input,.ca-demo-table-tools select { width:100%; display:block; margin-top:7px; }
+.ca-demo-table-tools input,.ca-demo-table-tools :is(select, .easel-select) { width:100%; display:block; margin-top:7px; }
 .ca-demo-table-tools >span { font-size:11px; color:var(--text-secondary); margin:0 0 10px auto; white-space:nowrap; }
 .ca-demo table { width:100%; border-collapse:collapse; text-align:left; font-size:12px; }
 .ca-demo table caption { text-align:left; font-size:11px; color:var(--text-secondary); line-height:1.8; padding:0 0 12px; }

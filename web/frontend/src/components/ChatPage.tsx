@@ -8,7 +8,9 @@ import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
-import { readSelectedSkills } from '../lib/selectedSkills';
+import '../styles/chat-workspace.css';
+import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
+import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import type { UploadedFile } from '../lib/api';
 
@@ -17,7 +19,7 @@ interface ChatPageProps {
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
   stopping?: boolean;
   stopError?: string;
-  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[]) => boolean;
+  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements) => boolean;
   onStop: () => void;
   onResend: (
     userIndex: number,
@@ -31,7 +33,7 @@ interface ChatPageProps {
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
-import { IconFire, IconEdit, IconLayout, IconVideo } from './icons';
+import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus } from './icons';
 import type { ComponentType } from 'react';
 type Suggestion = { Icon: ComponentType<{ size?: number }>; title: string; prompt: string };
 const SUGGESTIONS: Suggestion[] = [
@@ -80,6 +82,13 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const isStreaming = !isImported && !!stream;
   const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported);
   const isEmpty = session.messages.length === 0 && !isStreaming;
+  const header = <header className="chat-header">
+    <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
+    <div className="chat-header-actions">
+      {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
+      {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
+    </div>
+  </header>;
 
   useLayoutEffect(()=>{
     if(nodes.length>previousCount.current){navigationTarget.current=null;followLatest.current=true;}
@@ -99,22 +108,18 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   if (isEmpty && !isImported) {
     return (
       <div className="chat-page chat-welcome-page">
+        {header}
         <div className="chat-hero">
-          <div className="chat-hero-brand">
-            <img src="./static/easel-icon-transparent.png" alt="" />
-            <span>Easel</span>
-          </div>
           <h1 className="chat-hero-title">{greeting()}</h1>
-          <p className="chat-hero-sub">从选题到发布，一站式帮你把想法做成能发的内容。</p>
+          <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
           <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
-              <button key={s.title} className="card card-hover suggestion-card"
-                onClick={() => { if (!isStreaming && !stopping) onSend(s.prompt, undefined, readSelectedSkills(session.id)); }}>
+              <button key={s.title} className="suggestion-card" title={s.prompt}
+                onClick={() => { if (!isStreaming && !stopping) { const skills = readSelectedSkills(session.id); onSend(s.prompt, undefined, skills, readSkillRequirements(session.id, skills)); } }}>
                 <span className="suggestion-icon" aria-hidden="true"><s.Icon size={18} /></span>
                 <span className="suggestion-body">
                   <span className="suggestion-title">{s.title}</span>
-                  <span className="suggestion-text">{s.prompt}</span>
                 </span>
               </button>
             ))}
@@ -130,6 +135,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
   return (
     <div className="chat-page chat-conversation-page">
+      {header}
       {isImported && <section className="chat-backup-notice" aria-label="导入记录说明">
         <div>
           <strong>备份导入的只读记录</strong>
