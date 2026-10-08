@@ -12,12 +12,12 @@
 | --- | --- |
 | 小动物办公室 | Three.js / WebGL 3D 工位；猫、兔、狐狸和熊的连续角色表面；在办公室原位预览、保存或取消外观编辑；真实 Agent 显式绑定 |
 | 大团队与岗位 | 完整成员名单搜索、每区最多 8 个场景工位、选中成员自动定位分区；六类岗位的设备、坐姿与动作差异 |
-| 看得见的工作 | 阅读、书写、绘图与键鼠动作；持笔取放和阶段过渡；电脑显示已观测任务和工具名，可查看清晰屏幕与工作过程；演示支持定位、暂停和重播 |
+| 看得见的工作 | 场景前直接查看任务、承接成员、已上报步骤和最近回执，打开过程或定位产出文件；阅读、书写、绘图与键鼠动作对应已观测状态，演示支持定位、暂停和重播 |
 | 过程与反馈 | 点击状态查看精确会话、轮次对应的可见思考与工具回执；完成、错误和停止分别反馈；中断更新时明确保留旧快照 |
 | 产出监控 | 办公室查看整个工作区近期文件，筛选类型、预览媒体、下载并跳转内容库；不猜测文件属于哪位员工 |
-| 模型与执行 | 读取已配置渠道，在网关能力与身份通过核验时为目标 Agent 会话设置后续调用模型；主会话和单独子 Agent 停止范围分开 |
+| 模型与执行 | 办公室可新建任务、继续当前主会话、查看结果和中断本轮；每次提交可指定渠道及对应模型，严格核验后才执行，失败不静默换用默认或备用模型；成员后续模型配置与已核验子 Agent 停止分别提供 |
 | 对话与导航 | 参考 Codex 的工具栏 + 会话列表双列结构；工具栏可切换图标/图标加名称，会话列表独立展开/收起并分别记忆；默认窄工具栏和展开会话列，次要页面从“更多”进入；按会话保留草稿、上传归属与历史备份 |
-| 技能选择 | 输入区显示已选技能标签和数量；悬停或键盘聚焦查看本机技能导读，点击编辑、保存或清除“本会话补充要求”；选择与要求按会话保留，之后发送采用当次快照，不修改全局技能或历史消息；目录失败不清空选择，保存失败保留草稿并提示 |
+| 技能选择 | 工作台快捷创作与对话共用技能选择、常驻标签和详情组件；悬停或键盘聚焦查看导读，点击编辑、保存或清除补充要求；工作台的“本次创作要求”随成功接收的提交带入新会话，对话要求按会话保留；目录失败或发送被拒绝保留选择与草稿，不修改全局技能 |
 | 平台账号预览 | 悬停、聚焦或点击账号图标，查看七平台本地登录快照，沿用各品牌原图标；明确区分未登录、待读取与待在线校验，并提供账号中心入口 |
 | 图片工作台 | 页面显示当前模型，可编辑并保存已连接生图服务的模型 ID，生成任务记录实际选用型号；支持剪贴板图片、视频文件及本地素材预览，视频在浏览器提取首帧作为参考图，原片不上传；实际生成仍需有效模型服务 |
 | 局部图片编辑 | 在参考图上直接用画笔选择修改区域，支持橡皮、笔刷大小、清空、取消和应用；按原图尺寸上传 PNG 蒙版，取消保留原草稿，应用后仍需填写描述并主动生成；实际编辑取决于模型服务支持 |
@@ -27,6 +27,8 @@
 | 厂商形象审核 | 内置 14 家厂商与通配角色的设计清单，首批三款（豆包、DeepSeek、通配）提供可旋转、可导出参考图的 3D 审核样板；样板尚未替换办公室员工，其余仍在设计方向 |
 | 内容分析 | 七平台分别展示编辑重点与材料要求，单篇 AI 显式接收平台背景；同平台同账号跨作品 AI 使用最多 12 篇材料、32 张程序事实卡，最多返回 6 条建议，每条关联至少两篇作品的有效事实卡；可保存、导出并预填验证实验，真实模型与平台链路尚未验收 |
 | 统一控件与配色 | 页面下拉复用共享自定义 Select，图片/视频切换及蒙版绘制工具复用 RadioGroup；双列侧栏、弹出菜单与正文共用全局底色、边框、选中态和焦点颜色；验收范围单独记录 |
+| 响应式布局 | 设置分区与模型通道自动换行；工作台、创作页、分析与办公室按侧栏展开后剩余的实际容器宽度调整列数和操作布局；长表单和过程弹层保留可滚动内容，宽表格在自身区域滚动；设备及入口验收逐项登记 |
+| 演示数据开关 | 设置首页的「通用设置 → 显示演示数据」统一控制内容分析和 Agent 办公室；关闭后只显示已保存作品、实时观测或空状态，刷新与同地址标签页保持一致，保留真实记录和角色卡 |
 | 热点与运行记录 | “我的热榜”展示九个来源的平台图标；增删来源后显式“保存热榜”，支持保存空列表、恢复默认和刷新恢复，浏览器存储失败不伪报已保存；来源错误、获取时间与重试分别展示，运行记录支持会话、搜索和状态筛选 |
 | 其他创作流程 | 保留选题、日历、账号、画像、内容库及发布入口，持续改进本地体验 |
 
@@ -36,7 +38,7 @@
 
 视频创作的接口、协议与验证边界（六类适配器、参考图安全上传、MP4 校验、任务恢复与取消）见 [视频生成说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/video-generation-2026-10-01.md)。适配器代码存在不代表服务商已配置或已通过真实生成验收；本轮未发起付费生成。
 
-对话、生图模型与剪贴板素材的阶段记录见 [2026-10-05 实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/chat-studio-analysis-2026-10-05.md)，当前双列侧栏、技能选择和蒙版改进见 [2026-10-08 最新记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md)。剪贴板能否提供视频取决于浏览器和复制来源；视频链接不会被当作视频文件读取，必要时使用文件选择。内容分析的实时概览与持久归档分别受采集字段约束；目前其余六平台缺少可核验的稳定账号标识，应使用规范导入，不宣称七平台自动归档全部可用。
+对话、生图模型与剪贴板素材的阶段记录见 [2026-10-05 实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/chat-studio-analysis-2026-10-05.md)，双列侧栏、对话技能选择和蒙版改进见 [10 月 8 日平台分析与组件记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md)。剪贴板能否提供视频取决于浏览器和复制来源；视频链接不会被当作视频文件读取，必要时使用文件选择。内容分析的实时概览与持久归档分别受采集字段约束；目前其余六平台缺少可核验的稳定账号标识，应使用规范导入，不宣称七平台自动归档全部可用。
 
 动物外观卡只改变展示，不修改提示词、权限或员工执行行为。真实模式只显示取得的证据；未上报的思考、工具输出和远程桌面不会被补写。演示模式中的角色、任务和画板始终标为模拟。
 
@@ -44,15 +46,21 @@
 
 本轮参考 [stablyai/orca](https://github.com/stablyai/orca) 的关注事项与过程定位，改善办公室“现在需要看哪里”；另参考 LinkedIn Orca 的问题驱动分析。未引入这些项目为运行依赖，真实任务调度、人工等待协议、产物归属和交接回执仍待继续。源码对照与许可边界见 [Orca 调研](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/orca-research-2026-10-08.md)。
 
+办公室进一步参考腾讯 [Marvis 官方公开资料](https://marvis.qq.com/docs/agent-system)，将任务、承接成员、已上报步骤、回执和产出位置前置。没有记录时显示缺失状态，不推算完成百分比；工作区文件也不自动归属于选中成员。本轮没有安装或登录 Marvis 客户端，不宣称两者体验已全面等同；具体依据与边界见 [Marvis 调研及落地记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/marvis-office-2026-10-08.md)。
+
 另对照 [画境 AI Image Studio](https://gitee.com/starry-sea-1412/ai-image-studio)，本轮优先独立实现参考图上的蒙版绘制，复用现有上传与生成链路。风格模板库、持久图片队列和多渠道对照仍是后续工作；未引入其服务或运行依赖。功能对照、实施次序与 MIT 许可边界见 [生图工坊比较](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/image-studio-comparison-2026-10-08.md)。
 
-模型控制依赖已配对的本地网关、准确的会话/运行身份以及相应权限。模型保存影响该 Agent 会话后续调用，不会重跑已完成任务。独立停止可能停止该员工派生的任务；不停止父级或同级。网关未核验时按钮保持不可用。完整边界见 [专业办公室实现与验证](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md)。
+办公室的「新建任务 / 继续当前会话」复用对话执行链路，停止操作等待后台确认并保留已收到结果。未指定模型时沿用原会话配置；明确指定渠道模型时，只对已核验严格语义的 **OpenClaw 2026.9.2** 开放，并检查实际网关版本、权限和本次选择，不把较新或未知版本视为已兼容。能力或模型核验失败会拒绝该任务，不静默回退。界面保留本轮指定值，实际执行型号仍以运行记录为准；已登记配置、API 连通与真实推理是不同的验证层次。
+
+成员模型保存另行影响该 Agent 会话后续调用，不会重跑已完成任务。单独子 Agent 停止依赖准确的会话、轮次与运行身份，可能同时停止其派生任务，不停止父级或同级；没有可核验身份时不提供假成功。当前环境尚未完成真实模型和多 Agent 执行验收。新链路与检查范围见 [响应式、技能与办公室任务记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md)，既有控制边界保留于 [专业办公室记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/professional-office-2026-10-01.md)。
 
 角色自然持物、完整动作与任务交接仍在迭代；职责/能力配置、真实任务产出归属、逐帧碰撞与性能尚未完整验收。10 月 1 日热点 HTTP 抽查中，7 个来源取得内容，知乎与头条限流；10 月 8 日知乎主来源抽查恢复并返回 30 条问题热榜，不能据此保证长期可用。历史逐项状态见 [工作台整改与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)。
 
 知乎备用适配通过启动环境变量 `EASEL_ZHIHU_DAILYHOT_URL` 显式启用，默认关闭；可配置自部署或获准使用、兼容 DailyHotApi-Go 的完整问题热榜接口，重启后端后仅在主来源失败或冷却时尝试。公开演示实例只做过核验，没有设为默认依赖；这不是搜索关键词 API，也不以响应生成时间冒充榜单更新时间。配置方式、实际 HTTP 证据与限制见 [知乎热榜修正记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/zhihu-trends-2026-10-08.md)。
 
 ## 从本仓库源码开始
+
+Windows 首先准备 Git、Python 3.10+（建议 3.12）、Node.js 24.16+（24.x）或 26.1+、FFmpeg，并确认终端能找到这些命令。安装脚本会指出缺少的工具。
 
 ```bash
 git clone --branch codex/creator-workflow https://github.com/StarrySea1412/Easel.git
@@ -62,11 +70,21 @@ cd Easel
 Windows 10/11 使用 PowerShell：
 
 ```powershell
-.\setup.ps1 -NonInteractive
-.\.venv\Scripts\easel.exe web --port 7860
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive -DeferBrowser -DataDir .\data
+.\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
 
-安装脚本会检查工具、建立本地环境和前端，并配置隔离的 OpenClaw profile。缺少系统工具时先按提示安装；只有显式使用 `-AllowWinget` 才允许脚本通过 winget 安装缺失工具。`-NonInteractive` 将模型配置留到网页设置。首次安装仍需网络，不能当作离线便携包。
+这条快速启动路径明确把平台登录/发布用的独立浏览器留待稍后安装，先打开基础工作台。安装记录会标明“浏览器已延后”，不会把它算作已安装；依赖该浏览器的平台操作需要补装后再使用。补装时运行下面的命令，已完成阶段会保留：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive -DataDir .\data
+```
+
+如果希望首次就安装全部组件，直接使用不带 `-DeferBrowser` 的命令。官方浏览器下载需要能访问相应 CDN；慢网络默认等待 120 秒，仍失败时可先选择上述快速启动路径。
+
+第一条只需首次安装或更新依赖时运行；以后在 Easel 目录运行第二条即可。安装和启动必须使用同一个 `data` 目录，启动器会恢复该目录保存的网关配置和本地工具路径。不要改用裸 `easel web` 命令替代这一步。`ExecutionPolicy Bypass` 只作用于这次安装进程，不修改系统执行策略。
+
+安装脚本会检查工具、建立本地环境和前端，并配置隔离的 OpenClaw profile。缺少系统工具时先按提示安装；只有显式使用 `-AllowWinget` 才允许脚本通过 winget 安装缺失工具。`-NonInteractive` 将模型配置留到网页设置。首次安装需要联网下载依赖，终端显示安装成功后再启动；失败时按错误提示处理并重跑同一安装命令，可续接已完成阶段。不要关闭仍在安装的窗口，也不能把它当作离线便携包。
 
 macOS / Linux 保留原有安装入口：
 
@@ -76,7 +94,13 @@ source .venv/bin/activate
 easel web --port 7860
 ```
 
-打开终端输出的本地地址，在「设置」配置自己的模型渠道；进入「Agent 办公室」选择成员后可原位编辑外观。Windows 构建、数据目录与恢复说明见 [安装器文档](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)。不要把密钥、平台登录态或个人产出提交到 Git。
+启动器会打开浏览器，也可访问终端输出的本地地址（默认 `http://127.0.0.1:7860/`，端口被占用时以输出为准）。成功后服务在后台运行，可以关闭启动终端；下次运行同一命令会复用当前工作台。首次欢迎页可选「先用通用模式」，再进入「设置 → 模型配置 → 添加供应商」，填写自己的服务地址、模型和 API Key，设为主通道、保存，并使用「自测本通道」检查；模型服务可能收费。尚未配置时可以浏览工作台、选择技能、管理本地选题和日历，不能据此认为 AI 已能生成内容。
+
+上述基础启动路径已用独立源码、空数据、新 Python 环境和重新安装的前端依赖实际验证：安装与新终端启动成功，浏览器首页、首次引导和模型配置表单可用。测试机器已有上述系统工具；官方 Chromium 下载仍超时，完整平台浏览器安装未通过。首装中发现的 biliup 源码编译问题已通过与发行锁一致的 1.2.9 wheel 解决；模型密钥模板默认留空，不会误报“已配置”。详见[新用户验收记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md#新用户首次运行)。
+
+工作台快捷输入可先选技能、查看导读并保存本次创作的补充要求；提交被接收后，正文、技能与要求一起移交新会话。拒绝发送或本地保存失败时保留草稿；接收提交不代表模型任务已成功完成。进入「Agent 办公室」可新建或继续主会话任务，也可选择成员原位编辑外观。Windows 构建、数据目录与恢复说明见 [安装器文档](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)。不要把密钥、平台登录态或个人产出提交到 Git。
+
+不需要内置样例时，进入「设置 → 通用设置」，关闭「显示演示数据」。成功后立即生效并保存在当前浏览器，无需重启服务；存储失败会提示且保留原开关状态。重新开启即可恢复演示入口，不会删除已导入作品、会话或员工角色配置。
 
 ## 开发与验证
 
@@ -97,15 +121,20 @@ python -m pytest -q
 ```
 
 - [当前交付进度](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md)：源码、预览、安装包分别记录。
-- [本次用户要求清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md)：逐项对应实现、验收与剩余工作。
+- [本次用户要求清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md)：逐项对应实现、验收与剩余工作；每次用户打断追加，先记录原话要点、验收条件和优先级，再继续修改并同步并行分工。
+- [响应式、快捷技能与办公室任务验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md)：本轮页面矩阵、请求链路与真实模型边界。
 - [工作台体验整改清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-action-plan-2026-10-01.md)：已完成内容、用户反馈与待办。
 - [本轮验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)：区分真实浏览器、隔离 HTTP、模拟记录和网关协议测试。
 - [开发计划](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-plan.md)：剩余真实模型链路与安装升级验收。
 - [技能功能映射](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/skill-function-mapping.md)：保留的技能与脚本能力。
 
-2026-10-08 本轮自动检查：前端 **555/555**，Python **1417 passed / 6 skipped**，lint、TypeScript 与生产构建通过。自动测试数不代表同数量的真实服务验证。
+2026-10-08 响应式、工作台技能与办公室任务已通过前端 **639/639**、Python **1449 passed / 6 skipped**，以及 lint、TypeScript 和生产构建。16 个主页面完成 390/768/1280px 的入口与布局检查；运行记录会话条和日历长标题的最后修正已在浏览器复核。首次安装追加修正及其独立环境结果单列于[最新验收文档](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md)，不以旧环境运行替代新用户启动，也不把未核验的外部平台和真实模型标记为通过。
 
-真实浏览器已完成桌面与 **390×844** 窄屏的侧栏、技能补充要求、热榜来源保存和蒙版操作检查；办公室问题跳转使用演示数据，**640×480** 二值 PNG 蒙版已实际上传至本地后端。技能导读的键盘入口已验证，独立鼠标悬停仅有模拟 DOM 覆盖。逐项范围见 [本轮验收记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md)。
+此前 R15 演示开关阶段：前端 **572/572**，lint、TypeScript 与生产构建通过。更早同日 Python 全量为 **1417 passed / 6 skipped**；R15 只改前端，未重跑后端测试。这些历史结果不替代最新追加实现的完整验收，自动测试数也不代表同数量的真实服务验证。
+
+此前阶段的真实浏览器已完成桌面与 **390×844** 窄屏的侧栏、对话技能补充要求、热榜来源保存和蒙版操作检查；办公室问题跳转使用演示数据，**640×480** 二值 PNG 蒙版已实际上传至本地后端。技能导读的键盘入口已验证，独立鼠标悬停仅有模拟 DOM 覆盖。逐项范围见 [该阶段验收记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md)。
+
+演示开关已完成真实浏览器鼠标和 Space/Enter 操作、刷新恢复、设置分区导航及 390×844 布局检查。另一标签页关闭时，已打开的模拟过程、团队、时间轴和产出预览退出；内容分析保留已导入记录。该验证未调用真实模型。
 
 CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手动工作流，构建不会自动发布 Release。新版安装器的发现与下载元数据指向本仓库；没有已发布版本时不会回退安装上游包。
 
