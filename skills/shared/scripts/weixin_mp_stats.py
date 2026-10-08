@@ -30,6 +30,7 @@ else:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+import publish_receipt  # noqa: E402
 
 PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 LOGIN_DIR = PROJECT_ROOT / "outputs" / "_login"
@@ -699,12 +700,22 @@ def _editor_ctx(page, token):
             "nick_name": grab("nick_name", html)}
 
 
+@publish_receipt.publishing_command("wechat-oa", exec_attribute=None)
 def cmd_publish(a):
     """用后台会话建草稿（免 AppID/AppSecret、免 IP 白名单）。
     步骤：编辑器取 ticket → filetransfer 传封面 → operate_appmsg sub=create 建草稿。"""
     from playwright.sync_api import sync_playwright
     import time as _t
     out = {"success": False, "media_id": "", "error": None}
+
+    def finish(outcome, status, message, code=1):
+        out.update(outcome=outcome, url="")
+        print(json.dumps(out, ensure_ascii=True))
+        publish_receipt.emit(publish_receipt.make_receipt(
+            "wechat-oa", outcome, platform_status=status, content_id=out["media_id"],
+            message=message, evidence={"kind": "wechat_draft_api", "publicAccessChecked": False}))
+        return code
+
     html = Path(a.html).read_text(encoding="utf-8")
     title = a.title[:64]
     digest = (a.digest or "")[:120]
@@ -716,10 +727,12 @@ def cmd_publish(a):
             page.goto(MP_HOME, wait_until="commit", timeout=60000); page.wait_for_timeout(1500)
             token = _extract_token(page.url)
             if not token:
-                out["error"] = "未登录 mp 后台，请先 login 扫码"; print(json.dumps(out, ensure_ascii=False)); return 1
+                out["error"] = "未登录 mp 后台，请先 login 扫码"
+                return finish("failed", "login_required", "未登录公众号后台，尚未创建草稿。")
             info = _editor_ctx(page, token)
             if not info.get("ticket"):
-                out["error"] = "未取到上传 ticket（编辑器页结构可能变化）"; print(json.dumps(out, ensure_ascii=False)); return 1
+                out["error"] = "未取到上传 ticket（编辑器页结构可能变化）"
+                return finish("failed", "editor_unavailable", "公众号编辑器未就绪，尚未创建草稿。")
 
             # 上传素材统一走 filetransfer?action=upload_material&writetype=doublewrite
             # （真实编辑器用的接口；uploadimg2cdn 在会话模式下常返回 errcode -1 / invalid referrer，
@@ -750,10 +763,10 @@ def cmd_publish(a):
             cover_cdn_url = up.get("cdn_url") or (content.get("cdn_url") if isinstance(content, dict) else "") or ""
             if str(up.get("base_resp", {}).get("ret", 0)) != "0":
                 out["error"] = f"封面上传失败: {json.dumps(up, ensure_ascii=False)[:200]}"
-                print(json.dumps(out, ensure_ascii=False)); return 1
+                return finish("failed", "cover_upload_failed", "封面上传失败，尚未创建公众号草稿。")
             if not thumb_media_id:
                 out["error"] = f"封面上传失败: {json.dumps(up, ensure_ascii=False)[:200]}"
-                print(json.dumps(out, ensure_ascii=False)); return 1
+                return finish("failed", "cover_upload_unverified", "封面上传未返回素材 ID，尚未创建公众号草稿。")
 
             # 1.5) 正文内嵌图片 → 同一 upload_material 接口，取响应 cdn_url 替换 src
             def _upload_content_img(path):
@@ -797,24 +810,26 @@ def cmd_publish(a):
                     "cdn_url0": cover_cdn_url, "cdn_235_1_url0": cover_cdn_url,
                     "cdn_1_1_url0": cover_cdn_url, "cdn_16_9_url0": cover_cdn_url,
                 })
+            publish_receipt.mark_submitted()
             r2 = page.request.post(op_url, form=form,
                                    headers={"Referer": page.url, "X-Requested-With": "XMLHttpRequest"})
             try:
                 res = r2.json()
             except Exception:
-                out["error"] = f"建草稿返回非JSON: {r2.text()[:200]}"; print(json.dumps(out, ensure_ascii=False)); return 1
+                out["error"] = f"建草稿返回非JSON: {r2.text()[:200]}"
+                return finish("unverified", "invalid_response", "创建草稿后响应异常，请先在公众号后台核对，避免重复创建。")
             ret = res.get("ret", res.get("base_resp", {}).get("ret", -1))
             if str(ret) == "0":
                 media_id = str(res.get("appMsgId") or res.get("appmsgid") or res.get("app_id") or "").strip()
-                if not media_id:
-                    out["error"] = "建草稿成功但未返回草稿 ID"
-                    print(json.dumps(out, ensure_ascii=False)); return 1
+                if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", media_id):
+                    out["error"] = "建草稿成功但未返回有效草稿 ID"
+                    return finish("unverified", "missing_draft_id", "后台未返回草稿 ID，创建结果仍需核对。")
                 out["success"] = True
                 out["media_id"] = media_id
                 out["thumb_media_id"] = thumb_media_id
-                print(json.dumps(out, ensure_ascii=False)); return 0
+                return finish("draft", "draft_created", "公众号草稿已创建，尚未公开发布；请到公众号后台预览并发布。", 0)
             out["error"] = f"建草稿失败 ret={ret}: {json.dumps(res, ensure_ascii=False)[:250]}"
-            print(json.dumps(out, ensure_ascii=False)); return 1
+            return finish("failed", "platform_rejected", "公众号后台拒绝创建草稿，内容未发布。")
         finally:
             ctx.close()
 

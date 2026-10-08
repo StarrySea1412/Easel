@@ -10,7 +10,7 @@ WJZ-P/douyin-upload-mcp-skill（src/douyin-ops.js）。确定性 IO 在脚本，
   - 切 tab（发布视频/发布图文）→ 隐藏 file input 塞文件
   - 视频等 uploading-container 消失（≤5min）→ 等 AI 封面（≤60s）选推荐封面
   - 标题 input[placeholder*=作品标题]；简介 slate contenteditable（Ctrl+A 清空再输）
-  - 发布按钮在 card-container-creator-layout 内文本「发布」→ 发布后读回创作者中心作品列表对账（platform_readback；标题+时间窗对上才算成功）
+  - 点击发布后读回创作者中心作品列表，匹配作品并核实公开状态；审核中/私密/未知状态分别记录
   - 登录：img[aria-label=二维码] 抠图轮询；命中短信验证给提示
 
 子命令: check / login / plan / publish / publish-video / selftest
@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快照+列表对账协议）
+import publish_receipt  # noqa: E402
 import human_pace  # noqa: E402  人类节奏（分档随机停顿）
 
 HOME_URL = "https://creator.douyin.com/"
@@ -465,8 +466,7 @@ def _dump_publish_fail(page, tag: str = "publish-fail") -> None:
 
 
 def _wait_toast(page, timeout_s: int = 20) -> None:
-    """判发布结果：①URL 跳内容管理页(content/manage) = 成功；②toast 含「成功」= 成功；
-    ③toast 含失败/错误类词 = 失败(dump)；超时未确认 → dump 后按未确认处理（不误报成功）。"""
+    """等待提交界面反馈；URL/toast 不能代替后续的作品公开状态读回。"""
     start_url = page.url
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -474,13 +474,13 @@ def _wait_toast(page, timeout_s: int = 20) -> None:
             url = page.url
             if "content/manage" in url or ("post/video" not in url and "creator-micro" in url
                                            and url != start_url):
-                print(f"✅ 发布成功（已跳转：{url[:70]}）")
+                print("ℹ️ 已离开编辑页，正在读回核实作品状态。")
                 return
             t = page.query_selector(SELECTORS["toast"])
             if t:
                 txt = (t.inner_text() or "").strip()
                 if "成功" in txt:
-                    print(f"✅ 发布成功（toast：{txt}）")
+                    print("ℹ️ 检测到提交提示，正在读回核实作品状态。")
                     return
                 if any(k in txt for k in ("失败", "错误", "不能", "不支持", "请先", "请选择", "请上传")):
                     _dump_publish_fail(page)
@@ -1081,7 +1081,7 @@ def _plan_lines(kind, title, desc, media, tags):
         f"  2. 切 tab「{tab}」",
         f"  3. {'上传视频等转码(≤5min)+选AI封面' if kind == 'video' else '上传图片'}",
         "  4. 填标题/简介（Ctrl+A 清空再逐字输入）+ # 话题",
-        "  5. 点「发布」→ 发布后读回作品列表对账（标题+时间窗对上才算发布成功）",
+        "  5. 点「发布」→ 读回匹配作品并核实公开状态；审核中/私密/未知分别标明",
     ]
 
 
@@ -1181,6 +1181,7 @@ def _publish(a, kind: str) -> int:
                 _wait_video_processed(page)
                 _select_ai_cover(page)
             _fill_title_desc(page, a.title, a.content or "", tags)
+            publish_receipt.mark_submitted()
             _click_publish(page, len(a.title) + len(a.content or ""))
             # 点击后轮询等风控墙浮现（2026-09-12 真机发现：墙的渲染晚于 2.5s，
             # 单次检查会扑空 → 漏进收尾 → 对着被墙遮挡的按钮空点超时。≤12s 窗口）
@@ -1225,6 +1226,7 @@ def _publish(a, kind: str) -> int:
                     published = None
             # 读回对账（权威判定）：界面判定只说明「提交动作被接受」，以平台侧作品列表为准。
             if not a.keep_open and readback is None:
+                login_state.write_status(sf, "verifying", "已尝试提交，正在核对平台作品状态…")
                 try:
                     readback = platform_readback.verify_douyin_publish(
                         page, title=a.title, since_ms=started_ms,
@@ -1249,42 +1251,31 @@ def _publish(a, kind: str) -> int:
         if readback is None or readback.outcome == "readback_error":
             readback = _readback_verify(p, a, a.title, since_ms=started_ms,
                                         snapshot_ids=snapshot_ids)
-    # 结算：以读回对账为权威（四档），界面判定仅作旁证。
-    outcome = readback.outcome if readback else "readback_error"
-    if outcome == "verified":
-        m = readback.matched
-        _acct = (readback.evidence or {}).get("account") or {}
-        _who = f"；账号：{_acct.get('display_name')}" if _acct.get("display_name") else ""
-        login_state.write_status(sf, "success",
-                                 f"发布成功（读回核验：作品 {m.platform_content_id}，{m.status}{_who}）")
-        print(f"✅ 抖音发布成功（读回核验：{m.platform_content_id}{_who}）")
+    # 读回匹配只证明找到作品；审核中、私密等必须与公开发布分开。
+    receipt = publish_receipt.emit(publish_receipt.from_readback("douyin", readback, kind=kind))
+    outcome = receipt["outcome"]
+    print(f"{'✅' if outcome == 'published' else 'ℹ️'} 抖音：{receipt['message']}")
+    if outcome == "published":
         # 落统一内容日历（对话页自动；发布页由 web 设 AUTORECORD=0 跳过防重复）
         try:
             import calendar_ops
             calendar_ops.record_publish("douyin", a.title,
+                                        url=receipt["url"],
                                         ptype="视频" if kind == "video" else "图文",
                                         tags=(a.tags or ""), note=(a.content or ""), source="chat")
         except Exception:
             pass
+    if outcome in ("published", "submitted"):
         return 0
-    if outcome == "login_required":
-        login_state.write_status(sf, "error",
-                                 "发布未核验：读回时登录态已失效——请重新登录后到内容管理页核对是否已发出")
-        _die("读回核验时登录态已失效；请重新登录后核对内容管理页", 6)
-    if outcome == "unverified":
-        login_state.write_status(sf, "error",
-                                 "发布未确认：界面已操作完成，但读回作品列表未见本次内容（可能仍在索引/审核，或未真正发出）——请到内容管理页核对")
-        _die("发布未确认：读回作品列表未见本次内容（见内容管理页）", 5)
-    reason = getattr(readback, "error", None) or "读回通道异常"
-    login_state.write_status(sf, "error",
-                             f"发布未确认成功（{reason}；见 outputs/_login/douyin-publish-fail.* 或内容管理页）")
-    _die(f"发布未确认成功（{reason}；见截图/日志）", 5)
+    return 6 if getattr(readback, "outcome", None) == "login_required" else 5
 
 
+@publish_receipt.publishing_command("douyin")
 def cmd_publish(a) -> int:
     return _publish(a, "imagetext")
 
 
+@publish_receipt.publishing_command("douyin")
 def cmd_publish_video(a) -> int:
     return _publish(a, "video")
 
@@ -1357,7 +1348,7 @@ def cmd_selftest(_a) -> int:
     assert _proxy(None, True) is None
     assert _proxy("http://x:1", False) == "http://x:1"
     lv = _plan_lines("video", "标题", "简介", ["/a.mp4"], ["热点"])
-    assert any("发布视频" in x for x in lv) and any("发布成功" in x for x in lv)
+    assert any("发布视频" in x for x in lv) and any("公开状态" in x for x in lv)
     li = _plan_lines("imagetext", "t", "c", ["/a.jpg"], [])
     assert any("发布图文" in x for x in li)
     # 验证码文件协议：写入→读取消费一次→再读为空

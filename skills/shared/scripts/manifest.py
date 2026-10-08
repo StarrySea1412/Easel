@@ -202,6 +202,7 @@ def cmd_meta(args) -> None:
     if args.status and args.status not in PROJECT_STATUSES:
         sys.exit(f"错误：--status 需为 {'/'.join(PROJECT_STATUSES)}，收到 {args.status!r}")
 
+    previous_status = data.get('status')
     # 标量字段：仅合并本次传入的（None=不动，保留旧值）
     for field in META_SCALAR_FIELDS:
         val = getattr(args, field, None)
@@ -215,12 +216,13 @@ def cmd_meta(args) -> None:
 
     data["updated"] = now
     atomic_write(path, data)
-    # 邮箱通知钩子：项目标记 ready/published 发一封摘要邮件（draft 不发；未配置零开销）。
-    if data.get("status") in ("ready", "published") and _notify_completion is not None:
+    # 只对明确进入 ready 的状态转换提醒生成完成。修改展示字段不重发；
+    # 本地 published 元数据不构成平台发布凭据，不能触发成功邮件。
+    if args.status == 'ready' and previous_status != 'ready' and _notify_completion is not None:
         try:
             _notify_completion(topic=data.get("topic", ""), title=data.get("title", ""),
                                platform=data.get("platform", ""), kind=data.get("kind", ""),
-                               summary=data.get("summary", ""), source="publish",
+                               summary=data.get("summary", ""), source="generate",
                                deliverables=data.get("deliverables") or [])
         except Exception:  # noqa: BLE001
             pass

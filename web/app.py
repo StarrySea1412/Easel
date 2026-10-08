@@ -46,7 +46,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
-from easel import local_records
+from easel import local_records, publish_receipts
 from easel.reasoning_stream import ReasoningStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
@@ -478,6 +478,10 @@ async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
     from easel.storage_location import apply_pending
     await asyncio.to_thread(apply_pending, DATA_DIR)
+    try:
+        await asyncio.to_thread(_publish_receipt_store().recover_interrupted)
+    except local_records.RecordError as exc:
+        print(str(exc), file=sys.stderr)
     yield
     _stop_mp_login_on_shutdown()
 
@@ -4946,129 +4950,310 @@ class PublishRequest(BaseModel):
     tags: str = ''
 
 
+_PUBLISH_LOCK = threading.RLock()
+_PUBLISH_ACTIVE: dict[str, str] = {}
+# Preserve a known result in the running process if a disk fails after the
+# platform has accepted it. Starting a new operation still requires durable IO.
+_PUBLISH_VOLATILE: dict[str, dict] = {}
+
+
+def _publish_receipt_store() -> publish_receipts.ReceiptStore:
+    return publish_receipts.ReceiptStore(PUBLISH_DIR / 'receipts.json')
+
+
+def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
+    with _PUBLISH_LOCK:
+        base = _PUBLISH_VOLATILE.get(receipt_id, {})
+        try:
+            pending = {**base, **changes} if base.get('storageWarning') else dict(changes)
+            pending.pop('storageWarning', None)
+            result = _publish_receipt_store().update(receipt_id, pending)
+        except (local_records.RecordError, KeyError):
+            result = {**base, **changes, 'receiptId': receipt_id,
+                      'updatedAt': publish_receipts._now(base.get('updatedAt')),
+                      'storageWarning': '发布回执未能保存；请先核对平台结果，避免重复发布。'}
+        _PUBLISH_VOLATILE[receipt_id] = result
+        return dict(result)
+
+
+def _begin_publish(platform: str, title: str) -> dict:
+    with _PUBLISH_LOCK:
+        if platform in _PUBLISH_ACTIVE:
+            raise HTTPException(409, '该平台已有发布任务，请先查看现有任务。')
+        try:
+            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title)
+        except publish_receipts.ActivePublishError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except local_records.RecordError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from None
+        _PUBLISH_ACTIVE[platform] = receipt['receiptId']
+        _PUBLISH_VOLATILE[receipt['receiptId']] = receipt
+        return receipt
+
+
+def _release_publish(platform: str, receipt_id: str) -> None:
+    with _PUBLISH_LOCK:
+        if _PUBLISH_ACTIVE.get(platform) == receipt_id:
+            _PUBLISH_ACTIVE.pop(platform, None)
+
+
 def _write_publish_status(status_file: Path, state: str, message: str = '') -> None:
-    """写异步发布状态（与 login_state 同格式），原子写。"""
+    """Progress only. Platform scripts may replace this with their next state."""
+    import tempfile
+    temporary = None
     try:
         status_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = status_file.with_suffix('.tmp')
-        tmp.write_text(json.dumps({'state': state, 'message': message, 'ts': int(time.time())},
-                                  ensure_ascii=False), encoding='utf-8')
-        os.replace(tmp, status_file)
-    except Exception:
-        pass
-
-
-def _read_publish_status(platform: str) -> dict:
-    st = PUBLISH_DIR / f'{platform}.json'
-    if st.is_file():
-        try:
-            d = json.loads(st.read_text(encoding='utf-8'))
-            return {'state': d.get('state', 'unknown'), 'message': d.get('message', '')}
-        except Exception:
-            pass
-    return {'state': 'unknown', 'message': ''}
-
-
-def _run_publish_bg(platform: str, cmd: list, title: str, body: str, cfg: dict,
-                    status_file: Path, code_file: Path) -> None:
-    """后台线程跑发布脚本（脚本自身把 starting/sms_required/verifying/success/error 写进 status_file）。
-    结束后兜底补写终态 + 记 _publish.log + 成功则回流排期。"""
-    ok = False
-    out = err = ''
-    try:
-        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_publish_env(),
-                              capture_output=True, text=True, timeout=900)
-        ok = proc.returncode == 0
-        out, err = proc.stdout or '', proc.stderr or ''
-    except subprocess.TimeoutExpired:
-        err = '发布超时（>900s）'
-    except Exception as e:  # noqa: BLE001
-        err = f'发布进程异常：{e}'
-    try:
-        with (OUTPUTS_DIR / '_publish.log').open('a', encoding='utf-8') as lf:
-            lf.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {platform}(async) ok={ok} =====\n")
-            lf.write('CMD: ' + ' '.join(cmd) + '\nSTDOUT:\n' + out[-2000:] + '\nSTDERR:\n' + err[-2000:] + '\n')
-    except Exception:
-        pass
-    # 脚本正常会写终态；异常/超时没写到时兜底补一个
-    if _read_publish_status(platform)['state'] not in ('success', 'error'):
-        _write_publish_status(status_file, 'success' if ok else 'error',
-                              '发布成功' if ok else ('\n'.join((err or out).strip().splitlines()[-4:]) or '发布失败'))
-    try:
-        code_file.unlink()
+        fd, name = tempfile.mkstemp(dir=status_file.parent, suffix='.tmp')
+        temporary = Path(name)
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump({'state': state, 'message': message, 'ts': int(time.time())},
+                      handle, ensure_ascii=False)
+        os.replace(temporary, status_file)
+        temporary = None
     except OSError:
         pass
-    if ok:
-        calendar_warning = _record_published_schedule(title, body, cfg['name'])
-        if calendar_warning:
-            current = _read_publish_status(platform)
-            state = current['state'] if current['state'] in ('success', 'error') else 'success'
-            _write_publish_status(status_file, state, '\n'.join(filter(None, [current.get('message'), calendar_warning])))
-        # 邮箱通知钩子：发布成功发一封摘要邮件（异步路径）。未配置零开销，失败不影响结果。
-        if _notify_email_completion is not None:
+    finally:
+        if temporary is not None:
             try:
-                _notify_email_completion(title=title, platform=cfg['name'],
-                                         summary=body[:300], source='publish')
-            except Exception:
+                temporary.unlink(missing_ok=True)
+            except OSError:
                 pass
 
 
-def _start_async_publish(platform: str, cmd: list, title: str, body: str, cfg: dict,
-                         status_file: Path, code_file: Path) -> dict:
-    """启动异步发布：清旧码/状态 → 起后台线程 → 立即返回。前端轮询 /api/publish/{p}/status，
-    遇 sms_required 弹输入框、提交到 /api/publish/{p}/sms。"""
+def _refresh_publish_receipt(receipt: dict) -> dict:
+    if receipt.get('outcome') in publish_receipts.OUTCOMES:
+        return receipt
+    status_file = PUBLISH_DIR / (receipt['receiptId'] + '.status.json')
     try:
-        code_file.unlink()
-    except OSError:
+        progress = json.loads(status_file.read_text(encoding='utf-8'))
+        if (isinstance(progress, dict) and isinstance(progress.get('state'), str)
+                and progress['state'] in publish_receipts.PROGRESS_STATES):
+            return {**receipt, 'state': progress['state'],
+                    'message': str(progress.get('message') or receipt['message'])[:600]}
+    except (OSError, ValueError):
         pass
-    _write_publish_status(status_file, 'starting', '发布中…（若触发风控会要求短信验证）')
-    threading.Thread(target=_run_publish_bg,
-                     args=(platform, cmd, title, body, cfg, status_file, code_file),
-                     daemon=True).start()
-    # 关键：**不返回 ok:true**——这只是「已启动」的应答，真正结果要靠轮询 /status。
-    # 若这里给 ok:true，旧前端会把它当「已发布」立刻显示成功（假成功 bug，真机踩过）。
-    return {'async': True, 'pending': True, 'message': '发布已启动，请稍候…'}
+    # A script's "success" state is not a publication receipt. Keep waiting for
+    # the runner to validate stdout and persist its actual terminal outcome.
+    return receipt
+
+
+def _get_publish_receipt(receipt_id: str) -> dict:
+    if not publish_receipts.RECEIPT_ID.fullmatch(receipt_id):
+        raise HTTPException(404, '发布回执不存在')
+    cached = _PUBLISH_VOLATILE.get(receipt_id)
+    if cached and cached.get('storageWarning'):
+        return _refresh_publish_receipt(dict(cached))
+    try:
+        receipt = _publish_receipt_store().get(receipt_id)
+    except local_records.RecordError as exc:
+        if cached:
+            return _refresh_publish_receipt({**cached, 'storageWarning':
+                '发布回执文件读取失败，当前显示本次运行的缓存结果；请检查保存目录。'})
+        raise HTTPException(exc.status_code, str(exc)) from None
+    if receipt is None:
+        raise HTTPException(404, '发布回执不存在')
+    return _refresh_publish_receipt(receipt)
+
+
+def _recent_publish_receipts(limit: int = 50) -> list[dict]:
+    with _PUBLISH_LOCK:
+        cached = {key: dict(value) for key, value in _PUBLISH_VOLATILE.items()}
+        read_warning = ''
+        try:
+            receipts = _publish_receipt_store().recent(limit)
+        except local_records.RecordError as exc:
+            if not cached:
+                raise HTTPException(exc.status_code, str(exc)) from None
+            receipts = []
+            read_warning = '发布回执文件读取失败，当前仅显示本次运行的缓存结果，历史可能不完整；请检查保存目录。'
+        combined = {item['receiptId']: item for item in receipts}
+        for receipt_id, item in cached.items():
+            saved = combined.get(receipt_id)
+            if (saved is None or item.get('storageWarning')
+                    or str(item.get('updatedAt', '')) >= str(saved.get('updatedAt', ''))):
+                combined[receipt_id] = item
+        ordered = sorted(combined.values(), key=lambda item: str(item.get('createdAt', '')), reverse=True)
+        selected = ordered[:max(1, min(200, limit))]
+        selected_ids = {item['receiptId'] for item in selected}
+        selected += [item for item in ordered if item.get('outcome') not in publish_receipts.OUTCOMES
+                     and item['receiptId'] not in selected_ids]
+        if read_warning:
+            selected = [{**item, 'storageWarning': '\n'.join(filter(None, [
+                item.get('storageWarning'), read_warning]))} for item in selected]
+    return [_refresh_publish_receipt(item) for item in selected]
+
+
+@app.get("/api/publish/receipts")
+async def api_publish_receipts(limit: int = 50):
+    return _recent_publish_receipts(limit)
+
+
+@app.get("/api/publish/receipts/{receipt_id}")
+async def api_publish_receipt(receipt_id: str):
+    return _get_publish_receipt(receipt_id)
+
+
+def _read_publish_status(platform: str) -> dict:
+    """Legacy platform polling reads the newest durable receipt, not stale JSON."""
+    receipt = next((item for item in _recent_publish_receipts(200)
+                    if item['platform'] == platform), None)
+    return _refresh_publish_receipt(receipt) if receipt else {'state': 'unknown', 'message': ''}
+
+
+def _finish_publish(platform: str, receipt_id: str, title: str, body: str, cfg: dict,
+                    out: str, returncode: int | None, failure_message: str = '') -> dict:
+    result = publish_receipts.parse_result(platform, receipt_id, out, returncode,
+                                          failure_message=failure_message)
+    result['notification'] = {'state': 'skipped', 'message': '仅在平台确认公开发布后发送成功提醒。'}
+    receipt = _save_publish_receipt(receipt_id, result)
+    if result['outcome'] != 'published':
+        return receipt
+
+    calendar_warning = _record_published_schedule(title, body, cfg['name'],
+                                                   url=result['url'], receipt_id=receipt_id)
+    if calendar_warning:
+        receipt = _save_publish_receipt(receipt_id, {
+            'message': result['message'] + '\n' + calendar_warning})
+    notified = []
+    def notification_changed(notification):
+        if isinstance(notification, dict) and notification.get('state') in {
+                'unconfigured', 'queued', 'sent', 'failed', 'skipped'}:
+            notified.append(True)
+            _save_publish_receipt(receipt_id, {'notification': notification})
+    if _notify_email_completion is None:
+        notification_changed({'state': 'skipped', 'message': '邮箱通知模块不可用。'})
+    else:
+        try:
+            state = _notify_email_completion(
+                title=title, platform=cfg['name'], summary=body[:300], source='publish',
+                url=result['url'], receipt_id=receipt_id, outcome='published',
+                on_result=notification_changed)
+            if not notified:
+                valid_state = isinstance(state, dict) and state.get('state') in {
+                    'unconfigured', 'queued', 'sent', 'failed', 'skipped'}
+                notification_changed(state if valid_state else {
+                    'state': 'skipped', 'message': '旧版通知模块未提供发送回执，邮件结果未确认。'})
+        except Exception:
+            notification_changed({'state': 'failed', 'message': '邮件提醒未能启动，请检查通知设置。'})
+    return dict(_PUBLISH_VOLATILE.get(receipt_id, receipt))
+
+
+def _run_publish_job(platform: str, cmd: list, title: str, body: str, cfg: dict,
+                     status_file: Path, code_file: Path, receipt_id: str,
+                     timeout: int = 600) -> dict:
+    out = err = ''
+    returncode = None
+    failure_message = ''
+    try:
+        try:
+            env = _proxy_env() if platform == 'wechat-oa' else _publish_env()
+            env['EASEL_PUBLISH_RECEIPT_ID'] = receipt_id
+            # Calendar writes happen only after receipt validation in Web.
+            env['EASEL_CALENDAR_AUTORECORD'] = '0'
+            proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=env,
+                                  capture_output=True, text=True, encoding='utf-8',
+                                  errors='replace', timeout=timeout)
+            out, err, returncode = proc.stdout or '', proc.stderr or '', proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            out = exc.stdout or ''
+            if isinstance(out, bytes):
+                out = out.decode('utf-8', errors='replace')
+            err = '发布进程超时'
+            failure_message = '发布等待超时，平台结果尚未核实；请先到平台查看，避免重复发布。'
+        except Exception as exc:
+            returncode = -1
+            err = f'发布进程异常：{type(exc).__name__}'
+            failure_message = '发布进程未能正常执行，请检查运行环境和本地发布日志。'
+        try:
+            OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+            with (OUTPUTS_DIR / '_publish.log').open('a', encoding='utf-8') as handle:
+                handle.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} "
+                             f"{platform} receipt={receipt_id} rc={returncode} =====\n")
+                handle.write('STDOUT:\n' + out[-4000:] + '\nSTDERR:\n' + err[-2000:] + '\n')
+        except OSError:
+            pass
+        return _finish_publish(platform, receipt_id, title, body, cfg, out, returncode,
+                               failure_message)
+    finally:
+        try:
+            code_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _release_publish(platform, receipt_id)
+
+
+def _run_publish_bg(platform: str, cmd: list, title: str, body: str, cfg: dict,
+                    status_file: Path, code_file: Path, receipt_id: str) -> None:
+    _run_publish_job(platform, cmd, title, body, cfg, status_file, code_file,
+                     receipt_id, timeout=900)
+
+
+def _start_async_publish(platform: str, cmd: list, title: str, body: str, cfg: dict,
+                         status_file: Path, code_file: Path, receipt_id: str) -> dict:
+    _write_publish_status(status_file, 'starting', '发布处理中；如需短信验证会在此显示。')
+    try:
+        threading.Thread(target=_run_publish_bg,
+                         args=(platform, cmd, title, body, cfg, status_file, code_file, receipt_id),
+                         daemon=True, name=f'easel-publish-{platform}').start()
+    except Exception:
+        _finish_publish(platform, receipt_id, title, body, cfg, '', -1, '发布任务未能启动。')
+        _release_publish(platform, receipt_id)
+        raise HTTPException(503, '发布任务未能启动，请稍后重试。') from None
+    return {'async': True, 'pending': True, 'receiptId': receipt_id,
+            'state': 'starting', 'outcome': None, 'message': '发布已启动，请等待平台回执。'}
 
 
 @app.get("/api/publish/{platform}/status")
 async def api_publish_status(platform: str):
-    """轮询异步发布状态：starting/sms_required/verifying/success/error。"""
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
     return {'mode': 'publish', **_read_publish_status(platform)}
 
 
+class PublishSmsRequest(BaseModel):
+    code: str
+    receiptId: str = ''
+
+
 @app.post("/api/publish/{platform}/sms")
-async def api_publish_sms(platform: str, req: SmsCodeRequest):
-    """发布触发短信墙时回填验证码（写发布 runner 轮询的一次性验证码文件）。"""
+async def api_publish_sms(platform: str, req: PublishSmsRequest):
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
-    code = ''.join(ch for ch in (req.code or '') if ch.isdigit())
-    if not (4 <= len(code) <= 8):
-        raise HTTPException(400, '验证码应为 4-8 位数字')
-    PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-    (PUBLISH_DIR / f'{platform}.code').write_text(code, encoding='utf-8')
-    return {'ok': True}
+    with _PUBLISH_LOCK:
+        receipt_id = _PUBLISH_ACTIVE.get(platform)
+        if not receipt_id or (req.receiptId and req.receiptId != receipt_id):
+            raise HTTPException(409, '对应发布任务已结束或已变化，请刷新任务状态。')
+        if _get_publish_receipt(receipt_id).get('state') != 'sms_required':
+            raise HTTPException(409, '该发布任务当前不需要短信验证码。')
+        code = ''.join(ch for ch in (req.code or '') if ch.isascii() and ch.isdigit())
+        if not (4 <= len(code) <= 8):
+            raise HTTPException(400, '验证码应为 4-8 位数字')
+        code_file = PUBLISH_DIR / (receipt_id + '.code')
+        if code_file.is_symlink():
+            raise HTTPException(503, '验证码文件不可写，请检查保存目录。')
+        try:
+            code_file.write_text(code, encoding='utf-8')
+        except OSError:
+            raise HTTPException(503, '验证码未保存，请检查保存目录后重试。') from None
+    return {'ok': True, 'receiptId': receipt_id}
 
 
 @app.post("/api/publish/{platform}")
 async def api_publish(platform: str, req: PublishRequest):
-    """一键发布：分发到对应 publisher 脚本真发（--exec）。二次确认在前端。"""
+    """Run an explicitly requested publication and retain its platform receipt."""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
-    backend = cfg['backend']
-    if backend == 'unsupported':
+    if cfg['backend'] == 'unsupported':
         raise HTTPException(400, f"{cfg['name']} 暂不支持一键发布")
     if not req.title.strip() and not req.body.strip():
         raise HTTPException(400, '标题/正文不能为空')
     imgs, vids = [], []
     for rel in req.media or []:
         full = _safe_output_path(rel)
-        ext = full.suffix.lower()
-        if ext in VIDEO_EXTS:
+        if full.suffix.lower() in VIDEO_EXTS:
             vids.append(str(full))
-        elif ext in IMAGE_EXTS:
+        elif full.suffix.lower() in IMAGE_EXTS:
             imgs.append(str(full))
     if platform in MEDIA_REQUIRED and not imgs and not vids:
         raise HTTPException(400, f"{cfg['name']} 需附带图片或视频")
@@ -5076,96 +5261,76 @@ async def api_publish(platform: str, req: PublishRequest):
         raise HTTPException(400, '同一条内容不能同时发图片和视频，请二选一')
     if platform in VIDEO_ONLY_PUBLISH and not vids:
         raise HTTPException(400, f"{cfg['name']} 只能发视频，请附带一个视频文件")
+    if platform == 'wechat-oa':
+        if _mp_login_status().get('state') != 'success':
+            raise HTTPException(400, '公众号后台未登录：请先在账号页点「登录公众号后台」扫码')
+        if not imgs or vids:
+            raise HTTPException(400, '公众号文章需要封面图，请附带图片而非视频')
     title = req.title.strip() or req.body.strip()[:20]
     tags = req.tags or ''
     py = sys.executable
-    if platform == 'xiaohongshu':
-        base = [py, str(SHARED_SCRIPTS / 'xhs_publish.py')]
-        cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
-        cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec']
-    elif platform == 'bilibili':
-        # B站投稿：直接调 biliup CLI（需 cookies.json，PATH 上有 biliup）。必须视频；
-        # tid=36「知识」；B站投稿必须≥1 标签，无则兜底「日常」。
-        bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
-        cmd = ['biliup', '-u', str(DATA_DIR / 'cookies.json'), 'upload', vids[0],
-               '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag]
-        if req.body.strip():
-            cmd += ['--desc', req.body[:2000]]
-    elif platform == 'douyin':
-        base = [py, str(SHARED_SCRIPTS / 'douyin_publish.py')]
-        cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
-        cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec']
-        # 抖音发布可能触发风控短信墙——异步跑 + 状态/验证码文件，前端轮询到 sms_required 时弹输入框
-        PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-        status_file = PUBLISH_DIR / 'douyin.json'
-        code_file = PUBLISH_DIR / 'douyin.code'
-        cmd += ['--status-file', str(status_file), '--sms-code-file', str(code_file)]
-        return _start_async_publish(platform, cmd, title, req.body, cfg, status_file, code_file)
-    elif platform == 'wechat-oa':
-        # 微信公众号：走「后台会话」发布（免 AppID/AppSecret、免 IP 白名单）。
-        # 正文 MD → 公众号 HTML（skill 排版器）→ 会话建草稿（weixin_mp_stats.py publish，内嵌图传 mp CDN）。
-        if _mp_login_status().get('state') != 'success':
-            raise HTTPException(400, '公众号后台未登录：请先在账号页点「登录公众号后台」扫码')
-        if not imgs:
-            raise HTTPException(400, '公众号文章需要一张封面图，请附带至少一张图片')
-        if vids:
-            raise HTTPException(400, '公众号发图文文章，请附带封面/正文图片而非视频')
-        cover = imgs[0]
-        PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-        stamp = uuid.uuid4().hex[:12]
-        md_path = PUBLISH_DIR / f'wechat-oa-{stamp}.md'
-        html_path = PUBLISH_DIR / f'wechat-oa-{stamp}.html'
-        body_md = req.body or ''
-        extra_imgs = imgs[1:]
-        if extra_imgs:
-            body_md += "\n\n" + "\n\n".join(f'![]({p})' for p in extra_imgs)
-        md_path.write_text(f"# {title}\n\n{body_md}\n", encoding='utf-8')
-        conv = subprocess.run([py, str(WECHAT_SKILL_SCRIPTS / 'html_converter.py'),
-                               str(md_path), '-o', str(html_path)],
-                              cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                              capture_output=True, text=True, timeout=60)
-        if conv.returncode != 0 or not html_path.is_file():
-            raise HTTPException(500, f"排版失败：{(conv.stderr or conv.stdout or '')[-200:]}")
-        wx_proxy = os.environ.get('EASEL_PROXY') or os.environ.get('https_proxy') or ''
-        cmd = [py, str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'publish', '--proxy', wx_proxy,
-               '--html', str(html_path), '--cover', cover, '--title', title,
-               '--digest', (req.body or '').strip()[:100], '--author', '']
-    else:
-        cmd = [py, str(SHARED_SCRIPTS / 'web_publisher.py'), 'publish',
-               '--platform', cfg['wp'], '--title', title, '--desc', req.body,
-               '--tags', tags, '--exec']
-        media = vids[0] if vids else (imgs[0] if imgs else None)
-        if media:
-            cmd += ['--media', media]
-    # 公众号走后台会话（Playwright，脚本自带 --proxy，默认直连）；其余平台走 _publish_env
-    pub_env = _proxy_env() if platform == 'wechat-oa' else _publish_env()
+    receipt = _begin_publish(platform, title)
+    receipt_id = receipt['receiptId']
+    status_file = PUBLISH_DIR / (receipt_id + '.status.json')
+    code_file = PUBLISH_DIR / (receipt_id + '.code')
     try:
-        proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=pub_env,
-                                       capture_output=True, text=True, timeout=600)
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, '发布超时（媒体处理慢或流程卡住）')
-    ok = proc.returncode == 0
-    tail = (proc.stderr or proc.stdout or '').strip().splitlines()
-    detail = '\n'.join(tail[-8:])
-    try:
-        with (OUTPUTS_DIR / '_publish.log').open('a', encoding='utf-8') as lf:
-            lf.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {platform} rc={proc.returncode} ok={ok} =====\n")
-            lf.write('CMD: ' + ' '.join(cmd) + '\n')
-            lf.write('STDOUT:\n' + (proc.stdout or '')[-2000:] + '\n')
-            lf.write('STDERR:\n' + (proc.stderr or '')[-2000:] + '\n')
-    except Exception:
-        pass
-    calendar_warning = ''
-    if ok:
-        calendar_warning = _record_published_schedule(title, req.body, cfg['name'])
-        # 邮箱通知钩子：发布成功发一封摘要邮件（同步路径）。未配置零开销，失败不影响结果。
-        if _notify_email_completion is not None:
-            try:
-                _notify_email_completion(title=title, platform=cfg['name'],
-                                         summary=(req.body or '')[:300], source='publish')
-            except Exception:
-                pass
-    return {'ok': ok, 'message': calendar_warning or ('发布成功' if ok else '发布失败（见 detail）'), 'detail': detail}
+        if platform == 'xiaohongshu':
+            base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'xhs_publish.py')]
+            cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
+            cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec']
+        elif platform == 'bilibili':
+            bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
+            cmd = [py, '-X', 'utf8', str(PROJECT_ROOT / 'skills' / 'openclaw' / 'skill-bilibili-upload'
+                           / 'scripts' / 'bili_upload.py'), 'upload', '--video', vids[0],
+                   '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag,
+                   '--cookie', str(DATA_DIR / 'cookies.json'), '--exec']
+            if req.body.strip():
+                cmd += ['--desc', req.body[:2000]]
+        elif platform == 'douyin':
+            base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'douyin_publish.py')]
+            cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
+            cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec',
+                    '--status-file', str(status_file), '--sms-code-file', str(code_file)]
+        elif platform == 'wechat-oa':
+            # This platform endpoint creates a draft. The resulting receipt
+            # must retain that outcome instead of calling it a publication.
+            md_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.md'
+            html_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.html'
+            body_md = req.body or ''
+            if imgs[1:]:
+                body_md += "\n\n" + "\n\n".join(f'![]({path})' for path in imgs[1:])
+            md_path.write_text(f"# {title}\n\n{body_md}\n", encoding='utf-8')
+            conv = await asyncio.to_thread(
+                subprocess.run, [py, '-X', 'utf8', str(WECHAT_SKILL_SCRIPTS / 'html_converter.py'),
+                                 str(md_path), '-o', str(html_path)],
+                cwd=str(PROJECT_ROOT), env=_proxy_env(), capture_output=True,
+                text=True, encoding='utf-8', errors='replace', timeout=60)
+            if conv.returncode != 0 or not html_path.is_file():
+                raise HTTPException(500, '公众号排版失败，请检查正文、图片和本地日志。')
+            wx_proxy = os.environ.get('EASEL_PROXY') or os.environ.get('https_proxy') or ''
+            cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'publish', '--proxy', wx_proxy,
+                   '--html', str(html_path), '--cover', imgs[0], '--title', title,
+                   '--digest', (req.body or '').strip()[:100], '--author', '']
+        else:
+            cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'web_publisher.py'), 'publish',
+                   '--platform', cfg['wp'], '--title', title, '--desc', req.body,
+                   '--tags', tags, '--exec']
+            media = vids[0] if vids else (imgs[0] if imgs else None)
+            if media:
+                cmd += ['--media', media]
+        if platform == 'douyin':
+            return _start_async_publish(platform, cmd, title, req.body, cfg,
+                                         status_file, code_file, receipt_id)
+        _write_publish_status(status_file, 'starting', '正在等待平台处理和回执。')
+    except BaseException:
+        _finish_publish(platform, receipt_id, title, req.body, cfg, '', -1,
+                        '发布准备未完成，内容尚未交给平台发布。')
+        _release_publish(platform, receipt_id)
+        raise
+    # The worker owns finalization and cleanup, even if an HTTP client leaves
+    # while awaiting it. A disconnect must never unlock an active publication.
+    return await asyncio.shield(asyncio.to_thread(
+        _run_publish_job, platform, cmd, title, req.body, cfg, status_file, code_file, receipt_id))
 
 
 class ProfileBuildRequest(BaseModel):
@@ -5340,14 +5505,18 @@ def _write_schedule(items: list[dict]) -> None:
         raise HTTPException(exc.status_code, str(exc)) from None
 
 
-def _record_published_schedule(title: str, body: str, platform: str) -> str:
+def _record_published_schedule(title: str, body: str, platform: str,
+                               url: str = '', receipt_id: str = '') -> str:
     """Keep a completed publish successful, but make failed calendar saving visible."""
     try:
         items = _read_schedule()
+        if receipt_id and any(item.get('receiptId') == receipt_id for item in items):
+            return ''
         items.append({'id': uuid.uuid4().hex[:12], 'title': title,
                       'date': time.strftime('%Y-%m-%d'), 'platform': platform,
                       'time': time.strftime('%H:%M'), 'status': 'published', 'note': body[:200],
-                      'kind': 'content', 'source': 'publish-page'})
+                      'kind': 'content', 'source': 'publish-page', 'url': url,
+                      'receiptId': receipt_id})
         _write_schedule(items)
     except HTTPException as exc:
         return f'发布已完成，但排期记录未保存：{exc.detail}'

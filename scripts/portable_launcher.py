@@ -143,6 +143,9 @@ def isolated_env(bundle: Bundle, source: dict | None = None) -> dict[str, str]:
     paths.extend([system / "System32", system, system / "System32/WindowsPowerShell/v1.0"])
     env.update({
         "PATH": os.pathsep.join(map(str, paths)), "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+        # Windows expands this in native cache paths; leaving it unset creates
+        # literal %SystemDrive% directories under the application working dir.
+        "SystemDrive": system.drive,
         "HOME": str(home), "USERPROFILE": str(home),
         "HOMEDRIVE": home.drive, "HOMEPATH": str(home)[len(home.drive):],
         "APPDATA": str(home / "AppData/Roaming"), "LOCALAPPDATA": str(home / "AppData/Local"),
@@ -167,12 +170,14 @@ def isolated_env(bundle: Bundle, source: dict | None = None) -> dict[str, str]:
         "OPENCLAW_STATE_DIR": str(bundle.data / "openclaw"),
         "OPENCLAW_HOME": str(bundle.data / "openclaw-home"),
         "OPENCLAW_CONFIG_PATH": str(bundle.config),
+        "OPENCLAW_NO_AUTO_UPDATE": "1",
         "EASEL_OPENCLAW_WORKSPACE": str(bundle.workspace),
         "OPENCLAW_RAW_STREAM": "1",
         "OPENCLAW_RAW_STREAM_PATH": str(bundle.data / "logs/raw-stream.jsonl"),
         "EASEL_RAW_STREAM_PATH": str(bundle.data / "logs/raw-stream.jsonl"),
         "PLAYWRIGHT_BROWSERS_PATH": str(bundle.runtime["browserPath"]),
         "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+        "CHROME_LOG_FILE": str(bundle.data / "logs/chromium.log"),
         "NPM_CONFIG_CACHE": str(bundle.data / "cache/npm"),
         "COREPACK_HOME": str(bundle.data / "cache/corepack"),
         "NODE_COMPILE_CACHE": str(bundle.data / "cache/node"),
@@ -443,11 +448,12 @@ foreach ($item in $all) { $byId[[int]$item.ProcessId] = $item }
 $wanted = New-Object 'System.Collections.Generic.HashSet[int]'
 foreach ($itemId in $request.pids) { [void]$wanted.Add([int]$itemId) }
 $listeners = @()
-foreach ($port in $request.ports) {
-    foreach ($connection in @(Get-NetTCPConnection -State Listen -LocalPort ([int]$port) -ErrorAction SilentlyContinue)) {
+$requestedPorts = [int[]]@($request.ports)
+if ($requestedPorts.Count -gt 0) {
+    foreach ($connection in @(Get-NetTCPConnection -State Listen -LocalPort $requestedPorts -ErrorAction SilentlyContinue)) {
         if ($connection.LocalAddress -eq '127.0.0.1') {
             [void]$wanted.Add([int]$connection.OwningProcess)
-            $listeners += @{port=[int]$port;pid=[int]$connection.OwningProcess}
+            $listeners += @{port=[int]$connection.LocalPort;pid=[int]$connection.OwningProcess}
         }
     }
 }
@@ -478,9 +484,12 @@ def snapshot(bundle: Bundle, *, ports=(), pids=()) -> dict:
     env = isolated_env(bundle)
     env["EASEL_PORTABLE_INSPECT"] = json.dumps({"ports": list(ports), "pids": list(pids)})
     powershell = Path(env.get("SystemRoot", env.get("SYSTEMROOT", r"C:\Windows"))) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", _SNAPSHOT_SCRIPT],
-                            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                            timeout=12, creationflags=FLAGS)
+    try:
+        result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", _SNAPSHOT_SCRIPT],
+                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                timeout=30, creationflags=FLAGS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("读取本副本的进程状态超时，服务可能仍在运行；请稍后重试。未停止任何程序。") from exc
     if result.returncode:
         raise RuntimeError("无法核验本副本进程归属；没有操作其他进程。")
     try:

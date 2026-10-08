@@ -1,17 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
-  fetchAccounts, publishNow, publishStatus, submitPublishSms, fetchOutputs, mediaUrl,
+  fetchAccounts, fetchOutputs, mediaUrl,
 } from '../lib/api';
-import type { AccountItem, OutputFile } from '../lib/api';
+import type { AccountItem, OutputFile, PublishRequest } from '../lib/api';
+import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { loadPublishDraft, savePublishDraft } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconPublish, IconCopy, IconCheck, IconCalendar, IconSkills, IconEdit, IconStop, IconTrash } from './icons';
 import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
+import { PublishReceiptCard } from './PublishReceiptCenter';
 
 interface PublishPageProps {
   persona: string;
+  publishReceipts: PublishReceiptsModel;
 }
 
 // 平台列表须与后端 LOGIN_RUNNERS 对齐（有登录/发布链路的才列）
@@ -41,9 +44,7 @@ function parseSections(text: string): Record<string, string> {
   return map;
 }
 
-type PubState = { status: 'publishing' | 'ok' | 'fail'; msg: string };
-
-export default function PublishPage({ persona }: PublishPageProps) {
+export default function PublishPage({ persona, publishReceipts }: PublishPageProps) {
   const draft0 = loadPublishDraft();
   const [title, setTitle] = useState(draft0.title);
   const [body, setBody] = useState(draft0.body);
@@ -57,6 +58,9 @@ export default function PublishPage({ persona }: PublishPageProps) {
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState('');
   const adaptCtl = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // 发布相关
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
@@ -67,19 +71,23 @@ export default function PublishPage({ persona }: PublishPageProps) {
   const [mediaError, setMediaError] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
-  const [pub, setPub] = useState<Record<string, PubState>>({});
-  const [publishing, setPublishing] = useState(false);
-  // 发布时的短信验证窗口（抖音风控条件触发；没触发就不弹）
-  const [pubSms, setPubSms] = useState<{ platform: string; name: string; state: string; message: string } | null>(null);
-  const [pubSmsCode, setPubSmsCode] = useState('');
-  const [pubSmsBusy, setPubSmsBusy] = useState(false);
+  const [blocked, setBlocked] = useState<Record<string, string>>({});
+  const publishing = publishReceipts.submitting || publishReceipts.active.some(item => platforms.includes(item.platform));
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
     savePublishDraft({ title, body, platforms, overrides, tags });
   }, [title, body, platforms, overrides, tags]);
 
-  useEffect(() => () => adaptCtl.current?.abort(), []);   // 离开页面中止流
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      adaptCtl.current?.abort();
+      clearTimeout(toastTimer.current);
+      clearTimeout(copyTimer.current);
+    };
+  }, []);
 
   // 登录态 + 可选媒体列表
   const loadAssets = useCallback(() => {
@@ -102,7 +110,11 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
   const toggle = (k: string) =>
     setPlatforms((prev) => prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]);
-  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2800); };
+  const showToast = (m: string) => {
+    if (!mounted.current) return;
+    setToast(m); clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 4000);
+  };
   const effective = (k: string) => overrides[k] ?? body;
   const empty = !title.trim() && !body.trim();
   const isVideoPath = (p: string) => /\.(mp4|mov|flv|mkv|avi|webm|m4v|wmv|ts|mpe?g)$/i.test(p);
@@ -187,107 +199,41 @@ export default function PublishPage({ persona }: PublishPageProps) {
     if (accountsLoading || accountsError) { showToast('请先刷新并确认账号状态，再发布。'); return; }
     const targets = PLATFORMS.filter((p) => platforms.includes(p.key) && PUBLISHABLE.has(p.key));
     if (targets.length === 0) {
-      showToast('所选平台暂不支持一键发布（B站请用「复制」或终端 biliup）');
+      showToast('请先选择支持发布的平台。');
       return;
     }
+    const errors: Record<string, string> = {};
+    const requests: PublishRequest[] = [];
+    for (const target of targets) {
+      if (!loginOf(target.key)) errors[target.key] = '未登录，请先到账号页登录。';
+      else if (MEDIA_REQUIRED.has(target.key) && selectedMedia.length === 0) errors[target.key] = '需附带图片或视频。';
+      else if (VIDEO_ONLY.has(target.key) && !selectedMedia.some(path => VIDEO_RE.test(path))) errors[target.key] = `${target.label}需要视频，请从内容库选择。`;
+      else requests.push({ platform: target.key, payload: { title, body: effective(target.key), media: [...selectedMedia], tags } });
+    }
+    setBlocked(errors);
+    if (!requests.length) { showToast('请先处理平台卡片中的账号或媒体提示。'); return; }
     setChecking(true);
     try {
-      setCheckResult(await performPrecheck());
+      const result = await performPrecheck();
+      if (mounted.current) setCheckResult(result);
     } catch (e) {
-      setCheckResult(`预检失败：${e instanceof Error ? e.message : '未知错误'}\n\n预检仅用于提醒，不会阻止你继续发布。`);
+      if (mounted.current) setCheckResult(`预检失败：${e instanceof Error ? e.message : '未知错误'}\n\n预检仅用于提醒，不会阻止你继续发布。`);
     } finally {
-      setChecking(false);
+      if (mounted.current) setChecking(false);
     }
+    if (!mounted.current) return;
     const okToSend = window.confirm(
       `发布前预检已执行，结果已显示在页面中。人设评分只做提醒，不会阻止发布。\n\n` +
-      `即将【真实发布】到：${targets.map((t) => t.label).join('、')}。\n` +
-      `这会公开发布到你的账号，确定继续？`);
+      `即将向这些账号【真实提交内容】：${targets.filter(target => requests.some(request => request.platform === target.key)).map(target => target.label).join('、')}。\n` +
+      `平台可能进入审核，公众号保存到草稿箱。结果与可用作品地址会保存在发布回执中。确定继续？`);
     if (!okToSend) return;
-
-    setPublishing(true);
-    for (const t of targets) {
-      if (!loginOf(t.key)) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: '未登录 · 去账号页登录' } }));
-        continue;
-      }
-      if (MEDIA_REQUIRED.has(t.key) && selectedMedia.length === 0) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: '需附带图片/视频' } }));
-        continue;
-      }
-      if (VIDEO_ONLY.has(t.key) && !selectedMedia.some((p) => VIDEO_RE.test(p))) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: `${t.label}只能发视频，请从内容库选一个视频` } }));
-        continue;
-      }
-      setPub((r) => ({ ...r, [t.key]: { status: 'publishing', msg: '发布中…可能需 1-2 分钟' } }));
-      try {
-        const res = await publishNow(t.key, { title, body: effective(t.key), media: selectedMedia, tags });
-        if (res.async) {
-          // 抖音：异步发布，轮询状态；风控触发短信墙时弹输入框（条件触发，没触发就直接跑完）
-          await pollAsyncPublish(t.key, t.label);
-        } else {
-          setPub((r) => ({
-            ...r,
-            [t.key]: res.ok
-              ? { status: 'ok', msg: '已发布 ✅' }
-              : { status: 'fail', msg: res.detail || res.message || '发布失败' },
-          }));
-        }
-      } catch (e) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: e instanceof Error ? e.message : '发布失败' } }));
-      }
-    }
-    setPublishing(false);
-    showToast('发布流程结束，见各平台卡片状态');
-  };
-
-  // 异步发布轮询（抖音）：直到 success/error；遇 sms_required/verifying 弹短信窗口
-  const pollAsyncPublish = (key: string, label: string) => new Promise<void>((resolve) => {
-    const started = Date.now();
-    const iv = setInterval(async () => {
-      if (Date.now() - started > 15 * 60 * 1000) {   // 15min 兜底
-        clearInterval(iv); setPubSms(null);
-        setPub((r) => ({ ...r, [key]: { status: 'fail', msg: '发布超时' } }));
-        resolve(); return;
-      }
-      let s;
-      try { s = await publishStatus(key); } catch { return; }  // 单次失败忽略
-      if (s.state === 'sms_required' || s.state === 'verifying') {
-        setPubSms({ platform: key, name: label, state: s.state, message: s.message });
-        setPub((r) => ({ ...r, [key]: { status: 'publishing', msg: s.message || '需短信验证' } }));
-      } else if (s.state === 'success') {
-        clearInterval(iv); setPubSms(null);
-        setPub((r) => ({ ...r, [key]: { status: 'ok', msg: '已发布 ✅' } }));
-        resolve();
-      } else if (s.state === 'error') {
-        clearInterval(iv); setPubSms(null);
-        setPub((r) => ({ ...r, [key]: { status: 'fail', msg: s.message || '发布失败' } }));
-        resolve();
-      } else {
-        setPub((r) => ({ ...r, [key]: { status: 'publishing', msg: s.message || '发布中…' } }));
-      }
-    }, 2500);
-  });
-
-  const submitPubSms = async () => {
-    if (!pubSms) return;
-    const code = pubSmsCode.replace(/\D/g, '');
-    if (code.length < 4) { showToast('验证码应为 4-6 位数字'); return; }
-    setPubSmsBusy(true);
-    try {
-      await submitPublishSms(pubSms.platform, code);
-      setPubSmsCode('');
-      setPubSms((p) => p && ({ ...p, state: 'verifying', message: '正在验证验证码…' }));
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '提交失败');
-    } finally {
-      setPubSmsBusy(false);
-    }
+    void publishReceipts.submit(requests);
   };
 
   const copyFor = (key: string) => {
     const text = (title ? title + '\n\n' : '') + effective(key);
     navigator.clipboard?.writeText(text);
-    setCopied(key); setTimeout(() => setCopied(''), 1400);
+    setCopied(key); clearTimeout(copyTimer.current); copyTimer.current = setTimeout(() => setCopied(''), 1400);
   };
   const addToCalendar = async (key: string) => {
     if (empty) return;
@@ -392,7 +338,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
             <IconCheck size={14} /> {checking ? '预检中…' : '发布前预检'}
           </button>
           <button className="btn btn-sm btn-ghost publish-clear" disabled={empty || adapting}
-            onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setCheckResult(''); setPub({}); showToast('已清空'); }}>
+            onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setCheckResult(''); setBlocked({}); showToast('已清空母版，发布回执保留'); }}>
             <IconTrash size={13} /> 清空内容
           </button>
         </div>
@@ -401,13 +347,13 @@ export default function PublishPage({ persona }: PublishPageProps) {
             <IconCalendar size={14} /> 存入今日日历
           </button>
           <button className="btn btn-sm btn-primary" disabled={empty || publishing || checking || !canPublish}
-            title={canPublish ? '真实发布到已登录平台' : '所选平台无一键发布（B站走终端 biliup）'}
+            title={canPublish ? '真实提交内容到已登录平台' : '请先选择发布平台'}
             onClick={publishAll}>
-            <IconPublish size={14} /> {publishing ? '发布中…' : `发布到 ${platforms.length} 个平台`}
+            <IconPublish size={14} /> {publishing ? '等待发布回执…' : `发布到 ${platforms.length} 个平台`}
           </button>
         </div>
         {adapting && <div className="adapt-hint"><span className="live-pulse" />AI 正在逐字改写各平台版本…可随时停止。</div>}
-        <p className="publish-saved-note">发布会先执行预检，再由你确认。仅已登录且媒体齐全的平台可发布；公众号内容进入草稿箱。</p>
+        <p className="publish-saved-note">发布会先执行预检，再由你确认。仅已登录且媒体齐全的平台可发布；公众号内容进入草稿箱。发布回执会保留平台结果、可用作品地址和邮件通知状态。</p>
         </section>
         {checkResult && (
           <div className="panel" style={{ marginTop: 14 }}>
@@ -419,13 +365,14 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
       <div className="publish-previews">
         <div className="publish-preview-heading"><div><span className="publish-eyebrow">PLATFORM PREVIEW</span><h2>平台预览 <span>{platforms.length}</span></h2></div><p>独立编辑各平台版本，不影响母版。</p></div>
+        <button className="btn btn-sm publish-receipt-entry" onClick={publishReceipts.open}>查看全部发布回执</button>
         {platforms.length === 0 && <div className="dash-empty">选择至少一个平台查看预览</div>}
         {PLATFORMS.filter((p) => platforms.includes(p.key)).map((p) => {
           const text = effective(p.key);
           const over = text.length > p.bodyLimit;
           const titleOver = p.titleLimit != null && title.length > p.titleLimit;
           const isEdit = editing === p.key;
-          const ps = pub[p.key];
+          const receipt = publishReceipts.receipts.find(item => item.platform === p.key);
           const publishable = PUBLISHABLE.has(p.key);
           const logged = loginOf(p.key);
           return (
@@ -450,12 +397,8 @@ export default function PublishPage({ persona }: PublishPageProps) {
                       onChange={(e) => setOverrides((o) => ({ ...o, [p.key]: e.target.value }))} />
                   : <div className="pv-text">{text || <span className="pv-ph">正文预览…</span>}{adapting && overrides[p.key] != null && <span className="streaming-cursor" />}</div>}
               </div>
-              {ps && (
-                <div className={`pv-pubstate ${ps.status}`}>
-                  {ps.status === 'publishing' && <span className="live-pulse" />}
-                  {ps.status === 'ok' ? '✅ ' : ps.status === 'fail' ? '⚠️ ' : ''}{ps.msg}
-                </div>
-              )}
+              {blocked[p.key] && <div className="pv-pubstate fail" role="alert">{blocked[p.key]}</div>}
+              {receipt && <PublishReceiptCard receipt={receipt} onVerify={publishReceipts.open} />}
               <div className="pv-foot">
                 <span className="pv-hint">{p.hint}{over ? ' · 已超字数' : ''}</span>
                 <div className="pv-card-actions">
@@ -473,37 +416,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
       </div>
       </div>
 
-      {toast && <div className="toast ok"><span className="toast-icon">✓</span>{toast}</div>}
-
-      {pubSms && (
-        <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) setPubSms(null); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380 }}>
-            <h3 style={{ margin: '0 0 4px' }}>发布验证 · {pubSms.name}</h3>
-            <p style={{ fontSize: 13, color: /错误|过期|失败|重新|未完成|不正确|失效/.test(pubSms.message || '') ? 'var(--red)' : 'var(--text-secondary)' }}>
-              {pubSms.message || '平台风控要求短信验证，验证码已发到你手机，请输入：'}
-            </p>
-            {pubSms.state === 'verifying' ? (
-              <div className="dash-empty" style={{ padding: 16 }}>正在验证验证码…</div>
-            ) : (
-              <>
-                <input inputMode="numeric" autoFocus
-                  placeholder="请输入手机收到的验证码" value={pubSmsCode}
-                  onChange={(e) => setPubSmsCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') submitPubSms(); }}
-                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center',
-                    letterSpacing: 6, fontSize: 20, padding: '10px 12px', margin: '4px 0 10px',
-                    border: '1px solid var(--border)', borderRadius: 8 }} />
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-sm btn-ghost" onClick={() => setPubSms(null)}>关闭</button>
-                  <button className="btn btn-sm btn-primary" disabled={pubSmsBusy} onClick={submitPubSms}>
-                    {pubSmsBusy ? '提交中…' : '提交验证码'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );
 }

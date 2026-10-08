@@ -55,6 +55,7 @@ async function fixture(t, initial, realSidebar = false) {
     ? url(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))}; import ActualSidebar from ${JSON.stringify(actualSidebar)}; export default function Sidebar(props){globalThis.__backupApp.sidebar=props;return createElement(ActualSidebar,props);}`)
     : url(`export default function Sidebar(props) {globalThis.__backupApp.sidebar=props;return null;}`);
   const notice = url(`export default function StorageNotice(props) {globalThis.__backupApp.storageNotice=props;return null;}`);
+  const receiptCenter = url(`export default function PublishReceiptCenter(props) {globalThis.__backupApp.receiptCenter=props;return null;}`);
   const empty = url('export default function Empty(){return null;}');
   const dashboard = url("export default function Dashboard(props){globalThis.__backupApp.pages['工作台']=props;return null;}");
   const image = url(`export function useImageStudio(){return {};}`);
@@ -71,6 +72,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
     else if (specifier === './components/StorageNotice') target = notice;
+    else if (specifier === './components/PublishReceiptCenter') target = receiptCenter;
     else if (specifier === './components/DashboardPage') target = dashboard;
     else if (specifier === './hooks/useImageStudio') target = image;
     else if (specifier.startsWith('./components/')) target = empty;
@@ -92,6 +94,28 @@ async function fixture(t, initial, realSidebar = false) {
 const sourceSession = { id: 'original', title: '保留当前工作', created: 10, messages: [
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
+
+test('App retains one global publish monitor on dashboard, settings and publish page and routes its controls correctly', async t => {
+  const { harness } = await fixture(t, {});
+  assert.ok(harness.pages['工作台']);
+  const open = harness.receiptCenter.model.open;
+  await act(async () => open());
+  assert.equal(harness.receiptCenter.model.isOpen, true);
+  await act(async () => harness.sidebar.onPageChange('settings'));
+  assert.equal(harness.receiptCenter.model.open, open);
+  assert.equal(harness.receiptCenter.model.isOpen, true);
+  assert.equal(harness.pages['设置'].initialSection, 'general');
+  await act(async () => harness.receiptCenter.onConfigure());
+  assert.equal(harness.pages['设置'].initialSection, 'notify');
+  const navigationKey = harness.pages['设置'].navigationKey;
+  await act(async () => harness.receiptCenter.onConfigure());
+  assert.equal(harness.pages['设置'].navigationKey, navigationKey + 1);
+  await act(async () => harness.receiptCenter.onOpenPublish());
+  assert.equal(harness.pages['发布中心'].publishReceipts, harness.receiptCenter.model);
+  assert.equal(harness.receiptCenter.model.open, open);
+  await act(async () => harness.sidebar.onPageChange('dashboard'));
+  assert.equal(harness.receiptCenter.model.open, open);
+});
 const backup = { format: 'easel-conversation-backup', version: 1, exportedAt: '2026-09-30T00:00:00.000Z', sessions: [
   { title: '待导入记录', created: 2, incomplete: true, messages: [{ role: 'user', content: '导入提问' }] },
 ] };

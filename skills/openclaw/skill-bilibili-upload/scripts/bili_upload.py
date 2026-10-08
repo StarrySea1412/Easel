@@ -34,6 +34,7 @@ SHARED_SCRIPTS = Path(__file__).resolve().parents[3] / "shared" / "scripts"
 sys.path.insert(0, str(SHARED_SCRIPTS))
 import content_guard  # noqa: E402
 import platform_readback  # noqa: E402  发布读回对账（B站 reader）
+import publish_receipt  # noqa: E402
 
 
 def _direct_env() -> dict:
@@ -135,6 +136,7 @@ def cmd_tid(_a) -> int:
     return 0
 
 
+@publish_receipt.publishing_command("bilibili")
 def cmd_upload(a) -> int:
     if not Path(a.video).expanduser().is_file():
         _die(f"视频不存在：{a.video}")
@@ -163,35 +165,34 @@ def cmd_upload(a) -> int:
     # 发前快照 + 时间窗基准（读回对账用；快照失败自动退化为标题+时间窗）
     snapshot = platform_readback.capture_bilibili_snapshot(cookie)
     started_ms = int(time.time() * 1000)
+    publish_receipt.mark_submitted()
     rc = subprocess.call(cmd, env=_direct_env())
-    if rc == 0:
-        # 发布读回对账（权威判定：读回对上才算成功——没有平台侧证据绝不报成功）
-        title = a.title or Path(a.video).stem
-        try:
-            result = platform_readback.verify_bilibili_publish(
-                cookie, title=title, since_ms=started_ms, snapshot_ids=snapshot)
-        except Exception as e:  # noqa: BLE001
-            _die(f"投稿已提交但读回通道异常：{e}——去创作中心人工核对，先别重发。", 4)
-        if result.outcome == "verified" and result.matched:
-            m = result.matched
-            acct = (result.evidence.get("account") or {}).get("name", "")
-            print(f"✅ 读回核验：{m.platform_content_id}（{m.status}）；账号：{acct}", file=sys.stderr)
-        else:
-            hints = {
-                "unverified": "读回通了但多轮未见新稿件（索引/审核延迟）",
-                "login_required": "读回时登录态失效，请重新扫码登录",
-                "readback_error": f"读回通道故障（{result.error}）",
-            }
-            _die(f"投稿已提交但读回未核实（{result.outcome}）：{hints.get(result.outcome, '')}——去创作中心核对，先别重发。", 4)
-        # 投稿成功 → 落统一内容日历（对话页自动；发布页 B 站走 biliup CLI 由 web 记录，路径不同不重复）
+    if rc != 0:
+        publish_receipt.emit(publish_receipt.make_receipt(
+            "bilibili", "unverified", platform_status="cli_error",
+            message="投稿命令异常结束，尚不能确认是否已提交，请先到B站创作中心核对，避免重复投稿。",
+            evidence={"kind": "execution", "submissionAttempted": True}))
+        return rc
+    # Matching a new archive does not mean it has passed moderation or is public.
+    title = a.title or Path(a.video).stem
+    try:
+        result = platform_readback.verify_bilibili_publish(
+            cookie, title=title, since_ms=started_ms, snapshot_ids=snapshot)
+    except Exception:  # noqa: BLE001
+        result = platform_readback.ReadbackResult(outcome="readback_error")
+    receipt = publish_receipt.emit(publish_receipt.from_readback("bilibili", result))
+    print(f"B站：{receipt['message']}", file=sys.stderr)
+    if receipt["outcome"] == "published":
+        # Only a publicly visible BV archive enters the published calendar.
+        # Web disables this CLI auto-recording and records the same receipt once.
         try:
             import calendar_ops
-            calendar_ops.record_publish("bilibili", title,
+            calendar_ops.record_publish("bilibili", title, url=receipt["url"],
                                         ptype="视频", tags=(a.tag or ""),
                                         note=(a.desc or ""), source="chat")
         except Exception:
             pass
-    return rc
+    return 0 if receipt["outcome"] in ("published", "submitted") else 4
 
 
 def cmd_selftest(_a) -> int:

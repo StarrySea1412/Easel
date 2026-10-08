@@ -133,6 +133,8 @@ def _normalize_douyin_status(status: Any, public_time: Any) -> str:
     """作品状态归一化（平台状态码 → 统一枚举）。"""
     if isinstance(status, (int, float)):
         return str(status)
+    if not isinstance(status, dict):
+        return "unknown"
     s = status if isinstance(status, dict) else {}
     if s.get("is_delete"):
         return "deleted"
@@ -148,7 +150,12 @@ def _normalize_douyin_status(status: Any, public_time: Any) -> str:
         public_s = 0
     if public_s > time.time():
         return "scheduled"
-    return "published"
+    # Missing flags cannot establish public visibility. The old unconditional
+    # fallback turned an empty/malformed status into a false published result.
+    public_flags = ("is_delete", "is_prohibited", "in_reviewing", "is_private")
+    if all(key in s and s[key] in (False, 0) for key in public_flags):
+        return "published"
+    return "unknown"
 
 
 def _first_id(item: dict) -> str:
@@ -312,23 +319,37 @@ def find_published_work(works: list[WorkItem], title: str, *,
     """对账：列表中找属于本次发布的作品（标题前缀命中 + 不早于 since 时间窗）。
 
     - 标题为空 → 无法对账（返回 None，调用方按 unverified 处理）。
-    - since_ms 给了时：作品发布时间明显早于 since 的跳过（防同标题旧作品误判），
-      容差 SINCE_TOLERANCE_MS 吸收平台时间戳精度与索引延迟。
+    - since_ms 给了时：必须有有效的毫秒发布时间，且落在本次时间窗内；
+      时间缺失不能退化为只匹配标题，多个候选也不能任选一个报告成功。
+      有非空发前快照时保留 SINCE_TOLERANCE_MS 容差；没有快照证据时只容许
+      向前 1 秒的时间戳精度差，不能把几分钟前的同标题作品当作本次发布。
     - exclude_ids（发前快照）里的 id 视为旧作品跳过——发布前就存在的条目不可能是本次，
       同标题+时间戳精度边缘时它是比时间窗更硬的证据。
     """
     key = (title or "").strip().replace("\n", " ")[:key_len]
     if not key:
         return None
+    if since_ms is not None and (type(since_ms) is not int or since_ms <= 0):
+        return None
+    tolerance_ms = SINCE_TOLERANCE_MS if exclude_ids else 1000
+    latest_ms = int(time.time() * 1000) + tolerance_ms if since_ms is not None else None
+    matched: WorkItem | None = None
     for w in works:
         if key not in (w.title or ""):
             continue
         if exclude_ids and w.platform_content_id in exclude_ids:
             continue
-        if since_ms and w.published_at_ms and (w.published_at_ms + SINCE_TOLERANCE_MS) < since_ms:
+        if since_ms is None:
+            return w  # Independent title lookups retain their existing behavior.
+        published_ms = w.published_at_ms
+        if (type(published_ms) is not int or published_ms <= 0
+                or published_ms + tolerance_ms < since_ms
+                or published_ms > latest_ms):
             continue
-        return w
-    return None
+        if matched is not None:
+            return None  # Several plausible works do not identify this submission.
+        matched = w
+    return matched
 
 
 def verify_douyin_publish(page, *, title: str, since_ms: int | None = None,

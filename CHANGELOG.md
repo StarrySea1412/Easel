@@ -4,6 +4,13 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-08 R25: publication receipts and notifications
+
+- Keep Web publishing outcomes in the data directory with a persistent, shared receipt center across pages. A successful process exit no longer claims publication: pending review, draft, unknown, rejected and public results stay distinct. Only confirmed public outcomes enter the published calendar.
+- Connect Bilibili's existing before/after work readback to the Web runner and shared structured receipt. Carry validated public URLs through supported platform scripts, the backend, calendar and optional success email. Identify each operation separately so different works cannot suppress each other's notifications.
+- Keep mail queue, SMTP acceptance and failure separate from the platform outcome; honor the saved automatic-notification setting. Recover known results with a visible storage warning on disk failures, and mark interrupted operations as unverified after restart without retrying publication or email.
+- Rebuild and verify the frontend with 697 passing tests, lint and TypeScript. Platform responses and SMTP are isolated test doubles; no real posts or mail were sent. Xiaohongshu/Channels public readback, continued checks after moderation and the independent scheduled-publishing executor remain outside this delivery. Details and final evidence: [publishing acceptance](docs/publish-receipts-2026-10-08.md).
+
 ### 2026-10-08 R24: Windows portable preview in preparation
 
 - Prepare a separate Windows x64 portable candidate with a graphical `Easel.exe` entry, start/status/stop command fallbacks, bundled runtimes and a data directory relative to the extracted folder. The graphical window is intended to stop this copy's services when closed; command-file users use the explicit stop entry.

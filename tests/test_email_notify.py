@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -17,7 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "web"), str(ROOT / "mcp" / "easel-notify"),
                 str(ROOT / "skills" / "shared" / "scripts")]
 
-import app as web  # noqa: E402
 import mailer  # noqa: E402
 import notify_hook as nh  # noqa: E402
 import server as mcp  # noqa: E402
@@ -28,7 +26,15 @@ GOOD_ENV = {
     "EASEL_NOTIFY_SMTP_PORT": "465",
     "EASEL_NOTIFY_SMTP_USER": "u@x.com",
     "EASEL_NOTIFY_SMTP_PASS": "p",
+    "EASEL_NOTIFY_ON_DONE": "1",
 }
+
+
+@pytest.fixture(autouse=True)
+def isolate_notification_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(mailer, 'DEFAULT_ENV_FILE', tmp_path / '.env')
+    monkeypatch.delenv('EASEL_NOTIFY_OFF', raising=False)
+    nh._last_sent.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -46,6 +52,37 @@ def test_address_split_handles_semicolon_and_cjk_comma():
 def test_host_without_recipient_is_not_configured():
     assert not mailer.load_email_config(env={"EASEL_NOTIFY_SMTP_HOST": "smtp.x.com"}).configured
     assert not mailer.load_email_config(env={}).configured
+
+
+@pytest.mark.parametrize('setting,enabled', [(None, False), ('', False), ('0', False), ('false', False), ('1', True)])
+def test_automatic_notification_setting_matches_saved_checkbox(setting, enabled):
+    env = dict(GOOD_ENV)
+    env.pop('EASEL_NOTIFY_ON_DONE')
+    if setting is not None:
+        env['EASEL_NOTIFY_ON_DONE'] = setting
+    cfg = mailer.load_email_config(env=env)
+    assert cfg.configured and cfg.on_done is enabled
+    # Manually requested mail previews remain available with automation off.
+    assert mailer.send_email(cfg, 'test', 'test', dry_run=True)['ok'] is True
+
+
+@pytest.mark.parametrize('source', ['publish', 'generate'])
+def test_saved_automatic_notification_switch_is_reread_without_restart(tmp_path, monkeypatch, source):
+    path = tmp_path / '.env'
+    monkeypatch.setattr(mailer, 'DEFAULT_ENV_FILE', path)
+    sent, states = [], []
+    monkeypatch.setattr(nh, '_send_async', lambda *args: sent.append(args))
+    def save(value):
+        env = {**GOOD_ENV, 'EASEL_NOTIFY_ON_DONE': value}
+        path.write_text('\n'.join(f'{key}={value}' for key, value in env.items()), encoding='utf-8')
+    kwargs = {'source': source, 'title': 'test', 'receipt_id': 'a' * 32,
+              'outcome': 'published', 'on_result': states.append}
+    save('0')
+    result = nh.notify_completion(**kwargs)
+    assert result['state'] == 'skipped' and not sent
+    assert states[-1]['state'] == 'skipped' and '关闭' in result['message']
+    save('1')
+    assert nh.notify_completion(**kwargs)['state'] == 'queued' and len(sent) == 1
 
 
 def test_port_and_ssl_parsing():
@@ -215,62 +252,18 @@ def test_hook_dedupes_within_gap(monkeypatch):
 
 def test_hook_send_failure_does_not_raise(monkeypatch):
     monkeypatch.setattr(mailer, "DEFAULT_ENV_FILE", Path("<nonexistent>"))
+    cfg = mailer.load_email_config(env=dict(GOOD_ENV))
+    monkeypatch.setattr(nh.mailer, 'load_email_config', lambda: cfg)
     def _boom(cfg, s, b):
         raise RuntimeError("smtp down")
     monkeypatch.setattr(nh, "_send_async", _boom)
-    nh.notify_completion(title="项目", summary="x")   # 异常被吞，不抛即通过
+    result = nh.notify_completion(title="项目", summary="x")
+    assert result['state'] == 'failed'
 
 
-@pytest.fixture()
-def web_sandbox(tmp_path, monkeypatch):
-    monkeypatch.setattr(web, "OUTPUTS_DIR", tmp_path)
-    return tmp_path
-
-
-@pytest.mark.parametrize("async_path", [True, False])
-def test_publish_success_fires_email_hook(web_sandbox, monkeypatch, async_path):
-    fired = []
-    monkeypatch.setattr(web, "_notify_email_completion",
-                        lambda **kw: fired.append(kw))
-    monkeypatch.setattr(web, "_read_schedule", lambda: [])
-    monkeypatch.setattr(web, "_write_schedule", lambda items: None)
-    if async_path:
-        monkeypatch.setattr(web, "_read_publish_status", lambda p: {"state": "success"})
-        monkeypatch.setattr(web, "_write_publish_status", lambda *a, **k: None)
-        code_file = web_sandbox / "douyin.code"
-        web._run_publish_bg("douyin", [sys.executable, "-c", "pass"], "标题", "正文",
-                            {"name": "抖音"}, web_sandbox / "douyin.json", code_file)
-    else:
-        # 直接调用钩子注入点语义：api_publish 里的 if ok 块
-        class R:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-        ok = R.returncode == 0
-        assert ok
-        web._notify_email_completion(title="标题", platform="小红书",
-                                     summary="正文", source="publish")
-    assert fired and fired[0]["source"] == "publish"
-
-
-def test_publish_failure_does_not_fire_email_hook(web_sandbox, monkeypatch):
-    fired = []
-    monkeypatch.setattr(web, "_notify_email_completion",
-                        lambda **kw: fired.append(kw))
-    monkeypatch.setattr(web, "_read_schedule", lambda: [])
-    monkeypatch.setattr(web, "_write_schedule", lambda items: None)
-    monkeypatch.setattr(web, "_read_publish_status", lambda p: {"state": "error"})
-    monkeypatch.setattr(web, "_write_publish_status", lambda *a, **k: None)
-    monkeypatch.setattr(web, "subprocess", __import__("subprocess"))
-    import subprocess as sp
-
-    def _fail_run(*a, **k):
-        raise sp.TimeoutExpired(cmd="x", timeout=1)
-    monkeypatch.setattr("subprocess.run", _fail_run)
-    web._run_publish_bg("douyin", [sys.executable, "-c", "pass"], "标题", "正文",
-                        {"name": "抖音"}, web_sandbox / "douyin.json",
-                        web_sandbox / "douyin.code")
-    assert fired == []
+# Publish API integration (sync, background, URL, receipt ID, failures and
+# notification delivery) is covered by test_publish_receipts.py. Its isolated
+# API definitions avoid loading private workbench state or optional SSE runtime.
 
 
 def test_manifest_record_done_fires_email_hook(tmp_path, monkeypatch):
@@ -311,7 +304,51 @@ def test_manifest_meta_ready_fires_email_hook(tmp_path, monkeypatch):
                            status="ready", cover=None, tags=None,
                            deliverables=None)
     mf.cmd_meta(args)
-    assert fired and fired[0]["source"] == "publish"
+    assert fired and fired[0]["source"] == "generate"
+
+
+def test_manifest_meta_updates_do_not_repeat_completion_or_claim_publication(tmp_path, monkeypatch):
+    import manifest as mf
+    fired = []
+    monkeypatch.setattr(mf, '_notify_completion', lambda **kw: fired.append(kw))
+    monkeypatch.setattr(mf, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    args = SimpleNamespace(topic='project', data=None, profile='', title='title', summary='summary',
+                           platform='小红书', kind='xhs-note', status='ready', cover=None,
+                           tags=None, deliverables=None)
+    mf.cmd_meta(args)
+    for status in ('ready', None, 'published', None):
+        args.status = status
+        args.title = 'updated title'
+        mf.cmd_meta(args)
+    assert len(fired) == 1 and fired[0]['source'] == 'generate'
+    saved = json.loads((tmp_path / 'outputs/project/.easel.json').read_text(encoding='utf-8'))
+    assert saved['status'] == 'published' and saved['title'] == 'updated title'
+
+
+def test_manually_marking_manifest_published_does_not_send_success_mail(tmp_path, monkeypatch):
+    import manifest as mf
+    monkeypatch.setattr(mf, '_notify_completion', lambda **kw: pytest.fail('Metadata is not a platform receipt'))
+    monkeypatch.setattr(mf, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    args = SimpleNamespace(topic='project', data=None, profile='', title='title', summary='summary',
+                           platform='小红书', kind='xhs-note', status='published', cover=None,
+                           tags=None, deliverables=None)
+    mf.cmd_meta(args)
+    assert json.loads((tmp_path / 'outputs/project/.easel.json').read_text(encoding='utf-8'))['status'] == 'published'
+
+
+def test_manifest_ready_reaches_enabled_generation_mail_hook(tmp_path, monkeypatch):
+    import manifest as mf
+    cfg = mailer.load_email_config(env=dict(GOOD_ENV))
+    monkeypatch.setattr(nh.mailer, 'load_email_config', lambda: cfg)
+    sent = []
+    monkeypatch.setattr(nh, '_send_async', lambda cfg, subject, body: sent.append((subject, body)))
+    monkeypatch.setattr(mf, '_notify_completion', nh.notify_completion)
+    monkeypatch.setattr(mf, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    args = SimpleNamespace(topic='project', data=None, profile='', title='title', summary='summary',
+                           platform='小红书', kind='xhs-note', status='ready', cover=None,
+                           tags=None, deliverables=None)
+    mf.cmd_meta(args)
+    assert len(sent) == 1 and '生成完成' in sent[0][0] and '发布成功' not in sent[0][0]
 
 
 def test_manifest_without_hook_module_still_writes(tmp_path, monkeypatch):

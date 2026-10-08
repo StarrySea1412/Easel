@@ -453,7 +453,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         EASEL_NOTIFY_ON_DONE: ntf.onDone ? '1' : '0',
       });
       if (!mounted.current) return;
-      setNtfSaved('✓ 已保存；对话/发布收尾会按这里的配置自动发邮件');
+      setNtfSaved(ntf.onDone ? '✓ 已保存并开启自动邮件通知；具体发送结果可在发布回执中查看' : '✓ 已保存；自动邮件通知已关闭');
     } catch (e) {
       if (mounted.current) setNtfSaved(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
     }
@@ -956,7 +956,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
               <section className="st-sec active">
                 <div className="panel-top">
                   <span className={`pill ${ntf.email && ntf.host ? 'ok' : 'off'}`}><span className="dot" />{ntf.email && ntf.host ? '已配置' : '未配置'}</span>
-                  <span className="desc">图文/视频/文案生成完成、发布成功后，自动把结果发到你的邮箱</span>
+                  <span className="desc">开启后自动发送任务结果；平台发布结果与邮件发送状态会分别显示在发布回执中</span>
                   <span className="spacer" />
                 </div>
                 {ntfLoading ? (
@@ -996,10 +996,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       <button className="btn btn-sm btn-primary" onClick={() => void saveNotify()}
                         disabled={!ntf.email.trim() || !ntf.host.trim()}>保存通知配置</button>
                       <button className="btn btn-sm" onClick={() => void testNotify()} disabled={ntfTesting || !ntf.email.trim() || !ntf.host.trim()}>
-                        <IconSend size={13} /> {ntfTesting ? '发送中…' : '发测试邮件'}
+                        <IconSend size={13} /> {ntfTesting ? '发送中…' : '用已保存配置发测试邮件'}
                       </button>
                       {ntfTestMsg && <span className="hint" style={{ color: ntfTestMsg.startsWith('✅') ? 'var(--green, #1a9e5c)' : 'var(--red)' }}>{ntfTestMsg}</span>}
                     </div>
+                    <p className="hint">修改配置后请先保存。测试邮件使用已保存的收件人和 SMTP 配置。</p>
                   </div>
                 )}
                 <div className="foot-note">Agent 也会收到 notify_email 工具：让它「完成后发我邮箱」即可主动推送；配置与本页共享。IM 群机器人推送见技能 skill-publish-notify。</div>

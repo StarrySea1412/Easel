@@ -11,7 +11,7 @@ xpzouying/xiaohongshu-mcp（Go/go-rod，成熟稳定）。确定性 IO 固化在
   - 逐图上传并等预览出现（≤60s）；视频等发布按钮可点击（≤10min = 处理完成）
   - 话题：输 # + 联想下拉点选，真绑话题
   - 发布按钮：新版 <xhs-publish-btn> + 旧版 .bg-red 双兼容
-  - 发布成功校验：URL 离开 /publish/publish 才算成功（消除假成功）
+  - 提交校验：成功提示/表单复位仅标记已提交；缺少作品读回时不声明公开发布
   - 反检测：--disable-blink-features=AutomationControlled + 逐字符输入 + zh-CN
 
 子命令:
@@ -34,10 +34,12 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
+import publish_receipt  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # 选择器集中维护（小红书改版时单点更新）。REF = xiaohongshu-mcp 对应源。
@@ -340,28 +342,33 @@ def _confirm_publish_dialog(page) -> None:
         page.wait_for_timeout(500)
 
 
-def _wait_publish_success(page, timeout_s: int = 40) -> None:
-    """发布成功校验：小红书发布成功后**原地清空表单回到上传页**（不换 URL）。
-    成功信号任一：跳离 /publish/publish、出现「成功」toast、或编辑表单已重置（标题框+图片预览消失）。"""
+def _wait_publish_success(page, timeout_s: int = 40) -> str:
+    """Check submission UI only; these signals never prove public publication."""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        if "/publish/publish" not in page.url:
-            print(f"✅ 发布成功，已跳转：{page.url}")
-            return
+        parsed = urlsplit(page.url or "")
+        if (parsed.scheme != "https" or parsed.hostname != "creator.xiaohongshu.com"
+                or "login" in parsed.path.lower()):
+            _die("提交后页面离开创作者站点或进入登录页，发布结果未核实。", 5)
         for sel in (".d-message", ".d-toast", "[class*=toast]", "[class*=message]"):
             try:
                 el = page.query_selector(sel)
-                if el and el.is_visible() and "成功" in (el.inner_text() or ""):
-                    print("✅ 发布成功（检测到成功提示）")
-                    return
+                text = (el.inner_text() or "") if el and el.is_visible() else ""
+                if (any(word in text for word in ("发布成功", "提交成功"))
+                        and not any(word in text for word in ("未发布成功", "未提交成功", "失败"))):
+                    print("ℹ️ 检测到提交提示，公开发布状态尚未读回核实。")
+                    return "success_message"
             except Exception:
                 pass
-        # 表单已重置：填过的标题框 + 上传的图片预览都消失 = 已提交回到空上传页
+        if parsed.path.rstrip("/") != "/publish/publish":
+            print("ℹ️ 提交后编辑页已跳转，平台结果仍需核实。")
+            return "page_navigation"
+        # 仅在原编辑页检查复位；登录页/错误页的空表单不能充当提交证据。
         try:
             if (not page.query_selector(SELECTORS["title_input"])
                     and not page.query_selector(SELECTORS["img_preview"])):
-                print("✅ 发布成功（编辑表单已清空复位）")
-                return
+                print("ℹ️ 编辑表单已复位，公开发布状态尚未读回核实。")
+                return "form_reset"
         except Exception:
             pass
         page.wait_for_timeout(500)
@@ -379,7 +386,7 @@ def _normalize_content(text: str) -> str:
 
 
 def _fill_and_submit(page, title, content, tags):
-    """标题→正文→话题→长度校验→发布→成功校验。"""
+    """标题→正文→话题→长度校验→提交→界面反馈校验。"""
     content = _normalize_content(content)         # 修连续空行导致的发布失败
     title_el = page.query_selector(SELECTORS["title_input"])
     if not title_el:
@@ -401,6 +408,7 @@ def _fill_and_submit(page, title, content, tags):
     btn.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
     box = btn.bounding_box()
+    publish_receipt.mark_submitted()
     if kind == "new" and box:
         # xhs-publish-btn 是宽横条(闭合 Shadow DOM)，内含[暂存离开][发布]两个按钮；
         # 点 host 中心会落在两按钮间隙→无效。发布按钮在右侧约 62% 处（实测像素为品牌红），按坐标点它。
@@ -412,7 +420,7 @@ def _fill_and_submit(page, title, content, tags):
             btn.click()
     page.wait_for_timeout(1000)
     _confirm_publish_dialog(page)   # 若弹二次确认框，点确认
-    _wait_publish_success(page, 40)
+    return _wait_publish_success(page, 40)
 
 
 # --------------------------------------------------------------------------- #
@@ -595,7 +603,7 @@ def _plan_lines(kind: str, title: str, content: str, media: list[str], tags: lis
         "  4. 输标题/正文（逐字符）+ 话题联想点选",
         "  5. 平台 DOM 长度校验",
         "  6. 等发布按钮可点击（新版<xhs-publish-btn>/旧版.bg-red）→ 点击",
-        "  7. 成功校验：URL 离开 /publish/publish",
+        "  7. 提交校验：检查提交提示/表单复位；公开发布状态和作品链接仍需平台读回",
     ]
     return lines
 
@@ -667,27 +675,24 @@ def _publish(a, kind: str) -> int:
                 _click_publish_tab(page, "上传视频")
                 page.wait_for_timeout(1000)
                 _upload_video(page, media[0])
-            _fill_and_submit(page, a.title, a.content or "", tags)
+            signal = _fill_and_submit(page, a.title, a.content or "", tags)
         except PWTimeout as e:
             _die(f"步骤超时（选择器可能已失效，检查 SELECTORS）：{e}")
         finally:
             if not a.keep_open:
                 ctx.close()
-    # 发布成功 → 落统一内容日历（对话页自动记录；发布页由 web 设 AUTORECORD=0 跳过防重复）
-    try:
-        import calendar_ops
-        calendar_ops.record_publish("xiaohongshu", a.title,
-                                    ptype="视频" if kind == "video" else "图文",
-                                    tags=(a.tags or ""), note=(a.content or ""), source="chat")
-    except Exception:
-        pass
-    return 0
+    receipt = publish_receipt.emit(publish_receipt.from_ui("xiaohongshu", signal=signal))
+    print(receipt["message"])
+    # UI acknowledgement is not eligible for an already-published calendar row.
+    return 0 if receipt["outcome"] == "submitted" else 5
 
 
+@publish_receipt.publishing_command("xiaohongshu")
 def cmd_publish(a) -> int:
     return _publish(a, "image")
 
 
+@publish_receipt.publishing_command("xiaohongshu")
 def cmd_publish_video(a) -> int:
     return _publish(a, "video")
 
@@ -771,7 +776,7 @@ def cmd_selftest(_a) -> int:
     assert _proxy("http://x:1", False) == "http://x:1", "显式代理优先"
     # plan 渲染
     lines = _plan_lines("image", "标题", "正文", ["/a.jpg"], ["#tag"])
-    assert any("上传图文" in ln for ln in lines) and any("成功校验" in ln for ln in lines)
+    assert any("上传图文" in ln for ln in lines) and any("提交校验" in ln for ln in lines)
     lines_v = _plan_lines("video", "t", "c", ["/a.mp4"], [])
     assert any("上传视频" in ln for ln in lines_v)
     print("✅ selftest 通过（标题算法 + 选择器字典 + 路径/代理/路由 + plan 渲染）")

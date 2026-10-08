@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import { Window } from 'happy-dom';
 import { act, createElement } from 'react';
+import { tsModuleUrl } from './load-ts.mjs';
 
 // Actual SettingsPanel navigation/controller; child cards and every API are
 // stubs. This verifies React behavior, not browser layout or backend access.
@@ -27,6 +28,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   }
   let target;
   if (!specifier.startsWith('.')) target = import.meta.resolve(specifier);
+  else if (specifier === './settings/SettingsField') target = await tsModuleUrl(new URL('../src/components/settings/SettingsField.tsx', import.meta.url));
   else if (specifier === './settings/ConversationBackupCard') {
     target = moduleUrl(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
       export default function BackupCard(props) {globalThis.__settingsBackupNavigation.backupProps=props;return createElement('section',{'data-testid':'backup-card'},'会话备份桩');}`);
@@ -56,7 +58,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
 for (const replacement of replacements.reverse()) compiled = compiled.slice(0, replacement.start) + replacement.text + compiled.slice(replacement.end);
 const { default: SettingsPanel } = await import(moduleUrl(compiled));
 
-async function fixture(t) {
+async function fixture(t, responseOverrides = {}) {
   const harness = {
     calls: [], backupProps: null,
     responses: {
@@ -65,6 +67,7 @@ async function fixture(t) {
       fetchModelChannels: { channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: [] }])) },
       fetchSkillDetail: { apiSpec: { providers: [] } },
       fetchImagegenGallery: { channel: { baseUrl: '', keyMasked: '', model: '' } },
+      ...responseOverrides,
     },
   };
   globalThis.__settingsBackupNavigation = harness;
@@ -168,6 +171,38 @@ test('settings opens general by default and the demo preference remains reachabl
   await view.click(view.nav('通用设置'));
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
   assert.equal(view.harness.calls.length, before);
+});
+
+function notificationConfig(onDone = false) {
+  const config = { EASEL_NOTIFY_EMAIL: 'saved@example.test', EASEL_NOTIFY_SMTP_HOST: 'smtp.example.test', EASEL_NOTIFY_ON_DONE: onDone ? '1' : '0' };
+  return { apiSpec: { providers: [{ keys: Object.entries(config).map(([env, masked]) => ({ env, masked })) }] } };
+}
+
+test('notification test clearly uses saved settings and does not save pending form edits', async t => {
+  const view = await fixture(t, {
+    fetchSkillDetail: notificationConfig(), testNotifyEmail: { ok: true, detail: '模拟发送结果', to: ['saved@example.test'] },
+  });
+  await view.render(1, view.props, 'notify');
+  assert.match(view.container.textContent, /测试邮件使用已保存的收件人和 SMTP 配置/);
+  const email = [...view.container.querySelectorAll('.settings-field')].find(field => field.textContent.startsWith('收件人')).querySelector('input');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(email, 'unsaved@example.test');
+    email.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  const send = [...view.container.querySelectorAll('button')].find(button => button.textContent.includes('用已保存配置发测试邮件'));
+  await view.click(send);
+  const calls = view.harness.calls.filter(call => ['testNotifyEmail', 'saveEnv'].includes(call.name));
+  assert.deepEqual(calls, [{ name: 'testNotifyEmail', args: [] }]);
+  assert.match(view.container.textContent, /收件人 saved@example.test/);
+  assert.equal(email.value, 'unsaved@example.test');
+});
+
+for (const onDone of [false, true]) test(`saving notification configuration reports automatic mail ${onDone ? 'enabled' : 'disabled'} accurately`, async t => {
+  const view = await fixture(t, { fetchSkillDetail: notificationConfig(onDone), saveEnv: { ok: true } });
+  await view.render(1, view.props, 'notify');
+  await view.click([...view.container.querySelectorAll('button')].find(button => button.textContent === '保存通知配置'));
+  assert.equal(view.harness.calls.find(call => call.name === 'saveEnv').args[0].EASEL_NOTIFY_ON_DONE, onDone ? '1' : '0');
+  assert.match(view.container.querySelector('.save-note').textContent, onDone ? /已保存并开启自动邮件通知/ : /自动邮件通知已关闭/);
 });
 
 test.after(async () => {

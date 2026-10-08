@@ -12,6 +12,7 @@ server.py（MCP stdio）与 web/notify_hook.py（生成完成钩子）都走这�
     EASEL_NOTIFY_SMTP_PASS   密码 / 授权码（QQ/163 需在邮箱后台开授权码，不是登录密码）
     EASEL_NOTIFY_SMTP_SSL    1（默认）=SSL(465)；0=STARTTLS(587)
     EASEL_NOTIFY_FROM        发件人显示地址（缺省=认证账号或首个收件人）
+    EASEL_NOTIFY_ON_DONE     完成后自动通知（仅 1 启用；不影响手动测试或发送）
 
 子命令：
     send      发送一封邮件（--dry-run 只打印将发内容，不真发）
@@ -48,6 +49,7 @@ class EmailConfig:
     sender: str = ""
     to: list[str] = field(default_factory=list)
     ssl: bool = True
+    on_done: bool = False
 
     @property
     def configured(self) -> bool:
@@ -109,6 +111,7 @@ def load_email_config(env: dict[str, str] | None = None,
         sender=sender,
         to=to,
         ssl=use_ssl,
+        on_done=e.get('EASEL_NOTIFY_ON_DONE', '').strip() == '1',
     )
 
 

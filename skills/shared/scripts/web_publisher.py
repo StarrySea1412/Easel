@@ -6,7 +6,8 @@
 登录态用持久化 user-data-dir 保存，扫码/登录一次后复用。
 
 发布结果判定：界面信号（URL/toast）只作旁证——已接入读回对账的平台（快手），发布后回作品
-管理页读本人作品列表对账（标题+时间窗），`verified` 才算成功，其余档位绝不冒报（先别重发）。
+管理页读本人作品列表对账（标题+时间窗）；`verified` 仅证明匹配到作品，还需核实公开状态。
+小红书/视频号式界面反馈至多表示已提交；知乎必须跳转精确的公开文章页才确认已发布。
 
 ⚠️ 环境依赖（真实发布需具备，缺则不可用——同 skill-xhs-publisher 定位）：
     - playwright（`pip install playwright`）+ 浏览器内核（`playwright install chromium`）
@@ -32,11 +33,13 @@ import json
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快手已接入，注册表见 _READBACK_VERIFIERS）
+import publish_receipt  # noqa: E402
 import human_pace  # noqa: E402  人类节奏（提交前双停顿；EASEL_PACE_SKIP=1 跳过）
 
 # ── 平台配置注册表 ────────────────────────────────────────────────────
@@ -171,7 +174,7 @@ PLATFORMS: dict[str, dict] = {
              "selector": "[class*=_description], [placeholder*=描述], [contenteditable=true]",
              "value": "{title}\n{desc}\n{tags}"},
             {"action": "wait", "value": "1500"},
-            {"action": "click",
+            {"action": "click", "commit": True,
              "selector": "[class*=button-primary]:has-text('发布'), "
                          "div[class*=_button]:has-text('发布'):not(:has-text('作品'))"},
             {"action": "wait", "value": "2500"},
@@ -181,9 +184,9 @@ PLATFORMS: dict[str, dict] = {
              "optional": True},
             {"action": "wait", "value": "4000"},
         ],
-        # 发布成功校验：成功后离开发布页 / 出现成功 toast（避免"点了发布=成功"的假阳性）
+        # 界面提交反馈（旁证）；公开发布还需下面的作品读回。
         "publish_success": {"url_not_contains": "publish/video", "selector": "text=发布成功"},
-        # 读回对账（权威判定）：发布后回作品管理页读本人作品列表，标题+时间窗对上才算成功
+        # 发布后回作品管理页匹配本次作品，并区分审核/私密/公开等平台状态。
         "readback": True,
         "selector_caveat": "快手创作者中心发布页；上传后转码才出编辑表单（描述框 DIV，占位『作品描述…』）；"
                            "真发布按钮在表单底部：div[class*=button-primary]『发布』（品牌红，非 <button>；"
@@ -215,8 +218,8 @@ PLATFORMS: dict[str, dict] = {
             {"action": "wait", "value": "3000"},
             {"action": "click", "selector": "button:has-text('发表')"},
         ],
-        # 发布成功校验：成功后离开创作页（/platform/post/create → 作品列表）——避免"点了发表=成功"假阳性
-        "publish_success": {"url_not_contains": "post/create", "selector": "text=发表成功"},
+        # 提交反馈：从创作页进入作品列表；暂无公开作品读回，至多标记已提交。
+        "publish_success": {"url_contains": "https://channels.weixin.qq.com/platform/post/list", "selector": "text=发表成功"},
         "selector_caveat": "视频号需微信扫码登录，二维码在跨域 iframe（open.weixin.qq.com/connect/qrconnect）内，"
                            "已配 login_qr_iframe 直接截 iframe 元素本体（真机 2026-08 验证有效）。"
                            "登录判定/whoami 已真机校准（login_check=finder-nickname/唯一ID/桌面导航；昵称 .finder-nickname、头像 img.avatar）。"
@@ -240,7 +243,7 @@ PLATFORMS: dict[str, dict] = {
             {"action": "fill", "selector": ".WriteIndex-titleInput textarea,textarea[placeholder*='标题']", "value": "{title}"},
             {"action": "type", "selector": ".public-DraftEditor-content,[contenteditable=true]", "value": "{desc}"},
             {"action": "wait", "value": "2000"},
-            {"action": "click", "selector": "button:text-is('发布')"},
+            {"action": "click", "selector": "button:text-is('发布')", "commit": True},
         ],
         # 发布成功校验：知乎发成功后跳到文章页 zhuanlan.zhihu.com/p/<id>（草稿是 /p/<id>/edit，需排除）
         "publish_success": {"url_contains": "/p/", "url_not_contains": "/edit"},
@@ -472,8 +475,9 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
                 last_err = "未找到发表按钮"
                 page.wait_for_timeout(3000)
                 continue
+            publish_receipt.mark_submitted()
             page.keyboard.press("Enter")   # 可信提交
-            # 等 URL 离开创作页 = 提交成功（真机 ~6s 跳 /post/list）
+            # 等提交后的导航反馈（真机 ~6s 跳 /post/list）；后续还要检查目标页面。
             for _ in range(12):
                 page.wait_for_timeout(2000)
                 if "post/create" not in (page.url or "").lower():
@@ -485,7 +489,7 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
             last_err = e
             page.wait_for_timeout(3000)   # 多半是 frame 刚重载，换新 frame 重试
     if not published:
-        raise RuntimeError(f"视频号发表未成功（创作器反复重载或选择器失效）：{last_err}")
+        raise RuntimeError(f"视频号发表结果未确认（创作器反复重载或选择器失效）：{last_err}")
     page.wait_for_timeout(3000)
 
 
@@ -623,6 +627,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 print(f"  步骤 {i}/{len(steps)}: {act} {sel}", file=sys.stderr)
                 if s.get("commit") and submitted_at_ms is None:
                     submitted_at_ms = int(time.time() * 1000)
+                    publish_receipt.mark_submitted()
                     print("  ⏱ 提交步（读回时间窗基准已记录）", file=sys.stderr)
                     # 单次提交契约 × 人类节奏：提交前「复核 + 反应」双停顿（human_pace）
                     human_pace.pause_before_commit(
@@ -721,29 +726,38 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                         print(f"    (可选步骤跳过：{e})", file=sys.stderr)
                         continue
                     raise
-            # 发布结果校验（界面层，旁证）：配置了 publish_success 才验；未配的平台沿用"跑完即报"
+            # 界面只证明提交动作；公开发布由读回状态或精确公开作品页确认。
             chk = cfg.get("publish_success")
             ui_ok = False
+            ui_signal = ""
             if chk:
                 deadline = time.time() + 30
                 while time.time() < deadline:
                     url = (page.url or "").lower()
+                    parsed = urlsplit(url)
+                    same_origin = (parsed.scheme == "https" and parsed.hostname == urlsplit(cfg["publish_url"]).hostname
+                                   and parsed.username is None and parsed.password is None
+                                   and "login" not in parsed.path and "error" not in parsed.path)
                     uc, unc = chk.get("url_contains"), chk.get("url_not_contains")
                     if uc or unc:  # 支持纯 url_not_contains（发布成功后离开发布页）
-                        if (uc in url if uc else True) and (unc not in url if unc else True):
+                        if same_origin and (uc in url if uc else True) and (unc not in url if unc else True):
                             ui_ok = True
+                            ui_signal = "page_navigation"
                             break
-                    if chk.get("selector") and page.query_selector(chk["selector"]):
+                    if same_origin and chk.get("selector") and page.query_selector(chk["selector"]):
                         ui_ok = True
+                        ui_signal = "success_message"
                         break
                     page.wait_for_timeout(500)
-            # 读回对账（权威判定）：回到作品管理页读本人作品列表，标题+时间窗对上才算成功。
-            # 界面判定只作旁证；四档结算（verified 才成功），未核实绝不冒报成功、不许盲目重发。
+            # 读回 matched 仅证明作品身份；审核/私密/未知状态仍不能声称公开发布。
             if cfg.get("readback") and a.platform in _READBACK_VERIFIERS:
                 verdict = _readback_verify(a.platform, page, title=ctx.get("title") or "",
                                            since_ms=submitted_at_ms or flow_started_ms,
                                            snapshot_ids=snapshot_ids)
+                receipt = publish_receipt.from_readback(
+                    a.platform, verdict, kind="video" if a.media and Path(a.media).suffix.lower() in VIDEO_EXTS else "image")
                 if verdict.outcome != "verified":
+                    a._publish_receipt = publish_receipt.emit(receipt)
                     try:  # 失败留现场，供排错
                         fp = Path(__file__).resolve().parents[3] / "outputs" / "_login" / f"{a.platform}-publish-fail.png"
                         fp.parent.mkdir(parents=True, exist_ok=True)
@@ -755,10 +769,6 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                     _die(f"{cfg['name']}：{_ui}；{_READBACK_FAIL_HINTS.get(verdict.outcome, '读回未通过——发布结果未确认')}"
                          f"{_ev}（{verdict.error or ''}）",
                          6 if verdict.outcome == "login_required" else 5)
-                m = verdict.matched
-                _acct = (verdict.evidence or {}).get("account") or {}
-                _who = f"；账号：{_acct.get('display_name')}" if _acct.get("display_name") else ""
-                print(f"✅ {cfg['name']}发布成功（读回核验：作品 {m.platform_content_id}，{m.status or 'published'}{_who}）")
             elif chk:
                 if not ui_ok:
                     try:  # 仅失败时截图，供排错（正常成功不截）
@@ -799,9 +809,11 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                         pass
                     _die(f"发布未确认成功：步骤跑完但未跳到成功状态（当前 URL={page.url}）。"
                          f"可能『发布』按钮未生效或有二次确认弹窗——需核对选择器。", 5)
-                print(f"✅ 发布成功（已确认跳转：{page.url}）")
+                receipt = publish_receipt.from_ui(a.platform, url=page.url or "", signal=ui_signal)
             else:
-                print("✅ 发布步骤执行完毕，请在浏览器/平台后台确认发布结果。")
+                receipt = publish_receipt.from_ui(a.platform)
+            a._publish_receipt = publish_receipt.emit(receipt)
+            print(f"{'✅' if receipt['outcome'] == 'published' else 'ℹ️'} {cfg['name']}：{receipt['message']}")
         except PWTimeout as e:
             # 超时（常见：选择器失效 / 上传转码慢）——截图 + dump 当前可见输入控件，便于精修选择器
             try:
@@ -829,7 +841,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
         finally:
             if not a.keep_open:
                 browser.close()
-    return 0
+    return 0 if a._publish_receipt["outcome"] in ("published", "submitted", "draft") else 5
 
 
 def cmd_login(a) -> int:
@@ -1196,6 +1208,7 @@ def cmd_login_qr(a) -> int:
             browser.close()
 
 
+@publish_receipt.publishing_command()
 def cmd_publish(a) -> int:
     if not a.media and a.platform != "zhihu":
         _die("--media 媒体文件必填")
@@ -1219,15 +1232,17 @@ def cmd_publish(a) -> int:
     content_guard.guard_or_die([a.title, a.desc, a.tags], exec_mode=True,
                                allow_unsafe=getattr(a, "allow_unsafe", False),
                                label=f"{cfg.get('name', a.platform)}发布内容")
+    a._publish_receipt = None
     rc = _run_browser(a, headed=a.headed, do_publish=True)
-    if rc == 0:
-        # 发布成功 → 落统一内容日历（对话页自动；发布页 web 设 AUTORECORD=0 跳过防重复）
+    if rc == 0 and (a._publish_receipt or {}).get("outcome") == "published":
+        # 仅核实为公开发布的作品入已发布日历，页面提交/审核中不可提前登记。
         try:
             import calendar_ops
             ptype = ("文章" if a.platform == "zhihu"
                      else ("视频" if a.media and Path(a.media).suffix.lower() in VIDEO_EXTS
                            else "图文"))
             calendar_ops.record_publish(a.platform, a.title or (a.desc or "")[:20],
+                                        url=a._publish_receipt["url"],
                                         ptype=ptype, tags=(a.tags or ""),
                                         note=(a.desc or ""), source="chat")
         except Exception:

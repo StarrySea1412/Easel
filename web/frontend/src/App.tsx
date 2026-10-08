@@ -5,6 +5,8 @@ import StorageNotice from './components/StorageNotice';
 import { useImageStudio } from './hooks/useImageStudio';
 import { useVideoStudio } from './hooks/useVideoStudio';
 import { useDemoDataPreference } from './hooks/useDemoDataPreference';
+import { usePublishReceipts } from './hooks/usePublishReceipts';
+import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
@@ -74,6 +76,7 @@ export default function App() {
   const imageStudio = useImageStudio(currentPage === 'image');
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
+  const publishReceipts = usePublishReceipts();
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
@@ -858,7 +861,7 @@ export default function App() {
       case 'calendar':
         return <CalendarPage />;
       case 'publish':
-        return <PublishPage persona={selectedPersona} />;
+        return <PublishPage persona={selectedPersona} publishReceipts={publishReceipts} />;
       case 'breakdown':
         return <BreakdownPage persona={selectedPersona} />;
       case 'skills':
@@ -929,6 +932,9 @@ export default function App() {
       />
       <main className="main-content">
         <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
+        <PublishReceiptCenter model={publishReceipts}
+          onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
+          onOpenPublish={() => setCurrentPage('publish')} />
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}

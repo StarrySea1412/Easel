@@ -100,6 +100,7 @@ def test_environment_ignores_host_keys_paths_and_login_home(bundle):
     assert "C:\\host" not in env["PATH"]
     assert env["HOME"] == env["USERPROFILE"] == str(bundle.data / "home")
     assert env["OPENCLAW_CONFIG_PATH"] == str(bundle.config)
+    assert env["OPENCLAW_NO_AUTO_UPDATE"] == "1"
     assert env["EASEL_OPENCLAW_ENTRY"] == str(bundle.runtime["openclaw"])
     assert env["EASEL_NODE_EXECUTABLE"] == str(bundle.runtime["node"])
     assert env["EASEL_PYTHON"] == str(bundle.runtime["python"])
@@ -428,6 +429,25 @@ def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monk
         launcher.start(bundle, no_browser=True)
     assert stopped == [gateway]
     assert launcher._read_json(bundle.data / launcher.STATE_FILE)["services"] == {}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process identity integration")
+def test_snapshot_timeout_has_actionable_message_without_powershell_command(bundle, monkeypatch):
+    def timeout(command, **kwargs):
+        assert kwargs["timeout"] == 30
+        raise subprocess.TimeoutExpired(command, 30)
+    monkeypatch.setattr(launcher.subprocess, "run", timeout)
+    with pytest.raises(RuntimeError) as error:
+        launcher.snapshot(bundle, ports=[37881, 7881])
+    assert "进程状态超时" in str(error.value)
+    assert "未停止任何程序" in str(error.value)
+    assert "Get-CimInstance" not in str(error.value)
+
+
+def test_native_windows_and_chromium_cache_paths_do_not_use_distribution(bundle):
+    env = launcher.isolated_env(bundle, {"SystemRoot": r"C:\Windows"})
+    assert env["SystemDrive"] == Path(r"C:\Windows").drive
+    assert env["CHROME_LOG_FILE"] == str(bundle.data / "logs/chromium.log")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process identity integration")

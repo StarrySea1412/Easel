@@ -1,0 +1,61 @@
+.publish-receipts-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; flex: 0 0 auto; min-width: 0; padding: 7px 18px; color: var(--text-secondary); background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; }
+.publish-receipts-entry { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 5px 0; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 550; cursor: pointer; }
+.publish-receipts-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; padding: 1px 5px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-start); font-variant-numeric: tabular-nums; }
+.publish-receipts-summary { display: flex; align-items: center; flex: 1 1 160px; flex-wrap: wrap; gap: 5px 12px; min-width: 0; line-height: 1.6; }
+.publish-receipts-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(100%, 540px); }
+.publish-receipts-summary a, .publish-receipt-link { color: var(--accent-start); text-decoration: underline; text-underline-offset: 3px; }
+.publish-receipts-summary a { flex-shrink: 0; }
+.publish-receipts-idle { color: var(--text-tertiary); }
+.publish-receipt-text-button { padding: 2px 0; border: 0; background: transparent; color: var(--accent-start); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.publish-receipts-modal.modal { display: flex; flex-direction: column; width: min(640px, 100%); min-width: 0; max-height: min(90dvh, 820px); padding: 0; overflow: hidden; background: var(--surface); color: var(--text); }
+.publish-receipts-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 22px 12px; }
+.publish-receipts-modal-heading > div { min-width: 0; }
+.publish-receipts-modal-heading h2 { margin: 0 0 7px; font-size: 19px; }
+.publish-receipts-modal-heading p, .publish-receipts-footer p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
+.publish-receipts-modal-heading > button { flex-shrink: 0; }
+.publish-receipts-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 22px 14px; border-bottom: 1px solid var(--border); }
+.publish-receipts-list { display: grid; align-content: start; gap: 12px; padding: 18px 22px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.publish-receipts-list > .notice-error { margin: 0; }
+.publish-receipts-list .dash-empty { padding: 28px 8px; }
+.publish-receipts-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
+.publish-receipts-footer p { flex: 1 1 280px; }
+.publish-receipts-footer button { flex-shrink: 0; }
+.publish-receipt { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 15px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.publish-receipt-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.publish-receipt-platform { display: inline-flex; align-items: center; gap: 7px; font-weight: 550; }
+.publish-receipt-platform .platform-icon { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
+.publish-receipt-status { padding: 2px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-secondary); font-weight: 550; }
+.publish-receipt.tone-success .publish-receipt-status { color: var(--green); }
+.publish-receipt.tone-error .publish-receipt-status { color: var(--red); }
+.publish-receipt.tone-warning .publish-receipt-status, .publish-receipt.tone-pending .publish-receipt-status { color: var(--accent-start); }
+.publish-receipt h3 { margin: 10px 0 3px; font-size: 14px; font-weight: 600; }
+.publish-receipt time { color: var(--text-tertiary); font-size: 11px; }
+.publish-receipt p { margin: 8px 0; }
+.publish-receipt .publish-receipt-message, .publish-receipt-content-id { color: var(--text-secondary); white-space: pre-wrap; }
+.publish-receipt-link { display: inline-flex; margin: 2px 0 8px; }
+.publish-receipt-notification { display: flex; flex-wrap: wrap; gap: 3px 8px; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
+.publish-receipt-notification > span:nth-child(2) { flex-basis: 100%; }
+.publish-receipt-mail-error { color: var(--red); }
+.publish-receipt-sms { margin-top: 12px; }
+.publish-receipt-sms label { display: block; margin-bottom: 6px; font-weight: 550; }
+.publish-receipt-sms > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.publish-receipt-sms .field { flex: 1 1 180px; min-width: 0; max-width: 100%; width: auto; background: var(--surface); color: var(--text); }
+.publish-receipt-sms button { flex-shrink: 0; white-space: normal; }
+.publish-receipt-sms p { margin-bottom: 0; font-size: 11px; color: var(--text-secondary); }
+.publish-receipt-sms [role="alert"] { color: var(--red); }
+.publish-receipts-issues { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.publish-receipts-issues h3 { margin: 0; font-size: 14px; }
+.publish-receipts-progress { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
+.publish-receipts-bar button:focus-visible, .publish-receipts-bar a:focus-visible, .publish-receipts-modal :is(button, input, a):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.publish-studio .pv-card > .publish-receipt { margin: 0 14px 12px; background: var(--surface-2); }
+.publish-studio .publish-receipt-entry { margin: 0 0 12px; }
+@media (max-width: 540px) {
+  .publish-receipts-bar { padding: 6px 12px; gap: 3px 12px; }
+  .publish-receipts-summary { font-size: 11px; }
+  .publish-receipts-idle { display: none; }
+  .publish-receipts-modal.modal { max-height: 94dvh; }
+  .publish-receipts-modal-heading { padding: 16px 14px 12px; }
+  .publish-receipts-actions { padding: 0 14px 12px; }
+  .publish-receipts-list { padding: 14px; }
+  .publish-receipts-footer { padding: 12px 14px; }
+}

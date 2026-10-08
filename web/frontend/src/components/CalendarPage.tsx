@@ -3,6 +3,7 @@ import { fetchSchedule, createSchedule, updateSchedule, deleteSchedule, fetchSch
 import type { ScheduleItem, ScheduleInput, ScheduleContext } from '../lib/api';
 import { IconCalendar, IconTrash, IconChevron } from './icons';
 import { useModalFocus } from '../hooks/useModalFocus';
+import { safePublishedUrl } from '../lib/publishReceipts';
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   idea: { label: '选题', color: 'var(--text-tertiary)' },
@@ -86,6 +87,7 @@ export default function CalendarPage() {
   const closeDayView = useCallback(() => setDayView(null), []);
   const dayViewRef = useModalFocus(dayView !== null, closeDayView);
   const formRef = useModalFocus(form !== null, close);
+  const publishedUrl = editing?.status === 'published' ? safePublishedUrl(editing.platform, editing.url) : null;
 
   // 单条 chip（活动=色条，内容=按状态上色的圆点），日历格与当天详情共用
   const renderChip = (it: ScheduleItem) => {
@@ -313,6 +315,7 @@ export default function CalendarPage() {
               </>
             )}
             <label className="field-label">备注</label>
+            {publishedUrl && <p><a href={publishedUrl} target="_blank" rel="noopener noreferrer">查看作品地址 ↗</a></p>}
             <textarea className="field" style={{ minHeight: 60 }} value={form.note}
               onChange={(e) => setForm({ ...form, note: e.target.value })} />
             <div className="cal-form-actions">

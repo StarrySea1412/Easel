@@ -487,25 +487,60 @@ export function logoutAccount(platform: string): Promise<{ ok: boolean; deleted:
   return request(`/api/logout/${encodeURIComponent(platform)}`, { method: 'POST' });
 }
 
-export interface PublishResult {
-  ok?: boolean;
+export type PublishOutcome = 'published' | 'submitted' | 'draft' | 'unverified' | 'failed';
+
+export interface PublishNotification {
+  state: 'unconfigured' | 'queued' | 'sent' | 'failed' | 'skipped';
+  message?: string;
+}
+
+export interface PublishReceipt {
+  receiptId: string;
+  platform: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  state: string;
+  outcome: PublishOutcome | null;
+  contentId?: string;
+  url?: string;
   message: string;
-  detail?: string;
-  async?: boolean;   // true = 异步发布（抖音，可能触发短信验证），需轮询 publishStatus
+  notification?: PublishNotification;
+  storageWarning?: string;
+  ok?: boolean;
   pending?: boolean;
 }
 
-/** 一键发布到某平台（真发布，--exec）。media 为 outputs 相对路径数组。
- * 抖音返回 {async:true}，需轮询 publishStatus；其他平台同步返回结果。 */
+export interface PublishResult extends Partial<PublishReceipt> {
+  message: string;
+  detail?: string;
+  async?: boolean;
+}
+
+export interface PublishRequest {
+  platform: string;
+  payload: { title: string; body: string; media: string[]; tags?: string };
+}
+
+/** 真发布。只有 outcome=published 表示平台已确认公开发布；异步任务按 receiptId 跟踪。 */
 export function publishNow(
   platform: string,
-  payload: { title: string; body: string; media: string[]; tags?: string },
+  payload: PublishRequest['payload'],
 ): Promise<PublishResult> {
   return request<PublishResult>(`/api/publish/${encodeURIComponent(platform)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+/** 恢复最近回执；只读，不重发内容，也不重发通知。 */
+export function fetchPublishReceipts(signal?: AbortSignal): Promise<PublishReceipt[]> {
+  return request('/api/publish/receipts', { signal });
+}
+
+export function fetchPublishReceipt(receiptId: string, signal?: AbortSignal): Promise<PublishReceipt> {
+  return request(`/api/publish/receipts/${encodeURIComponent(receiptId)}`, { signal });
 }
 
 export interface PublishStatus {
@@ -520,11 +555,11 @@ export function publishStatus(platform: string): Promise<PublishStatus> {
 }
 
 /** 发布触发短信墙时回填验证码。 */
-export function submitPublishSms(platform: string, code: string): Promise<{ ok: boolean }> {
+export function submitPublishSms(platform: string, code: string, receiptId: string): Promise<{ ok: boolean }> {
   return request(`/api/publish/${encodeURIComponent(platform)}/sms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, receiptId }),
   });
 }
 

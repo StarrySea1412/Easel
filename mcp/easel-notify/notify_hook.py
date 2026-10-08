@@ -6,25 +6,27 @@
   1. web/app.py 对话流收尾（api_chat_stream supervisor finally）——图文/视频/文案等
      所有经 chat / skill 入口生成的内容，跑完（status=done）就发一封摘要邮件；
      失败/超时不发（用户在场看着呢），用户显式停止也不发。
-  2. skills/shared/scripts/manifest.py 的 record/meta —— 跨层编排登记产物时，
-     record --status done / meta --status ready|published 发邮件；供 CLI 直接跑
-     SKILL（不经过 chat 收尾）的场景。
-  3. web/app.py 一键发布成功（api_publish / _run_publish_bg）—— 发布成功发邮件。
+  2. skills/shared/scripts/manifest.py 的 record/meta —— 生成完成可发摘要；
+     仅有本地 ready/published 标记不能确认平台已经公开发布。
+  3. web/app.py 收到当前任务的 published 平台回执后发送成功提醒，附公开作品地址。
 
 设计约束：
 - 发送在守护线程里跑，主流程不等它（SMTP 20s 超时不拖住对话收尾）。
-- 任何异常都吞掉：通知失败不影响生成/发布结果本身。
+- 通知异常不影响生成/发布结果；发布回执可观察排队、已发送、失败或未配置。
 - 配置每次现读项目根 .env（EASEL_NOTIFY_EMAIL / EASEL_NOTIFY_SMTP_HOST 等），
-  改动即生效，无需重启。EASEL_NOTIFY_OFF=1 可临时整机关掉。
+  改动即生效，无需重启。EASEL_NOTIFY_ON_DONE=1 才自动发送；EASEL_NOTIFY_OFF=1 可临时关闭。
 - 邮件正文只带状态 + 标题 + 平台/体裁 + 产物名；不带敏感信息（路径/配置/Key）。
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import Callable
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mailer  # noqa: E402
@@ -34,46 +36,75 @@ PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_RO
 
 _last_sent: dict[str, float] = {}
 _LAST_SENT_GAP = 60.0  # 同 key 60s 内不重发（编排多层各登记一次时防轰炸）
+_SEND_LOCK = threading.Lock()
 
 
 def _enabled() -> bool:
     if os.environ.get("EASEL_NOTIFY_OFF", "").strip() == "1":
         return False
     try:
-        return mailer.load_email_config().configured
+        cfg = mailer.load_email_config()
+        return cfg.configured and cfg.on_done
     except Exception:  # noqa: BLE001
         return False
 
 
-def _send_async(cfg: mailer.EmailConfig, subject: str, body: str) -> None:
-    """守护线程发送：主流程不等、异常不抛（通知失败不影响任务结果）。"""
+def _send_async(cfg: mailer.EmailConfig, subject: str, body: str,
+                on_result: Callable[[dict], None] | None = None) -> None:
+    """SMTP 完成后报告结果；排入线程不是已经送达。"""
 
     def _run() -> None:
         try:
-            mailer.send_email(cfg, subject, body)
+            result = mailer.send_email(cfg, subject, body)
+            status = ({'state': 'sent', 'message': '邮件已交给 SMTP 服务，实际收件情况请检查邮箱。'}
+                      if isinstance(result, dict) and result.get('ok') is True
+                      else {'state': 'failed', 'message': '邮件发送失败，请检查通知配置和邮箱服务。'})
         except Exception:  # noqa: BLE001
-            pass
+            status = {'state': 'failed', 'message': '邮件发送失败，请检查通知配置和邮箱服务。'}
+        if on_result is not None:
+            try:
+                on_result(status)
+            except Exception:
+                pass
 
     threading.Thread(target=_run, daemon=True, name="easel-notify").start()
 
 
 def notify_completion(*, topic: str = "", title: str = "", platform: str = "",
                       kind: str = "", summary: str = "", source: str = "generate",
-                      deliverables: list[str] | None = None) -> None:
-    """生成/发布完成 → 发一封摘要邮件。
+                      deliverables: list[str] | None = None, url: str = "",
+                      receipt_id: str = "", outcome: str = "",
+                      on_result: Callable[[dict], None] | None = None) -> dict:
+    """Return notification state; published receipts deduplicate by task ID."""
+    def report(state: str, message: str) -> dict:
+        result = {'state': state, 'message': message}
+        if on_result is not None:
+            try:
+                on_result(result)
+            except Exception:
+                pass
+        return result
 
-    source 仅仅是正文里的动作词（生成完成/发布成功）；条件不满足（未配置）直接返回，
-    不打日志、不抛错——对未启用邮箱通知的部署完全零开销。
-    """
-    if not _enabled():
-        return
-    key = f"{source}:{topic}" if topic else source
-    now = time.monotonic()
-    if now - _last_sent.get(key, 0.0) < _LAST_SENT_GAP:
-        return
-    _last_sent[key] = now
+    if source == 'publish' and (outcome != 'published'
+                                or not re.fullmatch(r'[0-9a-f]{32}', receipt_id)):
+        return report('skipped', '缺少已确认公开发布的任务回执，未发送成功提醒。')
+    if os.environ.get('EASEL_NOTIFY_OFF', '').strip() == '1':
+        return report('skipped', '邮箱通知已关闭。')
     try:
         cfg = mailer.load_email_config()
+        if not cfg.configured:
+            return report('unconfigured', '邮箱通知未配置，可在设置中填写收件人与 SMTP。')
+        if not getattr(cfg, 'on_done', False):
+            return report('skipped', '任务完成后自动邮件通知已关闭。')
+        key = f'publish:{receipt_id}' if source == 'publish' else f'{source}:{topic}'
+        now = time.monotonic()
+        with _SEND_LOCK:
+            duplicate = key in _last_sent and (source == 'publish'
+                                              or now - _last_sent[key] < _LAST_SENT_GAP)
+            if not duplicate:
+                _last_sent[key] = now
+        if duplicate:
+            return report('skipped', '该任务已安排提醒，未重复发送。')
         action = "发布成功" if source == "publish" else "生成完成"
         subject = f"[Easel] {action}：{title or topic or '内容任务'}"
         lines = [f"Easel {action}。"]
@@ -87,12 +118,27 @@ def notify_completion(*, topic: str = "", title: str = "", platform: str = "",
             lines.append(f"体裁：{kind}")
         if deliverables:
             lines.append(f"产物：{'、'.join(deliverables[:8])}")
+        if source == 'publish':
+            try:
+                parsed = urlsplit(url)
+                safe_url = url if (parsed.scheme == 'https' and parsed.hostname
+                                  and not parsed.username and not parsed.password
+                                  and not any(ch.isspace() for ch in url)) else ''
+            except ValueError:
+                safe_url = ''
+            lines.append('作品地址：' + (safe_url or '平台未返回可验证的公开作品地址，请在平台内查看。'))
+            lines.append(f'发布回执：{receipt_id}')
         if summary:
             lines.append(f"\n{summary[:300]}")
         lines.append(f"\n时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
-        _send_async(cfg, subject, "\n".join(lines))
+        queued = report('queued', '邮件提醒已排队，正在等待 SMTP 发送结果。')
+        if on_result is None:
+            _send_async(cfg, subject, "\n".join(lines))
+        else:
+            _send_async(cfg, subject, "\n".join(lines), on_result)
+        return queued
     except Exception:  # noqa: BLE001
-        pass
+        return report('failed', '邮件提醒未能启动，请检查通知配置。')
 
 
 def notify_web_turn(status: str, text: str, *, stop_reason: str | None = None,

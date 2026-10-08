@@ -31,7 +31,7 @@ def api(tmp_path):
     names = {'ScheduleItem', 'IdeaItem', '_read_schedule', '_write_schedule', '_read_ideas', '_write_ideas',
              'api_schedule_list', 'api_schedule_create', 'api_schedule_update', 'api_schedule_delete',
              'api_ideas_list', 'api_ideas_create', 'api_ideas_update', 'api_ideas_delete',
-             '_record_published_schedule', '_run_publish_bg', 'api_schedule_context'}
+             '_record_published_schedule', 'api_schedule_context'}
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     nodes = [node for node in source.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names]
     assert {node.name for node in nodes} == names
@@ -138,17 +138,10 @@ def test_successful_publish_reports_calendar_failure_without_overwriting_corrupt
     _, namespace = api
     path = namespace['SCHEDULE_FILE']
     path.write_bytes(b'BROKEN_PRIVATE_DATA')
-    notices = []
-    namespace.update(PROJECT_ROOT=ROOT,
-                     subprocess=SimpleNamespace(run=lambda *a, **k: SimpleNamespace(returncode=0, stdout='', stderr=''),
-                                                TimeoutExpired=subprocess.TimeoutExpired),
-                     _publish_env=lambda: {}, _notify_email_completion=None,
-                     _read_publish_status=lambda _: {'state': 'success', 'message': 'published'},
-                     _write_publish_status=lambda *args: notices.append(args))
-    namespace['_run_publish_bg']('synthetic', ['synthetic-no-execution'], 'title', 'body', {'name': 'test'},
-                                 path.parent / 'status.json', path.parent / 'code.txt')
-    assert len(notices) == 1 and notices[0][1] == 'success'
-    assert '排期记录未保存' in notices[0][2] and 'BROKEN_PRIVATE_DATA' not in notices[0][2]
+    warning = namespace['_record_published_schedule']('title', 'body', 'test',
+                                                      url='https://zhuanlan.zhihu.com/p/123456',
+                                                      receipt_id='a' * 32)
+    assert '排期记录未保存' in warning and 'BROKEN_PRIVATE_DATA' not in warning
     assert path.read_bytes() == b'BROKEN_PRIVATE_DATA'
 
 
