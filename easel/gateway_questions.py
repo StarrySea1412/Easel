@@ -249,7 +249,9 @@ def _sign(payload: str) -> str:
 class GatewayClient:
     """Minimal Gateway WS RPC client (operator role, v2 device auth)."""
 
-    def __init__(self, timeout: float = 12.0, *, scopes: list[str] | None = None):
+    def __init__(self, timeout: float = 12.0, *, scopes: list[str] | None = None,
+                 client_id: str = CLIENT_ID, client_mode: str = "cli",
+                 auth: dict[str, str] | None = None):
         import websocket  # local import: keep module import cheap
 
         self._ws_lib = websocket
@@ -257,8 +259,12 @@ class GatewayClient:
         self.timeout = timeout
         self._seq = 0
         self.scopes = list(scopes) if scopes is not None else ["operator.admin", "operator.read", "operator.write"]
+        self.client_id = client_id
+        self.client_mode = client_mode
+        self._auth = dict(auth) if auth is not None else None
         self.methods: set[str] = set()
         self.granted_scopes: set[str] = set()
+        self.server_version: str | None = None
 
     def connect(self) -> None:
         import websocket  # noqa: F401
@@ -282,20 +288,21 @@ class GatewayClient:
             raise
 
         scopes = self.scopes
+        auth = self._auth if self._auth is not None else {"token": dev["token"]}
         payload = "|".join([
-            "v2", dev["device_id"], "cli", "cli", "operator",
-            ",".join(scopes), str(ts), dev["token"], nonce,
+            "v2", dev["device_id"], self.client_id, self.client_mode, "operator",
+            ",".join(scopes), str(ts), auth.get("token", ""), nonce,
         ])
         sig = _sign(payload)
         conn = {
             "type": "req", "id": "1", "method": "connect",
             "params": {
                 "minProtocol": GATEWAY_PROTOCOL_MIN, "maxProtocol": GATEWAY_PROTOCOL_MAX,
-                "client": {"id": CLIENT_ID, "version": CLIENT_VERSION,
-                           **_client_identity(), "mode": "cli"},
+                "client": {"id": self.client_id, "version": CLIENT_VERSION,
+                           **_client_identity(), "mode": self.client_mode},
                 "role": "operator", "scopes": scopes,
                 "caps": [], "commands": [], "permissions": {},
-                "auth": {"token": dev["token"]},
+                "auth": auth,
                 "device": {
                     "id": dev["device_id"],
                     "publicKey": dev["public_key"],
@@ -323,6 +330,11 @@ class GatewayClient:
                 auth = hello.get("auth") or {}
                 self.methods = {m for m in features.get("methods", []) if isinstance(m, str)}
                 self.granted_scopes = {s for s in auth.get("scopes", []) if isinstance(s, str)}
+                server = hello.get("server")
+                version = server.get("version") if isinstance(server, dict) else None
+                self.server_version = (version if isinstance(version, str)
+                                       and re.fullmatch(r'[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,3}(?:[-+][A-Za-z0-9.-]{1,32})?', version)
+                                       else None)
                 break
         if not ok:
             ws.close()

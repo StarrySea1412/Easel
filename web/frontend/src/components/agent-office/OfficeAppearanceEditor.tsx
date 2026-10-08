@@ -4,8 +4,9 @@ import { createPortal } from 'react-dom';
 import { DEFAULT_EMPLOYEE_APPEARANCES, type EmployeeAppearance } from '../../lib/employeeAppearance';
 import './office-appearance-editor.css';
 
-export default function OfficeAppearanceEditor({ draft, original, agentName, agentId, live, sharedCount, onChange, onSave, onCancel }: {
+export default function OfficeAppearanceEditor({ draft, original, agentName, agentId, live, sharedCount, compact = false, onChange, onSave, onCancel }: {
   draft: EmployeeAppearance; original: EmployeeAppearance; agentName: string; agentId: string; live: boolean; sharedCount: number;
+  compact?: boolean;
   onChange: (card: EmployeeAppearance) => void; onSave: (card: EmployeeAppearance) => void; onCancel: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -45,7 +46,7 @@ export default function OfficeAppearanceEditor({ draft, original, agentName, age
     };
   }, []);
 
-  return createPortal(<div className="office-appearance-overlay">
+  return createPortal(<div className={`office-appearance-overlay${compact ? ' is-compact' : ''}`}>
     <section className="office-appearance-editor" ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1}>
       <header><div><p>角色自定义</p><h2 id={titleId}>让这位同事更像你想的样子</h2></div><button type="button" ref={closeButton} aria-label="取消编辑并关闭" onClick={onCancel}>×</button></header>
       <p className="office-editor-preview-note" id={descriptionId}>修改会立即预览在办公室中，点击保存后才应用到角色卡。取消会恢复原来的外观。</p>

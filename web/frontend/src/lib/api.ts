@@ -737,6 +737,8 @@ export function streamChat(
   onHeartbeat?: (note: string) => void,
   selectedSkills: string[] = [],
   skillRequirements: SkillRequirements = {},
+  modelRef?: string,
+  onModelSelection?: (requestedModelRef: string | null) => void,
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -776,6 +778,11 @@ export function streamChat(
         } else if (currentEvent === 'heartbeat') {
           // 防呆心跳：独立于 activity/thinking，仅作「未卡住」提示，不覆盖真实状态。
           if (onHeartbeat) { try { onHeartbeat(JSON.parse(data) as string); } catch { onHeartbeat(data); } }
+        } else if (currentEvent === 'model_selection' && onModelSelection) {
+          try {
+            const selection = (JSON.parse(data) as { requestedModelRef?: unknown }).requestedModelRef;
+            if (selection === null || (typeof selection === 'string' && selection.length <= 500 && /^[^\s/]+\/[^\s]+$/.test(selection))) onModelSelection(selection);
+          } catch { /* Invalid metadata cannot manufacture a model selection. */ }
         } else if (currentEvent === 'error') {
           let detail:unknown;
           try { detail = JSON.parse(data); } catch { detail = data; }
@@ -831,7 +838,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -867,7 +874,7 @@ export function streamChat(
 }
 
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string }> {
+export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string; requestedModelRef?: string | null }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }

@@ -37,7 +37,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   const specifier = statement.moduleSpecifier.text;
   if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
   const target = specifier === './agent-office/AgentOfficeScene' ? scene : specifier === '../hooks/useAgentOffice' ? live
-    : ['./agent-office/OfficeProcessPanel', './agent-office/OfficeOutputMonitor', './agent-office/OfficeAgentControls', './agent-office/OfficeWorkPreview'].includes(specifier) ? moduleUrl('export default function Panel(){return null;}')
+    : ['./agent-office/OfficeProcessPanel', './agent-office/OfficeOutputMonitor', './agent-office/OfficeAgentControls', './agent-office/OfficeTaskComposer', './agent-office/OfficeWorkPreview'].includes(specifier) ? moduleUrl('export default function Panel(){return null;}')
       : specifier.startsWith('.') ? await tsModuleUrl(new URL('../src/components/' + specifier + (specifier.includes('/lib/') ? '.ts' : '.tsx'), import.meta.url)) : import.meta.resolve(specifier);
   replacements.push({ start: statement.moduleSpecifier.getStart(parsed), end: statement.moduleSpecifier.end, text: JSON.stringify(target) });
 }
@@ -304,6 +304,41 @@ test('independent character studies stay available when demo data is disabled an
   assert.equal(view.button('实时观测').getAttribute('aria-pressed'), 'true');
   assert.ok(view.harness.scene.agents.every(agent => agent.source === 'live'));
   assert.equal(view.harness.frames.size, 0);
+});
+
+test('the portaled appearance sheet follows the office width while preserving its draft and scene instance', async t => {
+  let availableWidth = 1080;
+  let resized;
+  const originalRect = window.HTMLElement.prototype.getBoundingClientRect;
+  t.mock.method(window.HTMLElement.prototype, 'getBoundingClientRect', function () {
+    return this.classList.contains('agent-office-page') ? new window.DOMRect(0, 0, availableWidth, 800) : originalRect.call(this);
+  });
+  const observerDescriptor = Object.getOwnPropertyDescriptor(window, 'ResizeObserver');
+  Object.defineProperty(window, 'ResizeObserver', { configurable: true, value: class {
+    constructor(callback) { resized = callback; }
+    observe() {}
+    disconnect() {}
+  } });
+  t.after(() => { if (observerDescriptor) Object.defineProperty(window, 'ResizeObserver', observerDescriptor); else delete window.ResizeObserver; });
+  const view = await fixture(t);
+  await view.click(view.container.querySelector('[data-agent="researcher"]'));
+  await view.click(view.button('编辑角色卡'));
+  const dialog = view.dialog();
+  assert.equal(dialog.parentElement.classList.contains('is-compact'), false);
+  await view.input(dialog.querySelector('.office-editor-fields input'), '保留的预览草稿');
+  availableWidth = 720;
+  await act(async () => resized([]));
+  assert.equal(view.dialog(), dialog, 'resizing must not remount the editor');
+  assert.equal(dialog.parentElement.classList.contains('is-compact'), true);
+  assert.ok(view.container.querySelector('.agent-office-page.is-compact-appearance'));
+  assert.equal(view.dialog().querySelector('.office-editor-fields input').value, '保留的预览草稿');
+  assert.equal(view.harness.mounts, 1);
+  assert.equal(view.harness.unmounts, 0);
+  availableWidth = 1100;
+  await act(async () => resized([]));
+  assert.equal(dialog.parentElement.classList.contains('is-compact'), false);
+  assert.equal(view.harness.scene.selectedId, 'researcher');
+  assert.equal(view.harness.mounts, 1);
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

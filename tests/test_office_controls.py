@@ -90,6 +90,7 @@ def run(sandbox, action='controls', agent=AGENT, turn='turn1', model=None):
 def test_controls_expose_configured_ids_and_disable_running_model_changes(sandbox):
     result = run(sandbox)
     assert result['stop'] == {'available': True, 'scope': 'agent',
+        'runId': RUN,
         'reason': '停止该 Agent 及其派生任务，不停止父级或兄弟 Agent。'}
     assert not result['model']['available']
     assert '停止' in result['model']['reason']
@@ -291,6 +292,23 @@ def test_root_stop_without_local_process_cannot_leave_stop_flag(sandbox):
     assert not sandbox.web._STOPPED_CHAT
 
 
+def test_stop_expected_run_rejects_stale_ui_before_gateway_mutation(sandbox):
+    with pytest.raises(HTTPException) as exc:
+        controls.operate(sandbox.web, 'chat', 'turn1', AGENT, 'stop', expected_run_id='previous-run')
+    assert exc.value.status_code == 409 and not sandbox.client.calls
+    result = controls.operate(sandbox.web, 'chat', 'turn1', AGENT, 'stop', expected_run_id=RUN)
+    assert result['confirmed'] and result['runId'] == RUN
+
+
+def test_child_new_gateway_run_cannot_inherit_old_spawn_receipt(sandbox):
+    sandbox.client.row['lastRunId'] = 'new-child-run'
+    capability = run(sandbox)['stop']
+    assert not capability['available'] and capability['runId'] is None
+    with pytest.raises(HTTPException):
+        controls.operate(sandbox.web, 'chat', 'turn1', AGENT, 'stop', expected_run_id=RUN)
+    assert all(method != 'sessions.abort' for method, _ in sandbox.client.calls)
+
+
 def test_http_routes_match_frontend_contract_and_reject_old_turn(sandbox, monkeypatch):
     from fastapi.testclient import TestClient
     import app as web
@@ -317,7 +335,8 @@ def test_gateway_handshake_requests_only_explicit_scopes(monkeypatch):
     frames = []
     incoming = iter([
         {'event': 'connect.challenge', 'payload': {'nonce': 'fixture-nonce', 'ts': 123}},
-        {'id': '1', 'ok': True, 'payload': {'features': {'methods': ['sessions.list', 'sessions.abort']},
+        {'id': '1', 'ok': True, 'payload': {'server': {'version': '2026.9.2'},
+                                          'features': {'methods': ['sessions.list', 'sessions.abort']},
                                           'auth': {'scopes': controls.SCOPES}}},
     ])
     socket = SimpleNamespace(recv=lambda: json.dumps(next(incoming)), send=lambda frame: frames.append(json.loads(frame)), close=lambda: None)
@@ -329,4 +348,27 @@ def test_gateway_handshake_requests_only_explicit_scopes(monkeypatch):
     assert frames[0]['params']['scopes'] == ['operator.read', 'operator.write']
     assert client.granted_scopes == set(controls.SCOPES)
     assert client.methods == {'sessions.list', 'sessions.abort'}
+    assert client.server_version == '2026.9.2'
+    client.close()
+
+
+def test_backend_probe_handshake_signs_exact_identity_and_existing_shared_auth(monkeypatch):
+    frames, signatures = [], []
+    incoming = iter([
+        {'event': 'connect.challenge', 'payload': {'nonce': 'fixture-nonce', 'ts': 123}},
+        {'id': '1', 'ok': True, 'payload': {'server': {'version': 'PRIVATE_SECRET'},
+            'features': {'methods': ['agent']}, 'auth': {'scopes': ['operator.admin']}}},
+    ])
+    socket = SimpleNamespace(recv=lambda: json.dumps(next(incoming)), send=lambda frame: frames.append(json.loads(frame)), close=lambda: None)
+    monkeypatch.setattr(controls.gateway, '_load_device', lambda: {'device_id': 'fixture', 'token': 'device-token', 'public_key': 'public'})
+    monkeypatch.setattr(controls.gateway, '_sign', lambda payload: signatures.append(payload) or 'synthetic-signature')
+    monkeypatch.setitem(sys.modules, 'websocket', SimpleNamespace(create_connection=lambda *a, **kw: socket))
+    client = controls.gateway.GatewayClient(timeout=1, scopes=['operator.admin'], client_id='gateway-client',
+        client_mode='backend', auth={'token': 'shared-token'})
+    client.connect()
+    params = frames[0]['params']
+    assert params['client']['id'] == 'gateway-client' and params['client']['mode'] == 'backend'
+    assert params['auth'] == {'token': 'shared-token'} and params['scopes'] == ['operator.admin']
+    assert signatures == ['v2|fixture|gateway-client|backend|operator|operator.admin|123|shared-token|fixture-nonce']
+    assert client.server_version is None
     client.close()

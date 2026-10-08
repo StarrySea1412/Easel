@@ -14,6 +14,7 @@ export interface ChatMessage {
   attachments?: UploadedFile[]; // 结构化附件引用；仅用于请求/重试，不在消息气泡展示
   selectedSkills?: string[];
   skillRequirements?: SkillRequirements; // Immutable requirements attached to this sent message, used on retry.
+  requestedModelRef?: string; // This turn's explicit request, never evidence of the model that actually ran.
   turnId?: string;
   thinking?: string;   // 模型服务实际返回的思考内容或摘要，流式结束后持久保留
   activity?: string;   // 工具/执行活动步骤（换行分隔），持久保留
@@ -34,6 +35,7 @@ export interface ChatSession {
 
 /** 进行中的流式状态（存于 App，不随页面切换/ChatPage 卸载而丢失）。 */
 export interface StreamState {
+  requestedModelRef?: string;
   content: string;
   thinking: string;
   activity: string;
@@ -132,6 +134,8 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   }
   if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');
   if (value.skillRequirements !== undefined) message.skillRequirements = requirementsForSelection(value.skillRequirements, message.selectedSkills || []);
+  if (typeof value.requestedModelRef === 'string' && value.requestedModelRef.length <= 500
+    && /^[^\s/]+\/[^\s]+$/.test(value.requestedModelRef)) message.requestedModelRef = value.requestedModelRef;
   if (Array.isArray(value.attachments)) {
     message.attachments = value.attachments.filter((file): file is UploadedFile => record(file)
       && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
@@ -176,6 +180,7 @@ function decodeSessions(raw: string): ChatSession[] {
         delete message.attachments;
         delete message.selectedSkills;
         delete message.skillRequirements;
+        delete message.requestedModelRef;
       }
     }
     sessions.push(session);

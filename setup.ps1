@@ -5,6 +5,7 @@ param(
     [string]$Phase = '',
     [switch]$NonInteractive,
     [switch]$AllowWinget,
+    [switch]$DeferBrowser,
     [string]$DataDir = $env:EASEL_DATA_DIR
 )
 $ErrorActionPreference = 'Stop'
@@ -388,8 +389,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $Frontend 'dist\index.html'))) { Fai
 function Invoke-chromium {
 
 Info '安装 Playwright Chromium...'
+if ([string]::IsNullOrWhiteSpace($env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT)) {
+    # 首次官方 CDN 重定向可能超过 30 秒；保留用户明确指定的等待时间。
+    $env:PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = '120000'
+}
 & $Python -m playwright install chromium
-if ($LASTEXITCODE -ne 0) { Fail 'Playwright Chromium 安装失败。' }
+if ($LASTEXITCODE -ne 0) { Fail 'Playwright Chromium 安装失败，请检查官方浏览器下载网络后重跑安装，已完成阶段会保留。' }
 
 }
 
@@ -625,7 +630,9 @@ try { if (Test-Path -LiteralPath $identityFile) { $previousIdentity = Get-Conten
 $action = if ($previousIdentity -and $previousIdentity.root -eq $currentIdentity.root -and $previousIdentity.version -eq $currentIdentity.version) { 'start' } else { 'restart' }
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'scripts\gateway.ps1') $action
 if ($LASTEXITCODE -ne 0) { Fail 'Easel Gateway 启动失败。' }
-& $Python -m easel doctor --install-mode
+$doctorArgs = @('-m', 'easel', 'doctor', '--install-mode')
+if ($DeferBrowser) { $doctorArgs += '--defer-browser' }
+& $Python @doctorArgs
 if ($LASTEXITCODE -ne 0) { Fail '安装环境检查失败；请按 doctor 提示修复。' }
 & $Python (Join-Path $Root 'easel\install_runner.py') --root $Root --data-dir $DataDir --verify-web
 if ($LASTEXITCODE -ne 0) { Fail 'Web 页面启动验证失败。' }
@@ -657,6 +664,7 @@ try {
     $runnerArgs = @((Join-Path $Root 'easel\install_runner.py'), '--root', $Root, '--data-dir', $DataDir)
     if ($NonInteractive) { $runnerArgs += '--non-interactive' }
     if ($AllowWinget) { $runnerArgs += '--allow-winget' }
+    if ($DeferBrowser) { $runnerArgs += '--defer-browser' }
     & $Python @runnerArgs
     exit $LASTEXITCODE
 } catch {

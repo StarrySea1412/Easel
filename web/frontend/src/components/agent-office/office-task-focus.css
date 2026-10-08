@@ -1,0 +1,40 @@
+.office-task-focus { margin:0 0 18px;padding:22px;border:1px solid var(--border);border-radius:16px;background:var(--surface);color:var(--text);min-width:0; }
+.office-task-focus-heading { display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px; }
+.office-task-focus-heading > div { min-width:0; }
+.office-task-focus-heading .office-eyebrow { color:var(--text-tertiary);font-size:11px;margin-bottom:5px; }
+.office-task-focus-heading h2 { font-size:20px;font-weight:600;line-height:1.5; }
+.office-task-focus-source { padding:5px 9px;border-radius:6px;background:var(--surface-2);color:var(--text-secondary);font-size:12px;overflow-wrap:anywhere; }
+.office-task-focus-team { margin:8px 0 15px;color:var(--text-secondary);font-size:12px;line-height:1.8; }
+.office-task-focus-member { display:grid;gap:6px;font-size:12px;color:var(--text-secondary);max-width:440px;min-width:0;margin-bottom:18px; }
+.office-task-focus-layout { display:grid;grid-template-columns:minmax(0,1fr) minmax(270px,.82fr);gap:24px;align-items:start; }
+.office-task-focus-summary,.office-task-focus-controls { min-width:0; }
+.office-task-focus-current { padding:14px;background:var(--surface-2);border-radius:10px; }
+.office-task-focus-current > div { display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap; }
+.office-task-focus-current strong { font-size:14px;overflow-wrap:anywhere; }
+.office-task-focus-current > p { margin:9px 0 0;font-size:14px;line-height:1.8;overflow-wrap:anywhere; }
+.office-task-focus-records { display:grid;gap:14px;margin:17px 0; }
+.office-task-focus-records > div { display:grid;grid-template-columns:82px minmax(0,1fr);gap:12px; }
+.office-task-focus-records dt { font-size:12px;color:var(--text-secondary);line-height:1.8; }
+.office-task-focus-records dd { margin:0;min-width:0;font-size:13px;line-height:1.8;overflow-wrap:anywhere; }
+.office-task-focus-records dd > p { margin:4px 0 0; }
+.office-task-focus-records small { display:block;margin-top:3px;color:var(--text-tertiary);font-size:11px; }
+.office-task-focus-failed { color:var(--red); }
+.office-task-focus-actions { display:flex;gap:8px;flex-wrap:wrap; }
+.office-task-focus .office-button { min-height:40px;border-color:var(--border);color:var(--text-secondary);background:var(--surface);white-space:normal;overflow-wrap:anywhere; }
+.office-task-focus .office-button:hover:not(:disabled) { background:var(--surface-hover); }
+.office-task-focus-note,.office-task-focus-empty { margin:10px 0 0;color:var(--text-secondary);font-size:12px;line-height:1.8; }
+.office-task-focus-empty .office-button { margin-top:12px; }
+.office-task-focus-controls > .office-agent-controls { margin:0;padding-top:0;border-top:0; }
+.office-task-focus-controls > .office-control-note { padding:14px;margin:0;background:var(--surface-2);border-radius:10px; }
+.office-task-focus .office-model-identity { background:var(--surface-2);border-color:var(--border); }
+.office-task-focus button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:3px; }
+@container office-page (max-width:900px) {
+  .office-task-focus-layout { grid-template-columns:minmax(0,1fr);gap:18px; }
+  .office-task-focus-controls { padding-top:18px;border-top:1px solid var(--border); }
+}
+@container office-page (max-width:620px) {
+  .office-task-focus { padding:16px;border-radius:13px; }
+  .office-task-focus-heading h2 { font-size:18px; }
+  .office-task-focus-records > div { grid-template-columns:minmax(0,1fr);gap:4px; }
+  .office-task-focus-member { max-width:none; }
+}

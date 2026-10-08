@@ -56,6 +56,7 @@ async function fixture(t, initial, realSidebar = false) {
     : url(`export default function Sidebar(props) {globalThis.__backupApp.sidebar=props;return null;}`);
   const notice = url(`export default function StorageNotice(props) {globalThis.__backupApp.storageNotice=props;return null;}`);
   const empty = url('export default function Empty(){return null;}');
+  const dashboard = url("export default function Dashboard(props){globalThis.__backupApp.pages['工作台']=props;return null;}");
   const image = url(`export function useImageStudio(){return {};}`);
   let compiled = ts.transpileModule(rawApp, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const imports = ts.createSourceFile('App.js', compiled, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS).statements.filter(ts.isImportDeclaration);
@@ -70,6 +71,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
     else if (specifier === './components/StorageNotice') target = notice;
+    else if (specifier === './components/DashboardPage') target = dashboard;
     else if (specifier === './hooks/useImageStudio') target = image;
     else if (specifier.startsWith('./components/')) target = empty;
     else target = await tsModuleUrl(new URL(specifier + '.ts', base));
@@ -147,6 +149,89 @@ test('skill requirements reach the stream as independent message snapshots and r
   await act(async () => harness.pages['对话'].onSend('另一会话未设置要求', [], ['card-quote']));
   assert.deepEqual(harness.streams[3].args[16], {});
   assert.deepEqual(harness.sidebar.sessions.find(s => s.id === 'other').messages[0].skillRequirements, {});
+});
+
+test('dashboard transfers selected skills and creation requirements before sending its new conversation', async t => {
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  const skills = ['card-quote']; const requirements = { 'card-quote': ' 本次创作保留引用 ', unselected: '不发送' };
+  let accepted;
+  await act(async () => { accepted = harness.pages['工作台'].onQuickPrompt('从工作台创作', skills, requirements); });
+  assert.equal(accepted, true);
+  const run = harness.streams[0]; const id = run.args[2];
+  assert.notEqual(id, sourceSession.id);
+  assert.deepEqual(run.args[15], ['card-quote']);
+  assert.deepEqual(run.args[16], { 'card-quote': '本次创作保留引用' });
+  assert.deepEqual(JSON.parse(values.get(`easel:selected-skills:${id}`)), ['card-quote']);
+  assert.deepEqual(JSON.parse(values.get(`easel:skill-requirements:${id}`)), run.args[16]);
+  skills.push('not-sent'); requirements['card-quote'] = '之后的改动';
+  assert.deepEqual(harness.sidebar.sessions.find(s => s.id === id).messages[0].selectedSkills, ['card-quote']);
+  assert.deepEqual(harness.sidebar.sessions.find(s => s.id === id).messages[0].skillRequirements, run.args[16]);
+  assert.equal(harness.pages['对话'].session.id, id);
+});
+
+for (const refused of ['easel:selected-skills:', 'easel:skill-requirements:']) test(`dashboard does not create or send a task when ${refused} cannot persist`, async t => {
+  const { harness, storage } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  const save = storage.setItem.bind(storage);
+  t.mock.method(storage, 'setItem', (key, value) => { if (key.startsWith(refused)) throw new Error('storage denied'); save(key, value); });
+  let accepted;
+  await act(async () => { accepted = harness.pages['工作台'].onQuickPrompt('不能丢失技能的草稿', ['card-quote'], { 'card-quote': '保留要求' }); });
+  assert.equal(accepted, false);
+  assert.equal(harness.streams.length, 0);
+  assert.deepEqual(harness.sidebar.sessions.map(s => s.id), ['original']);
+});
+
+test('office starts an explicit-model turn, preserves its snapshot on stop and retry, and blocks busy continuation', async t => {
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onPageChange('agent-office'));
+  let accepted, second;
+  await act(async () => {
+    accepted = harness.pages['Agent 办公室'].onStartTask({ sessionId: 'original', message: '办公室本轮任务', modelRef: 'channel-b/model-b' });
+    second = harness.pages['Agent 办公室'].onStartTask({ sessionId: 'original', message: '不应重复提交', modelRef: 'channel-a/model-a' });
+  });
+  assert.equal(accepted, 'original'); assert.equal(second, null);
+  const run = harness.streams[0];
+  assert.equal(run.args[17], 'channel-b/model-b');
+  assert.equal(harness.pages['Agent 办公室'].streams.original.requestedModelRef, 'channel-b/model-b');
+  assert.equal(JSON.parse(values.get('easel_sessions')).find(s => s.id === 'original').messages.at(-1).requestedModelRef, 'channel-b/model-b');
+  harness.stopResponse = async () => ({ stopped: true });
+  await act(async () => harness.pages['Agent 办公室'].onStopTask('original'));
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1).requestedModelRef, 'channel-b/model-b');
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onResend(2, '办公室本轮任务'));
+  assert.equal(harness.streams.length, 2);
+  assert.equal(harness.streams[1].args[17], 'channel-b/model-b');
+  assert.notEqual(harness.streams[1].args[9], run.args[9]);
+});
+
+test('office creates independent tasks and rejects missing or imported continuation targets', async t => {
+  const imported = { id: 'readonly-office', title: '备份', created: 1, importedFromBackup: true, messages: [] };
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, imported]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onPageChange('agent-office'));
+  let id;
+  await act(async () => {
+    assert.equal(harness.pages['Agent 办公室'].onStartTask({ sessionId: imported.id, message: '禁止续接' }), null);
+    assert.equal(harness.pages['Agent 办公室'].onStartTask({ sessionId: 'deleted', message: '禁止续接' }), null);
+    assert.equal(harness.pages['Agent 办公室'].onStartTask({ sessionId: null, message: '禁止空模型', modelRef: '' }), null);
+    id = harness.pages['Agent 办公室'].onStartTask({ sessionId: null, message: '新的办公室任务', modelRef: 'channel/model' });
+  });
+  assert.ok(id && id !== sourceSession.id);
+  assert.equal(harness.streams.length, 1);
+  assert.equal(harness.streams[0].args[2], id);
+  assert.equal(harness.streams[0].args[17], 'channel/model');
+  assert.equal(harness.sidebar.sessions.find(s => s.id === id).messages[0].content, '新的办公室任务');
+  assert.equal(harness.sidebar.currentPage, 'agent-office');
+});
+
+test('recovery keeps the saved model choice without turning a replay into another model request', async t => {
+  const pending = { ...sourceSession, pendingTurnId: 'pending-model-turn', messages: [...sourceSession.messages,
+    { role: 'user', content: '恢复已有任务', requestedModelRef: 'channel/saved-model' }] };
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([pending]), easel_active_session: 'original' });
+  const run = harness.streams[0];
+  assert.equal(run.args[10], true);
+  assert.equal(run.args[17], undefined, 'recovery never submits another request');
+  await act(async () => run.args[18]('channel/foreign-model'));
+  await act(async () => run.args[4]('confirmed-session'));
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1).requestedModelRef, 'channel/saved-model');
 });
 
 test('failed stop preserves the live connection and durable recovery identifiers, accepts more output and can retry', async t => {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchSchedule, createSchedule, updateSchedule, deleteSchedule, fetchScheduleContext } from '../lib/api';
 import type { ScheduleItem, ScheduleInput, ScheduleContext } from '../lib/api';
 import { IconCalendar, IconTrash, IconChevron } from './icons';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   idea: { label: '选题', color: 'var(--text-tertiary)' },
@@ -81,30 +82,33 @@ export default function CalendarPage() {
     setForm({ ...EMPTY, date, kind: filter === 'event' ? 'event' : 'content' });
   };
   const openEdit = (it: ScheduleItem) => { setError(''); setDayView(null); setEditing(it); setForm({ ...EMPTY, ...it }); };
-  const close = () => { setForm(null); setEditing(null); };
+  const close = useCallback(() => { setForm(null); setEditing(null); }, []);
+  const closeDayView = useCallback(() => setDayView(null), []);
+  const dayViewRef = useModalFocus(dayView !== null, closeDayView);
+  const formRef = useModalFocus(form !== null, close);
 
   // 单条 chip（活动=色条，内容=按状态上色的圆点），日历格与当天详情共用
   const renderChip = (it: ScheduleItem) => {
     if (kindOf(it) === 'event') {
       return (
-        <div key={it.id} className="cal-event is-event"
+        <button key={it.id} type="button" className="cal-event is-event"
           title={it.event_type ? `${it.event_type}·${it.title}` : it.title}
           style={{ ['--ev' as string]: EVENT_COLOR }}
           onClick={(e) => { e.stopPropagation(); openEdit(it); }}>
           <span className="cal-event-dot" />
           <span className="cal-event-title">{it.title}</span>
-        </div>
+        </button>
       );
     }
     return (
-      <div key={it.id} className="cal-event" title={it.title}
+      <button key={it.id} type="button" className="cal-event" title={it.title}
         style={{ ['--ev' as string]: STATUS_META[it.status]?.color || 'var(--text-tertiary)' }}
         onClick={(e) => { e.stopPropagation(); openEdit(it); }}>
         <span className="cal-event-dot" />
         <span className="cal-event-title">{it.platform ? `[${it.platform}] ` : ''}{it.title}</span>
         {it.status === 'published' && it.source && SOURCE_LABEL[it.source]
           && <span className="cal-src">{SOURCE_LABEL[it.source]}</span>}
-      </div>
+      </button>
     );
   };
 
@@ -141,10 +145,12 @@ export default function CalendarPage() {
         </div>
         <div className="cal-nav">
           <button className="btn btn-sm" onClick={load} disabled={loading}>{loading ? '加载中…' : '刷新'}</button>
-          <button className="btn btn-sm" aria-label="上个月" onClick={() => shift(-1)}><span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={14} /></span></button>
           <button className="btn btn-sm" onClick={() => setCursor(new Date(today.getFullYear(), today.getMonth(), 1))}>本月</button>
-          <span className="cal-month">{monthLabel}</span>
-          <button className="btn btn-sm" aria-label="下个月" onClick={() => shift(1)}><IconChevron size={14} /></button>
+          <div className="cal-month-nav">
+            <button className="btn btn-sm" aria-label="上个月" onClick={() => shift(-1)}><span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={14} /></span></button>
+            <span className="cal-month" aria-live="polite">{monthLabel}</span>
+            <button className="btn btn-sm" aria-label="下个月" onClick={() => shift(1)}><IconChevron size={14} /></button>
+          </div>
         </div>
       </div>
 
@@ -179,6 +185,7 @@ export default function CalendarPage() {
         </span>
       </div>
 
+      <div className="cal-board">
       <div className="cal-grid-head">
         {WEEKDAYS.map((w) => <div key={w} className="cal-wd">周{w}</div>)}
       </div>
@@ -193,7 +200,10 @@ export default function CalendarPage() {
           return (
             <div key={i} className={`cal-cell ${inMonth ? '' : 'dim'} ${ds === todayStr ? 'today' : ''}`}
               onClick={() => (dayItems.length ? setDayView(ds) : openNew(ds))}>
-              <div className="cal-daynum">{d.getDate()}</div>
+              <button type="button" className="cal-daynum" aria-label={`${ds}，${dayItems.length ? `${dayItems.length} 项安排，查看当天安排` : '新增排期'}`}>
+                {d.getDate()}
+                {dayItems.length > 0 && <span className="cal-day-summary" aria-hidden="true">{dayItems.length > 99 ? '99+' : `${dayItems.length}项`}</span>}
+              </button>
               <div className="cal-events">
                 {shown.map(renderChip)}
                 {hidden > 0 && (
@@ -206,16 +216,17 @@ export default function CalendarPage() {
           );
         })}
       </div>
+      </div>
 
       {dayView && (() => {
         const b = byDate[dayView] || { events: [], content: [] };
         const list = [...b.events, ...b.content];
         return (
-          <div className="overlay" onClick={() => setDayView(null)}>
-            <div className="modal" style={{ width: 420, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
+          <div className="overlay" onClick={closeDayView}>
+            <div ref={dayViewRef} className="modal" role="dialog" aria-modal="true" aria-label={`${dayView} 的安排`} tabIndex={-1} style={{ width: 420, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h3 style={{ margin: 0 }}>{dayView}（{list.length} 项）</h3>
-                <button className="icon-btn" onClick={() => setDayView(null)}>×</button>
+                <button className="icon-btn" aria-label="关闭当天安排" onClick={closeDayView}>×</button>
               </div>
               <div className="cal-dayview-list">
                 {list.map(renderChip)}
@@ -230,36 +241,36 @@ export default function CalendarPage() {
 
       {form && (
         <div className="overlay" onClick={close}>
-          <div className="modal" style={{ width: 440, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
+          <div ref={formRef} className="modal" role="dialog" aria-modal="true" aria-label={editing ? '编辑日历安排' : '新增日历安排'} tabIndex={-1} style={{ width: 440, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
             {error && <div className="notice-error" role="alert">{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <h3 style={{ margin: 0 }}>{editing ? '编辑' : '新增'}{isEvent ? '平台活动' : '排期'}</h3>
-              <button className="icon-btn" onClick={close}>×</button>
+              <button className="icon-btn" aria-label="关闭日历表单" onClick={close}>×</button>
             </div>
             <label className="field-label">类型</label>
-            <div style={{ display: 'flex', gap: 7 }}>
+            <div className="modal-choice-row">
               <button className={`chip ${!isEvent ? 'active' : ''}`}
                 onClick={() => setForm({ ...form, kind: 'content' })}>内容 / 发布</button>
               <button className={`chip ${isEvent ? 'active' : ''}`}
                 onClick={() => setForm({ ...form, kind: 'event', status: 'idea' })}>平台活动</button>
             </div>
             <label className="field-label">标题 *</label>
-            <input className="field" value={form.title} autoFocus placeholder={isEvent ? '活动/节点名称' : '要发什么内容'}
+            <input className="field" value={form.title} data-modal-autofocus="true" placeholder={isEvent ? '活动/节点名称' : '要发什么内容'}
               onChange={(e) => setForm({ ...form, title: e.target.value })} />
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}>
+            <div className="cal-datetime-fields">
+              <div>
                 <label className="field-label">{isEvent ? '开始日期 *' : '日期 *'}</label>
                 <input className="field" type="date" value={form.date}
                   onChange={(e) => setForm({ ...form, date: e.target.value })} />
               </div>
               {isEvent ? (
-                <div style={{ flex: 1 }}>
+                <div>
                   <label className="field-label">结束日期</label>
                   <input className="field" type="date" value={form.end_date || ''}
                     onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
                 </div>
               ) : (
-                <div style={{ width: 120 }}>
+                <div className="cal-time-field">
                   <label className="field-label">时间</label>
                   <input className="field" type="time" value={form.time}
                     onChange={(e) => setForm({ ...form, time: e.target.value })} />
@@ -293,7 +304,7 @@ export default function CalendarPage() {
                   ))}
                 </div>
                 <label className="field-label">状态</label>
-                <div style={{ display: 'flex', gap: 7 }}>
+                <div className="modal-choice-row">
                   {Object.entries(STATUS_META).map(([k, m]) => (
                     <button key={k} className={`chip ${form.status === k ? 'active' : ''}`}
                       onClick={() => setForm({ ...form, status: k })}>{m.label}</button>
@@ -304,11 +315,11 @@ export default function CalendarPage() {
             <label className="field-label">备注</label>
             <textarea className="field" style={{ minHeight: 60 }} value={form.note}
               onChange={(e) => setForm({ ...form, note: e.target.value })} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 18 }}>
+            <div className="cal-form-actions">
               {editing
                 ? <button className="btn btn-sm btn-danger" onClick={remove} disabled={saving}><IconTrash size={13} /> 删除</button>
                 : <span />}
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="page-actions">
                 <button className="btn btn-sm" onClick={close}>取消</button>
                 <button className="btn btn-sm btn-primary" onClick={save} disabled={saving || !form.title.trim() || !form.date}>
                   {saving ? '保存中…' : '保存'}

@@ -12,6 +12,7 @@ import DashboardPage from './components/DashboardPage';
 import SubNav from './components/SubNav';
 import OnboardingWizard from './components/OnboardingWizard';
 import type { SettingsSection } from './components/SettingsPanel';
+import type { OfficeTaskRequest } from './components/agent-office/OfficeTaskComposer';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
 import { questionStatus } from './lib/api';
@@ -28,7 +29,7 @@ import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { clearChatDraft } from './lib/chatDrafts';
-import { requirementsForSelection } from './lib/selectedSkills';
+import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
@@ -202,7 +203,7 @@ export default function App() {
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
   const streamCtl = useRef<Record<string, AbortController>>({});
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
-  const streamAcc = useRef<Record<string, { turnId?:string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
+  const streamAcc = useRef<Record<string, { turnId?:string; requestedModelRef?: string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
   const answeredRef = useRef<Set<string>>(new Set());   // 已提交答案的 question id：重放/恢复不再重现
   // ---- 打字机：分批到达的 token 按节奏吐给界面 ----
   const typingBuf = useRef<Record<string, string>>({});
@@ -279,6 +280,7 @@ export default function App() {
     attachments: UploadedFile[] = [],
     selectedSkills: string[] = [],
     skillRequirements: SkillRequirements = {},
+    modelRef?: string,
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -286,9 +288,9 @@ export default function App() {
       const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: turnId } : s));
       saveSessions(next); return next;
     });
-    const runAcc = { turnId, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc = { turnId, requestedModelRef: modelRef, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((prev) => ({ ...prev, [sessionId]: { content: '', thinking: '', activity: '', questions: [] } }));
+    setStreams((prev) => ({ ...prev, [sessionId]: { requestedModelRef: modelRef, content: '', thinking: '', activity: '', questions: [] } }));
     // 打字机队列：流式事件按批到达（OpenClaw 攒批），前端按字符节奏显示，体验逐字浮现。
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
@@ -306,7 +308,7 @@ export default function App() {
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '', turnId,
+            role: 'assistant', content: a?.content || '', turnId, requestedModelRef: a?.requestedModelRef,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -319,7 +321,7 @@ export default function App() {
           appendAssistant(sessionId, {
             role: 'assistant',
             content: a?.content || '', error:chatErrorDetail(err),
-            turnId,
+            turnId, requestedModelRef: a?.requestedModelRef,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           });
           clearStream(sessionId);
@@ -369,6 +371,12 @@ export default function App() {
       (note) => setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
       selectedSkills,
       skillRequirements,
+      modelRef,
+      (selection) => {
+        if (streamAcc.current[sessionId] !== runAcc || selection !== (modelRef ?? null)) return;
+        setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+          ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 
@@ -381,15 +389,15 @@ export default function App() {
     if (!last || last.role !== 'user') return;   // 没有悬空的用户消息 = 无需恢复
     let turnId = s.pendingTurnId;
     try { turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
-    const runAcc = { turnId, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc = { turnId, requestedModelRef: last.requestedModelRef, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((p) => ({ ...p, [sessionId]: { content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
+    setStreams((p) => ({ ...p, [sessionId]: { requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
     if (!turnId) {
       void fetchLastTurn(sessionId).then((r) => {
         if (streamAcc.current[sessionId] !== runAcc) return;
-        if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id });
+        if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
         clearStream(sessionId);
       }).catch(() => {if(streamAcc.current[sessionId]===runAcc)clearStream(sessionId);});
       return;
@@ -405,7 +413,7 @@ export default function App() {
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '（无输出）', turnId,
+            role: 'assistant', content: a?.content || '（无输出）', turnId, requestedModelRef: a?.requestedModelRef,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -415,7 +423,7 @@ export default function App() {
       (err) => {
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
-          appendAssistant(sessionId, { role: 'assistant', content: a?.content || '', error:chatErrorDetail(err), turnId, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
+          appendAssistant(sessionId, { role: 'assistant', content: a?.content || '', error:chatErrorDetail(err), turnId, requestedModelRef: a?.requestedModelRef, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
           clearStream(sessionId);
         });
       },
@@ -439,7 +447,7 @@ export default function App() {
         void fetchLastTurn(sessionId, turnId).then((r) => {
           if(streamAcc.current[sessionId]!==runAcc)return;
           if (r.status === 'done') {
-            appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId });
+            appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
           } else {
             appendAssistant(sessionId, {
               role: 'assistant',
@@ -477,6 +485,13 @@ export default function App() {
       },
       // onHeartbeat：同上，独立的「未卡住」提示，不覆盖 activity/thinking。
       (note) => setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
+      [], {}, undefined,
+      (selection) => {
+        if (streamAcc.current[sessionId] !== runAcc || (last.requestedModelRef && selection !== last.requestedModelRef)) return;
+        runAcc.requestedModelRef = selection || undefined;
+        setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+          ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 
@@ -494,6 +509,7 @@ export default function App() {
     truncateAt?: number,
     selectedSkills: string[] = [],
     skillRequirements: SkillRequirements = {},
+    modelRef?: string,
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -513,6 +529,7 @@ export default function App() {
             content: visible,
             selectedSkills,
             skillRequirements: requirementSnapshot,
+            ...(modelRef !== undefined ? { requestedModelRef: modelRef } : {}),
             ...(attachments.length ? { attachments } : {}),
             ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
           } as ChatMessage],
@@ -523,7 +540,7 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot);
+    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot, modelRef);
     return true;
   }, [selectedPersona, startStream]);
 
@@ -542,7 +559,8 @@ export default function App() {
   ) => {
     const selectedSkills = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.selectedSkills || [];
     const skillRequirements = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.skillRequirements || {};
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements);
+    const modelRef = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedModelRef;
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef);
   }, [sendUserAndStream]);
 
   // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
@@ -556,14 +574,37 @@ export default function App() {
   }, [selectedPersona, sendUserAndStream]);
 
   // 工作台「一句话开干」：用户输入什么就发什么，不再替用户编排指令（v2 直达创作入口）。
-  const handleQuickPrompt = useCallback((text: string) => {
+  const handleQuickPrompt = useCallback((text: string, selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}) => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || gatewayStatus !== 'connected') return false;
     const ns = createSession(selectedPersona || undefined);
+    const skills = [...selectedSkills];
+    const requirements = requirementsForSelection(skillRequirements, skills);
+    // The new composer must be able to display the same selection that is sent.
+    // A rejected local save leaves the dashboard draft in place and sends nothing.
+    if (skills.length && (!writeSelectedSkills(ns.id, skills) || !writeSkillRequirements(ns.id, requirements))) return false;
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
-    sendUserAndStream(ns.id, t);
+    return sendUserAndStream(ns.id, t, [], undefined, undefined, skills, requirements);
+  }, [selectedPersona, sendUserAndStream, gatewayStatus]);
+
+  const handleOfficeTask = useCallback(({ sessionId, message, modelRef }: OfficeTaskRequest): string | null => {
+    if (!message.trim() || (modelRef !== undefined && (!/^[^\s/]+\/[^\s]+$/.test(modelRef) || modelRef.length > 500))) return null;
+    let targetId = sessionId;
+    if (targetId) {
+      const current = sessionsRef.current.find(session => session.id === targetId);
+      if (!current || current.importedFromBackup || streamCtl.current[targetId] || streamAcc.current[targetId] || stopRequests.current[targetId]
+        || (current.pendingTurnId && current.messages.at(-1)?.role === 'user')) return null;
+    } else {
+      const created = createSession(selectedPersona || undefined);
+      targetId = created.id;
+      setSessions(previous => { const next = [created, ...previous]; saveSessions(next); return next; });
+    }
+    const accepted = sendUserAndStream(targetId, message, [], undefined, undefined, [], {}, modelRef);
+    if (!accepted) return null;
+    setActiveSessionId(targetId);
+    return targetId;
   }, [selectedPersona, sendUserAndStream]);
 
   const handleStopStream = useCallback(async (sessionId: string) => {
@@ -593,6 +634,7 @@ export default function App() {
         role: 'assistant',
         content: (run.content || '') + '\n\n_（已停止）_',
         turnId: run.turnId,
+        requestedModelRef: run.requestedModelRef,
         thinking: run.thinking || undefined,
         activity: run.steps.join('\n') || undefined,
       });
@@ -830,7 +872,7 @@ export default function App() {
       case 'activity':
         return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} />;
       case 'agent-office':
-        return <AgentOfficePage demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
+        return <AgentOfficePage demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':

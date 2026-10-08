@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   fetchTrends, fetchSchedule, fetchOutputs, fetchAccounts, fetchIdeas,
   fetchAnalyticsPlatforms, fetchAccountAnalytics,
@@ -14,6 +14,11 @@ import { IconText } from './icons';
 import DashboardCard from './ui/DashboardCard';
 import DashboardEmpty from './ui/DashboardEmpty';
 import { IconImage } from './settingsIcons';
+import { useComposerSkills } from '../hooks/useComposerSkills';
+import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
+import { getChatDraft, subscribeChatDraft, setChatDraftText, setChatDraftError, clearChatDraft } from '../lib/chatDrafts';
+import { DASHBOARD_DRAFT_SCOPE, isDashboardDraftTextCleared } from '../lib/dashboardDraft';
+import type { SkillRequirements } from '../lib/selectedSkills';
 import {
   IconFire, IconCalendar, IconOutputs, IconChat, IconSkills, IconAccounts,
   IconIdea, IconPublish,
@@ -41,7 +46,7 @@ interface DashboardProps {
   onNavigate: (page: Page) => void;
   onUseTopic: (title: string) => void;
   /** 工作台输入框直达创作：新开会话把这句话发给 Agent */
-  onQuickPrompt: (text: string) => void;
+  onQuickPrompt: (text: string, selectedSkills?: string[], skillRequirements?: SkillRequirements) => boolean;
 }
 
 const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', scheduled: '待发', published: '已发' };
@@ -73,7 +78,17 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>({});
 
   // ── 直达创作 ──
-  const [quickText, setQuickText] = useState('');
+  const quickDraft = useSyncExternalStore(
+    useCallback(listener => subscribeChatDraft(DASHBOARD_DRAFT_SCOPE, listener), []),
+    useCallback(() => getChatDraft(DASHBOARD_DRAFT_SCOPE), []),
+  );
+  const quickText = quickDraft.text;
+  const quickSkills = useComposerSkills(DASHBOARD_DRAFT_SCOPE, 'creation');
+  const composingQuick = useRef(false);
+  const setQuickText = (value: string | ((current: string) => string)) => {
+    setChatDraftText(DASHBOARD_DRAFT_SCOPE, value);
+    if (getChatDraft(DASHBOARD_DRAFT_SCOPE).error) setChatDraftError(DASHBOARD_DRAFT_SCOPE, '');
+  };
 
   useEffect(() => {
     let alive = true;
@@ -136,8 +151,32 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   };
 
   const submitQuick = () => {
-    const t = quickText.trim();
-    if (t) { onQuickPrompt(t); setQuickText(''); }
+    const submitted = getChatDraft(DASHBOARD_DRAFT_SCOPE);
+    const text = submitted.text.trim();
+    if (!text || composingQuick.current) return;
+    if (gatewayStatus !== 'connected') {
+      setChatDraftError(DASHBOARD_DRAFT_SCOPE, gatewayStatus === 'connecting'
+        ? '创作助手正在连接，草稿已保留，请连接成功后重试。'
+        : '创作助手尚未连接，草稿已保留，请检查设置后重试。');
+      return;
+    }
+    const snapshot = quickSkills.getSnapshot();
+    try {
+      if (onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements) !== true) {
+        setChatDraftError(DASHBOARD_DRAFT_SCOPE, '本次创作未被接收，草稿和技能已保留，请稍后重试。');
+        return;
+      }
+      // A callback may replace the draft; its newer content is never ours to clear.
+      if (getChatDraft(DASHBOARD_DRAFT_SCOPE) !== submitted) return;
+      const skillsCleared = quickSkills.clear(snapshot.revision);
+      if (skillsCleared === null) return;
+      clearChatDraft(DASHBOARD_DRAFT_SCOPE, submitted);
+      if (!skillsCleared || !isDashboardDraftTextCleared()) {
+        setChatDraftError(DASHBOARD_DRAFT_SCOPE, '创作已开始，但浏览器未能保存工作台草稿的清理；刷新后可能恢复旧内容，请勿重复发送。');
+      }
+    } catch {
+      setChatDraftError(DASHBOARD_DRAFT_SCOPE, '本次创作暂时无法开始，草稿和技能已保留，请稍后重试。');
+    }
   };
 
   const hour = new Date().getHours();
@@ -184,18 +223,34 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
         <label className="dash-launch-label" htmlFor="quick-create">今天，你想创作什么？</label>
         {/* 直达创作：一句话开干，不用先想「该去哪个页面」 */}
         <div className="dash-launch">
-          <input
+          <ComposerSkillChips skills={quickSkills} />
+          <textarea
             className="dash-launch-input"
             id="quick-create"
+            rows={2}
             value={quickText}
             placeholder="例如：帮我策划一组秋日咖啡探店笔记…"
             onChange={(e) => setQuickText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submitQuick(); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey && !composingQuick.current && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                e.preventDefault();
+                submitQuick();
+              }
+            }}
+            onCompositionStart={() => { composingQuick.current = true; }}
+            onCompositionEnd={() => { composingQuick.current = false; }}
+            aria-describedby="quick-create-hint"
           />
-          <button className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
-            开始创作 →
-          </button>
+          <div className="dash-composer-bar">
+            <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
+            <span className="dash-composer-hint" id="quick-create-hint">Enter 创作 · Shift+Enter 换行</span>
+            <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
+              开始创作 →
+            </button>
+          </div>
         </div>
+        {quickDraft.error && <p className="dash-composer-error" role="alert">{quickDraft.error}</p>}
+        {quickSkills.notice && <p className="composer-skills-note" role="status">{quickSkills.notice}</p>}
         <p className="dash-composer-note">{persona ? `当前画像 · ${persona}` : '通用创作模式'}<span> · {gatewayStatus === 'connected' ? '创作助手已连接' : gatewayStatus === 'connecting' ? '正在连接创作助手' : '网关离线，请先检查设置'}</span></p>
         </div>
         <div className="dash-quick">
@@ -213,14 +268,16 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       </div>}
 
       {/* 概览数字 */}
-      <div className="dash-stats">
-        {stats.map((s) => (
-          <button key={s.label} className="card card-hover dash-stat" onClick={() => onNavigate(s.page)}>
-            <span className="dash-stat-ic"><s.Icon size={18} /></span>
-            <span className="dash-stat-val">{s.value}</span>
-            <span className="dash-stat-label">{s.label}</span>
-          </button>
-        ))}
+      <div className="dash-stats-region">
+        <div className="dash-stats">
+          {stats.map((s) => (
+            <button key={s.label} className="card card-hover dash-stat" onClick={() => onNavigate(s.page)}>
+              <span className="dash-stat-ic"><s.Icon size={18} /></span>
+              <span className="dash-stat-val">{s.value}</span>
+              <span className="dash-stat-label">{s.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="dash-grid">

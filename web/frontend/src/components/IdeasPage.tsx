@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchIdeas, createIdea, updateIdea, deleteIdea, createSchedule } from '../lib/api';
 import type { Idea, IdeaInput } from '../lib/api';
 import { IconIdea, IconEdit, IconTrash, IconChat, IconCalendar, IconChevron } from './icons';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 interface IdeasPageProps {
   onUseTopic: (title: string) => void;
@@ -23,6 +24,8 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const closeForm = useCallback(() => setForm(null), []);
+  const modalRef = useModalFocus(form !== null, closeForm);
 
   const load = useCallback(() => {
     setLoading(true); setError('');
@@ -72,7 +75,7 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
           <h1 className="page-title"><IconIdea size={21} /> 选题库</h1>
           <p className="page-subtitle">攒住每一个灵感——从热点收藏或手动新增，推进到「做内容」再进日历。</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="page-actions">
           <button className="btn btn-sm" onClick={load} disabled={loading}>{loading ? '加载中…' : '刷新'}</button>
           <button className="btn btn-sm btn-primary" onClick={openNew}>+ 新建选题</button>
         </div>
@@ -91,11 +94,13 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
               {byStatus[col.key].length === 0 && <div className="kanban-empty">{loading ? '正在加载选题…' : error ? '选题尚未加载' : '暂无选题，可新建或从热点收藏'}</div>}
               {byStatus[col.key].map((it) => (
                 <div key={it.id} className="card idea-card">
-                  <div className="idea-card-actions">
-                    <button className="session-act" title="编辑" onClick={() => openEdit(it)}><IconEdit size={13} /></button>
-                    <button className="session-act danger" title="删除" onClick={() => remove(it)}><IconTrash size={13} /></button>
+                  <div className="idea-card-head">
+                    <div className="idea-title">{it.title}</div>
+                    <div className="idea-card-actions">
+                      <button className="session-act" title="编辑" aria-label={`编辑选题：${it.title}`} onClick={() => openEdit(it)}><IconEdit size={13} /></button>
+                      <button className="session-act danger" title="删除" aria-label={`删除选题：${it.title}`} onClick={() => remove(it)}><IconTrash size={13} /></button>
+                    </div>
                   </div>
-                  <div className="idea-title">{it.title}</div>
                   {it.source && <span className="badge" style={{ marginTop: 6 }}>{it.source}</span>}
                   {it.note && <div className="idea-note">{it.note}</div>}
                   <div className="idea-foot">
@@ -113,15 +118,15 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
       </div>
 
       {form && (
-        <div className="overlay" onClick={() => setForm(null)}>
-          <div className="modal" style={{ width: 440, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
+        <div className="overlay" onClick={closeForm}>
+          <div ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-label={editId ? '编辑选题' : '新建选题'} tabIndex={-1} style={{ width: 440, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <h3 style={{ margin: 0 }}>{editId ? '编辑选题' : '新建选题'}</h3>
-              <button className="icon-btn" onClick={() => setForm(null)}>×</button>
+              <button className="icon-btn" aria-label="关闭选题表单" onClick={closeForm}>×</button>
             </div>
             {error && <div className="notice-error" role="alert">{error}</div>}
             <label className="field-label">选题 *</label>
-            <input className="field" value={form.title} autoFocus placeholder="想做的内容 / 角度"
+            <input className="field" value={form.title} data-modal-autofocus="true" placeholder="想做的内容 / 角度"
               onChange={(e) => setForm({ ...form, title: e.target.value })} />
             <label className="field-label">备注 / 角度</label>
             <textarea className="field" style={{ minHeight: 70 }} value={form.note}
@@ -130,14 +135,14 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
             <input className="field" value={form.source} placeholder="如：微博热搜 / 灵感"
               onChange={(e) => setForm({ ...form, source: e.target.value })} />
             <label className="field-label">状态</label>
-            <div style={{ display: 'flex', gap: 7 }}>
+            <div className="modal-choice-row">
               {COLUMNS.map((c) => (
                 <button key={c.key} className={`chip ${form.status === c.key ? 'active' : ''}`}
                   onClick={() => setForm({ ...form, status: c.key })}>{c.label}</button>
               ))}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <button className="btn btn-sm" onClick={() => setForm(null)}>取消</button>
+            <div className="modal-actions">
+              <button className="btn btn-sm" onClick={closeForm}>取消</button>
               <button className="btn btn-sm btn-primary" onClick={save} disabled={saving || !form.title.trim()}>{saving ? '保存中…' : '保存'}</button>
             </div>
           </div>

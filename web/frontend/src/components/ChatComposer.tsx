@@ -1,13 +1,11 @@
-import { readSelectedSkills, writeSelectedSkills, readSkillRequirements, writeSkillRequirements,
-  requirementsForSelection, MAX_SKILL_REQUIREMENT_LENGTH, MAX_SKILL_REQUIREMENTS_TOTAL, MAX_SKILL_REQUIREMENTS_COUNT } from '../lib/selectedSkills';
 import type { SkillRequirements } from '../lib/selectedSkills';
 import { useState, useRef, useEffect, useId, useLayoutEffect, useCallback, useSyncExternalStore } from 'react';
 import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAttachment,
   dismissMissingDraftAttachments, setChatDraftError, beginChatDraftUpload,
   appendChatDraftUploads, finishChatDraftUpload, clearChatDraft } from '../lib/chatDrafts';
-import BrushEntry from './BrushEntry';
-import SelectedSkillChip from './SelectedSkillChip';
-import { uploadFiles, adoptOversize, fetchSkills } from '../lib/api';
+import { useComposerSkills } from '../hooks/useComposerSkills';
+import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
+import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile } from '../lib/api';
 import { IconArrowUp, IconStop, IconPlus, IconFile } from './icons';
 import '../styles/chat-composer.css';
@@ -36,45 +34,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
   const setInput = (value: string | ((current: string) => string)) => setChatDraftText(sessionId, value);
   const [dragOver, setDragOver] = useState(false);
   const [maxMb, setMaxMb] = useState(50);
-  const [selectedSkills, updateSelectedSkills] = useState<string[]>(() => readSelectedSkills(sessionId));
-  const selectedSkillsRef = useRef(selectedSkills);
-  const [skillRequirements, updateSkillRequirements] = useState(() => readSkillRequirements(sessionId, selectedSkills));
-  const skillRequirementsRef = useRef(skillRequirements);
-  const [skillStorageNotice, setSkillStorageNotice] = useState('');
-  const [skillCatalog, setSkillCatalog] = useState<Set<string> | null>(null);
-  const [skillCatalogFailed, setSkillCatalogFailed] = useState(false);
-  const skillNotice = skillStorageNotice || (skillCatalogFailed ? '技能列表暂时无法读取，已保留当前选择。'
-    : skillCatalog && selectedSkills.some(name => !skillCatalog.has(name)) ? '部分已选技能未出现在当前列表中，已保留选择；发送前请确认技能是否可用。' : '');
-  const setSelectedSkills = (update: (current: string[]) => string[]) => {
-    const next = update(selectedSkillsRef.current);
-    selectedSkillsRef.current = next;
-    updateSelectedSkills(next);
-    const kept = requirementsForSelection(skillRequirementsRef.current, next);
-    skillRequirementsRef.current = kept;
-    updateSkillRequirements(kept);
-    const selectedSaved = writeSelectedSkills(sessionId, next);
-    const requirementsSaved = writeSkillRequirements(sessionId, kept);
-    setSkillStorageNotice(selectedSaved && requirementsSaved ? '' : '浏览器未能保存技能选择或补充要求，刷新后需要重新设置。');
-  };
-  const saveSkillRequirement = (skill: string, text: string) => {
-    if (!selectedSkillsRef.current.includes(skill)) return false;
-    const next = { ...skillRequirementsRef.current, [skill]: text.trim() };
-    if (!text.trim()) delete next[skill];
-    if (text.trim().length > MAX_SKILL_REQUIREMENT_LENGTH || Object.keys(next).length > MAX_SKILL_REQUIREMENTS_COUNT
-      || Object.values(next).reduce((total, value) => total + value.length, 0) > MAX_SKILL_REQUIREMENTS_TOTAL) {
-      setSkillStorageNotice('每个技能补充要求最多 2000 字；本会话最多 20 项，总共 10000 字。');
-      return false;
-    }
-    const saved = writeSkillRequirements(sessionId, next);
-    if (!saved) {
-      setSkillStorageNotice('浏览器未能保存本会话补充要求，原要求仍然生效。请重试。');
-      return false;
-    }
-    skillRequirementsRef.current = next;
-    updateSkillRequirements(next);
-    setSkillStorageNotice('');
-    return true;
-  };
+  const skills = useComposerSkills(sessionId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
@@ -86,18 +46,6 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
     fetch('/api/upload/limits').then((r) => r.ok ? r.json() : null)
       .then((d) => { if (Number.isFinite(d?.max_mb) && d.max_mb > 0) setMaxMb(d.max_mb); }).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    let stale = false;
-    fetchSkills().then((skills) => {
-      if (stale) return;
-      if (!Array.isArray(skills)) throw new Error('Invalid skill catalogue');
-      // A late or incomplete directory response must never erase a user's picks.
-      setSkillCatalog(new Set(skills.map((skill) => skill.name)));
-      setSkillCatalogFailed(false);
-    }).catch(() => { if (!stale) setSkillCatalogFailed(true); });
-    return () => { stale = true; };
-  }, [sessionId]);
 
   const doUpload = async (fs: FileList | File[]) => {
     const arr = Array.from(fs);
@@ -167,8 +115,8 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
       || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     try {
-      if (onSend(trimmed, submitted.attachments, selectedSkillsRef.current,
-        requirementsForSelection(skillRequirementsRef.current, selectedSkillsRef.current)) === true) clearChatDraft(sessionId, submitted);
+      const snapshot = skills.getSnapshot();
+      if (onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements) === true) clearChatDraft(sessionId, submitted);
       else setChatDraftError(sessionId, '当前消息未被接收，草稿已保留，请稍后重试。');
     } catch {
       setChatDraftError(sessionId, '消息暂时无法发送，草稿已保留，请稍后重试。');
@@ -201,10 +149,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
         if (dragDepthRef.current === 0) setDragOver(false);
       }}
       onDrop={onDrop}>
-      {selectedSkills.length > 0 && <div className="composer-selected-skills" role="group" aria-label="已选择的创作技能"><span className="composer-selected-label">已选技能</span>{selectedSkills.map((skill) => <SelectedSkillChip key={skill} skillName={skill}
-        requirement={Object.hasOwn(skillRequirements, skill) ? skillRequirements[skill] : undefined}
-        onSaveRequirement={text => saveSkillRequirement(skill, text)}
-        onRemove={() => setSelectedSkills(current => current.filter(name => name !== skill))} />)}</div>}
+      <ComposerSkillChips skills={skills} />
       <textarea
         ref={textareaRef}
         id={inputId}
@@ -237,7 +182,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
         <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
       </div>}
       {attachments.length > 0 && <p className="composer-skills-note">素材会随会话切换保留；刷新页面后需要重新添加。</p>}
-      {skillNotice && <p className="composer-skills-note" role="status">{skillNotice}</p>}
+      {skills.notice && <p className="composer-skills-note" role="status">{skills.notice}</p>}
       <input ref={fileInputRef} type="file" multiple hidden
         onChange={(e) => { if (e.target.files) void doUpload(e.target.files); e.target.value = ''; }} />
       <div className="composer-bar">
@@ -246,10 +191,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
             disabled={isStreaming || uploading} aria-label={uploading ? '正在添加素材' : '添加图片或文档'} title={`添加图片或文档；支持拖入或粘贴，超过 ${maxMb}MB 的文件将存为本地素材`}>
             <IconPlus size={18} />{uploading && <span>上传中…</span>}
           </button>
-          <BrushEntry compact selectedSkills={selectedSkills} onRemove={(skill) => setSelectedSkills((current) => current.filter((name) => name !== skill))} onPick={(text, skill, example) => {
-            setSelectedSkills((current) => current.includes(skill) ? current : [...current, skill]);
-            setInput((current) => example ? (current.trim() ? `${current}\n${text}` : text) : current.trim() ? current : text);
-          }} />
+          <ComposerSkillPicker skills={skills} setInput={setInput} />
         </div>
         <span className="composer-hint" id={hintId}>
           <span>{stopping ? '正在等待停止确认' : isStreaming ? '正在生成，可随时停止' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}</span>

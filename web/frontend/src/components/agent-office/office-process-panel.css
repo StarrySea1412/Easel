@@ -1,15 +1,15 @@
 .office-process-backdrop { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; padding: 18px; background: rgba(27, 33, 31, .28); backdrop-filter: blur(3px); }
-.office-process-panel { display: flex; flex-direction: column; width: min(720px, 100%); max-height: 100%; min-height: 0; overflow: hidden; border: 1px solid #dce1d7; border-radius: 20px; background: #fbfcf8; color: #34483e; box-shadow: 0 18px 70px rgba(29, 45, 35, .22); font-size: 14px; line-height: 1.7; }
+.office-process-panel { display: flex; flex-direction: column; width: min(720px, 100%); max-height: 100%; min-height: 0;min-width:0; overflow: hidden; border: 1px solid #dce1d7; border-radius: 20px; background: #fbfcf8; color: #34483e; box-shadow: 0 18px 70px rgba(29, 45, 35, .22); font-size: 14px; line-height: 1.7; }
 .office-process-panel:focus { outline: none; }
 .office-process-header { display: flex; align-items: flex-start; gap: 20px; padding: 25px 26px 20px; border-bottom: 1px solid #e3e7dd; flex-shrink: 0; }
 .office-process-header > div { flex: 1; min-width: 0; }
 .office-process-eyebrow { color: #6d846f; font-size: 12px; letter-spacing: .06em; }
 .office-process-header h2 { margin: 6px 0 7px; font-size: 22px; line-height: 1.35; font-weight: 650; overflow-wrap: anywhere; }
-.office-process-header p { margin: 0; color: #738071; font-size: 13px; }
+.office-process-header p { margin: 0; color: #738071; font-size: 13px;overflow-wrap:anywhere; }
 .office-process-close { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border: 1px solid #dce2d4; border-radius: 11px; background: #f2f5ed; color: #506c55; font-size: 25px; line-height: 1; cursor: pointer; }
 .office-process-close:hover { background: #e9efe2; }
 .office-process-panel button:focus-visible, .office-process-body:focus-visible { outline: 3px solid #78a17c; outline-offset: 3px; }
-.office-process-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 23px 26px 30px; scrollbar-gutter: stable; }
+.office-process-body { min-height: 0;min-width:0; overflow-y: auto; overscroll-behavior: contain; padding: 23px 26px 30px; scrollbar-gutter: stable; }
 .office-process-status { display: grid; gap: 7px; padding: 15px 17px; border-radius: 12px; background: #edf3e9; }
 .office-process-badge { justify-self: start; color: #4d7556; font-weight: 650; font-size: 13px; }
 .office-process-status p { margin: 0; color: #677c68; font-size: 13px; }
@@ -74,4 +74,11 @@
   .office-process-footer { padding: 13px 18px; }
   .office-process-identity > div { grid-template-columns: 58px minmax(0, 1fr); gap: 10px; }
   .office-process-text { padding: 14px 15px; }
+}
+@media (max-height:520px) {
+  .office-process-backdrop { padding:8px; }
+  .office-process-header { padding:12px 16px;gap:12px; }
+  .office-process-header h2 { font-size:18px; }
+  .office-process-body { padding:14px 16px; }
+  .office-process-footer { padding:10px 16px; }
 }

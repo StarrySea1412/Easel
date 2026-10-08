@@ -54,7 +54,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
         <textarea className="field" style={{ minHeight: 160 }} value={input}
           placeholder="把对标账号的爆款文案 / 你收藏的内容粘贴进来…"
           onChange={(e) => setInput(e.target.value)} />
-        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+        <div className="breakdown-actions">
           <button className="btn btn-primary" disabled={loading || !input.trim()} onClick={run}>
             <IconSkills size={15} /> {loading ? '拆解中…' : '开始拆解'}
           </button>

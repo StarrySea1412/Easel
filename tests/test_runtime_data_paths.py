@@ -146,6 +146,27 @@ def test_normal_doctor_still_checks_credentials(ready_doctor, monkeypatch):
     assert doctor.cmd_doctor(SimpleNamespace()) == 1
 
 
+def test_install_doctor_can_explicitly_defer_browser(ready_doctor, monkeypatch, capsys):
+    monkeypatch.setattr(doctor, "_chromium_available", lambda: False)
+    assert doctor.cmd_doctor(SimpleNamespace(install_mode=True, defer_browser=True)) == 0
+    output = capsys.readouterr().out
+    assert "平台浏览器未安装" in output
+    assert "基础工作台环境就绪" in output
+
+
+@pytest.mark.parametrize("install_mode,failed_check", [
+    (False, "_chromium_available"),
+    (True, "_gateway_healthy"),
+    (True, "_venv_available"),
+])
+def test_doctor_browser_deferral_keeps_other_requirements(ready_doctor, monkeypatch,
+                                                        install_mode, failed_check):
+    monkeypatch.setattr(doctor, "_env_key_valid", lambda: True)
+    monkeypatch.setattr(doctor, "_primary_model_routable", lambda: (True, ""))
+    monkeypatch.setattr(doctor, failed_check, lambda: False)
+    assert doctor.cmd_doctor(SimpleNamespace(install_mode=install_mode, defer_browser=True)) == 1
+
+
 @pytest.mark.parametrize("relative", [
     "skills/shared/scripts/ai_image.py", "skills/shared/scripts/ai_video.py",
     "skills/shared/scripts/ai_music.py", "skills/shared/scripts/voice_clone.py",

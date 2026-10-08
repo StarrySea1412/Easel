@@ -2591,6 +2591,7 @@ class ChatRequest(BaseModel):
     persona: str | None = None
     sessionId: str | None = None
     turnId: str | None = None
+    modelRef: Annotated[str, Field(strict=True, min_length=1, max_length=300)] | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
     selectedSkills: list[str] = Field(default_factory=list, max_length=20)
     skillRequirements: dict[str, Annotated[str, Field(strict=True, max_length=2000)]] = Field(default_factory=dict, max_length=20)
@@ -2989,6 +2990,11 @@ async def api_chat_stream(req: ChatRequest):
     """
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
+    requested_model_ref = req.modelRef
+    if requested_model_ref is not None:
+        import office_controls
+        await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
+                                req.sessionId, requested_model_ref)
     import skill_audit
     specs = _selected_skill_specs(req)
     if req.sessionId:
@@ -3013,7 +3019,7 @@ async def api_chat_stream(req: ChatRequest):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
-        _save_turn(pk, "running", "", {"turn_id": turn_id})
+        _save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref})
 
         event_path = _job_event_file(turn_id)
         try:
@@ -3039,6 +3045,8 @@ async def api_chat_stream(req: ChatRequest):
 
         # 秒级反馈：发出即亮「已收到」，不等 agent 冷启动（首个 SSE 事件，随流回放必达）
         to_client("activity", "⏳ 已收到，正在唤醒 agent…")
+        if requested_model_ref is not None:
+            to_client('model_selection', {'requestedModelRef': requested_model_ref})
 
         async def _run_gateway_turn(hproc):
             """HTTP 直连常驻网关跑一轮（OpenAI 兼容端点 /v1/chat/completions，原生 SSE）。
@@ -3058,6 +3066,8 @@ async def api_chat_stream(req: ChatRequest):
             headers = {"x-openclaw-session-key": f"agent:main:{sk}",
                        "x-openclaw-session-id": _openclaw_session_id(sk)}
             headers.update(credentials.headers())
+            if requested_model_ref is not None:
+                headers['x-openclaw-model'] = requested_model_ref
             tool_noted = False
             saw_done = False
             try:
@@ -3144,6 +3154,7 @@ async def api_chat_stream(req: ChatRequest):
             if not got:
                 _save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
+                    "requestedModelRef": requested_model_ref,
                 })
                 to_client("activity", "⏳ 这个会话正在另一个窗口运行，请稍候再试")
                 return
@@ -3151,6 +3162,13 @@ async def api_chat_stream(req: ChatRequest):
             # Resolve credentials after queueing, so a rotation while the prior
             # turn runs is used by both transports on this turn.
             credentials = gateway_credentials()
+            selected_transport = None
+            if requested_model_ref is not None:
+                selected_transport = await asyncio.to_thread(_resolve_transport, sk)
+                # Recheck the exact choice, running gateway and approved identity
+                # after queueing. Never remove the override or switch transports.
+                await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
+                                        sk, requested_model_ref, transport=selected_transport, credentials=credentials)
             _heal_openclaw_session(sk)
 
             # _resolve_transport 里既有 stat 又有阻塞 urllib 探针（最多 3s），必须丢线程：
@@ -3162,7 +3180,7 @@ async def api_chat_stream(req: ChatRequest):
                 _ACTIVE_SKILL_TURNS[sk] = turn_id
             except Exception:
                 to_client('activity', '执行核验暂不可用；创作任务继续运行。')
-            is_http = (await asyncio.to_thread(_resolve_transport, sk)) == "http"
+            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http"
             # A queued turn must begin after the preceding turn's raw output.
             # The earlier pre-lock offset may belong to an entirely older run.
             try:
@@ -3180,6 +3198,8 @@ async def api_chat_stream(req: ChatRequest):
                         "--thinking", THINKING_LEVEL,
                         "--timeout", str(TIMEOUT_CHAT), "--message", message,
                     ]
+                    if requested_model_ref is not None:
+                        cmd.extend(['--model', requested_model_ref])
                     env = credentials.environment(_proxy_env())
                     # Raw streaming belongs to the gateway process. Only pass
                     # whether the local question bridge can display ask_user.
@@ -3193,6 +3213,7 @@ async def api_chat_stream(req: ChatRequest):
                     error = gateway_error(type(e).__name__ + ': ' + str(e))
                     _save_turn(pk, "done", "", {
                         "turn_id": turn_id, "clean_end": False, "stop_reason": "spawn_failed", "error": error,
+                        "requestedModelRef": requested_model_ref,
                     })
                     to_client("error", error)
                     return
@@ -3509,6 +3530,7 @@ async def api_chat_stream(req: ChatRequest):
                         lf.write(json.dumps({
                             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "session": sk,
+                            "requestedModelRef": requested_model_ref,
                             "rc": proc.poll(),
                             "stop_reason": run_info["stop_reason"],
                             "last_ev": run_info["last_ev"],
@@ -3528,6 +3550,7 @@ async def api_chat_stream(req: ChatRequest):
                 # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
                 _save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
+                    "requestedModelRef": requested_model_ref,
                     "gateway_run_id": run_info.get('run_id'),
                     "thinking": ''.join(full_thinking),
                     "thinkingStatus": 'available' if full_thinking else 'unavailable',
@@ -3556,10 +3579,13 @@ async def api_chat_stream(req: ChatRequest):
                     except Exception:
                         pass
         except Exception as e:
-            error = gateway_error(type(e).__name__ + ': ' + str(e))
+            error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
+                     and str(e.detail.get('code', '')).startswith('chat_model_')
+                     else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
             _save_turn(pk, 'done', ''.join(full_text), {
                 'turn_id': turn_id, 'thinking': ''.join(full_thinking),
+                'requestedModelRef': requested_model_ref,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
             })
         finally:
@@ -3622,6 +3648,8 @@ async def api_chat_stream(req: ChatRequest):
                 yield {"id": str(item["id"]), "event": "question", "data": item["text"]}
             elif t == "error":
                 yield {"id": str(item["id"]), "event": "error", "data": json.dumps(item["text"], ensure_ascii=False)}
+            elif t == 'model_selection':
+                yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
                 yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey")}, ensure_ascii=False)}
 
@@ -3716,6 +3744,9 @@ async def api_chat_stop(req: StopRequest):
 @app.post("/api/chat")
 async def api_chat(req: ChatRequest):
     """非流式对话（备选）。"""
+    if req.modelRef is not None:
+        raise HTTPException(400, {'code': 'chat_model_requires_stream', 'category': 'configuration',
+                                 'retryable': False, 'message': '指定渠道模型请使用流式任务入口。'})
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
@@ -5782,6 +5813,16 @@ class OfficeModelRequest(OfficeControlRequest):
     modelRef: str = Field(min_length=1, max_length=300)
 
 
+class OfficeStopRequest(OfficeControlRequest):
+    expectedRunId: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+@app.get('/api/agent-office/models')
+async def api_office_models(sessionId: str | None = None):
+    import office_controls
+    return await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId)
+
+
 @app.get('/api/agent-office/controls')
 async def api_office_controls(sessionId: str, turnId: str, agentId: str):
     import office_controls
@@ -5811,10 +5852,10 @@ async def api_office_model(req: OfficeModelRequest):
 
 
 @app.post('/api/agent-office/stop')
-async def api_office_stop(req: OfficeControlRequest):
+async def api_office_stop(req: OfficeStopRequest):
     import office_controls
     return await asyncio.to_thread(office_controls.operate, sys.modules[__name__], req.sessionId,
-                                   req.turnId, req.agentId, 'stop')
+                                   req.turnId, req.agentId, 'stop', expected_run_id=req.expectedRunId)
 
 
 class SkillCritiqueRequest(BaseModel):

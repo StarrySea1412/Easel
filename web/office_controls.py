@@ -11,9 +11,12 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 
 from fastapi import HTTPException
 
@@ -28,6 +31,9 @@ _MUTATION_LOCK = threading.Lock()
 _RECEIPT_LOCK = threading.Lock()
 _STOP_RECEIPTS: OrderedDict[tuple[str, str, str], dict] = OrderedDict()
 MAX_STOP_RECEIPTS = 128
+# Audited agent-command/model-fallback and HTTP/CLI ingress contracts. A newer
+# or unknown gateway is not evidence that explicit overrides disable fallback.
+STRICT_MODEL_OVERRIDE_VERSIONS = frozenset({'2026.9.2'})
 
 
 def _error(message: str, status: int = 409):
@@ -60,6 +66,190 @@ def configured_models(config_path: Path) -> list[dict]:
             if len(result) >= 256:
                 return result
     return result
+
+
+def _model_error(code: str, message: str, status: int = 503):
+    raise HTTPException(status, {'code': code, 'category': 'configuration',
+                                'retryable': False, 'message': message})
+
+
+def validate_requested_model(web, model_ref: str) -> None:
+    options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
+    if model_ref not in {option['id'] for option in options}:
+        _model_error('chat_model_not_configured', '只能选择已配置的完整渠道模型，请刷新模型设置。', 400)
+
+
+def _model_probe_client(transport: str, credentials):
+    """Read existing approval before connecting, never request a new identity.
+
+    `agent --model` uses gateway-client/backend + admin in the audited CLI.
+    HTTP only needs a read-scoped, already-paired connection for server.version;
+    its separate empty-message probe checks the actual HTTP authorization.
+    """
+    device = gateway._load_device()
+    if not gateway.PROFILE_DB.is_file():
+        _error('缺少已批准的网关连接，尚不能核验指定模型能力。', 503)
+    with sqlite3.connect(gateway.PROFILE_DB.resolve().as_uri() + '?mode=ro', uri=True, timeout=2) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute('SELECT * FROM device_pairing_paired WHERE device_id=?',
+                         (device['device_id'],)).fetchone()
+    if row is None:
+        _error('现有设备尚未批准；本页面不会创建配对或扩大权限。', 503)
+    row = dict(row)
+    approved = json.loads(row.get('approved_scopes_json') or row.get('scopes_json') or '[]')
+    roles = json.loads(row.get('roles_json') or '[]')
+    identity = (row.get('client_id'), row.get('client_mode'))
+    scopes = ['operator.admin'] if transport == 'cli' else ['operator.read']
+    valid_identity = (identity == ('gateway-client', 'backend') if transport == 'cli'
+                      else identity in {('cli', 'cli'), ('gateway-client', 'backend')})
+    metadata = gateway._client_identity()
+    metadata_matches = all(not row.get(column) or row[column] == metadata[key]
+                           for column, key in (('platform', 'platform'), ('device_family', 'deviceFamily')))
+    if (row.get('public_key') != device['public_key'] or not valid_identity or not metadata_matches
+            or not (row.get('role') == 'operator' or isinstance(roles, list) and 'operator' in roles)
+            or not isinstance(approved, list)
+            or not ('operator.admin' in approved or all(scope in approved for scope in scopes))):
+        _error('现有连接未批准指定模型所需的身份或权限；本页面不会自动配对或扩大权限。', 503)
+    auth = None
+    if credentials.mode == 'password' and credentials.password:
+        auth = {'password': credentials.password}
+    elif credentials.token:
+        auth = {'token': credentials.token}
+    elif credentials.password:
+        auth = {'password': credentials.password}
+    client = gateway.GatewayClient(timeout=3.0, scopes=scopes, client_id=identity[0],
+                                   client_mode=identity[1], auth=auth)
+    try:
+        client.connect()
+        if not (set(scopes).issubset(client.granted_scopes)
+                or transport == 'http' and 'operator.admin' in client.granted_scopes):
+            _error('网关未确认已批准的指定模型权限。', 503)
+        return client
+    except Exception:
+        client.close()
+        raise
+
+
+def _cli_override_version(web) -> str | None:
+    """Read the package belonging to the actual argv; never launch a CLI probe."""
+    command = web.openclaw_base_cmd()
+    if not command:
+        return None
+    entry = Path(command[-1])
+    if not entry.is_absolute():
+        located = shutil.which(str(entry))
+        if not located:
+            return None
+        entry = Path(located)
+    entry = entry.resolve()
+    if not entry.is_file() or entry.name not in {'openclaw.mjs', 'openclaw', 'openclaw.cmd', 'openclaw.ps1'}:
+        return None
+    for path in (entry.parent / 'package.json', entry.parent / 'node_modules' / 'openclaw' / 'package.json'):
+        try:
+            package = json.loads(path.read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            continue
+        if isinstance(package, dict) and package.get('name') == 'openclaw':
+            version = package.get('version')
+            return version if version in STRICT_MODEL_OVERRIDE_VERSIONS else None
+    return None
+
+
+class _NoProbeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _probe_http_override(web, session: str | None, credentials, model_ref: str | None) -> None:
+    """Exercise authorization/validation only: no user message and no runId.
+
+    The capability listing uses an invalid ref to test the override mechanism
+    without claiming any registered model is allowed. A submitted model must
+    pass its policy check and reach the exact missing-message rejection.
+    """
+    headers = {'Content-Type': 'application/json', 'x-openclaw-model': model_ref or '/'}
+    if session:
+        headers['x-openclaw-session-key'] = f'agent:main:{session}'
+        headers['x-openclaw-session-id'] = web._openclaw_session_id(session)
+    request = urllib.request.Request(web.chat_completions_url(),
+        data=b'{"model":"openclaw/default","messages":[]}', headers=headers, method='POST')
+    for name, value in credentials.headers().items():
+        request.add_unredirected_header(name, value)
+    expected = 'Missing user message in `messages`.' if model_ref else 'Invalid `x-openclaw-model`.'
+    try:
+        with urllib.request.build_opener(_NoProbeRedirect()).open(request, timeout=3):
+            pass
+    except urllib.error.HTTPError as exc:
+        try:
+            data = json.loads(exc.read(4096))
+        finally:
+            exc.close()
+        error = data.get('error') if isinstance(data, dict) else None
+        if exc.code == 400 and isinstance(error, dict) and error.get('message') == expected:
+            return
+    _error('网关未确认该请求的指定模型权限或模型允许范围；任务未启动。', 503)
+
+
+def turn_model_capability(web, session: str | None = None, model_ref: str | None = None,
+                          *, transport: str | None = None, credentials=None) -> dict:
+    if session and (not isinstance(session, str) or not office.SAFE_ID.fullmatch(session)):
+        _error('无效的会话标识。', 400)
+    options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
+    result = {'available': False, 'scope': 'unavailable', 'currentModelRef': None,
+              'options': options, 'reason': '尚未配置可选择的渠道模型。',
+              'gatewayVersion': None, 'transport': None}
+    if not options:
+        return result
+    client = None
+    try:
+        if model_ref is not None and model_ref not in {option['id'] for option in options}:
+            _error('所选渠道模型已从配置中移除，请重新选择。', 400)
+        transport = transport or web._resolve_transport(session or f'office-new-{office.uuid.uuid4().hex}')
+        if transport not in ('http', 'cli'):
+            _error('当前会话传输方式不支持指定模型。', 503)
+        result['transport'] = transport
+        credentials = credentials if credentials is not None else web.gateway_credentials()
+        if transport == 'cli' and _cli_override_version(web) is None:
+            _error('当前 CLI 版本尚未核验指定模型语义，任务不会改用默认模型。', 503)
+        client = _model_probe_client(transport, credentials)
+        version = getattr(client, 'server_version', None)
+        if isinstance(version, str) and re.fullmatch(r'[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,3}(?:[-+][A-Za-z0-9.-]{1,32})?', version):
+            result['gatewayVersion'] = version
+        if version not in STRICT_MODEL_OVERRIDE_VERSIONS or 'agent' not in client.methods:
+            _error('运行网关尚未核验严格指定模型能力，任务不会改用默认或备用模型。', 503)
+        if transport == 'http':
+            _probe_http_override(web, session, credentials, model_ref)
+        # Only a stored session override can preselect the next turn. The last
+        # runtime model is historical evidence, not a persistent selection.
+        if session and 'sessions.list' in client.methods:
+            payload = client._rpc('sessions.list', {'search': f'agent:main:{session}', 'limit': 32,
+                                                   'includeGlobal': False, 'includeUnknown': True})
+            rows = payload.get('sessions') if isinstance(payload, dict) else None
+            matches = [row for row in rows if isinstance(row, dict) and row.get('key') == f'agent:main:{session}'] if isinstance(rows, list) else []
+            if len(matches) == 1 and matches[0].get('sessionId') == web._openclaw_session_id(session):
+                row = matches[0]
+                ref = (f"{row['providerOverride']}/{row['modelOverride']}"
+                       if isinstance(row.get('providerOverride'), str) and isinstance(row.get('modelOverride'), str) else None)
+                if ref in {option['id'] for option in options}:
+                    result['currentModelRef'] = ref
+        result.update(available=True, scope='next_turn', reason=None)
+    except HTTPException as exc:
+        result['reason'] = str(exc.detail)
+    except Exception:
+        # Transport/schema/auth errors can contain credentials or private URLs.
+        result['reason'] = '无法只读核验当前网关的指定模型能力，任务不会改用默认模型。'
+    finally:
+        if client is not None:
+            client.close()
+    return result
+
+
+def require_model_override(web, session: str | None, model_ref: str, *, transport=None, credentials=None) -> dict:
+    validate_requested_model(web, model_ref)
+    capability = turn_model_capability(web, session, model_ref, transport=transport, credentials=credentials)
+    if not capability['available']:
+        _model_error('chat_model_override_unavailable', capability['reason'])
+    return capability
 
 
 def _new_client():
@@ -290,13 +480,16 @@ def confirmed_stop_snapshot(web, snapshot):
     return snapshot
 
 
-def operate(web, session: str, turn: str, agent: str, action='controls', model_ref=None):
+def operate(web, session: str, turn: str, agent: str, action='controls', model_ref=None,
+            *, expected_run_id: str | None = None):
     if action != 'controls' and not _MUTATION_LOCK.acquire(blocking=False):
         _error('另一个 Agent 控制正在处理，请稍候重试。')
     client = None
     options = []
     try:
         target = resolve_target(web, session, turn, agent)
+        if action == 'stop' and expected_run_id is not None and expected_run_id != target.run_id:
+            _error('运行标识已变化，请刷新该 Agent 后再停止。')
         options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
         base = target.identity
         if action == 'model' and model_ref not in {option['id'] for option in options}:
@@ -310,10 +503,14 @@ def operate(web, session: str, turn: str, agent: str, action='controls', model_r
                 raise
             return {**base, 'model': {'available': False, 'scope': 'unavailable', 'options': options,
                                       'currentModelRef': None, 'reason': str(exc.detail)},
-                    'stop': {'available': False, 'scope': 'unavailable', 'reason': str(exc.detail)}}
+                    'stop': {'available': False, 'scope': 'unavailable', 'runId': None, 'reason': str(exc.detail)}}
         can_model = 'sessions.patch' in client.methods and _can_model(target, row) and bool(options)
+        observed_runs = {row[name] for name in ('activeRunId', 'activeWriterRunId', 'lastRunId')
+                         if isinstance(row.get(name), str) and row[name]}
+        verified_run_id = target.run_id if target.run_id and observed_runs == {target.run_id} else None
         can_stop = ('sessions.abort' in client.methods and target.run_id is not None
-                    and row.get('status') not in TERMINAL)
+                    and row.get('status') not in TERMINAL
+                    and (verified_run_id is not None or action == 'stop' and expected_run_id is None))
         scope = 'agent' if target.child else 'session'
         if action == 'controls':
             reason = ('保存到该 Agent 会话，后续模型调用使用所选渠道；不会重新运行已完成任务。' if can_model
@@ -327,6 +524,7 @@ def operate(web, session: str, turn: str, agent: str, action='controls', model_r
                                       'options': options, 'currentModelRef': current if current in {o['id'] for o in options} else None,
                                       'reason': reason},
                     'stop': {'available': can_stop, 'scope': scope if 'sessions.abort' in client.methods else 'unavailable',
+                             'runId': verified_run_id,
                              'reason': '停止该 Agent 及其派生任务，不停止父级或兄弟 Agent。' if can_stop and target.child
                              else '停止本轮会话及其派生任务。' if can_stop
                              else '未确认精确运行标识、任务已结束或网关不支持停止，不能发送停止请求。'}}
@@ -361,7 +559,7 @@ def operate(web, session: str, turn: str, agent: str, action='controls', model_r
             if (confirmed and not target.child and target.live and target.process is not None
                     and web._RUNNING_CHAT.get(session) is target.process):
                 web._STOPPED_CHAT.add(session)
-            return {**base, 'confirmed': confirmed, 'scope': scope,
+            return {**base, 'confirmed': confirmed, 'scope': scope, 'runId': target.run_id,
                     'message': '网关已确认停止。' if confirmed else '网关未确认该次运行已停止，请刷新检查。'}
         _error('不支持的控制操作。', 400)
     except HTTPException:
@@ -372,7 +570,7 @@ def operate(web, session: str, turn: str, agent: str, action='controls', model_r
         if action == 'controls':
             return {'sessionId': session, 'turnId': turn, 'agentId': agent, 'model': {'available': False, 'scope': 'unavailable', 'options': options,
                                                 'currentModelRef': None, 'reason': '网关暂不可用，模型控制尚未核验。'},
-                    'stop': {'available': False, 'scope': 'unavailable', 'reason': '网关暂不可用，停止能力尚未核验。'}}
+                    'stop': {'available': False, 'scope': 'unavailable', 'runId': None, 'reason': '网关暂不可用，停止能力尚未核验。'}}
         _error('网关未确认操作结果，请刷新状态后再检查。', 503)
     finally:
         if client is not None:

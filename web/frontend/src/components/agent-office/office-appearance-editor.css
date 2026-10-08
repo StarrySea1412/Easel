@@ -31,7 +31,7 @@
 .office-appearance-editor footer .btn { min-height:40px; }
 .office-editor-error { color:var(--red); background:var(--red-soft); padding:12px; border-radius:8px; font-size:12px; line-height:1.7; }
 .office-appearance-editor button:focus-visible,.office-appearance-editor input:focus-visible,.office-appearance-editor select:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; }
-.agent-office-page.is-editing-appearance { overflow-anchor:none; scroll-behavior:auto; }
+.agent-office-page.is-editing-appearance { overflow-anchor:none; scroll-behavior:auto;container-type:normal; }
 .is-editing-appearance > .office-workspace { padding-right:418px; }
 .is-editing-appearance .office-stage-card { min-height:0; height:auto; }
 .is-editing-appearance .office-stage-toolbar,.is-editing-appearance .office-demo-navigation,.is-editing-appearance .office-stage-card > .office-work-preview,.is-editing-appearance .office-stage-footer { display:none; }
@@ -43,3 +43,15 @@
   .is-editing-appearance .office-stage-card { position:fixed; top:12px; left:12px; right:12px; z-index:1101; border-radius:10px; }
   .is-editing-appearance .office-stage-viewport { height:calc(30dvh - 36px); min-height:0; }
 }
+
+/* A sidebar can make the office narrow even on a wide browser window. The
+   portaled sheet and existing scene preview follow that same measurement. */
+.office-appearance-overlay.is-compact { padding:12px;align-items:flex-end;background:rgb(24 31 29 / 22%); }
+.office-appearance-overlay.is-compact .office-appearance-editor { width:100%;height:70dvh;padding:20px;border-radius:16px; }
+.office-appearance-overlay.is-compact .office-appearance-editor h2 { font-size:18px; }
+.office-appearance-overlay.is-compact .office-editor-fields { grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
+.office-editor-fields > label { min-width:0; }
+.office-appearance-overlay.is-compact .office-editor-colors { gap:20px; }
+.is-editing-appearance.is-compact-appearance > .office-workspace { padding-right:12px;padding-left:12px; }
+.is-editing-appearance.is-compact-appearance .office-stage-card { position:fixed;top:12px;left:12px;right:12px;z-index:1101;border-radius:10px; }
+.is-editing-appearance.is-compact-appearance .office-stage-viewport { height:calc(30dvh - 36px);min-height:0; }

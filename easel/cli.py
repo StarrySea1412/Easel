@@ -178,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor = sub.add_parser("doctor", help="检查环境")
     p_doctor.add_argument("--install-mode", action="store_true",
                           help="安装验收：模型认证留待 Web 设置，仍检查所有运行依赖")
+    p_doctor.add_argument("--defer-browser", action="store_true",
+                          help="仅在安装模式暂缓 Chromium 检查，保留其余运行依赖检查")
     p_doctor.set_defaults(func=cmd_doctor)
 
     # gateway

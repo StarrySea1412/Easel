@@ -41,7 +41,7 @@
 .xhs-evidence-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; margin-bottom: 8px; }
 .xhs-evidence-title a { color: var(--accent-end); text-decoration: none; }
 .xhs-evidence-title a:hover { text-decoration: underline; }
-.xhs-note-metrics { display: flex; gap: 24px; margin-bottom: 8px; }
+.xhs-note-metrics { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 8px; }
 .xhs-note-metrics > div { display: flex; align-items: baseline; gap: 6px; }
 .xhs-note-metrics dt { font-size: 11px; color: var(--text-secondary); }
 .xhs-note-metrics dd { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -64,7 +64,7 @@
 .xhs-data-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 18px; }
 .xhs-data-controls > button { color: var(--text-secondary); }
 .xhs-clear-confirm { border: 1px solid var(--red); border-radius: var(--radius); padding: 14px; margin-top: 12px; background: var(--red-soft); }
-.xhs-clear-confirm > div { display: flex; gap: 10px; margin-top: 12px; }
+.xhs-clear-confirm > div { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .xhs-danger-button { color: var(--red); border-color: var(--red); }
 .xhs-account-entry { margin-top: 10px; width: 100%; }
 @media (max-width: 920px) {

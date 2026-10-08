@@ -1,0 +1,4 @@
+.model-route-fields { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px;min-width:0; }
+.model-route-field { display:flex;flex-direction:column;gap:6px;min-width:0; }
+.model-route-field label { font-size:12px;color:var(--text-secondary); }
+.model-route-field .easel-select { width:100%;min-width:0; }

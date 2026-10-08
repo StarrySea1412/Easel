@@ -1,0 +1,22 @@
+.office-task-composer { border:1px solid var(--border);border-radius:16px;padding:20px;background:var(--surface);min-width:0; }
+.office-task-heading { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px; }
+.office-task-heading h2 { margin:0;font-size:16px;color:var(--text); }
+.office-task-heading p,.office-task-context { margin:7px 0;color:var(--text-secondary);font-size:12px;line-height:1.6;overflow-wrap:anywhere; }
+.office-task-composer form { display:grid;gap:12px;margin-top:14px;min-width:0; }
+.office-task-label { font-size:12px;font-weight:600;color:var(--text); }
+.office-task-composer textarea { box-sizing:border-box;width:100%;min-width:0;resize:vertical;min-height:100px;max-height:260px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font:inherit;font-size:13px;line-height:1.7; }
+.office-task-composer textarea:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
+.office-task-model-heading,.office-task-actions { display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-width:0; }
+.office-task-model-heading { justify-content:space-between; }
+.office-task-composer .easel-radio-group { max-width:100%;flex-wrap:wrap; }
+.office-task-composer .easel-radio-option { white-space:normal;min-height:36px; }
+.office-task-routing { min-width:0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2); }
+.office-task-actions .office-button { min-height:36px;white-space:normal; }
+.office-task-status { color:var(--text-secondary);font-size:12px;line-height:1.7;overflow-wrap:anywhere;margin:12px 0 0; }
+@container office-page (max-width:520px) {
+ .office-task-composer { padding:14px; }
+ .office-task-heading,.office-task-model-heading { align-items:stretch; }
+ .office-task-heading>div,.office-task-composer .easel-radio-group { width:100%; }
+ .office-task-composer .easel-radio-option { flex:1; }
+ .office-task-actions { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr)); }
+}

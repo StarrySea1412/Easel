@@ -10,6 +10,7 @@ export interface OfficeAgentControlsProps {
   sessionId: string | null;
   turnId: string | null;
   stale: boolean;
+  observationKey?: string | null;
   onChanged?: () => void;
   onOpenModelSettings?: () => void;
 }
@@ -21,14 +22,17 @@ export default function OfficeAgentControls(props: OfficeAgentControlsProps) {
   return <LiveOfficeAgentControls key={JSON.stringify(identity)} {...props} identity={identity} />;
 }
 
-function LiveOfficeAgentControls({ agent, identity, stale, onChanged, onOpenModelSettings }: OfficeAgentControlsProps & { identity: OfficeControlIdentity }) {
+function LiveOfficeAgentControls({ agent, identity, stale, observationKey, onChanged, onOpenModelSettings }: OfficeAgentControlsProps & { identity: OfficeControlIdentity }) {
   const [controls, setControls] = useState<OfficeControls | null>(null);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState<'model' | 'stop' | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [stopConfirmed, setStopConfirmed] = useState(false);
+  const [stoppedRun, setStoppedRun] = useState<string | null>(null);
+  const latestControls = useRef<OfficeControls | null>(null);
+  const lastKnownRun = useRef<string | null>(null);
+  const lastLifecycle = useRef({ state: agent.state, stale, revision });
   const operation = useRef<AbortController | null>(null);
   const active = useRef(true);
   const { sessionId, turnId, agentId } = identity;
@@ -38,20 +42,30 @@ function LiveOfficeAgentControls({ agent, identity, stale, onChanged, onOpenMode
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
+    if (!latestControls.current || lastLifecycle.current.state !== agent.state
+      || lastLifecycle.current.stale !== stale || lastLifecycle.current.revision !== revision) setLoading(true);
+    lastLifecycle.current = { state: agent.state, stale, revision };
     setError('');
     fetchOfficeControls({ sessionId, turnId, agentId }, controller.signal).then(value => {
-      if (!controller.signal.aborted) setControls(value);
+      if (!controller.signal.aborted) {
+        if (value.stop.runId && lastKnownRun.current && value.stop.runId !== lastKnownRun.current) {
+          setMessage(''); setStoppedRun(null);
+        }
+        if (value.stop.runId) lastKnownRun.current = value.stop.runId;
+        latestControls.current = value;
+        setControls(value);
+      }
     }).catch(cause => {
-      if (!controller.signal.aborted) { setControls(null); setError(cause instanceof Error ? cause.message : '控制选项读取失败。'); }
+      if (!controller.signal.aborted) { latestControls.current = null; setControls(null); setError(cause instanceof Error ? cause.message : '控制选项读取失败。'); }
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [sessionId, turnId, agentId, agent.state, stale, revision]);
+  }, [sessionId, turnId, agentId, agent.state, agent.updatedAt, observationKey, stale, revision]);
 
   const locked = stale || loading || Boolean(busy);
   const isRoot = !agent.parentId && agent.id === `root:${sessionId}`;
   const stopAllowed = controls?.stop.available && (controls.stop.scope === 'agent' || (isRoot && controls.stop.scope === 'session'));
-  const terminal = stopConfirmed || ['done', 'error', 'stopped'].includes(agent.state);
+  const controlRun = controls?.stop.runId || `${turnId}:${agentId}`;
+  const terminal = stoppedRun === controlRun || ['done', 'error', 'stopped'].includes(agent.state);
   const run = async (kind: 'model' | 'stop', modelRef?: string) => {
     if (locked || operation.current || !controls) return;
     if (kind === 'stop' && (!stopAllowed || terminal)) return;
@@ -68,10 +82,13 @@ function LiveOfficeAgentControls({ agent, identity, stale, onChanged, onOpenMode
           setRevision(value => value + 1);
         } else setError(`后台尚未确认模型分配，请刷新配置后检查。${receipt.message}`);
       } else {
-        const receipt = await stopOfficeAgent(identity, controller.signal);
+        const expectedRunId = controls.stop.runId || undefined;
+        const receipt = await stopOfficeAgent(identity, controller.signal, expectedRunId);
         if (!active.current || controller.signal.aborted) return;
-        if (receipt.confirmed && receipt.scope === controls.stop.scope && (receipt.scope === 'agent' || isRoot)) {
-          setStopConfirmed(true);
+        if (receipt.confirmed && receipt.scope === controls.stop.scope && (receipt.scope === 'agent' || isRoot)
+          && (!expectedRunId || receipt.runId === expectedRunId)
+          && (!expectedRunId || !lastKnownRun.current || lastKnownRun.current === expectedRunId)) {
+          setStoppedRun(controlRun);
           setMessage(receipt.scope === 'session' ? '后台已确认本轮会话停止。' : '后台已确认该 Agent 停止。');
           setRevision(value => value + 1);
         } else setError(`停止结果尚未确认，当前状态未更改，请刷新后检查。${receipt.message}`);

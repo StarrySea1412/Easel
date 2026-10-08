@@ -62,9 +62,10 @@
 }
 
 .settings-page .snav {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 3px 8px;
   width: 100%;
   min-width: 0;
   min-height: 44px;
@@ -83,9 +84,9 @@
 .settings-page .snav:hover { background: var(--surface-hover); color: var(--text); }
 .settings-page .snav.active { background: var(--accent-soft); color: var(--accent-end); font-weight: 650; }
 .settings-page .snav svg { width: 16px; height: 16px; flex: none; }
-.settings-page .snav small { margin-left: auto; max-width: 70px; color: var(--text-tertiary); font-size: 10.5px; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+.settings-page .snav small { grid-column: 2; color: var(--text-tertiary); font-size: 10.5px; font-weight: 500; text-align: left; overflow-wrap: anywhere; }
 .settings-page .snav.active small { color: var(--accent-end); }
-.settings-page .tabbar { display: flex; align-items: flex-end; gap: 2px; max-width: 100%; margin-bottom: 18px; padding: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.settings-page .tabbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; max-width: 100%; margin-bottom: 18px; padding: 0; border-bottom: 1px solid var(--border); }
 .settings-page .tab { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 9px 12px 11px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
 .settings-page .tab:hover { background: var(--surface-hover); color: var(--text); }
 .settings-page .tab.active { border-bottom-color: var(--accent-end); color: var(--accent-end); font-weight: 650; }
@@ -296,8 +297,8 @@
 
 @container settings-page (max-width: 900px) {
   .settings-page .settings-body { grid-template-columns: minmax(0, 1fr); }
-  .settings-page .settings-nav { flex-direction: row; gap: 6px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
-  .settings-page .snav { flex: 0 0 auto; width: auto; min-height: 40px; white-space: nowrap; }
+  .settings-page .settings-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(132px, 100%), 1fr)); gap: 6px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-page .snav { width: 100%; min-height: 40px; }
   .settings-page .snav small { display: none; }
   .settings-page .settings-head { padding: 18px; }
   .settings-page .settings-main { padding: 20px 18px 26px; }

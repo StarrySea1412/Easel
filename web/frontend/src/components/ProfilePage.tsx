@@ -167,7 +167,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
           <h1 className="page-title"><IconProfile size={22} aria-hidden={true} />{persona}</h1>
           <p className="page-subtitle">六个维度构成一个完整人设，可随时编辑保存。</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="profile-actions">
           <button className={`btn ${editing ? 'btn-primary' : ''}`} onClick={() => setEditing((v) => !v)}>
             <IconEdit size={15} />{editing ? '完成编辑' : '编辑资料'}
           </button>
@@ -190,7 +190,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
             <div key={f.filename} className="profile-dim">
               <div className="profile-dim-head">
                 <div className="profile-dim-title"><span className="profile-dim-badge" aria-hidden={true}>{meta.icon}</span>{meta.label}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="profile-actions">
                   {f.filename === 'platforms.md' && (
                     <button className="btn btn-sm" disabled={fetchingWx}
                       title="用已登录的公众号后台会话抓取粉丝/内容数据，写入本栏（与数据中心同源）"

@@ -17,13 +17,13 @@ export interface OfficeModelCapability {
 }
 export interface OfficeControls extends OfficeControlIdentity {
   model: OfficeModelCapability;
-  stop: { available: boolean; scope: OfficeStopScope; reason: string };
+  stop: { available: boolean; scope: OfficeStopScope; reason: string; runId?: string | null };
 }
 export interface OfficeModelReceipt extends OfficeControlIdentity {
   applied: boolean; scope: OfficeModelScope; modelRef: string | null; message: string;
 }
 export interface OfficeStopReceipt extends OfficeControlIdentity {
-  confirmed: boolean; scope: OfficeStopScope; message: string;
+  confirmed: boolean; scope: OfficeStopScope; message: string; runId?: string | null;
 }
 
 function record(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
@@ -37,10 +37,9 @@ function identity(value: unknown, expected: OfficeControlIdentity): Record<strin
 function modelScope(value: unknown): OfficeModelScope { return value === 'next_turn' || value === 'subsequent_calls' || value === 'future_spawn' ? value : 'unavailable'; }
 function stopScope(value: unknown): OfficeStopScope { return value === 'agent' || value === 'session' ? value : 'unavailable'; }
 
-export function decodeOfficeControls(value: unknown, expected: OfficeControlIdentity): OfficeControls {
-  const data = identity(value, expected);
-  const model = record(data.model) ? data.model : {};
-  const stop = record(data.stop) ? data.stop : {};
+export function decodeOfficeModelCapability(value: unknown): OfficeModelCapability {
+  if (!record(value)) throw new Error('模型选项格式无效，请刷新后重试。');
+  const model = value;
   const options: OfficeModelOption[] = [];
   const seen = new Set<string>();
   for (const item of Array.isArray(model.options) ? model.options.slice(0, 256) : []) {
@@ -50,13 +49,21 @@ export function decodeOfficeControls(value: unknown, expected: OfficeControlIden
     options.push({ id: item.id, provider: text(item.provider), model: text(item.model), label: text(item.label), configured: item.configured === true });
   }
   const scope = modelScope(model.scope);
+  return { available: model.available === true && scope !== 'unavailable', scope,
+    currentModelRef: typeof model.currentModelRef === 'string' ? text(model.currentModelRef) : null,
+    options, reason: text(model.reason, '当前暂不支持指定模型。') };
+}
+
+export function decodeOfficeControls(value: unknown, expected: OfficeControlIdentity): OfficeControls {
+  const data = identity(value, expected);
+  const model = record(data.model) ? data.model : {};
+  const stop = record(data.stop) ? data.stop : {};
   const stopTarget = stopScope(stop.scope);
   return { ...expected,
-    model: { available: model.available === true && scope !== 'unavailable', scope,
-      currentModelRef: typeof model.currentModelRef === 'string' ? model.currentModelRef : null,
-      options, reason: text(model.reason, '当前 Agent 暂不支持独立模型配置。') },
+    model: decodeOfficeModelCapability(model),
     stop: { available: stop.available === true && stopTarget !== 'unavailable', scope: stopTarget,
-      reason: text(stop.reason, '后台暂未提供可确认的单 Agent 停止能力。') },
+      reason: text(stop.reason, '后台暂未提供可确认的单 Agent 停止能力。'),
+      runId: typeof stop.runId === 'string' ? text(stop.runId) : null },
   };
 }
 
@@ -103,7 +110,39 @@ export async function saveOfficeAgentModel(expected: OfficeControlIdentity, mode
   return { ...expected, applied: data.applied === true, scope: modelScope(data.scope),
     modelRef: typeof data.modelRef === 'string' ? data.modelRef : null, message: text(data.message) };
 }
-export async function stopOfficeAgent(expected: OfficeControlIdentity, signal: AbortSignal): Promise<OfficeStopReceipt> {
-  const data = identity(await request('stop', expected, signal, {}), expected);
-  return { ...expected, confirmed: data.confirmed === true, scope: stopScope(data.scope), message: text(data.message) };
+export async function stopOfficeAgent(expected: OfficeControlIdentity, signal: AbortSignal, expectedRunId?: string): Promise<OfficeStopReceipt> {
+  const data = identity(await request('stop', expected, signal, expectedRunId ? { expectedRunId } : {}), expected);
+  return { ...expected, confirmed: data.confirmed === true, scope: stopScope(data.scope), message: text(data.message),
+    runId: typeof data.runId === 'string' ? text(data.runId) : null };
+}
+
+/** This catalog never proves that a configured model has completed an inference. */
+export async function fetchOfficeTaskModels(sessionId: string | null, signal: AbortSignal): Promise<OfficeModelCapability> {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  try {
+    const response = await fetch(`${base}/api/agent-office/models${sessionId ? `?${new URLSearchParams({ sessionId })}` : ''}`, { signal: controller.signal, cache: 'no-store' });
+    const data: unknown = await response.json();
+    if (timedOut) throw new Error('模型能力核验超时，请刷新模型选项后重试。');
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (!response.ok) {
+      const detail = record(data) ? data.detail : undefined;
+      throw new Error(typeof detail === 'string' ? text(detail) : record(detail) && typeof detail.message === 'string' ? text(detail.message) : `模型选项读取失败（HTTP ${response.status}）。`);
+    }
+    const decoded = decodeOfficeModelCapability(data);
+    return { ...decoded, available: decoded.available && decoded.scope === 'next_turn',
+      scope: decoded.scope === 'next_turn' ? 'next_turn' : 'unavailable',
+      options: decoded.options.filter(option => option.id === `${option.provider}/${option.model}`),
+      ...(decoded.scope !== 'next_turn' && decoded.available ? { reason: '后台未提供本轮模型指定能力，请检查网关配置。' } : {}) };
+  } catch (error) {
+    if (timedOut) throw new Error('模型能力核验超时，请刷新模型选项后重试。');
+    throw error;
+  } finally {
+    clearTimeout(timer); signal.removeEventListener('abort', abort);
+  }
 }

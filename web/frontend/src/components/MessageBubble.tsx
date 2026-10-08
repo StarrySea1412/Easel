@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconCopy, IconCheck, IconRetry } from './icons';
+import './message-model-selection.css';
 
 export interface BubbleActions {
   onCopy: () => void | Promise<void>;
@@ -80,6 +81,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       <div className="message-row user">
         <div className="msg-col user">
           <div className="message-bubble user">{message.content}</div>
+          {!backupSnapshot && message.requestedModelRef && <p className="message-model-selection">本轮指定：{message.requestedModelRef}</p>}
           {actions && <ActionBar actions={actions} />}
         </div>
       </div>

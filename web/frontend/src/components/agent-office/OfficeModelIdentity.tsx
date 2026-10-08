@@ -8,6 +8,6 @@ export default function OfficeModelIdentity({ agent, stale = false }: { agent: O
     <strong style={{ borderColor: modelProvider(identity?.provider).color }}>{stale ? '上次快照 · ' : ''}{officeModelLabel(identity)}</strong>
     <dl><div><dt>接入渠道</dt><dd>{identity?.channel || '未上报'}</dd></div><div><dt>记录时间</dt><dd>{identity?.observedAt ? new Date(identity.observedAt).toLocaleString('zh-CN', { hour12: false }) : '未上报'}</dd></div></dl>
     <p>{identity?.evidence || '尚未观察到该 Agent 的模型记录。'}{identity?.provider === 'unknown' && identity?.model ? ' 使用通配身份，不依据别名猜测厂商。' : ''}</p>
-    <small>调用记录标识不独立证明中转服务底层模型。下方模型配置用于后续调用，不改变已观测身份。</small>
+    <small>调用记录标识不独立证明中转服务底层模型。模型配置用于后续调用，不改变已观测身份。</small>
   </section>;
 }

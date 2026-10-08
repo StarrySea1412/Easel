@@ -252,6 +252,7 @@ def cmd_doctor(_args) -> int:
     print("Easel — 环境检查\n")
     all_ok = True
     install_mode = bool(getattr(_args, "install_mode", False))
+    defer_browser = install_mode and bool(getattr(_args, "defer_browser", False))
 
     # 1. Runtime prerequisites
     all_ok &= _check("Python >= 3.10", _python_version_ok(),
@@ -292,8 +293,11 @@ def cmd_doctor(_args) -> int:
     frontend_ready = (PROJECT_ROOT / "web" / "frontend" / "dist" / "index.html").is_file()
     all_ok &= _check("Web frontend build", frontend_ready,
                       "运行 cd web/frontend && npm ci && npm run build")
-    all_ok &= _check("Playwright Chromium", _chromium_available(),
-                      "运行 python3 -m playwright install chromium")
+    if defer_browser:
+        print(f"  {YELLOW}待安装{NC} Playwright Chromium：平台浏览器未安装；不加 -DeferBrowser 重跑安装可补装。")
+    else:
+        all_ok &= _check("Playwright Chromium", _chromium_available(),
+                          "运行 python3 -m playwright install chromium")
 
     # 3. .env file with valid key
     if install_mode:
@@ -329,7 +333,9 @@ def cmd_doctor(_args) -> int:
 
     print()
     if all_ok:
-        if install_mode:
+        if defer_browser:
+            print(f"{GREEN}✓ 基础工作台环境就绪{NC} — 平台浏览器未安装；请在 Web 设置中完成模型配置")
+        elif install_mode:
             print(f"{GREEN}✓ 安装环境就绪{NC} — 请在 Web 设置中完成模型配置")
         else:
             print(f"{GREEN}✓ 环境就绪{NC} — 运行 python -m easel ping 验证连通性")

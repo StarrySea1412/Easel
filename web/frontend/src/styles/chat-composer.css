@@ -12,20 +12,13 @@
 .chat-composer.composer.composer-drag { border-color:var(--text-secondary); border-style:dashed; background:var(--surface-2); }
 .chat-composer .composer-bar { display:flex; align-items:center; gap:10px; min-width:0; padding:0; margin-top:2px; border:0; }
 .chat-composer .composer-tools { display:flex; align-items:center; gap:4px; flex-shrink:0; }
-.chat-composer .composer-attach-btn,.chat-composer .composer-skill-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:6px 9px; border:0; border-radius:8px; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
-.chat-composer .composer-attach-btn:hover:not(:disabled),.chat-composer .composer-skill-button:hover { color:var(--text); background:var(--surface-2); }
+.chat-composer .composer-attach-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:6px 9px; border:0; border-radius:8px; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
+.chat-composer .composer-attach-btn:hover:not(:disabled) { color:var(--text); background:var(--surface-2); }
 .chat-composer .composer-attach-btn:disabled { cursor:default; opacity:.5; }
-.chat-composer .composer-skill-button { flex-direction:row; flex-wrap:nowrap; flex:none; width:max-content; white-space:nowrap; line-height:1; }
-.chat-composer .composer-skill-button > svg,.chat-composer .composer-skill-button > span { flex:none; }
-.chat-composer .composer-skill-label { display:inline; }
-.chat-composer .composer-skill-count { display:inline-flex; align-items:center; justify-content:center; min-width:17px; height:17px; padding:0 4px; border-radius:5px; background:var(--accent-soft); color:var(--accent-end); font-size:10px; }
-.chat-composer .composer-skill-chevron { display:block; width:12px; height:12px; margin:0; transition:transform .14s ease; }
-.chat-composer .composer-skill-button[aria-expanded=true] .composer-skill-chevron { transform:rotate(180deg); }
 .chat-composer .composer-hint { margin-left:auto; font-size:10px; line-height:1.5; color:var(--text-tertiary); text-align:right; }
 .chat-composer .send-btn { width:34px; height:34px; border-radius:50%; flex-shrink:0; box-shadow:none; }
 .chat-composer .send-btn:disabled { opacity:1; color:#fff; background:#c7c7c7; }
 .chat-composer .composer-selected-skills { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; margin:0 4px 10px; }
-.chat-composer .composer-selected-label { flex:none; color:var(--text-secondary); font-size:11px; }
 .chat-composer .composer-attachments { display:flex; flex-wrap:wrap; gap:7px; margin:8px 0; }
 .chat-composer .attach-chip { min-width:0; max-width:100%; padding:4px 6px 4px 9px; border-radius:8px; }
 .chat-composer .attach-chip>svg { flex-shrink:0; }

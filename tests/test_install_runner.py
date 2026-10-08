@@ -51,6 +51,102 @@ def test_all_phases_executed_and_resume_skips_installs(installation):
     assert [p for p, _ in calls] == ["system", "gateway"]
 
 
+def test_deferred_browser_is_installed_on_next_full_run(installation):
+    root, base = installation
+    calls, deferred_output, full_output = [], [], []
+    gateway_deferrals = []
+
+    def execute(r, b, phase, **kwargs):
+        calls.append(phase)
+        if phase == "gateway":
+            gateway_deferrals.append(bool(kwargs.get("defer_browser")))
+        return True, "success"
+
+    assert runner.run_install(root, base, defer_browser=True, execute=execute,
+                              emit=deferred_output.append) == 0
+    assert calls == [phase["id"] for phase in ic.PHASES if phase["id"] != "chromium"]
+    browser = ic.load_state(base)["phases"]["chromium"]
+    assert browser["status"] == "skipped"
+    assert browser.get("deferred") is True
+    assert "平台浏览器未安装" in browser["detail"]
+    assert gateway_deferrals == [True]
+    assert "基础" in deferred_output[-1]
+
+    calls.clear()
+    assert runner.run_install(root, base, execute=execute, emit=full_output.append) == 0
+    assert calls == ["system", "chromium", "gateway"]
+    browser = ic.load_state(base)["phases"]["chromium"]
+    assert browser["status"] == "ok"
+    assert not browser.get("deferred")
+    assert gateway_deferrals == [True, False]
+    assert full_output[-1] != deferred_output[-1]
+    assert "完整" in full_output[-1]
+
+
+def test_failed_browser_can_be_explicitly_deferred_without_repeating_dependencies(installation):
+    root, base = installation
+    calls = []
+
+    def execute(r, b, phase, **kwargs):
+        calls.append(phase)
+        return (False, "Access denied") if phase == "chromium" else (True, "success")
+
+    assert runner.run_install(root, base, execute=execute, emit=lambda _: None) == 1
+    assert ic.load_state(base)["phases"]["chromium"]["status"] == "failed"
+    calls.clear()
+
+    assert runner.run_install(root, base, defer_browser=True, execute=execute,
+                              emit=lambda _: None) == 0
+    assert calls == ["system", "profile", "skills", "gateway"]
+    phases = ic.load_state(base)["phases"]
+    assert phases["chromium"]["status"] == "skipped"
+    assert phases["chromium"].get("deferred") is True
+    assert all(phases[phase["id"]]["status"] == "ok"
+               for phase in ic.PHASES if phase["id"] != "chromium")
+
+
+def test_deferring_browser_does_not_downgrade_an_installed_browser(installation):
+    root, base = installation
+    calls, output = [], []
+    gateway_deferrals = []
+
+    def execute(r, b, phase, **kwargs):
+        calls.append(phase)
+        if phase == "gateway":
+            gateway_deferrals.append(bool(kwargs.get("defer_browser")))
+        return True, "success"
+
+    assert runner.run_install(root, base, execute=execute, emit=lambda _: None) == 0
+    calls.clear()
+    assert runner.run_install(root, base, defer_browser=True, execute=execute,
+                              emit=output.append) == 0
+    assert calls == ["system", "gateway"]
+    browser = ic.load_state(base)["phases"]["chromium"]
+    assert browser["status"] == "ok"
+    assert not browser.get("deferred")
+    assert gateway_deferrals == [False, False]
+    assert "完整" in output[-1]
+
+
+@pytest.mark.parametrize("failed_phase", ["pydeps", "gateway"])
+def test_deferring_browser_does_not_hide_other_phase_failures(installation, failed_phase):
+    root, base = installation
+    calls, output = [], []
+
+    def execute(r, b, phase, **kwargs):
+        calls.append(phase)
+        return (False, "Access denied") if phase == failed_phase else (True, "success")
+
+    assert runner.run_install(root, base, defer_browser=True, execute=execute,
+                              emit=output.append) == 1
+    expected = [phase["id"] for phase in ic.PHASES if phase["id"] != "chromium"]
+    assert calls == expected[:expected.index(failed_phase) + 1]
+    state = ic.load_state(base)
+    assert state["phases"][failed_phase]["status"] == "failed"
+    assert ic.overall(state)["status"] == "failed"
+    assert failed_phase in output[-1] and "失败" in output[-1]
+
+
 def test_new_version_reexecutes_all_stages(installation):
     root, base = installation
     seen = []

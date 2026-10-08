@@ -45,7 +45,8 @@ def redact(text: str, base: Path) -> str:
 
 
 def phase_command(root: Path, base: Path, phase: str, *,
-                  non_interactive: bool, allow_winget: bool) -> list[str]:
+                  non_interactive: bool, allow_winget: bool,
+                  defer_browser: bool = False) -> list[str]:
     if phase not in {p["id"] for p in ic.PHASES}:
         raise ValueError(f"未知安装阶段：{phase}")
     command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -55,14 +56,17 @@ def phase_command(root: Path, base: Path, phase: str, *,
         command.append("-NonInteractive")
     if allow_winget:
         command.append("-AllowWinget")
+    if defer_browser and phase == "gateway":
+        command.append("-DeferBrowser")
     return command
 
 
 def execute_phase(root: Path, base: Path, phase: str, *,
-                  non_interactive: bool, allow_winget: bool) -> tuple[bool, str]:
+                  non_interactive: bool, allow_winget: bool,
+                  defer_browser: bool = False) -> tuple[bool, str]:
     env = dict(os.environ, EASEL_DATA_DIR=str(base), EASEL_ROOT=str(root), PYTHONUTF8="1")
     command = phase_command(root, base, phase, non_interactive=non_interactive,
-                            allow_winget=allow_winget)
+                            allow_winget=allow_winget, defer_browser=defer_browser)
     # Preserve console Read-Host for the developer entry point only. No secrets
     # entered there pass through the installer log stream.
     interactive = phase == "profile" and not non_interactive
@@ -170,6 +174,7 @@ def installation_lock(base: Path):
 
 def run_install(root: Path, base: Path, *, version: str | None = None,
                 non_interactive: bool = True, allow_winget: bool = False,
+                defer_browser: bool = False,
                 execute=None, sleep=time.sleep, emit=print) -> int:
     root, base = root.resolve(), base.resolve()
     version = installation_version(root, version)
@@ -196,21 +201,40 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
                 emit(message)
 
             report(f"Easel {version} | {root} | 日志：{log_path}")
+            browser_deferred = False
             for phase in ic.PHASES:
                 pid = phase["id"]
+                previous = state["phases"].get(pid) or {}
+                retry_browser = pid == "chromium" and previous.get("status") != "ok" \
+                    and bool(previous.get("deferred"))
+                if pid == "chromium" and defer_browser and previous.get("status") != "ok":
+                    detail = "平台浏览器未安装：已按选项暂缓 Chromium；使用原数据目录、不加 -DeferBrowser 重跑安装可补装。"
+                    state["phases"][pid] = {
+                        **previous, "status": "skipped", "deferred": True,
+                        "lastRun": int(time.time()), "attempts": previous.get("attempts", 0),
+                        "detail": detail,
+                    }
+                    ic.save_state(state, base)
+                    browser_deferred = True
+                    report(f"[{pid}] {detail}")
+                    continue
                 # The two cheap environmental checks always re-run. The costly
                 # dependency/build stages retain successful checkpoints.
-                if not ic.should_run(state, pid) and pid not in ("system", "gateway"):
+                if not ic.should_run(state, pid) and pid not in ("system", "gateway") and not retry_browser:
                     report(f"[{pid}] 已完成，跳过")
                     continue
                 attempt = 0
                 while True:
                     attempt += 1
+                    if pid == "chromium":
+                        previous.pop("deferred", None)
                     ic.mark_running(state, pid, base=base)
                     report(f"[{pid}] {phase['title']}（本次第 {attempt} 次）")
                     try:
-                        ok, detail = executor(root, base, pid, non_interactive=non_interactive,
-                                              allow_winget=allow_winget)
+                        options = {"non_interactive": non_interactive, "allow_winget": allow_winget}
+                        if pid == "gateway" and browser_deferred:
+                            options["defer_browser"] = True
+                        ok, detail = executor(root, base, pid, **options)
                     except KeyboardInterrupt:
                         ic.mark_result(state, pid, False, "用户中断；重新运行可继续", base=base)
                         report(f"[{pid}] 已中断；保留安装状态")
@@ -231,7 +255,10 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
                     delay = ic.retry_wait_seconds(attempt)
                     report(f"[{pid}] 瞬时故障，{delay} 秒后重试")
                     sleep(delay)
-            report("安装环境和 Web 页面验证通过。模型服务可在 Web 设置中配置。")
+            if browser_deferred:
+                report("基础工作台安装和 Web 页面验证通过。平台浏览器未安装；使用原数据目录、不加 -DeferBrowser 重跑安装可补装。模型服务可在 Web 设置中配置。")
+            else:
+                report("完整安装环境和 Web 页面验证通过。模型服务可在 Web 设置中配置。")
             return 0
 
 
@@ -286,6 +313,8 @@ def main(argv=None) -> int:
     parser.add_argument("--version")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--allow-winget", action="store_true")
+    parser.add_argument("--defer-browser", action="store_true",
+                        help="仅暂缓 Chromium，完成基础工作台安装；下次不加此项即可补装")
     parser.add_argument("--verify-web", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -293,7 +322,8 @@ def main(argv=None) -> int:
             verify_web(args.root.resolve(), args.data_dir.resolve())
             return 0
         return run_install(args.root, args.data_dir, version=args.version,
-                           non_interactive=args.non_interactive, allow_winget=args.allow_winget)
+                           non_interactive=args.non_interactive, allow_winget=args.allow_winget,
+                           defer_browser=args.defer_browser)
     except (OSError, ValueError, RuntimeError) as exc:
         print(redact(str(exc), args.data_dir), file=sys.stderr)
         return 1

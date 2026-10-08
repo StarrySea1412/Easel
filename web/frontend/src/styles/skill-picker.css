@@ -44,6 +44,15 @@
 .skill-picker button:focus-visible { outline: 2px solid var(--accent-start); outline-offset: -2px; }
 .chat-composer .composer-heading-main { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; min-width: 0; }
 .composer-selected-skills { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.composer-selected-label { flex: none; color: var(--text-secondary); font-size: 11px; }
+.composer-skill-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; flex-direction: row; flex-wrap: nowrap; flex: none; width: max-content; white-space: nowrap; line-height: 1; }
+.composer-skill-button:hover { color: var(--text); background: var(--surface-2); }
+.composer-skill-button:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 3px; }
+.composer-skill-button > svg, .composer-skill-button > span { flex: none; }
+.composer-skill-label { display: inline; }
+.composer-skill-count { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 5px; background: var(--accent-soft); color: var(--accent-end); font-size: 10px; }
+.composer-skill-chevron { display: block; width: 12px; height: 12px; margin: 0; transition: transform .14s ease; }
+.composer-skill-button[aria-expanded=true] .composer-skill-chevron { transform: rotate(180deg); }
 .composer-skill-chip { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; padding: 3px 4px 3px 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--accent-soft); color: var(--text); font-size: 12px; line-height: 1.6; }
 .composer-skill-chip > span { min-width: 0; overflow-wrap: anywhere; }
 .composer-skill-chip button { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; font-size: 16px; }

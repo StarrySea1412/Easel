@@ -63,4 +63,4 @@
 .office-text-preview pre:focus-visible { outline: 3px solid #99b76c; outline-offset: 3px; }
 .office-text-preview-retry { padding: 7px 10px; border: 1px solid #bdcda9; border-radius: 7px; background: #fffef9; color: #546e3e; font: inherit; font-size: 12px; cursor: pointer; }
 .office-output-monitor button:focus-visible, .office-output-monitor a:focus-visible, .office-output-monitor select:focus-visible, .office-output-monitor input:focus-visible { outline: 3px solid #99b76c; outline-offset: 3px; }
-@media (max-width: 600px) { .office-output-monitor { padding: 16px; } .office-output-heading { flex-wrap: wrap; } .office-output-refresh { padding: 7px 10px; } .office-output-file { padding: 11px; gap: 10px; } }
+@container office-page (max-width: 600px) { .office-output-monitor { padding: 16px; } .office-output-heading { flex-wrap: wrap; } .office-output-refresh { padding: 7px 10px; } .office-output-file { padding: 11px; gap: 10px; } }

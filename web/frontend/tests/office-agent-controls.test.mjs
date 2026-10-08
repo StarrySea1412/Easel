@@ -171,6 +171,47 @@ test('root session stop is explicitly named as a whole-turn action', async t => 
   assert.match(view.container.textContent, /后台已确认本轮会话停止/);
 });
 
+test('a later observation refreshes a late run identity without discarding the model draft', async t => {
+  const view = await fixture(t, { observationKey: 'snapshot-one' });
+  view.h.controls.stop = { available: false, scope: 'agent', reason: '正在等待运行回执', runId: null };
+  await view.render();
+  await view.choose('使用模型', 'channel-a/new-model');
+  assert.equal(view.button('停止此 Agent').disabled, true);
+  view.h.controls.stop = { available: true, scope: 'agent', reason: '', runId: 'late-run' };
+  await view.render({ observationKey: 'snapshot-two' });
+  assert.equal(view.button('停止此 Agent').disabled, false);
+  assert.equal(view.button('保存模型分配').disabled, false, 'background refresh preserves the selected model');
+  view.h.post = async (_url, body) => ({ ...identity, confirmed: true, scope: 'agent', runId: body.expectedRunId });
+  await view.click(view.button('停止此 Agent'));
+  assert.equal(view.h.requests.find(request => request.method === 'POST').body.expectedRunId, 'late-run');
+  assert.match(view.container.textContent, /后台已确认该 Agent 停止/);
+});
+
+test('a confirmed old run does not lock a newly verified run of the same agent', async t => {
+  const view = await fixture(t, { observationKey: 'snapshot-one' });
+  view.h.controls.stop.runId = 'run-one';
+  view.h.post = async (_url, body) => ({ ...identity, confirmed: true, scope: 'agent', runId: body.expectedRunId });
+  await view.render(); await view.click(view.button('停止此 Agent'));
+  assert.equal(view.button('停止此 Agent').disabled, true);
+  view.h.controls.stop.runId = null; view.h.controls.stop.available = false;
+  await view.render({ observationKey: 'between-runs' });
+  view.h.controls.stop.runId = 'run-two'; view.h.controls.stop.available = true;
+  await view.render({ observationKey: 'snapshot-two' });
+  assert.equal(view.button('停止此 Agent').disabled, false);
+  assert.doesNotMatch(view.container.textContent, /后台已确认该 Agent 停止/);
+  await view.click(view.button('停止此 Agent'));
+  assert.equal(view.h.requests.filter(request => request.method === 'POST').at(-1).body.expectedRunId, 'run-two');
+});
+
+test('a stop receipt for another run never confirms the displayed run', async t => {
+  const view = await fixture(t);
+  view.h.controls.stop.runId = 'current-run';
+  view.h.post = async () => ({ ...identity, confirmed: true, scope: 'agent', runId: 'other-run' });
+  await view.render(); await view.click(view.button('停止此 Agent'));
+  assert.doesNotMatch(view.container.textContent, /后台已确认该 Agent 停止/);
+  assert.match(view.container.querySelector('[role=alert]').textContent, /尚未确认/);
+});
+
 test('capability decoding rejects foreign identities and ignores unknown or falsely truthy permissions', () => {
   assert.throws(() => decodeOfficeControls({ ...capability(), turnId: 'another-turn' }, identity), /不属于当前/);
   const raw = capability(); raw.stop.available = 'true'; raw.model.scope = 'current_running_agent';

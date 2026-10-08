@@ -25,7 +25,7 @@ async function fixture(t, overrides = {}, snapshots = {}) {
   const harness = {
     snapshots, hookCalls: [], outputModes: [], leases: 0, releases: 0, refreshes: 0,
     scene: null, sceneHistory: [], sceneMounts: 0, sceneUnmounts: 0, frames: new Map(), nextFrame: 0,
-    now: 0, cancelled: 0, fetches: [], opened: [],
+    now: 0, cancelled: 0, fetches: [], opened: [], composer: null, controlTargets: [],
   };
   globalThis.__officePage = harness;
   t.mock.method(globalThis, 'fetch', async (...args) => { harness.fetches.push(args); throw new Error('Page tests must not fetch'); });
@@ -66,7 +66,8 @@ async function fixture(t, overrides = {}, snapshots = {}) {
       continue;
     }
     const target = specifier === './agent-office/OfficeOutputMonitor' ? moduleUrl('export default function Output(props){globalThis.__officePage.outputModes.push(props.mode);return null;}')
-      : specifier === './agent-office/OfficeAgentControls' ? moduleUrl('export default function EmbeddedPanel(){return null;}') : specifier === '../hooks/useAgentOffice' ? hook
+      : specifier === './agent-office/OfficeAgentControls' ? moduleUrl('export default function EmbeddedPanel(props){globalThis.__officePage.controlTargets.push(props);return null;}')
+      : specifier === './agent-office/OfficeTaskComposer' ? moduleUrl('export default function Composer(props){globalThis.__officePage.composer=props;return null;}') : specifier === '../hooks/useAgentOffice' ? hook
       : specifier === './agent-office/AgentOfficeScene' ? scene
         : specifier === '../lib/agentOffice' ? await tsModuleUrl(new URL('../src/lib/agentOffice.ts', import.meta.url))
           : specifier.startsWith('.') ? await tsModuleUrl(new URL('../src/components/' + specifier + (specifier.includes('/lib/') ? '.ts' : '.tsx'), import.meta.url)) : import.meta.resolve(specifier);
@@ -559,6 +560,48 @@ test('demo time is resynchronized after team and mode changes without leaking se
   assert.equal(view.harness.scene.demoSeek.seconds, 28);
   assert.equal(view.container.querySelectorAll('.office-member-list button').length, 50);
   assert.equal(view.harness.sceneMounts, 1);
+});
+
+test('task focus selects the same observed member for the scene, process and control target, and focuses the output region', async t => {
+  const view = await fixture(t, { demoEnabled: false }, { one: snapshot([agent('first'), agent('second')], {
+    events: [{ id: 'second-result', agentId: 'second', source: 'live', kind: 'result', status: 'returned', title: '已上报的第二位成员回执' }],
+  }) });
+  await view.input(view.container.querySelector('.office-task-focus [role="combobox"]'), 'second');
+  assert.equal(view.harness.scene.selectedId, 'second');
+  assert.equal(view.harness.controlTargets.at(-1).agent.id, 'second');
+  assert.equal(view.harness.controlTargets.at(-1).observationKey, '2026-09-30T08:00:00Z');
+  assert.match(view.container.querySelector('.office-task-focus').textContent, /已上报的第二位成员回执/);
+  await view.click(view.button('查看工作过程'));
+  assert.match(document.querySelector('[role="dialog"]').textContent, /Agent second/);
+  await act(async () => document.querySelector('[aria-label="关闭员工过程"]').click());
+  await view.click(view.button('查看产出与位置 ↓'));
+  assert.equal(document.activeElement, view.container.querySelector('.office-output-anchor'));
+  assert.deepEqual(view.harness.fetches, []);
+});
+
+test('live task submission selects only an accepted session and passes its existing stream and stop status', async t => {
+  const submitted = [];
+  const stream = { phase: 'running', turnId: 'turn-two', blocks: [] };
+  const stop = () => {};
+  const view = await fixture(t, { demoEnabled: false, sessions: [session('one'), session('two')], streams: { two: stream },
+    stoppingSessions: { two: true }, stopErrors: { two: '等待确认' }, onStopTask: stop,
+    onStartTask: request => { submitted.push(request); return request.message === 'reject' ? null : 'two'; },
+  });
+  assert.equal(view.harness.composer.session.id, 'one');
+  let accepted;
+  const request = { sessionId: null, message: '开始新任务', modelRef: 'channel/model' };
+  await act(async () => { accepted = view.harness.composer.onSubmit(request); });
+  assert.equal(accepted, true);
+  assert.deepEqual(submitted, [request]);
+  assert.equal(view.harness.composer.session.id, 'two');
+  assert.equal(view.harness.composer.stream, stream);
+  assert.equal(view.harness.composer.stopping, true);
+  assert.equal(view.harness.composer.stopError, '等待确认');
+  assert.equal(view.harness.composer.onStop, stop);
+  await act(async () => { accepted = view.harness.composer.onSubmit({ sessionId: 'two', message: 'reject' }); });
+  assert.equal(accepted, false);
+  assert.equal(view.harness.composer.session.id, 'two');
+  assert.deepEqual(view.harness.fetches, []);
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
