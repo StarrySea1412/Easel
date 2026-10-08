@@ -25,6 +25,7 @@ A local creative workspace combining conversations, assets, content projects, an
 - A provider character registry covering 14 brands plus the wildcard role, with three first-batch rotatable 3D review studies (Doubao, DeepSeek, wildcard) that export white-background reference images. The studies have not replaced office characters, and the rest remain design directions.
 - Content analysis separates fictional examples from the user's work. Seven platforms have explicit editorial priorities and material requirements, also passed into single-work AI interpretation. Cross-work analysis stays within one platform and account, using up to 12 works and 32 program-generated fact cards, with at most six suggestions. Each suggestion must reference valid fact cards covering at least two works. Results can be saved, exported and used to prefill validation experiments. Real model and platform workflows remain unverified.
 - Page dropdowns use the shared custom Select component; the image/video switch and mask drawing tools reuse RadioGroup. Both sidebar columns, popovers and the main workspace share global surface, border, selected-state and focus colors. The iteration record lists the verification scope.
+- A shared Show demo data switch on Settings → General controls content-analysis samples and the Agent office demo. Turning it off shows saved works, live observations or empty states, persists across reloads and synchronizes tabs on the same origin. Existing records and employee appearances remain intact.
 - A My Trends picker with platform icons for nine sources. Add or remove sources, then explicitly save the list in the current browser; empty lists, restoring defaults and reload recovery are supported. Storage failures do not claim a successful save. Per-source errors, fetch times and retry controls remain distinct, alongside conversation, search and status filters in activity records.
 - Planning, account, profile, content-library and publishing workflows remain available and are being iterated on.
 
@@ -74,6 +75,8 @@ easel web --port 7860
 
 Open the local URL printed by the server and configure your own model channels in Settings. Select an employee in the Agent office to edit their appearance in place. Keep API keys, platform sessions and personal outputs outside Git.
 
+To hide built-in examples, open Settings → General (通用设置) and turn off Show demo data (显示演示数据). Successful changes apply immediately and are saved in the current browser; no server restart is needed. A storage failure keeps the previous setting and reports the problem. Re-enable the switch to restore demo entries without deleting imported works, conversations or employee appearances.
+
 ## Development
 
 React / TypeScript / Vite / Three.js frontend: `web/frontend`. Python backend: `web/app.py`. CLI: `easel/`. Use the project's supported Node.js versions: 24.16+ on 24.x, or 26.1+.
@@ -92,9 +95,11 @@ From the repository root with test dependencies installed:
 python -m pytest -q
 ```
 
-Automated checks for this October 8 iteration: **555/555 frontend tests**, **1417 Python tests passed / 6 skipped**, plus passing lint, TypeScript and production builds. Test counts do not represent equivalent coverage of real external services.
+October 8 demo-setting follow-up: **572/572 frontend tests**, with lint, TypeScript and production builds passing. The earlier same-day Python baseline was **1417 passed / 6 skipped**; this frontend-only follow-up did not rerun backend tests. Test counts do not represent equivalent coverage of real external services.
 
 Actual browser checks covered the sidebar, conversation skill instructions, trend-source saving and mask controls on desktop and at **390×844**. Office issue navigation used demo data, and a **640×480** binary PNG mask was uploaded to the actual local backend. The skill guide's keyboard entry was verified; independent mouse-hover behavior has simulated DOM coverage only. See the [iteration verification record](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md) for individual results.
+
+The demo switch was also checked in the actual browser using mouse and Space/Enter input, reload persistence, settings navigation and the 390×844 layout. Turning it off in another tab removed an open simulated process, team, timeline and output preview; imported analysis records remained. No real model was called for these checks.
 
 CI runs for `main` and `codex/**` branches. Windows installer builds are manual and do not publish releases automatically. New installer discovery and release metadata use this repository and do not fall back to an upstream package when a release is missing.
 

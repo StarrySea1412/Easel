@@ -4,6 +4,7 @@ import { createLazyPage } from './lib/lazyPage';
 import StorageNotice from './components/StorageNotice';
 import { useImageStudio } from './hooks/useImageStudio';
 import { useVideoStudio } from './hooks/useVideoStudio';
+import { useDemoDataPreference } from './hooks/useDemoDataPreference';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
@@ -71,7 +72,8 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const imageStudio = useImageStudio(currentPage === 'image');
   const videoStudio = useVideoStudio(currentPage === 'image');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
+  const demoDataPreference = useDemoDataPreference();
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
@@ -824,15 +826,15 @@ export default function App() {
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':
-        return <ContentAnalysisPage initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
+        return <ContentAnalysisPage demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
         return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} />;
       case 'agent-office':
-        return <AgentOfficePage onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
+        return <AgentOfficePage demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':
-        return <SettingsPanel initialSection={settingsSection} navigationKey={settingsNavigationKey} conversationBackup={{
+        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} navigationKey={settingsNavigationKey} conversationBackup={{
           onExport: handleExportConversations,
           onExportRaw: exportRawConversationStorage,
           onImport: handleImportConversations,
@@ -868,7 +870,7 @@ export default function App() {
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <Sidebar
         currentPage={currentPage}
-        onPageChange={(page) => { if (page === 'settings') setSettingsSection('model'); setCurrentPage(page); }}
+        onPageChange={(page) => { if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page); }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}

@@ -16,12 +16,12 @@ const { createRoot } = await import('react-dom/client');
 const { default: Demo } = await loadTsModule('../src/components/ContentAnalysisDemo.tsx', import.meta.url);
 const { demoContents, demoTotal, demoThemes, demoTrend, filterDemoContents } = await loadTsModule('../src/lib/contentAnalysisDemo.ts', import.meta.url);
 
-async function fixture(t, section = 'review', Component = Demo) {
+async function fixture(t, section = 'review', Component = Demo, initialProps = {}) {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   const calls = { source: 0, sections: [], fetches: [] };
-  let props = { section, onSection: value => { calls.sections.push(value); props.section = value; }, onUseMyData: () => { calls.source++; }, onNavigateAccounts() {}, onNavigateIdeas() {} };
+  let props = { section, onSection: value => { calls.sections.push(value); props.section = value; }, onUseMyData: () => { calls.source++; }, onNavigateAccounts() {}, onNavigateIdeas() {}, ...initialProps };
   t.mock.method(globalThis, 'fetch', async (...args) => { calls.fetches.push(args); throw new Error('Demo must not fetch'); });
   const render = async values => { props = { ...props, ...values }; await act(async () => root.render(createElement(Component, props))); };
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
@@ -142,7 +142,7 @@ async function loadPage() {
   for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
     const specifier = statement.moduleSpecifier.text;
     if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
-    const target = specifier === '../lib/api' ? moduleUrl('export async function fetchAccounts(){globalThis.__demoAccountReads++;return [];}')
+    const target = specifier === '../lib/api' ? moduleUrl('export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);return [];}')
       : specifier === './ContentAnalysisDemo' ? await tsModuleUrl(new URL('../src/components/ContentAnalysisDemo.tsx', import.meta.url))
       : specifier === './icons' ? await tsModuleUrl(new URL('../src/components/icons.tsx', import.meta.url))
       : specifier.startsWith('.') ? moduleUrl(`export default function Panel(){return ${JSON.stringify(specifier === './ContentAnalysisWorkbench' ? '真实作品工作台替身' : '')};}`)
@@ -169,6 +169,46 @@ test('page defaults to isolated demo and mounts real account tools only after se
   assert.equal(globalThis.__demoAccountReads, 1);
   assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
   assert.doesNotMatch(view.container.textContent, /真实作品工作台替身/);
+});
+
+test('disabled demo mounts actual-data tools immediately and never substitutes samples for empty or failed accounts', async t => {
+  globalThis.__demoAccountReads = 0;
+  globalThis.__demoAccountError = '隔离账号读取失败';
+  t.after(() => { delete globalThis.__demoAccountError; });
+  const Page = await loadPage();
+  const view = await fixture(t, 'review', Page, { demoEnabled: false });
+  assert.equal(globalThis.__demoAccountReads, 1);
+  assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
+  assert.equal(view.button('看演示数据'), undefined);
+  assert.match(view.container.textContent, /真实作品工作台替身/);
+  assert.match(view.container.querySelector('[role="alert"]').textContent, /隔离账号读取失败/);
+  globalThis.__demoAccountError = '';
+  await view.click(view.button('重试'));
+  assert.equal(view.container.querySelector('[role="alert"]'), null);
+  assert.match(view.container.textContent, /需要连接账号/);
+  assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
+  assert.equal(view.button('看演示数据'), undefined);
+  await view.render({ autoCollectSignal: 1 });
+  assert.equal(view.container.querySelector('.ca-collection-tools').open, true);
+  assert.equal(view.button('我的数据').getAttribute('aria-pressed'), 'true');
+});
+
+test('a mounted demo exits immediately when disabled and does not interrupt actual work when re-enabled', async t => {
+  globalThis.__demoAccountReads = 0;
+  const Page = await loadPage();
+  const view = await fixture(t, 'review', Page);
+  await view.click(view.button('逐篇看作品'));
+  assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
+  await view.render({ demoEnabled: false });
+  assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
+  assert.equal(view.button('看演示数据'), undefined);
+  assert.equal(globalThis.__demoAccountReads, 1);
+  assert.match(view.container.textContent, /真实作品工作台替身/);
+  await view.render({ demoEnabled: true });
+  assert.equal(view.button('我的数据').getAttribute('aria-pressed'), 'true');
+  assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
+  await view.click(view.button('看演示数据'));
+  assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

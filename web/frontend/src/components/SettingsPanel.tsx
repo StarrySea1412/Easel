@@ -2,6 +2,7 @@ import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
 import ConversationBackupCard from './settings/ConversationBackupCard';
 import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
+import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
 import type { ComponentProps } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
@@ -24,9 +25,9 @@ import type {
   EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
   ImportSource, ImportPreview,
 } from '../lib/api';
-import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
+import { IconGear, IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
 
-export type SettingsSection = 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more';
+export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more';
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string }[] = [
@@ -64,10 +65,11 @@ const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, conversationBackup }: {
+export default function SettingsPanel({ initialSection = 'general', navigationKey = 0, conversationBackup, demoDataPreference }: {
   initialSection?: SettingsSection;
   navigationKey?: number;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
+  demoDataPreference: ComponentProps<typeof DemoDataSettingsCard>;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
   const [sec, setSec] = useState<SettingsSection>(initialSection === 'video' ? 'model' : initialSection);
@@ -594,7 +596,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         <div className="settings-head">
           <div>
             <h2 className="settings-title">设置</h2>
-            <div className="settings-sub">配置导入 · 模型配置 · 环境安装 · 生图通道 · 更多</div>
+            <div className="settings-sub">通用设置 · 模型配置 · 环境安装 · 生图通道 · 更多</div>
           </div>
           <div className="settings-actions">
             {sec === 'model' && (
@@ -620,6 +622,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
         <div className="settings-body">
           <nav className="settings-nav">
+            <button aria-current={sec === 'general' ? 'page' : undefined} className={`snav${sec === 'general' ? ' active' : ''}`} onClick={() => setSec('general')}>
+              <IconGear size={16} />通用设置<small>演示数据开关</small>
+            </button>
             <button aria-current={sec === 'import' ? 'page' : undefined} className={`snav${sec === 'import' ? ' active' : ''}`} onClick={() => { setSec('import'); void openImport(); }}>
               <IconUpload size={16} />配置导入<small>CC Switch 一键迁移</small>
             </button>
@@ -644,6 +649,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
           </nav>
 
           <div className="settings-main">
+          {sec === 'general' && <DemoDataSettingsCard {...demoDataPreference} />}
           {sec === 'employees' && <EmployeeAppearanceSettings />}
           {/* ── 配置导入：CC Switch / OpenClaw 一键迁移（一级分区） ── */}
           {sec === 'import' && (
@@ -1021,7 +1027,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-foot">
-          ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存写入 .env（对话经本地网关路由，主备自动降级）。
+          {sec === 'general' ? '通用设置保存在当前浏览器，同一地址下的其他标签页会同步更新。' : 'ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存写入 .env（对话经本地网关路由，主备自动降级）。'}
         </div>
       </div>
     </div>

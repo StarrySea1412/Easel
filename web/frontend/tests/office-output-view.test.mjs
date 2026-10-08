@@ -43,11 +43,11 @@ test('undated demo files stay in authored order and missing dates never sort ahe
   assert.deepEqual(select([first, dated, second]), [dated, first, second]);
 });
 
-async function fixture(t) {
-  const h = { files: [file('Draft-2.txt'), file('Draft-10.txt', { size: 100 })], requests: [] };
+async function fixture(t, initialMode = 'live') {
+  const h = { files: [file('Draft-2.txt'), file('Draft-10.txt', { size: 100 })], requests: [], metadataResponse: null };
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
     h.requests.push({ url, ...init });
-    if (String(url).endsWith('/api/workspace-outputs')) return { ok: true, json: async () => ({ scope: 'workspace', source: 'local_output_metadata', observedAt: '2026-10-01T00:01:00Z', items: h.files, truncated: false, warnings: [] }) };
+    if (String(url).endsWith('/api/workspace-outputs')) return h.metadataResponse ? h.metadataResponse() : { ok: true, json: async () => ({ scope: 'workspace', source: 'local_output_metadata', observedAt: '2026-10-01T00:01:00Z', items: h.files, truncated: false, warnings: [] }) };
     return new Response('真实返回的测试文本', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   });
   const container = document.createElement('div'); document.body.append(container);
@@ -62,7 +62,7 @@ async function fixture(t) {
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
   const option = async (label, value) => selectOption(container.querySelector(`[role="combobox"][aria-label="${label}"]`), value);
-  await render();
+  await render(initialMode);
   return { h, container, render, click, button, query, option,
     rows: () => [...container.querySelectorAll('.office-output-file-main strong')].map(item => item.textContent),
     open: async name => click(container.querySelector(`[aria-label="查看 ${name}"]`)),
@@ -129,6 +129,36 @@ test('mode changes reset search/type/sort and demo search never reads real files
   assert.match(view.container.textContent, /模拟产出示例/);
   assert.equal(view.h.requests.length, before);
   assert.equal(view.container.querySelectorAll('a').length, 0);
+});
+
+test('switching away from demo removes its files and open preview while live metadata is pending, failed or empty', async t => {
+  const view = await fixture(t, 'demo');
+  await view.open('品牌提案摘要.md');
+  assert.ok(view.container.querySelector('.office-output-demo-preview'));
+  assert.equal(view.h.requests.length, 0);
+  let resolve;
+  view.h.metadataResponse = () => new Promise(done => { resolve = done; });
+  await view.render('live');
+  assert.equal(typeof resolve, 'function');
+  assert.deepEqual(view.rows(), []);
+  assert.equal(view.container.querySelector('.office-output-demo-preview'), null);
+  assert.doesNotMatch(view.container.textContent, /品牌提案摘要|春日视觉方案|交付检查清单|模拟产出示例/);
+  assert.match(view.container.querySelector('.office-output-empty').textContent, /正在读取工作区的真实文件清单/);
+  await act(async () => resolve({ ok: false, status: 503 }));
+  assert.deepEqual(view.rows(), []);
+  assert.match(view.container.querySelector('.office-output-error').textContent, /HTTP 503/);
+  assert.equal(view.container.querySelectorAll('a').length, 0);
+  view.h.metadataResponse = null;
+  view.h.files = [];
+  await view.click(view.button('刷新产出'));
+  assert.deepEqual(view.rows(), []);
+  assert.match(view.container.querySelector('.office-output-empty').textContent, /未发现可展示的近期产出/);
+  view.h.files = [file('Actual.txt')];
+  await view.click(view.button('刷新产出'));
+  assert.deepEqual(view.rows(), ['Actual.txt']);
+  assert.equal(view.container.querySelector('.office-output-preview'), null, 'the former demo selection cannot open a real file');
+  await view.open('Actual.txt');
+  assert.equal(view.container.querySelector('pre').textContent, '真实返回的测试文本');
 });
 
 test.after(() => window.close());

@@ -21,10 +21,10 @@ const moduleUrl = (code) => `data:text/javascript;base64,${Buffer.from(code).toS
 const raw = fs.readFileSync(new URL('../src/components/AgentOfficePage.tsx', import.meta.url), 'utf8');
 let sequence = 0;
 
-async function fixture(t, overrides = {}) {
+async function fixture(t, overrides = {}, snapshots = {}) {
   const harness = {
-    snapshots: {}, hookCalls: [], leases: 0, releases: 0, refreshes: 0,
-    scene: null, sceneMounts: 0, sceneUnmounts: 0, frames: new Map(), nextFrame: 0,
+    snapshots, hookCalls: [], outputModes: [], leases: 0, releases: 0, refreshes: 0,
+    scene: null, sceneHistory: [], sceneMounts: 0, sceneUnmounts: 0, frames: new Map(), nextFrame: 0,
     now: 0, cancelled: 0, fetches: [], opened: [],
   };
   globalThis.__officePage = harness;
@@ -46,7 +46,7 @@ async function fixture(t, overrides = {}) {
     }`);
   const scene = moduleUrl(`import { createElement, useEffect, useState } from ${react};
     export default function Scene(props) {
-      const h=globalThis.__officePage; h.scene=props;
+      const h=globalThis.__officePage; h.scene=props; h.sceneHistory.push(props);
       const [unavailable,setUnavailable]=useState(false);
       useEffect(() => {h.sceneMounts++;return () => {h.sceneUnmounts++;};}, []);
       return createElement('div', {'data-testid':'office-scene'},
@@ -65,7 +65,8 @@ async function fixture(t, overrides = {}) {
       replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' });
       continue;
     }
-    const target = ['./agent-office/OfficeOutputMonitor', './agent-office/OfficeAgentControls'].includes(specifier) ? moduleUrl('export default function EmbeddedPanel(){return null;}') : specifier === '../hooks/useAgentOffice' ? hook
+    const target = specifier === './agent-office/OfficeOutputMonitor' ? moduleUrl('export default function Output(props){globalThis.__officePage.outputModes.push(props.mode);return null;}')
+      : specifier === './agent-office/OfficeAgentControls' ? moduleUrl('export default function EmbeddedPanel(){return null;}') : specifier === '../hooks/useAgentOffice' ? hook
       : specifier === './agent-office/AgentOfficeScene' ? scene
         : specifier === '../lib/agentOffice' ? await tsModuleUrl(new URL('../src/lib/agentOffice.ts', import.meta.url))
           : specifier.startsWith('.') ? await tsModuleUrl(new URL('../src/components/' + specifier + (specifier.includes('/lib/') ? '.ts' : '.tsx'), import.meta.url)) : import.meta.resolve(specifier);
@@ -100,6 +101,99 @@ async function fixture(t, overrides = {}) {
 function session(id, extra = {}) { return { id, title: `会话 ${id}`, created: 1, messages: [], ...extra }; }
 function snapshot(agents, extra = {}) { return { agents, loading: false, error: null, observedAt: '2026-09-30T08:00:00Z', coverage: '来自本轮结构化执行记录，未上报角色不补全', ...extra }; }
 function agent(id, extra = {}) { return { id, name: `Agent ${id}`, role: '协作角色', task: `正在处理任务 ${id}`, state: 'working', source: 'live', ...extra }; }
+
+test('disabled demos use only live data and output mode from the first render while retaining independent study entries', async t => {
+  const events = [
+    { id: 'real-event', agentId: 'real', kind: 'call', title: '真实读取材料', status: 'called', source: 'live' },
+    { id: 'wrong-source', agentId: 'real', kind: 'call', title: '不得显示的模拟调用', status: 'called', source: 'demo' },
+  ];
+  const view = await fixture(t, { demoEnabled: false }, { one: snapshot([agent('real'), agent('demo', { source: 'demo', name: '不得显示的模拟成员' })], { events, turnId: 'real-turn' }) });
+  const h = view.harness;
+  assert.ok(h.sceneHistory.every(scene => scene.agents.length === 1 && scene.agents[0].id === 'real' && scene.demoSeek === undefined));
+  assert.ok(h.outputModes.length > 0 && h.outputModes.every(mode => mode === 'live'));
+  assert.ok(h.hookCalls.every(call => call.enabled && call.sessionId === 'one'));
+  assert.equal(h.frames.size, 0);
+  assert.equal(view.button('演示模式'), undefined);
+  assert.equal(view.button('重播演示'), undefined);
+  assert.equal(view.container.querySelector('.office-demo-team-select, .office-demo-seek, .office-demo-phases'), null);
+  assert.ok(view.button('角色与工位样板'));
+  assert.ok(view.button('模型厂商 3D 形象审核'));
+  assert.doesNotMatch(view.container.textContent, /不得显示的模拟/);
+  await view.click(view.container.querySelector('.office-status-button'));
+  const dialog = document.querySelector('[role="dialog"]');
+  assert.match(dialog.textContent, /真实读取材料/);
+  assert.doesNotMatch(dialog.textContent, /不得显示的模拟/);
+});
+
+test('disabling a running demo cancels its clock and late frames cannot repopulate an empty live scene', async t => {
+  const view = await fixture(t);
+  const lateFrame = [...view.harness.frames.values()][0];
+  assert.equal(typeof lateFrame, 'function');
+  const before = view.harness.sceneHistory.length;
+  await view.render({ demoEnabled: false });
+  assert.ok(view.harness.sceneHistory.slice(before).every(scene => scene.agents.length === 0 && scene.demoSeek === undefined && !scene.paused));
+  assert.equal(view.harness.frames.size, 0);
+  assert.match(view.container.querySelector('.office-scene-notice').textContent, /当前没有可观察的 Agent/);
+  await act(async () => { lateFrame(60_000); document.dispatchEvent(new window.Event('visibilitychange')); });
+  assert.equal(view.harness.frames.size, 0);
+  assert.equal(view.harness.scene.paused, false);
+  assert.equal(view.harness.scene.agents.length, 0);
+  await view.render({ demoEnabled: true });
+  assert.equal(view.button('实时观测').getAttribute('aria-pressed'), 'true');
+  assert.equal(view.harness.frames.size, 0, 'enabling availability must not automatically restart the demo');
+});
+
+test('disabling a paused demo closes its process and clears selection and focus even when a live ID matches', async t => {
+  const view = await fixture(t);
+  await view.click([...view.container.querySelectorAll('.office-member-list button')].find(button => button.textContent.includes('Quill')));
+  await view.click(view.button('并行协作'));
+  await view.click(view.container.querySelector('.office-status-button'));
+  assert.ok(document.querySelector('[role="dialog"]'));
+  assert.equal(view.harness.scene.selectedId, 'writer');
+  assert.equal(view.harness.scene.focusId, 'writer');
+  assert.equal(view.harness.scene.paused, true);
+  view.harness.snapshots.one = snapshot([agent('real-first'), agent('writer')], { turnId: 'real-turn' });
+  const before = view.harness.sceneHistory.length;
+  await view.render({ demoEnabled: false });
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.ok(view.harness.sceneHistory.slice(before).every(scene => scene.selectedId === 'real-first' && scene.focusId === null && !scene.paused));
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.equal(view.harness.sceneUnmounts, 0);
+  assert.doesNotMatch(view.container.querySelector('.office-event-list').textContent, /演示/);
+});
+
+test('changing demo availability preserves an existing live selection, focus, pause and process', async t => {
+  const view = await fixture(t);
+  view.harness.snapshots.one = snapshot([agent('real-first'), agent('real-second')], { turnId: 'real-turn' });
+  await view.click(view.button('实时观测'));
+  await view.click(view.container.querySelectorAll('.office-member-list button')[1]);
+  await view.click(view.button('暂停动画'));
+  await view.click(view.container.querySelector('.office-status-button'));
+  const dialog = document.querySelector('[role="dialog"]');
+  await view.render({ demoEnabled: false });
+  await view.render({ demoEnabled: true });
+  assert.equal(view.harness.scene.selectedId, 'real-second');
+  assert.equal(view.harness.scene.focusId, 'real-second');
+  assert.equal(view.harness.scene.paused, true);
+  assert.equal(document.querySelector('[role="dialog"]'), dialog);
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.equal(view.harness.frames.size, 0);
+});
+
+test('disabled demos retain honest empty and failed observations without filling missing members', async t => {
+  const view = await fixture(t, { demoEnabled: false, sessions: [session('backup', { importedFromBackup: true })] });
+  assert.match(view.container.querySelector('.office-scene-notice').textContent, /还没有可观察的会话/);
+  assert.equal(view.harness.leases, 0);
+  await view.render({ sessions: [session('one')], activeSessionId: 'one' });
+  assert.match(view.container.querySelector('.office-scene-notice').textContent, /当前没有可观察的 Agent/);
+  view.harness.snapshots.one = snapshot([], { error: '后台暂时不可用' });
+  await view.render();
+  assert.match(view.container.querySelector('.office-observation-error').textContent, /后台暂时不可用.*未填入模拟角色/);
+  assert.equal(view.harness.scene.agents.length, 0);
+  assert.equal(view.button('演示模式'), undefined);
+  assert.ok(view.harness.outputModes.every(mode => mode === 'live'));
+  assert.equal(view.harness.frames.size, 0);
+});
 
 test('status opens exact employee process and changing the observed session closes it', async t => {
   const view = await fixture(t, { sessions:[session('one'), session('two')] });

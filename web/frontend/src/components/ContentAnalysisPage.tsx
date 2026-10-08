@@ -21,12 +21,14 @@ const PLATFORMS = [
 
 const validPlatform = (value?: string) => PLATFORMS.some((item) => item.id === value) ? value! : 'xiaohongshu';
 
-export default function ContentAnalysisPage({ initialPlatform, onNavigateAccounts, onNavigateIdeas, autoCollectSignal = 0, onAutoCollectHandled }: {
+export default function ContentAnalysisPage({ initialPlatform, onNavigateAccounts, onNavigateIdeas, autoCollectSignal = 0, onAutoCollectHandled, demoEnabled = true }: {
   initialPlatform?: string; onNavigateAccounts: () => void; onNavigateIdeas: () => void;
   autoCollectSignal?: number; onAutoCollectHandled?: () => void;
+  demoEnabled?: boolean;
 }) {
   const [platform, setPlatform] = useState(() => validPlatform(initialPlatform));
-  const [dataSource, setDataSource] = useState<'demo' | 'mine'>(() => autoCollectSignal > 0 ? 'mine' : 'demo');
+  const [requestedSource, setDataSource] = useState<'demo' | 'mine'>(() => !demoEnabled || autoCollectSignal > 0 ? 'mine' : 'demo');
+  const dataSource = demoEnabled ? requestedSource : 'mine';
   const [section, setSection] = useState<AnalysisSection>('review');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +48,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   }, []);
 
   useEffect(() => { if (dataSource === 'mine') void refresh(); return () => { request.current += 1; }; }, [refresh, dataSource]);
+  useEffect(() => { if (!demoEnabled) setDataSource('mine'); }, [demoEnabled]);
   useEffect(() => { if (autoCollectSignal > 0) { setDataSource('mine'); setSection('review'); } }, [autoCollectSignal]);
   useEffect(() => { setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
   const selected = PLATFORMS.find((item) => item.id === platform)!;
@@ -63,7 +66,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden={true}>↗</span></button></div>
       </header>
 
-      <div className="ca-data-source"><div role="group" aria-label="分析数据来源"><button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button><button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '这里读取你保存的作品。没有记录时，可连接账号或导入作品。'}</p></div>
+      <div className="ca-data-source"><div role="group" aria-label="分析数据来源">{demoEnabled && <button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button>}<button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '这里读取你保存的作品。没有记录时，可连接账号或导入作品。'}</p></div>
 
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'ca-platform is-selected' : 'ca-platform'} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>

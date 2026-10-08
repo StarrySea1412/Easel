@@ -44,7 +44,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
 for (const replacement of replacements.reverse()) code = code.slice(0, replacement.start) + replacement.text + code.slice(replacement.end);
 const { default: Page } = await import(moduleUrl(code));
 
-async function fixture(t) {
+async function fixture(t, overrides = {}) {
   storage.fail = false;
   appearance.resetEmployeeAppearances();
   storage.writes = [];
@@ -58,10 +58,11 @@ async function fixture(t) {
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('No backend calls in editor tests'); });
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
-  const props = { sessions: [{ id: 'one', title: '测试会话', messages: [] }], activeSessionId: 'one', streams: {}, onOpenChat() {}, onOpenSettings() { harness.settings++; } };
-  await act(async () => root.render(createElement(Page, props)));
+  let props = { sessions: [{ id: 'one', title: '测试会话', messages: [] }], activeSessionId: 'one', streams: {}, onOpenChat() {}, onOpenSettings() { harness.settings++; }, ...overrides };
+  const render = async (patch = {}) => { props = { ...props, ...patch }; await act(async () => root.render(createElement(Page, props))); };
+  await render();
   t.after(async () => { await act(async () => root.unmount()); container.remove(); storage.fail = false; });
-  return { container, harness,
+  return { container, harness, render,
     dialog: () => document.querySelector('[role="dialog"]'),
     button: label => [...document.querySelectorAll('button')].find(item => item.textContent.replace(/[▶Ⅱ↺⌖↗]/g, '').trim() === label),
     async click(element) { assert.ok(element, 'target exists'); await act(async () => { element.focus(); element.click(); }); },
@@ -141,6 +142,56 @@ test('shared generic cards preview only the selected live Agent and keep real na
   assert.equal(view.button('实时观测').getAttribute('aria-pressed'), 'true');
   await view.click(view.button('保存角色卡'));
   assert.ok(view.harness.scene.agents.every(agent => agent.appearance.shirtColor === '#445566'));
+});
+
+test('disabling demos discards a dirty appearance without writes or leaking it to a live Agent with the same ID', async t => {
+  const view = await fixture(t);
+  await view.click(view.container.querySelector('[data-agent="researcher"]'));
+  await view.click(view.button('近看选中员工'));
+  await view.click(view.button('暂停动画'));
+  await view.click(view.button('编辑角色卡'));
+  await view.input(view.dialog().querySelector('.office-editor-fields input'), '不得带入真实成员的草稿');
+  await view.input(view.dialog().querySelector('[aria-label="服装颜色"]'), '#123456');
+  const saved = appearance.readEmployeeAppearances();
+  view.harness.liveAgents = [{ id: 'researcher', name: '同 ID 的真实研究员', role: '真实职责', task: '真实任务', source: 'live', state: 'working' }];
+  await view.render({ demoEnabled: false });
+  assert.equal(view.dialog(), null);
+  assert.equal(view.container.querySelector('.office-workspace').hasAttribute('inert'), false);
+  assert.equal(view.container.querySelector('.agent-office-page').classList.contains('is-editing-appearance'), false);
+  assert.equal(view.harness.scene.agents[0].name, '同 ID 的真实研究员');
+  assert.notEqual(view.harness.scene.agents[0].appearance.name, '不得带入真实成员的草稿');
+  assert.notEqual(view.harness.scene.agents[0].appearance.shirtColor, '#123456');
+  assert.equal(view.harness.scene.focusId, null);
+  assert.equal(view.harness.scene.paused, false);
+  assert.deepEqual(appearance.readEmployeeAppearances(), saved);
+  assert.deepEqual(storage.writes, []);
+  await view.render({ demoEnabled: true });
+  await view.click(view.button('演示模式'));
+  assert.equal(view.dialog(), null);
+  assert.equal(view.harness.scene.agents.find(agent => agent.id === 'researcher').appearance.name, saved.find(card => card.id === 'researcher').name);
+  assert.deepEqual(storage.writes, []);
+});
+
+test('disabling demos while editing live preserves the selected member, camera and unsaved draft', async t => {
+  const view = await fixture(t);
+  await view.click(view.button('实时观测'));
+  await view.click(view.container.querySelector('[data-agent="live-second"]'));
+  await view.click(view.button('近看选中员工'));
+  await view.click(view.button('编辑角色卡'));
+  await view.input(view.dialog().querySelector('[aria-label="服装颜色"]'), '#445566');
+  const dialog = view.dialog();
+  await view.render({ demoEnabled: false });
+  assert.equal(view.dialog(), dialog);
+  assert.equal(view.harness.scene.selectedId, 'live-second');
+  assert.equal(view.harness.scene.focusId, 'live-second');
+  assert.equal(view.dialog().querySelector('[aria-label="服装颜色"]').value, '#445566');
+  assert.equal(view.harness.scene.agents[1].appearance.shirtColor, '#445566');
+  assert.deepEqual(storage.writes, []);
+  await view.click(view.button('保存角色卡'));
+  assert.equal(view.dialog(), null);
+  assert.equal(appearance.readEmployeeAppearances().find(card => card.id === 'generic').shirtColor, '#445566');
+  assert.equal(view.harness.mounts, 1);
+  assert.equal(view.harness.unmounts, 0);
 });
 
 test('failed save retains draft, does not publish it or enqueue a later write, and cancel restores original', async t => {
@@ -239,6 +290,20 @@ test('opening the character study suspends the hidden demo clock and returning r
   assert.equal(Number(view.container.querySelector('.office-demo-seek').value), elapsed);
   await view.advance(70200);
   assert.equal(Number(view.container.querySelector('.office-demo-seek').value), 1.4);
+});
+
+test('independent character studies stay available when demo data is disabled and return to live observation', async t => {
+  const view = await fixture(t, { demoEnabled: false });
+  assert.equal(view.button('演示模式'), undefined);
+  await view.click(view.button('角色与工位样板'));
+  assert.ok(view.button('返回办公室样板'));
+  assert.equal(view.harness.frames.size, 0);
+  await view.render({ demoEnabled: true });
+  await view.render({ demoEnabled: false });
+  await view.click(view.button('返回办公室样板'));
+  assert.equal(view.button('实时观测').getAttribute('aria-pressed'), 'true');
+  assert.ok(view.harness.scene.agents.every(agent => agent.source === 'live'));
+  assert.equal(view.harness.frames.size, 0);
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

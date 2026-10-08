@@ -36,6 +36,9 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   } else if (specifier === './settings/EmployeeAppearanceSettings') {
     target = moduleUrl(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
       export default function EmployeeSettings() {return createElement('section',{'data-testid':'employee-settings'},'员工角色卡桩');}`);
+  } else if (specifier === './settings/DemoDataSettingsCard') {
+    target = moduleUrl(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
+      export default function DemoSettings(props) {globalThis.__settingsBackupNavigation.demoProps=props;return createElement('section',{'data-testid':'demo-settings'},'演示数据设置桩');}`);
   } else {
     const named = statement.importClause?.namedBindings;
     const names = named && ts.isNamedImports(named) ? named.elements.map(item => (item.propertyName || item.name).text) : [];
@@ -77,10 +80,11 @@ async function fixture(t) {
     container.remove();
     delete globalThis.__settingsBackupNavigation;
   });
-  const render = async (navigationKey, conversationBackup = props, initialSection = 'more') => act(async () => root.render(createElement(SettingsPanel, { initialSection, navigationKey, conversationBackup })));
+  const demoDataPreference = { enabled: false, saved: true, error: '', onChange() {} };
+  const render = async (navigationKey, conversationBackup = props, initialSection = 'more') => act(async () => root.render(createElement(SettingsPanel, { initialSection: initialSection === 'default' ? undefined : initialSection, navigationKey, conversationBackup, demoDataPreference })));
   await render(0);
   return {
-    container, harness, props, render,
+    container, harness, props, render, demoDataPreference,
     nav: label => [...container.querySelectorAll('.snav')].find(button => button.textContent.startsWith(label)),
     click: async button => act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
   };
@@ -150,6 +154,20 @@ test('employee appearance is a reachable independent settings section without ad
   await view.click(view.nav('更多设置'));
   assert.equal(view.container.querySelector('[data-testid="employee-settings"]'), null);
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
+});
+
+test('settings opens general by default and the demo preference remains reachable from model configuration', async t => {
+  const view = await fixture(t);
+  await view.render(1, view.props, 'default');
+  assert.equal(view.nav('通用设置').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
+  assert.deepEqual(view.harness.demoProps, view.demoDataPreference);
+  const before = view.harness.calls.length;
+  await view.click(view.nav('模型配置'));
+  assert.equal(view.container.querySelector('[data-testid="demo-settings"]'), null);
+  await view.click(view.nav('通用设置'));
+  assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
+  assert.equal(view.harness.calls.length, before);
 });
 
 test.after(async () => {

@@ -31,6 +31,7 @@ const DEMO_PHASES = [
 ];
 
 interface AgentOfficePageProps {
+  demoEnabled?: boolean;
   sessions: ChatSession[];
   activeSessionId: string | null;
   streams: Record<string, StreamState>;
@@ -55,12 +56,17 @@ function StateBadge({ state, stale = false }: { state: OfficeAgent['state']; sta
   return <span className={`office-state office-state-${state}`}><i aria-hidden="true" />{stale ? '快照 · ' : ''}{OFFICE_STATE_LABELS[state]}</span>;
 }
 
-export default function AgentOfficePage({ sessions, activeSessionId, streams, onOpenChat, onOpenActivity, onOpenModels, onOpenOutputs }: AgentOfficePageProps) {
-  const [mode, setMode] = useState<'demo' | 'live'>('demo');
+export default function AgentOfficePage({ demoEnabled = true, sessions, activeSessionId, streams, onOpenChat, onOpenActivity, onOpenModels, onOpenOutputs }: AgentOfficePageProps) {
+  const [chosenMode, setMode] = useState<'demo' | 'live'>(() => demoEnabled ? 'demo' : 'live');
+  // All data and child panels use the effective mode during this render, before
+  // transition cleanup runs. Disabling examples must never paint a demo frame.
+  const mode = demoEnabled ? chosenMode : 'live';
+  const leavingDemo = chosenMode === 'demo' && mode === 'live';
   const [showStudy, setShowStudy] = useState(false);
   const [showProviders, setShowProviders] = useState(false);
   const [sessionChoice, setSessionChoice] = useState<string | null>(activeSessionId);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelectedId] = useState<string | null>(null);
+  const selectedId = leavingDemo ? null : selection;
   // Demo team size survives remounts like the studio drafts; invalid values fall back to 6.
   const [demoTeamSize, setDemoTeamSize] = useState<OfficeDemoTeamSize>(() => {
     try {
@@ -68,21 +74,30 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
       return (OFFICE_DEMO_TEAM_SIZES as readonly number[]).includes(stored) ? stored as OfficeDemoTeamSize : 6;
     } catch { return 6; }
   });
-  const [memberQuery, setMemberQuery] = useState('');
-  const [paused, setPaused] = useState(false);
+  const [memberSearch, setMemberQuery] = useState('');
+  const memberQuery = leavingDemo ? '' : memberSearch;
+  const [playbackPaused, setPaused] = useState(false);
+  const paused = leavingDemo ? false : playbackPaused;
   const [resetKey, setResetKey] = useState(0);
   const [demoRunKey, setDemoRunKey] = useState(0);
   const [demoSeek, setDemoSeek] = useState({ seconds: 0, revision: 0 });
   const [elapsed, setElapsed] = useState(0);
   const [eventFilter, setEventFilter] = useState<'selected' | 'all'>('selected');
   const [processTarget, setProcessTarget] = useState<{ id: string; scope: string } | null>(null);
-  const [bindingNotice, setBindingNotice] = useState('');
-  const [appearanceEdit, setAppearanceEdit] = useState<{ agentId: string; agentName: string; live: boolean; original: EmployeeAppearance; draft: EmployeeAppearance } | null>(null);
+  const [bindingMessage, setBindingNotice] = useState('');
+  const bindingNotice = leavingDemo ? '' : bindingMessage;
+  const [appearanceDraft, setAppearanceEdit] = useState<{ agentId: string; agentName: string; live: boolean; original: EmployeeAppearance; draft: EmployeeAppearance } | null>(null);
+  // Agent IDs can coincide across demo and live data. A draft belongs to its
+  // source as well as its identity and must not leak into the other scene.
+  const appearanceEdit = appearanceDraft?.live === (mode === 'live') ? appearanceDraft : null;
+  const appearanceEditRef = useRef(appearanceEdit);
+  appearanceEditRef.current = appearanceEdit;
   const pageElement = useRef<HTMLDivElement>(null);
   const previewElement = useRef<HTMLDivElement>(null);
   const scrollBeforeEdit = useRef<number | null>(null);
   const appearanceEditorOpen = Boolean(appearanceEdit);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusedAgent, setFocusId] = useState<string | null>(null);
+  const focusId = leavingDemo ? null : focusedAgent;
   const [feedback, setFeedback] = useState<{ scope: string; message: string } | null>(null);
   const previousStates = useRef<{ scope: string; states: Map<string, OfficeAgent['state']> } | null>(null);
   const appearances = useEmployeeAppearances();
@@ -96,7 +111,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const rawAgents = useMemo(() => mode === 'demo'
     ? createTeamDemoOfficeAgents(elapsed, demoTeamSize)
     : live.agents.filter((agent) => agent.source === 'live'), [mode, elapsed, demoTeamSize, live.agents]);
-  const allEvents = useMemo(() => mode === 'demo' ? createTeamDemoOfficeEvents(elapsed, rawAgents) : live.events || [], [mode, elapsed, rawAgents, live.events]);
+  const allEvents = useMemo(() => mode === 'demo' ? createTeamDemoOfficeEvents(elapsed, rawAgents) : (live.events || []).filter(event => event.source === 'live'), [mode, elapsed, rawAgents, live.events]);
   const agents = useMemo(() => rawAgents.map(agent => {
     const cardId = assignments[agent.id] || (agent.source === 'demo' ? demoOfficeCardId(agent.id) : 'generic');
     const savedAppearance = appearances.find(card => card.id === cardId) || appearances[6];
@@ -140,6 +155,22 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
   const demoPhase = DEMO_PHASES.findLast(phase => elapsed >= phase.seconds) ?? DEMO_PHASES[0];
 
   useLayoutEffect(() => {
+    if (!leavingDemo) return;
+    // Re-enabling examples leaves the user in live mode until they explicitly
+    // choose demo again. Live selections and edits are untouched by this path.
+    setMode('live');
+    setSelectedId(null);
+    setMemberQuery('');
+    setProcessTarget(null);
+    setFocusId(null);
+    setPaused(false);
+    setAppearanceEdit(current => current?.live ? current : null);
+    setBindingNotice('');
+    setFeedback(null);
+    previousStates.current = null;
+  }, [leavingDemo]);
+
+  useLayoutEffect(() => {
     const page = pageElement.current;
     if (!page) return;
     if (appearanceEditorOpen && previewElement.current) {
@@ -176,10 +207,12 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
 
   useEffect(() => {
     if (mode !== 'demo' || paused || showStudy || showProviders) return;
+    let disposed = false;
     let frame = 0;
     let previous: number | null = null;
     let lastPaint = 0;
     const tick = (now: number) => {
+      if (disposed) return;
       if (document.hidden) { previous = null; return; }
       if (previous !== null) elapsedRef.current = Math.min(DEMO_DURATION_SECONDS, elapsedRef.current + Math.max(0, now - previous) / 1000);
       previous = now;
@@ -193,21 +226,25 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
       else frame = window.requestAnimationFrame(tick);
     };
     const visibility = () => {
+      if (disposed) return;
       window.cancelAnimationFrame(frame);
       previous = null;
       if (!document.hidden) frame = window.requestAnimationFrame(tick);
     };
     document.addEventListener('visibilitychange', visibility);
     visibility();
-    return () => { window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', visibility); };
+    return () => { disposed = true; window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', visibility); };
   }, [mode, paused, showStudy, showProviders]);
 
   const changeMode = (next: 'demo' | 'live') => {
+    if (next === mode || (next === 'demo' && !demoEnabled)) return;
     setMode(next);
     setSelectedId(null);
     setMemberQuery('');
     setProcessTarget(null);
     setFocusId(null);
+    setAppearanceEdit(null);
+    setBindingNotice('');
     setPaused(next === 'demo' && elapsedRef.current >= DEMO_DURATION_SECONDS);
     if (next === 'demo') setDemoSeek(value => ({ seconds: elapsedRef.current, revision: value.revision + 1 }));
   };
@@ -251,7 +288,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
           <div className="office-mode-controls" role="group" aria-label="办公室数据模式">
             <button type="button" onClick={() => setShowStudy(true)}>角色与工位样板 ↗</button>
             <button type="button" onClick={() => setShowProviders(true)}>模型厂商 3D 形象审核 ↗</button>
-            <button type="button" aria-pressed={mode === 'demo'} onClick={() => changeMode('demo')}>演示模式</button>
+            {demoEnabled && <button type="button" aria-pressed={mode === 'demo'} onClick={() => changeMode('demo')}>演示模式</button>}
             <button type="button" aria-pressed={mode === 'live'} onClick={() => changeMode('live')}>实时观测</button>
           </div>
         </header>
@@ -385,6 +422,7 @@ export default function AgentOfficePage({ sessions, activeSessionId, streams, on
         onChange={draft => setAppearanceEdit(current => current ? { ...current, draft } : current)}
         onCancel={() => setAppearanceEdit(null)}
         onSave={draft => {
+          if (appearanceEditRef.current !== appearanceEdit) return;
           // Merge only this card into the latest store so other edits are retained.
           const saved = saveEmployeeAppearances(readEmployeeAppearances().map(card => card.id === draft.id ? draft : card), { requirePersistence: true });
           if (!saved) throw new Error('尚未保存到本机，草稿仍保留在这里。请检查浏览器存储后再次保存；取消会恢复原来的角色卡。');

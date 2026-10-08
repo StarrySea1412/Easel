@@ -116,6 +116,16 @@
 .settings-page .key-mask { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11.5px; overflow-wrap: anywhere; }
 .settings-page .save-note { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; background: var(--green-soft); color: #15803d; font-size: 12.5px; overflow-wrap: anywhere; }
 .settings-page .save-note.err, .settings-page .env-error { background: var(--red-soft); color: #b91c1c; }
+.settings-page .demo-data-settings { max-width: 900px; padding: clamp(16px, 3vw, 24px); }
+.settings-page .demo-data-settings h3 { margin: 0 0 8px; font-size: 18px; }
+.settings-page .demo-data-settings header p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.settings-page .demo-data-setting-row { display: flex; align-items: center; flex-wrap: wrap; gap: 16px 24px; margin: 22px 0 16px; padding-block: 18px; border-block: 1px solid var(--border); }
+.settings-page .demo-data-setting-row > div:first-child { flex: 1 1 220px; min-width: 0; }
+.settings-page .demo-data-setting-row label { font-size: 14px; font-weight: 600; cursor: pointer; }
+.settings-page .demo-data-setting-row p { margin: 6px 0 0; font-size: 13px; line-height: 1.8; color: var(--text-secondary); }
+.settings-page .demo-data-setting-control { display: flex; align-items: center; gap: 10px; margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+.settings-page .demo-data-save-state { margin: 0 0 10px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.7; }
+.settings-page .demo-data-settings > .hint { margin: 0; }
 .settings-page .env-error { margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--red-soft); border-radius: 9px; font-size: 12.5px; overflow-wrap: anywhere; }
 
 /* Every provider field remains labelled at every width. */

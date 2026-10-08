@@ -347,6 +347,35 @@ test('repeated backup navigation emits a new settings request even while already
   assert.deepEqual(view.harness.calls, []);
 });
 
+test('App shares the saved demo preference across settings, analysis and office navigation', async t => {
+  const key = 'easel:demo-data:v1';
+  const view = await fixture(t, { [key]: JSON.stringify({ version: 1, enabled: false }), easel_sessions: JSON.stringify([sourceSession]), easel_active_session: sourceSession.id });
+  const navigate = page => act(async () => view.harness.sidebar.onPageChange(page));
+  await navigate('analysis');
+  assert.equal(view.harness.pages['内容分析'].demoEnabled, false);
+  await navigate('agent-office');
+  assert.equal(view.harness.pages['Agent 办公室'].demoEnabled, false);
+  await navigate('settings');
+  assert.equal(view.harness.pages['设置'].initialSection, 'general');
+  assert.equal(view.harness.pages['设置'].demoDataPreference.enabled, false);
+  await act(async () => view.harness.pages['设置'].demoDataPreference.onChange(true));
+  assert.equal(JSON.parse(view.values.get(key)).enabled, true);
+  await navigate('analysis');
+  assert.equal(view.harness.pages['内容分析'].demoEnabled, true);
+  await navigate('agent-office');
+  assert.equal(view.harness.pages['Agent 办公室'].demoEnabled, true);
+  view.values.set(key, JSON.stringify({ version: 1, enabled: false }));
+  await act(async () => window.dispatchEvent(new window.StorageEvent('storage', { key })));
+  assert.equal(view.harness.pages['Agent 办公室'].demoEnabled, false, 'an open office receives another tab’s setting immediately');
+  await act(async () => view.harness.pages['Agent 办公室'].onOpenModels());
+  assert.equal(view.harness.pages['设置'].initialSection, 'model', 'explicit model links keep their destination');
+  await navigate('settings');
+  assert.equal(view.harness.pages['设置'].initialSection, 'general');
+  assert.equal(view.harness.pages['设置'].demoDataPreference.enabled, false);
+  assert.deepEqual(JSON.parse(view.values.get('easel_sessions')), [sourceSession]);
+  assert.equal(view.harness.streams.length, 0);
+});
+
 test('reopening a saved imported user-only snapshot never resumes its old job and can open a fresh chat', async t => {
   const imported = { ...sourceSession, id: 'saved-copy', importedFromBackup: true, backupIncomplete: true,
     messages: [{ role: 'user', content: '只有提问的快照' }], pendingTurnId: 'old-job', sessionKey: 'old-key' };
