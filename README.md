@@ -5,6 +5,8 @@
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
 > 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-08**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+>
+> Windows x64 便携预览候选正在本地装配，最终 ZIP 尚未验收或公开发布。使用方式、固定组件和构建方法见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 这一版有什么
 
@@ -57,6 +59,12 @@
 角色自然持物、完整动作与任务交接仍在迭代；职责/能力配置、真实任务产出归属、逐帧碰撞与性能尚未完整验收。10 月 1 日热点 HTTP 抽查中，7 个来源取得内容，知乎与头条限流；10 月 8 日知乎主来源抽查恢复并返回 30 条问题热榜，不能据此保证长期可用。历史逐项状态见 [工作台整改与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)。
 
 知乎备用适配通过启动环境变量 `EASEL_ZHIHU_DAILYHOT_URL` 显式启用，默认关闭；可配置自部署或获准使用、兼容 DailyHotApi-Go 的完整问题热榜接口，重启后端后仅在主来源失败或冷却时尝试。公开演示实例只做过核验，没有设为默认依赖；这不是搜索关键词 API，也不以响应生成时间冒充榜单更新时间。配置方式、实际 HTTP 证据与限制见 [知乎热榜修正记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/zhihu-trends-2026-10-08.md)。
+
+## Windows 便携预览候选（装配中）
+
+R24 正在准备包含应用、前端、CPython 3.12.10、Node 24.19.0、OpenClaw 2026.9.2、FFmpeg 9.0.1 与匹配 Chromium 153.0.8010.12 / r1243 的 Windows x64 便携 ZIP。候选目标是完整解压到较短可写目录后双击 `Easel.exe`，由包内运行环境启动工作台；配置和产出保存在同目录的 `data`。图形控制窗口关闭时停止本副本服务，另有启动、检查和停止用的 `.cmd` 入口。
+
+模型服务需要使用者自己的 API Key；可选 Whisper、rembg 等模型权重未预装。本地候选尚未签名、尚未完成最终 ZIP 与全新 Windows 虚拟机完整验收，也未创建公开 Release，**已有 0.2.6 联网安装包保持原样**。当前装配状态与后续文件校验信息集中记录于 [Windows 便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 从本仓库源码开始
 

@@ -15,6 +15,7 @@ back to the PATH `openclaw` executable rather than hard-failing.
 
 from __future__ import annotations
 
+import os
 import shutil
 from functools import lru_cache
 from pathlib import Path
@@ -25,8 +26,25 @@ def openclaw_base_cmd() -> list[str]:
     """Return the argv prefix for invoking openclaw.
 
     Prefers ``[node, /path/to/openclaw.mjs]``; falls back to ``[openclaw]`` on
-    PATH. Raises FileNotFoundError only when openclaw cannot be located at all.
+    PATH. Explicit portable overrides take precedence and fail if incomplete.
+    Raises FileNotFoundError when the requested runtime cannot be located.
     """
+    # Portable processes must stay with the Node and OpenClaw shipped together.
+    # A missing component must not silently select a user's global installation.
+    configured_node = os.environ.get("EASEL_NODE_EXECUTABLE", "").strip()
+    configured_entry = os.environ.get("EASEL_OPENCLAW_ENTRY", "").strip()
+    if configured_node or configured_entry:
+        node_path, entry_path = Path(configured_node), Path(configured_entry)
+        if (not configured_node or not configured_entry
+                or not node_path.is_absolute() or not entry_path.is_absolute()
+                or not node_path.is_file() or not entry_path.is_file()
+                or entry_path.name != "openclaw.mjs"):
+            raise FileNotFoundError(
+                "The explicitly selected Node/OpenClaw runtime is incomplete; "
+                "restore the portable runtime before starting Easel."
+            )
+        return [str(node_path.resolve()), str(entry_path.resolve())]
+
     node = shutil.which("node")
     oc = shutil.which("openclaw")
 

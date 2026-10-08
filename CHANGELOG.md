@@ -4,6 +4,12 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-08 R24: Windows portable preview in preparation
+
+- Prepare a separate Windows x64 portable candidate with a graphical `Easel.exe` entry, start/status/stop command fallbacks, bundled runtimes and a data directory relative to the extracted folder. The graphical window is intended to stop this copy's services when closed; command-file users use the explicit stop entry.
+- Fix the candidate component targets at CPython 3.12.10 embedded amd64, Node 24.19.0, OpenClaw 2026.9.2, FFmpeg 9.0.1, and Playwright-matched Chromium 153.0.8010.12 / r1243 with headless shell, FFmpeg r1011 and winldd r1007. Keep a separate exact portable Python lock, component provenance, checksums and third-party licenses. Users provide model credentials; optional Whisper/rembg model weights are not preinstalled.
+- Document the five-component builder input, full extraction, lifecycle and relocation requirements in the [portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md). Local assembly is in progress: final ZIP acceptance, clean Windows VM verification, signing and R24 Git delivery are pending. No public Release has been created, and the existing 0.2.6 online installer EXE / ZIP remains unchanged. Earlier source-test results do not establish acceptance of this candidate.
+
 ### 2026-10-08 follow-up: responsive layouts, quick-create skills, office tasks and first-run setup
 
 - Replace the settings navigation's horizontal scroller with a wrapping grid and allow model-channel choices to wrap. Dashboard, creator pages, analysis and the office now use their available container width, including space taken by expanded sidebar columns. Fix squeezed calendar/profile/action rows, adapt idea columns, keep card actions reachable by keyboard and touch, and constrain long forms and process panels to the visible height. Wide data tables retain their own internal scrolling.

@@ -2,6 +2,16 @@
 
 更新：2026-10-08（Asia/Shanghai）。本页维护当前状态；完成条件见 [迭代计划](secondary-development-plan.md)。
 
+## Windows x64 便携预览候选（2026-10-08，R24，装配中）
+
+R24 优先准备独立的本地便携 ZIP 候选。构建器、运行管理器和 C# 图形入口正在实际装配；目标是完整解压到较短可写目录后双击 `Easel.exe`，使用包内运行环境，按相对路径保存 `runtime` 与 `data`，关闭图形控制窗口时停止本副本服务，并提供启动、检查、停止 `.cmd` 兜底入口。
+
+固定装配范围为 CPython **3.12.10 embedded amd64**、Node **24.19.0**、OpenClaw **2026.9.2**、FFmpeg **9.0.1**，以及匹配 Playwright 的 Chromium **153.0.8010.12 / r1243**、headless shell、FFmpeg **r1011** 和 winldd **r1007**。Python 使用实际便携包集的独立精确锁；五组件的公开来源、校验与许可随候选保留。包内不带用户 Key、平台登录态或个人产出，可选 Whisper/rembg 模型权重不预装。
+
+**当前尚未完成最终 ZIP 验收和 R24 Git 推送，也未创建公开 Release。** 候选未签名，完整解压后的首次启动、停止、迁移、真实浏览器入口及全新 Windows 虚拟机结果需继续登记，不能沿用下方 R16–R23 通过数替代。既有 **0.2.6 联网安装 EXE / ZIP** 保持原样，未替换其内容。
+
+用户操作、五组件 JSON 字段和已存在的 builder CLI 见 [Windows 便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。最终候选名称、SHA-256、实际验收和推送回执由后续结果更新；逐项任务继续以 [持续交付清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md) 为准。
+
 ## 响应式、工作台技能、办公室任务与新用户启动（2026-10-08，R16–R23）
 
 本轮功能实现与所列验收完成：前端 **639/639**、Python **1449 passed / 6 skipped**，lint、TypeScript、生产构建通过；随后追加的安装修正另有 **65 项定向通过**。16 个主页面在 390/768/1280px 核对入口与布局，最后日历标题和会话列表修正已构建复查；独立新环境能启动基础工作台并进入模型配置。完整边界统一登记在 [响应式、技能与办公室任务记录](responsive-office-skills-2026-10-08.md)，所有要求、剩余项与 Git 结果保留于 [持续交付清单](user-requirements-2026-10-08.md)。功能仍在 `codex/creator-workflow`，默认分支只同步中英文项目说明；没有发布包含这些功能的新安装包。
