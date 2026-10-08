@@ -4,7 +4,9 @@
 
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/CHANGELOG.md)
 
-> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-08**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-09**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+>
+> Windows x64 便携预览已生成本地候选 `Easel-preview-20a709c-0b56.zip`（约 1.06 GiB），完成实际解压、包内运行、PDF 解析、目录搬迁和双副本隔离验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 这一版有什么
 
@@ -30,7 +32,8 @@
 | 响应式布局 | 设置分区与模型通道自动换行；工作台、创作页、分析与办公室按侧栏展开后剩余的实际容器宽度调整列数和操作布局；长表单和过程弹层保留可滚动内容，宽表格在自身区域滚动；设备及入口验收逐项登记 |
 | 演示数据开关 | 设置首页的「通用设置 → 显示演示数据」统一控制内容分析和 Agent 办公室；关闭后只显示已保存作品、实时观测或空状态，刷新与同地址标签页保持一致，保留真实记录和角色卡 |
 | 热点与运行记录 | “我的热榜”展示九个来源的平台图标；增删来源后显式“保存热榜”，支持保存空列表、恢复默认和刷新恢复，浏览器存储失败不伪报已保存；来源错误、获取时间与重试分别展示，运行记录支持会话、搜索和状态筛选 |
-| 其他创作流程 | 保留选题、日历、账号、画像、内容库及发布入口，持续改进本地体验 |
+| 发布回执与提醒 | Web 发布任务保留跨页/刷新可读的结果，区分已发布、已提交、草稿、待核实与失败；B站、抖音、快手和知乎文章按各自凭据提供公开作品链接，成功邮件需在通知设置中开启；小红书、视频号的公开读回和审核后持续回查尚未完成，见 [平台范围与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/publish-receipts-2026-10-08.md) |
+| 其他创作流程 | 保留选题、日历、账号、画像及内容库入口，持续改进本地体验 |
 
 办公室角色由本地 Three.js 曲面与蒙皮生成，无需 Meshy 账号或模型生成额度。本轮细化四物种的体型、脸型、耳壳与狐狸尾巴，修正拇指方向、握笔/持纸接触与工位朝向，并按状态切换眼睛、眉形和嘴部神态；保留外观换色与角色卡。方案与验收范围见 [本地建模优化](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/local-character-modeling-2026-10-02.md)。
 
@@ -57,6 +60,12 @@
 角色自然持物、完整动作与任务交接仍在迭代；职责/能力配置、真实任务产出归属、逐帧碰撞与性能尚未完整验收。10 月 1 日热点 HTTP 抽查中，7 个来源取得内容，知乎与头条限流；10 月 8 日知乎主来源抽查恢复并返回 30 条问题热榜，不能据此保证长期可用。历史逐项状态见 [工作台整改与验收](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/workspace-experience-validation-2026-10-01.md)。
 
 知乎备用适配通过启动环境变量 `EASEL_ZHIHU_DAILYHOT_URL` 显式启用，默认关闭；可配置自部署或获准使用、兼容 DailyHotApi-Go 的完整问题热榜接口，重启后端后仅在主来源失败或冷却时尝试。公开演示实例只做过核验，没有设为默认依赖；这不是搜索关键词 API，也不以响应生成时间冒充榜单更新时间。配置方式、实际 HTTP 证据与限制见 [知乎热榜修正记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/zhihu-trends-2026-10-08.md)。
+
+## Windows 便携预览候选
+
+R24 提供包含应用、前端、CPython 3.12.10、Node 24.19.0、OpenClaw 2026.9.2、FFmpeg 9.0.1 与匹配 Chromium 153.0.8010.12 / r1243 的 Windows x64 便携候选。完整解压到较短可写目录后，通过 `Easel.exe` 或启动命令文件使用包内运行环境；配置和产出保存在同目录的 `data`。图形控制窗口关闭时停止本副本服务，另有检查和停止用的 `.cmd` 入口。
+
+模型服务需要使用者自己的 API Key；可选 Whisper、rembg 等模型权重未预装。新候选已补齐 PDF 依赖，完整文件校验、System32 下隔离 PATH 启动、真实浏览器入口、重复启动和中文空格目录搬迁通过；两份程序使用独立端口与进程，分别停止一份后另一份保持运行。并行解压时出现过一次网关启动超时，完整校验结束后单独启动通过，详情保留在验收记录中。真实图形双击、全新 Windows 虚拟机、真实模型与平台发布、代码签名和公开 Release 尚未完成；**已有 0.2.6 联网安装包保持原样**。具体范围与文件校验信息集中记录于 [Windows 便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 从本仓库源码开始
 
