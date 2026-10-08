@@ -2,7 +2,7 @@
 
 更新：2026-10-09。对应 `codex/creator-workflow` 的 R24。
 
-**当前状态：`20a709c` / `0b56` 候选已完成归档前后全量文件校验、包内 PDF 验证，以及实际解压副本的命令行启动、停止隔离、搬迁、HTTP 和指定浏览器入口验收。** 本次已补齐 PDF 依赖并调整配置校验时限；首个 `fefe9fe` 候选仅保留为历史记录，不作为最终交付包。仍保留一次 Gateway 冷启动超时及成功重试的记录。图形入口双击、全新 Windows 虚拟机、真实模型／平台、代码签名和公开 Release 尚未完成，本轮 Git 交付待推送回执。已有的 **0.2.6 联网安装 EXE / ZIP** 保留原样，构建来源仍是 `38e728c`，与便携候选分别记录。
+**当前状态：`20a709c` / `0b56` 候选已完成归档前后全量文件校验、包内 PDF 验证，以及实际解压副本的命令行启动、停止隔离、搬迁、HTTP 和指定浏览器入口验收。** 本次已补齐 PDF 依赖并调整配置校验时限；首个 `fefe9fe` 候选仅保留为历史记录，不作为最终交付包。仍保留一次 Gateway 冷启动超时及成功重试的记录。源码与验收文档已推送并核对远端 SHA，回执见 [持续交付清单](user-requirements-2026-10-08.md)；图形入口双击、全新 Windows 虚拟机、真实模型／平台、代码签名和公开 Release 尚未完成。已有的 **0.2.6 联网安装 EXE / ZIP** 保留原样，构建来源仍是 `38e728c`，与便携候选分别记录。
 
 候选面向 Windows 10/11 x64，将应用、已构建前端和所需运行组件放在同一个目录。目标是完整解压后双击启动，不在用户第一次打开时执行 pip、npm 或 winget 安装。图形入口使用 Windows 的 .NET Framework；该候选尚未代码签名，也未完成全新 Windows 虚拟机的完整验收。
 
@@ -178,7 +178,7 @@ python .\scripts\build_windows_portable.py --verify-bundle C:\Easel-check
 | 模型、平台与通知 | 使用者需提供凭据，尚未完成该候选的真实模型推理、平台登录／发布或 SMTP 投递验收；模拟响应和入口可达不计为通过 |
 | 全新 Windows 10/11 虚拟机 | 尚未完成完整验收 |
 | 代码签名、公开 Release | 尚未完成；旧 0.2.6 安装包保持原样 |
-| 本轮 Git 交付 | 必要验收已完成，**待推送回执**，以 [持续交付清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md) 中核对的远端 SHA 为准；`main` 只同步中英文 README，功能代码留在 `codex/creator-workflow`；候选打包源码提交与后续文档提交分开记录 |
+| 本轮 Git 交付 | **已推送并核对远端 SHA**：功能交付 `4f899259b5c277406d9091cebf5ffa2cf25ecb57`，main 首页文档 `6fde86783132874ca1aa95b33ab4052786667fa3`；实际回执见 [持续交付清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md)。`main` 只同步中英文 README，功能代码留在 `codex/creator-workflow`；候选打包源码提交与后续文档提交分开记录 |
 
 搬迁后实际发出的 HTTP 请求均以 A 的 `http://127.0.0.1:65028` 为基址：
 
