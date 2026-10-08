@@ -627,7 +627,9 @@ def validate_config(bundle: Bundle, env: dict) -> None:
                                    cwd=bundle.app, env=env, stdin=subprocess.DEVNULL,
                                    stdout=captured, stderr=subprocess.STDOUT, creationflags=FLAGS)
         try:
-            process.wait(timeout=60)
+            # First launch can spend over a minute loading the bundled modules
+            # on Windows; keep a bound while allowing the cold validation pass.
+            process.wait(timeout=120)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
             _terminate_created(process, bundle)
             raise RuntimeError("本副本配置验证超时或被中断；已清理本次验证进程，请查看日志。") from None

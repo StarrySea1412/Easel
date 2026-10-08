@@ -3,6 +3,7 @@
 # Easel editable install is excluded; app source is packaged separately.
 # This is a new portable lock draft, not the existing release Windows lock.
 # This file pins versions; it does not claim original wheel-download hashes.
+# PDF fallback additions use verified PyPI wheels; artifact hashes are recorded in portable-python-packages.json.
 
 aiodns==4.0.4
 aiohappyeyeballs==2.7.1
@@ -68,6 +69,8 @@ opentelemetry-api==1.45.1
 outcome==1.3.0.post0
 packaging==26.3
 pandas==3.0.6
+pdfminer-six==20260107
+pdfplumber==0.11.10
 pillow==12.3.0
 pip==25.0.1
 platformdirs==4.12.4
@@ -85,6 +88,7 @@ pydantic-core==2.46.5
 pyee==13.0.1
 pymatting==1.1.16
 pyparsing==3.3.3
+pypdfium2==5.14.0
 pysocks==1.7.1
 python-dateutil==2.9.0.post0
 python-multipart==0.0.32

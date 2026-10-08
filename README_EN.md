@@ -6,7 +6,7 @@ A local creative workspace combining conversations, assets, content projects, an
 
 > Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-08**. This page describes the current source on `codex/creator-workflow`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
 >
-> A Windows x64 portable preview is being assembled locally. Its final ZIP has not been accepted or publicly released. See the [portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md) for usage, fixed components and build instructions.
+> A Windows x64 portable preview is undergoing local acceptance and has not been publicly released. The first candidate passed basic startup and relocation checks; PDF parsing dependencies are being added before the final ZIP is verified again. See the [portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md) for usage, fixed components and verification records.
 
 ## Current features
 
@@ -57,11 +57,11 @@ Video creation interfaces, protocol decisions and verification boundaries (six a
 
 See the [2026-10-05 stage record](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/chat-studio-analysis-2026-10-05.md) for chat, studio model and clipboard changes, and the [2026-10-08 record](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md) for the current two-column sidebar, skill persistence and mask editor. Clipboard video availability depends on the browser and copy source; a copied video URL is not treated as a video file, and file selection remains available. Live content overviews and persistent archiving have different evidence requirements: the six platforms other than Xiaohongshu currently lack verified stable account IDs for archiving and require structured imports.
 
-## Windows portable preview in preparation
+## Windows portable preview
 
-R24 is preparing a Windows x64 ZIP containing the application, built frontend, CPython 3.12.10, Node 24.19.0, OpenClaw 2026.9.2, FFmpeg 9.0.1 and matching Chromium 153.0.8010.12 / r1243. The intended workflow is to extract the complete ZIP into a short, writable path and double-click `Easel.exe`. Runtime programs and the `data` directory remain relative to that folder. Closing the graphical control window stops this copy's services; separate `.cmd` files provide start, status and stop fallbacks.
+R24 provides a Windows x64 candidate containing the application, built frontend, CPython 3.12.10, Node 24.19.0, OpenClaw 2026.9.2, FFmpeg 9.0.1 and matching Chromium 153.0.8010.12 / r1243. Extract the complete ZIP into a short, writable path and use `Easel.exe` or the start command file. Runtime programs and the `data` directory remain relative to that folder. Closing the graphical control window stops this copy's services; separate `.cmd` files provide status and stop fallbacks.
 
-Users supply their own model API keys. Optional Whisper and rembg model weights are not bundled. This local candidate is unsigned, final ZIP and clean Windows VM acceptance remain pending, and no public Release has been created. **The existing 0.2.6 online installer packages remain unchanged.** Current preparation status and eventual checksum evidence are recorded in the [Windows portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md).
+Users supply their own model API keys. Optional Whisper and rembg model weights are not bundled. The first candidate passed actual extraction, startup with an isolated PATH and folder relocation; PDF dependencies and the cold-start validation timeout are being corrected and checked again. Actual graphical double-click testing, clean Windows VM acceptance, signing and a public Release remain pending. **The existing 0.2.6 online installer packages remain unchanged.** Scope and checksums are recorded in the [Windows portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md).
 
 ## Run the current source
 

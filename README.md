@@ -6,7 +6,7 @@
 
 > 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-08**，介绍 `codex/creator-workflow` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 >
-> Windows x64 便携预览候选正在本地装配，最终 ZIP 尚未验收或公开发布。使用方式、固定组件和构建方法见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
+> Windows x64 便携预览正在本地验收，尚未公开发布。首个候选已通过基础启动与搬迁检查，正在补齐 PDF 解析依赖并重验最终 ZIP。使用方式、固定组件和校验记录见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 这一版有什么
 
@@ -61,11 +61,11 @@
 
 知乎备用适配通过启动环境变量 `EASEL_ZHIHU_DAILYHOT_URL` 显式启用，默认关闭；可配置自部署或获准使用、兼容 DailyHotApi-Go 的完整问题热榜接口，重启后端后仅在主来源失败或冷却时尝试。公开演示实例只做过核验，没有设为默认依赖；这不是搜索关键词 API，也不以响应生成时间冒充榜单更新时间。配置方式、实际 HTTP 证据与限制见 [知乎热榜修正记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/zhihu-trends-2026-10-08.md)。
 
-## Windows 便携预览候选（装配中）
+## Windows 便携预览候选
 
-R24 正在准备包含应用、前端、CPython 3.12.10、Node 24.19.0、OpenClaw 2026.9.2、FFmpeg 9.0.1 与匹配 Chromium 153.0.8010.12 / r1243 的 Windows x64 便携 ZIP。候选目标是完整解压到较短可写目录后双击 `Easel.exe`，由包内运行环境启动工作台；配置和产出保存在同目录的 `data`。图形控制窗口关闭时停止本副本服务，另有启动、检查和停止用的 `.cmd` 入口。
+R24 提供包含应用、前端、CPython 3.12.10、Node 24.19.0、OpenClaw 2026.9.2、FFmpeg 9.0.1 与匹配 Chromium 153.0.8010.12 / r1243 的 Windows x64 便携候选。完整解压到较短可写目录后，通过 `Easel.exe` 或启动命令文件使用包内运行环境；配置和产出保存在同目录的 `data`。图形控制窗口关闭时停止本副本服务，另有检查和停止用的 `.cmd` 入口。
 
-模型服务需要使用者自己的 API Key；可选 Whisper、rembg 等模型权重未预装。本地候选尚未签名、尚未完成最终 ZIP 与全新 Windows 虚拟机完整验收，也未创建公开 Release，**已有 0.2.6 联网安装包保持原样**。当前装配状态与后续文件校验信息集中记录于 [Windows 便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
+模型服务需要使用者自己的 API Key；可选 Whisper、rembg 等模型权重未预装。首个候选的实际解压、隔离 PATH 启动与目录搬迁通过，PDF 依赖和冷启动校验时限正在修正后复验。真实图形双击、全新 Windows 虚拟机、代码签名和公开 Release 尚未完成；**已有 0.2.6 联网安装包保持原样**。具体范围与文件校验信息集中记录于 [Windows 便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-portable.md)。
 
 ## 从本仓库源码开始
 

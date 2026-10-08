@@ -1,12 +1,30 @@
 # Windows x64 便携预览候选
 
-更新：2026-10-08。对应 `codex/creator-workflow` 的 R24。
+更新：2026-10-09。对应 `codex/creator-workflow` 的 R24。
 
-**当前状态：本地候选正在装配，最终 ZIP 尚未完成验收，R24 尚未完成 Git 推送，也未创建公开 Release。** 本页先说明候选的使用方式、组件范围和构建方法；实际文件名、SHA-256 与逐项结果由最终交付回执补充。不要把已有的 **0.2.6 联网安装 EXE / ZIP** 当作这个便携包：旧包保留原样，构建来源仍是 `38e728c`。
+**当前状态：首个候选 ZIP 已完成文件校验、实际解压、基础启动与搬迁检查；环境自检发现缺少 PDF 解析依赖，第二副本冷启动触及原配置校验时限，正在修正并重新打包。** 下列 `fefe9fe` 文件信息属于首个候选，不作为最终交付包。图形入口双击、全新 Windows 虚拟机、代码签名和公开 Release 尚未完成，本轮 Git 交付仍待最终推送回执。已有的 **0.2.6 联网安装 EXE / ZIP** 保留原样，构建来源仍是 `38e728c`，与便携候选分别记录。
 
 候选面向 Windows 10/11 x64，将应用、已构建前端和所需运行组件放在同一个目录。目标是完整解压后双击启动，不在用户第一次打开时执行 pip、npm 或 winget 安装。图形入口使用 Windows 的 .NET Framework；该候选尚未代码签名，也未完成全新 Windows 虚拟机的完整验收。
 
 源码入口：[当前开发分支](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) · [交付进度](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md) · [原联网安装器说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/windows-installer.md)
+
+## 本地候选文件与完整性校验
+
+以下为 2026-10-09 01:17（北京时间）完成的归档与实际解压校验结果。文件保存在构建机的 `dist/portable-preview/`，目前尚无公开 Release 下载入口。
+
+| 项目 | 已核对结果 |
+| --- | --- |
+| 文件名 | `Easel-preview-fefe9fe-ad69.zip` |
+| 大小 | **1,118,359,957 字节**（约 1.04 GiB） |
+| ZIP SHA-256 | `60586a1ba97aae304952fe5949b04f406dc4f416cafe40607ce6ef12571c6c0d` |
+| 打包源码提交 | `fefe9fe8c712ff878cc9b3ae06c74e3f1dd0ad33` |
+| 打包源码树 SHA-256 | `ad6925268e54c03113e5a2a77492e8e11232bc092c6138b16596600a9d6ec576` |
+| 打包时源码状态 | `sourceDirty=false`；该身份固定记录于候选清单，后续文档提交单独追踪 |
+| 归档与解压文件数 | **52,398 个分发文件**；ZIP 共 **52,399 项**，包含唯一的空 `data/` 目录 |
+
+归档前与实际解压后分别对清单内 **52,397 个文件**读取全部字节并计算 SHA-256，再核对完整文件集合；另行核对 `checksums.sha256` 本身的摘要。两次 `portable-manifest.json` 和校验清单摘要一致，解压后的 `data` 为空；ZIP 在解压及校验后再次计算 SHA-256，结果一致。ZIP 采用标准 Deflate、压缩级别 6，并附同名 `.zip.sha256` 文件。
+
+原始回执保存在忽略的 `.scratch/portable-r24-inputs/metadata/final-archive.json`。上述结果确认该本地文件与实际解压内容的一致性；运行与功能验收分别列于文末。
 
 ## 收到候选 ZIP 后如何使用
 
@@ -54,19 +72,19 @@ data/
 
 ## 固定组件范围
 
-以下为本地候选的装配目标，最终以候选中的 `portable-manifest.json` 和验收回执为准。
+以下版本已记录于本次候选的 `portable-manifest.json`，归档与实际解压后均已按对应清单校验。
 
 | 组件 | 固定版本或修订 | 说明与公开来源 |
 | --- | --- | --- |
 | CPython | 3.12.10 embedded amd64 | [官方嵌入版 ZIP](https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip)；保留 `LICENSE.txt`，Python 依赖使用便携包实际包集的独立精确锁 |
 | Node.js | 24.19.0 win-x64 | [官方发行目录](https://nodejs.org/dist/v24.19.0/)；保留 Node 及随附组件许可 |
 | OpenClaw | 2026.9.2 | [公开 npm 包](https://www.npmjs.com/package/openclaw/v/2026.9.2)；采用与已审阅严格模型选择契约对应的版本，但这不证明用户模型凭据或真实推理有效 |
-| FFmpeg | 9.0.1 | [FFmpeg 项目](https://ffmpeg.org/)；实际 Windows 二进制来源、构建配置、许可与相应源码来源写入组件清单 |
-| Playwright 浏览器组件 | Chromium 153.0.8010.12 / r1243 | 包含匹配的 Chromium、headless shell、FFmpeg r1011 与 winldd r1007；与 Python 包内 Playwright 的 `browsers.json` 对照，不含浏览器用户 profile 或 `.links` |
+| FFmpeg | 9.0.1-full_build | [FFmpeg 项目](https://ffmpeg.org/)；Windows 二进制来自 [gyan.dev 构建](https://www.gyan.dev/ffmpeg/builds/)，组件清单记录版本、许可文件与相应源码来源 |
+| Playwright 浏览器组件 | Chromium 153.0.8010.12 / r1243 | 取自本机公开程序缓存，包含匹配的 Chromium、headless shell、FFmpeg r1011 与 winldd r1007；与 Python 包内 Playwright 的 `browsers.json` 对照，不含浏览器用户 profile 或 `.links` |
 
 `requirements/windows-portable-py312.lock` 对应**实际装入便携 Python 的包集**，与既有 `requirements/windows-py312.lock` 分开维护。它记录精确版本；原始下载摘要、逐文件校验与来源元数据分别保留，不用版本锁代替二进制校验。
 
-组件来源和许可说明汇总在 `THIRD_PARTY_LICENSES.txt`，前端依赖说明位于 `app/THIRD_PARTY_FRONTEND_LICENSES.txt`，原许可文件仍在相应组件目录。转发候选时一并保留这些文件、项目许可证及必要源码来源。
+组件来源和随附许可说明汇总在 `THIRD_PARTY_LICENSES.txt`，前端依赖说明位于 `app/THIRD_PARTY_FRONTEND_LICENSES.txt`，原许可文件仍在相应组件目录。Python 原始 ZIP 已与官方 Sigstore bundle 记录的摘要比对，**未执行签名和签名者身份验证**。浏览器程序来自本机已有的公开程序缓存，未在本轮重新从上游下载；**Chromium 再分发所需的完整许可审核尚未完成**。保留许可文件、版本和哈希记录不代表这些审核已经通过；对外再分发前仍需完成相应核验。
 
 ## 构建者准备
 
@@ -116,20 +134,25 @@ python .\scripts\build_windows_portable.py --verify-bundle C:\Easel-check
 
 ## 候选验收记录
 
-本节由最终装配与验收结果更新。此前 R16–R23 的源码、前端和安装测试保留其原范围，不计作这个 ZIP 已经通过。
+本节区分已经完成的最终 ZIP 文件校验、组件准备阶段的检查和仍待完成的运行验收。此前 R16–R23 的源码、前端和安装测试保留其原范围，不计作这个 ZIP 的运行或功能已经通过。
 
 | 项目 | 本页当前状态 |
 | --- | --- |
-| 最终 ZIP 文件名、大小、SHA-256 | 待装配完成后记录 |
+| 最终 ZIP 文件名、大小、SHA-256 | 已生成并核对，完整文件信息见上表；本地候选未公开发布 |
 | 代码与运行组件定向检查 | 便携/发行、生命周期及明确 OpenClaw 路径合计 142 passed / 1 skipped；跳过项为主机不支持创建符号链接。C# 编译、参数及未显示窗口的状态逻辑已测，未冒充真实双击点击验收 |
 | 前端重新构建 | R25 合入后重新运行 697/697、lint、TypeScript 与生产构建；现有 Three.js 大块提示保留，构建回执核对源码及产物摘要 |
-| 五组件来源、版本、许可与精确 Python 包集 | 五组件输入检查通过，Python 119 个非 editable 发行包按 RECORD 摘要验证；31 项核心/媒体模块导入、pip check 及重建 Biliup 1.2.9 --help/--version 通过；待以最终 ZIP 清单核对 |
-| 包内校验及敏感数据排除 | 待最终候选检查 |
-| 完整解压、首次启动、停止与再次启动 | 初版装配目录已用包内 Python/Node 从 System32、隔离 PATH 启动并按身份停止；最终 ZIP 解压仍待实测 |
-| 中文/空格目录搬迁、不同当前目录、系统工具不在 PATH | 待对最终候选实测 |
+| 五组件版本与精确 Python 包集 | 五组件输入检查通过，Python 119 个非 editable 发行包按 RECORD 摘要验证；31 项核心/媒体模块导入、pip check 及重建 Biliup 1.2.9 --help/--version 通过；最终 ZIP 已按对应分发清单完成逐文件校验 |
+| 最终副本依赖自检 | 提示缺少 `pdfplumber`，调用范围与处理方式仍在确认；尚未验收为全部基础依赖齐全 |
+| 来源与许可核验边界 | 浏览器取自本机公开程序缓存；Python 仅完成摘要比对，未验证签名身份；Chromium 完整再分发许可审核尚未完成 |
+| 完整解压、分发文件与空数据校验 | 已实际解压最终 ZIP；归档前及解压后 52,397 项完整 SHA、52,398 个分发文件清单通过，ZIP 的 `data/` 仅为空目录 |
+| 最终副本首次启动、停止与再次启动 | 正在验收；初版装配目录曾用包内 Python/Node 从 System32、隔离 PATH 启动并按身份停止，不能替代最终副本结果 |
+| 中文/空格目录搬迁、不同当前目录、系统工具不在 PATH | 最终副本验收进行中，尚未记录通过 |
+| 双副本端口及停止隔离 | 最终副本验收进行中，尚未记录通过 |
 | 真实浏览器首页、首次引导、模型设置入口 | 初版装配目录已看到首次欢迎页并进入通用模式、设置和添加供应商表单；最终 ZIP 仍需复核；HTTP 成功不替代浏览器验收 |
+| 图形入口双击、按钮及关闭窗口 | 尚未实际完成 GUI 操作验收；C# 编译和无窗口状态逻辑检查不能替代 |
 | 模型与平台 | 使用者需提供凭据，尚未完成该候选的真实模型或平台发布验收 |
 | 全新 Windows 10/11 虚拟机 | 尚未完成完整验收 |
-| 代码签名、公开 Release、R24 Git 推送 | 尚未完成；旧 0.2.6 安装包保持原样 |
+| 代码签名、公开 Release | 尚未完成；旧 0.2.6 安装包保持原样 |
+| 本轮 Git 交付 | 待最终提交、推送并核对远端 SHA；打包时源码干净不代表已经推送 |
 
 整体状态以 [持续交付清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md) 和 [交付进度](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/secondary-development-progress.md) 为准。
