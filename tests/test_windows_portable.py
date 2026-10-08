@@ -235,7 +235,8 @@ def test_archive_has_relative_layout_runtime_provenance_licenses_and_no_develope
     assert manifest["components"]["python"]["treeSha256"]
     assert "Public component fixture license" in (bundle / "THIRD_PARTY_LICENSES.txt").read_text(encoding="utf-8")
     archive = portable.write_archive(bundle, tmp_path, manifest)
-    assert "Portable-preview-aaaaaaaaaaaa-" in archive.name
+    assert archive.name.startswith("Easel-preview-aaaaaaa-")
+    assert len(archive.stem) <= 26  # Explorer's default extraction folder.
     assert archive.with_suffix(".zip.sha256").read_text().startswith(portable.sha256_of(archive))
     with zipfile.ZipFile(archive) as zipped:
         names = set(zipped.namelist())
@@ -442,6 +443,12 @@ class EchoProbe { static void Main(string[] args) {
     stopped = {"ok": True, "running": False, "services": {"gateway": False, "web": False}}
     result = subprocess.check_output([str(executable), "state", json.dumps(stopped), str(tmp_path)], text=True).splitlines()
     assert base64.b64decode(result[0]).decode("utf-8") == "服务已停止"
+    notice = "原端口已被占用，工作台地址已更新；浏览器内保存的偏好可能需要重新设置。"
+    ready = {"ok": True, "running": True, "url": "http://127.0.0.1:48100/", "message": notice,
+             "portChanged": True, "previousUrl": "http://127.0.0.1:48000/"}
+    result = subprocess.check_output([str(executable), "state", json.dumps(ready), str(tmp_path)], text=True).splitlines()
+    assert base64.b64decode(result[0]).decode("utf-8") == "工作台已就绪"
+    assert base64.b64decode(result[1]).decode("utf-8") == notice
     broken = tmp_path / "incomplete-extraction"
     assert subprocess.check_output([str(executable), "can-close", str(broken), "false"], text=True).strip() == "yes"
     assert subprocess.check_output([str(executable), "close-missing", str(broken)], text=True).strip() == "closed"

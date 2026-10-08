@@ -272,6 +272,44 @@ def available_port(preferred: int, *, strict: bool = False) -> int:
         return server.getsockname()[1]
 
 
+def _valid_web_port(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value < 65536
+
+
+def browser_storage_notice(identity: dict) -> str:
+    change = identity.get("webPortChange")
+    if not isinstance(change, dict) or not _valid_web_port(change.get("from")) \
+            or change.get("to") != identity.get("webPort"):
+        return ""
+    return (f"原工作台端口 {change['from']} 已被占用，现使用端口 {change['to']}。"
+            "浏览器草稿、会话等本地记录与原地址绑定，无法自动迁移；"
+            "如有已导出的对话备份，请在新地址导入。未停止占用原端口的服务。")
+
+
+def select_web_port(bundle: Bundle, identity: dict) -> tuple[int, bool]:
+    """A browser origin belongs to this data directory, not to a shared default."""
+    previous = identity.get("webPort")
+    if previous is None:
+        # Fresh ZIPs must not successively share 7860 and its browser storage.
+        with socket.socket() as server:
+            server.bind(("127.0.0.1", 0))
+            selected = server.getsockname()[1]
+    else:
+        if not _valid_web_port(previous):
+            raise ValueError("便携副本保存的工作台端口无效；未从进程记录猜测或抢占端口。")
+        selected = available_port(previous)
+    changed = previous is not None and previous != selected
+    identity["webPort"] = selected
+    if changed:
+        identity["webPortChange"] = {"from": previous, "to": selected}
+    _write_json(bundle.data / IDENTITY_FILE, identity)
+    if changed:
+        log(bundle, browser_storage_notice(identity))
+    elif previous is None:
+        log(bundle, f"首次为本副本分配工作台端口 {selected}；后续启动优先保持相同浏览器地址。")
+    return selected, changed
+
+
 def _minimal_config(bundle: Bundle, port: int) -> dict:
     return {"agents": {"defaults": {"workspace": str(bundle.workspace), "timeoutSeconds": 7200}},
             "memory": {"search": {"enabled": False}},
@@ -523,6 +561,8 @@ def _state(bundle: Bundle) -> tuple[dict, dict]:
     state = _read_json(bundle.data / STATE_FILE)
     if identity and (identity.get("schemaVersion") != 1 or not re.fullmatch(r"[a-f0-9]{32}", str(identity.get("bundleId", "")))):
         raise RuntimeError("便携副本身份记录无效；未操作服务。")
+    if "webPort" in identity and not _valid_web_port(identity["webPort"]):
+        raise RuntimeError("便携副本保存的工作台端口无效；未操作服务。")
     if state and (state.get("schemaVersion") != 1 or state.get("bundleId") != identity.get("bundleId")
                   or not isinstance(state.get("services"), dict)):
         raise RuntimeError("便携进程记录与本副本不一致；未操作服务。")
@@ -684,9 +724,11 @@ def status(bundle: Bundle) -> dict:
     services = {name: bool(service_listening(record, observed)) for name, record in state["services"].items()}
     running = bool(services.get("web") and services.get("gateway"))
     port = (state["services"].get("web") or {}).get("port")
+    notice = browser_storage_notice(identity)
     return {"ok": True, "running": running, "services": services,
             "url": f"http://127.0.0.1:{port}/" if services.get("web") else "",
-            "message": "本副本工作台正在运行。" if running else "本副本工作台尚未运行。",
+            "message": ("本副本工作台正在运行。" if running else "本副本工作台尚未运行。") + notice,
+            "browserStorageNotice": notice,
             "logPath": str(bundle.log_path), "bundleId": identity.get("bundleId")}
 
 
@@ -728,9 +770,16 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                     or not _http_ready(f"http://127.0.0.1:{web_port}/", expected=expected) \
                     or not _http_ready(f"http://127.0.0.1:{gateway_port}/healthz"):
                 raise RuntimeError("本副本服务仍在运行但未就绪；请先点击退出，再重新启动。")
+            # Upgrade an already running preview only after checking its exact
+            # owned process and HTTP identity; unverified state is never a port source.
+            if identity.get("webPort") != web_port:
+                identity["webPort"] = web_port
+                _write_json(bundle.data / IDENTITY_FILE, identity)
             result = {"ok": True, "running": True, "url": f"http://127.0.0.1:{web_port}/",
                       "webPort": web_port, "gatewayPort": gateway_port, "reused": True,
-                      "bundleId": identity["bundleId"], "message": "已打开正在运行的本副本工作台。",
+                      "portChanged": False, "bundleId": identity["bundleId"],
+                      "message": "已打开正在运行的本副本工作台。" + browser_storage_notice(identity),
+                      "browserStorageNotice": browser_storage_notice(identity),
                       "logPath": str(bundle.log_path)}
         else:
             if owned.get("web"):
@@ -754,7 +803,7 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                                "gateway", "run", "--allow-unconfigured", "--bind", "loopback", "--port", str(gateway_port)]
                     _launch_service(bundle, state, "gateway", command, env, gateway_port)
                     started.append("gateway")
-                web_port = available_port(7860)
+                web_port, port_changed = select_web_port(bundle, identity)
                 env["EASEL_PORT"] = str(web_port)
                 expected = (bundle.app / "web/frontend/dist/index.html").read_bytes()
                 _launch_service(bundle, state, "web", [str(bundle.runtime["python"]), "-B", "-s", str(bundle.app / "web/app.py")],
@@ -771,7 +820,10 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                 raise
             result = {"ok": True, "running": True, "url": f"http://127.0.0.1:{web_port}/",
                       "webPort": web_port, "gatewayPort": gateway_port, "bundleId": identity["bundleId"],
-                      "reused": False, "message": "工作台已就绪，请在设置中添加自己的模型服务。",
+                      "reused": False, "portChanged": port_changed,
+                      "previousUrl": f"http://127.0.0.1:{identity['webPortChange']['from']}/" if port_changed else "",
+                      "browserStorageNotice": browser_storage_notice(identity),
+                      "message": "工作台已就绪，请在设置中添加自己的模型服务。" + browser_storage_notice(identity),
                       "logPath": str(bundle.log_path)}
     if not no_browser:
         webbrowser.open(result["url"])

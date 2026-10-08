@@ -515,8 +515,10 @@ def verify_bundle(bundle: Path) -> dict:
 
 
 def write_archive(bundle: Path, output: Path, manifest: dict) -> Path:
-    suffix = manifest["sourceTreeSha256"][:8]
-    name = f"Easel-{manifest['version']}-Windows-Portable-preview-{manifest['sourceCommit'][:12]}-{suffix}.zip"
+    # Explorer defaults to extracting into a folder named after the ZIP. Keep
+    # that folder short; complete version/source hashes remain in the manifest.
+    suffix = manifest["sourceTreeSha256"][:4]
+    name = f"Easel-preview-{manifest['sourceCommit'][:7]}-{suffix}.zip"
     archive = output / name
     if archive.exists() or archive.with_suffix(".zip.sha256").exists():
         raise FileExistsError("A portable preview with this source identity already exists; use a new output directory")

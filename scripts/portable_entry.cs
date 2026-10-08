@@ -316,7 +316,9 @@ internal sealed class PortableWindow : Form
             url = result.Url;
             address.Text = url;
             state.Text = "工作台已就绪";
-            explanation.Text = "现在可以开始创作。模型服务和平台账号可在工作台中配置。";
+            explanation.Text = String.IsNullOrWhiteSpace(result.Message)
+                ? "现在可以开始创作。模型服务和平台账号可在工作台中配置。" : result.Message;
+            explanation.AccessibleDescription = explanation.Text;
             open.Enabled = !closeRequested;
             start.Enabled = false;
             if (action == "start" && !hasStarted && !closeRequested) OpenWorkbench();

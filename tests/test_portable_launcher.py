@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -194,6 +195,81 @@ def test_occupied_port_uses_independent_port_without_touching_listener():
             pass
 
 
+def test_first_web_port_is_dynamic_and_saved_to_this_data_identity(bundle, monkeypatch):
+    identity, _ = save_services(bundle, {})
+    monkeypatch.setattr(launcher, "available_port", lambda *a, **kw: pytest.fail("fresh copies must not choose a shared default"))
+    port, changed = launcher.select_web_port(bundle, identity)
+    assert 0 < port < 65536 and not changed
+    assert launcher._read_json(bundle.data / launcher.IDENTITY_FILE)["webPort"] == port
+    assert not launcher.browser_storage_notice(identity)
+
+
+def test_stop_and_restart_preserve_web_origin(bundle, monkeypatch):
+    identity, _ = save_services(bundle, {})
+    port, _ = launcher.select_web_port(bundle, identity)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **kw: pytest.fail("no services were started by this test"))
+    launcher.stop(bundle)
+    saved = launcher._read_json(bundle.data / launcher.IDENTITY_FILE)
+    original = launcher.available_port
+    requested = []
+    def choose(preferred, **kwargs):
+        requested.append(preferred)
+        return original(preferred, **kwargs)
+    monkeypatch.setattr(launcher, "available_port", choose)
+    restarted, changed = launcher.select_web_port(bundle, saved)
+    assert restarted == port and not changed
+    assert requested == [port]  # Never fall back to 7860 because it became free.
+
+
+def test_two_fresh_copies_get_independent_web_ports(bundle, tmp_path):
+    second_root = tmp_path / "另一个 Easel 副本"
+    shutil.copytree(bundle.root, second_root)
+    second = launcher.load_bundle(second_root)
+    first_identity, _ = launcher.initialize(bundle, {}, gateway_port=37881)
+    second_identity, _ = launcher.initialize(second, {}, gateway_port=37882)
+    assert first_identity["bundleId"] != second_identity["bundleId"]
+    first_port, _ = launcher.select_web_port(bundle, first_identity)
+    with socket.socket() as first_listener:
+        first_listener.bind(("127.0.0.1", first_port))
+        first_listener.listen()
+        second_port, changed = launcher.select_web_port(second, second_identity)
+        assert second_port != first_port and not changed
+        assert launcher._read_json(bundle.data / launcher.IDENTITY_FILE)["webPort"] == first_port
+        assert launcher._read_json(second.data / launcher.IDENTITY_FILE)["webPort"] == second_port
+        with socket.create_connection(("127.0.0.1", first_port), timeout=1):
+            pass
+
+
+def test_web_port_conflict_keeps_foreign_listener_and_explains_browser_storage(bundle, monkeypatch):
+    identity, _ = save_services(bundle, {})
+    previous, _ = launcher.select_web_port(bundle, identity)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **kw: pytest.fail("must not stop a port owner"))
+    with socket.socket() as foreign:
+        foreign.bind(("127.0.0.1", previous))
+        foreign.listen()
+        selected, changed = launcher.select_web_port(bundle, identity)
+        assert changed and selected != previous
+        with socket.create_connection(("127.0.0.1", previous), timeout=1):
+            pass
+    saved = launcher._read_json(bundle.data / launcher.IDENTITY_FILE)
+    assert saved["webPort"] == selected
+    assert saved["webPortChange"] == {"from": previous, "to": selected}
+    notice = launcher.browser_storage_notice(saved)
+    assert str(previous) in notice and str(selected) in notice
+    assert "浏览器草稿" in notice and "无法自动迁移" in notice and "对话备份" in notice
+    assert launcher.status(bundle)["browserStorageNotice"] == notice
+
+
+@pytest.mark.parametrize("invalid", [0, -1, 65536, True, "7860"])
+def test_invalid_persisted_web_port_is_rejected_without_touching_a_process(bundle, invalid, monkeypatch):
+    identity, _ = save_services(bundle, {})
+    identity["webPort"] = invalid
+    launcher._write_json(bundle.data / launcher.IDENTITY_FILE, identity)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **kw: pytest.fail("must not stop or inspect processes"))
+    with pytest.raises(RuntimeError, match="保存的工作台端口无效"):
+        launcher.status(bundle)
+
+
 @pytest.mark.parametrize("field,replacement", [
     ("created", "2026-10-08T01:00:00Z"), ("pid", 1000),
     ("executable", r"C:\different\python.exe"), ("commandLine", "python other.py"),
@@ -298,6 +374,7 @@ def test_repeated_start_reuses_only_own_healthy_pair(bundle, monkeypatch):
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not spawn duplicate"))
     result = launcher.start(bundle, no_browser=True)
     assert result["reused"] and result["url"] == "http://127.0.0.1:7881/"
+    assert launcher._read_json(bundle.data / launcher.IDENTITY_FILE)["webPort"] == 7881
 
 
 def test_logs_redact_bundle_credentials(bundle):

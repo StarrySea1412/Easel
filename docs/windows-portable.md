@@ -48,7 +48,7 @@ runtime/
 data/
 ```
 
-`runtime` 和 `data` 相对于解压目录定位。运行时使用包内程序，服务端配置、日志、模型缓存和产出写入本副本的 `data`，避免依赖构建者的 Python venv 或工具安装位置。迁移时保留完整目录；浏览器保存的会话与草稿仍应使用工作台现有备份入口另行备份。
+`runtime` 和 `data` 相对于解压目录定位。运行时使用包内程序，服务端配置、日志、模型缓存和产出写入本副本的 `data`，避免依赖构建者的 Python venv 或工具安装位置。首次为每个副本分配独立本地 Web 端口，后续启动和目录搬迁优先保持该地址；端口被其他服务占用时才改用新端口并提示。浏览器保存的会话与草稿与地址绑定，搬到另一台电脑或换端口时应使用工作台现有备份入口另行导出、导入。
 
 候选归档中的 `data` 为空。构建输入不包含使用者的 `.env`、Cookie、浏览器 profile、模型凭据或个人产出。源码仍沿用本项目及上游的许可证，第三方组件各自的许可文件随包保留。
 
@@ -106,7 +106,7 @@ python .\scripts\build_windows_portable.py --prepare-frontend .\.scratch\portabl
 python .\scripts\build_windows_portable.py --components C:\Easel-build\components.json --frontend-receipt .\.scratch\portable-frontend-checks.json --output .\dist\portable-preview
 ```
 
-输出文件名含 `Windows-Portable-preview`、源码提交和源码树摘要，并附 ZIP 的 `.sha256` 文件。完成解压后，可用构建器核对包内分发文件：
+输出短文件名为 `Easel-preview-<7位源码提交>-<4位源码树摘要>.zip`，并附 ZIP 的 `.sha256` 文件。短名减少 Windows「全部解压」默认目录过长的风险；完整版本和 SHA 保存在清单中，已有同名候选不会被覆盖。完成解压后，可用构建器核对包内分发文件：
 
 ```powershell
 python .\scripts\build_windows_portable.py --verify-bundle C:\Easel-check
@@ -121,7 +121,9 @@ python .\scripts\build_windows_portable.py --verify-bundle C:\Easel-check
 | 项目 | 本页当前状态 |
 | --- | --- |
 | 最终 ZIP 文件名、大小、SHA-256 | 待装配完成后记录 |
-| 五组件来源、版本、许可与精确 Python 包集 | 正在准备与装配，待以最终包清单核对 |
+| 代码与运行组件定向检查 | 便携/发行、生命周期及明确 OpenClaw 路径合计 142 passed / 1 skipped；跳过项为主机不支持创建符号链接。C# 编译、参数及未显示窗口的状态逻辑已测，未冒充真实双击点击验收 |
+| 前端重新构建 | 本项实际重新运行 639/639、lint、TypeScript 与生产构建；现有 Three.js 大块提示保留，构建回执核对源码及产物摘要 |
+| 五组件来源、版本、许可与精确 Python 包集 | 五组件输入检查通过，Python 119 个非 editable 发行包按 RECORD 摘要验证；31 项核心/媒体模块导入、pip check 及重建 Biliup 1.2.9 --help/--version 通过；待以最终 ZIP 清单核对 |
 | 包内校验及敏感数据排除 | 待最终候选检查 |
 | 完整解压、首次启动、停止与再次启动 | 待对最终候选实测 |
 | 中文/空格目录搬迁、不同当前目录、系统工具不在 PATH | 待对最终候选实测 |
