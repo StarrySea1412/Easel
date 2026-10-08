@@ -59,6 +59,7 @@
 - 实际蒙版上传得到 640×480 PNG，读回 alpha 仅为 0 和 255，其中 452 个透明像素。引用/蒙版文件均在忽略的隔离输出目录，未提交。
 - 最新本地 `/api/trends?platforms=zhihu&limit=30` 返回 HTTP200、30 条主来源问题、热度和问题创建时间；`sourceUpdatedAt` / `publishedAt` 保持未知，未把提问时间当榜单更新时间。
 - 60s、xxapi 与另外三个公开候选的低频 HTTP 结果详见 [知乎评估](zhihu-trends-2026-10-08.md)；备用只在明确配置后生效。回退失败分支用隔离替身验证，没有人为触发上游限流。
+- Git 推送后检查 README 引用的 18 个开发分支文档与 main 中英文 README，20 个仓库地址均 HTTP200。此检查不代表知乎问题页或产品业务入口已通过浏览器验证。
 - 日志、HTTP 原始响应和截图保存在 `.scratch/analysis-qa-2026-10-08` / `.scratch/zhihu-trends-2026-10-08`；前者包括 `workspace-delivery.jpg`、`skill-requirements-mobile.jpg`、`trends-saved-mobile.jpg`、`mask-controls-mobile.jpg`、`office-attention-process.jpg`。临时资料不提交 Git。
 - 未执行真实模型分析、平台账号登录/发布或付费生成。本轮没有自有管理员认证，`gaojitest / gaoji` 不适用。
 

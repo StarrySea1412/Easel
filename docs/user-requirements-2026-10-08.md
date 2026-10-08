@@ -37,6 +37,9 @@
 - 真实浏览器逐项验收已完成，桌面为默认 1280×720、窄屏为 390×844；临时视口已恢复。独立审查发现的技能要求保存失败提前生效问题已修复，新增保存/清除失败→取消→再次发送→成功重试回归。
 - 蒙版原图和像素校验、技能详情 HTTP200、缺少会话/未选技能要求 HTTP400、知乎本地后端 HTTP200/30 条已实际验证；正常模型推理、平台登录/发布和付费生成未执行。
 - 构建有既有 Three.js/OrbitControls 共享块超过 500 kB 的提示，不影响本轮构建；未增加新依赖。
-- Git：实现与验收已完成，当前待统一提交/推送功能分支、同步 main 中英文 README 并核验远端 SHA。推送完成后用真实提交信息更新本节，不提前标记成功。
+- Git 实现交付：[`3636ff2f8bf8ad58fc2159de3c6ac90886895327`](https://github.com/StarrySea1412/Easel/commit/3636ff2f8bf8ad58fc2159de3c6ac90886895327) 已推送 `starry/codex/creator-workflow`，本地与远端 SHA 一致；包含代码、自动测试、调研、验收和持续清单。
+- 默认分支首页：[`d1241837dbecb6a22511f617d2a7c6bb0d24cb31`](https://github.com/StarrySea1412/Easel/commit/d1241837dbecb6a22511f617d2a7c6bb0d24cb31) 已推送 `starry/main`，本地与远端 SHA 一致；仅更新 README.md / README_EN.md，未合并功能代码。
+- 首页引用的 18 个开发分支文档链接及 main 中英文 README 共 **20 个地址 HTTP200**；这属于仓库文档可达性检查，不混作产品页面或外部平台浏览器验收。本清单随后以单独文档提交记录上述真实交付结果。
+- 原改动的安全 stash `safety-before-content-analysis-integration-2026-10-08` 继续保留；未强推或清理该备份，隔离材料、截图、登录态与密钥未提交。
 
 详细实现与验收：[平台分析/组件统一](analysis-platform-orca-2026-10-08.md)、[Orca 调研](orca-research-2026-10-08.md)、[Gitee 工坊比较](image-studio-comparison-2026-10-08.md)、[知乎热榜评估](zhihu-trends-2026-10-08.md)。
