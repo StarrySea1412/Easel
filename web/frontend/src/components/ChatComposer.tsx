@@ -198,6 +198,8 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
   };
 
   return (
+    <div className="chat-composer-stack">
+      <ChatQueueTray sessionId={sessionId} editingId={editingQueue ? queueEdit!.id : undefined} onEdit={editQueued} onSteer={onSteer} isStreaming={isStreaming} stopping={stopping} />
     <div className={`composer chat-composer ${hero ? 'composer-hero' : ''} ${dragOver ? 'composer-drag' : ''}`}
       onDragEnter={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
@@ -217,7 +219,6 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       }}
       onDrop={onDrop}>
       <ChatCompactionIndicator event={compaction} />
-      <ChatQueueTray sessionId={sessionId} editingId={editingQueue ? queueEdit!.id : undefined} onEdit={editQueued} onSteer={onSteer} stopping={stopping} />
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
       {!editingQueue && <ComposerSkillChips skills={skills} />}
       <textarea
@@ -287,6 +288,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       </span>
       {!editingQueue && <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />}
       {thinkingUnsupported && <p className="composer-thinking-warning" role="status">{thinkingWarning}</p>}
+    </div>
     </div>
   );
 

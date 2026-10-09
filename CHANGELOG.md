@@ -4,6 +4,11 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-10 paused guidance and queue menus / 暂停引导与队列菜单
+
+- Move the narrower queue above the composer; send the selected idle message without a stop request and retain paused neighbours. / 内收队列移至主输入框上方；空闲引导直接发送所选消息，邻居仍暂停。
+- Make menus exclusive with outside/Escape dismissal and explain resume blockers. Actual App sequential-dispatch and menu regressions pass; a real chat confirmed idle guidance and queue resume at 390px. / 更多菜单互斥并支持关闭，继续排队说明阻止原因；实际App发送回归及真实390px短回复完成。
+
 ### 2026-10-10 publishing workspace and queue follow-up / 发布与队列追加整改
 
 - Reorganize publishing into shared editing/media and a single platform-tab preview with independent versions; retain per-platform preparation, progress and durable receipts. Confirmation explicitly identifies excluded targets. / 共享编辑与单平台标签预览，分别显示平台准备与进度，确认框列出未提交平台。

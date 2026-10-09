@@ -345,6 +345,23 @@ test('failed stop preserves the live connection and durable recovery identifiers
   assert.equal(harness.streams.length, 2);
 });
 
+test('App sends a selected paused message while idle, then resumes neighbours sequentially', async t => {
+  const { harness, queue } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  const message=text=>({text,attachments:[],selectedSkills:['card-quote'],skillRequirements:{'card-quote':'保留要求'},modelRef:'relay/model',thinkingLevel:'off'});
+  await act(async () => { queue.enqueueChat('original', message('第一条')); queue.enqueueChat('original', message('第二条')); queue.pauseChatQueue('original'); });
+  const selected=queue.getChatQueue('original').items[1];
+  await act(async () => assert.equal(await harness.pages['对话'].onSteer(selected.id),true));
+  assert.equal(harness.streams.length,1);assert.equal(harness.streams[0].args[0],'第二条');
+  assert.equal(harness.calls.filter(call=>call[0]==='stopChat').length,0);
+  assert.equal(queue.getChatQueue('original').paused,true);assert.deepEqual(queue.getChatQueue('original').items.map(row=>row.text),['第一条']);
+  await act(async()=>harness.streams[0].args[4]());
+  assert.equal(harness.streams.length,1,'neighbours remain paused after selected message completes');
+  await act(async()=>assert.equal(queue.resumeChatQueue('original'),true));
+  assert.equal(harness.streams.length,2);assert.equal(harness.streams[1].args[0],'第一条');
+  assert.equal(queue.getChatQueue('original').items.length,0);
+});
+
 test('App steering continues the selected queued snapshot after delayed stop and live final cleanup', async t => {
   const { harness, queue } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
   await act(async () => harness.sidebar.onSessionSelect('original'));

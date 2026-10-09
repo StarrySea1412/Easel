@@ -7,6 +7,13 @@ const q=await loadTsModule('../src/lib/chatQueue.ts',import.meta.url);
 const {steerQueuedMessage}=await loadTsModule('../src/lib/chatSteering.ts',import.meta.url);
 const message=text=>({text,attachments:[],selectedSkills:['s'],skillRequirements:{s:'exact'},modelRef:'relay/model',thinkingLevel:'off'});
 
+test('idle paused queue sends only the selected snapshot without a stop request',async()=>{
+ const session='steer-idle';q.enqueueChat(session,message('first'));q.enqueueChat(session,message('selected'));q.pauseChatQueue(session);
+ const selected=q.getChatQueue(session).items[1],sent=[];
+ assert.equal(await steerQueuedMessage(session,selected.id,async()=>{throw Error('idle must not stop');},item=>{sent.push(item);return true;},()=>false),true);
+ assert.deepEqual(sent,[selected]);assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['first']);assert.equal(q.getChatQueue(session).paused,true);
+});
+
 test('steering waits for confirmed stop, sends exact selected snapshot and pauses neighbours',async()=>{
  const session='steer-order';q.enqueueChat(session,message('first'));q.enqueueChat(session,message('selected'));q.enqueueChat(session,message('last'));
  const item=q.getChatQueue(session).items[1];let confirm;const sent=[];

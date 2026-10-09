@@ -60,11 +60,13 @@
 
 .chat-composer .composer-thinking-warning { margin:6px 4px 0; color:var(--amber,#9c6400); font-size:11px; line-height:1.6; }
 .composer-send-actions { display: flex; align-items: center; gap: 6px; }
-/* Compact inset tray at the top of the composer. */
+/* The narrower queue sits behind the upper edge of the main input. */
+.chat-composer-stack { width:100%; min-width:0; }
 .chat-composer { position:relative; }
-.chat-composer .chat-queue.is-compact { margin:-3px -3px 7px; padding:0; border:0; border-radius:0; background:transparent; font-size:12px; }
-.chat-queue ol { display:flex;flex-direction:column;gap:6px;list-style:none; margin:0; padding:1px; max-height:164px; overflow-y:auto; scrollbar-width:thin; }
-.chat-queue-row { display:flex; align-items:center; gap:6px; min-width:0; min-height:36px; padding:0 7px; border:1px solid color-mix(in srgb,var(--border) 60%,transparent); border-radius:9px; background:color-mix(in srgb,var(--surface-2) 45%,var(--surface)); }
+.chat-composer-stack>.chat-queue.is-compact { position:relative; margin:0 14px -14px; padding:3px 7px 14px; border:1px solid var(--border); border-bottom:0; border-radius:16px 16px 0 0; background:color-mix(in srgb,var(--surface-2) 25%,var(--surface)); font-size:12px; }
+.chat-composer-stack>.chat-queue+.chat-composer { z-index:1; }
+.chat-queue ol { display:flex;flex-direction:column;gap:2px;list-style:none; margin:0; padding:1px; max-height:164px; overflow-y:auto; scrollbar-width:thin; }
+.chat-queue-row { display:flex; align-items:center; gap:6px; min-width:0; min-height:32px; padding:0 3px; border:0; border-radius:7px; background:transparent; }
 .chat-queue-row:hover,.chat-queue-row.is-editing { background:var(--surface-2); }
 .chat-queue button,.chat-queue-reattach { border:0; background:transparent; color:var(--text-secondary); font:inherit; padding:5px; cursor:pointer; }
 .chat-queue button:disabled,.chat-queue button[aria-disabled=true] { opacity:.4; cursor:default; }
@@ -74,7 +76,7 @@
 .chat-queue-row.is-drop-target { box-shadow:inset 0 2px 0 var(--text-secondary); background:var(--surface-2); }
 .chat-queue-row.is-drag-placeholder { opacity:0; }
 .chat-queue-row.is-drag-placeholder>* { opacity:0; }
-.chat-queue-drag-preview { position:fixed;z-index:1200;box-sizing:border-box;pointer-events:none;box-shadow:0 7px 24px #0002;background:var(--surface);font-size:12px;color:var(--text-secondary); }
+.chat-queue-drag-preview { position:fixed;z-index:1200;box-sizing:border-box;pointer-events:none;border:1px solid var(--border);box-shadow:0 7px 24px #0002;background:var(--surface);font-size:12px;color:var(--text-secondary); }
 .chat-queue ol.is-dragging { overflow:visible; }
 .chat-queue ol.is-dragging .chat-queue-row { transition:transform 160ms ease; }
 .chat-queue ol.is-dragging .is-drop-target { box-shadow:none; }
@@ -87,6 +89,7 @@
 .chat-queue-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }
 .chat-queue .chat-queue-actions button,.chat-queue-menu summary { color:var(--text-tertiary); }
 .chat-queue .chat-queue-actions button:hover,.chat-queue-menu summary:hover { color:var(--text-secondary); }
+.chat-queue button:focus-visible,.chat-queue summary:focus-visible { outline:2px solid var(--text-secondary); outline-offset:-1px; }
 .chat-queue-remove { display:flex; align-items:center; }
 .chat-queue-remove:hover { color:var(--red); }
 .chat-queue-menu { position:relative; }
@@ -106,6 +109,10 @@
 .composer-queue-edit-actions button { border:0; border-radius:7px; background:transparent; color:var(--text-secondary); padding:6px 9px; font:inherit; cursor:pointer; }
 .composer-queue-edit-actions button:last-child { background:var(--text); color:var(--surface); }
 .composer-queue-edit-actions button:disabled { opacity:.4; }
-@media(max-width:640px) { .chat-queue-steer { font-size:11px!important; padding-inline:2px!important; } }
+@media(max-width:640px) {
+ .chat-composer-stack>.chat-queue.is-compact { margin-inline:10px; padding-inline:4px; border-radius:13px 13px 0 0; }
+ .chat-queue-row { gap:3px; }
+ .chat-queue-steer { font-size:11px!important; padding-inline:2px!important; }
+}
 
 .dash-launch-input::placeholder { color:var(--text-tertiary); font-weight:400; opacity:.72; }

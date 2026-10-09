@@ -89,6 +89,25 @@ test('steer is clickable, invokes the selected id and protects repeated clicks',
  await act(async()=>resolve(false));assert.equal(q.getChatQueue(session).items.length,1);
 });
 
+test('queue menus are exclusive and close outside or on Escape; resume explains editing blockers',async t=>{
+ const session='menus-ui';q.enqueueChat(session,draft('一'));q.enqueueChat(session,draft('二'));q.pauseChatQueue(session);
+ const {container,root}=await mount(t,Tray,{sessionId:session,onEdit(){}});
+ const menus=[...container.querySelectorAll('details')];
+ await act(async()=>{menus[0].open=true;menus[0].dispatchEvent(new window.Event('toggle'));});
+ await act(async()=>{menus[1].open=true;menus[1].dispatchEvent(new window.Event('toggle'));});
+ assert.equal(menus[0].open,false);assert.equal(menus[1].open,true);
+ await act(async()=>document.body.dispatchEvent(new window.PointerEvent('pointerdown',{bubbles:true})));
+ assert.equal(menus[1].open,false);
+ await act(async()=>{menus[1].open=true;document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));});
+ assert.equal(menus[1].open,false);
+ await act(async()=>root.render(createElement(Tray,{sessionId:session,onEdit(){},editingId:q.getChatQueue(session).items[0].id})));
+ const resume=[...container.querySelectorAll('button')].find(button=>button.textContent==='继续排队');
+ const notices=[];const handler=event=>notices.push(event.detail.message);window.addEventListener('easel:toast',handler);t.after(()=>window.removeEventListener('easel:toast',handler));
+ await click(resume);assert.equal(q.getChatQueue(session).paused,true);assert.match(notices.at(-1),/保存或取消/);
+ await act(async()=>root.render(createElement(Tray,{sessionId:session,onEdit(){}})));
+ await click(resume);assert.equal(q.getChatQueue(session).paused,false);assert.match(notices.at(-1),/已继续排队/);
+});
+
 test('pointer drag moves a complete row preview and commits exact target with snapshots preserved',async t=>{
  const session='pointer-ui';for(const text of ['一','二','三'])q.enqueueChat(session,{...draft(text),modelRef:'relay/model',selectedSkills:['s'],skillRequirements:{s:'keep'}});
  const {container}=await mount(t,Tray,{sessionId:session,onEdit(){}});

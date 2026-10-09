@@ -750,7 +750,9 @@ export default function App() {
 
   const handleSteer = useCallback((sessionId: string, id: string) => steerQueuedMessage(sessionId, id,
     () => handleStopStream(sessionId), item => sendUserAndStream(sessionId, item.text, item.attachments,
-      undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel)), [handleStopStream, sendUserAndStream]);
+      undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel),
+    () => Boolean(streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]
+      || sessionsRef.current.find(session => session.id === sessionId)?.pendingTurnId)), [handleStopStream, sendUserAndStream]);
 
   const handleSessionRename = useCallback((id: string, title: string) => {
     const t = title.trim();

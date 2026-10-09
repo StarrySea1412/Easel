@@ -1,14 +1,14 @@
 import { getChatQueue, pauseChatQueue, dispatchSelectedQueuedMessage, type QueuedMessage } from './chatQueue';
 
 const pending = new Set<string>();
-/** Interrupt and continue with the queued snapshot only after the current run stops. */
-export async function steerQueuedMessage(session: string, id: string, stop: () => Promise<boolean>, send: (item: QueuedMessage) => boolean): Promise<boolean> {
+/** Send one selected snapshot; interrupt first only when a run is active. */
+export async function steerQueuedMessage(session: string, id: string, stop: () => Promise<boolean>, send: (item: QueuedMessage) => boolean, hasActiveRun: () => boolean = () => true): Promise<boolean> {
   if (pending.has(session)) return false;
   const item = getChatQueue(session).items.find(row => row.id === id);
   if (!item || item.missingAttachments.length) return false;
   pending.add(session); pauseChatQueue(session);
   try {
-    if (!await stop()) {
+    if (hasActiveRun() && !await stop()) {
       pauseChatQueue(session, '引导未完成：当前任务停止尚未确认，所选消息未发送，队列保持暂停。');
       return false;
     }

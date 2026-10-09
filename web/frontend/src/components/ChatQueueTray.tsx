@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { showToast } from '../lib/toast';
 import { getChatQueue, subscribeChatQueue, removeQueuedMessage, moveQueuedMessage, resumeChatQueue, pauseChatQueue, attachQueuedFiles } from '../lib/chatQueue';
@@ -12,11 +12,28 @@ function QueueSteerIcon() {
   return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h9a6 6 0 0 1 6 6v3" /></svg>;
 }
 
-export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, stopping = false }: { sessionId: string; editingId?: string; onEdit: (id: string, text: string) => void; onSteer?: (id: string) => Promise<boolean>; stopping?: boolean }) {
+export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, isStreaming = false, stopping = false }: { sessionId: string; editingId?: string; onEdit: (id: string, text: string) => void; onSteer?: (id: string) => Promise<boolean>; isStreaming?: boolean; stopping?: boolean }) {
   const queue = useSyncExternalStore(subscribeChatQueue, () => getChatQueue(sessionId));
   const [error,setError]=useState(''),[uploading,setUploading]=useState<string|null>(null);
   const dragged = useRef<string | null>(null);
   const tray = useRef<HTMLElement>(null);
+  const menuGroup = useId();
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      tray.current?.querySelectorAll<HTMLDetailsElement>('.chat-queue-menu[open]').forEach(menu => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      tray.current?.querySelectorAll<HTMLDetailsElement>('.chat-queue-menu[open]').forEach(menu => {
+        menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus();
+      });
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeOnEscape); };
+  }, []);
   const touchTarget = useRef<string | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
   const steeringLock = useRef(false);
@@ -66,7 +83,15 @@ export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, s
   };
   const commit=(accepted:boolean)=>{setError(accepted?'':'更改未保存，请检查浏览器存储或输入内容。');return accepted;};
   const edit=(id:string,value:string)=>{pauseChatQueue(sessionId);onEdit(id,value);};
-  const toggle=()=>queue.paused?commit(resumeChatQueue(sessionId)):pauseChatQueue(sessionId);
+  const toggle = () => {
+    if (editingId) { showToast('请先保存或取消正在编辑的消息，再继续排队。'); return; }
+    if (stopping || steeringLock.current) { showToast('正在处理所选消息，请稍候再继续排队。'); return; }
+    if (queue.paused && queue.items.some(item => item.missingAttachments.length)) { showToast('请先补回队列消息的素材，再继续排队。'); return; }
+    if (queue.paused) {
+      const resumed = resumeChatQueue(sessionId); commit(resumed);
+      showToast(resumed ? (isStreaming ? '已继续排队，本轮结束后按顺序发送。' : '已继续排队，将按顺序发送。') : '队列未恢复，请检查页面提示。', resumed ? 'success' : 'error');
+    } else { pauseChatQueue(sessionId); showToast('已暂停排队，待发送消息已保留。'); }
+  };
   const dragItem = queue.items.find(item => item.id === dragVisual?.id);
   const sourceIndex = queue.items.findIndex(item => item.id === dragVisual?.id);
   const targetIndex = queue.items.findIndex(item => item.id === dragTarget);
@@ -78,7 +103,7 @@ export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, s
     {dragVisual && dragItem && createPortal(<div className="chat-queue-row chat-queue-drag-preview" aria-hidden="true" style={{ left: dragVisual.left + dragVisual.offsetX, top: dragVisual.top, width: dragVisual.width, height: dragVisual.height, transform: `translateY(${dragVisual.offset}px)` }}>
       <span className="chat-queue-grip"><QueueGripIcon/></span><span className="chat-queue-text">{dragItem.text || '素材消息'}{(dragItem.attachments.length || dragItem.missingAttachments.length) > 0 && <small> · {dragItem.attachments.length + dragItem.missingAttachments.length} 份素材{dragItem.missingAttachments.length ? '需重新添加' : ''}</small>}</span>{queue.paused && queue.items[0].id === dragItem.id && <span className="chat-queue-paused">已暂停</span>}<span className="chat-queue-actions"><span className="chat-queue-steer"><QueueSteerIcon/>引导</span><span className="chat-queue-remove"><IconTrash size={13}/></span><span>•••</span></span>
     </div>, document.body)}
-    {hint && queue.items.some(item => item.id === hint.itemId) && createPortal(<div ref={hintPanel} id={hintId} role="tooltip" className="chat-queue-steer-hint" style={hintPosition}>停止当前生成，按此消息继续<br/><small>保留已生成内容，其他队列保持暂停</small></div>, document.body)}
+    {hint && queue.items.some(item => item.id === hint.itemId) && createPortal(<div ref={hintPanel} id={hintId} role="tooltip" className="chat-queue-steer-hint" style={hintPosition}>{isStreaming ? '停止当前生成，按此消息继续' : '发送这条消息'}<br/><small>{isStreaming ? '保留已生成内容，其他队列保持暂停' : '其他队列消息保持暂停'}</small></div>, document.body)}
     <ol className={dragVisual ? 'is-dragging' : undefined}>{queue.items.map((item,index)=><li data-queue-id={item.id} className={`chat-queue-row ${editingId===item.id?'is-editing':''} ${dragTarget===item.id?'is-drop-target':''} ${dragVisual?.id===item.id?'is-drag-placeholder':''}`} key={item.id}
       style={dragVisual ? { transform: `translateY(${dragShift(index)}px)` } : undefined}
       onDragOver={event => { if (!dragged.current) return; event.preventDefault(); setDragTarget(item.id); }} onDrop={event => { if (!dragged.current) return; event.preventDefault(); reorder(item.id); }}>
@@ -115,16 +140,18 @@ export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, s
           if (steeringLock.current || stopping) { showToast('正在等待停止确认，请稍候。'); return; }
           if (editingId) { showToast('请先保存或取消正在编辑的消息。'); return; }
           if (item.missingAttachments.length) { showToast('请先补回这条消息的素材，再进行引导。'); return; }
-          if (!onSteer) { showToast('当前没有可引导的运行任务，消息已保留在队列中。'); return; }
-          steeringLock.current = true; setSteering(item.id); showToast('正在停止当前生成，随后按所选消息继续…');
-          try { const accepted = await onSteer(item.id); showToast(accepted ? '已按所选消息继续，其他队列消息保持暂停。' : '引导未完成：停止或发送尚未确认，消息已保留，请检查运行提示。', accepted ? 'success' : 'error'); }
+          if (!onSteer) { showToast('当前对话无法发送，消息已保留在队列中。'); return; }
+          steeringLock.current = true; setSteering(item.id); showToast(isStreaming ? '正在停止当前生成，随后按所选消息继续…' : '正在发送所选消息…');
+          try { const accepted = await onSteer(item.id); showToast(accepted ? (isStreaming ? '已按所选消息继续，其他队列消息保持暂停。' : '已发送所选消息，其他队列消息保持暂停。') : getChatQueue(sessionId).error || '消息未发送，已保留在队列中，请重试。', accepted ? 'success' : 'error'); }
           catch { showToast('引导失败，消息已保留，请重试。', 'error'); }
           finally { steeringLock.current = false; setSteering(null); }
         }}><QueueSteerIcon/>{steering===item.id?'引导中…':'引导'}</button>
         <button type="button" className="chat-queue-remove" aria-label={`删除第 ${index+1} 条消息`} onClick={()=>commit(removeQueuedMessage(sessionId,item.id))}><IconTrash size={13}/></button>
-        <details className="chat-queue-menu"><summary aria-label={`第 ${index+1} 条消息更多操作`}>•••</summary><div className="chat-queue-menu-items" onClick={event=>{const target=event.target as HTMLElement;const button=target.closest('button');if(button&&!button.disabled)button.closest('details')?.removeAttribute('open');}}>
+        <details className="chat-queue-menu" name={`chat-queue-${menuGroup}`} onToggle={event => {
+          if (event.currentTarget.open) tray.current?.querySelectorAll<HTMLDetailsElement>('.chat-queue-menu').forEach(menu => { if (menu !== event.currentTarget) menu.open = false; });
+        }}><summary aria-label={`第 ${index+1} 条消息更多操作`}>•••</summary><div className="chat-queue-menu-items" onClick={event=>{const target=event.target as HTMLElement;const button=target.closest('button');if(button&&!button.disabled)button.closest('details')?.removeAttribute('open');}}>
           <button type="button" onClick={()=>edit(item.id,item.text)}><IconEdit size={13}/>编辑消息</button>
-          <button type="button" disabled={Boolean(editingId)||(queue.paused&&queue.items.some(row=>row.missingAttachments.length))} onClick={toggle}>{queue.paused?'继续排队':'关闭排队'}</button>
+          <button type="button" aria-disabled={Boolean(editingId)||stopping||!!steering||(queue.paused&&queue.items.some(row=>row.missingAttachments.length))} onClick={toggle}>{queue.paused?'继续排队':'关闭排队'}</button>
         </div></details>
         {item.missingAttachments.length>0&&<label className="chat-queue-reattach">{uploading===item.id?'添加中…':'补素材'}<input type="file" multiple hidden disabled={Boolean(uploading)} onChange={async event=>{
           const files=Array.from(event.target.files||[]);event.target.value='';if(!files.length)return;setUploading(item.id);pauseChatQueue(sessionId);
