@@ -10,7 +10,11 @@ A local creative workspace combining conversations, assets, content projects, an
 >
 > This candidate freezes source [76bbaf69](https://github.com/StarrySea1412/Easel/commit/76bbaf690d224cf2c60496847402426a4619b5c3), including moderation follow-up for five platforms, pause/resume and publication-completion reminders. Later documentation commits are tracked separately and do not change the ZIP's source identity; the older `20a709c` package remains historical.
 
+Use the [functional acceptance checklist](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/functional-acceptance-2026-10-09.md) to check the interface, skills, office, publication reminders and portable startup. It separates basic interactions from real workflows that require your own accounts or model configuration.
+
 ## Current features
+
+**October 9 source update:** Account analysis now explains diagnostic capabilities, data quality, metric definitions and comparable cohorts for seven platforms, with topics grounded in actual tags/comments and seven-day experiments. Platform changes refresh data and reject late responses from another scope. The composer offers model and thinking-level selection with measured status; settings add custom text probes, objectively scored random color-grid image probes and opt-in scheduled checks (two requests per rolling 60 seconds, two automatic models per provider). Conversation ticks support preview/navigation, and Agent title suggestions require explicit saving. CC Switch imports and manual Xiaohongshu browser login have also been repaired. See the [operator handoff guide](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/operator-handoff-2026-10-09.md). These changes are source-only: the old portable ZIP and public 0.2.6 installer do not contain them. Real account identity, inference, publishing, SMTP and the final rebuilt package remain unverified.
 
 - A Three.js / WebGL office with continuous character surfaces for cats, rabbits, foxes and bears. Preview, save or cancel appearance edits in the office; live Agent bindings are explicit.
 - Search the full member list and locate employees across zones of up to eight visible workstations. Six role layouts have different equipment, seated poses and gestures.
