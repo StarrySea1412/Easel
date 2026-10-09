@@ -121,6 +121,23 @@ def test_whoami_cache_is_scoped_to_account_generation(isolated, monkeypatch):
     assert len(calls) == 2
 
 
+def test_manual_whoami_bypasses_fresh_positive_cache(isolated, monkeypatch):
+    replies = iter([True, False])
+    calls = []
+
+    def reply(*args, **kwargs):
+        calls.append(True)
+        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies)}), stderr='', returncode=0)
+
+    monkeypatch.setattr(web, '_run_owned_whoami', reply)
+    assert asyncio.run(web.api_account_whoami('xiaohongshu'))['loggedIn'] is True
+    assert asyncio.run(web.api_account_whoami('xiaohongshu'))['loggedIn'] is True
+    assert len(calls) == 1
+    assert asyncio.run(web.api_account_whoami('xiaohongshu', force=True))['loggedIn'] is False
+    assert len(calls) == 2
+    assert not (web.LOGIN_DIR / 'xiaohongshu.json').exists()
+
+
 def test_confirmed_logout_cache_uses_invalidated_generation(isolated, monkeypatch):
     seed("live")
     calls = []

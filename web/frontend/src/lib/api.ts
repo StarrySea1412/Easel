@@ -493,9 +493,9 @@ export interface AccountWhoami {
 }
 
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
-export async function accountWhoami(platform: string): Promise<AccountWhoami> {
+export async function accountWhoami(platform: string, force = false): Promise<AccountWhoami> {
   const signal = AbortSignal.timeout(60000);
-  try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami`, { signal }); }
+  try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, { signal }); }
   catch (cause) { if (signal.aborted) throw new Error('登录状态检查超时，请稍后重试'); throw cause; }
 }
 
@@ -529,6 +529,7 @@ export interface PublishReceipt {
   state: string;
   outcome: PublishOutcome | null;
   contentId?: string;
+  evidence?: { previewContentId?: string; [key: string]: unknown };
   url?: string;
   message: string;
   notification?: PublishNotification;
@@ -864,7 +865,14 @@ export function streamChat(
         } else if (currentEvent === 'activity' && onActivity) {
           try { onActivity(JSON.parse(data) as string); } catch { onActivity(data); }
         } else if (currentEvent === 'question' && onQuestion) {
-          try { onQuestion(JSON.parse(data) as ChatQuestion); } catch { /* 解析失败忽略 */ }
+          try {
+            const question: unknown = JSON.parse(data);
+            if (question && typeof question === 'object' && !Array.isArray(question)
+                && 'id' in question && typeof question.id === 'string'
+                && 'questions' in question && Array.isArray(question.questions)) {
+              onQuestion(question as ChatQuestion);
+            }
+          } catch { /* invalid question cannot create an unanswerable card */ }
         } else if (currentEvent === 'heartbeat') {
           // 防呆心跳：独立于 activity/thinking，仅作「未卡住」提示，不覆盖真实状态。
           if (onHeartbeat) { try { onHeartbeat(JSON.parse(data) as string); } catch { onHeartbeat(data); } }

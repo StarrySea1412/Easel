@@ -54,6 +54,7 @@ export interface PublishDraft {
   platforms: string[];
   overrides: Record<string, string>;
   tags: string;   // 话题标签，逗号分隔（小红书绑话题；其它平台按需写入）
+  media?: string[]; // Local content-library paths; no media bytes or login state.
 }
 const PUBLISH_KEY = 'easel_publish_draft';
 const PREVIOUS_BRAND = ['post', 'craft'].join('');
@@ -96,6 +97,7 @@ export function loadPublishDraft(): PublishDraft {
       title: typeof value.title === 'string' ? value.title : '',
       body: typeof value.body === 'string' ? value.body : '',
       tags: typeof value.tags === 'string' ? value.tags : '',
+      ...(Array.isArray(value.media) ? { media: [...new Set(value.media.filter((p): p is string => typeof p === 'string' && p.length > 0))] } : {}),
       platforms: Array.isArray(value.platforms) ? value.platforms.filter((p): p is string => typeof p === 'string') : [...PUBLISH_DEFAULT.platforms],
       overrides: record(value.overrides) ? Object.fromEntries(Object.entries(value.overrides).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {},
     };

@@ -1,3 +1,7 @@
+> **2026-10-10 发布中心整改**：正文和媒体位于左侧，平台选择、单一切换预览及提交操作位于右侧。多平台共享正文并保留独立版本；确认框明确实际提交及未就绪平台。媒体选择及顺序随草稿保存，预检/发布/只读核实显示轻量 loading。工具导航保持单行；待发送队列移除常驻恢复说明，整行拖动时邻居让位。一次小红书投稿的本人列表候选已找到，公开结果仍待核实，未重复发布。桌面浏览器已核对多选、键盘、素材恢复、五个工具跳转及队列拖动；本轮390px视口设置未生效，不能记作通过。功能尚未全部收口，便携 ZIP 暂停。
+
+> **October 10 publishing redesign:** the shared editor and media sit beside platform selection, a single switchable preview and submission controls. Platform-specific text remains independent; confirmation lists included and blocked targets. Media order persists with drafts; precheck, submission and read-only verification show loading feedback. Tool navigation stays on one row. Restored chat queues remain paused without a persistent informational error; neighbouring rows make room during whole-row dragging. One approved Xiaohongshu submission has a candidate in the creator list; public confirmation remains pending and no second post was sent. Desktop navigation, multiple previews, keyboard switching, media recovery and queue dragging were checked. The current 390px viewport override did not apply, so mobile browser QA remains pending. Packaging is paused.
+
 ## 最终交付要求：运营手册与便携 ZIP（2026-10-10 用户新增）
 
 用户要求：“记得这个迭代完，需要更新运营交接手册，打包一个便携版本的zip”。顺序：既有功能完成与必要验证 → 原始上游 main 修复兼容 → 更新运营交接手册 → 制作本轮 Windows x64 便携 ZIP → 实际解压/启动/关键入口验收 → 提供文件、校验值及边界。

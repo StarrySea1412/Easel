@@ -1,0 +1,6 @@
+.publish-spinner { display: inline-block; width: 14px; height: 14px; flex: 0 0 14px; box-sizing: border-box; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: publish-progress-spin .8s linear infinite; vertical-align: -2px; }
+.publish-progress-line { display: flex; align-items: center; gap: 8px; }
+.publish-receipt-status { display: inline-flex; align-items: center; gap: 6px; }
+.publish-platform.is-publishing { border-color: var(--accent-start); }
+@keyframes publish-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .publish-spinner { animation: none; } }

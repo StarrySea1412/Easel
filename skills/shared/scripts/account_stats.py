@@ -48,6 +48,8 @@ PLATFORMS: dict[str, dict] = {
         # 首页「近7日」块真实标签（旧列表与页面不符导致 metrics 恒空）；环比是「较前7日±X」。
         "metrics": ["播放量", "主页访问量", "作品分享", "作品评论"],
         "metrics_anchor": "近7日",   # 只从「近7日」之后解析，避开「最新作品」卡片里的同名「播放量」
+        "login_qr_selector": 'img[class*="qr"], [class*="qrcode"] img, [class*="qrcode"] canvas, img[aria-label="二维码"]',
+        "login_ok_selector": 'button[class*="douyin-creator-master-button"], #douyin-creator-master-side-upload-wrap button',
         "note_url_re": r"douyin\.com/(video|note)/|creator-micro/content",
     },
     "kuaishou": {
@@ -458,6 +460,27 @@ def _proxy(platform: str, explicit: str | None, disable: bool | None) -> str | N
     return os.environ.get("https_proxy") or os.environ.get("http_proxy") or os.environ.get("EASEL_PROXY")
 
 
+def _platform_logged_in(page, cfg: dict) -> bool:
+    """Hidden login markup is harmless; a visible iframe wall invalidates metrics."""
+    qr_selector = cfg.get("login_qr_selector")
+    ok_selector = cfg.get("login_ok_selector")
+    if not qr_selector or not ok_selector:
+        return True
+    for attempt in range(3):
+        try:
+            for frame in page.frames:
+                if any(element.is_visible() for element in frame.query_selector_all(qr_selector)):
+                    return False
+            return any(element.is_visible() for element in page.query_selector_all(ok_selector))
+        except Exception:
+            if attempt < 2:
+                try:
+                    page.wait_for_timeout(500)
+                except Exception:
+                    return False
+    return False
+
+
 def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) -> dict:
     from playwright.sync_api import sync_playwright
     cfg = PLATFORMS[platform]
@@ -500,6 +523,10 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
             if re.search(r"(passport|/login)", page.url or "") or \
                page.query_selector('button:has-text("扫码登录"), [class*="login-btn"]'):
                 r["logged_in"] = False
+            if r["logged_in"]:
+                r["logged_in"] = _platform_logged_in(page, cfg)
+            if cfg.get("login_ok_selector") and not r["logged_in"]:
+                return r
             r["followers"] = num_by_label(lines, ov["followers"], d)
             r["likes"] = num_by_label(lines, ov["likes"], d)
             r["following"] = num_by_label(lines, ov.get("following", []), d)

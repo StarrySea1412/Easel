@@ -245,6 +245,16 @@ test('publish drafts normalize broken fields and preserve unreadable originals',
   assert.equal(isolated.store.loadPublishDraft().body, '页内新稿');
 });
 
+test('publish media paths retain order after reload and tolerate legacy drafts', async () => {
+  const storage = memoryStorage({ easel_publish_draft: JSON.stringify({ title: '图文', body: '正文', media: ['outputs/02.png', null, 'outputs/01.png', '', 'outputs/02.png'] }) });
+  const { store } = await isolatedStore(storage);
+  const draft = store.loadPublishDraft();
+  assert.deepEqual(draft.media, ['outputs/02.png', 'outputs/01.png']);
+  store.savePublishDraft({ ...draft, media: ['outputs/01.png', 'outputs/02.png'] });
+  const reloaded = await isolatedStore(storage);
+  assert.deepEqual(reloaded.store.loadPublishDraft().media, ['outputs/01.png', 'outputs/02.png']);
+});
+
 test('clearing the active ID cannot resurrect an obsolete legacy ID', async () => {
   const storage = memoryStorage({ postcraft_active_session: 'obsolete' });
   const { store } = await isolatedStore(storage);

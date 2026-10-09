@@ -42,7 +42,7 @@ async function fixture(t, initial = [], page = 'other') {
   const h = {
     model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0,
     list: null, detail: null, publish: null, sms: null, verify: null, precheck: null,
-    accounts: [{ platform: 'zhihu', loggedIn: true }], schedule: [], confirm: true, confirmations: [],
+    accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
   t.mock.method(window, 'confirm', text => { h.confirmations.push(text); return h.confirm; });
   t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
@@ -64,7 +64,7 @@ async function fixture(t, initial = [], page = 'other') {
       if (!h.publish) throw new Error('No simulated publisher configured');
       result = await h.publish(path.split('/')[3], request.body, request);
     } else if (path === '/api/accounts') result = h.accounts;
-    else if (path === '/api/outputs') result = [];
+    else if (path === '/api/outputs') result = h.outputs;
     else if (path === '/api/schedule') result = h.schedule;
     else if (path.startsWith('/api/schedule/context?')) result = {};
     else if (path === '/api/chat') result = h.precheck ? await h.precheck(request) : { response: '模拟预检结果' };
@@ -122,10 +122,12 @@ test('manual moderation check cannot republish and announces the later result on
   };
   await view.click(view.button('核实发布结果'));
   assert.equal(view.button('处理中…').disabled, true);
+  assert.ok(view.button('处理中…').querySelector('.publish-spinner'));
   await act(async () => { await view.model().verify(pending.receiptId); });
   assert.equal(view.h.requests.filter(request => request.path.endsWith('/verify')).length, 1);
   await act(async () => { gate.resolve(); });
   assert.equal(view.button('正在核实…').disabled, true);
+  assert.ok(view.button('正在核实…').querySelector('.publish-spinner'));
   await view.render('calendar');
   view.h.items = [completed({ ...pending, outcome: 'published',
     url: 'https://www.xiaohongshu.com/explore/0123456789abcdef01234567',
@@ -136,6 +138,22 @@ test('manual moderation check cannot republish and announces the later result on
   await view.refresh();
   assert.equal(view.model().notices.length, 1);
   assert.equal(view.posts().length, 0);
+});
+
+test('a candidate preview offers a safe link without claiming confirmed publication', async t => {
+  const candidate = completed({platform:'xiaohongshu',outcome:'unverified',contentId:'',url:'',
+    evidence:{previewContentId:'0123456789abcdef01234567'}});
+  const view = await fixture(t,[candidate]);
+  await view.click(view.button('发布回执'));
+  const links = [...view.container.querySelectorAll('a')];
+  assert.equal(links.find(link=>link.textContent==='预览笔记 ↗')?.href,'https://www.xiaohongshu.com/explore/0123456789abcdef01234567');
+  assert.ok(links.some(link=>link.textContent==='打开作品管理 ↗'));
+  assert.ok(!links.some(link=>link.textContent==='查看已发布作品 ↗'));
+  assert.match(view.container.textContent,/预览不代表已确认公开/);
+  view.h.items=[{...candidate,updatedAt:'2026-10-08T01:03:00.000Z',evidence:{previewContentId:'../secret'}}];
+  await view.refresh();
+  assert.ok(![...view.container.querySelectorAll('a')].some(link=>link.textContent==='预览笔记 ↗'));
+  assert.equal(view.posts().length,0);
 });
 
 test('automatic checks can be paused and resumed with persisted receipt state', async t => {
@@ -288,6 +306,7 @@ test('confirmed batches survive editor unmount, keep immutable payloads and reje
   ];
   let pending;
   await act(async () => { pending = view.model().submit(requests); void view.model().submit(requests); });
+  assert.ok(view.container.querySelector('.publish-receipts-progress .publish-spinner'));
   requests[1].payload.title = '后来编辑的标题'; requests[0].payload.media.push('later.mp4');
   await view.render('other');
   const active = makeReceipt({ platform: 'douyin', title: '确认过的标题' });
@@ -348,6 +367,63 @@ test('editor confirmation is required, cancellation and leaving during precheck 
   await act(async () => wait.resolve({ response: '模拟晚到预检' }));
   assert.equal(view.h.confirmations.length, 1);
   assert.equal(view.posts().length, 0);
+});
+
+test('multiple previews switch by keyboard and preserve independent versions across pages', async t => {
+  const view = await fixture(t, [], 'publish');
+  await view.click(view.container.querySelector('.publish-platform-list button:nth-child(1)'));
+  assert.equal(view.container.querySelectorAll('[role="tab"]').length, 2);
+  const xhs = view.container.querySelector('#publish-tab-xiaohongshu');
+  const zhihu = view.container.querySelector('#publish-tab-zhihu');
+  assert.equal(xhs.getAttribute('aria-selected'), 'true');
+  const visiblePanel = () => view.container.querySelector('[role="tabpanel"]:not([hidden])');
+  assert.equal(visiblePanel().id, 'publish-preview-xiaohongshu');
+  await view.click([...visiblePanel().querySelectorAll('button')].find(b => b.textContent === '编辑'));
+  await view.type(visiblePanel().querySelector('textarea'), '小红书独立正文');
+  await act(async () => xhs.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+  assert.equal(zhihu.getAttribute('aria-selected'), 'true');
+  assert.equal(document.activeElement, zhihu);
+  assert.equal(visiblePanel().querySelector('.pv-text').textContent, '本次内容正文。');
+  await view.type(view.container.querySelector('#publish-body'), '更新通用正文');
+  await view.render('other'); await view.render('publish');
+  assert.equal(view.container.querySelectorAll('[role="tabpanel"]:not([hidden])').length, 1);
+  assert.equal(view.container.querySelector('#publish-preview-xiaohongshu .pv-text').textContent, '小红书独立正文');
+  assert.equal(view.container.querySelector('#publish-preview-zhihu .pv-text').textContent, '更新通用正文');
+  await view.click(view.container.querySelector('#publish-tab-xiaohongshu'));
+  await view.click(view.button('使用通用正文'));
+  assert.equal(visiblePanel().querySelector('.pv-text').textContent, '更新通用正文');
+  assert.equal(view.posts().length, 0);
+});
+
+test('mixed platform readiness explicitly excludes video targets and restores image order', async t => {
+  const view = await fixture(t, [], 'publish');
+  view.h.accounts = ['zhihu', 'xiaohongshu', 'douyin'].map(platform => ({ platform, loggedIn: true }));
+  view.h.outputs = ['01.png', '02.png'].map(name => ({ type: 'file', kind: 'image', name, path: `outputs/${name}` }));
+  await view.render('other'); await view.render('publish');
+  await view.click(view.container.querySelector('.publish-platform-list button:nth-child(1)'));
+  await view.click(view.container.querySelector('.publish-platform-list button:nth-child(2)'));
+  await view.click(view.button('选择媒体'));
+  await view.click(view.container.querySelector('[aria-label="选择素材 01.png"]'));
+  await view.click(view.container.querySelector('[aria-label="选择素材 02.png"]'));
+  await view.click(view.container.querySelector('[aria-label="素材 2 向前移动"]'));
+  await view.render('other'); await view.render('publish');
+  assert.equal(view.container.querySelectorAll('.media-chip').length, 2);
+  assert.equal(view.container.querySelector('.media-chip').getAttribute('aria-label'), '移除素材 02.png');
+  view.h.confirm = false;
+  await view.click(view.button('发布到 3 个平台'));
+  assert.match(view.h.confirmations[0], /本次不会提交：抖音（抖音需要视频/);
+  assert.equal(view.posts().length, 0);
+  view.h.confirm = true;
+  view.h.publish = (platform, payload) => {
+    assert.deepEqual(payload.media, ['outputs/02.png', 'outputs/01.png']);
+    const receipt = completed({ platform, receiptId: (platform === 'zhihu' ? 'a' : 'b').repeat(32), title: payload.title });
+    view.h.items.push(receipt); return receipt;
+  };
+  await view.click(view.button('发布到 3 个平台'));
+  assert.deepEqual(view.posts().map(r => r.path), ['/api/publish/xiaohongshu', '/api/publish/zhihu']);
+  assert.equal(view.model().receipts.length, 2);
+  await view.render('other'); await view.render('publish');
+  assert.equal(view.posts().length, 2, 'restoring draft and per-platform results never repeats submission');
 });
 
 test('editor uses the durable outcome, preserves receipts when clearing its draft, and opens notification settings', async t => {

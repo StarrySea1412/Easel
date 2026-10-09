@@ -33,7 +33,9 @@ from pathlib import Path
 HOME = Path.home()
 # Easel runs OpenClaw under an isolated `easel` profile at ~/.openclaw-easel/;
 # allow an override for non-default setups.
-PROFILE_DIR = Path(os.environ.get("EASEL_OPENCLAW_STATE_DIR") or (HOME / ".openclaw-easel"))
+from easel.openclaw_workspace import state_dir
+
+PROFILE_DIR = state_dir()
 PROFILE_STATE_DIR = PROFILE_DIR / "state"
 PROFILE_DB = PROFILE_STATE_DIR / "openclaw.sqlite"
 

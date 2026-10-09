@@ -1,5 +1,6 @@
 import type { Page } from './Sidebar';
 import type { ComponentType } from 'react';
+import { useEffect, useRef } from 'react';
 import { IconDashboard, IconFire, IconIdea, IconCalendar, IconPublish, IconSkills } from './icons';
 
 interface SubNavProps {
@@ -16,13 +17,17 @@ const TOOLS: { page: Page; Icon: ComponentType<{ size?: number }>; label: string
 ];
 
 export default function SubNav({ current, onNavigate }: SubNavProps) {
+  const tabs = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabs.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [current]);
   return (
     <nav className="subnav" aria-label="创作工具导航">
       <button className="subnav-back" onClick={() => onNavigate('dashboard')} title="返回工作台">
         <IconDashboard size={15} /> 工作台
       </button>
       <span className="subnav-div" />
-      <div className="subnav-tabs">
+      <div className="subnav-tabs" ref={tabs}>
         {TOOLS.map(({ page, Icon, label }) => (
           <button key={page} className={`subnav-tab ${current === page ? 'active' : ''}`}
             aria-current={current === page ? 'page' : undefined}

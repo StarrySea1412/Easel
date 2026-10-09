@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -70,7 +71,7 @@ def normalize_status(note: dict) -> str:
     # Presence matters: a default false/zero would turn an incomplete response
     # into an unsupported public-success claim.
     if (type(schedule) is not int or schedule != 0
-            or not (high_self is False or (type(high_self) is int and high_self == 0))):
+            or ("high_self" in note and not (high_self is False or (type(high_self) is int and high_self == 0)))):
         return "unknown"
     if "post_timing" in note and note["post_timing"] is not False:
         return "unknown"
@@ -92,7 +93,31 @@ def map_note(note: Any) -> WorkItem | None:
     # The first-party formatter establishes milliseconds for numeric values.
     # Date-only/minute strings cannot prove a new submission within one second.
     timestamp = timestamp if valid_since_ms(timestamp) else None
-    return WorkItem(note_id, title, normalize_status(note), timestamp)
+    stats = {}
+    visible = note.get("visible_time")
+    # The current creator list formats creation time to a local minute and
+    # supplies visibility time separately in seconds. Do not turn either into
+    # an exact creation timestamp. The runner pins its display timezone.
+    if (isinstance(note.get("time"), str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", note["time"])
+            and type(visible) is int and 1_000_000_000 <= visible <= 9_999_999_999):
+        try:
+            minute = datetime.strptime(note["time"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone(timedelta(hours=8)))
+            stats = {"createdMinuteMs": int(minute.timestamp() * 1000), "visibleAtMs": visible * 1000}
+        except ValueError:
+            pass
+    return WorkItem(note_id, title, normalize_status(note), timestamp, stats)
+
+
+def _minute_candidate(work: WorkItem, *, title: str, since_ms: int, until_ms: int | None = None) -> bool:
+    start = work.stats.get("createdMinuteMs")
+    visible = work.stats.get("visibleAtMs")
+    now = int(time.time() * 1000)
+    end = min(now, until_ms) if until_ms is not None else now
+    return (normalize_title(work.title) == normalize_title(title) and valid_since_ms(start)
+            and valid_since_ms(visible) and start <= end + TIMESTAMP_TOLERANCE_MS
+            and start + 59_999 >= since_ms - TIMESTAMP_TOLERANCE_MS
+            and since_ms - TIMESTAMP_TOLERANCE_MS <= visible <= now + TIMESTAMP_TOLERANCE_MS)
 
 
 def _assert_manager_location(page) -> None:
@@ -223,6 +248,11 @@ def find_xhs_work(works: list[WorkItem], *, title: str, since_ms: int,
         if normalize_title(work.title) != normalize_title(title):
             continue
         timestamp = work.published_at_ms
+        # Minute precision is sufficient only with an observed pre-submit
+        # baseline proving this ID did not exist before our submission.
+        if timestamp is None and snapshot_ids is not None and _minute_candidate(work, title=title, since_ms=since_ms, until_ms=until_ms):
+            candidates.append(work)
+            continue
         if (not valid_since_ms(timestamp) or timestamp < since_ms - TIMESTAMP_TOLERANCE_MS
                 or timestamp > latest_ms + TIMESTAMP_TOLERANCE_MS):
             continue
@@ -256,6 +286,11 @@ def verify_xhs_publish(page, *, title: str, since_ms: int, content_id: str = "",
             if work:
                 evidence["matchedBy"] = "content_id" if content_id else "exact_title_time"
                 return ReadbackResult("verified", work, evidence=evidence)
+            # A follow-up without the original snapshot can offer a preview,
+            # but must not adopt its candidate as the submitted work identity.
+            previews = [item for item in latest if _minute_candidate(item, title=title, since_ms=since_ms, until_ms=until_ms)]
+            if len(previews) == 1:
+                evidence["previewContentId"] = previews[0].platform_content_id
         except LoginRequiredError:
             return ReadbackResult("login_required", evidence=evidence, error="小红书登录已失效")
         except Exception:
@@ -267,6 +302,9 @@ def verify_xhs_publish(page, *, title: str, since_ms: int, content_id: str = "",
 
 def receipt_from_result(result: ReadbackResult, *, signal: str = "", read_only: bool = False) -> dict:
     receipt = publish_receipt.from_readback("xiaohongshu", result)
+    preview_id = result.evidence.get("previewContentId")
+    if isinstance(preview_id, str) and NOTE_ID.fullmatch(preview_id):
+        receipt["evidence"]["previewContentId"] = preview_id
     receipt["evidence"].update(source="xhs_creator_notes", readOnly=read_only)
     # Copy only our small, non-sensitive provenance fields. Never pass candidates,
     # raw errors, tokens, or account information through to notifications.

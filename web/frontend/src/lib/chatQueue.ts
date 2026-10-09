@@ -45,7 +45,8 @@ export function getChatQueue(session: string): ChatQueue {
           selectedSkills: row.selectedSkills as string[], skillRequirements: requirementsForSelection(row.skillRequirements as SkillRequirements, row.selectedSkills as string[]),
           thinkingLevel: row.thinkingLevel as ThinkingLevel | undefined, modelRef: row.modelRef as string | undefined };
       });
-      if (queue.items.length) queue.error = '已恢复待发送消息。确认内容与素材后继续发送。';
+      // Restored items stay paused. Their row state and missing-media action
+      // communicate this without treating an ordinary restore as an error.
     } catch {
       protectedSessions.add(session);
       queue.error = '队列记录无法读取，已保留原始数据；请先导出浏览器数据。';

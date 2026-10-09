@@ -94,13 +94,17 @@ test('pointer drag moves a complete row preview and commits exact target with sn
  const {container}=await mount(t,Tray,{sessionId:session,onEdit(){}});
  const before=q.getChatQueue(session).items[0],grip=container.querySelector('.chat-queue-grip');
  grip.setPointerCapture=()=>{};
- t.mock.method(document,'elementFromPoint',()=>container.querySelectorAll('li')[2]);
+ t.mock.method(window.HTMLElement.prototype,'getBoundingClientRect',function(){return {top:Array.from(this.parentElement?.children||[]).indexOf(this)*42,left:0,width:300,height:36};});
+ globalThis.getComputedStyle=window.getComputedStyle.bind(window);
  const pointer=(type,y)=>new window.PointerEvent(type,{button:0,pointerId:1,pointerType:'mouse',clientX:20,clientY:y,bubbles:true});
  await act(async()=>grip.dispatchEvent(pointer('pointerdown',20)));
  await act(async()=>grip.dispatchEvent(pointer('pointermove',100)));
  const ghost=document.querySelector('.chat-queue-drag-preview');
  assert.ok(ghost);assert.match(ghost.textContent,/一.*引导/);assert.equal(ghost.style.transform,'translateY(80px)');
  assert.ok(container.querySelector('.is-drag-placeholder'));
+ assert.equal(container.querySelectorAll('li')[1].style.transform,'translateY(-42px)');
+ assert.equal(container.querySelectorAll('li')[2].style.transform,'translateY(-42px)');
+ assert.equal(ghost.style.height,'36px');
  await act(async()=>grip.dispatchEvent(pointer('pointerup',100)));
  assert.equal(document.querySelector('.chat-queue-drag-preview'),null);
  assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['二','三','一']);assert.deepEqual(q.getChatQueue(session).items[2],before);

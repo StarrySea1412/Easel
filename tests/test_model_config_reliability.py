@@ -54,6 +54,45 @@ def source(tmp_path, protocol='openai', model='incoming-model'):
     return p
 
 
+@pytest.mark.parametrize('base', ['', 'https://old.example/v1'])
+def test_authoritative_env_pair_repairs_stale_mirror_on_model_save(sandbox, base):
+    _, oc = sandbox
+    data = json.loads(oc.read_text())
+    data['models']['providers']['openai'].update(baseUrl='https://stale.example/v1', apiKey='stale-key')
+    oc.write_text(json.dumps(data))
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='chat', rows=[
+        web.ModelSaveRow(slot='openai', model='new-model', baseUrl=base, key=''),
+    ])))
+    assert result['ok']
+    provider = json.loads(oc.read_text())['models']['providers']['openai']
+    assert (provider['baseUrl'], provider['apiKey']) == ('https://old.example/v1', 'sk-old-test')
+    assert provider['models'][0] == {'id': 'new-model', 'name': 'new-model'}
+
+
+def test_stale_mirror_repair_still_rejects_real_base_change(sandbox):
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='chat', rows=[
+            web.ModelSaveRow(slot='openai', model='new-model', baseUrl='https://different.example/v1', key=''),
+        ])))
+    assert caught.value.status_code == 400
+    assert web._model_file_snapshot() == before
+
+
+def test_model_only_save_preserves_local_gateway_auth_and_url(sandbox):
+    _, oc = sandbox
+    data = json.loads(oc.read_text())
+    provider = data['models']['providers']['openai']
+    provider.update(baseUrl='http://127.0.0.1:8890/v1', apiKey='gateway-token', headers={'X-Gateway': 'gateway-token'})
+    oc.write_text(json.dumps(data))
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='chat', rows=[
+        web.ModelSaveRow(slot='openai', model='new-model', baseUrl='https://old.example/v1', key=''),
+    ])))
+    updated = json.loads(oc.read_text())['models']['providers']['openai']
+    assert (updated['baseUrl'], updated['apiKey'], updated['headers']) == (
+        'http://127.0.0.1:8890/v1', 'gateway-token', {'X-Gateway': 'gateway-token'})
+
+
 def preview(p, slot='openai'):
     return asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='openclaw', path=str(p), slot=slot)))
 

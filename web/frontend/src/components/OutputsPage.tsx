@@ -90,12 +90,14 @@ function imageDimensions(node: OutputNode): string {
 }
 
 interface OutputsPageProps {
+  jumpPath?: string;
+  onJumpHandled?: () => void;
   initialFilter?: string;
   onReferenceImage?: (image: {name:string;url:string;mtime:number}) => void;
   onReuseImage?: (prompt: string, size?: string) => void;
 }
 
-export default function OutputsPage({ initialFilter = 'all', onReuseImage, onReferenceImage }: OutputsPageProps) {
+export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHandled, onReuseImage, onReferenceImage }: OutputsPageProps) {
   const [roots, setRoots] = useState<OutputNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState('');
@@ -210,6 +212,18 @@ export default function OutputsPage({ initialFilter = 'all', onReuseImage, onRef
       } finally { if (seq === reqSeq.current) setLoading(false); }
     }
   }, []);
+
+  useEffect(() => {
+    if (!jumpPath || treeLoading || treeError) return;
+    const parts = jumpPath.split('/').filter(Boolean);
+    const parent = parts.slice(0, -1);
+    const node = resolvePath(roots, parent).find(n => n.name === parts.at(-1));
+    setStack(node?.type === 'file' ? parent : parts);
+    setFilter('all'); setQuery('');
+    if (node?.type === 'file') void open(node);
+    else setSelected(null);
+    onJumpHandled?.();
+  }, [jumpPath, roots, treeLoading, treeError, open, onJumpHandled]);
 
   const preview = () => {
     if (!selected) return null;

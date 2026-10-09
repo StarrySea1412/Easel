@@ -103,6 +103,22 @@ export default function App() {
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
   const [outputFilter, setOutputFilter] = useState('');
+  const [outputJumpPath, setOutputJumpPath] = useState('');
+  useEffect(() => {
+    const navigateOutput = () => {
+      if (!window.location.hash.startsWith('#/outputs/')) return;
+      try {
+        const parts = window.location.hash.slice('#/outputs/'.length).split('/').map(decodeURIComponent);
+        if (parts.some(part => part === '.' || part === '..' || /[\\\u0000]/.test(part))) return;
+        setOutputJumpPath(parts.join('/'));
+        setOutputFilter('all');
+        setCurrentPage('outputs');
+      } catch { /* malformed links leave the current page intact */ }
+    };
+    window.addEventListener('hashchange', navigateOutput);
+    navigateOutput();
+    return () => window.removeEventListener('hashchange', navigateOutput);
+  }, [setCurrentPage]);
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState('');
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
@@ -977,7 +993,7 @@ export default function App() {
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
       case 'outputs':
-        return <OutputsPage initialFilter={outputFilter} onReferenceImage={(image) => { videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
+        return <OutputsPage initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':

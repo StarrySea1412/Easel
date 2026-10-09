@@ -6,6 +6,7 @@ import { useModalFocus } from '../hooks/useModalFocus';
 import { canVerifyPublishReceipt, isFinalPublishReceipt, publishNotificationLabel, publishPlatformLabel, publishReceiptStatus, receiptPublicUrl } from '../lib/publishReceipts';
 import { IconHistory, IconRefresh } from './icons';
 import PlatformIcon from './PlatformIcon';
+import PublishSpinner from './PublishSpinner';
 import '../styles/publish-receipts.css';
 import { showToast } from '../lib/toast';
 
@@ -21,10 +22,13 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, ch
   const url = receiptPublicUrl(receipt);
   const final = isFinalPublishReceipt(receipt);
   const label = publishPlatformLabel(receipt.platform);
+  const previewId = receipt.contentId || receipt.evidence?.previewContentId;
+  const preview = receipt.platform === 'xiaohongshu' && typeof previewId === 'string' && /^[0-9a-f]{24}$/.test(previewId)
+    ? `https://www.xiaohongshu.com/explore/${previewId}` : null;
   return <article className={`publish-receipt tone-${status.tone}`} data-receipt-id={receipt.receiptId}>
     <div className="publish-receipt-heading">
       <span className="publish-receipt-platform"><PlatformIcon platform={receipt.platform} name={label} />{label}</span>
-      <span className="publish-receipt-status">{status.label}</span>
+      <span className="publish-receipt-status">{(!final && receipt.state !== 'sms_required' || receipt.verification?.state === 'checking') && <PublishSpinner />}{status.label}</span>
     </div>
     <h3>{receipt.title || '未命名内容'}</h3>
     <time dateTime={receipt.createdAt}>{new Date(receipt.createdAt).toLocaleString('zh-CN')}</time>
@@ -33,6 +37,11 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, ch
     {receipt.storageWarning && <p className="notice-error" role="alert">{receipt.storageWarning}</p>}
     {url ? <a className="publish-receipt-link" href={url} target="_blank" rel="noopener noreferrer">查看已发布作品 ↗</a>
       : receipt.outcome === 'published' && <p className="publish-receipt-message">平台未返回可验证的公开作品地址，请到平台核对。</p>}
+    {receipt.platform === 'xiaohongshu' && <div className="publish-receipt-preview-links">
+      {!url && preview && <a href={preview} target="_blank" rel="noopener noreferrer">预览笔记 ↗</a>}
+      <a href="https://creator.xiaohongshu.com/new/note-manager" target="_blank" rel="noopener noreferrer">打开作品管理 ↗</a>
+    </div>}
+    {!url && preview && <p className="publish-receipt-message">预览不代表已确认公开；平台可能要求在 App 中查看。请按标题核对内容。</p>}
     {receipt.contentId && final && <p className="publish-receipt-content-id">作品编号：{receipt.contentId}</p>}
     {receipt.state === 'sms_required' && !final && onVerify && <button className="btn btn-sm" onClick={onVerify}>处理短信验证</button>}
     {canVerifyPublishReceipt(receipt) && onCheck && <PublishVerificationControls receipt={receipt} onCheck={onCheck} busy={checkBusy} />}
@@ -66,6 +75,7 @@ function PublishVerificationControls({ receipt, onCheck, busy }: {
     {verification?.automatic && nextTime && <p className="publish-receipt-message">下次自动核实：{nextTime}</p>}
     <div className="publish-receipt-verification-actions">
       <button className="btn btn-sm" disabled={busy || checking} onClick={() => { void check(); }}>
+        {(checking || busy) && <PublishSpinner />}
         {checking ? '正在核实…' : busy ? '处理中…' : '核实发布结果'}
       </button>
       {verification?.automatic
@@ -169,7 +179,7 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
         </div>
         <div className="publish-receipts-list">
           {model.error && <div className="notice-error" role="alert">{model.error} 已显示的状态可能不是最新结果；恢复连接后会继续更新。</div>}
-          {model.submitting && <p className="publish-receipts-progress" role="status">正在提交 {model.submittingLabel}。确认后的任务会继续处理，可切换工作台页面。</p>}
+          {model.submitting && <p className="publish-receipts-progress publish-progress-line" role="status"><PublishSpinner /><span>正在向 {model.submittingLabel} 发布，等待平台处理。任务会继续执行，可切换页面。</span></p>}
           {model.submissionIssues.length > 0 && <div className="publish-receipts-issues" role="alert">
             <h3>发布请求需要核对</h3>
             {model.submissionIssues.map((issue, index) => <p key={`${issue.platform}-${index}`}><strong>{publishPlatformLabel(issue.platform)} · {issue.title || '未命名内容'}</strong><br />{issue.message}</p>)}

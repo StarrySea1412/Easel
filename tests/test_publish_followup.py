@@ -119,6 +119,29 @@ def test_followup_uses_increasing_intervals_and_a_finite_attempt_budget(harness)
     assert h.row()['outcome'] == 'submitted' and not h.effects
 
 
+@pytest.mark.parametrize('preview_id', [CID, '../secret', None])
+def test_unmatched_xhs_preview_survives_worker_without_claiming_identity(harness, preview_id):
+    h = harness
+    h.store.update(RID, {'contentId': '', 'outcome': 'unverified',
+                         'submissionFinishedAt': followup.iso(h.clock[0]),
+                         'evidence': {'sinceMs': int(h.clock[0] * 1000) - 100,
+                                      'previewContentId': 'b' * 24}})
+    raw = {'schemaVersion': 1, 'receiptId': RID, 'platform': 'xiaohongshu',
+        'outcome': 'unverified', 'contentId': '', 'url': '',
+        'evidence': {'matched': False, 'source': 'xhs_creator_notes', 'readOnly': True,
+                     'readbackOutcome': 'unverified', 'previewContentId': preview_id,
+                     'rawToken': 'never-save-this'}}
+    h.service.run_check = lambda *_: publish_receipts.parse_result('xiaohongshu', RID,
+        publish_receipts.MARKER + json.dumps(raw), 5)
+    h.service.request(RID)
+    assert h.service.tick()
+    row = h.row()
+    assert row['outcome'] == 'unverified' and not row['contentId'] and not row['url']
+    assert row['evidence'].get('previewContentId') == (CID if preview_id == CID else None)
+    assert 'sinceMs' in row['evidence'] and 'rawToken' not in row['evidence']
+    assert not h.effects
+
+
 @pytest.mark.parametrize('has_id', [False, True])
 def test_old_scheduled_records_expire_without_any_platform_request(harness, has_id):
     h = harness

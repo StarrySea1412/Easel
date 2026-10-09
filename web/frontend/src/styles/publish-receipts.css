@@ -33,6 +33,8 @@
 .publish-receipt p { margin: 8px 0; }
 .publish-receipt .publish-receipt-message, .publish-receipt-content-id { color: var(--text-secondary); white-space: pre-wrap; }
 .publish-receipt-link { display: inline-flex; margin: 2px 0 8px; }
+.publish-receipt-preview-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0; }
+.publish-receipt-preview-links a { color: var(--accent-start); text-decoration: underline; text-underline-offset: 3px; }
 .publish-receipt-verification { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .publish-receipt-verification-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
 .publish-receipt-verification button { max-width: 100%; white-space: normal; }

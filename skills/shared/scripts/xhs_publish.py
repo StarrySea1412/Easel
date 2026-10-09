@@ -437,6 +437,7 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None):
     args = list(LAUNCH_ARGS)
     kwargs = dict(headless=not headed,
                   locale="zh-CN",
+                  timezone_id="Asia/Shanghai",
                   args=args)
     if proxy:
         kwargs["proxy"] = {"server": proxy}

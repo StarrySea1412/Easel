@@ -38,6 +38,8 @@ async function fixture(t, initial, realSidebar = false) {
   const drafts = url(Buffer.from(draftsBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
   const queueBase = await tsModuleUrl(new URL('lib/chatQueue.ts', base));
   const queue = url(Buffer.from(queueBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
+  const steeringBase = await tsModuleUrl(new URL('lib/chatSteering.ts', base));
+  const steering = url(Buffer.from(steeringBase.slice(prefix.length), 'base64').toString().replaceAll(queueBase, queue)) + `#${fixtureId}`;
   const storeBase = await tsModuleUrl(new URL('lib/store.ts', base));
   const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts).replaceAll(queueBase, queue)) + `#${fixtureId}`;
   const api = url(`
@@ -71,6 +73,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './lib/store') target = store;
     else if (specifier === './lib/chatDrafts') target = drafts;
     else if (specifier === './lib/chatQueue') target = queue;
+    else if (specifier === './lib/chatSteering') target = steering;
     else if (specifier === './lib/api') target = api;
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
@@ -340,6 +343,27 @@ test('failed stop preserves the live connection and durable recovery identifiers
   assert.equal(session.messages.at(-1).activity, '保留活动');
   await act(async () => harness.pages['对话'].onSend('确认停止后的新任务'));
   assert.equal(harness.streams.length, 2);
+});
+
+test('App steering continues the selected queued snapshot after delayed stop and live final cleanup', async t => {
+  const { harness, queue } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('运行中的长文'));
+  const run = harness.streams[0];
+  const message = text => ({ text, attachments: [], selectedSkills: [], skillRequirements: {}, modelRef: 'relay/model', thinkingLevel: 'off' });
+  await act(async () => { queue.enqueueChat('original', message('保留邻居')); queue.enqueueChat('original', message('所选引导')); });
+  const selected = queue.getChatQueue('original').items[1];
+  const response = deferredStop(); harness.stopResponse = () => response.promise;
+  let steering;
+  await act(async () => { steering = harness.pages['对话'].onSteer(selected.id); });
+  assert.equal(harness.streams.length, 1);
+  await act(async () => { run.args[4]('server-session'); });
+  await act(async () => { response.resolve({ stopped: true }); assert.equal(await steering, true); });
+  assert.equal(harness.streams.length, 2);
+  assert.equal(harness.streams[1].args[0].includes('所选引导'), true);
+  assert.equal(harness.streams[1].args[17], 'relay/model');
+  assert.deepEqual(queue.getChatQueue('original').items.map(item => item.text), ['保留邻居']);
+  assert.equal(queue.getChatQueue('original').paused, true);
 });
 
 test('an unconfirmed stop keeps receiving the final result instead of fabricating a stopped response', async t => {

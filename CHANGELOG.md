@@ -4,6 +4,14 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-10 publishing workspace and queue follow-up / 发布与队列追加整改
+
+- Reorganize publishing into shared editing/media and a single platform-tab preview with independent versions; retain per-platform preparation, progress and durable receipts. Confirmation explicitly identifies excluded targets. / 共享编辑与单平台标签预览，分别显示平台准备与进度，确认框列出未提交平台。
+- Persist selected media order, preview the cover/video, support image reordering, and add loading feedback. Precheck suggestions must not invent performance claims. / 保存媒体顺序，增加封面/视频预览、图片排序与 loading，预检禁止编造收益承诺。
+- Preserve a read-only Xiaohongshu candidate preview through the follow-up worker without claiming submission identity or public success. / 只读核实保留候选预览，但不据此宣称公开发布。
+- Keep tool navigation on one line and scroll overflowing tabs. Restored queues stay paused without a permanent informational error; dragging moves the entire row while neighbours make room. / 导航不换行；恢复队列保持暂停，整条拖动带相邻让位。
+- Focused checks: frontend publishing/storage/receipts 80 passed, queue/steering 14 passed, backend receipts/readback/follow-up 222 passed; build and lint passed (existing warnings remain). Desktop browser evidence is recorded; 390px override did not take effect, so this iteration's mobile check remains pending. No new portable package.
+
 ### 2026-10-10 composer, channels and public Zhihu ranking
 
 - Compact queued rows follow the pointer as a whole, retaining an empty source placeholder and animating actual reorder only. Redundant move-up/down menu entries are removed. Editing reuses the main composer; one primary action switches between stop and queue-send.

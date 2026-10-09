@@ -185,6 +185,98 @@ def detect_mode(base_url: str, explicit_mode: str | None) -> str:
     return "sync"
 
 
+def detect_provider(base_url: str) -> str:
+    """按 base_url 主机名识别非标准 provider。
+
+    Agnes AI 是 OpenAI 兼容的「形状」但不兼容的实例：它没有 /images/edits 与
+    /images/variations，文生图 / 图生图 / 多图合成统一打 /images/generations，
+    输入图放在 extra_body.image（官方文档：docs/agnes-image-21-flash）。
+    未识别的 base_url 一律返回 "openai"，走原有标准分支，零影响。
+    """
+    # 已知 Agnes 域名（官方文档 api.agnes-ai.cn；apihub.agnes-ai.com 见仓库内引用）。
+    AGNES_DOMAINS = ("agnes-ai.cn", "agnes-ai.com")
+    host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
+    # 对已知 Agnes 域名做精确后缀匹配，不用子串包含 —— 否则像
+    # stagneschurch.com / magnes.com 这类「含 agnes 字母序列」的无关域名
+    # 会被误判成 Agnes，被打到不存在端点的分支上全部报错（404）。
+    # 反过来说也不能只写 agnes.ai：真实域名是 agnes-ai.cn / agnes-ai.com。
+    for domain in AGNES_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return "agnes"
+    return "openai"
+
+
+def agnes_split_size(size: str, resolution: str) -> tuple[str, str]:
+    """把 --size 拆成 Agnes 的档位式 size + 独立 ratio。
+
+    Agnes 的 size 只认 1K/2K/3K/4K 档位，宽高比走独立的 ratio 参数；只给比例或
+    像素都会被拒。像素按输出尺寸参考表归到最接近的档位；未识别的像素尺寸退回
+    --resolution 档位并报错提示改用比例写法。
+    """
+    value = size.strip()
+    if ":" in value:
+        return resolution.upper(), value
+    try:
+        width, height = (int(part) for part in value.lower().split("x", 1))
+    except ValueError:
+        fail(f"Agnes 无法识别尺寸 '{size}'。请使用档位(size=1K/2K/3K/4K)、"
+             f"比例(16:9 等)或像素尺寸(1024x1024 / 1920x1080 等)。")
+        return "", ""
+    if width <= 0 or height <= 0:
+        fail(f"Agnes 尺寸 '{size}' 无效。")
+        return "", ""
+    ratio = PIXEL_TO_RATIO.get(value.lower())
+    if ratio is None:
+        # 官方：不支持的精确尺寸（如 1920x1080）会被标准化。本地按最大公约数化简。
+        a, b = width, height
+        while b:
+            a, b = b, a % b
+        ratio = f"{width // a}:{height // a}"
+    max_edge = max(width, height)
+    # 档位上界取官方输出尺寸参考表里各档的最大边（21:9 档：1568/3136/4704）。
+    if max_edge <= 1568:
+        tier = "1K"
+    elif max_edge <= 3136:
+        tier = "2K"
+    elif max_edge <= 4704:
+        tier = "3K"
+    else:
+        tier = "4K"
+    return tier, ratio
+
+
+def _agnes_generate(base_url: str, api_key: str, model: str, prompt: str,
+                    args: argparse.Namespace, images: list[str] | None) -> dict[str, Any]:
+    """Agnes 统一生成入口：文生图 / 图生图 / 变体共用 /images/generations。
+
+    - 输入图（Data URI 数组）放 extra_body.image，图生图必填；
+    - 顶层不放 response_format / n / tags（Agnes 参数表未定义；response_format
+      放 extra_body，n 传 >1 会 400「n 必须为 1」）；
+    - 多张改为客户端循环，结果合并成一个 data 数组交给 save_sync_data。
+    """
+    tier, ratio = agnes_split_size(args.size, args.resolution)
+    extra: dict[str, Any] = {"response_format": "url"}
+    if images:
+        extra["image"] = images
+    payload: dict[str, Any] = {
+        "model": model, "prompt": prompt,
+        "size": tier, "ratio": ratio, "extra_body": extra,
+    }
+    endpoint = _api_url(base_url, "images/generations")
+    count = max(1, args.n)
+    print(f"[sync/agnes] 提交生成请求到 {endpoint}"
+          f"（size={tier} ratio={ratio}，共 {count} 张，逐张请求）...", file=sys.stderr)
+    merged: list[Any] = []
+    for _ in range(count):
+        result = http_post(endpoint, api_key, payload, timeout=180)
+        data = result.get("data")
+        if isinstance(data, list) and data:
+            merged.extend(data)
+        else:
+            fail(f"Agnes 接口返回缺少 data 图片数组：{json.dumps(result)[:300]}")
+    return {"data": merged}
+
+
 def size_to_ratio(size: str) -> str:
     if size.strip().lower() == "auto":
         fail("当前异步生图服务不支持自动尺寸（auto），请选择固定画面比例。")
@@ -464,6 +556,9 @@ def cmd_text2img(args: argparse.Namespace) -> None:
         }
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
+    elif detect_provider(base_url) == "agnes":
+        result = _agnes_generate(base_url, api_key, model, prompt, args, images=None)
+        paths = save_sync_data(result, args.output, args.format)
     else:
         payload = {"model": model, "prompt": prompt, "n": args.n, "size": args.size}
         if args.quality:
@@ -496,8 +591,16 @@ def cmd_img2img(args: argparse.Namespace) -> None:
         }
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
+    elif detect_provider(base_url) == "agnes":
+        # Agnes 无 /images/edits：输入图放 extra_body.image，统一打 generations。
+        # mask 是 OpenAI 局部编辑语义，Agnes 不支持，显式拒绝而不是静默丢图。
+        if args.mask:
+            fail("Agnes 不支持 --mask 局部编辑（无 /images/edits 端点）。")
+        result = _agnes_generate(base_url, api_key, model, prompt, args,
+                                 images=[encode_image_data_uri(args.image)])
+        paths = save_sync_data(result, args.output, args.format)
     else:
-        # OpenAI 兼容 /images/edits：使用 multipart 上传参考图和可选蒙版。
+        # OpenAI 兼容 /images/edits：优先 multipart，失败时回退 JSON data-uri
         result = _post_edits_multipart(base_url, api_key, model, prompt, args)
         paths = save_sync_data(result, args.output, args.format)
 
@@ -587,6 +690,12 @@ def cmd_variations(args: argparse.Namespace) -> None:
         }
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
+    elif detect_provider(base_url) == "agnes":
+        # Agnes 无 /images/variations：变体 = 带参考图的生成，统一打 generations。
+        prompt = args.prompt or "generate a variation of the reference image"
+        result = _agnes_generate(base_url, api_key, model, prompt, args,
+                                 images=[encode_image_data_uri(args.image)])
+        paths = save_sync_data(result, args.output, args.format)
     else:
         path, mime = _check_image(args.image)
         try:

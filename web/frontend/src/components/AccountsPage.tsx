@@ -9,7 +9,7 @@ import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale } from
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
-import { IconAccounts, IconEye, IconEyeOff, IconRefresh } from './icons';
+import { IconAccounts, IconCheck, IconEye, IconEyeOff, IconInfo, IconRefresh } from './icons';
 import '../styles/accounts.css';
 
 type QRState = {
@@ -38,6 +38,17 @@ const STATE_LABEL: Record<string, string> = {
   unknown: '等待中…',
 };
 const isLoginTerminal = (state: string) => ['success', 'expired', 'error'].includes(state);
+
+type AccountVerification = { state: 'checking' | 'success' | 'expired' | 'error'; message: string };
+
+function AccountCheckResult({ result }: { result?: AccountVerification }) {
+  if (!result) return null;
+  const Icon = result.state === 'success' ? IconCheck : result.state === 'checking' ? IconRefresh : IconInfo;
+  return <p className={`account-check-result is-${result.state}`} role={result.state === 'error' ? 'alert' : 'status'}>
+    <span className="account-check-icon" aria-hidden="true"><Icon size={13} strokeWidth={2} /></span>
+    <span>{result.message}</span>
+  </p>;
+}
 
 /** 头像：有 URL 就显示图（加载失败退回首字），否则显示昵称/平台名首字。 */
 function Avatar({ url, name }: { url?: string; name: string }) {
@@ -107,7 +118,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [managedPlatform, setManagedPlatform] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [logoutMessage, setLogoutMessage] = useState('');
-  const [verification, setVerification] = useState<Record<string, { state: 'checking' | 'success' | 'expired' | 'error'; message: string }>>({});
+  const [verification, setVerification] = useState<Record<string, AccountVerification>>({});
   const [hideIdentity, setHideIdentity] = useState(() => { try { return localStorage.getItem('easel_account_privacy') === '1'; } catch { return false; } });
   const accountDialog = useRef<HTMLDialogElement>(null);
   const identityEpoch = useRef<Record<string, number>>({});
@@ -150,9 +161,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     const epoch = (identityEpoch.current[platform] || 0) + 1;
     identityEpoch.current[platform] = epoch;
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
-    setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态，请稍候…' } }));
+    setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在检查登录状态…' } }));
     try {
-      const r = await accountWhoami(platform);
+      const r = await accountWhoami(platform, true);
       if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0)) return null;
       if (r.verified === false) {
         setWhoami((w) => { const next = { ...w }; delete next[platform]; return next; });
@@ -161,7 +172,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       }
       setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
       setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
-      setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '检查完成：当前登录状态有效。' : '检查完成：未登录或登录已失效，请重新连接。' } }));
+      setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
       return r;
     } catch (cause) {
       if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0)) {
@@ -462,7 +473,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   onClick={() => logged ? void runWhoami(a.platform) : void handleLogin(a, a.backend === 'wechat-oa')}>
                   {pending ? '正在启动…' : w === 'loading' ? '正在检查…' : logged ? '检查登录状态' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
-                {verification[a.platform] && <p className={`account-check-result is-${verification[a.platform].state}`} role={verification[a.platform].state === 'error' ? 'alert' : 'status'}>{verification[a.platform].message}</p>}
+                <AccountCheckResult result={verification[a.platform]} />
                 {a.platform === 'xiaohongshu' && !logged && <button type="button" className="btn btn-block account-browser-login"
                   disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
                   在浏览器中登录
@@ -495,7 +506,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
           </dl>
           <div className="account-management-note"><strong>你可以控制本机登录态</strong><p>退出会清理此平台在 Easel 中保存的会话、扫码缓存及相关发布凭据。已保存的作品与分析记录保留，其他平台不受影响。</p><p>这不会退出你手机或其他设备上的账号，也不等同于撤销平台侧全部授权。请保护本机系统账户，不要分享应用数据目录。</p></div>
           {confirmLogout && <div className="account-logout-confirm" role="alert"><strong>{effLoggedIn(managedAccount) ? '确认退出' : '确认清除连接记录'} {managedAccount.name}？</strong><p>正在进行的登录会被停止；再次发布前需要重新登录。</p></div>}
-          {verification[managedAccount.platform] && <p className={`account-check-result is-${verification[managedAccount.platform].state}`} role={verification[managedAccount.platform].state === 'error' ? 'alert' : 'status'}>{verification[managedAccount.platform].message}</p>}
+          <AccountCheckResult result={verification[managedAccount.platform]} />
           {err && <p className="notice-error" role="alert">{err}</p>}
           <div className="account-management-buttons">
             <button className="btn" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(null); setConfirmLogout(false); }}>关闭</button>

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -248,6 +249,18 @@ class VerificationService:
                     changes = {key: result[key] for key in (
                         'outcome', 'ok', 'state', 'pending', 'message', 'contentId', 'url',
                         'platformStatus', 'evidence') if key in result}
+                elif (platform == 'xiaohongshu' and not latest.get('contentId')
+                      and evidence.get('source') == 'xhs_creator_notes'
+                      and evidence.get('readOnly') is True
+                      and evidence.get('readbackOutcome') == 'unverified'):
+                    # A candidate offers a way to inspect the note, not proof
+                    # of submission identity. Never adopt its ID or outcome.
+                    preview_id = evidence.get('previewContentId')
+                    preserved = dict(latest.get('evidence') or {})
+                    preserved.pop('previewContentId', None)
+                    if isinstance(preview_id, str) and re.fullmatch(r'[0-9a-f]{24}', preview_id):
+                        preserved['previewContentId'] = preview_id
+                    changes['evidence'] = preserved
                 outcome = changes.get('outcome', latest['outcome'])
                 created = timestamp(latest.get('createdAt'))
                 exhausted = self.now() - created >= MAX_AGE_SECONDS or _attempts(current.get('attempts')) >= MAX_ATTEMPTS

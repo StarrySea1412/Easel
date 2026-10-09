@@ -57,7 +57,7 @@ try:
 except Exception:  # 邮箱通知未安装/依赖缺失：钩子降级为空操作
     _notify_email_completion = None  # type: ignore
     _notify_email_web_turn = None  # type: ignore
-from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, _FILE_ORDER
+from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, valid_persona_name, _FILE_ORDER
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
 from image_reverse import (
     Provider as ImageReverseProvider, reverse_image,
@@ -582,7 +582,7 @@ def list_personas() -> list[dict]:
         return []
     result = []
     for d in sorted(PROFILES_DIR.iterdir()):
-        if d.is_dir() and d.name.startswith('_'):
+        if not d.is_dir() or not valid_persona_name(d.name):
             continue
         desc = ''
         identity = d / 'identity.md'
@@ -1371,7 +1371,7 @@ async def api_persona(name: str):
 
 
 def _valid_persona_name(name: str) -> bool:
-    return bool(name) and "/" not in name and "\\" not in name and not name.startswith((".", "_"))
+    return valid_persona_name(name)
 
 
 def _persona_file_path(name: str, filename: str) -> Path:
@@ -1881,6 +1881,9 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 if models[0].get('id') != model:
                     models[0]['id'] = model
                     changed = True
+                if not models[0].get('name'):
+                    models[0]['name'] = model
+                    changed = True
                 prov['models'] = models
         if primary_ref:
             ref = data.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})
@@ -2117,8 +2120,24 @@ async def api_settings_models_save(req: ModelSaveRequest):
         # 本来就不会改网关的 baseUrl，没有「拿旧 Key 打新地址」这个风险。
         if is_chat and pkey and base and not key:
             _pb, _pk = _cur_prov.get(pkey, ('', ''))
+            _be, _ke = _SLOT_ENV_KEYS.get(pkey, ('', ''))
+            if _be and _is_set(_cur_env.get(_ke)) and not _is_local_gateway_base(_pb):
+                _pb = (_cur_env.get(_be) or '').strip().rstrip('/')
+                _pk = (_cur_env.get(_ke) or '').strip()
+                if not _pb and pkey == 'anthropic':
+                    _pb = 'https://api.anthropic.com'
             if _pk and base != _pb.strip().rstrip('/') and not _is_local_gateway_base(_pb):
                 raise HTTPException(400, f'更换 Base URL 时必须重新填写 API Key（{pkey}）')
+        if is_chat and pkey in _SLOT_ENV_KEYS and not key:
+            _be, _ke = _SLOT_ENV_KEYS[pkey]
+            _pb, _pk = _cur_prov.get(pkey, ('', ''))
+            if not _is_local_gateway_base(_pb) and _is_set(_cur_env.get(_ke)):
+                authoritative_base = (_cur_env.get(_be) or '').strip().rstrip('/')
+                if not authoritative_base and pkey == 'anthropic':
+                    authoritative_base = 'https://api.anthropic.com'
+                if authoritative_base:
+                    provider_updates[pkey]['base'] = base or authoritative_base
+                    provider_updates[pkey]['key'] = _cur_env[_ke].strip()
         if is_chat and pkey and getattr(row, 'primary', False) and model:
             primary_ref = f'{pkey}/{model}'
     if not updates and not provider_updates and not primary_ref and not req.deletedProviders:
@@ -3355,10 +3374,12 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                 idle_since = time.monotonic()
                 for event in batch:
                     cursor = int(event["id"])
+                    raw = event.get("data")
+                    data_out = raw if event['event'] == 'question' and isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
                     yield {
                         "id": str(cursor),
                         "event": event["event"],
-                        "data": json.dumps(event.get("data"), ensure_ascii=False),
+                        "data": data_out,
                     }
                     if event["event"] in ("done", "error"):
                         return
@@ -4233,7 +4254,10 @@ async def api_chat_stop(req: StopRequest):
                 pass
         # supervisor removes the running marker only after persisting the final
         # snapshot and releasing both session locks.
-        deadline = time.monotonic() + 5
+        # Native gateway abort can acknowledge before its final result arrives.
+        # Keep the exact process fence until supervisor cleanup instead of
+        # returning false after five seconds and silently abandoning steering.
+        deadline = time.monotonic() + 35
         while _RUNNING_CHAT.get(sk) is proc and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
         return {"stopped": _RUNNING_CHAT.get(sk) is not proc}
@@ -4949,7 +4973,7 @@ async def api_mp_login_status(platform: str):
 
 
 @app.get("/api/accounts/{platform}/whoami")
-async def api_account_whoami(platform: str):
+async def api_account_whoami(platform: str, force: bool = False):
     """真校验登录态 + 读昵称/头像（起 headless 浏览器，数秒）。前端开页后台调用以自愈假阳性。
     带 TTL 进程内缓存（避免账号页+工作台重复起浏览器）；确认已登录则回写标记，令快速路径自愈。"""
     cfg = LOGIN_RUNNERS.get(platform)
@@ -4968,7 +4992,7 @@ async def api_account_whoami(platform: str):
     account_generation = _account_check_generation(platform)
     with _WHOAMI_LOCK:
         hit = _WHOAMI_CACHE.get(platform)
-    if hit and hit[2] == account_generation and (time.time() - hit[0]) < WHOAMI_TTL:
+    if not force and hit and hit[2] == account_generation and (time.time() - hit[0]) < WHOAMI_TTL:
         return hit[1]
     if backend == 'biliup':
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'whoami',

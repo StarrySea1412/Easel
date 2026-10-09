@@ -202,8 +202,8 @@ def _env_key_valid() -> bool:
 
 def _openclaw_config_path() -> Path:
     """easel 用独立 profile，不碰用户本机的 OpenClaw 配置（与 gateway_questions 同一约定）。"""
-    state = os.environ.get("EASEL_OPENCLAW_STATE_DIR")
-    return (Path(state) if state else Path.home() / ".openclaw-easel") / "openclaw.json"
+    from easel.openclaw_workspace import config_path
+    return config_path()
 
 
 def _primary_model_routable() -> tuple[bool, str]:

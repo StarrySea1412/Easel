@@ -39,7 +39,7 @@ async function fixture(t) {
     state.requests.push({ url, method: options?.method || 'GET' });
     assert.equal(options.cache, 'no-store');
     if (url === '/api/accounts') return response(accounts);
-    if (url.endsWith('/whoami')) { state.whoamiCalls++; return response({ loggedIn: true, name: 'Synthetic account', avatar: '' }); }
+    if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response({ loggedIn: true, name: 'Synthetic account', avatar: '' }); }
     if (url.endsWith('/sms')) return response(await state.sms());
     if (url.endsWith('/status')) return response(await state.read(url));
     if (url.startsWith('/api/login/') || url.startsWith('/api/accounts/wechat-oa/mp-login')) return response(await state.start(url));

@@ -75,11 +75,40 @@ def test_first_party_status_requires_explicit_public_visibility(changes, status)
     assert rb.normalize_status(note_with(**changes)) == status
 
 
-@pytest.mark.parametrize("field", ["tab_status", "permission_code", "schedule_post_time", "high_self"])
+@pytest.mark.parametrize("field", ["tab_status", "permission_code", "schedule_post_time"])
 def test_missing_public_evidence_is_not_defaulted_to_zero(field):
     raw = note()
     del raw[field]
     assert rb.normalize_status(raw) == "unknown"
+
+
+def test_actual_creator_schema_minute_time_needs_pre_submit_snapshot(monkeypatch):
+    now = 1791584508000
+    monkeypatch.setattr(rb.time, 'time', lambda: now / 1000)
+    raw = dict(id=NOTE_ID, display_title=TITLE, time='2026-10-10 06:21',
+               visible_time=1791584507, tab_status=1, permission_code=0,
+               permission_msg='', schedule_post_time=0)
+    work = rb.map_note(raw)
+    assert work.status == 'published'
+    assert work.published_at_ms is None  # Minute display is not exact creation time.
+    arguments = dict(title=TITLE, since_ms=1791584463221, until_ms=1791584483105)
+    assert rb.find_xhs_work([work], **arguments) is None
+    assert rb.find_xhs_work([work], snapshot_ids={OTHER_ID}, **arguments) is work
+    assert rb.find_xhs_work([work], snapshot_ids={NOTE_ID}, **arguments) is None
+    assert rb.find_xhs_work([work, work], snapshot_ids=set(), **arguments) is None
+    assert rb.find_xhs_work([work], snapshot_ids=set(), **{**arguments, 'since_ms': 1791584600000, 'until_ms': 1791584610000}) is None
+
+
+def test_minute_candidate_preview_does_not_confirm_publication(monkeypatch):
+    monkeypatch.setattr(rb.time, 'time', lambda: 1791584508)
+    raw = dict(id=NOTE_ID, display_title=TITLE, time='2026-10-10 06:21',
+               visible_time=1791584507, tab_status=1, permission_code=0, schedule_post_time=0)
+    monkeypatch.setattr(rb, 'read_xhs_works', lambda page: [rb.map_note(raw)])
+    result = rb.verify_xhs_publish(SimpleNamespace(), title=TITLE, since_ms=1791584463221, attempts=1)
+    receipt = rb.receipt_from_result(result, read_only=True)
+    assert receipt['outcome'] == 'unverified'
+    assert receipt['contentId'] == '' and receipt['url'] == ''
+    assert receipt['evidence']['previewContentId'] == NOTE_ID
 
 
 @pytest.mark.parametrize("changes", [

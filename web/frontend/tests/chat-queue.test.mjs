@@ -22,6 +22,7 @@ test('queue preserves snapshots, order and edits; refresh pauses without restori
   assert.ok(q.moveQueuedMessage('a', secondId, -1)); assert.ok(q.updateQueuedMessage('a', secondId, '修改后的第二条'));
   const restored = await fresh();
   assert.equal(restored.getChatQueue('a').paused, true);
+  assert.equal(restored.getChatQueue('a').error, '', 'ordinary restore is represented by paused rows, not a persistent error');
   assert.deepEqual(restored.getChatQueue('a').items.map(row => row.text), ['修改后的第二条', '第一条']);
   const row = restored.getChatQueue('a').items[1];
   assert.equal(row.skillRequirements['card-quote'], '原要求'); assert.deepEqual(row.attachments, []);

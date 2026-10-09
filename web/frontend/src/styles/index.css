@@ -1167,7 +1167,7 @@ textarea.field { resize: vertical; min-height: 90px; }
 .page-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .page-host > * { flex: 1; min-height: 0; }
 .subnav {
-  display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 8px 10px; flex-shrink: 0;
+  display: flex; align-items: center; flex-wrap: nowrap; min-width: 0; gap: 10px; flex-shrink: 0;
   padding: 8px 16px; border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -1180,10 +1180,10 @@ textarea.field { resize: vertical; min-height: 90px; }
 .subnav-back:hover { border-color: var(--accent-start); background: var(--accent-soft); }
 .subnav-back svg { color: var(--accent-start); }
 .subnav-div { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
-.subnav-tabs { display: flex; flex: 1 1 460px; flex-wrap: wrap; min-width: 0; gap: 4px; }
+.subnav-tabs { display: flex; flex: 1; flex-wrap: nowrap; min-width: 0; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
 .subnav-tab {
-  display: inline-flex; align-items: center; justify-content: center; flex: 1 0 95px; gap: 5px; white-space: nowrap;
-  padding: 6px 12px; border-radius: 8px; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; gap: 5px; white-space: nowrap;
+  padding: 8px 12px; min-height: 34px; border-radius: 8px; font-size: 12px;
   border: none; background: none; color: var(--text-secondary); cursor: pointer; transition: all var(--t-fast);
 }
 .subnav-tab:hover { background: var(--surface-hover); color: var(--text); }

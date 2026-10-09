@@ -90,7 +90,7 @@ def _evidence(value) -> dict:
         return {}
     allowed = {'source', 'type', 'kind', 'readbackOutcome', 'status', 'platformStatus',
                'contentId', 'uiSignal', 'verification', 'verified', 'method', 'reason',
-               'matched', 'publicAccessChecked', 'urlSource', 'signal', 'submissionAttempted', 'sinceMs'}
+               'matched', 'publicAccessChecked', 'urlSource', 'signal', 'submissionAttempted', 'sinceMs', 'previewContentId', 'readOnly'}
     return {key: (_text(val, 160) if isinstance(val, str) else val)
             for key, val in value.items()
             if key in allowed and isinstance(val, (str, bool, int))}
