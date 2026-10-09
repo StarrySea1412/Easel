@@ -5,7 +5,7 @@ const {chatTurnNodes,activeTurnFromOffsets,isChatAtBottom,shouldFollowChatScroll
 const {chatErrorDetail,makeChatError,chatErrorTitle,historicalGatewayAuthError}=await loadTsModule('../src/lib/chatErrors.ts',import.meta.url);
 test('turn nodes count user requests only and preserve anchors through assistant updates',()=>{
  const messages=[{role:'user',content:'第一轮\n问题'},{role:'assistant',content:'answer'},{role:'user',content:'',attachments:[{}]},{role:'assistant',content:'partial'}];
- assert.deepEqual(chatTurnNodes(messages),[{messageIndex:0,number:1,label:'第一轮 问题'},{messageIndex:2,number:2,label:'附件创作（1 个附件）'}]);
+ assert.deepEqual(chatTurnNodes(messages),[{messageIndex:0,number:1,label:'第一轮 问题',reply:'answer'},{messageIndex:2,number:2,label:'附件创作（1 个附件）',reply:'partial'}]);
  messages[3].content='more tokens';assert.equal(chatTurnNodes(messages)[1].messageIndex,2);
 });
 test('current node follows document offsets and latest node only at bottom',()=>{

@@ -4,6 +4,12 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-09 conversation nodes and execution feedback
+
+- Left-side ticks preview the user question and same-turn reply; streaming data updates retain the preview. Keyboard navigation, Enter jump and Escape dismissal are supported.
+- Empty execution lists preserve backend warnings and retry; errors and late responses are isolated by session and turn.
+- 28 focused repository checks and production build passed. Actual desktop and 390×844 browser checks passed; user acceptance is pending before packaging.
+
 ### 2026-10-09 conversation execution and accounting
 
 - Native gateway RPC preserves exact session, model and thinking selection; final authoritative text corrects out-of-order streaming output without resending a paid request. Real DeepSeek/Kimi/Grok short replies and a browser queue continuation were observed.

@@ -1,7 +1,15 @@
 import type { ChatMessage } from './store';
-export interface ChatTurnNode { messageIndex:number;number:number;label:string }
-export function chatTurnNodes(messages:Pick<ChatMessage,'role'|'content'|'attachments'>[]):ChatTurnNode[] {
- return messages.flatMap((message,messageIndex)=>message.role==='user'?[{messageIndex,number:0,label:message.content.replace(/\s+/g,' ').trim()||(message.attachments?.length?`附件创作（${message.attachments.length} 个附件）`:'未填写文字的请求')}]:[]).map((node,index)=>({...node,number:index+1}));
+export interface ChatTurnNode { messageIndex:number;number:number;label:string;reply?:string }
+const excerpt = (text:string) => text.replace(/<[^>]*>/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/(?:^|\n)\s{0,3}#{1,6}\s/g, ' ').replace(/[*`~]/g, '').replace(/\s+/g, ' ').trim().slice(0,240);
+export function chatTurnNodes(messages:Pick<ChatMessage,'role'|'content'|'attachments'>[], liveReply=''):ChatTurnNode[] {
+ const nodes:ChatTurnNode[]=[];
+ for(let messageIndex=0;messageIndex<messages.length;messageIndex++) {
+  const message=messages[messageIndex];
+  if(message.role==='user')nodes.push({messageIndex,number:nodes.length+1,label:message.content.replace(/\s+/g,' ').trim()||(message.attachments?.length?`附件创作（${message.attachments.length} 个附件）`:'未填写文字的请求')});
+  else if(message.role==='assistant'&&nodes.length){const reply=excerpt(message.content);if(reply)nodes[nodes.length-1].reply=reply;}
+ }
+ const live=excerpt(liveReply);if(live&&nodes.length)nodes[nodes.length-1].reply=live;
+ return nodes;
 }
 export function activeTurnFromOffsets(offsets:number[],scrollTop:number,atBottom:boolean,lead=72):number {
  if(!offsets.length)return -1;if(atBottom)return offsets.length-1;

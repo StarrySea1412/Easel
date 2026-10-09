@@ -33,11 +33,17 @@ export default function ChatTurnNavigation({ nodes, current, following, onJump, 
     revealTick(index);
     const button=ticks.current[index];
     const bounds=navigation.current?.getBoundingClientRect();
-    if(button&&bounds)setPreviewTop(Math.min(Math.max(0,button.getBoundingClientRect().top-bounds.top-18),Math.max(0,bounds.height-70)));
+    const area=navigation.current?.parentElement?.getBoundingClientRect();
+    if(button&&bounds&&area){
+      const min=area.top-bounds.top+8,max=Math.max(min,area.bottom-bounds.top-136);
+      setPreviewTop(Math.min(Math.max(min,button.getBoundingClientRect().top-bounds.top-24),max));
+    }
     setPreview(index);
   };
 
-  useEffect(()=>{setPreview(null);},[nodes]);
+  // Streaming updates replace node data, but must keep the hovered preview open.
+  const nodeIdentity=nodes.map(node=>node.messageIndex).join(',');
+  useEffect(()=>{setPreview(null);},[nodeIdentity]);
   useEffect(()=>{revealTick(current);},[current]);
 
   useEffect(() => {
@@ -89,7 +95,7 @@ export default function ChatTurnNavigation({ nodes, current, following, onJump, 
         <span>轮次</span><span className="chat-turn-nav-count">{current + 1} / {nodes.length}</span>
         <span className={`chat-turn-nav-chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">⌄</span>
       </button>
-      <div ref={tickRail} className="chat-turn-ticks" role="group" aria-label="对话轮次刻度" onPointerLeave={()=>setPreview(null)}>
+      <div ref={tickRail} className="chat-turn-ticks" role="group" aria-label="对话轮次刻度" onPointerLeave={()=>{if(!tickRail.current?.contains(document.activeElement))setPreview(null);}} onScroll={()=>setPreview(null)}>
         {nodes.map((node,index)=><button key={node.messageIndex} ref={button=>{if(button)ticks.current[index]=button;}} type="button" className={index===current?'chat-turn-tick is-current':'chat-turn-tick'}
           tabIndex={index===Math.max(0,current)?0:-1} aria-current={index===current?'step':undefined} aria-label={`定位第 ${node.number} 轮：${node.label}`} aria-describedby={preview===index?previewId:undefined}
           onPointerEnter={()=>showPreview(index)} onFocus={()=>showPreview(index)} onBlur={event=>{if(!event.relatedTarget||!navigation.current?.contains(event.relatedTarget as Node))setPreview(null);}}
@@ -103,7 +109,7 @@ export default function ChatTurnNavigation({ nodes, current, following, onJump, 
             if(next!==undefined){event.preventDefault();ticks.current[next]?.focus({preventScroll:true});showPreview(next);}
           }}><span aria-hidden="true"/></button>)}
       </div>
-      {!expanded&&preview!==null&&nodes[preview]&&<div id={previewId} role="tooltip" className="chat-turn-preview" style={{top:previewTop}}><strong>第 {nodes[preview].number} 轮{preview===current?' · 当前':''}</strong><p>{nodes[preview].label}</p><small>点击或按 Enter 定位</small></div>}
+      {!expanded&&preview!==null&&nodes[preview]&&<div id={previewId} role="tooltip" className="chat-turn-preview" style={{top:previewTop}}><strong>{nodes[preview].label}</strong><p>{nodes[preview].reply || '本轮暂无回复'}</p><small>第 {nodes[preview].number} 轮{preview===current?' · 当前':''} · 点击或按 Enter 定位</small></div>}
       {expanded && <div id={panelId} className="chat-turn-popover">
         <div className="chat-turn-nav-title"><span>对话目录</span><small>{following ? '跟随最新' : '正在浏览历史'}</small></div>
         <div className="chat-turn-nav-controls">

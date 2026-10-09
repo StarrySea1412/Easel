@@ -83,7 +83,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const lastScrollTop=useRef(0);
   const [following,setFollowing]=useState(true);
   const [currentTurn,setCurrentTurn]=useState(0);
-  const nodes=useMemo(()=>chatTurnNodes(session.messages),[session.messages]);
+  const nodes=useMemo(()=>chatTurnNodes(session.messages, session.importedFromBackup ? '' : stream?.content),[session.messages,session.importedFromBackup,stream?.content]);
   const previousCount=useRef(nodes.length);
   const syncPosition=useCallback(()=>{
     const element=scrollRef.current;if(!element)return;
@@ -230,7 +230,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
           )}
           <div ref={messagesEndRef} />
         </div>
-      </div>{nodes.length>0&&<ChatTurnNavigation nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
+      </div>{nodes.length>0&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
       {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
         {!isImported && <div className="chat-input-inner">

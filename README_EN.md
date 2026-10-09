@@ -1,3 +1,5 @@
+> October 9 conversation-node update is live on the source workspace at port 7880: left-side ticks preview each question and its reply, with keyboard navigation. Empty execution records preserve backend warnings and offer retry. All 28 focused repository checks and the production build passed; desktop and 390×844 browser checks passed. User acceptance is pending; packaging remains deferred.
+
 > October 9 source iteration: native model requests, canonical final text, editable per-chat queues, actual tool/file-change receipts, SQLite usage and CC Switch-compatible cost/speed accounting are implemented. Real DeepSeek, Kimi and Grok replies have been received; upstream content quality is assessed separately. The operator package will be assembled after iteration and acceptance, as requested. Existing packages do not include these changes. See the [checklist](docs/user-feedback-checklist-2026-10-09.md) and [accounting definitions](docs/ccswitch-cost-speed-2026-10-09.md).
 
 # Easel Creative Workspace
