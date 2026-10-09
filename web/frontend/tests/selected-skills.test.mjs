@@ -63,7 +63,7 @@ async function fixture(t, initial = {}, mode = 'page') {
     async pick(name) { await click([...document.querySelectorAll('.brush-item')].find(button => button.textContent.includes(name))); },
     async reload() { await act(async () => root.render(null)); await render(); },
     async type(text) { const input = container.querySelector('textarea'); await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(input, text); input.dispatchEvent(new window.Event('input', { bubbles: true })); }); },
-    async editRequirement(label = '小红书卡组') { await click(container.querySelector(`[aria-label="${label}技能详情与补充要求"]`)); },
+    async editRequirement(label = '小红书卡组') { await click(container.querySelector(`[aria-label="${label}技能详情与补充要求"]`)); await click([...document.querySelectorAll('.selected-skill-popover button')].find(button => button.textContent === '编辑补充要求')); },
     async typeRequirement(text) { const input = document.querySelector('.selected-skill-requirement-editor textarea'); assert.ok(input); await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(input, text); input.dispatchEvent(new window.Event('input', { bubbles: true })); }); },
     async requirementAction(text) { await click([...document.querySelectorAll('.selected-skill-popover button')].find(button => button.textContent === text)); },
   };

@@ -58,6 +58,47 @@ def test_zhihu_sixty_fields_retain_heat_and_normalize_question_milliseconds():
     assert updated is None, 'question creation does not establish the ranking update time'
 
 
+def official_payload():
+    return {'data': [{'type': 'hot_list_feed', 'detail_text': '123 万热度', 'target': {
+        'type': 'question', 'title': '公开问题', 'url': 'https://api.zhihu.com/questions/123', 'created': 1791417858}}]}
+
+
+def test_official_zhihu_keeps_question_links_heat_and_creation_but_not_board_time():
+    source = trends._zhihu_sources()[0]
+    items, updated = trends.parse(source, raw(official_payload()), 'zhihu')
+    assert items == [{'title': '公开问题', 'hot': '123 万热度', 'url': 'https://www.zhihu.com/question/123',
+                      'linkKind': 'article', 'publishedAt': None, 'createdAt': 1791417858}]
+    assert updated is None
+
+
+@pytest.mark.parametrize('target', [
+    {'type': 'article'}, {'url': 'https://api.zhihu.com.evil.test/questions/123'},
+    {'url': 'https://api.zhihu.com/questions/123?secret=private'}, {'url': 'javascript:alert(1)'},
+])
+def test_official_zhihu_rejects_nonquestion_or_unexpected_links(target):
+    payload = official_payload()
+    payload['data'][0]['target'].update(target)
+    with pytest.raises(trends.SourceError) as caught:
+        trends.parse(trends._zhihu_sources()[0], raw(payload), 'zhihu')
+    assert caught.value.code == 'empty'
+
+
+def test_official_zhihu_failure_uses_sixty_and_preserves_failed_attempt(monkeypatch):
+    sources = trends._zhihu_sources()[:2]
+    monkeypatch.setitem(trends.SOURCES, 'zhihu', sources)
+    calls = []
+    def download(url):
+        calls.append(url)
+        if url == sources[0].url:
+            raise trends.SourceError('access_denied', 'HTTP 403')
+        return raw({'code': 200, 'data': [{'title': '备用真实问题'}]})
+    monkeypatch.setattr(trends, '_download', download)
+    result = trends._fetch('zhihu')
+    assert calls == [source.url for source in sources]
+    assert result['source']['name'] == '60s API' and result['status'] == 'fresh'
+    assert result['attempts'][0]['code'] == 'access_denied'
+
+
 def test_zero_heat_is_not_a_missing_metric_and_timezone_free_dates_stay_unknown():
     items, _ = trends.parse(trends.SOURCES['zhihu'][0], raw({'data': [{
         'title': '真实零值', 'hot_value': 0, 'created': '2026-10-08T08:00:00',
@@ -70,14 +111,17 @@ def test_zero_heat_is_not_a_missing_metric_and_timezone_free_dates_stay_unknown(
     assert trends._timestamp(float('inf')) is None
 
 
-def test_zhihu_backup_is_opt_in_and_accepts_a_configured_self_hosted_endpoint(monkeypatch):
+def test_zhihu_reads_public_ranking_first_and_keeps_configured_backup_opt_in(monkeypatch):
     monkeypatch.delenv('EASEL_ZHIHU_DAILYHOT_URL', raising=False)
-    assert trends._zhihu_sources() == (trends.sixty('zhihu'),)
+    defaults = trends._zhihu_sources()
+    assert defaults[0].format == 'zhihu'
+    assert defaults[0].url == 'https://api.zhihu.com/topstory/hot-lists/total?limit=30'
+    assert defaults[1] == trends.sixty('zhihu')
     monkeypatch.setenv('EASEL_ZHIHU_DAILYHOT_URL', 'http://127.0.0.1:6688/zhihu')
     sources = trends._zhihu_sources()
-    assert sources[0] == trends.sixty('zhihu')
-    assert sources[1].url == 'http://127.0.0.1:6688/zhihu'
-    assert sources[1].format == 'dailyhot-go'
+    assert sources[:2] == defaults
+    assert sources[2].url == 'http://127.0.0.1:6688/zhihu'
+    assert sources[2].format == 'dailyhot-go'
 
 
 @pytest.mark.parametrize('endpoint', [
@@ -86,7 +130,8 @@ def test_zhihu_backup_is_opt_in_and_accepts_a_configured_self_hosted_endpoint(mo
 ])
 def test_zhihu_backup_rejects_invalid_or_credential_bearing_config_without_logging_values(monkeypatch, caplog, endpoint):
     monkeypatch.setenv('EASEL_ZHIHU_DAILYHOT_URL', endpoint)
-    assert trends._zhihu_sources() == (trends.sixty('zhihu'),)
+    assert len(trends._zhihu_sources()) == 2
+    assert trends._zhihu_sources()[0].format == 'zhihu'
     assert 'EASEL_ZHIHU_DAILYHOT_URL' in caplog.text
     assert endpoint not in caplog.text
     assert 'secret' not in caplog.text
@@ -133,7 +178,7 @@ def test_dailyhot_backup_cannot_substitute_search_terms_or_another_platform():
 
 def test_configured_zhihu_backup_runs_only_after_primary_failure_and_retains_provenance(monkeypatch):
     monkeypatch.setenv('EASEL_ZHIHU_DAILYHOT_URL', 'https://source.test/zhihu')
-    monkeypatch.setitem(trends.SOURCES, 'zhihu', trends._zhihu_sources())
+    monkeypatch.setitem(trends.SOURCES, 'zhihu', trends._zhihu_sources()[1:])
     clock, calls = [1791433800], []
     monkeypatch.setattr(trends.time, 'time', lambda: clock[0])
     def healthy(url):

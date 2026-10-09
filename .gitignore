@@ -103,3 +103,4 @@ gui-test-screenshots/
 # Saved model health state when the source checkout is its data root
 /model-health/
 /image-reverse-config.json
+/channel-names.json

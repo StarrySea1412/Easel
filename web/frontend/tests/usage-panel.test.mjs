@@ -122,3 +122,16 @@ test('partially priced summaries identify coverage rather than implying a comple
   const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
   assert.match(view.container.querySelector('.usage-performance-summary').textContent, /渠道估算 \$0\.01500000 · 部分合计 · 1\/2 次已计价（非账单）/);
 });
+
+test('channel endpoint and grouping distinguish the same model across two routes', async t => {
+  const payload = usagePayload('s1');
+  payload.turns[0].calls = [call('one','same','relay',{channelId:'ch_one',channelName:'relay',channelEndpoint:'a.example'}),call('two','same','relay',{channelId:'ch_two',channelName:'relay',channelEndpoint:'b.example'})];
+  payload.channels = { session: [{id:'ch_one',name:'relay',endpoint:'a.example',source:'turn_config',models:['same'],summary:summary(1,100)},{id:'ch_two',name:'relay',endpoint:'b.example',source:'turn_config',models:['same'],summary:summary(1,100)}], project:[] };
+  const view=await fixture(t,{embedded:true},payload);await view.respondFirst();
+  assert.match(view.text(),/按消耗渠道汇总/);assert.match(view.text(),/a.example/);assert.match(view.text(),/b.example/);
+  const filter=view.container.querySelector('.usage-request-filters select');
+  await act(async()=>{filter.value='ch_two';filter.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  assert.match(view.text(),/1 \/ 2 次/);
+  assert.match(view.container.querySelector('.usage-request-list').textContent,/b.example/);
+  assert.doesNotMatch(view.container.querySelector('.usage-request-list').textContent,/a.example/);
+});

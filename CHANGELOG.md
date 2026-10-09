@@ -4,6 +4,16 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-10 composer, channels and public Zhihu ranking
+
+- Compact queued rows follow the pointer as a whole, retaining an empty source placeholder and animating actual reorder only. Redundant move-up/down menu entries are removed. Editing reuses the main composer; one primary action switches between stop and queue-send.
+- Guidance stops the active turn, waits for confirmation and continues with the exact selected message while retaining paused neighbours; failure preserves the queue. The tooltip states this behavior and responds to viewport/layout changes.
+- Quick pinning and chat previews distinguish selected skills from actual execution evidence. Quote drafts retain their source independently until submitted. Gateway thinking declarations use a small info control, and visible thinking counts are explicitly estimated tokens.
+- CC Switch display names persist by exact channel identity and are editable. Initial status reads only the model list; click-to-open details avoid duplicate hover tooltips. Historical usage retains its original channel label.
+- Return-to-latest shows animated dots and a down arrow on hover/focus. Publication receipts no longer occupy every page header. Error avatars settle into a visible held pose.
+- Zhihu public question ranking replaces the rate-limited 60s endpoint as primary; 60s and explicitly configured DailyHot instances remain fallbacks. Only observed heat/question creation time is retained, without fabricating ranking update timestamps.
+- Actual desktop and 390px browser checks and remaining real execution boundaries are recorded in the checklist. No new installer/package has been built.
+
 ### 2026-10-09 conversation nodes and execution feedback
 
 - Left-side ticks preview the user question and same-turn reply; streaming data updates retain the preview. Keyboard navigation, Enter jump and Escape dismissal are supported.

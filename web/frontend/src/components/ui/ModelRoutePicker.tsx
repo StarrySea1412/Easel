@@ -1,4 +1,6 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { orderedChannels, readChannelOrder } from '../../lib/channelOrder';
+import ChannelOrderEditor from './ChannelOrderEditor';
 import { NativeSelect as Select } from './Select';
 import type { OfficeModelOption } from '../../lib/officeControls';
 import './model-route-picker.css';
@@ -13,14 +15,16 @@ export default function ModelRoutePicker({ options, selection, onChange, disable
   disabled?: boolean;
 }) {
   const prefix = useId();
-  const providers = [...new Set(options.filter(option => option.configured).map(option => option.provider))];
-  return <div className="model-route-fields">
+  const [order,setOrder]=useState(readChannelOrder);
+  const providers = orderedChannels([...new Set(options.filter(option => option.configured).map(option => option.provider))],order);
+  const names = Object.fromEntries(options.map(option => [option.provider, option.channelName || '未命名渠道']));
+  return <div className="model-route-fields"><ChannelOrderEditor providers={providers} names={names} onChange={setOrder} disabled={disabled} />
     <div className="model-route-field">
       <label htmlFor={`${prefix}-provider`}>模型渠道</label>
       <Select id={`${prefix}-provider`} value={selection.provider} disabled={disabled}
         onChange={event => onChange({ provider: event.target.value, modelRef: '' })}>
         <option value="">选择已配置渠道</option>
-        {providers.map(provider => <option key={provider} value={provider}>{provider}</option>)}
+        {providers.map(provider => <option key={provider} value={provider}>{names[provider]}</option>)}
       </Select>
     </div>
     <div className="model-route-field">

@@ -79,10 +79,14 @@ test('known unsupported strength preserves the draft and explains runtime choice
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.sent.length, 0);
   assert.match(view.container.textContent, /不支持 Ultra/);
-  assert.match(view.container.textContent, /运行时允许：关闭/);
+  assert.match(view.container.textContent, /网关声明可选：关闭/);
   assert.equal(view.container.querySelector('textarea').value, '需要保留的草稿');
   await view.click(view.trigger());
   assert.equal(view.container.querySelector('.thinking-level-adaptive').disabled, true);
+  assert.equal(view.container.querySelector('[aria-label="选择Ultra思考强度"]').disabled, true);
+  assert.ok(view.container.querySelector('[aria-label="思考强度能力说明"]'));
+  await view.click(view.container.querySelector('[aria-label="选择关闭思考强度"]'));
+  assert.equal(view.sent.length, 0);
   await view.key(view.slider(), 'Home');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.sent.length, 1);
@@ -198,21 +202,22 @@ test('eight strength stops and a separate adaptive button persist all nine value
 test('the compact popup identifies the selected configured model without claiming it has run', async t => {
   const selectedModel = { id: 'relay/actual-v2', provider: 'relay', model: 'actual-v2', configured: true, label: '实际模型' };
   const view = await fixture(t, 'high', { selectedModel }); await view.render(); await view.click(view.trigger());
-  assert.equal(view.menu().querySelector('.thinking-level-model').textContent, selectedModel.model);
-  assert.equal(view.menu().querySelector('.thinking-level-model').title, '所选模型：actual-v2');
+  assert.equal(view.menu().querySelector('.thinking-level-model > span').textContent, selectedModel.model);
+  assert.equal(view.menu().querySelector('.thinking-level-model > span').title, '所选模型：actual-v2');
+  assert.match(view.menu().querySelector('.inline-info').textContent, /能力信息尚未提供/);
   assert.equal(view.menu().querySelectorAll('[role=option]').length, 0);
   assert.equal(view.sent.length, 0);
 });
 
 test('session configuration has an honest model fallback and contains no invented model name', async t => {
   const view = await fixture(t); await view.render(); await view.click(view.trigger());
-  assert.equal(view.menu().querySelector('.thinking-level-model').textContent, '沿用会话模型');
+  assert.equal(view.menu().querySelector('.thinking-level-model > span').textContent, '沿用会话模型');
   assert.equal(view.menu().querySelector('.thinking-level-heading strong').textContent, '中');
 });
 
 test('narrow-screen style permits wrapped tools and anchors the bounded popup to the tool row', () => {
-  const style = fs.readFileSync(new URL('../src/styles/chat-composer.css', import.meta.url), 'utf8');
+  const style = fs.readFileSync(new URL('../src/styles/chat-composer.css', import.meta.url), 'utf8') + fs.readFileSync(new URL('../src/styles/thinking-level-picker.css', import.meta.url), 'utf8');
   assert.match(style, /\.composer-tools\s*\{[^}]*flex-wrap:wrap[^}]*min-width:0[^}]*position:relative/s);
   assert.match(style, /\.thinking-level-menu\s*\{[^}]*max-width:min\(260px, calc\(100vw - 28px\)\)[^}]*box-sizing:border-box/s);
-  assert.match(style, /@media\(max-width:640px\)[\s\S]*\.thinking-level-picker\s*\{\s*position:static/s);
+  assert.match(style, /\.thinking-level-picker\s*\{\s*position:relative/s);
 });

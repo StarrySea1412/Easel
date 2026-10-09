@@ -1,0 +1,7 @@
+.chat-compaction { display:flex; align-items:center; gap:6px; margin:0 0 6px; min-height:20px; font-size:12px; line-height:1.4; color:var(--text-muted,#888); }
+.chat-compaction svg { flex:none; }
+.chat-compaction.is-active .compact-line { animation:context-lines-compress 1.6s ease-in-out infinite; transform-box:fill-box; transform-origin:center; }
+.chat-compaction.is-active .bottom { animation-delay:.2s; }
+.chat-compaction.is-error { color:var(--danger,#b42323); }
+@keyframes context-lines-compress { 0%,100% { transform:scaleX(1); opacity:.95; } 50% { transform:scaleX(.4); opacity:.4; } }
+@media(prefers-reduced-motion:reduce) { .chat-compaction.is-active .compact-line { animation:none; } }

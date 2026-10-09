@@ -286,3 +286,25 @@ test('subscriptions expose stable snapshots and notify after save callers finish
   await new Promise(resolve => queueMicrotask(resolve));
   assert.equal(calls, 1);
 });
+
+test('pins survive cold storage reload, tolerate legacy values and preserve intentionally pinned empty chats', async () => {
+  const storage = memoryStorage({ easel_sessions: JSON.stringify([session(), { ...session('bad'), pinnedAt: 'true' }]) });
+  const { store } = await isolatedStore(storage);
+  const loaded = store.loadSessions();
+  assert.equal(loaded[0].pinnedAt, undefined);
+  assert.equal(loaded[1].pinnedAt, undefined);
+  const empty = id => ({ id, title: 'Empty', created: 123, messages: [] });
+  const pinned = store.setSessionPinned([empty('one'), empty('two'), ...loaded], 'two', true, 50);
+  assert.equal(store.saveSessions(pinned), true);
+  const { store: refreshed } = await isolatedStore(storage);
+  const restored = refreshed.loadSessions();
+  assert.equal(restored.find(item => item.id === 'two').pinnedAt, 50);
+  assert.equal(restored.find(item => item.id === 'two').messages.length, 0);
+  assert.equal(refreshed.setSessionPinned(restored, 'two', true, 99).find(item => item.id === 'two').pinnedAt, 50);
+  const unpinned = refreshed.setSessionPinned(restored, 'two', false);
+  assert.equal(unpinned.find(item => item.id === 'two').pinnedAt, undefined);
+  assert.deepEqual(unpinned.find(item => item.id === 'existing').messages, session().messages);
+  assert.equal(refreshed.saveSessions(unpinned), true);
+  const { store: finalReload } = await isolatedStore(storage);
+  assert.equal(finalReload.loadSessions().some(item => item.pinnedAt), false);
+});

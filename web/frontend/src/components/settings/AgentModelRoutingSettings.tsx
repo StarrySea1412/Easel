@@ -26,6 +26,7 @@ function ModelRoutingForm({ capability, disabled = false, saving = false, onSave
   const locked = disabled || saving || !capability.available;
   return <section className="office-model-router" aria-labelledby={`${prefix}-title`}>
     <h4 id={`${prefix}-title`}>渠道与模型</h4>
+    <p className="office-control-note">同一渠道可分配给多个 Agent / subagent；每位成员独立保存模型，渠道排序只调整显示顺序。</p>
     <p className="office-control-note">{OFFICE_MODEL_SCOPE_LABELS[capability.scope]}</p>
     {capability.available ? <>
       <ModelRoutePicker options={capability.options} selection={{ provider, modelRef: selected }} disabled={locked}

@@ -38,7 +38,10 @@ def xxapi(path: str) -> Source:
 
 
 def _zhihu_sources() -> tuple[Source, ...]:
-    sources = (sixty('zhihu'),)
+    # Public question ranking, also used by the 60s Zhihu adapter. Reading the
+    # original feed avoids the community gateway's shared daily request quota.
+    sources = (Source('知乎公开热榜', 'https://api.zhihu.com/topstory/hot-lists/total?limit=30', 'zhihu', '平台公开问题热榜'),
+               sixty('zhihu'))
     configured = os.environ.get('EASEL_ZHIHU_DAILYHOT_URL', '').strip()
     if not configured:
         return sources
@@ -160,7 +163,29 @@ def parse(source: Source, raw: bytes, platform: str) -> tuple[list[dict], int | 
                  'publishedAt': _timestamp(row.findtext('pubDate'))} for row in channel.findall('item')]
     else:
         payload = _json(raw)
-        if source.format == 'hn':
+        if source.format == 'zhihu':
+            if not isinstance(payload, dict) or payload.get('error'):
+                raise SourceError('upstream_error', '知乎公开接口暂未返回问题热榜。')
+            native_rows = payload.get('data')
+            if not isinstance(native_rows, list):
+                raise SourceError('invalid_response', '知乎公开热榜的数据结构已变化。')
+            rows = []
+            for row in native_rows:
+                if not isinstance(row, dict) or row.get('type') != 'hot_list_feed':
+                    continue
+                target = row.get('target')
+                if not isinstance(target, dict) or target.get('type') != 'question':
+                    continue
+                native_url = safe_url(target.get('url'))
+                link = urllib.parse.urlsplit(native_url)
+                question_id = link.path.removeprefix('/questions/')
+                if (link.scheme != 'https' or link.hostname != 'api.zhihu.com' or link.port not in (None, 443)
+                        or not link.path.startswith('/questions/') or not question_id.isdecimal()
+                        or link.query or link.fragment):
+                    continue
+                rows.append({'title': target.get('title'), 'url': f'https://www.zhihu.com/question/{question_id}',
+                             'hot': row.get('detail_text'), 'created': target.get('created')})
+        elif source.format == 'hn':
             rows = payload.get('hits') if isinstance(payload, dict) else None
         elif source.format == 'v2ex':
             rows = payload

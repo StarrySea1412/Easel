@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from usage_metrics import calculate_cost, speed, validate_price
+from usage_channels import attach_channel, read_snapshots, channel_groups
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -256,7 +257,7 @@ def _enrich(call, prices, old=None, observations=()):
         call['costBreakdown'] = old['costBreakdown']
         call['estimatedCostUsd'] = old.get('estimatedCostUsd')
     else:
-        result = calculate_cost(call, prices.get(f"{call['provider']}/{call['model']}"))
+        result = calculate_cost(call, prices.get(f"{call.get('channelId', call['provider'])}/{call['model']}"))
         if result:
             call['costBreakdown'] = result
             call['estimatedCostUsd'] = float(result['totalUsd'])
@@ -304,6 +305,7 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
         db.executemany('INSERT OR IGNORE INTO sessions VALUES (?)', [(value,) for value in known])
         sources = _sources(sessions_dir, known)
         observations = {web_id: _observations(web_sessions_dir, web_id) for web_id in known}
+        snapshots = {web_id: read_snapshots(web_sessions_dir, web_id) for web_id in known}
         for path, web_id in sources.items():
             try:
                 stat = path.stat()
@@ -324,6 +326,7 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                                 call[field] = old.get(field)
                         if call['turnIndex'] == 0:
                             call['turnId'], call['turnIndex'] = old['turnId'], old['turnIndex']
+                    attach_channel(call, snapshots.get(web_id, []), old if existing else None)
                     _enrich(call, prices, old if existing else None, observations.get(web_id, ()))
                     db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
                 db.execute('INSERT OR REPLACE INTO sources VALUES (?,?,?)', (str(path), signature, malformed))
@@ -347,12 +350,14 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                         for field in FIELDS:
                             if call[field] is None:
                                 call[field] = old.get(field)
+                    attach_channel(call, snapshots.get(web_id, []), old)
                     _enrich(call, prices, old, observations.get(web_id, ()))
                     db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
         all_calls = [json.loads(row[0]) for row in db.execute('SELECT payload FROM calls')]
         # Newly saved prices may fill missing estimates even when transcripts
         # have not changed. Existing estimates keep their original snapshot.
         for call in all_calls:
+            attach_channel(call, snapshots.get(call['sessionId'], []))
             _enrich(call, prices, call, observations.get(call['sessionId'], ()))
             db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
         source_count = db.execute('SELECT COUNT(*) FROM sources').fetchone()[0]
@@ -379,6 +384,8 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
     by_session.sort(key=lambda item: item['lastAt'], reverse=True)
     return {
         'sessionId': session_id, 'session': summarize(current), 'project': summarize(all_calls),
+        'channels': {'session': channel_groups(current, summarize), 'project': channel_groups(all_calls, summarize)},
+        'channelNote': '渠道标识取自实际调用记录；地址来自当轮配置快照，仅显示域名。旧记录缺少快照时标为地址未记录，不用当前配置猜填；同渠道模型价格与当时快照独立保存。',
         'turns': turns[offset:offset + limit], 'turnCount': len(turns), 'offset': offset, 'limit': limit,
         'sessions': by_session[:100], 'sessionCount': len(by_session),
         'sourceCount': source_count + len(sqlite_sessions),

@@ -94,7 +94,7 @@ export function removeQueuedMessage(session: string, id: string): boolean {
 }
 export function updateQueuedMessage(session: string, id: string, text: string): boolean {
   const queue = getChatQueue(session);
-  if (!text.trim() || text.length > 20000) return false;
+  if (!queue.items.some(item => item.id === id) || !text.trim() || text.length > 20000) return false;
   return publish(session, { ...queue, items: queue.items.map(item => item.id === id ? { ...item, text } : item) });
 }
 export function attachQueuedFiles(session: string, id: string, files: UploadedFile[]): boolean {
@@ -107,7 +107,8 @@ export function attachQueuedFiles(session: string, id: string, files: UploadedFi
 export function moveQueuedMessage(session: string, id: string, offset: number): boolean {
   const queue = getChatQueue(session), items = [...queue.items], from = items.findIndex(item => item.id === id), to = from + offset;
   if (from < 0 || to < 0 || to >= items.length) return false;
-  [items[from], items[to]] = [items[to], items[from]];
+  const [item] = items.splice(from, 1);
+  items.splice(to, 0, item);
   return publish(session, { ...queue, items });
 }
 export function clearChatQueue(session: string): void { publish(session, { items: [], paused: true, error: '' }); }
@@ -116,13 +117,21 @@ export const hasChatQueue = (session: string) => Boolean(getChatQueue(session).i
 export function dispatchQueuedMessage(session: string, send: (item: QueuedMessage) => boolean): boolean {
   const queue = getChatQueue(session), item = queue.items[0];
   if (queue.paused || !item || item.missingAttachments.length) return false;
-  if (!publish(session, { ...queue, items: queue.items.slice(1) })) {
+  return dispatchSelectedQueuedMessage(session, item.id, send);
+}
+
+/** Used after a confirmed stop; remove exactly the selected message, not its neighbours. */
+export function dispatchSelectedQueuedMessage(session: string, id: string, send: (item: QueuedMessage) => boolean): boolean {
+  const queue = getChatQueue(session), index = queue.items.findIndex(item => item.id === id), item = queue.items[index];
+  if (!item || item.missingAttachments.length) return false;
+  if (!publish(session, { ...queue, items: queue.items.filter(row => row.id !== id) })) {
     pauseChatQueue(session, '队列更改无法保存，未发送请求。'); return false;
   }
   let accepted = false;
   try { accepted = send(item); } catch { /* restore the unsent item */ }
   if (!accepted) {
-    const restored = { items: [item, ...getChatQueue(session).items], paused: true, error: '消息未被接收，已保留在队列中。' };
+    const items = [...getChatQueue(session).items]; items.splice(Math.min(index, items.length), 0, item);
+    const restored = { items, paused: true, error: '消息未被接收，已保留在队列中。' };
     if (!publish(session, restored)) publish(session, restored, false);
   }
   return accepted;

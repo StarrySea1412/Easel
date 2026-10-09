@@ -342,7 +342,7 @@ class GatewayClient:
         self.ws = ws
 
     def _rpc(self, method: str, params: dict, timeout: float | None = None,
-             *, expect_final: bool = False, on_accepted=None):
+             *, expect_final: bool = False, on_accepted=None, on_event=None):
         if self.ws is None:
             self.connect()
         self._seq += 1
@@ -354,6 +354,8 @@ class GatewayClient:
         while time.time() < deadline:
             self.ws.settimeout(max(0.01, deadline - time.time()))
             msg = json.loads(self.ws.recv())
+            if msg.get("type") == "event" and on_event is not None:
+                on_event(msg)
             if msg.get("id") == req_id:
                 if not msg.get("ok", False):
                     err = msg.get("error") or {}

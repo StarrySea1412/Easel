@@ -35,6 +35,7 @@ test('hover card shows question and answer, remains open while streamed text upd
   await act(async () => tick.dispatchEvent(new window.PointerEvent('pointerover', { bubbles: true })));
   assert.equal(container.querySelector('[role="tooltip"] strong').textContent, '问题标题');
   assert.equal(container.querySelector('[role="tooltip"] p').textContent, '部分回复');
+  assert.equal(container.querySelector('[role="tooltip"] small'), null, 'requested footer hint is removed');
   await render('部分回复继续更新');
   assert.equal(container.querySelector('[role="tooltip"] p').textContent, '部分回复继续更新');
   await act(async () => tick.click());

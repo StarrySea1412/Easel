@@ -128,21 +128,10 @@ test('an imported chat stays read-only despite forged stream and pending state, 
 
   const scroller = view.container.querySelector('.chat-messages');
   t.mock.method(scroller, 'scrollTo', ({ top }) => { scroller.scrollTop = top; });
-  const directory = view.container.querySelector('.chat-turn-nav-trigger');
-  await view.click(directory);
-  const nodes = [...view.container.querySelectorAll('.chat-turn-node-list button')];
-  assert.equal(nodes.length, 2);
-  await view.click(nodes[0]);
-  assert.equal(directory.getAttribute('aria-expanded'), 'false');
-  assert.match(directory.textContent, /1 \/ 2/);
-  assert.equal(document.activeElement?.getAttribute('aria-label'), '第 1 轮对话');
-  await view.click(directory);
-  assert.equal(view.container.querySelector('.chat-turn-node-list button').getAttribute('aria-current'), 'step');
-  await view.click(view.container.querySelector('button[aria-label="跳转下一轮对话"]'));
-  assert.match(directory.textContent, /2 \/ 2/);
-  await view.click(directory);
-  await view.click(view.container.querySelector('button[aria-label="回到底部并跟随最新回复"]'));
-  assert.match(directory.textContent, /2 \/ 2/);
+  assert.equal(view.container.querySelector('.chat-turn-nav-trigger,.chat-turn-popover'),null);
+  const nodes=[...view.container.querySelectorAll('.chat-turn-tick')];assert.equal(nodes.length,2);
+  await view.click(nodes[0]);assert.equal(document.activeElement?.getAttribute('aria-label'),'第 1 轮对话');
+  await view.click(nodes[1]);assert.equal(document.activeElement?.getAttribute('aria-label'),'第 2 轮对话');
 
   await view.click([...notice.querySelectorAll('button')].find((button) => button.textContent === '新建对话继续'));
   assert.deepEqual(actions.calls, { send: 0, stop: 0, resend: 0, question: 0, audit: 0, newChat: 1 });
@@ -193,7 +182,10 @@ test('imported Markdown retains text formatting and safe links without automatic
     ...actions.props,
   }));
   const bubble = view.container.querySelector('.message-bubble.assistant');
-  assert.equal(bubble.querySelector('img,picture,video,audio,source,iframe,object,embed,svg,math,style,link,input,script'), null);
+  // The thinking control owns a static SVG chevron. Imported markup must not
+  // supply any SVG or media; allow only that exact application-owned icon.
+  assert.equal(bubble.querySelector('img,picture,video,audio,source,iframe,object,embed,svg:not(.model-thinking-chevron),math,style,link,input,script'), null);
+  assert.equal(bubble.querySelectorAll('svg.model-thinking-chevron').length, 1);
   assert.equal(bubble.querySelector('[style],[onclick],[onerror],[src],[srcset],[ping]'), null);
   assert.equal(bubble.querySelector('strong')?.textContent, '保留粗体');
   assert.ok(bubble.querySelector('table'));
@@ -247,7 +239,9 @@ test('Activity keeps imported snapshots out of live counts and never mounts usag
   const props = { sessions: [session], activeSessionId: session.id, streams: { [session.id]: forgedStream } };
   await view.render(createElement(ActivityPage, props));
   assert.equal(view.container.querySelector('.activity-live-count').textContent, '0 个会话正在运行');
-  assert.match(view.container.querySelector('.activity-session-rows').textContent, /备份副本/);
+  const picker=view.container.querySelector('.activity-session-picker [role="combobox"]');
+  assert.ok(picker, 'imported session remains selectable in the compact control');
+  assert.equal(picker.textContent.trim(), session.title);
   assert.equal(view.container.querySelector('.activity-session-state').textContent, '备份副本');
   assert.match(view.container.querySelector('.activity-detail').textContent, /备份记录不包含真实后台用量或 Skill 证据/);
   assert.match(view.container.querySelector('.activity-detail').textContent, /未完成的对话快照/);
@@ -259,7 +253,7 @@ test('Activity keeps imported snapshots out of live counts and never mounts usag
   assert.deepEqual(view.requests, []);
   const running = [...view.container.querySelectorAll('.activity-filters button')].find((button) => button.textContent === '运行中');
   await view.click(running);
-  assert.equal(view.container.querySelector('.activity-session-rows button'), null);
+  assert.equal(view.container.querySelector('.activity-session-picker [role="combobox"]').disabled, true);
   assert.match(view.container.querySelector('.activity-detail').textContent, /请调整会话筛选/);
   assert.deepEqual(view.requests, []);
 });

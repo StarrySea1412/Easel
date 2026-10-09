@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Select from './ui/Select';
 import type { ChatSession, StreamState } from '../lib/store';
 import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from '../lib/activitySelection';
 import UsagePanel from './UsagePanel';
@@ -89,26 +90,13 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
               ))}
             </div>
             </div>
-            <nav className="activity-session-rows" aria-label="运行会话导航">
-              {visible.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  className={session?.id === item.id ? 'selected' : ''}
-                  aria-pressed={session?.id === item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <strong>{item.title}</strong>
-                  <span>
-                    {item.importedFromBackup ? '备份副本' : liveStreams[item.id] ? '运行中' : item.archived ? '已归档' : '已保存'}
-                    {' · '}{item.messages.filter((message) => message.role === 'user').length} 轮对话
-                  </span>
-                </button>
-              ))}
-              {!visible.length && (
-                <p className="usage-empty">{sessions.length ? '没有匹配会话，请调整筛选。' : '还没有会话记录。'}</p>
-              )}
-            </nav>
+            <div className="activity-session-picker">
+              <Select aria-label="运行会话" value={session?.id || ''} disabled={!visible.length}
+                onChange={setSelectedId} placeholder="选择会话"
+                options={visible.map(item=>({ value:item.id, label:item.title,
+                  description:`${item.importedFromBackup ? '备份副本' : liveStreams[item.id] ? '运行中' : item.archived ? '已归档' : '已保存'} · ${item.messages.filter(message=>message.role==='user').length} 轮对话` }))} />
+              {!visible.length && <p className="usage-empty">{sessions.length ? '没有匹配会话，请调整筛选。' : '还没有会话记录。'}</p>}
+            </div>
           </section>
 
           <main className="activity-detail">

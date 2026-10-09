@@ -5,7 +5,7 @@ type Price = Record<typeof fields[number][0], string> & { currency: string; sour
 const empty: Price = { input: '', output: '', cacheRead: '', cacheWrite: '', multiplier: '1', currency: 'USD', source: '' };
 const priceUrl = () => `${window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '')}/api/usage/pricing`;
 
-export default function UsagePriceEditor({ provider, model, onSaved }: { provider: string; model: string; onSaved: () => void }) {
+export default function UsagePriceEditor({ provider, model, onSaved, channelLabel }: { provider: string; model: string; onSaved: () => void; channelLabel?: string }) {
   const [price, setPrice] = useState<Price>(empty);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,7 +34,7 @@ export default function UsagePriceEditor({ provider, model, onSaved }: { provide
     finally { setSaving(false); }
   };
   return <details className="usage-price-editor" onToggle={event => setOpen(event.currentTarget.open)}><summary>设置此渠道模型的计费价格</summary>
-    <p className="usage-note">{provider} / {model} · USD / 百万 Token。按你使用的渠道报价填写，0 仅表示明确免费；不要填写 API Key。</p>
+    <p className="usage-note">{channelLabel || provider} / {model} · USD / 百万 Token。按你使用的渠道报价填写，0 仅表示明确免费；不要填写 API Key。</p>
     <div className="usage-request-filters">{fields.map(([key, label]) => <label key={key}>{label}<input type="number" min="0" max="1000000" step="any" value={price[key]} disabled={loading || saving} onChange={event => setPrice({ ...price, [key]: event.target.value })} /></label>)}
       <label>价格来源<input maxLength={100} value={price.source} placeholder="例如：渠道报价 2026-10-09" disabled={loading || saving} onChange={event => setPrice({ ...price, source: event.target.value })} /></label>
       <button type="button" className="btn btn-sm" disabled={loading || saving || fields.some(([key]) => price[key] === '') || !price.source.trim()} onClick={save}>{loading ? '读取中…' : saving ? '保存中…' : '保存价格'}</button>

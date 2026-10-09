@@ -55,10 +55,10 @@ test('streaming with live activity shows the pulse and heartbeat hint, not the w
   assert.ok(container.querySelector('.streaming-cursor'), 'cursor shows during streaming');
 });
 
-test('persisted thinking panel keeps character count and expands on click', async t => {
+test('persisted thinking panel labels estimated tokens and expands on click', async t => {
   const container = await mount(t, { message: { role: 'assistant', content: '答案', thinking: '推理过程' } });
   const toggle = container.querySelector('.model-thinking-toggle');
-  assert.match(toggle.textContent, /4 字符/);
+  assert.match(toggle.textContent, /≈ 4 tokens/);
   assert.match(toggle.textContent, /已保留/);
   assert.equal(container.querySelector('.model-thinking-body'), null, 'collapsed by default after streaming');
   await act(async () => toggle.click());

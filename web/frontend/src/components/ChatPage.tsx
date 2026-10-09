@@ -9,6 +9,7 @@ import MessageBubble from './MessageBubble';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
+import ChatQuoteToolbar from './ChatQuoteToolbar';
 import '../styles/chat-workspace.css';
 import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -25,6 +26,7 @@ interface ChatPageProps {
   stopError?: string;
   onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onStop: () => void;
+  onSteer?: (id: string) => Promise<boolean>;
   onResend: (
     userIndex: number,
     displayText: string,
@@ -54,7 +56,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -137,7 +139,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} sessionId={session.id} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -171,7 +173,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         </div>
         {onNewChat && <button type="button" className="btn" onClick={onNewChat}>新建对话继续</button>}
       </section>}
-      <div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
+      {!isImported && <ChatQuoteToolbar key={session.id} sessionId={session.id} root={scrollRef}/>}<div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
         onWheel={event=>{if(event.deltaY)navigationTarget.current=null;if(event.deltaY<0){followLatest.current=false;setFollowing(false);}}}
         onTouchMove={()=>{navigationTarget.current=null;}}
         onPointerDown={event=>{if(event.target===event.currentTarget)navigationTarget.current=null;}}
@@ -214,6 +216,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
               <Fragment key={`${i}-${msg.role}`}>{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
+                sessionId={session.id}
                 backupSnapshot={isImported}
                 isStreaming={live}
                 thinking={live ? stream!.thinking : ''}
@@ -232,11 +235,11 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         </div>
       </div>{nodes.length>0&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
-      {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" onClick={goLatest}>{isStreaming?'返回最新进度 ↓':'回到最新一轮 ↓'}</button>}
+      {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className="chat-return-latest" aria-label={isStreaming?'返回最新进度':'回到最新一轮'} onClick={goLatest}><span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span><svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
         {!isImported && <div className="chat-input-inner">
           {stopping && <p className="composer-skills-note" role="status">正在请求停止，等待后端确认…</p>}
           {stopError && <div className="composer-upload-error" role="alert">{stopError}{isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
-          <ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+       <ChatComposer key={session.id} sessionId={session.id} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
         </div>}
       </div>}
     </div>

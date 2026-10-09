@@ -90,6 +90,8 @@ def test_unavailable_explicit_ref_cannot_reuse_stale_inherited_credentials(tmp_p
     ('private response', 403, 'gateway_auth_rejected'),
     ('TimeoutError', None, 'gateway_timeout'),
     ('ECONNREFUSED', None, 'gateway_connection_failed'),
+    ('[WinError 10054] 远程主机强迫关闭了一个现有的连接。', None, 'gateway_connection_failed'),
+    ('[WinError 10061] connection refused', None, 'gateway_connection_failed'),
     ('exit code 1', None, 'agent_execution_failed'),
 ])
 def test_failures_classified_without_guessing_or_repeating_sensitive_details(raw, status, code):

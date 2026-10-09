@@ -21,6 +21,7 @@ async function fixture(t, saved) {
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
+        : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
         : url === '/api/upload/limits' ? { max_mb: 50 } : [];
     return { ok: true, json: async () => data };
   });
@@ -44,7 +45,7 @@ test('configured complete models are keyboard selectable, stored explicitly and 
   view.trigger().focus(); await view.key('ArrowDown');
   assert.equal(document.querySelectorAll('.easel-select-option').length, 2, 'default and configured only');
   await view.key('ArrowDown'); await view.key('Enter');
-  assert.equal(view.values.get(KEY), REF); assert.match(view.container.textContent, /通过/);
+  assert.equal(view.values.get(KEY), REF); assert.match(view.container.textContent, /渠道已连通/);
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
   assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, 'medium', REF]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
@@ -64,13 +65,13 @@ test('streaming allows next-message model selection; stopping locks selector wit
   await view.key('Home'); assert.equal(view.values.get(KEY), REF);
 });
 
-test('composer refreshes backend health without probing and stops reads after unmount', async t => {
+test('composer reads channel models by GET, refreshes status and stops reads after unmount', async t => {
   const timers = [];
   t.mock.method(globalThis, 'setInterval', (callback, delay) => { const timer = { callback, delay, cleared: false }; timers.push(timer); return timer; });
   t.mock.method(globalThis, 'clearInterval', timer => { timer.cleared = true; });
-  const view = await fixture(t, REF); await view.render(); assert.match(view.container.textContent, /通过/);
+  const view = await fixture(t, REF); await view.render(); assert.match(view.container.textContent, /渠道已连通/);
   const timer = timers.find(item => !item.cleared); assert.ok(timer); assert.equal(timer.delay, 60000);
-  view.h.healthState = 'failed'; await act(async () => timer.callback()); assert.match(view.container.textContent, /失败/);
+  view.h.healthState = 'failed'; await act(async () => timer.callback()); assert.match(view.container.querySelector('.composer-model-health').getAttribute('aria-label'), /失败/);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'status refresh never probes a model');
   await view.unmount(); assert.equal(timer.cleared, true);
   const count = view.calls.length; await act(async () => timer.callback()); assert.equal(view.calls.length, count);
@@ -86,4 +87,30 @@ test('unavailable model choices explain the next step even without a saved overr
   assert.equal(document.querySelectorAll('.easel-select-option[aria-disabled=true]').length, 1);
   assert.equal(view.values.get(KEY), undefined);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance does not save or probe models');
+});
+
+test('channel details open only on click, omit duplicate native tooltip and close with Escape', async t => {
+  const view = await fixture(t, REF); await view.render();
+  const trigger = view.container.querySelector('.composer-model-health');
+  assert.equal(trigger.hasAttribute('title'), false); assert.equal(trigger.hasAttribute('data-tooltip'), false);
+  await act(async () => trigger.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true })));
+  assert.equal(document.querySelector('.composer-channel-popover'), null);
+  await act(async () => trigger.click());
+  const panel = document.querySelector('[role=dialog][aria-label="渠道状态详情"]');
+  assert.match(panel.textContent, /测试渠道/); assert.match(panel.textContent, /推理未测/);
+  assert.ok(parseFloat(panel.style.left) >= 12);
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  assert.equal(document.querySelector('.composer-channel-popover'), null);
+});
+
+test('running composer has one primary action and switches from stop to queue then back', async t => {
+  const view = await fixture(t, REF); await view.render({ isStreaming: true });
+  const actions = () => [...view.container.querySelectorAll('.composer-send-actions button')];
+  assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
+  await view.type('下一条独立消息');
+  assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '排队发送');
+  await act(async () => actions()[0].click());
+  assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
+  await view.type('停止中保留草稿'); await view.render({ stopping: true });
+  assert.equal(actions().length, 1); assert.equal(actions()[0].disabled, true);
 });

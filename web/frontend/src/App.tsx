@@ -9,6 +9,9 @@ import { usePublishReceipts } from './hooks/usePublishReceipts';
 import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
+import ToastHost from './components/ToastHost';
+import { showToast } from './lib/toast';
+import { steerQueuedMessage } from './lib/chatSteering';
 import type { Page } from './components/Sidebar';
 import DashboardPage from './components/DashboardPage';
 import SubNav from './components/SubNav';
@@ -22,6 +25,7 @@ import { deleteSession as deleteRemoteSession } from './lib/api';
 import {
   loadSessions,
   saveSessions,
+  setSessionPinned,
   createSession,
   updateSessionTitle,
   loadActiveId,
@@ -415,6 +419,8 @@ export default function App() {
         setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
           ? { ...p, [sessionId]: { ...p[sessionId], content: text } } : p);
       },
+      (event) => setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+        ? { ...p, [sessionId]: { ...p[sessionId], compaction: event } } : p),
     );
   }, [appendAssistant, clearStream]);
 
@@ -540,6 +546,8 @@ export default function App() {
         setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
           ? { ...p, [sessionId]: { ...p[sessionId], content: text } } : p);
       },
+      (event) => setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+        ? { ...p, [sessionId]: { ...p[sessionId], compaction: event } } : p),
     );
   }, [appendAssistant, clearStream]);
 
@@ -671,9 +679,9 @@ export default function App() {
   }, [selectedPersona, sendUserAndStream]);
 
   const handleStopStream = useCallback(async (sessionId: string) => {
-    if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return;
+    if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return false;
     const run = streamAcc.current[sessionId];
-    if (!run || stopRequests.current[sessionId]) return;
+    if (!run || stopRequests.current[sessionId]) return false;
     pauseChatQueue(sessionId, '生成已请求停止，队列已暂停。');
     const request = {};
     stopRequests.current[sessionId] = request;
@@ -686,11 +694,12 @@ export default function App() {
     try {
       // Keep receiving/reconnecting until the backend confirms termination.
       // A network failure must not discard the only durable job identifier.
-      const result = await stopChat(sessionId);
-      if (streamAcc.current[sessionId] !== run || stopRequests.current[sessionId] !== request) return;
+      const result = await stopChat(sessionId, run.turnId);
+      if (stopRequests.current[sessionId] !== request) return false;
+      if (streamAcc.current[sessionId] !== run) return !streamAcc.current[sessionId] && !streamCtl.current[sessionId];
       if (!result.stopped) {
         setStopErrors((prev) => ({ ...prev, [sessionId]: '后端尚未确认本轮已停止。已保留连接和恢复记录，等待结果或重试停止。' }));
-        return;
+        return false;
       }
       streamCtl.current[sessionId]?.abort();
       flushTyping(sessionId);
@@ -704,11 +713,13 @@ export default function App() {
       });
       clearStream(sessionId);
       try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
+      return true;
     } catch (error) {
       if (streamAcc.current[sessionId] === run && stopRequests.current[sessionId] === request) {
         const detail = error instanceof Error ? error.message : '连接失败';
         setStopErrors((prev) => ({ ...prev, [sessionId]: `停止请求失败：${detail}。任务可能仍在运行，已保留连接和恢复记录，请重试停止。` }));
       }
+      return false;
     } finally {
       if (stopRequests.current[sessionId] === request) {
         delete stopRequests.current[sessionId];
@@ -721,12 +732,26 @@ export default function App() {
     }
   }, [appendAssistant, clearStream]);
 
+  const handleSteer = useCallback((sessionId: string, id: string) => steerQueuedMessage(sessionId, id,
+    () => handleStopStream(sessionId), item => sendUserAndStream(sessionId, item.text, item.attachments,
+      undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel)), [handleStopStream, sendUserAndStream]);
+
   const handleSessionRename = useCallback((id: string, title: string) => {
     const t = title.trim();
     if (!t) return;
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, title: t } : s));
-      saveSessions(next);
+      const saved = saveSessions(next);
+      showToast(saved ? '已保存对话标题' : '标题已在本页修改，但未能保存；请保留当前页面。', saved ? 'success' : 'error');
+      return next;
+    });
+  }, []);
+
+  const handleSessionPin = useCallback((id: string, pinned: boolean) => {
+    setSessions(previous => {
+      const next = setSessionPinned(previous, id, pinned);
+      const saved = saveSessions(next);
+      showToast(saved ? (pinned ? '已置顶对话' : '已取消置顶') : '置顶状态已在本页修改，但未能保存；请保留当前页面。', saved ? 'success' : 'error');
       return next;
     });
   }, []);
@@ -744,7 +769,8 @@ export default function App() {
     if (!target) return;
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, archived } : s));
-      saveSessions(next);
+      const saved = saveSessions(next);
+      showToast(saved ? (archived ? '已归档对话' : '已恢复对话') : '归档状态已在本页修改，但未能保存；请保留当前页面。', saved ? 'success' : 'error');
       return next;
     });
     // 归档当前会话只切换已有会话；由用户明确新建下一条。
@@ -906,6 +932,7 @@ export default function App() {
             stopError={stopErrors[activeSession.id]}
             onSend={(displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef)}
             onStop={() => handleStopStream(activeSession.id)}
+            onSteer={id => handleSteer(activeSession.id, id)}
             onNewChat={handleNewChat}
             onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
@@ -996,6 +1023,7 @@ export default function App() {
 
   return (
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
+      <ToastHost />
       <Sidebar
         currentPage={currentPage}
         onPageChange={(page) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page); }}
@@ -1004,6 +1032,8 @@ export default function App() {
         onPersonaChange={handlePersonaChange}
         onNewProfile={() => setShowWizard(true)}
         sessions={sessions}
+        runningSessions={Object.keys(streams)}
+        stoppingSessions={Object.keys(stoppingSessions).filter(id => stoppingSessions[id])}
         activeSessionId={activeSessionId}
         activeSessionHasMessages={activeSession ? activeSession.messages.length > 0 : false}
         onSessionSelect={handleSessionSelect}
@@ -1011,12 +1041,13 @@ export default function App() {
         onSessionRename={handleSessionRename}
         onGenerateSessionTitle={handleGenerateSessionTitle}
         onSessionArchive={handleSessionArchive}
+        onSessionPin={handleSessionPin}
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
       />
       <main className="main-content">
         <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
-        <PublishReceiptCenter model={publishReceipts}
+        <PublishReceiptCenter model={publishReceipts} showEntry={false}
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
           onOpenPublish={() => setCurrentPage('publish')} />
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (

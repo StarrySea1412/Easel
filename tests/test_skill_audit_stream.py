@@ -38,11 +38,11 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
         def poll(self):
             return 0
 
-    def begin(*args):
+    def begin(*args, **kwargs):
         calls.append('begin')
         if failure == 'begin':
             raise RuntimeError('injected audit initialization failure')
-        return {'test_context': True}
+        return {'test_context': True, 'record': {}}
 
     def finish(*args):
         calls.append('finish')
@@ -71,6 +71,7 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
     monkeypatch.setattr(web, '_notify_email_web_turn', None)
     monkeypatch.setattr(web.subprocess, 'Popen', Process)
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, '_channel_labels', lambda: {})
     monkeypatch.setattr(web, 'OPENCLAW_SESSIONS_DIR', tmp_path / 'transcripts')
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'absent-raw.jsonl')
     monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')

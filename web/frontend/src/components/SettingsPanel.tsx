@@ -7,6 +7,7 @@ import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import ModelHealthPanel from './settings/ModelHealthPanel';
+import ChannelNameEditor from './settings/ChannelNameEditor';
 import ImageReverseSettings from './settings/ImageReverseSettings';
 import Select from './ui/Select';
 import type { ProviderBoardOptions } from './settings/ProviderBoard';
@@ -900,7 +901,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       health: (i, open) => {
                         const row = chatRows[i];
                         const ref = row.slot === 'custom' ? `${row.name}/${row.model}` : `${row.slot}/${row.model}`;
-                        return row.model && row.slot ? <details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details> : null;
+                        return row.model && row.slot ? <><ChannelNameEditor key={row.slot === 'custom' ? row.name : row.slot} provider={row.slot === 'custom' ? row.name : row.slot}/><details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details></> : null;
                       },
                       presets: presets.chat,
                       discovery: (i) => discover[`chat:${i}`],

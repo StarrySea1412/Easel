@@ -77,3 +77,20 @@
   .brush-guide { padding: 12px; font-size: 11px; }.brush-guide h3 { font-size: 13px; }
   .skill-picker-footer { padding: 10px 12px; font-size: 10px; }
 }
+
+.composer-skill-chip > button[aria-label^="移除技能"] { color:#c73636; }.composer-skill-chip > button[aria-label^="移除技能"]:is(:hover,:focus-visible) { color:#b42323; background:#c7363612; }
+
+/* Shared selected chips: equal outer padding, balanced label and remove targets. */
+.composer-selected-skills { gap:8px; }
+.composer-selected-label { margin-right:2px; }
+.composer-skill-chip { padding:3px 6px; gap:4px; min-height:28px; box-sizing:border-box; background:var(--surface-2); border-color:var(--border); }
+.composer-skill-chip .composer-skill-detail-trigger { padding:0 4px; min-height:22px; }
+.composer-skill-chip > button[aria-label^="移除技能"] { width:22px; padding:0; }
+.skill-picker .brush-body { padding:12px; }
+.skill-picker .brush-grp { display:grid; gap:7px; }
+.skill-picker .brush-item { border:1px solid transparent; border-radius:9px; padding:11px; }
+.skill-picker .brush-item.is-selected { background:var(--surface-2); border-color:var(--text-secondary); }
+.skill-picker .brush-item.is-selected .brush-il { font-weight:650; }
+.skill-picker .brush-item.is-selected .brush-iadd { display:flex; align-items:center; justify-content:center; width:19px; height:19px; flex:none; border-radius:50%; background:var(--text); color:var(--surface); font-size:12px; }
+.skill-picker .brush-item.is-selected .brush-dot { background:var(--text-secondary); }
+.skill-picker .brush-item.is-previewed { box-shadow:none; outline:1px solid var(--border-strong); outline-offset:-1px; }

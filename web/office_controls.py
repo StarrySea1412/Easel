@@ -217,6 +217,11 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
     if session and (not isinstance(session, str) or not office.SAFE_ID.fullmatch(session)):
         _error('无效的会话标识。', 400)
     options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
+    labels = web._channel_labels() if hasattr(web, '_channel_labels') else {}
+    for option in options:
+        channel = labels.get(option['provider'], {})
+        option['channelName'] = channel.get('name', '未命名渠道')
+        option['label'] = f"{option['channelName']} · {option['model']}"
     result = {'available': False, 'scope': 'unavailable', 'currentModelRef': None,
               'options': options, 'reason': '尚未配置可选择的渠道模型。',
               'gatewayVersion': None, 'transport': None}

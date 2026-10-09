@@ -7,6 +7,7 @@ import { canVerifyPublishReceipt, isFinalPublishReceipt, publishNotificationLabe
 import { IconHistory, IconRefresh } from './icons';
 import PlatformIcon from './PlatformIcon';
 import '../styles/publish-receipts.css';
+import { showToast } from '../lib/toast';
 
 export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, checkBusy = false, children }: {
   receipt: PublishReceipt;
@@ -112,10 +113,11 @@ function PublishSmsForm({ receipt, onSubmit }: { receipt: PublishReceipt; onSubm
   </form>;
 }
 
-export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish }: {
+export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish, showEntry = true }: {
   model: PublishReceiptsModel;
   onConfigure: () => void;
   onOpenPublish: () => void;
+  showEntry?: boolean;
 }) {
   const titleId = useId();
   const dialogId = useId();
@@ -125,8 +127,18 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
   const ordered = [...model.active, ...model.receipts.filter(isFinalPublishReceipt)];
   const count = model.verification.length || model.notices.length || model.active.length || model.checking.length;
   const configure = () => { model.close(); onConfigure(); };
+  const seenNotices = useRef(new Set<string>());
+  useEffect(() => {
+    if (showEntry) return;
+    for (const receipt of model.notices) {
+      const key = `${receipt.receiptId}:${receipt.outcome}`;
+      if (seenNotices.current.has(key)) continue;
+      seenNotices.current.add(key);
+      showToast(`${publishPlatformLabel(receipt.platform)} · ${publishReceiptStatus(receipt).label}`, receipt.outcome === 'failed' ? 'error' : 'info', { label: '查看回执', run: model.open });
+    }
+  }, [model.notices, model.open, showEntry]);
   return <>
-    <div className="publish-receipts-bar" aria-label="发布回执与提醒">
+    {showEntry && <div className="publish-receipts-bar" aria-label="发布回执与提醒">
       <button type="button" className="publish-receipts-entry" onClick={model.open}
         aria-expanded={model.isOpen} aria-controls={model.isOpen ? dialogId : undefined}>
         <IconHistory size={16} />发布回执{count > 0 && <span className="publish-receipts-count">{count}</span>}
@@ -143,7 +155,7 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
           : model.error ? <><span>回执暂时无法更新</span><button className="publish-receipt-text-button" onClick={model.open}>查看详情</button></>
           : <span className="publish-receipts-idle">结果与作品地址保存在这里</span>}
       </div>
-    </div>
+    </div>}
     {model.isOpen && <div className="overlay publish-receipts-overlay" onClick={event => { if (event.target === event.currentTarget) model.close(); }}>
       <div className="modal publish-receipts-modal" id={dialogId} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={modalRef}>
         <div className="publish-receipts-modal-heading">

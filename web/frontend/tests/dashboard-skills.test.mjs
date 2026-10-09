@@ -135,7 +135,8 @@ async function fixture(t, initial = {}) {
     await act(async () => root.render(createElement(modules.Dashboard, {
       persona: '', gatewayStatus, onNavigate() {}, onUseTopic() {},
       onQuickPrompt: (...args) => {
-        h.sent.push(args);
+        h.sent.push(args.slice(0,3));
+        h.sentRoute = args.slice(3);
         return h.onQuick ? h.onQuick(...args) : h.accepted;
       },
     })));
@@ -170,7 +171,7 @@ async function fixture(t, initial = {}) {
     pick: async label => click([...document.querySelectorAll('.brush-item')].find(button => button.textContent.includes(label))),
     skillButton: label => [...document.querySelectorAll('.brush-item')].find(button => button.textContent.includes(label)),
     detailTrigger: (label = firstLabel) => container.querySelector(`[aria-label="${label}技能详情与补充要求"]`),
-    editRequirement: async (label = firstLabel) => click(container.querySelector(`[aria-label="${label}技能详情与补充要求"]`)),
+    editRequirement: async (label = firstLabel) => { await click(container.querySelector(`[aria-label="${label}技能详情与补充要求"]`)); await click([...document.querySelectorAll('.selected-skill-popover button')].find(button => button.textContent.trim() === '编辑补充要求')); },
     typeRequirement: async value => typeInto(document.querySelector('.selected-skill-requirement-editor textarea'), value),
     requirementAction: async label => click([...document.querySelectorAll('.selected-skill-popover button')].find(button => button.textContent.trim() === label)),
     hover: async element => {
@@ -218,17 +219,21 @@ test('Dashboard uses the actual picker, keeps existing text when choosing skills
   assert.equal(view.h.sent.length, 0);
 });
 
-test('hover and keyboard reveal the real guide, while creation-scoped requirements save and cancel independently', async t => {
+test('click and keyboard reveal the real guide, while creation-scoped requirements save and cancel independently', async t => {
   const view = await fixture(t, { skills: [first.name], text: '准备发送的首页草稿' });
   await view.render();
   await view.hover(view.container.querySelector('.composer-skill-detail-trigger'));
+  assert.equal(document.querySelector('.selected-skill-popover'), null);
+  await view.click(view.detailTrigger());
   await view.waitForGuide();
   assert.match(document.querySelector('.selected-skill-popover').textContent, /本次创作补充要求/);
   assert.match(document.querySelector('.selected-skill-popover').textContent, /原始记录与出处/);
   await view.key(view.detailTrigger(), 'Escape');
   assert.equal(document.querySelector('.selected-skill-popover'), null);
   assert.equal(document.activeElement, view.detailTrigger());
-  await view.focus(view.input()); await view.focus(view.detailTrigger()); await view.waitForGuide();
+  await view.focus(view.input()); await view.focus(view.detailTrigger());
+  assert.equal(document.querySelector('.selected-skill-popover'), null);
+  await view.click(view.detailTrigger()); await view.waitForGuide();
   await view.key(view.detailTrigger(), 'ArrowDown');
   const editor = document.querySelector('.selected-skill-requirement-editor textarea');
   assert.equal(document.activeElement, editor);
@@ -579,3 +584,17 @@ for (const failedPart of ['text', 'skills', 'requirements']) test(`failed ${fail
 });
 
 test.after(() => window.close());
+
+test('Dashboard exposes the shared thinking control and hands the selected level to creation', async t => {
+  const view = await fixture(t, { text: '第一轮强度验收' });
+  await view.render();
+  const trigger = view.container.querySelector('.thinking-level-trigger');
+  assert.ok(trigger);
+  await view.click(trigger);
+  const slider = view.container.querySelector('.thinking-level-menu input[type="range"]');
+  await view.key(slider, 'Home');
+  await view.key(slider, 'Enter');
+  await view.send();
+  assert.equal(view.h.sentRoute[0], 'off');
+  assert.equal(view.h.sentRoute[1], undefined);
+});

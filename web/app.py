@@ -65,6 +65,7 @@ from image_reverse import (
     FORMATS as IMAGE_REVERSE_FORMATS,
 )
 import model_health
+import channel_profiles
 try:
     from easel.gateway_questions import (
         GatewayClient, GatewayQuestionError, GatewayUnsupportedError,
@@ -1908,12 +1909,12 @@ def _atomic_model_bytes(path: Path, content: bytes) -> None:
 
 
 def _model_file_snapshot() -> dict[Path, bytes | None]:
-    paths = (ENV_FILE, openclaw_state_dir() / 'openclaw.json')
+    paths = (ENV_FILE, openclaw_state_dir() / 'openclaw.json', DATA_DIR / 'channel-names.json')
     return {p: p.read_bytes() if p.exists() else None for p in paths}
 
 
 def _commit_model_configuration(updates: dict[str, str], providers: dict[str, dict] | None = None,
-                                keep: set[str] | None = None, primary: str = '') -> str:
+                                keep: set[str] | None = None, primary: str = '', channel_label: tuple[str, str] | None = None) -> str:
     """Rollback ordinary write/sync failures. Each file is atomic; hard process termination is not a transaction."""
     _guard_env_values(updates)
     with _MODEL_CONFIG_LOCK:
@@ -1927,6 +1928,8 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
             note = _sync_openclaw_chat(providers, keep or set(), primary) if providers is not None else ''
             if '失败' in note:
                 raise RuntimeError('sync failed')
+            if channel_label:
+                channel_profiles.save(sys.modules[__name__], channel_label[0], channel_label[1], channel_label[1])
             return note
         except Exception:
             restored = True
@@ -2262,6 +2265,64 @@ class ModelSchedulesRequest(BaseModel):
 @app.get("/api/settings/models/health")
 async def api_model_health():
     return await asyncio.to_thread(_model_health_service().status)
+
+
+def _channel_labels():
+    return channel_profiles.labels(sys.modules[__name__])
+
+
+class ChannelNameRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=80)
+
+
+@app.get('/api/settings/models/channel-names')
+async def api_channel_names():
+    return {'channels': await asyncio.to_thread(_channel_labels)}
+
+
+@app.post('/api/settings/models/channel-names')
+async def api_channel_name_save(req: ChannelNameRequest):
+    def save():
+        with _MODEL_CONFIG_LOCK:
+            try:
+                name = channel_profiles.save(sys.modules[__name__], req.provider, req.name)
+                return {'ok': True, 'name': name}
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+            except OSError:
+                raise HTTPException(500, '渠道名称保存失败，原名称已保留。') from None
+    return await asyncio.to_thread(save)
+
+
+_CHANNEL_CONNECTIONS = {}
+_CHANNEL_CONNECTION_LOCK = threading.Lock()
+
+
+@app.get('/api/settings/models/connection')
+async def api_channel_connection(modelRef: str):
+    def check():
+        target = _model_health_service().target(modelRef)
+        fingerprint = channel_profiles.fingerprint(target)
+        with _CHANNEL_CONNECTION_LOCK:
+            cached = _CHANNEL_CONNECTIONS.get(fingerprint)
+            if cached and time.monotonic() - cached[0] < 60:
+                result = cached[1]
+            else:
+                result = _discover_models(target.base, target.key, target.protocol)
+                _CHANNEL_CONNECTIONS[fingerprint] = (time.monotonic(), result)
+                while len(_CHANNEL_CONNECTIONS) > 128:
+                    _CHANNEL_CONNECTIONS.pop(next(iter(_CHANNEL_CONNECTIONS)))
+        # Reject a late response after the channel configuration changes.
+        current = _model_health_service().target(modelRef)
+        if channel_profiles.fingerprint(current) != fingerprint:
+            raise HTTPException(409, '渠道配置已变化，请重新检测。')
+        ok = result.get('ok') is True
+        return {'modelRef': modelRef, 'state': 'success' if ok else 'unverified' if result.get('kind') in ('not_found', 'unsupported') else 'failed',
+                'channelName': _channel_labels().get(target.provider, {}).get('name', '未命名渠道'),
+                'detail': ('渠道模型列表已读取；模型推理尚未验证。' if ok else str(result.get('message') or '渠道模型列表读取失败，推理能力尚未验证。')),
+                'modelListed': target.model in result.get('models', []), 'checkedAt': int(time.time()), 'kind': result.get('kind', 'unknown')}
+    return await asyncio.to_thread(check)
 
 
 @app.post("/api/settings/models/probe")
@@ -2872,7 +2933,7 @@ async def api_import_apply(req: ImportApplyRequest):
         if selected_model or hit.get('model'):
             updates[model_env] = selected_model or hit['model']
         note = _commit_model_configuration(updates, {slot: {
-            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep)
+            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name']))
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
     resp = {"ok": True, "note": note,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,
@@ -3255,6 +3316,23 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
         payload = json.loads(f.read_text(encoding="utf-8"))
         if turn_id and payload.get("turn_id") != turn_id:
             return {"status": "stale", "text": "", "turn_id": payload.get("turn_id")}
+        old_error = payload.get('error') or {}
+        if (payload.get('status') == 'done' and isinstance(old_error, dict)
+                and old_error.get('code') in ('agent_execution_failed', 'agent_request_aborted')
+                and (old_error.get('detail') == 'aborted' or str(old_error.get('message', '')).endswith('aborted'))):
+            import skill_audit
+            from chat_failure import recover_failure
+            audit_file = skill_audit.audit_path(OUTPUTS_DIR / '_skill_audits', session_id, payload['turn_id'])
+            if audit_file.is_file():
+                try:
+                    audit = json.loads(audit_file.read_text(encoding='utf-8'))
+                    if audit.get('sessionId') == session_id and audit.get('turnId') == payload['turn_id']:
+                        recovered = await asyncio.to_thread(recover_failure, OPENCLAW_SESSIONS_DIR, audit)
+                        if recovered:
+                            payload['error'] = recovered
+                except (OSError, ValueError, KeyError, TypeError):
+                    # Optional diagnostics must never erase the saved reply.
+                    pass
         return payload
     except Exception:
         return {"status": "none", "text": ""}
@@ -3519,7 +3597,7 @@ async def api_chat_stream(req: ChatRequest):
             audit_context = None
             try:
                 audit_context = await asyncio.to_thread(skill_audit.begin, OUTPUTS_DIR, OPENCLAW_SESSIONS_DIR,
-                                                         sk, turn_id, specs, req.message)
+                                                         sk, turn_id, specs, req.message, await asyncio.to_thread(_channel_labels))
                 _ACTIVE_SKILL_TURNS[sk] = turn_id
             except Exception:
                 to_client('activity', '执行核验暂不可用；创作任务继续运行。')
@@ -3549,7 +3627,8 @@ async def api_chat_stream(req: ChatRequest):
                         if requested_model_ref is not None:
                             params['model'] = requested_model_ref
                         proc = GatewayAgentProc(native_client,
-                            lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT)
+                            lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
+                            on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event))
                     else:
                         proc = None
                     if proc is None:
@@ -3869,7 +3948,9 @@ async def api_chat_stream(req: ChatRequest):
                         to_client('text_snapshot', canonical)
                 if rc not in (0, None) and sk not in _STOPPED_CHAT and turn_error is None:
                     native_error = getattr(proc, 'error_text', None)
-                    to_client('error', gateway_error(native_error or ''.join(stdout_lines), include_detail=bool(native_error)))
+                    from chat_failure import turn_failure
+                    failure = await asyncio.to_thread(turn_failure, OPENCLAW_SESSIONS_DIR, audit_context, native_error or ''.join(stdout_lines))
+                    to_client('error', failure)
                 if not emitted and turn_error is None:
                     clean = redact_gateway_text(clean_agent_output("".join(stdout_lines)), credentials)
                     if clean:
@@ -4126,6 +4207,7 @@ async def api_question_status(req: QuestionStatusRequest):
 
 class StopRequest(BaseModel):
     sessionId: str | None = None
+    turnId: str | None = None
 
 
 @app.post("/api/chat/stop")
@@ -4134,6 +4216,8 @@ async def api_chat_stop(req: StopRequest):
     下一句立刻能发（不再卡「上一条还在跑」）。仅此显式入口会杀进程；客户端断线不经此路径。"""
     sk = (req.sessionId or "").strip()
     proc = _RUNNING_CHAT.get(sk) if sk else None
+    if req.turnId and _ACTIVE_SKILL_TURNS.get(sk) != req.turnId:
+        return {"stopped": False}
     if proc is not None and proc.poll() is None:
         _STOPPED_CHAT.add(sk)          # 标记为用户停止，供 supervisor 正常收尾（不报「被中断」）
         try:
@@ -4152,7 +4236,7 @@ async def api_chat_stop(req: StopRequest):
         deadline = time.monotonic() + 5
         while _RUNNING_CHAT.get(sk) is proc and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
-        return {"stopped": True}
+        return {"stopped": _RUNNING_CHAT.get(sk) is not proc}
     return {"stopped": False}          # 没有在跑（可能已结束）→ 前端照常清理即可
 
 

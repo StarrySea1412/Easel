@@ -81,3 +81,37 @@ def test_disconnect_reconciles_without_resending_prompt():
         'sessionKey': 'agent:main:chat'}, 10)
     assert proc.wait(1) == 1 and 'connection reset' in proc.error_text
     assert calls == ['agent', 'chat.abort']
+
+
+def test_compaction_events_are_forwarded_only_for_own_run_and_safe_lifecycle():
+    class Client:
+        def _rpc(self, method, params, **kw):
+            kw['on_accepted']({'runId': 'own'})
+            for payload in [
+                {'runId': 'foreign', 'stream': 'compaction', 'data': {'phase': 'start'}},
+                {'runId': 'own', 'sessionKey': 'foreign-session', 'stream': 'compaction', 'data': {'phase': 'start'}},
+                {'runId': 'own', 'stream': 'assistant', 'data': {'phase': 'start'}},
+                {'runId': 'own', 'stream': 'compaction', 'data': {'phase': 'start', 'reason': 'PRIVATE'}},
+                {'runId': 'own', 'stream': 'compaction', 'data': {'phase': 'end', 'completed': False, 'outcome': 'failed', 'reason': 'PRIVATE'}},
+                {'runId': 'own', 'stream': 'compaction', 'data': {'phase': 'end', 'completed': True, 'outcome': 'completed'}},
+            ]:
+                kw['on_event']({'type': 'event', 'event': 'agent', 'payload': payload})
+            return {'status': 'ok', 'result': {'payloads': [{'text': '正文'}]}}
+        def close(self): pass
+    seen=[]
+    proc=GatewayAgentProc(Client(),Client,{'idempotencyKey':'id','sessionKey':'own-session','agentId':'main'},10,on_compaction=seen.append)
+    assert proc.wait(1)==0
+    assert seen==[{'phase':'start'},{'phase':'end','outcome':'failed'},{'phase':'end','outcome':'completed'}]
+    assert ''.join(proc.stdout)=='正文\n'
+
+
+def test_rpc_delivers_events_without_confusing_them_with_final_response(monkeypatch):
+    monkeypatch.setitem(__import__('sys').modules, 'websocket', SimpleNamespace())
+    frames=iter([
+      {'type':'event','event':'agent','payload':{'stream':'compaction','data':{'phase':'start'}}},
+      {'id':'1','ok':True,'payload':{'status':'ok'}},
+    ])
+    client=GatewayClient();client.ws=SimpleNamespace(send=lambda _:None,recv=lambda:json.dumps(next(frames)),settimeout=lambda _:None)
+    events=[]
+    assert client._rpc('agent',{},on_event=events.append)=={'status':'ok'}
+    assert len(events)==1 and events[0]['payload']['stream']=='compaction'

@@ -138,8 +138,16 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         code = 'gateway_auth_rejected'
     elif status in (408, 504) or any(s in message for s in ('timed out', 'timeout', 'timeouterror')):
         code = 'gateway_timeout'
-    elif any(s in message for s in ('econnrefused', 'connection refused', 'connecterror', 'connection reset', 'ehostunreach')):
+    elif any(s in message for s in ('econnrefused', 'connection refused', 'connecterror', 'connection reset', 'ehostunreach', '[winerror 10054]', '[winerror 10061]', 'connectionreseterror', 'connectionabortederror')):
         code = 'gateway_connection_failed'
+    elif 'stream ended before a terminal event' in message or 'stream ended before terminal' in message:
+        code = 'model_stream_interrupted'
+    elif re.fullmatch(r'\s*(?:aborted|cancelled|canceled)\s*', message):
+        code = 'agent_request_aborted'
+    elif status == 429 or 'rate limit' in message or 'too many requests' in message:
+        code = 'model_rate_limited'
+    elif (status in (500, 502, 503) and fallback != 'gateway_request_failed') or 'overloaded' in message:
+        code = 'model_service_unavailable'
     else:
         code = fallback
     messages = {
@@ -150,6 +158,10 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         'gateway_connection_failed': ('connection', True, '无法连接当前网关，请检查网关是否启动，以及主机和端口是否匹配。'),
         'gateway_request_failed': ('execution', True, '网关请求失败，请检查网关服务及接口配置后重试。'),
         'gateway_stream_interrupted': ('connection', True, '网关响应流未正常结束，已保留收到的内容，请检查连接后重试。'),
+        'model_stream_interrupted': ('connection', True, '模型服务的响应流在结束事件到达前中断，本轮没有正常完成。已保留收到的内容；可手动重试，若重复出现请检查此渠道的流式接口兼容性或改用其他渠道。'),
+        'agent_request_aborted': ('execution', True, '网关报告本轮请求被中断（aborted），但没有说明由谁取消或中断原因。已保留收到的内容；请查看本轮失败详情，确认后手动重试。'),
+        'model_rate_limited': ('execution', True, '模型服务限制了本次请求。请稍后重试，或检查当前渠道的额度与并发限制。'),
+        'model_service_unavailable': ('connection', True, '模型服务暂不可用。请稍后手动重试，若持续失败请检查渠道状态。'),
         'agent_execution_failed': ('execution', True, '本轮执行失败。请查看运行记录中的具体失败步骤后重试；仅凭退出码不能确定原因。'),
     }
     category, retryable, public_message = messages.get(code, messages['agent_execution_failed'])
@@ -159,5 +171,4 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         detail = re.sub(r'https?://[^\s"\']+', '[服务地址]', detail)
         detail = re.sub(r'\bsk-[A-Za-z0-9_-]+', '[REDACTED]', detail)
         result['detail'] = detail[:600]
-        result['message'] += '\n返回原因：' + detail[:600]
     return result

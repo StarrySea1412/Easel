@@ -99,3 +99,10 @@ test('legacy display replacement never includes old diagnostic credentials or ti
  const original='Error: gateway agent requires credentials before opening a websocket\nFix with token AUTH_SECRET_SHOULD_NOT_DISPLAY\n可能超时';
  const result=historicalGatewayAuthError(original);assert.ok(result);assert.ok(!JSON.stringify(result).includes('AUTH_SECRET_SHOULD_NOT_DISPLAY'));assert.ok(!JSON.stringify(result).includes('超时'));assert.ok(original.includes('AUTH_SECRET_SHOULD_NOT_DISPLAY'));
 });
+
+test('generic historical aborted explains missing provenance and retains real upstream diagnostics',()=>{
+ const old=chatErrorDetail({code:'agent_execution_failed',category:'execution',message:'本轮执行失败。\n返回原因：aborted',detail:'aborted'});
+ assert.equal(old.code,'agent_request_aborted');assert.equal(chatErrorTitle(old),'请求被中断');assert.match(old.message,/没有提供中断原因/);
+ const actual=chatErrorDetail({message:'模型流中断',code:'model_stream_interrupted',category:'connection',detail:'Anthropic stream ended before a terminal event',channel:'anthropic',channelEndpoint:'fixture.example',modelRef:'anthropic/kimi-k3'});
+ assert.equal(chatErrorTitle(actual),'模型响应中断');assert.equal(actual.channelEndpoint,'fixture.example');assert.equal(actual.detail,'Anthropic stream ended before a terminal event');
+});

@@ -19,7 +19,7 @@ const base = new URL('../src/', import.meta.url);
 const prefix = 'data:text/javascript;base64,';
 const bases = Object.fromEntries(await Promise.all([
   ['persistence', 'lib/localPersistence.ts'], ['draft', 'lib/chatDrafts.ts'],
-  ['composer', 'components/ChatComposer.tsx'], ['page', 'components/ChatPage.tsx'], ['store', 'lib/store.ts'],
+  ['quoteDraft', 'components/ChatQuoteDraft.tsx'], ['composer', 'components/ChatComposer.tsx'], ['page', 'components/ChatPage.tsx'], ['store', 'lib/store.ts'],
 ].map(async ([key, path]) => [key, await tsModuleUrl(new URL(path, base))])));
 let sequence = 0;
 const rewrite = (url, pairs, suffix) => {
@@ -31,7 +31,8 @@ async function freshModules() {
   const suffix = `#chat-draft-${++sequence}`;
   const persistence = bases.persistence + suffix;
   const draft = rewrite(bases.draft, [[bases.persistence, persistence]], suffix);
-  const composer = rewrite(bases.composer, [[bases.draft, draft]], suffix);
+  const quoteDraft = rewrite(bases.quoteDraft, [[bases.draft, draft]], suffix);
+  const composer = rewrite(bases.composer, [[bases.draft, draft], [bases.quoteDraft, quoteDraft]], suffix);
   const page = rewrite(bases.page, [[bases.composer, composer]], suffix);
   const store = rewrite(bases.store, [[bases.persistence, persistence], [bases.draft, draft]], suffix);
   return { persistence: await import(persistence), draft: await import(draft),
@@ -226,3 +227,21 @@ test('read-only backups never mount or read a draft, even when a forged draft ke
 });
 
 test.after(() => window.close());
+
+
+test('quotes retain comments, survive refresh, isolate sessions and clear only on accepted send', async t => {
+  const view = await fixture(t); await view.render('one'); await view.type('评论草稿');
+  await act(async () => window.dispatchEvent(new window.CustomEvent('easel:quote', {detail:{sessionId:'one',text:'原文第一段\n第二段'}})));
+  assert.match(view.container.textContent, /1 条引用/); assert.equal(view.container.querySelector('textarea').value,'评论草稿'); assert.equal(view.h.sent.length,0);
+  await view.reload(); assert.match(view.container.textContent,/原文第一段/);
+  await view.render('two'); assert.equal(view.container.querySelector('.composer-quote-details'),null);
+  await view.render('one'); view.h.accepted=false;
+  await view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  assert.match(view.h.sent.at(-1)[0],/> 原文第一段\n> 第二段/); assert.match(view.h.sent.at(-1)[0],/评论草稿/);
+  assert.ok(view.container.querySelector('.composer-quote-details'));
+  await view.click(view.container.querySelector('[aria-label="移除引用 1"]')); assert.equal(view.container.querySelector('.composer-quote-details'),null);
+  await view.type(''); await act(async () => view.modules().draft.addChatDraftQuote('one','仅引用'));
+  assert.equal(view.container.querySelector('[aria-label="发送消息"]').disabled,false);
+  view.h.accepted=true; await view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  assert.equal(view.container.querySelector('.composer-quote-details'),null);
+});

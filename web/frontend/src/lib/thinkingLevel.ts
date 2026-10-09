@@ -19,3 +19,8 @@ export function loadThinkingLevel(): ThinkingLevel {
 export function saveThinkingLevel(value: ThinkingLevel): boolean {
   return writeLocalValue(KEY, value);
 }
+
+export const THINKING_LABELS: Record<ThinkingLevel, string> = {
+  off: '关闭', minimal: '极简', low: '低', medium: '中', high: '高',
+  xhigh: '极高', adaptive: '自适应', max: '最大', ultra: 'Ultra',
+};

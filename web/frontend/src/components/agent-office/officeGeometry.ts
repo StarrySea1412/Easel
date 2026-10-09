@@ -479,6 +479,7 @@ export interface OfficeAvatar {
   tablet: THREE.Group;
   pen: THREE.Mesh;
   beacon: THREE.Mesh;
+  errorMarker: THREE.Group;
   selection: THREE.Mesh;
   statusMaterial: THREE.MeshStandardMaterial;
   screen: THREE.MeshStandardMaterial;
@@ -724,6 +725,17 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   penStand.name = 'office-pen-stand';
   const statusMaterial = resources.material(`status:${desk.slot.index}`, { color: 0x99a2aa, emissive: 0x99a2aa, emissiveIntensity: 0.24 });
   const beacon = sphere(resources, root, statusMaterial, 0.055, 0.28, 1.07, 0.04, 8);
+  const errorMarker = new THREE.Group(); errorMarker.name = 'error-alert';
+  errorMarker.position.set(0, 1.27, 0); root.add(errorMarker);
+  const alertMaterial = resources.material('office-error-alert', { color:0xdb493e, emissive:0xb92922, emissiveIntensity:.3, roughness:.55 });
+  const badge = sphere(resources, errorMarker, alertMaterial, .13, 0, 0, 0, 16);
+  badge.scale.z = .6;
+  const white = resources.color(0xffffff);
+  for (const z of [-.082,.082]) {
+    mesh(errorMarker, resources.geometry('error-mark-bar', () => new THREE.BoxGeometry(.026,.092,.012)), white, 0, .028, z);
+    sphere(resources,errorMarker,white,.016,0,-.053,z,8);
+  }
+  errorMarker.visible = false;
   const selection = mesh(root, resources.geometry('selected-ring', () => new THREE.TorusGeometry(0.42, 0.022, 5, 28)),
     resources.color(0x619a84), 0, -0.55, 0.08);
   selection.rotation.x = -Math.PI / 2; selection.visible = false;
@@ -732,7 +744,7 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   document.visible = tablet.visible = pen.visible = false;
   return { root, body, head, ears, eyes, expression, tail, leftArm: arms[0].arm, rightArm: arms[1].arm,
     bodySkin, leftHand: arms[0].hand, rightHand: arms[1].hand,
-    leftElbow: arms[0].elbow, rightElbow: arms[1].elbow, leftWrist: arms[0].wrist, rightWrist: arms[1].wrist, document, tablet, pen, beacon, selection,
+    leftElbow: arms[0].elbow, rightElbow: arms[1].elbow, leftWrist: arms[0].wrist, rightWrist: arms[1].wrist, document, tablet, pen, beacon, errorMarker, selection,
     statusMaterial, screen: desk.screen, label: new THREE.Vector3(root.position.x, species === 'rabbit' ? 2.18 : 2.04, root.position.z), phase: (hash % 1000) / 100,
     workstationRole: desk.workstationRole, postureVariation: id ? (hash % 997) / 996 - .5 : 0 };
 }
@@ -745,5 +757,9 @@ export function poseOfficeAvatar(avatar: OfficeAvatar, state: AgentState, time: 
   applyOfficeAvatarMotion(avatar, state, time, action, blend);
   applyOfficeExpression(avatar.expression, state, action);
   avatar.beacon.scale.setScalar(1);
+  avatar.beacon.visible = state !== 'error';
+  avatar.errorMarker.visible = state === 'error';
+  avatar.errorMarker.position.y = 1.27;
+  avatar.errorMarker.scale.setScalar(1);
   avatar.selection.visible = selected;
 }

@@ -1,0 +1,17 @@
+.chat-quote-button{position:fixed;z-index:1000;display:flex;align-items:center;gap:10px;min-height:34px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);box-shadow:var(--shadow-md);font:inherit;font-size:12px;cursor:pointer}
+.chat-quote-button:hover{background:var(--surface-2)}
+.chat-quote-button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.chat-quote-button span{color:var(--text-secondary)}
+.composer-quote-row{display:flex;align-items:center;gap:3px;width:max-content;max-width:100%;margin:0 4px 8px}
+.composer-quote-details{position:relative;width:max-content;max-width:100%;margin:0;color:var(--text-secondary);font-size:11px}
+.composer-quote-row>.inline-info>.inline-info-content{top:auto;bottom:calc(100% + 7px);left:-60px;right:auto}
+.composer-quote-details summary{display:flex;align-items:center;gap:5px;min-height:28px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);list-style:none;cursor:pointer}
+.composer-quote-details summary::-webkit-details-marker{display:none}
+.composer-quote-panel{position:absolute;z-index:40;bottom:calc(100% + 7px);left:0;width:360px;max-width:calc(100vw - 92px);max-height:calc(100dvh - 200px);overflow:auto;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-md);line-height:1.6}
+.composer-quote-panel section+section{margin-top:12px}
+.composer-quote-heading{display:flex;align-items:center;justify-content:space-between;color:var(--text-tertiary)}
+.composer-quote-heading button{width:24px;height:24px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);font-size:16px;cursor:pointer}
+.composer-quote-panel blockquote{margin:3px 0 10px;padding:0 0 0 9px;border-left:2px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-secondary)}
+.composer-quote-comment>span{color:var(--text-tertiary)}
+.composer-quote-comment p{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+.composer-quote-details summary:focus-visible,.composer-quote-heading button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}

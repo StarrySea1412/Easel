@@ -30,7 +30,7 @@ def _fingerprint(path: Path) -> dict:
 
 
 def begin(outputs: Path, sessions_dir: Path, session_id: str, turn_id: str,
-          specs: dict, request: str) -> dict:
+          specs: dict, request: str, channel_labels: dict | None = None) -> dict:
     """Capture a turn boundary before starting its serialized chat transport."""
     audit_path(outputs / '_skill_audits', session_id, turn_id)
     started = time.time()
@@ -47,6 +47,8 @@ def begin(outputs: Path, sessions_dir: Path, session_id: str, turn_id: str,
               '_request': request, '_specs': specs, '_response': '', '_sources': sources}
     from easel.session_trace import capture
     record['_sqlite'] = capture(sessions_dir, session_id)
+    from usage_channels import capture_channels
+    record['_usageChannels'] = capture_channels(sessions_dir.parents[2] / 'openclaw.json', channel_labels)
     save(outputs / '_skill_audits', record)
     return {'record': record, 'before': snapshot(outputs), 'sources': sources}
 

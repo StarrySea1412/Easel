@@ -92,6 +92,7 @@ def cc_home(tmp_path, monkeypatch):
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.setenv('USERPROFILE', str(tmp_path))
     monkeypatch.setenv('EASEL_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path / 'data')
     monkeypatch.setattr(web, 'ENV_FILE', tmp_path / '.env')
     web._IMPORT_PREVIEWS.clear()
     return oc_home, cc_home
@@ -105,8 +106,11 @@ def fake_env(tmp_path, monkeypatch):
                         encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_file)
     synced: list = []
-    monkeypatch.setattr(web, "_sync_openclaw_chat",
-                        lambda updates, keep, primary='': synced.append((updates, keep)) or "")
+    real_sync = web._sync_openclaw_chat
+    def sync(updates, keep, primary=''):
+        synced.append((updates, keep))
+        return real_sync(updates, keep, primary)
+    monkeypatch.setattr(web, "_sync_openclaw_chat", sync)
     return env_file, synced
 
 
@@ -398,7 +402,10 @@ def test_auto_import_prefers_empty_slot_and_keeps_unrelated_existing_configurati
         slot='anthropic', previewToken=selected['previewToken'])))
     updated = env_file.read_text(encoding='utf-8')
     assert all(line in updated for line in original.splitlines())
-    assert oc.read_bytes() == original_oc  # This fixture spies on OpenClaw writes.
+    saved_providers = json.loads(oc.read_text(encoding='utf-8'))['models']['providers']
+    for name, row in json.loads(original_oc)['models']['providers'].items():
+        assert saved_providers[name] == row
+    assert web.channel_profiles.labels(web)['anthropic']['name'] == 'Relay A'
     assert synced[-1][1] == {'relay', 'untouched-custom'}
     assert set(synced[-1][0]) == {'anthropic'}
 

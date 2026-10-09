@@ -31,12 +31,14 @@ export interface ChatSession {
   sessionKey?: string;  // OpenClaw 的 session key，用于后端删除
   pendingTurnId?: string; // 进行中的可重连 job；浏览器重开后继续按 eventId 续流
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
+  pinnedAt?: number; // Local pin order, independent of streaming or active selection.
   importedFromBackup?: boolean; // 只读备份记录，不关联后台上下文或恢复任务
   backupIncomplete?: boolean; // 备份时仍在进行，仅保留已收到的内容
 }
 
 /** 进行中的流式状态（存于 App，不随页面切换/ChatPage 卸载而丢失）。 */
 export interface StreamState {
+  compaction?: import('./chatCompaction').ChatCompaction;
   requestedModelRef?: string;
   content: string;
   thinking: string;
@@ -174,6 +176,7 @@ function decodeSessions(raw: string): ChatSession[] {
     };
     for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
     if (typeof value.archived === 'boolean') session.archived = value.archived;
+    if (typeof value.pinnedAt === 'number' && Number.isFinite(value.pinnedAt) && value.pinnedAt > 0) session.pinnedAt = value.pinnedAt;
     if (value.importedFromBackup === true) {
       session.importedFromBackup = true;
       session.backupIncomplete = value.backupIncomplete === true;
@@ -209,7 +212,7 @@ export function loadSessions(): ChatSession[] {
 function prune(sessions: ChatSession[]): ChatSession[] {
   let keptEmpty = false;
   const pruned = sessions.filter((s) => {
-    if (s.archived || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
+    if (s.archived || s.pinnedAt || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;
     return true;
@@ -244,6 +247,16 @@ export function createSession(persona?: string): ChatSession {
     persona,
     created: Date.now(),
   };
+}
+
+export function setSessionPinned(sessions: ChatSession[], id: string, pinned: boolean, now = Date.now()): ChatSession[] {
+  return sessions.map(session => {
+    if (session.id !== id || session.archived) return session;
+    if (pinned) return session.pinnedAt ? session : { ...session, pinnedAt: Math.max(1, now) };
+    const next = { ...session };
+    delete next.pinnedAt;
+    return next;
+  });
 }
 
 type TitleIntent = 'issue' | 'create' | 'optimize' | 'publish' | 'inspect' | 'general';

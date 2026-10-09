@@ -2,6 +2,7 @@ import type { UploadedFile } from './api';
 import { readLocalValue, writeLocalValue, reportLocalPersistenceFailure } from './localPersistence';
 
 export interface ChatDraft {
+  quotes?: string[];
   text: string;
   attachments: UploadedFile[];
   missingAttachments: string[];
@@ -35,6 +36,10 @@ export function getChatDraft(sessionId: string): ChatDraft {
       if (saved.version !== 1 || typeof saved.text !== 'string' || !Array.isArray(saved.attachmentNames)
         || !saved.attachmentNames.every(name => typeof name === 'string')) throw new Error('Invalid draft');
       draft.text = saved.text;
+      if (saved.quotes !== undefined) {
+        if (!Array.isArray(saved.quotes) || !saved.quotes.every(text => typeof text === 'string')) throw new Error('Invalid quotes');
+        draft.quotes = saved.quotes;
+      }
       draft.missingAttachments = [...new Set(saved.attachmentNames as string[])];
     } catch {
       protectedSessions.add(sessionId);
@@ -60,7 +65,7 @@ function publish(sessionId: string, draft: ChatDraft, persist = true): void {
   if (persist) {
     const key = keyFor(sessionId);
     if (protectedSessions.has(sessionId)) reportLocalPersistenceFailure(key, 'write', 'unreadable');
-    else writeLocalValue(key, JSON.stringify({ version: 1, text: draft.text,
+    else writeLocalValue(key, JSON.stringify({ version: 1, text: draft.text, ...(draft.quotes?.length ? { quotes: draft.quotes } : {}),
       attachmentNames: [...new Set([...draft.missingAttachments, ...draft.attachments.map(file => file.name)])] }));
   }
   for (const listener of listeners.get(sessionId) || []) listener();
@@ -69,6 +74,17 @@ function publish(sessionId: string, draft: ChatDraft, persist = true): void {
 export function setChatDraftText(sessionId: string, value: string | ((current: string) => string)): void {
   const draft = getChatDraft(sessionId);
   publish(sessionId, { ...draft, text: typeof value === 'function' ? value(draft.text) : value });
+}
+
+export function addChatDraftQuote(sessionId: string, text: string): void {
+  const draft = getChatDraft(sessionId);
+  if (!text.trim()) return;
+  publish(sessionId, { ...draft, quotes: [...(draft.quotes || []), text.trim()] });
+}
+
+export function removeChatDraftQuote(sessionId: string, index: number): void {
+  const draft = getChatDraft(sessionId);
+  publish(sessionId, { ...draft, quotes: (draft.quotes || []).filter((_, position) => position !== index) });
 }
 
 export function removeChatDraftAttachment(sessionId: string, path: string): void {
@@ -122,5 +138,5 @@ export function clearChatDraft(sessionId: string, accepted?: ChatDraft): void {
 export function hasChatDraft(sessionId: string): boolean {
   const draft = getChatDraft(sessionId);
   return protectedSessions.has(sessionId) || Boolean(draft.text || draft.attachments.length
-    || draft.missingAttachments.length || draft.uploading);
+    || draft.quotes?.length || draft.missingAttachments.length || draft.uploading);
 }

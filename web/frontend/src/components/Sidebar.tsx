@@ -1,15 +1,17 @@
 import { NativeSelect as Select } from './ui/Select';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
   IconChat,
-  IconNewChat, IconEdit, IconArchive, IconUnarchive, IconTrash, IconChevron,
+  IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice,
 } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 import SidebarAccountPopover from './SidebarAccountPopover';
 import SidebarMoreMenu from './SidebarMoreMenu';
+import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
+import SessionHoverCard from './SessionHoverCard';
 import '../styles/sidebar-shell.css';
 
 export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
@@ -29,8 +31,11 @@ interface SidebarProps {
   onSessionRename: (id: string, title: string) => void;
   onGenerateSessionTitle?: (id: string) => Promise<string>;
   onSessionArchive: (id: string, archived: boolean) => void;
+  onSessionPin: (id: string, pinned: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
+  runningSessions?: string[];
+  stoppingSessions?: string[];
 }
 
 export default function Sidebar({
@@ -48,8 +53,11 @@ export default function Sidebar({
   onSessionRename,
   onGenerateSessionTitle,
   onSessionArchive,
+  onSessionPin,
   onNewChat,
   gatewayStatus,
+  runningSessions = [],
+  stoppingSessions = [],
 }: SidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -60,6 +68,7 @@ export default function Sidebar({
   const renameEditRevision = useRef(0);
   renameContext.current = { id: renamingId, value: renameValue };
   const [showArchived, setShowArchived] = useState(false);
+  const [hoveredSession, setHoveredSession] = useState<{ session: ChatSession; anchor: HTMLElement } | null>(null);
 
   // Layout starts compact on every mount; old saved expansion must not reopen it.
   const [expanded, setExpanded] = useState(false);
@@ -70,8 +79,17 @@ export default function Sidebar({
   const collapseToggleRef = useRef<HTMLButtonElement>(null);
   const recentRef = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef<HTMLElement>(null);
+  const pinFocusId = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!pinFocusId.current) return;
+    const row = Array.from(conversationsRef.current?.querySelectorAll<HTMLElement>('[data-session-id]') || [])
+      .find(item => item.dataset.sessionId === pinFocusId.current);
+    row?.querySelector<HTMLButtonElement>('.session-menu-trigger')?.focus({ preventScroll: true });
+    pinFocusId.current = null;
+  }, [sessions]);
 
   const changeExpanded = useCallback((next: boolean) => {
+    setHoveredSession(null);
     focusConversationToggle.current = true;
     setExpanded(next);
   }, []);
@@ -113,7 +131,7 @@ export default function Sidebar({
   useEffect(() => {
     if (!expanded) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('.sidebar-account-popover, .sidebar-more-menu, .easel-select-popup') && window.matchMedia('(max-width: 760px)').matches) {
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('.sidebar-account-popover, .sidebar-more-menu, .session-menu, .easel-select-popup') && window.matchMedia('(max-width: 760px)').matches) {
         event.preventDefault(); closeSidebar();
       }
     };
@@ -142,7 +160,9 @@ export default function Sidebar({
     } finally { if (renameGeneration.current === generation) setTitleGenerating(false); }
   };
 
-  const active = sessions.filter((s) => !s.archived && (s.messages.length > 0 || s.id === activeSessionId));
+  const active = sessions.filter((s) => !s.archived && (s.pinnedAt || s.messages.length > 0 || s.id === activeSessionId));
+  const pinned = active.filter(s => s.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!);
+  const recent = active.filter(s => !s.pinnedAt);
   const archived = sessions.filter((s) => s.archived);
 
   const renderItem = (s: ChatSession, isArchived: boolean) => {
@@ -174,20 +194,19 @@ export default function Sidebar({
     return (
       <div
         key={s.id}
+        data-session-id={s.id}
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => selectSession(s.id)}
+        onPointerLeave={()=>setHoveredSession(null)}
+        onClickCapture={()=>setHoveredSession(null)}
+        onFocusCapture={event=>{if(!(event.target as HTMLElement).classList.contains('session-select'))setHoveredSession(null);}}
+        onPointerOver={event=>{if(!(event.target as HTMLElement).closest('.session-select'))setHoveredSession(null);}}
       >
-        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
-        <div className="session-actions">
-          <button className="session-act" title="重命名"
-            onClick={(e) => { e.stopPropagation(); startRename(s); }}><IconEdit size={14} /></button>
-          <button className="session-act" title={isArchived ? '取消归档' : '归档'}
-            onClick={(e) => { e.stopPropagation(); onSessionArchive(s.id, !isArchived); }}>
-            {isArchived ? <IconUnarchive size={14} /> : <IconArchive size={14} />}
-          </button>
-          <button className="session-act danger" title="删除"
-            onClick={(e) => { e.stopPropagation(); onSessionDelete(s.id); }}><IconTrash size={14} /></button>
-        </div>
+        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')setHoveredSession({session:s,anchor:event.currentTarget});}} onFocus={event=>setHoveredSession({session:s,anchor:event.currentTarget})} onBlur={()=>setHoveredSession(null)} onKeyDown={event=>{if(event.key==='Escape')setHoveredSession(null);}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
+        {!s.importedFromBackup && (runningSessions.includes(s.id) || stoppingSessions.includes(s.id)) && <span className="session-running-indicator" role="status" aria-label={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} title={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} />}
+        {!isArchived && <button type="button" className={`session-quick-pin${s.pinnedAt?' is-pinned':''}`} aria-label={`${s.pinnedAt?'取消置顶':'置顶'}对话：${s.title}`} title={s.pinnedAt?'取消置顶':'置顶'} onPointerEnter={()=>setHoveredSession(null)} onClick={event=>{event.stopPropagation();pinFocusId.current=s.id;onSessionPin(s.id,!s.pinnedAt);}}><SessionPinIcon unpin={Boolean(s.pinnedAt)}/></button>}
+        <SessionActionsMenu session={s} onPin={() => { setHoveredSession(null);pinFocusId.current = s.id; onSessionPin(s.id, !s.pinnedAt); }}
+          onRename={() => startRename(s)} onArchive={() => onSessionArchive(s.id, !isArchived)} onDelete={() => onSessionDelete(s.id)} />
       </div>
     );
   };
@@ -221,14 +240,18 @@ export default function Sidebar({
             <button type="button" className="new-chat-btn sidebar-new-chat" onClick={onNewChat} title="新建对话"><IconNewChat size={16}/>新建对话</button>
             <Select className="persona-select" aria-label="创作画像" value={selectedPersona} onChange={e=>{if(e.target.value==='__new__'){onNewProfile();return;}onPersonaChange(e.target.value);}} disabled={activeSessionHasMessages} title={activeSessionHasMessages?'当前对话已绑定画像，请先新建对话再切换画像':'选择用户画像'}><option value="">通用模式</option>{personas.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}<option value="__new__">+ 新建画像…</option></Select>
           </header>
-          <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span><span className="sidebar-session-count">{active.length}</span></div>
-            {active.map(s=>renderItem(s,false))}
+          <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section">
+            {pinned.length > 0 && <section className="sidebar-pinned" aria-label="置顶对话"><div className="sidebar-section-header"><span className="sidebar-section-title">置顶</span><span className="sidebar-session-count">{pinned.length}</span></div>{pinned.map(s=>renderItem(s,false))}</section>}
+            <section className="sidebar-recent" aria-label="最近对话"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span><span className="sidebar-session-count">{recent.length}</span></div>
+            {recent.map(s=>renderItem(s,false))}
             {!active.length&&<p className="sidebar-empty">还没有最近对话。<br/>新建对话，开始今天的创作。</p>}
+            </section>
             {archived.length>0&&<><button className="archived-header" aria-expanded={showArchived} onClick={()=>setShowArchived(value=>!value)}><span className={`archived-chevron ${showArchived?'open':''}`}><IconChevron size={12}/></span>已归档 · {archived.length}</button>{showArchived&&archived.map(s=>renderItem(s,true))}</>}
           </div></div>
           <div className="sidebar-status" title={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'连接中…'}><span className={`status-dot ${gatewayStatus==='connected'?'':'offline'}`}/><span className="sidebar-status-label">{gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'连接中…'}</span></div>
         </section>}
       </aside>
+      {expanded && hoveredSession && <SessionHoverCard key={hoveredSession.session.id} session={hoveredSession.session} anchor={hoveredSession.anchor}/>}
     </div>
   );
 }

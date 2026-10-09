@@ -12,11 +12,12 @@ import time
 
 
 class GatewayAgentProc:
-    def __init__(self, client, client_factory, params, timeout):
+    def __init__(self, client, client_factory, params, timeout, on_compaction=None):
         self.client = client
         self.client_factory = client_factory
         self.params = dict(params)
         self.timeout = timeout
+        self.on_compaction = on_compaction
         self._office_run_id = params['idempotencyKey']
         self._done = threading.Event()
         self._stop = threading.Event()
@@ -41,6 +42,26 @@ class GatewayAgentProc:
             self._office_run_id = payload['runId']
         if self._stop.is_set():
             self._abort()
+
+    def _on_event(self, frame):
+        if frame.get('event') != 'agent' or self.on_compaction is None:
+            return
+        payload = frame.get('payload')
+        if not isinstance(payload, dict) or payload.get('runId') != self._office_run_id:
+            return
+        if payload.get('sessionKey') not in (None, self.params['sessionKey']):
+            return
+        data = payload.get('data')
+        if payload.get('stream') != 'compaction' or not isinstance(data, dict):
+            return
+        if data.get('phase') == 'start':
+            self.on_compaction({'phase': 'start'})
+        elif data.get('phase') == 'end':
+            outcome = data.get('outcome')
+            if data.get('completed') is True:
+                outcome = 'completed'
+            if outcome in ('completed', 'failed', 'skipped', 'aborted'):
+                self.on_compaction({'phase': 'end', 'outcome': outcome})
 
     def _abort(self):
         # Separate connection: the original receiver must keep waiting for final.
@@ -80,7 +101,7 @@ class GatewayAgentProc:
     def _run(self):
         try:
             self.result = self.client._rpc('agent', self.params, timeout=self.timeout + 30,
-                                           expect_final=True, on_accepted=self._accepted)
+                                           expect_final=True, on_accepted=self._accepted, on_event=self._on_event)
             if not isinstance(self.result, dict) or self.result.get('status') != 'ok':
                 self.error_text = str((self.result or {}).get('summary', 'Gateway returned no final agent result')) if isinstance(self.result, dict) else 'Gateway returned no final agent result'
                 self.returncode = 1

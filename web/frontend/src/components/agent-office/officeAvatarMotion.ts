@@ -130,9 +130,12 @@ export function applyOfficeAvatarMotion(avatar: OfficeAvatar, state: OfficeAgent
   const role = avatar.workstationRole;
   const variation = avatar.postureVariation;
   const tempo = tempos[role] * (1 + variation * .12);
-  const t = (Number.isFinite(time) ? Math.max(0, time) : 0) * tempo + avatar.phase;
+  // Errors settle into a visible facepalm. The transition player animates the
+  // change of pose; a failed agent must not keep working or looping forever.
+  const t = state === 'error' ? avatar.phase : (Number.isFinite(time) ? Math.max(0, time) : 0) * tempo + avatar.phase;
   const active = state === 'working' && ['executing', 'reading', 'writing', 'designing', 'delegating'].includes(action);
   const thinking = state === 'thinking';
+  const failed = state === 'error';
   const animated = active || thinking;
   const cycle = t % 6;
   avatar.body.position.set(0, 0, 0);
@@ -156,7 +159,14 @@ export function applyOfficeAvatarMotion(avatar: OfficeAvatar, state: OfficeAgent
   left.set(-0.1, 0.435, -0.24); right.set(0.28, 0.435, -0.24);
   gaze.set(0.55, 0.81, -0.74); // actual monitor, relative to the seated avatar
   let stage = 'rest';
-  if (active && action === 'executing') {
+  if (failed) {
+    const sigh = (1 - Math.cos(t * 1.45)) / 2;
+    left.set(-.16, .43, -.25);
+    right.set(.15, .80 + sigh * .018, -.20);
+    rightWristRotation.setFromEuler(new THREE.Euler(.25, 0, -.65));
+    gaze.set(Math.sin(t * 1.1) * .055, .40 - sigh * .025, -.46);
+    stage = 'facepalm';
+  } else if (active && action === 'executing') {
     // Type, inspect the monitor, then reach the real mouse. Pauses prevent perpetual hammering.
     const typing = cycle < 3.5;
     const mouseWeight = THREE.MathUtils.smoothstep(cycle, 4.2, 4.7) * (1 - THREE.MathUtils.smoothstep(cycle, 5.5, 6));
@@ -337,7 +347,7 @@ export function applyOfficeAvatarMotion(avatar: OfficeAvatar, state: OfficeAgent
     const sign = index === 0 ? 1 : -1;
     const base = avatar.root.userData.species === 'bear' ? 0 : 0.15 * sign;
     ear.rotation.set(animated ? Math.sin(t * 0.9 + index * 1.3) * 0.035 : 0, 0,
-      base + (animated ? Math.sin(t * 0.7 + index) * 0.025 : state === 'error' ? sign * 0.07 : 0));
+      base + (failed ? sign * .24 : animated ? Math.sin(t * 0.7 + index) * 0.025 : 0));
   });
   avatar.tail.rotation.y = animated ? Math.sin(t * 0.75) * 0.09 : 0;
   avatar.root.userData.motionStage = stage;

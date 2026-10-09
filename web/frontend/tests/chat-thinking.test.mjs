@@ -41,3 +41,11 @@ test('final snapshot replaces deltas while later completion notes still append',
   assert.equal(content, '正确字序\n完成说明');
   assert.equal(thinking, '公开摘要');
 });
+
+
+test('only confirmed compaction lifecycles reach the caller and normal text remains separate',async()=>{
+ const events=[],text=[];
+ globalThis.fetch=async()=>new Response(event('compaction',{phase:'start'})+event('compaction',{phase:'guess',percentage:80})+event('token','回答')+event('compaction',{phase:'end',outcome:'failed'})+event('done',{}));
+ await new Promise((resolve,reject)=>streamChat('x',undefined,'s',chunk=>text.push(chunk),resolve,reject,undefined,undefined,undefined,'compact-turn',false,undefined,[],undefined,undefined,[],{},undefined,undefined,undefined,undefined,value=>events.push(value)));
+ assert.deepEqual(events,[{phase:'start'},{phase:'end',outcome:'failed'}]);assert.deepEqual(text,['回答']);
+});

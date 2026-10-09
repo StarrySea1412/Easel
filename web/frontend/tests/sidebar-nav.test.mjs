@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
+const { setSessionPinned } = await loadTsModule('../src/lib/store.ts', import.meta.url);
 
 // Real Sidebar with simulated DOM and controlled account snapshots. These checks
 // exercise both columns and navigation, not real viewport pixels or live sessions.
@@ -21,7 +22,7 @@ async function fixture(t, props = {}, preferences = {}) {
   sessionStorage.clear(); localStorage.clear();
   for (const [key, value] of Object.entries(preferences)) localStorage.setItem(key, value);
   const visits = [], selected = [], requests = [];
-  const actions = { newChats: 0 };
+  const actions = { newChats: 0, pins: [], archives: [], deleted: [] };
   t.mock.method(globalThis, 'fetch', async url => { requests.push(url); return { ok: true, json: async () => [] }; });
   const container = document.createElement('div'); document.body.append(container);
   let root = createRoot(container);
@@ -31,6 +32,7 @@ async function fixture(t, props = {}, preferences = {}) {
     sessions: [session('s1', '今天的对话'), session('s2', '此前的调研'), session('hidden', '未启用的空会话', { messages: [] })],
     activeSessionId: 's1', activeSessionHasMessages: true,
     onSessionSelect: id => selected.push(id), onSessionDelete: () => {}, onSessionRename: () => {}, onSessionArchive: () => {},
+    onSessionPin: (id, pinned) => { actions.pins.push([id, pinned]); base.sessions = setSessionPinned(base.sessions, id, pinned, 100); root.render(createElement(Sidebar, base)); },
     onNewChat: () => actions.newChats++, gatewayStatus: 'connected', ...props,
   };
   await act(async () => root.render(createElement(Sidebar, base)));
@@ -260,4 +262,88 @@ test('small-screen session selection and new chat preserve the expanded conversa
   assert.equal(view.actions.newChats, 1);
   assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
+});
+
+test('conversation loading follows each running session and disappears when its run ends',async t=>{
+ const view=await fixture(t,{runningSessions:['s2']});await view.clickLabel('展开对话列表');
+ const row=()=>[...view.container.querySelectorAll('.session-item')].find(item=>item.textContent.includes('此前的调研'));
+ assert.ok(row().querySelector('[aria-label="正在对话"]'));
+ await view.update({activeSessionId:'s2'});assert.ok(row().querySelector('[aria-label="正在对话"]'));
+ await view.update({runningSessions:[],stoppingSessions:['s2']});assert.ok(row().querySelector('[aria-label="正在停止"]'));
+ await view.update({stoppingSessions:[]});assert.equal(view.container.querySelector('.session-running-indicator'),null);
+});
+
+test('pinning moves one conversation into its own section without selecting it or losing running state', async t => {
+  const view = await fixture(t, { runningSessions: ['s2'] });
+  await view.clickLabel('展开对话列表');
+  await view.clickLabel('对话操作：此前的调研');
+  const menu = document.querySelector('.session-menu');
+  assert.ok(menu);
+  assert.equal(document.activeElement.textContent.trim(), '置顶');
+  await act(async () => [...menu.querySelectorAll('button')].find(button => button.textContent.trim() === '置顶').click());
+  assert.deepEqual(view.actions.pins, [['s2', true]]);
+  assert.deepEqual(view.selected, []);
+  const pinned = view.container.querySelector('.sidebar-pinned');
+  assert.equal(pinned.querySelectorAll('.session-select').length, 1);
+  assert.equal(pinned.querySelector('.session-select').textContent, '此前的调研');
+  assert.ok(pinned.querySelector('[aria-label="正在对话"]'));
+  assert.equal(view.container.querySelector('.sidebar-recent .session-select').textContent, '今天的对话');
+  assert.equal(view.container.querySelectorAll('.session-select').length, 2);
+  assert.equal(document.activeElement, pinned.querySelector('.session-menu-trigger'));
+  await view.clickLabel('对话操作：此前的调研');
+  await view.clickText('取消置顶');
+  assert.equal(view.container.querySelector('.sidebar-pinned'), null);
+  assert.deepEqual([...view.container.querySelectorAll('.session-select')].map(button => button.textContent), ['今天的对话', '此前的调研']);
+  assert.deepEqual(view.selected, []);
+});
+
+test('pin order survives updates, archive restoration and empty-session selection changes', async t => {
+  const items = [session('s1', '较后置顶', { pinnedAt: 20 }), session('s2', '较早置顶', { pinnedAt: 10 }), session('empty', '置顶空对话', { pinnedAt: 30, messages: [] })];
+  const view = await fixture(t, { sessions: items });
+  await view.clickLabel('展开对话列表');
+  const titles = () => [...view.container.querySelectorAll('.sidebar-pinned .session-select')].map(button => button.textContent);
+  assert.deepEqual(titles(), ['较早置顶', '较后置顶', '置顶空对话']);
+  await view.update({ sessions: [session('new', '新对话'), ...items], activeSessionId: 'new' });
+  assert.deepEqual(titles(), ['较早置顶', '较后置顶', '置顶空对话']);
+  await view.update({ sessions: items.map(item => item.id === 's2' ? { ...item, archived: true } : item) });
+  assert.deepEqual(titles(), ['较后置顶', '置顶空对话']);
+  await view.clickText('已归档 · 1');
+  await view.clickLabel('对话操作：较早置顶');
+  assert.ok(document.querySelector('.session-menu').textContent.includes('取消归档'));
+  assert.equal(document.querySelector('.session-menu').textContent.includes('置顶'), false);
+  await act(async () => document.querySelector('.session-menu').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await view.update({ sessions: items });
+  assert.deepEqual(titles(), ['较早置顶', '较后置顶', '置顶空对话']);
+  await view.update({ sessions: items.filter(item => item.id !== 's2') });
+  assert.deepEqual(titles(), ['较后置顶', '置顶空对话']);
+});
+
+test('conversation menu supports keyboard navigation, dismissal and the existing actions without selection', async t => {
+  t.mock.method(window, 'matchMedia', () => ({ matches: true }));
+  const calls = [];
+  const view = await fixture(t, { onSessionArchive: (...args) => calls.push(['archive', ...args]), onSessionDelete: id => calls.push(['delete', id]), onSessionRename: (...args) => calls.push(['rename', ...args]) });
+  await view.clickLabel('展开对话列表');
+  const trigger = view.byLabel('对话操作：此前的调研');
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  const menu = () => document.querySelector('.session-menu');
+  assert.equal(document.activeElement.textContent.trim(), '置顶');
+  await act(async () => menu().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'End', bubbles: true })));
+  assert.equal(document.activeElement.textContent.trim(), '删除');
+  await act(async () => menu().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  assert.equal(menu(), null);
+  assert.equal(document.activeElement, trigger);
+  assert.ok(view.container.querySelector('.sidebar-conversations'), 'Escape closes the menu before the mobile sidebar');
+  await view.clickLabel('对话操作：此前的调研');
+  await act(async () => document.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })));
+  assert.equal(menu(), null);
+  await view.clickLabel('对话操作：此前的调研');
+  await view.clickText('归档');
+  await view.clickLabel('对话操作：此前的调研');
+  await view.clickText('删除');
+  await view.clickLabel('对话操作：此前的调研');
+  await view.clickText('重命名');
+  assert.equal(view.container.querySelector('.session-rename-input').value, '此前的调研');
+  await view.clickText('保存标题');
+  assert.deepEqual(calls, [['archive', 's2', true], ['delete', 's2'], ['rename', 's2', '此前的调研']]);
+  assert.deepEqual(view.selected, []);
 });

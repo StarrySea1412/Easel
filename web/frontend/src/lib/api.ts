@@ -1,3 +1,4 @@
+import { decodeChatCompaction } from './chatCompaction';
 import { makeChatError, type ChatErrorDetail } from './chatErrors';
 import type { SkillRequirements } from './selectedSkills';
 function getBasePath(): string {
@@ -787,11 +788,11 @@ export function submitLoginSms(platform: string, code: string): Promise<{ ok: bo
 }
 
 /** 用户显式停止：终止后端正在跑的对话 agent，释放会话锁，令下一句能立刻发。 */
-export function stopChat(sessionId: string): Promise<{ stopped: boolean }> {
+export function stopChat(sessionId: string, turnId?: string): Promise<{ stopped: boolean }> {
   return request('/api/chat/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, ...(turnId ? { turnId } : {}) }),
   });
 }
 
@@ -817,6 +818,7 @@ export function streamChat(
   thinkingLevelOrSelection?: ThinkingLevel | ((requestedModelRef: string | null) => void),
   onSelectionOrThinking?: ((requestedModelRef: string | null) => void) | ThinkingLevel,
   onTextSnapshot?: (text: string) => void,
+  onCompaction?: (event: import('./chatCompaction').ChatCompaction) => void,
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -857,6 +859,8 @@ export function streamChat(
           let thinkingChunk: unknown;
           try { thinkingChunk = JSON.parse(data); } catch { thinkingChunk = data; }
           if (typeof thinkingChunk === 'string' && thinkingChunk) onThinking(thinkingChunk);
+        } else if (currentEvent === 'compaction' && onCompaction) {
+          try { const event = decodeChatCompaction(JSON.parse(data)); if (event) onCompaction(event); } catch { /* invalid lifecycle */ }
         } else if (currentEvent === 'activity' && onActivity) {
           try { onActivity(JSON.parse(data) as string); } catch { onActivity(data); }
         } else if (currentEvent === 'question' && onQuestion) {

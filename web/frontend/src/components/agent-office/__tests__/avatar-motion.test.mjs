@@ -100,14 +100,14 @@ test('head faces actual monitor and actions keep joints finite and paws out of d
   resources.dispose();
 });
 
-test('switching to stopped, error or completed clears work and freezes all joints', () => {
+test('switching to stopped or completed clears work and freezes all joints', () => {
   const { resources, avatar } = fixture();
   function snapshot() {
     const result = [];
     avatar.root.traverse(o => result.push(o.visible, ...o.position, ...o.quaternion, ...o.scale));
     return result;
   }
-  for (const state of ['waiting', 'unknown', 'stopped', 'error', 'done']) {
+  for (const state of ['waiting', 'unknown', 'stopped', 'done']) {
     poseOfficeAvatar(avatar, 'working', 2, false, 'designing');
     poseOfficeAvatar(avatar, state, 3, false, 'designing');
     assert.equal(avatar.pen.userData.held, false); assert.equal(avatar.tablet.visible, false);
@@ -213,7 +213,7 @@ test('role habits preserve reported-action boundaries and freeze unreported and 
       assert.deepEqual(joints(avatar), before, `${role}/${state} remains static`);
       assert.equal(avatar.pen.userData.held, false); assert.equal(avatar.tablet.visible, false);
       assert.equal(avatar.document.visible, true); assert.equal(avatar.document.userData.engaged, false);
-      assert.equal(avatar.root.userData.motionStage, 'rest');
+      assert.equal(avatar.root.userData.motionStage, state === 'error' ? 'facepalm' : 'rest');
     }
     resources.dispose();
   }
@@ -279,4 +279,21 @@ test('real typing finger pads meet the key plane with a small release instead of
     }
     resources.dispose();
   }
+});
+
+test('error stops work, holds a visible facepalm with a red alert and resets on recovery', () => {
+  const {resources, avatar} = fixture();
+  poseOfficeAvatar(avatar,'working',2,false,'designing');
+  poseOfficeAvatar(avatar,'error',3,false,'unreported');
+  assert.equal(avatar.pen.userData.held,false); assert.equal(avatar.tablet.visible,false);
+  assert.equal(avatar.root.userData.motionStage,'facepalm');
+  assert.ok(local(avatar,avatar.rightWrist).y>.77);
+  assert.equal(avatar.errorMarker.visible,true); assert.equal(avatar.beacon.visible,false);
+  const before=joints(avatar);
+  poseOfficeAvatar(avatar,'error',4,false,'unreported'); assert.deepEqual(joints(avatar),before, 'failed work settles into a held pose');
+  avatar.root.traverse(o=>assert.ok([...o.position,...o.quaternion].every(Number.isFinite)));
+  poseOfficeAvatar(avatar,'working',1,false,'executing');
+  assert.equal(avatar.errorMarker.visible,false); assert.equal(avatar.beacon.visible,true);
+  assert.ok(local(avatar,avatar.rightWrist).y<.5);
+  resources.dispose();
 });

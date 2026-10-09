@@ -576,7 +576,8 @@ for (const messages of [[], sourceSession.messages]) test(`archiving the final $
   const view = await fixture(t, { easel_sessions: JSON.stringify([original]), easel_active_session: original.id }, true);
   await act(async () => view.harness.sidebar.onPageChange('chat'));
   await act(async () => view.container.querySelector('[aria-label="展开对话列表"]').click());
-  const archive = view.container.querySelector('.session-item [title="归档"]');
+  await act(async () => view.container.querySelector(".session-menu-trigger").click());
+  const archive = [...document.querySelectorAll(".session-menu button")].find(button => button.textContent.trim() === "归档");
   assert.ok(archive);
   await act(async () => archive.click());
   assert.equal(view.harness.sidebar.activeSessionId, null);
@@ -598,7 +599,8 @@ for (const messages of [[], sourceSession.messages]) test(`archiving the final $
   assert.equal(reloaded.container.querySelectorAll('.session-select').length, 0);
   await act(async () => reloaded.container.querySelector('.archived-header').click());
   assert.equal(reloaded.container.querySelectorAll('.session-select').length, 1);
-  const restore = reloaded.container.querySelector('[title="取消归档"]');
+  await act(async () => reloaded.container.querySelector('.session-menu-trigger').click());
+  const restore = [...document.querySelectorAll('.session-menu button')].find(button => button.textContent.trim() === '取消归档');
   await act(async () => restore.click());
   assert.equal(reloaded.harness.sidebar.activeSessionId, original.id);
   assert.equal(reloaded.harness.sidebar.sessions[0].archived, false);
@@ -641,4 +643,33 @@ for (const messages of [[], sourceSession.messages]) test(`an explicit new-chat 
   await act(async () => reopened.harness.sidebar.onSessionArchive(original.id, false));
   await act(async () => reopened.harness.sidebar.onSessionSelect(original.id));
   assert.deepEqual(reopened.harness.pages['对话'].session.messages, messages);
+});
+
+test('actual App pins through the Sidebar, persists across reload and preserves archive/restore and deletion behavior', async t => {
+  const second = { ...sourceSession, id: 'pin-second', title: '待置顶会话' };
+  const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, second]), easel_active_session: sourceSession.id }, true);
+  await act(async () => view.container.querySelector('[aria-label="展开对话列表"]').click());
+  const trigger = [...view.container.querySelectorAll('.session-menu-trigger')].find(button => button.getAttribute('aria-label') === '对话操作：待置顶会话');
+  await act(async () => trigger.click());
+  await act(async () => [...document.querySelectorAll('.session-menu button')].find(button => button.textContent.trim() === '置顶').click());
+  assert.equal(view.harness.sidebar.activeSessionId, sourceSession.id);
+  const pinnedAt = JSON.parse(view.values.get('easel_sessions')).find(item => item.id === second.id).pinnedAt;
+  assert.ok(pinnedAt > 0);
+  assert.equal(view.container.querySelector('.sidebar-pinned .session-select').textContent, '待置顶会话');
+  const reloaded = await fixture(t, Object.fromEntries(view.values), true);
+  assert.equal(reloaded.harness.sidebar.sessions.find(item => item.id === second.id).pinnedAt, pinnedAt);
+  await act(async () => reloaded.harness.sidebar.onSessionArchive(second.id, true));
+  assert.equal(reloaded.harness.sidebar.sessions.find(item => item.id === second.id).pinnedAt, pinnedAt);
+  await act(async () => reloaded.harness.sidebar.onSessionArchive(second.id, false));
+  assert.equal(reloaded.harness.sidebar.sessions.find(item => item.id === second.id).pinnedAt, pinnedAt);
+  await act(async () => reloaded.harness.sidebar.onSessionPin(second.id, false));
+  assert.equal(JSON.parse(reloaded.values.get('easel_sessions')).find(item => item.id === second.id).pinnedAt, undefined);
+  await act(async () => reloaded.harness.sidebar.onSessionPin(second.id, true));
+  const originalConfirm = window.confirm;
+  window.confirm = () => true;
+  t.after(() => { window.confirm = originalConfirm; });
+  await act(async () => reloaded.harness.sidebar.onSessionDelete(second.id));
+  assert.equal(reloaded.harness.sidebar.sessions.some(item => item.id === second.id), false);
+  assert.equal(JSON.parse(reloaded.values.get('easel_sessions')).some(item => item.id === second.id), false);
+  assert.equal(reloaded.harness.streams.length, 0);
 });

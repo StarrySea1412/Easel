@@ -1,4 +1,5 @@
-import { chatErrorTitle, historicalGatewayAuthError } from '../lib/chatErrors';
+import type { ChatErrorDetail } from '../lib/chatErrors';
+import { chatErrorDetail, chatErrorTitle, historicalGatewayAuthError } from '../lib/chatErrors';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
@@ -14,6 +15,7 @@ export interface BubbleActions {
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  sessionId?: string;
   isStreaming?: boolean;
   thinking?: string;
   activity?: string;
@@ -28,11 +30,15 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   // Preserve the user's expanded/collapsed choice as new chunks and the final
   // answer arrive; binding `open` to answer emptiness used to override it.
   const [expanded, setExpanded] = useState(streaming);
+  // The stream carries reasoning text, without a provider reasoning-token count.
+  // Present a bounded text estimate rather than relabeling characters as usage.
+  const estimatedTokens = Math.max(1, (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[^\p{L}\p{N}\s]|[\p{L}\p{N}]+/gu) || [])
+    .reduce((sum, token) => sum + (/^[\x00-\x7F]+$/.test(token) ? Math.ceil(token.length / 4) : [...token].length), 0));
   return <section className="model-thinking" aria-label="模型返回的思考内容">
     <button type="button" className="model-thinking-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      <span className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} aria-hidden="true">›</span>
+      <svg className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m7 5 5 5-5 5"/></svg>
       <span>模型思考</span><span className="model-thinking-state">{backupSnapshot ? '来自备份' : streaming ? '接收中' : '已保留'}</span>
-      <span className="model-thinking-count">{text.length.toLocaleString()} 字符</span>
+      <span className="model-thinking-count" title="按可见思考文字估算，非服务商返回或计费用量。">≈ {estimatedTokens.toLocaleString()} tokens</span>
     </button>
     {expanded && <div className="model-thinking-body"><p className="model-thinking-note">{backupSnapshot ? '备份保留的思考文字，未经本机后台核验' : '模型服务实际返回的思考内容或摘要'}</p><div className="model-thinking-text">{text}</div></div>}
   </section>;
@@ -67,9 +73,23 @@ function ActionBar({ actions, status }: { actions?: BubbleActions; status?: Reac
   );
 }
 
-export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions, status, execution, backupSnapshot }: MessageBubbleProps) {
+export default function MessageBubble({ message, sessionId, isStreaming, thinking, activity, stillWorking, actions, status, execution, backupSnapshot }: MessageBubbleProps) {
   const historicalError=message.role==='assistant'&&!message.error?historicalGatewayAuthError(message.content):undefined;
-  const displayedError=message.error||historicalError;
+  const sourceError=message.error||historicalError;
+  const shouldRecover=Boolean(sourceError && chatErrorDetail(sourceError).code==='agent_request_aborted');
+  const [recoveredError,setRecoveredError]=useState<{key:string;error:ChatErrorDetail}|null>(null);
+  const failureKey=JSON.stringify([sessionId,message.turnId,sourceError?.code,sourceError?.message]);
+  useEffect(()=>{
+    if(backupSnapshot || !sessionId || !message.turnId || !shouldRecover)return;
+    const controller=new AbortController();
+    const base=window.location.pathname.replace(/\/index\.html$/,'').replace(/\/$/,'');
+    void fetch(`${base}/api/chat/last/${encodeURIComponent(sessionId)}?turn_id=${encodeURIComponent(message.turnId)}`,{signal:controller.signal,cache:'no-store'})
+      .then(async response=>{if(!response.ok)return null;return response.json();})
+      .then(result=>{if(!controller.signal.aborted && result?.turn_id===message.turnId && result?.error)setRecoveredError({key:failureKey,error:chatErrorDetail(result.error)});})
+      .catch(()=>{});
+    return ()=>controller.abort();
+  },[backupSnapshot,sessionId,message.turnId,failureKey,shouldRecover]);
+  const displayedError=recoveredError?.key===failureKey?recoveredError.error:sourceError ? chatErrorDetail(sourceError) : undefined;
   const displayedContent=historicalError?'':message.content;
   const html = useMemo(() => {
     if (message.role === 'user') return '';
@@ -145,7 +165,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
           {livePanel}
           {execution}
           {displayedContent && <div dangerouslySetInnerHTML={{ __html: html }} />}
-          {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
+          {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.stage && <p className="chat-response-error-hint">失败阶段：{displayedError.stage==='model_response'?'模型响应':displayedError.stage==='agent_execution'?'Agent 执行':displayedError.stage}</p>}{(displayedError.channel || displayedError.modelRef) && <p className="chat-response-error-hint">渠道：{displayedError.channel || '未上报'}{displayedError.channelEndpoint ? ` · ${displayedError.channelEndpoint}` : ''} · 模型：{displayedError.modelRef || '未上报'}</p>}{displayedError.detail && <details className="chat-error-details"><summary>服务返回详情</summary><pre>{displayedError.detail}</pre></details>}{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
         {(actions || status) && <ActionBar actions={isStreaming ? undefined : actions} status={status} />}

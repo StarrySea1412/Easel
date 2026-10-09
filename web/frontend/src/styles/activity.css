@@ -32,3 +32,5 @@
 @media(max-width:600px){.usage-request-browser{padding:14px;}.usage-request-list dl{grid-template-columns:1fr;}}
 
 .activity-detail-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+.activity-session-picker { min-width:0; width:min(100%,480px); }.activity-session-picker .easel-select { width:100%; }.usage-table-scroll td small { display:block; color:var(--text-secondary); overflow-wrap:anywhere; }
