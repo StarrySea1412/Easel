@@ -16,7 +16,7 @@ import OnboardingWizard from './components/OnboardingWizard';
 import type { SettingsSection } from './components/SettingsPanel';
 import type { OfficeTaskRequest } from './components/agent-office/OfficeTaskComposer';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
-import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
+import type { PersonaItem, UploadedFile, ChatQuestion, ThinkingLevel } from './lib/api';
 import { questionStatus } from './lib/api';
 import { deleteSession as deleteRemoteSession } from './lib/api';
 import {
@@ -33,6 +33,7 @@ import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { clearChatDraft } from './lib/chatDrafts';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
+import { requestConversationTitle } from './lib/conversationTitles';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
@@ -284,6 +285,7 @@ export default function App() {
     selectedSkills: string[] = [],
     skillRequirements: SkillRequirements = {},
     modelRef?: string,
+    thinkingLevel?: ThinkingLevel,
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -291,7 +293,7 @@ export default function App() {
       const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: turnId } : s));
       saveSessions(next); return next;
     });
-    const runAcc = { turnId, requestedModelRef: modelRef, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc = { turnId, requestedModelRef: modelRef, requestedThinkingLevel: thinkingLevel, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
     streamAcc.current[sessionId] = runAcc;
     setStreams((prev) => ({ ...prev, [sessionId]: { requestedModelRef: modelRef, content: '', thinking: '', activity: '', questions: [] } }));
     // 打字机队列：流式事件按批到达（OpenClaw 攒批），前端按字符节奏显示，体验逐字浮现。
@@ -380,6 +382,7 @@ export default function App() {
         setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
           ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
       },
+      thinkingLevel,
     );
   }, [appendAssistant, clearStream]);
 
@@ -392,7 +395,7 @@ export default function App() {
     if (!last || last.role !== 'user') return;   // 没有悬空的用户消息 = 无需恢复
     let turnId = s.pendingTurnId;
     try { turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
-    const runAcc = { turnId, requestedModelRef: last.requestedModelRef, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc = { turnId, requestedModelRef: last.requestedModelRef, requestedThinkingLevel: last.requestedThinkingLevel, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
     streamAcc.current[sessionId] = runAcc;
     setStreams((p) => ({ ...p, [sessionId]: { requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
     typingBuf.current[sessionId] = '';
@@ -495,6 +498,7 @@ export default function App() {
         setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
           ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
       },
+      last.requestedThinkingLevel,
     );
   }, [appendAssistant, clearStream]);
 
@@ -513,6 +517,7 @@ export default function App() {
     selectedSkills: string[] = [],
     skillRequirements: SkillRequirements = {},
     modelRef?: string,
+    thinkingLevel?: ThinkingLevel,
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -533,6 +538,7 @@ export default function App() {
             selectedSkills,
             skillRequirements: requirementSnapshot,
             ...(modelRef !== undefined ? { requestedModelRef: modelRef } : {}),
+            ...(thinkingLevel !== undefined ? { requestedThinkingLevel: thinkingLevel } : {}),
             ...(attachments.length ? { attachments } : {}),
             ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
           } as ChatMessage],
@@ -543,13 +549,13 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot, modelRef);
+    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot, modelRef, thinkingLevel);
     return true;
   }, [selectedPersona, startStream]);
 
-  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}) => {
+  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string) => {
     if (!sessionsRef.current.some(session => session.id === sessionId)) return false;
-    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements);
+    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -563,7 +569,8 @@ export default function App() {
     const selectedSkills = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.selectedSkills || [];
     const skillRequirements = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.skillRequirements || {};
     const modelRef = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedModelRef;
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef);
+    const thinkingLevel = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedThinkingLevel;
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel);
   }, [sendUserAndStream]);
 
   // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
@@ -577,7 +584,7 @@ export default function App() {
   }, [selectedPersona, sendUserAndStream]);
 
   // 工作台「一句话开干」：用户输入什么就发什么，不再替用户编排指令（v2 直达创作入口）。
-  const handleQuickPrompt = useCallback((text: string, selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}) => {
+  const handleQuickPrompt = useCallback((text: string, selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string) => {
     const t = text.trim();
     if (!t || gatewayStatus !== 'connected') return false;
     const ns = createSession(selectedPersona || undefined);
@@ -589,7 +596,7 @@ export default function App() {
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
-    return sendUserAndStream(ns.id, t, [], undefined, undefined, skills, requirements);
+    return sendUserAndStream(ns.id, t, [], undefined, undefined, skills, requirements, modelRef, thinkingLevel);
   }, [selectedPersona, sendUserAndStream, gatewayStatus]);
 
   const handleOfficeTask = useCallback(({ sessionId, message, modelRef }: OfficeTaskRequest): string | null => {
@@ -668,6 +675,14 @@ export default function App() {
       saveSessions(next);
       return next;
     });
+  }, []);
+
+  const handleGenerateSessionTitle = useCallback(async (id: string) => {
+    const session = sessionsRef.current.find(item => item.id === id);
+    if (!session || session.importedFromBackup || streamCtl.current[id] || stopRequests.current[id]) {
+      throw new Error('请在可编辑且已结束的对话中生成标题。');
+    }
+    return requestConversationTitle(session.messages.slice(-6).map(({ role, content }) => ({ role, content })));
   }, []);
 
   const handleSessionArchive = useCallback((id: string, archived: boolean) => {
@@ -828,7 +843,7 @@ export default function App() {
             stream={streams[activeSession.id]}
             stopping={Boolean(stoppingSessions[activeSession.id])}
             stopError={stopErrors[activeSession.id]}
-            onSend={(displayText, attachments, selectedSkills, skillRequirements) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements)}
+            onSend={(displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef)}
             onStop={() => handleStopStream(activeSession.id)}
             onNewChat={handleNewChat}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
@@ -926,6 +941,7 @@ export default function App() {
         onSessionSelect={handleSessionSelect}
         onSessionDelete={handleSessionDelete}
         onSessionRename={handleSessionRename}
+        onGenerateSessionTitle={handleGenerateSessionTitle}
         onSessionArchive={handleSessionArchive}
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}

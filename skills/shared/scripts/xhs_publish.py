@@ -35,7 +35,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
@@ -493,6 +493,113 @@ def _query_safe(page, selector: str):
         return None
 
 
+def _classify_login_page_error(url: str, title: str, body: str = "") -> str | None:
+    """Classify only a first-party login error page, never ordinary feed text.
+
+    An error redirect or a generic security title is not evidence of error
+    300012. Keep unknown platform failures distinct from an explicit IP warning.
+    """
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or not (host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com")):
+        return None
+    error_route = parsed.path.rstrip("/") == "/website-login/error"
+    security_title = "安全限制" in title or "安全验证" in title
+    if not (error_route or security_title):
+        return None
+    visible = title + "\n" + body
+    codes = parse_qs(parsed.query)
+    explicit_code = any("300012" in codes.get(key, []) for key in ("code", "error_code", "errorCode", "errCode"))
+    if (explicit_code or re.search(r"(?<!\d)300012(?!\d)", visible)
+            or re.search(r"IP\s*存在风险", visible, re.IGNORECASE)):
+        return "network_risk"
+    if security_title or "安全验证" in body or "安全限制" in body:
+        return "security_verification"
+    return "login_page_error"
+
+
+_LOGIN_PAGE_MESSAGES = {
+    "network_risk": "小红书明确提示当前网络存在风险。请先在官方客户端确认账号可正常登录，按平台提示处理后再试。",
+    "security_verification": "小红书要求额外安全验证，暂未提供二维码。请先在官方客户端完成验证后再试。",
+    "login_page_error": "小红书登录页面返回错误，尚未确认具体原因。请稍后手动重试。",
+}
+
+
+def _stop_on_login_page_error(page, status_file: str | None, *, allow_verification: bool = False) -> bool:
+    """Read only public error text; never put page URLs or account data in status."""
+    try:
+        url, title = page.url, page.title() or ""
+    except Exception:
+        return False  # Navigation can temporarily replace the execution context.
+    kind = _classify_login_page_error(url, title)
+    if kind is None:
+        return False
+    try:
+        body = page.locator("body").inner_text(timeout=1000)
+    except Exception:
+        body = ""
+    kind = _classify_login_page_error(url, title, body) or kind
+    if allow_verification and kind != "network_risk":
+        return True  # Leave the official page available for the user's own action.
+    message = _LOGIN_PAGE_MESSAGES[kind]
+    login_state.write_status(status_file, "error", message)
+    _die(message, 4)
+    return True
+
+
+def _login_page_closed(page) -> bool:
+    try:
+        return page is not None and page.is_closed()
+    except Exception:
+        return False
+
+
+def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: int) -> str:
+    """Observe manual login without clicking, reloading, or filling verification.
+
+    The window remains usable when the platform offers a manual verification
+    step or no extractable QR. A confirmed network-risk block still terminates.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_state = ""
+    qr_saved = False
+    while time.monotonic() < deadline:
+        if _login_page_closed(page):
+            return "closed"
+        verification = _stop_on_login_page_error(page, status_file, allow_verification=True)
+        try:
+            location = urlsplit(page.url)
+            official = (location.scheme == "https" and location.hostname in ("www.xiaohongshu.com", "xiaohongshu.com")
+                        and location.username is None and location.password is None)
+        except (ValueError, AttributeError):
+            official = False
+        if official and not verification and _query_safe(page, SELECTORS["login_ok"]) is not None:
+            return "success"
+        qr = _query_safe(page, SELECTORS["qrcode"]) if official and not verification else None
+        if qr is not None:
+            if not qr_saved:
+                try:
+                    qr_out.parent.mkdir(parents=True, exist_ok=True)
+                    qr.screenshot(path=str(qr_out), timeout=1500)
+                    qr_saved = True
+                except Exception:
+                    pass  # The user can still interact with the visible official page.
+            state = "qr_ready" if qr_saved else "verifying"
+        else:
+            qr_saved = False
+            state = "verifying"
+        if state != last_state:
+            message = ("请用小红书 App 扫码，也可在已打开的浏览器窗口完成登录。" if state == "qr_ready"
+                       else "请在已打开的小红书浏览器窗口完成登录或安全验证。")
+            login_state.write_status(status_file, state, message, qr=str(qr_out) if state == "qr_ready" else "")
+            last_state = state
+        page.wait_for_timeout(1000)
+    return "expired"
+
+
 def cmd_login(a) -> int:
     """headless 友好登录：把二维码抠成 PNG 供扫码，轮询登录成功后持久化 cookie。
     REF login.go FetchQrcodeImage/WaitForLogin。远程无桌面环境靠图片扫码，非有头窗口。"""
@@ -507,28 +614,42 @@ def cmd_login(a) -> int:
     login_state.write_status(sf, "starting")
 
     with sync_playwright() as p:
-        ctx = _launch(p, headed=a.headed, base=a.profile_base, proxy=_proxy(a.proxy, a.no_proxy))
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
-            page.goto(EXPLORE_URL, wait_until="domcontentloaded")
+            ctx = _launch(p, headed=a.headed, base=a.profile_base, proxy=_proxy(a.proxy, a.no_proxy))
+        except Exception:
+            message = "无法启动登录浏览器，请检查浏览器组件是否完整，并关闭占用此账号的窗口后重试。"
+            login_state.write_status(sf, "error", message)
+            _die(message, 3)
+        page = None
+        completed_message = ""
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            try:
+                page.goto(EXPLORE_URL, wait_until="domcontentloaded")
+            except Exception:
+                if _login_page_closed(page):
+                    login_state.write_status(sf, "expired", "登录窗口已关闭，本次登录已结束。")
+                    return 1
+                verification = _stop_on_login_page_error(page, sf, allow_verification=a.headed)
+                if not (a.headed and verification):
+                    message = "无法打开小红书登录页面，请检查网络连接或稍后重试。"
+                    login_state.write_status(sf, "error", message)
+                    _die(message)
 
-            def _risk_blocked() -> bool:
-                """小红书风险 IP 拦截页（重定向可能晚于 domcontentloaded，须重复查）。"""
-                try:
-                    return ("website-login/error" in page.url
-                            or "安全限制" in (page.title() or ""))
-                except Exception:
-                    return False
+            if a.headed:
+                result = _wait_visible_login(page, qr_out, sf, timeout_s)
+                if result == "success":
+                    completed_message = "登录成功"
+                    return 0
+                message = ("登录窗口已关闭，本次登录已结束。" if result == "closed"
+                           else "等待浏览器登录超时，请重新连接后在窗口中完成登录。")
+                login_state.write_status(sf, "expired", message)
+                return 1
 
             # 等待页面稳定并完成可能的跳转（登录引导 / 风险拦截 / 已登录态）
             for _ in range(10):
                 page.wait_for_timeout(800)
-                if _risk_blocked():
-                    login_state.write_status(sf, "error", "IP 存在风险，需干净网络/代理")
-                    _die("小红书判定当前网络为风险 IP（安全限制 300012「IP存在风险，请切换可靠网络环境」）——"
-                         "二维码在此环境无法弹出。解决：①用干净/家宽 IP 的代理 `--proxy socks5://...`；"
-                         "②在正常网络的机器上 login 拿到登录态，再把持久化目录 "
-                         f"{_profile_dir(a.profile_base)} 整个拷到本机复用。", 4)
+                _stop_on_login_page_error(page, sf)
                 try:
                     if page.query_selector(SELECTORS["login_ok"]) is not None:
                         break  # 已登录
@@ -541,8 +662,7 @@ def cmd_login(a) -> int:
             except Exception:
                 logged_in = False
             if logged_in:
-                print("✅ 已登录（cookie 已在持久化目录），无需扫码")
-                login_state.write_status(sf, "success", "已登录")
+                completed_message = "已登录"
                 return 0
 
             # 抠二维码存 PNG（元素截图，不依赖 src 格式，最稳）
@@ -550,15 +670,10 @@ def cmd_login(a) -> int:
                 qr = _wait_sel(page, SELECTORS["qrcode"], 20000, "登录二维码")
             except Exception:
                 # 超时后先复查是不是风险拦截页（重定向晚到的情况），别误报「页面结构变了」
-                if _risk_blocked():
-                    login_state.write_status(sf, "error", "IP 存在风险，需干净网络/代理")
-                    _die("小红书判定当前网络为风险 IP（安全限制 300012「IP存在风险，请切换可靠网络环境」）——"
-                         "二维码在此环境无法弹出。解决：①用干净/家宽 IP 的代理 `--proxy socks5://...`；"
-                         "②在正常网络的机器上 login 拿到登录态，再把持久化目录 "
-                         f"{_profile_dir(a.profile_base)} 整个拷到本机复用。", 4)
-                login_state.write_status(sf, "error", "未找到登录二维码")
-                _die("未找到登录二维码（页面结构可能已变，检查 SELECTORS.qrcode），"
-                     "或已弹别的登录方式——可加 --headed 观察")
+                _stop_on_login_page_error(page, sf)
+                message = "小红书登录页未提供二维码，可能正在验证或页面已更新。请稍后手动重试。"
+                login_state.write_status(sf, "error", message)
+                _die(message)
             qr_out.parent.mkdir(parents=True, exist_ok=True)
             qr.screenshot(path=str(qr_out))
             login_state.write_status(sf, "qr_ready", "二维码已就绪，请扫码", qr=str(qr_out))
@@ -570,25 +685,43 @@ def cmd_login(a) -> int:
             # 轮询登录成功（扫码成功瞬间页面会跳转，查询崩了是正常的，重试继续等）
             deadline = time.time() + timeout_s
             while time.time() < deadline:
+                _stop_on_login_page_error(page, sf)
                 try:
                     logged_in = page.query_selector(SELECTORS["login_ok"]) is not None
                 except Exception:
                     logged_in = False
                 if logged_in:
-                    print("✅ 登录成功，cookie 已持久化，下次免登")
-                    login_state.write_status(sf, "success", "登录成功")
-                    try:
-                        qr_out.unlink()  # 登录成功清掉二维码图，避免误扫过期码
-                    except OSError:
-                        pass
+                    completed_message = "登录成功"
                     return 0
                 page.wait_for_timeout(2000)
             login_state.write_status(sf, "expired", "二维码超时未扫")
             print(f"⏱️ {timeout_s}s 内未检测到登录成功（二维码可能已过期）。请重跑 login 再扫。",
                   file=sys.stderr)
             return 1
+        except Exception:
+            if _login_page_closed(page):
+                login_state.write_status(sf, "expired", "登录窗口已关闭，本次登录已结束。")
+                return 1
+            message = "登录流程意外中断，请关闭登录窗口后重新连接。"
+            login_state.write_status(sf, "error", message)
+            _die(message)
         finally:
-            ctx.close()
+            try:
+                ctx.close()
+            except Exception:
+                if completed_message:
+                    message = "已在平台完成登录，但本地登录资料未能保存完成，请重新连接后核验。"
+                    login_state.write_status(sf, "error", message)
+                    _die(message, 3)
+            if completed_message:
+                # Persistent Chromium flushes the profile during close. Do not
+                # announce success while it still owns or writes that profile.
+                login_state.write_status(sf, "success", completed_message)
+                try:
+                    qr_out.unlink()
+                except OSError:
+                    pass
+                print("✅ 登录成功，登录资料已保存在本机")
 
 
 def _plan_lines(kind: str, title: str, content: str, media: list[str], tags: list[str]) -> list[str]:

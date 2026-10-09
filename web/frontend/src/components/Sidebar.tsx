@@ -27,6 +27,7 @@ interface SidebarProps {
   onSessionSelect: (id: string) => void;
   onSessionDelete: (id: string) => void;
   onSessionRename: (id: string, title: string) => void;
+  onGenerateSessionTitle?: (id: string) => Promise<string>;
   onSessionArchive: (id: string, archived: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
@@ -52,12 +53,19 @@ export default function Sidebar({
   onSessionSelect,
   onSessionDelete,
   onSessionRename,
+  onGenerateSessionTitle,
   onSessionArchive,
   onNewChat,
   gatewayStatus,
 }: SidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [titleGenerating, setTitleGenerating] = useState(false);
+  const [titleError, setTitleError] = useState('');
+  const renameContext = useRef({ id: null as string | null, value: '' });
+  const renameGeneration = useRef(0);
+  const renameEditRevision = useRef(0);
+  renameContext.current = { id: renamingId, value: renameValue };
   const [showArchived, setShowArchived] = useState(false);
 
   const [expanded, setExpanded] = useState(readExpanded);
@@ -99,10 +107,25 @@ export default function Sidebar({
     return () => document.removeEventListener('keydown', escape);
   }, [expanded]);
 
-  const startRename = (s: ChatSession) => { setRenamingId(s.id); setRenameValue(s.title); };
+  const cancelRename = () => { renameGeneration.current++; setRenamingId(null); setTitleGenerating(false); setTitleError(''); };
+  useEffect(() => { cancelRename(); }, [activeSessionId, currentPage]);
+  const startRename = (s: ChatSession) => { renameGeneration.current++; setRenamingId(s.id); setRenameValue(s.title); setTitleGenerating(false); setTitleError(''); };
   const commitRename = () => {
     if (renamingId) onSessionRename(renamingId, renameValue);
-    setRenamingId(null);
+    cancelRename();
+  };
+  const generateTitle = async (session: ChatSession) => {
+    if (!onGenerateSessionTitle || titleGenerating) return;
+    const before = { ...renameContext.current };
+    const generation = renameGeneration.current;
+    const editRevision = renameEditRevision.current;
+    setTitleGenerating(true); setTitleError('');
+    try {
+      const suggestion = await onGenerateSessionTitle(session.id);
+      if (renameGeneration.current === generation && renameEditRevision.current === editRevision && renameContext.current.id === before.id && renameContext.current.value === before.value) setRenameValue(suggestion);
+    } catch (error) {
+      if (renameGeneration.current === generation && renameContext.current.id === before.id) setTitleError(error instanceof Error ? error.message : '命名失败，原标题已保留。');
+    } finally { if (renameGeneration.current === generation) setTitleGenerating(false); }
   };
 
   const active = sessions.filter((s) => !s.archived && (s.messages.length > 0 || s.id === activeSessionId));
@@ -111,19 +134,26 @@ export default function Sidebar({
   const renderItem = (s: ChatSession, isArchived: boolean) => {
     if (renamingId === s.id) {
       return (
-        <div key={s.id} className="session-item">
+        <div key={s.id} className="session-item session-rename-form">
           <input
             className="session-rename-input"
             value={renameValue}
             autoFocus
-            onChange={(e) => setRenameValue(e.target.value)}
+            onChange={(e) => { renameEditRevision.current++; setRenameValue(e.target.value); }}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitRename();
-              else if (e.key === 'Escape') setRenamingId(null);
+              else if (e.key === 'Escape') cancelRename();
             }}
-            onBlur={commitRename}
           />
+          {onGenerateSessionTitle && !s.importedFromBackup && s.messages.length > 0 && <button type="button" className="session-title-agent"
+            disabled={titleGenerating} onMouseDown={event => event.preventDefault()} onClick={() => void generateTitle(s)}
+            title="调用已配置的缺省模型，可能产生费用；生成建议后按 Enter 保存，手工编辑优先保留。">
+            {titleGenerating ? '命名中…' : 'Agent 命名建议'}
+          </button>}
+          <button type="button" className="session-title-save" onClick={commitRename}>保存标题</button>
+          <button type="button" className="session-title-save" onClick={cancelRename}>取消</button>
+          {titleError && <span role="alert" className="session-title-error">{titleError}</span>}
         </div>
       );
     }

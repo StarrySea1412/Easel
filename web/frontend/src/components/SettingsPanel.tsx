@@ -6,6 +6,7 @@ import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
 import type { ComponentProps } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
+import ModelHealthPanel from './settings/ModelHealthPanel';
 import Select from './ui/Select';
 import type { ProviderBoardOptions } from './settings/ProviderBoard';
 import { SettingsField } from './settings/SettingsField';
@@ -25,6 +26,7 @@ import type {
   EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
   ImportSource, ImportPreview,
 } from '../lib/api';
+import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImports';
 import { IconGear, IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
 
 export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more';
@@ -252,14 +254,19 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const [impSources, setImpSources] = useState<ImportSource[]>([]);
   const [impSource, setImpSource] = useState('');
   const [impPath, setImpPath] = useState('');
-  const [impSlot, setImpSlot] = useState('openai');
+  const [impSlot, setImpSlot] = useState('auto');
   const [impPreview, setImpPreview] = useState<ImportPreview | null>(null);
   const [impPick, setImpPick] = useState('');
   const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply'>('');
   const [impMsg, setImpMsg] = useState('');
   const [impConfirmed, setImpConfirmed] = useState(false);
+  const [impSourcesLoading, setImpSourcesLoading] = useState(false);
+  const impSourceRequest = useRef(0);
+  const impPreviewRequest = useRef(0);
+  const impApplying = useRef(false);
 
   const clearImportPreview = useCallback(() => {
+    impPreviewRequest.current += 1;
     setImpPreview(null);
     setImpPick('');
     setImpConfirmed(false);
@@ -267,20 +274,30 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   }, []);
 
   const openImport = useCallback(async () => {
-    if (impSources.length) return;
+    const requestId = ++impSourceRequest.current;
+    setImpSourcesLoading(true);
+    setImpMsg('');
     try {
       const d = await fetchImportSources();
-      if (!mounted.current) return;
+      if (!mounted.current || requestId !== impSourceRequest.current) return;
       setImpSources(d.sources);
-      const first = d.sources.find((s) => s.available) || d.sources[0];
-      if (first) setImpSource(first.id);
+      const first = d.sources.find((s) => s.id === 'cc-switch' && s.available)
+        || d.sources.find((s) => s.available) || d.sources[0];
+      setImpSource((current) => d.sources.some((s) => s.id === current) ? current : first?.id || '');
     } catch (e) {
-      if (mounted.current) setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+      if (mounted.current && requestId === impSourceRequest.current) setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+    } finally {
+      if (mounted.current && requestId === impSourceRequest.current) setImpSourcesLoading(false);
     }
-  }, [impSources.length]);
+  }, []);
+
+  useEffect(() => {
+    if (sec === 'import') void openImport();
+  }, [sec, openImport]);
 
   const loadImportPreview = useCallback(async () => {
     if (!impSource) { setImpMsg('先选择一个来源'); return; }
+    const requestId = ++impPreviewRequest.current;
     setImpBusy('preview');
     setImpMsg('');
     setImpPreview(null);
@@ -288,40 +305,40 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
     setImpConfirmed(false);
     try {
       const d = await previewImport(impSource, impSlot, impPath.trim());
-      if (!mounted.current) return;
+      if (!mounted.current || requestId !== impPreviewRequest.current) return;
       setImpPreview(d);
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
     } catch (e) {
-      if (mounted.current) setImpMsg(e instanceof Error ? e.message : '预览失败');
+      if (mounted.current && requestId === impPreviewRequest.current) setImpMsg(e instanceof Error ? e.message : '预览失败');
     } finally {
-      if (mounted.current) setImpBusy('');
+      if (mounted.current && requestId === impPreviewRequest.current) setImpBusy('');
     }
   }, [impSource, impSlot, impPath]);
 
   const applyImportPick = useCallback(async () => {
     const selected = impPreview?.candidates.find((c) => c.id === impPick && c.compatible);
-    if (!selected?.previewToken || !impConfirmed || impBusy) return;
+    if (!selected?.previewToken || !impConfirmed || impBusy || impApplying.current) return;
+    impApplying.current = true;
     setImpBusy('apply');
     setImpMsg('');
     try {
-      const r = await applyImport(impSource, impPick, impSlot, impPath.trim(), selected.previewToken);
+      const targetSlot = selected.targetSlot || impSlot;
+      const r = await applyImport(impSource, impPick, targetSlot, impPreview?.path || impPath.trim(), selected.previewToken);
       if (!mounted.current) return;
-      setImpMsg(`✓ 已导入「${r.applied.name}」→ ${impSlot}${r.note ? `（${r.note}）` : ''}`);
+      setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}${r.note ? `（${r.note}）` : ''}`);
       setImpPreview(null);
       setImpPick('');
       setImpConfirmed(false);
-      try {
-        const d = await fetchModelChannels();
-        if (!mounted.current) return;
-        const imported = d.channels.chat.rows.find((row) => row.slot === impSlot);
-        if (imported) setChatRows((rows) => rows.some((row) => row.slot === impSlot)
-          ? rows.map((row) => row.slot === impSlot ? { ...imported, role: row.role } : row) : [...rows, imported]);
-      } catch {
-        if (mounted.current) setImpMsg('✓ 配置已导入，但刷新失败；请重新打开设置核对。');
-      }
+      const imported = r.channels.chat.rows.find((row) => row.slot === targetSlot);
+      if (imported) setChatRows((rows) => rows.some((row) => row.slot === targetSlot)
+        ? rows.map((row) => row.slot === targetSlot ? { ...imported, role: row.role } : row) : [...rows, imported]);
     } catch (e) {
-      if (mounted.current) setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
+      if (mounted.current) {
+        setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
+        setImpConfirmed(false);
+      }
     } finally {
+      impApplying.current = false;
       if (mounted.current) setImpBusy('');
     }
   }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy]);
@@ -625,7 +642,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
             <button aria-current={sec === 'general' ? 'page' : undefined} className={`snav${sec === 'general' ? ' active' : ''}`} onClick={() => setSec('general')}>
               <IconGear size={16} />通用设置<small>演示数据开关</small>
             </button>
-            <button aria-current={sec === 'import' ? 'page' : undefined} className={`snav${sec === 'import' ? ' active' : ''}`} onClick={() => { setSec('import'); void openImport(); }}>
+            <button aria-current={sec === 'import' ? 'page' : undefined} className={`snav${sec === 'import' ? ' active' : ''}`} onClick={() => setSec('import')}>
               <IconUpload size={16} />配置导入<small>CC Switch 一键迁移</small>
             </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
@@ -658,16 +675,20 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                 <span className="desc">
                   读取本机 CC Switch / OpenClaw 里已配好的模型（密钥脱敏展示），选中一条一键写入 Easel 对话通道。
                 </span>
+                <button type="button" className="adv-btn" disabled={impSourcesLoading || Boolean(impBusy)} onClick={() => void openImport()}>
+                  {impSourcesLoading ? '检测来源…' : '刷新来源'}
+                </button>
               </div>
+              {impMsg && <div role="status" className="import-msg">{impMsg}</div>}
               <div className="imp-cards">
-                {impSources.length === 0 && (
+                {impSourcesLoading && impSources.length === 0 && (
                   <div className="board"><div className="empty"><Skeleton w="70%" h={14} style={{ marginBottom: 10 }} /><Skeleton w="45%" h={12} /></div></div>
                 )}
                 {impSources.map((s) => (
                   <button
                     key={s.id}
                     className={`imp-card${impSource === s.id ? ' on' : ''}${s.available ? '' : ' off'}`}
-                    onClick={() => { setImpSource(s.id); clearImportPreview(); }}
+                    onClick={() => { setImpSource(s.id); setImpPath(''); clearImportPreview(); }}
                     disabled={Boolean(impBusy)}
                   >
                     <span className="imp-name">{s.label}</span>
@@ -684,16 +705,13 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       value={impSlot}
                       disabled={Boolean(impBusy)}
                       onChange={(value) => { setImpSlot(value); clearImportPreview(); }}
-                      options={[
-                        { value: 'openai', label: '写入：OpenAI 兼容槽位（OPENAI_*）' },
-                        { value: 'relay', label: '写入：Anthropic 兼容中转（EASEL_LLM_*）' },
-                        { value: 'anthropic', label: '写入：Anthropic 槽位（ANTHROPIC_*）' },
-                      ]}
+                      options={MODEL_IMPORT_SLOT_OPTIONS}
                     />
                     <input
                       className="mock"
                       value={impPath}
-                      placeholder="自定义配置路径（可留空）"
+                      aria-label="自定义配置路径"
+                      placeholder="配置文件或 CC Switch 目录（可留空）"
                       disabled={Boolean(impBusy)}
                       onChange={(e) => { setImpPath(e.target.value); clearImportPreview(); }}
                     />
@@ -701,8 +719,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       {impBusy === 'preview' ? '读取中…' : '读取候选'}
                     </button>
                   </div>
-                  {impMsg && <div className="import-msg">{impMsg}</div>}
                   {impBusy === 'preview' && <SkeletonCard rows={3} />}
+                  {impPreview && impPreview.candidates.length > 0 && !impPreview.candidates.some((candidate) => candidate.compatible) && (
+                    <p className="hint">没有匹配当前通道的配置。可选择自动匹配协议；Responses 配置当前不支持直接导入，具体原因见各条目。</p>
+                  )}
                   {impPreview && impPreview.candidates.length > 0 && (
                     <>
                       <div className="import-list">
@@ -726,6 +746,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                               </span>
                               <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
                               <span className="ii-meta">
+                                {c.compatible && `写入 ${modelImportSlotLabel(c.targetSlot || impSlot)} · `}
                                 {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
                                 {!c.compatible && ` · ${c.skipReason}`}
                                 {c.note && ` · ${c.note}`}
@@ -788,7 +809,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                         clearImportPreview();
                         setSelftest(null);
                       }}
-                      onOpenImport={() => { setSec('import'); void openImport(); }} />
+                      onOpenImport={() => setSec('import')} />
                     <div className="panel-top">
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatLive ? '主通道在线' : chatOk ? '主通道已配置' : '未配置'}</span>
                       <span className="desc">经本地网关路由（主备自动降级）</span>
@@ -811,11 +832,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                     })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
                     <div className="import-block">
-                      <button className="adv-btn" onClick={() => { setSec('import'); void openImport(); }}>
+                      <button className="adv-btn" onClick={() => setSec('import')}>
                         ⬇ 从本机配置导入（CC Switch / OpenClaw）→ 去「配置导入」页
                       </button>
                     </div>
                     <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；预设只填公开端点，模型列表现场向服务商查询，不做猜测。</div>
+                    <ModelHealthPanel />
                   </section>
                 )}
 

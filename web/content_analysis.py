@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from content_analysis_platforms import platform_profile, platform_diagnostics, VERSION
+from content_analysis_professional import ADVANCED_METRICS, build_professional, metric as metric_value
 
 PLATFORMS = ('xiaohongshu', 'douyin', 'kuaishou', 'zhihu', 'weixin-channels', 'bilibili', 'wechat-oa')
 METRICS = ('views', 'likes', 'comments', 'collects', 'shares')
@@ -63,6 +64,24 @@ def text(value, limit=20000):
     return value.strip()
 
 
+def normalize_metrics(raw, keys, field):
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError(f'{field} 必须为对象')
+    result = {}
+    for key in keys:
+        value = raw.get(key)
+        try:
+            valid = value is None or (type(value) in (int, float) and math.isfinite(value) and value >= 0)
+        except OverflowError:
+            valid = False
+        if not valid:
+            raise ValueError(f'{key} 必须为非负有限数值或 null；次数不得输入百分比或统计文案')
+        result[key] = value
+    return result
+
+
 def normalize(item, account_id, observed_at):
     if not isinstance(item, dict):
         raise ValueError('作品必须是对象')
@@ -82,16 +101,9 @@ def normalize(item, account_id, observed_at):
     tags = item.get('tags', [])
     if not isinstance(tags, list) or len(tags) > 40:
         raise ValueError('tags 必须为最多 40 个文字标签的数组')
-    tags = list(dict.fromkeys(text(tag, 60) for tag in tags if tag))
-    raw = item.get('metrics') or {}
-    if not isinstance(raw, dict):
-        raise ValueError('metrics 必须为对象')
-    metrics = {}
-    for key in METRICS:
-        value = raw.get(key)
-        if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0):
-            raise ValueError(f'{key} 必须为非负有限数值或 null；不接受统计文案')
-        metrics[key] = value
+    tags = list(dict.fromkeys(value for value in (text(tag, 60) for tag in tags if tag) if value))
+    metrics = normalize_metrics(item.get('metrics'), METRICS, 'metrics')
+    advanced = normalize_metrics(item.get('advancedMetrics'), ADVANCED_METRICS, 'advancedMetrics')
     url = text(item.get('url'), 2000)
     if url:
         parsed = urlsplit(url)
@@ -107,7 +119,7 @@ def normalize(item, account_id, observed_at):
             'comments': comments, 'coverText': cover_text, 'transcript': transcript,
             'format': text(item.get('format'), 40) or 'unknown', 'url': url,
             'publishedAt': timestamp(item.get('publishedAt')), 'snapshotAt': timestamp(item.get('snapshotAt'), default=observed_at),
-            'period': period, 'paid': paid, 'metrics': metrics}
+            'period': period, 'paid': paid, 'metrics': metrics, 'advancedMetrics': advanced}
 
 
 def diagnostics(content):
@@ -222,12 +234,21 @@ class Store:
                     for key in ('title', 'body', 'tags', 'format', 'url', 'publishedAt', 'comments', 'coverText', 'transcript'):
                         if key not in item:
                             content[key] = old.get(key)
-                    if 'metrics' not in item:
+                    if 'metrics' not in item and 'advancedMetrics' not in item:
                         for key in ('metrics', 'snapshotAt', 'period', 'paid'):
                             content[key] = old[key]
+                        content['advancedMetrics'] = {key: (old.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
+                    elif all(content[key] == old.get(key) for key in ('snapshotAt', 'period', 'paid')):
+                        # Only merge complementary metric blocks for the exact same observation.
+                        if 'metrics' not in item:
+                            content['metrics'] = old['metrics']
+                        if 'advancedMetrics' not in item:
+                            content['advancedMetrics'] = {key: (old.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
                 content['identity'] = identity
                 snapshot = {'contentId': content['id'], 'snapshotAt': content['snapshotAt'],
                             'period': content['period'], 'metrics': content['metrics'], 'paid': content['paid']}
+                if any(value is not None for value in content['advancedMetrics'].values()):
+                    snapshot['advancedMetrics'] = content['advancedMetrics']
                 encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
                 digest = hashlib.sha256(encoded.encode()).hexdigest()
                 db.execute('INSERT OR IGNORE INTO snapshots VALUES(?,?,?,?,?)', (platform, account_id, content['id'], digest, encoded))
@@ -258,11 +279,14 @@ class Store:
         source_hash = account_material_hash(contents)
         account_insights = json.loads(insight_row[1]) if insight_row and insight_row[0] == source_hash else None
         for content in contents:
+            content['advancedMetrics'] = {key: (content.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
             content['diagnostics'] = diagnostics(content) + platform_diagnostics(platform, content)
             content['draft'] = draft(content)
             review = reviews.get(content['id'])
             content['aiReview'] = review[1] if review and review[0] == material_hash(content) else None
             content['snapshots'] = sorted([s for s in snapshots if s['contentId'] == content['id']], key=lambda s: s['snapshotAt'])
+            for snapshot in content['snapshots']:
+                snapshot['advancedMetrics'] = {key: (snapshot.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
         totals, coverage = summarize(contents)
         tags = sorted({tag for content in contents for tag in content['tags']})
         themes = []
@@ -282,7 +306,8 @@ class Store:
             warnings.append('部分作品统计窗口未知，不能做同龄效果比较。')
         return {'account': account, 'platformProfile': platform_profile(platform), 'accountInsights': account_insights, 'contents': contents, 'overview': {'contentCount': len(contents), 'metricCoverage': coverage,
                 'totals': totals, 'lastImportedAt': account['lastImportedAt']}, 'themes': themes, 'experiments': experiments,
-                'quality': {'identity': account['identity'], 'warnings': warnings}, 'methodology': METHOD}
+                'quality': {'identity': account['identity'], 'warnings': warnings}, 'methodology': METHOD,
+                'professional': build_professional(platform, account_id, contents)}
 
     def experiment(self, payload, experiment_id=None):
         platform, account_id = scope(payload.get('platform'), payload.get('accountId'))
@@ -303,9 +328,10 @@ class Store:
                 baseline = {b['contentId']: b for b in experiment['baseline']}
                 for ident in experiment['contentIds']:
                     content = by_id[ident]
-                    value = content['metrics'][experiment['metric']]
+                    value = metric_value(content, experiment['metric'])
                     base = baseline[ident]
-                    comparable = content['period'] == base['period'] == 'lifetime' and content['paid'] == base.get('paid') and content['snapshotAt'] > base['snapshotAt']
+                    cumulative = experiment['metric'] not in ('averageWatchSeconds', 'durationSeconds')
+                    comparable = cumulative and content['period'] == base['period'] == 'lifetime' and content['paid'] == base.get('paid') and content['snapshotAt'] > base['snapshotAt']
                     delta = value - base['value'] if comparable and value is not None and base['value'] is not None else None
                     observations.append({'contentId': ident, 'snapshotAt': content['snapshotAt'], 'value': value, 'delta': delta,
                                          'comparable': comparable, 'note': '累计观测差值，不是改动的因果效果；负值可能来自平台回溯修正。' if comparable else '尚无同口径的新观测，或不支持累计差值。'})
@@ -315,7 +341,7 @@ class Store:
             if not isinstance(ids, list) or not ids or any(not isinstance(i, str) or i not in by_id for i in ids):
                 raise ValueError('实验必须关联所选账号的有效作品 ID')
             metric = payload.get('metric')
-            if metric not in METRICS:
+            if metric not in METRICS + ADVANCED_METRICS:
                 raise ValueError('请指定支持的主指标')
             title, hypothesis, action = [text(payload.get(k), 2000) for k in ('title', 'hypothesis', 'action')]
             if not all((title, hypothesis, action)):
@@ -323,9 +349,22 @@ class Store:
             experiment = {'id': uuid.uuid4().hex, 'title': title, 'hypothesis': hypothesis, 'action': action, 'metric': metric,
                           'contentIds': list(dict.fromkeys(ids)), 'reviewAt': timestamp(payload.get('reviewAt')), 'createdAt': now(),
                           'status': 'planned', 'conclusion': '', 'reviews': [], 'baseline': [
-                              {'contentId': i, 'snapshotAt': by_id[i]['snapshotAt'], 'value': by_id[i]['metrics'][metric],
+                              {'contentId': i, 'snapshotAt': by_id[i]['snapshotAt'], 'value': metric_value(by_id[i], metric),
                                'period': by_id[i]['period'], 'paid': by_id[i]['paid']} for i in dict.fromkeys(ids)]}
+            supplied = payload.get('evidence')
+            if supplied is not None:
+                expected_scope = {'platform': platform, 'accountId': account_id}
+                if not isinstance(supplied, dict) or supplied.get('scope') != expected_scope or not isinstance(supplied.get('topic'), dict):
+                    raise ValueError('题材证据与当前平台/账号不符')
+                topic = next((t for t in report['professional']['topics'] if t['id'] == supplied['topic'].get('id')), None)
+                if topic is None or set(ids) != set(topic['evidenceIds']):
+                    raise ValueError('题材证据已改变或作品范围不符，请重新读取当前报告')
+                experiment['evidence'] = {'scope': expected_scope, 'topic': topic, 'capturedAt': now()}
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = [json.loads(row[0]) for row in db.execute('SELECT data FROM contents WHERE platform=? AND account_id=? ORDER BY id', (platform, account_id))]
+            if account_material_hash(current) != account_material_hash(report['contents']):
+                raise ValueError('账号材料已更改，请重新读取报告后保存实验')
             db.execute('INSERT OR REPLACE INTO experiments VALUES(?,?,?,?)', (platform, account_id, experiment['id'], json.dumps(experiment, ensure_ascii=False)))
         return experiment
 
@@ -359,6 +398,7 @@ def account_material_hash(contents):
 
 def material_hash(content):
     selected = {k: content.get(k) for k in ('id', 'title', 'body', 'coverText', 'transcript', 'comments', 'metrics', 'period', 'tags', 'format', 'paid', 'snapshotAt', 'publishedAt', 'identity')}
+    selected['advancedMetrics'] = {key: (content.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
     # Older stored interpretations did not pass the current material/quantity
     # checks. Preserve them in SQLite, but never expose them as current reviews.
     return hashlib.sha256(json.dumps([REVIEW_RULE_VERSION, selected], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -371,7 +411,13 @@ def summarize(contents):
     for key in METRICS:
         known = [c for c in contents if c['metrics'][key] is not None]
         periods = {c['period'] for c in known}
-        totals[key] = sum(c['metrics'][key] for c in known) if known and len(periods) == 1 and 'unknown' not in periods else None
+        totals[key] = None
+        if known and len(periods) == 1 and 'unknown' not in periods:
+            try:
+                value = sum(c['metrics'][key] for c in known)
+                totals[key] = value if math.isfinite(value) else None
+            except OverflowError:
+                pass
     return totals, coverage
 
 
@@ -383,6 +429,7 @@ def markdown(report):
     for content in report['contents']:
         lines += ['', '## ' + content['title'].replace('\n', ' '), '', f'作品 ID：{content["id"]} · 观察时间：{content["snapshotAt"]} · 口径：{content["period"]}', '',
                   '指标：' + '；'.join(f'{k}={v if v is not None else "缺失"}' for k, v in content['metrics'].items())]
+        lines += ['高级指标：' + '；'.join(f'{k}={v if v is not None else "缺失"}' for k, v in (content.get('advancedMetrics') or {}).items())]
         for finding in content['diagnostics']:
             lines += ['', f'### {finding["dimension"]}', finding['observation'], '', '> ' + finding['evidence'].replace('\n', '\n> '), '', finding['action'], '', finding['limitation']]
         lines += ['', '### 创作起点', '', content['draft']['audienceQuestion'], '']
@@ -395,6 +442,22 @@ def markdown(report):
     profile = report.get('platformProfile')
     if profile:
         lines += ['', '## 平台编辑视角', '', profile['label'], *['- ' + v for v in profile['focus']], *profile['limitations']]
+    professional = report.get('professional')
+    if professional:
+        quality = professional['quality']
+        lines += ['', '## 可诊断问题与数据依据', '', f'样本 {quality["total"]} 篇，可比 {quality["comparable"]} 篇；观察范围：{quality["observedFrom"] or "缺失"} 至 {quality["observedTo"] or "缺失"}', '']
+        for capability in professional['capabilities']:
+            lines += [f'- {capability["question"]} [{capability["status"]}] {capability["available"]}/{capability["total"]} 篇；需要：' + '、'.join(capability['required']) + '；' + capability['limitation']]
+        for item in quality['excluded']:
+            lines += [f'- 排除作品 {item["id"]}：' + '、'.join(item['reasons'])]
+        lines += ['', '### 指标口径', '']
+        lines.extend(f'- {item["label"]}（{item["unit"]}）：{item["formula"]}；{item["limitation"]}' for item in professional['metricDefinitions'])
+        lines += ['', '## 待验证题材', '']
+        for topic in professional['topics']:
+            lines += [f'### {topic["label"]} [{topic["status"]}]', '', topic['observation'], '引用作品：' + '、'.join(topic['evidenceIds']),
+                      '同组其他题材：' + ('、'.join(topic['counterexampleIds']) or '缺少比较作品'), topic['comparison'],
+                      f'{topic["metricLabel"]}：{topic["value"] if topic["value"] is not None else "不可计算"}；比较值：{topic["baselineValue"] if topic["baselineValue"] is not None else "不可计算"}',
+                      topic['hypothesis'], topic['action'], f'建议复查：{topic["reviewAt"] or "待设置"}', topic['stopRule'], *['- ' + value for value in topic['limitations']], '']
     insight = report.get('accountInsights')
     if insight:
         lines += ['', '## 跨作品 AI 解读', '', insight['notice']]
@@ -406,4 +469,6 @@ def markdown(report):
     for experiment in report['experiments']:
         lines += [f'- {experiment["title"]} [{experiment["status"]}]：{experiment["hypothesis"]}；改动：{experiment["action"]}；主指标：{experiment["metric"]}',
                   f'  结论：{experiment["conclusion"] or "待回收"}']
+        if experiment.get('evidence'):
+            lines += ['  冻结题材证据：' + json.dumps(experiment['evidence'], ensure_ascii=False, sort_keys=True)]
     return '\n'.join(lines) + '\n'

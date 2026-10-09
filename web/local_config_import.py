@@ -42,6 +42,11 @@ def _valid_base(base: str) -> bool:
         return False
 
 
+def public_base_url(base: str) -> str:
+    """Invalid URLs may carry credentials in userinfo/query; never preview them."""
+    return base if not base or _valid_base(base) else "（地址格式不兼容，已隐藏）"
+
+
 def _cc_protocol(app_type: str, cfg: dict) -> str:
     if app_type == "claude":
         return "anthropic"
@@ -123,11 +128,31 @@ def _codex_options(config: str) -> dict:
     except ValueError:
         return {}
     active = data.get('model_provider')
-    provider = data.get('model_providers', {}).get(active, {}) if active else data
+    if active is not None and not isinstance(active, str):
+        return {}
+    providers = data.get('model_providers', {})
+    provider = providers.get(active, {}) if active and isinstance(providers, dict) else data if not active else {}
     if not isinstance(provider, dict):
         return {}
     return {'model': data.get('model', ''), 'base_url': provider.get('base_url', ''),
             'wire_api': provider.get('wire_api', '')}
+
+
+def _cc_credentials(app_type: str, cfg: dict) -> tuple[str, str]:
+    """Read the documented credential fields, not unrelated tokens or key length."""
+    def value(obj: dict, name: str) -> str:
+        item = obj.get(name)
+        return item.strip() if isinstance(item, str) else ""
+
+    if app_type == "claude":
+        env = cfg.get("env") if isinstance(cfg.get("env"), dict) else {}
+        return value(env, "ANTHROPIC_BASE_URL"), (value(env, "ANTHROPIC_AUTH_TOKEN")
+                                                 or value(env, "ANTHROPIC_API_KEY"))
+    if app_type == "codex":
+        auth = cfg.get("auth") if isinstance(cfg.get("auth"), dict) else {}
+        options = _codex_options(str(cfg.get("config") or ""))
+        return value(options, "base_url"), value(auth, "OPENAI_API_KEY")
+    return _pick_base(cfg), _pick_key(cfg)
 
 
 def _model_hints(app_type: str, cfg: dict) -> list[str]:
@@ -136,7 +161,8 @@ def _model_hints(app_type: str, cfg: dict) -> list[str]:
     models: list[str] = []
     if app_type == "claude":
         for k, v in env.items():
-            if isinstance(v, str) and re.match(r"ANTHROPIC_(DEFAULT_\w+_)?MODEL(_NAME)?$", k) and v.strip():
+            # CC Switch's *_MODEL_NAME fields are display labels, not model IDs.
+            if isinstance(v, str) and re.fullmatch(r"ANTHROPIC_(DEFAULT_\w+_)?MODEL", k) and v.strip():
                 models.append(re.sub(r"\[.*?\]$", "", v).strip())
     if app_type == "codex":
         got = _codex_options(str(cfg.get("config") or "")).get('model', '')
@@ -156,14 +182,14 @@ def _expand_models(candidate: dict, models: list[str]) -> list[dict]:
 
 
 def _candidate(source: str, name: str, base: str, key: str, protocol: str,
-               app_type: str = "", cfg: dict | None = None, note: str = "") -> dict:
+               app_type: str = "", cfg: dict | None = None, note: str = "", source_id: str = "") -> dict:
     """归一成导入候选。密钥明文只放在 `key` 里，出网前由端点删除。"""
     cfg = cfg if isinstance(cfg, dict) else {}
     base = (base or "").strip().rstrip("/")
     if app_type == 'codex' and isinstance(cfg.get('config'), str):
         base = str(_codex_options(cfg['config']).get('base_url') or '').strip().rstrip('/')
     key = (key or "").strip()
-    cid = hashlib.sha1(f"{source}|{name}|{base}".encode("utf-8")).hexdigest()[:12]
+    cid = hashlib.sha1(f"{source}|{app_type}|{source_id}|{name}|{base}".encode("utf-8")).hexdigest()[:12]
     skip = ""
     if _has_oauth(cfg):
         skip = "检测到 OAuth 会话/刷新令牌，不导入"
@@ -173,14 +199,16 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         skip = "Base URL 不是合法的 http(s) 地址"
     elif not key:
         skip = "没有可用的密钥（可能只存了 OAuth 登录态）"
+    elif protocol == "openai-responses":
+        skip = "此配置使用 Responses；当前对话通道仅支持 Chat Completions / Anthropic Messages，不能直接导入"
     elif protocol not in ("openai", "anthropic"):
-        skip = "协议未明确或为 Responses，不能导入 Chat Completions / Anthropic 槽位"
+        skip = "协议未明确或当前通道不支持，不能直接导入"
     elif any(c.isspace() for c in key):
         skip = "密钥包含空白字符"
     return {
         "id": cid,
         "source": source,
-        "name": (name or base or "未命名").strip()[:80],
+        "name": (name or (base if _valid_base(base) else "") or "未命名").strip()[:80],
         "baseUrl": base,
         "model": next(iter(_model_hints(app_type, cfg)), "") if cfg else "",
         "protocol": protocol,
@@ -205,7 +233,7 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
     if not path.is_file():
         return [], [f"未找到 {path}"]
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as e:  # noqa: BLE001
         return [], [f"配置解析失败：{type(e).__name__}"]
     if not isinstance(data, dict) or not isinstance(data.get("models", {}), dict):
@@ -234,14 +262,41 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
 
 # ---- CC Switch ----
 
-def ccswitch_path() -> Path | None:
-    db = HOME_CCSWITCH / "cc-switch.db"
+def _windows_profile_home() -> Path | None:
+    """Ask Windows for the current user's profile, independently of portable HOME."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        # CSIDL_PROFILE; this does not enumerate other users or read credentials.
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0028, None, 0, buffer) == 0 and buffer.value:
+            return Path(buffer.value)
+    except (AttributeError, OSError):
+        pass
+    return None
+
+
+def _ccswitch_file(directory: Path) -> Path | None:
+    db = directory / "cc-switch.db"
     if db.is_file():
         return db
-    js = HOME_CCSWITCH / "config.json"
+    js = directory / "config.json"
     if js.is_file():
         return js
     return None
+
+
+def ccswitch_path() -> Path | None:
+    # Runtime HOME remains isolated. Only this user-requested import source uses
+    # the current Windows profile; source discovery itself reads no file content.
+    if os.environ.get("EASEL_PORTABLE") == "1":
+        profile = _windows_profile_home()
+        if profile is not None:
+            path = _ccswitch_file(profile / ".cc-switch")
+            if path is not None:
+                return path
+    return _ccswitch_file(HOME_CCSWITCH)
 
 
 def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
@@ -250,7 +305,9 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
     out: list[dict] = []
     errors: list[str] = []
     try:
-        rows = con.execute("SELECT app_type, name, settings_config FROM providers").fetchall()
+        columns = {row[1] for row in con.execute("PRAGMA table_info(providers)")}
+        source_id = "id" if "id" in columns else "''"
+        rows = con.execute(f"SELECT {source_id} AS source_id, app_type, name, settings_config FROM providers").fetchall()
     except sqlite3.OperationalError:
         con.close()
         return [], ["数据库结构不兼容"]
@@ -264,9 +321,11 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
         if not isinstance(cfg, dict):
             errors.append("settings_config 结构不兼容，已跳过")
             continue
-        protocol = _cc_protocol(str(r["app_type"]), cfg)
-        cand = _candidate("cc-switch", str(r["name"]), _pick_base(cfg), _pick_key(cfg),
-                          protocol, app_type=str(r["app_type"]), cfg=cfg)
+        app_type = str(r["app_type"])
+        protocol = _cc_protocol(app_type, cfg)
+        base, key = _cc_credentials(app_type, cfg)
+        cand = _candidate("cc-switch", str(r["name"]), base, key,
+                          protocol, app_type=app_type, cfg=cfg, source_id=str(r["source_id"]))
         out.extend(_expand_models(cand, _model_hints(str(r["app_type"]), cfg)))
     con.close()
     return out, errors
@@ -274,7 +333,7 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
 
 def _read_ccswitch_json(path: Path) -> tuple[list[dict], list[str]]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as e:  # noqa: BLE001
         return [], [f"配置解析失败：{type(e).__name__}"]
     out: list[dict] = []
@@ -295,8 +354,9 @@ def _read_ccswitch_json(path: Path) -> tuple[list[dict], list[str]]:
             protocol = _cc_protocol(str(app_type), cfg)
             name = str(p.get("name") or pid)
             try:
-                cand = _candidate("cc-switch", name, _pick_base(cfg), _pick_key(cfg),
-                                  protocol, app_type=str(app_type), cfg=cfg)
+                base, key = _cc_credentials(str(app_type), cfg)
+                cand = _candidate("cc-switch", name, base, key,
+                                  protocol, app_type=str(app_type), cfg=cfg, source_id=str(pid))
                 out.extend(_expand_models(cand, _model_hints(str(app_type), cfg)))
             except Exception as e:  # noqa: BLE001  单条坏了不影响整体
                 errors.append(f"条目解析失败：{type(e).__name__}")
@@ -320,14 +380,20 @@ SOURCES: dict[str, dict] = {
 def resolve_source(source: str, explicit_path: str = "") -> tuple[Path | None, str]:
     """定位来源文件 → (路径, 错误)。explicit_path 是用户主动指定的其它位置。"""
     if explicit_path.strip():
-        p = Path(explicit_path.strip()).expanduser()
+        supplied = explicit_path.strip()
+        if len(supplied) >= 2 and supplied[0] == supplied[-1] and supplied[0] in ('"', "'"):
+            supplied = supplied[1:-1]
+        p = Path(supplied).expanduser()
+        if source == "cc-switch" and p.is_dir():
+            found = _ccswitch_file(p)
+            return (found, "") if found else (None, "指定目录下未找到 cc-switch.db 或 config.json")
         return (p, "") if p.is_file() else (None, f"指定路径不存在：{p}")
     if source == "openclaw":
         p = openclaw_path()
         return (p, "") if p.is_file() else (None, f"未找到 {p}")
     if source == "cc-switch":
         p = ccswitch_path()
-        return (p, "") if p else (None, "未找到 ~/.cc-switch 下的 cc-switch.db 或 config.json")
+        return (p, "") if p else (None, "未找到当前用户的 CC Switch 配置，可指定 .cc-switch 目录或配置文件")
     return None, f"不认识的来源：{source}"
 
 

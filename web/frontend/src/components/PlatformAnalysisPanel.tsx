@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAccountAnalytics } from '../lib/api';
 import type { AccountAnalysis } from '../lib/accountAnalysis';
 import Select from './ui/Select';
@@ -18,13 +18,7 @@ export default function PlatformAnalysisPanel({ accounts, platform, onPlatformCh
   const sequence = useRef(0);
   const pending = useRef(false);
   const current = accounts.find((account) => account.platform === platform);
-  useEffect(() => {
-    sequence.current += 1; pending.current = false;
-    setData(null); setNickname(''); setError(''); setBusy(false); setSearch('');
-    return () => { sequence.current += 1; };
-  }, [platform, current?.identity, current?.loggedIn, revision]);
-
-  const collect = async () => {
+  const collect = useCallback(async () => {
     if (!current?.loggedIn || pending.current) return;
     pending.current = true;
     const request = ++sequence.current;
@@ -43,7 +37,15 @@ export default function PlatformAnalysisPanel({ accounts, platform, onPlatformCh
     } finally {
       if (request === sequence.current) { pending.current = false; setBusy(false); }
     }
-  };
+  }, [current?.loggedIn, platform]);
+  useEffect(() => {
+    sequence.current += 1; pending.current = false;
+    setData(null); setNickname(''); setError(''); setBusy(false); setSearch('');
+    return () => { sequence.current += 1; };
+  }, [platform, current?.identity, current?.loggedIn, revision]);
+  useEffect(() => {
+    if (current?.loggedIn) void collect();
+  }, [collect, current?.loggedIn, current?.identity, platform, revision]);
   const visibleNotes = data?.notes.filter((note) => note.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) || [];
 
   return <section id="platform-analysis" className="platform-analysis card" aria-labelledby="platform-analysis-title">

@@ -4,8 +4,9 @@ import {
   accountWhoami, logoutAccount, submitLoginSms,
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
-import type { AccountItem, AccountWhoami } from '../lib/api';
+import type { AccountItem, AccountWhoami, LoginStatus } from '../lib/api';
 import { getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
+import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts, IconEye, IconEyeOff, IconRefresh } from './icons';
@@ -14,6 +15,8 @@ import '../styles/accounts.css';
 type QRState = {
   platform: string;
   name: string;
+  flow: 'account' | 'mp';
+  visibleBrowser: boolean;
   state: string;       // starting | qr_ready | success | expired | error | unknown
   message: string;
   qr: string;          // outputs 相对路径
@@ -31,6 +34,7 @@ const STATE_LABEL: Record<string, string> = {
   error: '登录出错',
   unknown: '等待中…',
 };
+const isLoginTerminal = (state: string) => ['success', 'expired', 'error'].includes(state);
 
 /** 头像：有 URL 就显示图（加载失败退回首字），否则显示昵称/平台名首字。 */
 function Avatar({ url, name }: { url?: string; name: string }) {
@@ -70,7 +74,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [credBusy, setCredBusy] = useState(false);
   const [credMsg, setCredMsg] = useState('');
   const [credErr, setCredErr] = useState('');
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loginAttemptRef = useRef(0);
   const aliveRef = useRef(true);
   const qrPlatformRef = useRef('');   // 当前登录中的平台，供 submitSms 稳定引用
 
@@ -121,7 +126,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   // 切回本标签页 / 窗口重新获得焦点时自动重拉账号态——登录/退出后即使漏了一次刷新，切回来也是最新的，
   // 用户无需手动刷新页面。（登录中弹着二维码时不打扰，避免打断轮询。）
   useEffect(() => {
-    const refresh = () => { if (document.visibilityState === 'visible' && !pollRef.current) load(); };
+    const refresh = () => { if (document.visibilityState === 'visible' && !qrPlatformRef.current) load(); };
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
@@ -131,32 +136,39 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   }, [load]);
 
   const stopPoll = useCallback(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    loginAttemptRef.current++;
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }, []);
 
   useEffect(() => () => stopPoll(), [stopPoll]);
 
   const closeQr = useCallback(() => {
     stopPoll();
+    qrPlatformRef.current = '';
     setQr(null);
+    setBusy('');
     setSmsCode(''); setSmsErr(''); setSmsBusy(false);
     load();
   }, [stopPoll, load]);
+  const qrModalRef = useModalFocus(qr !== null, closeQr);
 
   const submitSms = useCallback(async () => {
     const code = smsCode.replace(/\D/g, '');
     if (code.length < 4) { setSmsErr('请输入手机收到的验证码'); return; }
+    const attempt = loginAttemptRef.current;
+    const current = () => aliveRef.current && attempt === loginAttemptRef.current;
     setSmsBusy(true); setSmsErr('');
     try {
       await submitLoginSms(qrPlatformRef.current, code);
+      if (!current()) return;
       setSmsCode('');
       // 乐观切到「验证中」转圈：后端读走码→verifying；成功→success，失败→退回 sms_required 带错误
       setQr((prev) => prev && ({ ...prev, state: 'verifying', message: '正在验证验证码…' }));
       // 不停轮询：runner 读走验证码填码提交后，state 会转 success / 或退回 sms_required 重试
     } catch (e) {
-      setSmsErr(e instanceof Error ? e.message : '提交验证码失败');
+      if (current()) setSmsErr(e instanceof Error ? e.message : '提交验证码失败');
     } finally {
-      setSmsBusy(false);
+      if (current()) setSmsBusy(false);
     }
   }, [smsCode]);
 
@@ -193,78 +205,80 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     }
   }, [cred, credForm, runWhoami, closeCred]);
 
-  const handleLogin = useCallback(async (a: AccountItem) => {
+  // One attempt owns its initial response, serial polling, and success callback.
+  // Closing or retrying invalidates every in-flight response from the old attempt.
+  const handleLogin = useCallback(async (a: AccountItem, mp = false, visibleBrowser = false) => {
     if (!a.supported) return;
-    if (a.backend === 'wechat-oa') { openCred(a); return; }   // 公众号走凭证表单，不扫码
+    if (!mp && a.backend === 'wechat-oa') { openCred(a); return; }
+    stopPoll();
+    const attempt = loginAttemptRef.current;
+    const current = () => aliveRef.current && attempt === loginAttemptRef.current;
+    identityEpoch.current[a.platform] = (identityEpoch.current[a.platform] || 0) + 1;
+    setErr('');
     setTerminalMsg('');
-    setBusy(a.platform);
-    setSmsCode(''); setSmsErr('');
+    setBusy(a.platform + (mp ? ':mp' : ''));
+    setSmsCode(''); setSmsErr(''); setSmsBusy(false);
     qrPlatformRef.current = a.platform;
     setQrNonce((n) => n + 1);
+    setQr({ platform: a.platform, name: a.name + (mp ? ' · 后台取数' : ''),
+      flow: mp ? 'mp' : 'account', visibleBrowser, state: 'starting', message: '', qr: '' });
+
+    const applyStatus = async (s: Pick<LoginStatus, 'state' | 'message' | 'qr' | 'qrTs' | 'visibleBrowser'>) => {
+      if (!current()) return;
+      setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs,
+        visibleBrowser: s.visibleBrowser ?? prev.visibleBrowser }));
+      if (s.state !== 'success') return;
+      if (mp) {
+        setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true } : x));
+        setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
+        setWhoamiCache(a.platform, null);
+      }
+      const identity = await runWhoami(a.platform);
+      if (!current()) return;
+      if (mp) load();
+      else if (a.platform === 'xiaohongshu' && identity?.loggedIn) onAnalysisLogin();
+    };
+    let failures = 0;
+    const poll = async () => {
+      if (!current()) return;
+      pollRef.current = null;
+      try {
+        const s = await (mp ? mpLoginStatus(a.platform) : loginStatus(a.platform));
+        if (!current()) return;
+        failures = 0;
+        await applyStatus(s);
+        if (isLoginTerminal(s.state)) return;
+      } catch {
+        if (!current()) return;
+        if (++failures >= 3) {
+          setQr((prev) => prev && ({ ...prev, state: 'error', qr: '',
+            message: '暂时无法读取登录进度，请确认工作台服务仍在运行后重试。' }));
+          return;
+        }
+      }
+      if (current()) pollRef.current = setTimeout(poll, 2000);
+    };
     try {
-      const res = await startLogin(a.platform);
-      if (res.mode === 'terminal') {
-        setTerminalMsg(res.message || '请在终端登录');
+      const res = await (mp ? startMpLogin(a.platform) : startLogin(a.platform, visibleBrowser));
+      if (!current()) return;
+      if (res.mode === 'terminal' || res.mode === 'credentials') {
+        qrPlatformRef.current = '';
+        setQr(null);
+        if (res.mode === 'terminal') setTerminalMsg(res.message || '请在终端登录');
+        else openCred(a);
         return;
       }
-      if (res.mode === 'credentials') { openCred(a); return; }
-      setQr({ platform: a.platform, name: a.name, state: res.state || 'starting',
-              message: res.message || '', qr: res.qr || '' });   // qrTs 由随后的轮询填入
-      stopPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const s = await loginStatus(a.platform);
-          setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs }));
-          if (['success', 'expired', 'error'].includes(s.state)) {
-            stopPoll();
-            if (s.state === 'success') {
-              const identity = await runWhoami(a.platform);
-              if (aliveRef.current && a.platform === 'xiaohongshu' && identity?.loggedIn) onAnalysisLogin();
-            }
-          }
-        } catch { /* 忽略单次轮询失败 */ }
-      }, 2000);
+      await applyStatus({ state: res.state || 'starting', message: res.message || '', qr: res.qr || '',
+        visibleBrowser: res.visibleBrowser,
+        qrTs: 'qrTs' in res ? res.qrTs : undefined });
+      if (current() && !isLoginTerminal(res.state || 'starting')) pollRef.current = setTimeout(poll, 2000);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '启动登录失败');
+      if (current()) setQr((prev) => prev && ({ ...prev, state: 'error', qr: '',
+        message: e instanceof Error ? e.message : '启动登录失败，请稍后重试。' }));
     } finally {
-      setBusy('');
+      if (current()) setBusy('');
     }
-  }, [stopPoll, runWhoami, openCred, onAnalysisLogin]);
-
-  // 公众号后台扫码登录（数据中心取数用，独立于 AppID 凭证）
-  const handleMpLogin = useCallback(async (a: AccountItem) => {
-    setBusy(a.platform + ':mp');
-    setSmsCode(''); setSmsErr('');
-    setQrNonce((n) => n + 1);
-    try {
-      const res = await startMpLogin(a.platform);
-      setQr({ platform: a.platform, name: a.name + ' · 后台取数', state: res.state || 'starting',
-              message: res.message || '', qr: res.qr || '', qrTs: res.qrTs });
-      stopPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const s = await mpLoginStatus(a.platform);
-          setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs }));
-          if (['success', 'expired', 'error'].includes(s.state)) {
-            stopPoll();
-            if (s.state === 'success') {
-              // 像快手一样“内存态立即翻”：wechat-oa 的 effLoggedIn 只看 a.loggedIn，这里直接把它乐观置 true，
-              // 卡片瞬间变「已登录」，不必等 load() 那趟网络往返（后面 load() 再对账兜底）。
-              setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true } : x));
-              setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
-              setWhoamiCache(a.platform, null);
-              runWhoami(a.platform);
-              load();
-            }
-          }
-        } catch { /* 忽略单次轮询失败 */ }
-      }, 2000);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '启动后台登录失败');
-    } finally {
-      setBusy('');
-    }
-  }, [stopPoll, runWhoami, load]);
+  }, [stopPoll, runWhoami, openCred, onAnalysisLogin, load]);
 
   const handleLogout = useCallback(async (a: AccountItem) => {
     identityEpoch.current[a.platform] = (identityEpoch.current[a.platform] || 0) + 1;
@@ -324,6 +338,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const openAnalysis = onNavigateAnalysis;
   const managedAccount = accounts.find((account) => account.platform === managedPlatform);
   const managedInfo = managedPlatform ? whoami[managedPlatform] : null;
+  const qrAccount = qr ? accounts.find((account) => account.platform === qr.platform) : undefined;
 
   return (
     <div className="accounts-page accounts-center">
@@ -366,9 +381,13 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
               <p className="account-login-method">{a.backend === 'wechat-oa' ? '使用微信扫码连接公众号' : a.backend === 'biliup' ? '按登录引导完成账号连接' : '使用手机 App 扫码连接'}</p>
               <div className="account-actions">
                 <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} disabled={!a.supported || pending || w === 'loading'}
-                  onClick={() => logged ? void runWhoami(a.platform) : void (a.backend === 'wechat-oa' ? handleMpLogin(a) : handleLogin(a))}>
+                  onClick={() => logged ? void runWhoami(a.platform) : void handleLogin(a, a.backend === 'wechat-oa')}>
                   {pending ? '正在启动…' : w === 'loading' ? '正在校验…' : logged ? '校验连接' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
+                {a.platform === 'xiaohongshu' && !logged && <button type="button" className="btn btn-block account-browser-login"
+                  disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true)}>
+                  在浏览器中登录
+                </button>}
                 <div className="account-secondary-actions">
                   {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden={true}>→</span></button>}
                   {a.supported && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>{logoutBusy === a.platform ? '退出中…' : '管理账号'}</button>}
@@ -409,13 +428,14 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
 
       {qr && (
         <div className="overlay" onClick={closeQr}>
-          <div className="modal" style={{ width: 360, maxWidth: '100%', textAlign: 'center' }}
+          <div className="modal account-login-modal" ref={qrModalRef} role="dialog" aria-modal="true"
+            aria-labelledby="account-login-title" tabIndex={-1}
             onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 4px' }}>登录 {qr.name}</h3>
+            <h3 id="account-login-title" style={{ margin: '0 0 4px' }}>登录 {qr.name}</h3>
             <div style={{ fontSize: 13, marginBottom: 14,
               color: qr.state === 'success' ? 'var(--green)'
                 : ['error', 'expired'].includes(qr.state) ? 'var(--red)' : 'var(--text-secondary)' }}>
-              {STATE_LABEL[qr.state] || qr.state}{qr.message ? ` — ${qr.message}` : ''}
+              {STATE_LABEL[qr.state] || qr.state}{qr.message && !['error', 'expired', 'sms_required'].includes(qr.state) ? ` — ${qr.message}` : ''}
             </div>
             {qr.state === 'sms_required' ? (
               <div style={{ padding: '6px 4px 2px' }}>
@@ -443,7 +463,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             ) : qr.state === 'scanned' ? (
               <div className="loading" style={{ padding: 40 }}><div className="spinner" />扫码成功，正在跳转验证…（首次可能等十几秒）</div>
             ) : qr.state === 'verifying' ? (
-              <div className="loading" style={{ padding: 40 }}><div className="spinner" />正在验证验证码，登录中…</div>
+              <div className="loading" style={{ padding: 40 }}><div className="spinner" />{qr.visibleBrowser ? '请在工作台所在电脑的小红书窗口完成登录或安全验证。' : '正在验证验证码，登录中…'}</div>
             ) : qr.state === 'success' ? (
               <div style={{ padding: '20px 8px' }}>
                 <div style={{ fontSize: 44 }}>✅</div>
@@ -454,14 +474,19 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                 )}
               </div>
             ) : ['error', 'expired'].includes(qr.state) ? (
-              <div style={{ fontSize: 13, color: 'var(--red)', padding: 30 }}>
-                {qr.message || '登录失败'}<br />可关闭后重试（或换干净 IP）。
+              <div className="account-login-error" role="alert">
+                <p>{qr.message || (qr.state === 'expired' ? '二维码已过期，请重新获取。' : '登录未完成，请稍后重试。')}</p>
+                <p>已停止检查登录进度，不会自动重试。</p>
               </div>
             ) : (
-              <div className="loading" style={{ padding: 40 }}><div className="spinner" />准备二维码…</div>
+              <div className="loading" style={{ padding: 40 }}><div className="spinner" />{qr.visibleBrowser ? '正在打开本机浏览器，准备登录…' : '准备二维码…'}</div>
             )}
-            <div style={{ marginTop: 16 }}>
+            <div className="account-login-actions">
               <button className="btn" onClick={closeQr}>{qr.state === 'success' ? '完成' : '关闭'}</button>
+              {qrAccount && ['error', 'expired'].includes(qr.state) && <button className="btn btn-primary"
+                disabled={!!busy} onClick={() => void handleLogin(qrAccount, qr.flow === 'mp', qr.visibleBrowser)}>重新连接</button>}
+              {qrAccount?.platform === 'xiaohongshu' && !qr.visibleBrowser && ['error', 'expired'].includes(qr.state) &&
+                <button className="btn" disabled={!!busy} onClick={() => void handleLogin(qrAccount, false, true)}>在浏览器中登录</button>}
             </div>
           </div>
         </div>

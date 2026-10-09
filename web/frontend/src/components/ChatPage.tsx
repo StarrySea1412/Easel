@@ -12,14 +12,17 @@ import '../styles/chat-workspace.css';
 import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
 import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
-import type { UploadedFile } from '../lib/api';
+import type { UploadedFile, ThinkingLevel } from '../lib/api';
+import { loadComposerModel } from '../lib/composerModel';
+import { loadThinkingLevel } from '../lib/thinkingLevel';
+import { fetchOfficeTaskModels } from '../lib/officeControls';
 
 interface ChatPageProps {
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
   stopping?: boolean;
   stopError?: string;
-  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements) => boolean;
+  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onStop: () => void;
   onResend: (
     userIndex: number,
@@ -50,6 +53,26 @@ function greeting(): string {
 }
 
 export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat }: ChatPageProps) {
+  const [suggestionError, setSuggestionError] = useState('');
+  const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
+  suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
+  const suggestionPending = useRef(false);
+  const suggestionMounted = useRef(true);
+  useEffect(() => { suggestionMounted.current = true; return () => { suggestionMounted.current = false; }; }, []);
+  const sendSuggestion = async (prompt: string) => {
+    if (stream || stopping || session.importedFromBackup || suggestionPending.current) return;
+    const skills = readSelectedSkills(session.id), requirements = readSkillRequirements(session.id, skills);
+    const modelRef = loadComposerModel();
+    if (!modelRef) { onSend(prompt, undefined, skills, requirements); return; }
+    suggestionPending.current = true;
+    try {
+      const capability = await fetchOfficeTaskModels(session.id, new AbortController().signal);
+      if (!suggestionMounted.current || suggestionContext.current.sessionId !== session.id || suggestionContext.current.blocked) return;
+      if (!capability.available || !capability.options.some(option => option.id === modelRef && option.configured)) { setSuggestionError('所选模型当前不可用，请在输入框刷新模型或改用会话配置。'); return; }
+      setSuggestionError(''); onSend(prompt, undefined, skills, requirements, loadThinkingLevel(), modelRef);
+    } catch { if (suggestionMounted.current && suggestionContext.current.sessionId === session.id && !suggestionContext.current.blocked) setSuggestionError('模型选项暂不可核验，请在输入框刷新后重试。'); }
+    finally { suggestionPending.current = false; }
+  };
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef=useRef<HTMLDivElement>(null);
   const turnRefs=useRef(new Map<number,HTMLDivElement>());
@@ -116,7 +139,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
-                onClick={() => { if (!isStreaming && !stopping) { const skills = readSelectedSkills(session.id); onSend(s.prompt, undefined, skills, readSkillRequirements(session.id, skills)); } }}>
+                onClick={() => void sendSuggestion(s.prompt)}>
                 <span className="suggestion-icon" aria-hidden="true"><s.Icon size={18} /></span>
                 <span className="suggestion-body">
                   <span className="suggestion-title">{s.title}</span>
@@ -124,6 +147,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
               </button>
             ))}
           </div>
+          {suggestionError && <p role="alert" className="composer-upload-error">{suggestionError}</p>}
         </div>
       </div>
     );

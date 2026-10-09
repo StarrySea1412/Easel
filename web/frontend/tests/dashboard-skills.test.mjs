@@ -30,6 +30,7 @@ const modulePaths = [
   ['dashboard', 'components/DashboardPage.tsx'],
 ];
 const bases = Object.fromEntries(await Promise.all(modulePaths.map(async ([key, path]) => [key, await tsModuleUrl(new URL(path, source))])));
+const { createLazyPage } = await import(await tsModuleUrl(new URL('lib/lazyPage.ts', source)));
 let sequence = 0;
 
 function rewrite(url, replacements, suffix) {
@@ -93,8 +94,12 @@ function initialValues({ text, skills, requirements, extra = {} }) {
 async function fixture(t, initial = {}) {
   const values = initialValues(initial);
   const storage = {
-    values, reads: [], writes: [], failing: false, failWrite: () => false,
-    getItem(key) { this.reads.push(key); return values.get(key) ?? null; },
+    values, reads: [], writes: [], failing: false, failRead: () => false, failWrite: () => false,
+    getItem(key) {
+      this.reads.push(key);
+      if (this.failRead(key)) throw Object.assign(new Error('storage temporarily unavailable'), { name: 'SecurityError' });
+      return values.get(key) ?? null;
+    },
     setItem(key, value) {
       this.writes.push([key, value]);
       if (this.failing || this.failWrite(key, value)) throw Object.assign(new Error('storage full'), { name: 'QuotaExceededError' });
@@ -104,7 +109,7 @@ async function fixture(t, initial = {}) {
   };
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   const h = {
-    accepted: true, sent: [], chatSent: [], requests: [], catalogCalls: 0,
+    accepted: true, sent: [], chatSent: [], requests: [], caughtErrors: [], catalogCalls: 0,
     catalog: async () => [first, second],
     onQuick: null,
   };
@@ -123,7 +128,7 @@ async function fixture(t, initial = {}) {
   let modules = await freshModules();
   assert.equal(modules.dashboardDraft.DASHBOARD_DRAFT_SCOPE, scope);
   const container = document.createElement('div'); document.body.append(container);
-  const root = createRoot(container);
+  const root = createRoot(container, { onCaughtError: error => h.caughtErrors.push(error) });
   let gatewayStatus = initial.gatewayStatus ?? 'connected';
   const render = async (status = gatewayStatus) => {
     gatewayStatus = status;
@@ -179,6 +184,7 @@ async function fixture(t, initial = {}) {
       assert.match(document.body.textContent, /将有依据的素材整理成知识卡片/);
     },
     async away() { await act(async () => root.render(createElement('section', null, 'Other page'))); },
+    async renderPage(element) { await act(async () => root.render(element)); },
     async remount() { await act(async () => root.render(null)); await render(); },
     async reload() { await act(async () => root.render(null)); modules = await freshModules(); await render(); },
     async renderChat(id) {
@@ -319,7 +325,7 @@ test('Dashboard and a real ChatComposer restore separate drafts and requirement 
   assert.equal(view.container.querySelector('textarea').value, '会话里未发的消息');
   assert.deepEqual(view.chips(), [second.name]);
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.chatSent[0], ['会话里未发的消息', [], [second.name], { [second.name]: '会话自己的要求' }]);
+  assert.deepEqual(view.h.chatSent[0], ['会话里未发的消息', [], [second.name], { [second.name]: '会话自己的要求' }, 'medium']);
   await view.render();
   assert.equal(view.input().value, '首页的独立草稿');
   assert.deepEqual(view.chips(), [first.name]);
@@ -361,6 +367,139 @@ for (const catalogue of ['failed', 'empty']) test(`${catalogue} catalogues prese
   assert.deepEqual(view.modules().selectedSkills.readSkillRequirements(scope), requirement);
   view.h.accepted = false; await view.send();
   assert.deepEqual(view.h.sent.at(-1), ['仍可恢复的草稿', [first.name], requirement]);
+});
+
+test('temporary skill storage read failure recovers the saved picks when the catalogue becomes available', async t => {
+  const requirement = { [first.name]: '重连后应恢复的要求' };
+  const view = await fixture(t, { text: '服务重启期间保留的草稿', skills: [first.name], requirements: requirement });
+  let unavailable = true, finishCatalogue;
+  view.storage.failRead = key => unavailable && key === selectedKey(scope);
+  view.h.catalog = () => new Promise(resolve => { finishCatalogue = resolve; });
+  await view.render('disconnected');
+  const pendingNotice = view.container.textContent;
+  assert.equal(view.input().value, '服务重启期间保留的草稿');
+  assert.deepEqual(view.storage.writes, [], 'an unreadable selection is never saved as an empty one');
+  unavailable = false;
+  await act(async () => finishCatalogue([first, second]));
+  await view.render('connected');
+  assert.deepEqual(view.chips(), [first.name], 'a successful catalogue load must recover the saved selection after a temporary read failure');
+  assert.match(pendingNotice, /技能选择暂时无法读取/);
+  assert.deepEqual(view.modules().selectedSkills.readSkillRequirements(scope), requirement);
+  assert.deepEqual(view.storage.writes, [], 'recovery only reads existing values');
+  await view.reload();
+  assert.deepEqual(view.chips(), [first.name]);
+});
+
+test('unreadable skill selection cannot be overwritten by a new pick and recovers when the window is focused', async t => {
+  const requirement = { [first.name]: '读取失败时不能覆盖的要求' };
+  const view = await fixture(t, { text: '已有草稿', skills: [first.name], requirements: requirement });
+  let unavailable = true;
+  view.storage.failRead = key => unavailable && key === selectedKey(scope);
+  await view.render(); await view.open(); await view.pick(secondLabel);
+  assert.deepEqual(JSON.parse(view.storage.values.get(selectedKey(scope))), [first.name], 'do not replace an unread saved selection with only the latest click');
+  assert.deepEqual(JSON.parse(view.storage.values.get(requirementKey(scope))), requirement);
+  assert.deepEqual(view.storage.writes, []);
+  unavailable = false;
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  assert.deepEqual(view.chips(), [first.name]);
+  await view.pick(secondLabel);
+  assert.deepEqual(view.chips(), [first.name, second.name]);
+  assert.deepEqual(JSON.parse(view.storage.values.get(selectedKey(scope))), [first.name, second.name]);
+  assert.deepEqual(JSON.parse(view.storage.values.get(requirementKey(scope))), requirement);
+});
+
+for (const failedPart of ['selection', 'requirements']) test(`unreadable Dashboard ${failedPart} blocks incomplete sends and edits until explicit recovery`, async t => {
+  const requirement = { [first.name]: '恢复前不能忽略的原要求' };
+  const text = '先恢复全部技能状态再发送';
+  const view = await fixture(t, { text, skills: [first.name], requirements: requirement });
+  const unreadableKey = failedPart === 'selection' ? selectedKey(scope) : requirementKey(scope);
+  let unavailable = true;
+  view.storage.failRead = key => unavailable && key === unreadableKey;
+  await view.render();
+  if (failedPart === 'requirements') {
+    assert.deepEqual(view.chips(), [first.name], 'readable skill names remain visible while their notes are unavailable');
+    await view.click(view.container.querySelector(`[aria-label="移除技能 ${firstLabel}"]`));
+    assert.deepEqual(view.chips(), [first.name], 'removal cannot destroy an unread saved note');
+    await view.editRequirement(); await view.typeRequirement('读取原要求失败时的新草稿');
+    await view.requirementAction('保存补充要求');
+    assert.match(document.querySelector('.selected-skill-error').textContent, /尚未完成保存/);
+    await view.requirementAction('取消');
+  }
+  await view.open(); await view.pick(secondLabel); await view.close();
+  await view.send(); await view.key(view.input(), 'Enter');
+  assert.deepEqual(view.h.sent, [], 'no creation may silently omit unread skills or requirements');
+  assert.equal(view.input().value, text);
+  assert.deepEqual(JSON.parse(view.storage.values.get(selectedKey(scope))), [first.name]);
+  assert.deepEqual(JSON.parse(view.storage.values.get(requirementKey(scope))), requirement);
+  assert.deepEqual(view.storage.writes, []);
+  const retry = () => [...view.container.querySelectorAll('button')].find(button => button.textContent === '重试恢复技能');
+  await view.click(retry());
+  assert.match(view.container.textContent, /技能选择暂时无法读取/);
+  unavailable = false;
+  await view.click(retry());
+  assert.deepEqual(view.chips(), [first.name]);
+  assert.equal(retry(), undefined);
+  assert.deepEqual(view.storage.writes, [], 'explicit recovery does not replace saved state');
+  view.h.accepted = false; await view.send();
+  assert.deepEqual(view.h.sent, [[text, [first.name], requirement]]);
+});
+
+for (const failedPart of ['selection', 'requirements']) test(`unreadable conversation ${failedPart} cannot be omitted by click or Enter sends`, async t => {
+  const chat = `unreadable-chat-${failedPart}`;
+  const text = '会话也必须保留完整的发送要求';
+  const requirement = { [first.name]: '这个会话的原要求' };
+  const view = await fixture(t, { extra: {
+    [draftKey(chat)]: storedDraft(text),
+    [selectedKey(chat)]: JSON.stringify([first.name]),
+    [requirementKey(chat)]: JSON.stringify(requirement),
+  } });
+  const unreadableKey = failedPart === 'selection' ? selectedKey(chat) : requirementKey(chat);
+  let unavailable = true;
+  view.storage.failRead = key => unavailable && key === unreadableKey;
+  await view.renderChat(chat);
+  const send = () => view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  await send(); await view.key(view.container.querySelector('textarea'), 'Enter');
+  assert.deepEqual(view.h.chatSent, []);
+  assert.equal(view.container.querySelector('textarea').value, text);
+  assert.match(view.container.textContent, /技能选择暂时无法读取/);
+  assert.deepEqual(view.storage.writes, []);
+  unavailable = false;
+  await send();
+  assert.deepEqual(view.chips(), [first.name]);
+  assert.deepEqual(view.h.chatSent, [[text, [], [first.name], requirement, 'medium']], 'the first retry sends the complete recovered snapshot');
+  assert.deepEqual(view.storage.writes, []);
+  assert.deepEqual(JSON.parse(view.storage.values.get(requirementKey(chat))), requirement);
+});
+
+test('navigation through a rejected lazy page and its retry preserves Dashboard picks, notes and text', async t => {
+  const text = '页面加载失败前保存的草稿';
+  const requirement = { [first.name]: '切回工作台后继续使用的要求' };
+  const view = await fixture(t, { text, skills: [first.name], requirements: requirement });
+  let finishOldCatalogue;
+  view.h.catalog = call => call === 1 ? new Promise(resolve => { finishOldCatalogue = resolve; }) : Promise.resolve([first, second]);
+  await view.render();
+  assert.deepEqual(view.chips(), [first.name]);
+  let rejectPage, finishPage, loads = 0;
+  const OtherPage = createLazyPage('图片工作室', () => ++loads === 1
+    ? new Promise((_, reject) => { rejectPage = reject; })
+    : new Promise(resolve => { finishPage = resolve; }));
+  await view.renderPage(createElement(OtherPage));
+  const failedImport = new Error('simulated dynamically imported module failure');
+  await act(async () => rejectPage(failedImport));
+  assert.match(view.container.querySelector('[role="alert"]').textContent, /图片工作室暂时无法打开/);
+  assert.deepEqual(view.h.caughtErrors, [failedImport]);
+  await view.click([...view.container.querySelectorAll('button')].find(button => button.textContent === '重新尝试'));
+  await act(async () => finishPage({ default: () => createElement('section', null, 'Recovered page') }));
+  assert.equal(view.container.textContent, 'Recovered page');
+  await view.render();
+  await act(async () => finishOldCatalogue([]));
+  assert.equal(view.input().value, text);
+  assert.deepEqual(view.chips(), [first.name]);
+  assert.deepEqual(view.modules().selectedSkills.readSkillRequirements(scope), requirement);
+  assert.deepEqual(view.storage.writes, [], 'unmount, error boundary retry and stale catalogue completion are never edits');
+  await view.reload();
+  view.h.accepted = false; await view.send();
+  assert.deepEqual(view.h.sent, [[text, [first.name], requirement]]);
 });
 
 for (const action of ['保存补充要求', '清除补充要求']) test(`failed ${action} keeps the editor draft and the old active requirement until a successful retry`, async t => {

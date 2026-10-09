@@ -337,6 +337,9 @@ export function deleteOutput(path: string): Promise<{ ok: boolean; deleted: stri
 
 export interface UploadedFile { id: string; name: string; path: string; }
 
+/** OpenClaw's canonical per-turn reasoning levels. */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'adaptive' | 'max' | 'ultra';
+
 /** OpenClaw ask_user 问答题（SSE question 事件 payload）。 */
 export interface ChatQuestionOption { label: string; description?: string; }
 export interface ChatQuestionItem {
@@ -422,6 +425,7 @@ export interface LoginStart {
   message?: string;
   qr?: string;          // outputs 下相对路径，用 mediaUrl() 取图
   configured?: boolean; // 凭证式：是否已配置
+  visibleBrowser?: boolean;
 }
 
 // ---- 凭证式账号（微信公众号 AppID/AppSecret）----
@@ -465,6 +469,7 @@ export interface LoginStatus {
   message: string;
   qr: string;
   qrTs?: number;
+  visibleBrowser?: boolean;
 }
 
 export function fetchAccounts(): Promise<AccountItem[]> {
@@ -584,8 +589,8 @@ export function submitPublishSms(platform: string, code: string, receiptId: stri
   });
 }
 
-export function startLogin(platform: string): Promise<LoginStart> {
-  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}`, { method: 'POST' });
+export function startLogin(platform: string, visibleBrowser = false): Promise<LoginStart> {
+  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}${visibleBrowser ? '?visibleBrowser=true' : ''}`, { method: 'POST' });
 }
 
 export function loginStatus(platform: string): Promise<LoginStatus> {
@@ -794,8 +799,15 @@ export function streamChat(
   selectedSkills: string[] = [],
   skillRequirements: SkillRequirements = {},
   modelRef?: string,
-  onModelSelection?: (requestedModelRef: string | null) => void,
+  thinkingLevelOrSelection?: ThinkingLevel | ((requestedModelRef: string | null) => void),
+  onSelectionOrThinking?: ((requestedModelRef: string | null) => void) | ThinkingLevel,
 ): AbortController {
+  // Accept both the current `(model, thinking, selection)` order and the
+  // legacy `(model, selection)` call shape while callers migrate.
+  const thinkingLevel = typeof thinkingLevelOrSelection === 'string' ? thinkingLevelOrSelection :
+    (typeof onSelectionOrThinking === 'string' ? onSelectionOrThinking : undefined);
+  const onModelSelection = typeof thinkingLevelOrSelection === 'function' ? thinkingLevelOrSelection :
+    (typeof onSelectionOrThinking === 'function' ? onSelectionOrThinking : undefined);
   const controller = new AbortController();
   let lastEventId = 0;
 
@@ -894,7 +906,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}) }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -1082,6 +1094,7 @@ export interface ImportCandidate {
   keyMasked: string;   // 只回脱敏值，明文不出后端
   compatible: boolean;
   skipReason: string;
+  targetSlot: string;
   overwrites: ImportOverwrite[];
   previewToken?: string;
 }
@@ -1110,7 +1123,7 @@ export function previewImport(source: string, slot: string, path = ''): Promise<
   });
 }
 
-export function applyImport(source: string, id: string, slot: string, path = '', previewToken = ''): Promise<{
+export function applyImport(source: string, id: string, slot: string, path = '', previewToken = ''): Promise<ModelChannelsResponse & {
   ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
 }> {
   return request('/api/models/import/apply', {

@@ -1,6 +1,11 @@
 .accounts-center { --accounts-paper: var(--surface); max-width: 100%; background: var(--bg); }
 .accounts-center > * { max-width: 1160px; margin-left: auto; margin-right: auto; }
 .accounts-center > .overlay { max-width: none; }
+.account-login-modal { width: min(400px, 100%); max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+.account-login-error { padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary); font-size: 13px; line-height: 1.8; text-align: left; }
+.account-login-error p { margin: 0; color: var(--text); }
+.account-login-error p + p { margin-top: 10px; color: var(--text-secondary); font-size: 12px; }
+.account-login-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 20px; }
 .accounts-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
 .accounts-heading > :first-child { flex: 1 1 260px; min-width: 0; }
 .accounts-eyebrow { margin: 0 0 8px; color: var(--accent-start); font-size: 11px; letter-spacing: .12em; }
@@ -35,6 +40,7 @@
 .accounts-center .account-avatar-fallback { background: var(--surface-hover); color: var(--text-secondary); font-size: 16px; }
 .account-login-method { margin: 0; color: var(--text-tertiary); font-size: 11px; }
 .account-actions { margin-top: auto; }
+.account-browser-login { margin-top: 8px; }
 .accounts-center .account-actions .btn { min-height: 36px; border-radius: 8px; font-size: 12px; }
 .accounts-center .btn-primary { background: var(--text); border-color: var(--text); color: var(--accounts-paper); box-shadow: none; }
 .accounts-center .btn-primary:hover { background: var(--button-hover); }

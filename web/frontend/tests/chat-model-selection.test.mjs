@@ -26,7 +26,7 @@ function run(t, options = {}) {
     options.turnId || 'turn-a', options.resumeOnly || false,
     () => terminal.resolve({ kind: 'unavailable' }),
     options.attachments || [], undefined, undefined,
-    options.skills || [], options.requirements || {}, modelRef, ref => state.selections.push(ref),
+    options.skills || [], options.requirements || {}, modelRef, ref => state.selections.push(ref), options.thinkingLevel,
   );
   t.after(() => controller.abort());
   return { ...state, state, terminal: terminal.promise, controller };
@@ -46,6 +46,19 @@ test('streamChat sends one exact provider/model field alongside the original tas
   assert.deepEqual(JSON.parse(calls[0].body), { message: '用户原始任务', sessionId: 'session-a', turnId: 'turn-a',
     attachments, selectedSkills: ['analysis'], skillRequirements: { analysis: '保留来源' }, modelRef: MODEL });
   assert.deepEqual(result.state.selections, [MODEL]);
+});
+
+test('streamChat includes an explicit thinking level without inventing a reasoning field', async t => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    calls.push(init);
+    return new Response(event('done', {}));
+  });
+  const result = run(t, { modelRef: undefined, thinkingLevel: 'xhigh' });
+  await result.terminal;
+  const body = JSON.parse(calls[0].body);
+  assert.equal(body.thinkingLevel, 'xhigh');
+  assert.equal(Object.hasOwn(body, 'reasoning_effort'), false);
 });
 
 test('an unspecified route leaves modelRef absent instead of inventing a default choice', async t => {

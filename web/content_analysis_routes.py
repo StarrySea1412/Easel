@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from content_analysis import METRICS, PLATFORMS, Store, markdown, now, scope
+from content_analysis import ADVANCED_METRICS, METRICS, PLATFORMS, Store, markdown, now, scope
 
 
 def create_router(root_getter, capture, providers_getter=lambda: []):
@@ -56,7 +56,8 @@ def create_router(root_getter, capture, providers_getter=lambda: []):
                 'contents': [{'id': '请替换为稳定作品ID', 'title': '请替换为实际作品标题', 'body': '', 'tags': [],
                               'comments': [], 'coverText': '', 'transcript': '',
                               'format': 'unknown', 'publishedAt': None, 'snapshotAt': now(), 'period': 'unknown', 'paid': None,
-                              'url': '', 'metrics': {key: None for key in METRICS}}]}
+                              'url': '', 'metrics': {key: None for key in METRICS},
+                              'advancedMetrics': {key: None for key in ADVANCED_METRICS}}]}
 
     @router.post('/experiments')
     async def create_experiment(request: Request):

@@ -1,0 +1,14 @@
+.model-health-panel { margin-top:20px; padding:16px; border:1px solid var(--border); border-radius:12px; min-width:0; }
+.model-health-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.model-health-heading h3 { margin:0 0 6px; font-size:14px; }
+.model-health-heading p, .model-health-panel p { font-size:12px; line-height:1.7; }
+.model-health-list { display:grid; gap:8px; margin:12px 0; }
+.model-health-row { display:flex; flex-wrap:wrap; gap:10px; font-size:12px; padding:8px; background:var(--surface-2); border-radius:8px; overflow-wrap:anywhere; }
+.model-health-row strong { flex:1 1 220px; min-width:0; }
+.model-health-row small { color:var(--text-tertiary); }
+.model-health-fields { display:grid; gap:6px; font-size:12px; }
+.model-health-fields textarea { width:100%; box-sizing:border-box; resize:vertical; border:1px solid var(--border); border-radius:8px; padding:8px; background:var(--surface); color:var(--text); font:inherit; }
+.model-health-actions, .model-health-schedule { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; }
+.model-health-schedule .easel-select { min-width:130px; }
+.model-health-error { color:var(--red); overflow-wrap:anywhere; }
+@media(max-width:640px) { .model-health-panel { padding:10px; } .model-health-heading { flex-wrap:wrap; } .model-health-schedule>label { width:100%; } .model-health-schedule .easel-select { flex:1; min-width:0; } }

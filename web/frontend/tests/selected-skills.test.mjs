@@ -83,7 +83,7 @@ test('actual picker selection remains visible after closing and sends exact sele
   assert.match(view.container.querySelector('[aria-label="已选择的创作技能"]').textContent, /已选技能.*小红书卡组.*金句卡/);
   await view.type('只发送我输入的正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent, [['只发送我输入的正文', [], [first.name, second.name], {}]]);
+  assert.deepEqual(view.h.sent, [['只发送我输入的正文', [], [first.name, second.name], {}, 'medium']]);
   assert.deepEqual(view.chips(), [first.name, second.name], 'accepted sends retain the next-turn skill choices');
   await view.click(view.container.querySelector('[aria-label="移除技能 小红书卡组"]'));
   assert.deepEqual(view.chips(), [second.name]);
@@ -189,7 +189,7 @@ test('actual Composer sends per-session requirements after navigation, remount a
   view.storage.values.set(view.requirementKey('b'), JSON.stringify({ [first.name]: '会话二：采用列表' }));
   await view.render('a'); await view.type('会话一正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent.at(-1), ['会话一正文', [], [first.name], { [first.name]: '会话一：保留出处' }]);
+  assert.deepEqual(view.h.sent.at(-1), ['会话一正文', [], [first.name], { [first.name]: '会话一：保留出处' }, 'medium']);
   await view.render('a', [{ role: 'user', content: '已发送正文' }]);
   await view.render('b', []); await view.reload(); await view.type('会话二正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));

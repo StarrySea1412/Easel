@@ -50,6 +50,38 @@ test('export/parse/import roundtrip preserves portable text, errors, archive sta
   assert.match(imported.id, /^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
 });
 
+test('per-turn thinking strength survives backup import, saved history and a cold refresh', async () => {
+  const exported = createConversationBackup([session({
+    messages: [{ role: 'user', content: '需要深度分析', requestedThinkingLevel: 'xhigh' }],
+  })]);
+  assert.equal(exported.sessions[0].messages[0].requestedThinkingLevel, 'xhigh');
+  const [imported] = createImportedSessions(parseConversationBackup(JSON.stringify(exported)), []);
+  assert.equal(imported.messages[0].requestedThinkingLevel, 'xhigh');
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem(key) { return values.get(key) ?? null; }, setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  } });
+  const { saveSessions } = await loadTsModule('../src/lib/store.ts', import.meta.url);
+  assert.equal(saveSessions([imported]), true);
+  // A fresh store module must decode the actual serialized, read-only backup.
+  const { tsModuleUrl } = await import('./load-ts.mjs');
+  const fresh = await import(`${await tsModuleUrl(new URL('../src/lib/store.ts', import.meta.url))}#thinking-backup-refresh`);
+  const [reloaded] = fresh.loadSessions();
+  assert.equal(reloaded.importedFromBackup, true);
+  assert.equal(reloaded.messages[0].requestedThinkingLevel, 'xhigh');
+  assert.equal(reloaded.pendingTurnId, undefined);
+  assert.equal(reloaded.sessionKey, undefined);
+  assert.equal(createConversationBackup([reloaded]).sessions[0].messages[0].requestedThinkingLevel, 'xhigh');
+});
+
+test('backup validation rejects unsupported thinking strength and accepts legacy messages without it', () => {
+  const invalid = backup();
+  invalid.sessions[0].messages[0].requestedThinkingLevel = 'unsupported';
+  assert.throws(() => parseConversationBackup(JSON.stringify(invalid)), /requestedThinkingLevel/);
+  assert.equal(parseConversationBackup(JSON.stringify(backup())).sessions[0].messages[0].requestedThinkingLevel, undefined);
+});
+
 test('export whitelist excludes identities, secrets, attachments and action identifiers', () => {
   const exported = createConversationBackup([session({
     persona: 'PERSONA_SECRET', sessionKey: 'SESSION_SECRET', pendingTurnId: 'TURN_SECRET',

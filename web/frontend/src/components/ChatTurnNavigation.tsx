@@ -11,10 +11,34 @@ interface ChatTurnNavigationProps {
 
 export default function ChatTurnNavigation({ nodes, current, following, onJump, onLatest }: ChatTurnNavigationProps) {
   const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState<number|null>(null);
+  const [previewTop, setPreviewTop] = useState(0);
   const navigation = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLOListElement>(null);
   const panelId = useId();
+  const previewId = useId();
+  const ticks = useRef<HTMLButtonElement[]>([]);
+  const tickRail = useRef<HTMLDivElement>(null);
+
+  const revealTick = (index:number) => {
+    const button=ticks.current[index];const rail=tickRail.current;
+    if(!button||!rail)return;
+    const top=button.getBoundingClientRect().top-rail.getBoundingClientRect().top+rail.scrollTop;
+    if(top<rail.scrollTop)rail.scrollTop=top;
+    else if(top+button.offsetHeight>rail.scrollTop+rail.clientHeight)rail.scrollTop=top+button.offsetHeight-rail.clientHeight;
+  };
+
+  const showPreview = (index:number) => {
+    revealTick(index);
+    const button=ticks.current[index];
+    const bounds=navigation.current?.getBoundingClientRect();
+    if(button&&bounds)setPreviewTop(Math.min(Math.max(0,button.getBoundingClientRect().top-bounds.top-18),Math.max(0,bounds.height-70)));
+    setPreview(index);
+  };
+
+  useEffect(()=>{setPreview(null);},[nodes]);
+  useEffect(()=>{revealTick(current);},[current]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -54,16 +78,32 @@ export default function ChatTurnNavigation({ nodes, current, following, onJump, 
     // otherwise return to the compact trigger when removing the focused item.
     if (navigation.current?.contains(document.activeElement)) trigger.current?.focus({ preventScroll: true });
     setExpanded(false);
+    setPreview(null);
   };
 
   return (
     <nav ref={navigation} className="chat-turn-navigation" aria-label="对话轮次导航">
       <button ref={trigger} type="button" className="chat-turn-nav-trigger" aria-expanded={expanded}
         aria-controls={panelId} aria-label={`对话轮次目录，当前第 ${current + 1} 轮，共 ${nodes.length} 轮`}
-        onClick={() => setExpanded(value => !value)}>
+        onClick={() => {setPreview(null);setExpanded(value => !value);}}>
         <span>轮次</span><span className="chat-turn-nav-count">{current + 1} / {nodes.length}</span>
         <span className={`chat-turn-nav-chevron${expanded ? ' is-open' : ''}`} aria-hidden="true">⌄</span>
       </button>
+      <div ref={tickRail} className="chat-turn-ticks" role="group" aria-label="对话轮次刻度" onPointerLeave={()=>setPreview(null)}>
+        {nodes.map((node,index)=><button key={node.messageIndex} ref={button=>{if(button)ticks.current[index]=button;}} type="button" className={index===current?'chat-turn-tick is-current':'chat-turn-tick'}
+          tabIndex={index===Math.max(0,current)?0:-1} aria-current={index===current?'step':undefined} aria-label={`定位第 ${node.number} 轮：${node.label}`} aria-describedby={preview===index?previewId:undefined}
+          onPointerEnter={()=>showPreview(index)} onFocus={()=>showPreview(index)} onBlur={event=>{if(!event.relatedTarget||!navigation.current?.contains(event.relatedTarget as Node))setPreview(null);}}
+          onClick={()=>choose(()=>onJump(index))} onKeyDown={event=>{
+            let next:number|undefined;
+            if(event.key==='ArrowUp'||event.key==='ArrowLeft')next=Math.max(0,index-1);
+            if(event.key==='ArrowDown'||event.key==='ArrowRight')next=Math.min(nodes.length-1,index+1);
+            if(event.key==='Home')next=0;
+            if(event.key==='End')next=nodes.length-1;
+            if(event.key==='Escape'){event.preventDefault();setPreview(null);trigger.current?.focus({preventScroll:true});}
+            if(next!==undefined){event.preventDefault();ticks.current[next]?.focus({preventScroll:true});showPreview(next);}
+          }}><span aria-hidden="true"/></button>)}
+      </div>
+      {!expanded&&preview!==null&&nodes[preview]&&<div id={previewId} role="tooltip" className="chat-turn-preview" style={{top:previewTop}}><strong>第 {nodes[preview].number} 轮{preview===current?' · 当前':''}</strong><p>{nodes[preview].label}</p><small>点击或按 Enter 定位</small></div>}
       {expanded && <div id={panelId} className="chat-turn-popover">
         <div className="chat-turn-nav-title"><span>对话目录</span><small>{following ? '跟随最新' : '正在浏览历史'}</small></div>
         <div className="chat-turn-nav-controls">

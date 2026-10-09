@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { applyImport, fetchImportSources, fetchModelChannels, previewImport } from '../lib/api';
+import { applyImport, fetchImportSources, previewImport } from '../lib/api';
 import type { ImportPreview, ImportSource, ModelRow } from '../lib/api';
+import { modelImportSlotLabel } from '../lib/modelImports';
 
 /** Model settings can select local configurations without leaving the model page. */
 export function useModelImport({ onApplied, onBusyChange }: {
@@ -10,7 +11,7 @@ export function useModelImport({ onApplied, onBusyChange }: {
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [loadingSources, setLoadingSources] = useState(true);
   const [source, setSource] = useState('saved');
-  const [slot, setSlot] = useState('openai');
+  const [slot, setSlot] = useState('auto');
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [pick, setPick] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -45,6 +46,7 @@ export function useModelImport({ onApplied, onBusyChange }: {
   useEffect(() => { void refreshSources(); }, [refreshSources]);
 
   const read = useCallback(async (nextSource: string, nextSlot: string) => {
+    if (applying.current) return;
     const id = ++requestId.current;
     setSource(nextSource);
     setSlot(nextSlot);
@@ -76,19 +78,15 @@ export function useModelImport({ onApplied, onBusyChange }: {
     callbacks.current.onBusyChange(true);
     setMessage('');
     try {
-      await applyImport(source, selected.id, slot, '', selected.previewToken);
+      const targetSlot = selected.targetSlot || slot;
+      const result = await applyImport(source, selected.id, targetSlot, preview?.path || '', selected.previewToken);
+      const row = result.channels.chat.rows.find((item) => item.slot === targetSlot);
+      if (row) callbacks.current.onApplied(row);
       if (alive.current) {
         setPreview(null);
         setPick('');
         setConfirmed(false);
-        setMessage(`已导入 ${selected.name} · ${selected.model || '保留原模型'}。可在「当前配置」中选择为主模型，再保存。`);
-      }
-      try {
-        const data = await fetchModelChannels();
-        const row = data.channels.chat.rows.find((item) => item.slot === slot);
-        if (row) callbacks.current.onApplied(row);
-      } catch {
-        if (alive.current) setMessage('配置已导入，但刷新失败；重新打开模型设置可查看。');
+        setMessage(`已导入并保存 ${selected.name} · ${selected.model || '保留原模型'} → ${modelImportSlotLabel(targetSlot)}。如需切换主模型，在「当前配置」选择后再保存。`);
       }
     } catch (error) {
       if (alive.current) {
@@ -100,7 +98,7 @@ export function useModelImport({ onApplied, onBusyChange }: {
       callbacks.current.onBusyChange(false);
       if (alive.current) setBusy('');
     }
-  }, [selected, confirmed, source, slot]);
+  }, [selected, confirmed, source, slot, preview]);
 
   return { sources, loadingSources, source, slot, preview, pick, selected, confirmed, busy, message,
     refreshSources, read, apply, setConfirmed,

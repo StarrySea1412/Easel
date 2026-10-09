@@ -16,6 +16,11 @@ import DashboardEmpty from './ui/DashboardEmpty';
 import { IconImage } from './settingsIcons';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
+import ComposerModelPicker from './ComposerModelPicker';
+import { useComposerModels } from '../hooks/useComposerModels';
+import { loadThinkingLevel } from '../lib/thinkingLevel';
+import type { ThinkingLevel } from '../lib/api';
+import '../styles/chat-composer.css';
 import { getChatDraft, subscribeChatDraft, setChatDraftText, setChatDraftError, clearChatDraft } from '../lib/chatDrafts';
 import { DASHBOARD_DRAFT_SCOPE, isDashboardDraftTextCleared } from '../lib/dashboardDraft';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -46,7 +51,7 @@ interface DashboardProps {
   onNavigate: (page: Page) => void;
   onUseTopic: (title: string) => void;
   /** 工作台输入框直达创作：新开会话把这句话发给 Agent */
-  onQuickPrompt: (text: string, selectedSkills?: string[], skillRequirements?: SkillRequirements) => boolean;
+  onQuickPrompt: (text: string, selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
 }
 
 const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', scheduled: '待发', published: '已发' };
@@ -84,6 +89,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   );
   const quickText = quickDraft.text;
   const quickSkills = useComposerSkills(DASHBOARD_DRAFT_SCOPE, 'creation');
+  const quickModels = useComposerModels(null);
   const composingQuick = useRef(false);
   const setQuickText = (value: string | ((current: string) => string)) => {
     setChatDraftText(DASHBOARD_DRAFT_SCOPE, value);
@@ -161,8 +167,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       return;
     }
     const snapshot = quickSkills.getSnapshot();
+    if (!snapshot) return;
+    const model = quickModels.getSnapshot();
+    if (!model) { setChatDraftError(DASHBOARD_DRAFT_SCOPE, '所选模型当前无法用于本轮，草稿已保留。请刷新或改用会话配置。'); return; }
     try {
-      if (onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements) !== true) {
+      const accepted = model.modelRef ? onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements, loadThinkingLevel(), model.modelRef) : onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements);
+      if (accepted !== true) {
         setChatDraftError(DASHBOARD_DRAFT_SCOPE, '本次创作未被接收，草稿和技能已保留，请稍后重试。');
         return;
       }
@@ -243,6 +253,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
           />
           <div className="dash-composer-bar">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
+            <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} />
             <span className="dash-composer-hint" id="quick-create-hint">Enter 创作 · Shift+Enter 换行</span>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →
@@ -250,7 +261,9 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
           </div>
         </div>
         {quickDraft.error && <p className="dash-composer-error" role="alert">{quickDraft.error}</p>}
-        {quickSkills.notice && <p className="composer-skills-note" role="status">{quickSkills.notice}</p>}
+        {quickSkills.notice && <p className="composer-skills-note" role="status">{quickSkills.notice}
+          {quickSkills.restorePending && <button type="button" className="link-btn" onClick={() => quickSkills.retryRestore()}>重试恢复技能</button>}
+        </p>}
         <p className="dash-composer-note">{persona ? `当前画像 · ${persona}` : '通用创作模式'}<span> · {gatewayStatus === 'connected' ? '创作助手已连接' : gatewayStatus === 'connecting' ? '正在连接创作助手' : '网关离线，请先检查设置'}</span></p>
         </div>
         <div className="dash-quick">

@@ -1,22 +1,38 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchSkills } from '../lib/api';
 import {
-  readSelectedSkills, writeSelectedSkills, readSkillRequirements, writeSkillRequirements,
+  readComposerSkillState, writeSelectedSkills, writeSkillRequirements,
   requirementsForSelection, MAX_SKILL_REQUIREMENT_LENGTH, MAX_SKILL_REQUIREMENTS_TOTAL,
   MAX_SKILL_REQUIREMENTS_COUNT,
 } from '../lib/selectedSkills';
 
 /** The caller remounts on scope changes, so edits always belong to one draft. */
 export function useComposerSkills(scope: string, requirementScope: 'conversation' | 'creation' = 'conversation') {
-  const [selectedSkills, updateSelectedSkills] = useState(() => readSelectedSkills(scope));
+  const [initial] = useState(() => readComposerSkillState(scope));
+  const [selectedSkills, updateSelectedSkills] = useState(initial.selectedSkills);
   const selectedSkillsRef = useRef(selectedSkills);
-  const [skillRequirements, updateSkillRequirements] = useState(() => readSkillRequirements(scope, selectedSkills));
+  const [skillRequirements, updateSkillRequirements] = useState(initial.skillRequirements);
   const skillRequirementsRef = useRef(skillRequirements);
+  const needsRestore = useRef(!initial.readable);
+  const [restorePending, setRestorePending] = useState(needsRestore.current);
   const revision = useRef(0);
   const [storageNotice, setStorageNotice] = useState('');
   const [catalog, setCatalog] = useState<Set<string> | null>(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const scopeLabel = requirementScope === 'creation' ? '本次创作' : '本会话';
+
+  const retryRestore = useCallback(() => {
+    if (!needsRestore.current) return true;
+    const saved = readComposerSkillState(scope);
+    if (!saved.readable) return false;
+    selectedSkillsRef.current = saved.selectedSkills;
+    updateSelectedSkills(saved.selectedSkills);
+    skillRequirementsRef.current = saved.skillRequirements;
+    updateSkillRequirements(saved.skillRequirements);
+    needsRestore.current = false;
+    setRestorePending(false);
+    return true;
+  }, [scope]);
 
   useEffect(() => {
     let stale = false;
@@ -26,9 +42,21 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
       // Directory responses describe availability; only user edits change picks.
       setCatalog(new Set(skills.map(skill => skill.name)));
       setCatalogFailed(false);
-    }).catch(() => { if (!stale) setCatalogFailed(true); });
+      retryRestore();
+    }).catch(() => { if (!stale) { setCatalogFailed(true); retryRestore(); } });
     return () => { stale = true; };
-  }, [scope]);
+  }, [scope, retryRestore]);
+
+  useEffect(() => {
+    window.addEventListener('focus', retryRestore);
+    window.addEventListener('online', retryRestore);
+    window.addEventListener('pageshow', retryRestore);
+    return () => {
+      window.removeEventListener('focus', retryRestore);
+      window.removeEventListener('online', retryRestore);
+      window.removeEventListener('pageshow', retryRestore);
+    };
+  }, [retryRestore]);
 
   const replaceSkills = (next: string[]) => {
     selectedSkillsRef.current = next;
@@ -45,7 +73,7 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
   };
 
   const saveSkillRequirement = (skill: string, text: string) => {
-    if (!selectedSkillsRef.current.includes(skill)) return false;
+    if (!retryRestore() || !selectedSkillsRef.current.includes(skill)) return false;
     const trimmed = text.trim();
     const next = { ...skillRequirementsRef.current, [skill]: trimmed };
     if (!trimmed) delete next[skill];
@@ -67,17 +95,18 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
   };
 
   return {
-    selectedSkills, skillRequirements, requirementScope, saveSkillRequirement,
-    notice: storageNotice || (catalogFailed ? '技能列表暂时无法读取，已保留当前选择。'
+    selectedSkills, skillRequirements, requirementScope, saveSkillRequirement, restorePending, retryRestore,
+    notice: restorePending ? '技能选择暂时无法读取，保存的选择和补充要求未被覆盖；请重试恢复。'
+      : storageNotice || (catalogFailed ? '技能列表暂时无法读取，已保留当前选择。'
       : catalog && selectedSkills.some(name => !catalog.has(name)) ? '部分已选技能未出现在当前列表中，已保留选择；发送前请确认技能是否可用。' : ''),
-    selectSkill: (skill: string) => replaceSkills(selectedSkillsRef.current.includes(skill)
+    selectSkill: (skill: string) => retryRestore() && replaceSkills(selectedSkillsRef.current.includes(skill)
       ? selectedSkillsRef.current : [...selectedSkillsRef.current, skill]),
-    removeSkill: (skill: string) => replaceSkills(selectedSkillsRef.current.filter(name => name !== skill)),
-    getSnapshot: () => ({
+    removeSkill: (skill: string) => retryRestore() && replaceSkills(selectedSkillsRef.current.filter(name => name !== skill)),
+    getSnapshot: () => retryRestore() ? ({
       selectedSkills: [...selectedSkillsRef.current],
       skillRequirements: requirementsForSelection(skillRequirementsRef.current, selectedSkillsRef.current),
       revision: revision.current,
-    }),
+    }) : null,
     /** null means the accepted send no longer owns the current selection. */
     clear: (acceptedRevision: number): boolean | null => revision.current === acceptedRevision ? replaceSkills([]) : null,
   };

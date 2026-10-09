@@ -4,6 +4,18 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-09: professional analysis and operator handoff / 专业分析与运营交接
+
+- Added seven-platform diagnostic capabilities, optional advanced metrics, explicit sample quality and comparable cohorts, evidence-bound topics and frozen seven-day experiments. Platform changes automatically refresh live data and reject stale responses. / 新增七平台诊断、可选高级指标、样本质量、同条件比较、证据题材和实验；切平台自动读取并隔离旧响应。
+- Added composer model/thinking selection, measured model status, custom text and objective random image probes, durable opt-in schedules and a shared rolling quota. / 输入框可选模型/思考强度，展示实测状态；自定义文本/随机图片检测及默认关闭的自动测活统一限流。
+- Added conversation ticks and user-confirmed Agent title suggestions; fixed CC Switch mapping and Xiaohongshu browser-login recovery. / 新增侧边刻度和需保存的 Agent 命名建议，修复配置映射和小红书浏览器登录恢复。
+- Added the [operator handoff guide](docs/operator-handoff-2026-10-09.md), platform research and final-package audit boundaries. Frontend full suite: 755 passed; final changed-component suite: 47 passed. Backend combined affected suites: 422 passed, with 145 final focused checks passing (overlapping, not summed). TypeScript, lint and production build passed. / 检查覆盖模拟请求与界面契约，真实业务和最终 ZIP 尚未验收；旧包与公开安装器未更新。
+
+### 2026-10-09 R28: current portable candidate acceptance extension
+
+- Test the actual `76bbaf6-3fb7` extraction with its embedded Python: pdfplumber, pdfminer.six and native PDFium return the expected one-page text; the 612×792 rendering passes pixel and visual checks. Loaded module and native DLL paths and hashes match the distribution. This covers one synthetic English page, without inheriting the historical package's results.
+- Preserve the initial preflight failure caused by an existing Chromium `debug.log`; the retry records that log without changing distribution files. Native desktop capture and window activation remain unavailable, and no ready clean Windows acceptance environment was identified. No product source or ZIP was changed for these checks.
+
 ### 2026-10-09 R27: moderation follow-up and portable browser verification
 
 - Read Xiaohongshu and WeChat Channels creator-page responses using status rules traced to public first-party JavaScript. Require explicit public visibility and completed publication; review, scheduled, restricted and unknown results remain distinct. Xiaohongshu can expose a validated explore URL; Channels retains its work ID without guessing a public URL. Authenticated live platform responses remain unverified.

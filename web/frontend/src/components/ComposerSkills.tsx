@@ -20,6 +20,7 @@ export function ComposerSkillPicker({ skills, setInput }: {
 }) {
   return <BrushEntry compact selectedSkills={skills.selectedSkills} onRemove={skills.removeSkill}
     onPick={(text, skill, example) => {
+      if (!skills.retryRestore()) return;
       skills.selectSkill(skill);
       setInput(current => example ? (current.trim() ? `${current}\n${text}` : text) : current.trim() ? current : text);
     }} />;

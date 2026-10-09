@@ -48,3 +48,10 @@
 .sidebar-shell.is-expanded .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:70;border:0;background:color-mix(in srgb,var(--text) 16%,transparent);cursor:pointer}
 .app-layout:has(.sidebar-rail)>.main-content{height:100%}
 }
+
+.session-rename-form { display:flex; flex-wrap:wrap; gap:5px; }
+.session-rename-form .session-rename-input { width:100%; min-width:0; }
+.session-title-agent, .session-title-save { border:1px solid var(--border); background:var(--bg-card); color:var(--text-secondary); border-radius:6px; padding:4px 6px; font-size:11px; }
+.session-title-agent:focus-visible, .session-title-save:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.session-title-agent:disabled { opacity:.5; }
+.session-title-error { width:100%; font-size:11px; color:var(--danger); overflow-wrap:anywhere; }

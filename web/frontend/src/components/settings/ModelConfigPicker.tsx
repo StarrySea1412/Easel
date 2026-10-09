@@ -2,12 +2,7 @@ import type { ModelRow } from '../../lib/api';
 import { useModelImport } from '../../hooks/useModelImports';
 import Select from '../ui/Select';
 import { SettingsField } from './SettingsField';
-
-const SLOT_OPTIONS = [
-  { value: 'openai', label: 'OpenAI 兼容', description: '适用于 Chat Completions 协议' },
-  { value: 'relay', label: 'Anthropic 兼容中转', description: '适用于 Anthropic Messages 协议' },
-  { value: 'anthropic', label: 'Anthropic', description: '适用于 Anthropic Messages 协议' },
-];
+import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../../lib/modelImports';
 
 export function ModelConfigPicker({ rows, disabled, onPrimary, onApplied, onBusyChange, onOpenImport }: {
   rows: ModelRow[];
@@ -51,7 +46,7 @@ export function ModelConfigPicker({ rows, disabled, onPrimary, onApplied, onBusy
           </SettingsField>
         ) : (
           <SettingsField label="导入到">
-            <Select aria-label="导入目标通道" value={state.slot} disabled={locked} options={SLOT_OPTIONS}
+            <Select aria-label="导入目标通道" value={state.slot} disabled={locked} options={MODEL_IMPORT_SLOT_OPTIONS}
               onChange={(slot) => void state.read(state.source, slot)} />
           </SettingsField>
         )}
@@ -70,11 +65,12 @@ export function ModelConfigPicker({ rows, disabled, onPrimary, onApplied, onBusy
               }))} onChange={state.selectCandidate} />
           </SettingsField>
           {state.preview && !state.preview.candidates.some((candidate) => candidate.compatible) && state.preview.candidates.length > 0 && (
-            <p className="hint">此来源没有匹配当前通道的配置。请切换导入目标；不兼容原因见模型选项。</p>
+            <p className="hint">此来源没有匹配当前通道的配置。可选择自动匹配协议；Responses 配置当前不支持直接导入，具体原因见各模型选项。</p>
           )}
           {state.selected && (
             <div className="model-import-preview">
               <p><strong>{state.selected.name}</strong> · {state.selected.model || '保留目标模型'}</p>
+              <p>将写入：{modelImportSlotLabel(state.selected.targetSlot || state.slot)}</p>
               <p className="hint">{state.selected.baseUrl} · 密钥 {state.selected.keyMasked || '未配置'}</p>
               {state.selected.overwrites.length > 0 && <ul>{state.selected.overwrites.map((overwrite) => (
                 <li key={overwrite.field}><strong>{overwrite.field}</strong>：{overwrite.current} → {overwrite.incoming}</li>

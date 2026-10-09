@@ -7,6 +7,12 @@ export const MAX_SKILL_REQUIREMENT_LENGTH = 2000;
 export const MAX_SKILL_REQUIREMENTS_TOTAL = 10000;
 export const MAX_SKILL_REQUIREMENTS_COUNT = 20;
 
+export interface ComposerSkillState {
+  selectedSkills: string[];
+  skillRequirements: SkillRequirements;
+  readable: boolean;
+}
+
 export function requirementsForSelection(value: unknown, selectedSkills: readonly string[]): SkillRequirements {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const selected = new Set(normalizeSelectedSkills(selectedSkills));
@@ -22,11 +28,31 @@ export function requirementsForSelection(value: unknown, selectedSkills: readonl
   return Object.fromEntries(entries);
 }
 
-export function readSelectedSkills(sessionId: string): string[] {
+function readStoredSelection(sessionId: string): string[] {
+  const raw = localStorage.getItem(`easel:selected-skills:${sessionId}`);
+  const saved: unknown = JSON.parse(raw === null ? '[]' : raw);
+  if (!Array.isArray(saved)) throw new Error('Invalid saved skill selection');
+  return normalizeSelectedSkills(saved);
+}
+
+function readStoredRequirements(sessionId: string, selectedSkills: string[]): SkillRequirements {
+  const raw = localStorage.getItem(`easel:skill-requirements:${sessionId}`);
+  const saved: unknown = JSON.parse(raw === null ? '{}' : raw);
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('Invalid saved skill requirements');
+  return requirementsForSelection(saved, selectedSkills);
+}
+
+/** A failed read is not an empty selection and must not authorize a replacement. */
+export function readComposerSkillState(sessionId: string): ComposerSkillState {
+  let selectedSkills: string[] = [];
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(`easel:selected-skills:${sessionId}`) || '[]');
-    return normalizeSelectedSkills(saved);
-  } catch { return []; }
+    selectedSkills = readStoredSelection(sessionId);
+    return { selectedSkills, skillRequirements: readStoredRequirements(sessionId, selectedSkills), readable: true };
+  } catch { return { selectedSkills, skillRequirements: {}, readable: false }; }
+}
+
+export function readSelectedSkills(sessionId: string): string[] {
+  try { return readStoredSelection(sessionId); } catch { return []; }
 }
 
 /** Persist explicit user edits only; reading a partial skill catalogue is not an edit. */
@@ -38,10 +64,7 @@ export function writeSelectedSkills(sessionId: string, skills: string[]): boolea
 }
 
 export function readSkillRequirements(sessionId: string, selectedSkills = readSelectedSkills(sessionId)): SkillRequirements {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(`easel:skill-requirements:${sessionId}`) || '{}');
-    return requirementsForSelection(value, selectedSkills);
-  } catch { return {}; }
+  try { return readStoredRequirements(sessionId, selectedSkills); } catch { return {}; }
 }
 
 export function writeSkillRequirements(sessionId: string, requirements: SkillRequirements): boolean {

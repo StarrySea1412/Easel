@@ -85,6 +85,8 @@ def cc_home(tmp_path, monkeypatch):
     cc_home = tmp_path / ".cc-switch"
     monkeypatch.setattr(lci, "HOME_OPENCLAW", oc_home)
     monkeypatch.setattr(lci, "HOME_CCSWITCH", cc_home)
+    monkeypatch.delenv('EASEL_PORTABLE', raising=False)
+    monkeypatch.setattr(lci, '_windows_profile_home', lambda: None)
     monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(oc_home))
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.setenv('USERPROFILE', str(tmp_path))
@@ -311,3 +313,138 @@ def test_apply_failure_keeps_env_untouched(cc_home, fake_env, monkeypatch):
         asyncio.run(web.api_import_apply(web.ImportApplyRequest(
             source="cc-switch", id=cand["id"], slot="openai", previewToken=cand['previewToken'])))
     assert env_file.read_text(encoding="utf-8") == before
+
+
+def test_portable_source_discovery_uses_current_windows_profile_without_reading_it(cc_home, tmp_path, monkeypatch):
+    profile = tmp_path / 'windows-profile'
+    source = _write_ccswitch_db(profile / '.cc-switch')
+    monkeypatch.setenv('EASEL_PORTABLE', '1')
+    monkeypatch.setattr(lci, '_windows_profile_home', lambda: profile)
+    monkeypatch.setattr(lci, 'read_ccswitch', lambda *_: pytest.fail('Source discovery must not read credentials'))
+    result = asyncio.run(web.api_import_sources())
+    found = next(item for item in result['sources'] if item['id'] == 'cc-switch')
+    assert found['available'] and Path(found['path']) == source
+    assert lci.HOME_CCSWITCH == cc_home[1]
+    assert not list(cc_home[1].glob('*'))
+    assert lci.openclaw_path() == cc_home[0] / 'openclaw.json'
+
+
+def test_explicit_ccswitch_directory_and_bom_json_are_supported(cc_home):
+    source = _write_ccswitch_json(cc_home[1])
+    source.write_text(json.dumps(CCSWITCH_JSON_FIXTURE), encoding='utf-8-sig')
+    resolved, error = lci.resolve_source('cc-switch', f'"{cc_home[1]}"')
+    assert resolved == source and not error
+    candidates, errors = lci.read_source('cc-switch', resolved)
+    assert not errors and len(candidates) == 2
+
+
+def test_ccswitch_display_names_are_not_model_ids_and_short_explicit_keys_are_retained(cc_home):
+    data = json.loads(json.dumps(CCSWITCH_JSON_FIXTURE))
+    env = data['claude']['providers']['p1']['settingsConfig']['env']
+    env.update({'UNRELATED_TOKEN': 'not-the-provider-key', 'ANTHROPIC_AUTH_TOKEN': 'local-key',
+                'ANTHROPIC_DEFAULT_SONNET_MODEL': 'claude-sonnet-4-6',
+                'ANTHROPIC_DEFAULT_SONNET_MODEL_NAME': '我的日常模型',
+                'ANTHROPIC_DEFAULT_OPUS_MODEL': 'claude-opus-4-6',
+                'ANTHROPIC_DEFAULT_OPUS_MODEL_NAME': '深度思考显示名称'})
+    path = _write_ccswitch_json(cc_home[1])
+    path.write_text(json.dumps(data), encoding='utf-8')
+    candidates, errors = lci.read_ccswitch(path)
+    claude = [item for item in candidates if item['appType'] == 'claude']
+    assert not errors
+    assert [item['model'] for item in claude] == ['claude-sonnet-4-6', 'claude-opus-4-6']
+    assert all(item['key'] == 'local-key' and item['compatible'] for item in claude)
+
+
+def test_auto_preview_matches_protocol_and_apply_uses_the_confirmed_target(cc_home, fake_env):
+    _write_ccswitch_json(cc_home[1])
+    env_file, synced = fake_env
+    original = env_file.read_text(encoding='utf-8')
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
+    assert preview['slot'] == 'auto'
+    claude = next(item for item in preview['candidates'] if item['appType'] == 'claude')
+    codex = next(item for item in preview['candidates'] if item['appType'] == 'codex')
+    assert claude['compatible'] and claude['targetSlot'] == 'relay'
+    assert codex['compatible'] and codex['targetSlot'] == 'openai'
+    with pytest.raises(web.HTTPException) as rejected:
+        asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=claude['id'],
+            slot='anthropic', previewToken=claude['previewToken'])))
+    assert rejected.value.status_code == 409
+    assert env_file.read_text(encoding='utf-8') == original
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=claude['id'],
+        slot=claude['targetSlot'], path=preview['path'], previewToken=claude['previewToken'])))
+    assert result['ok'] and result['applied']['slot'] == 'relay'
+    assert next(row for row in result['channels']['chat']['rows'] if row['slot'] == 'relay')['model'] == 'claude-sonnet-4-6'
+    assert 'OPENAI_BASE_URL=https://old.example.com/v1' in env_file.read_text(encoding='utf-8')
+    assert set(synced[-1][0]) == {'relay'}
+
+
+def test_auto_import_prefers_empty_slot_and_keeps_unrelated_existing_configuration(cc_home, fake_env):
+    _write_ccswitch_json(cc_home[1])
+    env_file, synced = fake_env
+    original = env_file.read_text(encoding='utf-8') + 'EASEL_LLM_BASE_URL=https://keep.example/v1\nEASEL_LLM_API_KEY=keep-relay-key\nVIDEO_MODEL=keep-video-model\n'
+    env_file.write_text(original, encoding='utf-8')
+    oc = cc_home[0] / 'openclaw.json'
+    oc.parent.mkdir(parents=True)
+    oc.write_text(json.dumps({'models': {'providers': {'relay': {'api': 'anthropic-messages',
+        'baseUrl': 'https://keep.example/v1', 'apiKey': 'keep-relay-key'}, 'untouched-custom': {'apiKey': 'custom-test-key'}}}}), encoding='utf-8')
+    original_oc = oc.read_bytes()
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
+    selected = next(item for item in preview['candidates'] if item['appType'] == 'claude')
+    assert selected['targetSlot'] == 'anthropic'
+    assert all(item['field'].startswith('ANTHROPIC_') for item in selected['overwrites'])
+    asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=selected['id'],
+        slot='anthropic', previewToken=selected['previewToken'])))
+    updated = env_file.read_text(encoding='utf-8')
+    assert all(line in updated for line in original.splitlines())
+    assert oc.read_bytes() == original_oc  # This fixture spies on OpenClaw writes.
+    assert synced[-1][1] == {'relay', 'untouched-custom'}
+    assert set(synced[-1][0]) == {'anthropic'}
+
+
+def test_same_name_and_endpoint_ccswitch_rows_keep_distinct_database_identities(cc_home, fake_env):
+    cc_home[1].mkdir()
+    path = cc_home[1] / 'cc-switch.db'
+    with sqlite3.connect(path) as con:
+        con.execute('CREATE TABLE providers (id TEXT, app_type TEXT, name TEXT, settings_config TEXT)')
+        for identity, key in [('first', 'first-fixture-key'), ('second', 'second-fixture-key')]:
+            cfg = json.loads(json.dumps(CCSWITCH_JSON_FIXTURE['codex']['providers']['p2']['settingsConfig']))
+            cfg['auth']['OPENAI_API_KEY'] = key
+            con.execute('INSERT INTO providers VALUES (?,?,?,?)', (identity, 'codex', 'Same provider', json.dumps(cfg)))
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch')))
+    assert len({item['id'] for item in preview['candidates']}) == 2
+    selected = preview['candidates'][1]
+    asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=selected['id'],
+        previewToken=selected['previewToken'])))
+    assert 'OPENAI_API_KEY=second-fixture-key' in fake_env[0].read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize('unsafe_base', [
+    'https://fixture-user:fixture-password@host.example/v1',
+    'https://host.example/v1?key=fixture-query-secret',
+    'https://host.example/v1#fixture-fragment-secret',
+])
+def test_preview_hides_credentials_embedded_in_rejected_urls(cc_home, fake_env, unsafe_base):
+    path = _write_ccswitch_json(cc_home[1])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['claude']['providers']['p1']['settingsConfig']['env']['ANTHROPIC_BASE_URL'] = unsafe_base
+    path.write_text(json.dumps(data), encoding='utf-8')
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
+    selected = next(item for item in preview['candidates'] if item['appType'] == 'claude')
+    blob = json.dumps(preview)
+    assert not selected['compatible'] and 'previewToken' not in selected
+    assert all(secret not in blob for secret in ['fixture-password', 'fixture-query-secret', 'fixture-fragment-secret'])
+    assert selected['baseUrl'] == '（地址格式不兼容，已隐藏）'
+
+
+def test_responses_remains_explicitly_incompatible_and_does_not_change_target(cc_home, fake_env):
+    path = _write_ccswitch_json(cc_home[1])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    cfg = data['codex']['providers']['p2']['settingsConfig']
+    cfg['config'] = cfg['config'].replace('wire_api = "chat"', 'wire_api = "responses"')
+    path.write_text(json.dumps(data), encoding='utf-8')
+    before = fake_env[0].read_bytes()
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
+    selected = next(item for item in preview['candidates'] if item['appType'] == 'codex')
+    assert selected['protocol'] == 'openai-responses' and not selected['compatible']
+    assert 'Responses' in selected['skipReason'] and 'previewToken' not in selected
+    assert fake_env[0].read_bytes() == before

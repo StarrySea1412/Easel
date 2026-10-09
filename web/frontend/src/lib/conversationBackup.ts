@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSession } from './store';
+import type { ThinkingLevel } from './api';
 import { historicalGatewayAuthError } from './chatErrors';
 
 export const MAX_BACKUP_BYTES = 20 * 1024 * 1024;
@@ -11,6 +12,7 @@ export interface BackupMessage {
   thinking?: string;
   activity?: string;
   error?: string;
+  requestedThinkingLevel?: ThinkingLevel;
 }
 
 export interface BackupSession {
@@ -35,6 +37,9 @@ export interface BackupLiveSnapshot {
 }
 
 const encoder = new TextEncoder();
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra',
+];
 
 function invalid(path: string, reason: string): never {
   throw new Error(`会话备份格式无效：${path} ${reason}`);
@@ -115,6 +120,13 @@ function validateBackup(value: unknown): ConversationBackup {
       for (const field of ['thinking', 'activity', 'error'] as const) {
         if (message[field] !== undefined) result[field] = textField(message[field], `${messagePath}.${field}`, budget);
       }
+      if (message.requestedThinkingLevel !== undefined) {
+        if (typeof message.requestedThinkingLevel !== 'string'
+          || !THINKING_LEVELS.includes(message.requestedThinkingLevel as ThinkingLevel)) {
+          invalid(`${messagePath}.requestedThinkingLevel`, '不是受支持的思考强度。');
+        }
+        result.requestedThinkingLevel = message.requestedThinkingLevel as ThinkingLevel;
+      }
       return result;
     });
     return {
@@ -139,6 +151,7 @@ function visibleMessage(message: ChatMessage): BackupMessage {
     content: historical ? '' : message.content,
     ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
     ...(message.activity !== undefined ? { activity: message.activity } : {}),
+    ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),
     ...(historical || message.error ? { error: historical?.message ?? message.error!.message } : {}),
   };
 }
@@ -218,6 +231,7 @@ export function createImportedSessions(backup: ConversationBackup, existingIds: 
         content: message.content,
         ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
         ...(message.activity !== undefined ? { activity: message.activity } : {}),
+        ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),
         ...(message.error !== undefined ? { error: { message: message.error } } : {}),
       })),
     };

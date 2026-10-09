@@ -99,3 +99,6 @@ gui-test-screenshots/
 
 # Local workbench state, gateway databases and credentials
 /data/
+
+# Saved model health state when the source checkout is its data root
+/model-health/

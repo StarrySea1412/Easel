@@ -228,6 +228,32 @@ def test_unspecified_model_keeps_original_transport_without_capability_checks(sa
     assert not [event for event in events if event['event'] == 'model_selection']
 
 
+def test_explicit_thinking_forces_cli_model_capability_before_and_after_lock(sandbox, monkeypatch):
+    commands, transports = [], []
+    original = controls.require_model_override
+    def require(*args, **kwargs):
+        transports.append(kwargs.get("transport"))
+        return original(*args, **kwargs)
+    class Process:
+        def __init__(self, command, **kwargs):
+            commands.append(command)
+            self.stdout = io.StringIO("synthetic CLI reply\n")
+        def poll(self): return 0
+    monkeypatch.setattr(controls, "require_model_override", require)
+    monkeypatch.setattr(web.subprocess, "Popen", Process)
+    async def exercise():
+        response = await web.api_chat_stream(web.ChatRequest(message="test", sessionId="model-session",
+            turnId="thinking-turn", modelRef="relay/model-b", thinkingLevel="high"))
+        events = [event async for event in response.body_iterator]
+        return events, await web.api_chat_last("model-session", "thinking-turn")
+    events, saved = asyncio.run(exercise())
+    assert transports == ["cli", "cli"]
+    assert len(commands) == 1 and commands[0][commands[0].index("--thinking") + 1] == "high"
+    assert commands[0][commands[0].index("--model") + 1] == "relay/model-b"
+    assert not sandbox.requests and not sandbox.probes
+    assert saved["requestedThinkingLevel"] == "high" and events[-1]["event"] == "done"
+
+
 @pytest.mark.parametrize('change', ['configuration', 'gateway-version', 'approval'])
 def test_revalidation_after_lock_prevents_execution_and_retains_request(sandbox, monkeypatch, change):
     def revoke():

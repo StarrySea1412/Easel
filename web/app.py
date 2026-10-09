@@ -23,7 +23,7 @@ import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,6 +63,7 @@ from image_reverse import (
     MAX_BYTES as IMAGE_REVERSE_MAX_BYTES, MAX_PIXELS as IMAGE_REVERSE_MAX_PIXELS,
     FORMATS as IMAGE_REVERSE_FORMATS,
 )
+import model_health
 try:
     from easel.gateway_questions import (
         GatewayClient, GatewayQuestionError, GatewayUnsupportedError,
@@ -484,9 +485,12 @@ async def _lifespan(_app: FastAPI):
         print(str(exc), file=sys.stderr)
     verification = _publish_verification_service()
     verification.start()
+    health = _model_health_service()
+    health.start()
     try:
         yield
     finally:
+        await asyncio.to_thread(health.stop)
         await asyncio.to_thread(verification.stop)
         _stop_mp_login_on_shutdown()
 
@@ -1133,7 +1137,8 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
     }
 
 
-def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None) -> str:
+def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None,
+                   thinking_level: str | None = None) -> str:
     sk = session_id or f'web-{int(time.time() * 1000)}'
     # 跨进程锁：同一会话同时刻只跑一个 openclaw，防并发 takeover 崩溃（rc=1）
     xlock = _CrossProcLock(sk)
@@ -1145,7 +1150,7 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
         # Keep CLI setup inside the same safe error boundary as execution.
         cmd = openclaw_base_cmd() + ['--profile', OPENCLAW_PROFILE, 'agent', '--agent', 'main',
                '--session-key', f'agent:main:{sk}', '--session-id', _openclaw_session_id(sk),
-               '--thinking', THINKING_LEVEL,
+               '--thinking', thinking_level or THINKING_LEVEL,
                '--timeout', str(timeout), '--message', msg]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=timeout + 30,
                            env=credentials.environment(_proxy_env()))
@@ -2111,15 +2116,116 @@ async def api_models_selftest(req: SelftestRequest):
             return {"baseUrl": base, "ok": False, "ms": 0,
                     "detail": "目标指向本机/内网地址，已拒绝（避免把 API Key 发给内网服务）"}
         try:
+            _model_health_service().reserve_legacy()
             rq = urllib.request.Request(base + "/models", headers={"Authorization": f"Bearer {key}"})
             with _opener.open(rq, timeout=15) as resp:
                 return {"baseUrl": base, "ok": resp.status == 200, "ms": int((time.time() - t0) * 1000)}
+        except HTTPException as exc:
+            return {"baseUrl": base, "ok": False, "ms": 0, "detail": "滚动 60 秒测活额度已用完，本目标未发起请求", "rateLimited": exc.status_code == 429}
         except Exception as e:  # noqa: BLE001
+            if isinstance(e, urllib.error.HTTPError):
+                e.close()
             return {"baseUrl": base, "ok": False, "ms": int((time.time() - t0) * 1000),
-                    "detail": f"{type(e).__name__}: {e}"[:140]}
+                    "detail": _redact(f"{type(e).__name__}: {e}", key)[:140]}
 
     results = await asyncio.to_thread(lambda: [_probe(b, k) for b, k in targets])
     return {"channel": channel, "results": results, "testedAt": int(time.time())}
+
+
+def _model_health_target(ref: str):
+    """Resolve exact saved model refs, never accept request-supplied credentials."""
+    import office_controls
+    with _MODEL_CONFIG_LOCK:
+        path = openclaw_state_dir() / "openclaw.json"
+        if ref not in {row["id"] for row in office_controls.configured_models(path)}:
+            return None
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+            provider, model = ref.split("/", 1)
+            saved = config["models"]["providers"][provider]
+            entry = next(row for row in saved["models"] if row.get("id") == model)
+            api = entry.get("api") or saved.get("api") or _CHAT_PROTOCOLS.get(provider, "")
+            protocol = {"openai-completions": "openai", "anthropic-messages": "anthropic",
+                        "openai": "openai", "anthropic": "anthropic"}.get(api, "")
+            base = str(saved.get("baseUrl") or _saved_base_for("chat", provider)).strip().rstrip("/")
+            key = saved.get("apiKey") or _saved_key_for("chat", provider)
+            if _is_local_gateway_base(base):
+                # Built-in gateway routes expose an adapter URL, not the saved
+                # upstream. Probe the exact env-backed model without fallback.
+                env = _read_env()
+                if provider not in _CHAT_MODEL_KEYS or _chat_model(provider, env, {provider: saved}) != model:
+                    return None
+                base = _saved_base_for("chat", provider).strip().rstrip("/")
+                key = _saved_key_for("chat", provider)
+                protocol = _CHAT_PROTOCOLS[provider]
+            if not isinstance(key, str):
+                return None
+            match = re.fullmatch(r"\$\{([A-Z][A-Z0-9_]*)\}", key)
+            if match:
+                key = _read_env().get(match[1], "") or os.environ.get(match[1], "")
+            # Header/OAuth authentication is not interchangeable with these protocols.
+            if any(row.get("auth") or row.get("headers") or row.get("authHeader") is False for row in (saved, entry)):
+                return None
+            return model_health.Target(ref, provider, model, protocol, base, key.strip())
+        except (OSError, ValueError, KeyError, TypeError, StopIteration, AttributeError):
+            return None
+
+
+_MODEL_HEALTH_SERVICE = None
+_MODEL_HEALTH_SERVICE_LOCK = threading.Lock()
+
+
+def _model_health_service():
+    global _MODEL_HEALTH_SERVICE
+    root = DATA_DIR / "model-health"
+    with _MODEL_HEALTH_SERVICE_LOCK:
+        if _MODEL_HEALTH_SERVICE is None or _MODEL_HEALTH_SERVICE.path.parent != root:
+            _MODEL_HEALTH_SERVICE = model_health.Service(root, _model_health_target,
+                lambda base: _valid_base_url(base) and (_ssrf_safe(base) or
+                    (_ssrf_safe_allow_local() and _is_loopback_url(base))))
+        return _MODEL_HEALTH_SERVICE
+
+
+def _conversation_title_runner(prompt, *, timeout=45, session_id=None, thinking_level=None):
+    """One saved default-model completion without Agent tools or session mutation."""
+    if thinking_level is not None:
+        raise ValueError("标题生成当前使用渠道默认思考设置")
+    try:
+        config = json.loads((openclaw_state_dir() / "openclaw.json").read_text(encoding="utf-8"))
+        selected = config["agents"]["defaults"]["model"]
+        ref = selected.get("primary") if isinstance(selected, dict) else selected
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError("请先保存缺省模型配置") from None
+    target = _model_health_service().target(ref)
+    result = model_health.dispatch(target, prompt, "text")
+    if not result.get("ok"):
+        raise ValueError("标题模型请求失败")
+    return result.get("preview", "")
+
+
+class ModelProbeRequest(BaseModel):
+    modelRef: str = Field(min_length=1, max_length=500)
+    mode: Literal["text", "vision"] = "text"
+    prompt: str = Field(default="", max_length=2000)
+
+
+class ModelSchedulesRequest(BaseModel):
+    schedules: list[dict] = Field(default_factory=list, max_length=32)
+
+
+@app.get("/api/settings/models/health")
+async def api_model_health():
+    return await asyncio.to_thread(_model_health_service().status)
+
+
+@app.post("/api/settings/models/probe")
+async def api_model_probe(req: ModelProbeRequest):
+    return await asyncio.to_thread(_model_health_service().probe, req.modelRef, req.mode, req.prompt)
+
+
+@app.post("/api/settings/models/health/schedules")
+async def api_model_schedules(req: ModelSchedulesRequest):
+    return await asyncio.to_thread(_model_health_service().configure, req.schedules)
 
 
 def _image_reverse_providers() -> list[ImageReverseProvider]:
@@ -2431,6 +2537,20 @@ def _import_compatible(slot: str, candidate: dict) -> str:
     return ''
 
 
+def _import_target_slot(requested: str, candidate: dict, env: dict, providers: dict) -> str:
+    """Auto matches transport and prefers an empty slot; preview still confirms writes."""
+    if requested != 'auto':
+        return requested
+    preferred = {'openai': ('openai',), 'anthropic': ('relay', 'anthropic')}.get(candidate['protocol'], ())
+    usable = [slot for slot in preferred if not _import_compatible(slot, candidate)]
+    if not usable:
+        return preferred[0] if preferred else 'openai'
+    for slot in usable:
+        if not providers.get(slot) and not any(str(env.get(field) or '').strip() for field in _IMPORT_SLOT_ENV[slot]):
+            return slot
+    return usable[0]
+
+
 def _import_source_path(source: str, supplied_path: str) -> Path:
     if source not in local_config_import.SOURCES:
         raise HTTPException(400, '不认识的配置来源')
@@ -2470,7 +2590,8 @@ def _import_overwrites(slot: str, cand: dict, env: dict[str, str]) -> list[dict]
     out: list[dict] = []
     cur_base = (env.get(base_env) or "").strip()
     if cand.get("baseUrl") and cand["baseUrl"] != cur_base:
-        out.append({"field": base_env, "current": cur_base or "（空）", "incoming": cand["baseUrl"]})
+        out.append({"field": base_env, "current": local_config_import.public_base_url(cur_base) or "（空）",
+                    "incoming": local_config_import.public_base_url(cand["baseUrl"])})
     cur_key = (env.get(key_env) or "").strip()
     if cand.get("keyPresent"):
         out.append({"field": key_env,
@@ -2486,7 +2607,7 @@ def _import_overwrites(slot: str, cand: dict, env: dict[str, str]) -> list[dict]
 async def api_import_preview(req: ImportPreviewRequest):
     """读取来源 → 候选列表（脱敏）+ 覆盖预览。只读，不改任何配置。"""
     slot = req.slot
-    if slot not in _IMPORT_SLOT_ENV:
+    if slot not in _IMPORT_SLOT_ENV and slot != 'auto':
         raise HTTPException(400, '目标槽位不认识')
     path = _import_source_path(req.source, req.path)
     cands, errors = await asyncio.to_thread(local_config_import.read_source, req.source, path)
@@ -2496,29 +2617,35 @@ async def api_import_preview(req: ImportPreviewRequest):
         except Exception:
             raise HTTPException(500, '无法读取当前配置，请检查访问权限') from None
         env = _read_env()
+        target_oc = openclaw_state_dir() / 'openclaw.json'
+        try:
+            target_data = json.loads(target_oc.read_text(encoding='utf-8')) if target_oc.is_file() else {}
+            target_providers = target_data.get('models', {}).get('providers', {})
+            if not isinstance(target_providers, dict):
+                raise ValueError('Invalid provider collection')
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(500, 'OpenClaw 配置格式不正确，请修复后重新预览') from None
         now = time.monotonic()
         for token, record in list(_IMPORT_PREVIEWS.items()):
             if record['expires'] <= now:
                 _IMPORT_PREVIEWS.pop(token, None)
         for c in cands:
-            reason = _import_compatible(slot, c)
+            target_slot = _import_target_slot(slot, c, env, target_providers)
+            reason = _import_compatible(target_slot, c)
             fingerprint = _import_digest(c)
             c['compatible'], c['skipReason'] = not reason, reason
-            c["overwrites"] = _import_overwrites(slot, c, env) if not reason else []
+            c['targetSlot'] = target_slot
+            c["overwrites"] = _import_overwrites(target_slot, c, env) if not reason else []
             if not reason:
                 token = uuid.uuid4().hex
-                target_oc = openclaw_state_dir() / 'openclaw.json'
-                try:
-                    target_providers = json.loads(target_oc.read_text(encoding='utf-8')).get('models', {}).get('providers', {}) if target_oc.is_file() else {}
-                except (ValueError, TypeError, AttributeError):
-                    raise HTTPException(500, 'OpenClaw 配置格式不正确，请修复后重新预览') from None
-                _IMPORT_PREVIEWS[token] = {'source': req.source, 'path': str(path), 'slot': slot,
+                _IMPORT_PREVIEWS[token] = {'source': req.source, 'path': str(path), 'slot': target_slot,
                     'id': c['id'], 'candidate': fingerprint, 'target': target, 'expires': now + 600,
-                    'model': c.get('model') or _chat_model(slot, env, target_providers)}
+                    'model': c.get('model') or _chat_model(target_slot, env, target_providers)}
                 if not c.get('model'):
                     c['note'] = f'未提供模型名，保留目标模型 {_IMPORT_PREVIEWS[token]["model"]}；导入后可手动修改'
                 c['previewToken'] = token
             c.pop("key", None)
+            c['baseUrl'] = local_config_import.public_base_url(c['baseUrl'])
         # A provider may expose more than 128 explicitly configured models;
         # keep every token from this preview valid while evicting older previews.
         while len(_IMPORT_PREVIEWS) > max(128, len(cands)):
@@ -2526,7 +2653,7 @@ async def api_import_preview(req: ImportPreviewRequest):
     return {
         "source": req.source, "path": str(path), "slot": slot,
         "candidates": cands, "errors": errors, "readAt": int(time.time()),
-        "note": "预览不写入；确认后仅更新所选槽位。预览十分钟内有效，源或现有配置变化须重新预览。",
+        "note": "预览不写入；确认后仅更新候选标明的通道并立即保存。预览十分钟内有效，源或现有配置变化须重新预览。",
     }
 
 
@@ -2601,6 +2728,7 @@ class ChatRequest(BaseModel):
     sessionId: str | None = None
     turnId: str | None = None
     modelRef: Annotated[str, Field(strict=True, min_length=1, max_length=300)] | None = None
+    thinkingLevel: Literal['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'] | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
     selectedSkills: list[str] = Field(default_factory=list, max_length=20)
     skillRequirements: dict[str, Annotated[str, Field(strict=True, max_length=2000)]] = Field(default_factory=dict, max_length=20)
@@ -3000,10 +3128,12 @@ async def api_chat_stream(req: ChatRequest):
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
     requested_model_ref = req.modelRef
+    requested_thinking_level = req.thinkingLevel
     if requested_model_ref is not None:
         import office_controls
         await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
-                                req.sessionId, requested_model_ref)
+                                req.sessionId, requested_model_ref,
+                                transport='cli' if requested_thinking_level is not None else None)
     import skill_audit
     specs = _selected_skill_specs(req)
     if req.sessionId:
@@ -3028,7 +3158,8 @@ async def api_chat_stream(req: ChatRequest):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
-        _save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref})
+        _save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
+                                         "requestedThinkingLevel": requested_thinking_level})
 
         event_path = _job_event_file(turn_id)
         try:
@@ -3164,6 +3295,7 @@ async def api_chat_stream(req: ChatRequest):
                 _save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
                     "requestedModelRef": requested_model_ref,
+                    "requestedThinkingLevel": requested_thinking_level,
                 })
                 to_client("activity", "⏳ 这个会话正在另一个窗口运行，请稍候再试")
                 return
@@ -3173,7 +3305,8 @@ async def api_chat_stream(req: ChatRequest):
             credentials = gateway_credentials()
             selected_transport = None
             if requested_model_ref is not None:
-                selected_transport = await asyncio.to_thread(_resolve_transport, sk)
+                selected_transport = ('cli' if requested_thinking_level is not None
+                                      else await asyncio.to_thread(_resolve_transport, sk))
                 # Recheck the exact choice, running gateway and approved identity
                 # after queueing. Never remove the override or switch transports.
                 await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
@@ -3189,7 +3322,10 @@ async def api_chat_stream(req: ChatRequest):
                 _ACTIVE_SKILL_TURNS[sk] = turn_id
             except Exception:
                 to_client('activity', '执行核验暂不可用；创作任务继续运行。')
-            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http"
+            # The OpenAI-compatible gateway endpoint does not expose a documented
+            # per-turn thinking field. Use the CLI when the user explicitly chose
+            # a level so the value reaches OpenClaw's native --thinking option.
+            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None
             # A queued turn must begin after the preceding turn's raw output.
             # The earlier pre-lock offset may belong to an entirely older run.
             try:
@@ -3204,7 +3340,7 @@ async def api_chat_stream(req: ChatRequest):
                     cmd = openclaw_base_cmd() + [
                         "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                         "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                        "--thinking", THINKING_LEVEL,
+                        "--thinking", requested_thinking_level or THINKING_LEVEL,
                         "--timeout", str(TIMEOUT_CHAT), "--message", message,
                     ]
                     if requested_model_ref is not None:
@@ -3223,6 +3359,7 @@ async def api_chat_stream(req: ChatRequest):
                     _save_turn(pk, "done", "", {
                         "turn_id": turn_id, "clean_end": False, "stop_reason": "spawn_failed", "error": error,
                         "requestedModelRef": requested_model_ref,
+                        "requestedThinkingLevel": requested_thinking_level,
                     })
                     to_client("error", error)
                     return
@@ -3560,6 +3697,7 @@ async def api_chat_stream(req: ChatRequest):
                 _save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
                     "requestedModelRef": requested_model_ref,
+                    "requestedThinkingLevel": requested_thinking_level,
                     "gateway_run_id": run_info.get('run_id'),
                     "thinking": ''.join(full_thinking),
                     "thinkingStatus": 'available' if full_thinking else 'unavailable',
@@ -3595,6 +3733,7 @@ async def api_chat_stream(req: ChatRequest):
             _save_turn(pk, 'done', ''.join(full_text), {
                 'turn_id': turn_id, 'thinking': ''.join(full_thinking),
                 'requestedModelRef': requested_model_ref,
+                'requestedThinkingLevel': requested_thinking_level,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
             })
         finally:
@@ -3760,7 +3899,8 @@ async def api_chat(req: ChatRequest):
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
     # chat 可能中途触发制作层长任务 → 用 TIMEOUT_CHAT，与流式 /api/chat/stream 一致（勿用 300s）
-    result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT, req.sessionId)
+    result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT,
+                                        req.sessionId, req.thinkingLevel)
     return {"response": result}
 
 
@@ -4029,15 +4169,15 @@ def _login_status(platform: str) -> dict:
             data = {'state': d.get('state', 'unknown'), 'message': d.get('message', '')}
         except Exception:
             pass
-    # A runner that exits before writing its status must become an actionable error,
-    # never the ambiguous ``unknown`` state shown as an endless spinner in the UI.
+    # A runner can exit at any point (including QR/SMS verification). A stale
+    # nonterminal marker must not keep the UI polling a dead child indefinitely.
     proc = LOGIN_PROCESSES.get(platform)
-    if data['state'] in ('unknown', 'starting') and proc is not None:
+    if data['state'] not in ('success', 'expired', 'error') and proc is not None:
         code = proc.poll()
         if code is not None:
-            data = {'state': 'error', 'message': f'登录程序异常退出（退出码 {code}），请查看 outputs/_login/{platform}.log'}
+            data = {'state': 'error', 'message': f'登录流程已结束，但未返回成功结果。请重新连接（退出码 {code}）。'}
     qr = LOGIN_DIR / f'{platform}.png'
-    if qr.is_file():
+    if data['state'] not in ('success', 'expired', 'error') and qr.is_file():
         data['qr'] = f'_login/{platform}.png'
         try:
             data['qrTs'] = int(qr.stat().st_mtime)   # 二维码 mtime 作缓存键：码每刷新一次就变，前端 img 随之刷新
@@ -4046,6 +4186,7 @@ def _login_status(platform: str) -> dict:
     else:
         data['qr'] = ''
         data['qrTs'] = 0
+    data['visibleBrowser'] = bool(proc is not None and '--headed' in (getattr(proc, 'args', ()) or ()))
     return data
 
 
@@ -4177,11 +4318,13 @@ def _run_owned_whoami(platform: str, command: list[str], expected_generation: st
 
 
 @app.post("/api/login/{platform}")
-async def api_login_start(platform: str):
+async def api_login_start(platform: str, visibleBrowser: bool = False):
     """启动某平台登录：浏览器平台后台跑 QR runner，轮询到二维码就绪即返回。"""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
+    if visibleBrowser and cfg.get('backend') != 'xhs':
+        raise HTTPException(400, '此平台暂不支持在浏览器窗口中登录')
     # Reserve the profile until the child is registered. No browser wait or
     # await belongs inside this lock; logout can then stop the owned child.
     with _PUBLISH_LOCK:
@@ -4214,6 +4357,8 @@ async def api_login_start(platform: str):
         if backend == 'xhs':
             cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'login', '--no-proxy',
                    '--qr-out', str(qr), '--status-file', str(status), '--timeout', str(LOGIN_TIMEOUT)]
+            if visibleBrowser:
+                cmd.append('--headed')
         elif backend == 'biliup':
             # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
             cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
@@ -4336,28 +4481,7 @@ async def api_save_credentials(platform: str, req: WechatCredentials):
 
 def _mp_login_status() -> dict:
     """读公众号后台(mp)登录状态 + 二维码（文件由 weixin_mp_stats.py login 写）。"""
-    st = LOGIN_DIR / "wechat-oa-mp.json"
-    data = {"state": "unknown", "message": ""}
-    if st.is_file():
-        try:
-            d = json.loads(st.read_text(encoding="utf-8"))
-            data = {"state": d.get("state", "unknown"), "message": d.get("message", "")}
-        except Exception:
-            pass
-    proc = LOGIN_PROCESSES.get("wechat-oa-mp")
-    if data["state"] in ("unknown", "starting") and proc is not None and proc.poll() is not None:
-        data = {"state": "error", "message": f"登录程序退出（码 {proc.poll()}），见 outputs/_login/wechat-oa-mp.log"}
-    qr = LOGIN_DIR / "wechat-oa-mp.png"
-    if qr.is_file():
-        data["qr"] = "_login/wechat-oa-mp.png"
-        try:
-            data["qrTs"] = int(qr.stat().st_mtime)
-        except OSError:
-            data["qrTs"] = 0
-    else:
-        data["qr"] = ""
-        data["qrTs"] = 0
-    return data
+    return _login_status('wechat-oa-mp')
 
 
 def _stop_mp_login_on_shutdown() -> None:
@@ -4966,8 +5090,10 @@ async def api_analytics(platform: str):
 
 
 from content_analysis_routes import create_router as _content_analysis_router
+from conversation_titles import create_router as _conversation_titles_router
 
 app.include_router(_content_analysis_router(lambda: OUTPUTS_DIR / "_analytics" / "workbench", api_analytics, _image_reverse_providers))
+app.include_router(_conversation_titles_router(_conversation_title_runner))
 
 from storage_location_routes import create_router as _storage_location_router
 app.include_router(_storage_location_router(lambda: DATA_DIR))

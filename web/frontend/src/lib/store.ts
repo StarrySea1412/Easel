@@ -1,5 +1,5 @@
 import type { ChatErrorDetail } from './chatErrors';
-import type { UploadedFile, ChatQuestion } from './api';
+import type { UploadedFile, ChatQuestion, ThinkingLevel } from './api';
 import { chatErrorDetail } from './chatErrors';
 import { readLocalValue, writeLocalValue, removeMigratedLocalValue, reportLocalPersistenceFailure } from './localPersistence';
 import { hasChatDraft } from './chatDrafts';
@@ -15,6 +15,7 @@ export interface ChatMessage {
   selectedSkills?: string[];
   skillRequirements?: SkillRequirements; // Immutable requirements attached to this sent message, used on retry.
   requestedModelRef?: string; // This turn's explicit request, never evidence of the model that actually ran.
+  requestedThinkingLevel?: ThinkingLevel; // Per-turn request snapshot; not proof the provider exposed reasoning.
   turnId?: string;
   thinking?: string;   // 模型服务实际返回的思考内容或摘要，流式结束后持久保留
   activity?: string;   // 工具/执行活动步骤（换行分隔），持久保留
@@ -136,6 +137,10 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   if (value.skillRequirements !== undefined) message.skillRequirements = requirementsForSelection(value.skillRequirements, message.selectedSkills || []);
   if (typeof value.requestedModelRef === 'string' && value.requestedModelRef.length <= 500
     && /^[^\s/]+\/[^\s]+$/.test(value.requestedModelRef)) message.requestedModelRef = value.requestedModelRef;
+  const thinkingLevels: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'];
+  if (typeof value.requestedThinkingLevel === 'string' && thinkingLevels.includes(value.requestedThinkingLevel as ThinkingLevel)) {
+    message.requestedThinkingLevel = value.requestedThinkingLevel as ThinkingLevel;
+  }
   if (Array.isArray(value.attachments)) {
     message.attachments = value.attachments.filter((file): file is UploadedFile => record(file)
       && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
@@ -181,6 +186,8 @@ function decodeSessions(raw: string): ChatSession[] {
         delete message.selectedSkills;
         delete message.skillRequirements;
         delete message.requestedModelRef;
+        // A validated request snapshot is portable history, not an executable
+        // configuration. Imported sessions remain read-only after refresh.
       }
     }
     sessions.push(session);
