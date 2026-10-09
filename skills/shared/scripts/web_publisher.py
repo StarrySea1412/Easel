@@ -38,6 +38,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+import login_qr  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  快手读回与共享结果类型；注册表见 _READBACK_VERIFIERS
 import channels_readback  # noqa: E402  视频号本人作品列表：只监听平台响应
@@ -239,6 +240,9 @@ PLATFORMS: dict[str, dict] = {
         "profile": "ZhihuProfile",
         "login_check": ".AppHeader-profile, .AppHeader-userInfo",
         "logged_out_selector": ".SignContainer, .Login-content, button:has-text('登录')",
+        "login_qr_selector": ".Qrcode-img, .Qrcode img, .Qrcode canvas, .SignFlow-qrcode img, "
+                             "img[class*=Qrcode], img[class*=QRCode], img[src*=qrcode]",
+        "qr_loaded": ".Qrcode-img, .Qrcode img, .Qrcode canvas, .SignFlow-qrcode img, img[src*=qrcode]",
         "me_name_selector": ".AppHeader-profile .name, .ProfileHeader-name, .AppHeader-userInfo .name",
         "me_avatar_selector": ".AppHeader-profile img[src], .Avatar[src]",
         "steps": [
@@ -1028,8 +1032,9 @@ def _score_qr_el(el) -> float | None:
     if not b:
         return None
     w, h = b["width"], b["height"]
-    # 尺寸：收紧到 140~600（原 120~520 太松，logo/广告/头像会误命中）
-    if w < 140 or h < 140 or w > 600 or h > 600:
+    # Some official pages render the QR below 140px. Image detection below,
+    # rather than this size heuristic, confirms a candidate is a QR.
+    if w < 24 or h < 24 or w > 640 or h > 640:
         return None
     ratio = w / h if h else 0
     if not (0.75 <= ratio <= 1.34):   # 二维码接近正方形，排除横幅/文字条
@@ -1049,7 +1054,7 @@ def _score_qr_el(el) -> float | None:
     return score
 
 
-def _crop_qr(page, qr_out, cfg) -> None:
+def _crop_qr(page, qr_out, cfg) -> dict:
     """把登录二维码裁出来单独存图（而非整页）。遍历平台配置 + 常见选择器的所有候选，
     用 _score_qr_el 挑「最像二维码」的那个（base64/canvas 本体 + 接近正方形 + 尺寸合适），
     而不是遇到第一个宽松方形就用；都不中才退回整页。
@@ -1058,7 +1063,7 @@ def _crop_qr(page, qr_out, cfg) -> None:
     if cfg.get("login_qr_selector"):  # 拆逗号逐个试，保证具体选择器优先于容器
         cands += [s.strip() for s in cfg["login_qr_selector"].split(",") if s.strip()]
     cands += list(_QR_SELECTORS)
-    best = None  # (score, el)
+    candidates = []
     for sel in cands:
         try:
             els = page.query_selector_all(sel)
@@ -1068,18 +1073,17 @@ def _crop_qr(page, qr_out, cfg) -> None:
             sc = _score_qr_el(el)
             if sc is None:
                 continue
-            if best is None or sc > best[0]:
-                best = (sc, el)
-    if best is not None:
-        try:
-            best[1].screenshot(path=str(qr_out))
-            return
-        except Exception:
-            pass
-    page.screenshot(path=str(qr_out))   # 兜底：整页
+            candidates.append((sc, el))
+    for _, element in sorted(candidates, key=lambda item: item[0], reverse=True):
+        metadata = login_qr.capture_element(element, Path(qr_out))
+        if metadata:
+            return metadata
+    # A whole-page preview is not a ready QR. Detection can still crop a
+    # code from an unfamiliar DOM; otherwise callers must report verifying.
+    return login_qr.capture_page(page, Path(qr_out))
 
 
-def _capture_qr(page, qr_out, cfg) -> None:
+def _capture_qr(page, qr_out, cfg) -> dict:
     """截登录二维码到 qr_out，按平台形态分两条路：
     - 码在跨域 iframe（视频号：open.weixin.qq.com 的微信标准扫码组件）→ 主页面 query_selector 找不到，
       直接截 <iframe> 元素本体（真机验证得清晰码；iframe 内 img 是相对 URL 非 base64，打分裁剪那套不适用）。
@@ -1092,17 +1096,21 @@ def _capture_qr(page, qr_out, cfg) -> None:
             for fr in page.frames:
                 if fr != page.main_frame and "qrconnect" in (fr.url or ""):
                     try:
-                        fr.wait_for_selector(
+                        code = fr.wait_for_selector(
                             "img.js_qrcode_img, img.web_qrcode_img, img[src*='/connect/qrcode/']",
                             timeout=10000, state="attached")
+                        metadata = login_qr.capture_element(code, Path(qr_out))
+                        if metadata:
+                            return metadata
                     except Exception:
                         pass
                     break
             page.wait_for_timeout(800)  # 让二维码画完再截
             el = page.query_selector(ifr)
             if el:
-                el.screenshot(path=str(qr_out))
-                return
+                metadata = login_qr.capture_element(el, Path(qr_out))
+                if metadata:
+                    return metadata
         except Exception:
             pass  # iframe 路径任何异常都退回主页面裁剪
     # 主页面二维码：先等渲染（异步 base64/canvas，固定 wait 不够会截到空框），再打分裁剪
@@ -1111,7 +1119,7 @@ def _capture_qr(page, qr_out, cfg) -> None:
                                timeout=15000, state="visible")
     except Exception:
         pass
-    _crop_qr(page, qr_out, cfg)
+    return _crop_qr(page, qr_out, cfg)
 
 
 def _probe_logged_in(browser, cfg: dict) -> bool:
@@ -1187,8 +1195,11 @@ def cmd_login_qr(a) -> int:
             # 截二维码为 PNG。视频号等把码放在跨域 iframe 里（主页面找不到）→ 截 iframe 元素本体；
             # 其余平台在主页面异步渲染（base64/canvas）→ 先等渲染再按打分裁剪。统一走 _capture_qr。
             qr_out.parent.mkdir(parents=True, exist_ok=True)
-            _capture_qr(page, qr_out, cfg)
-            login_state.write_status(sf, "qr_ready", f"扫码登录 {cfg['name']}", qr=str(qr_out))
+            qr_meta = _capture_qr(page, qr_out, cfg)
+            qr_state = "qr_ready" if qr_meta["qrKind"] == "qr" else "verifying"
+            qr_message = (f"扫码登录 {cfg['name']}" if qr_state == "qr_ready" else
+                          "尚未识别到可扫描二维码，当前为官方登录页面预览。请查看页面提示后手动重试。")
+            login_state.write_status(sf, qr_state, qr_message, qr=str(qr_out), qr_meta=qr_meta)
             print(f"📱 {cfg['name']} 登录页/二维码已保存：{qr_out}", file=sys.stderr)
             print(f"⏳ 等待扫码（最长 {timeout_s}s）...", file=sys.stderr)
 
@@ -1200,6 +1211,17 @@ def cmd_login_qr(a) -> int:
                 if _is_logged_in(page, cfg):
                     confirmed = True
                     break
+                if tick % 3 == 0:
+                    # Keep code rotations and late render/verification changes
+                    # in sync with the UI; unchanged bytes retain their cache key.
+                    try:
+                        current = _crop_qr(page, qr_out, cfg)
+                        current_state = "qr_ready" if current["qrKind"] == "qr" else "verifying"
+                        current_message = (f"扫码登录 {cfg['name']}" if current_state == "qr_ready" else
+                                           "尚未识别到可扫描二维码，当前为官方登录页面预览。请查看页面提示后手动重试。")
+                        login_state.write_status(sf, current_state, current_message, qr=str(qr_out), qr_meta=current)
+                    except Exception:
+                        pass
                 # 扫码页仍停在 passport/login 域时深探：用辅助页 goto 发布页判登录态
                 # （快手扫码成功不自跳创作者中心，主扫码页 URL 恒含 passport）
                 try:

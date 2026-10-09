@@ -16,7 +16,7 @@ import DashboardEmpty from './ui/DashboardEmpty';
 import { IconImage } from './settingsIcons';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
-import ComposerModelPicker from './ComposerModelPicker';
+import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { loadThinkingLevel } from '../lib/thinkingLevel';
 import type { ThinkingLevel } from '../lib/api';
@@ -49,6 +49,7 @@ interface DashboardProps {
   persona: string;
   gatewayStatus: string;
   onNavigate: (page: Page) => void;
+  onOpenModels?: () => void;
   onUseTopic: (title: string) => void;
   /** 工作台输入框直达创作：新开会话把这句话发给 Agent */
   onQuickPrompt: (text: string, selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
@@ -56,7 +57,7 @@ interface DashboardProps {
 
 const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', scheduled: '待发', published: '已发' };
 
-export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUseTopic, onQuickPrompt }: DashboardProps) {
+export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUseTopic, onQuickPrompt, onOpenModels }: DashboardProps) {
   const mounted = useRef(false);
   const dataVersion = useRef(0);
   useEffect(() => {
@@ -252,19 +253,27 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             aria-describedby="quick-create-hint"
           />
           <div className="dash-composer-bar">
+            <div className="dash-composer-tools">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
-            <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} />
-            <span className="dash-composer-hint" id="quick-create-hint">Enter 创作 · Shift+Enter 换行</span>
+            <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
+            </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →
             </button>
+          </div>
+          <div className="dash-composer-meta">
+            <div className="dash-composer-status">
+              <ComposerModelStatus models={quickModels} onOpenModels={onOpenModels} />
+              {persona && <span className="dash-persona" title={`当前画像：${persona}`}>{persona}</span>}
+              {gatewayStatus !== 'connected' && <span className="dash-connection" role="status">{gatewayStatus === 'connecting' ? '正在连接…' : '助手未连接'}{gatewayStatus === 'disconnected' && <button type="button" className="link-btn" onClick={() => onNavigate('settings')}>检查设置</button>}</span>}
+            </div>
+            <span className="dash-composer-hint" id="quick-create-hint">Enter 创作 · Shift+Enter 换行</span>
           </div>
         </div>
         {quickDraft.error && <p className="dash-composer-error" role="alert">{quickDraft.error}</p>}
         {quickSkills.notice && <p className="composer-skills-note" role="status">{quickSkills.notice}
           {quickSkills.restorePending && <button type="button" className="link-btn" onClick={() => quickSkills.retryRestore()}>重试恢复技能</button>}
         </p>}
-        <p className="dash-composer-note">{persona ? `当前画像 · ${persona}` : '通用创作模式'}<span> · {gatewayStatus === 'connected' ? '创作助手已连接' : gatewayStatus === 'connecting' ? '正在连接创作助手' : '网关离线，请先检查设置'}</span></p>
         </div>
         <div className="dash-quick">
           {quick.map((q) => (

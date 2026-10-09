@@ -7,6 +7,7 @@ export function useImageReverse(active: boolean) {
   const [preview, setPreview] = useState('');
   const [providers, setProviders] = useState<ImageReverseProvider[]>([]);
   const [provider, setProvider] = useState('');
+  const [modelRef, setModelRef] = useState('');
   const [instruction, setInstruction] = useState('');
   const [mode, setMode] = useState<'auto' | 'vision'>('auto');
   const [language, setLanguage] = useState<'zh' | 'en'>('zh');
@@ -22,15 +23,18 @@ export function useImageReverse(active: boolean) {
     if (!active) return;
     let alive = true;
     setConfigLoading(true);
-    fetchImageReverseConfig().then(({ providers: rows }) => {
+    fetchImageReverseConfig().then(({ providers: rows, modelRef: saved }) => {
       if (!alive) return;
       setProviders(rows);
-      setProvider((previous) => rows.some((row) => row.id === previous && row.configured)
-        ? previous : rows.find((row) => row.configured)?.id || '');
+      const selected = rows.find(row => row.configured && `${row.id}/${row.model}` === (saved || modelRef));
+      setProvider(selected?.id || '');
+      setModelRef(saved || modelRef);
       setConfigError('');
     }).catch((e: unknown) => { if (alive) setConfigError(e instanceof Error ? e.message : '模型配置读取失败'); })
       .finally(() => { if (alive) setConfigLoading(false); });
     return () => { alive = false; };
+  // Selection changes should not reload configuration while a request is in progress.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   useEffect(() => {
@@ -58,15 +62,16 @@ export function useImageReverse(active: boolean) {
     pending.current = controller;
     setBusy(true); setError(''); setResult(null); setPrompt('');
     try {
-      const data = await reverseImage(file, provider, instruction.trim(), mode, language, controller.signal);
+      const data = await reverseImage(file, provider, instruction.trim(), mode, language, controller.signal, modelRef);
       if (pending.current === controller) { setResult(data); setPrompt(data.prompt); }
     } catch (e) {
       if (pending.current === controller && !controller.signal.aborted) setError(e instanceof Error ? e.message : '反推失败，请重试');
     } finally {
       if (pending.current === controller) { pending.current = null; setBusy(false); }
     }
-  }, [file, provider, instruction, mode, language]);
+  }, [file, provider, instruction, mode, language, modelRef]);
 
-  return { file, preview, selectFile, providers, provider, setProvider, instruction, setInstruction,
+  const chooseProvider = (id: string) => { setProvider(id); const row = providers.find(item => item.id === id); setModelRef(row ? `${row.id}/${row.model}` : ''); };
+  return { file, preview, selectFile, providers, provider, setProvider: chooseProvider, instruction, setInstruction,
     mode, setMode, language, setLanguage, result, prompt, setPrompt, busy, error, configError, configLoading, run };
 }

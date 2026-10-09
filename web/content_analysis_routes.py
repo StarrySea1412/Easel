@@ -9,10 +9,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from content_analysis import ADVANCED_METRICS, METRICS, PLATFORMS, Store, markdown, now, scope
+from content_analysis_sync import SyncService
 
 
-def create_router(root_getter, capture, providers_getter=lambda: []):
+def create_router(root_getter, capture, providers_getter=lambda: [], *, session_getter=None, generation_getter=None):
     router = APIRouter(prefix='/api/content-analysis')
+    synchronizer = SyncService(root_getter, capture, session_getter, generation_getter)
 
     def store():
         return Store(Path(root_getter()))
@@ -40,6 +42,24 @@ def create_router(root_getter, capture, providers_getter=lambda: []):
     @router.get('/accounts')
     async def accounts():
         return {'accounts': store().accounts()}
+
+    @router.get('/sync/status')
+    async def sync_status(platform: str, accountId: str | None = None):
+        if accountId is not None:
+            _, accountId = run(scope, platform, accountId)
+        return run(synchronizer.status, platform, accountId)
+
+    @router.post('/sync')
+    async def sync_content(request: Request):
+        data = await payload(request)
+        platform, requested_id = run(scope, data.get('platform'), data.get('accountId') or '__discover__')
+        account_id = requested_id if data.get('accountId') is not None else None
+        if data.get('accountId') is not None and not data.get('accountId'):
+            raise HTTPException(400, '账号 ID 不能为空；首次载入请省略 accountId')
+        try:
+            return await synchronizer.sync(platform, account_id, force=data.get('force', False))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @router.get('/report')
     async def report(platform: str, accountId: str):

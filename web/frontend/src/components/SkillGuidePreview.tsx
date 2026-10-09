@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchSkillDetail } from '../lib/api';
 import type { SkillDetail } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
+import SkillDependencyBadges from './SkillDependencyBadges';
 
 function GuideList({ title, items, ordered = false }: { title: string; items: string[]; ordered?: boolean }) {
   const List = ordered ? 'ol' : 'ul';
@@ -47,6 +48,7 @@ export default function SkillGuidePreview({ skillName, onPick }: { skillName: st
       : !detail ? <p className="brush-guide-muted" role="status">正在读取技能详情…</p>
       : guide ? <>
         <section className="brush-guide-section"><h4>能做什么</h4><p>{guide.what || '原文未说明'}</p></section>
+        <SkillDependencyBadges skill={detail} detail={detail} />
         <GuideList title="什么时候用" items={guide.whenToUse} />
         <GuideList title="需要准备" items={preparation} />
         <GuideList title="怎么开始" items={guide.howToStart} ordered />

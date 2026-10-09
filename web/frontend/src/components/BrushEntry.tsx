@@ -5,6 +5,7 @@ import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillGuidePreview from './SkillGuidePreview';
+import SkillDependencyBadges from './SkillDependencyBadges';
 import { IconSpark } from './icons';
 import '../styles/skill-picker.css';
 
@@ -101,7 +102,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
         {loadError ? <div className="skill-picker-empty" role="alert">{loadError}<button className="link-btn" type="button" onClick={() => setReload((value) => value + 1)}>重新加载</button></div> : !skills ? <p className="skill-picker-empty" role="status">正在确认已安装的技能…</p> : !groups.length ? <p className="skill-picker-empty">{query ? `没有匹配「${q}」的已安装技能` : '当前分类暂无已安装技能'}</p> : groups.map((group) => <div key={group.label} className="brush-grp"><div className="brush-grp-name">{group.label} · {group.skills.length}</div>{group.skills.map((skill) => {
           const selected = selectedSkills.includes(skill.name);
           const needsSetup = skill.needsApi && !skill.apiConfigured;
-          return <button key={skill.name} type="button" className={`brush-item${selected ? ' is-selected' : ''}${preview === skill.name ? ' is-previewed' : ''}`} aria-pressed={selected} onMouseEnter={() => setPreview(skill.name)} onFocus={() => setPreview(skill.name)} onClick={() => pick(skill)}><span className={`brush-dot ${needsSetup ? 's-need' : 's-ready'}`} aria-hidden="true" /><span className="brush-item-copy"><span className="brush-il">{displayName(skill.name)}</span><span className="brush-idesc">{skill.description || skill.name}</span>{needsSetup && <span className="brush-needs">需要配置 API</span>}</span><span className="brush-iadd" aria-hidden="true">{selected ? '✓' : '＋'}</span></button>;
+          return <button key={skill.name} type="button" className={`brush-item${selected ? ' is-selected' : ''}${preview === skill.name ? ' is-previewed' : ''}`} aria-pressed={selected} onMouseEnter={() => setPreview(skill.name)} onFocus={() => setPreview(skill.name)} onClick={() => pick(skill)}><span className={`brush-dot ${needsSetup ? 's-need' : 's-ready'}`} aria-hidden="true" /><span className="brush-item-copy"><span className="brush-il">{displayName(skill.name)}</span><span className="brush-idesc">{skill.description || skill.name}</span>{needsSetup && <span className="brush-needs">需要配置 API</span>}<SkillDependencyBadges skill={skill} /></span><span className="brush-iadd" aria-hidden="true">{selected ? '✓' : '＋'}</span></button>;
         })}</div>)}
       </div><SkillGuidePreview skillName={preview && installed.has(preview) ? preview : null} onPick={(text, skill) => { if (installed.has(skill)) { onPick(text, skill, true); close(); } }} /></div>
       <footer className="skill-picker-footer"><span>已选 {selectedSkills.length} 个 · 点击已选项可移除</span><button type="button" className="btn btn-primary btn-sm" onClick={close}>完成选择</button></footer>

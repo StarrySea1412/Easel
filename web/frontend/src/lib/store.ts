@@ -3,6 +3,7 @@ import type { UploadedFile, ChatQuestion, ThinkingLevel } from './api';
 import { chatErrorDetail } from './chatErrors';
 import { readLocalValue, writeLocalValue, removeMigratedLocalValue, reportLocalPersistenceFailure } from './localPersistence';
 import { hasChatDraft } from './chatDrafts';
+import { hasChatQueue } from './chatQueue';
 import { requirementsForSelection } from './selectedSkills';
 import type { SkillRequirements } from './selectedSkills';
 
@@ -208,7 +209,7 @@ export function loadSessions(): ChatSession[] {
 function prune(sessions: ChatSession[]): ChatSession[] {
   let keptEmpty = false;
   const pruned = sessions.filter((s) => {
-    if (s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && hasChatDraft(s.id))) return true;
+    if (s.archived || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;
     return true;

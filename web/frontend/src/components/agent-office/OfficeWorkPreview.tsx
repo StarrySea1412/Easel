@@ -5,6 +5,7 @@ import './office-work-preview.css';
 export default function OfficeWorkPreview({ agent, stale, observedAt, onOpen }: { agent: OfficeAgent; stale: boolean; observedAt?: string | null; onOpen: () => void }) {
   const work = officeWorkSurface(agent, { stale, observedAt });
   const name = agent.appearance?.id !== 'generic' ? agent.appearance?.name || agent.name : agent.name;
+  if (work.kind === 'unreported' && !agent.task) return <section className="office-work-preview office-work-preview--compact" aria-label={`${name}的工位屏幕`}><strong>{stale ? '上次快照 · ' : ''}暂无任务与操作记录</strong><p>收到该成员的后台记录后更新。</p></section>;
   return <section className={`office-work-preview office-work-preview--${work.kind}`} aria-label={`${name}的工位屏幕`}>
     <div className="office-work-preview__screen">
       <header><span><i aria-hidden="true" />{work.title}</span><small>{work.source}</small></header>

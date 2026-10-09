@@ -109,7 +109,8 @@ def _events(directory: Path, session: str, audit: dict | None, live: bool,
         return []
     sources = audit['_sources']
     remaining = MAX_TRACE_BYTES
-    events = []
+    from easel.session_trace import read_events
+    events = read_events(directory, session, audit, live=live, finished=finished_at, warnings=warnings)
     for path in _transcript_paths(directory, session, warnings):
         try:
             if path.is_symlink() or path.resolve().parent != directory.resolve():

@@ -29,3 +29,15 @@ test('thinking text beyond 4000 characters survives stream consumption', async (
   const result = await consume([event('thinking', text) + event('done', {})]);
   assert.equal(result.thinking.join(''), text);
 });
+
+test('final snapshot replaces deltas while later completion notes still append', async () => {
+  let content = '', thinking = '';
+  globalThis.fetch = async () => new Response(event('token', '序字错') + event('thinking', '公开摘要')
+    + event('text_snapshot', { invalid: true }) + event('text_snapshot', '正确字序')
+    + event('token', '\n完成说明') + event('done', {}));
+  await new Promise((resolve, reject) => streamChat('test', undefined, 'isolated', chunk => content += chunk,
+    resolve, reject, chunk => thinking += chunk, undefined, undefined, 'snapshot-turn', false,
+    undefined, [], undefined, undefined, [], {}, undefined, undefined, undefined, text => content = text));
+  assert.equal(content, '正确字序\n完成说明');
+  assert.equal(thinking, '公开摘要');
+});

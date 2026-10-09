@@ -22,6 +22,12 @@ function isAsset(specifier) {
 export async function tsModuleUrl(url) {
   const href = String(url);
   if (modules.has(href)) return modules.get(href);
+  if (href.endsWith('.json')) {
+    const value = JSON.parse(fs.readFileSync(new URL(href), 'utf8'));
+    const result = `data:text/javascript;base64,${Buffer.from(`export default ${JSON.stringify(value)}`).toString('base64')}`;
+    modules.set(href, result);
+    return result;
+  }
   let code = ts.transpileModule(fs.readFileSync(new URL(href), 'utf8'), {
     fileName: fileURLToPath(href),
     compilerOptions: {

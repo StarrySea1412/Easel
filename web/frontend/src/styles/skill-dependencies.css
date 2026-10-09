@@ -1,0 +1,6 @@
+.skill-dependencies{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-top:8px;min-width:0}
+.skill-dependencies>span,.skill-dependencies>button{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:3px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface-2);color:var(--text-secondary);font:inherit;font-size:11px;line-height:1.5;text-align:left}
+.skill-dependencies svg{flex:none}.skill-dependencies .needs-config{color:var(--amber);border-color:var(--amber-soft)}
+.skill-dependencies>button{cursor:pointer}.skill-dependencies>button:hover{background:var(--surface-hover);color:var(--text)}
+.skill-dependencies>span:focus-visible,.skill-dependencies>button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.skill-dependencies small{color:var(--text-tertiary);font-size:10px}.skill-dependencies>p{flex-basis:100%;margin:3px 0 0;font-size:11px;line-height:1.7;color:var(--text-secondary)}

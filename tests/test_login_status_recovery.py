@@ -67,3 +67,23 @@ def test_live_runner_still_delivers_current_qr(status_reader, platform):
     result = read(env, platform)
     assert result['state'] == 'qr_ready' and result['qr'] == f'_login/{platform}.png'
     assert result['qrTs'] > 0
+
+
+@pytest.mark.parametrize('state', ['starting', 'verifying'])
+def test_empty_image_marker_never_resurrects_previous_code(status_reader, state):
+    env = status_reader
+    (env['LOGIN_DIR'] / 'xiaohongshu.json').write_text(json.dumps({'state': state, 'qr': ''}), encoding='utf-8')
+    (env['LOGIN_DIR'] / 'xiaohongshu.png').write_bytes(b'previous code')
+    env['LOGIN_PROCESSES']['xiaohongshu'] = SimpleNamespace(poll=lambda: None)
+    assert read(env, 'xiaohongshu')['qr'] == ''
+
+
+def test_preview_metadata_is_delivered_in_verifying_without_claiming_qr_ready(status_reader):
+    env = status_reader
+    marker = {'state': 'verifying', 'qr': 'local-image.png', 'qrKind': 'page',
+              'qrWidth': 1280, 'qrHeight': 720}
+    (env['LOGIN_DIR'] / 'zhihu.json').write_text(json.dumps(marker), encoding='utf-8')
+    (env['LOGIN_DIR'] / 'zhihu.png').write_bytes(b'synthetic preview')
+    result = read(env, 'zhihu')
+    assert result['state'] == 'verifying' and result['qr'] == '_login/zhihu.png'
+    assert (result['qrKind'], result['qrWidth'], result['qrHeight']) == ('page', 1280, 720)

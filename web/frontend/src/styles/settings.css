@@ -6,7 +6,7 @@
   display: block;
   width: 100%;
   min-width: 0;
-  padding: 18px clamp(12px, 2%, 26px) 36px;
+  padding: 0 clamp(12px, 2%, 26px) 36px;
   background: transparent;
 }
 
@@ -19,6 +19,7 @@
   height: auto;
   max-height: none;
   padding: 0;
+  margin-top: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl, 20px);
   background: var(--bg);
@@ -41,6 +42,13 @@
 .settings-page .settings-actions .btn { min-height: 36px; }
 .settings-page .settings-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-width: 0; }
 .settings-page .settings-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  z-index: 4;
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -50,6 +58,11 @@
   background: var(--surface-2);
 }
 .settings-page .settings-main { min-width: 0; padding: 24px; }
+.settings-more-cards { display: grid; gap: 16px; }
+.settings-more-cards > .conversation-backup-card,
+.settings-more-cards > .storage-settings-card { margin: 0; max-width: none; padding: 20px; border-radius: 14px; }
+.settings-more-cards .storage-settings-heading h2 { margin: 0 0 7px; font-size: 16px; font-weight: 650; }
+.settings-more-cards .storage-settings-heading p { margin: 0; }
 .settings-page .settings-foot {
   padding: 12px 24px;
   border-top: 1px solid var(--border);
@@ -132,6 +145,23 @@
 /* Every provider field remains labelled at every width. */
 .settings-page .model-config-picker { min-width: 0; margin-bottom: 22px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
 .settings-page .model-config-picker .hint { margin: 12px 0; }
+.settings-page .model-default-current { display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: baseline; padding: 12px 14px; margin: 0 0 16px; border-radius: 9px; background: var(--surface); font-size: 12px; overflow-wrap: anywhere; }
+.settings-page .model-default-current > span, .settings-page .model-default-current > small { color: var(--text-secondary); }
+.settings-page .model-default-current > strong { font-size: 14px; font-weight: 550; }
+.settings-page .model-default-pending { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); color: var(--text); border-radius: 5px; }
+.settings-page .model-settings-details { min-width: 0; border: 1px solid var(--border); border-radius: 10px; margin: 16px 0; padding: 14px; }
+.settings-page .model-settings-details > summary { cursor: pointer; font-size: 13px; font-weight: 550; line-height: 1.7; }
+.settings-page .model-settings-details[open] > summary { margin-bottom: 16px; }
+.settings-page .model-settings-details > summary:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
+.settings-page .model-provider-editors { min-width: 0; border: 0; padding: 0; margin: 0; }
+.settings-page .model-add-provider { min-height: 34px; }
+.settings-page .model-import-steps { list-style: none; padding: 0; margin: 0 0 20px; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; color: var(--text-secondary); }
+.settings-page .model-import-steps > li { display: flex; align-items: center; gap: 7px; }
+.settings-page .model-import-steps strong { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-hover); }
+.settings-page .model-import-steps > li[aria-current] { color: var(--text); font-weight: 550; }
+.settings-page .import-advanced { flex: 1 1 260px; margin: 0; }
+.settings-page .import-advanced > .mock { margin-top: 12px; }
+.settings-page .imp-action { color: var(--text); font-size: 12px; font-weight: 550; }
 .settings-page .model-import-options { display: grid; gap: 14px; margin: 16px 0; }
 .settings-page .model-import-preview { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.7; }
 .settings-page .model-import-preview p { margin: 0 0 8px; }
@@ -140,20 +170,38 @@
 .settings-page .model-import-confirm input { flex: none; margin-top: 5px; }
 .settings-page .model-picker-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .settings-page .model-picker-message { padding: 10px 12px; background: var(--accent-soft); border-radius: 8px; font-size: 12.5px; line-height: 1.7; overflow-wrap: anywhere; }
-.settings-page .provider-list { display: grid; gap: 14px; min-width: 0; }
+.settings-page .provider-list { display: grid; gap: 8px; min-width: 0; }
 .settings-page .provider-card {
   container-type: inline-size;
   container-name: provider;
   min-width: 0;
-  padding: 18px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
-.settings-page .provider-head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 10px 14px; min-width: 0; margin: 0 0 18px; }
-.settings-page .provider-order, .settings-page .step { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-end); font-size: 12px; font-weight: 700; }
-.settings-page .provider-order.ghost, .settings-page .step.ghost { background: var(--surface-hover); color: var(--text-secondary); }
+.settings-page .provider-head { display: flex; align-items: center; gap: 10px 14px; min-width: 0; margin: 0; }
+.settings-page .provider-toggle { width: 100%; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.settings-page .provider-glyph { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-end); }
+.settings-page .provider-summary-status { display: flex; align-items: flex-end; flex-direction: column; flex: none; gap: 3px; }
+.settings-page .provider-summary-status small { color: var(--text-tertiary); font-size: 11px; }
+.settings-page .provider-chevron { flex: none; transition: transform var(--t-fast); }
+.settings-page .provider-toggle[aria-expanded=true] .provider-chevron { transform: rotate(90deg); }
+.settings-page .provider-compact-row { display:flex; align-items:center; gap:12px; min-width:0; }
+.settings-page .provider-compact-row .provider-toggle { flex:1; min-width:0; }
+.settings-page .provider-quick-actions { display:flex; align-items:center; gap:6px; flex:none; }
+.settings-page .provider-quick-actions .adv-btn { white-space:nowrap; margin:0; font-size:11px; padding:5px 8px; }
+.settings-page .provider-quick-edit { display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.settings-page .provider-quick-edit label { display:grid; gap:4px; flex:1 1 140px; min-width:0; font-size:11px; }
+.settings-page .provider-quick-edit small { color:var(--text-tertiary); font-size:10px; padding-bottom:7px; }
+.settings-page .provider-compact-row .provider-heading small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media(max-width:640px) { .settings-page .provider-compact-row { flex-wrap:wrap; gap:8px; } .settings-page .provider-quick-actions { margin-left:44px; } }
+.settings-page .provider-body { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.settings-page .provider-body[hidden] { display: none; }
+.settings-page .channel-icon { display: inline-flex; flex: none; align-items: center; }
+.settings-page .provider-fixed p, .settings-page .provider-save-hint { color: var(--text-tertiary); font-size: 11.5px; line-height: 1.7; margin: 0 0 8px; }
+.settings-page .provider-save-hint { margin-top: 10px; }
 .settings-page .provider-heading { display: flex; flex: 1 1 160px; flex-direction: column; gap: 3px; min-width: 0; }
 .settings-page .provider-title, .settings-page .provider-heading h3, .settings-page .provider-heading strong { margin: 0; color: var(--text); font-size: 14px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
 .settings-page .provider-sub, .settings-page .provider-heading small { color: var(--text-tertiary); font-size: 11.5px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
@@ -184,7 +232,8 @@
 .settings-page .provider-model-controls, .settings-page .model-fetch { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
 .settings-page .provider-model-controls .adv-btn, .settings-page .model-fetch .adv-btn { min-height: 36px; }
 .settings-page .key-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.settings-page .provider-status { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; min-width: 0; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.settings-page .provider-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.settings-page .provider-status .tag,.settings-page .provider-status .stt { display:inline-flex; align-items:center; justify-content:center; min-height:26px; box-sizing:border-box; line-height:18px; }
 .settings-page .stt { min-width: 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 .settings-page .stt.good { color: var(--green); }
 .settings-page .stt.bad { color: var(--red); }
@@ -223,8 +272,13 @@
 .settings-page .import-row > * { min-height: 36px; max-width: 100%; }
 .settings-page .import-msg { margin-top: 9px; color: var(--text-secondary); font-size: 12.5px; overflow-wrap: anywhere; }
 .settings-page .import-list { display: flex; flex-direction: column; gap: 7px; max-height: 300px; margin-top: 10px; padding: 3px; overflow-y: auto; }
-.settings-page .import-item { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); cursor: pointer; }
-.settings-page .import-item.on { border-color: var(--accent-start); background: var(--accent-soft); }
+.settings-page .import-item { min-width: 0; padding: 14px 16px; border: 1px solid var(--border-strong,#c9cbd2); border-radius: 8px; background: var(--surface); }
+.settings-page .import-choice { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+.settings-page .import-candidate-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.settings-page .import-candidate-actions .hint { flex: 1 1 200px; font-size: 11.5px; line-height: 1.6; }
+.settings-page .import-item.on { border-color: var(--text-secondary); background: var(--surface-2); box-shadow:inset 3px 0 0 var(--text); }
+.settings-page .import-list { flex-shrink:0; }
+.settings-page .import-list .import-item { flex-shrink:0; }
 .settings-page .import-item.off { opacity: .55; cursor: not-allowed; }
 .settings-page .import-item input[type="radio"] { flex: none; margin-top: 4px; }
 .settings-page .ii-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
@@ -297,7 +351,7 @@
 
 @container settings-page (max-width: 900px) {
   .settings-page .settings-body { grid-template-columns: minmax(0, 1fr); }
-  .settings-page .settings-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(132px, 100%), 1fr)); gap: 6px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-page .settings-nav { top: 0; max-height: min(240px, 40dvh); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(132px, 100%), 1fr)); gap: 6px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); box-shadow: 0 3px 8px #00000008; }
   .settings-page .snav { width: 100%; min-height: 40px; }
   .settings-page .snav small { display: none; }
   .settings-page .settings-head { padding: 18px; }
@@ -322,6 +376,9 @@
 }
 
 @container provider (max-width: 520px) {
+  .settings-page .provider-head { flex-wrap: wrap; gap: 8px; }
+  .settings-page .provider-heading { flex-basis: 120px; }
+  .settings-page .provider-summary-status { flex-basis: calc(100% - 42px); margin-left: 42px; align-items: flex-start; flex-direction: row; flex-wrap: wrap; gap: 5px 10px; order: 1; }
   .settings-page .provider-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .settings-page .provider-model-controls, .settings-page .model-fetch { grid-template-columns: minmax(0, 1fr); }
   .settings-page .provider-model-controls .adv-btn, .settings-page .model-fetch .adv-btn { justify-self: start; min-height: 32px; }

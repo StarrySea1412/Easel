@@ -21,8 +21,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,7 +53,7 @@ class Tool:
 def _pip_chain(*pkgs: str, timeout: int = 1200) -> list[tuple]:
     """pip 双策略：默认源（带重试）→ 清华镜像（国内断流保险）。"""
     base = ["{python}", "-m", "pip", "install", "--upgrade",
-            "--timeout", "60", "--retries", "5", *pkgs]
+            "--timeout", "30", "--retries", "2", *pkgs]
     mirror = [*base, "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"]
     return [("pip 安装（默认源）", base, timeout),
             ("pip 安装（清华镜像）", mirror, timeout)]
@@ -111,7 +114,7 @@ TOOLS: list[Tool] = [
          [("winget · Python.Python.3.13",
            ["winget", "install", "-e", "--id", "Python.Python.3.13",
             "--accept-source-agreements", "--accept-package-agreements"], 900)]),
-    Tool("fw", "faster-whisper", "rm", "GPU 转录（cu121）",
+    Tool("fw", "faster-whisper", "rm", "本地语音转写 · 模型另行准备",
          ["{python}", "-c", "import faster_whisper as f;print(getattr(f,'__version__','ok'))"],
          _pip_chain("faster-whisper", timeout=1800)),
     Tool("model", "Whisper large-v3 模型", "rm", "约 3.1GB · hf-mirror 直拉 · 不入包",
@@ -134,7 +137,10 @@ TOOLS: list[Tool] = [
          ["biliup", "--version"],
          _pip_chain("biliup", timeout=1800)),
     Tool("pw", "Playwright Chromium", "pub", "小红书 / 快手 / 知乎 发布链浏览器",
-         ["{python}", "-c", "import playwright;print('playwright ok')"],
+         ["{python}", "-c",
+          "from pathlib import Path;from playwright.sync_api import sync_playwright;"
+          "p=sync_playwright().start();exe=Path(p.chromium.executable_path);"
+          "p.stop();print('Chromium '+str(exe));raise SystemExit(0 if exe.is_file() else 1)"],
          _pip_chain("playwright")
          + [("下载 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)]),
     Tool("cft", "Chrome for Testing", "pub", "登录态浏览器 · 平台登录用",
@@ -147,6 +153,76 @@ TOOLS: list[Tool] = [
 ]
 
 GROUP_NAMES = {"rm": "视频产线套件（Remotion）", "pub": "发布链", "common": "常用库"}
+
+# User-facing descriptions come from the same allowlisted recipes as installs.
+# "Optional" refers to the workbench as a whole, not to the named feature.
+TOOL_GUIDES = {
+    "node": {
+        "purpose": "运行 JavaScript 工具和 Remotion 视频工程。",
+        "usedBy": ["视频模板渲染", "OpenClaw 网关"], "requirement": "相关功能必需",
+        "scope": "Windows 本机：winget 按 Node.js LTS 包规则安装，可能需要管理员权限。",
+        "notes": "便携版可能已自带；检测通过就不需要再次安装。"},
+    "ffmpeg": {
+        "purpose": "剪辑、转码、合并音视频，并生成或处理字幕。",
+        "usedBy": ["音视频处理", "视频导出", "本地转写预处理"], "requirement": "相关功能必需",
+        "scope": "Windows 本机：优先 winget，失败后尝试 Chocolatey；可能需要管理员权限。",
+        "notes": "只做文字创作时可暂不安装。"},
+    "python": {
+        "purpose": "运行 Easel 后端和技能脚本。",
+        "usedBy": ["工作台服务", "Python 技能"], "requirement": "基础运行必需",
+        "scope": "检测当前工作台使用的 Python；缺少时才尝试 Windows 的 Python 安装包。",
+        "notes": "当前页面能连接后端，说明已有 Python；无需另装一份。"},
+    "fw": {
+        "purpose": "在本机把音频转成文字，作为云端转写之外的选择。",
+        "usedBy": ["本地语音转写", "字幕生成"], "requirement": "可选",
+        "scope": "当前工作台的 Python 环境（见上方解释器路径）；pip 无写权限时可能使用用户目录。",
+        "notes": "模型需另行准备；使用 GPU 还依赖兼容的驱动和运行库，此检测不证明 GPU 可用。"},
+    "model": {
+        "purpose": "为 faster-whisper 提供 large-v3 离线识别权重。",
+        "usedBy": ["large-v3 本地转写"], "requirement": "可选",
+        "scope": "模型保存到当前用户 models/whisper-large-v3；huggingface_hub 装入目标 Python。",
+        "notes": "约 3.1 GB，需联网下载；不使用本地转写时可跳过。目录存在不等于真实转写已验证。"},
+    "rmdeps": {
+        "purpose": "还原某个 Remotion 视频工程的 JavaScript 依赖。",
+        "usedBy": ["Remotion 视频工程"], "requirement": "相关功能必需",
+        "scope": "指定工程的 node_modules，不是全局安装。",
+        "notes": "本页尚未选择具体视频工程，请在工程初始化流程中安装。"},
+    "shell": {
+        "purpose": "让 Remotion 在后台渲染画面并导出视频。",
+        "usedBy": ["Remotion 视频渲染"], "requirement": "相关功能必需",
+        "scope": "指定 Remotion 工程内的浏览器缓存。",
+        "notes": "与平台登录浏览器用途不同；需先准备具体 Remotion 工程。"},
+    "biliup": {
+        "purpose": "提供 B 站视频上传的命令行能力。",
+        "usedBy": ["B 站视频投稿"], "requirement": "可选",
+        "scope": "当前工作台的 Python 环境；必要时补充用户 PATH，新进程生效。",
+        "notes": "安装不会登录或投稿，使用时仍需本人账号授权。"},
+    "pw": {
+        "purpose": "让技能控制 Chromium 浏览器完成平台登录、读取和发布流程。",
+        "usedBy": ["平台账号登录", "浏览器采集", "浏览器发布"], "requirement": "相关功能必需",
+        "scope": "Playwright 包装入目标 Python；Chromium 使用 PLAYWRIGHT_BROWSERS_PATH 或用户浏览器缓存。",
+        "notes": "同时检查 Python 包和 Chromium 可执行文件；安装成功不代表平台登录或发布成功。"},
+    "cft": {
+        "purpose": "检查平台登录可使用的 Chrome / Chromium 浏览器。",
+        "usedBy": ["平台登录浏览器"], "requirement": "可选",
+        "scope": "复用检测到的 Chrome，或下载到 Playwright 浏览器缓存。",
+        "notes": "与 Playwright Chromium 可能复用同一浏览器；补装前需有 Playwright Python 包。"},
+    "pylibs": {
+        "purpose": "补齐图片处理、在线配音、PDF 文字读取和 HTTP 请求能力。",
+        "usedBy": ["Pillow：图片处理", "edge-tts：在线配音", "pdfplumber：PDF 文本读取", "requests：网络请求"],
+        "requirement": "按功能选装",
+        "scope": "以上 4 个库装入当前工作台的 Python 环境；pip 无写权限时可能使用用户目录。",
+        "notes": "不包含 PDF 渲染器或 OCR；edge-tts 配音仍需要联网。"},
+}
+
+EVENT_PREFIX = "EASEL_INSTALL_EVENT "
+_EVENTS = False
+
+
+def _event(stage: str, **data) -> None:
+    if _EVENTS:
+        print(EVENT_PREFIX + json.dumps({"stage": stage, **data}, ensure_ascii=False),
+              file=sys.stderr, flush=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # 解释器解析：优先「Scripts 目录已在 PATH 上」的（装完 CLI 直接可见）
@@ -293,7 +369,32 @@ def _err_tail(proc) -> str:
     return pick[:140]
 
 
-def _run(argv: list[str], *, cwd: str | None = None, timeout: int = 600):
+class InstallCleanupError(RuntimeError):
+    """A timed out child may still run; never start the next strategy."""
+
+
+def _terminate_tree(proc) -> None:
+    if os.name == "nt":
+        taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+        try:
+            result = subprocess.run([str(taskkill), "/PID", str(proc.pid), "/T", "/F"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode and proc.poll() is None:
+                raise InstallCleanupError("无法结束超时安装进程，请结束该进程后再重试")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise InstallCleanupError("无法确认超时安装进程已结束，已停止后续策略") from exc
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait(timeout=10)
+
+
+def _run(argv: list[str], *, cwd: str | None = None, timeout: int = 600, stream: bool = False):
     exe = shutil.which(argv[0]) or argv[0]
     if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
         # Windows 通病：CreateProcess 不认 .cmd shim（npm/npx 等），走 cmd /c
@@ -301,9 +402,42 @@ def _run(argv: list[str], *, cwd: str | None = None, timeout: int = 600):
         exe = [os.environ.get("COMSPEC", "cmd.exe"), "/c", exe]
     else:
         exe = [exe]
-    return subprocess.run([*exe, *argv[1:]], cwd=cwd, timeout=timeout,
-                          capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    command = [*exe, *argv[1:]]
+    if not stream:
+        return subprocess.run(command, cwd=cwd, timeout=timeout,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Read output concurrently with wait(): a silent/hung installer must still
+    # hit its deadline. stdout remains reserved for the final machine result.
+    proc = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace", bufsize=1,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                            start_new_session=os.name != "nt")
+    tail: deque[str] = deque(maxlen=100)
+
+    def drain():
+        for line in iter(lambda: proc.stdout.readline(4096), ""):
+            tail.append(line)
+            print(line.rstrip("\r\n"), file=sys.stderr, flush=True)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    old_handler = None
+    if os.name != "nt" and threading.current_thread() is threading.main_thread():
+        def interrupted(_signum, _frame):
+            _terminate_tree(proc)
+            raise SystemExit(143)
+        old_handler = signal.signal(signal.SIGTERM, interrupted)
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_tree(proc)
+        raise
+    finally:
+        if old_handler is not None:
+            signal.signal(signal.SIGTERM, old_handler)
+        reader.join(timeout=2)
+    return subprocess.CompletedProcess(command, proc.returncode, stdout="".join(tail), stderr="")
 
 
 def check_tool(tool: Tool, python: str, dir_: str | None = None) -> dict:
@@ -347,7 +481,11 @@ def check_all(python: str, dir_: str | None = None, only: list[str] | None = Non
         r = check_tool(t, python, dir_)
         r.update({"name": t.name, "group": t.group,
                   "group_name": GROUP_NAMES.get(t.group, t.group),
-                  "desc": t.desc, "big": bool(t.big)})
+                  "desc": t.desc, "big": bool(t.big),
+                  "needsDir": t.needs_dir, **TOOL_GUIDES.get(t.id, {}),
+                  "strategies": len(t.install),
+                  "timeoutSeconds": min(10800, sum(int(s[2]) if len(s) > 2 else 600 for s in t.install)
+                                        + 120 * (len(t.install) + 1) + 90)})
         out.append(r)
     return out
 
@@ -410,37 +548,47 @@ def install_tool(tool: Tool, python: str, dir_: str | None = None) -> dict:
     if tool.needs_dir and not (Path(dir_) / "package.json").is_file():
         _die(f"{dir_} 里没有 package.json，不是 Remotion 工程目录", 3)
 
+    _event("checking", label="安装前检测", strategyCount=len(tool.install))
     pre = check_tool(tool, python, dir_)
     if pre["state"] == "ok":
         note = _ensure_cli_visible(tool, python)
-        print(f"✓ {tool.name} 已装，跳过（{pre['version']}）{note}", file=sys.stderr)
+        print(f"✓ {tool.name} 已装，跳过（{pre['version']}）{note}", file=sys.stderr, flush=True)
+        _event("complete", label="已检测就绪，无需重复安装")
         return {"id": tool.id, "state": "ok", "version": pre["version"],
                 "strategy": "已装", "detail": note or None}
 
-    print(f"▶ 安装 {tool.name}（{tool.desc}）", file=sys.stderr)
+    print(f"▶ 安装 {tool.name}（{tool.desc}）", file=sys.stderr, flush=True)
     last_err = ""
-    for label, argv, *rest in tool.install:
+    for index, (label, argv, *rest) in enumerate(tool.install, 1):
         timeout = int(rest[0]) if rest else 600
         argv_f = _fill(argv, python, dir_)
-        print(f"  → 策略：{label}", file=sys.stderr)
+        _event("installing", label=label, strategy=label, strategyIndex=index,
+               strategyCount=len(tool.install), phaseTimeoutSeconds=timeout)
+        print(f"  → 步骤 {index}/{len(tool.install)}：{label}（最多 {timeout} 秒）", file=sys.stderr, flush=True)
         try:
-            proc = _run(argv_f, cwd=dir_ if tool.needs_dir else None, timeout=timeout)
+            proc = _run(argv_f, cwd=dir_ if tool.needs_dir else None, timeout=timeout, stream=True)
+        except InstallCleanupError as e:
+            return {"id": tool.id, "state": "fail", "version": None, "strategy": label,
+                    "detail": str(e), "kind": "cleanup", "retryable": False}
         except Exception as e:  # noqa: BLE001
             last_err = f"{label}: {type(e).__name__}: {e}"
-            print(f"    ✗ {last_err}", file=sys.stderr)
+            print(f"    ✗ {last_err}", file=sys.stderr, flush=True)
             continue
         if proc.returncode != 0:
             last_err = f"{label}: 退出码 {proc.returncode}" + (f" · {_err_tail(proc)}" if _err_tail(proc) else "")
-            print(f"    ✗ {last_err}", file=sys.stderr)
+            print(f"    ✗ {last_err}", file=sys.stderr, flush=True)
             continue
+        _event("verifying", label="安装后校验", strategy=label, strategyIndex=index,
+               strategyCount=len(tool.install))
         state = check_tool(tool, python, dir_)
         if state["state"] == "ok":
             note = _ensure_cli_visible(tool, python)
-            print(f"    ✓ {label} 完成{note}", file=sys.stderr)
+            print(f"    ✓ {label} 完成{note}", file=sys.stderr, flush=True)
+            _event("complete", label="安装后校验通过")
             return {"id": tool.id, "state": "ok", "version": state["version"],
                     "strategy": label, "detail": note or None}
         last_err = f"{label}: 装完校验未通过（{state['detail'] or 'check 未认到'}）"
-        print(f"    ✗ {last_err}", file=sys.stderr)
+        print(f"    ✗ {last_err}", file=sys.stderr, flush=True)
 
     return {"id": tool.id, "state": "fail", "version": None,
             "strategy": None, "detail": last_err or "未知失败"}
@@ -557,6 +705,7 @@ def cmd_selftest(_a) -> int:
 
 
 def main() -> int:
+    global _EVENTS
     # 输出里全是中文。Windows 上 stdout 一旦是管道（被面板/agent 捕获），Python 就按
     # 系统 locale 编码（cp936/cp1252）写，配方表里的中文直接 UnicodeEncodeError 崩掉，
     # stdout 一个字节都不出 —— 调用方拿到空串，只会以为「配方表是空的」。
@@ -572,6 +721,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--python", help="目标解释器路径（默认自动解析：优先 PATH 可见者）")
     ap.add_argument("--json", action="store_true", help="机读输出（stdout 一个 JSON）")
+    ap.add_argument("--events", action="store_true", help="stderr 输出安装阶段事件与真实进程日志")
     sub = ap.add_subparsers(dest="cmd")
 
     sub.add_parser("list", help="配方总览").set_defaults(func=cmd_list)
@@ -593,6 +743,7 @@ def main() -> int:
                         help="机读输出（与全局 --json 等效）")
 
     a = ap.parse_args()
+    _EVENTS = a.events
     if not getattr(a, "func", None):
         ap.print_help()
         return 1

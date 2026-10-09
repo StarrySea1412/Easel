@@ -45,6 +45,8 @@ def begin(outputs: Path, sessions_dir: Path, session_id: str, turn_id: str,
     record = {'sessionId': session_id, 'turnId': turn_id, 'started': started,
               'status': 'running', 'invocation': [], 'quality': {},
               '_request': request, '_specs': specs, '_response': '', '_sources': sources}
+    from easel.session_trace import capture
+    record['_sqlite'] = capture(sessions_dir, session_id)
     save(outputs / '_skill_audits', record)
     return {'record': record, 'before': snapshot(outputs), 'sources': sources}
 
@@ -71,7 +73,8 @@ def _turn_events(sessions_dir: Path, context: dict) -> list[dict]:
     """Read only the owning session's bytes appended after its turn boundary."""
     from usage_stats import _sources
     record = dict(context['record'])
-    events = []
+    from easel.session_trace import read_events
+    events = read_events(sessions_dir, record['sessionId'], record, live=record.get('status') == 'running', finished=record.get('finished'))
     for path in _sources(sessions_dir, {record['sessionId']}):
         if path.is_symlink():
             continue
@@ -105,7 +108,7 @@ def finish(outputs: Path, sessions_dir: Path, context: dict, response: str, stat
     record = dict(context['record'])
     events = _turn_events(sessions_dir, context)
     invocation, references = invocation_evidence(events, record['_specs'])
-    record.update(status=status, invocation=invocation, _response=response,
+    record.update(status=status, finished=time.time(), invocation=invocation, _response=response,
                   quality=assess(outputs, context['before'], response, references,
                                  record['_specs'], record['_request']))
     save(outputs / '_skill_audits', record)

@@ -193,13 +193,14 @@ test('busy submission or reference upload locks edits and ignores dropped or pas
   assert.deepEqual(view.calls.modes, []);
 });
 
-test('prompt extraction is an auxiliary round trip preserving the editing draft and model-settings route', async t => {
+test('prompt extraction preserves the editing draft and opens the image channel for vision settings', async t => {
   const view = await fixture(t, { mode: 'img2img', reference, imgPrompt: '保留已有修改要求' });
   await view.click(view.button('提取提示词'));
   assert.equal(view.studio.mode, 'reverse');
   assert.ok(view.container.querySelector('[aria-label="反推参数"]'));
   await view.click(view.button('配置理解模型'));
-  assert.equal(view.calls.models, 1);
+  assert.equal(view.calls.settings, 1);
+  assert.equal(view.calls.models, 0);
   await view.click(view.button('返回图片创作'));
   assert.deepEqual(view.calls.modes, ['reverse', 'img2img']);
   assert.equal(view.container.querySelector('#image-prompt').value, '保留已有修改要求');

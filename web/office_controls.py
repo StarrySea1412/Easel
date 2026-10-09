@@ -31,9 +31,19 @@ _MUTATION_LOCK = threading.Lock()
 _RECEIPT_LOCK = threading.Lock()
 _STOP_RECEIPTS: OrderedDict[tuple[str, str, str], dict] = OrderedDict()
 MAX_STOP_RECEIPTS = 128
+THINKING_LEVELS = frozenset({'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'})
 # Audited agent-command/model-fallback and HTTP/CLI ingress contracts. A newer
 # or unknown gateway is not evidence that explicit overrides disable fallback.
-STRICT_MODEL_OVERRIDE_VERSIONS = frozenset({'2026.9.2'})
+# 2026.9.6: agent-via-gateway forwards the run's model to agent RPC; HTTP
+# forwards x-openclaw-model. Both validate authorization/visibility before
+# executing. agent-command marks explicit overrides as user selections and
+# agent-scope projects disabled_by_model_override to an empty fallback list.
+# Keep exact releases: a neighboring version does not inherit this audit.
+STRICT_MODEL_OVERRIDE_VERSIONS = frozenset({'2026.9.2', '2026.9.6'})
+# 2026.9.6 authorizeExistingGatewayDevice pins the public key, platform,
+# device family, roles and scopes. CLI/backend client metadata can reuse
+# those same grants; it is not a new device or a permission upgrade.
+CLI_DEVICE_REUSE_VERSIONS = frozenset({'2026.9.6'})
 
 
 def _error(message: str, status: int = 409):
@@ -83,8 +93,10 @@ def _model_probe_client(transport: str, credentials):
     """Read existing approval before connecting, never request a new identity.
 
     `agent --model` uses gateway-client/backend + admin in the audited CLI.
-    HTTP only needs a read-scoped, already-paired connection for server.version;
-    its separate empty-message probe checks the actual HTTP authorization.
+    On 2026.9.6 the same paired CLI device can use that client metadata with
+    its existing admin grant. Verify that running version on the original
+    read connection first; never approve a device or request broader scopes.
+    HTTP's separate empty-message probe checks its actual authorization.
     """
     device = gateway._load_device()
     if not gateway.PROFILE_DB.is_file():
@@ -100,8 +112,7 @@ def _model_probe_client(transport: str, credentials):
     roles = json.loads(row.get('roles_json') or '[]')
     identity = (row.get('client_id'), row.get('client_mode'))
     scopes = ['operator.admin'] if transport == 'cli' else ['operator.read']
-    valid_identity = (identity == ('gateway-client', 'backend') if transport == 'cli'
-                      else identity in {('cli', 'cli'), ('gateway-client', 'backend')})
+    valid_identity = identity in {('cli', 'cli'), ('gateway-client', 'backend')}
     metadata = gateway._client_identity()
     metadata_matches = all(not row.get(column) or row[column] == metadata[key]
                            for column, key in (('platform', 'platform'), ('device_family', 'deviceFamily')))
@@ -117,7 +128,18 @@ def _model_probe_client(transport: str, credentials):
         auth = {'token': credentials.token}
     elif credentials.password:
         auth = {'password': credentials.password}
-    client = gateway.GatewayClient(timeout=3.0, scopes=scopes, client_id=identity[0],
+    if transport == 'cli' and identity == ('cli', 'cli'):
+        discovery = gateway.GatewayClient(timeout=10.0, scopes=['operator.read'],
+                                         client_id=identity[0], client_mode=identity[1], auth=auth)
+        try:
+            discovery.connect()
+            if (discovery.server_version not in CLI_DEVICE_REUSE_VERSIONS
+                    or not ({'operator.read', 'operator.admin'} & discovery.granted_scopes)):
+                _error('当前网关尚未核验已批准设备的 CLI 身份复用能力；未请求新配对或扩大权限。', 503)
+        finally:
+            discovery.close()
+        identity = ('gateway-client', 'backend')
+    client = gateway.GatewayClient(timeout=10.0, scopes=scopes, client_id=identity[0],
                                    client_mode=identity[1], auth=auth)
     try:
         client.connect()
@@ -198,6 +220,13 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
     result = {'available': False, 'scope': 'unavailable', 'currentModelRef': None,
               'options': options, 'reason': '尚未配置可选择的渠道模型。',
               'gatewayVersion': None, 'transport': None}
+    config = office._read_json(web.openclaw_state_dir() / 'openclaw.json', web.openclaw_state_dir(), set()) or {}
+    agents = config.get('agents', {})
+    defaults = agents.get('defaults', {}) if isinstance(agents, dict) else {}
+    model = defaults.get('model') if isinstance(defaults, dict) else None
+    default_ref = model.get('primary') if isinstance(model, dict) else model
+    if isinstance(default_ref, str) and default_ref in {option['id'] for option in options}:
+        result['defaultModelRef'] = default_ref
     if not options:
         return result
     client = None
@@ -217,6 +246,23 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
             result['gatewayVersion'] = version
         if version not in STRICT_MODEL_OVERRIDE_VERSIONS or 'agent' not in client.methods:
             _error('运行网关尚未核验严格指定模型能力，任务不会改用默认或备用模型。', 503)
+        # Read the running gateway's own policy, including custom provider
+        # metadata. Brand/model-name heuristics cannot determine allowed effort.
+        if 'models.list' in client.methods:
+            try:
+                catalog = client._rpc('models.list', {'agentId': 'main', 'view': 'configured'})
+                rows = catalog.get('models', []) if isinstance(catalog, dict) else []
+                for option in options:
+                    matches = [row for row in rows if isinstance(row, dict)
+                               and row.get('provider') == option['provider'] and row.get('id') == option['model']]
+                    if len(matches) != 1:
+                        continue
+                    raw = matches[0].get('thinkingLevels')
+                    levels = [row.get('id') for row in raw if isinstance(row, dict) and row.get('id') in THINKING_LEVELS] if isinstance(raw, list) else []
+                    if levels:
+                        option['thinkingLevels'] = list(dict.fromkeys(levels))
+            except Exception:
+                pass  # Missing policy is unknown, never an invented off-only list.
         if transport == 'http':
             _probe_http_override(web, session, credentials, model_ref)
         # Only a stored session override can preselect the next turn. The last
@@ -244,12 +290,25 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
     return result
 
 
-def require_model_override(web, session: str | None, model_ref: str, *, transport=None, credentials=None) -> dict:
+def require_model_override(web, session: str | None, model_ref: str, *, transport=None, credentials=None, thinking_level=None) -> dict:
     validate_requested_model(web, model_ref)
     capability = turn_model_capability(web, session, model_ref, transport=transport, credentials=credentials)
     if not capability['available']:
         _model_error('chat_model_override_unavailable', capability['reason'])
+    validate_thinking_level(capability, model_ref, thinking_level)
     return capability
+
+
+def validate_thinking_level(capability, model_ref, thinking_level):
+    if thinking_level is None:
+        return
+    ref = model_ref or capability.get('currentModelRef') or capability.get('defaultModelRef')
+    option = next((row for row in capability.get('options', []) if row.get('id') == ref), None)
+    levels = option.get('thinkingLevels') if option else None
+    if levels and thinking_level not in levels:
+        from easel.gateway_auth import gateway_error
+        raise HTTPException(400, gateway_error(
+            f'Thinking level "{thinking_level}" is not supported for {ref}. Use one of: {", ".join(levels)}.'))
 
 
 def _new_client():

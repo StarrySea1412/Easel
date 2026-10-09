@@ -207,6 +207,7 @@ class Store:
             db.execute('CREATE TABLE IF NOT EXISTS ai_reviews (platform TEXT, account_id TEXT, content_id TEXT, source_hash TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id,content_id))')
 
             db.execute('CREATE TABLE IF NOT EXISTS account_insights (platform TEXT, account_id TEXT, source_hash TEXT, data TEXT NOT NULL, PRIMARY KEY(platform,account_id))')
+            db.execute('CREATE TABLE IF NOT EXISTS sync_states (platform TEXT, request_account_id TEXT, updated_at TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(platform,request_account_id))')
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=15)
@@ -214,6 +215,18 @@ class Store:
     def accounts(self):
         with self.connect() as db:
             return [json.loads(row[0]) for row in db.execute('SELECT data FROM accounts ORDER BY platform,account_id')]
+
+    def sync_state(self, platform, account_id=None):
+        scope(platform, account_id or '__discover__')
+        with self.connect() as db:
+            row = db.execute('SELECT data FROM sync_states WHERE platform=? AND request_account_id=?', (platform, account_id or '')).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_sync_state(self, platform, request_account_id, state):
+        scope(platform, request_account_id or '__discover__')
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO sync_states VALUES(?,?,?,?)',
+                       (platform, request_account_id or '', now(), json.dumps(state, ensure_ascii=False)))
 
     def ingest(self, payload, *, identity='user_declared'):
         platform, account_id = scope(payload.get('platform'), payload.get('accountId'))

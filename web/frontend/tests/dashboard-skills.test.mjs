@@ -221,7 +221,7 @@ test('Dashboard uses the actual picker, keeps existing text when choosing skills
 test('hover and keyboard reveal the real guide, while creation-scoped requirements save and cancel independently', async t => {
   const view = await fixture(t, { skills: [first.name], text: '准备发送的首页草稿' });
   await view.render();
-  await view.hover(view.container.querySelector('.composer-skill-chip'));
+  await view.hover(view.container.querySelector('.composer-skill-detail-trigger'));
   await view.waitForGuide();
   assert.match(document.querySelector('.selected-skill-popover').textContent, /本次创作补充要求/);
   assert.match(document.querySelector('.selected-skill-popover').textContent, /原始记录与出处/);

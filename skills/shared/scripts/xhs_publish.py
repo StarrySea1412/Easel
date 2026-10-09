@@ -39,6 +39,7 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+import login_qr  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import publish_receipt  # noqa: E402
 import xhs_readback  # noqa: E402
@@ -565,7 +566,8 @@ def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: 
     """
     deadline = time.monotonic() + timeout_s
     last_state = ""
-    qr_saved = False
+    qr_meta = None
+    last_capture = -3.0
     while time.monotonic() < deadline:
         if _login_page_closed(page):
             return "closed"
@@ -579,22 +581,21 @@ def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: 
         if official and not verification and _query_safe(page, SELECTORS["login_ok"]) is not None:
             return "success"
         qr = _query_safe(page, SELECTORS["qrcode"]) if official and not verification else None
+        captured = False
         if qr is not None:
-            if not qr_saved:
-                try:
-                    qr_out.parent.mkdir(parents=True, exist_ok=True)
-                    qr.screenshot(path=str(qr_out), timeout=1500)
-                    qr_saved = True
-                except Exception:
-                    pass  # The user can still interact with the visible official page.
-            state = "qr_ready" if qr_saved else "verifying"
+            if time.monotonic() - last_capture >= 3:
+                qr_meta = login_qr.capture_element(qr, qr_out)
+                last_capture = time.monotonic()
+                captured = True
+            state = "qr_ready" if qr_meta else "verifying"
         else:
-            qr_saved = False
+            qr_meta = None
+            last_capture = -3.0
             state = "verifying"
-        if state != last_state:
+        if state != last_state or captured:
             message = ("请用小红书 App 扫码，也可在已打开的浏览器窗口完成登录。" if state == "qr_ready"
                        else "请在已打开的小红书浏览器窗口完成登录或安全验证。")
-            login_state.write_status(status_file, state, message, qr=str(qr_out) if state == "qr_ready" else "")
+            login_state.write_status(status_file, state, message, qr=str(qr_out) if state == "qr_ready" else "", qr_meta=qr_meta)
             last_state = state
         page.wait_for_timeout(1000)
     return "expired"
@@ -675,8 +676,13 @@ def cmd_login(a) -> int:
                 login_state.write_status(sf, "error", message)
                 _die(message)
             qr_out.parent.mkdir(parents=True, exist_ok=True)
-            qr.screenshot(path=str(qr_out))
-            login_state.write_status(sf, "qr_ready", "二维码已就绪，请扫码", qr=str(qr_out))
+            qr_meta = login_qr.capture_element(qr, qr_out)
+            if not qr_meta:
+                _stop_on_login_page_error(page, sf)
+                message = "小红书登录页尚无可扫描二维码，请尝试浏览器登录并查看官方验证提示。"
+                login_state.write_status(sf, "error", message)
+                _die(message)
+            login_state.write_status(sf, "qr_ready", "二维码已就绪，请扫码", qr=str(qr_out), qr_meta=qr_meta)
             print(f"📱 二维码已保存：{qr_out}")
             print(f"   用小红书 App 扫码登录。若走 Easel Web UI，可在 outputs 里查看这张图。")
             print(f"   （二维码有时效，约几分钟；过期请重跑 login）")
@@ -693,6 +699,11 @@ def cmd_login(a) -> int:
                 if logged_in:
                     completed_message = "登录成功"
                     return 0
+                current_qr = _query_safe(page, SELECTORS["qrcode"])
+                current_meta = login_qr.capture_element(current_qr, qr_out) if current_qr is not None else None
+                login_state.write_status(sf, "qr_ready" if current_meta else "verifying",
+                                        "二维码已就绪，请扫码" if current_meta else "请查看官方页面是否要求安全验证。",
+                                        qr=str(qr_out) if current_meta else "", qr_meta=current_meta)
                 page.wait_for_timeout(2000)
             login_state.write_status(sf, "expired", "二维码超时未扫")
             print(f"⏱️ {timeout_s}s 内未检测到登录成功（二维码可能已过期）。请重跑 login 再扫。",

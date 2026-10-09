@@ -2,16 +2,26 @@
 from __future__ import annotations
 
 import json
+import io
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import cv2
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/shared/scripts'))
 import xhs_publish as publisher
 
 ERROR_URL = 'https://www.xiaohongshu.com/website-login/error'
+
+
+def qr_image():
+    pixels = cv2.QRCodeEncoder_create().encode('offline-xhs-login-fixture')
+    output = io.BytesIO()
+    Image.fromarray(pixels).resize((240, 240), Image.Resampling.NEAREST).save(output, format='PNG')
+    return output.getvalue()
 
 
 @pytest.mark.parametrize('url,title,body,expected', [
@@ -167,8 +177,10 @@ def test_late_security_redirect_after_qr_is_terminal(monkeypatch, tmp_path):
     def screenshot(*_args, **_kwargs):
         page.url = ERROR_URL
         page.page_title = '安全验证'
+        return qr_image()
 
-    monkeypatch.setattr(publisher, '_wait_sel', lambda *_a: SimpleNamespace(screenshot=screenshot))
+    monkeypatch.setattr(publisher, '_wait_sel', lambda *_a: SimpleNamespace(
+        screenshot=screenshot, is_visible=lambda: True, evaluate=lambda _js: 'CANVAS'))
     with pytest.raises(SystemExit):
         publisher.cmd_login(args)
     message = read_status(args)['message']
@@ -209,10 +221,17 @@ class InteractivePage(Page):
             return self if self.qr else None
         raise AssertionError('Unexpected DOM access')
 
-    def screenshot(self, *, path, timeout):
+    def is_visible(self):
+        return True
+
+    def evaluate(self, _script):
+        return 'CANVAS'
+
+    def screenshot(self, *, timeout, type):
         assert timeout == 1500
-        self.screenshots.append(path)
-        Path(path).write_bytes(b'synthetic QR')
+        assert type == 'png'
+        self.screenshots.append(True)
+        return qr_image()
 
     def wait_for_timeout(self, delay):
         self.waits.append(delay)
@@ -231,9 +250,9 @@ def visible_runner(monkeypatch, tmp_path, page, on_close=None):
     transitions = []
     write = publisher.login_state.write_status
 
-    def track(path, state, message='', qr=''):
+    def track(path, state, message='', qr='', **kwargs):
         transitions.append(state)
-        write(path, state, message, qr)
+        write(path, state, message, qr, **kwargs)
 
     monkeypatch.setattr(publisher.login_state, 'write_status', track)
     return args, closed, transitions

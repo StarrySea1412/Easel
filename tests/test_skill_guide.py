@@ -57,11 +57,20 @@ def test_guide_image_skill_marks_image_api():
 
 
 def test_guide_image_api_configured():
-    env = {"IMG_API_KEY": "sk-test", "IMG_BASE_URL": "https://example.com/v1"}
+    env = {"IMG_API_KEY": "sk-test", "IMG_BASE_URL": "https://example.com/v1", "IMG_MODEL": "fixture-image"}
     g = _guide("ai-image-gen", env=env)
     assert g["needs"]["api"]["configured"] is True
     assert all(m["configured"] for m in g["needs"]["media"])
     assert not any("API 配置" in h for h in g["howToStart"])
+
+
+def test_chat_credentials_do_not_configure_workbench_image_or_video_channels():
+    env = {'OPENAI_API_KEY': 'fixture', 'OPENAI_BASE_URL': 'https://fixture', 'IMG_MODEL': 'fixture-image'}
+    assert not web._skill_api_configured('ai-image-gen', env)
+    assert not web._guide_group_ready('image', env)
+    assert not web._guide_group_ready('video', {**env, 'VIDEO_MODEL': 'fixture-video'})
+    assert not web._skill_api_configured('ai-image-gen', {**env, 'IMG_API_KEY': 'dedicated'})
+    assert web._skill_api_configured('ai-image-gen', {**env, 'IMG_API_KEY': 'dedicated', 'IMG_BASE_URL': 'https://image-fixture'})
 
 
 def test_guide_video_skill():

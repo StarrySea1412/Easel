@@ -26,7 +26,7 @@ async function fixture(t, props = {}, preferences = {}) {
   const container = document.createElement('div'); document.body.append(container);
   let root = createRoot(container);
   const base = {
-    currentPage: 'dashboard', onPageChange: page => visits.push(page),
+    currentPage: 'chat', onPageChange: page => { visits.push(page); base.currentPage = page; root.render(createElement(Sidebar, base)); },
     personas: [], selectedPersona: '', onPersonaChange: () => {}, onNewProfile: () => {},
     sessions: [session('s1', '今天的对话'), session('s2', '此前的调研'), session('hidden', '未启用的空会话', { messages: [] })],
     activeSessionId: 's1', activeSessionHasMessages: true,
@@ -42,14 +42,18 @@ async function fixture(t, props = {}, preferences = {}) {
     async clickLabel(label) { const button = container.querySelector(`[aria-label="${label}"]`); assert.ok(button, `missing control: ${label}`); await act(async () => button.click()); },
     async clickText(label) { const button = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === label); assert.ok(button, `missing button: ${label}`); await act(async () => button.click()); },
     async remount() { await act(async () => root.unmount()); root = createRoot(container); await act(async () => root.render(createElement(Sidebar, base))); },
+    async update(patch) { Object.assign(base, patch); await act(async () => root.render(createElement(Sidebar, base))); },
   };
 }
 
-test('new installations show compact tools beside an expanded real conversation list', async t => {
+test('new installations start with both columns collapsed and reveal real conversations on request', async t => {
   const view = await fixture(t);
-  assert.ok(view.shell().classList.contains('is-expanded'));
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
   assert.equal(view.shell().classList.contains('is-toolbar-expanded'), false);
   assert.ok(view.container.querySelector('.sidebar-toolbar'));
+  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.equal(view.byLabel('展开对话列表').getAttribute('aria-expanded'), 'false');
+  await view.clickLabel('展开对话列表');
   assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.container.querySelector('.sidebar-conversations .session-select'));
   assert.equal(view.byLabel('展开工具栏').getAttribute('aria-expanded'), 'false');
@@ -60,17 +64,65 @@ test('new installations show compact tools beside an expanded real conversation 
   assert.deepEqual(view.requests, []);
 });
 
-test('a legacy collapsed rail does not override the new default conversation column', async t => {
-  const view = await fixture(t, {}, { 'easel:sidebar-expanded': 'false' });
-  assert.ok(view.shell().classList.contains('is-expanded'));
+for (const page of ['chat', 'dashboard', 'settings', 'accounts', 'analysis', 'agent-office']) test(`${page} ignores legacy expansion and starts with both columns collapsed`, async t => {
+  const view = await fixture(t, { currentPage: page }, { [CONVERSATIONS]: 'true', [TOOLBAR]: 'true' });
+  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.equal(view.shell().classList.contains('is-toolbar-expanded'), false);
+  assert.equal(localStorage.getItem(CONVERSATIONS), 'true');
+  await view.clickLabel('展开对话列表');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  await view.remount();
+  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.equal(localStorage.getItem(CONVERSATIONS), 'true');
+});
+
+for (const savedOpen of [true, false]) test(`navigation collapses conversations even when the legacy chat preference was ${savedOpen}`, async t => {
+  const view = await fixture(t, {}, { [CONVERSATIONS]: String(savedOpen), [TOOLBAR]: 'true' });
+  await view.clickLabel('展开工具栏');
+  for (const page of ['settings', 'accounts', 'analysis', 'agent-office', 'chat']) {
+    await view.update({ currentPage: page });
+    assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+    await view.clickLabel('展开对话列表');
+    assert.ok(view.container.querySelector('.sidebar-conversations'));
+    assert.equal(localStorage.getItem(CONVERSATIONS), String(savedOpen), 'manual expansion stores no preference');
+  }
+  assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
+  await view.update({ currentPage: 'settings' });
+  await view.update({ currentPage: 'chat' });
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
+});
+
+test('automatic collapse restores focus if navigation removes the focused conversation control', async t => {
+  const view = await fixture(t);
+  await view.clickLabel('展开对话列表');
+  await act(async () => view.byLabel('收起对话列表').focus());
+  await view.update({ currentPage: 'settings' });
+  assert.equal(document.activeElement, view.byLabel('展开对话列表'));
+});
+
+test('mobile navigation keeps returning chat unobscured despite legacy expansion', async t => {
+  t.mock.method(window, 'matchMedia', () => ({ matches: true }));
+  const view = await fixture(t, {}, { [CONVERSATIONS]: 'true' });
+  await view.update({ currentPage: 'settings' });
+  await view.clickLabel('展开对话列表');
+  await view.update({ currentPage: 'chat' });
+  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.equal(localStorage.getItem(CONVERSATIONS), 'true');
+  await view.clickLabel('展开对话列表');
   assert.ok(view.byLabel('收起对话列表'));
+});
+
+test('a legacy expanded rail cannot override the compact first screen', async t => {
+  const view = await fixture(t, {}, { 'easel:sidebar-expanded': 'true' });
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
+  assert.ok(view.byLabel('展开对话列表'));
 });
 
 for (const savedOpen of [undefined, 'true']) test(`initial ${savedOpen ? 'restored' : 'default'} conversations preserve existing page focus`, async t => {
   const input = document.createElement('input'); document.body.append(input); input.focus();
   t.after(() => input.remove());
   const view = await fixture(t, {}, savedOpen ? { [CONVERSATIONS]: savedOpen } : {});
-  assert.ok(view.byLabel('收起对话列表'));
+  assert.ok(view.byLabel('展开对话列表'));
   assert.equal(document.activeElement, input);
 });
 
@@ -92,6 +144,8 @@ for (const narrow of [false, true]) test(`${narrow ? 'small-screen' : 'desktop'}
 test('toolbar and conversations toggle independently through all four combinations', async t => {
   const view = await fixture(t);
   const state = () => [view.shell().classList.contains('is-toolbar-expanded'), view.shell().classList.contains('is-expanded')];
+  assert.deepEqual(state(), [false, false]);
+  await view.clickLabel('展开对话列表');
   assert.deepEqual(state(), [false, true]);
   const firstSession = view.container.querySelector('.session-select');
   await view.clickLabel('展开工具栏');
@@ -108,28 +162,28 @@ test('toolbar and conversations toggle independently through all four combinatio
   assert.deepEqual(view.selected, []);
 });
 
-test('both column preferences persist separately across remount', async t => {
+test('manual expansion stays within the mounted page and both columns reset on remount', async t => {
   const view = await fixture(t);
   await view.clickLabel('展开工具栏');
-  await view.clickLabel('收起对话列表');
-  assert.equal(localStorage.getItem(TOOLBAR), 'true');
-  assert.equal(localStorage.getItem(CONVERSATIONS), 'false');
-  await view.remount();
-  assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
-  assert.equal(view.shell().classList.contains('is-expanded'), false);
   await view.clickLabel('展开对话列表');
-  assert.equal(localStorage.getItem(CONVERSATIONS), 'true');
-  assert.equal(localStorage.getItem(TOOLBAR), 'true');
+  assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
+  assert.ok(view.shell().classList.contains('is-expanded'));
+  assert.equal(localStorage.getItem(TOOLBAR), null);
+  assert.equal(localStorage.getItem(CONVERSATIONS), null);
+  await view.remount();
+  assert.equal(view.shell().classList.contains('is-toolbar-expanded'), false);
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
 });
 
-test('unknown preferences fall back to compact toolbar and expanded conversations', async t => {
+test('invalid legacy preferences still start with both columns compact', async t => {
   const view = await fixture(t, {}, { [TOOLBAR]: '{invalid', [CONVERSATIONS]: '{invalid' });
-  assert.ok(view.shell().classList.contains('is-expanded'));
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
   assert.equal(view.shell().classList.contains('is-toolbar-expanded'), false);
 });
 
 for (const expanded of [true, false]) test(`all eleven workspaces remain reachable with conversations ${expanded ? 'expanded' : 'collapsed'}`, async t => {
   const view = await fixture(t, {}, { [CONVERSATIONS]: String(expanded) });
+  if (expanded) await view.clickLabel('展开对话列表');
   for (const [label, page] of [['工作台', 'dashboard'], ['对话', 'chat'], ['生图工坊', 'image'], ['Agent 办公室', 'agent-office'], ['设置', 'settings']]) {
     await view.clickLabel(label); assert.equal(view.visits.at(-1), page);
   }
@@ -148,14 +202,17 @@ for (const expanded of [true, false]) test(`all eleven workspaces remain reachab
   await act(async () => accountLink.click());
   assert.equal(view.visits.at(-1), 'accounts');
   assert.equal(new Set(view.visits).size, 11);
-  assert.equal(view.shell().classList.contains('is-expanded'), expanded, 'desktop navigation preserves column preference');
+  assert.equal(view.shell().classList.contains('is-expanded'), false, 'account navigation automatically collapses the conversation column');
+  assert.equal(localStorage.getItem(CONVERSATIONS), String(expanded), 'navigation does not rewrite obsolete layout preferences');
 });
 
 test('selecting an existing conversation and creating a new one invoke their separate actions', async t => {
   const view = await fixture(t);
+  await view.clickLabel('展开对话列表');
   await view.clickText('此前的调研');
   assert.deepEqual(view.selected, ['s2']);
   assert.deepEqual(view.visits, []);
+  assert.ok(view.container.querySelector('.sidebar-conversations'), 'session switching preserves the expanded list');
   await view.clickText('新建对话');
   assert.equal(view.actions.newChats, 1);
   assert.deepEqual(view.selected, ['s2']);
@@ -175,6 +232,7 @@ test('small-screen backdrop and Escape dismiss conversations while preserving to
   t.mock.method(window, 'matchMedia', () => ({ matches: true }));
   const view = await fixture(t);
   await view.clickLabel('展开工具栏');
+  await view.clickLabel('展开对话列表');
   await view.clickLabel('关闭侧边栏遮罩');
   assert.equal(view.container.querySelector('.sidebar-conversations'), null);
   assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
@@ -190,15 +248,16 @@ test('small-screen backdrop and Escape dismiss conversations while preserving to
   assert.ok(view.byLabel('工作台'));
 });
 
-test('small-screen session selection and new chat close only conversations', async t => {
+test('small-screen session selection and new chat preserve the expanded conversation list', async t => {
   t.mock.method(window, 'matchMedia', () => ({ matches: true }));
   const view = await fixture(t, {}, { [TOOLBAR]: 'true' });
+  await view.clickLabel('展开工具栏');
+  await view.clickLabel('展开对话列表');
   await view.clickText('今天的对话');
   assert.deepEqual(view.selected, ['s1']);
-  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
-  await view.clickLabel('展开对话列表');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
   await view.clickText('新建对话');
   assert.equal(view.actions.newChats, 1);
-  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
 });

@@ -3,6 +3,7 @@ import { modelProvider, officeModelLabel } from '../../lib/modelProviders';
 
 export default function OfficeModelIdentity({ agent, stale = false }: { agent: OfficeAgent; stale?: boolean }) {
   const identity = agent.observedModel;
+  if (agent.source !== 'demo' && !identity?.model) return <section className="office-model-identity office-model-identity--unreported" aria-label="模型身份"><strong>{stale ? '上次快照 · ' : ''}模型：来源未确认</strong><small>有调用记录后显示实际模型；配置仅用于后续调用。</small></section>;
   if (agent.source === 'demo') return <section className="office-model-identity" aria-label="模型身份"><strong>模拟员工 · 未调用真实模型</strong><p>品牌形象请从「模型厂商 3D 形象审核」预览。</p></section>;
   return <section className="office-model-identity" aria-label="模型身份">
     <strong style={{ borderColor: modelProvider(identity?.provider).color }}>{stale ? '上次快照 · ' : ''}{officeModelLabel(identity)}</strong>

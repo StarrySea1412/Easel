@@ -143,7 +143,8 @@ def load_env_file(env_file: Path | None) -> None:
 
 def resolve_config(name: str) -> tuple[str, str | None]:
     """返回 (值, 命中的变量名)；未配置时返回 ("", None)。不报错，供 check 复用。"""
-    for candidate in (name, *ENV_ALIASES.get(name, ())):
+    candidates = (name,) if os.environ.get('EASEL_IMAGE_DEDICATED_CHANNEL') == '1' else (name, *ENV_ALIASES.get(name, ()))
+    for candidate in candidates:
         value = os.environ.get(candidate, "").strip()
         if value:
             return value, candidate
@@ -626,6 +627,20 @@ def cmd_variations(args: argparse.Namespace) -> None:
 # ── 子命令：check（离线，不发请求）──────────────────────────
 
 def cmd_check(args: argparse.Namespace) -> None:
+    if getattr(args, 'dedicated_channel', False):
+        missing = []
+        print('生图工坊专用通道离线检查（不联网、不展示凭据）')
+        for name in (ENV_BASE_URL, ENV_MODEL, ENV_API_KEY):
+            value = os.environ.get(name, '').strip()
+            present = bool(value) and not (value.startswith('<') and value.endswith('>'))
+            print(f'{name}: ' + ('已填写' if present else '未填写'))
+            if not present:
+                missing.append(name)
+        if missing:
+            print('未配置完整，请到设置 → 生图通道填写；聊天通道Key不用于生图。')
+            raise SystemExit(2)
+        print('配置已填写；尚未联网测通，不代表可用。')
+        return
     base_url, base_from = resolve_config(ENV_BASE_URL)
     model, model_from = resolve_config(ENV_MODEL)
     api_key, key_from = resolve_config(ENV_API_KEY)
@@ -721,6 +736,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     p_chk = sub.add_parser("check", help="离线校验配置状态（不发起请求）")
     p_chk.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")
+    p_chk.add_argument('--dedicated-channel', action='store_true', help='只检查生图工坊IMG_*，不借用聊天Key，不输出配置值')
     p_chk.set_defaults(func=cmd_check)
 
     return parser.parse_args(argv)

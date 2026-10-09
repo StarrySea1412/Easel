@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchAccounts } from '../lib/api';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, WHOAMI_TTL_MS } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts } from './icons';
 import '../styles/sidebar-account-popover.css';
@@ -15,6 +16,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [position, setPosition] = useState({ left: 64, top: 12, width: 290 });
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -47,6 +49,11 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
 
   useEffect(() => () => clearTimeout(hideTimer.current), []);
   useEffect(() => {
+    const update = () => setRevision(value => value + 1);
+    window.addEventListener(ACCOUNT_STATE_EVENT, update); window.addEventListener('storage', update);
+    return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, update); window.removeEventListener('storage', update); };
+  }, []);
+  useEffect(() => {
     if (!open) return;
     let stale = false;
     setSnapshot(undefined);
@@ -57,11 +64,13 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
       if (stale) return;
       setSnapshot(PLATFORMS.map(([platform, name]) => {
         const account = accounts.find(item => item.platform === platform);
-        return { platform, name, loggedIn: typeof account?.loggedIn === 'boolean' ? account.loggedIn : null };
+        const cached = getWhoamiCache()[platform];
+        const fresh = cached && Date.now() - cached.ts < WHOAMI_TTL_MS;
+        return { platform, name, loggedIn: fresh ? cached.loggedIn : typeof account?.loggedIn === 'boolean' ? account.loggedIn : null };
       }));
     }).catch(() => { if (!stale) setError(true); });
     return () => { stale = true; };
-  }, [open]);
+  }, [open, revision]);
 
   useLayoutEffect(() => {
     if (!open) return;

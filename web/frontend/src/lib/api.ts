@@ -424,6 +424,10 @@ export interface LoginStart {
   state?: string;       // starting | qr_ready | success | expired | error | unknown
   message?: string;
   qr?: string;          // outputs 下相对路径，用 mediaUrl() 取图
+  qrTs?: number;
+  qrKind?: 'qr' | 'page';
+  qrWidth?: number;
+  qrHeight?: number;
   configured?: boolean; // 凭证式：是否已配置
   visibleBrowser?: boolean;
 }
@@ -454,8 +458,8 @@ export function saveCredentials(
 }
 
 /** 启动「公众号后台」扫码登录（数据中心取数用，独立于 AppID 凭证）。返回二维码状态。 */
-export function startMpLogin(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login`, { method: 'POST' });
+export function startMpLogin(platform: string, options: { restart?: boolean } = {}): Promise<LoginStatus> {
+  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login${options.restart ? '?restart=true' : ''}`, { method: 'POST' });
 }
 
 /** 轮询公众号后台扫码登录状态。 */
@@ -469,6 +473,9 @@ export interface LoginStatus {
   message: string;
   qr: string;
   qrTs?: number;
+  qrKind?: 'qr' | 'page';
+  qrWidth?: number;
+  qrHeight?: number;
   visibleBrowser?: boolean;
 }
 
@@ -480,11 +487,15 @@ export interface AccountWhoami {
   loggedIn: boolean;
   name: string;
   avatar: string;   // 头像 URL（http）或空
+  verified?: boolean;
+  verificationMessage?: string;
 }
 
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
-export function accountWhoami(platform: string): Promise<AccountWhoami> {
-  return request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami`);
+export async function accountWhoami(platform: string): Promise<AccountWhoami> {
+  const signal = AbortSignal.timeout(60000);
+  try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami`, { signal }); }
+  catch (cause) { if (signal.aborted) throw new Error('登录状态检查超时，请稍后重试'); throw cause; }
 }
 
 /** 退出登录：删该平台持久化登录态。 */
@@ -589,8 +600,12 @@ export function submitPublishSms(platform: string, code: string, receiptId: stri
   });
 }
 
-export function startLogin(platform: string, visibleBrowser = false): Promise<LoginStart> {
-  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}${visibleBrowser ? '?visibleBrowser=true' : ''}`, { method: 'POST' });
+export function startLogin(platform: string, visibleBrowser = false, options: { restart?: boolean } = {}): Promise<LoginStart> {
+  const params = new URLSearchParams();
+  if (visibleBrowser) params.set('visibleBrowser', 'true');
+  if (options.restart) params.set('restart', 'true');
+  const query = params.toString();
+  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}${query ? `?${query}` : ''}`, { method: 'POST' });
 }
 
 export function loginStatus(platform: string): Promise<LoginStatus> {
@@ -801,6 +816,7 @@ export function streamChat(
   modelRef?: string,
   thinkingLevelOrSelection?: ThinkingLevel | ((requestedModelRef: string | null) => void),
   onSelectionOrThinking?: ((requestedModelRef: string | null) => void) | ThinkingLevel,
+  onTextSnapshot?: (text: string) => void,
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -835,6 +851,8 @@ export function streamChat(
         const data = dataLines.join('\n');
         if (currentEvent === 'token') {
           try { onToken(JSON.parse(data) as string); } catch { onToken(data); }
+        } else if (currentEvent === 'text_snapshot' && onTextSnapshot) {
+          try { const text: unknown = JSON.parse(data); if (typeof text === 'string') onTextSnapshot(text); } catch { /* malformed snapshot */ }
         } else if (currentEvent === 'thinking' && onThinking) {
           let thinkingChunk: unknown;
           try { thinkingChunk = JSON.parse(data); } catch { thinkingChunk = data; }
@@ -947,6 +965,18 @@ export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ sta
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }
 
+export interface ChatExecution {
+  sessionId: string; turnId: string; warnings: string[];
+  operations: { id: string; name: string; status: 'running' | 'returned' | 'failed' | 'unconfirmed'; command: string; path: string; output: string; diff: string; added?: number; removed?: number; elapsedSeconds?: number }[];
+}
+export async function fetchChatExecution(sessionId: string, turnId: string, signal?: AbortSignal): Promise<ChatExecution> {
+  const response = await fetch(`${BASE}/api/chat/execution/${encodeURIComponent(sessionId)}/${encodeURIComponent(turnId)}`, { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error(`执行记录不可用（HTTP ${response.status}）`);
+  const value = await response.json() as ChatExecution;
+  if (value.sessionId !== sessionId || value.turnId !== turnId || !Array.isArray(value.operations) || value.operations.length > 40 || !Array.isArray(value.warnings)) throw new Error('执行记录不属于本轮');
+  return value;
+}
+
 // ═══ 设置面板 · 环境安装（install_tool 引擎桥） ═══
 
 export interface EnvTool {
@@ -959,6 +989,14 @@ export interface EnvTool {
   group_name?: string;
   desc: string;
   big?: boolean;
+  purpose?: string;
+  usedBy?: string[];
+  requirement?: string;
+  scope?: string;
+  notes?: string;
+  needsDir?: boolean;
+  strategies?: number;
+  timeoutSeconds?: number;
 }
 
 export interface EnvToolsResponse {
@@ -968,7 +1006,21 @@ export interface EnvToolsResponse {
 }
 
 export function fetchEnvTools(refresh = false): Promise<EnvToolsResponse> {
-  return request(`/api/env/tools${refresh ? '?refresh=1' : ''}`);
+  return envRequest(`/api/env/tools${refresh ? '?refresh=1' : ''}`, undefined, 250000);
+}
+
+/** Timeout aborts the HTTP read, never the background installation. */
+async function envRequest<T>(url: string, options?: RequestInit, timeoutMs = 15000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await request<T>(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('连接超时，后台任务可能仍在运行');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface EnvJobResult {
@@ -977,28 +1029,76 @@ export interface EnvJobResult {
   version?: string | null;
   strategy?: string | null;
   detail?: string | null;
+  kind?: string;
+  nextStep?: string;
+  retryable?: boolean;
 }
 
 export interface EnvJob {
   jobId: string;
   id: string;
-  state: 'running' | 'ok' | 'fail';
+  name?: string;
+  state: 'queued' | 'running' | 'ok' | 'fail';
+  stage: 'queued' | 'checking' | 'installing' | 'verifying' | 'complete' | 'failed';
+  label: string;
   lines: string[];
   result: EnvJobResult | null;
-  started: number;
+  started: number | null;
   ended: number | null;
+  created: number;
+  updated: number;
+  elapsedSeconds: number;
+  lastOutputAt: number | null;
+  queuePosition: number;
+  logLineCount: number;
+  strategy?: string | null;
+  strategyIndex: number;
+  strategyCount: number;
+  phaseTimeoutSeconds?: number | null;
+  timeoutSeconds: number;
+  attempt: number;
+  retryOf?: string | null;
 }
 
-export function startEnvInstall(id: string): Promise<{ jobId: string; id: string; state: string }> {
-  return request('/api/env/install', {
+export interface EnvInstallResponse {
+  jobId: string;
+  id: string;
+  state: EnvJob['state'];
+  reused: boolean;
+  jobs: (EnvJob & { reused?: boolean })[];
+}
+
+export interface EnvJobsResponse {
+  jobs: EnvJob[];
+  blockedReason?: string;
+  serverId: string;
+  logLimit?: number;
+}
+
+export function startEnvInstall(id: string): Promise<EnvInstallResponse> {
+  return envRequest('/api/env/install', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id }),
   });
 }
 
+export function startEnvInstallBatch(ids: string[]): Promise<EnvInstallResponse> {
+  return envRequest('/api/env/install', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+}
+
+export function fetchEnvJobs(): Promise<EnvJobsResponse> {
+  return envRequest('/api/env/jobs');
+}
+
+export function retryEnvInstall(jobId: string): Promise<EnvInstallResponse> {
+  return envRequest(`/api/env/job/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+}
+
 export function fetchEnvJob(jobId: string): Promise<EnvJob> {
-  return request(`/api/env/job/${encodeURIComponent(jobId)}`);
+  return envRequest(`/api/env/job/${encodeURIComponent(jobId)}`);
 }
 
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
@@ -1046,7 +1146,7 @@ export interface DiscoverResult {
   slot: string;
   source: string;     // 实际查询的根地址（不含 Key）
   fetchedAt: number;
-  keySource: 'input' | 'saved' | 'none';
+  keySource: 'input' | 'saved' | 'source' | 'none';
   elapsedMs?: number;
 }
 
@@ -1120,6 +1220,26 @@ export function previewImport(source: string, slot: string, path = ''): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, slot, path }),
+  });
+}
+
+export interface ImportCandidateRequest {
+  source: string;
+  path: string;
+  id: string;
+  slot: string;
+  previewToken: string;
+}
+
+export function discoverImportModels(payload: ImportCandidateRequest): Promise<DiscoverResult> {
+  return request('/api/models/import/discover', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+}
+
+export function selectImportModel(payload: ImportCandidateRequest & { model: string }): Promise<ImportCandidate> {
+  return request('/api/models/import/model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   });
 }
 
@@ -1217,13 +1337,17 @@ export interface ImageReverseResult {
   prompt: string; negativePrompt?: string; source: 'metadata' | 'vision';
   model?: string; metadataFormat?: string; width: number; height: number;
 }
-export function fetchImageReverseConfig(): Promise<{ providers: ImageReverseProvider[] }> {
+export function fetchImageReverseConfig(): Promise<{ providers: ImageReverseProvider[]; modelRef?: string }> {
   return request('/api/image-reverse/config');
 }
-export function reverseImage(image: File, provider: string, instruction: string, mode: 'auto' | 'vision', language: 'zh' | 'en', signal: AbortSignal): Promise<ImageReverseResult> {
+export function saveImageReverseConfig(modelRef: string): Promise<{ modelRef: string }> {
+  return request('/api/image-reverse/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelRef }) });
+}
+export function reverseImage(image: File, provider: string, instruction: string, mode: 'auto' | 'vision', language: 'zh' | 'en', signal: AbortSignal, modelRef = ''): Promise<ImageReverseResult> {
   const data = new FormData();
   data.append('image', image);
   data.append('provider', provider);
+  data.append('modelRef', modelRef);
   data.append('instruction', instruction);
   data.append('mode', mode);
   data.append('language', language);

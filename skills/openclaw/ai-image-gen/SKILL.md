@@ -18,6 +18,8 @@ layer: produce
 - **card-\* / poster-\***：HTML+CSS 渲染截图（金句卡、小红书卡、海报），**非 AI 生成**，是确定性设计出图。
 - **image-editing**：已有图片的确定性处理（改尺寸/裁剪/加水印/压缩），不生成新画面。
 
+卡片和海报需要插画、场景或商品背景时，可主动建议本技能生成素材，再交给排版技能合成；文字与参数表仍用确定性排版。用户已明确要求生成配图时按步骤执行，只追问影响结果的关键缺项，不重复询问是否生成。通道缺配置时引导「设置 → 生图通道」，不在对话索取 Key；已填配置不代表已测通，成功必须以真实工具回执与产物为准。
+
 ## 配置（执行前必读）
 
 > **配置检查路径铁律**：先 `cd` 到 `AGENTS.md` 末尾给出的 Easel 项目根，确认当前目录有 `.env` 和 `skills/shared/scripts/ai_image.py`，再运行下列命令。不得在 OpenClaw workspace 用 `./shared/scripts/...` 检查，也不得用 `env` / `printenv` 代替读取项目 `.env`；否则会把已配置的 `IMG_BASE_URL`/Key 误判为缺失。
@@ -42,7 +44,7 @@ layer: produce
 ### 1. 先确认配置（离线，不发请求）
 
 ```bash
-python skills/shared/scripts/ai_image.py check
+python skills/shared/scripts/ai_image.py check --dedicated-channel
 ```
 
 打印三项配置状态（key 脱敏显示）、命中的别名、自动检测的模式。缺项时给出 `.env` 填写示例并以退出码 2 结束。**配置未就绪就不要往下走**，直接把缺什么、怎么配告诉用户。

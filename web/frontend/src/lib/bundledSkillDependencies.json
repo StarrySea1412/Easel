@@ -1,0 +1,73 @@
+{
+  "ai-image-gen": [
+    "image"
+  ],
+  "ai-music": [
+    "speech",
+    "music"
+  ],
+  "ai-video-gen": [
+    "video",
+    "speech"
+  ],
+  "auto-short-video": [
+    "image",
+    "video",
+    "speech",
+    "music"
+  ],
+  "auto-subtitle": [
+    "transcribe"
+  ],
+  "comparison-card": [
+    "image"
+  ],
+  "ecom-details-image": [
+    "image"
+  ],
+  "green-screen": [
+    "image",
+    "video"
+  ],
+  "image-enhance": [
+    "image"
+  ],
+  "multi-voice-dubbing": [
+    "speech"
+  ],
+  "paper-explainer": [
+    "speech",
+    "document"
+  ],
+  "short-drama": [
+    "image",
+    "video",
+    "speech",
+    "music"
+  ],
+  "skill-email-notify": [
+    "notify"
+  ],
+  "skill-wechat-publisher": [
+    "image"
+  ],
+  "tts-voiceover": [
+    "speech"
+  ],
+  "video-chapters": [
+    "transcribe"
+  ],
+  "video-editing": [
+    "video"
+  ],
+  "video-highlights": [
+    "transcribe"
+  ],
+  "video-to-article": [
+    "transcribe"
+  ],
+  "voice-clone": [
+    "speech",
+    "music"
+  ]
+}

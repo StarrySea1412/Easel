@@ -4,6 +4,7 @@ import { fetchSkillDetail, executeSkill, saveEnv } from '../lib/api';
 import type { SkillDetail } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { displayName } from '../lib/skillDisplayNames';
+import SkillDependencyBadges from './SkillDependencyBadges';
 
 interface SkillDrawerProps {
   skillName: string;
@@ -116,6 +117,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
         </div>
 
         <div className="drawer-body">
+          {detail && <SkillDependencyBadges skill={detail} detail={detail} />}
           {loadErr && <div style={{ color: 'var(--red)', fontSize: 14 }}>{loadErr}</div>}
 
           {/* 新手导读：按 SKILL.md 原文静态整理，不需要先配模型 */}

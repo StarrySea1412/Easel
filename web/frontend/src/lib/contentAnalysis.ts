@@ -16,6 +16,13 @@ export interface AnalysisExperiment { id: string; title: string; hypothesis: str
 export interface AnalysisReport { platformProfile?:AnalysisPlatformProfile; accountInsights?:AccountInsights|null; account: AnalysisAccount; contents: AnalysisContent[]; overview: {contentCount:number;metricCoverage:Metrics;totals:Metrics;lastImportedAt?:string}; themes:{tag:string;count:number;contentIds:string[];metrics:Metrics;coverage:Metrics}[]; experiments:AnalysisExperiment[]; quality:{warnings:string[];identity:string}; methodology:unknown }
 export interface AnalysisContent { advancedMetrics?:AdvancedMetrics; paid?:boolean|null }
 export interface AnalysisReport { professional?:ProfessionalAnalysis }
+export interface AnalysisSyncState {
+  scope: { platform:string; accountId:string|null };
+  status: 'idle'|'syncing'|'ready'|'partial'|'empty'|'logged_out'|'identity_unverified'|'account_mismatch'|'unsupported'|'error';
+  supported:boolean; accountName?:string; loadedCount:number; receivedCount?:number; totalCount:number|null; totalKnown:boolean;
+  complete:boolean; fetchedAt:string|number|null; message:string; retryable:boolean; report?:AnalysisReport;
+  connectedAccountId?:string; connectedAccountName?:string; cached?:boolean;
+}
 export interface AnalysisExperiment { evidence?:TopicEvidence }
 export function validateAnalysisReport(report:AnalysisReport, platform:string, accountId:string):AnalysisReport {
   if (report?.account?.platform !== platform || report.account.accountId !== accountId ||

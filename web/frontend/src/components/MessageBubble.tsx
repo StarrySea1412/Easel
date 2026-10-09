@@ -1,5 +1,6 @@
 import { chatErrorTitle, historicalGatewayAuthError } from '../lib/chatErrors';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconCopy, IconCheck, IconRetry } from './icons';
@@ -18,6 +19,8 @@ interface MessageBubbleProps {
   activity?: string;
   stillWorking?: string;   // 防呆心跳提示（未卡住）；仅流式时的独立提示，不替代思考/活动
   actions?: BubbleActions;
+  status?: ReactNode;
+  execution?: ReactNode;
   backupSnapshot?: boolean;
 }
 
@@ -35,7 +38,7 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   </section>;
 }
 
-function ActionBar({ actions }: { actions: BubbleActions }) {
+function ActionBar({ actions, status }: { actions?: BubbleActions; status?: ReactNode }) {
   const [copyStatus, setCopyStatus] = useState<'idle'|'copying'|'copied'|'failed'>('idle');
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(resetTimer.current), []);
@@ -43,7 +46,7 @@ function ActionBar({ actions }: { actions: BubbleActions }) {
     clearTimeout(resetTimer.current);
     setCopyStatus('copying');
     try {
-      await actions.onCopy();
+      await actions?.onCopy();
       setCopyStatus('copied');
       resetTimer.current = setTimeout(() => setCopyStatus('idle'), 1200);
     } catch {
@@ -52,18 +55,19 @@ function ActionBar({ actions }: { actions: BubbleActions }) {
   };
   return (
     <div className="msg-actions">
-      <button type="button" className="msg-action" onClick={copy} disabled={copyStatus==='copying'} title="复制">
+      {actions && <button type="button" className="msg-action" onClick={copy} disabled={copyStatus==='copying'} title="复制">
         {copyStatus==='copied' ? <IconCheck size={14} /> : <IconCopy size={14} />}<span>{copyStatus==='copied' ? '已复制' : copyStatus==='copying' ? '复制中…' : '复制'}</span>
-      </button>
+      </button>}
       {copyStatus==='failed'&&<span className="msg-copy-error" role="status">复制失败，请允许剪贴板访问后重试。</span>}
-      {actions.onRetry && actions.canModify && (
+      {actions?.onRetry && actions.canModify && (
         <button type="button" className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}
+      {status}
     </div>
   );
 }
 
-export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions, backupSnapshot }: MessageBubbleProps) {
+export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions, status, execution, backupSnapshot }: MessageBubbleProps) {
   const historicalError=message.role==='assistant'&&!message.error?historicalGatewayAuthError(message.content):undefined;
   const displayedError=message.error||historicalError;
   const displayedContent=historicalError?'':message.content;
@@ -107,7 +111,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       ) : null}
       {doneSteps && (
         <details className="thinking-block">
-          <summary>{backupSnapshot ? '备份活动文字' : '执行记录'}（{doneSteps.split('\n').length} 步）</summary>
+          <summary>{backupSnapshot ? '备份活动文字' : '活动摘要'}</summary>
           {backupSnapshot && <p className="model-thinking-note">以下文字来自备份，未经本机后台核验。</p>}
           <div className="thinking-text">{doneSteps}</div>
         </details>
@@ -119,7 +123,7 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
   ) : null;
 
   // 等待回复中（还没有正文、思考、活动）
-  if (isStreaming && !message.content && !effThinking && !liveActivity && !liveHint) {
+  if (isStreaming && !message.content && !effThinking && !liveActivity && !liveHint && !execution) {
     return (
       <div className="message-row assistant">
         <div className="message-bubble assistant">
@@ -139,11 +143,12 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
       <div className="msg-col assistant">
         <div className="message-bubble assistant">
           {livePanel}
+          {execution}
           {displayedContent && <div dangerouslySetInnerHTML={{ __html: html }} />}
           {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
-        {actions && !isStreaming && <ActionBar actions={actions} />}
+        {(actions || status) && <ActionBar actions={isStreaming ? undefined : actions} status={status} />}
       </div>
     </div>
   );

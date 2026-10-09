@@ -5,6 +5,7 @@ import { accountWhoami, type AccountWhoami } from './api';
 const KEY = 'easel_whoami';
 const requestVersions = new Map<string, number>();
 export const WHOAMI_TTL_MS = 600_000; // 10 分钟，与后端 WHOAMI_TTL 对齐
+export const ACCOUNT_STATE_EVENT = 'easel:account-state';
 
 export type WhoamiEntry = AccountWhoami & { ts: number };
 
@@ -14,13 +15,14 @@ export function getWhoamiCache(): Record<string, WhoamiEntry> {
 
 /** 写缓存；r 为 null 则删除该平台条目。附带 ts 供 TTL 判定（旧格式无 ts→视为过期）。 */
 export function setWhoamiCache(platform: string, r: AccountWhoami | null): void {
-  if (!r) requestVersions.set(platform, (requestVersions.get(platform) || 0) + 1);
+  requestVersions.set(platform, (requestVersions.get(platform) || 0) + 1);
   try {
     const c = getWhoamiCache();
     if (r) c[platform] = { ...r, ts: Date.now() };
     else delete c[platform];
     localStorage.setItem(KEY, JSON.stringify(c));
   } catch { /* 配额 / 隐私模式：忽略 */ }
+  window.dispatchEvent(new window.CustomEvent(ACCOUNT_STATE_EVENT, { detail: { platform, entry: r } }));
 }
 
 function isFresh(e: WhoamiEntry | undefined, ttlMs: number): boolean {
@@ -56,6 +58,7 @@ export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
       try {
         const r = await accountWhoami(p);
         if (version !== (requestVersions.get(p) || 0)) continue;
+        if (r.verified === false) continue;
         setWhoamiCache(p, r);
         if (!opts.alive || opts.alive()) opts.onUpdate?.(p, r);
       } catch {

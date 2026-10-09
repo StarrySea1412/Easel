@@ -1,5 +1,5 @@
 import { NativeSelect as Select } from './ui/Select';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
@@ -33,13 +33,6 @@ interface SidebarProps {
   gatewayStatus: string;
 }
 
-const EXPANDED_KEY = 'easel:sidebar-conversations-open-v2';
-const TOOLBAR_KEY = 'easel:sidebar-toolbar-expanded-v2';
-function readToolbarExpanded() { try { return localStorage.getItem(TOOLBAR_KEY) === 'true'; } catch { return false; } }
-function readExpanded(): boolean {
-  try { return localStorage.getItem(EXPANDED_KEY) !== 'false'; }
-  catch { return true; }
-}
 export default function Sidebar({
   currentPage,
   onPageChange,
@@ -68,33 +61,54 @@ export default function Sidebar({
   renameContext.current = { id: renamingId, value: renameValue };
   const [showArchived, setShowArchived] = useState(false);
 
-  const [expanded, setExpanded] = useState(readExpanded);
-  const [toolbarExpanded, setToolbarExpanded] = useState(readToolbarExpanded);
+  // Layout starts compact on every mount; old saved expansion must not reopen it.
+  const [expanded, setExpanded] = useState(false);
+  const previousPage = useRef(currentPage);
+  const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const focusConversationToggle = useRef(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const collapseToggleRef = useRef<HTMLButtonElement>(null);
   const recentRef = useRef<HTMLDivElement>(null);
+  const conversationsRef = useRef<HTMLElement>(null);
 
-  const changeExpanded = (next: boolean) => {
+  const changeExpanded = useCallback((next: boolean) => {
     focusConversationToggle.current = true;
     setExpanded(next);
-    try { localStorage.setItem(EXPANDED_KEY, String(next)); } catch { /* optional layout preference */ }
-  };
-  const closeSidebar = () => changeExpanded(false);
+  }, []);
+  const closeSidebar = useCallback(() => changeExpanded(false), [changeExpanded]);
+  useEffect(() => {
+    const collapse = (event: Event) => {
+      const navigation = (event as CustomEvent<{ page?: Page; preserveConversations?: boolean }>).detail;
+      if (navigation?.preserveConversations) {
+        if (navigation.page) previousPage.current = navigation.page;
+        return;
+      }
+      if (conversationsRef.current?.contains(document.activeElement)) focusConversationToggle.current = true;
+      setExpanded(false);
+    };
+    window.addEventListener('easel:page-navigation', collapse);
+    return () => window.removeEventListener('easel:page-navigation', collapse);
+  }, []);
+  useEffect(() => {
+    if (previousPage.current === currentPage) return;
+    previousPage.current = currentPage;
+    // Every destination starts compact, including a return to chat.
+    if (conversationsRef.current?.contains(document.activeElement)) focusConversationToggle.current = true;
+    setExpanded(false);
+  }, [currentPage]);
   useEffect(() => {
     // Only explicit toggles move focus; restoring the initial layout must not.
     if (!focusConversationToggle.current) return;
     (expanded ? collapseToggleRef : toggleRef).current?.focus({ preventScroll: true });
     focusConversationToggle.current = false;
   }, [expanded]);
-  const toggleToolbar = () => { const next=!toolbarExpanded; setToolbarExpanded(next); try { localStorage.setItem(TOOLBAR_KEY,String(next)); } catch { /* optional preference */ } };
+  const toggleToolbar = () => setToolbarExpanded((previous) => !previous);
   const navigate = (page: Page) => {
+    setExpanded(false);
     onPageChange(page);
-    if (window.matchMedia('(max-width: 760px)').matches) setExpanded(false);
   };
   const selectSession = (id: string) => {
     onSessionSelect(id);
-    if (window.matchMedia('(max-width: 760px)').matches) setExpanded(false);
   };
   useEffect(() => {
     if (!expanded) return;
@@ -105,7 +119,7 @@ export default function Sidebar({
     };
     document.addEventListener('keydown', escape);
     return () => document.removeEventListener('keydown', escape);
-  }, [expanded]);
+  }, [expanded, closeSidebar]);
 
   const cancelRename = () => { renameGeneration.current++; setRenamingId(null); setTitleGenerating(false); setTitleError(''); };
   useEffect(() => { cancelRename(); }, [activeSessionId, currentPage]);
@@ -202,9 +216,9 @@ export default function Sidebar({
             {railItem('settings','设置',<IconGear size={19}/>)}
           </div>
         </div>
-        {expanded&&<section className="sidebar-conversations" aria-label="对话列表">
+        {expanded&&<section ref={conversationsRef} className="sidebar-conversations" aria-label="对话列表">
           <header className="sidebar-header"><div className="sidebar-topline"><div className="sidebar-logo"><img className="sidebar-logo-icon" src="./static/easel-icon-transparent.png" alt=""/><h1>Easel</h1></div><button ref={collapseToggleRef} type="button" className="sidebar-toggle" aria-label="收起对话列表" title="收起对话列表" aria-expanded={true} onClick={closeSidebar}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16m7 5-3 3 3 3"/></svg></button></div>
-            <button type="button" className="new-chat-btn sidebar-new-chat" onClick={()=>{onNewChat();if(window.matchMedia('(max-width:760px)').matches)setExpanded(false);}} title="新建对话"><IconNewChat size={16}/>新建对话</button>
+            <button type="button" className="new-chat-btn sidebar-new-chat" onClick={onNewChat} title="新建对话"><IconNewChat size={16}/>新建对话</button>
             <Select className="persona-select" aria-label="创作画像" value={selectedPersona} onChange={e=>{if(e.target.value==='__new__'){onNewProfile();return;}onPersonaChange(e.target.value);}} disabled={activeSessionHasMessages} title={activeSessionHasMessages?'当前对话已绑定画像，请先新建对话再切换画像':'选择用户画像'}><option value="">通用模式</option>{personas.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}<option value="__new__">+ 新建画像…</option></Select>
           </header>
           <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span><span className="sidebar-session-count">{active.length}</span></div>

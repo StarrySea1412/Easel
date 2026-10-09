@@ -1,7 +1,20 @@
 .accounts-center { --accounts-paper: var(--surface); max-width: 100%; background: var(--bg); }
 .accounts-center > * { max-width: 1160px; margin-left: auto; margin-right: auto; }
 .accounts-center > .overlay { max-width: none; }
-.account-login-modal { width: min(400px, 100%); max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+.account-login-modal { width: min(520px, 100%); max-width: 100%; text-align: center; overflow-wrap: anywhere; }
+.account-login-modal:has(.account-login-image-page) { width: min(860px, 100%); }
+.account-login-image { min-width: 0; }
+.account-login-image-hint { margin: 10px 0 16px; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.account-login-image-viewport { margin: 0 auto; min-width: 0; width: 100%; overflow: auto; background: #fff; border: 1px solid var(--border); border-radius: 12px; overscroll-behavior: contain; }
+.account-login-image-code .account-login-image-viewport { width: min(320px, 100%); }
+.account-login-image-content { display: block; width: 100%; height: auto; max-width: 100%; margin: 0 auto; }
+.account-login-image-code .account-login-image-content { aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; }
+.account-login-image-viewport.is-expanded { width: 100%; max-height: min(560px, 60dvh); }
+.account-login-image-viewport.is-expanded .account-login-image-content { margin: 0; }
+.account-login-image-viewport:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
+.account-login-image-tools { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.account-login-image-tools a { text-decoration: none; }
+.account-login-image-error { color: var(--red); font-size: 13px; line-height: 1.8; }
 .account-login-error { padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary); font-size: 13px; line-height: 1.8; text-align: left; }
 .account-login-error p { margin: 0; color: var(--text); }
 .account-login-error p + p { margin-top: 10px; color: var(--text-secondary); font-size: 12px; }
@@ -66,6 +79,9 @@
   .accounts-heading h1 { font-size: 28px; }
   .accounts-summary { gap: 8px; }
   .accounts-summary > :last-child { flex-basis: 100%; padding-left: 14px; }
+  .accounts-center > .overlay:has(.account-login-modal) { padding: 12px; }
+  .account-login-modal { padding: 20px; max-height: calc(100dvh - 24px); }
+  .account-login-image-hint { margin-bottom: 12px; }
 }
 .account-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .accounts-protection { margin-top: 18px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); font-size: 12px; }
@@ -89,4 +105,7 @@
 .account-logout-confirm p { margin: 4px 0 0; }
 .account-management-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 24px; }
 .account-logout-button { color: var(--red); border-color: var(--red); }
+.account-check-result { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.account-check-result.is-error, .account-check-result.is-expired { color: var(--red); }
+.account-check-result.is-success { color: #15803d; }
 @media (max-width: 600px) { .accounts-protection { align-items: flex-start; flex-direction: column; gap: 8px; } .account-management-dialog { padding: 20px; } }

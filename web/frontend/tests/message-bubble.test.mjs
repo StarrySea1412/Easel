@@ -13,6 +13,7 @@ Object.defineProperty(globalThis, 'navigator', { value: window.navigator, config
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const { default: MessageBubble } = await loadTsModule('../src/components/MessageBubble.tsx', import.meta.url);
+const { default: ChatSkillEvidence } = await loadTsModule('../src/components/ChatSkillEvidence.tsx', import.meta.url);
 
 async function mount(t, props) {
   const container = document.createElement('div'); document.body.append(container);
@@ -93,4 +94,30 @@ test('assistant error renders an alert with code and authentication guidance', a
   assert.match(alert.textContent, /密钥无效/);
   assert.match(alert.textContent, /错误代码：AUTH_FAILED/);
   assert.match(alert.textContent, /请先检查服务凭据与授权/);
+});
+
+test('skill status shares the copy/retry action bar; explanation is a tooltip and evidence opens on request', async t => {
+  const container = await mount(t, {
+    message: { role: 'assistant', content: '内容' },
+    actions: { onCopy() {}, onRetry() {}, canModify: true },
+    status: createElement(ChatSkillEvidence, {
+      sessionId: 'sample', turnId: 'turn', streaming: false, selectedSkills: ['card-quote'],
+      record: { sessionId: 'sample', turnId: 'turn', status: 'complete', invocation: [{ skill: 'card-quote', status: 'loaded', evidence: [] }] },
+    }),
+  });
+  const bar = container.querySelector('.msg-actions');
+  const icon = container.querySelector('.chat-skill-status-icon');
+  assert.equal(container.querySelectorAll('.msg-actions').length, 1);
+  assert.ok(bar.contains(icon));
+  assert.equal(bar.querySelectorAll('.msg-action').length, 2);
+  assert.equal(container.querySelector('.chat-skill-evidence'), null);
+  assert.equal(icon.getAttribute('aria-expanded'), 'false');
+  assert.match(container.querySelector('[role="tooltip"]').textContent, /card-quote：已读取说明/);
+  assert.equal(icon.getAttribute('aria-describedby'), container.querySelector('[role="tooltip"]').id);
+  await act(async () => icon.click());
+  assert.equal(icon.getAttribute('aria-expanded'), 'true');
+  assert.ok(bar.querySelector('.chat-skill-evidence'));
+  assert.match(bar.textContent, /选择 Skill 或读取说明不等于执行成功/);
+  await act(async () => icon.click());
+  assert.equal(container.querySelector('.chat-skill-evidence'), null);
 });

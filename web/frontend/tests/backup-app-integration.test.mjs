@@ -36,8 +36,10 @@ async function fixture(t, initial, realSidebar = false) {
   const persistence = `${persistenceBase}#backup-app-${++fixtureId}`;
   const draftsBase = await tsModuleUrl(new URL('lib/chatDrafts.ts', base));
   const drafts = url(Buffer.from(draftsBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
+  const queueBase = await tsModuleUrl(new URL('lib/chatQueue.ts', base));
+  const queue = url(Buffer.from(queueBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
   const storeBase = await tsModuleUrl(new URL('lib/store.ts', base));
-  const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts)) + `#${fixtureId}`;
+  const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts).replaceAll(queueBase, queue)) + `#${fixtureId}`;
   const api = url(`
     export const fetchStatus = async () => ({gateway: true, personas: [{name:'fixture'}]});
     export const fetchPersonas = async () => [];
@@ -68,6 +70,7 @@ async function fixture(t, initial, realSidebar = false) {
     if (!specifier.startsWith('.')) target = import.meta.resolve(specifier);
     else if (specifier === './lib/store') target = store;
     else if (specifier === './lib/chatDrafts') target = drafts;
+    else if (specifier === './lib/chatQueue') target = queue;
     else if (specifier === './lib/api') target = api;
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
@@ -87,13 +90,28 @@ async function fixture(t, initial, realSidebar = false) {
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   await act(async () => root.render(createElement(StrictMode, null, createElement(App))));
   return { harness, storage, values, container, persistence: await import(persistence),
-    settings: async () => { await act(async () => harness.sidebar.onPageChange('settings')); return harness.pages['设置'].conversationBackup; },
+    queue: await import(queue), settings: async () => { await act(async () => harness.sidebar.onPageChange('settings')); return harness.pages['设置'].conversationBackup; },
   };
 }
 
 const sourceSession = { id: 'original', title: '保留当前工作', created: 10, messages: [
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
+
+test('final snapshot discards pending typing and stale turns cannot replace a new answer', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('校正正文'));
+  const first = harness.streams[0];
+  await act(async () => first.args[3]('错序正文还在队列中'));
+  await act(async () => first.args[20]('正确正文'));
+  assert.equal(harness.pages['对话'].stream.content, '正确正文');
+  await act(async () => first.args[4]());
+  assert.equal(harness.sidebar.sessions[0].messages.at(-1).content, '正确正文');
+  await act(async () => harness.pages['对话'].onSend('下一轮'));
+  await act(async () => first.args[20]('迟到旧回执'));
+  assert.equal(harness.pages['对话'].stream.content, '');
+});
 
 test('App retains one global publish monitor on dashboard, settings and publish page and routes its controls correctly', async t => {
   const { harness } = await fixture(t, {});
@@ -126,7 +144,7 @@ function deferredStop() {
   return { promise, resolve, reject };
 }
 
-test('send callbacks explicitly accept one draft and reject busy, read-only or deleted sessions', async t => {
+test('send callbacks queue a busy draft and reject read-only or deleted sessions', async t => {
   const imported = { id: 'readonly', title: '备份', created: 1, importedFromBackup: true, messages: [] };
   const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, imported]), easel_active_session: 'original' });
   const previousConfirm = window.confirm;
@@ -136,7 +154,7 @@ test('send callbacks explicitly accept one draft and reject busy, read-only or d
   const originalSend = harness.pages['对话'].onSend;
   let accepted, busy, readonly, deleted;
   await act(async () => { accepted = originalSend('已接受草稿'); busy = originalSend('不应再接收'); });
-  assert.equal(accepted, true); assert.equal(busy, false);
+  assert.equal(accepted, true); assert.equal(busy, true);
   assert.equal(harness.streams.length, 1);
   await act(async () => harness.sidebar.onSessionSelect('readonly'));
   await act(async () => { readonly = harness.pages['对话'].onSend('只读草稿不可发送', [], ['card-quote'], { 'card-quote': '不得被只读备份触发' }); });
@@ -173,6 +191,24 @@ test('skill requirements reach the stream as independent message snapshots and r
   await act(async () => harness.pages['对话'].onSend('另一会话未设置要求', [], ['card-quote']));
   assert.deepEqual(harness.streams[3].args[16], {});
   assert.deepEqual(harness.sidebar.sessions.find(s => s.id === 'other').messages[0].skillRequirements, {});
+});
+
+test('busy messages drain in edited order with exact snapshots and a failure pauses the rest', async t => {
+  const { harness, queue } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('当前轮次', [], [], {}, 'off', 'relay/first'));
+  await act(async () => harness.pages['对话'].onSend('下一条', [], ['card-quote'], { 'card-quote': '排队时要求' }, 'low', 'relay/second'));
+  await act(async () => harness.pages['对话'].onSend('提前的消息', [], [], {}, 'off', 'relay/third'));
+  assert.equal(harness.streams.length, 1);
+  await act(async () => queue.moveQueuedMessage('original', queue.getChatQueue('original').items[1].id, -1));
+  await act(async () => harness.streams[0].args[4]());
+  assert.equal(harness.streams.length, 2); assert.equal(harness.streams[1].args[0], '提前的消息');
+  await act(async () => harness.streams[1].args[5](new Error('synthetic failure')));
+  assert.equal(harness.streams.length, 2); assert.equal(queue.getChatQueue('original').paused, true);
+  await act(async () => queue.resumeChatQueue('original'));
+  assert.equal(harness.streams.length, 3); const next = harness.streams[2];
+  assert.equal(next.args[17], 'relay/second'); assert.equal(next.args[19], 'low');
+  assert.deepEqual(next.args[16], { 'card-quote': '排队时要求' });
 });
 
 test('dashboard transfers selected skills and creation requirements before sending its new conversation', async t => {
@@ -506,7 +542,9 @@ test('real Sidebar buttons select persisted sessions and create a separate empty
   const { harness, container, values } = await fixture(t, {
     easel_sessions: JSON.stringify([sourceSession, second]), easel_active_session: sourceSession.id,
   }, true);
-  assert.ok(container.querySelector('.sidebar-conversations'), 'the new conversation column is expanded by default');
+  await act(async () => harness.sidebar.onPageChange('chat'));
+  assert.equal(container.querySelector('.sidebar-conversations'), null, 'the conversation column starts collapsed');
+  await act(async () => container.querySelector('[aria-label="展开对话列表"]').click());
   const existing = [...container.querySelectorAll('.session-select')].find(button => button.textContent === second.title);
   assert.ok(existing);
   await act(async () => existing.click());
@@ -514,6 +552,7 @@ test('real Sidebar buttons select persisted sessions and create a separate empty
   assert.equal(values.get('easel_active_session'), second.id);
   assert.equal(harness.pages['对话'].session.id, second.id);
   assert.equal(harness.pages['对话'].session.messages[0].content, '独立历史');
+  assert.ok(container.querySelector('.sidebar-conversations'), 'selecting a session preserves the expanded column');
   await act(async () => container.querySelector('[aria-label="展开工具栏"]').click());
   assert.equal(harness.sidebar.activeSessionId, second.id, 'expanding tools does not replace the selected conversation');
   await act(async () => container.querySelector('[aria-label="收起对话列表"]').click());
@@ -530,4 +569,76 @@ test('real Sidebar buttons select persisted sessions and create a separate empty
   assert.deepEqual(persisted.find(item => item.id === second.id).messages, second.messages);
   assert.equal(harness.pages['对话'].session.id, created);
   assert.equal(harness.streams.length, 0, 'opening and selecting conversations never sends a model prompt');
+});
+
+for (const messages of [[], sourceSession.messages]) test(`archiving the final ${messages.length ? 'populated' : 'empty'} conversation creates no replacement and survives reopening`, async t => {
+  const original = { ...sourceSession, title: 'New Chat', messages };
+  const view = await fixture(t, { easel_sessions: JSON.stringify([original]), easel_active_session: original.id }, true);
+  await act(async () => view.harness.sidebar.onPageChange('chat'));
+  await act(async () => view.container.querySelector('[aria-label="展开对话列表"]').click());
+  const archive = view.container.querySelector('.session-item [title="归档"]');
+  assert.ok(archive);
+  await act(async () => archive.click());
+  assert.equal(view.harness.sidebar.activeSessionId, null);
+  assert.equal(view.harness.sidebar.sessions.length, 1);
+  assert.deepEqual(view.harness.sidebar.sessions[0].messages, messages);
+  assert.equal(view.harness.sidebar.sessions[0].archived, true);
+  assert.equal(view.container.querySelectorAll('.session-select').length, 0);
+  assert.ok(view.container.querySelector('[aria-label="开始新对话"] button'));
+  assert.equal(view.values.get('easel_active_session'), '');
+  assert.equal(sessionStorage.getItem('easel_tab_session'), null);
+  assert.equal(JSON.parse(view.values.get('easel_sessions')).length, 1);
+  assert.deepEqual(view.harness.calls, []);
+
+  const reloaded = await fixture(t, Object.fromEntries(view.values), true);
+  await act(async () => reloaded.harness.sidebar.onPageChange('chat'));
+  await act(async () => reloaded.container.querySelector('[aria-label="展开对话列表"]').click());
+  assert.equal(reloaded.harness.sidebar.activeSessionId, null);
+  assert.equal(reloaded.harness.sidebar.sessions.length, 1);
+  assert.equal(reloaded.container.querySelectorAll('.session-select').length, 0);
+  await act(async () => reloaded.container.querySelector('.archived-header').click());
+  assert.equal(reloaded.container.querySelectorAll('.session-select').length, 1);
+  const restore = reloaded.container.querySelector('[title="取消归档"]');
+  await act(async () => restore.click());
+  assert.equal(reloaded.harness.sidebar.activeSessionId, original.id);
+  assert.equal(reloaded.harness.sidebar.sessions[0].archived, false);
+  assert.equal(reloaded.container.querySelectorAll('.session-select').length, 1);
+  assert.equal(reloaded.container.querySelector('.archived-header'), null);
+  assert.deepEqual(reloaded.harness.pages['对话'].session.messages, messages);
+  assert.deepEqual(reloaded.harness.calls, []);
+});
+
+test('archiving the active conversation switches only to an existing unarchived conversation and its persona', async t => {
+  const hidden = { ...sourceSession, id: 'archived', archived: true };
+  const second = { ...sourceSession, id: 'second', title: '保留的第二条', persona: '另一个画像' };
+  const { harness, values } = await fixture(t, {
+    easel_sessions: JSON.stringify([sourceSession, hidden, second]), easel_active_session: sourceSession.id,
+  });
+  await act(async () => harness.sidebar.onSessionArchive(sourceSession.id, true));
+  assert.equal(harness.sidebar.activeSessionId, second.id);
+  assert.equal(harness.sidebar.selectedPersona, second.persona);
+  assert.equal(harness.sidebar.sessions.length, 3);
+  assert.deepEqual(JSON.parse(values.get('easel_sessions')).find(item => item.id === sourceSession.id).messages, sourceSession.messages);
+  assert.equal(harness.streams.length, 0);
+});
+
+for (const messages of [[], sourceSession.messages]) test(`an explicit new-chat action preserves archived ${messages.length ? 'populated' : 'empty'} history across reload`, async t => {
+  const original = { ...sourceSession, messages };
+  const { harness, container, values } = await fixture(t, {
+    easel_sessions: JSON.stringify([original]), easel_active_session: original.id,
+  });
+  await act(async () => harness.sidebar.onSessionArchive(sourceSession.id, true));
+  await act(async () => container.querySelector('[aria-label="开始新对话"] button').click());
+  assert.equal(harness.sidebar.sessions.length, 2);
+  assert.notEqual(harness.sidebar.activeSessionId, sourceSession.id);
+  const archived = JSON.parse(values.get('easel_sessions')).find(item => item.id === sourceSession.id);
+  assert.equal(archived.archived, true);
+  assert.deepEqual(archived.messages, messages);
+  assert.equal(harness.streams.length, 0);
+  const reopened = await fixture(t, Object.fromEntries(values));
+  assert.equal(reopened.harness.sidebar.sessions.length, 2);
+  assert.equal(reopened.harness.sidebar.sessions.find(item => item.id === original.id).archived, true);
+  await act(async () => reopened.harness.sidebar.onSessionArchive(original.id, false));
+  await act(async () => reopened.harness.sidebar.onSessionSelect(original.id));
+  assert.deepEqual(reopened.harness.pages['对话'].session.messages, messages);
 });

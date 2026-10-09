@@ -118,3 +118,4 @@ wheel==0.48.0
 wsproto==1.3.2
 yarl==1.25.1
 yt-dlp==2026.8.19
+zstandard==0.25.0

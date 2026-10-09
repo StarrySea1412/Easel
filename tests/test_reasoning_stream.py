@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
-from easel.reasoning_stream import ReasoningStream, provider_reasoning
+from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning
 import app as web
 import skill_audit
 
@@ -35,6 +35,22 @@ def test_opaque_reasoning_is_not_rendered():
     assert provider_reasoning({'choices': [{'delta': {'reasoning': {'encrypted_content': 'secret'}}}]}) == []
     assert provider_reasoning({'choices': [{'delta': {'reasoning': [{'type': 'redacted_thinking', 'data': 'opaque'}]}}]}) == []
     assert provider_reasoning({'type': 'content_block_delta', 'delta': {'type': 'signature_delta', 'signature': 'opaque'}}) == []
+
+
+@pytest.mark.parametrize('chunks', [list('<think>公开摘要</think>答案'), ['<thi', 'nk>公开', '摘要</th', 'ink>答案'], ['<thinking>公开摘要</thinking>答案']])
+def test_newapi_thinking_wrapper_survives_fragmented_sse(chunks):
+    stream = ThinkingTextStream()
+    result = [stream.push(chunk) for chunk in chunks] + [stream.push('', final=True)]
+    assert ''.join(pair[0] for pair in result) == '公开摘要'
+    assert ''.join(pair[1] for pair in result) == '答案'
+
+
+@pytest.mark.parametrize('text', ['示例：<think>这只是引用</think>', '```html\n<think>x</think>\n```', '<thi'])
+def test_normal_answer_and_incomplete_tag_are_not_hidden(text):
+    stream = ThinkingTextStream()
+    result = [stream.push(text), stream.push('', final=True)]
+    assert ''.join(pair[0] for pair in result) == ''
+    assert ''.join(pair[1] for pair in result) == text
 
 
 def test_anthropic_and_structured_summary_text():
@@ -126,7 +142,7 @@ def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeyp
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('mode', ['http', 'raw_end', 'unavailable'])
+@pytest.mark.parametrize('mode', ['http', 'raw_end', 'raw_thinking_only', 'unavailable'])
 def test_http_supervisor_waits_for_raw_tail_and_retains_provider_summary(tmp_path, monkeypatch, mode):
     import httpx
     raw = tmp_path / 'raw.jsonl'
@@ -144,7 +160,7 @@ def test_http_supervisor_waits_for_raw_tail_and_retains_provider_summary(tmp_pat
             if mode != 'unavailable':
                 raw.write_text(json.dumps({'runId': 'chatcmpl_ours', 'event': 'assistant_thinking_stream',
                                             'evtType': 'thinking_end', 'content': '供应商公开摘要'}) + '\n' +
-                               json.dumps({'runId': 'chatcmpl_ours', 'event': 'assistant_message_end'}) + '\n', encoding='utf-8')
+                               (json.dumps({'runId': 'chatcmpl_ours', 'event': 'assistant_message_end'}) + '\n' if mode != 'raw_thinking_only' else ''), encoding='utf-8')
             yield 'data: ' + json.dumps({'choices': [{'delta': {'content': '回答'}}]})
             yield 'data: [DONE]'
     class Client:

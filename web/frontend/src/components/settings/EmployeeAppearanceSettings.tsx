@@ -37,7 +37,9 @@ function EmployeePortrait({ card }: { card: EmployeeAppearance }) {
   </svg>;
 }
 
-export default function EmployeeAppearanceSettings() {
+export default function EmployeeAppearanceSettings({ defaultModelLabel = '尚未配置默认模型', onOpenModels, onOpenOffice }: {
+  defaultModelLabel?: string; onOpenModels?: () => void; onOpenOffice?: () => void;
+}) {
   const [cards, setCards] = useState<EmployeeAppearance[]>(() => readEmployeeAppearances().map(card => ({ ...card })));
   const [baseline, setBaseline] = useState(() => JSON.stringify(cards));
   const [message, setMessage] = useState('');
@@ -67,6 +69,15 @@ export default function EmployeeAppearanceSettings() {
       <h2 id={`${prefix}-title`}>员工角色卡</h2>
       <p>为办公室里的小动物搭配形象，让每位伙伴更容易辨认。</p>
     </div><span className="employee-settings__count">6 个岗位 · 1 个通用形象</span></header>
+    <section className="employee-settings__models" aria-labelledby={`${prefix}-models`}>
+      <h3 id={`${prefix}-models`}>模型设置</h3>
+      <p>已保存默认模型：<strong>{defaultModelLabel}</strong></p>
+      <div className="employee-settings__model-actions">
+        {onOpenModels && <button type="button" className="btn btn-sm btn-primary" onClick={onOpenModels}>选择或导入默认模型</button>}
+        {onOpenOffice && <button type="button" className="btn btn-sm" onClick={onOpenOffice}>为实际 Agent 分配模型</button>}
+      </div>
+      <p>默认模型在模型设置中保存。给某位 Agent 单独分配时，打开办公室，选择实际成员，在详情的「渠道与模型」里保存；正在执行的调用不会改换模型。</p>
+    </section>
     <div className="employee-settings__scope">
       <strong>仅改变展示</strong>
       <p>显示名、岗位与外观不会修改模型提示词、权限或执行行为。真实 Agent 默认使用通用形象，可在员工详情中手动绑定角色卡；后台身份和任务仍按真实记录显示。</p>
@@ -86,6 +97,7 @@ export default function EmployeeAppearanceSettings() {
             <label>动物种类<Select value={card.species} onChange={event => change(card.id, { species: event.target.value as EmployeeAppearance['species'] })}><option value="cat">小猫</option><option value="rabbit">兔子</option><option value="fox">狐狸</option><option value="bear">小熊</option></Select></label>
             <label>配饰<Select value={card.accessory} onChange={event => change(card.id, { accessory: event.target.value as EmployeeAppearance['accessory'] })}><option value="none">无配饰</option><option value="glasses">眼镜</option><option value="headset">耳机</option></Select></label>
           </div>
+          {onOpenOffice && <p className="employee-card__model-note">模型跟随实际 Agent；角色卡只保存外观。<button type="button" className="link-btn" onClick={onOpenOffice}>到办公室设置模型</button></p>}
         </article>)}
       </div>
       <div className="employee-settings__actions">

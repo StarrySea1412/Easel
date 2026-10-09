@@ -55,3 +55,6 @@
 .session-title-agent:focus-visible, .session-title-save:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .session-title-agent:disabled { opacity:.5; }
 .session-title-error { width:100%; font-size:11px; color:var(--danger); overflow-wrap:anywhere; }
+.chat-no-session { align-items:center; justify-content:center; gap:16px; padding:24px; text-align:center; }
+.chat-no-session h1 { margin:0; font-size:24px; }
+.chat-no-session p { max-width:480px; margin:0; color:var(--text-secondary); line-height:1.7; }

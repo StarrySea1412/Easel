@@ -5,7 +5,7 @@ import {
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
 import type { AccountItem, AccountWhoami, LoginStatus } from '../lib/api';
-import { getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
@@ -21,6 +21,9 @@ type QRState = {
   message: string;
   qr: string;          // outputs 相对路径
   qrTs?: number;       // 二维码文件 mtime，作 img 缓存键：码刷新一次就变，避免看到过期旧码
+  qrKind?: 'qr' | 'page';
+  qrWidth?: number;
+  qrHeight?: number;
 };
 
 const STATE_LABEL: Record<string, string> = {
@@ -47,6 +50,52 @@ function Avatar({ url, name }: { url?: string; name: string }) {
   return <div className="account-avatar account-avatar-fallback">{initial}</div>;
 }
 
+/** A full login-page screenshot needs its own readable view, rather than a QR label. */
+function LoginImage({ login, nonce }: { login: QRState; nonce: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [broken, setBroken] = useState(false);
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const src = `${mediaUrl(login.qr)}?v=${login.qrTs || nonce}`;
+  const width = login.qrWidth || naturalSize.width;
+  const height = login.qrHeight || naturalSize.height;
+  // Older servers have no kind metadata. Dimensions affect layout only: they do
+  // not prove that a square image actually contains a QR code.
+  const page = login.qrKind === 'page' || (!login.qrKind && (!width || !height || width / height < .8 || width / height > 1.2));
+  const label = login.qrKind === 'qr' ? '登录二维码' : login.qrKind === 'page' ? '官方登录页面预览' : '登录图像';
+
+  useEffect(() => { setBroken(false); }, [src]);
+
+  return (
+    <div className={`account-login-image ${page ? 'account-login-image-page' : 'account-login-image-code'}`}>
+      <p className="account-login-image-hint">
+        {login.qrKind === 'qr' ? '用手机 App 扫描下方二维码，并在手机上确认登录。'
+          : login.qrKind === 'page' ? (login.visibleBrowser
+            ? '这是官方登录页面预览。可放大查看；请在已打开的本机平台窗口完成登录或安全验证。'
+            : '这是官方登录页面预览，可放大检查。如页面未出现二维码，请重新连接。')
+            : '请确认图片中的登录内容；页面截图可放大查看。'}
+      </p>
+      {broken ? <p className="account-login-image-error" role="alert">登录图片加载失败。请重新连接，或打开原图检查。</p> : (
+        <div className={`account-login-image-viewport${expanded ? ' is-expanded' : ''}`}
+          tabIndex={expanded || page ? 0 : undefined} role="region" aria-label={`${label}${expanded ? '，可滚动查看' : ''}`}>
+          <img className="account-login-image-content" src={src} alt={label}
+            style={expanded ? { width: page ? Math.max(width || 1200, 960) : 480, maxWidth: 'none' } : undefined}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
+              setBroken(false);
+            }} onError={() => setBroken(true)} />
+        </div>
+      )}
+      <div className="account-login-image-tools">
+        <button type="button" className="btn btn-sm" aria-pressed={expanded} disabled={broken}
+          onClick={() => setExpanded((value) => !value)}>{expanded ? '恢复大小' : '放大查看'}</button>
+        <a className="btn btn-sm" href={src} target="_blank" rel="noopener noreferrer">打开原图</a>
+      </div>
+      {expanded && <p className="account-login-image-hint">可滚动查看完整图片，按 Tab 切换操作，按 Esc 关闭登录窗口。</p>}
+    </div>
+  );
+}
+
 export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { onNavigateAnalysis: (platform: string) => void; onAnalysisLogin: () => void }) {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
@@ -58,6 +107,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [managedPlatform, setManagedPlatform] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [logoutMessage, setLogoutMessage] = useState('');
+  const [verification, setVerification] = useState<Record<string, { state: 'checking' | 'success' | 'expired' | 'error'; message: string }>>({});
   const [hideIdentity, setHideIdentity] = useState(() => { try { return localStorage.getItem('easel_account_privacy') === '1'; } catch { return false; } });
   const accountDialog = useRef<HTMLDialogElement>(null);
   const identityEpoch = useRef<Record<string, number>>({});
@@ -83,18 +133,41 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     aliveRef.current = true;
     return () => { aliveRef.current = false; };
   }, []);
+  useEffect(() => {
+    const sync = (event: Event) => {
+      if (!(event instanceof window.CustomEvent)) return;
+      const { platform, entry } = event.detail || {};
+      if (typeof platform !== 'string') return;
+      setWhoami(value => { const next = { ...value }; if (entry) next[platform] = entry; else delete next[platform]; return next; });
+    };
+    const storage = (event: StorageEvent) => { if (event.key === 'easel_whoami') setWhoami(getWhoamiCache()); };
+    window.addEventListener(ACCOUNT_STATE_EVENT, sync); window.addEventListener('storage', storage);
+    return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
+  }, []);
 
   // 真校验某平台登录态 + 拉昵称/头像（后端起浏览器，数秒）；手动「校验账号」或登录成功后调
   const runWhoami = useCallback(async (platform: string) => {
-    const epoch = identityEpoch.current[platform] || 0;
+    const epoch = (identityEpoch.current[platform] || 0) + 1;
+    identityEpoch.current[platform] = epoch;
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
+    setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态，请稍候…' } }));
     try {
       const r = await accountWhoami(platform);
       if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0)) return null;
+      if (r.verified === false) {
+        setWhoami((w) => { const next = { ...w }; delete next[platform]; return next; });
+        setVerification(value => ({ ...value, [platform]: { state: 'error', message: r.verificationMessage || '本次检查未能确认登录状态，保留上次状态，请稍后重试。' } }));
+        return null;
+      }
       setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
+      setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
+      setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '检查完成：当前登录状态有效。' : '检查完成：未登录或登录已失效，请重新连接。' } }));
       return r;
-    } catch {
-      if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0)) setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
+    } catch (cause) {
+      if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0)) {
+        setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
+        setVerification(value => ({ ...value, [platform]: { state: 'error', message: `检查失败：${cause instanceof Error ? cause.message : '请稍后重试'}。尚未确认登录是否有效。` } }));
+      }
       return null;
     }
   }, []);
@@ -107,6 +180,10 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       .then((list) => {
         if (!aliveRef.current) return;
         setAccounts(list);
+        const cached = getWhoamiCache();
+        list.forEach(account => {
+          if (account.loggedIn && cached[account.platform]?.loggedIn === false) setWhoamiCache(account.platform, null);
+        });
         setLoaded(true);
         const targets = list
           .filter((a) => a.supported && a.backend !== 'biliup')
@@ -207,13 +284,14 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
 
   // One attempt owns its initial response, serial polling, and success callback.
   // Closing or retrying invalidates every in-flight response from the old attempt.
-  const handleLogin = useCallback(async (a: AccountItem, mp = false, visibleBrowser = false) => {
+  const handleLogin = useCallback(async (a: AccountItem, mp = false, visibleBrowser = false, restart = false) => {
     if (!a.supported) return;
     if (!mp && a.backend === 'wechat-oa') { openCred(a); return; }
     stopPoll();
     const attempt = loginAttemptRef.current;
     const current = () => aliveRef.current && attempt === loginAttemptRef.current;
     identityEpoch.current[a.platform] = (identityEpoch.current[a.platform] || 0) + 1;
+    setVerification(value => { const next = { ...value }; delete next[a.platform]; return next; });
     setErr('');
     setTerminalMsg('');
     setBusy(a.platform + (mp ? ':mp' : ''));
@@ -223,16 +301,15 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     setQr({ platform: a.platform, name: a.name + (mp ? ' · 后台取数' : ''),
       flow: mp ? 'mp' : 'account', visibleBrowser, state: 'starting', message: '', qr: '' });
 
-    const applyStatus = async (s: Pick<LoginStatus, 'state' | 'message' | 'qr' | 'qrTs' | 'visibleBrowser'>) => {
+    const applyStatus = async (s: Pick<LoginStatus, 'state' | 'message' | 'qr' | 'qrTs' | 'qrKind' | 'qrWidth' | 'qrHeight' | 'visibleBrowser'>) => {
       if (!current()) return;
       setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs,
+        qrKind: s.qrKind, qrWidth: s.qrWidth, qrHeight: s.qrHeight,
         visibleBrowser: s.visibleBrowser ?? prev.visibleBrowser }));
       if (s.state !== 'success') return;
-      if (mp) {
-        setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true } : x));
-        setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
-        setWhoamiCache(a.platform, null);
-      }
+      setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true, hasLocalSession: true } : x));
+      setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '' });
+      setVerification(value => ({ ...value, [a.platform]: { state: 'checking', message: '登录成功，正在读取账号身份…' } }));
       const identity = await runWhoami(a.platform);
       if (!current()) return;
       if (mp) load();
@@ -259,7 +336,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       if (current()) pollRef.current = setTimeout(poll, 2000);
     };
     try {
-      const res = await (mp ? startMpLogin(a.platform) : startLogin(a.platform, visibleBrowser));
+      const res = await (mp ? startMpLogin(a.platform, { restart }) : startLogin(a.platform, visibleBrowser, { restart }));
       if (!current()) return;
       if (res.mode === 'terminal' || res.mode === 'credentials') {
         qrPlatformRef.current = '';
@@ -270,6 +347,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       }
       await applyStatus({ state: res.state || 'starting', message: res.message || '', qr: res.qr || '',
         visibleBrowser: res.visibleBrowser,
+        qrKind: res.qrKind, qrWidth: res.qrWidth, qrHeight: res.qrHeight,
         qrTs: 'qrTs' in res ? res.qrTs : undefined });
       if (current() && !isLoginTerminal(res.state || 'starting')) pollRef.current = setTimeout(poll, 2000);
     } catch (e) {
@@ -382,16 +460,16 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
               <div className="account-actions">
                 <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} disabled={!a.supported || pending || w === 'loading'}
                   onClick={() => logged ? void runWhoami(a.platform) : void handleLogin(a, a.backend === 'wechat-oa')}>
-                  {pending ? '正在启动…' : w === 'loading' ? '正在校验…' : logged ? '校验连接' : a.supported ? '连接账号' : '暂不可连接'}
+                  {pending ? '正在启动…' : w === 'loading' ? '正在检查…' : logged ? '检查登录状态' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
+                {verification[a.platform] && <p className={`account-check-result is-${verification[a.platform].state}`} role={verification[a.platform].state === 'error' ? 'alert' : 'status'}>{verification[a.platform].message}</p>}
                 {a.platform === 'xiaohongshu' && !logged && <button type="button" className="btn btn-block account-browser-login"
-                  disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true)}>
+                  disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
                   在浏览器中登录
                 </button>}
                 <div className="account-secondary-actions">
-                  {(a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden={true}>→</span></button>}
-                  {a.supported && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>{logoutBusy === a.platform ? '退出中…' : '管理账号'}</button>}
-                  {a.supported && (logged || a.hasLocalSession) && <button type="button" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(true); }}>退出登录</button>}
+                  {logged && (a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden={true}>→</span></button>}
+                  {a.supported && logged && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>管理账号</button>}
                 </div>
               </div>
             </article>;
@@ -400,7 +478,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         <details className="accounts-help"><summary>连接遇到问题？</summary>
           <p>二维码未出现或已过期时，请关闭登录窗口后重试。平台可能要求短信验证，请按登录窗口中的提示完成。</p>
           <p>更换网络、代理或服务器环境可能触发平台验证。优先在稳定的正常网络中重新连接；具体失败原因以平台返回结果为准。</p>
-          <p>连接状态会在打开页面时检查，也可使用「校验连接」重新核实。当前每个平台仅保留一个登录会话，不支持同时切换多个账号。</p>
+          <p>「检查登录状态」会在线确认本机保存的登录是否仍有效，并显示结果；不会重新登录或发布内容。当前每个平台仅保留一个登录会话。</p>
           {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
         </details>
       </section>
@@ -416,12 +494,13 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             <div><dt>凭据保存方式</dt><dd>{managedAccount.credentialStorage ? {browser_profile:'本机浏览器会话目录',cookie_file:'本机 Cookie 文件',app_credentials:'本机应用凭据配置'}[managedAccount.credentialStorage] : '接口未上报'}</dd></div><div><dt>最近状态记录</dt><dd>{managedAccount.lastStateAt ? new Date(managedAccount.lastStateAt * 1000).toLocaleString() : '尚无记录'}<small>状态记录时间不等于刚刚在线验证。</small></dd></div>
           </dl>
           <div className="account-management-note"><strong>你可以控制本机登录态</strong><p>退出会清理此平台在 Easel 中保存的会话、扫码缓存及相关发布凭据。已保存的作品与分析记录保留，其他平台不受影响。</p><p>这不会退出你手机或其他设备上的账号，也不等同于撤销平台侧全部授权。请保护本机系统账户，不要分享应用数据目录。</p></div>
-          {confirmLogout && <div className="account-logout-confirm" role="alert"><strong>确认退出 {managedAccount.name}？</strong><p>正在进行的登录会被停止；再次发布前需要重新登录。</p></div>}
+          {confirmLogout && <div className="account-logout-confirm" role="alert"><strong>{effLoggedIn(managedAccount) ? '确认退出' : '确认清除连接记录'} {managedAccount.name}？</strong><p>正在进行的登录会被停止；再次发布前需要重新登录。</p></div>}
+          {verification[managedAccount.platform] && <p className={`account-check-result is-${verification[managedAccount.platform].state}`} role={verification[managedAccount.platform].state === 'error' ? 'alert' : 'status'}>{verification[managedAccount.platform].message}</p>}
           {err && <p className="notice-error" role="alert">{err}</p>}
           <div className="account-management-buttons">
             <button className="btn" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(null); setConfirmLogout(false); }}>关闭</button>
-            {!confirmLogout && <button className="btn" disabled={!!logoutBusy || managedInfo === 'loading'} onClick={() => void runWhoami(managedAccount.platform)}>{managedInfo === 'loading' ? '正在校验…' : '校验连接'}</button>}
-            {(managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn account-logout-button" disabled={!!logoutBusy} onClick={() => confirmLogout ? void handleLogout(managedAccount) : setConfirmLogout(true)}>{logoutBusy ? '正在退出…' : confirmLogout ? '确认退出并清理登录态' : '退出此账号'}</button>}
+            {!confirmLogout && (managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn" disabled={!!logoutBusy || managedInfo === 'loading'} onClick={() => void runWhoami(managedAccount.platform)}>{managedInfo === 'loading' ? '正在检查…' : '检查登录状态'}</button>}
+            {(managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn account-logout-button" disabled={!!logoutBusy} onClick={() => confirmLogout ? void handleLogout(managedAccount) : setConfirmLogout(true)}>{logoutBusy ? '正在清理…' : effLoggedIn(managedAccount) ? confirmLogout ? '确认退出并清理登录态' : '退出此账号' : confirmLogout ? '确认清除连接记录' : '清除连接记录'}</button>}
           </div>
         </>}
       </dialog>
@@ -458,8 +537,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   {smsBusy ? '提交中…' : '提交验证码'}
                 </button>
               </div>
-            ) : qr.state === 'qr_ready' && qr.qr ? (
-              <img className="qr-img" src={`${mediaUrl(qr.qr)}?v=${qr.qrTs || qrNonce}`} alt="登录二维码" />
+            ) : qr.qr && (qr.state === 'qr_ready' || (qr.state === 'verifying' && qr.qrKind === 'page')) ? (
+              <LoginImage key={`${qr.platform}:${qrNonce}:${qr.qr}`} login={qr} nonce={qrNonce} />
             ) : qr.state === 'scanned' ? (
               <div className="loading" style={{ padding: 40 }}><div className="spinner" />扫码成功，正在跳转验证…（首次可能等十几秒）</div>
             ) : qr.state === 'verifying' ? (
@@ -483,10 +562,11 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             )}
             <div className="account-login-actions">
               <button className="btn" onClick={closeQr}>{qr.state === 'success' ? '完成' : '关闭'}</button>
-              {qrAccount && ['error', 'expired'].includes(qr.state) && <button className="btn btn-primary"
-                disabled={!!busy} onClick={() => void handleLogin(qrAccount, qr.flow === 'mp', qr.visibleBrowser)}>重新连接</button>}
-              {qrAccount?.platform === 'xiaohongshu' && !qr.visibleBrowser && ['error', 'expired'].includes(qr.state) &&
-                <button className="btn" disabled={!!busy} onClick={() => void handleLogin(qrAccount, false, true)}>在浏览器中登录</button>}
+              {qrAccount && (['error', 'expired', 'qr_ready'].includes(qr.state) || (qr.state === 'verifying' && qr.qrKind === 'page')) && <button className="btn btn-primary"
+                disabled={!!busy} onClick={() => void handleLogin(qrAccount, qr.flow === 'mp', qr.visibleBrowser, true)}>重新连接</button>}
+              {qrAccount?.platform === 'xiaohongshu' && !qr.visibleBrowser
+                && (['error', 'expired', 'qr_ready'].includes(qr.state) || (qr.state === 'verifying' && qr.qrKind === 'page')) &&
+                <button className="btn" disabled={!!busy} onClick={() => void handleLogin(qrAccount, false, true, true)}>在浏览器中登录</button>}
             </div>
           </div>
         </div>

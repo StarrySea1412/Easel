@@ -12,6 +12,7 @@ import asyncio
 import json
 import sqlite3
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -127,7 +128,7 @@ def test_read_openclaw_candidates(cc_home):
     by_name = {c["name"]: c for c in cands}
     assert not errors
     assert by_name["openai"]["compatible"] and by_name["openai"]["model"] == "deepseek-chat"
-    assert by_name["openai"]["keyMasked"].endswith("1234»")
+    assert by_name["openai"]["keyMasked"].endswith("1234")
     assert by_name["broken"]["compatible"] is False
     assert "http(s)" in by_name["broken"]["skipReason"]
     assert by_name["oauthone"]["compatible"] is False
@@ -219,7 +220,8 @@ def test_preview_never_leaks_plaintext_key(cc_home, fake_env):
     d = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source="cc-switch", slot="openai")))
     blob = json.dumps(d, ensure_ascii=False)
     assert "sk-ant-token-1234567890" not in blob and "sk-codex-key-1234567890" not in blob
-    assert any(c["keyMasked"].startswith("«") for c in d["candidates"])
+    assert any("…" in c["keyMasked"] for c in d["candidates"])
+    assert all(not any(mark in c["keyMasked"] for mark in "«»《》") for c in d["candidates"])
     assert d["note"]
 
 
@@ -448,3 +450,253 @@ def test_responses_remains_explicitly_incompatible_and_does_not_change_target(cc
     assert selected['protocol'] == 'openai-responses' and not selected['compatible']
     assert 'Responses' in selected['skipReason'] and 'previewToken' not in selected
     assert fake_env[0].read_bytes() == before
+
+
+def discovery_args(cc_home, app_type='codex'):
+    path = _write_ccswitch_json(cc_home[1])
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
+    candidate = next(c for c in preview['candidates'] if c['appType'] == app_type)
+    return path, candidate, dict(source='cc-switch', path=str(path), id=candidate['id'],
+                                slot=candidate['targetSlot'], previewToken=candidate['previewToken'])
+
+
+@pytest.mark.parametrize('app_type', ['codex', 'claude'])
+def test_source_discovery_uses_exact_source_auth_protocol_without_saving(cc_home, fake_env, monkeypatch, app_type):
+    path, candidate, args = discovery_args(cc_home, app_type)
+    before = web._model_file_snapshot()
+    original_source = path.read_bytes()
+    observed = []
+    key = 'sk-codex-key-1234567890' if app_type == 'codex' else 'sk-ant-token-1234567890'
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def read(self, limit):
+            assert limit == 512 * 1024
+            return json.dumps({'data': [{'id': 'provider-model-a'}, {'id': 'provider-model-b'}]}).encode()
+    class Opener:
+        def open(self, request, timeout):
+            observed.append(request)
+            assert timeout == 10
+            return Response()
+    def opener(handler):
+        assert handler is web._NoRedirect
+        return Opener()
+    monkeypatch.setattr(web, '_ssrf_safe', lambda _: True)
+    monkeypatch.setattr(web.urllib.request, 'build_opener', opener)
+    result = asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    assert result['ok'] and result['models'] == ['provider-model-a', 'provider-model-b']
+    assert result['keySource'] == 'source' and result['protocol'] == candidate['protocol']
+    assert result['previewToken'] == candidate['previewToken']
+    assert result['source'] == candidate['baseUrl'] and result['slot'] == candidate['targetSlot']
+    request = observed[0]
+    expected_suffix = '/v1/models' if app_type == 'claude' else '/models'
+    assert request.full_url == candidate['baseUrl'] + expected_suffix
+    assert request.get_method() == 'GET'
+    assert (request.get_header('X-api-key') == key if app_type == 'claude' else request.get_header('Authorization') == 'Bearer ' + key)
+    assert key not in json.dumps(result)
+    assert web._model_file_snapshot() == before and path.read_bytes() == original_source
+    assert fake_env[1] == []
+
+
+def test_model_selection_returns_immutable_token_same_deadline_and_confirm_saves_exact_model(cc_home, fake_env, monkeypatch):
+    path, candidate, args = discovery_args(cc_home)
+    original_source = path.read_bytes()
+    monkeypatch.setattr(web, '_discover_models', lambda *_: {'ok': True, 'kind': 'ok', 'message': 'two', 'models': ['model-a', 'model-b']})
+    before = web._model_file_snapshot()
+    original = dict(web._IMPORT_PREVIEWS[candidate['previewToken']])
+    asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    first = asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model='model-a')))
+    second = asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model='model-b')))
+    chained = asyncio.run(web.api_import_model(web.ImportModelRequest(**{**args, 'previewToken': first['previewToken']}, model='model-b')))
+    assert len({first['previewToken'], second['previewToken'], candidate['previewToken']}) == 3
+    assert first['id'] == second['id'] == candidate['id']
+    assert first['model'] == 'model-a' and second['model'] == 'model-b'
+    for selected in (first, second, chained):
+        record = web._IMPORT_PREVIEWS[selected['previewToken']]
+        assert record['expires'] == original['expires']
+        assert record['model'] == selected['model'] and record['target'] == original['target']
+        assert record['candidate'] == original['candidate'] and 'key' not in selected
+    assert web._IMPORT_PREVIEWS[candidate['previewToken']]['model'] == original['model']
+    assert any(v['field'] == 'OPENAI_MODEL' and v['incoming'] == 'model-b' for v in second['overwrites'])
+    assert web._model_file_snapshot() == before and fake_env[1] == []
+    chosen_args = {**args, 'previewToken': second['previewToken']}
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(**chosen_args)))
+    assert result['ok'] and web._read_env()['OPENAI_MODEL'] == 'model-b'
+    assert fake_env[1][-1][0]['openai']['model'] == 'model-b'
+    assert next(r for r in result['channels']['chat']['rows'] if r['slot'] == 'openai')['model'] == 'model-b'
+    assert 'sk-codex-key-1234567890' not in json.dumps(result)
+    assert path.read_bytes() == original_source
+    with pytest.raises(web.HTTPException) as changed:
+        asyncio.run(web.api_import_apply(web.ImportApplyRequest(**{**args, 'previewToken': first['previewToken']})))
+    assert changed.value.status_code == 409
+
+
+@pytest.mark.parametrize('operation', ['discover', 'model'])
+@pytest.mark.parametrize('mutation', ['expired', 'source', 'target', 'slot', 'candidate', 'path'])
+def test_source_model_operations_reject_preview_drift_before_network_or_writes(cc_home, fake_env, monkeypatch, tmp_path, operation, mutation):
+    path, candidate, args = discovery_args(cc_home)
+    record = web._IMPORT_PREVIEWS[candidate['previewToken']]
+    record['discoveredModels'] = ['model-a']
+    if mutation == 'expired':
+        record['expires'] = web.time.monotonic() - 1
+    elif mutation == 'source':
+        value = json.loads(path.read_text(encoding='utf-8'))
+        value['codex']['providers']['p2']['settingsConfig']['auth']['OPENAI_API_KEY'] = 'changed-source-key'
+        path.write_text(json.dumps(value), encoding='utf-8')
+    elif mutation == 'target':
+        fake_env[0].write_text(fake_env[0].read_text(encoding='utf-8') + 'OTHER=external-change\n', encoding='utf-8')
+    elif mutation == 'slot':
+        args['slot'] = 'relay'
+    elif mutation == 'candidate':
+        args['id'] = 'not-the-previewed-candidate'
+    else:
+        other = tmp_path / 'other-source.json'
+        other.write_bytes(path.read_bytes())
+        args['path'] = str(other)
+    before = web._model_file_snapshot()
+    monkeypatch.setattr(web, '_discover_models', lambda *_: pytest.fail('invalid preview must not send provider request'))
+    with pytest.raises(web.HTTPException) as error:
+        if operation == 'discover':
+            asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+        else:
+            asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model='model-a')))
+    assert error.value.status_code == 409
+    assert web._model_file_snapshot() == before and fake_env[1] == []
+
+
+@pytest.mark.parametrize('change', ['expiry', 'source', 'target'])
+def test_slow_source_discovery_revalidates_preview_after_response(cc_home, fake_env, monkeypatch, change):
+    path, candidate, args = discovery_args(cc_home)
+    def discover(*_):
+        if change == 'expiry':
+            web._IMPORT_PREVIEWS[candidate['previewToken']]['expires'] = web.time.monotonic() - 1
+        elif change == 'source':
+            value = json.loads(path.read_text(encoding='utf-8'))
+            value['codex']['providers']['p2']['settingsConfig']['auth']['OPENAI_API_KEY'] = 'changed-source-key'
+            path.write_text(json.dumps(value), encoding='utf-8')
+        else:
+            fake_env[0].write_text('OTHER=external-change\n', encoding='utf-8')
+        return {'ok': True, 'kind': 'ok', 'models': ['model-a'], 'message': 'ok'}
+    monkeypatch.setattr(web, '_discover_models', discover)
+    with pytest.raises(web.HTTPException) as error:
+        asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    assert error.value.status_code == 409
+    assert 'discoveredModels' not in web._IMPORT_PREVIEWS[candidate['previewToken']]
+    assert fake_env[1] == []
+
+
+def test_selection_requires_ids_discovered_for_this_token(cc_home, fake_env, monkeypatch):
+    path, candidate, args = discovery_args(cc_home)
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as missing:
+        asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model='gpt-5-codex')))
+    assert missing.value.status_code == 400
+    monkeypatch.setattr(web, '_discover_models', lambda *_: {'ok': True, 'models': ['model-a'], 'kind': 'ok'})
+    asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    for model in ('not-listed', 'gpt-5-codex', '   '):
+        with pytest.raises(web.HTTPException) as rejected:
+            asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model=model)))
+        assert rejected.value.status_code == 400
+    other = next(c for c in asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))['candidates'] if c['appType'] == 'claude')
+    with pytest.raises(web.HTTPException):
+        asyncio.run(web.api_import_model(web.ImportModelRequest(**{**args, 'id': other['id'], 'slot': other['targetSlot'], 'previewToken': other['previewToken']}, model='model-a')))
+    assert web._model_file_snapshot() == before
+
+
+def test_source_discovery_redacts_provider_echo_and_filters_secret_model_ids(cc_home, fake_env, monkeypatch):
+    path, candidate, args = discovery_args(cc_home)
+    key = 'sk-codex-key-1234567890'
+    monkeypatch.setattr(web, '_discover_models', lambda *_: {'ok': True, 'models': [key, 'echo-' + key, 'valid-model', 'unsafe\nmodel'],
+                                                          'kind': 'ok', 'message': 'echo ' + key})
+    result = asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    assert result['models'] == ['valid-model'] and key not in json.dumps(result)
+    selected = asyncio.run(web.api_import_model(web.ImportModelRequest(**args, model='valid-model')))
+    assert key not in json.dumps(selected) and 'key' not in selected
+
+
+def test_source_discovery_reuses_private_target_rejection_without_credentials_request(cc_home, fake_env, monkeypatch):
+    path = _write_ccswitch_json(cc_home[1])
+    value = json.loads(path.read_text(encoding='utf-8'))
+    cfg = value['codex']['providers']['p2']['settingsConfig']
+    cfg['config'] = cfg['config'].replace('https://codex.example.com/v1', 'http://127.0.0.1:9/v1')
+    path.write_text(json.dumps(value), encoding='utf-8')
+    candidate = next(c for c in asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))['candidates'] if c['appType'] == 'codex')
+    monkeypatch.setattr(web, '_ssrf_safe', lambda _: False)
+    monkeypatch.setattr(web, '_ssrf_safe_allow_local', lambda: False)
+    monkeypatch.setattr(web.urllib.request, 'build_opener', lambda *_: pytest.fail('private source target must not be contacted'))
+    result = asyncio.run(web.api_import_discover(web.ImportApplyRequest(source='cc-switch', path=str(path),
+        id=candidate['id'], slot=candidate['targetSlot'], previewToken=candidate['previewToken'])))
+    assert not result['ok'] and result['kind'] == 'blocked_target' and result['models'] == []
+    assert 'discoveredModels' not in web._IMPORT_PREVIEWS[candidate['previewToken']]
+
+
+def test_source_discovery_reuses_no_redirect_handler(cc_home, fake_env, monkeypatch):
+    path, candidate, args = discovery_args(cc_home)
+    class Opener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(request.full_url, 302, 'redirect', {}, None)
+    def build(handler):
+        assert handler is web._NoRedirect and handler().redirect_request(None) is None
+        return Opener()
+    monkeypatch.setattr(web, '_ssrf_safe', lambda _: True)
+    monkeypatch.setattr(web.urllib.request, 'build_opener', build)
+    result = asyncio.run(web.api_import_discover(web.ImportApplyRequest(**args)))
+    assert not result['ok'] and result['kind'] == 'redirect_blocked'
+
+
+def test_transcribe_settings_read_real_model_and_base_defaults(cc_home, fake_env):
+    row = next(r for r in web._model_channels()['channels']['transcribe']['rows'] if r.get('slot') == 'siliconflow')
+    assert row['model'] == 'XingChenAGI/XingChenGSR-V1.0'
+    assert row['baseUrl'] == 'https://api.siliconflow.cn/v1'
+    assert row['modelEditable'] and row['baseEditable']
+    fake_env[0].write_text(fake_env[0].read_text(encoding='utf-8') +
+        'SILICONFLOW_ASR_MODEL=provider-asr-model\nSILICONFLOW_BASE_URL=https://asr.example/v1\n', encoding='utf-8')
+    row = next(r for r in web._model_channels()['channels']['transcribe']['rows'] if r.get('slot') == 'siliconflow')
+    assert row['model'] == 'provider-asr-model' and row['baseUrl'] == 'https://asr.example/v1'
+
+
+def test_transcribe_model_can_save_reopen_and_empty_draft_preserves_configuration(cc_home, fake_env):
+    before = fake_env[0].read_text(encoding='utf-8')
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='transcribe', rows=[
+        web.ModelSaveRow(slot='siliconflow', model='available-asr-model', baseUrl='https://asr.example/v1', key='test-asr-key')])))
+    row = next(r for r in result['channels']['transcribe']['rows'] if r.get('slot') == 'siliconflow')
+    assert result['ok'] and row['model'] == 'available-asr-model' and row['baseUrl'] == 'https://asr.example/v1'
+    assert web._read_env()['SILICONFLOW_ASR_MODEL'] == 'available-asr-model'
+    assert all(line in fake_env[0].read_text(encoding='utf-8') for line in before.splitlines())
+    snapshot = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as empty:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='transcribe', rows=[web.ModelSaveRow(slot='siliconflow')])))
+    assert empty.value.status_code == 400 and web._model_file_snapshot() == snapshot
+    assert 'test-asr-key' not in json.dumps(result) and fake_env[1] == []
+
+
+def test_transcribe_model_rejects_environment_injection_without_writes(cc_home, fake_env):
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as invalid:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='transcribe', rows=[
+            web.ModelSaveRow(slot='siliconflow', model='asr-model\nOTHER=must-not-write')])))
+    assert invalid.value.status_code == 400 and web._model_file_snapshot() == before
+
+
+def test_transcribe_saved_key_and_implicit_base_can_change_only_model(cc_home, fake_env):
+    fake_env[0].write_text(fake_env[0].read_text(encoding='utf-8') + 'SILICONFLOW_API_KEY=existing-asr-test-key\n', encoding='utf-8')
+    displayed = next(r for r in web._model_channels()['channels']['transcribe']['rows'] if r.get('slot') == 'siliconflow')
+    assert displayed['baseUrl'] == 'https://api.siliconflow.cn/v1'
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='transcribe', rows=[
+        web.ModelSaveRow(slot='siliconflow', model='selected-asr-model', baseUrl=displayed['baseUrl'], key='')])))
+    assert result['ok']
+    saved = web._read_env()
+    assert saved['SILICONFLOW_ASR_MODEL'] == 'selected-asr-model'
+    assert saved['SILICONFLOW_API_KEY'] == 'existing-asr-test-key'
+    assert saved['SILICONFLOW_BASE_URL'] == displayed['baseUrl']
+    assert 'existing-asr-test-key' not in json.dumps(result) and fake_env[1] == []
+
+
+def test_transcribe_saved_key_and_implicit_base_still_reject_actual_address_change(cc_home, fake_env):
+    fake_env[0].write_text(fake_env[0].read_text(encoding='utf-8') + 'SILICONFLOW_API_KEY=existing-asr-test-key\n', encoding='utf-8')
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as rejected:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='transcribe', rows=[
+            web.ModelSaveRow(slot='siliconflow', model='selected-asr-model', baseUrl='https://different-asr.example/v1', key='')])))
+    assert rejected.value.status_code == 400 and '重新填写' in rejected.value.detail
+    assert web._model_file_snapshot() == before and fake_env[1] == []

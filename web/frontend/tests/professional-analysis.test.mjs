@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'https://easel.test/'});
 globalThis.document=window.document;
@@ -15,11 +15,11 @@ const response=data=>({ok:true,json:async()=>data});
 const account=(platform='xiaohongshu',accountId='same-id')=>({platform,accountId,name:'示例作者',contentCount:3});
 const topic={id:'tag-one',label:'分步教程',kind:'tag',status:'exploratory',evidenceIds:['one','two'],counterexampleIds:['three'],sampleCount:2,totalCount:3,metric:'collects',metricLabel:'每百次观看收藏事件',value:5,baselineValue:2,period:'lifetime',comparison:'同形式同龄无投放',missingCount:1,observation:'实际样本收藏事件较多',hypothesis:'分步结构可能满足收藏需求',action:'下一篇只补一个步骤清单',reviewAt:'2026-10-16T02:00:00Z',stopRule:'样本不足或窗口不齐时停止比较',limitations:['小样本不能证明因果']};
 function report(platform='xiaohongshu',accountId='same-id') {return {account:account(platform,accountId),contents:['one','two','three'].map(id=>({id,title:`${platform}作品 ${id}`,body:'真实内容材料',tags:['教程'],format:'图文',period:'lifetime',metrics:{views:100,collects:5},diagnostics:[]})),overview:{contentCount:3,metricCoverage:{},totals:{}},themes:[],experiments:[],quality:{identity:'user_declared',warnings:[]},professional:{scope:{platform,accountId},capabilities:[{id:'body',question:'正文是否交付实际步骤？',required:['真实正文'],available:3,total:3,status:'available',limitation:'只做材料观察'}],quality:{total:3,comparable:2,excluded:[{id:'three',reasons:['窗口未知']}],observedFrom:'2026-10-01T00:00:00Z',observedTo:'2026-10-09T00:00:00Z'},metricDefinitions:[{key:'collects',label:'收藏次数',unit:'次',formula:'收藏事件合计 / 观看合计 × 100',limitation:'事件不是独立人数'}],cohorts:[{id:'c',label:'同龄图文',contentIds:['one','two'],period:'lifetime',ageDays:2,format:'图文',paid:false}],topics:[structuredClone(topic)]}};}
-async function fixture(t,{platform='xiaohongshu',fetcher}={}) {
- const state={platform,section:'review',requests:[]};
+async function fixture(t,{platform='xiaohongshu',fetcher,connected=false,sessionReady=false,strict=false}={}) {
+ const state={platform,section:'review',requests:[],connected,sessionReady};
  t.mock.method(globalThis,'fetch',async(url,options)=>{state.requests.push({url,options});if(fetcher)return fetcher(url,options);if(url.endsWith('/accounts'))return response({accounts:[account('xiaohongshu'),account('douyin'),account('xiaohongshu','other')]});if(url.includes('/report?')){const query=new URL(url,'https://easel.test').searchParams;return response(report(query.get('platform'),query.get('accountId')));}return response({ok:true});});
  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
- const render=()=>root.render(createElement(Workbench,{platform:state.platform,section:state.section,onSection:section=>{state.section=section;render();},onNavigateIdeas:()=>{}}));
+ const render=()=>{const page=createElement(Workbench,{platform:state.platform,section:state.section,connected:state.connected,sessionReady:state.sessionReady,onSection:section=>{state.section=section;render();},onNavigateIdeas:()=>{}});root.render(strict?createElement(StrictMode,null,page):page);};
  await act(async()=>render());t.after(async()=>{await act(async()=>root.unmount());container.remove();});
  return {state,container,render,button:text=>Array.from(container.querySelectorAll('button')).find(b=>b.textContent===text)};
 }
@@ -49,4 +49,117 @@ test('a pending topic save cannot post a success notice into a newly selected pl
 });
 test('old reports show compatibility guidance and evidence snapshots stay unchanged when source changes',async t=>{
  const old=report();delete old.professional;const v=await fixture(t,{fetcher:async url=>url.endsWith('/accounts')?response({accounts:[account()]}):response(old)});assert.match(v.container.textContent,/尚未提供专业证据字段/);assert.equal(v.container.querySelector('.ca-topic-card'),null);const data=report();const snapshot=topicEvidence(data,data.professional.topics[0]);data.professional.topics[0].sampleCount=99;assert.equal(snapshot.topic.sampleCount,2);assert.ok(topicIdeaNote(snapshot).includes("引用样本：2/3"));
+});
+
+const syncState=(platform='xiaohongshu',accountId=null,extra={})=>({scope:{platform,accountId},status:'idle',supported:true,loadedCount:0,totalCount:null,totalKnown:false,complete:false,fetchedAt:null,message:'等待读取当前账号',retryable:true,...extra});
+test('a connected platform automatically archives confirmed works once and distinguishes loaded samples from unknown total',async t=>{
+ let captured=false;
+ const v=await fixture(t,{connected:true,sessionReady:true,fetcher:async(url,options)=>{
+  if(url.endsWith('/accounts'))return response({accounts:captured?[account()]:[]});
+  if(url.includes('/report?'))return response(report());
+  if(url.includes('/sync/status'))return response(syncState());
+  if(url.endsWith('/sync')){captured=true;return response(syncState('xiaohongshu','same-id',{status:'partial',loadedCount:3,receivedCount:3,fetchedAt:123,message:'当前只读取最近一页，不代表全量',report:report()}));}
+  throw new Error(url);
+ }});
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 尚未确认/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/不代表全量/);
+ assert.match(v.container.textContent,/先选一个问题/);
+ await act(async()=>v.render());
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
+ assert.equal(v.state.requests.some(item=>item.url.endsWith('/insights')||item.url.endsWith('/interpret')),false);
+});
+
+test('opening cached confirmed works reads them without starting another collector',async t=>{
+ const v=await fixture(t,{platform:'bilibili',connected:true,sessionReady:true,fetcher:async url=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account('bilibili')]});
+  if(url.includes('/report?'))return response(report('bilibili'));
+  if(url.includes('/sync/status'))return response(syncState('bilibili','same-id',{status:'partial',loadedCount:3,totalCount:37,totalKnown:true,fetchedAt:123,message:'已读取保存的作品',report:report('bilibili')}));
+  throw new Error(url);
+ }});
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,0);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 37 篇/);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/不代表全部历史/);
+});
+
+test('failed synchronization keeps saved scope records and exposes explicit retry without switching to examples',async t=>{
+ const v=await fixture(t,{connected:true,sessionReady:true,fetcher:async url=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account()]});
+  if(url.includes('/report?'))return response(report());
+  if(url.includes('/sync/status'))return response(syncState());
+  if(url.endsWith('/sync'))throw new Error('平台读取失败，请检查登录状态');
+  throw new Error(url);
+ }});
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/平台读取失败/);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
+ assert.ok(v.button('重试读取作品'));
+ assert.match(v.container.textContent,/xiaohongshu作品/);
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
+});
+
+test('a late previous-platform synchronization cannot overwrite a newly selected platform',async t=>{
+ let finish;
+ const v=await fixture(t,{connected:true,sessionReady:true,fetcher:async(url,options)=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account(),account('douyin')]});
+  if(url.includes('/report?'))return response(report(new URL(url,'https://easel.test').searchParams.get('platform')));
+  if(url.includes('/sync/status')){const platform=new URL(url,'https://easel.test').searchParams.get('platform');return response(syncState(platform,null,platform==='douyin'?{status:'unsupported',supported:false,message:'当前不能确认稳定作品归属',retryable:false}:{}));}
+  if(url.endsWith('/sync'))return new Promise(resolve=>{finish=resolve;});
+  throw new Error(url);
+ }});
+ await act(async()=>{v.state.platform='douyin';v.render();});
+ await act(async()=>finish(response(syncState('xiaohongshu','same-id',{status:'partial',message:'STALE_SOURCE',report:report()}))));
+ assert.match(v.container.textContent,/douyin作品/);
+ assert.doesNotMatch(v.container.textContent,/STALE_SOURCE|xiaohongshu作品/);
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1,'unsupported platforms do not start collectors');
+});
+
+test('selecting a saved account keeps its records separate and offers the currently logged-in account after mismatch',async t=>{
+ const v=await fixture(t,{connected:true,sessionReady:true,fetcher:async(url,options)=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account(),account('xiaohongshu','other')]});
+  if(url.includes('/report?'))return response(report('xiaohongshu',new URL(url,'https://easel.test').searchParams.get('accountId')));
+  if(url.includes('/sync/status'))return response(syncState('xiaohongshu','same-id',{status:'partial',report:report()}));
+  if(url.endsWith('/sync')){const payload=JSON.parse(options.body);return response(payload.accountId==='other'
+   ?syncState('xiaohongshu','other',{status:'account_mismatch',connectedAccountId:'same-id',message:'所选历史账号与当前登录账号不同，未覆盖记录'})
+   :syncState('xiaohongshu','same-id',{status:'partial',report:report(),message:'已载入当前登录账号'}));}
+  throw new Error(url);
+ }});
+ const picker=v.container.querySelector('select');
+ await act(async()=>{picker.value='other';picker.dispatchEvent(new window.Event('change',{bubbles:true}));});
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/历史账号与当前登录账号不同/);
+ assert.equal(v.container.querySelector('select').value,'other');
+ const requests=v.state.requests.filter(item=>item.url.endsWith('/sync'));
+ assert.equal(JSON.parse(requests.at(-1).options.body).accountId,'other');
+ await act(async()=>v.button('读取当前登录账号').click());
+ assert.equal(v.container.querySelector('select').value,'same-id');
+ assert.equal(JSON.parse(v.state.requests.filter(item=>item.url.endsWith('/sync')).at(-1).options.body).accountId,undefined);
+});
+
+test('strict-mode effect cleanup does not strand the automatic work loader or start duplicate collection',async t=>{
+ const v=await fixture(t,{strict:true,connected:true,sessionReady:true,fetcher:async url=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account()]});
+  if(url.includes('/report?'))return response(report());
+  if(url.includes('/sync/status'))return response(syncState());
+  if(url.endsWith('/sync'))return response(syncState('xiaohongshu','same-id',{status:'partial',report:report(),message:'严格模式仍成功读取'}));
+  throw new Error(url);
+ }});
+ assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/严格模式仍成功读取/);
+ assert.match(v.container.textContent,/xiaohongshu作品/);
+});
+
+test('an empty new login scope never leaves another saved account masquerading as its works',async t=>{
+ const v=await fixture(t,{connected:true,sessionReady:true,fetcher:async url=>{
+  if(url.endsWith('/accounts'))return response({accounts:[account()]});
+  if(url.includes('/report?'))return response(report());
+  if(url.includes('/sync/status'))return response(syncState());
+  if(url.endsWith('/sync'))return response(syncState('xiaohongshu','new-login',{status:'empty',accountName:'当前登录账号',loadedCount:0,message:'当前页没有可归档作品，不能视为全历史为零'}));
+  throw new Error(url);
+ }});
+ assert.equal(v.container.querySelector('select').value,'new-login');
+ assert.doesNotMatch(v.container.textContent,/xiaohongshu作品/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/不能视为全历史为零/);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 0 篇/);
+ assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 尚未确认/);
 });

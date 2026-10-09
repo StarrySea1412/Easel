@@ -13,6 +13,7 @@ interface ActivityPageProps {
   activeSessionId: string | null;
   streams: Record<string, StreamState>;
   target?: ActivityTarget;
+  onOpenOffice?: (sessionId: string) => void;
 }
 
 const FILTER_LABELS: Record<ActivityFilter, string> = {
@@ -30,8 +31,8 @@ export default function ActivityPage(props: ActivityPageProps) {
   return <ActivityWorkspace key={targetKey} {...props} />;
 }
 
-function ActivityWorkspace({ sessions, activeSessionId, streams, target }: ActivityPageProps) {
-  const [tab, setTab] = useState<Tab>(target ? 'audit' : 'usage');
+function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenOffice }: ActivityPageProps) {
+  const [tab, setTab] = useState<Tab>(target?.turnId ? 'audit' : 'usage');
   const [selectedId, setSelectedId] = useState(target?.sessionId || activeSessionId || '');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<ActivityFilter>('all');
@@ -117,9 +118,12 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target }: Activ
                 <h2>{session?.title || emptyTitle}</h2>
                 {session && <p>{session.importedFromBackup ? '备份内容仅供阅读，不作为执行证据。' : '模型用量与 Skill 执行证据分开核验。'}</p>}
               </div>
+              <div className="activity-detail-actions">
+              {session && !session.importedFromBackup && onOpenOffice && <button type="button" className="btn btn-sm" onClick={() => onOpenOffice(session.id)}>查看会话工作室 ↗</button>}
               {session && (
                 <span className="activity-session-state">{session.importedFromBackup ? '备份副本' : liveStreams[session.id] ? '运行中' : '历史记录'}</span>
               )}
+              </div>
             </div>
 
             {session?.importedFromBackup ? (

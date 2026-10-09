@@ -99,3 +99,26 @@ test('failed usage fetch surfaces the error without inventing numbers', async t 
   assert.match(view.text(), /读取失败/);
   assert.doesNotMatch(view.text(), /\b0 次模型调用\b/);
 });
+
+test('request details separate recorded and estimated costs, stream and estimated speed', async t => {
+  const payload = usagePayload('s1');
+  payload.turns[0].calls[0] = call('c1', 'sample', 'fixture', {
+    durationMs: 8000, firstTokenMs: 2000, outputTokensPerSecond: 50, speedSource: 'stream', estimatedCostUsd: .015,
+    costBreakdown: { pricing: { source: 'fixture quote', multiplier: '1.5' }, freshInputTokens: 40, partsUsd: { input: '.001' } },
+  });
+  payload.turns[0].calls[1] = call('c2', 'unknown', 'fixture', { durationMs: 15000, firstTokenMs: null, outputTokensPerSecond: 20, speedSource: 'estimated' });
+  const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
+  assert.match(view.text(), /50.00 tok\/s/);
+  assert.match(view.text(), /估算速度（含等待）/);
+  assert.match(view.text(), /fixture quote/);
+  assert.match(view.text(), /价格或用量不完整/);
+  assert.equal(view.requests.length, 1, 'collapsed pricing controls make no reads');
+});
+
+test('partially priced summaries identify coverage rather than implying a complete cost', async t => {
+  const payload = usagePayload('s1');
+  payload.session.estimatedCostUsd = .015;
+  payload.session.coverage.estimatedCostUsd = 1;
+  const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
+  assert.match(view.container.querySelector('.usage-performance-summary').textContent, /渠道估算 \$0\.01500000 · 部分合计 · 1\/2 次已计价（非账单）/);
+});

@@ -209,6 +209,7 @@ def cmd_stats(a) -> int:
     cookie_file = Path(a.cookie).expanduser() if a.cookie else DEFAULT_COOKIE
     cookie, mid = _load_cookie(cookie_file)
     r = {"platform": "bilibili", "name": "B站", "nickname": "", "loggedIn": False,
+         "accountId": "",
          "followers": None, "likes": None, "following": None, "posts": None,
          "metrics": [], "notes": [],
          "growth": {"last": None, "day": None, "week": None, "month": None, "year": None},
@@ -219,7 +220,13 @@ def cmd_stats(a) -> int:
         nav = (_api("https://api.bilibili.com/x/web-interface/nav", cookie).get("data") or {})
         r["loggedIn"] = bool(nav.get("isLogin"))
         r["nickname"] = (nav.get("uname") or "")[:40]
-        mid = mid or int(nav.get("mid") or 0)
+        # Identity comes from the authenticated nav response, not stale cookie-file metadata.
+        verified_mid = nav.get("mid")
+        if r["loggedIn"] and type(verified_mid) is int and verified_mid > 0:
+            r["accountId"] = str(verified_mid)
+            mid = verified_mid
+        if not r["loggedIn"]:
+            print(json.dumps(r, ensure_ascii=False)); return 0
         stat = (_api("https://api.bilibili.com/x/web-interface/nav/stat", cookie).get("data") or {})
         r["followers"] = stat.get("follower")
         r["following"] = stat.get("following")

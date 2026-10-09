@@ -54,6 +54,14 @@ def openclaw_base_cmd() -> list[str]:
         resolved = Path(oc).resolve()
         if resolved.suffix == ".mjs" and resolved.is_file():
             return [node, str(resolved)]
+        # A project-local npm prefix can be separate from the Node directory.
+        # Resolve the package beside the shim PATH actually selected before
+        # considering a user's unrelated global installation. Calling the
+        # .cmd shim via CreateProcess would fail on Windows (or truncate a
+        # multiline prompt if wrapped in cmd.exe).
+        selected_entry = resolved.parent / "node_modules" / "openclaw" / "openclaw.mjs"
+        if selected_entry.is_file():
+            return [node, str(selected_entry.resolve())]
 
     # 2) Hunt for openclaw.mjs under the known npm global layouts.
     if node:

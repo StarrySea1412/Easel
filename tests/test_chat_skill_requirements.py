@@ -44,6 +44,19 @@ def test_requirements_are_exact_user_context_without_writing_global_skill_files(
     assert all(path.read_text(encoding='utf-8') == text for path, text in skills.items())
 
 
+def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, monkeypatch):
+    monkeypatch.setattr(web, '_read_env', lambda: {'IMG_API_KEY': 'PRIVATE_KEY', 'IMG_BASE_URL': 'https://PRIVATE_URL', 'IMG_MODEL': 'fixture'})
+    visual = web._chat_message(request())
+    assert '本轮视觉创作协作' in visual and '不擅自调用付费工具' in visual
+    assert '已填写配置' in visual and 'PRIVATE_' not in visual
+    plain = web._chat_message(request(selectedSkills=['skill-example'], skillRequirements={}))
+    assert '本轮视觉创作协作' not in plain
+    monkeypatch.setattr(web, '_read_env', lambda: {})
+    assert '设置 → 生图通道' in web._chat_message(request())
+    monkeypatch.setattr(web, '_read_env', lambda: {'OPENAI_API_KEY': 'PRIVATE_CHAT_KEY', 'IMG_BASE_URL': 'https://fixture', 'IMG_MODEL': 'image'})
+    assert '配置不完整' in web._chat_message(request())
+
+
 def test_requests_from_other_sessions_and_cleared_snapshots_do_not_reuse_prior_notes(skills):
     first = web._chat_message(request())
     second = web._chat_message(request(sessionId='session-b', skillRequirements={}))

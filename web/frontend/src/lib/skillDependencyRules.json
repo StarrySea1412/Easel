@@ -1,0 +1,10 @@
+[
+  {"id":"image","label":"生图","channel":"image","markers":["ai_image.py","generate_image.py","ai-image-gen","IMG_API_KEY"],"requiredSkills":["ai-image-gen","ecom-details-image","short-drama"],"note":"调用生图服务需要 API Key 和服务地址。"},
+  {"id":"video","label":"视频","channel":"video","markers":["ai_video.py","ai-video-gen","VIDEO_API_KEY"],"requiredSkills":["ai-video-gen"],"note":"生成视频需要视频通道 Key；短剧可选视频分支，未配置时可制作图片短剧。"},
+  {"id":"speech","label":"配音","channel":"speech","markers":["tts.py","voice_clone.py","multivoice.py","dubbing.py","tts-voiceover","VOICE_API_KEY"],"requiredSkills":["voice-clone"],"note":"云端配音或克隆需要相应 Key；普通 TTS 可使用无 Key 的 Edge 兜底，仍需网络与依赖。"},
+  {"id":"transcribe","label":"转写","channel":"transcribe","markers":["asr.py","TRANSCRIBE_API_KEY"],"requiredSkills":[],"note":"本地转写无需 API Key，需要本地环境和模型；云端转写另配转写通道。"},
+  {"id":"music","label":"音乐","channel":"music","markers":["ai_music.py","ai-music","MUSIC_API_KEY"],"requiredSkills":["ai-music"],"note":"AI 音乐生成需要音乐通道 Key；使用已有音乐文件不需要生成服务。"},
+  {"id":"notify","label":"邮件","channel":"notify","markers":["EASEL_NOTIFY_SMTP_HOST","skill-email-notify"],"requiredSkills":["skill-email-notify"],"note":"邮件推送需配置收件人和 SMTP；服务商要求认证时还需邮箱授权码。"},
+  {"id":"document","label":"文档解析","channel":null,"markers":["MINERU_API_TOKEN"],"requiredSkills":[],"note":"MinerU 云解析 Token 可选；未配置时使用本地 PDF 解析。在本技能 API 配置中填写。"},
+  {"id":"api","label":"联网 API","channel":null,"markers":["SERPER_API_KEY","TAVILY_API_KEY","BRAVE_API_KEY"],"requiredSkills":[],"note":"外部服务需要其对应 Key；请查看本技能原文与 API 配置。"}
+]

@@ -19,7 +19,7 @@ async function fixture(t,{requirement='',fail=false}={}) {
 }
 test('hover reads the installed skill guide without editing or sending, and an unknown pick action is not displayed',async t=>{
  const v=await fixture(t);assert.deepEqual(v.requests,[]);
- await act(async()=>v.container.querySelector('[data-skill]').dispatchEvent(new window.MouseEvent('mouseover',{bubbles:true})));
+ await act(async()=>v.trigger.dispatchEvent(new window.MouseEvent('mouseover',{bubbles:true})));
  await act(async()=>new Promise(resolve=>setTimeout(resolve,180)));
  assert.deepEqual(v.requests,['/api/skill/custom-skill']);assert.match(v.panel().textContent,/来自已安装技能的实际说明/);assert.doesNotMatch(v.panel().textContent,/填入创作框/);
  assert.equal(v.panel().querySelector('textarea'),null);assert.deepEqual(v.saved,[]);
@@ -37,7 +37,15 @@ test('save failure preserves the draft, and Escape cancels without another write
 });
 test('keyboard focus previews details and leaving through the remove button closes the preview; removal is explicit',async t=>{
  const v=await fixture(t);await act(async()=>v.trigger.focus());assert.ok(v.panel());
- const remove=v.container.querySelector('[aria-label="移除技能 custom-skill"]');await act(async()=>remove.focus());assert.ok(v.panel());
+ const remove=v.container.querySelector('[aria-label="移除技能 custom-skill"]');await act(async()=>remove.focus());assert.equal(v.panel(),null);
  const outside=document.createElement('button');document.body.append(outside);t.after(()=>outside.remove());await act(async()=>outside.focus());assert.equal(v.panel(),null);assert.equal(document.activeElement,outside);
  await act(async()=>remove.click());assert.equal(v.removed(),1);assert.deepEqual(v.saved,[]);
 });
+
+ test('remove hover closes a visible preview and never opens one; one click removes the skill',async t=>{
+ const v=await fixture(t);const remove=v.container.querySelector('[aria-label="移除技能 custom-skill"]');
+ await act(async()=>remove.dispatchEvent(new window.MouseEvent('mouseover',{bubbles:true})));assert.equal(v.panel(),null);
+ await act(async()=>v.trigger.dispatchEvent(new window.MouseEvent('mouseover',{bubbles:true})));assert.ok(v.panel());
+ await act(async()=>v.trigger.dispatchEvent(new window.MouseEvent('mouseout',{bubbles:true,relatedTarget:remove})));assert.equal(Boolean(v.panel()),false);
+ await act(async()=>remove.click());assert.equal(v.removed(),1);assert.deepEqual(v.saved,[]);
+ });

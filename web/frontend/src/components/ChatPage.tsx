@@ -6,6 +6,7 @@ import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCal
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
+import ChatExecutionPanel from './ChatExecutionPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import '../styles/chat-workspace.css';
@@ -32,6 +33,7 @@ interface ChatPageProps {
   ) => void; // 重试：仅对最后一轮
   onOpenAudit?: (turnId:string)=>void;
   onNewChat?: () => void;
+  onOpenModels?: () => void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
 }
 
@@ -52,7 +54,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -135,7 +137,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} />
+          <ChatComposer key={session.id} sessionId={session.id} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -218,7 +220,9 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-              />{!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)&&<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>}</Fragment>
+                execution={!isImported && msg.role === 'assistant' && auditTurn ? <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
+                status={!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
+              /></Fragment>
             );
           })}
           {isStreaming && (stream!.questions?.length ?? 0) > 0 && (
@@ -232,7 +236,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         {!isImported && <div className="chat-input-inner">
           {stopping && <p className="composer-skills-note" role="status">正在请求停止，等待后端确认…</p>}
           {stopError && <div className="composer-upload-error" role="alert">{stopError}{isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
-          <ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} />
+          <ChatComposer key={session.id} sessionId={session.id} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
         </div>}
       </div>}
     </div>

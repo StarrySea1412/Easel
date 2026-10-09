@@ -17,6 +17,7 @@ export interface OfficeProcessPanelProps {
   stale: boolean;
   onClose: () => void;
   onOpenChat?: () => void;
+  onOpenActivity?: () => void;
 }
 
 const STATUS_EXPLANATION: Record<OfficeAgent['state'], string> = {
@@ -102,7 +103,7 @@ function ProcessRecords({ steps, agent, turnId, stale }: Pick<OfficeRecordExport
 }
 
 export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
-  const { agent, events, session, stream, turnId, stale, onClose, onOpenChat } = props;
+  const { agent, events, session, stream, turnId, stale, onClose, onOpenChat, onOpenActivity } = props;
   const panel = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const current = useRef({ onClose });
@@ -180,7 +181,7 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
           {steps.length ? <ProcessRecords key={JSON.stringify([agent.source, agent.id, session?.id, turnId])} steps={steps} agent={agent} turnId={turnId} stale={stale} /> : <p className="office-process-empty">{agent.source === 'live' && !turnId ? '当前快照没有轮次标识，调用过程暂时无法归属到本轮。' : '尚未收到属于该员工、本轮的调用或回执记录。这不代表它没有工作。'}</p>}
         </section>
       </div>
-      <footer className="office-process-footer"><span>{agent.source === 'demo' ? '演示内容与真实会话数据分开显示' : '仅显示已经取得的记录，不补写未提供的过程'}</span>{onOpenChat && agent.source === 'live' && <button type="button" className="office-process-open-chat" onClick={() => { onClose(); onOpenChat(); }}>在对话中查看</button>}</footer>
+      <footer className="office-process-footer"><span>{agent.source === 'demo' ? '演示内容与真实会话数据分开显示' : '仅显示已经取得的记录，不补写未提供的过程'}</span>{onOpenActivity && agent.source === 'live' && <button type="button" className="office-process-open-chat" onClick={() => { onClose(); onOpenActivity(); }}>{turnId ? '查看本轮运行记录' : '查看会话运行记录'}</button>}{onOpenChat && agent.source === 'live' && <button type="button" className="office-process-open-chat" onClick={() => { onClose(); onOpenChat(); }}>在对话中查看</button>}</footer>
     </section>
   </div>, document.body);
 }

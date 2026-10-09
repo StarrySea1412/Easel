@@ -5,6 +5,8 @@ import asyncio
 import json
 import sys
 import uuid
+import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -149,3 +151,71 @@ def test_usage_endpoint_uses_project_paths_and_validates_query(sandbox, monkeypa
         with pytest.raises(web.HTTPException) as error:
             asyncio.run(web.api_usage(**args))
         assert error.value.status_code == 400
+
+
+def test_sqlite_usage_is_project_scoped_deduplicated_and_prices_preserve_snapshot(sandbox):
+    from easel.session_trace import database_path
+    target = database_path(sandbox[3]); target.parent.mkdir()
+    with sqlite3.connect(target) as db:
+        db.executescript('CREATE TABLE session_nodes(session_key TEXT,current_session_id TEXT);'
+            'CREATE TABLE transcript_events(session_id TEXT,seq INTEGER,event_json TEXT,event_zstd BLOB,event_utf8_bytes INTEGER);'
+            'CREATE TABLE transcript_event_identities(session_id TEXT,seq INTEGER,event_id TEXT);'
+            'CREATE TABLE transcript_rewrite_watermarks(session_id TEXT,generation INTEGER);')
+        db.execute('INSERT INTO session_nodes VALUES(?,?)', ('agent:main:own', 'mapped-own'))
+        db.execute('INSERT INTO session_nodes VALUES(?,?)', ('agent:main:foreign', 'mapped-foreign'))
+    # append to the target using the same schema, including one private session.
+    now = time.time()
+    start = int((now - 15) * 1000)
+    end = (now - 5) * 1000
+    own = record('sqlite-call', tokens={'input': 700, 'output': 500, 'cacheRead': 200, 'cacheWrite': 100})
+    own['timestamp'] = end; own['message']['timestamp'] = start
+    other = record('private-call', tokens={'input': 99999, 'output': 99999})
+    other['timestamp'] = end
+    with sqlite3.connect(target) as db:
+        db.execute('UPDATE session_nodes SET session_key=? WHERE session_key=?', ('agent:main:chat1', 'agent:main:own'))
+        for ident, e in (('mapped-own', own), ('mapped-foreign', other)):
+            text = json.dumps(e)
+            db.execute('INSERT INTO transcript_events VALUES(?,?,?,?,?)', (ident, 0, text, None, len(text.encode())))
+    (sandbox[2] / 'web_chat1.json').write_text('{}')
+    audit_folder = sandbox[2].parent / '_skill_audits' / usage.hashlib.sha256(b'chat1').hexdigest()[:24]
+    audit_folder.mkdir(parents=True)
+    (audit_folder / 'turn.json').write_text(json.dumps({'sessionId': 'chat1', '_usageObservations': [
+        {'kind': 'output', 'ts': start + 2000}, {'kind': 'end', 'ts': end}]}))
+    data = collect(sandbox)
+    assert data['session']['calls'] == 1 and data['session']['totalTokens'] == 1500
+    assert data['sourceCount'] == 1 and data['sourceCounts'] == {'jsonl': 0, 'sqliteSessions': 1}
+    call = data['turns'][0]['calls'][0]
+    assert call['firstTokenMs'] == 2000 and call['speedSource'] == 'stream'
+    assert abs(call['outputTokensPerSecond'] - 62.5) < .01
+    assert call['estimatedCostUsd'] is None
+    price = {'currency': 'USD', 'input': '3', 'output': '15', 'cacheRead': '.3', 'cacheWrite': '3.75', 'multiplier': '1.5', 'source': 'fixture'}
+    usage.save_price(sandbox[2], 'sample-provider', 'sample-model', price)
+    priced = collect(sandbox)['turns'][0]['calls'][0]
+    assert priced['estimatedCostUsd'] == .0150525
+    usage.save_price(sandbox[2], 'sample-provider', 'sample-model', {**price, 'input': '30'})
+    assert collect(sandbox)['turns'][0]['calls'][0]['estimatedCostUsd'] == .0150525
+    assert collect(sandbox)['project']['calls'] == 1
+    assert 'PRIVATE CONTENT' not in json.dumps(data)
+
+
+def test_speed_aggregation_weights_eligible_windows_instead_of_individual_rates():
+    calls = [dict(outputTokens=300, durationMs=8000, firstTokenMs=2000, speedSource='stream'),
+             dict(outputTokens=100, durationMs=3000, firstTokenMs=1000, speedSource='stream')]
+    result = usage.summarize(calls)
+    assert result['performance']['stream'] == {'calls': 2, 'outputTokensPerSecond': 50.0}
+    assert result['performance']['estimated']['outputTokensPerSecond'] is None
+
+
+def test_pricing_endpoint_validates_and_preserves_corrupt_saved_prices(sandbox, monkeypatch):
+    monkeypatch.setattr(web, 'SESSIONS_DIR', sandbox[2])
+    price = {'currency': 'USD', 'input': '3', 'output': '15', 'cacheRead': '.3', 'cacheWrite': '3.75', 'multiplier': '1', 'source': 'fixture quote'}
+    req = web.UsagePriceRequest(provider='fixture', model='fixture', pricing=price)
+    assert 'fixture/fixture' in asyncio.run(web.api_usage_save_price(req))['prices']
+    assert 'fixture/fixture' in asyncio.run(web.api_usage_prices())['prices']
+    for invalid in ({**price, 'currency': 'CNY'}, {**price, 'input': '-1'}, {**price, 'source': ''}):
+        with pytest.raises(web.HTTPException) as error:
+            asyncio.run(web.api_usage_save_price(web.UsagePriceRequest(provider='fixture', model='fixture', pricing=invalid)))
+        assert error.value.status_code == 400
+    path = usage.pricing_path(sandbox[2]); path.write_text('{broken')
+    with pytest.raises(ValueError): usage.save_price(sandbox[2], 'fixture', 'fixture', price)
+    assert path.read_text() == '{broken'

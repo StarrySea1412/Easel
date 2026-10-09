@@ -27,13 +27,14 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   demoEnabled?: boolean;
 }) {
   const [platform, setPlatform] = useState(() => validPlatform(initialPlatform));
-  const [requestedSource, setDataSource] = useState<'demo' | 'mine'>(() => !demoEnabled || autoCollectSignal > 0 ? 'mine' : 'demo');
+  const [requestedSource, setDataSource] = useState<'demo' | 'mine'>('mine');
   const dataSource = demoEnabled ? requestedSource : 'mine';
   const [section, setSection] = useState<AnalysisSection>('review');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [legacyOpen,setLegacyOpen]=useState(false);
   const request = useRef(0);
   const refresh = useCallback(async () => {
     const sequence = ++request.current;
@@ -51,6 +52,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   useEffect(() => { if (!demoEnabled) setDataSource('mine'); }, [demoEnabled]);
   useEffect(() => { if (autoCollectSignal > 0) { setDataSource('mine'); setSection('review'); } }, [autoCollectSignal]);
   useEffect(() => { setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
+  useEffect(()=>setLegacyOpen(false),[platform]);
   const selected = PLATFORMS.find((item) => item.id === platform)!;
   const account = accounts.find((item) => item.platform === platform);
   const available = Boolean(account?.supported && account.loggedIn);
@@ -66,7 +68,9 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden={true}>↗</span></button></div>
       </header>
 
-      <div className="ca-data-source"><div role="group" aria-label="分析数据来源">{demoEnabled && <button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button>}<button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '这里读取你保存的作品。没有记录时，可连接账号或导入作品。'}</p></div>
+      <div className="ca-data-source"><div role="group" aria-label="分析数据来源">{demoEnabled && <button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button>}<button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '选平台后读取已有作品；支持的已登录账号会自动载入可确认归属的作品。'}</p></div>
+
+      {dataSource==='mine'&&<ol className="ca-start-steps" aria-label="内容分析使用步骤"><li><strong>1</strong><div>选择账号与作品<span>先确认正在分析谁、已读到多少篇</span></div></li><li><strong>2</strong><div>选择想解决的问题<span>看不懂标题、互动少，还是下一篇没方向？</span></div></li><li><strong>3</strong><div>看结论与下一步<span>打开依据，挑一项改动再验证</span></div></li></ol>}
 
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'ca-platform is-selected' : 'ca-platform'} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
@@ -90,16 +94,18 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       </nav>
 
       {dataSource === 'demo' ? <ContentAnalysisDemo section={section} onSection={setSection} onUseMyData={() => { setDataSource('mine'); setSection('review'); }} /> : <>
-      <ContentAnalysisWorkbench key={platform} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas} />
+      <ContentAnalysisWorkbench key={platform} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas}
+        connected={available} sessionReady={!loading&&!error} onNavigateAccounts={onNavigateAccounts} onSyncHandled={autoCollectSignal>0?onAutoCollectHandled:undefined} />
 
       <div hidden={section !== 'review'}>
-        <details className="ca-collection-tools" open={autoCollectSignal > 0 || undefined}><summary>连接平台与采集数据 <span>已有账号？展开读取最新作品</span></summary>
+        <details className="ca-collection-tools" open={legacyOpen} onToggle={event=>setLegacyOpen(event.currentTarget.open)}><summary>可选：查看平台原始概览 <span>与归档作品分开核对，展开后才读取</span></summary>
+        {legacyOpen&&<>
         <div className="ca-review-layout">
           <section className="ca-review-main" aria-label="内容复盘">
             <div className="ca-section-intro"><p className="ca-kicker">01 / REVIEW</p><h2>平台采集与实时概览</h2><p>{selected.scope}</p></div>
             {loading ? <div className="ca-loading" role="status">正在读取账号连接状态…</div> : error ? <div className="ca-loading">账号状态暂不可用，重试成功后即可查看分析。</div> : <>
               {!available && <div className="ca-connect-callout"><div><strong>连接{selected.name}，开始自己的内容复盘</strong><p>{platform === 'xiaohongshu' ? '连接后采集本人笔记；已有导出文件也可在下方查看导入方式。' : '登录并校验身份后，采集当前账号真实返回的指标与作品。'}</p></div><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateAccounts}>前往账号中心</button></div>}
-              {platform === 'xiaohongshu' ? <XhsInsightsPanel key={`xhs-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} autoCollectSignal={autoCollectSignal} onAutoCollectHandled={onAutoCollectHandled} /> : platform === 'bilibili' ? <><BiliInsightsPanel key={`bili-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /><PlatformAnalysisPanel showPlatformPicker={false} key={`bili-platform-${revision}`} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} /></> : <PlatformAnalysisPanel showPlatformPicker={false} key={platform} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} />}
+              {platform === 'xiaohongshu' ? <XhsInsightsPanel key={`xhs-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /> : platform === 'bilibili' ? <><BiliInsightsPanel key={`bili-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /><PlatformAnalysisPanel showPlatformPicker={false} key={`bili-platform-${revision}`} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} /></> : <PlatformAnalysisPanel showPlatformPicker={false} key={platform} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} />}
             </>}
           </section>
           <aside className="ca-guide" aria-label="复盘指引">
@@ -107,6 +113,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
             <div className="ca-scope-card"><h3>本平台的分析边界</h3><p>{selected.limit}</p><button type="button" className="ca-text-button" onClick={() => setSection('method')}>查看完整数据口径 <span aria-hidden={true}>→</span></button></div>
           </aside>
         </div>
+        </>}
         </details>
       </div>
 

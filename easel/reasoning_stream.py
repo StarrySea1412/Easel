@@ -86,3 +86,48 @@ class ReasoningStream:
             delta = text
         self.blocks[block] = previous + delta
         return delta
+
+
+class ThinkingTextStream:
+    """Split a leading New API thinking wrapper across arbitrary text chunks.
+
+    Only a response-start wrapper counts. Quotations/code containing tags later
+    in the answer remain ordinary text. Unmatched partial opening tags flush.
+    """
+    def __init__(self):
+        self.buffer = ''
+        self.mode = 'start'
+        self.close = ''
+
+    def push(self, text, *, final=False):
+        self.buffer += text
+        thinking, content = '', ''
+        if self.mode == 'start':
+            candidate = self.buffer.lstrip()
+            tags = ('<think>', '<thinking>')
+            match = next((tag for tag in tags if candidate.startswith(tag)), None)
+            if match:
+                self.close = match.replace('<', '</', 1)
+                self.buffer = candidate[len(match):]
+                self.mode = 'thinking'
+            elif not final and any(tag.startswith(candidate) for tag in tags):
+                return '', ''
+            else:
+                self.mode = 'content'
+        if self.mode == 'thinking':
+            index = self.buffer.find(self.close)
+            if index >= 0:
+                thinking = self.buffer[:index]
+                self.buffer = self.buffer[index + len(self.close):]
+                self.mode = 'content'
+            else:
+                keep = 0
+                if not final:
+                    for size in range(1, min(len(self.close), len(self.buffer)) + 1):
+                        if self.close.startswith(self.buffer[-size:]):
+                            keep = size
+                thinking = self.buffer[:-keep] if keep else self.buffer
+                self.buffer = self.buffer[-keep:] if keep else ''
+        if self.mode == 'content':
+            content, self.buffer = self.buffer, ''
+        return thinking, content

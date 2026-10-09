@@ -9,7 +9,7 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: wind
 const { createRoot } = await import('react-dom/client');
 const { default: Panel } = await loadTsModule('../src/components/settings/ModelHealthPanel.tsx', import.meta.url);
 const REF = 'relay/model-a';
-async function fixture(t) {
+async function fixture(t, props = {}) {
   const calls = [], h = { enabled: false, fail: false, failHealthRead: false };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push({ url, ...init }); const body = init?.body ? JSON.parse(init.body) : undefined;
@@ -20,7 +20,7 @@ async function fixture(t) {
     return { ok: !(h.fail && body), status: h.fail && body ? 400 : 200, json: async () => data };
   });
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
-  await act(async () => root.render(createElement(Panel))); t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  await act(async () => root.render(createElement(Panel, props))); t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   const button = text => [...container.querySelectorAll('button')].find(element => element.textContent === text);
   const click = async element => { assert.ok(element); await act(async () => element.click()); };
   return { calls, h, container, button, click, async choose() { const trigger = container.querySelector('[role=combobox]'); await click(trigger); await click(document.querySelector(`[role=option][data-value="${REF}"]`)); },
@@ -47,5 +47,21 @@ test('a failed state refresh cannot overwrite schedules using an older snapshot'
   const view = await fixture(t); await view.choose(); view.h.failHealthRead = true; await view.click(view.button('刷新状态'));
   assert.match(view.container.querySelector('[role=alert]').textContent, /状态暂不可读/);
   assert.equal(view.button('保存自动测活').disabled, true); await view.click(view.button('保存自动测活'));
+  assert.ok(view.calls.every(call => !call.body));
+});
+
+test('a provider card probes its fixed model without another model picker', async t => {
+  const view = await fixture(t, { targetModelRef: REF });
+  assert.equal(view.container.querySelector('[aria-label="测活模型"]'), null);
+  assert.match(view.container.textContent, /relay\/model-a/);
+  await view.click(view.button('测试文本'));
+  assert.deepEqual(JSON.parse(view.calls.find(call => call.url.endsWith('/probe')).body), { modelRef: REF, mode: 'text', prompt: '请只回复：连接成功' });
+});
+
+test('an unsaved provider draft cannot probe or overwrite the saved schedule', async t => {
+  const view = await fixture(t, { targetModelRef: REF, dirty: true });
+  assert.equal(view.container.querySelector('fieldset').disabled, true);
+  await view.click(view.button('测试文本'));
+  await view.click(view.button('保存自动测活'));
   assert.ok(view.calls.every(call => !call.body));
 });

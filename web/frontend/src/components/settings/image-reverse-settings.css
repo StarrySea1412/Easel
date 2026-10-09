@@ -1,0 +1,16 @@
+.reverse-settings { margin-top: 24px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); min-width: 0; }
+.reverse-settings-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.reverse-settings-heading h3 { margin: 0 0 4px; font-size: 15px; }
+.reverse-settings-heading p, .reverse-test-status { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.reverse-settings > label { display: block; margin-bottom: 8px; font-size: 13px; }
+.reverse-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+.reverse-settings-actions button { white-space: nowrap; }
+.reverse-settings .model-settings-details { margin-top: 16px; }
+.reverse-test-status { overflow-wrap: anywhere; }
+.reverse-provider-editor { min-width: 0; border: 0; margin: 14px 0 0; padding: 0; display: grid; gap: 14px; }
+.reverse-provider-toolbar { display: flex; gap: 10px; align-items: center; }
+.reverse-provider-toolbar .easel-select { flex: 1; min-width: 0; }
+.reverse-provider-toolbar > button { flex: none; white-space: nowrap; }
+.reverse-provider-editor .provider-card { padding: 14px; border-radius: 10px; box-shadow: none; }
+.reverse-provider-editor > .btn { justify-self: start; }
+@media (max-width: 500px) { .reverse-settings { padding: 14px; }.reverse-settings-heading { align-items: flex-start; }.reverse-settings-heading > svg { flex-shrink: 0; } }

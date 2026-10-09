@@ -3,42 +3,43 @@ import StorageSettingsCard from './settings/StorageSettingsCard';
 import ConversationBackupCard from './settings/ConversationBackupCard';
 import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
 import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import ModelHealthPanel from './settings/ModelHealthPanel';
+import ImageReverseSettings from './settings/ImageReverseSettings';
 import Select from './ui/Select';
 import type { ProviderBoardOptions } from './settings/ProviderBoard';
 import { SettingsField } from './settings/SettingsField';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import EnvBoard from './EnvBoard';
-import type { JobView } from './EnvBoard';
 import { Sk as Skeleton, SkeletonCard } from './Skeleton';
 import {
-  fetchEnvTools, startEnvInstall, fetchEnvJob,
+  fetchEnvTools,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchModelPresets, discoverModels,
-  fetchImportSources, previewImport, applyImport,
+  fetchImportSources, previewImport, applyImport, discoverImportModels, selectImportModel,
   saveImagegenChannel, fetchImagegenGallery, fetchSkillDetail, saveEnv, testNotifyEmail,
 } from '../lib/api';
 import type {
   EnvTool, ModelRow, SelftestResult, ModelPreset, DiscoverResult,
-  ImportSource, ImportPreview,
+  ImportSource, ImportPreview, ImportCandidate,
 } from '../lib/api';
 import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImports';
-import { IconGear, IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend } from './settingsIcons';
+import { IconGear, IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
+import { IconText, IconMic, IconMusic } from './icons';
 
-export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more';
+export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
-const CHANNELS: { id: Chan; label: string }[] = [
-  { id: 'chat', label: '对话与脚本' },
-  { id: 'transcribe', label: '语音转写' },
-  { id: 'speech', label: '配音' },
-  { id: 'image', label: '生图' },
-  { id: 'video', label: '视频' },
-  { id: 'music', label: '音乐' },
+const CHANNELS: { id: Chan; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'chat', label: '对话与脚本', icon: IconText },
+  { id: 'transcribe', label: '语音转写', icon: IconMic },
+  { id: 'speech', label: '配音', icon: IconAudioWaveform },
+  { id: 'image', label: '生图', icon: IconImage },
+  { id: 'video', label: '视频', icon: IconFilm },
+  { id: 'music', label: '音乐', icon: IconMusic },
 ];
 
 /** 后台繁忙（整机高负载）时的抗抖动取数：单次超时即重试，撑过多秒级接口延迟。 */
@@ -64,19 +65,32 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, tries = 4, timeoutMs = 18
 /** 后端放在 model/baseUrl 里的展示占位串——提交前要清掉，它们不是真实配置值。 */
 const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内建默认']);
 
+function modelConfigLabel(row?: ModelRow) {
+  if (!row) return '尚未设置';
+  const model = !row.model || PLACEHOLDERS.has(row.model) ? '模型未指定' : row.model;
+  return row.name.trim().toLowerCase() === model.toLowerCase() ? model : `${row.name || '未命名供应商'} · ${model}`;
+}
+
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'general', navigationKey = 0, conversationBackup, demoDataPreference }: {
+export default function SettingsPanel({ initialSection = 'general', navigationKey = 0, conversationBackup, demoDataPreference, onOpenOffice }: {
   initialSection?: SettingsSection;
   navigationKey?: number;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
   demoDataPreference: ComponentProps<typeof DemoDataSettingsCard>;
+  onOpenOffice?: () => void;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
-  const [sec, setSec] = useState<SettingsSection>(initialSection === 'video' ? 'model' : initialSection);
-  const [chan, setChan] = useState<Chan>(initialSection === 'video' ? 'video' : 'chat');
-  useEffect(() => { setSec(initialSection === 'video' ? 'model' : initialSection); if (initialSection === 'video') setChan('video'); }, [initialSection, navigationKey]);
+  const [sec, setSec] = useState<SettingsSection>(initialSection.startsWith('channel:') || initialSection === 'video' || initialSection === 'import' ? 'model' : initialSection);
+  const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'video' ? 'video' : 'chat');
+  const [importOpen, setImportOpen] = useState(initialSection === 'import');
+  useEffect(() => {
+    setSec(initialSection.startsWith('channel:') || initialSection === 'video' || initialSection === 'import' ? 'model' : initialSection);
+    if (initialSection.startsWith('channel:')) setChan(initialSection.slice(8) as Chan);
+    if (initialSection === 'video') setChan('video');
+    if (initialSection === 'import') { setChan('chat'); setImportOpen(true); }
+  }, [initialSection, navigationKey]);
   const mounted = useRef(false);
   const jobCleanups = useRef(new Set<() => void>());
   useEffect(() => {
@@ -94,8 +108,6 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const [python, setPython] = useState('');
   const [envLoading, setEnvLoading] = useState(true);
   const [envError, setEnvError] = useState('');
-  const [jobs, setJobs] = useState<Record<string, JobView>>({});
-  const runningRef = useRef(false);
 
   const refreshEnv = useCallback(async (force = false) => {
     setEnvLoading(true);
@@ -114,92 +126,14 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
   useEffect(() => { void refreshEnv(); }, [refreshEnv]);
 
-  const batchMode = useRef(false);
-
-  // 装完统一收尾：刷新体检（期间卡片显示「校验中」），然后清掉成功的 job 记录、保留失败（带原因）
-  const settleJobs = useCallback(async () => {
-    await refreshEnv(true);
-    if (!mounted.current) return;
-    setJobs((j) => {
-      const n: Record<string, JobView> = {};
-      Object.entries(j).forEach(([k, v]) => { if (v.state === 'fail') n[k] = v; });
-      return n;
-    });
-  }, [refreshEnv]);
-
-  const pollJob = useCallback((id: string, jobId: string) => new Promise<void>((resolve) => {
-    let fails = 0;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const stop = () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-      jobCleanups.current.delete(stop);
-      resolve();
-    };
-    jobCleanups.current.add(stop);
-    const poll = async () => {
-      try {
-        const st = await fetchEnvJob(jobId);
-        if (stopped || !mounted.current) return;
-        fails = 0;
-        const last = (st.lines || [])[st.lines.length - 1] || '';
-        setJobs((j) => ({
-          ...j,
-          [id]: { state: st.state, line: last.trim().slice(0, 140), detail: st.result?.detail || null },
-        }));
-        if (st.state !== 'running') { stop(); return; }
-      } catch (e) {
-        if (stopped || !mounted.current) return;
-        fails += 1;
-        if (fails >= 3) {
-          setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: `无法读取安装结果：${e instanceof Error ? e.message : '连接失败'}。请刷新环境状态核对。` } }));
-          stop();
-          return;
-        }
-      }
-      timer = setTimeout(() => void poll(), 1500);
-    };
-    timer = setTimeout(() => void poll(), 1500);
-  }), []);
-
-  const installOne = useCallback(async (id: string) => {
-    setJobs((j) => ({ ...j, [id]: { state: 'running', line: '启动中…' } }));
-    try {
-      const { jobId } = await startEnvInstall(id);
-      if (!mounted.current) return;
-      await pollJob(id, jobId);
-    } catch (e) {
-      if (mounted.current) setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: e instanceof Error ? e.message : '启动失败' } }));
-    }
-    if (!mounted.current) return;
-    if (!batchMode.current) await settleJobs();   // 单卡装完立即收尾刷新
-  }, [pollJob, settleJobs]);
-
-  const installMany = useCallback(async (ids: string[]) => {
-    runningRef.current = true;
-    batchMode.current = true;
-    setJobs((j) => {
-      const n = { ...j };
-      ids.forEach((id) => { n[id] = { state: 'running', line: '排队中…' }; });
-      return n;
-    });
-    for (const id of ids) {
-      if (!mounted.current) break;
-      // eslint-disable-next-line no-await-in-loop
-      await installOne(id);
-    }
-    batchMode.current = false;
-    runningRef.current = false;
-    if (mounted.current) await settleJobs();
-  }, [installOne, settleJobs]);
-
-  const anyRunning = runningRef.current || Object.values(jobs).some((j) => j.state === 'running');
   const okCount = tools.filter((t) => t.state === 'ok').length;
   const total = tools.length;
 
   // ── 模型配置（真值只读 + 真自测） ────────────────────────
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
+  const [savedChatRows, setSavedChatRows] = useState<ModelRow[]>([]);
+  const [providerDetailsOpen, setProviderDetailsOpen] = useState(false);
+  const [visionEditorIndex, setVisionEditorIndex] = useState(0);
   const [transRows, setTransRows] = useState<ModelRow[]>([]);
   const [mediaRows, setMediaRows] = useState<Record<string, ModelRow[]>>({});
   const [modelLoading, setModelLoading] = useState(true);
@@ -209,9 +143,18 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const [selftestNote, setSelftestNote] = useState('');
 
   // ── 服务商预设与「获取模型」（方案功能 C 第一步） ──────────
+  const [saving, setSaving] = useState(false);
+  const modelSavePending = useRef(false);
+  const [savedNote, setSavedNote] = useState('');
   const [presets, setPresets] = useState<Record<string, ModelPreset[]>>({});
   const [discover, setDiscover] = useState<Record<string, DiscoverResult | 'loading'>>({});
-  const [discovering, setDiscovering] = useState('');
+  const discoveryRequests = useRef(new Map<string, symbol>());
+
+  const clearModelDiscovery = useCallback((channel: string, index?: number) => {
+    const matches = (key: string) => index === undefined ? key.startsWith(`${channel}:`) : key === `${channel}:${index}`;
+    for (const key of discoveryRequests.current.keys()) if (matches(key)) discoveryRequests.current.delete(key);
+    setDiscover(current => Object.fromEntries(Object.entries(current).filter(([key]) => !matches(key))));
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -223,7 +166,9 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
   const runDiscover = useCallback(async (ch: string, i: number, row: ModelRow) => {
     const key = `${ch}:${i}`;
-    setDiscovering(key);
+    const request = Symbol(key);
+    discoveryRequests.current.set(key, request);
+    const current = () => mounted.current && discoveryRequests.current.get(key) === request;
     setDiscover((m) => ({ ...m, [key]: 'loading' }));
     try {
       const r = await discoverModels({
@@ -233,10 +178,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         apiKey: row.keyNew || '',
         protocol: row.protocol || '',
       });
-      if (!mounted.current) return;
+      if (!current()) return;
       setDiscover((m) => ({ ...m, [key]: r }));
     } catch (e) {
-      if (!mounted.current) return;
+      if (!current()) return;
       setDiscover((m) => ({
         ...m,
         [key]: {
@@ -246,7 +191,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         },
       }));
     } finally {
-      if (mounted.current) setDiscovering('');
+      if (current()) discoveryRequests.current.delete(key);
     }
   }, []);
 
@@ -257,9 +202,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const [impSlot, setImpSlot] = useState('auto');
   const [impPreview, setImpPreview] = useState<ImportPreview | null>(null);
   const [impPick, setImpPick] = useState('');
-  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply'>('');
+  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply' | 'discover' | 'model'>('');
+  const [impDiscovery, setImpDiscovery] = useState<Record<string, DiscoverResult | 'loading'>>({});
   const [impMsg, setImpMsg] = useState('');
   const [impConfirmed, setImpConfirmed] = useState(false);
+  const [impAdvancedOpen, setImpAdvancedOpen] = useState(false);
   const [impSourcesLoading, setImpSourcesLoading] = useState(false);
   const impSourceRequest = useRef(0);
   const impPreviewRequest = useRef(0);
@@ -271,6 +218,8 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
     setImpPick('');
     setImpConfirmed(false);
     setImpMsg('');
+    setImpDiscovery({});
+    setImpBusy((busy) => busy === 'apply' ? busy : '');
   }, []);
 
   const openImport = useCallback(async () => {
@@ -292,19 +241,20 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   }, []);
 
   useEffect(() => {
-    if (sec === 'import') void openImport();
-  }, [sec, openImport]);
+    if (importOpen) void openImport();
+  }, [importOpen, openImport]);
 
-  const loadImportPreview = useCallback(async () => {
-    if (!impSource) { setImpMsg('先选择一个来源'); return; }
+  const loadImportPreview = useCallback(async (source = impSource, path = impPath.trim()) => {
+    if (!source) { setImpMsg('先选择一个来源'); return; }
     const requestId = ++impPreviewRequest.current;
     setImpBusy('preview');
     setImpMsg('');
     setImpPreview(null);
     setImpPick('');
     setImpConfirmed(false);
+    setImpDiscovery({});
     try {
-      const d = await previewImport(impSource, impSlot, impPath.trim());
+      const d = await previewImport(source, impSlot, path);
       if (!mounted.current || requestId !== impPreviewRequest.current) return;
       setImpPreview(d);
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
@@ -315,9 +265,52 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
     }
   }, [impSource, impSlot, impPath]);
 
+  const discoverImportCandidate = useCallback(async (candidate: ImportCandidate) => {
+    if (!candidate.previewToken || !impPreview || impBusy || saving) return;
+    const requestId = ++impPreviewRequest.current;
+    setImpBusy('discover');
+    setImpMsg('');
+    setImpDiscovery((current) => ({ ...current, [candidate.id]: 'loading' }));
+    try {
+      const result = await discoverImportModels({ source: impSource, path: impPreview.path, id: candidate.id,
+        slot: candidate.targetSlot, previewToken: candidate.previewToken });
+      if (!mounted.current || requestId !== impPreviewRequest.current) return;
+      setImpDiscovery((current) => ({ ...current, [candidate.id]: result }));
+    } catch (error) {
+      if (!mounted.current || requestId !== impPreviewRequest.current) return;
+      setImpDiscovery((current) => ({ ...current, [candidate.id]: {
+        ok: false, models: [], kind: 'client_error', channel: 'chat', slot: candidate.targetSlot,
+        source: candidate.baseUrl, fetchedAt: Math.floor(Date.now() / 1000), keySource: 'source',
+        message: error instanceof Error ? error.message : '读取失败，请重新预览后重试',
+      } }));
+    } finally {
+      if (mounted.current && requestId === impPreviewRequest.current) setImpBusy('');
+    }
+  }, [impPreview, impBusy, impSource, saving]);
+
+  const pickImportModel = useCallback(async (candidate: ImportCandidate, model: string) => {
+    if (!candidate.previewToken || !impPreview || impBusy || saving || !model) return;
+    const requestId = ++impPreviewRequest.current;
+    setImpBusy('model');
+    setImpConfirmed(false);
+    setImpMsg('');
+    try {
+      const updated = await selectImportModel({ source: impSource, path: impPreview.path, id: candidate.id,
+        slot: candidate.targetSlot, previewToken: candidate.previewToken, model });
+      if (!mounted.current || requestId !== impPreviewRequest.current) return;
+      setImpPreview((current) => current ? { ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? updated : item) } : current);
+      setImpPick(candidate.id);
+      setImpMsg(`已预览模型 ${updated.model}，请核对下方替换内容并重新确认。尚未保存。`);
+    } catch (error) {
+      if (mounted.current && requestId === impPreviewRequest.current) setImpMsg(error instanceof Error ? error.message : '更新预览失败，请重试');
+    } finally {
+      if (mounted.current && requestId === impPreviewRequest.current) setImpBusy('');
+    }
+  }, [impPreview, impBusy, impSource, saving]);
+
   const applyImportPick = useCallback(async () => {
     const selected = impPreview?.candidates.find((c) => c.id === impPick && c.compatible);
-    if (!selected?.previewToken || !impConfirmed || impBusy || impApplying.current) return;
+    if (!selected?.previewToken || !impConfirmed || impBusy || impApplying.current || modelSavePending.current) return;
     impApplying.current = true;
     setImpBusy('apply');
     setImpMsg('');
@@ -325,7 +318,13 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       const targetSlot = selected.targetSlot || impSlot;
       const r = await applyImport(impSource, impPick, targetSlot, impPreview?.path || impPath.trim(), selected.previewToken);
       if (!mounted.current) return;
-      setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}${r.note ? `（${r.note}）` : ''}`);
+      clearModelDiscovery('chat');
+      const previousDefault = savedChatRows.find((row) => row.role === '主');
+      const actualDefault = r.channels.chat.rows.find((row) => row.role === '主');
+      const identity = (row?: ModelRow) => row ? `${row.slot}:${row.name}:${row.model}:${row.baseUrl}` : '';
+      setSavedChatRows(r.channels.chat.rows);
+      setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}。${identity(previousDefault) === identity(actualDefault)
+        ? `默认模型未改变：${modelConfigLabel(actualDefault)}` : `已保存默认现为：${modelConfigLabel(actualDefault)}`}。尚未进行真实调用测活。${r.note ? ` ${r.note}` : ''}`);
       setImpPreview(null);
       setImpPick('');
       setImpConfirmed(false);
@@ -341,7 +340,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       impApplying.current = false;
       if (mounted.current) setImpBusy('');
     }
-  }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy]);
+  }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy, savedChatRows, clearModelDiscovery]);
 
   useEffect(() => {
     let alive = true;
@@ -349,6 +348,8 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       .then((d) => {
         if (!alive) return;
         setChatRows(d.channels.chat.rows || []);
+        setSavedChatRows(d.channels.chat.rows || []);
+        setProviderDetailsOpen(!(d.channels.chat.rows || []).some((row) => row.keyMasked && row.keyMasked !== '—'));
         setTransRows(d.channels.transcribe.rows || []);
         setMediaRows({
           image: d.channels.image?.rows || [],
@@ -382,13 +383,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   }, [refreshEnv]);
 
   // ── 模型配置可编辑（v2）：保存到 .env / openclaw ──────────
-  const [saving, setSaving] = useState(false);
-  const [modelImportBusy, setModelImportBusy] = useState(false);
-  const [savedNote, setSavedNote] = useState('');
   const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
 
-  const saveCurrent = useCallback(async () => {
-    const rows = chan === 'chat' ? chatRows : chan === 'transcribe' ? transRows : (mediaRows[chan] || []);
+  const saveCurrent = useCallback(async (channel: Chan = chan) => {
+    if (modelSavePending.current || impApplying.current || modelLoading) return;
+    const rows = channel === 'chat' ? chatRows : channel === 'transcribe' ? transRows : (mediaRows[channel] || []);
     const payload = rows
       .filter((r) => r.slot)
       .map((r) => ({
@@ -401,35 +400,40 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         key: r.keyNew || '',
         key2: r.keyNew2 || '',
         primary: r.role === '主',
-        protocol: chan === 'chat' ? r.protocol || r.type : undefined,
+        protocol: channel === 'chat' ? r.protocol || r.type : undefined,
       }));
     if (!payload.length) {
       setSavedNote('当前通道没有可保存的配置');
       return;
     }
+    modelSavePending.current = true;
     setSaving(true);
     setSavedNote('');
     try {
-      const d = await saveModelConfig(chan, payload, chan === 'chat' ? deletedProviders : []);
+      const d = await saveModelConfig(channel, payload, channel === 'chat' ? deletedProviders : []);
       if (!mounted.current) return;
-      if (chan === 'chat') {
+      clearModelDiscovery(channel);
+      if (channel === 'chat') {
         setChatRows(d.channels.chat.rows || []);
+        setSavedChatRows(d.channels.chat.rows || []);
         setDeletedProviders([]);
       }
-      else if (chan === 'transcribe') setTransRows(d.channels.transcribe.rows || []);
-      else setMediaRows((rows) => ({ ...rows, [chan]: d.channels[chan]?.rows || [] }));
+      else if (channel === 'transcribe') setTransRows(d.channels.transcribe.rows || []);
+      else setMediaRows((rows) => ({ ...rows, [channel]: d.channels[channel]?.rows || [] }));
       clearImportPreview();
-      setSavedNote(d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
+      setSavedNote(channel === 'chat'
+        ? `✓ 已保存默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。请回到对话选择“沿用会话模型”；实际调用以执行回执为准。${d.note ? ` ${d.note}` : ''}`
+        : d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
     } catch (e) {
       if (mounted.current) setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
     } finally {
+      modelSavePending.current = false;
       if (mounted.current) {
         setSaving(false);
-        setTimeout(() => { if (mounted.current) setSavedNote(''); }, 6000);
       }
     }
-  }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders]);
+  }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders, modelLoading, clearModelDiscovery]);
 
   // ── 通知中心（邮箱通知可视化配置 + 测试发送） ──────────────
   const [ntf, setNtf] = useState({ email: '', host: '', port: '465', user: '', pass: '', onDone: false });
@@ -559,6 +563,8 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   };
 
   const addProvider = () => {
+    setProviderDetailsOpen(true);
+    setSavedNote('');
     setChatRows((rs) => [...rs, {
       slot: 'custom', order: 0, name: '', sub: '自定义', type: 'openai',
       model: '', baseUrl: '', keyMasked: '', role: '备', result: '待保存',
@@ -567,10 +573,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
   const setPrimaryRow = (i: number) => {
     setChatRows((rs) => rs.map((r, j) => (r.slot ? { ...r, role: j === i ? '主' : '备' } : r)));
-    setSavedNote('已选择主模型，点击「保存配置」生效。');
+    setSavedNote('');
   };
 
   const removeRow = (i: number) => {
+    // Removing a row changes the indexes of every later provider card.
+    clearModelDiscovery('chat');
     const removed = chatRows[i];
     if (removed?.deletable && removed.name) setDeletedProviders((names) => [...new Set([...names, removed.name])]);
     setChatRows((rs) => {
@@ -585,13 +593,19 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   };
 
   const updateRow = (
+    channel: Chan,
     setRows: Dispatch<SetStateAction<ModelRow[]>>,
     i: number,
     patch: Partial<ModelRow>,
-  ) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  ) => {
+    if (['slot', 'name', 'baseUrl', 'protocol', 'type', 'keyNew', 'keyNew2'].some(key => key in patch)) clearModelDiscovery(channel, i);
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  };
 
-  const updateMediaRow = (ch: string, i: number, patch: Partial<ModelRow>) =>
+  const updateMediaRow = (ch: string, i: number, patch: Partial<ModelRow>) => {
+    if (['slot', 'name', 'baseUrl', 'protocol', 'type', 'keyNew', 'keyNew2'].some(key => key in patch)) clearModelDiscovery(ch, i);
     setMediaRows((m) => ({ ...m, [ch]: (m[ch] || []).map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
+  };
 
   const setMediaPrimary = (ch: string, i: number) =>
     setMediaRows((m) => ({ ...m, [ch]: (m[ch] || []).map((r, j) => ({ ...r, role: j === i ? '主' : '备' })) }));
@@ -599,13 +613,32 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const mediaOk = (ch: string) => (mediaRows[ch] || []).some((r) => r.result === '已配置');
 
   const renderBoard = (rows: ModelRow[], ops?: ProviderBoardOptions) => (
-    <ProviderBoard rows={rows} ops={ops} modelLoading={modelLoading} resultText={resultText} />
+    <fieldset className="model-provider-editors" disabled={modelLoading || saving || Boolean(impBusy)}>
+      <ProviderBoard rows={rows} ops={ops ? { ...ops, saving, onSave: () => void saveCurrent((ops.channel || chan) as Chan) } : undefined} modelLoading={modelLoading} resultText={resultText} />
+    </fieldset>
   );
 
-  const chatOk = chatRows.some((r) => r.role === '主' && (r.result.includes('已配置') || r.result.includes('✓')))
-    || chatRows.some((r) => r.result.includes('已配置'));
-  const chatLive = chatOk && !!selftest && Object.values(selftest.byBase).some((r) => r.ok);
+  const chatOk = savedChatRows.some((r) => r.result.includes('已配置') || r.result.includes('✓'));
   const transOk = transRows.length > 1 && transRows[1].result.includes('已配置');
+  const chatDirty = JSON.stringify(chatRows) !== JSON.stringify(savedChatRows) || deletedProviders.length > 0;
+
+  const visionIndex = Math.min(visionEditorIndex, Math.max(0, chatRows.length - 1));
+  const reverseSettings = <ImageReverseSettings revision={JSON.stringify(savedChatRows)} dirty={chatDirty} editor={<>
+    <fieldset className="reverse-provider-editor" disabled={saving || modelLoading || Boolean(impBusy)}>
+      <div className="reverse-provider-toolbar">
+        <Select aria-label="编辑视觉供应商" value={chatRows.length ? String(visionIndex) : ''} options={chatRows.map((row, index) => ({ value: String(index), label: row.name || '新供应商' }))} placeholder="选择供应商" onChange={value => setVisionEditorIndex(Number(value))} />
+        <button type="button" className="btn btn-sm" disabled={modelLoading || saving} onClick={() => { setVisionEditorIndex(chatRows.length); addProvider(); }}>＋ 添加供应商</button>
+      </div>
+      {chatRows[visionIndex] && <div key={visionIndex}>{renderBoard([chatRows[visionIndex]], {
+        channel: 'chat', onRow: (_, patch) => updateRow('chat', setChatRows, visionIndex, patch),
+        onRemove: () => { removeRow(visionIndex); setVisionEditorIndex(0); }, presets: presets.chat,
+        discovery: () => discover[`chat:${visionIndex}`], onDiscover: () => void runDiscover('chat', visionIndex, chatRows[visionIndex]),
+        onPickPreset: (_, preset) => updateRow('chat', setChatRows, visionIndex, { baseUrl: preset.baseUrl, protocol: preset.protocol, name: preset.id, type: preset.protocol }),
+      })}</div>}
+      <button type="button" className="btn btn-sm btn-primary" disabled={saving || modelLoading || !chatDirty} onClick={() => void saveCurrent('chat')}>{saving ? '保存中…' : '保存供应商修改'}</button>
+      {savedNote && <p role="status">{savedNote}</p>}
+    </fieldset>
+  </>} />;
 
   return (
     <div className="page-scroll settings-page">
@@ -616,12 +649,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
             <div className="settings-sub">通用设置 · 模型配置 · 环境安装 · 生图通道 · 更多</div>
           </div>
           <div className="settings-actions">
-            {sec === 'model' && (
+            {sec === 'model' && chan !== 'chat' && (
               <>
                 <button
                   className="btn btn-sm btn-primary"
                   onClick={() => void saveCurrent()}
-                  disabled={saving || Boolean(impBusy) || modelImportBusy}
+                  disabled={saving || Boolean(impBusy)}
                 >
                   {saving ? '保存中…' : '保存配置'}
                 </button>
@@ -641,9 +674,6 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
           <nav className="settings-nav">
             <button aria-current={sec === 'general' ? 'page' : undefined} className={`snav${sec === 'general' ? ' active' : ''}`} onClick={() => setSec('general')}>
               <IconGear size={16} />通用设置<small>演示数据开关</small>
-            </button>
-            <button aria-current={sec === 'import' ? 'page' : undefined} className={`snav${sec === 'import' ? ' active' : ''}`} onClick={() => setSec('import')}>
-              <IconUpload size={16} />配置导入<small>CC Switch 一键迁移</small>
             </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型配置<small>六个通道</small>
@@ -667,10 +697,35 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
           <div className="settings-main">
           {sec === 'general' && <DemoDataSettingsCard {...demoDataPreference} />}
-          {sec === 'employees' && <EmployeeAppearanceSettings />}
-          {/* ── 配置导入：CC Switch / OpenClaw 一键迁移（一级分区） ── */}
-          {sec === 'import' && (
+          {sec === 'employees' && <EmployeeAppearanceSettings
+            defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
+            onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
+            {sec === 'model' && (
+              <section className="st-sec active">
+                  <div className="tabbar" role="tablist" aria-label="模型能力通道">
+                  {CHANNELS.map((c) => (
+                    <button key={c.id} role="tab" aria-selected={chan === c.id} className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
+                      <span className="channel-icon" aria-hidden="true"><c.icon size={15} /></span>{c.label}
+                    </button>
+                  ))}
+                </div>
+                {savedNote && chan !== 'chat' ? <div role="status" aria-live="polite" className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
+
+                {chan === 'chat' && (
+                  <section className="st-panel active">
+                    <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
+                      savedPrimary={savedChatRows.find((row) => row.role === '主')} saving={saving} dirty={chatDirty}
+                      saveNote={savedNote} labelFor={modelConfigLabel} onPrimary={setPrimaryRow} onSave={() => void saveCurrent()}
+                      onOpenImport={() => setImportOpen(true)} />
+                    <details className="model-settings-details model-inline-import" open={importOpen}
+                      onToggle={(event) => setImportOpen(event.currentTarget.open)}>
+                      <summary><IconUpload size={14} /> 从 CC Switch / OpenClaw 导入模型</summary>
             <section className="st-sec active">
+              <ol className="model-import-steps" aria-label="配置导入步骤">
+                <li aria-current={!impPreview ? 'step' : undefined}><strong>1</strong> 选择来源</li>
+                <li aria-current={impPreview && !impPick ? 'step' : undefined}><strong>2</strong> 预览模型与覆盖</li>
+                <li aria-current={impPick ? 'step' : undefined}><strong>3</strong> 确认写入</li>
+              </ol>
               <div className="panel-top">
                 <span className="desc">
                   读取本机 CC Switch / OpenClaw 里已配好的模型（密钥脱敏展示），选中一条一键写入 Easel 对话通道。
@@ -680,6 +735,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                 </button>
               </div>
               {impMsg && <div role="status" className="import-msg">{impMsg}</div>}
+              {chatDirty && <p className="model-default-pending hint">模型配置有未保存草稿。返回不会丢失；确认导入仅替换目标通道的草稿，其他通道编辑继续保留。</p>}
               <div className="imp-cards">
                 {impSourcesLoading && impSources.length === 0 && (
                   <div className="board"><div className="empty"><Skeleton w="70%" h={14} style={{ marginBottom: 10 }} /><Skeleton w="45%" h={12} /></div></div>
@@ -687,21 +743,33 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                 {impSources.map((s) => (
                   <button
                     key={s.id}
+                    type="button"
+                    aria-pressed={impSource === s.id}
                     className={`imp-card${impSource === s.id ? ' on' : ''}${s.available ? '' : ' off'}`}
-                    onClick={() => { setImpSource(s.id); setImpPath(''); clearImportPreview(); }}
-                    disabled={Boolean(impBusy)}
+                    onClick={() => {
+                      setImpSource(s.id); setImpPath(''); clearImportPreview(); setImpAdvancedOpen(!s.available);
+                      if (s.available) void loadImportPreview(s.id, '');
+                      else setImpMsg(`尚未检测到 ${s.label}。请在下方“指定路径或写入通道”填写配置文件路径，再点击预览。`);
+                    }}
+                    disabled={impBusy === 'apply' || saving}
                   >
                     <span className="imp-name">{s.label}</span>
                     <span className="imp-detail">{s.available ? (s.detail || '本机已检测到') : `不可用：${s.detail}`}</span>
-                    <span className={`pill ${s.available ? 'ok' : 'off'}`}><span className="dot" />{s.available ? '可导入' : '未检测到'}</span>
+                    <span className={`pill ${s.available ? 'ok' : 'off'}`}><span className="dot" />{s.available ? '已检测到' : '未检测到'}</span>
+                    <span className="imp-action">{impSource === s.id && impBusy === 'preview' ? '正在读取模型…'
+                      : impSource === s.id && impPreview ? `已读取 ${impPreview.candidates.length} 个模型`
+                        : s.available ? '点击读取模型' : '点击指定配置路径'}</span>
                   </button>
                 ))}
               </div>
               {impSources.length > 0 && (
                 <>
                   <div className="import-row">
+                    <details className="model-settings-details import-advanced" open={impAdvancedOpen}
+                      onToggle={(event) => setImpAdvancedOpen(event.currentTarget.open)}>
+                      <summary>可选：指定路径或写入通道</summary>
                     <Select
-                      aria-label="导入目标槽位"
+                      aria-label="导入目标通道"
                       value={impSlot}
                       disabled={Boolean(impBusy)}
                       onChange={(value) => { setImpSlot(value); clearImportPreview(); }}
@@ -715,8 +783,9 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       disabled={Boolean(impBusy)}
                       onChange={(e) => { setImpPath(e.target.value); clearImportPreview(); }}
                     />
+                    </details>
                     <button className="btn btn-sm btn-primary" onClick={() => void loadImportPreview()} disabled={Boolean(impBusy) || saving}>
-                      {impBusy === 'preview' ? '读取中…' : '读取候选'}
+                      {impBusy === 'preview' ? '读取中…' : '2. 预览可导入模型'}
                     </button>
                   </div>
                   {impBusy === 'preview' && <SkeletonCard rows={3} />}
@@ -726,11 +795,15 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   {impPreview && impPreview.candidates.length > 0 && (
                     <>
                       <div className="import-list">
-                        {impPreview.candidates.map((c) => (
-                          <label
+                        {impPreview.candidates.map((c) => {
+                          const fetched = impDiscovery[c.id];
+                          const discoveryReason = !c.compatible ? c.skipReason : !c.baseUrl ? '此来源缺少服务地址，不能仅凭 Key 确定渠道。'
+                            : !c.keyPresent ? '此来源未提供 API Key，请先在来源工具补齐，再重新读取。' : '';
+                          return <article
                             key={c.id}
                             className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
                           >
+                            <label className="import-choice">
                             <input
                               type="radio"
                               name="imp-pick"
@@ -753,18 +826,39 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                               </span>
                               {c.compatible && c.overwrites.length > 0 && (
                                 <span className="ii-ov">
-                                  将覆盖：{c.overwrites.map((o) => `${o.field}（${o.current} → ${o.incoming}）`).join('；')}
+                                  将替换：{c.overwrites.map((o) => `${o.field.endsWith('_API_KEY') ? 'API 密钥' : o.field.endsWith('_BASE_URL') ? '服务地址' : o.field.endsWith('_MODEL') ? '模型名称' : '现有配置'}（${o.current} → ${o.incoming}）`).join('；')}
                                 </span>
                               )}
                             </span>
-                          </label>
-                        ))}
+                            </label>
+                            <div className="import-candidate-actions">
+                              <button type="button" className="adv-btn" disabled={Boolean(discoveryReason) || !c.previewToken || Boolean(impBusy) || saving}
+                                title="服务端使用此来源的地址、协议和 Key 仅读取模型列表，密钥不发送到前端"
+                                onClick={() => void discoverImportCandidate(c)}>
+                                {fetched === 'loading' ? '正在获取…' : '获取该渠道模型'}
+                              </button>
+                              <span className="hint">{discoveryReason || '使用该来源的地址、协议和 Key，只枚举模型，不发起推理。'}</span>
+                            </div>
+                            {fetched && <div className={`discover-row${fetched !== 'loading' ? fetched.ok ? ' ok' : ' bad' : ''}`} role="status">
+                              {fetched === 'loading' ? <><span className="spin" /> 正在读取此来源的模型列表…</> : <>
+                                <span>{fetched.message}</span>
+                                {fetched.ok && fetched.models.length > 0 ? <span className="dr-pick">
+                                  <Select aria-label={`${c.name}渠道可用模型`} value={fetched.models.includes(c.model) ? c.model : ''}
+                                    disabled={Boolean(impBusy) || saving} placeholder={`选择获取的模型（${fetched.models.length} 个）`}
+                                    options={fetched.models.map((model) => ({ value: model, label: model }))}
+                                    onChange={(model) => void pickImportModel(c, model)} />
+                                  <span className="dr-src">选择后更新模型与替换预览；确认导入后才保存。</span>
+                                </span> : <span className="dr-src">核对来源的地址、协议和 Key 后重新读取；渠道不支持枚举时，仍可导入来源中已填的模型名。</span>}
+                              </>}
+                            </div>}
+                          </article>;
+                        })}
                       </div>
                       <label className="import-msg">
                         <input type="checkbox" checked={impConfirmed}
                           disabled={!impPick || Boolean(impBusy)}
                           onChange={(e) => setImpConfirmed(e.target.checked)} />
-                        我已核对覆盖内容，确认立即写入所选槽位（替换此槽位尚未保存的编辑）
+                        我已核对替换内容，确认保存到所选通道（替换此通道尚未保存的编辑）
                       </label>
                       <div className="import-foot">
                         <button
@@ -772,7 +866,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                           onClick={() => void applyImportPick()}
                           disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
                         >
-                          {impBusy === 'apply' ? '导入中…' : '⚡ 一键导入'}
+                          {impBusy === 'apply' ? '导入中…' : '3. 确认导入并保存'}
                         </button>
                         <span className="hint">{impPreview.note}</span>
                       </div>
@@ -781,85 +875,73 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   {impPreview && impPreview.errors.length > 0 && (
                     <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
                   )}
-                  <div className="foot-note">导入后可在「模型配置 → 对话与脚本」里核对主备顺序；导入会同步写入 .env 与 OpenClaw 配置，失败自动回滚。</div>
+                  <div className="foot-note">预览不会写入或调用模型；确认后才保存。导入不等于连接验证，默认模型是否改变以保存回执为准。</div>
                 </>
               )}
+              <div className="import-foot"><button type="button" className="btn btn-sm" disabled={Boolean(impBusy)}
+                onClick={() => setImportOpen(false)}>收起导入</button></div>
             </section>
-          )}
-
-            {sec === 'model' && (
-              <section className="st-sec active">
-                  <div className="tabbar" role="tablist" aria-label="模型能力通道">
-                  {CHANNELS.map((c) => (
-                    <button key={c.id} role="tab" aria-selected={chan === c.id} className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
-                      <span className="cdot" />{c.label}
-                    </button>
-                  ))}
-                </div>
-                {savedNote ? <div role="status" aria-live="polite" className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
-
-                {chan === 'chat' && (
-                  <section className="st-panel active">
-                    <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
-                      onPrimary={setPrimaryRow} onBusyChange={setModelImportBusy}
-                      onApplied={(imported) => {
-                        if (!mounted.current) return;
-                        setChatRows((rows) => rows.some((row) => row.slot === imported.slot)
-                          ? rows.map((row) => row.slot === imported.slot ? { ...imported, role: row.role } : row) : [...rows, imported]);
-                        clearImportPreview();
-                        setSelftest(null);
-                      }}
-                      onOpenImport={() => setSec('import')} />
+                    </details>
+                    <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}>＋ 添加供应商</button>
+                    <details className="model-settings-details" open={providerDetailsOpen}
+                      onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
+                      <summary>编辑供应商、协议、地址与密钥</summary>
+                    <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
                     <div className="panel-top">
-                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatLive ? '主通道在线' : chatOk ? '主通道已配置' : '未配置'}</span>
-                      <span className="desc">经本地网关路由（主备自动降级）</span>
-                      {selftest && <span className="desc">上次自测 {hhmm(selftest.testedAt)}</span>}
+                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
+                      <span className="desc">密钥留空会保留原值；编辑后需保存。</span>
                       <span className="spacer" />
                     </div>
                     {renderBoard(chatRows, {
-                      onRow: (i, p) => updateRow(setChatRows, i, p),
+                      onRow: (i, p) => updateRow('chat', setChatRows, i, p),
                       onPrimary: setPrimaryRow,
                       onRemove: removeRow,
                       channel: 'chat',
+                      health: (i, open) => {
+                        const row = chatRows[i];
+                        const ref = row.slot === 'custom' ? `${row.name}/${row.model}` : `${row.slot}/${row.model}`;
+                        return row.model && row.slot ? <details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details> : null;
+                      },
                       presets: presets.chat,
                       discovery: (i) => discover[`chat:${i}`],
                       onDiscover: (i) => void runDiscover('chat', i, chatRows[i]),
-                      busyKey: discovering,
-                      onPickPreset: (i, p) => updateRow(setChatRows, i, {
+                      onPickPreset: (i, p) => updateRow('chat', setChatRows, i, {
                         baseUrl: p.baseUrl, protocol: p.protocol,
                         name: p.id, sub: p.note || '预设', type: p.protocol,
                       }),
                     })}
-                    <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
-                    <div className="import-block">
-                      <button className="adv-btn" onClick={() => setSec('import')}>
-                        ⬇ 从本机配置导入（CC Switch / OpenClaw）→ 去「配置导入」页
-                      </button>
-                    </div>
-                    <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；预设只填公开端点，模型列表现场向服务商查询，不做猜测。</div>
-                    <ModelHealthPanel />
+                    <div className="foot-note">“获取模型列表”需要地址与 API Key，仅读取列表，不运行模型。选择结果会填入“模型名称”；列表为空或读取失败时可按服务商文档手动填写。编辑完成后点击上方“保存并使用”。</div>
+                    </fieldset>
+                    </details>
+                    <details className="model-settings-details">
+                      <summary>批量检查已保存通道的模型列表</summary>
+                      <p className="hint">状态读取不调用模型；文字 / 图片验证会发起真实请求，供应商可能计费。自动检查默认关闭。</p>
+                      <button type="button" className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing || saving}>
+                        {testing ? '检查中…' : '检查已保存通道的模型列表'}</button>
+                      {selftest && <p className="hint">上次模型列表检查 {hhmm(selftest.testedAt)}；接口可达不代表对话已完成。</p>}
+                    </details>
                   </section>
                 )}
 
                 {chan === 'transcribe' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '主通道在线' : (localReady ? '本地兜底生效' : '备用待安装')}</span>
-                      <span className="desc">三级链：自带字幕 → API → 本地兜底</span>
+                      <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '云端已配置 · 未验证' : (localReady ? '本地组件已就绪' : '需配置或安装')}</span>
+                      <span className="desc">优先读取自带字幕，其次云端转写，最后本地兜底</span>
                       <span className="spacer" />
                     </div>
                     {renderBoard([...transRows, localRow], {
-                      onRow: (i, p) => updateRow(setTransRows, i, p),
+                      onRow: (i, p) => updateRow('transcribe', setTransRows, i, p),
                       channel: 'transcribe',
+                      onOpenEnvironment: () => setSec('env'),
                       presets: presets.transcribe,
                       discovery: (i) => discover[`transcribe:${i}`],
                       onDiscover: (i) => void runDiscover('transcribe', i, transRows[i]),
-                      busyKey: discovering,
-                      onPickPreset: (i, p) => updateRow(setTransRows, i, {
+                      onPickPreset: (i, p) => updateRow('transcribe', setTransRows, i, {
                         baseUrl: p.baseUrl, protocol: p.protocol, sub: p.note || '预设',
                       }),
                     })}
-                    <div className="foot-note">有字幕不下模型；API 通道缺 key 自动落到本地 whisper（本地组件在「环境安装」页装）。保存即写入 .env 生效。</div>
+                    <div className="foot-note">自带字幕无需配置；云端转写需要 API Key，本地兜底组件可在「环境安装」安装。修改后请点击保存。</div>
                   </section>
                 )}
 
@@ -867,10 +949,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('speech') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('speech') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建）；「主/备」= 默认</span>
+                      <span className="desc">展开提供商可编辑配置；预置项会说明原因</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.speech || [], { onRow: (i, p) => updateMediaRow('speech', i, p), onPrimary: (i) => setMediaPrimary('speech', i), media: true })}
+                    {renderBoard(mediaRows.speech || [], { onRow: (i, p) => updateMediaRow('speech', i, p), onPrimary: (i) => setMediaPrimary('speech', i), media: true, channel: 'speech' })}
                     <div className="foot-note">配音脚本按「主」provider 合成；本地 VoxCPM / edge-tts 在视频产线里可直接替代。</div>
                   </section>
                 )}
@@ -879,7 +961,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('image') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('image') ? '已配置' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）</span>
+                      <span className="desc">展开后直接编辑模型、地址和 Key；保存后生效</span>
                       <span className="spacer" />
                     </div>
                     {renderBoard(mediaRows.image || [], {
@@ -889,12 +971,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       presets: presets.image,
                       discovery: (i) => discover[`image:${i}`],
                       onDiscover: (i) => void runDiscover('image', i, (mediaRows.image || [])[i]),
-                      busyKey: discovering,
                       onPickPreset: (i, p) => updateMediaRow('image', i, {
                         baseUrl: p.baseUrl, protocol: p.protocol, adv: true,
                       }),
                     })}
                     <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。预设只提供公开端点，能否枚举模型取决于服务商。</div>
+                    {reverseSettings}
                   </section>
                 )}
 
@@ -902,10 +984,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('video') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('video') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）；「主/备」= 默认</span>
+                      <span className="desc">展开后直接编辑可配置字段；设置默认提供商后请保存</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.video || [], { onRow: (i, p) => updateMediaRow('video', i, p), onPrimary: (i) => setMediaPrimary('video', i), media: true })}
+                    {renderBoard(mediaRows.video || [], { onRow: (i, p) => updateMediaRow('video', i, p), onPrimary: (i) => setMediaPrimary('video', i), media: true, channel: 'video' })}
                     <div className="foot-note">脚本按「主」provider 出片；同类多家的自动降级随统一网关接入开放。</div>
                   </section>
                 )}
@@ -914,10 +996,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('music') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('music') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用；「主/备」= 默认</span>
+                      <span className="desc">展开查看可配置字段；设置默认提供商后请保存</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.music || [], { onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true })}
+                    {renderBoard(mediaRows.music || [], { onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true, channel: 'music' })}
                   </section>
                 )}
 
@@ -970,6 +1052,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   </div>
                 </div>
                 <div className="foot-note">与「模型配置 → 生图」的技能通道共享 IMG_* 配置：这里改了，技能生图也用同一通道。</div>
+                {reverseSettings}
               </section>
             )}
 
@@ -1036,21 +1119,17 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   python={python}
                   loading={envLoading}
                   error={envError}
-                  jobs={jobs}
-                  anyRunning={anyRunning}
                   onRefresh={() => void refreshEnv(true)}
-                  onInstall={installOne}
-                  onInstallMany={installMany}
                 />
               </section>
             )}
 
-            {sec === 'more' && <section className="st-sec active"><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
+            {sec === 'more' && <section className="st-sec active settings-more-cards"><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
           </div>
         </div>
 
         <div className="settings-foot">
-          {sec === 'general' ? '通用设置保存在当前浏览器，同一地址下的其他标签页会同步更新。' : 'ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存写入 .env（对话经本地网关路由，主备自动降级）。'}
+          {sec === 'general' ? '通用设置保存在当前浏览器，同一地址下的其他标签页会同步更新。' : sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : '保存配置'}」。获取模型列表或选择候选不会自动保存。` : '修改后请使用对应的保存按钮；页面会显示保存结果。'}
         </div>
       </div>
     </div>

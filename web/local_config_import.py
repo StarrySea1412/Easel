@@ -28,7 +28,7 @@ def _mask(key: str) -> str:
     k = (key or "").strip()
     if not k:
         return ""
-    return f"«{k[:5]}…{k[-4:]}»" if len(k) > 14 else "«已配置»"
+    return f"{k[:5]}…{k[-4:]}" if len(k) > 14 else "已配置"
 
 
 def _valid_base(base: str) -> bool:

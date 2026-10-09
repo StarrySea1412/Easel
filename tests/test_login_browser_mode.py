@@ -1,5 +1,6 @@
 """In-process login API checks with synthetic files; never starts a browser or connects to a platform."""
 import ast
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import sys
 import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -26,12 +28,19 @@ class Process:
     def poll(self):
         return self.returncode
 
+    def wait(self, timeout):
+        assert timeout == 5
+        if self.returncode is None:
+            raise RuntimeError('fixture still running')
+        return self.returncode
+
 
 @pytest.fixture
 def login_api(tmp_path):
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     names = {'api_login_start', 'api_login_status', '_login_status',
-             '_require_account_available', '_account_browser_busy'}
+             '_require_account_available', '_account_browser_busy', '_restart_owned_login',
+             'api_mp_login_start', '_mp_login_status'}
     nodes = [node for node in source.body
              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names]
     assert {node.name for node in nodes} == names
@@ -48,7 +57,7 @@ def login_api(tmp_path):
         '_WHOAMI_LOCK': threading.Lock(), '_WHOAMI_CACHE': {}, '_WHOAMI_PROCESSES': {},
         '_invalidate_account_check': Mock(), '_account_check_generation': Mock(return_value='isolated-generation'),
         'invalidate_account_context': Mock(), '_proxy_env': lambda: {}, '_wechat_has_credentials': lambda: False,
-        'asyncio': SimpleNamespace(sleep=AsyncMock()),
+        'asyncio': SimpleNamespace(sleep=AsyncMock(), to_thread=asyncio.to_thread),
     }
 
     def spawn(args, **_kwargs):
@@ -64,6 +73,7 @@ def login_api(tmp_path):
     popen = Mock(side_effect=spawn)
     env['subprocess'] = SimpleNamespace(
         Popen=popen, STDOUT=subprocess.STDOUT,
+        SubprocessError=subprocess.SubprocessError,
         CREATE_NEW_PROCESS_GROUP=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
         CREATE_NO_WINDOW=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
     )
@@ -169,3 +179,119 @@ def test_invalid_query_boolean_is_rejected_without_a_process(login_api):
     response = login_api.client.post('/api/login/xiaohongshu', params={'visibleBrowser': 'invalid'})
     assert response.status_code == 422
     login_api.popen.assert_not_called()
+
+
+def test_explicit_reconnect_replaces_only_registered_login_and_preserves_other_platform(monkeypatch, login_api):
+    import easel.install_runner
+
+    assert login_api.client.post('/api/login/xiaohongshu').status_code == 200
+    assert login_api.client.post('/api/login/zhihu').status_code == 200
+    old = login_api.env['LOGIN_PROCESSES']['xiaohongshu']
+    other = login_api.env['LOGIN_PROCESSES']['zhihu']
+    stopped = []
+
+    def terminate(process):
+        stopped.append(process)
+        process.returncode = 0
+
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', terminate)
+    response = login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true', 'visibleBrowser': 'true'})
+    assert response.status_code == 200 and response.json()['visibleBrowser'] is True
+    assert stopped == [old]
+    assert login_api.env['LOGIN_PROCESSES']['xiaohongshu'] is not old
+    assert login_api.env['LOGIN_PROCESSES']['zhihu'] is other and other.poll() is None
+    assert login_api.popen.call_count == 3
+
+
+def test_reconnect_during_whoami_preserves_both_processes_and_old_marker(monkeypatch, login_api):
+    import easel.install_runner
+
+    assert login_api.client.post('/api/login/xiaohongshu').status_code == 200
+    old = login_api.env['LOGIN_PROCESSES']['xiaohongshu']
+    marker = login_api.env['LOGIN_DIR'] / 'xiaohongshu.json'
+    before = marker.read_bytes()
+    whoami = Process(['fixture-whoami'])
+    login_api.env['_WHOAMI_PROCESSES']['xiaohongshu'] = [whoami]
+    stop = Mock()
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', stop)
+    response = login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true'})
+    assert response.status_code == 409
+    stop.assert_not_called()
+    assert login_api.env['LOGIN_PROCESSES']['xiaohongshu'] is old and old.poll() is None
+    assert whoami.poll() is None and marker.read_bytes() == before
+    login_api.popen.assert_called_once()
+
+
+def test_failed_reconnect_does_not_spawn_another_writer_or_delete_marker(monkeypatch, login_api):
+    import easel.install_runner
+
+    assert login_api.client.post('/api/login/xiaohongshu').status_code == 200
+    old = login_api.env['LOGIN_PROCESSES']['xiaohongshu']
+    marker = login_api.env['LOGIN_DIR'] / 'xiaohongshu.json'
+    before = marker.read_bytes()
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', Mock(side_effect=OSError('offline stop failure')))
+    response = login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true'})
+    assert response.status_code == 500
+    assert login_api.env['LOGIN_PROCESSES']['xiaohongshu'] is old and marker.read_bytes() == before
+    login_api.popen.assert_called_once()
+
+
+def test_mp_reconnect_replaces_registered_mp_login(monkeypatch, login_api):
+    import easel.install_runner
+
+    route = '/api/accounts/wechat-oa/mp-login'
+    assert login_api.client.post(route).status_code == 200
+    old = login_api.env['LOGIN_PROCESSES']['wechat-oa-mp']
+
+    def terminate(process):
+        assert process is old
+        process.returncode = 0
+
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', terminate)
+    response = login_api.client.post(route, params={'restart': 'true'})
+    assert response.status_code == 200
+    assert login_api.env['LOGIN_PROCESSES']['wechat-oa-mp'] is not old
+    assert login_api.popen.call_count == 2
+
+
+def test_slow_reconnect_keeps_event_loop_responsive_and_reserves_same_account(monkeypatch, login_api):
+    import easel.install_runner
+
+    assert login_api.client.post('/api/login/xiaohongshu').status_code == 200
+    entered, release = threading.Event(), threading.Event()
+
+    def terminate(process):
+        entered.set()
+        assert release.wait(5)
+        process.returncode = 0
+
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', terminate)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(login_api.client.post, '/api/login/xiaohongshu', params={'restart': 'true'})
+        try:
+            assert entered.wait(5)
+            # Other platforms remain usable while taskkill/wait is running.
+            other = pool.submit(login_api.client.post, '/api/login/zhihu').result(timeout=2)
+            assert other.status_code == 200
+            assert login_api.client.post('/api/login/xiaohongshu').status_code == 409
+            assert login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true'}).status_code == 409
+            with pytest.raises(HTTPException) as busy:
+                login_api.env['_require_account_available']('xiaohongshu')
+            assert busy.value.status_code == 409
+        finally:
+            release.set()
+        assert pending.result(timeout=5).status_code == 200
+    assert login_api.env['_ACCOUNT_CLEARING'] == set()
+
+
+def test_reconnect_is_rejected_before_stopping_login_during_active_publish(monkeypatch, login_api):
+    import easel.install_runner
+
+    assert login_api.client.post('/api/login/xiaohongshu').status_code == 200
+    old = login_api.env['LOGIN_PROCESSES']['xiaohongshu']
+    login_api.env['_PUBLISH_ACTIVE']['xiaohongshu'] = 'fixture-publish'
+    stop = Mock()
+    monkeypatch.setattr(easel.install_runner, 'terminate_phase_tree', stop)
+    assert login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true'}).status_code == 409
+    stop.assert_not_called()
+    assert login_api.env['LOGIN_PROCESSES']['xiaohongshu'] is old

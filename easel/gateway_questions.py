@@ -341,7 +341,8 @@ class GatewayClient:
             raise GatewayQuestionError("gateway connect timed out")
         self.ws = ws
 
-    def _rpc(self, method: str, params: dict, timeout: float | None = None):
+    def _rpc(self, method: str, params: dict, timeout: float | None = None,
+             *, expect_final: bool = False, on_accepted=None):
         if self.ws is None:
             self.connect()
         self._seq += 1
@@ -351,19 +352,28 @@ class GatewayClient:
         }))
         deadline = time.time() + (timeout or self.timeout)
         while time.time() < deadline:
+            self.ws.settimeout(max(0.01, deadline - time.time()))
             msg = json.loads(self.ws.recv())
             if msg.get("id") == req_id:
                 if not msg.get("ok", False):
                     err = msg.get("error") or {}
-                    detail = json.dumps(err)[:200]
+                    detail = json.dumps(err, ensure_ascii=False)
                     # An unknown method surfaces as INVALID_REQUEST here (the
                     # question RPCs don't exist pre-2026.9.x). Flag it so callers
                     # can quietly disable the bridge instead of retrying forever.
                     if err.get("code") == "INVALID_REQUEST":
-                        raise GatewayUnsupportedError(
-                            f"{method} not supported by this gateway: {detail}")
-                    raise GatewayQuestionError(f"{method} failed: {detail}")
-                return msg.get("payload")
+                        exc = GatewayUnsupportedError(f"{method} not supported by this gateway: {detail}")
+                    else:
+                        exc = GatewayQuestionError(f"{method} failed: {detail}")
+                    exc.rpc_response = True
+                    exc.response_payload = msg.get('payload')
+                    raise exc
+                payload = msg.get('payload')
+                if expect_final and isinstance(payload, dict) and payload.get('status') == 'accepted':
+                    if on_accepted is not None:
+                        on_accepted(payload)
+                    continue
+                return payload
         raise GatewayQuestionError(f"{method} timed out")
 
     def list_questions(self, session_key: str | None = None,

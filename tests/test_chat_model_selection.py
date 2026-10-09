@@ -153,13 +153,30 @@ def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks
     assert client.get('/api/agent-office/models', params={'sessionId': '../foreign'}).status_code == 400
 
 
-@pytest.mark.parametrize('version', [None, '2026.6.11', '2026.9.4', 'PRIVATE_TOKEN https://private.invalid'])
+@pytest.mark.parametrize('version', [None, '2026.6.11', '2026.9.4', '2026.9.7', '2026.9.6-custom',
+                                     'PRIVATE_TOKEN https://private.invalid'])
 def test_unverified_running_gateway_cannot_inherit_installed_version_or_probe_http(sandbox, version):
     sandbox.client.server_version = version
     result = controls.turn_model_capability(web)
     assert not result['available'] and result['scope'] == 'unavailable'
     assert result['options'] and not sandbox.probes and sandbox.client.closed
     assert 'PRIVATE_' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('transport', ['http', 'cli'])
+def test_audited_2026_9_6_still_requires_exact_transport_permission(sandbox, monkeypatch, transport):
+    sandbox.client.server_version = '2026.9.6'
+    sandbox.transport = transport
+    monkeypatch.setattr(controls, '_cli_override_version', lambda app: '2026.9.6')
+    result = controls.turn_model_capability(web)
+    assert result['available'] and result['scope'] == 'next_turn'
+    assert result['gatewayVersion'] == '2026.9.6' and result['transport'] == transport
+    assert sandbox.probes == ([None] if transport == 'http' else [])
+    assert not sandbox.requests and not sandbox.client.calls and sandbox.client.closed
+    monkeypatch.setattr(controls, '_model_probe_client',
+                        lambda *_args: (_ for _ in ()).throw(HTTPException(503, 'approval missing')))
+    assert not controls.turn_model_capability(web)['available']
+    assert not sandbox.requests
 
 
 def test_listing_uses_only_verified_session_override_not_last_runtime_model(sandbox):
@@ -254,6 +271,39 @@ def test_explicit_thinking_forces_cli_model_capability_before_and_after_lock(san
     assert saved["requestedThinkingLevel"] == "high" and events[-1]["event"] == "done"
 
 
+@pytest.mark.parametrize('streamed', ['', 'reply native'])
+def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, monkeypatch, streamed):
+    calls = []
+    class Client:
+        def _rpc(self, method, params, **kwargs):
+            calls.append((method, params))
+            kwargs['on_accepted']({'runId': 'native-run'})
+            if streamed:
+                web.SHARED_RAW_STREAM.write_text(json.dumps({'runId': 'native-run',
+                    'sessionId': params['sessionId'], 'event': 'assistant_text_stream',
+                    'evtType': 'text_delta', 'delta': streamed}) + '\n', encoding='utf-8')
+            return {'status': 'ok', 'result': {'payloads': [{'text': 'native reply'}]}}
+        def close(self): pass
+    monkeypatch.setattr(web, '_native_agent_client', lambda credentials: Client())
+    async def exercise():
+        response = await web.api_chat_stream(web.ChatRequest(message='test', sessionId='model-session',
+            turnId='native-turn', modelRef='relay/model-b', thinkingLevel='off'))
+        events = [event async for event in response.body_iterator]
+        saved = await web.api_chat_last('model-session', 'native-turn')
+        assert saved['text'] == 'native reply' and saved['clean_end'] and saved['error'] is None
+        assert saved['gateway_run_id'] == 'native-run' and events[-1]['event'] == 'done'
+        if streamed:
+            assert [json.loads(e['data']) for e in events if e['event'] == 'text_snapshot'] == ['native reply']
+            replay = await web.api_chat_job_stream('native-turn')
+            replay_events = [event async for event in replay.body_iterator]
+            assert [json.loads(e['data']) for e in replay_events if e['event'] == 'text_snapshot'] == ['native reply']
+    asyncio.run(exercise())
+    assert len(calls) == 1
+    assert calls[0][1]['model'] == 'relay/model-b' and calls[0][1]['thinking'] == 'off'
+    assert calls[0][1]['sessionId'] == web._openclaw_session_id('model-session')
+    assert calls[0][1]['idempotencyKey'] == 'native-turn'
+
+
 @pytest.mark.parametrize('change', ['configuration', 'gateway-version', 'approval'])
 def test_revalidation_after_lock_prevents_execution_and_retains_request(sandbox, monkeypatch, change):
     def revoke():
@@ -300,13 +350,16 @@ def test_disconnected_client_keeps_selection_and_next_turn_gets_new_run(sandbox)
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('transport,identity,approved,allowed', [
-    ('http', ('cli', 'cli'), ['operator.read'], True),
-    ('cli', ('gateway-client', 'backend'), ['operator.admin'], True),
-    ('cli', ('cli', 'cli'), ['operator.admin'], False),
-    ('cli', ('gateway-client', 'backend'), ['operator.read', 'operator.write'], False),
+@pytest.mark.parametrize('transport,identity,approved,version,allowed', [
+    ('http', ('cli', 'cli'), ['operator.read'], '2026.9.2', True),
+    ('cli', ('gateway-client', 'backend'), ['operator.admin'], '2026.9.2', True),
+    ('cli', ('cli', 'cli'), ['operator.admin'], '2026.9.2', False),
+    ('cli', ('gateway-client', 'backend'), ['operator.read', 'operator.write'], '2026.9.2', False),
+    ('cli', ('cli', 'cli'), ['operator.admin'], '2026.9.6', True),
+    ('cli', ('cli', 'cli'), ['operator.read', 'operator.write'], '2026.9.6', False),
+    ('cli', ('cli', 'cli'), ['operator.admin'], '2026.9.7', False),
 ])
-def test_model_probe_uses_only_already_approved_identity(tmp_path, monkeypatch, transport, identity, approved, allowed):
+def test_model_probe_uses_only_already_approved_identity(tmp_path, monkeypatch, transport, identity, approved, version, allowed):
     database = tmp_path / 'paired.sqlite'
     with sqlite3.connect(database) as db:
         db.execute('CREATE TABLE device_pairing_paired(device_id TEXT, public_key TEXT, approved_scopes_json TEXT, '
@@ -319,17 +372,27 @@ def test_model_probe_uses_only_already_approved_identity(tmp_path, monkeypatch, 
     connected = []
     def factory(**kwargs):
         connected.append(kwargs)
-        return ReadGateway()
+        client = ReadGateway()
+        client.server_version = version
+        return client
     monkeypatch.setattr(controls.gateway, 'GatewayClient', factory)
     credentials = GatewayCredentials('token', token='synthetic-shared-secret')
     if allowed:
         controls._model_probe_client(transport, credentials).close()
         assert connected[0]['client_id'] == identity[0] and connected[0]['client_mode'] == identity[1]
-        assert connected[0]['scopes'] == (['operator.admin'] if transport == 'cli' else ['operator.read'])
+        reuses_device = transport == 'cli' and identity == ('cli', 'cli')
+        assert len(connected) == (2 if reuses_device else 1)
+        assert connected[0]['scopes'] == (['operator.read'] if reuses_device or transport == 'http' else ['operator.admin'])
+        assert connected[-1]['scopes'] == (['operator.admin'] if transport == 'cli' else ['operator.read'])
+        if reuses_device:
+            assert (connected[-1]['client_id'], connected[-1]['client_mode']) == ('gateway-client', 'backend')
     else:
         with pytest.raises(HTTPException):
             controls._model_probe_client(transport, credentials)
-        assert not connected
+        discovery_only = transport == 'cli' and identity == ('cli', 'cli') and 'operator.admin' in approved
+        assert len(connected) == (1 if discovery_only else 0)
+        if discovery_only:
+            assert connected[0]['scopes'] == ['operator.read']
     assert database.read_bytes() == original
 
 
@@ -360,13 +423,14 @@ def test_http_override_probe_requires_exact_authorization_validation_receipt(mon
     assert len(requests) == 1
 
 
-def test_installed_cli_version_is_read_from_actual_command_without_launch(tmp_path, monkeypatch):
+@pytest.mark.parametrize('version', ['2026.9.2', '2026.9.6'])
+def test_installed_cli_version_is_read_from_actual_command_without_launch(tmp_path, monkeypatch, version):
     entry = tmp_path / 'openclaw.mjs'
     entry.write_text('// fixture, never execute')
     package = tmp_path / 'package.json'
-    package.write_text(json.dumps({'name': 'openclaw', 'version': '2026.9.2'}))
+    package.write_text(json.dumps({'name': 'openclaw', 'version': version}))
     monkeypatch.setattr(web, 'openclaw_base_cmd', lambda: ['node', str(entry)])
     monkeypatch.setattr(web.subprocess, 'run', lambda *a, **kw: pytest.fail('no CLI version invocation'))
-    assert controls._cli_override_version(web) == '2026.9.2'
+    assert controls._cli_override_version(web) == version
     package.write_text(json.dumps({'name': 'openclaw', 'version': '2026.6.11'}))
     assert controls._cli_override_version(web) is None

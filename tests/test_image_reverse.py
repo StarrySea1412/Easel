@@ -264,12 +264,35 @@ def test_public_config_and_multipart_routes(monkeypatch):
 
 
 def test_saved_channel_adapter_uses_chat_credentials_only(monkeypatch):
-    monkeypatch.setattr(web, '_model_channels', lambda: {'chat': {'rows': [
+    monkeypatch.setattr(web, '_model_channels', lambda: {'channels': {'chat': {'rows': [
         {'slot': 'openai', 'name': 'OpenAI', 'model': 'vision-model', 'protocol': 'openai'},
-        {'slot': 'custom', 'name': 'studio', 'model': 'other-vision', 'protocol': 'anthropic'}]}})
+        {'slot': 'custom', 'name': 'studio', 'model': 'other-vision', 'protocol': 'anthropic'}]}}})
     monkeypatch.setattr(web, '_read_env', lambda: {'OPENAI_API_KEY': 'chat-only', 'OPENAI_BASE_URL': 'https://chat.test/v1',
                                                  'IMG_API_KEY': 'never-use-image-secret'})
     monkeypatch.setattr(web, '_openclaw_provider_creds', lambda: {'studio': ('https://custom.test', 'custom-key')})
     result = web._image_reverse_providers()
     assert [(p.id, p.key, p.base_url) for p in result] == [
         ('openai', 'chat-only', 'https://chat.test/v1'), ('studio', 'custom-key', 'https://custom.test')]
+
+
+def test_reverse_model_selection_persists_and_rejects_unknown_without_credentials(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(web, '_image_reverse_providers', lambda: [provider()])
+    client = TestClient(web.app, base_url='http://127.0.0.1:7860', client=('127.0.0.1', 51234))
+    assert client.get('/api/image-reverse/config').json()['modelRef'] == ''
+    response = client.post('/api/image-reverse/config', json={'modelRef': 'vision/vision-model'})
+    assert response.status_code == 200
+    assert client.get('/api/image-reverse/config').json()['modelRef'] == 'vision/vision-model'
+    assert json.loads((tmp_path / 'image-reverse-config.json').read_text()) == {'modelRef': 'vision/vision-model'}
+    assert client.post('/api/image-reverse/config', json={'modelRef': 'vision/unknown'}).status_code == 400
+    assert client.get('/api/image-reverse/config').json()['modelRef'] == 'vision/vision-model'
+    assert client.post('/api/image-reverse/config', json={'modelRef': ''}).status_code == 200
+
+
+def test_reverse_rejects_changed_exact_model_instead_of_substitution(monkeypatch):
+    monkeypatch.setattr(web, '_image_reverse_providers', lambda: [provider()])
+    client = TestClient(web.app, base_url='http://127.0.0.1:7860', client=('127.0.0.1', 51234))
+    response = client.post('/api/image-reverse', files={'image': ('fox.png', image_bytes(), 'image/png')},
+                           data={'provider': 'vision', 'modelRef': 'vision/old-model', 'mode': 'vision'})
+    assert response.status_code == 409
+    assert '不会替换' in response.json()['detail']

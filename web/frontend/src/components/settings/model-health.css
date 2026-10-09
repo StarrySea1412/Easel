@@ -11,4 +11,8 @@
 .model-health-actions, .model-health-schedule { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; }
 .model-health-schedule .easel-select { min-width:130px; }
 .model-health-error { color:var(--red); overflow-wrap:anywhere; }
+.model-health-controls { border:0; padding:0; margin:0; min-width:0; }
+.model-health-inline { border:0; border-radius:0; padding:12px 0 0; margin-top:0; }
+.provider-health { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); font-size:12px; }
+.provider-health > summary { cursor:pointer; }
 @media(max-width:640px) { .model-health-panel { padding:10px; } .model-health-heading { flex-wrap:wrap; } .model-health-schedule>label { width:100%; } .model-health-schedule .easel-select { flex:1; min-width:0; } }

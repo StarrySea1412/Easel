@@ -5,13 +5,14 @@ import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAtta
   appendChatDraftUploads, finishChatDraftUpload, clearChatDraft } from '../lib/chatDrafts';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
-import ComposerModelPicker from './ComposerModelPicker';
+import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { IconArrowUp, IconStop, IconPlus, IconFile, IconChevron } from './icons';
-import { loadThinkingLevel, saveThinkingLevel, THINKING_LEVELS } from '../lib/thinkingLevel';
+import { DEFAULT_THINKING_LEVEL, loadThinkingLevel, saveThinkingLevel, THINKING_LEVELS } from '../lib/thinkingLevel';
 import '../styles/chat-composer.css';
+import ChatQueueTray from './ChatQueueTray';
 
 interface ChatComposerProps {
   sessionId: string;
@@ -20,6 +21,7 @@ interface ChatComposerProps {
   stopping?: boolean;
   onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onStop: () => void;
+  onOpenModels?: () => void;
 }
 
 
@@ -28,7 +30,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = false, onSend, onStop }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = false, onSend, onStop, onOpenModels }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -40,6 +42,10 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId);
+  const effectiveModel = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
+  const supportedThinking = effectiveModel?.thinkingLevels;
+  const thinkingUnsupported = Boolean(supportedThinking?.length && !supportedThinking.includes(thinkingLevel));
+  const thinkingWarning = thinkingUnsupported ? `${effectiveModel?.model} 不支持 ${THINKING_LABELS[thinkingLevel]}；运行时允许：${supportedThinking?.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。请选择支持的档位。` : '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
@@ -60,7 +66,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
 
   const doUpload = async (fs: FileList | File[]) => {
     const arr = Array.from(fs);
-    if (!arr.length || isStreaming || stopping) return;
+    if (!arr.length || stopping) return;
     const token = beginChatDraftUpload(sessionId);
     if (!token) return;
     const cap = maxMb * 1024 * 1024;
@@ -122,7 +128,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
   const handleSend = () => {
     const submitted = getChatDraft(sessionId);
     const trimmed = submitted.text.trim();
-    if ((!trimmed && submitted.attachments.length === 0) || isStreaming || stopping || submitted.uploading
+    if ((!trimmed && submitted.attachments.length === 0) || stopping || submitted.uploading
       || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     try {
@@ -130,6 +136,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
       if (!snapshot) return;
       const model = models.getSnapshot();
       if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。请刷新模型选项或改用会话配置。'); return; }
+      if (thinkingUnsupported) { setChatDraftError(sessionId, `${thinkingWarning} 草稿已保留，未发送请求。`); return; }
       const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
         : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
       if (accepted === true) clearChatDraft(sessionId, submitted);
@@ -152,12 +159,12 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
         dragDepthRef.current += 1;
-        if (!isStreaming && !uploading) setDragOver(true);
+        if (!uploading && !stopping) setDragOver(true);
       }}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = isStreaming || uploading ? 'none' : 'copy';
+        e.dataTransfer.dropEffect = stopping || uploading ? 'none' : 'copy';
       }}
       onDragLeave={(e) => {
         e.preventDefault();
@@ -165,6 +172,7 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
         if (dragDepthRef.current === 0) setDragOver(false);
       }}
       onDrop={onDrop}>
+      <ChatQueueTray sessionId={sessionId} />
       <ComposerSkillChips skills={skills} />
       <textarea
         ref={textareaRef}
@@ -202,28 +210,31 @@ function SessionChatComposer({ sessionId, hero = false, isStreaming, stopping = 
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
-      {models.modelRef && !models.ready && <p className="composer-skills-note" role="status">{models.error || models.capability?.reason || '所选模型尚未通过本轮能力核验。请刷新或重新选择。'}</p>}
       <input ref={fileInputRef} type="file" multiple hidden
         onChange={(e) => { if (e.target.files) void doUpload(e.target.files); e.target.value = ''; }} />
       <div className="composer-bar">
         <div className="composer-tools">
           <button type="button" className="composer-attach-btn" onClick={() => fileInputRef.current?.click()}
-            disabled={isStreaming || uploading} aria-label={uploading ? '正在添加素材' : '添加图片或文档'} title={`添加图片或文档；支持拖入或粘贴，超过 ${maxMb}MB 的文件将存为本地素材`}>
+            disabled={stopping || uploading} aria-label={uploading ? '正在添加素材' : '添加图片或文档'} title={`添加图片或文档；支持拖入或粘贴，超过 ${maxMb}MB 的文件将存为本地素材`}>
             <IconPlus size={18} />{uploading && <span>上传中…</span>}
           </button>
           <ComposerSkillPicker skills={skills} setInput={setInput} />
-          <ComposerModelPicker models={models} disabled={isStreaming || stopping} />
-          <ThinkingLevelPicker value={thinkingLevel} onChange={changeThinkingLevel} disabled={isStreaming || stopping} />
+          <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />
+          <ThinkingLevelPicker value={thinkingLevel} onChange={changeThinkingLevel} disabled={stopping}
+            supportedLevels={supportedThinking}
+            modelLabel={models.selected?.model || (models.modelRef ? models.modelRef : '沿用会话模型')} />
         </div>
-        <span className="composer-hint" id={hintId}>
-          <span>{stopping ? '正在等待停止确认' : isStreaming ? '正在生成，可随时停止' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}</span>
-        </span>
-        {isStreaming ? (
+        <div className="composer-send-actions">{isStreaming && (
           <button type="button" className="send-btn" onClick={onStop} disabled={stopping} title={stopping ? '等待停止确认' : '停止生成'} aria-label={stopping ? '等待停止确认' : '停止生成'}><IconStop size={15} /></button>
-        ) : (
-          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || stopping || draft.missingAttachments.length > 0} title="发送" aria-label="发送消息"><IconArrowUp size={18} /></button>
         )}
+          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || stopping || draft.missingAttachments.length > 0} title={isStreaming ? '加入队列，本轮完成后发送' : '发送'} aria-label={isStreaming ? '排队发送' : '发送消息'}><IconArrowUp size={18} /></button>
+        </div>
       </div>
+      <span className="composer-hint" id={hintId}>
+        {stopping ? '正在等待停止确认' : isStreaming ? 'Enter 排队 · Shift+Enter 换行' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}
+      </span>
+      <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />
+      {thinkingUnsupported && <p className="composer-thinking-warning" role="status">{thinkingWarning}</p>}
     </div>
   );
 
@@ -234,18 +245,19 @@ const THINKING_LABELS: Record<ThinkingLevel, string> = {
   xhigh: '极高', adaptive: '自适应', max: '最大', ultra: 'Ultra',
 };
 
-function ThinkingLevelPicker({ value, onChange, disabled }: { value: ThinkingLevel; onChange: (value: ThinkingLevel) => void; disabled: boolean }) {
+function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, supportedLevels }: { value: ThinkingLevel; onChange: (value: ThinkingLevel) => void; disabled: boolean; modelLabel: string; supportedLevels?: string[] }) {
   const [open, setOpen] = useState(false);
   const menuOpen = open && !disabled;
-  const [activeIndex, setActiveIndex] = useState(() => Math.max(0, THINKING_LEVELS.indexOf(value)));
+  const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive');
+  const resetLevel = supportedLevels?.length && !supportedLevels.includes(DEFAULT_THINKING_LEVEL)
+    ? THINKING_LEVELS.find(level => supportedLevels.includes(level)) : DEFAULT_THINKING_LEVEL;
+  const index = Math.max(0, strengthLevels.indexOf(value as Exclude<ThinkingLevel, 'adaptive'>));
   const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const sliderRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const optionId = useId();
-  const activeId = `${optionId}-${THINKING_LEVELS[activeIndex]}`;
-  const openMenu = (index = Math.max(0, THINKING_LEVELS.indexOf(value))) => {
+  const pickerId = useId();
+  const openMenu = () => {
     if (disabled) return;
-    setActiveIndex(index);
     setOpen(true);
   };
   useEffect(() => {
@@ -258,53 +270,62 @@ function ThinkingLevelPicker({ value, onChange, disabled }: { value: ThinkingLev
     if (disabled) setOpen(false);
   }, [disabled]);
   useEffect(() => {
-    if (menuOpen) menuRef.current?.focus();
+    if (menuOpen) sliderRef.current?.focus();
   }, [menuOpen]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    menuRef.current?.querySelector<HTMLElement>('.is-active')?.scrollIntoView?.({ block: 'nearest' });
-  }, [menuOpen, activeIndex]);
-  const choose = (level: ThinkingLevel) => {
+  const choose = (nextIndex: number) => {
     if (disabled) return;
-    onChange(level);
-    setActiveIndex(Math.max(0, THINKING_LEVELS.indexOf(level)));
+    const level = strengthLevels[Math.min(strengthLevels.length - 1, Math.max(0, Math.round(nextIndex)))];
+    if (level && level !== value && (!supportedLevels?.length || supportedLevels.includes(level))) onChange(level);
+  };
+  const closeAndFocus = () => {
     setOpen(false);
     triggerRef.current?.focus();
   };
-  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleSliderKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      event.preventDefault(); setActiveIndex(index => (index + 1) % THINKING_LEVELS.length);
+      event.preventDefault(); const next = strengthLevels.findIndex((level, i) => i > index && (!supportedLevels?.length || supportedLevels.includes(level))); if (next >= 0) choose(next);
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      event.preventDefault(); setActiveIndex(index => (index - 1 + THINKING_LEVELS.length) % THINKING_LEVELS.length);
+      event.preventDefault(); for (let i = index - 1; i >= 0; i--) { if (!supportedLevels?.length || supportedLevels.includes(strengthLevels[i])) { choose(i); break; } }
     } else if (event.key === 'Home') {
-      event.preventDefault(); setActiveIndex(0);
+      event.preventDefault(); choose(0);
     } else if (event.key === 'End') {
-      event.preventDefault(); setActiveIndex(THINKING_LEVELS.length - 1);
-    } else if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault(); choose(THINKING_LEVELS[activeIndex]);
-    } else if (event.key === 'Escape') {
-      event.preventDefault(); setOpen(false); triggerRef.current?.focus();
+      event.preventDefault(); for (let i = strengthLevels.length - 1; i >= 0; i--) { if (!supportedLevels?.length || supportedLevels.includes(strengthLevels[i])) { choose(i); break; } }
+    } else if (event.key === 'Enter') {
+      event.preventDefault(); closeAndFocus();
     }
   };
-  return <div className="thinking-level-picker" ref={rootRef}>
+  return <div className={`thinking-level-picker${value === 'ultra' ? ' is-ultra' : ''}${value === 'adaptive' ? ' is-adaptive' : ''}`} ref={rootRef} style={{ '--thinking-progress': `${index / (strengthLevels.length - 1) * 100}%` } as React.CSSProperties}>
     <button ref={triggerRef} type="button" className="thinking-level-trigger" disabled={disabled}
-      aria-haspopup="listbox" aria-expanded={menuOpen} aria-controls={menuOpen ? `${optionId}-menu` : undefined} aria-label={`思考强度：${THINKING_LABELS[value]}`} title="选择本轮思考强度；实际支持取决于模型"
+      aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls={menuOpen ? `${pickerId}-menu` : undefined} aria-label={`思考强度：${THINKING_LABELS[value]}`} title="选择本轮思考强度；实际支持取决于模型"
       onClick={() => open ? setOpen(false) : openMenu()}
       onKeyDown={(event) => {
         if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openMenu(); }
         else if (event.key === 'ArrowUp') { event.preventDefault(); openMenu(); }
         else if (event.key === 'Escape') setOpen(false);
       }}>
-      <span>思考强度</span><strong>{THINKING_LABELS[value]}</strong><IconChevron size={13} />
+      <strong>{THINKING_LABELS[value]}</strong><IconChevron size={13} />
     </button>
-    {menuOpen && <div ref={menuRef} id={`${optionId}-menu`} className="thinking-level-menu" role="listbox" tabIndex={-1} aria-label="思考强度选项" aria-activedescendant={activeId} onKeyDown={handleMenuKeyDown}
+    {menuOpen && <div id={`${pickerId}-menu`} className="thinking-level-menu" role="dialog" aria-label="思考强度"
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); } }}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      {THINKING_LEVELS.map((level, index) => <button id={`${optionId}-${level}`} key={level} type="button" tabIndex={-1} role="option" aria-selected={level === value}
-        className={`thinking-level-option ${level === value ? 'is-selected' : ''} ${index === activeIndex ? 'is-active' : ''}`} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(level)}>
-        <span><strong>{THINKING_LABELS[level]}</strong><small>{level}</small></span>
-        {level === value && <span aria-hidden="true">✓</span>}
-      </button>)}
+      <div className="thinking-level-heading"><strong>{THINKING_LABELS[value]}</strong>
+        <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title={supportedLevels?.length && !supportedLevels.includes('adaptive') ? '当前运行时不支持自适应' : '由模型自动决定强度'} disabled={disabled || Boolean(supportedLevels?.length && !supportedLevels.includes('adaptive'))} onClick={() => onChange('adaptive')}>自适应</button>
+        <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title={resetLevel ? `恢复可用默认：${THINKING_LABELS[resetLevel]}` : '当前模型没有可用默认档位'} disabled={disabled || !resetLevel || value === resetLevel}
+          onClick={() => { if (resetLevel) onChange(resetLevel); sliderRef.current?.focus(); }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 7a5 5 0 1 1 .9 4M3 2v5h5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+      </div>
+      <p className="thinking-level-model" title={`所选模型：${modelLabel}`}>{modelLabel}</p>
+      {supportedLevels?.length ? <p className="thinking-level-supported">运行时支持：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}</p> : null}
+      <div className="thinking-level-slider-wrap">
+        {value === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
+        <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={strengthLevels.length - 1} step={1} value={index}
+          aria-label="思考强度" aria-valuetext={THINKING_LABELS[value]} aria-describedby={`${pickerId}-hint`} disabled={disabled}
+          onChange={event => choose(Number(event.target.value))} onKeyDown={handleSliderKeyDown} />
+        <div className="thinking-level-ticks" aria-hidden="true">{strengthLevels.map((level, tick) => <span key={level} className={level === value ? 'is-current' : tick < index ? 'is-filled' : ''} />)}</div>
+      </div>
+      <span id={`${pickerId}-hint`} className="thinking-level-note">支持程度取决于模型，调整立即保存，对下一轮生效。</span>
     </div>}
   </div>;
 }

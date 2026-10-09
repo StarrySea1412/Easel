@@ -119,6 +119,16 @@ def test_discover_success_anthropic_protocol(monkeypatch):
     assert "authorization" not in seen["hdr"]
 
 
+def test_discover_preserves_real_ids_without_truncating_or_coercing(monkeypatch):
+    exact_limit = 'm' * 120
+    payload = {'data': [{'id': 'valid/model-v1'}, {'id': exact_limit}, {'id': 'm' * 121},
+                        {'id': 'model\nunsafe'}, {'id': 'model\x00unsafe'}, {'id': ' model '},
+                        {'id': 123}, {'id': None}, {'id': {'name': 'model'}}, {'id': 'echo-sk-test'}]}
+    _patch_open(monkeypatch, lambda req, timeout: _FakeResp(json.dumps(payload).encode()))
+    result = web._discover_models('https://api.example/v1', 'sk-test')
+    assert result['ok'] and result['models'] == ['valid/model-v1', exact_limit]
+
+
 # ---- 失败分级：401 / 403 / 404 / 429 / 5xx / 跳转 ----
 
 @pytest.mark.parametrize("code,kind", [

@@ -25,6 +25,7 @@ dependencies = [
     # ask_user 问答题桥接（easel/gateway_questions.py）：连本地 gateway WS RPC + Ed25519 设备签名
     # 只用到 load_pem_private_key + Ed25519.sign（长期稳定 API），上界放宽避免与新版冲突
     "websocket-client>=1.7,<2",
+    "zstandard>=0.25,<1",       # OpenClaw SQLite 压缩会话事件（只读）
     "cryptography>=42",
 ]
 

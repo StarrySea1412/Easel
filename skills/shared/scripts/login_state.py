@@ -39,11 +39,13 @@ def read_sms_code(path: str | None) -> str:
     return code
 
 
-def write_status(path: str | None, state: str, message: str = "", qr: str = "") -> None:
+def write_status(path: str | None, state: str, message: str = "", qr: str = "", *, qr_meta: dict | None = None) -> None:
     """原子写登录状态。path 为空则跳过（CLI 直跑不需要文件时）。"""
     if not path:
         return
     data = {"state": state, "message": message, "qr": qr, "ts": int(time.time())}
+    if qr and qr_meta:
+        data.update({key: qr_meta[key] for key in ("qrKind", "qrWidth", "qrHeight") if key in qr_meta})
     d = os.path.dirname(path) or "."
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")

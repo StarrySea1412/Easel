@@ -7,11 +7,12 @@ export const OFFICE_MODEL_SCOPE_LABELS: Record<OfficeModelScope, string> = {
   unavailable: '后台暂未提供独立模型分配能力。',
 };
 export type OfficeStopScope = 'agent' | 'session' | 'unavailable';
-export interface OfficeModelOption { id: string; provider: string; model: string; label: string; configured: boolean }
+export interface OfficeModelOption { id: string; provider: string; model: string; label: string; configured: boolean; thinkingLevels?: string[] }
 export interface OfficeModelCapability {
   available: boolean;
   scope: OfficeModelScope;
   currentModelRef: string | null;
+  defaultModelRef?: string;
   options: OfficeModelOption[];
   reason: string;
 }
@@ -46,11 +47,13 @@ export function decodeOfficeModelCapability(value: unknown): OfficeModelCapabili
     if (!record(item) || typeof item.id !== 'string' || !item.id || item.id.length > 500 || seen.has(item.id)
       || typeof item.provider !== 'string' || !item.provider || typeof item.model !== 'string' || !item.model) continue;
     seen.add(item.id);
-    options.push({ id: item.id, provider: text(item.provider), model: text(item.model), label: text(item.label), configured: item.configured === true });
+    options.push({ id: item.id, provider: text(item.provider), model: text(item.model), label: text(item.label), configured: item.configured === true,
+      ...(Array.isArray(item.thinkingLevels) ? { thinkingLevels: item.thinkingLevels.filter((level): level is string => typeof level === 'string' && ['off','minimal','low','medium','high','xhigh','adaptive','max','ultra'].includes(level)) } : {}) });
   }
   const scope = modelScope(model.scope);
   return { available: model.available === true && scope !== 'unavailable', scope,
     currentModelRef: typeof model.currentModelRef === 'string' ? text(model.currentModelRef) : null,
+    ...(typeof model.defaultModelRef === 'string' ? {defaultModelRef:text(model.defaultModelRef)} : {}),
     options, reason: text(model.reason, '当前暂不支持指定模型。') };
 }
 

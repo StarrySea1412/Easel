@@ -25,3 +25,5 @@
 .work-state-symbol { display:grid;place-items:center;width:74px;height:74px;border-radius:22px;background:#e2ebd9;color:#5f7e62;font-size:36px;font-weight:400; }
 .office-work-preview--error .work-state-symbol { background:#f3ded5;color:#a25d4b; }
 @container office-page (max-width:700px){.office-work-preview__body{grid-template-columns:72px minmax(0,1fr);gap:13px;padding:14px}.office-work-preview__visual{transform:scale(.76);transform-origin:center}.office-work-preview__copy h3{font-size:14px}.office-work-preview__footer{align-items:flex-start;flex-direction:column}.office-work-preview__screen>header{padding:8px 9px}}
+.office-work-preview--compact { flex:1 1 240px;min-width:0;margin:0;font-size:12px; }
+.office-work-preview--compact p { margin:4px 0 0;color:var(--text-secondary);font-size:11px; }

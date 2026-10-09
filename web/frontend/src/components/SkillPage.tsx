@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
 import SkillDrawer from './SkillDrawer';
+import SkillDependencyBadges from './SkillDependencyBadges';
 import { displayName } from '../lib/skillDisplayNames';
 import { Sk } from './Skeleton';
 import {
@@ -156,6 +157,7 @@ export default function SkillPage({ persona }: SkillPageProps) {
                     <div className="skill-card-rawname">{s.name}</div>
                     <div className="skill-card-desc">{s.description?.trim() || LAYER_DESC[layer.key]}</div>
                     <div className="skill-card-foot">
+                      <SkillDependencyBadges skill={s} />
                       {s.needsApi && (s.apiConfigured
                         ? <span className="badge badge-ok">已配置</span>
                         : <span className="badge badge-warn">需 API</span>)}

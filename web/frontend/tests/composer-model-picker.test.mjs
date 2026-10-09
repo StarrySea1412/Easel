@@ -57,9 +57,10 @@ test('removed saved model preserves draft until user explicitly restores session
   assert.equal(view.sent[0].length, 5); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), '');
 });
 
-test('busy composer disables an open model selector and leaves preference unchanged', async t => {
+test('streaming allows next-message model selection; stopping locks selector without changing preference', async t => {
   const view = await fixture(t, REF); await view.render(); await view.key('ArrowDown'); assert.ok(document.querySelector('.easel-select-popup'));
-  await view.render({ isStreaming: true }); assert.equal(view.trigger().disabled, true); assert.equal(document.querySelector('.easel-select-popup'), null);
+  await view.render({ isStreaming: true }); assert.equal(view.trigger().disabled, false);
+  await view.render({ isStreaming: true, stopping: true }); assert.equal(view.trigger().disabled, true); assert.equal(document.querySelector('.easel-select-popup'), null);
   await view.key('Home'); assert.equal(view.values.get(KEY), REF);
 });
 
@@ -73,4 +74,16 @@ test('composer refreshes backend health without probing and stops reads after un
   assert.ok(view.calls.every(([, init]) => !init?.body), 'status refresh never probes a model');
   await view.unmount(); assert.equal(timer.cleared, true);
   const count = view.calls.length; await act(async () => timer.callback()); assert.equal(view.calls.length, count);
+});
+
+test('unavailable model choices explain the next step even without a saved override', async t => {
+  const view = await fixture(t); view.h.capability = false; let opened = 0;
+  await view.render({ onOpenModels: () => { opened++; } });
+  assert.match(view.container.querySelector('[role=status]').textContent, /重新读取/);
+  const button = [...view.container.querySelectorAll('button')].find(item => item.textContent === '配置模型');
+  assert.ok(button); await act(async () => button.click()); assert.equal(opened, 1);
+  await view.key('ArrowDown');
+  assert.equal(document.querySelectorAll('.easel-select-option[aria-disabled=true]').length, 1);
+  assert.equal(view.values.get(KEY), undefined);
+  assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance does not save or probe models');
 });

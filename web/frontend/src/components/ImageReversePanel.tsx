@@ -53,7 +53,7 @@ export default function ImageReversePanel({ studio, onOpenSettings }: {
           { value: 'zh', label: '中文' }, { value: 'en', label: 'English' },
         ]} /></div>
       </div>
-      <label htmlFor="reverse-provider">图片理解模型</label>
+      <div className="image-section-heading"><label htmlFor="reverse-provider">图片理解模型</label><button type="button" className="link-btn" onClick={onOpenSettings}>模型设置与视觉测试 →</button></div>
       <Select id="reverse-provider" className="image-model-select" disabled={reverse.busy || reverse.configLoading} value={reverse.provider} onChange={reverse.setProvider} aria-describedby="reverse-provider-hint" options={[
         { value: '', label: '仅提取原图提示词', description: '读取本机元数据，无需图片理解模型' },
         ...reverse.providers.map((item) => ({ value: item.id, label: `${item.name} · ${item.model || '未填写模型'}`, description: item.configured ? '分析时将图片发送到此模型' : '未配置，请先在设置中补全模型信息', disabled: !item.configured })),

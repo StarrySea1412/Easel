@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/generate-skill-dependencies.mjs",
     "test": "node --test tests/*.test.mjs src/components/agent-office/__tests__/*.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",

@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
+import math
 from sse_starlette.sse import EventSourceResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,7 @@ from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
 from easel import local_records, publish_receipts, publish_followup
-from easel.reasoning_stream import ReasoningStream, provider_reasoning, visible_text
+from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
     sys.path.insert(0, str(PROJECT_ROOT / "mcp" / "easel-notify"))
@@ -160,6 +161,18 @@ class _GatewayHttpProc:
                 raise subprocess.TimeoutExpired("gateway-http-turn", timeout)
             time.sleep(0.05)
         return 0
+
+
+def _native_agent_client(credentials):
+    """Reuse existing approved identity only for the audited native contract."""
+    import office_controls
+    if GatewayClient is None:
+        return None
+    client = office_controls._model_probe_client('cli', credentials)
+    if client.server_version == '2026.9.6' and {'agent', 'chat.abort', 'agent.wait'}.issubset(client.methods):
+        return client
+    client.close()
+    return None
 
 
 _HTTP_READY_CACHE: dict = {"at": -1e9, "ok": False}
@@ -376,8 +389,24 @@ def _k(env, label, required=True, secret=True, aliases=None):
     return {"env": env, "label": label, "required": required, "secret": secret, "aliases": aliases or []}
 
 
+def _media_ui_spec(group: str) -> dict:
+    """The workbench uses dedicated media channels, not implicit chat credentials.
+
+    Legacy CLI aliases remain supported by model_registry for explicit CLI use.
+    """
+    import copy
+    spec = copy.deepcopy(model_group(group))
+    generic = {'OPENAI_API_KEY', 'API_KEY', 'OPENAI_BASE_URL', 'OPENAI_API_BASE', 'BASE_URL'}
+    for provider in spec['providers']:
+        for key in provider['keys']:
+            key['aliases'] = [alias for alias in key.get('aliases', ()) if alias not in generic]
+            if key['env'] == 'IMG_MODEL':
+                key['required'] = True
+    return spec
+
+
 def _model_spec(group: str, label: str | None = None) -> dict:
-    spec = model_group(group)
+    spec = _media_ui_spec(group)
     return {
         "label": label or spec["label"],
         "settings": spec.get("settings", []),
@@ -387,10 +416,10 @@ def _model_spec(group: str, label: str | None = None) -> dict:
 
 def _short_drama_spec() -> dict:
     """Image is required; video and cloud voice settings remain optional enhancements."""
-    image = model_group("image")
+    image = _media_ui_spec("image")
     optional = []
     for group_name in ("video", "voice"):
-        group = model_group(group_name)
+        group = _media_ui_spec(group_name)
         optional.extend({**key, "required": False} for key in group.get("settings", []))
         for provider in group["providers"]:
             optional.extend({**key, "required": False} for key in provider["keys"])
@@ -788,7 +817,7 @@ def _guide_accounts(desc: str, body: str) -> list[str]:
 def _guide_group_ready(group: str, env: dict[str, str]) -> bool:
     """模型分组是否已配好：任一 provider 的必需 key 齐全（含别名），语义与设置页一致。"""
     try:
-        spec = model_group(group)
+        spec = _media_ui_spec(group)
     except Exception:  # noqa: BLE001
         return False
     return any(all(_key_configured(k, env) for k in prov['keys'] if k.get('required'))
@@ -1452,38 +1481,77 @@ async def api_env_save(req: EnvUpdateRequest):
 # ═══════════════════════════════════════════════════════════════════════
 
 INSTALL_TOOL = SHARED_SCRIPTS / "install_tool.py"
+from environment_install import EnvironmentInstalls, safe_output as _safe_env_output
+
 _ENV_TOOLS_CACHE: dict = {"ts": 0.0, "data": None}
-_ENV_JOBS: dict[str, dict] = {}
+_ENV_CHECK_LOCK = threading.Lock()
+
+
+def _env_install_finished():
+    _ENV_TOOLS_CACHE["ts"] = 0.0
+
+
+_ENV_INSTALLS = EnvironmentInstalls(INSTALL_TOOL, PROJECT_ROOT, sys.executable, DATA_DIR, _env_install_finished)
+
+
+def _check_env_tools(refresh: bool = False):
+    requested_at = time.time()
+    with _ENV_CHECK_LOCK:
+        # Reuse a check that finished while this caller was waiting, even for
+        # refresh. A slow request must not cause several concurrent probes.
+        cached = _ENV_TOOLS_CACHE["data"]
+        if cached and (_ENV_TOOLS_CACHE["ts"] >= requested_at or
+                       (not refresh and time.time() - _ENV_TOOLS_CACHE["ts"] < 15)):
+            return cached
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(INSTALL_TOOL), "--python", sys.executable, "--json", "check"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=240, cwd=str(PROJECT_ROOT),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "环境检测超过 240 秒；请稍后重新检测，安装任务不会因此中断")
+        if proc.returncode != 0 or not (proc.stdout or "").strip():
+            detail = _safe_env_output((proc.stderr or "").strip(), PROJECT_ROOT, DATA_DIR)[-600:]
+            raise HTTPException(500, f"环境检测失败：{detail or '无输出'}")
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            raise HTTPException(500, "环境检测没有返回有效结果，请重新检测")
+        data["cachedAt"] = int(time.time())
+        _ENV_TOOLS_CACHE.update({"ts": time.time(), "data": data})
+        return data
 
 
 @app.get("/api/env/tools")
 async def api_env_tools(refresh: bool = False):
-    """环境体检：引擎 check --json（15 秒缓存；refresh=1 强制重测）。"""
-    if not refresh and _ENV_TOOLS_CACHE["data"] and time.time() - _ENV_TOOLS_CACHE["ts"] < 15:
-        return _ENV_TOOLS_CACHE["data"]
-    try:
-        proc = await asyncio.to_thread(lambda: subprocess.run(
-            [sys.executable, str(INSTALL_TOOL), "--json", "check"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=240, cwd=str(PROJECT_ROOT)))
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "环境体检超时，请稍后再试")
-    if proc.returncode != 0 or not (proc.stdout or "").strip():
-        raise HTTPException(500, f"环境体检失败：{(proc.stderr or '').strip()[-300:] or '无输出'}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"体检输出解析失败：{e}")
-    data["cachedAt"] = int(time.time())
-    _ENV_TOOLS_CACHE.update({"ts": time.time(), "data": data})
-    return data
+    """检测当前后端的解释器；单次检测共享，15 秒缓存。"""
+    return await asyncio.to_thread(_check_env_tools, refresh)
 
 
 class EnvInstallRequest(BaseModel):
-    id: str
+    model_config = {"extra": "forbid"}
+    id: str | None = Field(default=None, max_length=64)
+    ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
 
 
 _INSTALL_IDS_CACHE: dict = {"ts": 0.0, "ids": frozenset()}
+_INSTALL_CATALOG_CACHE: dict = {"ts": 0.0, "tools": {}}
+
+
+def _install_tool_catalog() -> dict[str, dict]:
+    if _INSTALL_CATALOG_CACHE["tools"] and time.time() - _INSTALL_CATALOG_CACHE["ts"] < 300:
+        return _INSTALL_CATALOG_CACHE["tools"]
+    try:
+        p = subprocess.run([sys.executable, str(INSTALL_TOOL), "--python", sys.executable, "--json", "list"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=30, cwd=str(PROJECT_ROOT), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        tools = {t["id"]: t for t in (json.loads(p.stdout).get("tools") or []) if isinstance(t, dict) and t.get("id")}
+        if p.returncode == 0 and tools:
+            _INSTALL_CATALOG_CACHE.update(ts=time.time(), tools=tools)
+    except Exception:  # noqa: BLE001
+        pass
+    return _INSTALL_CATALOG_CACHE["tools"]
 
 
 def _install_tool_ids() -> frozenset[str]:
@@ -1491,13 +1559,7 @@ def _install_tool_ids() -> frozenset[str]:
     只按正则放行的话，`--help` 这类带横线的串会被 argparse 当选项吃掉。"""
     if _INSTALL_IDS_CACHE["ids"] and time.time() - _INSTALL_IDS_CACHE["ts"] < 300:
         return _INSTALL_IDS_CACHE["ids"]
-    try:
-        p = subprocess.run([sys.executable, str(INSTALL_TOOL), "--json", "list"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30, cwd=str(PROJECT_ROOT))
-        ids = frozenset(t["id"] for t in (json.loads(p.stdout).get("tools") or []) if t.get("id"))
-    except Exception:  # noqa: BLE001
-        return _INSTALL_IDS_CACHE["ids"]
+    ids = frozenset(_install_tool_catalog())
     if ids:
         _INSTALL_IDS_CACHE.update({"ts": time.time(), "ids": ids})
     return ids
@@ -1505,62 +1567,40 @@ def _install_tool_ids() -> frozenset[str]:
 
 @app.post("/api/env/install")
 async def api_env_install(req: EnvInstallRequest):
-    """后台安装（引擎 install）：立即返回 jobId，前端轮询进度。"""
-    tid = (req.id or "").strip()
-    known = await asyncio.to_thread(_install_tool_ids)
-    if tid not in known:
-        raise HTTPException(400, f"无效的工具 id：{tid[:40]!r}")
-    job_id = uuid.uuid4().hex[:16]
-    if len(_ENV_JOBS) >= 200:                   # 任务表不能无限长：清掉最老的已结束任务
-        for k, _ in sorted((kv for kv in _ENV_JOBS.items() if kv[1].get("ended")),
-                           key=lambda kv: kv[1]["ended"])[:100]:
-            _ENV_JOBS.pop(k, None)
-    job = {"jobId": job_id, "id": tid, "state": "running", "lines": [],
-           "result": None, "started": int(time.time()), "ended": None}
-    _ENV_JOBS[job_id] = job
+    """服务端串行队列；重复的待装/在装工具复用原任务。"""
+    if (req.id is None) == (req.ids is None):
+        raise HTTPException(400, "请提供一个工具 id 或一组 ids")
+    ids = [(tid or "").strip() for tid in (req.ids or [req.id])]
+    catalog = await asyncio.to_thread(_install_tool_catalog)
+    try:
+        return _ENV_INSTALLS.enqueue(ids, catalog)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
 
-    def _run() -> None:
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, str(INSTALL_TOOL), "--json", "install", tid],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", cwd=str(PROJECT_ROOT))
-            # stdout 必须**并发**抽干：串行地先读完 stderr 再读 stdout，子进程一旦往 stdout
-            # 写满管道缓冲（64K）就会阻塞，而我们还堵在 stderr 上——双向死锁。
-            _out: list[str] = []
-            t_out = threading.Thread(target=lambda: _out.append(proc.stdout.read() or ""), daemon=True)
-            t_out.start()
-            for line in proc.stderr:            # 引擎进度日志走 stderr
-                line = line.rstrip()
-                if line:
-                    job["lines"] = (job["lines"] + [line])[-40:]   # 只留最近 40 行（换列表，避免读端正在序列化时被就地改）
-            try:
-                proc.wait(timeout=3600)
-            except subprocess.TimeoutExpired:   # 卡死的安装进程必须真的杀掉，否则线程与子进程永久泄漏
-                proc.kill()
-                proc.wait(timeout=30)
-                raise
-            t_out.join(timeout=30)
-            out = ("".join(_out)).strip()
-            if out:
-                job["result"] = (json.loads(out).get("results") or [None])[0]
-            job["state"] = "ok" if (job["result"] or {}).get("state") == "ok" else "fail"
-        except Exception as e:  # noqa: BLE001
-            job["state"] = "fail"
-            job["result"] = {"id": tid, "state": "fail", "detail": f"{type(e).__name__}: {e}"}
-        finally:
-            job["ended"] = int(time.time())
-            _ENV_TOOLS_CACHE["ts"] = 0.0        # 装完让下一次体检不吃旧缓存
 
-    threading.Thread(target=_run, daemon=True).start()
-    return {"jobId": job_id, "id": tid, "state": "running"}
+@app.get("/api/env/jobs")
+async def api_env_jobs():
+    """重新打开页面/恢复网络时找回本服务全部进行中及近期终态任务。"""
+    return _ENV_INSTALLS.list()
+
+
+@app.post("/api/env/job/{job_id}/retry")
+async def api_env_retry(job_id: str):
+    catalog = await asyncio.to_thread(_install_tool_catalog)
+    try:
+        return _ENV_INSTALLS.retry(job_id, catalog)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
 
 
 @app.get("/api/env/job/{job_id}")
 async def api_env_job(job_id: str):
-    """查安装进度：running / ok / fail + 最近日志行 + 最终结果。"""
-    job = _ENV_JOBS.get(job_id)
+    """读取阶段、真实日志、耗时与终态；连接失败本身不是安装失败。"""
+    job = _ENV_INSTALLS.get(job_id)
     if not job:
         raise HTTPException(404, "任务不存在（服务可能重启过）")
     return job
@@ -1575,7 +1615,7 @@ def _mask_key(v: str) -> str:
     v = (v or "").strip()
     if not v:
         return ""
-    return f"«{v[:5]}…{v[-4:]}»" if len(v) > 14 else "«已配置»"
+    return f"{v[:5]}…{v[-4:]}" if len(v) > 14 else "已配置"
 
 
 _CHAT_PROTOCOLS = {'openai': 'openai', 'anthropic': 'anthropic', 'relay': 'anthropic'}
@@ -1677,7 +1717,9 @@ def _model_channels() -> dict:
         {"order": 0, "name": "自带字幕", "sub": "视频自带 SRT/VTT 时直接读", "type": "脚本层",
          "model": "—", "baseUrl": "—", "keyMasked": "—", "role": "免配", "result": "优先"},
         {"slot": "siliconflow", "order": 1, "name": "siliconflow", "sub": "硅基流动", "type": "openai",
-         "model": "SenseVoiceSmall", "baseUrl": "https://api.siliconflow.cn/v1",
+         "model": (env.get("SILICONFLOW_ASR_MODEL") or "").strip() or "XingChenAGI/XingChenGSR-V1.0",
+         "baseUrl": (env.get("SILICONFLOW_BASE_URL") or "").strip() or "https://api.siliconflow.cn/v1",
+         "modelEditable": True, "baseEditable": True,
          "keyMasked": _mask_key(env.get("SILICONFLOW_API_KEY", "")), "role": "主",
          "result": "已配置" if sf else "缺 key"},
     ]
@@ -1686,7 +1728,7 @@ def _model_channels() -> dict:
         import model_registry as _mr  # skills/shared/scripts 已在 sys.path 上
         _setting_env = {"video": "VIDEO_PROVIDER", "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}
         for _gid, _ch in (("image", "image"), ("video", "video"), ("music", "music"), ("voice", "speech")):
-            _spec = _mr.MODEL_GROUPS[_gid]
+            _spec = _media_ui_spec(_gid)
             _chosen = (env.get(_setting_env.get(_gid, ""), "") or "").strip()
             _rows = []
             for _p in _spec["providers"]:
@@ -1929,7 +1971,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
     if ch0 in ("speech", "image", "video", "music"):
         import model_registry as _mr2
         _gid0 = {"speech": "voice", "image": "image", "video": "video", "music": "music"}[ch0]
-        _spec0 = _mr2.MODEL_GROUPS[_gid0]
+        _spec0 = _media_ui_spec(_gid0)
         _by_id = {p["id"]: p for p in _spec0["providers"]}
         _setting0 = {"video": "VIDEO_PROVIDER", "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}.get(_gid0)
         _mupd: dict[str, str] = {}
@@ -2011,6 +2053,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
         saved_base = (_cur_env.get(_be, '') or '').strip().rstrip('/') if _be else ''
         if slot == 'anthropic' and not saved_base:
             saved_base = 'https://api.anthropic.com'
+        elif slot == 'siliconflow' and not saved_base:
+            saved_base = 'https://api.siliconflow.cn/v1'
         if base and _be and not key and base != saved_base \
                 and (_cur_env.get(_ke, '') or '').strip():
             raise HTTPException(400, f'更换 Base URL 时必须重新填写 API Key（{slot}）')
@@ -2050,6 +2094,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
                 updates['SILICONFLOW_BASE_URL'] = base
             if key:
                 updates['SILICONFLOW_API_KEY'] = key
+            if model:
+                updates['SILICONFLOW_ASR_MODEL'] = model
         elif slot == 'custom' and is_chat:
             if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,23}', name):
                 raise HTTPException(400, f'供应商名只能用小写字母/数字/横线（最长24位）：{name[:30] or "（空）"}')
@@ -2231,7 +2277,7 @@ async def api_model_schedules(req: ModelSchedulesRequest):
 def _image_reverse_providers() -> list[ImageReverseProvider]:
     """Resolve only saved chat channels; request data can never choose a URL or key."""
     with _MODEL_CONFIG_LOCK:
-        channels = _model_channels().get('chat', {}).get('rows', [])
+        channels = _model_channels().get('channels', {}).get('chat', {}).get('rows', [])
         credentials = _openclaw_provider_creds()
         result = []
         for row in channels:
@@ -2248,21 +2294,53 @@ def _image_reverse_providers() -> list[ImageReverseProvider]:
 @app.get('/api/image-reverse/config')
 async def api_image_reverse_config():
     return {'providers': [provider.public() for provider in _image_reverse_providers()],
+            'modelRef': _image_reverse_model_ref(),
             'maxBytes': IMAGE_REVERSE_MAX_BYTES, 'maxPixels': IMAGE_REVERSE_MAX_PIXELS,
             'formats': list(IMAGE_REVERSE_FORMATS.values())}
+
+
+def _image_reverse_model_ref() -> str:
+    try:
+        value = json.loads((DATA_DIR / 'image-reverse-config.json').read_text(encoding='utf-8'))
+        ref = value.get('modelRef', '') if isinstance(value, dict) else ''
+        return ref if isinstance(ref, str) else ''
+    except (OSError, ValueError):
+        return ''
+
+
+class ImageReverseConfigRequest(BaseModel):
+    modelRef: str = Field(max_length=500)
+
+
+@app.post('/api/image-reverse/config')
+async def api_image_reverse_config_save(req: ImageReverseConfigRequest):
+    with _MODEL_CONFIG_LOCK:
+        if req.modelRef and req.modelRef not in {
+            f'{p.id}/{p.model}' for p in _image_reverse_providers() if p.configured
+        }:
+            raise HTTPException(400, '请选择完整配置且已保存的图片理解模型。')
+        path = DATA_DIR / 'image-reverse-config.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps({'modelRef': req.modelRef}), encoding='utf-8')
+        temporary.replace(path)
+    return {'modelRef': req.modelRef}
 
 
 @app.post('/api/image-reverse')
 async def api_image_reverse(
     image: UploadFile = File(...), provider: str = Form(''), mode: str = Form('auto'),
-    language: str = Form('zh'), instruction: str = Form(''),
+    language: str = Form('zh'), instruction: str = Form(''), modelRef: str = Form(''),
 ):
     """Metadata first; when absent, use an explicitly selected saved vision channel."""
     try:
         raw = await image.read(IMAGE_REVERSE_MAX_BYTES + 1)
     finally:
         await image.close()
-    return await asyncio.to_thread(reverse_image, raw, _image_reverse_providers(),
+    providers = _image_reverse_providers()
+    if modelRef and not any(p.id == provider and f'{p.id}/{p.model}' == modelRef for p in providers):
+        raise HTTPException(409, '所选视觉模型配置已改变，请重新选择；不会替换为其他模型。')
+    return await asyncio.to_thread(reverse_image, raw, providers,
                                    provider, mode, language, instruction)
 
 
@@ -2454,8 +2532,10 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
     models: list[str] = []
     for it in (items or []):
         mid = it.get("id") if isinstance(it, dict) else (it if isinstance(it, str) else "")
-        mid = str(mid or "").strip()[:120]
-        if mid and mid not in models:
+        if (not isinstance(mid, str) or not mid or len(mid) > 120 or mid != mid.strip()
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in mid) or (key and key in mid)):
+            continue
+        if mid not in models:
             models.append(mid)
         if len(models) >= 500:
             break
@@ -2665,33 +2745,115 @@ class ImportApplyRequest(BaseModel):
     previewToken: str = ""
 
 
+def _validated_import_preview(req: ImportApplyRequest):
+    """Call under the model lock; credentials are reread only for a valid unchanged preview."""
+    slot = (req.slot or 'openai').strip()
+    if slot not in _IMPORT_SLOT_ENV:
+        raise HTTPException(400, '目标槽位不认识')
+    if not (req.id or '').strip():
+        raise HTTPException(400, '没有选择要导入的配置')
+    path = _import_source_path(req.source, req.path)
+    preview = _IMPORT_PREVIEWS.get(req.previewToken)
+    if not preview or preview['expires'] <= time.monotonic():
+        raise HTTPException(409, '请先读取并确认预览；预览已过期或不存在')
+    if any(preview[k] != value for k, value in
+           (('source', req.source), ('path', str(path)), ('slot', slot), ('id', req.id))):
+        raise HTTPException(409, '来源、候选或目标槽位已变化，请重新预览')
+    cands, _errors = local_config_import.read_source(req.source, path)
+    hits = [c for c in cands if c['id'] == req.id]
+    if len(hits) != 1 or _import_digest(hits[0]) != preview['candidate']:
+        raise HTTPException(409, '来源内容已变化，请重新预览')
+    hit = hits[0]
+    reason = _import_compatible(slot, hit)
+    if reason:
+        raise HTTPException(400, f'该来源配置不可用：{reason}')
+    try:
+        if _import_target_digest() != preview['target']:
+            raise HTTPException(409, '当前配置已变化，请重新预览覆盖内容')
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(500, '无法读取当前配置，请检查访问权限') from None
+    return preview, hit, path, slot
+
+
+def _public_import_candidate(candidate, slot, token, env):
+    """Project source credentials into a masked, explicit model-selection preview."""
+    key = candidate.get('key') or ''
+    value = {k: v for k, v in candidate.items() if k != 'key'}
+    value.update(targetSlot=slot, compatible=True, skipReason='', previewToken=token,
+                 overwrites=_import_overwrites(slot, candidate, env))
+    value['baseUrl'] = local_config_import.public_base_url(candidate['baseUrl'])
+    def redact(item):
+        if isinstance(item, str):
+            return item.replace(key, '••••') if key else item
+        if isinstance(item, list):
+            return [redact(v) for v in item]
+        if isinstance(item, dict):
+            return {k: redact(v) for k, v in item.items()}
+        return item
+    return redact(value)
+
+
+@app.post('/api/models/import/discover')
+async def api_import_discover(req: ImportApplyRequest):
+    """Enumerate the exact previewed source with its server-only credentials; no inference or writes."""
+    with _MODEL_CONFIG_LOCK:
+        preview, hit, _path, slot = _validated_import_preview(req)
+        base, key, protocol = hit.get('baseUrl') or '', hit.get('key') or '', hit.get('protocol') or ''
+        if not base:
+            raise HTTPException(400, '来源缺少 Base URL；仅有 Key 无法确定模型列表地址')
+        if not key:
+            raise HTTPException(400, '来源没有可用 API Key，请先补全来源配置并重新预览')
+        if protocol not in ('openai', 'anthropic'):
+            raise HTTPException(400, '来源协议不支持模型列表枚举')
+    # Reuse the existing SSRF, no-redirect, authentication and protocol restrictions.
+    discovered = await asyncio.to_thread(_discover_models, base, key, protocol)
+    with _MODEL_CONFIG_LOCK:
+        # A slow provider response must not extend expiry or revive changed source/target files.
+        current, _hit, _path, _slot = _validated_import_preview(req)
+        models = [m for m in discovered.get('models', []) if isinstance(m, str) and m.strip()
+                  and len(m) <= 120 and not any(c in m for c in ('\n', '\r', '\x00')) and key not in m]
+        models = list(dict.fromkeys(models))[:500]
+        result = {k: discovered[k] for k in ('ok', 'kind', 'message', 'elapsedMs') if k in discovered}
+        result['message'] = _redact(result.get('message'), key)
+        result['models'] = models
+        if result.get('ok') and not models:
+            result.update(ok=False, kind='empty', message='接口没有返回可使用的模型 ID，请检查来源配置或手动填写')
+        if result.get('ok'):
+            current['discoveredModels'] = models
+        result.update(channel='chat', slot=slot, protocol=protocol,
+                      source=local_config_import.public_base_url(base).replace(key, '••••'),
+                      fetchedAt=int(time.time()), keySource='source', previewToken=req.previewToken)
+    return result
+
+
+class ImportModelRequest(ImportApplyRequest):
+    model: Annotated[str, Field(strict=True, min_length=1, max_length=120)]
+
+
+@app.post('/api/models/import/model')
+async def api_import_model(req: ImportModelRequest):
+    """Bind a discovered ID to a new confirmation token, preserving the original deadline."""
+    model = req.model.strip()
+    with _MODEL_CONFIG_LOCK:
+        preview, hit, _path, slot = _validated_import_preview(req)
+        if not model or model not in preview.get('discoveredModels', []):
+            raise HTTPException(400, '请先获取此来源的模型列表，并选择返回的真实模型 ID')
+        token = uuid.uuid4().hex
+        _IMPORT_PREVIEWS[token] = {**preview, 'model': model, 'selectedModel': model,
+                                  'discoveredModels': list(preview['discoveredModels'])}
+        candidate = {**hit, 'model': model,
+                     'note': '已选择该来源返回的模型 ID；确认导入后才保存，仍沿用原预览十分钟期限。'}
+        return _public_import_candidate(candidate, slot, token, _read_env())
+
+
 @app.post("/api/models/import/apply")
 async def api_import_apply(req: ImportApplyRequest):
     """把选中候选写入指定槽位：先全部校验，再 .env 原子写 + chat 同步 openclaw。"""
-    slot = (req.slot or "openai").strip()
-    if slot not in _IMPORT_SLOT_ENV:
-        raise HTTPException(400, "目标槽位不认识")
-    if not (req.id or "").strip():
-        raise HTTPException(400, "没有选择要导入的配置")
-    path = _import_source_path(req.source, req.path)
     with _MODEL_CONFIG_LOCK:
-        preview = _IMPORT_PREVIEWS.get(req.previewToken)
-        if not preview or preview['expires'] <= time.monotonic():
-            raise HTTPException(409, '请先读取并确认预览；预览已过期或不存在')
-        if any(preview[k] != value for k, value in
-               (('source', req.source), ('path', str(path)), ('slot', slot), ('id', req.id))):
-            raise HTTPException(409, '来源、候选或目标槽位已变化，请重新预览')
-        cands, _errors = local_config_import.read_source(req.source, path)
-        hits = [c for c in cands if c['id'] == req.id]
-        if len(hits) != 1 or _import_digest(hits[0]) != preview['candidate']:
-            raise HTTPException(409, '来源内容已变化，请重新预览')
-        hit = hits[0]
-        reason = _import_compatible(slot, hit)
-        if reason:
-            raise HTTPException(400, f'该配置不可导入：{reason}')
+        preview, hit, path, slot = _validated_import_preview(req)
         try:
-            if _import_target_digest() != preview['target']:
-                raise HTTPException(409, '当前配置已变化，请重新预览覆盖内容')
             oc = openclaw_state_dir() / 'openclaw.json'
             data = json.loads(oc.read_text(encoding='utf-8')) if oc.is_file() else {}
             keep = set(data.get('models', {}).get('providers', {}))
@@ -2704,8 +2866,11 @@ async def api_import_apply(req: ImportApplyRequest):
             raise HTTPException(400, 'Base URL 不合法')
         base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
         updates = {base_env: base, key_env: key}
-        if hit.get('model'):
-            updates[model_env] = hit['model']
+        selected_model = preview.get('selectedModel')
+        if selected_model and selected_model not in preview.get('discoveredModels', []):
+            raise HTTPException(409, '选择的模型已不在最新来源列表中，请重新选择')
+        if selected_model or hit.get('model'):
+            updates[model_env] = selected_model or hit['model']
         note = _commit_model_configuration(updates, {slot: {
             'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep)
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
@@ -2835,6 +3000,21 @@ def _chat_message(req: ChatRequest) -> str:
     if specs:
         message += '\n\n〔本轮指定技能〕\n' + '\n'.join(specs)
         message += '\n先读取对应 SKILL.md，按原文要求执行；无法执行时说明缺少什么，不要把读取说明当成执行成功。'
+        visual = {'comparison-card', 'ai-image-gen', 'ecom-details-image', 'card-design'}
+        if any(name in visual or name.startswith(('card-', 'poster-')) for name in specs):
+            image_env = _read_env()
+            configured = all(_is_set(image_env.get(key)) for key in ('IMG_BASE_URL', 'IMG_MODEL', 'IMG_API_KEY'))
+            state = '已填写配置，尚未证明本轮可调用' if configured else '配置不完整，需要在设置 → 生图通道补充地址、模型和 API Key'
+            message += ('\n\n〔本轮视觉创作协作〕\n'
+                '主动根据任务说明出图方式，不只询问素材：文字、参数和对比表优先确定性排版；'
+                '需要插画、场景或商品背景时，主动建议 ai-image-gen 配合排版。用户已明确要求生成配图时，'
+                '按生图技能执行，不重复询问是否要生图；未选择 AI 配图时说明可选方案，不擅自调用付费工具。'
+                'ai-image-gen 调用联网供应商，可能计费，绝不是本地免费生成；本地 SVG 手绘是另一种确定性方案，不能混称 AI 生图。'
+                f'本轮必须使用准确源码脚本离线核验："{sys.executable}" "{PROJECT_ROOT / "skills/shared/scripts/ai_image.py"}" check --dedicated-channel --env-file "{DATA_DIR / ".env"}"；'
+                '不得改用workspace/shared的旧脚本，也不得删除--dedicated-channel。这是离线核验，不是出图，也不证明联网可用；不读取或打印.env原文。'
+                '先检查通道，再准备主体、构图、风格和尺寸；只追问缺失的对比对象或必要事实，其他采用合理默认并说明。'
+                f'当前生图通道：{state}。核验只认IMG_*，不要把聊天Key别名结果当作生图工坊可用。'
+                '不要向用户索取 Key 文本；引导在设置中填写。没有工具成功回执和真实产物时不能声称已经生成。')
     requirements = _skill_requirements_context(req, specs)
     if requirements:
         message += '\n\n' + requirements
@@ -2895,6 +3075,9 @@ def _resolve_transport(sk: str) -> str:
     """
     if (OPENCLAW_SESSIONS_DIR / f"{_openclaw_session_id(sk)}.jsonl").is_file():
         return "cli"
+    from easel.session_trace import has_session
+    if has_session(OPENCLAW_SESSIONS_DIR, sk):
+        return 'cli'
     try:
         if _transport_pin_file(sk).read_text(encoding="utf-8").strip() == "http":
             return "http"
@@ -3129,11 +3312,15 @@ async def api_chat_stream(req: ChatRequest):
     message = _chat_message(req)
     requested_model_ref = req.modelRef
     requested_thinking_level = req.thinkingLevel
+    import office_controls
     if requested_model_ref is not None:
-        import office_controls
         await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                 req.sessionId, requested_model_ref,
-                                transport='cli' if requested_thinking_level is not None else None)
+                                transport='cli' if requested_thinking_level is not None else None,
+                                thinking_level=requested_thinking_level)
+    elif requested_thinking_level is not None:
+        capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], req.sessionId, transport='cli')
+        office_controls.validate_thinking_level(capability, None, requested_thinking_level)
     import skill_audit
     specs = _selected_skill_specs(req)
     if req.sessionId:
@@ -3154,6 +3341,8 @@ async def api_chat_stream(req: ChatRequest):
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
         reasoning_stream = ReasoningStream()
+        http_text_stream = ThinkingTextStream()
+        raw_text_stream = ThinkingTextStream()
         turn_error = None
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
@@ -3258,13 +3447,24 @@ async def api_chat_stream(req: ChatRequest):
                                 delta = {}
                             # 正文来自当前 HTTP 响应。公开 reasoning/summary 字段
                             # 已在上方独立映射，单轮只选一个来源以防 raw/HTTP 重叠。
-                            c = visible_text(delta.get("content"))
+                            wrapped, c = http_text_stream.push(visible_text(delta.get("content")))
+                            rc = reasoning_stream.push('http-tag', wrapped)
+                            if rc:
+                                run_info['thinking_chars'] += len(rc)
+                                _emit('thinking', rc)
                             if c:
                                 _emit("token", c)
                             if delta.get("tool_calls") and not tool_noted:
                                 tool_noted = True
                                 to_client("activity", "🔧 正在执行操作…")
                 # EOF alone is not successful SSE completion, even after text.
+                wrapped, tail = http_text_stream.push('', final=True)
+                rc = reasoning_stream.push('http-tag', wrapped)
+                if rc:
+                    run_info['thinking_chars'] += len(rc)
+                    _emit('thinking', rc)
+                if tail:
+                    _emit('token', tail)
                 # Persist the same structured error for live and recovery paths.
                 if not saw_done:
                     _emit('error', gateway_error(fallback='gateway_stream_interrupted'))
@@ -3310,7 +3510,8 @@ async def api_chat_stream(req: ChatRequest):
                 # Recheck the exact choice, running gateway and approved identity
                 # after queueing. Never remove the override or switch transports.
                 await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
-                                        sk, requested_model_ref, transport=selected_transport, credentials=credentials)
+                                        sk, requested_model_ref, transport=selected_transport, credentials=credentials,
+                                        thinking_level=requested_thinking_level)
             _heal_openclaw_session(sk)
 
             # _resolve_transport 里既有 stat 又有阻塞 urllib 探针（最多 3s），必须丢线程：
@@ -3337,23 +3538,38 @@ async def api_chat_stream(req: ChatRequest):
                 proc = _GatewayHttpProc()
             else:
                 try:
-                    cmd = openclaw_base_cmd() + [
-                        "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
-                        "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                        "--thinking", requested_thinking_level or THINKING_LEVEL,
-                        "--timeout", str(TIMEOUT_CHAT), "--message", message,
-                    ]
-                    if requested_model_ref is not None:
-                        cmd.extend(['--model', requested_model_ref])
-                    env = credentials.environment(_proxy_env())
-                    # Raw streaming belongs to the gateway process. Only pass
-                    # whether the local question bridge can display ask_user.
-                    _cards_ok = question_bridge_supported is not None and question_bridge_supported()
-                    env["EASEL_ASKUSER_CARDS"] = "1" if _cards_ok else "0"
-                    proc = subprocess.Popen(
-                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        cwd=str(PROJECT_ROOT), text=True, bufsize=1, env=env,
-                    )
+                    native_client = await asyncio.to_thread(_native_agent_client, credentials)
+                    if native_client is not None:
+                        from easel.gateway_agent import GatewayAgentProc
+                        params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
+                                  'sessionId': _openclaw_session_id(sk), 'message': message,
+                                  'thinking': requested_thinking_level or THINKING_LEVEL,
+                                  'deliver': False, 'timeout': TIMEOUT_CHAT,
+                                  'idempotencyKey': turn_id}
+                        if requested_model_ref is not None:
+                            params['model'] = requested_model_ref
+                        proc = GatewayAgentProc(native_client,
+                            lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT)
+                    else:
+                        proc = None
+                    if proc is None:
+                        cmd = openclaw_base_cmd() + [
+                            "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
+                            "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
+                            "--thinking", requested_thinking_level or THINKING_LEVEL,
+                            "--timeout", str(TIMEOUT_CHAT), "--message", message,
+                        ]
+                        if requested_model_ref is not None:
+                            cmd.extend(['--model', requested_model_ref])
+                        env = credentials.environment(_proxy_env())
+                        # Raw streaming belongs to the gateway process. Only pass
+                        # whether the local question bridge can display ask_user.
+                        _cards_ok = question_bridge_supported is not None and question_bridge_supported()
+                        env["EASEL_ASKUSER_CARDS"] = "1" if _cards_ok else "0"
+                        proc = subprocess.Popen(
+                            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            cwd=str(PROJECT_ROOT), text=True, bufsize=1, env=env,
+                        )
                 except Exception as e:
                     error = gateway_error(type(e).__name__ + ': ' + str(e))
                     _save_turn(pk, "done", "", {
@@ -3372,9 +3588,10 @@ async def api_chat_stream(req: ChatRequest):
             SENTINEL = object()
             stdout_lines = []
             run_info: dict = {"stop_reason": None, "last_ev": None, "saw_message_end": False,
-                              "run_id": None,
+                              "run_id": getattr(proc, '_office_run_id', None),
                               "fetch_count": 0, "token_chars": 0, "thinking_chars": 0,
                               "delegated": False, "ignored_foreign_events": 0}
+            usage_observations = []
 
             def _drain_stdout():
                 try:
@@ -3469,6 +3686,9 @@ async def api_chat_stream(req: ChatRequest):
                 loop.run_in_executor(None, _question_poll)
 
             def _handle(line: str):
+                nonlocal raw_text_stream
+                if hasattr(proc, 'clean_end'):
+                    run_info['run_id'] = proc._office_run_id
                 o = _raw_event_for_run(line, run_info["run_id"], _openclaw_session_id(sk))
                 if o is None:
                     # 属其它并发 run 的事件（或无法解析）：绝不混入本轮可见流/收尾诊断，仅计数。
@@ -3488,12 +3708,28 @@ async def api_chat_stream(req: ChatRequest):
                     run_info["run_id"] = rid
                     proc._office_run_id = rid
                 ev, et, delta = o.get("event"), o.get("evtType"), visible_text(o.get("delta"))
+                stamp = o.get('ts')
+                if (isinstance(stamp, (int, float)) and not isinstance(stamp, bool)
+                        and math.isfinite(stamp) and len(usage_observations) < 20000
+                        and (ev == 'assistant_message_end' or
+                             (ev in ('assistant_text_stream', 'assistant_thinking_stream')
+                              and et in ('text_delta', 'thinking_delta') and delta))):
+                    usage_observations.append({'ts': stamp, 'kind': 'end' if ev == 'assistant_message_end' else 'output'})
                 # 记录最后一个 raw 事件：正常收尾 last_ev == assistant_message_end；
                 # 若停在 text_delta/thinking_delta 说明输出或思考流被中断、没正常收尾（本次排查关键信号）。
                 if ev:
                     run_info["last_ev"] = ev
                 if ev == "assistant_message_end":
                     run_info["saw_message_end"] = True
+                    if not is_http:
+                        wrapped, tail = raw_text_stream.push('', final=True)
+                        chunk = reasoning_stream.push('raw-tag', wrapped)
+                        if chunk:
+                            run_info['thinking_chars'] += len(chunk)
+                            _emit('thinking', chunk)
+                        if tail:
+                            run_info['token_chars'] += len(tail)
+                            _emit('token', tail)
                 if ev == 'assistant_thinking_stream':
                     if et == 'thinking_start':
                         reasoning_stream.reset('raw')
@@ -3504,12 +3740,21 @@ async def api_chat_stream(req: ChatRequest):
                         run_info['thinking_chars'] += len(chunk)
                         _emit('thinking', chunk)
                     return
+                if ev == 'assistant_text_stream' and et == 'text_start' and not is_http:
+                    raw_text_stream = ThinkingTextStream()
                 if not delta:
                     return
                 if ev == "assistant_text_stream" and et == "text_delta":
                     if is_http:
                         # HTTP 模式正文以 SSE 为准（那条才是本请求自己的响应流）。这里再发一遍
                         # 就是同一段内容进两次队列 —— 前端会看到每个字重复。
+                        return
+                    wrapped, delta = raw_text_stream.push(delta)
+                    chunk = reasoning_stream.push('raw-tag', wrapped)
+                    if chunk:
+                        run_info['thinking_chars'] += len(chunk)
+                        _emit('thinking', chunk)
+                    if not delta:
                         return
                     run_info["token_chars"] += len(delta)
                     run_info["text_tail"] = (run_info.get("text_tail", "") + delta)[-160:]
@@ -3606,8 +3851,25 @@ async def api_chat_stream(req: ChatRequest):
                     except Exception:
                         pass
                 sr = run_info.get("stop_reason")
+                native_result = getattr(proc, 'result', None)
+                if hasattr(proc, 'clean_end'):
+                    run_info['run_id'] = proc._office_run_id
+                if rc == 0 and isinstance(native_result, dict) and native_result.get('status') == 'ok':
+                    result = native_result.get('result')
+                    payloads = result.get('payloads', []) if isinstance(result, dict) else []
+                    canonical = '\n'.join(row['text'] for row in payloads
+                                          if isinstance(row, dict) and isinstance(row.get('text'), str) and not row.get('isError'))
+                    if canonical:
+                        run_info['text_tail'] = canonical[-160:]
+                    if canonical and canonical != ''.join(full_text):
+                        # Provider adapters may revise or reorder their deltas.
+                        # The native final payload is authoritative, not append-only.
+                        full_text[:] = [canonical]
+                        emitted = True
+                        to_client('text_snapshot', canonical)
                 if rc not in (0, None) and sk not in _STOPPED_CHAT and turn_error is None:
-                    to_client('error', gateway_error(''.join(stdout_lines)))
+                    native_error = getattr(proc, 'error_text', None)
+                    to_client('error', gateway_error(native_error or ''.join(stdout_lines), include_detail=bool(native_error)))
                 if not emitted and turn_error is None:
                     clean = redact_gateway_text(clean_agent_output("".join(stdout_lines)), credentials)
                     if clean:
@@ -3629,7 +3891,7 @@ async def api_chat_stream(req: ChatRequest):
                     elif sr == "tool_use":
                         note = ("\n\n---\n⚠️ 我刚做完这一步、**正要执行下一步操作时中断了**"
                                 "（本轮以工具调用结尾却没能继续，前端把它当成答完了）。回我「继续」我接着做。")
-                    elif run_info.get("last_ev") not in (None, "assistant_message_end"):
+                    elif not (is_http and run_info.get('http_done')) and not getattr(proc, 'clean_end', False) and run_info.get("last_ev") not in (None, "assistant_message_end"):
                         note = ("\n\n---\n⚠️ 这条**可能没写完**——模型的输出/思考流被中断、没有正常收尾"
                                 "（多为网络或模型代理把长回复的流掐断了）。回我「继续」，或重试。")
                     elif run_info.get("text_tail", "").rstrip()[-1:] in ("：", ":"):
@@ -3651,13 +3913,13 @@ async def api_chat_stream(req: ChatRequest):
                 clean_end = (not user_stopped and turn_error is None
                              and run_info.get('stop_reason') not in ('length', 'max_tokens', 'model_length', 'tool_use', 'content_filter', 'error')
                              and (bool(run_info.get('http_done')) if is_http
-                                  else run_info.get('last_ev') == 'assistant_message_end'))
+                                  else (getattr(proc, 'clean_end', False) or run_info.get('last_ev') == 'assistant_message_end')))
                 # Reaching finally while the child is alive means timeout, explicit
                 # stop, cancellation, or an internal stream failure. Never release
                 # the session locks while such a process can still write history.
                 if proc.poll() is None:
                     try:
-                        proc.terminate()
+                        await asyncio.to_thread(proc.terminate)
                     except OSError:
                         pass
                     try:
@@ -3668,6 +3930,10 @@ async def api_chat_stream(req: ChatRequest):
                             await asyncio.to_thread(proc.wait, timeout=2)
                         except (OSError, subprocess.TimeoutExpired):
                             pass
+                    if hasattr(proc, 'clean_end') and proc.poll() is None:
+                        # Native RPC disconnection does not end the gateway run.
+                        # Keep both locks until its worker confirms abort/final.
+                        await asyncio.to_thread(proc.wait)
                 # 诊断日志：每次对话流收尾都记一行，供事后定位「莫名停下」到底是哪种情况。
                 try:
                     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -3708,6 +3974,7 @@ async def api_chat_stream(req: ChatRequest):
                 })
                 if audit_context is not None:
                     try:
+                        audit_context['record']['_usageObservations'] = usage_observations
                         await asyncio.to_thread(skill_audit.finish, OUTPUTS_DIR, OPENCLAW_SESSIONS_DIR,
                                                 audit_context, ''.join(full_text),
                                                 'stopped' if user_stopped else 'interrupted' if timed_out or turn_error is not None or proc.poll() not in (0, None) else 'completed')
@@ -3786,8 +4053,8 @@ async def api_chat_stream(req: ChatRequest):
                 break
             idle_since = time.monotonic()
             t = item["t"]
-            if t == "token":
-                yield {"id": str(item["id"]), "event": "token", "data": json.dumps(item["text"], ensure_ascii=False)}
+            if t in ("token", "text_snapshot"):
+                yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "thinking":
                 yield {"id": str(item["id"]), "event": "thinking", "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "activity":
@@ -3870,7 +4137,7 @@ async def api_chat_stop(req: StopRequest):
     if proc is not None and proc.poll() is None:
         _STOPPED_CHAT.add(sk)          # 标记为用户停止，供 supervisor 正常收尾（不报「被中断」）
         try:
-            proc.terminate()
+            await asyncio.to_thread(proc.terminate)
         except OSError:
             pass
         try:
@@ -4163,9 +4430,11 @@ def _login_status(platform: str) -> dict:
     """读登录状态文件 + 二维码是否就绪。"""
     st = LOGIN_DIR / f'{platform}.json'
     data = {'state': 'unknown', 'message': ''}
+    marker = {}
     if st.is_file():
         try:
             d = json.loads(st.read_text(encoding="utf-8"))
+            marker = d
             data = {'state': d.get('state', 'unknown'), 'message': d.get('message', '')}
         except Exception:
             pass
@@ -4177,12 +4446,22 @@ def _login_status(platform: str) -> dict:
         if code is not None:
             data = {'state': 'error', 'message': f'登录流程已结束，但未返回成功结果。请重新连接（退出码 {code}）。'}
     qr = LOGIN_DIR / f'{platform}.png'
-    if data['state'] not in ('success', 'expired', 'error') and qr.is_file():
+    # New runners explicitly bind the image to this phase. A verification
+    # marker with qr="" must never resurrect a previously saved code.
+    show_image = (data['state'] in ('qr_ready', 'scanned', 'sms_required')
+                  or (data['state'] == 'verifying' and bool(marker.get('qr'))))
+    if show_image and qr.is_file():
         data['qr'] = f'_login/{platform}.png'
         try:
-            data['qrTs'] = int(qr.stat().st_mtime)   # 二维码 mtime 作缓存键：码每刷新一次就变，前端 img 随之刷新
+            data['qrTs'] = int(qr.stat().st_mtime * 1000)   # 毫秒缓存键，保留短时间内二维码刷新的区分
         except OSError:
             data['qrTs'] = 0
+        if marker.get('qrKind') in ('qr', 'page'):
+            data['qrKind'] = marker['qrKind']
+        for field in ('qrWidth', 'qrHeight'):
+            value = marker.get(field)
+            if type(value) is int and 0 < value <= 16384:
+                data[field] = value
     else:
         data['qr'] = ''
         data['qrTs'] = 0
@@ -4246,7 +4525,7 @@ def _invalidate_account_check(platform: str) -> None:
 def _require_account_available(platform: str) -> None:
     with _PUBLISH_LOCK:
         if platform in _ACCOUNT_CLEARING:
-            raise HTTPException(409, '该账号正在退出，请完成后重试')
+            raise HTTPException(409, '该账号正在退出或重新连接，请完成后重试')
         if platform in _PUBLISH_ACTIVE:
             raise HTTPException(409, '该平台正在发布或核实作品，请等待结束后再操作账号')
 
@@ -4317,14 +4596,49 @@ def _run_owned_whoami(platform: str, command: list[str], expected_generation: st
                     _WHOAMI_PROCESSES.pop(platform, None)
 
 
+async def _restart_owned_login(platform: str, key: str) -> None:
+    """Reserve one account while stopping its registered login off the loop."""
+    with _PUBLISH_LOCK:
+        _require_account_available(platform)
+        existing = LOGIN_PROCESSES.get(key)
+        if existing is None or existing.poll() is not None:
+            return
+        with _WHOAMI_LOCK:
+            if any(process.poll() is None for process in _WHOAMI_PROCESSES.get(platform, [])):
+                raise HTTPException(409, '该平台正在核验账号，请等待结束后再重新连接')
+        _ACCOUNT_CLEARING.add(platform)
+
+    def stop():
+        from easel.install_runner import terminate_phase_tree
+        try:
+            terminate_phase_tree(existing)
+            existing.wait(timeout=5)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise HTTPException(500, '旧登录流程未能停止，请关闭该平台登录窗口后重试') from exc
+        if existing.poll() is None:
+            raise HTTPException(500, '旧登录流程仍在运行，请关闭该平台登录窗口后重试')
+
+    try:
+        await asyncio.to_thread(stop)
+        with _PUBLISH_LOCK:
+            if LOGIN_PROCESSES.get(key) is not existing:
+                raise HTTPException(409, '登录流程已变化，请重新连接')
+            LOGIN_PROCESSES.pop(key, None)
+    finally:
+        with _PUBLISH_LOCK:
+            _ACCOUNT_CLEARING.discard(platform)
+
+
 @app.post("/api/login/{platform}")
-async def api_login_start(platform: str, visibleBrowser: bool = False):
+async def api_login_start(platform: str, visibleBrowser: bool = False, restart: bool = False):
     """启动某平台登录：浏览器平台后台跑 QR runner，轮询到二维码就绪即返回。"""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
     if visibleBrowser and cfg.get('backend') != 'xhs':
         raise HTTPException(400, '此平台暂不支持在浏览器窗口中登录')
+    if restart and cfg.get('backend') not in ('unsupported', 'wechat-oa'):
+        await _restart_owned_login(platform, platform)
     # Reserve the profile until the child is registered. No browser wait or
     # await belongs inside this lock; logout can then stop the owned child.
     with _PUBLISH_LOCK:
@@ -4498,12 +4812,14 @@ def _stop_mp_login_on_shutdown() -> None:
 
 
 @app.post("/api/accounts/{platform}/mp-login")
-async def api_mp_login_start(platform: str):
+async def api_mp_login_start(platform: str, restart: bool = False):
     """启动「公众号后台」扫码登录（数据中心取数用，管理员级会话，独立于 AppID 凭证）。
     默认直连起 Playwright 出二维码；受限网络可设 EASEL_PROXY / https_proxy 走正向代理。"""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get("backend") != "wechat-oa":
         raise HTTPException(404, "该平台不使用公众号后台登录")
+    if restart:
+        await _restart_owned_login(platform, 'wechat-oa-mp')
     with _PUBLISH_LOCK:
         _require_account_available(platform)
         # 重复点击复用正在进行的登录，不能删除其二维码或启动第二个 Chromium。
@@ -4602,7 +4918,8 @@ async def api_account_whoami(platform: str):
     if not confident:
         # 校验失败/无有效输出 → **不缓存、不删标记**，返回「上次已知」登录态（读标记）。
         # 避免一次校验抖动就把已登录卡片翻成「未登录」并缓存 10 分钟；下次校验(缓存未写)会自动重试恢复。
-        return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': ''}
+        return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': '',
+                'verified': False, 'verificationMessage': '本次在线检查未取得可信结果，保留上次登录状态；请稍后重试。'}
     if platform == 'xiaohongshu' and not data['loggedIn']:
         invalidate_account_context(platform, live_only=True)
     current_generation = _account_check_generation(platform)
@@ -4618,7 +4935,7 @@ async def api_account_whoami(platform: str):
                 (LOGIN_DIR / f'{platform}.json').unlink()
             except OSError:
                 pass
-    return data
+    return {**data, 'verified': True}
 
 
 @app.post("/api/logout/{platform}")
@@ -5092,7 +5409,48 @@ async def api_analytics(platform: str):
 from content_analysis_routes import create_router as _content_analysis_router
 from conversation_titles import create_router as _conversation_titles_router
 
-app.include_router(_content_analysis_router(lambda: OUTPUTS_DIR / "_analytics" / "workbench", api_analytics, _image_reverse_providers))
+def _content_analysis_session_generation(platform):
+    # Collection itself changes the evidence generation; login-session invalidation does not.
+    # A successful whoami atomically rewrites ts/message. That is not a new session.
+    with _WHOAMI_LOCK:
+        generation = _ACCOUNT_GENERATIONS.get(platform, '')
+    if platform == 'bilibili':
+        # Bilibili's checker never rewrites this credential file; replacing it invalidates cache.
+        marker = DATA_DIR / 'cookies.json'
+        try:
+            info = marker.stat()
+            signature = f'{marker.resolve()}:{info.st_ino}:{info.st_mtime_ns}:{info.st_size}'
+        except OSError:
+            signature = 'missing'
+    else:
+        marker = LOGIN_DIR / f'{platform}.json'
+        try:
+            value = json.loads(marker.read_text(encoding='utf-8'))
+            if not isinstance(value, dict):
+                value = {}
+            # No nickname, QR, timestamps, or mtime: none proves a different account.
+            identity = {key: value.get(key) for key in
+                        ('state', 'accountId', 'externalId', 'sessionId', 'loginGeneration')}
+            identity['markerPath'] = str(marker.resolve())
+        except (OSError, ValueError):
+            identity = {'state': 'missing'}
+        profile_name = LOGIN_RUNNERS.get(platform, {}).get('profile')
+        profile = BROWSER_PROFILES / profile_name if profile_name else None
+        try:
+            info = profile.stat() if profile else None
+            # Browser reads update the profile's files, but retain the directory identity.
+            identity['profile'] = [str(profile.resolve()), info.st_dev, info.st_ino] if info else None
+        except OSError:
+            identity['profile'] = None
+        signature = hashlib.sha256(json.dumps(identity, sort_keys=True).encode('utf-8')).hexdigest()
+    return generation + ':' + signature
+
+
+app.include_router(_content_analysis_router(
+    lambda: OUTPUTS_DIR / "_analytics" / "workbench", api_analytics, _image_reverse_providers,
+    session_getter=lambda platform: _account_logged_in(platform, LOGIN_RUNNERS[platform])
+    and platform not in _ACCOUNT_CLEARING,
+    generation_getter=_content_analysis_session_generation))
 app.include_router(_conversation_titles_router(_conversation_title_runner))
 
 from storage_location_routes import create_router as _storage_location_router
@@ -6197,6 +6555,19 @@ async def api_skill_audits(sessionId: str, turnId: str | None = None):
         raise HTTPException(503, '技能核验记录暂不可读，请稍后重试') from None
 
 
+@app.get('/api/chat/execution/{session_id}/{turn_id}')
+async def api_chat_execution(session_id: str, turn_id: str):
+    import chat_execution
+    process = _RUNNING_CHAT.get(session_id)
+    live = process is not None and process.poll() is None and _ACTIVE_SKILL_TURNS.get(session_id) == turn_id
+    result = await asyncio.to_thread(chat_execution.snapshot, session_id, turn_id,
+        OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR, live=live, credentials=gateway_credentials())
+    if live and (_RUNNING_CHAT.get(session_id) is not process or _ACTIVE_SKILL_TURNS.get(session_id) != turn_id):
+        result['operations'] = []
+        result['warnings'] = ['执行轮次正在更新，请稍后查看。']
+    return result
+
+
 @app.get('/api/agent-office')
 async def api_agent_office(sessionId: str):
     import agent_office
@@ -6336,6 +6707,30 @@ async def api_usage(sessionId: str = '', limit: int = 60, offset: int = 0):
         raise HTTPException(400, '会话标识无效') from None
     except (OSError, sqlite3.Error):
         raise HTTPException(500, '用量记录暂不可读，请检查数据目录访问权限后重试') from None
+
+
+@app.get('/api/usage/pricing')
+async def api_usage_prices():
+    from usage_stats import read_prices
+    return {'prices': await asyncio.to_thread(read_prices, SESSIONS_DIR)}
+
+
+class UsagePriceRequest(BaseModel):
+    provider: str
+    model: str
+    pricing: dict
+
+
+@app.put('/api/usage/pricing')
+async def api_usage_save_price(req: UsagePriceRequest):
+    from usage_stats import save_price
+    try:
+        prices = await asyncio.to_thread(save_price, SESSIONS_DIR, req.provider, req.model, req.pricing)
+        return {'prices': prices}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except OSError:
+        raise HTTPException(500, '价格保存失败，请检查数据目录权限') from None
 
 
 if __name__ == "__main__":

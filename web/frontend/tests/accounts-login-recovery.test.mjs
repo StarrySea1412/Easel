@@ -18,6 +18,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const accounts = [
   { platform: 'xiaohongshu', name: '小红书', backend: 'xhs', supported: true, loggedIn: false },
   { platform: 'wechat-oa', name: '微信公众号', backend: 'wechat-oa', supported: true, loggedIn: false },
+  { platform: 'zhihu', name: '知乎', backend: 'web', supported: true, loggedIn: false },
 ];
 
 async function fixture(t) {
@@ -41,7 +42,7 @@ async function fixture(t) {
     if (url.endsWith('/whoami')) { state.whoamiCalls++; return response({ loggedIn: true, name: 'Synthetic account', avatar: '' }); }
     if (url.endsWith('/sms')) return response(await state.sms());
     if (url.endsWith('/status')) return response(await state.read(url));
-    if (url.split('?')[0] === '/api/login/xiaohongshu' || url === '/api/accounts/wechat-oa/mp-login') return response(await state.start(url));
+    if (url.startsWith('/api/login/') || url.startsWith('/api/accounts/wechat-oa/mp-login')) return response(await state.start(url));
     assert.fail(`Unexpected request ${url}`);
   });
   const container = document.createElement('div'); document.body.append(container);
@@ -183,7 +184,9 @@ test('a terminal polling result stops further checks and manual retry starts a f
   await view.click('重新连接');
   assert.match(view.modal().querySelector('img').src, /synthetic-current.png/);
   assert.equal(view.timers.size, 1);
-  assert.equal(view.state.requests.filter(item => item.url === '/api/login/xiaohongshu').length, 2);
+  assert.deepEqual(view.state.requests.filter(item => item.method === 'POST').map(item => item.url), [
+    '/api/login/xiaohongshu', '/api/login/xiaohongshu?restart=true',
+  ]);
 });
 
 test('WeChat backend retries keep their own endpoint and share terminal polling behavior', async t => {
@@ -195,7 +198,7 @@ test('WeChat backend retries keep their own endpoint and share terminal polling 
   await view.click('重新连接');
   assert.match(view.modal().querySelector('img').src, /mp-current.png/);
   assert.deepEqual(view.state.requests.filter(item => item.method === 'POST').map(item => item.url), [
-    '/api/accounts/wechat-oa/mp-login', '/api/accounts/wechat-oa/mp-login',
+    '/api/accounts/wechat-oa/mp-login', '/api/accounts/wechat-oa/mp-login?restart=true',
   ]);
   assert.equal(view.timers.size, 1);
 });
@@ -207,7 +210,7 @@ test('a failed QR flow can open the official browser with an explicit request', 
   view.state.start = async () => ({ ...snapshot('verifying', '请在小红书窗口完成登录'), visibleBrowser: true });
   await view.click('在浏览器中登录');
   assert.equal(view.state.requests.filter(item => item.method === 'POST').at(-1).url,
-    '/api/login/xiaohongshu?visibleBrowser=true');
+    '/api/login/xiaohongshu?visibleBrowser=true&restart=true');
   assert.match(view.modal().textContent, /工作台所在电脑的小红书窗口/);
   assert.doesNotMatch(view.modal().textContent, /正在验证验证码/);
   assert.equal(view.timers.size, 1);
@@ -216,7 +219,7 @@ test('a failed QR flow can open the official browser with an explicit request', 
   assert.equal(view.timers.size, 0);
   await view.click('重新连接');
   assert.equal(view.state.requests.filter(item => item.method === 'POST').at(-1).url,
-    '/api/login/xiaohongshu?visibleBrowser=true');
+    '/api/login/xiaohongshu?visibleBrowser=true&restart=true');
 });
 
 test('browser login is reachable from the Xiaohongshu card and respects an existing QR flow', async t => {
@@ -226,9 +229,104 @@ test('browser login is reachable from the Xiaohongshu card and respects an exist
   view.state.start = async () => ({ ...snapshot('verifying'), visibleBrowser: false });
   await act(async () => buttons[0].click());
   assert.equal(view.state.requests.filter(item => item.method === 'POST').at(-1).url,
-    '/api/login/xiaohongshu?visibleBrowser=true');
+    '/api/login/xiaohongshu?visibleBrowser=true&restart=true');
   assert.doesNotMatch(view.modal().textContent, /工作台所在电脑的小红书窗口/);
   await view.click('关闭');
   assert.equal(view.modal(), null);
   assert.equal(view.timers.size, 0);
+});
+
+test('verified QR metadata has a code view, local enlargement and an original-image fallback', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/zhihu-code.png'),
+    qrKind: 'qr', qrWidth: 220, qrHeight: 220, qrTs: 123 });
+  const trigger = await view.start('知乎');
+  const image = view.modal().querySelector('img');
+  assert.equal(image.alt, '登录二维码');
+  assert.ok(view.modal().querySelector('.account-login-image-code'));
+  assert.match(image.src, /zhihu-code.png\?v=123$/);
+  const original = view.modal().querySelector('.account-login-image-tools a');
+  assert.equal(original.href, image.src);
+  assert.equal(original.target, '_blank');
+  const postsBefore = view.state.requests.filter(item => item.method === 'POST').length;
+  await view.click('放大查看');
+  assert.equal(image.style.width, '480px');
+  assert.ok(view.modal().querySelector('.account-login-image-viewport.is-expanded'));
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').length, postsBefore);
+  await view.click('恢复大小');
+  assert.equal(image.style.width, '');
+  const retry = [...view.modal().querySelectorAll('button')].find(item => item.textContent === '重新连接');
+  retry.focus();
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+  assert.equal(document.activeElement.textContent, '放大查看');
+  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  assert.equal(view.modal(), null);
+  assert.equal(document.activeElement, trigger);
+});
+
+test('a verifying full-page screenshot is labeled as a page and can be inspected without starting another login', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('verifying', '等待官方页面确认', '_login/zhihu-page.png'),
+    qrKind: 'page', qrWidth: 1360, qrHeight: 768 });
+  await view.start('知乎');
+  assert.ok(view.modal().querySelector('.account-login-image-page'));
+  const image = view.modal().querySelector('img');
+  assert.equal(image.alt, '官方登录页面预览');
+  assert.doesNotMatch(view.modal().textContent, /用手机 App 扫描下方二维码/);
+  assert.match(view.modal().textContent, /如页面未出现二维码，请重新连接/);
+  assert.doesNotMatch(view.modal().textContent, /本机官方浏览器/);
+  await view.click('放大查看');
+  assert.equal(image.style.width, '1360px');
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').length, 1);
+  assert.equal(view.timers.size, 1);
+  view.state.read = async () => ({ ...snapshot('qr_ready', '', '_login/zhihu-code.png'), qrKind: 'qr', qrWidth: 220, qrHeight: 220 });
+  await view.tick();
+  assert.equal(view.modal().querySelector('img').alt, '登录二维码');
+  assert.ok(view.modal().querySelector('.account-login-image-code'));
+});
+
+test('legacy full-page responses remain inspectable without pretending they are extracted QR codes', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => snapshot('qr_ready', '', '_login/legacy-page.png');
+  await view.start('知乎');
+  const image = view.modal().querySelector('img');
+  Object.defineProperty(image, 'naturalWidth', { value: 1440 });
+  Object.defineProperty(image, 'naturalHeight', { value: 900 });
+  await act(async () => image.dispatchEvent(new window.Event('load')));
+  assert.equal(image.alt, '登录图像');
+  assert.ok(view.modal().querySelector('.account-login-image-page'));
+  await view.click('放大查看');
+  assert.equal(image.style.width, '1440px');
+  await view.click('重新连接');
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').length, 2);
+  assert.equal(view.modal().querySelector('.is-expanded'), null);
+});
+
+test('failed login images show recovery controls and do not trigger an automatic reconnect', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/code.png'), qrKind: 'qr' });
+  await view.start();
+  await act(async () => view.modal().querySelector('img').dispatchEvent(new window.Event('error')));
+  assert.match(view.modal().querySelector('[role="alert"]').textContent, /登录图片加载失败/);
+  assert.ok(view.modal().querySelector('.account-login-image-tools a'));
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').length, 1);
+  await view.click('重新连接');
+  assert.equal(view.modal().querySelector('[role="alert"]'), null);
+  assert.ok(view.modal().querySelector('img'));
+  assert.equal(view.timers.size, 1);
+});
+
+test('Xiaohongshu page previews offer an explicit browser login before terminal failure', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('verifying', '等待验证', '_login/xhs-page.png'), qrKind: 'page' });
+  await view.start();
+  assert.equal(view.modal().querySelector('img').alt, '官方登录页面预览');
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').length, 1);
+  view.state.start = async () => ({ ...snapshot('verifying', '请完成官方登录'), visibleBrowser: true });
+  await view.click('在浏览器中登录');
+  assert.equal(view.state.requests.filter(item => item.method === 'POST').at(-1).url,
+    '/api/login/xiaohongshu?visibleBrowser=true&restart=true');
+  assert.equal(view.modal().querySelector('img'), null);
+  assert.match(view.modal().textContent, /工作台所在电脑的小红书窗口/);
+  assert.equal(view.timers.size, 1);
 });

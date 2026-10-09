@@ -26,3 +26,7 @@
 .usage-table-scroll td small { display: block; margin-top: 4px; color: var(--text-tertiary); font-size: 10px; }
 .usage-pagination { justify-content: center; padding: 10px 0; font-size: 11px; color: var(--text-tertiary); }
 .usage-toggle:focus-visible, .usage-tabs button:focus-visible, .usage-turn > summary:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }
+.usage-performance-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 11px; color: var(--text-tertiary); margin: 10px 0; }
+.usage-price-editor { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.usage-price-editor summary { cursor: pointer; font-size: 12px; }
+.usage-price-editor input { min-width: 0; width: 100%; }

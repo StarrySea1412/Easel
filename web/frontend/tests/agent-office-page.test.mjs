@@ -103,6 +103,21 @@ function session(id, extra = {}) { return { id, title: `会话 ${id}`, created: 
 function snapshot(agents, extra = {}) { return { agents, loading: false, error: null, observedAt: '2026-09-30T08:00:00Z', coverage: '来自本轮结构化执行记录，未上报角色不补全', ...extra }; }
 function agent(id, extra = {}) { return { id, name: `Agent ${id}`, role: '协作角色', task: `正在处理任务 ${id}`, state: 'working', source: 'live', ...extra }; }
 
+test('a run-record link enters live mode for the exact session and preserves its turn when opening records', async t => {
+  const opened = [];
+  const view = await fixture(t, { initialSessionId: 'two', sessions: [session('one'), session('two')], onOpenActivity: (...args) => opened.push(args) }, { two: snapshot([agent('worker')], { turnId: 'turn-two' }) });
+  assert.ok(view.harness.hookCalls.every(call => call.enabled && call.sessionId === 'two'));
+  assert.equal(view.harness.frames.size, 0);
+  await view.click(view.button('查看运行记录'));
+  assert.deepEqual(opened, [['two', 'turn-two']]);
+});
+
+test('a deleted run-record target stays empty without showing a different session', async t => {
+  const view = await fixture(t, { initialSessionId: 'deleted', sessions: [session('one')] }, { one: snapshot([agent('must-not-appear')]) });
+  assert.ok(view.harness.hookCalls.every(call => !call.enabled && call.sessionId === null));
+  assert.equal(view.harness.scene.agents.length, 0);
+});
+
 test('disabled demos use only live data and output mode from the first render while retaining independent study entries', async t => {
   const events = [
     { id: 'real-event', agentId: 'real', kind: 'call', title: '真实读取材料', status: 'called', source: 'live' },
@@ -357,7 +372,8 @@ test('observation errors retain and freeze the last snapshot while labeling it s
   assert.match(view.container.querySelector('[role="alert"]').textContent, /保留上次快照/);
   assert.equal(h.scene.stale, true);
   assert.equal(h.scene.observedAt, '2026-09-30T08:00:00Z');
-  assert.match(view.container.querySelector('.office-action-summary').textContent, /上次记录：/);
+  assert.equal(view.container.querySelector('.office-action-summary'), null, 'missing action evidence does not create a duplicate status row');
+  assert.match(view.container.querySelector('.office-task-focus-source').textContent, /上次快照/);
   assert.match(view.container.querySelector('.office-work-preview').textContent, /上次快照/);
   assert.match(view.container.querySelector('[role="alert"]').textContent, /并非当前实时执行状态/);
   assert.match(view.container.querySelector('.office-agent-detail').textContent, /快照中的任务/);

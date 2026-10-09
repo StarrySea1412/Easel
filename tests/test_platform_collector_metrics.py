@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills/shared/scripts'))
@@ -13,6 +14,16 @@ import weixin_mp_stats as mp
 
 def test_wechat_unknown_overview_is_not_zero():
     assert all(mp.EMPTY[key] is None for key in ('followers', 'likes', 'following', 'posts'))
+
+
+@pytest.mark.parametrize('logged_in,verified_mid,expected', [(True, 42, '42'), (True, None, ''), (True, True, ''), (False, 42, '')])
+def test_bilibili_identity_comes_from_authenticated_nav_not_cookie_metadata(monkeypatch, capsys, logged_in, verified_mid, expected):
+    monkeypatch.setattr(bili, '_load_cookie', lambda *_: ('test-cookie', 999))
+    monkeypatch.setattr(bili, '_api', lambda url, *_: {'data': {'isLogin': logged_in, 'mid': verified_mid}} if url.endswith('/nav') else {'data': {}})
+    bili.cmd_stats(SimpleNamespace(cookie='unused'))
+    result = json.loads(capsys.readouterr().out)
+    assert result['accountId'] == expected
+    assert result['loggedIn'] == logged_in
 
 
 def test_wechat_read_counts_do_not_become_likes_and_missing_counts_stay_unknown():

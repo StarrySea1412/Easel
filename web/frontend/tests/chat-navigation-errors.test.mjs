@@ -27,6 +27,12 @@ test('plain unknown failures are not classified from guesses in their text',()=>
  assert.equal(chatErrorDetail('timeout may have occurred').category,undefined);
  assert.equal(chatErrorTitle(chatErrorDetail('Unavailable')),'请求未完成');
 });
+
+test('unsupported effort has a specific title and retains the runtime explanation',()=>{
+ const detail={message:'当前模型不支持ultra；允许运行档位off',code:'thinking_level_unsupported',category:'configuration',retryable:false};
+ assert.deepEqual(chatErrorDetail(makeChatError(detail)),detail);
+ assert.equal(chatErrorTitle(detail),'思考档位不支持');
+});
 globalThis.window={location:{pathname:'/'}};
 const {streamChat}=await loadTsModule('../src/lib/api.ts',import.meta.url);
 test('SSE structured authentication failure is terminal with preserved fields',async()=>{

@@ -117,8 +117,19 @@ def redact_gateway_text(value, credentials=None):
     ''', r'\1[REDACTED]', text)
 
 
-def gateway_error(raw='', *, status=None, fallback='agent_execution_failed'):
+def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', include_detail=False):
     message = str(raw).lower()
+    # Preserve the actionable runtime rejection without echoing arbitrary CLI
+    # output (which can contain credentials or private request contents).
+    thinking = re.search(r'Thinking level "([a-z]+)" is not supported for ([A-Za-z0-9_.:/+-]{1,300})\. Use one of: ([a-z, ]+)\.', str(raw))
+    if thinking:
+        level, model, allowed = thinking.groups()
+        legal = {'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'}
+        levels = [value.strip() for value in allowed.split(',') if value.strip() in legal]
+        if level in legal and levels:
+            return {'code': 'thinking_level_unsupported', 'category': 'configuration', 'retryable': False,
+                    'modelRef': model, 'requestedThinkingLevel': level, 'supportedThinkingLevels': levels,
+                    'message': f'当前模型 {model} 不支持思考档位 {level}。运行时允许：{", ".join(levels)}。请调整思考强度后重新发送；未自动降档或重试。'}
     if any(s in message for s in ('requires credentials before opening a websocket', 'gateway_credentials_required', 'gatewaysecretrefunavailable', 'gateway_secret_ref_unavailable')):
         code = 'gateway_auth_missing'
     elif any(s in message for s in ('not_paired', 'pairing required', 'device pairing', 'pair this device', 'scope-upgrade')):
@@ -142,4 +153,11 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed'):
         'agent_execution_failed': ('execution', True, '本轮执行失败。请查看运行记录中的具体失败步骤后重试；仅凭退出码不能确定原因。'),
     }
     category, retryable, public_message = messages.get(code, messages['agent_execution_failed'])
-    return {'code': code, 'category': category, 'retryable': retryable, 'message': public_message}
+    result = {'code': code, 'category': category, 'retryable': retryable, 'message': public_message}
+    if include_detail and str(raw).strip():
+        detail = redact_gateway_text(raw)
+        detail = re.sub(r'https?://[^\s"\']+', '[服务地址]', detail)
+        detail = re.sub(r'\bsk-[A-Za-z0-9_-]+', '[REDACTED]', detail)
+        result['detail'] = detail[:600]
+        result['message'] += '\n返回原因：' + detail[:600]
+    return result

@@ -5,6 +5,24 @@
 .ca-heading h1 { margin: 0; font-size: clamp(28px, 3vw, 36px); font-weight: 550; letter-spacing: -.045em; }
 .ca-subtitle { color: var(--text-secondary); font-size: 13px; line-height: 1.7; margin: 12px 0 0; }
 .ca-heading-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.ca-start-steps { list-style: none; margin: 0 0 24px; padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.ca-start-steps li { display: flex; gap: 10px; flex: 1 1 210px; font-size: 13px; }
+.ca-start-steps li > strong { display: grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--surface); }
+.ca-start-steps span { display: block; margin-top: 5px; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.ca-start-card { min-width: 0; padding: 20px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
+.ca-start-card h2 { font-size: 19px; font-weight: 550; margin: 0 0 12px; }
+.ca-start-card p { font-size: 13px; line-height: 1.8; margin: 10px 0; }
+.ca-sync-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; font-size: 12px; color: var(--text-secondary); }
+.ca-sync-facts strong { font-weight: 550; color: var(--text); overflow-wrap: anywhere; }
+.ca-question-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 10px; }
+.ca-question-grid button { min-width: 0; padding: 16px; text-align: left; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.ca-question-grid button[aria-pressed=true] { border-color: var(--accent-start); background: var(--surface-2); }
+.ca-question-grid strong { display: block; font-size: 13px; font-weight: 550; }
+.ca-question-grid span { display: block; font-size: 12px; line-height: 1.8; color: var(--text-secondary); margin-top: 7px; }
+.ca-analysis-details { min-width: 0; border: 1px solid var(--border); border-radius: 9px; padding: 15px; margin: 18px 0; }
+.ca-analysis-details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; line-height: 1.8; }
+.ca-analysis-details[open] > summary { margin-bottom: 18px; }
+.ca-analysis-details > summary:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
 .ca-platform-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-bottom: 19px; border-bottom: 1px solid var(--border); }
 .ca-platform { display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 15px; background: transparent; border: 1px solid transparent; border-radius: 9px; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
 .ca-platform .platform-icon { width: 24px; height: 24px; object-fit: contain; border-radius: 5px; }

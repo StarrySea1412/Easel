@@ -153,18 +153,15 @@ async function loadPage() {
   return (await import(moduleUrl(code))).default;
 }
 
-test('page defaults to isolated demo and mounts real account tools only after selecting my data', async t => {
+test('page defaults to actual works and the user can explicitly switch to isolated examples', async t => {
   globalThis.__demoAccountReads = 0;
   const Page = await loadPage();
   const view = await fixture(t, 'review', Page);
-  assert.equal(globalThis.__demoAccountReads, 0);
-  assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
-  assert.doesNotMatch(view.container.textContent, /真实作品工作台替身/);
-  await view.click(view.button('我的数据'));
   assert.equal(globalThis.__demoAccountReads, 1);
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.match(view.container.textContent, /真实作品工作台替身/);
   assert.equal(view.container.querySelector('.ca-collection-tools').open, false);
+  assert.equal(view.container.querySelectorAll('.ca-start-steps li').length, 3);
   await view.click(view.button('看演示数据'));
   assert.equal(globalThis.__demoAccountReads, 1);
   assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
@@ -189,7 +186,7 @@ test('disabled demo mounts actual-data tools immediately and never substitutes s
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.equal(view.button('看演示数据'), undefined);
   await view.render({ autoCollectSignal: 1 });
-  assert.equal(view.container.querySelector('.ca-collection-tools').open, true);
+  assert.equal(view.container.querySelector('.ca-collection-tools').open, false, 'the optional legacy collector is not auto-mounted beside work synchronization');
   assert.equal(view.button('我的数据').getAttribute('aria-pressed'), 'true');
 });
 
@@ -197,12 +194,13 @@ test('a mounted demo exits immediately when disabled and does not interrupt actu
   globalThis.__demoAccountReads = 0;
   const Page = await loadPage();
   const view = await fixture(t, 'review', Page);
+  await view.click(view.button('看演示数据'));
   await view.click(view.button('逐篇看作品'));
   assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
   await view.render({ demoEnabled: false });
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.equal(view.button('看演示数据'), undefined);
-  assert.equal(globalThis.__demoAccountReads, 1);
+  assert.equal(globalThis.__demoAccountReads, 2);
   assert.match(view.container.textContent, /真实作品工作台替身/);
   await view.render({ demoEnabled: true });
   assert.equal(view.button('我的数据').getAttribute('aria-pressed'), 'true');

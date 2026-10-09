@@ -9,7 +9,7 @@
 .office-task-model-heading,.office-task-actions { display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-width:0; }
 .office-task-model-heading { justify-content:space-between; }
 .office-task-composer .easel-radio-group { max-width:100%;flex-wrap:wrap; }
-.office-task-composer .easel-radio-option { white-space:normal;min-height:36px; }
+.office-task-composer .easel-radio-option { white-space:nowrap; flex:0 0 auto; width:auto; min-width:max-content; min-height:36px; }
 .office-task-routing { min-width:0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2); }
 .office-task-actions .office-button { min-height:36px;white-space:normal; }
 .office-task-status { color:var(--text-secondary);font-size:12px;line-height:1.7;overflow-wrap:anywhere;margin:12px 0 0; }

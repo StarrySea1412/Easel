@@ -4,6 +4,29 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-09 conversation execution and accounting
+
+- Native gateway RPC preserves exact session, model and thinking selection; final authoritative text corrects out-of-order streaming output without resending a paid request. Real DeepSeek/Kimi/Grok short replies and a browser queue continuation were observed.
+- Per-chat queues retain text and model/skill snapshots, support edit/reorder/remove/pause, and pause on failures or reload. Attachments must be reattached after reload. Next-turn queueing is explicitly distinguished from unsupported live steering.
+- Compact expandable tool rows show actual receipts, elapsed time and successful file diffs. SQLite transcripts, including bounded zstd events and fresh-session generations, are read without database mutation; skill audits and the office use the same turn boundaries.
+- Usage reads the current project's JSONL/SQLite records idempotently. Channel quotes use decimal four-bucket pricing and a final multiplier, retaining per-request rate provenance. Stream speed and wait-inclusive log estimates follow CC Switch eligibility thresholds and weighted aggregation; missing measurements/prices remain unknown.
+- Image workbench readiness uses dedicated IMG_* settings. The offline `check --dedicated-channel` does not borrow chat credentials or claim network availability. Visual skills proactively propose an AI artwork and deterministic layout workflow; model-generated advice still requires receipt-based validation.
+- Only Ultra uses purple particles; model cards start collapsed, health actions belong to each card, logged-in account actions are gated by confirmed account state, and skill removal closes its hover guide.
+- Core affected backend checks: 399 passed, one environment-specific skip; frontend: 842 passed. Actual browser evidence and remaining operator/business checks are kept in the checklist. No new installer release is claimed.
+
+
+### 2026-10-09 R46–R65 follow-up: clearer setup, QR login and navigation / 配置、扫码与导航追加整改（交付收尾）
+
+- Combine imports with model configuration: show saved versus pending defaults, keep Save and use nearby, and fold CC Switch/OpenClaw previews into the same page. Clicking a detected source reads candidates; explicit confirmation writes the selected slot. Preserve other drafts and compatibility for old import links. / 导入集中同页，来源卡点击即预览，确认才写入；保存与待保存状态分清。
+- Explain unavailable composer models with reload and settings actions. Audit strict selection for OpenClaw 2026.9.6, including actual read-only CLI/HTTP capability checks returning available=true; 48 targeted backend checks pass without inference, expanded permissions or configuration writes. Add appearance-card links to default model settings and actual Agent assignment. / 核验2026.9.6严格指定，补输入框原因和员工模型入口；真实调用与成员身份单独验收。
+- Extract QR images with white margins and distinguish them from full-page previews; show codes at 320px with 480px zoom, plus original-image and reconnect controls. Backend 140 and frontend 16 targeted checks pass. The current 7877 Zhihu QR source is 166×166; actual browser display is 318×318, zoom is 480×480 and Escape restores focus to the connection button. / 知乎码图显示与键盘已验；手机扫码、身份及二维码390px布局未验。小红书API曾success仅记状态。
+- Restart the configured source project at 7877; model capability available=true, three saved models, gateway=true and 115 skills. Real browser checks confirm saved/pending model state without writes, source-card preview with three candidates and the employee default-model entry. Stop the mistakenly started empty 7876. / 当前实例模型同页与入口已实际检查，未确认导入/保存、模型推理或真实Agent分配。
+- Remove final-chat placeholders and retain archived empty records; 86 early checks pass. Start both columns collapsed, ignore old expanded values and keep manual controls independent; R58 supersedes the earlier R55 restoration plan, with 69 targeted checks. / 7877实测最后归档最近0、刷新保持、恢复正常；7875最新前端520/390px默认折叠通过。
+- Implement stable-account Xiaohongshu/Bilibili loading of up to 20 recent works with caching, timestamps and known/unknown totals, default My data and account→question→action. Fix normal whoami timestamp updates being mistaken for login changes; combined backend109 and sync28 checks pass, with overlap. / 三步与加载状态真UI已验，误判缺陷已修复；真实非空采集仍待确认。其他五平台保留导入，样本不当全历史。
+- Implement shared dashboard/chat tool groups and stable send/create positions. R61 replaces large guidance with a compact status row, optional error/reload details and an Add/settings menu item. Its TypeScript/build and actual 7875 chat/dashboard checks pass at 520/390px. / 输入工具与紧凑状态已验，QA服务没有用户模型配置，不当作7877配置丢失。
+- Replace the thinking list with a compact purple slider popup, centered current strength and selected model, plus a reset icon. Mouse and arrows/Home/End save immediately; Enter closes, Escape returns focus, busy state blocks changes. All nine values, medium default and request snapshots are preserved; 16 combined thinking/model-picker checks and related lint pass. / R62依据用户参考图调整，不虚构运行型号；最终浏览器与联合构建另补。
+- R63 source-based model retrieval and R64/R65 provider icons, collapsing and visible basic editing remain in integration; do not count them as accepted yet. Operator guide, summary, startup and template are prepared, with documents ZIP and new Git synchronization pending. / 前端全量804与扫码/兼容联合148为此前阶段结果；最新联合检查另记，不累计重叠套件。独立身份、非空采集、推理、发布/SMTP、长会话与新程序包生命周期未验。
+
 ### 2026-10-09: professional analysis and operator handoff / 专业分析与运营交接
 
 - Added seven-platform diagnostic capabilities, optional advanced metrics, explicit sample quality and comparable cohorts, evidence-bound topics and frozen seven-day experiments. Platform changes automatically refresh live data and reject stale responses. / 新增七平台诊断、可选高级指标、样本质量、同条件比较、证据题材和实验；切平台自动读取并隔离旧响应。

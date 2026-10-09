@@ -107,6 +107,15 @@ def test_gateway_log_redaction_removes_resolved_and_bearer_values():
     assert all(secret not in result for secret in ('unique-secret', 'other-secret', 'third-secret'))
 
 
+def test_unsupported_thinking_preserves_only_actionable_runtime_fields():
+    result = gateway_error('Thinking level "ultra" is not supported for relay/grok-4.7. Use one of: off. api_key=PRIVATE')
+    assert result['code'] == 'thinking_level_unsupported'
+    assert result['supportedThinkingLevels'] == ['off']
+    assert result['modelRef'] == 'relay/grok-4.7'
+    assert result['category'] == 'configuration' and result['retryable'] is False
+    assert 'ultra' in result['message'] and 'PRIVATE' not in json.dumps(result)
+
+
 def test_gateway_log_redacts_json_and_quoted_secret_values():
     raw = '''{"token": "private-token", "password": "private phrase", "api_key": "private-key"} --password 'other phrase' '''
     result = redact_gateway_text(raw, GatewayCredentials())

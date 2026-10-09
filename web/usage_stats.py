@@ -15,6 +15,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from usage_metrics import calculate_cost, speed, validate_price
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -81,12 +82,20 @@ def normalize_usage(usage: object) -> dict:
 
 
 def summarize(calls: list[dict]) -> dict:
-    counts = {field: sum(call.get(field) is not None for call in calls) for field in FIELDS}
+    fields = (*FIELDS, 'estimatedCostUsd')
+    counts = {field: sum(call.get(field) is not None for call in calls) for field in fields}
     result = {field: sum(call[field] for call in calls if call.get(field) is not None)
-              if counts[field] else None for field in FIELDS}
+              if counts[field] else None for field in fields}
     result.update(calls=len(calls), reportedCalls=sum(any(call.get(field) is not None
                   for field in TOKEN_FIELDS) for call in calls), coverage=counts)
     result['missingCalls'] = result['calls'] - result['reportedCalls']
+    performance = {}
+    for source in ('stream', 'estimated'):
+        eligible = [call for call in calls if call.get('speedSource') == source]
+        window = sum(call['durationMs'] - (call.get('firstTokenMs') or 0) for call in eligible)
+        performance[source] = {'calls': len(eligible), 'outputTokensPerSecond':
+                               round(sum(call['outputTokens'] for call in eligible) * 1000 / window, 3) if window > 0 else None}
+    result['performance'] = performance
     return result
 
 
@@ -115,50 +124,64 @@ def _timestamp(value: object) -> str:
     return ''
 
 
-def _transcript_calls(path: Path, session_id: str) -> tuple[list[dict], int]:
+def _event_calls(events, session_id: str) -> list[dict]:
     calls: dict[str, dict] = {}
     seen: set[str] = set()
     turn = 'unattributed'
     turn_index = 0
-    malformed = 0
+    for line_number, event in enumerate(events, 1):
+        if not isinstance(event, dict):
+            continue
+        message = event.get('message')
+        if not isinstance(message, dict) or message.get('role') not in ('user', 'assistant'):
+            continue
+        # IDs remain stable when a transcript is copied or compacted.
+        event_id = str(event.get('id') or message.get('id') or _hash(event))
+        if message['role'] == 'user':
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            turn = event_id
+            turn_index += 1
+            continue
+        values = normalize_usage(message.get('usage'))
+        call = {
+            'id': _hash([session_id, event_id]), 'sessionId': session_id,
+            'turnId': _hash([session_id, turn]), 'turnIndex': turn_index,
+            'timestamp': _timestamp(message.get('timestamp') or event.get('timestamp')),
+            'model': str(message.get('model') or '未上报')[:160],
+            'provider': str(message.get('provider') or '未上报')[:100],
+            'line': line_number, **values,
+        }
+        begin, end = _timestamp(message.get('timestamp')), _timestamp(event.get('timestamp'))
+        duration = None
+        if begin and end:
+            elapsed = (datetime.fromisoformat(end) - datetime.fromisoformat(begin)).total_seconds() * 1000
+            if elapsed > 0:
+                duration = round(elapsed, 3)
+        call.update(durationMs=duration, firstTokenMs=None, speedSource=None,
+                    outputTokensPerSecond=None, estimatedCostUsd=None, costBreakdown=None)
+        call['endTimestamp'] = end
+        call['outputTokensPerSecond'], call['speedSource'] = speed(call['outputTokens'], duration)
+        if event_id in calls:
+            previous = calls[event_id]
+            call['turnId'], call['turnIndex'] = previous['turnId'], previous['turnIndex']
+            for field in FIELDS:
+                if call[field] is None:
+                    call[field] = previous[field]
+        calls[event_id] = call
+    return list(calls.values())
+
+
+def _transcript_calls(path: Path, session_id: str) -> tuple[list[dict], int]:
+    events, malformed = [], 0
     with path.open(encoding='utf-8') as stream:
-        for line_number, line in enumerate(stream, 1):
+        for line in stream:
             try:
-                event = json.loads(line)
+                events.append(json.loads(line))
             except (ValueError, UnicodeError):
                 malformed += 1
-                continue
-            if not isinstance(event, dict):
-                continue
-            message = event.get('message')
-            if not isinstance(message, dict) or message.get('role') not in ('user', 'assistant'):
-                continue
-            # IDs remain stable when a transcript is copied or compacted.
-            event_id = str(event.get('id') or message.get('id') or _hash(event))
-            if message['role'] == 'user':
-                if event_id in seen:
-                    continue
-                seen.add(event_id)
-                turn = event_id
-                turn_index += 1
-                continue
-            values = normalize_usage(message.get('usage'))
-            call = {
-                'id': _hash([session_id, event_id]), 'sessionId': session_id,
-                'turnId': _hash([session_id, turn]), 'turnIndex': turn_index,
-                'timestamp': _timestamp(message.get('timestamp') or event.get('timestamp')),
-                'model': str(message.get('model') or '未上报')[:160],
-                'provider': str(message.get('provider') or '未上报')[:100],
-                'line': line_number, **values,
-            }
-            if event_id in calls:
-                previous = calls[event_id]
-                call['turnId'], call['turnIndex'] = previous['turnId'], previous['turnIndex']
-                for field in FIELDS:
-                    if call[field] is None:
-                        call[field] = previous[field]
-            calls[event_id] = call
-    return list(calls.values()), malformed
+    return _event_calls(events, session_id), malformed
 
 
 def _sources(sessions_dir: Path, known_ids: set[str]) -> dict[Path, str]:
@@ -181,6 +204,81 @@ def _sources(sessions_dir: Path, known_ids: set[str]) -> dict[Path, str]:
     return result
 
 
+def pricing_path(web_sessions_dir):
+    return web_sessions_dir.parent / '_usage' / 'pricing.json'
+
+
+def read_prices(web_sessions_dir):
+    return _read_json(pricing_path(web_sessions_dir))
+
+
+def save_price(web_sessions_dir, provider, model, price):
+    if not isinstance(provider, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', provider):
+        raise ValueError('供应商标识无效')
+    if not isinstance(model, str) or not model.strip() or len(model) > 160 or any(c in model for c in '\r\n\x00'):
+        raise ValueError('模型标识无效')
+    price = validate_price(price)
+    with _LOCK:
+        path = pricing_path(web_sessions_dir)
+        if path.exists():
+            # Preserve invalid existing records instead of replacing them.
+            raw = json.loads(path.read_text(encoding='utf-8'))
+            if not isinstance(raw, dict):
+                raise ValueError('已有价格记录不可读，请先备份检查')
+        else:
+            raw = {}
+        if len(raw) >= 500 and f'{provider}/{model}' not in raw:
+            raise ValueError('最多保存 500 个模型价格')
+        raw[f'{provider}/{model}'] = {**price, 'updatedAt': int(time.time())}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(raw, ensure_ascii=False), encoding='utf-8')
+        temporary.replace(path)
+    return raw
+
+
+def _enrich(call, prices, old=None, observations=()):
+    begin, end = call.get('timestamp'), call.get('endTimestamp')
+    if begin and end:
+        start_ms = datetime.fromisoformat(begin).timestamp() * 1000
+        end_ms = datetime.fromisoformat(end).timestamp() * 1000
+        ends = [row['ts'] for row in observations if row['kind'] == 'end' and abs(row['ts'] - end_ms) <= 100]
+        # Match a unique same-session assistant completion, never a whole-turn
+        # timer that includes tools or multiple model calls.
+        if len(ends) == 1:
+            output = [row['ts'] for row in observations if row['kind'] == 'output' and start_ms <= row['ts'] <= ends[0]]
+            if output:
+                call['durationMs'] = round(ends[0] - start_ms, 3)
+                call['firstTokenMs'] = round(min(output) - start_ms, 3)
+    call['outputTokensPerSecond'], call['speedSource'] = speed(call.get('outputTokens'), call.get('durationMs'), call.get('firstTokenMs'))
+    # Freeze a successful estimate and its rate provenance per request.
+    if old and old.get('costBreakdown'):
+        call['costBreakdown'] = old['costBreakdown']
+        call['estimatedCostUsd'] = old.get('estimatedCostUsd')
+    else:
+        result = calculate_cost(call, prices.get(f"{call['provider']}/{call['model']}"))
+        if result:
+            call['costBreakdown'] = result
+            call['estimatedCostUsd'] = float(result['totalUsd'])
+    return call
+
+
+def _observations(web_sessions_dir, session):
+    folder = web_sessions_dir.parent / '_skill_audits' / hashlib.sha256(session.encode()).hexdigest()[:24]
+    result = []
+    for path in sorted(folder.glob('*.json'))[-1000:]:
+        if path.is_symlink():
+            continue
+        record = _read_json(path)
+        if record.get('sessionId') != session:
+            continue
+        rows = record.get('_usageObservations')
+        if isinstance(rows, list):
+            result.extend(row for row in rows[:20000] if isinstance(row, dict) and row.get('kind') in ('end', 'output')
+                          and _number(row.get('ts'), False) is not None)
+    return result
+
+
 def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                   session_id: str = '', limit: int = 60, offset: int = 0) -> dict:
     """Refresh an idempotent disk ledger and return project/session/turn totals."""
@@ -192,6 +290,7 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
     ledger_dir.mkdir(parents=True, exist_ok=True)
     sessions_dir = state_dir / 'agents' / 'main' / 'sessions'
     issues: list[str] = []
+    prices = read_prices(web_sessions_dir)
     with _LOCK, _database(ledger_dir / f'{scope}.sqlite3') as db:
         db.execute('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY)')
         db.execute('CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
@@ -204,6 +303,7 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                     known.add(value)
         db.executemany('INSERT OR IGNORE INTO sessions VALUES (?)', [(value,) for value in known])
         sources = _sources(sessions_dir, known)
+        observations = {web_id: _observations(web_sessions_dir, web_id) for web_id in known}
         for path, web_id in sources.items():
             try:
                 stat = path.stat()
@@ -224,13 +324,37 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                                 call[field] = old.get(field)
                         if call['turnIndex'] == 0:
                             call['turnId'], call['turnIndex'] = old['turnId'], old['turnIndex']
+                    _enrich(call, prices, old if existing else None, observations.get(web_id, ()))
                     db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
                 db.execute('INSERT OR REPLACE INTO sources VALUES (?,?,?)', (str(path), signature, malformed))
                 if malformed:
                     issues.append('部分记录尚未写完或格式不可读，已跳过；刷新后重试。')
             except (OSError, UnicodeError):
                 issues.append('部分会话记录无法读取；已有统计已保留。')
+        sqlite_sessions = set()
+        from easel.session_trace import read_events, database_path
+        if database_path(sessions_dir).is_file():
+            for web_id in sorted(known):
+                warnings = set()
+                events = read_events(sessions_dir, web_id, {'started': 0}, finished=time.time(), warnings=warnings)
+                if events:
+                    sqlite_sessions.add(web_id)
+                issues.extend(warnings)
+                for call in _event_calls(events, web_id):
+                    existing = db.execute('SELECT payload FROM calls WHERE id=?', (call['id'],)).fetchone()
+                    old = json.loads(existing[0]) if existing else None
+                    if old:
+                        for field in FIELDS:
+                            if call[field] is None:
+                                call[field] = old.get(field)
+                    _enrich(call, prices, old, observations.get(web_id, ()))
+                    db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
         all_calls = [json.loads(row[0]) for row in db.execute('SELECT payload FROM calls')]
+        # Newly saved prices may fill missing estimates even when transcripts
+        # have not changed. Existing estimates keep their original snapshot.
+        for call in all_calls:
+            _enrich(call, prices, call, observations.get(call['sessionId'], ()))
+            db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
         source_count = db.execute('SELECT COUNT(*) FROM sources').fetchone()[0]
     current = [call for call in all_calls if call['sessionId'] == session_id]
     rounds: dict[str, list[dict]] = {}
@@ -257,8 +381,12 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
         'sessionId': session_id, 'session': summarize(current), 'project': summarize(all_calls),
         'turns': turns[offset:offset + limit], 'turnCount': len(turns), 'offset': offset, 'limit': limit,
         'sessions': by_session[:100], 'sessionCount': len(by_session),
-        'sourceCount': source_count, 'updatedAt': int(time.time()), 'issues': sorted(set(issues)),
+        'sourceCount': source_count + len(sqlite_sessions),
+        'sourceCounts': {'jsonl': source_count, 'sqliteSessions': len(sqlite_sessions)},
+        'updatedAt': int(time.time()), 'issues': sorted(set(issues)),
         'scope': '本 Easel 项目已创建的 Web 对话；仅读取其专用 OpenClaw profile，已累计记录在删除会话后仍保留。',
         'note': '输入含缓存；缓存和推理为子项，不重复加入总量。未上报字段显示为未上报，汇总只累计已知值。',
-        'costNote': '费用来自 OpenClaw usage.cost 记录，可能按网关配置价格估算；非账单金额，缺少价格时不自行估价。',
+        'costNote': '记录费用来自 OpenClaw usage.cost，非账单金额；记录为0可能因为网关未配置价格，不能据此判断免费。渠道估算费用独立展示，缺少价格或用量时不猜算。',
+        'performanceNote': '参考 CC Switch：速度=输出Token÷(耗时−首个输出延迟)，输出至少100且生成窗口至少100ms；无首字计时仅在输出至少200、耗时至少1s时估算（含等待）。汇总按总输出÷总窗口加权，非逐条平均。',
+        'pricingNote': '自定义价格以 USD/百万Token计，普通输入=输入总量−缓存读−缓存写；四项费用相加后乘倍率。缺价格/缓存用量不估算；成功估算保留当时价格快照，非供应商账单。',
     }

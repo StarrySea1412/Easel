@@ -7,7 +7,7 @@ import { useVideoStudio } from './hooks/useVideoStudio';
 import { useDemoDataPreference } from './hooks/useDemoDataPreference';
 import { usePublishReceipts } from './hooks/usePublishReceipts';
 import PublishReceiptCenter from './components/PublishReceiptCenter';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
 import DashboardPage from './components/DashboardPage';
@@ -31,6 +31,7 @@ import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { clearChatDraft } from './lib/chatDrafts';
+import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispatchQueuedMessage, pauseChatQueue, clearChatQueue } from './lib/chatQueue';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
 import { requestConversationTitle } from './lib/conversationTitles';
@@ -73,12 +74,27 @@ function markOnboardingSeen() {
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [currentPage, setPageState] = useState<Page>('dashboard');
+  const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
+    window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));
+    setPageState(page);
+  }, []);
   const imageStudio = useImageStudio(currentPage === 'image');
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
   const publishReceipts = usePublishReceipts();
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  useEffect(() => {
+    const open = (event: Event) => {
+      const channel = (event as CustomEvent<unknown>).detail;
+      if (typeof channel !== 'string' || !['chat', 'transcribe', 'speech', 'image', 'video', 'music', 'notify'].includes(channel)) return;
+      setSettingsSection(channel === 'notify' ? 'notify' : `channel:${channel}` as SettingsSection);
+      setSettingsNavigationKey(key => key + 1);
+      setCurrentPage('settings');
+    };
+    window.addEventListener('easel:open-skill-settings', open);
+    return () => window.removeEventListener('easel:open-skill-settings', open);
+  }, []);
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
@@ -105,13 +121,16 @@ export default function App() {
     let ch: BroadcastChannel | null = null;
     try { ch = new BroadcastChannel('easel-session'); } catch { ch = null; }
 
-    const settle = (id: string, sess: ChatSession[]) => {
+    const settle = (id: string | null, sess: ChatSession[]) => {
       setSessions(sess);
       setActiveSessionId(id);
       const s = sess.find((x) => x.id === id);
       if (s) setSelectedPersona(s.persona || '');
-      try { sessionStorage.setItem(TAB_SESSION_KEY, id); } catch { /* ignore */ }
-      ch?.postMessage({ type: 'claim', sessionId: id });
+      try {
+        if (id) sessionStorage.setItem(TAB_SESSION_KEY, id);
+        else sessionStorage.removeItem(TAB_SESSION_KEY);
+      } catch { /* ignore */ }
+      if (id) ch?.postMessage({ type: 'claim', sessionId: id });
     };
     const openNew = (sess: ChatSession[]) => {
       const ns = createSession();
@@ -139,7 +158,7 @@ export default function App() {
 
     // 2) 新标签：候选=上次活跃会话；先跨标签问有没有别的活标签占着它
     const lastId = loadActiveId();
-    const candidate = lastId && existing.find((s) => s.id === lastId) ? lastId : null;
+    const candidate = lastId && existing.find((s) => s.id === lastId && !s.archived) ? lastId : null;
     if (candidate && ch) {
       let taken = false;
       const probe = (e: MessageEvent) => {
@@ -156,12 +175,14 @@ export default function App() {
       return () => { clearTimeout(t); ch?.removeEventListener('message', probe); ch?.removeEventListener('message', onMsg); ch?.close(); };
     }
 
-    // 3) 无候选 / 不支持 BroadcastChannel：退化为原逻辑（复用空会话或新建；后端 flock 兜底防崩）
+    // 3) 仅有归档时保留空白入口，刷新不生成同名的最近会话。
     if (candidate) {
       settle(candidate, existing);
     } else {
-      const empty = existing.find((s) => s.messages.length === 0);
-      if (empty) settle(empty.id, existing);
+      const available = existing.find((s) => !s.archived && s.messages.length === 0)
+        || existing.find((s) => !s.archived);
+      if (available) settle(available.id, existing);
+      else if (existing.length) settle(null, existing);
       else openNew(existing);
     }
     return () => { ch?.removeEventListener('message', onMsg); ch?.close(); };
@@ -205,8 +226,10 @@ export default function App() {
 
   // ---- 流式对话：状态与生命周期都放在 App（永不卸载），切页/切 ChatPage 都不中断/丢失 ----
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
+  const queueRevision = useSyncExternalStore(subscribeChatQueue, getQueueRevision);
   const streamCtl = useRef<Record<string, AbortController>>({});
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
+  const [officeTarget, setOfficeTarget] = useState<{ sessionId: string; key: number } | null>(null);
   const streamAcc = useRef<Record<string, { turnId?:string; requestedModelRef?: string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
   const answeredRef = useRef<Set<string>>(new Set());   // 已提交答案的 question id：重放/恢复不再重现
   // ---- 打字机：分批到达的 token 按节奏吐给界面 ----
@@ -321,6 +344,7 @@ export default function App() {
         });
       },
       (err) => {
+        if (streamAcc.current[sessionId] === runAcc) pauseChatQueue(sessionId, '本轮失败，队列已暂停。修复后可继续发送。');
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
@@ -383,6 +407,14 @@ export default function App() {
           ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
       },
       thinkingLevel,
+      (text) => {
+        if (streamAcc.current[sessionId] !== runAcc) return;
+        clearTyping(sessionId);
+        typingBuf.current[sessionId] = '';
+        runAcc.content = text;
+        setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+          ? { ...p, [sessionId]: { ...p[sessionId], content: text } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 
@@ -427,6 +459,7 @@ export default function App() {
         });
       },
       (err) => {
+        if (streamAcc.current[sessionId] === runAcc) pauseChatQueue(sessionId, '本轮失败，队列已暂停。修复后可继续发送。');
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, { role: 'assistant', content: a?.content || '', error:chatErrorDetail(err), turnId, requestedModelRef: a?.requestedModelRef, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
@@ -499,6 +532,14 @@ export default function App() {
           ? { ...p, [sessionId]: { ...p[sessionId], requestedModelRef: selection || undefined } } : p);
       },
       last.requestedThinkingLevel,
+      (text) => {
+        if (streamAcc.current[sessionId] !== runAcc) return;
+        clearTyping(sessionId);
+        typingBuf.current[sessionId] = '';
+        runAcc.content = text;
+        setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
+          ? { ...p, [sessionId]: { ...p[sessionId], content: text } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 
@@ -554,9 +595,21 @@ export default function App() {
   }, [selectedPersona, startStream]);
 
   const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string) => {
-    if (!sessionsRef.current.some(session => session.id === sessionId)) return false;
+    const session = sessionsRef.current.find(session => session.id === sessionId);
+    if (!session || session.importedFromBackup || stopRequests.current[sessionId]) return false;
+    if (streamAcc.current[sessionId] || streamCtl.current[sessionId] || getChatQueue(sessionId).items.length) {
+      return enqueueChat(sessionId, { text: displayText.trim(), attachments: attachments || [], selectedSkills, skillRequirements, thinkingLevel, modelRef });
+    }
     return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel);
   }, [sendUserAndStream]);
+
+  useEffect(() => {
+    for (const session of sessionsRef.current) {
+      if (session.importedFromBackup || session.archived || streamAcc.current[session.id] || streamCtl.current[session.id] || stopRequests.current[session.id]) continue;
+      dispatchQueuedMessage(session.id, item => sendUserAndStream(session.id, item.text, item.attachments,
+        undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel));
+    }
+  }, [streams, queueRevision, sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
   const handleResend = useCallback((
@@ -621,6 +674,7 @@ export default function App() {
     if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return;
     const run = streamAcc.current[sessionId];
     if (!run || stopRequests.current[sessionId]) return;
+    pauseChatQueue(sessionId, '生成已请求停止，队列已暂停。');
     const request = {};
     stopRequests.current[sessionId] = request;
     setStoppingSessions((prev) => ({ ...prev, [sessionId]: true }));
@@ -686,24 +740,30 @@ export default function App() {
   }, []);
 
   const handleSessionArchive = useCallback((id: string, archived: boolean) => {
+    const target = sessionsRef.current.find((session) => session.id === id);
+    if (!target) return;
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, archived } : s));
       saveSessions(next);
       return next;
     });
-    // 归档当前激活会话 → 切到另一个未归档会话或新建
+    // 归档当前会话只切换已有会话；由用户明确新建下一条。
     if (archived && id === activeSessionId) {
       const rest = sessionsRef.current.filter((s) => s.id !== id && !s.archived);
-      if (rest.length) {
-        setActiveSessionId(rest[0].id);
-      } else {
-        const ns = createSession(selectedPersona || undefined);
-        setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
-        setActiveSessionId(ns.id);
+      const next = rest[0] || null;
+      setActiveSessionId(next?.id || null);
+      setSelectedPersona(next?.persona || '');
+      if (!next) {
+        saveActiveId(null);
+        try { sessionStorage.removeItem(TAB_SESSION_KEY); } catch { /* ignore */ }
       }
-      setCurrentPage('chat');
+      setCurrentPage('chat', true);
+    } else if (!archived && !activeSessionId) {
+      setActiveSessionId(id);
+      setSelectedPersona(target.persona || '');
+      setCurrentPage('chat', true);
     }
-  }, [activeSessionId, selectedPersona]);
+  }, [activeSessionId]);
 
   const handleNewChat = useCallback(() => {
     const newSession = createSession(selectedPersona || undefined);
@@ -713,7 +773,7 @@ export default function App() {
       return updated;
     });
     setActiveSessionId(newSession.id);
-    setCurrentPage('chat');
+    setCurrentPage('chat', true);
   }, [selectedPersona]);
 
   const handleSessionSelect = useCallback((id: string) => {
@@ -722,14 +782,14 @@ export default function App() {
     if (target) {
       setSelectedPersona(target.persona || '');
     }
-    setCurrentPage('chat');
+    setCurrentPage('chat', true);
   }, [sessions]);
 
   const handleSessionDelete = useCallback((id: string) => {
     if (!window.confirm('确定删除这条对话？')) return;
 
     const target = sessionsRef.current.find((s) => s.id === id);
-    if (target && !target.importedFromBackup) clearChatDraft(id);
+    if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
       ? stopChat(id).catch(() => ({ stopped: false }))
@@ -829,6 +889,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             onNavigate={setCurrentPage}
+            onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onUseTopic={handleUseTopic}
             onQuickPrompt={handleQuickPrompt}
           />
@@ -846,6 +907,7 @@ export default function App() {
             onSend={(displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef)}
             onStop={() => handleStopStream(activeSession.id)}
             onNewChat={handleNewChat}
+            onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -868,7 +930,13 @@ export default function App() {
               }
             }}
           />
-        ) : null;
+        ) : (
+          <section className="chat-page chat-no-session" aria-label="开始新对话">
+            <h1>开始新对话</h1>
+            <p>已归档的内容保留在对话列表中，可以随时查看或取消归档。</p>
+            <button type="button" className="btn" onClick={handleNewChat}>新建对话</button>
+          </section>
+        );
       case 'trends':
         return <TrendsPage onUseTopic={handleUseTopic} />;
       case 'ideas':
@@ -888,13 +956,13 @@ export default function App() {
       case 'analysis':
         return <ContentAnalysisPage demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
-        return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} />;
+        return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
       case 'agent-office':
-        return <AgentOfficePage demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={sessionId => { setActivityTarget({sessionId, turnId: '', key: Date.now()}); setCurrentPage('activity'); }} />;
+        return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':
-        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} navigationKey={settingsNavigationKey} conversationBackup={{
+        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
           onExport: handleExportConversations,
           onExportRaw: exportRawConversationStorage,
           onImport: handleImportConversations,
@@ -930,7 +998,7 @@ export default function App() {
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <Sidebar
         currentPage={currentPage}
-        onPageChange={(page) => { if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page); }}
+        onPageChange={(page) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page); }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}
