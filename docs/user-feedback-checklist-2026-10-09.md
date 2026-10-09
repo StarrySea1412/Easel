@@ -1,3 +1,5 @@
+Git回执（2026-10-10）：功能源码 dbdfc8b171aec620651846e9d84eea537c8671b1 已推送 starry/codex/creator-workflow 并核对远端SHA；main仅同步中英文README，6b44bcf1284687071d9d5946b78f97d29ac3e2d2 已推送并核对。源码推送不代表安装包发布。
+
 ## 2026-10-10 最新实现与验证（覆盖下方历史进度）
 
 先更新 checklist 后实现；用户签收保持未勾选，确认前不打包。
