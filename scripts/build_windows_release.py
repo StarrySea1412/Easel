@@ -98,8 +98,10 @@ def build_frontend(root: Path) -> None:
     if npm is None:
         raise RuntimeError("npm is required to verify and rebuild the release frontend")
     frontend = root / "web/frontend"
+    env = os.environ.copy()
+    env["EASEL_CLEAN_FRONTEND_BUILD"] = "1"
     for args in (("ci",), ("test",), ("run", "lint"), ("run", "build")):
-        subprocess.run([npm, *args], cwd=frontend, check=True)
+        subprocess.run([npm, *args], cwd=frontend, env=env, check=True)
 
 
 def build_archive(root: Path, archive: Path, version: str, lock: Path) -> None:

@@ -10,6 +10,7 @@ import { IconSpark } from './icons';
 import '../styles/skill-picker.css';
 
 interface BrushEntryProps {
+  openRequest?: number;
   compact?: boolean;
   selectedSkills: string[];
   onPick: (text: string, skill: string, example?: boolean) => void;
@@ -17,7 +18,7 @@ interface BrushEntryProps {
 }
 
 /** Choose installed skills while keeping their actual SKILL.md guide in view. */
-export default function BrushEntry({ selectedSkills, onPick, onRemove, compact = false }: BrushEntryProps) {
+export default function BrushEntry({ selectedSkills, onPick, onRemove, compact = false, openRequest = 0 }: BrushEntryProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState(0);
   const [q, setQ] = useState('');
@@ -33,6 +34,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
   const gradientId = useId();
 
   function close() { setOpen(false); triggerRef.current?.focus(); }
+  useEffect(() => { if (openRequest) setOpen(true); }, [openRequest]);
 
   useEffect(() => {
     if (!open) return;

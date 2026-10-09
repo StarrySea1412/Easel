@@ -130,8 +130,9 @@ def test_release_entrypoint_rebuilds_before_any_packaging(release_checkout, monk
     root, frontend = release_checkout
     calls = []
 
-    def run(command, *, cwd, check):
+    def run(command, *, cwd, env, check):
         assert cwd == frontend and check is True
+        assert env["EASEL_CLEAN_FRONTEND_BUILD"] == "1"
         calls.append(tuple(command[1:]))
         if command[1:] == ["run", "build"]:
             (frontend / "dist/index.html").write_text("fresh frontend", encoding="utf-8")

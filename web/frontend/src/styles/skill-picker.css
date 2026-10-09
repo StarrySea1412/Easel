@@ -86,6 +86,8 @@
 .composer-skill-chip { padding:3px 6px; gap:4px; min-height:28px; box-sizing:border-box; background:var(--surface-2); border-color:var(--border); }
 .composer-skill-chip .composer-skill-detail-trigger { padding:0 4px; min-height:22px; }
 .composer-skill-chip > button[aria-label^="移除技能"] { width:22px; padding:0; }
+.composer-skill-type-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; color:var(--text-secondary); }
+.composer-skill-type-icon svg { display:block; }
 .skill-picker .brush-body { padding:12px; }
 .skill-picker .brush-grp { display:grid; gap:7px; }
 .skill-picker .brush-item { border:1px solid transparent; border-radius:9px; padding:11px; }

@@ -1,3 +1,7 @@
+## 2026-10-10 · 队列连续执行与输入交互 / Queue continuation and composer interactions
+
+> **2026-10-10 输入与队列补充**：引导成功后自动接续剩余消息，空闲引导直接发送，运行中先等停止确认；手动停止、发送失败或缺素材仍暂停并保留消息。空闲回到底部显示箭头，运行中显示三点并在hover/focus时切换箭头。已选技能增加类型icon，附件提供图片缩略图/大预览与文件名/格式；“＋”可添加媒体、文件、文件夹素材或打开技能选择。生图/视频比例增加真实宽高示意，提示词输入与思考强度灰色区段增强辨识。引用info改为临时hover/focus提示，与展开引用互斥，Escape关闭。旧标签页切页失败定位为重建删除旧模块，预览构建已保留旧哈希资源；不刷新旧页面实际打开工坊成功。109项定向检查、生产构建和lint通过（既有warning）；真实队列自动取得“引导后继续正常”“剩余队列自动继续正常”。桌面/390px附件与菜单、图标、比例、输入已检查；引用hover属组件检查，尚无真实浏览器选择引用复核。旧未完成项继续保留，便携包仍未生成。
+
 # Changelog
 
 Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.

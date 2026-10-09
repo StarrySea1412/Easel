@@ -1,3 +1,4 @@
+import AspectRatioIcon from './AspectRatioIcon';
 import { NativeSelect as Select } from './ui/Select';
 import { useRef, useState } from 'react';
 import type { VideoStudioController } from '../hooks/useVideoStudio';
@@ -61,7 +62,7 @@ export default function VideoStudioPanel({ video, images, onOpenSettings }: {
           <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => uploadInput.current?.click()}><IconImage size={16} />{video.referenceBusy ? '上传中…' : reference ? '换参考图' : '添加参考图'}</button>
           <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => void media.pasteClipboard()}>{media.processing ? '读取素材中…' : '从剪贴板粘贴'}</button>
           <input ref={uploadInput} aria-label="上传视频参考图" type="file" hidden accept={STUDIO_MEDIA_ACCEPT} disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
-          <label className="image-ratio-select"><span>比例</span><Select aria-label="视频画面比例" disabled={locked || !provider} value={video.ratio} onChange={event => video.setRatio(event.target.value)}>{(provider?.ratios || ['16:9', '9:16', '1:1']).map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</Select></label>
+          <label className="image-ratio-select"><span>比例</span><Select aria-label="视频画面比例" optionIcons={Object.fromEntries((provider?.ratios || ['16:9', '9:16', '1:1']).map(ratio => [ratio, <AspectRatioIcon key={ratio} ratio={ratio}/>]))} disabled={locked || !provider} value={video.ratio} onChange={event => video.setRatio(event.target.value)}>{(provider?.ratios || ['16:9', '9:16', '1:1']).map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</Select></label>
           <label className="image-ratio-select"><span>时长</span><Select aria-label="视频时长" disabled={locked || !provider} value={video.duration ?? ''} onChange={event => video.setDuration(event.target.value ? Number(event.target.value) : null)}><option value="">默认</option>{provider?.durations.map(duration => <option key={duration} value={duration}>{duration} 秒</option>)}</Select></label>
         </div><button type="submit" className="btn btn-primary image-generate" disabled={!canGenerate}>{video.submitting ? '正在提交…' : busy ? '正在生成…' : '生成视频 →'}</button></div>
         {video.prompt.length > 2000 && <p className="image-error" role="alert">描述最多 2000 字，当前 {video.prompt.length} 字，请稍作精简。</p>}

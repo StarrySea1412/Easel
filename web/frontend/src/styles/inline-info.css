@@ -4,3 +4,8 @@
 .inline-info>summary:hover,.inline-info[open]>summary{background:var(--surface-2);color:var(--text-secondary)}
 .inline-info>summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .inline-info-content{position:absolute;z-index:55;right:0;top:calc(100% + 5px);box-sizing:border-box;width:210px;max-width:calc(100vw - 70px);padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface);box-shadow:0 4px 16px #0001;color:var(--text-secondary);line-height:1.6;white-space:normal;overflow-wrap:anywhere;text-align:left}
+
+.inline-info.is-hover>button { display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;cursor:help;color:inherit; }
+.inline-info.is-hover>button:hover,.inline-info.is-hover>button:focus-visible { background:var(--surface-2);color:var(--text-secondary); }
+.inline-info.is-hover>button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
+.inline-info-tooltip { position:fixed;right:auto;z-index:1200;pointer-events:none; }

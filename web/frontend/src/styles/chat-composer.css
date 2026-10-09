@@ -116,3 +116,42 @@
 }
 
 .dash-launch-input::placeholder { color:var(--text-tertiary); font-weight:400; opacity:.72; }
+
+.chat-composer .composer-attachments { gap:8px; margin:8px 4px 12px; }
+.chat-composer .composer-attachment-card { position:relative; display:block; flex:none; width:220px; max-width:100%; padding:0; border:1px solid var(--border); background:var(--surface-2); border-radius:12px; }
+.composer-attachment-open { display:flex; align-items:center; gap:10px; width:100%; min-width:0; padding:10px 32px 10px 10px; border:0; border-radius:inherit; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+.composer-attachment-open:hover { background:var(--surface-hover); }
+.composer-attachment-visual { position:relative; display:flex; align-items:center; justify-content:center; flex:none; width:42px; height:46px; border-radius:6px; color:var(--text-secondary); background:var(--surface); overflow:hidden; }
+.composer-attachment-visual img,.composer-attachment-visual video { width:100%; height:100%; object-fit:cover; }
+.composer-attachment-copy { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.composer-attachment-copy .attach-name { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; white-space:normal; overflow-wrap:anywhere; font-size:12px; line-height:1.4; color:var(--text); }
+.composer-attachment-copy small { color:var(--text-tertiary); font-size:10px; }
+.chat-composer .composer-attachment-card.is-image,.chat-composer .composer-attachment-card.is-video { width:144px; }
+.is-image .composer-attachment-open,.is-video .composer-attachment-open { flex-direction:column; align-items:stretch; gap:7px; padding:5px 5px 8px; }
+.is-image .composer-attachment-visual,.is-video .composer-attachment-visual { width:100%; height:80px; }
+.is-image .composer-attachment-copy,.is-video .composer-attachment-copy { padding:0 3px; }
+.composer-attachment-play { position:absolute; display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#0009; color:#fff; }
+.chat-composer .composer-attachment-card .attach-x { position:absolute; top:4px; right:4px; display:flex; align-items:center; justify-content:center; min-width:24px; min-height:24px; width:24px; height:24px; padding:0; border:1px solid var(--border); border-radius:50%; background:var(--surface); color:var(--text-secondary); font-size:16px; cursor:pointer; box-shadow:0 1px 4px #0001; }
+.chat-composer .composer-attachment-card .attach-x:hover { color:var(--red); }
+.composer-attachment-backdrop { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; padding:18px; background:#0006; }
+.composer-attachment-preview { display:flex; flex-direction:column; width:800px; max-width:100%; max-height:calc(100dvh - 36px); border-radius:16px; border:1px solid var(--border); background:var(--surface); color:var(--text); overflow:hidden; box-shadow:0 16px 60px #0003; }
+.composer-attachment-preview header,.composer-attachment-preview footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; flex:none; }
+.composer-attachment-preview header { border-bottom:1px solid var(--border); }
+.composer-attachment-preview header>div { min-width:0; display:grid; gap:4px; }
+.composer-attachment-preview strong { font-size:14px; overflow-wrap:anywhere; }
+.composer-attachment-preview small { font-size:11px; color:var(--text-tertiary); }
+.composer-attachment-preview .icon-btn { font-size:24px; flex:none; }
+.composer-attachment-preview-body { min-height:0; overflow:auto; padding:16px; text-align:center; }
+.composer-attachment-preview-body>img,.composer-attachment-preview-body>video { display:block; max-width:100%; max-height:65dvh; margin:auto; object-fit:contain; }
+.composer-attachment-preview-body iframe { width:100%; height:60dvh; border:0; }
+.composer-attachment-preview footer { border-top:1px solid var(--border); }
+.composer-attachment-preview a { font-size:12px; color:var(--text-secondary); }
+.composer-attachment-document { padding:35px 0; color:var(--text-secondary); overflow-wrap:anywhere; }
+.composer-add-menu { position:fixed; z-index:1100; box-sizing:border-box; width:260px; max-width:calc(100vw - 24px); padding:7px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); box-shadow:0 6px 24px #0002; }
+.composer-add-menu>small { display:block; padding:5px 9px 7px; font-size:11px; color:var(--text-tertiary); }
+.composer-add-menu button { display:flex; align-items:center; gap:10px; width:100%; padding:9px; border:0; border-radius:8px; background:transparent; color:inherit; text-align:left; font:inherit; font-size:12px; cursor:pointer; }
+.composer-add-menu button:hover,.composer-add-menu button:focus-visible { background:var(--surface-2); outline:none; }
+.composer-add-menu button>svg { flex:none; color:var(--text-secondary); }
+.composer-add-menu button span { display:grid; gap:3px; }
+.composer-add-menu button small { color:var(--text-tertiary); font-size:10px; }
+.composer-add-menu hr { margin:5px; border:0; border-top:1px solid var(--border); }

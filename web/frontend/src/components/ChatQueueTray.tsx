@@ -142,7 +142,7 @@ export default function ChatQueueTray({ sessionId, editingId, onEdit, onSteer, i
           if (item.missingAttachments.length) { showToast('请先补回这条消息的素材，再进行引导。'); return; }
           if (!onSteer) { showToast('当前对话无法发送，消息已保留在队列中。'); return; }
           steeringLock.current = true; setSteering(item.id); showToast(isStreaming ? '正在停止当前生成，随后按所选消息继续…' : '正在发送所选消息…');
-          try { const accepted = await onSteer(item.id); showToast(accepted ? (isStreaming ? '已按所选消息继续，其他队列消息保持暂停。' : '已发送所选消息，其他队列消息保持暂停。') : getChatQueue(sessionId).error || '消息未发送，已保留在队列中，请重试。', accepted ? 'success' : 'error'); }
+          try { const accepted = await onSteer(item.id); showToast(accepted ? (getChatQueue(sessionId).paused && getChatQueue(sessionId).items.length ? '已发送所选消息；剩余消息有修改或缺少素材，请确认后继续。' : '已发送所选消息，剩余队列将在本轮结束后按顺序继续。') : getChatQueue(sessionId).error || '消息未发送，已保留在队列中，请重试。', accepted ? 'success' : 'error'); }
           catch { showToast('引导失败，消息已保留，请重试。', 'error'); }
           finally { steeringLock.current = false; setSteering(null); }
         }}><QueueSteerIcon/>{steering===item.id?'引导中…':'引导'}</button>

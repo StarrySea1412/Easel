@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { displayName } from '../lib/skillDisplayNames';
 import { MAX_SKILL_REQUIREMENT_LENGTH } from '../lib/selectedSkills';
 import SkillGuidePreview from './SkillGuidePreview';
+import SkillTypeIcon from './SkillTypeIcon';
 import '../styles/skill-picker.css';
 
 export default function SelectedSkillChip({skillName,requirement='',requirementScope='conversation',onSaveRequirement,onRemove}:{
@@ -38,7 +39,7 @@ export default function SelectedSkillChip({skillName,requirement='',requirementS
     return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);};
   },[open]);
   return <><span ref={chip} className="composer-skill-chip" data-skill={skillName} onBlur={event=>{if(event.relatedTarget&&!chip.current?.contains(event.relatedTarget as Node)&&!panel.current?.contains(event.relatedTarget as Node))close();}}>
-    <button type="button" ref={trigger} className="composer-skill-detail-trigger" aria-label={`${label}技能详情与补充要求`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open?id:undefined} onClick={reveal} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();edit();}}} onBlur={event=>{if(event.relatedTarget&&!chip.current?.contains(event.relatedTarget as Node)&&!panel.current?.contains(event.relatedTarget as Node))close();}}><span>{label}</span>{requirement&&<i className="composer-skill-requirement-dot" title={`已添加${requirementLabel}`} aria-label={`已添加${requirementLabel}`}/>}</button>
+    <button type="button" ref={trigger} className="composer-skill-detail-trigger" aria-label={`${label}技能详情与补充要求`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open?id:undefined} onClick={reveal} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();edit();}}} onBlur={event=>{if(event.relatedTarget&&!chip.current?.contains(event.relatedTarget as Node)&&!panel.current?.contains(event.relatedTarget as Node))close();}}><SkillTypeIcon name={skillName}/><span>{label}</span>{requirement&&<i className="composer-skill-requirement-dot" title={`已添加${requirementLabel}`} aria-label={`已添加${requirementLabel}`}/>}</button>
     <button type="button" aria-label={`移除技能 ${label}`} onMouseEnter={()=>close()} onFocus={()=>close()} onClick={()=>{close();onRemove();}}>×</button>
   </span>{open&&createPortal(<div ref={panel} id={id} className="selected-skill-popover" role="dialog" aria-label={`${label}技能详情与补充要求`} style={position} onBlur={event=>{if(event.relatedTarget&&!event.currentTarget.contains(event.relatedTarget as Node)&&!chip.current?.contains(event.relatedTarget as Node))close();}}>
     <header><strong>{label}</strong><button type="button" className="icon-btn" aria-label="关闭技能详情" onClick={()=>close(true)}>×</button></header>

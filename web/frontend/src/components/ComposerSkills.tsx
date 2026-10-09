@@ -14,11 +14,12 @@ export function ComposerSkillChips({ skills }: { skills: ComposerSkills }) {
   </div>;
 }
 
-export function ComposerSkillPicker({ skills, setInput }: {
+export function ComposerSkillPicker({ skills, setInput, openRequest }: {
   skills: ComposerSkills;
+  openRequest?: number;
   setInput: (value: string | ((current: string) => string)) => void;
 }) {
-  return <BrushEntry compact selectedSkills={skills.selectedSkills} onRemove={skills.removeSkill}
+  return <BrushEntry compact openRequest={openRequest} selectedSkills={skills.selectedSkills} onRemove={skills.removeSkill}
     onPick={(text, skill, example) => {
       if (!skills.retryRestore()) return;
       skills.selectSkill(skill);

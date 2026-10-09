@@ -694,11 +694,11 @@ export default function App() {
     return targetId;
   }, [selectedPersona, sendUserAndStream]);
 
-  const handleStopStream = useCallback(async (sessionId: string) => {
+  const handleStopStream = useCallback(async (sessionId: string, pauseQueue = true) => {
     if (sessionsRef.current.find(s => s.id === sessionId)?.importedFromBackup) return false;
     const run = streamAcc.current[sessionId];
     if (!run || stopRequests.current[sessionId]) return false;
-    pauseChatQueue(sessionId, '生成已请求停止，队列已暂停。');
+    if (pauseQueue) pauseChatQueue(sessionId, '生成已请求停止，队列已暂停。');
     const request = {};
     stopRequests.current[sessionId] = request;
     setStoppingSessions((prev) => ({ ...prev, [sessionId]: true }));
@@ -749,7 +749,7 @@ export default function App() {
   }, [appendAssistant, clearStream]);
 
   const handleSteer = useCallback((sessionId: string, id: string) => steerQueuedMessage(sessionId, id,
-    () => handleStopStream(sessionId), item => sendUserAndStream(sessionId, item.text, item.attachments,
+    () => handleStopStream(sessionId, false), item => sendUserAndStream(sessionId, item.text, item.attachments,
       undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel),
     () => Boolean(streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]
       || sessionsRef.current.find(session => session.id === sessionId)?.pendingTurnId)), [handleStopStream, sendUserAndStream]);

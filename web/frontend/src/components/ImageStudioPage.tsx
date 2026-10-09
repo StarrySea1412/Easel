@@ -2,6 +2,7 @@ import { NativeSelect as Select } from './ui/Select';
 import RadioGroup from './ui/RadioGroup';
 import InpaintMaskEditor from './InpaintMaskEditor';
 import { useEffect, useRef, useState } from 'react';
+import AspectRatioIcon from './AspectRatioIcon';
 import { IMAGE_SIZES } from '../hooks/useImageStudio';
 import type { ImageStudioController } from '../hooks/useImageStudio';
 import type { VideoStudioController } from '../hooks/useVideoStudio';
@@ -123,7 +124,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
             <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => uploadInput.current?.click()}><IconImage size={16} />{studio.referenceBusy ? '上传中…' : reference ? '换图' : '添加图片'}</button>
             <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => void media.pasteClipboard()}>{media.processing ? '读取素材中…' : '从剪贴板粘贴'}</button>
             <input ref={uploadInput} aria-label="上传参考图" type="file" hidden accept={STUDIO_MEDIA_ACCEPT} disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
-            <label className="image-ratio-select"><span>比例</span><Select aria-label="画面比例" disabled={locked} value={studio.imgSize} onChange={event => studio.setImgSize(event.target.value)}>{IMAGE_SIZES.map(item => <option key={item.id} value={item.id}>{item.id === 'auto' ? '自动尺寸' : item.label.split(' ').at(-1)}</option>)}</Select></label>
+            <label className="image-ratio-select"><span>比例</span><Select aria-label="画面比例" optionIcons={Object.fromEntries(IMAGE_SIZES.map(item => [item.id, <AspectRatioIcon key={item.id} ratio={item.ratio} automatic={item.id === 'auto'}/>]))} disabled={locked} value={studio.imgSize} onChange={event => studio.setImgSize(event.target.value)}>{IMAGE_SIZES.map(item => <option key={item.id} value={item.id}>{item.id === 'auto' ? '自动尺寸' : item.label.split(' ').at(-1)}</option>)}</Select></label>
           </div><button type="submit" className="btn btn-primary image-generate" disabled={!canGenerate}>{studio.imgSubmitting ? '正在提交…' : busy ? '正在生成…' : reference ? '生成修改图 →' : '生成图片 →'}</button></div>
           {studio.imgPrompt.length > 2000 && <p className="image-error" role="alert">描述最多 2000 字，当前 {studio.imgPrompt.length} 字，请稍作精简。</p>}
           <StudioMediaSource media={media} locked={locked} />

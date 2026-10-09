@@ -354,10 +354,9 @@ test('App sends a selected paused message while idle, then resumes neighbours se
   await act(async () => assert.equal(await harness.pages['对话'].onSteer(selected.id),true));
   assert.equal(harness.streams.length,1);assert.equal(harness.streams[0].args[0],'第二条');
   assert.equal(harness.calls.filter(call=>call[0]==='stopChat').length,0);
-  assert.equal(queue.getChatQueue('original').paused,true);assert.deepEqual(queue.getChatQueue('original').items.map(row=>row.text),['第一条']);
+  assert.equal(queue.getChatQueue('original').paused,false);assert.deepEqual(queue.getChatQueue('original').items.map(row=>row.text),['第一条']);
   await act(async()=>harness.streams[0].args[4]());
-  assert.equal(harness.streams.length,1,'neighbours remain paused after selected message completes');
-  await act(async()=>assert.equal(queue.resumeChatQueue('original'),true));
+  // Completion drains the remainder automatically, without clicking resume.
   assert.equal(harness.streams.length,2);assert.equal(harness.streams[1].args[0],'第一条');
   assert.equal(queue.getChatQueue('original').items.length,0);
 });
@@ -380,7 +379,10 @@ test('App steering continues the selected queued snapshot after delayed stop and
   assert.equal(harness.streams[1].args[0].includes('所选引导'), true);
   assert.equal(harness.streams[1].args[17], 'relay/model');
   assert.deepEqual(queue.getChatQueue('original').items.map(item => item.text), ['保留邻居']);
-  assert.equal(queue.getChatQueue('original').paused, true);
+  assert.equal(queue.getChatQueue('original').paused, false);
+  await act(async () => harness.streams[1].args[4]());
+  assert.equal(harness.streams.length, 3);
+  assert.equal(harness.streams[2].args[0], '保留邻居');
 });
 
 test('an unconfirmed stop keeps receiving the final result instead of fabricating a stopped response', async t => {
@@ -713,4 +715,16 @@ test('actual App pins through the Sidebar, persists across reload and preserves 
   assert.equal(reloaded.harness.sidebar.sessions.some(item => item.id === second.id), false);
   assert.equal(JSON.parse(reloaded.values.get('easel_sessions')).some(item => item.id === second.id), false);
   assert.equal(reloaded.harness.streams.length, 0);
+});
+
+test('settings navigation replaces the main page for current, other and toolbar chat selections without sending', async t => {
+ const second={...sourceSession,id:'second',title:'另一条对话'};
+ const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,second]),easel_active_session:'original'});
+ for(const id of ['original','second']){
+  await v.settings();assert.equal(v.container.querySelector('.page-host').textContent,'设置');
+  await act(async()=>v.harness.sidebar.onSessionSelect(id));
+  assert.equal(v.container.querySelector('.page-host').textContent,'对话');assert.equal(v.harness.pages['对话'].session.id,id);
+ }
+ await v.settings();await act(async()=>v.harness.sidebar.onPageChange('chat'));
+ assert.equal(v.container.querySelector('.page-host').textContent,'对话');assert.equal(v.harness.streams.length,0);
 });

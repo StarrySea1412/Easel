@@ -331,6 +331,7 @@ def test_frontend_preparation_runs_required_checks_with_bounded_parallelism(tmp_
     monkeypatch.setattr(portable.shutil, "which", lambda executable, **_kwargs: executable)
     def run(command, **kwargs):
         assert kwargs["check"] and kwargs["cwd"] == root / "web/frontend"
+        assert kwargs["env"]["EASEL_CLEAN_FRONTEND_BUILD"] == "1"
         calls.append(command)
     monkeypatch.setattr(portable.subprocess, "run", run)
     receipt = tmp_path / "frontend.json"

@@ -10,7 +10,9 @@ import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker'
 import { useComposerModels } from '../hooks/useComposerModels';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
-import { IconArrowUp, IconStop, IconPlus, IconFile, IconChevron } from './icons';
+import { IconArrowUp, IconStop, IconChevron } from './icons';
+import ComposerAttachments from './ComposerAttachments';
+import ComposerAddMenu, { type ComposerUploadKind } from './ComposerAddMenu';
 import { DEFAULT_THINKING_LEVEL, loadThinkingLevel, saveThinkingLevel, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
 import '../styles/chat-composer.css';
 import '../styles/thinking-level-picker.css';
@@ -74,6 +76,8 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
   const thinkingWarning = thinkingUnsupported ? `${effectiveModel?.model} 不支持 ${THINKING_LABELS[thinkingLevel]}；网关声明可选：${supportedThinking?.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。请选择支持的档位。` : '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null), folderInputRef = useRef<HTMLInputElement>(null);
+  const [skillPickerRequest, setSkillPickerRequest] = useState(0);
   const composingRef = useRef(false);
   const dragDepthRef = useRef(0);
   const inputId = useId();
@@ -143,6 +147,19 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
     if (e.clipboardData.files?.length) { e.preventDefault(); void doUpload(e.clipboardData.files); }
   };
   const removeAttachment = (path: string) => removeChatDraftAttachment(sessionId, path);
+  const openUpload = (kind: ComposerUploadKind) => {
+    (kind === 'media' ? mediaInputRef : kind === 'folder' ? folderInputRef : fileInputRef).current?.click();
+  };
+  const uploadSelection = (event: React.ChangeEvent<HTMLInputElement>, folder = false) => {
+    let files = Array.from(event.currentTarget.files || []); event.currentTarget.value = '';
+    if (folder) {
+      const supported = files.filter(file => /\.(png|jpe?g|webp|gif|bmp|svg|mp4|mov|webm|m4v|pdf|txt|md|markdown|csv|json|srt|vtt|docx?|xlsx?|pptx?|mp3|wav|m4a)$/i.test(file.name));
+      if (supported.length !== files.length) showToast(`已跳过 ${files.length - supported.length} 个不支持的文件。`);
+      files = supported;
+      if (!files.length) { showToast('文件夹中没有支持的素材文件。'); return; }
+    }
+    void doUpload(files);
+  };
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -237,35 +254,23 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
         rows={2}
         autoFocus={hero}
       />
-      {!editingQueue && attachments.length > 0 && (
-        <div className="composer-attachments" aria-label="已添加的素材">
-          {attachments.map((a) => (
-            <span key={a.path} className="attach-chip" title={a.path}>
-              <IconFile size={12} /> <span className="attach-name">{a.name}</span>
-              <button type="button" className="attach-x" onClick={() => removeAttachment(a.path)} title="移除" aria-label={`移除 ${a.name}`}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
+      {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
       {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
       {draft.missingAttachments.length > 0 && <div className="composer-skills-note" role="status">
         <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
         <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
       </div>}
-      {attachments.length > 0 && <p className="composer-skills-note">素材会随会话切换保留；刷新页面后需要重新添加。</p>}
       {skills.notice && <p className="composer-skills-note" role="status">{skills.notice}
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
-      <input ref={fileInputRef} type="file" multiple hidden
-        onChange={(e) => { if (e.target.files) void doUpload(e.target.files); e.target.value = ''; }} />
+      <input ref={fileInputRef} type="file" multiple hidden onChange={uploadSelection}/>
+      <input ref={mediaInputRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.mp4,.mov,.webm,.m4v" multiple hidden onChange={uploadSelection}/>
+      <input ref={folderInputRef} type="file" multiple hidden {...{ webkitdirectory: '' }} onChange={event => uploadSelection(event, true)}/>
       <div className="composer-bar">
         <div className="composer-tools" hidden={editingQueue}>
-          <button type="button" className="composer-attach-btn" onClick={() => fileInputRef.current?.click()}
-            disabled={stopping || uploading} aria-label={uploading ? '正在添加素材' : '添加图片或文档'} title={`添加图片或文档；支持拖入或粘贴，超过 ${maxMb}MB 的文件将存为本地素材`}>
-            <IconPlus size={18} />{uploading && <span>上传中…</span>}
-          </button>
-          <ComposerSkillPicker skills={skills} setInput={setInput} />
+          <ComposerAddMenu disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>
           <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />
           <ThinkingLevelPicker value={thinkingLevel} onChange={changeThinkingLevel} disabled={stopping}
             supportedLevels={supportedThinking}
@@ -391,6 +396,7 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
         {supportedLevels?.length ? <>网关声明可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。不支持的档位已禁用。<br/>这是能力声明，非本轮调用实测。</> : <>能力信息尚未提供；当前选择用于下一轮请求。</>}
       </InlineInfo></div>
       <div className="thinking-level-slider-wrap">
+        {maxIndex < strengthLevels.length - 1 && <span className="thinking-level-unavailable" aria-hidden="true"/>}
         {value === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
         <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={maxIndex || 1} step={1} value={sliderIndex}
           style={{width:maxIndex ? `calc(${maxIndex / (strengthLevels.length - 1) * 100}% + ${27 * (1 - maxIndex / (strengthLevels.length - 1))}px)` : '27px'}}

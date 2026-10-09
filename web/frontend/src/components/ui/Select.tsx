@@ -7,6 +7,7 @@ export interface SelectOption {
   value: string;
   label: string;
   description?: string;
+  icon?: ReactNode;
   disabled?: boolean;
 }
 
@@ -176,7 +177,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       aria-required={required || undefined} disabled={disabled} {...aria}
       onClick={() => expanded ? setOpen(false) : show()} onKeyDown={onKeyDown}
       onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
-      <span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
+      <span className="easel-select-icon" aria-hidden="true">{selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
       <svg className="easel-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
     </button>
     {name && <input type="hidden" name={name} value={value} disabled={disabled} />}
@@ -188,7 +189,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
         className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
         onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-        <span className="easel-select-option-copy"><span className="easel-select-option-label">{option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
+        {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
         {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
       </div>)}
     </div>, document.body)}
@@ -207,14 +208,14 @@ function childOptions(children: ReactNode, groupDisabled = false): SelectOption[
 }
 
 /** Native option/event compatibility; the visible control always uses our listbox. */
-export function NativeSelect({children,value,defaultValue,onChange,id,className,disabled,required,name,...props}: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple' | 'size'>) {
+export function NativeSelect({children,value,defaultValue,onChange,id,className,disabled,required,name,optionIcons,...props}: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple' | 'size'> & { optionIcons?: Record<string, ReactNode> }) {
   const nativeRef = useRef<HTMLSelectElement>(null);
   const generatedId=useId();
   const triggerId=id || `native-select-${generatedId}`;
   const errorId=`${triggerId}-error`;
   const [localValue,setLocalValue] = useState<string|undefined>(()=>defaultValue === undefined ? undefined : String(defaultValue));
   const [validationMessage,setValidationMessage] = useState('');
-  const options=childOptions(children);
+  const options=childOptions(children).map(option => ({ ...option, icon: optionIcons?.[option.value] }));
   const selectedValue=value === undefined ? localValue ?? options.find(option=>!option.disabled)?.value ?? '' : String(value);
   useEffect(()=>{
     if(disabled || !required || nativeRef.current?.validity.valid) setValidationMessage('');

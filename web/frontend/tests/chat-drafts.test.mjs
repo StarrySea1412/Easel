@@ -62,11 +62,11 @@ async function fixture(t, initial = {}) {
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
   let current = session('one');
-  const render = async (id = current.id, patch = {}) => {
+  const render = async (id = current.id, patch = {}, pageProps = {}) => {
     current = session(id, patch);
     await act(async () => root.render(createElement(modules.Page, {
       session: current, onSend: (...args) => { h.sent.push(args); return h.accepted; },
-      onStop() {}, onResend() {},
+      onStop() {}, onResend() {}, ...pageProps,
     })));
   };
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
@@ -97,7 +97,7 @@ test('navigation restores each session draft and uploaded references independent
   await view.render('one');
   assert.equal(view.container.querySelector('textarea').value, '  草稿一\n保留换行  ');
   assert.equal(view.container.querySelectorAll('.attach-chip').length, 1);
-  assert.match(view.container.textContent, /刷新页面后需要重新添加/);
+  assert.equal(view.container.querySelector('.composer-attachment-visual img').alt, 'reference.png');
   await view.click(view.container.querySelector('[aria-label="移除 reference.png"]'));
   await view.render('two'); assert.equal(view.container.querySelector('textarea').value, '草稿二');
   assert.equal(view.container.querySelector('.attach-chip'), null);
@@ -244,4 +244,14 @@ test('quotes retain comments, survive refresh, isolate sessions and clear only o
   assert.equal(view.container.querySelector('[aria-label="发送消息"]').disabled,false);
   view.h.accepted=true; await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.container.querySelector('.composer-quote-details'),null);
+});
+
+test('return to latest shows loading only while a run exists, then changes to an idle arrow without another click',async t=>{
+ const v=await fixture(t);const patch={messages:[{role:'user',content:'第一轮'},{role:'assistant',content:'回复'}]};
+ await v.render('latest',patch,{stream:{content:'生成中',thinking:'',activity:[]}});
+ await v.click(v.container.querySelector('.chat-turn-navigation button'));
+ let latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),true);assert.ok(latest.querySelector('.chat-latest-dots'));
+ await v.render('latest',patch);
+ latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),false);assert.equal(latest.querySelector('.chat-latest-dots'),null);assert.ok(latest.querySelector('.chat-latest-arrow'));
+ await v.click(latest);assert.equal(v.container.querySelector('.chat-return-latest'),null);
 });

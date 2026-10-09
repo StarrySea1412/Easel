@@ -61,9 +61,9 @@
 .image-result-actions a { color:var(--text-secondary); text-decoration:none; }.image-result-actions a:hover { color:var(--accent-start); text-decoration:underline; }
 .image-composer { border-top:1px solid var(--border); padding:19px 22px 12px; }
 .image-prompt-label { display:block; font-size:13px; font-weight:550; margin-bottom:4px; color:var(--text); }
-.image-composer>textarea { display:block; width:100%; min-height:66px; max-height:220px; padding:8px 0; resize:vertical; box-sizing:border-box; border:0; background:transparent; color:var(--text); font:inherit; font-size:14px; line-height:1.75; }
+.image-composer>textarea { display:block; width:100%; min-height:108px; max-height:260px; padding:12px 14px; resize:vertical; box-sizing:border-box; border:1px solid color-mix(in srgb,var(--text-tertiary) 30%,var(--border)); border-radius:12px; background:var(--surface-2); color:var(--text); font:inherit; font-size:14px; line-height:1.75; }
 .image-composer>textarea::placeholder { color:var(--text-tertiary,var(--text-secondary)); }
-.image-composer>textarea:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; border-radius:4px; }
+.image-composer>textarea:focus-visible { outline:2px solid color-mix(in srgb,var(--accent-start) 45%,transparent); outline-offset:2px; border-color:var(--accent-start); }
 .image-prompt-suggestions { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 14px; }
 .image-prompt-suggestions button { border:1px solid var(--border); background:var(--surface-2); color:var(--text-secondary); font:inherit; font-size:11px; padding:5px 10px; border-radius:6px; cursor:pointer; }
 .image-prompt-suggestions button:hover { color:var(--accent-start); border-color:var(--accent-start); }

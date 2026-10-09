@@ -60,3 +60,6 @@
   .easel-select-option.is-active { outline: 1px solid Highlight; outline-offset: -1px; }
   .easel-select-option.is-disabled { color: GrayText; }
 }
+
+.easel-select-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; color:var(--text-secondary); }
+.easel-select-icon:empty { display:none; }

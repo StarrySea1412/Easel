@@ -325,6 +325,7 @@ def frontend_output(root: Path) -> dict[str, dict]:
 
 def prepare_frontend(root: Path, receipt: Path | None = None, *, node_dir: Path | None = None) -> dict:
     env = os.environ.copy()
+    env["EASEL_CLEAN_FRONTEND_BUILD"] = "1"
     if node_dir is not None:
         env["PATH"] = str(node_dir) + os.pathsep + env.get("PATH", "")
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env.get("PATH"))

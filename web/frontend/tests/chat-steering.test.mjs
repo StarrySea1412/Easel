@@ -11,17 +11,17 @@ test('idle paused queue sends only the selected snapshot without a stop request'
  const session='steer-idle';q.enqueueChat(session,message('first'));q.enqueueChat(session,message('selected'));q.pauseChatQueue(session);
  const selected=q.getChatQueue(session).items[1],sent=[];
  assert.equal(await steerQueuedMessage(session,selected.id,async()=>{throw Error('idle must not stop');},item=>{sent.push(item);return true;},()=>false),true);
- assert.deepEqual(sent,[selected]);assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['first']);assert.equal(q.getChatQueue(session).paused,true);
+ assert.deepEqual(sent,[selected]);assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['first']);assert.equal(q.getChatQueue(session).paused,false);
 });
 
-test('steering waits for confirmed stop, sends exact selected snapshot and pauses neighbours',async()=>{
+test('steering waits for confirmed stop, sends exact selected snapshot and resumes neighbours',async()=>{
  const session='steer-order';q.enqueueChat(session,message('first'));q.enqueueChat(session,message('selected'));q.enqueueChat(session,message('last'));
  const item=q.getChatQueue(session).items[1];let confirm;const sent=[];
  const result=steerQueuedMessage(session,item.id,()=>new Promise(r=>confirm=r),row=>{sent.push(row);return true;});
  assert.equal(sent.length,0);assert.equal(q.getChatQueue(session).paused,true);
  assert.equal(await steerQueuedMessage(session,item.id,async()=>true,()=>{throw Error('duplicate');}),false);
  confirm(true);assert.equal(await result,true);assert.deepEqual(sent,[item]);
- assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['first','last']);assert.equal(q.getChatQueue(session).paused,true);
+ assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['first','last']);assert.equal(q.getChatQueue(session).paused,false);
 });
 test('stop failure, rejected send and edits while stopping preserve queued messages',async()=>{
  const session='steer-failed';q.enqueueChat(session,message('one'));q.enqueueChat(session,message('two'));const id=q.getChatQueue(session).items[1].id;
@@ -31,4 +31,12 @@ test('stop failure, rejected send and edits while stopping preserve queued messa
  let confirm;const result=steerQueuedMessage(session,id,()=>new Promise(r=>confirm=r),()=>{throw Error('changed');});
  q.updateQueuedMessage(session,id,'edited');confirm(true);assert.equal(await result,false);
  assert.deepEqual(q.getChatQueue(session).items.map(row=>row.text),['one','edited']);
+});
+
+test('neighbour edits while stopping keep the remainder paused for review', async()=>{
+ const session='steer-neighbour';q.enqueueChat(session,message('first'));q.enqueueChat(session,message('selected'));
+ const [first,selected]=q.getChatQueue(session).items;let confirm;
+ const result=steerQueuedMessage(session,selected.id,()=>new Promise(r=>confirm=r),()=>true);
+ q.updateQueuedMessage(session,first.id,'edited neighbour');confirm(true);assert.equal(await result,true);
+ assert.equal(q.getChatQueue(session).paused,true);assert.equal(q.getChatQueue(session).items[0].text,'edited neighbour');
 });
