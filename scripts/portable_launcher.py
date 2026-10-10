@@ -700,7 +700,10 @@ def _launch_service(bundle: Bundle, state: dict, name: str, command: list[str], 
         state["services"][name] = record
         _save_state(bundle, state)
         url = f"http://127.0.0.1:{port}/" + ("healthz" if name == "gateway" else "")
-        deadline = time.monotonic() + (120 if name == "gateway" else 60)
+        # Cold module loading can exceed two minutes on Windows while the
+        # freshly extracted runtime is scanned. Keep progress visible and
+        # permit it to finish, with a bounded wait and owned-process cleanup.
+        deadline = time.monotonic() + (300 if name == "gateway" else 90)
         while time.monotonic() < deadline:
             if _http_ready(url, expected=expected):
                 observed = snapshot(bundle, ports=[port], pids=[process.pid])
