@@ -63,3 +63,12 @@
   .office-nameplate__heading { gap: 4px; font-size: 11px; }
   .agent-office-scene__hint { gap: 7px; padding: 7px 10px; font-size: 9px; }
 }
+.office-area-navigation { padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface); }
+.office-area-navigation > div { display:flex; flex-wrap:wrap; gap:6px; }
+.office-area-navigation button { padding:6px 10px; border:1px solid var(--border); border-radius:8px; color:var(--text-secondary); background:var(--surface); font:inherit; font-size:12px; cursor:pointer; }
+.office-area-navigation button[aria-pressed=true] { color:var(--text); background:var(--surface-2); border-color:var(--text-secondary); }
+.office-area-navigation button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+.office-area-navigation p { margin:7px 0 0; font-size:11px; color:var(--text-secondary); line-height:1.7; }
+.office-area-navigation .office-tour-toggle { margin-top:8px; }
+.office-tour-notice { margin-left:8px; color:var(--text-secondary); font-size:11px; }
+.office-tour-label { position:absolute; left:0; top:0; padding:5px 8px; border-radius:7px; background:#fff5d9; color:#6e5730; font-size:11px; white-space:nowrap; }

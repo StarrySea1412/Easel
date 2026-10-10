@@ -14,9 +14,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const moduleUrl = code => `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
 const runtimeModule = moduleUrl(`export function createOfficeSceneRuntime(options) {
-  const record = {options, focused: [], resets: 0, disposed: 0};
+  const record = {options, focused: [], areas: [], resets: 0, disposed: 0};
   globalThis.__officeRetryRuntimes.push(record);
-  return {update() {}, focus(id) {record.focused.push(id);}, reset() {record.resets++;}, dispose() {record.disposed++;}};
+  return {update() {}, focus(id) {record.focused.push(id);}, focusArea(id) {record.areas.push(id);}, reset() {record.resets++;}, dispose() {record.disposed++;}};
 }`);
 const sourceUrl = new URL('../src/components/agent-office/AgentOfficeScene.tsx', import.meta.url);
 let code = ts.transpileModule(fs.readFileSync(sourceUrl, 'utf8'), { compilerOptions: {
@@ -69,6 +69,28 @@ test('retry reapplies unchanged close-up focus and safely ignores failures from 
   assert.equal(runtimes.length, 3);
   assert.deepEqual(runtimes[2].focused, []);
   assert.equal(runtimes[2].resets, 1, 'retry uses the latest focus preference after the user leaves close-up');
+});
+
+test('area navigation changes only camera intent, survives GPU retry and reset returns to overview', async t => {
+  const runtimes = globalThis.__officeRetryRuntimes = [];
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container);
+  t.after(async () => { await act(async () => root.unmount()); container.remove(); delete globalThis.__officeRetryRuntimes; });
+  const agent = { id: 'live-member', name: '实际成员', state: 'working', source: 'live', task: '保留当前任务' };
+  let props = { agents: [agent], selectedId: agent.id, onSelect() { assert.fail('Area navigation must not select an employee'); }, paused: false, resetKey: 0 };
+  await act(async () => root.render(createElement(AgentOfficeScene, props)));
+  const fitness = () => [...container.querySelectorAll('.office-area-navigation button')].find(b => b.textContent === '健身区');
+  await act(async () => fitness().click());
+  assert.deepEqual(runtimes[0].areas, ['fitness']);
+  assert.equal(agent.task, '保留当前任务'); assert.equal(agent.state, 'working');
+  assert.equal(fitness().getAttribute('aria-pressed'), 'true');
+  await act(async () => runtimes[0].options.onUnavailable('模拟GPU丢失'));
+  assert.equal(fitness().disabled, true);
+  await act(async () => container.querySelector('.agent-office-scene__fallback button').click());
+  assert.deepEqual(runtimes[1].areas, ['fitness']);
+  props = { ...props, resetKey: 1 };
+  await act(async () => root.render(createElement(AgentOfficeScene, props)));
+  assert.equal(container.querySelector('.office-area-navigation button').getAttribute('aria-pressed'), 'true');
 });
 
 test.after(() => window.close());

@@ -3,6 +3,7 @@ import { OFFICE_STATE_LABELS, type OfficeAgent } from '../../lib/agentOffice';
 import { officeModelLabel } from '../../lib/modelProviders';
 import { createOfficeSceneRuntime, type OfficeSceneRuntime } from './OfficeSceneRuntime';
 import './agent-office-scene.css';
+import { OFFICE_AREAS, type OfficeAreaView } from './officeAreas';
 
 export interface AgentOfficeSceneProps {
   agents: OfficeAgent[];
@@ -16,11 +17,13 @@ export interface AgentOfficeSceneProps {
   demoSeek?: { seconds: number; revision: number };
   resetKey: number;
   onUnavailable?: (message: string) => void;
+  onNavigateArea?: () => void;
 }
 
 export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
   const host = useRef<HTMLDivElement>(null);
   const sign = useRef<HTMLSpanElement>(null);
+  const tourLabel = useRef<HTMLSpanElement>(null);
   const labels = useRef(new Map<string, HTMLButtonElement>());
   const stems = useRef(new Map<string, SVGLineElement>());
   const runtime = useRef<OfficeSceneRuntime | null>(null);
@@ -28,6 +31,9 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
   latest.current = props;
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [area, setArea] = useState<OfficeAreaView>('all');
+  const [tourEnabled, setTourEnabled] = useState(false);
+  const tourPreference = useRef(tourEnabled); tourPreference.current = tourEnabled;
 
   useEffect(() => {
     if (!host.current || !sign.current) return;
@@ -45,6 +51,8 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
         ...latest.current,
         host: host.current,
         sign: sign.current,
+        tourLabel: tourLabel.current || undefined,
+        tourEnabled: tourPreference.current,
         labels: labels.current,
         stems: stems.current,
         onSelect: (id) => latest.current.onSelect(id),
@@ -62,16 +70,23 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
 
   useEffect(() => {
     runtime.current?.update({ agents: props.agents, selectedId: props.selectedId, paused: props.paused,
-      stale: props.stale, observedAt: props.observedAt, demoSeek: props.demoSeek });
-  }, [props.agents, props.selectedId, props.paused, props.stale, props.observedAt, props.demoSeek]);
+      stale: props.stale, observedAt: props.observedAt, demoSeek: props.demoSeek, tourEnabled });
+  }, [props.agents, props.selectedId, props.paused, props.stale, props.observedAt, props.demoSeek, tourEnabled]);
 
-  useEffect(() => { runtime.current?.reset(); }, [props.resetKey]);
-  useEffect(() => { if (props.focusId) runtime.current?.focus(props.focusId); else runtime.current?.reset(); }, [props.focusId, retryKey]);
+  useEffect(() => { setArea('all'); runtime.current?.reset(); }, [props.resetKey]);
+  useEffect(() => { if (props.focusId) { setArea('all'); runtime.current?.focus(props.focusId); } else if (area === 'all') runtime.current?.reset(); else runtime.current?.focusArea?.(area); }, [props.focusId, retryKey, area]);
 
-  return <div className={`agent-office-scene${unavailable ? ' agent-office-scene--unavailable' : ''}`} ref={host}>
+  return <div className="office-scene-frame">
+    <nav className="office-area-navigation" aria-label="办公室功能区域">
+      <div role="group" aria-label="查看办公室区域"><button type="button" aria-pressed={area === 'all'} disabled={Boolean(unavailable)} onClick={() => { props.onNavigateArea?.(); setArea('all'); }}>全景</button>{OFFICE_AREAS.map(item => <button key={item.id} type="button" aria-pressed={area === item.id} disabled={Boolean(unavailable)} onClick={() => { props.onNavigateArea?.(); setArea(item.id); }}>{item.label}</button>)}</div>
+      <p>{area === 'all' ? '选择区域可近看设施；点击员工查看当前任务。' : OFFICE_AREAS.find(item => item.id === area)?.description}</p>
+      <button type="button" className="office-tour-toggle" aria-pressed={tourEnabled} disabled={Boolean(unavailable)} onClick={() => setTourEnabled(value => !value)}>{tourEnabled ? '关闭漫游演示' : '区域漫游演示'}</button>{tourEnabled && <span className="office-tour-notice">模拟角色沿过道参观区域 · 不发起任务</span>}
+    </nav>
+    <div className={`agent-office-scene${unavailable ? ' agent-office-scene--unavailable' : ''}`} ref={host}>
     <div className="agent-office-scene__labels" aria-label="办公室中的 Agent" hidden={Boolean(unavailable)}>
       <svg className="office-label-connectors" aria-hidden="true">{props.agents.map(agent => <line key={agent.id} ref={element => { if (element) stems.current.set(agent.id, element); else stems.current.delete(agent.id); }} />)}</svg>
       <span className="agent-office-scene__sign" ref={sign} aria-hidden="true">EASEL STUDIO</span>
+      <span className="office-tour-label" ref={tourLabel} hidden={!tourEnabled}>模拟漫游</span>
       {props.agents.map((agent) => <button
         key={agent.id}
         type="button"
@@ -93,5 +108,5 @@ export default function AgentOfficeScene(props: AgentOfficeSceneProps) {
       <p>{unavailable}</p>
       <button type="button" onClick={() => { setUnavailable(null); setRetryKey((value) => value + 1); }}>重新加载场景</button>
     </div> : <div className="agent-office-scene__hint" aria-hidden="true"><span>拖动旋转</span><i />滚动缩放<i /><span>点击状态查看过程</span></div>}
-  </div>;
+  </div></div>;
 }

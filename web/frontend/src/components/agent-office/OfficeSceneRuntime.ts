@@ -5,11 +5,14 @@ import { createOfficeScreenTexture } from './officeScreenTexture';
 import { createOfficeMotionPlayer } from './officeMotionPlayer';
 import type { OfficeAgent } from '../../lib/agentOffice';
 import {
-  OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, officeWorkstationLayoutKey,
+  OfficeResources, batchOfficeArchitecture, createOfficeAvatar, createOfficeWorld, createOfficeTourAvatar, officeWorkstationLayoutKey,
   type OfficeAvatar, type OfficeWorld,
 } from './officeGeometry';
 import { createSceneScheduler } from './sceneScheduler';
 import { layoutOfficeLabels, type OfficeLabelAnchor, type OfficeLabelPlacement, type OfficeProtectedArea } from './labelLayout';
+import { OFFICE_AREAS, officeAreaCenter, type OfficeAreaId } from './officeAreas';
+import { officeTourPose, officeTourRoute } from './officeTour';
+import { poseOfficeTourAvatar } from './officeAvatarMotion';
 
 export interface OfficeSceneInput {
   agents: OfficeAgent[];
@@ -18,6 +21,7 @@ export interface OfficeSceneInput {
   stale?: boolean;
   observedAt?: string | null;
   demoSeek?: { seconds: number; revision: number };
+  tourEnabled?: boolean;
 }
 
 interface RuntimeOptions extends OfficeSceneInput {
@@ -25,6 +29,7 @@ interface RuntimeOptions extends OfficeSceneInput {
   labels: Map<string, HTMLButtonElement>;
   stems?: Map<string, SVGLineElement>;
   sign: HTMLSpanElement;
+  tourLabel?: HTMLSpanElement;
   onSelect: (id: string) => void;
   onUnavailable: (message: string) => void;
 }
@@ -108,6 +113,22 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   let avatars = new Map<string, OfficeAvatar>();
   const motionPlayers = new Map<string, ReturnType<typeof createOfficeMotionPlayer>>();
   const workSurfaces = new Map<string, ReturnType<typeof officeWorkSurface>>();
+  let tourResources = new OfficeResources();
+  cleanups.push(() => tourResources.dispose());
+  let tourAvatar: OfficeAvatar | null = null;
+  let tourSeconds = 0;
+  let tourRoute = officeTourRoute(world.width, world.depth);
+  function synchronizeTour() {
+    if (input.tourEnabled && !tourAvatar) {
+      tourAvatar = createOfficeTourAvatar(tourResources, world.desks[0]);
+      scene.add(tourAvatar.root); tourSeconds = 0;
+    } else if (!input.tourEnabled && tourAvatar) {
+      scene.remove(tourAvatar.root); tourAvatar = null;
+      tourResources.dispose(); tourResources = new OfficeResources();
+    }
+    tourRoute = officeTourRoute(world.width, world.depth);
+    if (options.tourLabel) options.tourLabel.hidden = !input.tourEnabled;
+  }
   let width = 1, height = 1;
   let focused = document.hasFocus();
   let intersecting = true;
@@ -117,7 +138,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const visible = () => !document.hidden && intersecting && !contextLost;
   const motionAllowed = () => visible() && focused && !input.paused && !input.stale && !reducedMotion?.matches;
-  const animate = () => motionAllowed() && (Array.from(motionPlayers.values()).some(player => player.pending)
+  const animate = () => motionAllowed() && (input.tourEnabled || Array.from(motionPlayers.values()).some(player => player.pending)
     || input.agents.some((agent) => ['working', 'thinking'].includes(agent.state)
       && workSurfaces.get(agent.id)?.kind !== 'unreported'));
   const projected = new THREE.Vector3();
@@ -217,6 +238,15 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
         motionPlayers.get(agent.id)?.draw(agent.state, workSurfaces.get(agent.id)?.kind || 'unreported',
           animationTime, agent.id === input.selectedId, delta, motionAllowed());
       }
+      if (tourAvatar && input.tourEnabled) {
+        tourSeconds += delta;
+        const pose = officeTourPose(tourRoute, tourSeconds);
+        tourAvatar.root.position.set(pose.x, .64, pose.z);
+        tourAvatar.root.rotation.y = pose.heading;
+        poseOfficeTourAvatar(tourAvatar, tourSeconds, pose.walking);
+        tourAvatar.label.set(pose.x, 2.0, pose.z);
+        if (options.tourLabel) options.tourLabel.textContent = `模拟漫游 · ${pose.walking ? '前往' : ''}${OFFICE_AREAS.find(area => area.id === pose.area)?.label}`;
+      }
       camera.updateMatrixWorld();
       try { renderer.render(scene, camera); }
       catch {
@@ -226,6 +256,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       }
       positionAgentLabels();
       projectLabel(sign, world.sign);
+      if (tourAvatar && options.tourLabel) projectLabel(options.tourLabel, tourAvatar.label);
     },
   });
   cleanups.push(() => scheduler.dispose());
@@ -407,6 +438,7 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
   cleanups.push(() => { scene.clear(); avatars.clear(); motionPlayers.clear(); });
 
   synchronizeAgents();
+  synchronizeTour();
   resize();
   fitCamera(true);
   return {
@@ -419,8 +451,18 @@ export function createOfficeSceneRuntime(options: RuntimeOptions, createRenderer
       input = next;
       measureLabels();
       synchronizeAgents();
+      synchronizeTour(); refresh();
     },
     reset() { if (!disposed) { focusedAgentId = null; fitCamera(true); } },
+    focusArea(id: OfficeAreaId) {
+      if (disposed) return;
+      focusedAgentId = null;
+      controls.target.set(...officeAreaCenter(id, world.width, world.depth));
+      // Look over the washroom partition within the room's orbit limits.
+      camera.position.copy(controls.target).add(id === 'washroom' ? new THREE.Vector3(4, 16, 6) : new THREE.Vector3(7, 8, 9));
+      camera.zoom = id === 'work' ? 1.3 : 2.6;
+      camera.updateProjectionMatrix(); controls.update(); refresh();
+    },
     focus(id: string) {
       const avatar = avatars.get(id);
       if (disposed || !avatar) return;

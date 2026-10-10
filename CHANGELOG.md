@@ -1,3 +1,9 @@
+## 2026-10-10 · 办公室区域、显式漫游与窄屏卡片
+
+> **2026-10-10 区域与窄屏补验**：办公室新增工作/茶水/休闲/健身/卫生间近看入口，健身植物及卫生间相机遮挡已修；真实浏览器五区域、键盘Enter、员工近看/全景复位及390px布局通过。显式开启的独立模拟角色沿外围过道漫游，实测移动、暂停位置不变、关闭移除，不改变真实成员任务与状态。办公室↔运行记录核对同一已完成会话与轮次。390px技能说明滚轮到434px末尾，卡片修复后146px、列表无横向滚动；触摸设备未测。发布中心390px小红书/知乎切换仅显示一个预览，已恢复小红书单选，未预检或再次投稿。58项相关前端检查（25场景/漫游/重试、33办公室页面/任务焦点）、生产构建及lint通过（既有warning）。主动提问完整链路、上游兼容报告和真实业务未签收项继续；未打包。
+
+> **October 10 office and narrow-screen verification:** five camera views cover work, coffee, lounge, fitness and washroom areas. Plants and the washroom camera were adjusted after real occlusion checks. Real browser checks passed for the five areas, Enter navigation, employee close-up/reset and 390px bounds. An explicitly enabled simulation mascot walks the perimeter; movement, a stable paused position and removal on close were verified without changing observed task/member states. Office and activity views matched the same completed chat and turn. At 390px the skill details scrolled to the 434px end, cards fit their list, and switching Xiaohongshu/Zhihu kept one preview visible. The original platform selection was restored; no new submission was made. Touch hardware remains untested. All 58 relevant frontend checks, build and lint passed (existing warnings). Full question/answer execution, upstream compatibility and outstanding live-business acceptance remain pending; no package was built.
+
 ## 2026-10-10 · 跨作品解读失败分类与真实引用入口 / Analysis failures and quote selection
 
 > **2026-10-10 跨作品解读与引用修复**：真实 deepseek-v4-flash 请求在3000 tokens预算下返回 finish_reason=length、空正文，其中2647 tokens用于思考；原提示误将截断归为无依据结论。预算改8192，区分截断/空正文/JSON解析/事实校验失败，在解读区显示具体原因和重新生成入口，成功后保持面板展开；失败不覆盖已有有效结果。真实页面生成并保存5条基于标题的解读（正文与指标缺失，不能做效果归因）。再次进页自动采集产生新观察时间，旧解读按既有材料版本规则失效；已保存数据仍留在库中，未重复请求模型。引用按钮保护选区快照，真实双击选取→点击→加入草稿已通过；info键盘聚焦、与展开引用互斥及Escape通过，真实鼠标hover仍待验。75项后端、34项前端定向检查、build和lint通过（既有warning）。其余迭代继续，便携包暂停。

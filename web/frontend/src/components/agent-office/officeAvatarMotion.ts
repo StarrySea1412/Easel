@@ -24,6 +24,21 @@ const contactOffset = new THREE.Vector3();
 const left = new THREE.Vector3(), right = new THREE.Vector3(), gaze = new THREE.Vector3();
 const penLift = new THREE.Vector3();
 
+/** Used only by the explicitly requested tour mascot, never inferred from live state. */
+export function poseOfficeTourAvatar(avatar: OfficeAvatar, time: number, walking: boolean) {
+  const swing = walking ? Math.sin(time * 7) : 0;
+  avatar.body.position.set(0, walking ? Math.abs(swing) * .012 : 0, 0);
+  avatar.body.rotation.set(0, 0, swing * .025);
+  avatar.head.rotation.set(0, 0, 0);
+  avatar.body.updateMatrix(); inverseBody.copy(avatar.body.matrix).invert();
+  reach(avatar, 'left', left.set(-.28, -.02, swing * .14), wristRotation.identity());
+  reach(avatar, 'right', right.set(.28, -.02, -swing * .14), wristRotation.identity());
+  syncOfficeBodySkin(avatar.bodySkin);
+  avatar.document.visible = false; avatar.tablet.visible = false; avatar.pen.visible = false;
+  avatar.beacon.visible = false; avatar.errorMarker.visible = false; avatar.selection.visible = false;
+  avatar.root.children.filter(child => child.name.startsWith('tour-leg')).forEach((leg, i) => { leg.rotation.x = (i ? -1 : 1) * swing * .22; });
+}
+
 export interface OfficeMotionPose {
   position: THREE.Vector3;
   body: THREE.Quaternion;

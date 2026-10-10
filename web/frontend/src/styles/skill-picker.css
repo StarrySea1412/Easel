@@ -94,9 +94,14 @@
 .composer-skill-type-icon svg { display:block; }
 .skill-picker .brush-body { padding:12px; }
 .skill-picker .brush-grp { display:grid; gap:7px; }
-.skill-picker .brush-item { border:1px solid transparent; border-radius:9px; padding:11px; }
+.skill-picker .brush-item { min-width:0; width:100%; box-sizing:border-box; border:1px solid transparent; border-radius:9px; padding:11px; }
 .skill-picker .brush-item.is-selected { background:var(--surface-2); border-color:var(--text-secondary); }
 .skill-picker .brush-item.is-selected .brush-il { font-weight:650; }
 .skill-picker .brush-item.is-selected .brush-iadd { display:flex; align-items:center; justify-content:center; width:19px; height:19px; flex:none; border-radius:50%; background:var(--text); color:var(--surface); font-size:12px; }
 .skill-picker .brush-item.is-selected .brush-dot { background:var(--text-secondary); }
 .skill-picker .brush-item.is-previewed { box-shadow:none; outline:1px solid var(--border-strong); outline-offset:-1px; }
+@media (max-width:650px) {
+  .skill-picker .brush-body { padding:4px; }
+  .skill-picker .brush-item { padding:9px 5px; }
+  .skill-picker .brush-il { overflow-wrap:anywhere; }
+}

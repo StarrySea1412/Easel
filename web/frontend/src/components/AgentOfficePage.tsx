@@ -460,7 +460,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
               </div>}
             </div>
             <div className="office-stage-viewport" ref={previewElement}>
-              <AgentOfficeScene agents={zone.agents} selectedId={selected?.id ?? null} onSelect={selectAgent} onOpenProcess={openProcess} focusId={zone.agents.some(agent => agent.id === focusId) ? focusId : null} paused={paused || stale} resetKey={resetKey} demoSeek={mode === 'demo' ? demoSeek : undefined} stale={stale} observedAt={live.observedAt} />
+              <AgentOfficeScene agents={zone.agents} selectedId={selected?.id ?? null} onSelect={selectAgent} onOpenProcess={openProcess} onNavigateArea={() => setFocusId(null)} focusId={zone.agents.some(agent => agent.id === focusId) ? focusId : null} paused={paused || stale} resetKey={resetKey} demoSeek={mode === 'demo' ? demoSeek : undefined} stale={stale} observedAt={live.observedAt} />
               <div className="office-stage-stamp" aria-hidden="true"><strong>E.</strong><span>{mode === 'demo' ? 'SIMULATION' : 'OBSERVATION'}</span></div>
               {mode === 'live' && !agents.length && <div className="office-scene-notice" role="status">
                 <strong>{!sessionId ? '还没有可观察的会话' : live.loading ? '正在读取后台记录' : live.error ? '暂时无法读取协作记录' : '当前没有可观察的 Agent'}</strong>

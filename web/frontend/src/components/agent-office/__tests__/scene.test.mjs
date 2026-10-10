@@ -319,6 +319,30 @@ function runtimeHarness({ throwOnRender = false } = {}) {
   return { options, make, calls, clock, window, media, observers, host, canvas, unavailable, agents, label };
 }
 
+test('explicit tour pauses with the scene, keeps observed agents at their stations, and releases its assets when closed', () => {
+  const h=runtimeHarness();
+  const runtime=createOfficeSceneRuntime({...h.options,tourEnabled:true},h.make);
+  h.clock.tick(0);
+  const mascot=h.calls.scene.getObjectByName('scene-tour-guide');
+  assert.ok(mascot);
+  const actual=h.calls.scene.getObjectByName('employee:agent-1');
+  const actualPosition=actual.position.clone();
+  for(let i=1;i<75;i++)h.clock.tick(i*60);
+  const position=mascot.position.clone();
+  assert.notEqual(position.x,0,'tour must walk beyond its initial pause');
+  assert.deepEqual(actual.position,actualPosition,'the actual agent stays at its workstation');
+  runtime.update({...h.options,tourEnabled:true,paused:true});h.clock.tick(4500);
+  const paused=mascot.position.clone();h.clock.tick(5500);
+  assert.deepEqual(mascot.position,paused);assert.equal(h.clock.pending.size,0);
+  let disposals=0;
+  mascot.getObjectByName('tour-leg-0').children[0].geometry.addEventListener('dispose',()=>disposals++);
+  runtime.update({...h.options,tourEnabled:false,paused:true});h.clock.tick(5600);
+  assert.equal(h.calls.scene.getObjectByName('scene-tour-guide'),undefined);
+  assert.equal(disposals,1);
+  runtime.dispose(); assert.equal(disposals,1);
+  h.host.remove();h.window.close();
+});
+
 test('simulated DOM with real Three/OrbitControls preserves renderer on selection, pauses and releases resources on exit', () => {
   const harness = runtimeHarness();
   const { options, make, calls, clock, window, observers, host, agents, label } = harness;

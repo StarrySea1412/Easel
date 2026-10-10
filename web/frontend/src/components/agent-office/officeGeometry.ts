@@ -8,6 +8,7 @@ import { createOfficeBodySkin, type OfficeBodySkin } from './officeBodySkin';
 import { createOfficeHand, type OfficeHandRig } from './officeHands';
 import { CHARACTER_FACE_FEATURES, characterFaceSurface, createCharacterEarGeometry, createCharacterFoxTailGeometry, createCharacterHeadGeometry, createCharacterLegGeometry, createCharacterNeckGeometry } from './officeCharacterForms';
 import { applyOfficeExpression, createOfficeExpression, type OfficeExpressionRig } from './officeExpression';
+import { officeAreaCenter } from './officeAreas';
 
 type AgentState = OfficeAgent['state'];
 
@@ -446,13 +447,36 @@ export function createOfficeWorld(resources: OfficeResources, count: number, age
   for (const z of [coffeeZ - 0.6, coffeeZ + 1.8]) box(resources, root, trim, [0.05, 2.13, 0.055], [partitionX, 1.08, z]);
   box(resources, root, trim, [0.05, 0.05, 2.45], [partitionX, 2.13, coffeeZ + 0.6]);
 
+  // Facilities occupy the perimeter, outside the workstation rows.
+  const [gymX, , gymZ] = officeAreaCenter('fitness', width, depth);
+  box(resources, root, resources.color(0x78958e), [1.2, .025, 1.7], [gymX - .55, .06, gymZ]);
+  box(resources, root, resources.color(0xd1b493), [1.12, .07, .38], [gymX + .7, .7, gymZ]);
+  for (const x of [gymX + .23, gymX + 1.17]) box(resources, root, trim, [.05, .67, .34], [x, .37, gymZ]);
+  for (const z of [gymZ - .11, gymZ + .11]) {
+    const bar = cylinder(resources, root, resources.color(0x6d7774), .025, .025, .46, gymX + .7, .78, z);
+    bar.rotation.z = Math.PI / 2;
+    for (const x of [gymX + .5, gymX + .9]) {
+      const weight = cylinder(resources, root, resources.color(0x4c605c), .105, .105, .10, x, .78, z);
+      weight.rotation.z = Math.PI / 2;
+    }
+  }
+  const [washX, , washZ] = officeAreaCenter('washroom', width, depth);
+  box(resources, root, white, [.07, 1.65, 1.85], [washX + .72, .86, washZ]);
+  box(resources, root, white, [1.44, 1.65, .07], [washX, .86, washZ + .94]);
+  box(resources, root, resources.color(0xadc2bb), [1.3, .022, 1.78], [washX, .06, washZ]);
+  box(resources, root, oak, [.60, .68, .46], [washX, .39, washZ + .48]);
+  box(resources, root, resources.color(0xf6f4ed), [.64, .10, .48], [washX, .78, washZ + .48]);
+  cylinder(resources, root, trim, .025, .025, .18, washX, .91, washZ + .58);
+  box(resources, root, glass, [.49, .52, .025], [washX, 1.21, washZ + .88], false);
+  box(resources, root, resources.color(0xf6f4ed), [.38, .43, .55], [washX, .27, washZ - .35]);
+
   // Door and architectural nameplate; its lettering is projected HTML.
   box(resources, root, oak, [0.055, 2.1, 1.08], [-width / 2 + 0.12, 1.08, 1.8]);
   box(resources, root, glass, [0.018, 1.04, 0.62], [-width / 2 + 0.158, 1.35, 1.8], false);
   cylinder(resources, root, resources.color(0x807b70), 0.04, 0.04, 0.15, -width / 2 + 0.23, 0.91, 2.12).rotation.z = Math.PI / 2;
   box(resources, root, resources.color(0x687a70), [0.045, 0.25, 0.86], [-width / 2 + 0.14, 2.39, 1.8]);
-  plant(resources, root, -width / 2 + 0.79, depth / 2 - 1.0, 1.06);
-  plant(resources, root, width / 2 - 0.75, depth / 2 - 0.92, 0.87);
+  plant(resources, root, -width / 2 + 0.79, 0.1, 1.06);
+  plant(resources, root, width / 2 - 0.55, 0.1, 0.87);
   plant(resources, root, width / 2 - 0.8, -depth / 2 + 0.61, 0.8);
   const desks = layout.slots.map((slot) => desk(resources, root, slot, officeWorkstationRole(agents[slot.index])));
   return { root, desks, width, depth, sign: new THREE.Vector3(-width / 2 + 0.22, 2.4, 1.8) };
@@ -699,7 +723,7 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
   // float above the floor, and asymmetric leg placements share the same support.
   const footrest = box(resources, root, resources.color(0x8b9890), [.72, .08, .58], [0, -.425, -.235]);
   footrest.name = 'employee-footrest';
-  for (const x of [-.28, .28]) box(resources, root, resources.color(0x687173), [.04, .15, .40], [x, -.535, -.235]);
+  for (const x of [-.28, .28]) box(resources, root, resources.color(0x687173), [.04, .15, .40], [x, -.535, -.235]).name = 'employee-footrest-support';
   // Raised, camera-facing surfaces and large geometric marks make the tool legible at desk scale.
   const document = new THREE.Group(); document.name = 'reading-document'; root.add(document);
   document.position.set(0.01, 0.54, -0.36); document.rotation.x = -0.8;
@@ -747,6 +771,21 @@ export function createOfficeAvatar(resources: OfficeResources, desk: OfficeDesk,
     leftElbow: arms[0].elbow, rightElbow: arms[1].elbow, leftWrist: arms[0].wrist, rightWrist: arms[1].wrist, document, tablet, pen, beacon, errorMarker, selection,
     statusMaterial, screen: desk.screen, label: new THREE.Vector3(root.position.x, species === 'rabbit' ? 2.18 : 2.04, root.position.z), phase: (hash % 1000) / 100,
     workstationRole: desk.workstationRole, postureVariation: id ? (hash % 997) / 996 - .5 : 0 };
+}
+
+export function createOfficeTourAvatar(resources: OfficeResources, station: OfficeDesk) {
+  const avatar = createOfficeAvatar(resources, station, 'scene-tour-guide', { species:'fox', shirtColor:'#8ca59a', skinColor:'#d6a878', hairColor:'#815e46' } as OfficeAgent['appearance']);
+  avatar.root.name = 'scene-tour-guide';
+  delete avatar.root.userData.agentId;
+  avatar.root.children.filter(child => child.name.startsWith('employee-leg') || child.name.startsWith('employee-footrest')).forEach(child => { child.visible = false; });
+  for (const [i,x] of [-.115,.115].entries()) {
+    const leg = new THREE.Group(); leg.name = `tour-leg-${i}`; leg.position.x = x;
+    mesh(leg, resources.geometry('tour-upright-leg', () => new THREE.CapsuleGeometry(.085,.35,4,8)), resources.color(0x596970), 0,-.245,0);
+    const paw = mesh(leg, resources.geometry('tour-paw', () => new THREE.SphereGeometry(1,12,8)), resources.color(0xd6a878), 0,-.50,-.07);
+    paw.scale.set(.105,.07,.15);
+    avatar.root.add(leg);
+  }
+  return avatar;
 }
 
 export function poseOfficeAvatar(avatar: OfficeAvatar, state: AgentState, time: number, selected: boolean, action: NonNullable<OfficeAgent['action']>['kind'] = 'unreported', blend?: OfficeMotionBlend) {
