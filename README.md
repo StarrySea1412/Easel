@@ -1,3 +1,5 @@
+> **最新便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
+
 > **最新收口**：当前模型厂商icon、超过3轮显示节点、紧凑工具执行、自动匹配可用思考档位/黄色info已完成；修正登录有效性缓存、B站失效回正、公众号会话区分，并在发布前逐平台在线检查。定向前端98项、后端250通过1跳过；真实小红书只读检查有效，无重复投稿。按最新授权开始生成dist新便携包，包的全量前端/启停回执单独记录。
 
 > **2026-10-10 最新验收**：真实提问卡片→回答→续跑→刷新通过；引用说明已实测鼠标悬停、移出隐藏与展开面板互斥。用户在小红书 App 确认唯一一次授权图文已公开且内容正确，网页自动读回仍待核实，不重复投稿。上游 main 78 路径已逐项审计并补齐画像创建校验、凭据镜像回归、workspace 硬链接保护和字体非阻塞加载；相关后端385通过/1跳过、兼容前端19通过，非最终全仓全量。办公室/技能/多平台390px证据另记。最新程序包与干净Windows验证单独跟踪。
@@ -12,7 +14,7 @@
 
 > 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/upstream-compat-2026-10-10` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 >
-> Windows x64 当前便携候选为 `Easel-preview-76bbaf6-3fb7.zip`（约 1.06 GiB），已完成实际解压、完整文件校验、包内启动、两种 Chromium 运行和指定工作台入口的浏览器验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md)。
+> Windows x64 历史便携候选为 `Easel-preview-76bbaf6-3fb7.zip`（约 1.06 GiB），已完成实际解压、完整文件校验、包内启动、两种 Chromium 运行和指定工作台入口的浏览器验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md)。
 >
 > 此候选固定源码 [76bbaf69](https://github.com/StarrySea1412/Easel/commit/76bbaf690d224cf2c60496847402426a4619b5c3)，包含五平台审核后核实、暂停/恢复和发布完成提醒。后续文档提交独立追踪，不改变 ZIP 的源码身份；旧 `20a709c` 包保留为历史版本。
 
