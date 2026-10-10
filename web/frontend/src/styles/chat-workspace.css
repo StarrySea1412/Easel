@@ -36,12 +36,12 @@
 .chat-page .live-panel { margin:0 0 18px; }
 .chat-page .live-activity { flex-wrap:wrap; font-size:12px; }
 .chat-page .live-pulse { width:6px; height:6px; background:var(--text-tertiary); box-shadow:none; }
-.chat-page .thinking-block { border:0; background:transparent; border-radius:0; padding:7px 0; }
-.chat-page .thinking-block summary::before { content:'›'; display:inline-block; margin-right:9px; font-size:17px; line-height:1; }
-.chat-page .thinking-block[open] summary::before { transform:rotate(90deg); }
+.chat-page .thinking-block { border:0; background:transparent; border-radius:0; padding:0; }
+.chat-page .thinking-block summary::before { content:none; }
+.chat-page .thinking-block[open] summary > .model-thinking-chevron { transform:rotate(90deg); }
 .chat-page .thinking-text,.chat-page .model-thinking-body { margin:9px 0 0 5px; padding:0 0 0 16px; border-left:1px solid var(--border); color:var(--text-secondary); }
 .chat-page .model-thinking { margin:0; border:0; border-radius:0; background:transparent; }
-.chat-page .model-thinking-toggle { padding:7px 0; font-size:12px; }
+.chat-page .message-disclosure-toggle { display:flex; align-items:center; gap:9px; width:100%; box-sizing:border-box; margin:0; padding:7px 0; border:0; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; line-height:1.85; text-align:left; cursor:pointer; }
 .chat-page .model-thinking-toggle:hover { background:transparent; color:var(--text); }
 .chat-page .model-thinking-count { margin-left:4px; }
 .chat-page .model-thinking-text { line-height:1.85; }

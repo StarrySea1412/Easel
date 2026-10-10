@@ -1,3 +1,9 @@
+## 2026-10-10 · 技能状态同行与折叠标题对齐 / Compact skill metadata and disclosure alignment
+
+2026-10-10 界面密度与标题对齐：技能列表的配置状态与能力徽标放入同一紧凑行，真实窄屏空间不足时自然换行；活动摘要与模型思考共用14px SVG箭头、9px间距及等高标题。桌面与390px真实浏览器确认标题文字/箭头横坐标一致，点击及Enter展开/收起正常；桌面技能标签中心线一致，390px无页面横向溢出。35项定向检查、生产构建和lint通过（既有warning）。旧未完成项继续，便携打包暂停。
+
+October 10 density and alignment: skill setup status and capability badges share a compact row, wrapping only when narrow columns run out of space. Activity and reasoning headers share a 14px SVG chevron, 9px gap and equal row height. Real desktop/390px checks confirmed matching icon/text positions and click/Enter toggles; desktop skill badges align and 390px has no page overflow. All 35 focused checks, build and lint passed (existing warnings). Remaining iteration work and portable packaging are pending.
+
 ## 2026-10-10 · 队列连续执行与输入交互 / Queue continuation and composer interactions
 
 > **2026-10-10 输入与队列补充**：引导成功后自动接续剩余消息，空闲引导直接发送，运行中先等停止确认；手动停止、发送失败或缺素材仍暂停并保留消息。空闲回到底部显示箭头，运行中显示三点并在hover/focus时切换箭头。已选技能增加类型icon，附件提供图片缩略图/大预览与文件名/格式；“＋”可添加媒体、文件、文件夹素材或打开技能选择。生图/视频比例增加真实宽高示意，提示词输入与思考强度灰色区段增强辨识。引用info改为临时hover/focus提示，与展开引用互斥，Escape关闭。旧标签页切页失败定位为重建删除旧模块，预览构建已保留旧哈希资源；不刷新旧页面实际打开工坊成功。109项定向检查、生产构建和lint通过（既有warning）；真实队列自动取得“引导后继续正常”“剩余队列自动继续正常”。桌面/390px附件与菜单、图标、比例、输入已检查；引用hover属组件检查，尚无真实浏览器选择引用复核。旧未完成项继续保留，便携包仍未生成。

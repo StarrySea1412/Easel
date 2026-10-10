@@ -17,7 +17,11 @@
 .skill-picker .brush-item-copy { flex: 1; min-width: 0; }
 .skill-picker .brush-il { display: block; max-width: none; white-space: normal; font-size: 12.5px; }
 .skill-picker .brush-idesc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; font-size: 11px; margin-top: 3px; line-height: 1.7; }
-.skill-picker .brush-needs { display: block; margin-top: 4px; color: #9a641f; font-size: 10px; }
+.skill-picker .brush-item-meta { display:flex; align-items:center; flex-wrap:wrap; gap:5px 8px; margin-top:5px; }
+.skill-picker .brush-item-meta:empty { display:none; }
+.skill-picker .brush-needs { margin:0; color:#9a641f; font-size:10px; white-space:nowrap; }
+.skill-picker .brush-item-meta .skill-dependencies { display:contents; }
+.skill-picker .brush-item-meta .skill-dependencies > span { padding:1px 5px; font-size:10px; gap:4px; }
 .skill-picker .brush-iadd { color: var(--accent-start); }
 .skill-picker-empty { padding: 28px 18px; color: var(--text-secondary); font-size: 12px; line-height: 1.8; }
 .skill-picker-empty .link-btn { display: block; margin-top: 8px; }

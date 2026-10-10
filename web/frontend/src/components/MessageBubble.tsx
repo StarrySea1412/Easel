@@ -26,6 +26,10 @@ interface MessageBubbleProps {
   backupSnapshot?: boolean;
 }
 
+function DisclosureChevron({ expanded = false }: { expanded?: boolean }) {
+  return <svg className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m7 5 5 5-5 5" /></svg>;
+}
+
 function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; streaming: boolean; backupSnapshot?: boolean }) {
   // Preserve the user's expanded/collapsed choice as new chunks and the final
   // answer arrive; binding `open` to answer emptiness used to override it.
@@ -35,8 +39,8 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   const estimatedTokens = Math.max(1, (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[^\p{L}\p{N}\s]|[\p{L}\p{N}]+/gu) || [])
     .reduce((sum, token) => sum + (/^[\x00-\x7F]+$/.test(token) ? Math.ceil(token.length / 4) : [...token].length), 0));
   return <section className="model-thinking" aria-label="模型返回的思考内容">
-    <button type="button" className="model-thinking-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      <svg className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m7 5 5 5-5 5"/></svg>
+    <button type="button" className="model-thinking-toggle message-disclosure-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      <DisclosureChevron expanded={expanded} />
       <span>模型思考</span><span className="model-thinking-state">{backupSnapshot ? '来自备份' : streaming ? '接收中' : '已保留'}</span>
       <span className="model-thinking-count" title="按可见思考文字估算，非服务商返回或计费用量。">≈ {estimatedTokens.toLocaleString()} tokens</span>
     </button>
@@ -131,7 +135,7 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
       ) : null}
       {doneSteps && (
         <details className="thinking-block">
-          <summary>{backupSnapshot ? '备份活动文字' : '活动摘要'}</summary>
+          <summary className="message-disclosure-toggle"><DisclosureChevron /><span>{backupSnapshot ? '备份活动文字' : '活动摘要'}</span></summary>
           {backupSnapshot && <p className="model-thinking-note">以下文字来自备份，未经本机后台核验。</p>}
           <div className="thinking-text">{doneSteps}</div>
         </details>
