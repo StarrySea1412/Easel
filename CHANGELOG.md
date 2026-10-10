@@ -1,3 +1,9 @@
+## 2026-10-10 · 跨作品解读失败分类与真实引用入口 / Analysis failures and quote selection
+
+> **2026-10-10 跨作品解读与引用修复**：真实 deepseek-v4-flash 请求在3000 tokens预算下返回 finish_reason=length、空正文，其中2647 tokens用于思考；原提示误将截断归为无依据结论。预算改8192，区分截断/空正文/JSON解析/事实校验失败，在解读区显示具体原因和重新生成入口，成功后保持面板展开；失败不覆盖已有有效结果。真实页面生成并保存5条基于标题的解读（正文与指标缺失，不能做效果归因）。再次进页自动采集产生新观察时间，旧解读按既有材料版本规则失效；已保存数据仍留在库中，未重复请求模型。引用按钮保护选区快照，真实双击选取→点击→加入草稿已通过；info键盘聚焦、与展开引用互斥及Escape通过，真实鼠标hover仍待验。75项后端、34项前端定向检查、build和lint通过（既有warning）。其余迭代继续，便携包暂停。
+
+> **October 10 analysis and quoting fix:** a real deepseek-v4-flash call exhausted the former 3,000-token budget (2,647 reasoning tokens, length stop, empty answer). The budget is now 8,192. Truncation, empty text, JSON parsing and evidence rejection have distinct errors, with an analysis-specific retry and an expanded result panel. Failed generation preserves an existing valid result. The real page saved five title-based observations; bodies and metrics are missing, so performance attribution is unsupported. A later automatic collection created a new observation timestamp and invalidated the old interpretation under the existing version rules, without deleting its stored row or repeating inference. Real selection-to-quote insertion and keyboard tooltip checks passed; real pointer hover remains unverified. All 75 backend and 34 frontend focused checks, build and lint passed (existing warnings). Remaining work and portable packaging are pending.
+
 ## 2026-10-10 · 技能状态同行与折叠标题对齐 / Compact skill metadata and disclosure alignment
 
 2026-10-10 界面密度与标题对齐：技能列表的配置状态与能力徽标放入同一紧凑行，真实窄屏空间不足时自然换行；活动摘要与模型思考共用14px SVG箭头、9px间距及等高标题。桌面与390px真实浏览器确认标题文字/箭头横坐标一致，点击及Enter展开/收起正常；桌面技能标签中心线一致，390px无页面横向溢出。35项定向检查、生产构建和lint通过（既有warning）。旧未完成项继续，便携打包暂停。

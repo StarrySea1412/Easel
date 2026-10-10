@@ -255,3 +255,24 @@ test('return to latest shows loading only while a run exists, then changes to an
  latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),false);assert.equal(latest.querySelector('.chat-latest-dots'),null);assert.ok(latest.querySelector('.chat-latest-arrow'));
  await v.click(latest);assert.equal(v.container.querySelector('.chat-return-latest'),null);
 });
+
+
+test('selected text reaches the real composer through the quote button after pointer release', async t => {
+ const v=await fixture(t); await v.render('quote-click',{messages:[{role:'assistant',content:'引用入口验收原文'}]});
+ const text=v.container.querySelector('.message-bubble.assistant p').firstChild;
+ const range=document.createRange();range.selectNodeContents(text);
+ range.getBoundingClientRect=()=>({left:30,top:100});
+ const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+ await act(async()=>document.dispatchEvent(new window.Event('selectionchange')));
+ const trigger=document.querySelector('[aria-label="引用选中文字"]');assert.ok(trigger);
+ // Native focus/selection updates can occur before click. A release on the
+ // toolbar must preserve the snapshot and its own click must deliver it once.
+ await act(async()=>trigger.dispatchEvent(new window.Event('pointerdown',{bubbles:true,cancelable:true})));
+ selection.removeAllRanges();
+ await act(async()=>trigger.dispatchEvent(new window.Event('pointerup',{bubbles:true})));
+ assert.ok(document.querySelector('[aria-label="引用选中文字"]'));
+ await v.click(trigger);
+ assert.deepEqual(v.modules().draft.getChatDraft('quote-click').quotes,['引用入口验收原文']);
+ assert.match(v.container.textContent,/1 条引用/);assert.equal(v.h.sent.length,0);
+ assert.equal(document.querySelector('[aria-label="引用选中文字"]'),null);
+});

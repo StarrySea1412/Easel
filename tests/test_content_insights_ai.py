@@ -242,3 +242,59 @@ def test_reviews_saved_under_older_validation_rules_are_hidden(source, monkeypat
     current = store.report('xiaohongshu', 'a')
     assert current['contents'][0]['aiReview'] is None
     assert current['accountInsights'] is None
+
+
+@pytest.mark.parametrize('payload,expected,status', [
+ ({'insights': []}, '没有从当前材料中得出', 503),
+ ({'findings': []}, '缺少跨作品解读列表', 503),
+ ({'insights': [{'factIds': ['unknown'], 'observation': '材料可比较', 'action': '补充使用场景'}]}, '引用未匹配', 503),
+])
+def test_insight_failure_explains_actual_category_and_keeps_prior_result(source, monkeypatch, payload, expected, status):
+ store,report=source
+ prior={'facts':fact_sheet(report),'insights':valid(fact_sheet(report))['insights']}
+ store.save_insights('xiaohongshu','a',report['contents'],prior)
+ monkeypatch.setattr('content_analysis_ai.request_json',lambda *args:payload)
+ with pytest.raises(HTTPException) as exc:insights(report,PROVIDER)
+ assert exc.value.status_code==status
+ assert expected in exc.value.detail
+ assert '已有有效结果保留' in exc.value.detail
+ assert store.report('xiaohongshu','a')['accountInsights']==prior
+
+
+def test_insight_parse_failure_does_not_claim_unfounded_observation(source,monkeypatch):
+ def bad(*args):raise json.JSONDecodeError('raw-secret-marker','private-marker',0)
+ monkeypatch.setattr('content_analysis_ai.request_json',bad)
+ with pytest.raises(HTTPException) as exc:insights(source[1],PROVIDER)
+ assert exc.value.status_code==502
+ assert 'JSON' in exc.value.detail and 'marker' not in exc.value.detail
+
+
+def test_insight_reject_reasons_are_specific_without_model_text(source,monkeypatch):
+ facts=fact_sheet(source[1]);payload=valid(facts)
+ payload['insights'][0]['action']='获得100个关注 private-marker'
+ payload['insights'].append({'factIds':[facts[0]['id']],'observation':'作品结构需要核对','action':'补充使用情境'})
+ monkeypatch.setattr('content_analysis_ai.request_json',lambda *args:payload)
+ with pytest.raises(HTTPException) as exc:insights(source[1],PROVIDER)
+ assert '数字、效果归因' in exc.value.detail and '单篇作品' in exc.value.detail
+ assert 'private-marker' not in exc.value.detail
+
+
+@pytest.mark.parametrize('protocol,payload,expected', [
+ ('openai',{'choices':[{'finish_reason':'length','message':{'content':''}}]},'长度上限'),
+ ('anthropic',{'stop_reason':'max_tokens','content':[{'type':'text','text':'partial'}]},'长度上限'),
+ ('openai',{'choices':[{'finish_reason':'stop','message':{'content':None,'reasoning_content':'private-marker'}}]},'没有返回解读正文'),
+])
+def test_response_truncation_and_reasoning_only_are_not_evidence_failures(monkeypatch,protocol,payload,expected):
+ import content_analysis_ai as ai
+ provider=Provider('test','Test','model',protocol,'https://example.invalid/v1','secret-marker')
+ requests=[]
+ class Reply:
+  def __enter__(self):return self
+  def __exit__(self,*args):pass
+  def read(self,*args):return json.dumps(payload).encode()
+ class Opener:
+  def open(self,request,**kwargs):requests.append(json.loads(request.data));return Reply()
+ monkeypatch.setattr(ai.urllib.request,'build_opener',lambda *args:Opener())
+ with pytest.raises(ai.ModelResponseError) as exc:ai.request_json(provider,'rules','material')
+ assert expected in str(exc.value) and 'private-marker' not in str(exc.value)
+ assert requests[0]['max_tokens']==8192

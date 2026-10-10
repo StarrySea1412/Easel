@@ -60,6 +60,7 @@ test('generation sends only the selected account identity, disables duplicate re
  v.state.saved=saved;
  await act(async()=>finish(response(saved)));
  assert.match(v.container.textContent,/已保存结果/);
+ assert.equal(v.container.querySelector('[aria-label="跨作品 AI 解读"]').closest('details').open,true);
  assert.equal(v.state.requests.filter(r=>r.url.includes('/report?')).length,2);
 });
 
@@ -109,4 +110,19 @@ test('comments alone qualify as real text while placeholder titles do not',async
  await act(async()=>render());
  button=Array.from(container.querySelectorAll('button')).find(b=>b.textContent==='生成账号解读');
  assert.equal(button.disabled,true);
+});
+
+
+test('failed model generation stays in the insight section, retains saved result and retries generation',async t=>{
+ const v=await fixture(t);
+ v.state.insights=async()=>({ok:false,json:async()=>({detail:'本次引用只覆盖单篇作品；已有有效结果保留。'})});
+ await act(async()=>v.button('重新生成账号解读').click());
+ const panel=v.container.querySelector('[aria-label="跨作品 AI 解读"]');
+ assert.match(panel.querySelector('[role=alert]').textContent,/单篇作品/);
+ assert.match(panel.textContent,/已保存结果/);
+ assert.equal(v.button('重新读取'),undefined);
+ v.state.insights=async()=>response(saved);
+ await act(async()=>v.button('重新生成解读').click());
+ assert.equal(v.state.requests.filter(r=>r.url.endsWith('/insights')).length,2);
+ assert.equal(v.container.querySelector('[aria-label="跨作品 AI 解读"] [role=alert]'),null);
 });

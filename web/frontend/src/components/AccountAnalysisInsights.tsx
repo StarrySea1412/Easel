@@ -1,9 +1,10 @@
 import type { AccountInsight, AnalysisContent, AnalysisReport } from '../lib/contentAnalysis';
 import '../styles/account-analysis-insights.css';
 
-export default function AccountAnalysisInsights({ report, busy, onRequest, onChoose, onPlan }: {
+export default function AccountAnalysisInsights({ report, busy, error, onRequest, onChoose, onPlan }: {
  report: AnalysisReport;
  busy: boolean;
+ error?: string;
  onRequest: () => void;
  onChoose: (content: AnalysisContent) => void;
  onPlan: (insight: AccountInsight, contentIds: string[]) => void;
@@ -20,6 +21,7 @@ export default function AccountAnalysisInsights({ report, busy, onRequest, onCho
   <section className="ca-paper" aria-label="跨作品 AI 解读" aria-busy={busy}>
    <div className="ca-card-heading"><h3>跨作品 AI 解读</h3><button className="btn btn-sm" disabled={busy || materialCount < 2} onClick={onRequest}>{busy ? '正在分析当前账号…' : saved ? '重新生成账号解读' : '生成账号解读'}</button></div>
    <p className="ca-caption">点击会将当前账号已保存作品的文字材料与事实发送至已配置的模型服务。事实由程序整理，模型建议仍是待验证假设。</p>
+   {error && <div className="ca-error" role="alert"><p>{error}</p><button className="ca-text-button" disabled={busy} onClick={onRequest}>重新生成解读</button><p className="ca-caption">重新生成会再次请求模型服务；本地材料诊断仍可使用。</p></div>}
    {materialCount < 2 && <p className="ca-caption">至少保存两篇含文字材料的作品后才能生成跨作品解读。</p>}
    {saved ? <>
     <p className="ca-caption">已保存结果 · {saved.model} · {new Date(saved.at).toLocaleString('zh-CN')}</p>

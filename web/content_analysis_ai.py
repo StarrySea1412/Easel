@@ -75,8 +75,14 @@ def interpret(content, provider, platform=None):
         findings = validate_findings(request_json(provider, system, prompt), evidence)
         return {'model': provider.model, 'at': now(), 'findings': findings,
                 'notice': '原文引用已通过程序匹配；编辑解释仍是模型建议，需人工判断，不代表效果原因。仅发送当前作品文字材料及平台编辑视角。'}
+    except ModelResponseError as exc:
+        raise HTTPException(502, f'{exc} 本次未保存新解释，已有有效结果保留。') from None
     except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
         raise HTTPException(502, '深度解释未返回可核验结果；请检查模型连接或重试。未保存无依据的模型结论。') from None
+
+
+class ModelResponseError(ValueError):
+    """Safe provider response failure, separate from evidence validation."""
 
 
 def request_json(provider, system, prompt):
@@ -84,12 +90,12 @@ def request_json(provider, system, prompt):
     base = provider.base_url.rstrip('/')
     if provider.protocol == 'anthropic':
         headers.update({'x-api-key': provider.key, 'anthropic-version': '2023-06-01'})
-        body = {'model': provider.model, 'system': system, 'max_tokens': 3000,
+        body = {'model': provider.model, 'system': system, 'max_tokens': 8192,
                 'messages': [{'role': 'user', 'content': prompt}]}
         url = base + ('/messages' if base.endswith('/v1') else '/v1/messages')
     else:
         headers['Authorization'] = 'Bearer ' + provider.key
-        body = {'model': provider.model, 'max_tokens': 3000,
+        body = {'model': provider.model, 'max_tokens': 8192,
                 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}]}
         url = base + '/chat/completions'
     request = urllib.request.Request(url, json.dumps(body).encode(), headers)
@@ -98,9 +104,17 @@ def request_json(provider, system, prompt):
     if len(raw) > 512000:
         raise ValueError('响应过长')
     payload = json.loads(raw)
-    output = '\n'.join(b.get('text', '') for b in payload.get('content', []) if b.get('type') == 'text') if provider.protocol == 'anthropic' else payload['choices'][0]['message']['content']
-    if not isinstance(output, str):
-        raise ValueError('响应格式不正确')
+    if provider.protocol == 'anthropic':
+        stop_reason = payload.get('stop_reason')
+        output = '\n'.join(b.get('text', '') for b in payload.get('content', []) if b.get('type') == 'text')
+    else:
+        choice = payload['choices'][0]
+        stop_reason = choice.get('finish_reason')
+        output = choice['message'].get('content')
+    if stop_reason in ('length', 'max_tokens'):
+        raise ModelResponseError('模型输出达到长度上限，解读尚未完整返回。请重新生成，或换用思考开销较小的对话模型。')
+    if not isinstance(output, str) or not output.strip():
+        raise ModelResponseError('模型没有返回解读正文，可能只返回了思考内容。请重新生成，或换用能输出结构化正文的对话模型。')
     output = re.sub(r'^```(?:json)?\s*|\s*```$', '', output.strip())
     return json.loads(output)
 
@@ -154,29 +168,44 @@ def fact_sheet(report):
     return facts
 
 
+class InsightValidationError(ValueError):
+    """Safe failure categories, without echoing model output or private materials."""
+
+
 def validate_insights(response, facts):
     if not isinstance(response, dict) or not isinstance(response.get('insights'), list):
-        raise ValueError('缺少结构化跨作品解读')
+        raise InsightValidationError('模型返回的格式不正确，缺少跨作品解读列表。请重新生成，或检查所选模型是否支持 JSON 输出。')
+    if not response['insights']:
+        raise InsightValidationError('模型没有从当前材料中得出可用的跨作品观察。请补充作品正文、评论或逐字稿，再生成解读。')
     by_id = {f['id']: f for f in facts}
     result = []
+    rejected = {'format': 0, 'references': 0, 'claims': 0, 'scope': 0}
     for item in response['insights'][:12]:
         if not isinstance(item, dict):
+            rejected['format'] += 1
             continue
         ids = item.get('factIds')
         if not isinstance(ids, list) or not ids or len(ids) > 10 or any(not isinstance(i, str) or i not in by_id for i in ids):
+            rejected['references'] += 1
             continue
         observation, action = item.get('observation'), item.get('action')
         if not all(isinstance(v, str) and 4 <= len(v.strip()) <= 1500 for v in (observation, action)):
+            rejected['format'] += 1
             continue
         if UNSUPPORTED_CLAIM.search(observation + action):
+            rejected['claims'] += 1
             continue
         if len({i for fact_id in ids for i in by_id[fact_id]['contentIds']}) < 2:
+            rejected['scope'] += 1
             continue
         result.append({'factIds': list(dict.fromkeys(ids)), 'observation': observation.strip(), 'action': action.strip()})
         if len(result) == 6:
             break
     if not result:
-        raise ValueError('模型没有返回可通过事实引用和数字检查的跨作品解读')
+        labels = {'format': '观察或建议格式不完整', 'references': '引用未匹配提供的事实',
+                  'claims': '包含数字、效果归因或保证性表述', 'scope': '引用只覆盖单篇作品'}
+        reasons = '；'.join(f'{labels[key]}（{count}条）' for key, count in rejected.items() if count)
+        raise InsightValidationError(f'本次模型解读未通过校验：{reasons}。可重新生成，或先核对作品材料；无需因此重复配置模型。')
     return result
 
 
@@ -192,14 +221,20 @@ def insights(report, provider):
               '不得宣称看过图片、音频、留存曲线、原始问题页面；未知窗口、样本筛选和投放混杂不能被忽略。'
               '可以提出假设，但需给出验证动作；无法得出观察时返回空列表。')
     prompt = json.dumps({'platformProfile': report['platformProfile'], 'facts': facts,
+        'responseFormat': {'insights': [{'factIds': ['必须原样复制 facts 中的 id，且覆盖不同作品'],
+            'observation': '比较提供的文字材料，明确观察与假设的边界', 'action': '提出针对该观察的具体修改或验证动作，不编号、不写数量'}]},
         'scope': '仅当前账号最近观察的最多十二篇文字样本；文字与评论已节选；不代表账号全部作品。'}, ensure_ascii=False)
     if len(prompt) > 65000:
         raise HTTPException(400, '事实材料过长，请减少文字后重试')
     try:
         result = validate_insights(request_json(provider, system, prompt), facts)
+    except ModelResponseError as exc:
+        raise HTTPException(502, f'{exc} 本次未保存新解读，已有有效结果保留。') from None
+    except InsightValidationError as exc:
+        raise HTTPException(503, f'{exc} 本次未保存新解读，已有有效结果保留。') from None
     except (urllib.error.URLError, OSError, KeyError, IndexError, TypeError, AttributeError):
         raise HTTPException(502, '跨作品解读连接或响应失败，请检查模型配置后重试；未保存结果') from None
     except ValueError:
-        raise HTTPException(503, '模型没有返回可通过事实引用和数字检查的跨作品解读；未保存无依据结论') from None
+        raise HTTPException(502, '模型响应未能解析为 JSON；请重新生成，或检查所选模型的 JSON 输出能力。本次未保存新解读，已有有效结果保留。') from None
     return {'model': provider.model, 'at': now(), 'facts': facts, 'insights': result,
         'notice': '仅发送当前账号最近观察的最多十二篇文字样本、原始指标和标签事实（文字已节选）。事实引用与禁用表述通过程序检查，不保证语义解释正确；模型建议需人工核对，不代表效果原因。材料或指标更新后旧解读自动隐藏。'}
