@@ -69,3 +69,16 @@ def test_listings_only_return_valid_directories(profiles):
     (profiles / "not-a-profile.md").write_text("not a directory", encoding="utf-8")
     assert persona.list_personas() == ["正常画像"]
     assert [row["name"] for row in web.list_personas()] == ["正常画像"]
+
+
+@pytest.mark.parametrize('name', ['../outside', r'nested\profile', '.hidden', '_internal', 'name:stream', 'bad\x00name', 'bad\nname'])
+def test_profile_creation_rejects_invalid_names_before_files_or_model(profiles, monkeypatch, name):
+    def unexpected(*args, **kwargs):
+        pytest.fail('Invalid profile creation reached writing or model execution')
+    monkeypatch.setattr(web, '_write_baseline_profile', unexpected)
+    monkeypatch.setattr(web, 'run_agent_sync', unexpected)
+    local = 'http://127.0.0.1:7860'
+    client = TestClient(web.app, base_url=local, client=('127.0.0.1', 51234), headers={'Origin': local})
+    response = client.post('/api/profile/build', json={'name': name, 'form': {}})
+    assert response.status_code == 400
+    assert not list(profiles.iterdir())

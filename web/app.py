@@ -6068,10 +6068,8 @@ async def api_profile_build(req: ProfileBuildRequest):
     name = (req.name or '').strip()  # 自动去掉首尾空格
     if not name:
         raise HTTPException(400, '画像名不能为空（去掉首尾空格后为空，请输入有效名称）')
-    if '/' in name or '\\' in name:
-        raise HTTPException(400, '画像名不能包含 / 或 \\ 字符，请改掉后重试')
-    if name.startswith(('.', '_')):
-        raise HTTPException(400, '画像名不能以 . 或 _ 开头，请换个开头')
+    if not valid_persona_name(name):
+        raise HTTPException(400, '画像名不能以 . 或 _ 开头，也不能包含路径分隔符、冒号或控制字符')
     pd = PROFILES_DIR / name
     if pd.exists():
         raise HTTPException(409, f'画像「{name}」已存在，请换一个名字')

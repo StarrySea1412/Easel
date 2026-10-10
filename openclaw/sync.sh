@@ -65,7 +65,7 @@ synced=0
 for skill_dir in "$OPENCLAW_SKILL_SRC"/*/; do
     [ -d "$skill_dir" ] || continue
     name=$(basename "$skill_dir")
-    rm -rf "$OPENCLAW_SKILL_DST/$name"
+    rm -rf "${OPENCLAW_SKILL_DST:?}/$name"
     cp -r "$skill_dir" "$OPENCLAW_SKILL_DST/$name"
     echo "  ✓ $name"
     synced=$((synced + 1))
@@ -89,7 +89,16 @@ echo "Workspace:"
 for f in "$OPENCLAW_WORKSPACE_SRC"/*.md; do
     [ -f "$f" ] || continue
     name=$(basename "$f")
-    cp "$f" "$OPENCLAW_WORKSPACE_DST/$name"
+    dst="$OPENCLAW_WORKSPACE_DST/$name"
+    # Bootstrap documents may be hardlinked. Replace the directory entry before
+    # copying so updating a workspace never writes through to another link.
+    rm -f "$dst"
+    cp "$f" "$dst"
+    links=$(stat -c %h "$dst" 2>/dev/null || stat -f %l "$dst" 2>/dev/null || echo 1)
+    if [ "$links" != "1" ]; then
+        echo "  ✗ $name 仍是硬链接（nlink=$links）；请删除该文件后重新同步" >&2
+        exit 1
+    fi
     echo "  ✓ $name"
 done
 
