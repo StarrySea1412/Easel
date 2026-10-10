@@ -423,7 +423,8 @@ def distribution_files(bundle: Path):
 def smoke_shared_scripts(bundle: Path) -> None:
     """Launch the actual embedded interpreter, which ignores normal script paths."""
     env = {key: value for key, value in os.environ.items() if key.lower() in ('systemroot', 'windir', 'temp', 'tmp', 'path')}
-    env.update(EASEL_ROOT=str(bundle / 'app'), EASEL_DATA_DIR=str(bundle / 'data'), PYTHONIOENCODING='utf-8')
+    env.update(EASEL_ROOT=str(bundle / 'app'), EASEL_DATA_DIR=str(bundle / 'data'), PYTHONIOENCODING='utf-8',
+               USERPROFILE=str(bundle / 'data/home'), HOME=str(bundle / 'data/home'))
     for name in ('ai_image.py', 'ai_video.py', 'ai_music.py', 'voice_clone.py', 'channels_readback.py', 'xhs_readback.py'):
         result = subprocess.run([str(bundle / RUNTIME['python']), '-B',
             str(bundle / 'app/skills/shared/scripts' / name), '--help'], cwd=bundle / 'app',
