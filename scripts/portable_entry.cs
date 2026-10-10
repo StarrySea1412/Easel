@@ -120,17 +120,27 @@ internal sealed class PortableWindow : Form
     private readonly Button stop = new Button();
     private readonly Button logs = new Button();
     private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+    private readonly System.Windows.Forms.Timer startupTimer = new System.Windows.Forms.Timer();
+    private readonly EventWaitHandle openRequest;
+    private readonly Action<string> openUrl;
+    private Stopwatch startupWatch;
+    private DateTime startupBegan;
+    private bool starting;
+    private bool reopenRequested;
     private bool busy;
     private bool closeRequested;
     private bool canClose;
-    private bool hasStarted;
     private bool runtimeInvoked;
     private string url;
     private string logPath;
 
-    internal PortableWindow(string bundleRoot)
+    internal PortableWindow(string bundleRoot) : this(bundleRoot, null, null) { }
+
+    internal PortableWindow(string bundleRoot, EventWaitHandle request, Action<string> browserOpener)
     {
         root = bundleRoot;
+        openRequest = request;
+        openUrl = browserOpener ?? (value => Process.Start(new ProcessStartInfo(value) { UseShellExecute = true }));
         Text = "Easel 便携版";
         Font = new Font("Microsoft YaHei UI", 9F);
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -199,7 +209,20 @@ internal sealed class PortableWindow : Form
         layout.Controls.Add(buttons, 0, 5);
         timer.Interval = 15000;
         timer.Tick += delegate { if (!busy && !closeRequested) RunAction("status", false); };
-        Shown += delegate { timer.Start(); RunAction("start", true); };
+        startupTimer.Interval = 750;
+        startupTimer.Tick += delegate
+        {
+            if (openRequest != null && openRequest.WaitOne(0) && !closeRequested)
+            {
+                WindowState = FormWindowState.Normal;
+                Show(); Activate();
+                if (busy) reopenRequested = true;
+                else if (PortableArguments.WorkbenchUrl(url)) OpenWorkbench();
+                else RunAction("start", true);
+            }
+            UpdateStartupProgress();
+        };
+        Shown += delegate { timer.Start(); startupTimer.Start(); RunAction("start", true); };
         FormClosing += Closing;
     }
 
@@ -216,11 +239,13 @@ internal sealed class PortableWindow : Form
     {
         if (busy) return;
         SetBusy(true, showProgress);
+        starting = action == "start";
+        if (starting) { startupBegan = DateTime.UtcNow; startupWatch = Stopwatch.StartNew(); }
         if (showProgress)
         {
             state.Text = action == "stop" ? "正在停止服务…" : "正在启动工作台…";
             explanation.Text = action == "stop" ? "正在关闭本文件夹启动的服务，请稍候。"
-                : "首次启动可能需要几分钟。无需安装工具，请保持此窗口打开。";
+                : "正在准备本机服务，就绪后会自动打开浏览器。首次启动加载组件可能较慢。";
         }
         Task.Factory.StartNew(delegate { return InvokeLauncher(action); }).ContinueWith(task =>
         {
@@ -231,6 +256,7 @@ internal sealed class PortableWindow : Form
                     ? new PortableResult { Ok = false, Message = task.Exception.GetBaseException().Message }
                     : task.Result;
                 SetBusy(false, false);
+                starting = false;
                 ApplyResult(action, result);
                 if (closeRequested)
                 {
@@ -250,8 +276,40 @@ internal sealed class PortableWindow : Form
                     }
                     else RunAction("stop", true);
                 }
+                else if (reopenRequested)
+                {
+                    reopenRequested = false;
+                    if (result.Ok && result.Running) { if (action != "start") OpenWorkbench(); }
+                    else if (action == "stop" && result.Ok) RunAction("start", true);
+                }
             });
         });
+    }
+
+    private void UpdateStartupProgress()
+    {
+        if (!busy || !starting || closeRequested || startupWatch == null) return;
+        state.Text = "正在启动工作台… " + (int)startupWatch.Elapsed.TotalSeconds + " 秒";
+        string path = Path.Combine(root, "data", "portable-startup.json");
+        try
+        {
+            FileInfo file = new FileInfo(path);
+            if (!file.Exists || file.Length > 4096 || file.LastWriteTimeUtc < startupBegan) return;
+            Dictionary<string, object> value = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8));
+            object message;
+            if (value != null && value.TryGetValue("message", out message) && message is string && ((string)message).Length <= 300)
+                explanation.Text = (string)message + " 服务就绪后会自动打开浏览器。";
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { timer.Dispose(); startupTimer.Dispose(); }
+        base.Dispose(disposing);
     }
 
     private PortableResult InvokeLauncher(string action)
@@ -321,15 +379,13 @@ internal sealed class PortableWindow : Form
             explanation.AccessibleDescription = explanation.Text;
             open.Enabled = !closeRequested;
             start.Enabled = false;
-            if (action == "start" && !hasStarted && !closeRequested) OpenWorkbench();
-            hasStarted = true;
+            if (action == "start" && !closeRequested) OpenWorkbench();
         }
         else if (result.GatewayRunning || result.WebRunning)
         {
             url = result.WebRunning && PortableArguments.WorkbenchUrl(result.Url) ? result.Url : null;
             address.Text = url ?? "";
             open.Enabled = !closeRequested && url != null;
-            hasStarted = false;
             state.Text = "部分服务仍在运行";
             explanation.Text = "工作台尚未完整就绪。请先停止服务，再移动文件夹；可查看日志后重新启动。";
         }
@@ -338,7 +394,6 @@ internal sealed class PortableWindow : Form
             url = null;
             address.Text = "";
             open.Enabled = false;
-            hasStarted = false;
             state.Text = "服务已停止";
             explanation.Text = "个人资料已保留。点击启动可继续使用；现在也可以移动整个文件夹。";
         }
@@ -353,7 +408,7 @@ internal sealed class PortableWindow : Form
     private void OpenWorkbench()
     {
         if (!PortableArguments.WorkbenchUrl(url)) return;
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        try { openUrl(url); }
         catch (Exception error) { explanation.Text = "无法打开默认浏览器：" + error.Message; }
     }
 
@@ -406,17 +461,18 @@ internal static class PortableEntry
             identity = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(root.ToUpperInvariant()))).Replace("-", "");
         bool created;
         using (Mutex instance = new Mutex(true, "Local\\EaselPortable-" + identity, out created))
+        using (EventWaitHandle openRequest = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\EaselPortable-Open-" + identity))
         {
             if (!created)
             {
-                MessageBox.Show("这个文件夹的 Easel 控制窗口已经打开。请使用已有窗口。", "Easel");
+                openRequest.Set();
                 return;
             }
             try
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new PortableWindow(root));
+                Application.Run(new PortableWindow(root, openRequest, null));
             }
             finally { instance.ReleaseMutex(); }
         }

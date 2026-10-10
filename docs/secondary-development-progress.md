@@ -420,3 +420,5 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 内容分析既有证据见 [工作台验收](content-analysis-workbench-2026-09-30.md)、[数据审计](content-analysis-data-audit-2026-09-30.md) 和 [方法规范](content-analysis-methodology-2026-09-30.md)；更早资料见 [参考依据](final-iteration-2026-09-30.md)。
 
 本轮Git：功能源码`5fa7a8fe307e4187421a93ad493f4f4b4f1d9f80`与main首页`d0bf52d7b3ad4791a24d6581680dd0ec178bccbf`已原子推送用户远端并核对SHA。main仅双语README；运营指南、调研/审计、main两首页共5个地址HTTP200。文档回执独立提交，旧ZIP未更新。
+2026-10-10 启动体验追加：缓存精确配置及运行时的成功验证，减少重复加载；显示启动阶段和耗时；就绪后及再次双击同一副本自动打开工作台。启动器/原生窗口行为相关106通过、1跳过，实际整包耗时待回执。
+

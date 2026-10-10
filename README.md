@@ -174,3 +174,5 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)，感谢原作者及贡献者。原有功能、历史提交和必要资源保留；本仓库维护独立的创作工作台、办公室交互和可靠性改进，不代表上游官方发行。
 
 采用 [Apache License 2.0](LICENSE)，保留[原有致谢](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/ACKNOWLEDGMENTS.md)。OpenClaw、前端库及技能中的第三方组件继续遵循各自许可证；发布包保留所需许可证信息。
+> **启动体验**：配置与运行时未变时复用已通过的配置检查，启动窗口显示当前阶段和等待秒数；工作台就绪后自动打开默认浏览器，再次双击同一副本也会打开已有工作台。相关启动器与原生参数/页面打开行为检查106通过、1项主机条件跳过；本机实际耗时另见交付回执。
+

@@ -630,6 +630,18 @@ def validate_config(bundle: Bundle, env: dict) -> None:
         cwd=bundle.app, env=env, capture_output=True, timeout=15, creationflags=FLAGS)
     if node_check.returncode:
         raise RuntimeError("包内 Node 版本或 SQLite 支持不匹配；不会下载其他运行时，请重新获取完整便携包。")
+    # A successful schema check is reusable only for the exact config and
+    # bundled runtime. The gateway still validates its config on every start.
+    cache_path = bundle.data / 'portable-config-validation.json'
+    fingerprint = hashlib.sha256(bundle.config.read_bytes() + bundle.runtime['openclaw'].read_bytes()
+        + json.dumps(bundle.manifest.get('components', {}), sort_keys=True).encode()).hexdigest()
+    try:
+        cached = _read_json(cache_path)
+    except (OSError, ValueError):
+        cached = {}
+    if cached.get('fingerprint') == fingerprint:
+        log(bundle, '配置和内置运行时未变，复用已通过的配置检查；网关启动仍核验配置。')
+        return
     with tempfile.TemporaryFile(dir=bundle.data / "tmp") as captured:
         process = subprocess.Popen([str(bundle.runtime["node"]), str(bundle.runtime["openclaw"]),
                                     "--profile", "easel", "config", "validate"],
@@ -647,6 +659,10 @@ def validate_config(bundle: Bundle, env: dict) -> None:
     if process.returncode:
         log(bundle, "包内 OpenClaw 配置验证失败：" + detail[-2400:])
         raise RuntimeError("包内 OpenClaw 配置验证失败；保留用户配置，请查看本副本日志。")
+    try:
+        _write_json(cache_path, {'fingerprint': fingerprint})
+    except OSError:
+        log(bundle, '配置检查已通过，缓存无法写入；下次启动将重新检查。')
 
 
 def _terminate_created(process, bundle: Bundle) -> None:
@@ -806,7 +822,19 @@ finally:
 
 
 def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
+    began = time.monotonic()
+    timings = {}
+    previous = ('processCheck', began)
+    def phase(name: str, message: str) -> None:
+        nonlocal previous
+        now = time.monotonic()
+        timings[previous[0]] = round(now - previous[1], 3)
+        previous = (name, now)
+        _write_json(bundle.data / 'portable-startup.json',
+                    {'phase': name, 'message': message, 'elapsedSeconds': round(now - began, 1)})
+        log(bundle, f'启动阶段：{message}（{now - began:.1f} 秒）')
     with bundle_lock(bundle):
+        phase('processCheck', '正在检查本副本服务…')
         identity, state = _state(bundle)
         observed = _service_snapshot(bundle, state)
         state = _current_records(bundle, identity, state, observed)
@@ -826,6 +854,7 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                 _write_json(bundle.data / IDENTITY_FILE, identity)
             env = isolated_env(bundle)
             env['EASEL_GATEWAY_PORT'] = env['OPENCLAW_GATEWAY_PORT'] = str(gateway_port)
+            phase('pairing', '正在核验本机设备权限…')
             ensure_local_device_pairing(bundle, env)
             result = {"ok": True, "running": True, "url": f"http://127.0.0.1:{web_port}/",
                       "webPort": web_port, "gatewayPort": gateway_port, "reused": True,
@@ -841,24 +870,29 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                 if not owned.get(name):
                     services.pop(name)
             existing_gateway = services.get("gateway")
+            phase('prepare', '正在准备本副本的数据和技能…')
             identity, gateway_port = initialize(bundle, identity,
                                                  gateway_port=existing_gateway.get("port") if existing_gateway else None)
             state.update(bundleId=identity["bundleId"], root=str(bundle.root))
             _save_state(bundle, state)
             env = isolated_env(bundle)
             env["OPENCLAW_GATEWAY_PORT"] = env["EASEL_GATEWAY_PORT"] = str(gateway_port)
+            phase('configValidation', '正在检查模型配置…')
             validate_config(bundle, env)
             started = []
             try:
                 if not existing_gateway:
+                    phase('gateway', '正在加载内置模型网关…')
                     command = [str(bundle.runtime["node"]), str(bundle.runtime["openclaw"]), "--profile", "easel",
                                "gateway", "run", "--allow-unconfigured", "--bind", "loopback", "--port", str(gateway_port)]
                     _launch_service(bundle, state, "gateway", command, env, gateway_port)
                     started.append("gateway")
+                phase('pairing', '正在核验本机设备权限…')
                 ensure_local_device_pairing(bundle, env)
                 web_port, port_changed = select_web_port(bundle, identity)
                 env["EASEL_PORT"] = str(web_port)
                 expected = (bundle.app / "web/frontend/dist/index.html").read_bytes()
+                phase('web', '正在启动网页工作台…')
                 _launch_service(bundle, state, "web", [str(bundle.runtime["python"]), "-B", "-s", str(bundle.app / "web/app.py")],
                                 env, web_port, expected=expected)
                 started.append("web")
@@ -878,6 +912,8 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                       "browserStorageNotice": browser_storage_notice(identity),
                       "message": "工作台已就绪，请在设置中添加自己的模型服务。" + browser_storage_notice(identity),
                       "logPath": str(bundle.log_path)}
+    phase('ready', '工作台已就绪，正在打开页面…' if not no_browser else '工作台已就绪。')
+    result.update(startupSeconds=round(time.monotonic() - began, 3), startupTimings=timings)
     if not no_browser:
         webbrowser.open(result["url"])
     return result
@@ -907,6 +943,7 @@ def main(argv=None) -> int:
         if bundle:
             try:
                 log(bundle, message)
+                _write_json(bundle.data / 'portable-startup.json', {'phase': 'error', 'message': message[:300]})
             except OSError:
                 pass
         result = {"ok": False, "running": False, "url": "", "message": message, "error": message,

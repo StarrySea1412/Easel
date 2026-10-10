@@ -379,6 +379,19 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 internal static class ArgumentProbe {
   public static void Main(string[] args) {
+    if(args.Length > 0 && args[0] == "auto-open") {
+      List<string> opened = new List<string>();
+      using(PortableWindow window = new PortableWindow(args[1], null, value => opened.Add(value))) {
+        MethodInfo apply = typeof(PortableWindow).GetMethod("ApplyResult", BindingFlags.NonPublic | BindingFlags.Instance);
+        PortableResult ready = new PortableResult { Ok=true, Running=true, Url="http://127.0.0.1:37881/" };
+        apply.Invoke(window, new object[] { "start", ready });
+        apply.Invoke(window, new object[] { "status", ready });
+        apply.Invoke(window, new object[] { "start", ready });
+        apply.Invoke(window, new object[] { "start", new PortableResult { Ok=false, Url="https://evil.test/" } });
+        Console.WriteLine(String.Join("|", opened));
+      }
+      return;
+    }
     if(args.Length > 0 && args[0] == "url") {
       Console.WriteLine(PortableArguments.WorkbenchUrl(args[1]) ? "yes" : "no"); return;
     }
@@ -415,6 +428,8 @@ internal static class ArgumentProbe {
         "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll",
         "/out:" + str(executable), str(ROOT / "scripts/portable_entry.cs"), str(probe)], check=True,
         capture_output=True, text=True, encoding="utf-8")
+    opened = subprocess.check_output([str(executable), 'auto-open', str(tmp_path)], text=True).strip()
+    assert opened == 'http://127.0.0.1:37881/|http://127.0.0.1:37881/'
     values = ["", "simple", "C:\\便携测试\\folder with spaces\\", 'C:\\quotes\\"x"\\', "a&b%PATH%!name!"]
     output = subprocess.check_output([str(executable), *values], text=True).splitlines()
     import base64

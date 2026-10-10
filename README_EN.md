@@ -160,3 +160,5 @@ CI runs for `main` and `codex/**` branches. Windows installer builds are manual 
 Based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel), with thanks to its authors and contributors. This repository maintains its own workspace experience, office interactions and reliability changes; it is not an official upstream release.
 
 [Apache License 2.0](LICENSE), with the [original acknowledgments](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/ACKNOWLEDGMENTS.md) retained. OpenClaw, frontend libraries and third-party skill components retain their respective licenses and required notices.
+> **Startup experience**: Unchanged configuration and runtime reuse a successful schema check. The window shows the current stage and elapsed seconds, opens the default browser once ready, and reopens the running workspace on a second launch. Launcher and native argument/browser-opening checks: 106 passed, one host-dependent skip. Actual local startup timings are recorded with the delivery.
+

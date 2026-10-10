@@ -421,6 +421,32 @@ def test_failed_config_validation_preserves_config_and_uses_exact_bundled_node(b
         launcher.validate_config(bundle, launcher.isolated_env(bundle, {}))
     assert calls[0][0] == [str(bundle.runtime["node"]), str(bundle.runtime["openclaw"]), "--profile", "easel", "config", "validate"]
     assert bundle.config.read_bytes() == before
+    assert not (bundle.data / 'portable-config-validation.json').exists()
+
+
+def test_successful_validation_cache_invalidates_on_config_or_runtime_change(bundle, monkeypatch):
+    launcher.initialize(bundle, {}, gateway_port=37881)
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda command, **kw: subprocess.CompletedProcess(command, 0))
+    calls = []
+    class ValidProcess:
+        returncode = 0
+        def wait(self, **kwargs): return 0
+    monkeypatch.setattr(launcher.subprocess, 'Popen', lambda command, **kw: calls.append(command) or ValidProcess())
+    env = launcher.isolated_env(bundle, {})
+    launcher.validate_config(bundle, env)
+    launcher.validate_config(bundle, env)
+    assert len(calls) == 1
+    config = launcher._read_json(bundle.config)
+    config['models'] = {'providers': {}}
+    launcher._write_json(bundle.config, config)
+    launcher.validate_config(bundle, env)
+    assert len(calls) == 2
+    bundle.manifest['components'] = {'openclaw': {'treeSha256': 'changed-runtime'}}
+    launcher.validate_config(bundle, env)
+    assert len(calls) == 3
+    bundle.runtime['openclaw'].write_bytes(b'changed-entry')
+    launcher.validate_config(bundle, env)
+    assert len(calls) == 4
 
 
 def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monkeypatch):
