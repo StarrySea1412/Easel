@@ -85,7 +85,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
         : <button className="link-btn" disabled={locked} onClick={() => { returnMode.current = studio.mode === 'img2img' ? 'img2img' : 'generate'; studio.setMode('reverse'); }}>提取提示词 ↗</button>}
     </div>
     {studio.mode === 'reverse' ? <ImageReversePanel studio={studio} onOpenSettings={onOpenSettings} /> : <>
-      <StudioModelControl model={(busy && job?.model) || studio.imgChannel?.model || ''} service="当前图片模型" disabled={locked || studio.loading} saving={studio.modelSaving} error={studio.modelError} onSave={studio.saveModel} onSettings={onOpenSettings} />
+      <StudioModelControl model={(busy && job?.model) || studio.imgChannel?.model || ''} baseUrl={studio.imgChannel?.baseUrl} service="当前图片模型" disabled={locked || studio.loading} saving={studio.modelSaving} error={studio.modelError} onSave={studio.saveModel} onSettings={onOpenSettings} />
       <section className={`image-creation${dragging ? ' is-dragging' : ''}`} aria-label="图片创作工作区"
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!locked) setDragging(true); } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}

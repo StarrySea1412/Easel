@@ -908,8 +908,20 @@ def cmd_whoami(a) -> int:
                     page.wait_for_selector(SELECTORS["login_ok"], timeout=4000)
                 except Exception:
                     pass
-                logged = _query_safe(page, SELECTORS["login_ok"]) is not None
+                host = urlsplit(page.url).hostname or ''
+                first_party = host == 'xiaohongshu.com' or host.endswith('.xiaohongshu.com')
+                identity = _query_safe(page, SELECTORS["login_ok"])
+                logged = bool(first_party and identity is not None and identity.is_visible())
                 result["loggedIn"] = logged
+                if not logged:
+                    kind = _classify_login_page_error(page.url, page.title() or '')
+                    login = _query_safe(page, '.login-container, .login-btn')
+                    if not first_party:
+                        result['error'] = '页面未处于小红书站点，暂时无法确认账号状态。'
+                    elif kind:
+                        result['error'] = _LOGIN_PAGE_MESSAGES[kind]
+                    elif not (first_party and login is not None and login.is_visible()):
+                        result['error'] = '未识别到可见账号或登录入口，暂时无法确认会话状态，请稍后重试。'
                 if logged:
                     img = page.query_selector('.main-container .user img.reds-img')
                     if img:

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
-  fetchAccounts, fetchOutputs, mediaUrl,
+  fetchAccounts, fetchOutputs, mediaUrl, accountWhoami,
 } from '../lib/api';
 import type { AccountItem, OutputFile, PublishRequest } from '../lib/api';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
@@ -13,6 +13,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache } from '../lib/whoami';
 
 interface PublishPageProps {
   persona: string;
@@ -59,6 +60,8 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const [toast, setToast] = useState('');
   const [adapting, setAdapting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [checkStage, setCheckStage] = useState('');
+  const checkLock = useRef(false);
   const [checkResult, setCheckResult] = useState('');
   const adaptCtl = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -108,6 +111,14 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     }).catch(() => setMediaError('媒体列表加载失败，请重试。')).finally(() => setMediaLoading(false));
   }, []);
   useEffect(() => { loadAssets(); }, [loadAssets]);
+
+  useEffect(() => {
+    const sync = () => { void fetchAccounts().then(rows => { if (mounted.current) setAccounts(rows); }).catch(() => { if (mounted.current) setAccountsError('账号状态加载失败，请重试。'); }); };
+    const storage = (event: StorageEvent) => { if (event.key === 'easel_whoami') sync(); };
+    window.addEventListener(ACCOUNT_STATE_EVENT, sync);
+    window.addEventListener('storage', storage);
+    return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
+  }, []);
 
   const loginOf = (key: string) => accounts.find((a) => a.platform === key)?.loggedIn ?? false;
 
@@ -211,17 +222,19 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   // C. 发布前一键预检
   const check = async () => {
     if (empty) return;
-    setChecking(true); setCheckResult('');
+    if (checkLock.current) return;
+    checkLock.current = true;
+    setChecking(true); setCheckStage('正在预检内容…'); setCheckResult('');
     try {
       setCheckResult(await performPrecheck());
     } catch (e) {
       setCheckResult(e instanceof Error ? e.message : '预检失败');
-    } finally { setChecking(false); }
+    } finally { checkLock.current = false; setChecking(false); setCheckStage(''); }
   };
 
   // D. 一键发布（真发布，二次确认）
   const publishAll = async () => {
-    if (empty || publishing || checking) return;
+    if (empty || publishing || checking || checkLock.current) return;
     if (accountsLoading || accountsError) { showToast('请先刷新并确认账号状态，再发布。'); return; }
     const targets = PLATFORMS.filter((p) => platforms.includes(p.key) && PUBLISHABLE.has(p.key));
     if (targets.length === 0) {
@@ -238,7 +251,36 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     }
     setBlocked(errors);
     if (!requests.length) { showToast('请先处理平台卡片中的账号或媒体提示。'); return; }
+    checkLock.current = true;
     setChecking(true);
+    const confirmed: PublishRequest[] = [];
+    const identities: Record<string, string> = {};
+    for (const request of requests) {
+      const platform = request.platform;
+      setCheckStage(`正在检查${PLATFORMS.find(p => p.key === platform)?.label}登录状态…`);
+      const before = JSON.stringify(getWhoamiCache()[platform]);
+      try {
+        const result = await accountWhoami(platform, true);
+        if (before !== JSON.stringify(getWhoamiCache()[platform])) throw new Error('账号状态已变化，请重新检查。');
+        if (result.verified === false) throw new Error(result.verificationMessage || '本次在线检查未确认登录状态。');
+        setWhoamiCache(platform, result);
+        identities[platform] = JSON.stringify(getWhoamiCache()[platform]);
+        if (result.loggedIn) confirmed.push(request);
+        else errors[platform] = '在线检查确认登录已失效，请重新连接。';
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : '登录检查失败，请重试。';
+        if (before === JSON.stringify(getWhoamiCache()[platform])) markWhoamiUnverified(platform, message);
+        errors[platform] = message;
+      }
+      if (!mounted.current) { checkLock.current = false; return; }
+    }
+    setBlocked({ ...errors });
+    if (!confirmed.length) {
+      checkLock.current = false; setChecking(false); setCheckStage('');
+      showToast('登录状态未确认，内容已保留，请检查平台提示后重试。');
+      return;
+    }
+    setCheckStage('正在预检内容…');
     try {
       const result = await performPrecheck();
       if (mounted.current) setCheckResult(result);
@@ -246,15 +288,22 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       if (mounted.current) setCheckResult(`预检失败：${e instanceof Error ? e.message : '未知错误'}\n\n预检仅用于提醒，不会阻止你继续发布。`);
     } finally {
       if (mounted.current) setChecking(false);
+      checkLock.current = false;
+      if (mounted.current) setCheckStage('');
     }
     if (!mounted.current) return;
     const okToSend = window.confirm(
       `发布前预检已执行，结果已显示在页面中。人设评分只做提醒，不会阻止发布。\n\n` +
-      `即将向这些账号【真实提交内容】：${targets.filter(target => requests.some(request => request.platform === target.key)).map(target => target.label).join('、')}。\n` +
+      `即将向这些账号【真实提交内容】：${targets.filter(target => confirmed.some(request => request.platform === target.key)).map(target => target.label).join('、')}。\n` +
       `${Object.keys(errors).length ? '\n本次不会提交：' + targets.filter(target => errors[target.key]).map(target => target.label + '（' + errors[target.key] + '）').join('、') + '。\n' : ''}` +
       `平台可能进入审核，公众号保存到草稿箱。结果与可用作品地址会保存在发布回执中。确定继续？`);
     if (!okToSend) return;
-    void publishReceipts.submit(requests);
+    const unchanged = confirmed.filter(request => {
+      const entry = getWhoamiCache()[request.platform];
+      return isWhoamiFresh(entry) && entry.loggedIn && identities[request.platform] === JSON.stringify(entry);
+    });
+    if (unchanged.length !== confirmed.length) { showToast('账号状态已变化，内容已保留，请重新检查后发布。'); return; }
+    void publishReceipts.submit(confirmed);
   };
 
   const copyFor = (key: string) => {
@@ -303,7 +352,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                   <IconSkills size={14} /> 一键适配各平台
                 </button>}
               <button className="btn btn-sm btn-ghost" disabled={empty || checking || adapting || publishing} onClick={check}>
-                {checking ? <PublishSpinner /> : <IconCheck size={14} />}{checking ? '预检中…' : '发布前预检'}
+                {checking ? <PublishSpinner /> : <IconCheck size={14} />}{checking ? checkStage : '发布前预检'}
               </button>
             </div>
             {adapting && <div className="adapt-hint" role="status"><PublishSpinner />正在生成平台版本，可切换预览查看。</div>}
@@ -446,7 +495,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
             <button className="btn btn-primary publish-submit" disabled={empty || publishing || checking || adapting || !canPublish}
               title={canPublish ? '预检后确认本次实际提交的平台' : '请先选择发布平台'} onClick={publishAll}>
               {publishing || checking ? <PublishSpinner /> : <IconPublish size={16} />}
-              {checking ? '正在检查内容…' : publishing ? '正在发布，等待平台回执…' : `发布到 ${platforms.length} 个平台`}
+              {checking ? checkStage : publishing ? '正在发布，等待平台回执…' : `发布到 ${platforms.length} 个平台`}
             </button>
             <p className="publish-saved-note">{publishing ? '任务会在后台继续，每个平台单独保存结果。' : selectedPlatforms.length && readyCount < selectedPlatforms.length
               ? `${readyCount} 个平台就绪，请点击上方平台查看待处理项。` : '先预检，再确认提交。公众号保存到草稿箱。'}</p>

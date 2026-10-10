@@ -14,7 +14,13 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
   const connection = models.connection;
   const effective = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const channelName = effective?.channelName || connection?.channelName || '未命名渠道';
-  const state = models.loading ? 'running' : connection?.state || 'unverified';
+  const [slowLoading, setSlowLoading] = useState(false);
+  useEffect(() => {
+    if (!models.loading) return;
+    const timer = setTimeout(() => setSlowLoading(true), 400);
+    return () => { clearTimeout(timer); setSlowLoading(false); };
+  }, [models.loading]);
+  const state = models.loading && slowLoading ? 'running' : connection?.state || 'unverified';
   const connectionLabel = state === 'running' ? '检测中' : state === 'success' ? '渠道已连通' : state === 'failed' ? '渠道检测失败' : '渠道未验证';
   const healthHint = `${channelName} · ${connectionLabel}。${connection?.detail || '尚未读取渠道模型列表。'} 模型推理：${healthLabel}${health?.detail ? ` · ${health.detail}` : ''}。点击查看渠道状态。`;
   const unavailable = !models.loading && (Boolean(models.error) || !models.capability?.available);
@@ -57,7 +63,7 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
           : `渠道：${option.channelName || '未命名渠道'} · 仅用于本轮消息`, disabled: models.loading || !models.capability?.available })),
         ...(onOpenModels ? [{value:'__manage_models__',label:'添加或设置模型…',description:'打开模型设置，选择、添加或导入'}] : [])]}
       onChange={value => value === '__manage_models__' ? onOpenModels?.() : models.choose(value)} />
-    {!unavailable && !models.ready && <button type="button" className="link-btn" disabled={disabled || models.loading} onClick={models.refresh}>{models.loading ? '读取中' : '刷新模型'}</button>}
+    {!unavailable && !models.ready && !models.loading && <button type="button" className="link-btn" disabled={disabled} onClick={models.refresh}>刷新模型</button>}
   </div>;
 }
 

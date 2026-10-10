@@ -489,6 +489,7 @@ export interface AccountWhoami {
   name: string;
   avatar: string;   // 头像 URL（http）或空
   verified?: boolean;
+  checkedAt?: number; // 在线检查时间，毫秒；本地快照没有此字段
   verificationMessage?: string;
 }
 

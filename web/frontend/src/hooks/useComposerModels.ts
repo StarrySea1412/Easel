@@ -19,7 +19,7 @@ export function useComposerModels(sessionId: string | null) {
     return () => window.removeEventListener('easel:channel-names-changed', changed);
   }, []);
   useEffect(() => {
-    const controller = new AbortController(); setLoading(true); setError(''); setCapability(null);
+    const controller = new AbortController(); setLoading(true); setError('');
     fetchOfficeTaskModels(sessionId, controller.signal).then(value => { if (!controller.signal.aborted) setCapability(value); })
       .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂不可用。'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });

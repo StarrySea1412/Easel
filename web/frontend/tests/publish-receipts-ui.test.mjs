@@ -42,7 +42,7 @@ async function fixture(t, initial = [], page = 'other') {
   const h = {
     model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0,
     list: null, detail: null, publish: null, sms: null, verify: null, precheck: null,
-    accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
+    whoami: null, accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
   t.mock.method(window, 'confirm', text => { h.confirmations.push(text); return h.confirm; });
   t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
@@ -63,7 +63,8 @@ async function fixture(t, initial = [], page = 'other') {
     } else if (/^\/api\/publish\/[^/]+$/.test(path) && options.method === 'POST') {
       if (!h.publish) throw new Error('No simulated publisher configured');
       result = await h.publish(path.split('/')[3], request.body, request);
-    } else if (path === '/api/accounts') result = h.accounts;
+    } else if (/^\/api\/accounts\/[^/]+\/whoami/.test(path)) result = h.whoami ? await h.whoami(request) : { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟账号', avatar: '' };
+    else if (path === '/api/accounts') result = h.accounts;
     else if (path === '/api/outputs') result = h.outputs;
     else if (path === '/api/schedule') result = h.schedule;
     else if (path.startsWith('/api/schedule/context?')) result = {};
@@ -474,3 +475,30 @@ for (const valid of [true, false]) test(`calendar exposes ${valid ? 'the saved p
 });
 
 test.after(() => window.close());
+
+for (const scenario of ['expired', 'unknown', 'error']) test(`publication checks current login and blocks ${scenario} without losing the draft`, async t => {
+  const view = await fixture(t, [], 'publish');
+  view.h.whoami = async () => {
+    if (scenario === 'error') throw new Error('模拟检查超时');
+    return { loggedIn: scenario !== 'expired', verified: scenario !== 'unknown', checkedAt: Date.now(), name: '', avatar: '', verificationMessage: '模拟无法确认' };
+  };
+  const send = [...view.container.querySelectorAll('button')].find(button => button.textContent.includes('发布到 1 个平台'));
+  await view.click(send);
+  assert.equal(view.posts().length, 0);
+  assert.equal(view.h.confirmations.length, 0);
+  assert.equal(view.container.querySelector('#publish-title').value, '本次要发布的标题');
+  assert.match(view.container.textContent, scenario === 'expired' ? /登录已失效/ : scenario === 'unknown' ? /模拟无法确认/ : /模拟检查超时/);
+});
+
+test('slow login check has a spinner and repeated clicks cannot start another check', async t => {
+  const view = await fixture(t, [], 'publish'), gate = deferred();
+  view.h.whoami = () => gate.promise;
+  const send = [...view.container.querySelectorAll('button')].find(button => button.textContent.includes('发布到 1 个平台'));
+  await view.click(send);
+  assert.match(send.textContent, /检查知乎登录状态/); assert.equal(send.disabled, true);
+  assert.ok(send.querySelector('.publish-spinner'));
+  await view.click(send);
+  assert.equal(view.h.requests.filter(r => r.path.includes('/whoami')).length, 1);
+  await act(async () => gate.resolve({ loggedIn: false, verified: true, checkedAt: Date.now(), name: '', avatar: '' }));
+  assert.equal(view.posts().length, 0);
+});

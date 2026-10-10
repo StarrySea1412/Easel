@@ -1365,6 +1365,20 @@ def cmd_whoami(a) -> int:
                 page.goto(cfg["publish_url"], wait_until="domcontentloaded", timeout=30000)
                 _settle_login(page, cfg)  # 等客户端跳转落定，避免 SPA 未跳转期误判已登录
                 logged = _is_logged_in(page, cfg)
+                # A changed URL or missing selector alone cannot establish an
+                # account state on an error page. Require visible evidence.
+                visible = lambda selector: any(
+                    el is not None and el.is_visible()
+                    for sel in selector.split(',') if sel.strip()
+                    for el in [page.query_selector(sel.strip())])
+                host = urlsplit(page.url).hostname
+                first_party = host in {urlsplit(cfg['login_url']).hostname, urlsplit(cfg['publish_url']).hostname}
+                if not first_party:
+                    result['error'] = '页面站点与目标平台不匹配，无法确认登录状态。'
+                elif logged and not visible(cfg.get('login_check') or ''):
+                    result['error'] = '未取得可见账号证据，暂时无法确认登录状态。'
+                elif not logged and not any(marker in page.url.lower() for marker in _LOGIN_MARKERS) and not visible(cfg.get('logged_out_selector') or ''):
+                    result['error'] = '未识别到账号或登录入口，暂时无法确认状态。'
                 # 外壳判已登录后，再探发布子系统鉴权：外壳 token 活着但发布 token 已死时翻成未登录
                 if logged and cfg.get("login_probe"):
                     pa = _probe_publish_auth(page, cfg)
@@ -1372,6 +1386,8 @@ def cmd_whoami(a) -> int:
                     if pa == "expired":
                         logged = False
                         result["reason"] = "publish_auth_expired"
+                    elif pa == 'unknown':
+                        result['error'] = '发布权限检查未取得可信结果，请稍后重试。'
                 result["loggedIn"] = logged
                 if logged:
                     for s in (cfg.get("me_name_selector") or "").split(","):

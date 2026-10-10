@@ -31,7 +31,7 @@ export default function VideoStudioPanel({ video, images, onOpenSettings }: {
   const receiveFile = (file?: File) => { if (file && !locked) void media.receiveFile(file); };
 
   return <>
-    <StudioModelControl model={(busy && job?.model) || (reference ? provider?.imageModel : provider?.model) || ''} service={provider ? `${provider.name} · 当前视频模型` : '当前视频模型'} onSettings={onOpenSettings} />
+    <StudioModelControl model={(busy && job?.model) || (reference ? provider?.imageModel : provider?.model) || ''} provider={provider?.name} service={provider ? `${provider.name} · 当前视频模型` : '当前视频模型'} onSettings={onOpenSettings} />
     <section className={`image-creation video-creation${dragging ? ' is-dragging' : ''}`} aria-label="视频创作工作区"
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (!locked) setDragging(true); } }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}

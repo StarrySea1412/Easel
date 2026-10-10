@@ -5,7 +5,7 @@ import {
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
 import type { AccountItem, AccountWhoami, LoginStatus } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified } from '../lib/whoami';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
@@ -150,8 +150,15 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       const { platform, entry } = event.detail || {};
       if (typeof platform !== 'string') return;
       setWhoami(value => { const next = { ...value }; if (entry) next[platform] = entry; else delete next[platform]; return next; });
+      if (entry?.verified === false) setVerification(value => ({ ...value, [platform]: { state: 'error', message: entry.verificationMessage || '登录状态尚未确认，请重试。' } }));
+      else setVerification(value => { const next = { ...value }; delete next[platform]; return next; });
+      if (isWhoamiFresh(entry)) setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: entry.loggedIn } : row));
     };
-    const storage = (event: StorageEvent) => { if (event.key === 'easel_whoami') setWhoami(getWhoamiCache()); };
+    const storage = (event: StorageEvent) => {
+      if (event.key !== 'easel_whoami') return;
+      const cache = getWhoamiCache(); setWhoami(cache); setVerification({});
+      setAccounts(rows => rows.map(row => isWhoamiFresh(cache[row.platform]) ? { ...row, loggedIn: cache[row.platform].loggedIn } : row));
+    };
     window.addEventListener(ACCOUNT_STATE_EVENT, sync); window.addEventListener('storage', storage);
     return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
   }, []);
@@ -160,13 +167,15 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const runWhoami = useCallback(async (platform: string) => {
     const epoch = (identityEpoch.current[platform] || 0) + 1;
     identityEpoch.current[platform] = epoch;
+    const before = JSON.stringify(getWhoamiCache()[platform]);
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
     setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在检查登录状态…' } }));
     try {
       const r = await accountWhoami(platform, true);
-      if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0)) return null;
+      if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0) || before !== JSON.stringify(getWhoamiCache()[platform])) return null;
       if (r.verified === false) {
-        setWhoami((w) => { const next = { ...w }; delete next[platform]; return next; });
+        markWhoamiUnverified(platform, r.verificationMessage || '登录状态尚未确认，请重试。');
+        setWhoami((w) => ({ ...w, [platform]: getWhoamiCache()[platform] || r }));
         setVerification(value => ({ ...value, [platform]: { state: 'error', message: r.verificationMessage || '本次检查未能确认登录状态，保留上次状态，请稍后重试。' } }));
         return null;
       }
@@ -175,8 +184,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
       return r;
     } catch (cause) {
-      if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0)) {
-        setWhoami((w) => { const n = { ...w }; delete n[platform]; return n; });
+      if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0) && before === JSON.stringify(getWhoamiCache()[platform])) {
+        markWhoamiUnverified(platform, '检查失败，尚未确认登录是否有效。');
+        setWhoami((w) => { const n = { ...w }; if (getWhoamiCache()[platform]) n[platform] = getWhoamiCache()[platform]; else delete n[platform]; return n; });
         setVerification(value => ({ ...value, [platform]: { state: 'error', message: `检查失败：${cause instanceof Error ? cause.message : '请稍后重试'}。尚未确认登录是否有效。` } }));
       }
       return null;
@@ -197,13 +207,17 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         });
         setLoaded(true);
         const targets = list
-          .filter((a) => a.supported && a.backend !== 'biliup')
+          .filter((a) => a.supported && (a.loggedIn || a.hasLocalSession || cached[a.platform]))
           .map((a) => a.platform);
         verifyStale(targets, {
           alive: () => aliveRef.current,
+          onChecking: platform => setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态…' } })),
           onUpdate: (platform, r) => {
             setWhoami((w) => ({ ...w, [platform]: r }));
+            setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
+            setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
           },
+          onError: (platform, message) => setVerification(value => ({ ...value, [platform]: { state: 'error', message } })),
         });
       })
       .catch(() => setErr('加载账号状态失败'));
@@ -319,7 +333,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         visibleBrowser: s.visibleBrowser ?? prev.visibleBrowser }));
       if (s.state !== 'success') return;
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true, hasLocalSession: true } : x));
-      setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '' });
+      setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '', checkedAt: Date.now(), verified: true });
       setVerification(value => ({ ...value, [a.platform]: { state: 'checking', message: '登录成功，正在读取账号身份…' } }));
       const identity = await runWhoami(a.platform);
       if (!current()) return;
@@ -405,18 +419,18 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   };
 
   // 卡片真实登录态：whoami 权威（已返回则以它为准，自愈假阳性），否则用后端 last-known。
-  // 公众号(wechat-oa)例外：后端查 mp 会话即真值(快且权威)，直接用它，避免浏览器里过期的 whoami 缓存把已登录盖成未登录。
   const effLoggedIn = (a: AccountItem): boolean => {
-    if (a.backend === 'wechat-oa') return a.loggedIn;
     const w = whoami[a.platform];
-    if (w && w !== 'loading') return w.loggedIn;
+    if (w && w !== 'loading' && isWhoamiFresh(w)) return w.loggedIn;
     return a.loggedIn;
   };
 
   const badge = (a: AccountItem) => {
     if (!a.supported) return <span className="badge">暂不可连接</span>;
-    if (whoami[a.platform] === 'loading') return <span className="badge">校验中…</span>;
-    if (effLoggedIn(a)) return <span className="badge badge-ok">已连接</span>;
+    if (whoami[a.platform] === 'loading' || verification[a.platform]?.state === 'checking') return <span className="badge">校验中…</span>;
+    const w = whoami[a.platform];
+    if (verification[a.platform]?.state === 'error' || (w && w !== 'loading' && w.verified === false)) return <span className="badge">状态待确认</span>;
+    if (effLoggedIn(a)) return w && w !== 'loading' && isWhoamiFresh(w) ? <span className="badge badge-ok">已连接</span> : <span className="badge">待在线校验</span>;
     return <span className="badge">未连接</span>;
   };
 
@@ -474,6 +488,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   {pending ? '正在启动…' : w === 'loading' ? '正在检查…' : logged ? '检查登录状态' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
                 <AccountCheckResult result={verification[a.platform]} />
+                {info?.checkedAt && <p className="account-login-method">上次在线确认：{new Date(info.checkedAt).toLocaleString()}</p>}
                 {a.platform === 'xiaohongshu' && !logged && <button type="button" className="btn btn-block account-browser-login"
                   disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
                   在浏览器中登录

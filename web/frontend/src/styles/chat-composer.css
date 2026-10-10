@@ -58,7 +58,8 @@
  .chat-composer .send-btn { margin-left:auto; }
 }
 
-.chat-composer .composer-thinking-warning { margin:6px 4px 0; color:var(--amber,#9c6400); font-size:11px; line-height:1.6; }
+.composer-thinking-info { display:inline-flex; align-items:center; color:var(--amber,#ad7a25); }
+.composer-thinking-info .inline-info,.composer-thinking-info .inline-info button { color:inherit; }
 .composer-send-actions { display: flex; align-items: center; gap: 6px; }
 /* The narrower queue sits behind the upper edge of the main input. */
 .chat-composer-stack { width:100%; min-width:0; }

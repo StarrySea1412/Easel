@@ -1301,6 +1301,12 @@ def cmd_whoami(a) -> int:
                     pass
                 logged = _logged_in(page)
                 result["loggedIn"] = logged
+                identity = page.query_selector(SELECTORS['hd_publish'])
+                login = page.query_selector(SELECTORS['qrcode'])
+                if logged and (not identity or not identity.is_visible()):
+                    result['error'] = '未取得可见账号证据，暂时无法确认登录状态。'
+                elif not logged and (not login or not login.is_visible()):
+                    result['error'] = '未识别到账号或可见登录入口，暂时无法确认状态。'
                 if logged:
                     # 昵称/头像用**稳定锚点**取，不靠随机 class（真机校准 2026-08）：
                     # 头像 src 路径含 aweme-avatar 稳定；昵称是「抖音号：」上一行的非数字文本。

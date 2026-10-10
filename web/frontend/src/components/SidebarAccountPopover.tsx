@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchAccounts } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, WHOAMI_TTL_MS } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts } from './icons';
 import '../styles/sidebar-account-popover.css';
@@ -65,8 +65,8 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
       setSnapshot(PLATFORMS.map(([platform, name]) => {
         const account = accounts.find(item => item.platform === platform);
         const cached = getWhoamiCache()[platform];
-        const fresh = cached && Date.now() - cached.ts < WHOAMI_TTL_MS;
-        return { platform, name, loggedIn: fresh ? cached.loggedIn : typeof account?.loggedIn === 'boolean' ? account.loggedIn : null };
+        const fresh = isWhoamiFresh(cached);
+        return { platform, name, loggedIn: cached?.verified === false ? null : fresh ? cached.loggedIn : typeof account?.loggedIn === 'boolean' ? account.loggedIn : null };
       }));
     }).catch(() => { if (!stale) setError(true); });
     return () => { stale = true; };

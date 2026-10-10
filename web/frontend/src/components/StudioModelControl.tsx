@@ -1,14 +1,17 @@
 import { useState } from 'react';
+import ProviderIcon from './ProviderIcon';
+import { IconSpark } from './icons';
 
-export default function StudioModelControl({ model, service, disabled, saving, error, onSave, onSettings }: {
+export default function StudioModelControl({ model, service, provider = '', baseUrl = '', disabled, saving, error, onSave, onSettings }: {
   model: string; service: string; disabled?: boolean; saving?: boolean; error?: string;
+  provider?: string; baseUrl?: string;
   onSave?: (model: string) => Promise<boolean>; onSettings: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [saved, setSaved] = useState(false);
   return <div className="studio-model-control">
-    <div className="studio-model-current"><span className="studio-model-symbol" aria-hidden="true">◇</span><div><span>{service}</span><strong>{model || '尚未设置模型'}</strong></div>
+    <div className="studio-model-current"><span className="studio-model-symbol" aria-hidden="true"><ProviderIcon row={{ model, name: provider, baseUrl }} fallback={IconSpark} /></span><div><span>{service}</span><strong>{model || '尚未设置模型'}</strong></div>
       {onSave ? <button type="button" className="link-btn" disabled={disabled || saving} onClick={() => { setDraft(model); setEditing(!editing); setSaved(false); }}>{editing ? '收起' : '自定义模型'}</button>
         : <button type="button" className="link-btn" onClick={onSettings}>设置模型 ↗</button>}
     </div>

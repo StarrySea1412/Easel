@@ -1,8 +1,8 @@
-.chat-execution { margin: 8px 0; font-size: 11px; }
+.chat-execution { margin: 6px 0; font-size: 10px; line-height: 1.4; }
 .chat-execution-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text-muted, #777); margin-bottom: 4px; }
 .chat-execution button { background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; }
-.chat-execution-row { border: 1px solid var(--border, #ddd); border-radius: 7px; margin: 4px 0; }
-.chat-execution-row summary { display: flex; gap: 8px; align-items: center; cursor: pointer; padding: 6px 8px; }
+.chat-execution-row { border: 1px solid var(--border, #ddd); border-radius: 5px; margin: 3px 0; }
+.chat-execution-row summary { display: flex; gap: 6px; align-items: center; cursor: pointer; padding: 4px 7px; min-height: 20px; box-sizing: border-box; }
 .chat-execution-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; }
 .chat-execution-state, .chat-execution-row small { flex-shrink: 0; color: var(--text-muted, #777); }
 .chat-execution-state.is-failed { color: #ba4242; }

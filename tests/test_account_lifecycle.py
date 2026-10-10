@@ -319,3 +319,47 @@ def test_malformed_wechat_credentials_cannot_report_successful_cleanup(isolated)
     with pytest.raises(web.HTTPException) as failure:
         asyncio.run(web.api_logout('wechat-oa'))
     assert failure.value.status_code == 500 and web.WECHAT_CONFIG_YAML.exists()
+
+
+def test_bili_expiry_is_honoured_without_deleting_cookie_and_recovers(isolated, monkeypatch):
+    cookie = isolated / 'cookies.json'
+    cookie.write_text('synthetic retained cookie')
+    replies = iter([False, True])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
+        stdout=json.dumps({'loggedIn': next(replies)}), returncode=0))
+    expired = asyncio.run(web.api_account_whoami('bilibili', force=True))
+    assert expired['verified'] and expired['checkedAt'] > 0
+    assert cookie.exists() and not web._account_logged_in('bilibili', web.LOGIN_RUNNERS['bilibili'])
+    asyncio.run(web.api_account_whoami('bilibili', force=True))
+    assert cookie.exists() and web._account_logged_in('bilibili', web.LOGIN_RUNNERS['bilibili'])
+
+
+def test_cache_preserves_original_online_check_time_and_failure_invalidates_it(isolated, monkeypatch):
+    replies = iter([{'loggedIn': True}, {'loggedIn': False, 'error': 'synthetic failure'}])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
+        stdout=json.dumps(next(replies)), returncode=0))
+    first = asyncio.run(web.api_account_whoami('xiaohongshu'))
+    cached = asyncio.run(web.api_account_whoami('xiaohongshu'))
+    assert cached['checkedAt'] == first['checkedAt'] and cached['verified']
+    unknown = asyncio.run(web.api_account_whoami('xiaohongshu', force=True))
+    assert unknown['verified'] is False and unknown['loggedIn'] is True
+    assert 'xiaohongshu' not in web._WHOAMI_CACHE
+    assert (web.LOGIN_DIR / 'xiaohongshu.json').exists()
+
+
+def test_wechat_browser_session_is_distinct_from_app_credentials_and_recovers(isolated, monkeypatch):
+    web.WECHAT_CONFIG_YAML.write_text('accounts:\n  web:\n    app_id: mock-id\n    app_secret: mock-secret\n')
+    cfg = web.LOGIN_RUNNERS['wechat-oa']
+    assert not web._account_logged_in('wechat-oa', cfg)
+    commands = []
+    replies = iter([True, False, True])
+    def reply(platform, cmd, generation):
+        commands.append(cmd)
+        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies)}), returncode=0)
+    monkeypatch.setattr(web, '_run_owned_whoami', reply)
+    for logged in (True, False, True):
+        result = asyncio.run(web.api_account_whoami('wechat-oa', force=True))
+        assert result['verified'] and result['loggedIn'] is logged
+        assert web._account_logged_in('wechat-oa', cfg) is logged
+        assert (web._mp_login_status()['state'] == 'success') is logged
+    assert all('weixin_mp_stats.py' in command[1] and command[2] == 'whoami' for command in commands)

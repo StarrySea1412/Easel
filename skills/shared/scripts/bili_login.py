@@ -194,7 +194,12 @@ def cmd_whoami(a) -> int:
     cookie, _mid = _load_cookie(cookie_file)
     if cookie:
         try:
-            nav = (_api("https://api.bilibili.com/x/web-interface/nav", cookie).get("data") or {})
+            payload = _api("https://api.bilibili.com/x/web-interface/nav", cookie)
+            nav = payload.get("data") or {}
+            if payload.get('code') == -101:
+                nav = {'isLogin': False}
+            elif payload.get('code', 0) != 0 or not isinstance(nav.get('isLogin'), bool):
+                raise RuntimeError('B站未返回可信登录状态，请稍后重试。')
             if nav.get("isLogin"):
                 result = {"loggedIn": True, "name": (nav.get("uname") or "")[:40],
                           "avatar": nav.get("face") or ""}

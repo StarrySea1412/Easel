@@ -4515,16 +4515,19 @@ def _account_logged_in(platform: str, cfg: dict) -> bool:
     backend = cfg['backend']
     if backend == 'unsupported':
         return False
-    if backend == 'biliup':
-        return (DATA_DIR / 'cookies.json').is_file()
     if backend == 'wechat-oa':
-        # 发布+数据都走「后台会话」→ 以 mp 后台登录成功为准；AppID 凭证作为兜底（旧配置）
-        try:
-            if _mp_login_status().get('state') == 'success':
-                return True
-        except Exception:
-            pass
-        return _wechat_has_credentials()
+        # AppID credentials are independent of the browser session used by
+        # publication and analytics. Only the MP session marker is relevant.
+        return _mp_login_status().get('state') == 'success'
+    try:
+        if json.loads((LOGIN_DIR / f'{platform}.json').read_text(encoding='utf-8')).get('state') == 'expired':
+            return False
+    except (OSError, ValueError, AttributeError):
+        pass
+    if backend == 'biliup':
+        # A retained Cookie file is not proof of an active session. Keep the
+        # credentials for reconnecting, but honour a confirmed expiry.
+        return (DATA_DIR / 'cookies.json').is_file()
     st = LOGIN_DIR / f'{platform}.json'
     if st.is_file():
         try:
@@ -4983,18 +4986,15 @@ async def api_account_whoami(platform: str, force: bool = False):
     backend = cfg['backend']
     if backend == 'unsupported':
         return {'loggedIn': False, 'name': '', 'avatar': ''}
-    if backend == 'wechat-oa':
-        # 不起浏览器：以 mp 后台会话/AppID 配置判断（见 _account_logged_in），名字取配置账号名
-        acc = _wechat_web_account()
-        return {'loggedIn': _account_logged_in(platform, cfg),
-                'name': acc.get('name', '') or '微信公众号', 'avatar': ''}
     # 小红书账号数据切换后，旧缓存的昵称和登录结论不再属于当前上下文。
     account_generation = _account_check_generation(platform)
     with _WHOAMI_LOCK:
         hit = _WHOAMI_CACHE.get(platform)
     if not force and hit and hit[2] == account_generation and (time.time() - hit[0]) < WHOAMI_TTL:
         return hit[1]
-    if backend == 'biliup':
+    if backend == 'wechat-oa':
+        cmd = [sys.executable, str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'whoami', '--no-proxy']
+    elif backend == 'biliup':
         cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'whoami',
                '--cookie', str(DATA_DIR / 'cookies.json')]
     elif backend == 'xhs':
@@ -5007,6 +5007,8 @@ async def api_account_whoami(platform: str, force: bool = False):
     try:
         proc = await asyncio.to_thread(_run_owned_whoami, platform, cmd, account_generation)
     except subprocess.TimeoutExpired:
+        with _WHOAMI_LOCK:
+            _WHOAMI_CACHE.pop(platform, None)
         raise HTTPException(504, '校验超时（浏览器起不来或网络慢）')
     if account_generation != _account_check_generation(platform) or platform in _ACCOUNT_CLEARING:
         raise HTTPException(409, '账号状态已变化，已丢弃旧校验结果，请重新校验')
@@ -5026,11 +5028,14 @@ async def api_account_whoami(platform: str, force: bool = False):
     if not confident:
         # 校验失败/无有效输出 → **不缓存、不删标记**，返回「上次已知」登录态（读标记）。
         # 避免一次校验抖动就把已登录卡片翻成「未登录」并缓存 10 分钟；下次校验(缓存未写)会自动重试恢复。
+        with _WHOAMI_LOCK:
+            _WHOAMI_CACHE.pop(platform, None)
         return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': '',
                 'verified': False, 'verificationMessage': '本次在线检查未取得可信结果，保留上次登录状态；请稍后重试。'}
     if platform == 'xiaohongshu' and not data['loggedIn']:
         invalidate_account_context(platform, live_only=True)
     current_generation = _account_check_generation(platform)
+    data.update(verified=True, checkedAt=int(time.time() * 1000))
     with _WHOAMI_LOCK:
         _WHOAMI_CACHE[platform] = (time.time(), data, current_generation)
     # 回写标记：确认已登录 → 快速路径（/api/accounts、/api/analytics/platforms）此后也正确；
@@ -5038,11 +5043,19 @@ async def api_account_whoami(platform: str, force: bool = False):
     if backend != 'biliup':
         if data['loggedIn']:
             _write_login_marker(platform, 'success', data.get('name') or '')
+        elif backend == 'wechat-oa':
+            _write_login_marker(platform, 'expired', '在线检查确认公众号后台会话已失效')
         else:
             try:
                 (LOGIN_DIR / f'{platform}.json').unlink()
             except OSError:
                 pass
+    else:
+        _write_login_marker(platform, 'success' if data['loggedIn'] else 'expired',
+                            '在线检查确认登录有效' if data['loggedIn'] else '在线检查确认登录已失效，请重新连接')
+    if backend == 'wechat-oa':
+        _write_login_marker('wechat-oa-mp', 'success' if data['loggedIn'] else 'expired',
+                            '在线检查确认公众号后台会话有效' if data['loggedIn'] else '在线检查确认公众号后台会话已失效')
     return {**data, 'verified': True}
 
 

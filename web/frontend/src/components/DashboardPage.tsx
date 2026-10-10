@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
+import InlineInfo from './InlineInfo';
 import {
   fetchTrends, fetchSchedule, fetchOutputs, fetchAccounts, fetchIdeas,
   fetchAnalyticsPlatforms, fetchAccountAnalytics,
@@ -94,11 +96,10 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   const quickText = quickDraft.text;
   const quickSkills = useComposerSkills(DASHBOARD_DRAFT_SCOPE, 'creation');
   const quickModels = useComposerModels(null);
-  const [quickThinking, setQuickThinking] = useState<ThinkingLevel>(()=>loadThinkingLevel());
+  const [quickPreferredThinking, setQuickThinking] = useState<ThinkingLevel>(()=>loadThinkingLevel());
   const quickEffectiveModel = quickModels.selected || quickModels.options.find(option=>option.id===(quickModels.capability?.currentModelRef || quickModels.capability?.defaultModelRef));
   const quickSupportedThinking = quickEffectiveModel?.thinkingLevels;
-  const quickThinkingUnsupported = Boolean(quickSupportedThinking?.length && !quickSupportedThinking.includes(quickThinking));
-  const quickThinkingWarning = quickThinkingUnsupported ? `${quickEffectiveModel?.model} 不支持 ${THINKING_LABELS[quickThinking]}；请选择支持的档位。` : '';
+  const { level: quickThinking, notice: quickThinkingNotice } = useCompatibleThinking(quickPreferredThinking, quickSupportedThinking, setQuickThinking);
   const changeQuickThinking = (value: ThinkingLevel) => { setQuickThinking(value); const saved = saveThinkingLevel(value); showToast(saved ? `已选择思考强度：${THINKING_LABELS[value]}，下一轮生效` : '强度已在本页修改，但未能保存。', saved ? 'success' : 'error'); };
 
   const composingQuick = useRef(false);
@@ -177,7 +178,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
         : '创作助手尚未连接，草稿已保留，请检查设置后重试。');
       return;
     }
-    if (quickThinkingUnsupported) { setChatDraftError(DASHBOARD_DRAFT_SCOPE, `${quickThinkingWarning} 草稿已保留，未发送请求。`); return; }
     const snapshot = quickSkills.getSnapshot();
     if (!snapshot) return;
     const model = quickModels.getSnapshot();
@@ -268,6 +268,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
             <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
             <ThinkingLevelPicker value={quickThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} modelLabel={quickEffectiveModel?.model || '沿用会话模型'} />
+            {quickThinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{quickThinkingNotice}</InlineInfo></span>}
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →
@@ -276,7 +277,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
           <div className="dash-composer-meta">
             <div className="dash-composer-status">
               <ComposerModelStatus models={quickModels} onOpenModels={onOpenModels} />
-              {quickThinkingUnsupported && <span className="composer-thinking-warning" role="status">{quickThinkingWarning}</span>}
               {persona && <span className="dash-persona" title={`当前画像：${persona}`}>{persona}</span>}
               {gatewayStatus !== 'connected' && <span className="dash-connection" role="status">{gatewayStatus === 'connecting' ? '正在连接…' : '助手未连接'}{gatewayStatus === 'disconnected' && <button type="button" className="link-btn" onClick={() => onNavigate('settings')}>检查设置</button>}</span>}
             </div>

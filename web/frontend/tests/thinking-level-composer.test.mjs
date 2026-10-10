@@ -73,36 +73,23 @@ async function fixture(t, preference, { strict = false, selectedModel } = {}) {
   };
 }
 
-test('known unsupported strength preserves the draft and explains runtime choices without sending', async t => {
+test('unsupported saved strength automatically matches the runtime without losing or blocking the draft', async t => {
   const view = await fixture(t, 'ultra', {selectedModel:{id:'relay/grok-4.7',provider:'relay',model:'grok-4.7',configured:true,thinkingLevels:['off']}});
-  await view.render(); await view.type('需要保留的草稿');
-  await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.equal(view.sent.length, 0);
-  assert.match(view.container.textContent, /不支持 Ultra/);
-  assert.match(view.container.textContent, /网关声明可选：关闭/);
-  assert.equal(view.container.querySelector('textarea').value, '需要保留的草稿');
+  await view.render(); await view.type('自动匹配后的草稿');
+  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：关闭');
+  assert.equal(view.storage.values.get(KEY), 'off');
+  assert.equal(view.container.querySelector('.composer-thinking-warning'), null);
+  const info = view.container.querySelector('[aria-label="思考档位已自动匹配"]');
+  assert.ok(info); assert.equal(document.querySelector('[role=tooltip]'), null);
+  await act(async () => info.focus());
+  assert.match(document.querySelector('[role=tooltip]').textContent, /已按网关能力声明使用关闭/);
   await view.click(view.trigger());
   assert.equal(view.container.querySelector('.thinking-level-adaptive').disabled, true);
   assert.equal(view.container.querySelector('[aria-label="选择Ultra思考强度"]').disabled, true);
-  assert.ok(view.container.querySelector('[aria-label="思考强度能力说明"]'));
-  await view.click(view.container.querySelector('[aria-label="选择关闭思考强度"]'));
-  assert.equal(view.sent.length, 0);
-  await view.key(view.slider(), 'Home');
+  assert.equal(view.container.querySelector('.thinking-level-reset').disabled, true);
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.equal(view.sent.length, 1);
-  assert.equal(view.sent[0][4], 'off');
-});
-
-test('reset explicitly selects an allowed default for an off-only runtime model', async t => {
-  const view = await fixture(t, 'ultra', {selectedModel:{id:'relay/grok-4.7',provider:'relay',model:'grok-4.7',configured:true,thinkingLevels:['off']}});
-  await view.render(); await view.click(view.trigger());
-  const reset = view.container.querySelector('.thinking-level-reset');
-  assert.equal(reset.disabled, false);
-  assert.match(reset.title, /关闭/);
-  await view.click(reset);
-  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：关闭');
-  assert.equal(view.sent.length, 0);
-  assert.equal(view.storage.values.get(KEY), 'off');
+  assert.equal(view.sent.length, 1); assert.equal(view.sent[0][4], 'off');
+  assert.equal(view.sent[0][0], '自动匹配后的草稿');
 });
 
 test('StrictMode mount and remount read a saved preference without saving or replacing it', async t => {

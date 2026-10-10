@@ -233,7 +233,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
           )}
           <div ref={messagesEndRef} />
         </div>
-      </div>{nodes.length>0&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
+      </div>{nodes.length>3&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
       {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className={`chat-return-latest${isStreaming ? ' is-running' : ''}`} aria-label={isStreaming?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{isStreaming && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
         {!isImported && <div className="chat-input-inner">

@@ -872,7 +872,12 @@ def cmd_whoami(a):
             try:
                 page.goto(MP_HOME, wait_until="commit", timeout=60000)
                 page.wait_for_timeout(1200)
-                out["loggedIn"] = bool(_extract_token(page.url))
+                host = urlsplit(page.url).hostname
+                out["loggedIn"] = host == 'mp.weixin.qq.com' and bool(_extract_token(page.url))
+                if not out['loggedIn']:
+                    qr = page.query_selector("img[src*='qrcode'], .login__type__container__scan")
+                    if host != 'mp.weixin.qq.com' or not qr or not qr.is_visible():
+                        out['error'] = '未识别到公众号账号或可见登录入口，暂时无法确认状态。'
             finally:
                 ctx.close()
     except Exception as e:

@@ -75,6 +75,23 @@ class Page:
         self.waits.append(delay)
 
 
+@pytest.mark.parametrize('case,logged,error', [('identity', True, False), ('login', False, False), ('unknown', False, True), ('risk', False, True), ('hidden_identity', False, True)])
+def test_whoami_distinguishes_visible_identity_login_wall_and_unknown_page(monkeypatch, tmp_path, capsys, case, logged, error):
+    page = Page(ERROR_URL if case == 'risk' else publisher.EXPLORE_URL, '登录错误' if case == 'risk' else '小红书')
+    def query(selector):
+        if selector == publisher.SELECTORS['login_ok'] and case in ('identity', 'hidden_identity'):
+            return SimpleNamespace(is_visible=lambda: case == 'identity', get_attribute=lambda *_: '', inner_text=lambda: '')
+        if selector == '.login-container, .login-btn' and case == 'login':
+            return SimpleNamespace(is_visible=lambda: True)
+        return None
+    page.query_selector = query
+    args, closed = runner(monkeypatch, tmp_path, page)
+    assert publisher.cmd_whoami(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['loggedIn'] is logged and bool(result.get('error')) is error
+    assert closed == [True]
+
+
 def runner(monkeypatch, tmp_path, page, on_close=None):
     closed = []
 

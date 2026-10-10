@@ -22,6 +22,7 @@ import { addChatDraftQuote } from '../lib/chatDrafts';
 import ChatQuoteDraft from './ChatQuoteDraft';
 import InlineInfo from './InlineInfo';
 import ChatQueueTray from './ChatQueueTray';
+import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { getChatQueue, subscribeChatQueue, pauseChatQueue, updateQueuedMessage } from '../lib/chatQueue';
 
 interface ChatComposerProps {
@@ -66,14 +67,13 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
   };
   useEffect(() => { if (editingQueue) textareaRef.current?.focus(); }, [editingQueue, queueEdit?.id]);
   const [dragOver, setDragOver] = useState(false);
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>(() => loadThinkingLevel());
+  const [preferredThinking, setThinkingLevel] = useState<ThinkingLevel>(() => loadThinkingLevel());
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId);
   const effectiveModel = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const supportedThinking = effectiveModel?.thinkingLevels;
-  const thinkingUnsupported = Boolean(supportedThinking?.length && !supportedThinking.includes(thinkingLevel));
-  const thinkingWarning = thinkingUnsupported ? `${effectiveModel?.model} 不支持 ${THINKING_LABELS[thinkingLevel]}；网关声明可选：${supportedThinking?.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。请选择支持的档位。` : '';
+  const { level: thinkingLevel, notice: thinkingNotice } = useCompatibleThinking(preferredThinking, supportedThinking, setThinkingLevel);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null), folderInputRef = useRef<HTMLInputElement>(null);
@@ -196,7 +196,6 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       if (!snapshot) return;
       const model = models.getSnapshot();
       if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。请刷新模型选项或改用会话配置。'); return; }
-      if (thinkingUnsupported) { setChatDraftError(sessionId, `${thinkingWarning} 草稿已保留，未发送请求。`); return; }
       const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
         : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
       if (accepted === true) clearChatDraft(sessionId, submitted);
@@ -275,6 +274,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
           <ThinkingLevelPicker value={thinkingLevel} onChange={changeThinkingLevel} disabled={stopping}
             supportedLevels={supportedThinking}
             modelLabel={models.selected?.model || (models.modelRef ? models.modelRef : '沿用会话模型')} />
+          {thinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{thinkingNotice}</InlineInfo></span>}
         </div>
         {editingQueue && <div className="composer-queue-edit-actions">
           <span>编辑待发送消息</span>
@@ -292,7 +292,6 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
         {editingQueue ? 'Enter 保存 · Esc 取消 · Shift+Enter 换行' : stopping ? '正在等待停止确认' : isStreaming ? 'Enter 排队 · Shift+Enter 换行' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}
       </span>
       {!editingQueue && <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />}
-      {thinkingUnsupported && <p className="composer-thinking-warning" role="status">{thinkingWarning}</p>}
     </div>
     </div>
   );
