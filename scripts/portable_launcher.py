@@ -795,6 +795,33 @@ def stop(bundle: Bundle) -> dict:
                 "logPath": str(bundle.log_path)}
 
 
+def prepare_local_device_identity(bundle: Bundle, env: dict) -> None:
+    """Create the canonical identity through bundled OpenClaw before its writer starts."""
+    code = '''import {readdirSync,readFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+const dist=path.join(path.dirname(process.argv[1]),'dist');
+let loaded=false;
+for(const name of readdirSync(dist).filter(n=>/^device-identity-.*\\.mjs$/.test(n))) {
+ const file=path.join(dist,name);
+ const match=readFileSync(file,'utf8').match(/loadOrCreateDeviceIdentity as ([A-Za-z_$][\\w$]*)/);
+ if(!match)continue;
+ const api=await import(pathToFileURL(file).href);
+ if(typeof api[match[1]]!=='function')throw new Error('identity API unavailable');
+ api[match[1]](); loaded=true; break;
+}
+if(!loaded)throw new Error('bundled identity API unavailable');
+process.exit(0);
+'''
+    result = subprocess.run([str(bundle.runtime['node']), '--input-type=module', '-e', code,
+                             str(bundle.runtime['openclaw'])], cwd=bundle.app, env=env,
+                            capture_output=True, timeout=90, creationflags=FLAGS)
+    if result.returncode:
+        log(bundle, '本副本设备身份初始化失败：' + redact(result.stderr.decode('utf-8', errors='replace'), bundle)[-1200:])
+        raise RuntimeError('本副本设备身份初始化失败；未启动网关，请查看日志。')
+    log(bundle, '已通过内置 OpenClaw 初始化本副本设备身份；未复制外部身份。')
+
+
 def ensure_local_device_pairing(bundle: Bundle, env: dict) -> None:
     """Initialize this copy's canonical CLI identity through the owned gateway.
 
@@ -804,22 +831,30 @@ def ensure_local_device_pairing(bundle: Bundle, env: dict) -> None:
     config = _read_json(bundle.config, required=True)
     if config.get('gateway', {}).get('bind') != 'loopback':
         raise RuntimeError('便携设备初始化仅支持本副本的本机网关。')
-    code = '''from easel.gateway_questions import GatewayClient
-c = GatewayClient(timeout=12, scopes=['operator.admin', 'operator.read', 'operator.write'])
-try:
-    c.connect()
-    if 'operator.admin' not in c.granted_scopes:
-        raise RuntimeError('local device permissions unavailable')
-finally:
-    c.close()
+    code = '''import time
+from easel.gateway_questions import GatewayClient
+deadline=time.monotonic()+60
+while True:
+    c=GatewayClient(timeout=12, scopes=['operator.admin', 'operator.read', 'operator.write'])
+    try:
+        c.connect()
+        if 'operator.admin' not in c.granted_scopes:
+            raise RuntimeError('local device permissions unavailable')
+        break
+    except Exception:
+        if time.monotonic()>=deadline: raise
+        time.sleep(1)
+    finally:
+        c.close()
 '''
     try:
         result = subprocess.run([str(bundle.runtime['python']), '-B', '-c', code],
                                 cwd=bundle.app, env=env, capture_output=True,
-                                timeout=25, creationflags=FLAGS)
+                                timeout=85, creationflags=FLAGS)
     except (OSError, subprocess.TimeoutExpired):
         raise RuntimeError('本机设备配对核验超时，工作台尚未就绪。') from None
     if result.returncode:
+        log(bundle, '本机设备握手失败：' + redact(result.stderr.decode('utf-8', errors='replace'), bundle)[-1200:])
         raise RuntimeError('本机设备配对或权限核验失败，请检查本副本网关日志。')
     log(bundle, '本副本设备配对和模型选择所需权限已核验；未调用模型。')
 
@@ -882,6 +917,9 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
             env["OPENCLAW_GATEWAY_PORT"] = env["EASEL_GATEWAY_PORT"] = str(gateway_port)
             phase('configValidation', '正在检查模型配置…')
             validate_config(bundle, env)
+            if not existing_gateway:
+                phase('identity', '正在初始化本副本设备身份…')
+                prepare_local_device_identity(bundle, env)
             started = []
             try:
                 if not existing_gateway:

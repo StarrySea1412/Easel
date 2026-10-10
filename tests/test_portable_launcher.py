@@ -451,6 +451,7 @@ def test_successful_validation_cache_invalidates_on_config_or_runtime_change(bun
 
 def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monkeypatch):
     monkeypatch.setattr(launcher, 'ensure_local_device_pairing', lambda *a: None)
+    monkeypatch.setattr(launcher, 'prepare_local_device_identity', lambda *a: None)
     monkeypatch.setattr(launcher, "validate_config", lambda *a: None)
     gateway = process_record(bundle, "gateway", pid=722)
     observed = observed_services({"gateway": gateway})
