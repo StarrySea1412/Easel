@@ -45,12 +45,13 @@ import argparse
 import http.client
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from output_paths import validate_output_path
 from typing import Any
 

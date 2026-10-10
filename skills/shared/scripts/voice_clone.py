@@ -53,14 +53,15 @@ import argparse
 import http.client
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.request
 import uuid
-from pathlib import Path
 from typing import Any
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_registry import env_aliases, provider_ids, provider_required_env
 
 UA = "Easel-voice-clone/0.1"

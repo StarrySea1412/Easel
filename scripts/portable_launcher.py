@@ -127,11 +127,20 @@ def _write_json(path: Path, value: dict) -> None:
 
 def isolated_env(bundle: Bundle, source: dict | None = None) -> dict[str, str]:
     """Allowlist OS/network settings; never inherit credentials or tool search paths."""
+    use_system_proxy = source is None
     source = os.environ if source is None else source
     allowed = {"systemroot", "windir", "comspec", "pathext", "os", "processor_architecture",
                "processor_identifier", "number_of_processors", "http_proxy", "https_proxy",
                "all_proxy", "no_proxy"}
     env = {key: value for key, value in source.items() if key.lower() in allowed}
+    # Python's urllib reads Windows Internet Settings, while Node's model SDKs
+    # need explicit environment proxies. Keep both runtimes on the same route.
+    if use_system_proxy and os.name == 'nt' and not any(k.lower() in ('http_proxy', 'https_proxy', 'all_proxy') for k in env):
+        for kind, value in urllib.request.getproxies().items():
+            if kind in ('http', 'https'):
+                env[kind.upper() + '_PROXY'] = value
+    if any(k.lower() in ('http_proxy', 'https_proxy', 'all_proxy') for k in env):
+        env['NODE_USE_ENV_PROXY'] = '1'
     system = Path(next((v for k, v in env.items() if k.lower() == "systemroot"), r"C:\Windows"))
     home = bundle.data / "home"
     python, node, entry = (bundle.runtime[k] for k in ("python", "node", "openclaw"))
@@ -767,6 +776,35 @@ def stop(bundle: Bundle) -> dict:
                 "logPath": str(bundle.log_path)}
 
 
+def ensure_local_device_pairing(bundle: Bundle, env: dict) -> None:
+    """Initialize this copy's canonical CLI identity through the owned gateway.
+
+    Use its normal signed loopback handshake, never copy identities or write the
+    pairing database directly while the gateway owns its SQLite writer.
+    """
+    config = _read_json(bundle.config, required=True)
+    if config.get('gateway', {}).get('bind') != 'loopback':
+        raise RuntimeError('便携设备初始化仅支持本副本的本机网关。')
+    code = '''from easel.gateway_questions import GatewayClient
+c = GatewayClient(timeout=12, scopes=['operator.admin', 'operator.read', 'operator.write'])
+try:
+    c.connect()
+    if 'operator.admin' not in c.granted_scopes:
+        raise RuntimeError('local device permissions unavailable')
+finally:
+    c.close()
+'''
+    try:
+        result = subprocess.run([str(bundle.runtime['python']), '-B', '-c', code],
+                                cwd=bundle.app, env=env, capture_output=True,
+                                timeout=25, creationflags=FLAGS)
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError('本机设备配对核验超时，工作台尚未就绪。') from None
+    if result.returncode:
+        raise RuntimeError('本机设备配对或权限核验失败，请检查本副本网关日志。')
+    log(bundle, '本副本设备配对和模型选择所需权限已核验；未调用模型。')
+
+
 def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
     with bundle_lock(bundle):
         identity, state = _state(bundle)
@@ -786,6 +824,9 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
             if identity.get("webPort") != web_port:
                 identity["webPort"] = web_port
                 _write_json(bundle.data / IDENTITY_FILE, identity)
+            env = isolated_env(bundle)
+            env['EASEL_GATEWAY_PORT'] = env['OPENCLAW_GATEWAY_PORT'] = str(gateway_port)
+            ensure_local_device_pairing(bundle, env)
             result = {"ok": True, "running": True, "url": f"http://127.0.0.1:{web_port}/",
                       "webPort": web_port, "gatewayPort": gateway_port, "reused": True,
                       "portChanged": False, "bundleId": identity["bundleId"],
@@ -814,6 +855,7 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                                "gateway", "run", "--allow-unconfigured", "--bind", "loopback", "--port", str(gateway_port)]
                     _launch_service(bundle, state, "gateway", command, env, gateway_port)
                     started.append("gateway")
+                ensure_local_device_pairing(bundle, env)
                 web_port, port_changed = select_web_port(bundle, identity)
                 env["EASEL_PORT"] = str(web_port)
                 expected = (bundle.app / "web/frontend/dist/index.html").read_bytes()

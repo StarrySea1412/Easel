@@ -8,6 +8,7 @@ import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import ModelHealthPanel from './settings/ModelHealthPanel';
 import ChannelNameEditor from './settings/ChannelNameEditor';
+import QuickAddModel from './settings/QuickAddModel';
 import ImageReverseSettings from './settings/ImageReverseSettings';
 import Select from './ui/Select';
 import type { ProviderBoardOptions } from './settings/ProviderBoard';
@@ -69,7 +70,8 @@ const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内
 function modelConfigLabel(row?: ModelRow) {
   if (!row) return '尚未设置';
   const model = !row.model || PLACEHOLDERS.has(row.model) ? '模型未指定' : row.model;
-  return row.name.trim().toLowerCase() === model.toLowerCase() ? model : `${row.name || '未命名供应商'} · ${model}`;
+  const channel = row.channelName || row.name;
+  return channel.trim().toLowerCase() === model.toLowerCase() ? model : `${channel || '未命名供应商'} · ${model}`;
 }
 
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -225,6 +227,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
   const openImport = useCallback(async () => {
     const requestId = ++impSourceRequest.current;
+    let autoPreviewId = 0;
     setImpSourcesLoading(true);
     setImpMsg('');
     try {
@@ -233,11 +236,19 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       setImpSources(d.sources);
       const first = d.sources.find((s) => s.id === 'cc-switch' && s.available)
         || d.sources.find((s) => s.available) || d.sources[0];
-      setImpSource((current) => d.sources.some((s) => s.id === current) ? current : first?.id || '');
+      setImpSource(first?.id || '');
+      if (first?.available) {
+        setImpSlot('auto'); setImpPath(''); setImpBusy('preview');
+        const previewId = ++impPreviewRequest.current; autoPreviewId = previewId;
+        const preview = await previewImport(first.id, 'auto', '');
+        if (!mounted.current || requestId !== impSourceRequest.current || previewId !== impPreviewRequest.current) return;
+        setImpPreview(preview); setImpPick(preview.candidates.find(item => item.compatible && item.model)?.id || ''); setImpConfirmed(false);
+      }
     } catch (e) {
-      if (mounted.current && requestId === impSourceRequest.current) setImpMsg(e instanceof Error ? e.message : '读取来源失败');
+      if (mounted.current && requestId === impSourceRequest.current && (!autoPreviewId || autoPreviewId === impPreviewRequest.current)) setImpMsg(e instanceof Error ? e.message : '读取来源失败');
     } finally {
       if (mounted.current && requestId === impSourceRequest.current) setImpSourcesLoading(false);
+      if (mounted.current && requestId === impSourceRequest.current && autoPreviewId === impPreviewRequest.current) setImpBusy(busy => busy === 'preview' ? '' : busy);
     }
   }, []);
 
@@ -258,6 +269,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       const d = await previewImport(source, impSlot, path);
       if (!mounted.current || requestId !== impPreviewRequest.current) return;
       setImpPreview(d);
+      setImpPick(d.candidates.find(item => item.compatible && item.model)?.id || '');
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
     } catch (e) {
       if (mounted.current && requestId === impPreviewRequest.current) setImpMsg(e instanceof Error ? e.message : '预览失败');
@@ -311,7 +323,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
   const applyImportPick = useCallback(async () => {
     const selected = impPreview?.candidates.find((c) => c.id === impPick && c.compatible);
-    if (!selected?.previewToken || !impConfirmed || impBusy || impApplying.current || modelSavePending.current) return;
+    if (!selected?.previewToken || !selected.model || (selected.overwrites.some(item => item.current !== '（空）') && !impConfirmed) || impBusy || impApplying.current || modelSavePending.current) return;
     impApplying.current = true;
     setImpBusy('apply');
     setImpMsg('');
@@ -329,9 +341,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       setImpPreview(null);
       setImpPick('');
       setImpConfirmed(false);
-      const imported = r.channels.chat.rows.find((row) => row.slot === targetSlot);
-      if (imported) setChatRows((rows) => rows.some((row) => row.slot === targetSlot)
-        ? rows.map((row) => row.slot === targetSlot ? { ...imported, role: row.role } : row) : [...rows, imported]);
+      const matches = (row: ModelRow) => row.slot === targetSlot || (row.slot === 'custom' && row.name === targetSlot);
+      const imported = r.channels.chat.rows.find(matches);
+      if (imported) setChatRows((rows) => rows.some(matches)
+        ? rows.map((row) => matches(row) ? { ...imported, role: row.role } : row) : [...rows, imported]);
     } catch (e) {
       if (mounted.current) {
         setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
@@ -720,7 +733,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       onOpenImport={() => setImportOpen(true)} />
                     <details className="model-settings-details model-inline-import" open={importOpen}
                       onToggle={(event) => setImportOpen(event.currentTarget.open)}>
-                      <summary><IconUpload size={14} /> 从 CC Switch / OpenClaw 导入模型</summary>
+                      <summary><IconUpload size={14} /> 从 CC Switch / Magpie / OpenClaw 导入模型</summary>
             <section className="st-sec active">
               <ol className="model-import-steps" aria-label="配置导入步骤">
                 <li aria-current={!impPreview ? 'step' : undefined}><strong>1</strong> 选择来源</li>
@@ -791,7 +804,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   </div>
                   {impBusy === 'preview' && <SkeletonCard rows={3} />}
                   {impPreview && impPreview.candidates.length > 0 && !impPreview.candidates.some((candidate) => candidate.compatible) && (
-                    <p className="hint">没有匹配当前通道的配置。可选择自动匹配协议；Responses 配置当前不支持直接导入，具体原因见各条目。</p>
+                    <p className="hint">没有可导入的配置，请查看各条目的原因，或改用快速添加渠道。</p>
                   )}
                   {impPreview && impPreview.candidates.length > 0 && (
                     <>
@@ -855,19 +868,19 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                           </article>;
                         })}
                       </div>
-                      <label className="import-msg">
+                      {impPreview.candidates.find(c => c.id === impPick)?.overwrites.some(item => item.current !== '（空）') && <label className="import-msg">
                         <input type="checkbox" checked={impConfirmed}
                           disabled={!impPick || Boolean(impBusy)}
                           onChange={(e) => setImpConfirmed(e.target.checked)} />
                         我已核对替换内容，确认保存到所选通道（替换此通道尚未保存的编辑）
-                      </label>
+                      </label>}
                       <div className="import-foot">
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => void applyImportPick()}
-                          disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
+                          disabled={!impPick || !impPreview.candidates.find(c => c.id === impPick)?.model || (Boolean(impPreview.candidates.find(c => c.id === impPick)?.overwrites.some(item => item.current !== '（空）')) && !impConfirmed) || Boolean(impBusy) || saving}
                         >
-                          {impBusy === 'apply' ? '导入中…' : '3. 确认导入并保存'}
+                          {impBusy === 'apply' ? '导入中…' : '导入所选模型'}
                         </button>
                         <span className="hint">{impPreview.note}</span>
                       </div>
@@ -883,10 +896,14 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                 onClick={() => setImportOpen(false)}>收起导入</button></div>
             </section>
                     </details>
-                    <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}>＋ 添加供应商</button>
+                    {chatDirty && <p className="hint">请先保存已有模型编辑，再快速添加渠道。</p>}
+                    <QuickAddModel presets={presets.chat || []} disabled={modelLoading || saving || Boolean(impBusy) || chatDirty} onSaving={value => { modelSavePending.current = value; setSaving(value); }} onSaved={result => {
+                      setSavedChatRows(result.channels.chat.rows); setChatRows(result.channels.chat.rows); clearModelDiscovery('chat');
+                    }}/>
                     <details className="model-settings-details" open={providerDetailsOpen}
                       onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
                       <summary>编辑供应商、协议、地址与密钥</summary>
+                    <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}>＋ 手动添加供应商</button>
                     <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
                     <div className="panel-top">
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
@@ -901,7 +918,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       health: (i, open) => {
                         const row = chatRows[i];
                         const ref = row.slot === 'custom' ? `${row.name}/${row.model}` : `${row.slot}/${row.model}`;
-                        return row.model && row.slot ? <><ChannelNameEditor key={row.slot === 'custom' ? row.name : row.slot} provider={row.slot === 'custom' ? row.name : row.slot}/><details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details></> : null;
+                        return row.model && row.slot ? <><ChannelNameEditor key={row.slot === 'custom' ? row.name : row.slot} provider={row.slot === 'custom' ? row.name : row.slot} saved={savedChatRows.some(item => item.slot === row.slot && item.name === row.name)}/><details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details></> : null;
                       },
                       presets: presets.chat,
                       discovery: (i) => discover[`chat:${i}`],

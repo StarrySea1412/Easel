@@ -137,7 +137,11 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           </div></details>
           {studio.mask && reference && <p className="image-field-hint">已使用局部编辑蒙版，可在更多选项中移除。</p>}
           {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
-          {belongsToDraft && job?.state === 'error' && <p className="image-error" role="alert">生成失败：{job.error || '请重试'}</p>}
+          {belongsToDraft && job?.state === 'error' && <div className="image-error" role="alert">
+            <p>生成失败：{job.error || '请检查图片渠道后重试'}</p>
+            <button type="button" className="btn btn-sm" onClick={onOpenSettings}>修改图片渠道</button>
+            {job.errorDetail && <details><summary>服务返回详情</summary><pre>{job.errorDetail}</pre></details>}
+          </div>}
         </form>
       </section>
       <div className="image-service-status" role="status">

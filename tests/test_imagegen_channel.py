@@ -122,7 +122,8 @@ def test_imagegen_preserves_provider_size_error(imagegen_stub, monkeypatch, size
     assert job["state"] == "error"
     assert job["size"] == size
     assert job["url"] is None
-    assert job["error"] == f"model does not support size {size}"
+    assert job['errorCode'] == 'unsupported_size'
+    assert job['errorDetail'] == f'model does not support size {size}'
     assert "width" not in job and "height" not in job
 
 

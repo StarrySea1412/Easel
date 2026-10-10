@@ -6,5 +6,5 @@ export const MODEL_IMPORT_SLOT_OPTIONS = [
 ];
 
 export function modelImportSlotLabel(slot: string) {
-  return MODEL_IMPORT_SLOT_OPTIONS.find(option => option.value === slot)?.label || slot;
+  return slot.startsWith('import-') ? '新渠道（保留现有渠道）' : MODEL_IMPORT_SLOT_OPTIONS.find(option => option.value === slot)?.label || slot;
 }

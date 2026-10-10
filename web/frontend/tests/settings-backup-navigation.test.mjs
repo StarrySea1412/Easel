@@ -240,14 +240,14 @@ test('default model selection is a draft until saved and survives the single imp
   assert.match(view.container.querySelector('.model-default-pending').textContent, /保存前仍使用已保存默认：OpenAI · model-a/);
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'applyImport', 'runChannelSelftest'].includes(call.name)), false);
   assert.equal(view.container.querySelectorAll('button').length > 0, true);
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '从 CC Switch / Magpie / OpenClaw 导入'));
   assert.equal(view.container.querySelectorAll('.model-import-steps li').length, 3);
   await view.click(findButton(view, '收起导入'));
   assert.equal(view.nav('模型配置').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('配置导入'), undefined);
   assert.match(view.container.querySelector('button[aria-label="主模型"]').textContent, /model-b/);
   assert.equal(findButton(view, '保存并使用').disabled, false);
-  await view.click(findButton(view, '＋ 添加供应商'));
+  await view.click(findButton(view, '＋ 手动添加供应商'));
   assert.equal(view.container.querySelector('.model-provider-editors').closest('details').open, true);
   assert.ok(view.container.querySelector('input[aria-label="供应商名称"]'));
 });
@@ -294,13 +294,13 @@ test('import preview needs explicit confirmation, reports the actual default and
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(secondModel, 'unsaved-model-b');
     secondModel.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '从 CC Switch / Magpie / OpenClaw 导入'));
   await view.click(findButton(view, '2. 预览可导入模型'));
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
   await view.click(view.container.querySelector('input[type="radio"]'));
-  assert.equal(findButton(view, '3. 确认导入并保存').disabled, true);
+  assert.equal(findButton(view, '导入所选模型').disabled, true);
   await view.click(view.container.querySelector('input[type="checkbox"]'));
-  await view.click(findButton(view, '3. 确认导入并保存'));
+  await view.click(findButton(view, '导入所选模型'));
   const apply = view.harness.calls.find(call => call.name === 'applyImport');
   assert.deepEqual(apply.args, ['cc-switch', 'source-entry', 'openai', 'synthetic-source.db', 'synthetic-preview-token']);
   assert.match(view.container.querySelector('.import-msg').textContent, /已保存默认现为：OpenAI · imported-model-a/);
@@ -385,11 +385,10 @@ test('source cards read their own models immediately and reject a late response 
     previewImport: async source => source === 'cc-switch' ? first : current,
   });
   await view.render(1, view.props, 'model');
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '从 CC Switch / Magpie / OpenClaw 导入'));
   const cards = () => [...view.container.querySelectorAll('.imp-card')];
-  assert.match(cards()[0].textContent, /点击读取模型/);
+  assert.match(cards()[0].textContent, /正在读取模型/);
   assert.match(cards()[0].textContent, /已检测到/);
-  await view.click(cards()[0]);
   assert.match(cards()[0].textContent, /正在读取模型/);
   assert.equal(cards()[1].disabled, false);
   await view.click(cards()[1]);
@@ -409,7 +408,7 @@ test('source cards read their own models immediately and reject a late response 
 test('import discovery keeps source credentials on the server and requires fresh confirmation for the fetched model', async t => {
   const candidate = { id: 'catalog-source', source: 'cc-switch', name: 'Catalog source', compatible: true,
     model: 'source-model', baseUrl: 'https://catalog.example.test/v1', keyPresent: true, keyMasked: 'sk***',
-    protocol: 'openai', targetSlot: 'openai', overwrites: [], previewToken: 'original-token' };
+    protocol: 'openai', targetSlot: 'openai', overwrites: [{ field: 'OPENAI_MODEL', current: 'model-a', incoming: 'source-model' }], previewToken: 'original-token' };
   let finishSelection;
   const pendingSelection = new Promise(resolve => { finishSelection = resolve; });
   const view = await fixture(t, {
@@ -431,14 +430,14 @@ test('import discovery keeps source credentials on the server and requires fresh
   const picker = view.container.querySelector('button[aria-label="Catalog source渠道可用模型"]');
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   assert.equal(view.container.querySelector('input[type="checkbox"]').checked, false);
-  assert.equal(findButton(view, '3. 确认导入并保存').disabled, true);
+  assert.equal(findButton(view, '导入所选模型').disabled, true);
   await act(async () => finishSelection({ ...candidate, model: 'fetched-model', previewToken: 'selected-token',
     overwrites: [{ field: 'OPENAI_MODEL', current: 'model-a', incoming: 'fetched-model' }] }));
   assert.match(view.container.querySelector('.ii-ov').textContent, /model-a → fetched-model/);
   assert.match(view.container.querySelector('.import-msg').textContent, /尚未保存/);
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
   await view.click(view.container.querySelector('input[type="checkbox"]'));
-  await view.click(findButton(view, '3. 确认导入并保存'));
+  await view.click(findButton(view, '导入所选模型'));
   assert.deepEqual(view.harness.calls.find(call => call.name === 'applyImport').args, [
     'cc-switch', candidate.id, 'openai', 'synthetic-source.db', 'selected-token',
   ]);

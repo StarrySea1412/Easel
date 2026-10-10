@@ -27,6 +27,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from platform_readback import LoginRequiredError, ReadbackResult, WorkItem
 import publish_receipt
 

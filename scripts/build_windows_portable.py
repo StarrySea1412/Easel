@@ -420,6 +420,18 @@ def distribution_files(bundle: Path):
             yield Path(folder) / name
 
 
+def smoke_shared_scripts(bundle: Path) -> None:
+    """Launch the actual embedded interpreter, which ignores normal script paths."""
+    env = {key: value for key, value in os.environ.items() if key.lower() in ('systemroot', 'windir', 'temp', 'tmp', 'path')}
+    env.update(EASEL_ROOT=str(bundle / 'app'), EASEL_DATA_DIR=str(bundle / 'data'), PYTHONIOENCODING='utf-8')
+    for name in ('ai_image.py', 'ai_video.py', 'ai_music.py', 'voice_clone.py', 'channels_readback.py', 'xhs_readback.py'):
+        result = subprocess.run([str(bundle / RUNTIME['python']), '-B',
+            str(bundle / 'app/skills/shared/scripts' / name), '--help'], cwd=bundle / 'app',
+            capture_output=True, env=env, timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            raise RuntimeError(f'Embedded script startup failed: {name}; portable export rejected')
+
+
 def assemble(root: Path, bundle: Path, components: dict[str, Component], inputs: dict[str, dict[str, Path]], frontend: dict) -> dict:
     source = indexed_files(root)
     source_records = file_records(source)
@@ -470,6 +482,7 @@ def assemble(root: Path, bundle: Path, components: dict[str, Component], inputs:
             notice = inputs[name][license_name].read_text(encoding="utf-8-sig", errors="replace")
             notices.append(f"\n{'=' * 72}\n{name} {component.version} / {license_name}\n{component.source}\n\n{notice}")
     (bundle / "THIRD_PARTY_LICENSES.txt").write_text("Bundled runtime component notices\n" + "\n".join(notices), encoding="utf-8")
+    smoke_shared_scripts(bundle)
     compile_launcher(bundle / "app", bundle / "Easel.exe")
     for filename, action in (("启动 Easel.cmd", "start"), ("停止 Easel.cmd", "stop"), ("检查 Easel.cmd", "status")):
         (bundle / filename).write_bytes(command_file(action).encode("ascii"))
@@ -536,6 +549,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--components", type=Path, help="Prepared public component manifest; never a venv or installed user-data directory")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/portable-preview")
+    parser.add_argument('--directory-only', action='store_true', help='Keep an unpacked runnable Easel directory; do not create a ZIP')
     parser.add_argument("--prepare-frontend", type=Path, metavar="RECEIPT", help="Run frontend checks/build and write a reusable verified receipt, then exit")
     parser.add_argument("--frontend-receipt", type=Path, help="Reuse only a receipt whose source AND dist hashes still match")
     parser.add_argument("--verify-bundle", type=Path, help="Check every distributed file in an extracted portable bundle, then exit")
@@ -554,6 +568,12 @@ def main(argv: list[str] | None = None) -> int:
     frontend = verify_frontend_receipt(ROOT, args.frontend_receipt.resolve()) if args.frontend_receipt else prepare_frontend(ROOT, node_dir=components["node"].path)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    if args.directory_only:
+        bundle = output / 'Easel-fixed'
+        assemble(ROOT, bundle, components, inputs, frontend)
+        verify_bundle(bundle)
+        print(f'Unpacked portable preview ready for acceptance: {bundle}')
+        return 0
     with tempfile.TemporaryDirectory(prefix=".easel-portable-build-", dir=output) as temporary:
         bundle = Path(temporary) / "bundle"
         manifest = assemble(ROOT, bundle, components, inputs, frontend)

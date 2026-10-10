@@ -409,3 +409,15 @@
 .storage-settings-card form label { display:block; margin:20px 0 9px; font-size:13px; }.storage-settings-card form input { box-sizing:border-box; width:100%; padding:12px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; font:inherit; font-size:13px; }.storage-settings-card form input:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
 .storage-pending { background:var(--surface-2); padding:17px; border-radius:8px; }.storage-pending strong { font-size:13px; font-weight:550; }.storage-pending p { color:var(--text-secondary); font-size:12px; line-height:1.8; }.storage-notice { background:var(--surface-2); padding:12px; border-radius:7px; font-size:12px; }
 @media(max-width:650px) { .storage-settings-card { padding:18px; }.storage-settings-heading { flex-direction:column; }.storage-location-list>div { grid-template-columns:1fr;gap:6px; } }
+.quick-add-model { margin:18px 0; padding:18px; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+.quick-add-model h3 { margin:0 0 6px; font-size:15px; }
+.quick-add-model fieldset { border:0; padding:0; margin:12px 0 0; min-width:0; }
+.quick-add-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.quick-add-model label { display:grid; gap:6px; font-size:13px; min-width:0; }
+.quick-add-model input:not([type=checkbox]) { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:8px; min-width:0; }
+.quick-add-model-row { display:flex; gap:10px; align-items:end; margin:12px 0; }
+.quick-add-model-row label { flex:1; }
+.quick-add-model details { margin:12px 0; }
+.quick-add-model summary { cursor:pointer; margin-bottom:8px; }
+.quick-add-model .quick-add-default { display:flex; align-items:center; margin:12px 0; }
+@media(max-width:600px) { .quick-add-grid { grid-template-columns:1fr; } .quick-add-model-row { flex-wrap:wrap; } .quick-add-model-row label { flex-basis:100%; } }

@@ -40,3 +40,10 @@ def test_rate_limits_and_unavailability_are_actionable():
     assert gateway_error('rate limit exceeded')['code']=='model_rate_limited'
     assert gateway_error('overloaded')['code']=='model_service_unavailable'
     assert gateway_error('timeout')['code']=='gateway_timeout'
+
+
+def test_observed_model_timeout_is_distinct_from_local_gateway_timeout():
+    result = observed_failure([event('Request timed out.', provider='test', model='gpt-fixture')])
+    assert result['code'] == 'model_timeout' and result['stage'] == 'model_response'
+    assert '模型服务' in result['message']
+    assert observed_failure([], 'TimeoutError')['code'] == 'gateway_timeout'

@@ -1701,8 +1701,8 @@ def _model_channels() -> dict:
                 mid = models[0].get("id", "") if models and isinstance(models[0], dict) else ""
                 custom_rows.append({
                     "slot": "custom", "order": 0, "name": pkey, "sub": "自定义",
-                    "type": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
-                    "protocol": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
+                    "type": {'anthropic-messages': 'anthropic', 'openai-responses': 'openai-responses'}.get(pv.get('api'), 'openai'),
+                    "protocol": {'anthropic-messages': 'anthropic', 'openai-responses': 'openai-responses'}.get(pv.get('api'), 'openai'),
                     "model": mid or "", "baseUrl": pv.get("baseUrl") or "",
                     "keyMasked": _mask_key(str(pv.get("apiKey") or "")),
                     "role": "主" if primary == f"{pkey}/{mid}" else "备",
@@ -1712,6 +1712,14 @@ def _model_channels() -> dict:
     except Exception:  # noqa: BLE001
         pass
     chat_rows.extend(custom_rows)
+    try:
+        display_names = _channel_labels()
+        for row in chat_rows:
+            label = display_names.get(row['name'] if row['slot'] == 'custom' else row['slot'], {}).get('name')
+            if label and label != '未命名渠道':
+                row['channelName'] = label
+    except (OSError, ValueError):
+        pass
 
     sf = bool((env.get("SILICONFLOW_API_KEY") or "").strip())
     trans_rows = [
@@ -1856,7 +1864,8 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                     key = env.get(_SLOT_ENV_KEYS[pkey][1], '')
                 if not model and not prov.get('models'):
                     model = _chat_model(pkey, env)
-            api = 'anthropic-messages' if vals.get('protocol', _CHAT_PROTOCOLS.get(pkey)) == 'anthropic' else 'openai-completions'
+            api = {'anthropic': 'anthropic-messages', 'openai-responses': 'openai-responses'}.get(
+                vals.get('protocol', _CHAT_PROTOCOLS.get(pkey)), 'openai-completions')
             if not local_gateway and prov.get('api') != api:
                 prov['api'] = api
                 changed = True
@@ -1917,7 +1926,7 @@ def _model_file_snapshot() -> dict[Path, bytes | None]:
 
 
 def _commit_model_configuration(updates: dict[str, str], providers: dict[str, dict] | None = None,
-                                keep: set[str] | None = None, primary: str = '', channel_label: tuple[str, str] | None = None) -> str:
+                                keep: set[str] | None = None, primary: str = '', channel_label: tuple | None = None) -> str:
     """Rollback ordinary write/sync failures. Each file is atomic; hard process termination is not a transaction."""
     _guard_env_values(updates)
     with _MODEL_CONFIG_LOCK:
@@ -1932,7 +1941,9 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
             if '失败' in note:
                 raise RuntimeError('sync failed')
             if channel_label:
-                channel_profiles.save(sys.modules[__name__], channel_label[0], channel_label[1], channel_label[1])
+                source = channel_label[2] if len(channel_label) > 2 else 'manual'
+                channel_profiles.save(sys.modules[__name__], channel_label[0], channel_label[1],
+                    channel_label[1] if source != 'manual' else None, source=source)
             return note
         except Exception:
             restored = True
@@ -1966,6 +1977,35 @@ class ModelSaveRequest(BaseModel):
     channel: str = "chat"
     rows: list[ModelSaveRow] = Field(default_factory=list)
     deletedProviders: list[str] = Field(default_factory=list)
+
+
+class ModelAddRequest(BaseModel):
+    name: str = Field(default='', max_length=80)
+    baseUrl: str = Field(min_length=1, max_length=300)
+    apiKey: str = Field(min_length=1, max_length=400)
+    model: str = Field(min_length=1, max_length=120)
+    protocol: Literal['openai', 'anthropic', 'openai-responses'] = 'openai'
+    makeDefault: bool = True
+
+
+@app.post('/api/settings/models/add')
+async def api_settings_models_add(req: ModelAddRequest):
+    """Add one complete channel atomically; no internal slot/name entry required."""
+    base, key, model = req.baseUrl.strip().rstrip('/'), req.apiKey.strip(), req.model.strip()
+    if not _valid_base_url(base) or any(c.isspace() for c in key) or not key:
+        raise HTTPException(400, '请填写有效的服务地址和 API Key。')
+    if not model or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:/+-]{0,119}', model):
+        raise HTTPException(400, '请填写有效的模型 ID。')
+    name = req.name.strip() or urllib.parse.urlsplit(base).hostname or '新渠道'
+    if any(ord(c) < 32 for c in name):
+        raise HTTPException(400, '渠道名称不能包含控制字符。')
+    with _MODEL_CONFIG_LOCK:
+        existing = _openclaw_provider_creds()
+        provider = 'channel-' + uuid.uuid4().hex[:12]
+        note = _commit_model_configuration({}, {provider: {'model': model, 'base': base, 'key': key,
+            'protocol': req.protocol}}, set(existing), f'{provider}/{model}' if req.makeDefault else '',
+            channel_label=(provider, name))
+    return {'ok': True, 'provider': provider, 'note': note, **_model_channels()}
 
 
 @app.post("/api/settings/models/save")
@@ -2045,7 +2085,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
         protocol = (row.protocol or '').strip().lower()
         if is_chat and slot in _CHAT_PROTOCOLS and protocol and protocol != _CHAT_PROTOCOLS[slot]:
             raise HTTPException(400, '服务商协议与目标槽位不匹配，请选择同协议的服务商')
-        if is_chat and slot == 'custom' and protocol and protocol not in ('openai', 'anthropic'):
+        if is_chat and slot == 'custom' and protocol and protocol not in ('openai', 'anthropic', 'openai-responses'):
             raise HTTPException(400, '自定义服务商仅支持 OpenAI Chat Completions 或 Anthropic 协议')
         if base and not _valid_base_url(base):
             raise HTTPException(400, 'Base URL 需是合法的 http(s):// 地址')
@@ -2185,7 +2225,7 @@ async def api_models_selftest(req: SelftestRequest):
                     "detail": "目标指向本机/内网地址，已拒绝（避免把 API Key 发给内网服务）"}
         try:
             _model_health_service().reserve_legacy()
-            rq = urllib.request.Request(base + "/models", headers={"Authorization": f"Bearer {key}"})
+            rq = urllib.request.Request(base + "/models", headers={"Authorization": f"Bearer {key}", 'User-Agent': 'Easel/0.2.6'})
             with _opener.open(rq, timeout=15) as resp:
                 return {"baseUrl": base, "ok": resp.status == 200, "ms": int((time.time() - t0) * 1000)}
         except HTTPException as exc:
@@ -2213,7 +2253,7 @@ def _model_health_target(ref: str):
             saved = config["models"]["providers"][provider]
             entry = next(row for row in saved["models"] if row.get("id") == model)
             api = entry.get("api") or saved.get("api") or _CHAT_PROTOCOLS.get(provider, "")
-            protocol = {"openai-completions": "openai", "anthropic-messages": "anthropic",
+            protocol = {"openai-completions": "openai", "anthropic-messages": "anthropic", "openai-responses": "openai-responses",
                         "openai": "openai", "anthropic": "anthropic"}.get(api, "")
             base = str(saved.get("baseUrl") or _saved_base_for("chat", provider)).strip().rstrip("/")
             key = saved.get("apiKey") or _saved_key_for("chat", provider)
@@ -2556,7 +2596,7 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
                 "message": "目标指向本机/内网地址，已拒绝（避免服务端被当作内网跳板）"}
     suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
     url = base + suffix
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", 'User-Agent': 'Easel/0.2.6'}
     if key:
         if protocol == "anthropic":
             headers["x-api-key"] = key
@@ -2644,7 +2684,7 @@ async def api_models_discover(req: ModelDiscoverRequest):
     key = typed or _saved_key_for(channel, slot)
     proto = (req.protocol or "").strip().lower()
     expected = _CHAT_PROTOCOLS.get(slot) if channel == 'chat' else 'openai'
-    if proto and proto not in ('openai', 'anthropic'):
+    if proto and proto not in ('openai', 'anthropic', 'openai-responses'):
         raise HTTPException(400, '不支持的模型协议')
     if expected and proto and expected != proto:
         raise HTTPException(400, '协议与目标槽位不匹配')
@@ -2689,6 +2729,8 @@ def _import_target_digest() -> str:
 def _import_compatible(slot: str, candidate: dict) -> str:
     if not candidate['compatible']:
         return candidate['skipReason']
+    if slot.startswith('import-'):
+        return ''
     if candidate['protocol'] != _CHAT_PROTOCOLS[slot]:
         return f'协议不匹配：{slot} 槽位需要 {_CHAT_PROTOCOLS[slot]}'
     base, _ = _openclaw_provider_creds().get(slot, ('', ''))
@@ -2701,14 +2743,20 @@ def _import_target_slot(requested: str, candidate: dict, env: dict, providers: d
     """Auto matches transport and prefers an empty slot; preview still confirms writes."""
     if requested != 'auto':
         return requested
+    new_slot = 'import-' + candidate['id'][:12]
+    if new_slot in providers:
+        new_slot = 'import-' + uuid.uuid4().hex[:12]
     preferred = {'openai': ('openai',), 'anthropic': ('relay', 'anthropic')}.get(candidate['protocol'], ())
+    if candidate['protocol'] == 'openai-responses':
+        return new_slot
     usable = [slot for slot in preferred if not _import_compatible(slot, candidate)]
     if not usable:
-        return preferred[0] if preferred else 'openai'
+        return new_slot if preferred else 'openai'
     for slot in usable:
         if not providers.get(slot) and not any(str(env.get(field) or '').strip() for field in _IMPORT_SLOT_ENV[slot]):
             return slot
-    return usable[0]
+    # Adding an unrelated channel must not replace the user's current one.
+    return new_slot
 
 
 def _import_source_path(source: str, supplied_path: str) -> Path:
@@ -2746,6 +2794,8 @@ class ImportPreviewRequest(BaseModel):
 
 def _import_overwrites(slot: str, cand: dict, env: dict[str, str]) -> list[dict]:
     """覆盖预览：目标槽位各 env 的现值 vs 拟写入值（密钥只给脱敏）。"""
+    if slot.startswith('import-'):
+        return []
     base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
     out: list[dict] = []
     cur_base = (env.get(base_env) or "").strip()
@@ -2800,9 +2850,10 @@ async def api_import_preview(req: ImportPreviewRequest):
                 token = uuid.uuid4().hex
                 _IMPORT_PREVIEWS[token] = {'source': req.source, 'path': str(path), 'slot': target_slot,
                     'id': c['id'], 'candidate': fingerprint, 'target': target, 'expires': now + 600,
-                    'model': c.get('model') or _chat_model(target_slot, env, target_providers)}
+                    'model': c.get('model') or ('' if target_slot.startswith('import-') else _chat_model(target_slot, env, target_providers))}
                 if not c.get('model'):
-                    c['note'] = f'未提供模型名，保留目标模型 {_IMPORT_PREVIEWS[token]["model"]}；导入后可手动修改'
+                    c['model'] = _IMPORT_PREVIEWS[token]['model']
+                    c['note'] = '未提供模型 ID，请获取渠道模型并选择后导入' if not c['model'] else f'未提供模型名，保留目标模型 {c["model"]}'
                 c['previewToken'] = token
             c.pop("key", None)
             c['baseUrl'] = local_config_import.public_base_url(c['baseUrl'])
@@ -2828,7 +2879,7 @@ class ImportApplyRequest(BaseModel):
 def _validated_import_preview(req: ImportApplyRequest):
     """Call under the model lock; credentials are reread only for a valid unchanged preview."""
     slot = (req.slot or 'openai').strip()
-    if slot not in _IMPORT_SLOT_ENV:
+    if slot not in _IMPORT_SLOT_ENV and not re.fullmatch(r'import-[a-f0-9]{12}', slot):
         raise HTTPException(400, '目标槽位不认识')
     if not (req.id or '').strip():
         raise HTTPException(400, '没有选择要导入的配置')
@@ -2885,7 +2936,7 @@ async def api_import_discover(req: ImportApplyRequest):
             raise HTTPException(400, '来源缺少 Base URL；仅有 Key 无法确定模型列表地址')
         if not key:
             raise HTTPException(400, '来源没有可用 API Key，请先补全来源配置并重新预览')
-        if protocol not in ('openai', 'anthropic'):
+        if protocol not in ('openai', 'anthropic', 'openai-responses'):
             raise HTTPException(400, '来源协议不支持模型列表枚举')
     # Reuse the existing SSRF, no-redirect, authentication and protocol restrictions.
     discovered = await asyncio.to_thread(_discover_models, base, key, protocol)
@@ -2942,17 +2993,19 @@ async def api_import_apply(req: ImportApplyRequest):
         except Exception:
             raise HTTPException(500, '无法读取 OpenClaw 配置，未导入；请检查配置后重试') from None
         base, key = hit['baseUrl'], hit['key']
+        if not preview.get('model'):
+            raise HTTPException(400, '请先获取渠道模型并选择一个模型 ID。')
         if not _valid_base_url(base):
             raise HTTPException(400, 'Base URL 不合法')
-        base_env, key_env, model_env = _IMPORT_SLOT_ENV[slot]
-        updates = {base_env: base, key_env: key}
+        base_env, key_env, model_env = _IMPORT_SLOT_ENV.get(slot, ('', '', ''))
+        updates = {base_env: base, key_env: key} if base_env else {}
         selected_model = preview.get('selectedModel')
         if selected_model and selected_model not in preview.get('discoveredModels', []):
             raise HTTPException(409, '选择的模型已不在最新来源列表中，请重新选择')
-        if selected_model or hit.get('model'):
+        if model_env and (selected_model or hit.get('model')):
             updates[model_env] = selected_model or hit['model']
         note = _commit_model_configuration(updates, {slot: {
-            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name']))
+            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name'], req.source))
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
     resp = {"ok": True, "note": note,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,
@@ -6529,11 +6582,15 @@ async def api_imagegen_start(req: ImagegenRequest):
             _IMAGEGEN_JOBS[job_id].update({
                 "state": "done" if ok else "error",
                 "url": f"/api/media/{IMAGEGEN_DIR.name}/{result.name}" if ok else None,
-                "error": None if ok else (proc.stderr or proc.stdout or "生成失败")[-400:],
+                "error": None,
+                **(__import__('image_errors').image_failure(proc.stderr or proc.stdout,
+                    key=channel_env.get('IMG_API_KEY', '').strip()) if not ok else {}),
                 **(_imagegen_dimensions(result) if ok else {}),
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败落状态，不崩进程
-            _IMAGEGEN_JOBS[job_id].update({"state": "error", "error": str(exc)[:400]})
+            raw = '图片任务超过本地等待时间' if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
+            _IMAGEGEN_JOBS[job_id].update({'state': 'error', **__import__('image_errors').image_failure(
+                raw, key=channel_env.get('IMG_API_KEY', '').strip(), timed_out=isinstance(exc, subprocess.TimeoutExpired))})
 
     threading.Thread(target=_run, daemon=True, name="easel-imagegen").start()
     return {"jobId": job_id, "state": "running"}

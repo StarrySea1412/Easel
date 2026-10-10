@@ -36,13 +36,14 @@ import io
 import json
 import os
 import subprocess
-import sys
 import time
 import urllib.error
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from output_paths import validate_output_path
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 from model_registry import env_aliases, provider_ids, provider_required_env

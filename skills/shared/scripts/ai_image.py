@@ -38,6 +38,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Embedded Python's ._pth omits the executed script's directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from output_paths import validate_output_path
 
 

@@ -99,7 +99,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
               </SettingsField>}
               {isCustom && ops?.channel === 'chat' && <SettingsField label="请求协议">
                 <Select aria-label="请求协议" value={r.protocol || r.type || 'openai'}
-                  options={[{ value: 'openai', label: 'OpenAI 兼容', description: 'Chat Completions' }, { value: 'anthropic', label: 'Anthropic 兼容', description: 'Messages' }]}
+                  options={[{ value: 'openai', label: 'OpenAI 兼容', description: 'Chat Completions' }, { value: 'openai-responses', label: 'OpenAI Responses', description: 'Codex 渠道' }, { value: 'anthropic', label: 'Anthropic 兼容', description: 'Messages' }]}
                   onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
               </SettingsField>}
               <SettingsField label="模型">

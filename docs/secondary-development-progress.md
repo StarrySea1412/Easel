@@ -1,3 +1,5 @@
+> **2026-10-10 便携修复**：修复内置 Python 的共享脚本导入、首次设备配对与渠道名称保存；新增快速添加、Magpie / CC Switch 导入和 Responses 协议；系统代理显式同步给 Python 与 Node。生图失败分为中文摘要和脱敏详情。aihub 对话与 xjbh 生图已取得真实服务响应；本地私用配置不进入 Git。未压缩便携目录及逐项验收见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
+
 ## 2026-10-10 最新便携交付回执
 
 - **本轮可交接文件**：`dist/portable-20261010/Easel-preview-2f1818d-c38a.zip`，Windows x64 便携预览版，1,169,390,503 字节。完整解压到短、可写目录（如 `C:\Easel`），再运行 `Easel.exe`；也可使用启动/检查/停止 CMD。

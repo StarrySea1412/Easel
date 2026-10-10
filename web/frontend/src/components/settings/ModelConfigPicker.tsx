@@ -42,7 +42,7 @@ export function ModelConfigPicker({ rows, savedPrimary, disabled, saving, dirty,
       <div className="model-picker-actions">
         <button type="button" className="btn btn-sm btn-primary" disabled={disabled || !dirty}
           onClick={onSave}>{saving ? '保存中…' : '保存并使用'}</button>
-        <button type="button" className="btn btn-sm" disabled={disabled} onClick={onOpenImport}>从 CC Switch / OpenClaw 导入</button>
+        <button type="button" className="btn btn-sm" disabled={disabled} onClick={onOpenImport}>从 CC Switch / Magpie / OpenClaw 导入</button>
       </div>
       {dirty && <p className="hint">保存默认后，输入框里手动选过的模型仍按本轮选择；切回“沿用会话模型”即可使用新默认。</p>}
       {saveNote && <p role={saveNote.startsWith('保存失败') ? 'alert' : 'status'}

@@ -370,7 +370,8 @@ def test_auto_preview_matches_protocol_and_apply_uses_the_confirmed_target(cc_ho
     claude = next(item for item in preview['candidates'] if item['appType'] == 'claude')
     codex = next(item for item in preview['candidates'] if item['appType'] == 'codex')
     assert claude['compatible'] and claude['targetSlot'] == 'relay'
-    assert codex['compatible'] and codex['targetSlot'] == 'openai'
+    assert codex['compatible'] and codex['targetSlot'].startswith('import-')
+    assert codex['overwrites'] == []
     with pytest.raises(web.HTTPException) as rejected:
         asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=claude['id'],
             slot='anthropic', previewToken=claude['previewToken'])))
@@ -445,7 +446,7 @@ def test_preview_hides_credentials_embedded_in_rejected_urls(cc_home, fake_env, 
     assert selected['baseUrl'] == '（地址格式不兼容，已隐藏）'
 
 
-def test_responses_remains_explicitly_incompatible_and_does_not_change_target(cc_home, fake_env):
+def test_responses_preview_targets_new_channel_without_changing_target(cc_home, fake_env):
     path = _write_ccswitch_json(cc_home[1])
     data = json.loads(path.read_text(encoding='utf-8'))
     cfg = data['codex']['providers']['p2']['settingsConfig']
@@ -454,8 +455,9 @@ def test_responses_remains_explicitly_incompatible_and_does_not_change_target(cc
     before = fake_env[0].read_bytes()
     preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
     selected = next(item for item in preview['candidates'] if item['appType'] == 'codex')
-    assert selected['protocol'] == 'openai-responses' and not selected['compatible']
-    assert 'Responses' in selected['skipReason'] and 'previewToken' not in selected
+    assert selected['protocol'] == 'openai-responses' and selected['compatible']
+    assert selected['targetSlot'].startswith('import-') and selected['previewToken']
+    assert selected['overwrites'] == []
     assert fake_env[0].read_bytes() == before
 
 
@@ -524,13 +526,13 @@ def test_model_selection_returns_immutable_token_same_deadline_and_confirm_saves
         assert record['model'] == selected['model'] and record['target'] == original['target']
         assert record['candidate'] == original['candidate'] and 'key' not in selected
     assert web._IMPORT_PREVIEWS[candidate['previewToken']]['model'] == original['model']
-    assert any(v['field'] == 'OPENAI_MODEL' and v['incoming'] == 'model-b' for v in second['overwrites'])
+    assert second['overwrites'] == []
     assert web._model_file_snapshot() == before and fake_env[1] == []
     chosen_args = {**args, 'previewToken': second['previewToken']}
     result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(**chosen_args)))
-    assert result['ok'] and web._read_env()['OPENAI_MODEL'] == 'model-b'
-    assert fake_env[1][-1][0]['openai']['model'] == 'model-b'
-    assert next(r for r in result['channels']['chat']['rows'] if r['slot'] == 'openai')['model'] == 'model-b'
+    assert result['ok'] and 'OPENAI_MODEL' not in web._read_env()
+    assert fake_env[1][-1][0][candidate['targetSlot']]['model'] == 'model-b'
+    assert next(r for r in result['channels']['chat']['rows'] if r['name'] == candidate['targetSlot'])['model'] == 'model-b'
     assert 'sk-codex-key-1234567890' not in json.dumps(result)
     assert path.read_bytes() == original_source
     with pytest.raises(web.HTTPException) as changed:

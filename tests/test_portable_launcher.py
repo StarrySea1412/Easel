@@ -11,6 +11,16 @@ import sys
 import pytest
 
 
+def test_windows_system_proxy_is_passed_explicitly_to_both_runtimes(bundle, monkeypatch):
+    if os.name != 'nt': pytest.skip('Windows Internet Settings only')
+    monkeypatch.setattr(launcher.os, 'environ', {'SystemRoot': r'C:\Windows'})
+    monkeypatch.setattr(launcher.urllib.request, 'getproxies', lambda: {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'})
+    env = launcher.isolated_env(bundle)
+    assert env['HTTPS_PROXY'] == 'http://127.0.0.1:7890'
+    assert env['HTTP_PROXY'] == env['HTTPS_PROXY'] and env['NODE_USE_ENV_PROXY'] == '1'
+    assert {'localhost', '127.0.0.1', '::1'}.issubset(set(env['NO_PROXY'].split(',')))
+
+
 _spec = importlib.util.spec_from_file_location("portable_launcher", Path(__file__).parents[1] / "scripts/portable_launcher.py")
 launcher = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = launcher
@@ -366,6 +376,8 @@ def test_status_requires_owned_listener_for_both_services(bundle, monkeypatch):
 
 
 def test_repeated_start_reuses_only_own_healthy_pair(bundle, monkeypatch):
+    paired = []
+    monkeypatch.setattr(launcher, 'ensure_local_device_pairing', lambda b, env: paired.append(env['EASEL_GATEWAY_PORT']))
     services = {"web": process_record(bundle, "web", pid=721),
                 "gateway": process_record(bundle, "gateway", pid=722)}
     save_services(bundle, services)
@@ -374,6 +386,7 @@ def test_repeated_start_reuses_only_own_healthy_pair(bundle, monkeypatch):
     monkeypatch.setattr(launcher, "initialize", lambda *a, **kw: pytest.fail("must not reinitialize"))
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not spawn duplicate"))
     result = launcher.start(bundle, no_browser=True)
+    assert paired == ['37881']
     assert result["reused"] and result["url"] == "http://127.0.0.1:7881/"
     assert launcher._read_json(bundle.data / launcher.IDENTITY_FILE)["webPort"] == 7881
 
@@ -411,6 +424,7 @@ def test_failed_config_validation_preserves_config_and_uses_exact_bundled_node(b
 
 
 def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monkeypatch):
+    monkeypatch.setattr(launcher, 'ensure_local_device_pairing', lambda *a: None)
     monkeypatch.setattr(launcher, "validate_config", lambda *a: None)
     gateway = process_record(bundle, "gateway", pid=722)
     observed = observed_services({"gateway": gateway})

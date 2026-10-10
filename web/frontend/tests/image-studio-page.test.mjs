@@ -68,6 +68,15 @@ async function fixture(t, patch = {}) {
   };
 }
 
+test('provider failure shows an actionable summary, collapsed diagnostics and a working channel settings action', async t => {
+  const view = await fixture(t, { imgJob: resultJob({ state: 'error', mode: 'text2img', url: null, error: '渠道无可用账号', errorDetail: 'HTTP 503: no_available_account' }) });
+  const error = view.container.querySelector('.image-error');
+  assert.match(error.querySelector('p').textContent, /渠道无可用账号/);
+  assert.equal(error.querySelector('details').open, false);
+  assert.match(error.querySelector('pre').textContent, /no_available_account/);
+  await view.click(view.button('修改图片渠道')); assert.equal(view.calls.settings, 1);
+});
+
 test('compact ratio control preserves all sizes and optional masks stay available in collapsed options', async t => {
   const view = await fixture(t, { mode: 'img2img', reference });
   const select = view.container.querySelector('select[aria-label="画面比例"]');

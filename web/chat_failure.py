@@ -21,6 +21,8 @@ def observed_failure(events, native_error='', channels=None):
             failed.append((raw, message))
     raw, message = failed[-1] if failed else (native_error, {})
     result = gateway_error(raw, include_detail=True)
+    if failed and result['code'] == 'gateway_timeout':
+        result.update(code='model_timeout', message='模型服务未在时限内返回响应。请检查该渠道的服务状态、网络与代理；若持续超时，可更换渠道后手动重试。')
     provider, model = message.get('provider'), message.get('model')
     if isinstance(provider, str) and LABEL.fullmatch(provider):
         result['channel'] = provider

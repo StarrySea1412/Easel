@@ -214,6 +214,7 @@ def checkout(tmp_path, monkeypatch):
 
     monkeypatch.setattr(portable.subprocess, "check_output", git_output)
     monkeypatch.setattr(portable, "compile_launcher", lambda _root, dest: dest.write_bytes(b"MZ GUI fixture"))
+    monkeypatch.setattr(portable, 'smoke_shared_scripts', lambda _: None)
     receipt = {"schemaVersion": 1, "kind": "easel-frontend-build-receipt",
         "sourceSha256": portable.frontend_source_hash(root), "files": portable.frontend_output(root),
         "checks": ["npm ci", "node --test --test-concurrency=2", "npm run lint", "npm run build"]}

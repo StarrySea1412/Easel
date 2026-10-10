@@ -72,7 +72,7 @@ def image_score(text, expected):
 
 
 def request_body(target, prompt, image=None):
-    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Easel/0.2.6'}
     if target.protocol == 'anthropic':
         headers.update({'x-api-key': target.key, 'anthropic-version': '2023-06-01'})
         content = [{'type': 'text', 'text': prompt}]
@@ -81,6 +81,13 @@ def request_body(target, prompt, image=None):
                                                         'data': base64.b64encode(image).decode('ascii')}})
         payload = {'model': target.model, 'max_tokens': 200, 'messages': [{'role': 'user', 'content': content}]}
         url = target.base.rstrip('/') + ('/messages' if target.base.rstrip('/').endswith('/v1') else '/v1/messages')
+    elif target.protocol == 'openai-responses':
+        headers['Authorization'] = 'Bearer ' + target.key
+        content = [{'type': 'input_text', 'text': prompt}]
+        if image:
+            content.append({'type': 'input_image', 'image_url': 'data:image/png;base64,' + base64.b64encode(image).decode('ascii')})
+        payload = {'model': target.model, 'max_output_tokens': 200, 'input': [{'role': 'user', 'content': content}]}
+        url = target.base.rstrip('/') + '/responses'
     else:
         headers['Authorization'] = 'Bearer ' + target.key
         content = prompt if not image else [{'type': 'text', 'text': prompt},
@@ -105,6 +112,10 @@ def dispatch(target, prompt, mode, opener=None):
         if target.protocol == 'anthropic':
             text = '\n'.join(block['text'] for block in payload.get('content', [])
                              if isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str))
+        elif target.protocol == 'openai-responses':
+            text = '\n'.join(block['text'] for item in payload.get('output', []) if isinstance(item, dict)
+                             for block in item.get('content', []) if isinstance(block, dict)
+                             and block.get('type') == 'output_text' and isinstance(block.get('text'), str))
         else:
             text = payload['choices'][0]['message']['content']
             if not isinstance(text, str):
@@ -156,7 +167,7 @@ class Service:
         if not isinstance(ref, str) or not ref or len(ref) > 500:
             raise HTTPException(400, '模型标识无效。')
         target = self.resolver(ref)
-        if not target or not target.key or not target.base or target.protocol not in ('openai', 'anthropic'):
+        if not target or not target.key or not target.base or target.protocol not in ('openai', 'anthropic', 'openai-responses'):
             raise HTTPException(400, '所选模型没有完整的已保存渠道配置，请先保存配置。')
         if not self.allowed(target.base):
             raise HTTPException(400, '已保存目标地址不可用于测试，请核对最终接口地址。')

@@ -23,6 +23,9 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from platform_readback import LoginRequiredError, ReadbackResult, WorkItem
 import publish_receipt
 

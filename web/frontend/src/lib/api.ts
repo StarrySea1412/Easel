@@ -1117,6 +1117,7 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
 
 export interface ModelRow {
+  channelName?: string;
   slot?: string;
   order: number;
   name: string;
@@ -1308,6 +1309,10 @@ export function fetchModelChannels(): Promise<ModelChannelsResponse> {
   return request('/api/settings/models');
 }
 
+export function addModelChannel(payload: { name: string; baseUrl: string; apiKey: string; model: string; protocol: string; makeDefault: boolean }): Promise<ModelSaveResponse> {
+  return request('/api/settings/models/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
 // （保存接口见上方 saveModelConfig）
 
 export interface SelftestResult { baseUrl: string; ok: boolean; ms: number; detail?: string }
@@ -1323,6 +1328,8 @@ export function runChannelSelftest(channel: string): Promise<{ channel: string; 
 // ── AI 生图直通车（工作台生图工坊） ─────────────────────────
 export interface ImagegenStart { jobId: string; state: string }
 export interface ImagegenJob {
+  errorCode?: string;
+  errorDetail?: string;
   jobId: string;
   state: 'running' | 'done' | 'error';
   prompt: string;

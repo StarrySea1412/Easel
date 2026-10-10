@@ -21,6 +21,7 @@ from pathlib import Path
 
 HOME_CCSWITCH = Path.home() / ".cc-switch"
 HOME_OPENCLAW = Path.home() / ".openclaw-easel"
+HOME_MAGPIE = Path.home() / '.config' / 'magpie'
 
 
 def _mask(key: str) -> str:
@@ -199,9 +200,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         skip = "Base URL 不是合法的 http(s) 地址"
     elif not key:
         skip = "没有可用的密钥（可能只存了 OAuth 登录态）"
-    elif protocol == "openai-responses":
-        skip = "此配置使用 Responses；当前对话通道仅支持 Chat Completions / Anthropic Messages，不能直接导入"
-    elif protocol not in ("openai", "anthropic"):
+    elif protocol not in ("openai", "anthropic", "openai-responses"):
         skip = "协议未明确或当前通道不支持，不能直接导入"
     elif any(c.isspace() for c in key):
         skip = "密钥包含空白字符"
@@ -371,9 +370,41 @@ def read_ccswitch(path: Path) -> tuple[list[dict], list[str]]:
     return _read_ccswitch_json(path)
 
 
+def magpie_path() -> Path | None:
+    home = _windows_profile_home() if os.environ.get('EASEL_PORTABLE') == '1' else None
+    path = (home / '.config' / 'magpie' if home else HOME_MAGPIE) / 'providers.json'
+    return path if path.is_file() else None
+
+
+def read_magpie(path: Path) -> tuple[list[dict], list[str]]:
+    """Read Magpie's documented providers.json; never copy subscription sessions."""
+    data = json.loads(path.read_text(encoding='utf-8-sig'))
+    providers = data.get('providers') if isinstance(data, dict) else None
+    if not isinstance(providers, list):
+        return [], ['Magpie 配置缺少 providers 列表']
+    rows = []
+    for item in providers:
+        if not isinstance(item, dict):
+            continue
+        for field, protocol in (('chat', 'openai'), ('responses', 'openai-responses'), ('anthropic', 'anthropic')):
+            base = item.get(field)
+            if not isinstance(base, str) or not base.strip():
+                continue
+            if item.get('keyProtocol') and item['keyProtocol'] != field:
+                continue
+            key = item.get('key') if isinstance(item.get('key'), str) else ''
+            candidate = _candidate('magpie', str(item.get('name') or item.get('id') or 'Magpie'),
+                base, key, protocol, cfg=item, source_id=str(item.get('id') or '') + ':' + field)
+            if item.get('off') or item.get('headers') or item.get('proxy'):
+                candidate.update(compatible=False, skipReason='该渠道已关闭或依赖自定义请求头/代理，请先在 Magpie 中核对；未复制此类配置')
+            rows.extend(_expand_models(candidate, item.get('models') if isinstance(item.get('models'), list) else []))
+    return rows, []
+
+
 SOURCES: dict[str, dict] = {
     "openclaw": {"label": "OpenClaw 配置（本机）", "note": "本应用自己的网关配置，只读"},
     "cc-switch": {"label": "CC Switch", "note": "读取其 provider 列表，只读，不回明文密钥"},
+    'magpie': {'label': 'Magpie', 'note': '读取 providers.json 中的 API Key 渠道；不迁移订阅登录态'},
 }
 
 
@@ -387,6 +418,8 @@ def resolve_source(source: str, explicit_path: str = "") -> tuple[Path | None, s
         if source == "cc-switch" and p.is_dir():
             found = _ccswitch_file(p)
             return (found, "") if found else (None, "指定目录下未找到 cc-switch.db 或 config.json")
+        if source == 'magpie' and p.is_dir():
+            p = p / 'providers.json'
         return (p, "") if p.is_file() else (None, f"指定路径不存在：{p}")
     if source == "openclaw":
         p = openclaw_path()
@@ -394,6 +427,9 @@ def resolve_source(source: str, explicit_path: str = "") -> tuple[Path | None, s
     if source == "cc-switch":
         p = ccswitch_path()
         return (p, "") if p else (None, "未找到当前用户的 CC Switch 配置，可指定 .cc-switch 目录或配置文件")
+    if source == 'magpie':
+        p = magpie_path()
+        return (p, '') if p else (None, '未找到当前用户的 Magpie 配置，可指定 providers.json 文件或所在目录')
     return None, f"不认识的来源：{source}"
 
 
@@ -403,6 +439,8 @@ def read_source(source: str, path: Path) -> tuple[list[dict], list[str]]:
             return read_openclaw(path)
         if source == "cc-switch":
             return read_ccswitch(path)
+        if source == 'magpie':
+            return read_magpie(path)
     except (OSError, sqlite3.Error, ValueError, TypeError):
         return [], ["无法读取来源配置，请检查文件格式和访问权限"]
     return [], [f"不认识的来源：{source}"]
