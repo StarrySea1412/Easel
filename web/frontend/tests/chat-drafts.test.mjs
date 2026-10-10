@@ -247,7 +247,10 @@ test('quotes retain comments, survive refresh, isolate sessions and clear only o
 });
 
 test('return to latest shows loading only while a run exists, then changes to an idle arrow without another click',async t=>{
- const v=await fixture(t);const patch={messages:[{role:'user',content:'第一轮'},{role:'assistant',content:'回复'}]};
+ const v=await fixture(t);const patch={messages:[1,2,3,4].flatMap(number=>[
+  {role:'user',content:`第${number}轮`,turnId:`latest-${number}`},
+  {role:'assistant',content:'回复',turnId:`latest-${number}`},
+ ])};
  await v.render('latest',patch,{stream:{content:'生成中',thinking:'',activity:[]}});
  await v.click(v.container.querySelector('.chat-turn-navigation button'));
  let latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),true);assert.ok(latest.querySelector('.chat-latest-dots'));

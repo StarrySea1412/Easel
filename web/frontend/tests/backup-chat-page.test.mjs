@@ -103,6 +103,10 @@ test('an imported chat stays read-only despite forged stream and pending state, 
   const copied = [];
   t.mock.method(navigator.clipboard, 'writeText', async (text) => { copied.push(text); });
   const session = imported({ pendingTurnId: 'forged-pending', backupIncomplete: true });
+  for (const number of [3, 4]) session.messages.push(
+    { role: 'user', content: `第${number}轮问题`, turnId: `original-turn-${number}` },
+    { role: 'assistant', content: `第${number}轮备份答复`, turnId: `original-turn-${number}` },
+  );
   session.messages.at(-1).error = { category: 'authentication', message: '合成认证失败', code: 'QA_AUTH', historical: true };
   await view.render(createElement(ChatPage, {
     session,
@@ -129,7 +133,7 @@ test('an imported chat stays read-only despite forged stream and pending state, 
   const scroller = view.container.querySelector('.chat-messages');
   t.mock.method(scroller, 'scrollTo', ({ top }) => { scroller.scrollTop = top; });
   assert.equal(view.container.querySelector('.chat-turn-nav-trigger,.chat-turn-popover'),null);
-  const nodes=[...view.container.querySelectorAll('.chat-turn-tick')];assert.equal(nodes.length,2);
+  const nodes=[...view.container.querySelectorAll('.chat-turn-tick')];assert.equal(nodes.length,4);
   await view.click(nodes[0]);assert.equal(document.activeElement?.getAttribute('aria-label'),'第 1 轮对话');
   await view.click(nodes[1]);assert.equal(document.activeElement?.getAttribute('aria-label'),'第 2 轮对话');
 
@@ -182,10 +186,11 @@ test('imported Markdown retains text formatting and safe links without automatic
     ...actions.props,
   }));
   const bubble = view.container.querySelector('.message-bubble.assistant');
-  // The thinking control owns a static SVG chevron. Imported markup must not
-  // supply any SVG or media; allow only that exact application-owned icon.
+  // Activity and thinking controls each own a static SVG chevron. Imported
+  // markup must not supply SVG or media; both icons must belong to controls.
   assert.equal(bubble.querySelector('img,picture,video,audio,source,iframe,object,embed,svg:not(.model-thinking-chevron),math,style,link,input,script'), null);
-  assert.equal(bubble.querySelectorAll('svg.model-thinking-chevron').length, 1);
+  assert.equal(bubble.querySelectorAll('svg.model-thinking-chevron').length, 2);
+  assert.equal(bubble.querySelectorAll('.message-disclosure-toggle > svg.model-thinking-chevron, .model-thinking-toggle > svg.model-thinking-chevron').length, 2);
   assert.equal(bubble.querySelector('[style],[onclick],[onerror],[src],[srcset],[ping]'), null);
   assert.equal(bubble.querySelector('strong')?.textContent, '保留粗体');
   assert.ok(bubble.querySelector('table'));
