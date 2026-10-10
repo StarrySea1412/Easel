@@ -1,4 +1,6 @@
-> **最新便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
+> **2026-10-10 便携修复**：修复内置 Python 的共享脚本导入、首次设备配对与渠道名称保存；新增快速添加、Magpie / CC Switch 导入和 Responses 协议；系统代理显式同步给 Python 与 Node。生图失败分为中文摘要和脱敏详情。aihub 对话与 xjbh 生图已取得真实服务响应；本地私用配置不进入 Git。未压缩便携目录及逐项验收见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
+
+> **历史便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
 
 > **最新收口**：当前模型厂商icon、超过3轮显示节点、紧凑工具执行、自动匹配可用思考档位/黄色info已完成；修正登录有效性缓存、B站失效回正、公众号会话区分，并在发布前逐平台在线检查。定向前端98项、后端250通过1跳过；真实小红书只读检查有效，无重复投稿。按最新授权开始生成dist新便携包，包的全量前端/启停回执单独记录。
 
@@ -10,9 +12,9 @@
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
-[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
+[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/portable-model-import-fixes) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
 
-> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/upstream-compat-2026-10-10` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/portable-model-import-fixes` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 >
 > Windows x64 历史便携候选为 `Easel-preview-76bbaf6-3fb7.zip`（约 1.06 GiB），已完成实际解压、完整文件校验、包内启动、两种 Chromium 运行和指定工作台入口的浏览器验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md)。
 >
