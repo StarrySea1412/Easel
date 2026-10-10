@@ -1,4 +1,4 @@
-> **2026-10-10 便携修复**：修复内置 Python 的共享脚本导入、首次设备配对与渠道名称保存；新增快速添加、Magpie / CC Switch 导入和 Responses 协议；系统代理显式同步给 Python 与 Node。生图失败分为中文摘要和脱敏详情。aihub 对话与 xjbh 生图已取得真实服务响应；本地私用配置不进入 Git。未压缩便携目录及逐项验收见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
+> **2026-10-10 修复便携交付**：本地未压缩 `Easel-fixed` 已完成整包搬移启动与受影响页面验收。修复共享脚本导入、首次设备配对、渠道名称保存，新增快速添加及 CC Switch / Magpie 导入；启动显示阶段，就绪打开页面。新版网关实际 aihub 对话成功，按用户要求生图不预配置；当前图片额度不足，不报告新版生图成功。OpenClaw 固定 2026.9.6，首次新路径加载仍需数分钟，运行中复用约4.4秒。私用凭据不进入 Git。详见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
 
 ## 2026-10-10 最新便携交付回执
 
