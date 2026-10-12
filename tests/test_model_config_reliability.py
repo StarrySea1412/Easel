@@ -104,6 +104,98 @@ def apply(p, candidate, slot='openai', **patch):
     return asyncio.run(web.api_import_apply(web.ImportApplyRequest(**args)))
 
 
+@pytest.mark.parametrize('reasoning', [True, False])
+def test_import_preserves_explicit_exact_model_reasoning(sandbox, reasoning):
+    root, oc = sandbox
+    p = source(root)
+    data = json.loads(p.read_text())
+    data['models']['providers']['Chosen']['models'][0].update(reasoning=reasoning,
+        compat={'supportsReasoningEffort': True, 'supportedReasoningEfforts': ['low', 'high']},
+        thinkingLevelMap={'low': 'low', 'ultra': None})
+    p.write_text(json.dumps(data))
+    candidate = preview(p)['candidates'][0]
+    apply(p, candidate)
+    entry = json.loads(oc.read_text())['models']['providers']['openai']['models'][0]
+    assert entry['reasoning'] is reasoning
+    assert entry['compat']['supportedReasoningEfforts'] == ['low', 'high']
+    assert entry['thinkingLevelMap'] == {'low': 'low', 'ultra': None}
+
+
+def test_new_model_does_not_inherit_previous_capabilities(sandbox):
+    _, oc = sandbox
+    data = json.loads(oc.read_text())
+    data['models']['providers']['openai']['models'][0].update(reasoning=True,
+        compat={'supportsReasoningEffort': True}, thinkingLevelMap={'high': 'high'})
+    oc.write_text(json.dumps(data))
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(channel='chat', rows=[
+        web.ModelSaveRow(slot='openai', model='different-model'),
+    ])))
+    entry = json.loads(oc.read_text())['models']['providers']['openai']['models'][0]
+    assert entry == {'id': 'different-model', 'name': 'different-model'}
+
+
+def test_reimport_same_id_does_not_inherit_target_reasoning(sandbox):
+    root, oc = sandbox
+    data = json.loads(oc.read_text())
+    data['models']['providers']['openai']['models'][0]['reasoning'] = True
+    oc.write_text(json.dumps(data))
+    p = source(root, model='old-model')
+    apply(p, preview(p)['candidates'][0])
+    assert 'reasoning' not in json.loads(oc.read_text())['models']['providers']['openai']['models'][0]
+
+
+@pytest.mark.parametrize('reasoning', [True, False, None])
+def test_reasoning_editor_only_changes_exact_model_and_preserves_credentials(sandbox, reasoning):
+    _, oc = sandbox
+    before = json.loads(oc.read_text())
+    before['models']['providers']['custom']['models'][0]['reasoning'] = True
+    oc.write_text(json.dumps(before))
+    config = asyncio.run(web.api_settings_models_reasoning())
+    assert 'custom-keep-key' not in json.dumps(config)
+    result = asyncio.run(web.api_settings_models_reasoning_save(web.ModelReasoningRequest(
+        modelRef='custom/custom-model', reasoning=reasoning, fingerprint=config['fingerprint'])))
+    expected = copy.deepcopy(before)
+    entry = expected['models']['providers']['custom']['models'][0]
+    if reasoning is None:
+        entry.pop('reasoning')
+    else:
+        entry['reasoning'] = reasoning
+    assert json.loads(oc.read_text()) == expected
+    assert result['ok'] and 'custom-keep-key' not in json.dumps(result)
+
+
+def test_reasoning_editor_rejects_stale_snapshot(sandbox):
+    _, oc = sandbox
+    config = asyncio.run(web.api_settings_models_reasoning())
+    oc.write_bytes(oc.read_bytes() + b'\n')
+    before = oc.read_bytes()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_reasoning_save(web.ModelReasoningRequest(
+            modelRef='custom/custom-model', reasoning=True, fingerprint=config['fingerprint'])))
+    assert caught.value.status_code == 409 and oc.read_bytes() == before
+
+
+def test_codex_import_declares_only_explicit_source_model():
+    options = lci._codex_options('model = "source-model"\nmodel_reasoning_effort = "high"\n'
+                               'model_provider = "relay"\n[model_providers.relay]\n'
+                               'base_url = "https://fixture.example/v1"\nwire_api = "responses"\n')
+    from easel.model_reasoning import capabilities
+    assert capabilities({}, options) == {'source-model': {'reasoning': True}}
+    assert capabilities({}, {**options, 'model_reasoning_effort': []}) == {}
+    assert capabilities({'models': [{'id': 'source-model', 'reasoning': False,
+        'thinkingLevelMap': {'high': [], 'low': 'low'}}]}, options) == {
+            'source-model': {'reasoning': False, 'thinkingLevelMap': {'low': 'low'}}}
+
+
+def test_quick_add_persists_explicit_reasoning(sandbox):
+    _, oc = sandbox
+    result = asyncio.run(web.api_settings_models_add(web.ModelAddRequest(
+        baseUrl='https://fixture.example/v1', apiKey='fixture-key', model='reasoning-model',
+        protocol='openai-responses', reasoning=True)))
+    entry = json.loads(oc.read_text())['models']['providers'][result['provider']]['models'][0]
+    assert entry['reasoning'] is True
+
+
 @pytest.mark.parametrize('slot,protocol,field', [
     ('openai', 'openai', 'OPENAI_MODEL'), ('anthropic', 'anthropic', 'ANTHROPIC_MODEL'),
     ('relay', 'anthropic', 'EASEL_LLM_MODEL'),

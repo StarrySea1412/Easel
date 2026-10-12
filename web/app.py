@@ -1888,11 +1888,38 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 if not isinstance(models[0], dict):
                     models = [{}]
                 if models[0].get('id') != model:
-                    models[0]['id'] = model
+                    # Capability declarations belong to one exact model ID.
+                    match = next((m for m in models if isinstance(m, dict) and m.get('id') == model), None)
+                    if match is not None:
+                        models = [match] + [m for m in models if m is not match]
+                    else:
+                        models[0] = {'id': model, 'name': model}
                     changed = True
                 if not models[0].get('name'):
                     models[0]['name'] = model
                     changed = True
+                if vals.get('replaceAuth'):
+                    for field in ('reasoning', 'thinkingLevelMap'):
+                        if field in models[0]:
+                            del models[0][field]
+                            changed = True
+                    compat = models[0].get('compat')
+                    if isinstance(compat, dict):
+                        for field in ('supportsReasoningEffort', 'supportedReasoningEfforts'):
+                            if field in compat:
+                                del compat[field]
+                                changed = True
+                        if not compat:
+                            del models[0]['compat']
+                from easel.model_reasoning import capabilities
+                declaration = capabilities({'models': [{'id': model, **vals.get('capabilities', {})}]}).get(model, {})
+                for field, value in declaration.items():
+                    if field == 'compat':
+                        existing_compat = models[0].get('compat')
+                        value = {**(existing_compat if isinstance(existing_compat, dict) else {}), **value}
+                    if models[0].get(field) != value:
+                        models[0][field] = value
+                        changed = True
                 prov['models'] = models
         if primary_ref:
             ref = data.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})
@@ -1986,6 +2013,7 @@ class ModelAddRequest(BaseModel):
     model: str = Field(min_length=1, max_length=120)
     protocol: Literal['openai', 'anthropic', 'openai-responses'] = 'openai'
     makeDefault: bool = True
+    reasoning: Annotated[bool, Field(strict=True)] | None = None
 
 
 @app.post('/api/settings/models/add')
@@ -2003,9 +2031,78 @@ async def api_settings_models_add(req: ModelAddRequest):
         existing = _openclaw_provider_creds()
         provider = 'channel-' + uuid.uuid4().hex[:12]
         note = _commit_model_configuration({}, {provider: {'model': model, 'base': base, 'key': key,
-            'protocol': req.protocol}}, set(existing), f'{provider}/{model}' if req.makeDefault else '',
+            'protocol': req.protocol, 'capabilities': {} if req.reasoning is None else {'reasoning': req.reasoning}}},
+            set(existing), f'{provider}/{model}' if req.makeDefault else '',
             channel_label=(provider, name))
     return {'ok': True, 'provider': provider, 'note': note, **_model_channels()}
+
+
+def _reasoning_configuration() -> tuple[Path, bytes, dict]:
+    path = openclaw_state_dir() / 'openclaw.json'
+    try:
+        raw = path.read_bytes()
+        data = json.loads(raw.decode('utf-8-sig'))
+        if not isinstance(data.get('models', {}).get('providers'), dict):
+            raise ValueError('invalid providers')
+        return path, raw, data
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise HTTPException(500, '无法读取模型配置，请检查配置文件后重试。') from None
+
+
+@app.get('/api/settings/models/reasoning')
+async def api_settings_models_reasoning():
+    """Return declared capabilities for exact configured models; never return credentials."""
+    with _MODEL_CONFIG_LOCK:
+        path, raw, data = _reasoning_configuration()
+        import office_controls
+        allowed = {option['id'] for option in office_controls.configured_models(path)}
+        labels = _channel_labels()
+        options = []
+        for provider, config in data['models']['providers'].items():
+            if not isinstance(config, dict) or not isinstance(config.get('models'), list):
+                continue
+            for entry in config['models']:
+                if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
+                    continue
+                model = entry['id']
+                if f'{provider}/{model}' not in allowed:
+                    continue
+                declared = entry.get('reasoning')
+                options.append({'id': f'{provider}/{model}', 'label': f"{labels.get(provider, {}).get('name') or provider} · {model}",
+                                'reasoning': declared if isinstance(declared, bool) else None})
+        return {'options': options, 'fingerprint': hashlib.sha256(raw).hexdigest()}
+
+
+class ModelReasoningRequest(BaseModel):
+    modelRef: str = Field(min_length=1, max_length=500)
+    reasoning: Annotated[bool, Field(strict=True)] | None
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
+@app.post('/api/settings/models/reasoning')
+async def api_settings_models_reasoning_save(req: ModelReasoningRequest):
+    with _MODEL_CONFIG_LOCK:
+        path, raw, data = _reasoning_configuration()
+        if hashlib.sha256(raw).hexdigest() != req.fingerprint:
+            raise HTTPException(409, '模型配置已经改变，请刷新后重新保存。')
+        provider, separator, model = req.modelRef.partition('/')
+        config = data['models']['providers'].get(provider)
+        entries = config.get('models', []) if isinstance(config, dict) else []
+        matches = [m for m in entries if isinstance(m, dict) and m.get('id') == model] if isinstance(entries, list) else []
+        if not separator or len(matches) != 1:
+            raise HTTPException(400, '模型不存在或配置重复，请刷新后重新选择。')
+        entry = matches[0]
+        if req.reasoning is None:
+            entry.pop('reasoning', None)
+        else:
+            entry['reasoning'] = req.reasoning
+        content = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+        try:
+            _atomic_model_bytes(path, content)
+        except OSError:
+            raise HTTPException(500, '保存失败，请检查配置文件权限后重试。') from None
+    return {'ok': True, 'note': '已保存推理能力声明；可用强度以运行网关返回为准。',
+            **await api_settings_models_reasoning()}
 
 
 @app.post("/api/settings/models/save")
@@ -3005,7 +3102,9 @@ async def api_import_apply(req: ImportApplyRequest):
         if model_env and (selected_model or hit.get('model')):
             updates[model_env] = selected_model or hit['model']
         note = _commit_model_configuration(updates, {slot: {
-            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name'], req.source))
+            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True,
+            'capabilities': hit.get('modelCapabilities', {}).get(preview['model'], {})}}, keep,
+            channel_label=(slot, hit['name'], req.source))
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
     resp = {"ok": True, "note": note,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,

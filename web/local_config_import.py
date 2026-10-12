@@ -123,7 +123,7 @@ def _codex_options(config: str) -> dict:
     except ImportError:  # Python 3.10: accept the unambiguous legacy flat form only.
         if '[' in config:
             return {}
-        return {field: _toml_field(config, field) for field in ('base_url', 'wire_api', 'model')}
+        return {field: _toml_field(config, field) for field in ('base_url', 'wire_api', 'model', 'model_reasoning_effort')}
     try:
         data = tomllib.loads(config)
     except ValueError:
@@ -135,7 +135,8 @@ def _codex_options(config: str) -> dict:
     provider = providers.get(active, {}) if active and isinstance(providers, dict) else data if not active else {}
     if not isinstance(provider, dict):
         return {}
-    return {'model': data.get('model', ''), 'base_url': provider.get('base_url', ''),
+    return {'model': data.get('model', ''), 'model_reasoning_effort': data.get('model_reasoning_effort', ''),
+            'base_url': provider.get('base_url', ''),
             'wire_api': provider.get('wire_api', '')}
 
 
@@ -186,6 +187,9 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
                app_type: str = "", cfg: dict | None = None, note: str = "", source_id: str = "") -> dict:
     """归一成导入候选。密钥明文只放在 `key` 里，出网前由端点删除。"""
     cfg = cfg if isinstance(cfg, dict) else {}
+    from easel.model_reasoning import capabilities
+    model_capabilities = capabilities(cfg, _codex_options(cfg['config'])
+        if app_type == 'codex' and isinstance(cfg.get('config'), str) else None)
     base = (base or "").strip().rstrip("/")
     if app_type == 'codex' and isinstance(cfg.get('config'), str):
         base = str(_codex_options(cfg['config']).get('base_url') or '').strip().rstrip('/')
@@ -211,6 +215,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         "baseUrl": base,
         "model": next(iter(_model_hints(app_type, cfg)), "") if cfg else "",
         "protocol": protocol,
+        "modelCapabilities": model_capabilities,
         "appType": app_type,
         "note": note,
         "keyPresent": bool(key),

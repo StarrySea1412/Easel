@@ -10,6 +10,8 @@
 
 # Easel 创作工作台
 
+> **2026-10-12 推理声明修复**：新增精确模型的推理声明设置，导入保留来源能力，切换模型不继承旧能力。离线后端146、前端22项定向检查及构建通过；真实网关与生成验证单独记录。[修复与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。
+
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)

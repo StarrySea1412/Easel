@@ -74,6 +74,11 @@ October 10 density and alignment: skill setup status and capability badges share
 
 # Changelog
 
+## 2026-10-12
+
+- 修复自定义模型导入丢失推理声明，新增精确模型的推理能力设置及快速添加声明。
+- 模型变化不继承旧推理能力；保留网关的实际档位校验。离线后端146、前端22项定向通过，真实调用另记。
+
 Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.
 
 ## [Unreleased]

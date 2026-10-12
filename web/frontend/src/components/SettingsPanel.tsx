@@ -9,6 +9,7 @@ import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import ModelHealthPanel from './settings/ModelHealthPanel';
 import ChannelNameEditor from './settings/ChannelNameEditor';
 import QuickAddModel from './settings/QuickAddModel';
+import ModelReasoningSettings from './settings/ModelReasoningSettings';
 import ImageReverseSettings from './settings/ImageReverseSettings';
 import Select from './ui/Select';
 import type { ProviderBoardOptions } from './settings/ProviderBoard';
@@ -896,6 +897,8 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                 onClick={() => setImportOpen(false)}>收起导入</button></div>
             </section>
                     </details>
+                    <ModelReasoningSettings revision={savedChatRows} disabled={modelLoading || saving || Boolean(impBusy) || chatDirty}
+                      onSaving={value => { modelSavePending.current = value; setSaving(value); }}/>
                     {chatDirty && <p className="hint">请先保存已有模型编辑，再快速添加渠道。</p>}
                     <QuickAddModel presets={presets.chat || []} disabled={modelLoading || saving || Boolean(impBusy) || chatDirty} onSaving={value => { modelSavePending.current = value; setSaving(value); }} onSaved={result => {
                       setSavedChatRows(result.channels.chat.rows); setChatRows(result.channels.chat.rows); clearModelDiscovery('chat');

@@ -10,6 +10,8 @@
 
 # Easel Creative Workspace
 
+> **October 12, 2026 reasoning declarations**: Configure reasoning for an exact saved model, preserve explicit source capabilities on import, and avoid carrying them across model changes. Targeted offline checks passed: 146 backend and 22 frontend tests, plus production build. Live gateway and generation evidence are tracked separately in the [fix record](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md).
+
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.
 
 [简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)

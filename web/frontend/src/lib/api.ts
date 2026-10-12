@@ -1309,8 +1309,23 @@ export function fetchModelChannels(): Promise<ModelChannelsResponse> {
   return request('/api/settings/models');
 }
 
-export function addModelChannel(payload: { name: string; baseUrl: string; apiKey: string; model: string; protocol: string; makeDefault: boolean }): Promise<ModelSaveResponse> {
+export function addModelChannel(payload: { name: string; baseUrl: string; apiKey: string; model: string; protocol: string; makeDefault: boolean; reasoning?: boolean | null }): Promise<ModelSaveResponse> {
   return request('/api/settings/models/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
+export interface ModelReasoningConfiguration {
+  options: { id: string; label: string; reasoning: boolean | null }[];
+  fingerprint: string;
+  note?: string;
+}
+
+export function fetchModelReasoning(): Promise<ModelReasoningConfiguration> {
+  return request('/api/settings/models/reasoning');
+}
+
+export function saveModelReasoning(modelRef: string, reasoning: boolean | null, fingerprint: string): Promise<ModelReasoningConfiguration> {
+  return request('/api/settings/models/reasoning', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelRef, reasoning, fingerprint }) });
 }
 
 // （保存接口见上方 saveModelConfig）

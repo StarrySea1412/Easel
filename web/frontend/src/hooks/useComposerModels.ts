@@ -16,7 +16,8 @@ export function useComposerModels(sessionId: string | null) {
   useEffect(() => {
     const changed = () => setRevision(value => value + 1);
     window.addEventListener('easel:channel-names-changed', changed);
-    return () => window.removeEventListener('easel:channel-names-changed', changed);
+    window.addEventListener('easel:model-capabilities-changed', changed);
+    return () => { window.removeEventListener('easel:channel-names-changed', changed); window.removeEventListener('easel:model-capabilities-changed', changed); };
   }, []);
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setError('');

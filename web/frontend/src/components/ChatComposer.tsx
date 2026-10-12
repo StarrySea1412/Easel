@@ -392,7 +392,7 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
         </button>
       </div>
       <div className="thinking-level-model"><span title={`所选模型：${modelLabel}`}>{modelLabel}</span><InlineInfo label="思考强度能力说明">
-        {supportedLevels?.length ? <>网关声明可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。不支持的档位已禁用。<br/>这是能力声明，非本轮调用实测。</> : <>能力信息尚未提供；当前选择用于下一轮请求。</>}
+        {supportedLevels?.length ? <>网关声明可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。未声明的档位已禁用。<br/>这是能力声明，非本轮调用实测。若服务支持但仅有关闭，请在模型设置中检查推理声明。</> : <>能力信息尚未提供；当前选择用于下一轮请求。</>}
       </InlineInfo></div>
       <div className="thinking-level-slider-wrap">
         {maxIndex < strengthLevels.length - 1 && <span className="thinking-level-unavailable" aria-hidden="true"/>}
