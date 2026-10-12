@@ -8,7 +8,7 @@
 
 # 2026-10-12 Toolbar and library refinement
 
-The chat toolbar now uses icons for the OpenClaw/Codex engine switch and keeps only “Thinking strength” visible. A compact status dot beside the model represents channel and inference state, with accessible details in a popover. Gateway status lives in the sidebar tool area, with backoff-based automatic reconnect and a manual retry. The content library filters for all, images, video, audio and documents now include matching icons; generated and ordinary images remain under one Images category.
+The chat toolbar now uses icons for the OpenClaw/Codex engine switch and keeps only “Thinking strength” visible. A compact status dot beside the model represents channel and inference state, with accessible details in a popover. The sidebar gateway entry is explicitly marked OpenClaw, with backoff-based automatic reconnect and a manual retry. The content library filters for all, images, video, audio and documents now include matching icons; generated and ordinary images remain under one Images category.
 
 The frontend production build passed, and the existing isolated-browser coverage remains in place for desktop/390px layouts, filtering, preview and download. No live model or paid service was called; portable packaging remains paused until a new instruction.
 

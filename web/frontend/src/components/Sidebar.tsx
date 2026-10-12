@@ -5,7 +5,7 @@ import type { PersonaItem } from '../lib/api';
 import {
   IconChat,
   IconNewChat, IconChevron,
-  IconDashboard, IconAgentOffice,
+  IconDashboard, IconAgentOffice, IconOpenClaw,
 } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 import SidebarAccountPopover from './SidebarAccountPopover';
@@ -238,8 +238,8 @@ export default function Sidebar({
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}
           </nav>
           <div className="sidebar-toolbar-bottom">
-            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击重试':'网关正在连接'} title={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击立即重试':'网关正在重连…'} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
-              <span className="status-dot" aria-hidden="true"/><span className="nav-item-label">{gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'网关重连中…'}</span>
+            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击重试':'OpenClaw 网关正在连接'} title={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击立即重试':'OpenClaw 网关正在重连…'} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
+              <IconOpenClaw size={17}/><span className="status-dot" aria-hidden="true"/><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {railItem('settings','设置',<IconGear size={19}/>)}

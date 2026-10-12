@@ -1,6 +1,6 @@
 # 2026-10-12
 
-- Compact the composer controls: icon-based OpenClaw/Codex selector, a stable “Thinking strength” trigger, model-adjacent status dot with accessible channel/inference details, and a sidebar gateway indicator with guarded backoff reconnect plus manual retry. Add icons to the content-library filters while keeping generated images under the shared Images category with their AI-generated tag. Production build passed; packaging remains paused and no live model request was made.
+- Compact the composer controls: icon-based OpenClaw/Codex selector, a stable “Thinking strength” trigger, model-adjacent status dot with accessible channel/inference details, and an explicitly marked OpenClaw sidebar gateway indicator with guarded backoff reconnect plus manual retry. Add icons to the content-library filters while keeping generated images under the shared Images category with their AI-generated tag. Production build passed; packaging remains paused and no live model request was made.
 
 - Refine execution into compact icon/summary rows with expandable evidence, ordered progress and durable journal recovery. Remove duplicate progress and the Codex outer card; preserve failure states, approval/question controls, copies, paging and artifact verification. Explicitly separate legacy operations without shared order.
 - Disable skill completion with no selected skills; preview is distinct from selection. Merge generated and ordinary images into one Images filter with an AI-generated tag and compatible studio/legacy entries.

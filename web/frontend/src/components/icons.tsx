@@ -232,6 +232,13 @@ export const IconSpark = ({ size, className, strokeWidth }: P) => (
     <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" />
   </svg>
 );
+/** OpenClaw gateway mark: a compact claw around the local gateway node. */
+export const IconOpenClaw = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="12" r="2.2" />
+    <path d="M12 3.5v4M5.6 7.2l3.4 2M18.4 7.2l-3.4 2M5.6 16.8l3.4-2M18.4 16.8l-3.4-2M12 16.5v4" />
+  </svg>
+);
 export const IconKey = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.3-9.3" /><path d="m17 5 3 3" /><path d="m15 7 3 3" />
