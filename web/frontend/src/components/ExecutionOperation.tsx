@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Operation } from '../lib/execution';
 import { operationKind, operationTitle } from '../lib/execution';
 import { formatChatElapsed } from '../lib/chatTiming';
+import { IconTerminal, IconEdit, IconFile, IconSearch, IconCompass, IconSkills, IconChevron } from './icons';
 
 const labels = {running:'执行中',returned:'工具已返回',completed:'执行已结束',failed:'失败',unconfirmed:'结果未确认',stopped:'已停止',denied:'已拒绝'};
 function Copy({text,label}:{text:string;label:string}) {
@@ -27,9 +28,11 @@ export default function ExecutionOperation({row,running}:{row:Operation;running:
   useEffect(()=>{if(!running||row.status!=='running'||!row.startedAt)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[running,row.status,row.startedAt]);
   const duration=row.elapsedSeconds!==undefined?row.elapsedSeconds*1000:running&&row.status==='running'&&row.startedAt?Math.max(0,now-Date.parse(row.startedAt)):undefined;
   const url=row.url&&/^https?:\/\//i.test(row.url)?row.url:undefined;
+  const Icon=row.kind==='command'?IconTerminal:row.kind==='file_change'?IconEdit:row.kind==='read'?IconFile:row.kind==='search'?IconSearch:row.kind==='browser'?IconCompass:IconSkills;
+  const normal=row.status==='returned'||row.status==='completed';
   return <details className={`chat-execution-row is-${row.status}`} open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}>
-    <summary><span className="execution-kind">{operationKind(row)}</span><span className="chat-execution-title" title={row.path||row.command||row.name}>{operationTitle(row)}</span><span className={`chat-execution-state is-${row.status}`}>{labels[row.status]}</span>{duration!==undefined&&Number.isFinite(duration)&&<small>{formatChatElapsed(duration)}</small>}{row.diff&&<small className="chat-execution-diff-count">+{row.added??0} −{row.removed??0}</small>}</summary>
-    {expanded&&<div className="chat-execution-detail"><div className="execution-metadata"><span>工具：{row.name}</span>{row.cwd&&<span>工作目录：{row.cwd}</span>}{row.path&&<span>文件：{row.path}</span>}{row.exitCode!==undefined&&<span>退出码：{row.exitCode}</span>}{row.exitSignal&&<span>退出信号：{row.exitSignal}</span>}{row.processSessionId&&<span>进程会话：{row.processSessionId}</span>}</div>
+    <summary><span className="execution-kind" title={operationKind(row)}><Icon size={14}/></span><span className="chat-execution-title" title={row.path||row.command||row.name}>{operationTitle(row)}</span>{!normal&&<span className={`chat-execution-state is-${row.status}`}>{labels[row.status]}</span>}{row.status==='running'&&duration!==undefined&&Number.isFinite(duration)&&<small>{formatChatElapsed(duration)}</small>}<span className="execution-chevron" aria-hidden="true"><IconChevron size={12}/></span></summary>
+    {expanded&&<div className="chat-execution-detail"><div className="execution-metadata"><span>{labels[row.status]}{duration!==undefined&&Number.isFinite(duration)?` · ${formatChatElapsed(duration)}`:''}{row.diff&&<span className="chat-execution-diff-count"> · +{row.added??0} −{row.removed??0}</span>}</span><span>工具：{row.name}</span>{row.cwd&&<span>工作目录：{row.cwd}</span>}{row.path&&<span>文件：{row.path}</span>}{row.exitCode!==undefined&&<span>退出码：{row.exitCode}</span>}{row.exitSignal&&<span>退出信号：{row.exitSignal}</span>}{row.processSessionId&&<span>进程会话：{row.processSessionId}</span>}</div>
       {row.command&&<section className="execution-command"><div className="execution-detail-heading"><strong>命令</strong><Copy text={row.command} label="复制命令"/></div><pre>{row.command}</pre>{row.truncated?.command&&<p className="execution-note">命令超过展示上限，已截断。</p>}</section>}
       {url&&<p><a href={url} target="_blank" rel="noreferrer">{url}</a></p>}
       {row.diff&&<section aria-label="文件差异"><div className="execution-detail-heading"><strong>文件差异</strong><Copy text={row.diff} label="复制差异"/></div><pre className="chat-execution-diff">{row.diff.split('\n').map((line,index)=><span key={index} className={line.startsWith('+')&&!line.startsWith('+++')?'is-added':line.startsWith('-')&&!line.startsWith('---')?'is-removed':''}>{line}{'\n'}</span>)}</pre>{row.truncated?.diff&&<p className="execution-note">差异超过展示上限，已截断。</p>}</section>}

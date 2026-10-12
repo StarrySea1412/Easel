@@ -29,7 +29,7 @@ function RequestCard({request, sessionId, turnId, refresh}: {request: CodexPendi
     {error && <p role="alert">{error}</p>}
   </div>;
 }
-export default function CodexRunPanel({sessionId,turnId,streaming}: {sessionId:string;turnId:string;streaming:boolean}) {
+export default function CodexRunPanel({sessionId,turnId,streaming,onProgressOwnership}: {sessionId:string;turnId:string;streaming:boolean;onProgressOwnership?:(owned:boolean)=>void}) {
   const [turn,setTurn]=useState<CodexTurn|null>(null), [error,setError]=useState(''), [revision,setRevision]=useState(0);
   useEffect(()=>{
     const controller=new AbortController(); let reading=false;
@@ -46,7 +46,7 @@ export default function CodexRunPanel({sessionId,turnId,streaming}: {sessionId:s
   return <div className="codex-run-panel">
     <p className="codex-reasoning-state" role="status">Codex · {reasoning}{current?.outcome==='interrupted'?' · 已停止':''}</p>
     {current?.pending.map(request=><RequestCard key={request.requestId} request={request} sessionId={sessionId} turnId={turnId} refresh={()=>setRevision(v=>v+1)}/>)}
-    <ChatExecutionPanel sessionId={sessionId} turnId={turnId} streaming={streaming}/>
+    <ChatExecutionPanel sessionId={sessionId} turnId={turnId} streaming={streaming} onProgressOwnership={onProgressOwnership}/>
     <details className="execution-runtime"><summary>本轮引擎与用量</summary><p>请求模型：{current?.requestedModelRef || '等待回执'} · 运行模型：{current?.actualModel || '未返回'}。网页检索：{current?.webSearch==='cached'?'缓存检索':'未上报'}。</p>{Boolean(current?.tokenUsage)&&<pre>{print(current?.tokenUsage)}</pre>}</details>
     {error && <p role="alert">{error}<button type="button" onClick={()=>setRevision(v=>v+1)}>重新读取</button></p>}
   </div>;

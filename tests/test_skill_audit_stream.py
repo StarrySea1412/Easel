@@ -109,5 +109,14 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
             assert any(turn[1] == 'done' and 'The complete isolated response.' in turn[2] for turn in saved)
             assert any('执行核验' in json.loads(event['data']) for event in events if event['event'] == 'activity')
         assert ('finish' in calls) == (failure == 'finish')
+        from easel.execution_store import read_snapshot
+        journal = read_snapshot(web.OUTPUTS_DIR, 'audit-stream', 'turn1')
+        assert journal['timeline'][0]['type'] == 'progress'
+        assert '已收到' in journal['timeline'][0]['text']
+        execution = [json.loads(event['data']) for event in events if event['event'] == 'execution']
+        assert execution and execution[-1]['timeline'] == journal['timeline']
+        assert execution[-1]['sessionId'] == 'audit-stream' and execution[-1]['turnId'] == 'turn1'
+        restored = await web.api_chat_execution('audit-stream', 'turn1')
+        assert restored['timeline'] == journal['timeline']
 
     asyncio.run(scenario())

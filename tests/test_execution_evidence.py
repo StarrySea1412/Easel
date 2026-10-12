@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from easel.execution import begin, returned, codex_rows, page
-from easel.execution_store import ExecutionStore, read
+from easel.execution_store import ExecutionStore, read, read_snapshot, location
 from easel.codex_service import CodexService
 
 
@@ -48,6 +48,27 @@ def test_live_gateway_updates_deduplicate_persist_and_keep_final(tmp_path):
     rows = read(tmp_path, 'chat', 'turn')
     assert len(rows) == 1 and rows[0]['status'] == 'completed' and rows[0]['output'] == 'terminal output'
     assert not read(tmp_path, 'other', 'turn')
+
+
+def test_gateway_progress_order_survives_restart_and_legacy_rows_are_not_given_fake_order(tmp_path):
+    store = ExecutionStore(tmp_path, 's', 't')
+    store.progress('检查输入 token=private-value')
+    store.consume({'stream': 'tool', 'data': {'phase': 'start', 'toolCallId': 'c', 'name': 'exec', 'args': {'command': 'example'}}})
+    store.progress('检查输出')
+    restored = ExecutionStore(tmp_path, 's', 't')
+    restored.progress('检查输出')
+    restored.progress('结束')
+    value = read_snapshot(tmp_path, 's', 't')
+    assert [entry['type'] for entry in value['timeline']] == ['progress', 'operation', 'progress', 'progress']
+    assert [entry['order'] for entry in value['timeline']] == [1, 2, 3, 4]
+    assert 'private-value' not in json.dumps(value)
+    assert value['operations'][0]['order'] == 2
+    assert read_snapshot(tmp_path, 'other', 't') == {}
+    legacy_path = location(tmp_path, 'old', 'turn')
+    legacy_path.write_text(json.dumps({'sessionId': 'old', 'turnId': 'turn',
+                                      'operations': [{'id': 'old-row', 'name': 'exec'}]}))
+    legacy = ExecutionStore(tmp_path, 'old', 'turn')
+    assert legacy.timeline == [] and 'order' not in legacy.rows['old-row']
 
 
 def test_truncation_is_explicit_and_pages_cover_all_operations():
@@ -143,6 +164,9 @@ def test_codex_progress_is_separate_from_final_and_truncation_is_visible(tmp_pat
     emit('item/completed',item={'id':'f','type':'fileChange','status':'completed','changes':[{'path':'a.py','diff':'+'*70000}]})
     value=service.execution('s','t')
     assert state['text']=='delivered' and value['progress']==['checking files']
+    assert [entry['type'] for entry in value['timeline']] == ['progress', 'operation', 'operation']
+    assert [entry['order'] for entry in value['timeline']] == [0, 2, 3]
+    assert CodexService(tmp_path).execution('s', 't')['timeline'] == value['timeline']
     assert value['operations'][0]['truncated']['output'] and value['operations'][1]['truncated']['diff']
 
 

@@ -45,6 +45,7 @@
 .brush-guide-empty span { font-size: 10px; }
 .brush-guide-error { color: var(--red); }.brush-guide-error button { display: block; margin-top: 8px; }
 .skill-picker-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); }
+.skill-picker-footer button:disabled { opacity:.4; cursor:not-allowed; }
 .skill-picker button:focus-visible { outline: 2px solid var(--accent-start); outline-offset: -2px; }
 .chat-composer .composer-heading-main { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; min-width: 0; }
 .composer-selected-skills { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }

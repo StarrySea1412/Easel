@@ -4,11 +4,12 @@ export interface Operation {
   command: string; path: string; output: string; diff: string; cwd?: string; query?: string; url?: string; action?: string;
   startedAt?: string; finishedAt?: string; elapsedSeconds?: number; exitCode?: number; exitSignal?: string;
   processSessionId?: string; added?: number; removed?: number; changeKind?: string; artifactPath?: string;
-  contentHidden?: boolean; source?: string; truncated?: Record<string, boolean>;
+  contentHidden?: boolean; source?: string; truncated?: Record<string, boolean>; order?: number;
 }
+export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {
   sessionId: string; turnId: string; operations: Operation[]; warnings: string[];
-  total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[];
+  total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[]; timeline?:ExecutionEntry[];
 }
 const statuses = new Set(['running','returned','completed','failed','unconfirmed','stopped','denied']);
 export function decodeExecution(value: unknown): ExecutionSnapshot|null {
@@ -18,7 +19,8 @@ export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   if(data.operations.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||!statuses.has(row.status)||['command','path','output','diff'].some(key=>typeof row[key as keyof Operation]!=='string')))return null;
   const plan=Array.isArray(data.plan)?data.plan.filter(x=>x&&typeof x.step==='string'&&['pending','inProgress','completed'].includes(x.status)).slice(0,100):[];
   const progress=Array.isArray(data.progress)?data.progress.filter(x=>typeof x==='string').slice(-50):[];
-  return {...data,plan,progress,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
+  const timeline=Array.isArray(data.timeline)?data.timeline.filter(entry=>entry&&typeof entry.id==='string'&&Number.isSafeInteger(entry.order)&&entry.order>=0&&(entry.type==='progress'?typeof entry.text==='string':entry.type==='operation'&&typeof entry.operationId==='string')).slice(-500):undefined;
+  return {...data,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
 }
 export function publishExecution(value: unknown) {
   const data=decodeExecution(value);
@@ -31,7 +33,13 @@ export function mergeOperations(previous: Operation[], incoming: Operation[]) {
     if(old&&['returned','completed','failed','stopped','denied'].includes(old.status)&&['running','unconfirmed'].includes(row.status))continue;
     map.set(row.id,{...old,...row});
   }
-  return [...map.values()].sort((a,b)=>(Date.parse(a.startedAt||'')||0)-(Date.parse(b.startedAt||'')||0));
+  return [...map.values()].sort((a,b)=>a.order!==undefined&&b.order!==undefined?a.order-b.order:(Date.parse(a.startedAt||'')||0)-(Date.parse(b.startedAt||'')||0));
+}
+export function mergeTimeline(previous:ExecutionEntry[]|undefined,incoming:ExecutionEntry[]|undefined) {
+  if(!incoming)return previous;
+  const entries=new Map((previous||[]).map(entry=>[entry.id,entry]));
+  for(const entry of incoming)entries.set(entry.id,entry);
+  return [...entries.values()].sort((a,b)=>a.order-b.order).slice(-500);
 }
 const kinds:Record<string,string>={command:'终端',read:'读取',file_change:'文件',search:'搜索',browser:'浏览器',tool:'工具'};
 export function operationKind(row:Operation){return kinds[row.kind||'tool']||'工具';}

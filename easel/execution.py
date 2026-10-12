@@ -184,11 +184,12 @@ def artifact(row, outputs, cwd=None):
 
 def codex_rows(state):
     rows = []
-    for item in state.get('items', []):
+    for order, item in enumerate(state.get('items', [])):
         name = item.get('type', '')
         if name in ('userMessage', 'agentMessage', 'reasoning', 'plan'):
             continue
         row = begin(state['sessionId'], state['turn_id'], item['id'], name, item, source='codex')
+        row['order'] = order
         row['status'] = {'inProgress': 'running', 'completed': 'completed', 'failed': 'failed',
                          'declined': 'denied', 'interrupted': 'stopped'}.get(item.get('status'), 'unconfirmed')
         if item.get('_startedAt'):

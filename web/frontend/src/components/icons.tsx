@@ -170,6 +170,9 @@ export const IconFile = ({ size, className, strokeWidth }: P) => (
   </svg>
 );
 export const IconRefresh = IconRetry;
+export const IconTerminal = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className} aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 8 3 4-3 4m6 0h4" /></svg>
+);
 
 export const IconFolder = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>

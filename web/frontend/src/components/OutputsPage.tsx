@@ -8,7 +8,6 @@ import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, Ico
 
 const FILTERS: { key: string; label: string }[] = [
   { key: 'all', label: '全部' },
-  { key: 'imagegen', label: 'AI 生图' },
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
@@ -17,7 +16,7 @@ const FILTERS: { key: string; label: string }[] = [
 
 const KIND_LABEL: Record<string, string> = {
   article: '文章', 'xhs-note': '小红书', video: '视频', cards: '卡片',
-  poster: '海报', audio: '音频', image: 'AI 生图', other: '其他',
+  poster: '海报', audio: '音频', image: '图片', other: '其他',
 };
 const STATUS_LABEL: Record<string, string> = { draft: '草稿', ready: '待发', published: '已发' };
 const STATUS_COLOR: Record<string, string> = { draft: '#94a3b8', ready: '#d97706', published: '#16a34a' };
@@ -102,7 +101,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState('');
   const [stack, setStack] = useState<string[]>([]);   // 当前所在的文件夹名称路径
-  const [filter, setFilter] = useState(initialFilter);
+  const [filter, setFilter] = useState(initialFilter === 'imagegen' ? 'image' : initialFilter);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<OutputNode | null>(null);
   const [content, setContent] = useState('');
@@ -128,7 +127,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     window.addEventListener('easel:outputs-updated', load);
     return () => window.removeEventListener('easel:outputs-updated', load);
   }, [load]);
-  useEffect(() => { setFilter(initialFilter); setStack([]); }, [initialFilter]);
+  useEffect(() => { setFilter(initialFilter === 'imagegen' ? 'image' : initialFilter); setStack([]); }, [initialFilter]);
 
   useEffect(() => {
     if (!selected) return;
@@ -159,7 +158,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
   const files = useMemo(() => {
     const fs = searching ? allFiles(currentNodes) : currentNodes.filter((n) => n.type === 'file');
     const term = query.trim().toLocaleLowerCase();
-    return fs.filter((f) => (filter === 'all' || (filter === 'imagegen' ? generatedImage(f) : f.kind === filter))
+    return fs.filter((f) => (filter === 'all' || f.kind === filter)
       && (!term || `${f.name} ${f.path} ${f.generation?.prompt || ''}`.toLocaleLowerCase().includes(term)))
       .sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   }, [currentNodes, filter, query, searching]);
@@ -279,13 +278,13 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
   const renderFile = (f: OutputNode) => (
     <div key={f.path} className="card card-hover gcard" onClick={() => open(f)}>
       <div className="gcard-thumb">
-        <span className="gcard-kind">{generatedImage(f) ? 'AI 生图' : kindLabel(f)}</span>
+        <span className="gcard-kind">{kindLabel(f)}</span>
         <button className="gcard-del" title="删除" onClick={(e) => remove(f, e)}><IconTrash size={14} /></button>
         <Thumb f={f} />
       </div>
       <div className="gcard-meta">
         <button className="gcard-name" title={f.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); void open(f); }}>{f.name}</button>
-        {f.kind === 'image' && <div className="gcard-sub">{imageDimensions(f) || '查看完整图片'}</div>}
+        {f.kind === 'image' && <div className="gcard-sub" style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>{generatedImage(f) && <span style={badge}>AI 生图</span>}<span>{imageDimensions(f) || '查看完整图片'}</span></div>}
         {f.generation?.prompt && <div className="gcard-sub" title={f.generation.prompt} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4 }}>{f.generation.prompt}</div>}
       </div>
     </div>

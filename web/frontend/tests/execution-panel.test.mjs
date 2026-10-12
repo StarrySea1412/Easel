@@ -97,6 +97,7 @@ test('paging retains 65 operations and loaded history after refreshing the lates
   await view.click('加载较早记录');
   assert.match(view.requests[1].url,/before=25/);
   await view.respond(1,{...payload('a',rows.slice(0,25)),total:65,nextBefore:null});
+  await view.click('只看最近 3 项');
   await view.click('查看全部 65 项');
   assert.equal(view.container.querySelectorAll('details.chat-execution-row').length,65);
   await emit({...payload('a',rows.slice(25)),total:65,nextBefore:25});
@@ -122,4 +123,20 @@ test('returned receipts cannot be revived by delayed running or unconfirmed snap
   assert.match(view.container.textContent,/saved receipt/);
   assert.match(view.container.textContent,/工具已返回/);
   assert.doesNotMatch(view.container.textContent,/late running|late unknown/);
+});
+
+test('progress interleaves by recorded order; partial events preserve earlier entries and reject malformed ones', async t => {
+  const view=await setup(t);
+  const rows=[{...operation('one','completed'),order:2},{...operation('two','failed'),order:4}];
+  const timeline=[{id:'p1',type:'progress',order:1,text:'先检查输入'},
+    {id:'one',type:'operation',order:2,operationId:'one'},
+    {id:'p2',type:'progress',order:3,text:'再检查输出'},
+    {id:'two',type:'operation',order:4,operationId:'two'}];
+  await view.respond(0,{...payload('a',rows),timeline});
+  const list=()=>[...view.container.querySelector('.execution-timeline').children];
+  assert.deepEqual(list().map(el=>el.tagName),['P','DETAILS','P','DETAILS']);
+  assert.match(list()[0].textContent,/先检查输入/);assert.match(list()[3].textContent,/失败/);
+  await emit({...payload('a',[{...rows[1],status:'running'}]),timeline:[{...timeline[2],text:'再检查输出 · 更新'},{id:'bad',type:'progress',order:NaN,text:'INVALID ENTRY'}]});
+  assert.equal(list().length,4);assert.match(list()[2].textContent,/更新/);
+  assert.match(list()[3].textContent,/失败/);assert.doesNotMatch(view.container.textContent,/INVALID ENTRY/);
 });

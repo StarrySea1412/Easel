@@ -127,9 +127,21 @@ class CodexService:
     def execution(self, sid, tid, before=None, limit=40):
         state = self.snapshot(sid, tid)
         state['_outputs'] = self.outputs
+        rows = codex_rows(state)
         return {'sessionId': sid, 'turnId': tid, 'warnings': [], 'source': 'codex',
-                **page(codex_rows(state), before, limit), 'plan': state.get('plan', []),
-                'progress': self._progress(state)}
+                **page(rows, before, limit), 'plan': state.get('plan', []),
+                'progress': self._progress(state), 'timeline': self._timeline(state, rows)}
+
+    @staticmethod
+    def _timeline(state, rows):
+        entries = []
+        for order, item in enumerate(state.get('items', [])):
+            if item.get('type') == 'agentMessage' and item.get('phase') == 'commentary' and item.get('text'):
+                entries.append({'id': 'progress-' + item['id'], 'type': 'progress',
+                                'order': order, 'text': public_text(item['text'], limit=4000)})
+            entries.extend({'id': row['id'], 'type': 'operation', 'operationId': row['id'], 'order': order}
+                           for row in rows if row['order'] == order)
+        return entries[-500:]
 
     @staticmethod
     def _progress(state):
@@ -138,9 +150,10 @@ class CodexService:
                 and item.get('text')][-50:]
 
     def _execution_event(self, state):
+        rows = codex_rows({**state, '_outputs': self.outputs})
         self._event(state, 'execution', {'sessionId': state['sessionId'], 'turnId': state['turn_id'],
-            **page(codex_rows({**state, '_outputs': self.outputs}), limit=100), 'source': 'codex',
-            'plan': state.get('plan', []), 'progress': self._progress(state)})
+            **page(rows, limit=100), 'source': 'codex',
+            'plan': state.get('plan', []), 'progress': self._progress(state), 'timeline': self._timeline(state, rows)})
 
     def _event_path(self, sid, tid):
         return self.folder(sid) / 'turns' / (key(tid) + '.jsonl')

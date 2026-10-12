@@ -40,7 +40,8 @@ async function fixture(t, initial = {}, mode = 'page') {
   t.mock.method(globalThis, 'fetch', async url => {
     const data = url === '/api/skills' ? await h.catalog(++h.catalogCalls)
       : url === '/api/upload/limits' ? { max_mb: 50 }
-        : String(url).startsWith('/api/skill/') ? { name: String(url).split('/').at(-1), content: '' } : { records: [] };
+        : String(url).startsWith('/api/skill/') ? { name: String(url).split('/').at(-1), content: '' }
+          : String(url).includes('/api/agent-office/models') ? {available:true,scope:'next_turn',options:[],currentModelRef:null} : { records: [] };
     return { ok: true, json: async () => data };
   });
   const container = document.createElement('div'); document.body.append(container);
@@ -83,7 +84,7 @@ test('actual picker selection remains visible after closing and sends exact sele
   assert.match(view.container.querySelector('[aria-label="已选择的创作技能"]').textContent, /已选技能.*小红书卡组.*金句卡/);
   await view.type('只发送我输入的正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent, [['只发送我输入的正文', [], [first.name, second.name], {}, 'medium']]);
+  assert.deepEqual(view.h.sent, [['只发送我输入的正文', [], [first.name, second.name], {}, undefined]]);
   assert.deepEqual(view.chips(), [first.name, second.name], 'accepted sends retain the next-turn skill choices');
   await view.click(view.container.querySelector('[aria-label="移除技能 小红书卡组"]'));
   assert.deepEqual(view.chips(), [second.name]);
@@ -189,7 +190,7 @@ test('actual Composer sends per-session requirements after navigation, remount a
   view.storage.values.set(view.requirementKey('b'), JSON.stringify({ [first.name]: '会话二：采用列表' }));
   await view.render('a'); await view.type('会话一正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.sent.at(-1), ['会话一正文', [], [first.name], { [first.name]: '会话一：保留出处' }, 'medium']);
+  assert.deepEqual(view.h.sent.at(-1), ['会话一正文', [], [first.name], { [first.name]: '会话一：保留出处' }, undefined]);
   await view.render('a', [{ role: 'user', content: '已发送正文' }]);
   await view.render('b', []); await view.reload(); await view.type('会话二正文');
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
@@ -231,7 +232,21 @@ test('welcome suggestions include the active conversation requirements', async t
   view.storage.values.set(view.requirementKey('a'), JSON.stringify({ [first.name]: '建议入口也遵守' }));
   await view.render();
   await view.click(view.container.querySelector('.suggestion-card'));
-  assert.deepEqual(view.h.sent.at(-1).slice(1), [undefined, [first.name], { [first.name]: '建议入口也遵守' }]);
+  assert.deepEqual(view.h.sent.at(-1).slice(1), [undefined, [first.name], { [first.name]: '建议入口也遵守' }, undefined, undefined]);
+});
+
+test('preview is not selection; completion is disabled again after removing the last skill', async t => {
+  const view=await fixture(t);await view.render();await view.open();
+  const done=()=>document.querySelector('.skill-picker-footer button');
+  assert.equal(done().disabled,true);
+  const item=document.querySelector('.brush-item');
+  await act(async()=>item.focus());
+  assert.ok(document.querySelector('.brush-item.is-previewed'));
+  assert.equal(item.getAttribute('aria-pressed'),'false');assert.equal(done().disabled,true);
+  await view.pick('小红书卡组');assert.equal(done().disabled,false);
+  await view.pick('小红书卡组');assert.equal(done().disabled,true);
+  await view.click(done());assert.ok(document.querySelector('.skill-picker'));
+  await view.close();assert.equal(document.querySelector('.skill-picker'),null);
 });
 
 test('read-only imported conversations do not mount skill controls or read forged requirement preferences', async t => {

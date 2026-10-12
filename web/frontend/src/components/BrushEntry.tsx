@@ -107,7 +107,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
           return <button key={skill.name} type="button" className={`brush-item${selected ? ' is-selected' : ''}${preview === skill.name ? ' is-previewed' : ''}`} aria-pressed={selected} onMouseEnter={() => setPreview(skill.name)} onFocus={() => setPreview(skill.name)} onClick={() => pick(skill)}><span className={`brush-dot ${needsSetup ? 's-need' : 's-ready'}`} aria-hidden="true" /><div className="brush-item-copy"><span className="brush-il">{displayName(skill.name)}</span><span className="brush-idesc">{skill.description || skill.name}</span><div className="brush-item-meta">{needsSetup && <span className="brush-needs">需要配置 API</span>}<SkillDependencyBadges skill={skill} /></div></div><span className="brush-iadd" aria-hidden="true">{selected ? '✓' : '＋'}</span></button>;
         })}</div>)}
       </div><SkillGuidePreview skillName={preview && installed.has(preview) ? preview : null} onPick={(text, skill) => { if (installed.has(skill)) { onPick(text, skill, true); close(); } }} /></div>
-      <footer className="skill-picker-footer"><span>已选 {selectedSkills.length} 个 · 点击已选项可移除</span><button type="button" className="btn btn-primary btn-sm" onClick={close}>完成选择</button></footer>
+      <footer className="skill-picker-footer"><span>已选 {selectedSkills.length} 个 · {selectedSkills.length ? '点击已选项可移除' : '点击技能添加，预览不算选中'}</span><button type="button" className="btn btn-primary btn-sm" disabled={!selectedSkills.length} onClick={() => { if (selectedSkills.length) close(); }}>完成选择</button></footer>
     </div>, document.body)}
   </div>;
 }

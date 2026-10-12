@@ -226,7 +226,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-                execution={!isImported && msg.role === 'assistant' && auditTurn ? session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
+                executionScope={`${session.id}:${auditTurn||''}`}
+                execution={!isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
                 status={session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
               /></Fragment>
             );

@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 import time
 
-from .execution import begin, returned, ident
+from .execution import begin, returned, ident, public_text
 
 
 def location(root, session, turn):
@@ -13,22 +13,48 @@ def location(root, session, turn):
     return Path(root) / '_execution' / (digest + '.json')
 
 
-def read(root, session, turn):
+def read_snapshot(root, session, turn):
     try:
         value = json.loads(location(root, session, turn).read_text(encoding='utf-8'))
-        if value.get('sessionId') == session and value.get('turnId') == turn:
-            return value.get('operations', [])
+        if isinstance(value, dict) and value.get('sessionId') == session and value.get('turnId') == turn:
+            return value
     except (OSError, ValueError):
         pass
-    return []
+    return {}
+
+
+def read(root, session, turn):
+    return read_snapshot(root, session, turn).get('operations', [])
 
 
 class ExecutionStore:
     def __init__(self, root, session, turn, credentials=None):
         self.root, self.session, self.turn, self.credentials = root, session, turn, credentials
-        self.rows = {row['id']: row for row in read(root, session, turn)}
+        saved = read_snapshot(root, session, turn)
+        self.rows = {row['id']: row for row in saved.get('operations', [])}
+        self.timeline = saved.get('timeline', [])
+        self.order = max((entry['order'] for entry in self.timeline), default=0)
         self.seen = set()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+
+    def snapshot(self):
+        with self.lock:
+            return {'sessionId': self.session, 'turnId': self.turn, 'source': 'gateway',
+                    'operations': [dict(row) for row in list(self.rows.values())[-100:]],
+                    'timeline': [dict(entry) for entry in self.timeline[-500:]]}
+
+    def progress(self, text):
+        text = public_text(text, self.credentials, 4000).strip()
+        if not text:
+            return
+        with self.lock:
+            if self.timeline and self.timeline[-1].get('text') == text:
+                return
+            self.order += 1
+            self.timeline.append({'id': f'progress-{self.order}', 'type': 'progress',
+                                  'order': self.order, 'text': text})
+            self.timeline = self.timeline[-500:]
+            self.persist()
 
     def consume(self, payload):
         data = payload.get('data')
@@ -55,6 +81,11 @@ class ExecutionStore:
                 if row['name'] == 'process' and isinstance(data.get('args'), dict):
                     row['processSessionId'] = data['args'].get('sessionId', '')
                 self.rows[row_id] = row
+                self.order += 1
+                row['order'] = self.order
+                self.timeline.append({'id': row_id, 'type': 'operation',
+                                      'operationId': row_id, 'order': self.order})
+                self.timeline = self.timeline[-500:]
             elif row is None:
                 return None  # Unmatched outputs are not public evidence.
             elif row['status'] != 'running':
@@ -73,8 +104,7 @@ class ExecutionStore:
                         if original['name'] != 'process' and original.get('processSessionId') == process:
                             returned(original, result, time.time(), self.credentials, partial=phase == 'update')
             self.persist()
-            return {'sessionId': self.session, 'turnId': self.turn, 'source': 'gateway',
-                    'operations': list(self.rows.values())[-100:]}
+            return self.snapshot()
 
     def finish(self):
         with self.lock:
@@ -88,5 +118,6 @@ class ExecutionStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps({'sessionId': self.session, 'turnId': self.turn,
-                                  'operations': list(self.rows.values())}, ensure_ascii=False), encoding='utf-8')
+                                  'operations': list(self.rows.values()),
+                                  'timeline': self.timeline}, ensure_ascii=False), encoding='utf-8')
         tmp.replace(path)

@@ -34,3 +34,19 @@ test('real OutputsPage waits for the tree then opens the linked file preview', a
   assert.equal(calls.some(url=>url.includes('project/readme.md')),true);
   await act(async()=>root.unmount());node.remove();
 });
+
+test('image category includes generated and ordinary images; legacy entry normalizes and AI remains a tag', async t => {
+  const tree=[{name:'images',type:'dir',path:'images',children:[{name:'generated.png',type:'file',kind:'image',path:'images/generated.png',source:'imagegen'}]},
+    {name:'import.png',type:'file',kind:'image',path:'import.png'},
+    {name:'readme.md',type:'file',kind:'text',path:'readme.md'}];
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>tree}));
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  t.after(async()=>{await act(async()=>root.unmount());node.remove();});
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:'imagegen'})));
+  const chips=[...node.querySelectorAll('.gallery-filter-options .chip')];
+  assert.equal(chips.some(chip=>chip.textContent==='AI 生图'),false);
+  assert.equal(chips.find(chip=>chip.textContent==='图片').getAttribute('aria-pressed'),'true');
+  assert.deepEqual([...node.querySelectorAll('.gcard-name')].map(el=>el.textContent).sort(),['generated.png','import.png']);
+  assert.deepEqual([...node.querySelectorAll('.gcard-kind')].map(el=>el.textContent),['图片','图片']);
+  assert.equal([...node.querySelectorAll('.gcard-sub span')].filter(el=>el.textContent==='AI 生图').length,1);
+});

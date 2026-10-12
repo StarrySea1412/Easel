@@ -4,3 +4,4 @@
 .codex-actions button:disabled{opacity:.5;cursor:default}.codex-run-panel pre,.codex-request pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font-size:12px}
 .codex-request{padding:12px;margin:8px 0;border:1px solid var(--border);border-radius:8px}.codex-request fieldset{border:0;padding:5px 0}.codex-request input{display:block;max-width:100%;width:100%;margin:8px 0;padding:8px;box-sizing:border-box}.codex-request button[aria-pressed=true]{outline:2px solid currentColor}.codex-run-panel summary{cursor:pointer}.codex-reasoning-state{color:var(--text-secondary)}
 .composer-engine{max-width:160px}.composer-tools{flex-wrap:wrap}
+.codex-run-panel{padding:0;border:0;border-radius:0;margin:8px 0}.codex-run-panel .execution-progress-text{margin:12px 0}.codex-reasoning-state{font-size:12px}

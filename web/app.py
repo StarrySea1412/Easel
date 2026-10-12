@@ -3538,6 +3538,12 @@ async def api_chat_stream(req: ChatRequest):
 
         def to_client(kind, text=None, **extra):
             nonlocal event_seq, turn_error
+            if kind == 'activity' and isinstance(text, str):
+                try:
+                    execution_store.progress(text)
+                    to_client('execution', execution_store.snapshot())
+                except OSError:
+                    pass  # Preserve the original activity even if its journal cannot be written.
             if kind in ('error', 'done'):
                 to_client('timing', timing(True))
             if kind == 'error' and isinstance(text, dict):
@@ -4201,8 +4207,7 @@ async def api_chat_stream(req: ChatRequest):
         finally:
             try:
                 execution_store.finish()
-                to_client('execution', {'sessionId': sk, 'turnId': turn_id, 'source': 'gateway',
-                    'operations': list(execution_store.rows.values())[-100:]})
+                to_client('execution', execution_store.snapshot())
             except OSError:
                 to_client('activity', '执行记录保存失败；本轮结束回执仍保留。')
             xlock.release()
@@ -6791,18 +6796,21 @@ async def api_skill_audits(sessionId: str, turnId: str | None = None):
 @app.get('/api/chat/execution/{session_id}/{turn_id}')
 async def api_chat_execution(session_id: str, turn_id: str, before: int | None = None, limit: int = 40):
     import chat_execution
-    from easel.execution_store import read as read_execution
+    from easel.execution_store import read_snapshot as read_execution
     if before is not None and before < 0 or not 1 <= limit <= 100:
         raise HTTPException(400, '执行记录分页参数无效')
     if _codex_service.owns(session_id):
         return _codex_service.execution(session_id, turn_id, before, limit)
     process = _RUNNING_CHAT.get(session_id)
     live = process is not None and process.poll() is None and _ACTIVE_SKILL_TURNS.get(session_id) == turn_id
+    journal = read_execution(OUTPUTS_DIR, session_id, turn_id)
     result = await asyncio.to_thread(chat_execution.snapshot, session_id, turn_id,
         OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR, live=live, credentials=gateway_credentials(),
-        before=before, limit=limit, journal=read_execution(OUTPUTS_DIR, session_id, turn_id), outputs=OUTPUTS_DIR)
+        before=before, limit=limit, journal=journal.get('operations', []), outputs=OUTPUTS_DIR)
+    result['timeline'] = journal.get('timeline', [])[-500:]
     if live and (_RUNNING_CHAT.get(session_id) is not process or _ACTIVE_SKILL_TURNS.get(session_id) != turn_id):
         result['operations'] = []
+        result['timeline'] = []
         result['warnings'] = ['执行轮次正在更新，请稍后查看。']
     return result
 
