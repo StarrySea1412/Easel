@@ -10,6 +10,8 @@
 
 # Easel 创作工作台
 
+> **2026-10-12 界面修正已完成**：执行操作改为小图标和一行摘要，点击展开命令、回执与diff；工作进度按记录顺序穿插，不重复显示，旧操作缺共同顺序时明确说明。技能未选中时禁用“完成选择”，预览不算选中；内容库统一“图片”分类，生成图片以“AI 生图”标签区分，工坊历史进入同一分类。前端42项、后端62项定向检查及构建通过，真实隔离Chromium验证桌面/390px、键盘/复制/分页/实时更新、实际文件跳转、图片预览下载和Codex审批入口。模型和工具事件为模拟，没有新增模型或付费请求。源码服务7880已更新，功能提交[aa98aab4](https://github.com/StarrySea1412/Easel/commit/aa98aab462dcdf8d3afcaa9a742378cf0c1704d0)；详见[验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)。main仅同步首页，便携打包继续暂停。
+
 > **2026-10-12 执行展示首版已实现**：OpenClaw/Codex共用操作卡，完整命令、目录、输出、退出码和后台进程可查；文件diff与回执同显、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，中断未完成项标为未确认。后端112项、前端102项定向回归及构建通过，真实隔离Chromium检查键盘/复制/实时终态/分页、实际本地文件跳转及390px。引擎事件为模拟，没有新增真实模型或付费服务调用；远端恢复对账、完整浏览器闭环及Codex技能/办公室适配仍待完成。源码提交[11874bf7](https://github.com/StarrySea1412/Easel/commit/11874bf7741590d1ab6a68e23d48b1b481b508ae)，见[实现与验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)；main只同步首页说明，原接入计划保留，打包继续暂停。
 
 > **当前打包暂停，等待用户新指令。** [桌面应用、包体/启动与 ZCode / DeepSeek Harness 差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)已完成；建议先补齐执行/产物机制和优化重型运行组件，再验证 Windows WebView2 桌面窗口。仅评估和规划，未迁移到 Electron/Tauri、未修改现有 Codex 接入计划。
