@@ -12,7 +12,7 @@
 
 > **October 12, 2026 turn duration**: Show elapsed time during generation, freeze it on completion, failure or stop, and preserve it across reloads and backups. Targeted checks passed: 39 frontend and 46 backend tests, plus production build. See the [delivery record](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md) for live verification.
 
-> **October 12, 2026 reasoning declarations**: Configure reasoning for an exact saved model, preserve explicit source capabilities on import, and avoid carrying them across model changes. Targeted offline checks passed: 146 backend and 22 frontend tests, plus production build. Live gateway and generation evidence are tracked separately in the [fix record](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md).
+> **October 12, 2026 automatic highest effort**: Reasoning defaults to the highest effort supported by the current model, with manual choices in the composer and no separate configuration panel. Imports preserve explicit capabilities without carrying them across models. The current aihub model supports up to high; live generation has still encountered upstream 502 errors. See the [fix record](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md).
 
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.
 

@@ -12,7 +12,7 @@
 
 > **2026-10-12 对话耗时**：生成中显示实时用时，结束、失败或停止后保留耗时，刷新与备份保留记录。前端39、后端46项相关定向检查及构建通过；真实浏览器与本机更新状态见[耗时交付记录](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md)。
 
-> **2026-10-12 推理声明修复**：新增精确模型的推理声明设置，导入保留来源能力，切换模型不继承旧能力。离线后端146、前端22项定向检查及构建通过；真实网关与生成验证单独记录。[修复与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。
+> **2026-10-12 自适应最高**：思考强度默认匹配当前模型支持的最高档，手动调整只在对话框；移除独立推理配置。导入保留明确能力，切模型不继承旧声明。当前 aihub 模型可用最高档为“高”，生成仍遇到上游 502。[修复与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 

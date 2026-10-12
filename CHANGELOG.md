@@ -78,7 +78,7 @@ October 10 density and alignment: skill setup status and capability badges share
 
 - 新增每轮对话耗时：生成中计时，结束/失败/停止后保留，支持事件重放、刷新恢复与会话备份。
 
-- 修复自定义模型导入丢失推理声明，新增精确模型的推理能力设置及快速添加声明。
+- 修复自定义模型导入丢失推理声明；思考强度默认自适应最高，手动调整集中在对话框，按最新要求移除独立声明配置。
 - 模型变化不继承旧推理能力；保留网关的实际档位校验。离线后端146、前端22项定向通过，真实调用另记。
 
 Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.

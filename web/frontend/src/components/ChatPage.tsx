@@ -16,7 +16,7 @@ import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { loadComposerModel } from '../lib/composerModel';
-import { loadThinkingLevel } from '../lib/thinkingLevel';
+import { loadThinkingLevel, resolveThinkingPreference } from '../lib/thinkingLevel';
 import { fetchOfficeTaskModels } from '../lib/officeControls';
 
 interface ChatPageProps {
@@ -67,13 +67,13 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     if (stream || stopping || session.importedFromBackup || suggestionPending.current) return;
     const skills = readSelectedSkills(session.id), requirements = readSkillRequirements(session.id, skills);
     const modelRef = loadComposerModel();
-    if (!modelRef) { onSend(prompt, undefined, skills, requirements); return; }
     suggestionPending.current = true;
     try {
       const capability = await fetchOfficeTaskModels(session.id, new AbortController().signal);
       if (!suggestionMounted.current || suggestionContext.current.sessionId !== session.id || suggestionContext.current.blocked) return;
-      if (!capability.available || !capability.options.some(option => option.id === modelRef && option.configured)) { setSuggestionError('所选模型当前不可用，请在输入框刷新模型或改用会话配置。'); return; }
-      setSuggestionError(''); onSend(prompt, undefined, skills, requirements, loadThinkingLevel(), modelRef);
+      const effective = capability.options.find(option => option.id === (modelRef || capability.currentModelRef || capability.defaultModelRef) && option.configured);
+      if (!capability.available || (modelRef && !effective)) { setSuggestionError('所选模型当前不可用，请在输入框刷新模型或改用会话配置。'); return; }
+      setSuggestionError(''); onSend(prompt, undefined, skills, requirements, resolveThinkingPreference(loadThinkingLevel(), effective?.thinkingLevels), modelRef || undefined);
     } catch { if (suggestionMounted.current && suggestionContext.current.sessionId === session.id && !suggestionContext.current.blocked) setSuggestionError('模型选项暂不可核验，请在输入框刷新后重试。'); }
     finally { suggestionPending.current = false; }
   };

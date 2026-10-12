@@ -14,8 +14,8 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: wind
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 const { createRoot } = await import('react-dom/client');
 const { default: Composer } = await loadTsModule('../src/components/ChatComposer.tsx', import.meta.url);
-const { THINKING_LEVELS } = await loadTsModule('../src/lib/thinkingLevel.ts', import.meta.url);
-const KEY = 'easel_thinking_level';
+const { THINKING_LEVELS, resolveThinkingPreference } = await loadTsModule('../src/lib/thinkingLevel.ts', import.meta.url);
+const KEY = 'easel_thinking_preference';
 let sequence = 0;
 
 test('only Ultra enables the highlighted theme and particles, and leaving Ultra removes them', async t => {
@@ -30,7 +30,7 @@ test('only Ultra enables the highlighted theme and particles, and leaving Ultra 
   assert.equal(view.container.querySelector('.thinking-level-particles'), null);
 });
 
-async function fixture(t, preference, { strict = false, selectedModel } = {}) {
+async function fixture(t, preference, { strict = false, selectedModel, otherModel } = {}) {
   const values = new Map(preference === undefined ? [] : [[KEY, preference]]);
   if (selectedModel) values.set('easel_chat_model_ref', selectedModel.id);
   const storage = { values, writes: [], blocked: false, failWrite: false,
@@ -40,7 +40,7 @@ async function fixture(t, preference, { strict = false, selectedModel } = {}) {
   };
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   t.mock.method(globalThis, 'fetch', async url => ({ ok: true, json: async () => url === '/api/upload/limits' ? { max_mb: 50 }
-    : String(url).includes('/agent-office/models') ? { available: true, scope: 'next_turn', options: selectedModel ? [selectedModel] : [] } : [] }));
+    : String(url).includes('/agent-office/models') ? { available: true, scope: 'next_turn', options: selectedModel ? [selectedModel, ...(otherModel ? [otherModel] : [])] : [] } : [] }));
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container), sent = [];
   let sessionId = `thinking-composer-${++sequence}`, busy = {};
@@ -60,6 +60,7 @@ async function fixture(t, preference, { strict = false, selectedModel } = {}) {
     menu: () => container.querySelector('.thinking-level-menu[role=dialog]'),
     slider: () => container.querySelector('input[type=range][aria-label="思考强度"]'),
     async choose(level, element = this.slider()) { assert.ok(element); await act(async () => {
+      if (level === 'auto') { container.querySelector('.thinking-level-auto').click(); return; }
       if (level === 'adaptive') { container.querySelector('.thinking-level-adaptive').click(); return; }
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, String(THINKING_LEVELS.filter(value => value !== 'adaptive').indexOf(level)));
       element.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -84,9 +85,9 @@ test('unsupported saved strength automatically matches the runtime without losin
   await act(async () => info.focus());
   assert.match(document.querySelector('[role=tooltip]').textContent, /已按网关能力声明使用关闭/);
   await view.click(view.trigger());
-  assert.equal(view.container.querySelector('.thinking-level-adaptive').disabled, true);
+  assert.equal(view.container.querySelector('.thinking-level-adaptive'), null);
   assert.equal(view.container.querySelector('[aria-label="选择Ultra思考强度"]').disabled, true);
-  assert.equal(view.container.querySelector('.thinking-level-reset').disabled, true);
+  assert.equal(view.container.querySelector('.thinking-level-reset').disabled, false);
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.sent.length, 1); assert.equal(view.sent[0][4], 'off');
   assert.equal(view.sent[0][0], '自动匹配后的草稿');
@@ -100,9 +101,9 @@ test('StrictMode mount and remount read a saved preference without saving or rep
   assert.deepEqual(view.storage.writes.filter(([key]) => key === KEY), []);
 });
 
-test('invalid saved strength falls back to medium without rewriting until an explicit selection', async t => {
+test('invalid saved strength falls back to auto without rewriting until an explicit selection', async t => {
   const view = await fixture(t, 'old-invalid-level', { strict: true }); await view.render();
-  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：中');
+  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：自适应最高');
   assert.equal(view.storage.values.get(KEY), 'old-invalid-level');
   await view.click(view.trigger()); await view.choose('ultra');
   assert.equal(view.storage.values.get(KEY), 'ultra');
@@ -169,8 +170,8 @@ test('outside pointer closes menu without changing the current strength', async 
   assert.equal(view.menu(), null); assert.equal(view.storage.values.get(KEY), 'adaptive');
 });
 
-test('eight strength stops and a separate adaptive button persist all nine values', async t => {
-  const view = await fixture(t); await view.render(); await view.click(view.trigger());
+test('manual strength stops and model adaptive remain available, and reset restores auto', async t => {
+  const view = await fixture(t, undefined, {selectedModel:{id:'fixture/all',provider:'fixture',model:'all',configured:true,thinkingLevels:[...THINKING_LEVELS]}}); await view.render(); await view.click(view.trigger());
   assert.equal(view.slider().min, '0'); assert.equal(view.slider().max, String(THINKING_LEVELS.length - 2)); assert.equal(view.slider().step, '1');
   for (const level of THINKING_LEVELS) {
     await view.choose(level);
@@ -180,8 +181,8 @@ test('eight strength stops and a separate adaptive button persist all nine value
     assert.match(view.trigger().getAttribute('aria-label'), /^思考强度：/);
   }
   await view.click(view.container.querySelector('.thinking-level-reset'));
-  assert.equal(view.storage.values.get(KEY), 'medium');
-  assert.equal(view.slider().getAttribute('aria-valuetext'), '中');
+  assert.equal(view.storage.values.get(KEY), 'auto');
+  assert.equal(view.slider().getAttribute('aria-valuetext'), '自适应最高');
   assert.equal(view.container.querySelector('.thinking-level-reset').disabled, true);
   assert.equal(document.activeElement, view.slider());
 });
@@ -196,10 +197,42 @@ test('the compact popup identifies the selected configured model without claimin
   assert.equal(view.sent.length, 0);
 });
 
-test('session configuration has an honest model fallback and contains no invented model name', async t => {
+test('auto without known capabilities uses an honest model fallback', async t => {
   const view = await fixture(t); await view.render(); await view.click(view.trigger());
   assert.equal(view.menu().querySelector('.thinking-level-model > span').textContent, '沿用会话模型');
-  assert.equal(view.menu().querySelector('.thinking-level-heading strong').textContent, '中');
+  assert.equal(view.menu().querySelector('.thinking-level-heading strong').textContent, '自适应最高');
+});
+
+test('auto resolves the highest supported concrete effort and never guesses unknown capabilities', () => {
+  assert.equal(resolveThinkingPreference('auto', ['off','minimal','low','medium','high']), 'high');
+  assert.equal(resolveThinkingPreference('auto', ['off','xhigh','adaptive','max','ultra']), 'ultra');
+  assert.equal(resolveThinkingPreference('auto', ['off','adaptive']), 'adaptive');
+  assert.equal(resolveThinkingPreference('auto', ['off']), 'off');
+  assert.equal(resolveThinkingPreference('auto', ['unrecognized']), undefined);
+  assert.equal(resolveThinkingPreference('auto'), undefined);
+});
+
+test('default auto sends high for the current model, survives refresh, and manual low overrides it', async t => {
+  const view = await fixture(t, undefined, {selectedModel:{id:'fixture/reasoning',provider:'fixture',model:'reasoning',configured:true,thinkingLevels:['off','low','medium','high']},
+    otherModel:{id:'fixture/stronger',provider:'fixture',model:'stronger',configured:true,thinkingLevels:['off','low','xhigh']}});
+  await view.render();
+  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：自适应最高');
+  assert.equal(view.storage.values.has(KEY), false, 'resolving auto does not replace the preference with high');
+  await view.reload(); await view.type('最高档请求'); await view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  assert.equal(view.sent[0][4], 'high');
+  await view.click(view.trigger()); await view.choose('low'); await view.reload();
+  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：低');
+  await view.type('手动低档'); await view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  assert.equal(view.sent[1][4], 'low');
+  await view.click(view.trigger()); await view.choose('auto'); await view.reload();
+  assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：自适应最高');
+  assert.equal(view.storage.values.get(KEY), 'auto');
+  await view.click(view.container.querySelector('[aria-label="本轮使用模型"]'));
+  await view.click([...document.querySelectorAll('[role="option"]')].find(element => element.textContent.includes('stronger')));
+  await view.type('切换后最高档'); await view.click(view.container.querySelector('[aria-label="发送消息"]'));
+  assert.equal(view.sent[2][4], 'xhigh');
+  assert.equal(view.sent[2][5], 'fixture/stronger');
+  assert.equal(view.storage.values.get(KEY), 'auto');
 });
 
 test('narrow-screen style permits wrapped tools and anchors the bounded popup to the tool row', () => {
