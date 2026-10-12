@@ -44,6 +44,17 @@ test('streaming bubble shows typing indicator before any content arrives', async
   assert.match(container.textContent, /等待模型响应/);
 });
 
+test('waiting turns show a running clock and completed failures retain a frozen duration', async t => {
+  t.mock.method(Date, 'now', () => 100000);
+  const waiting = await mount(t, { message: { role: 'assistant', content: '', startedAt: 92000 }, isStreaming: true });
+  assert.match(waiting.textContent, /已用时 8秒/);
+  const failed = await mount(t, { message: { role: 'assistant', content: '', startedAt: 1000, elapsedMs: 65000,
+    error: { code: 'fixture', message: '失败' } } });
+  assert.match(failed.textContent, /耗时 1分5秒/);
+  const old = await mount(t, { message: { role: 'assistant', content: 'old' } });
+  assert.equal(old.querySelector('.message-turn-elapsed'), null);
+});
+
 test('streaming with live activity shows the pulse and heartbeat hint, not the wait state', async t => {
   const container = await mount(t, {
     message: { role: 'assistant', content: '部分回复' }, isStreaming: true,

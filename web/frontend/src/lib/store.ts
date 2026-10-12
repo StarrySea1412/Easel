@@ -6,8 +6,10 @@ import { hasChatDraft } from './chatDrafts';
 import { hasChatQueue } from './chatQueue';
 import { requirementsForSelection } from './selectedSkills';
 import type { SkillRequirements } from './selectedSkills';
+import { decodeChatTiming } from './chatTiming';
+import type { ChatTiming } from './chatTiming';
 
-export interface ChatMessage {
+export interface ChatMessage extends ChatTiming {
   role: 'user' | 'assistant';
   content: string;
   error?:ChatErrorDetail;
@@ -37,7 +39,7 @@ export interface ChatSession {
 }
 
 /** 进行中的流式状态（存于 App，不随页面切换/ChatPage 卸载而丢失）。 */
-export interface StreamState {
+export interface StreamState extends ChatTiming {
   compaction?: import('./chatCompaction').ChatCompaction;
   requestedModelRef?: string;
   content: string;
@@ -135,6 +137,7 @@ function generateId(): string {
 function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMessage | null {
   if (!record(value) || (value.role !== 'user' && value.role !== 'assistant')) return null;
   const message: ChatMessage = { role: value.role, content: typeof value.content === 'string' ? value.content : '' };
+  Object.assign(message, decodeChatTiming(value));
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];
   }

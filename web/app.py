@@ -3588,6 +3588,19 @@ async def api_chat_stream(req: ChatRequest):
         sk = req.sessionId or f"web-{int(time.time() * 1000)}"
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
         turn_id = req.turnId or uuid.uuid4().hex
+        started_at_ms = int(time.time() * 1000)
+        started_monotonic = time.monotonic()
+        terminal_timing = None
+
+        def timing(terminal=False):
+            nonlocal terminal_timing
+            if terminal and terminal_timing is None:
+                terminal_timing = {'startedAt': started_at_ms,
+                                   'elapsedMs': max(0, int((time.monotonic() - started_monotonic) * 1000))}
+            return terminal_timing or {'startedAt': started_at_ms}
+
+        def save_turn(key, status, text, extra=None):
+            _save_turn(key, status, text, {**(extra or {}), **timing(status == 'done')})
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
@@ -3598,7 +3611,7 @@ async def api_chat_stream(req: ChatRequest):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
-        _save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
+        save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
                                          "requestedThinkingLevel": requested_thinking_level})
 
         event_path = _job_event_file(turn_id)
@@ -3610,6 +3623,8 @@ async def api_chat_stream(req: ChatRequest):
 
         def to_client(kind, text=None, **extra):
             nonlocal event_seq, turn_error
+            if kind in ('error', 'done'):
+                to_client('timing', timing(True))
             if kind == 'error' and isinstance(text, dict):
                 turn_error = text
             event_seq += 1
@@ -3624,6 +3639,7 @@ async def api_chat_stream(req: ChatRequest):
             client_q.put_nowait({"t": kind, "text": text, "id": event_seq, **extra})
 
         # 秒级反馈：发出即亮「已收到」，不等 agent 冷启动（首个 SSE 事件，随流回放必达）
+        to_client('timing', timing())
         to_client("activity", "⏳ 已收到，正在唤醒 agent…")
         if requested_model_ref is not None:
             to_client('model_selection', {'requestedModelRef': requested_model_ref})
@@ -3743,7 +3759,7 @@ async def api_chat_stream(req: ChatRequest):
             # flock 可能阻塞（等另一进程/标签跑完），放线程池避免卡住事件循环
             got = await loop.run_in_executor(None, xlock.acquire, min(TIMEOUT_CHAT, 300))
             if not got:
-                _save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
+                save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
                     "requestedModelRef": requested_model_ref,
                     "requestedThinkingLevel": requested_thinking_level,
@@ -3824,7 +3840,7 @@ async def api_chat_stream(req: ChatRequest):
                         )
                 except Exception as e:
                     error = gateway_error(type(e).__name__ + ': ' + str(e))
-                    _save_turn(pk, "done", "", {
+                    save_turn(pk, "done", "", {
                         "turn_id": turn_id, "clean_end": False, "stop_reason": "spawn_failed", "error": error,
                         "requestedModelRef": requested_model_ref,
                         "requestedThinkingLevel": requested_thinking_level,
@@ -4214,7 +4230,7 @@ async def api_chat_stream(req: ChatRequest):
                 except Exception:
                     pass
                 # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
-                _save_turn(pk, "done", "".join(full_text), {
+                save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
                     "requestedModelRef": requested_model_ref,
                     "requestedThinkingLevel": requested_thinking_level,
@@ -4251,7 +4267,7 @@ async def api_chat_stream(req: ChatRequest):
                      and str(e.detail.get('code', '')).startswith('chat_model_')
                      else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
-            _save_turn(pk, 'done', ''.join(full_text), {
+            save_turn(pk, 'done', ''.join(full_text), {
                 'turn_id': turn_id, 'thinking': ''.join(full_thinking),
                 'requestedModelRef': requested_model_ref,
                 'requestedThinkingLevel': requested_thinking_level,
@@ -4317,7 +4333,7 @@ async def api_chat_stream(req: ChatRequest):
                 yield {"id": str(item["id"]), "event": "question", "data": item["text"]}
             elif t == "error":
                 yield {"id": str(item["id"]), "event": "error", "data": json.dumps(item["text"], ensure_ascii=False)}
-            elif t == 'model_selection':
+            elif t in ('model_selection', 'timing'):
                 yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
                 yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey")}, ensure_ascii=False)}

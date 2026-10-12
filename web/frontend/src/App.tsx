@@ -1,4 +1,6 @@
 import { chatErrorDetail } from './lib/chatErrors';
+import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
+import type { ChatTiming } from './lib/chatTiming';
 import { drainStreamRun } from './lib/streamLifecycle';
 import { createLazyPage } from './lib/lazyPage';
 import StorageNotice from './components/StorageNotice';
@@ -250,7 +252,7 @@ export default function App() {
   const streamCtl = useRef<Record<string, AbortController>>({});
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
   const [officeTarget, setOfficeTarget] = useState<{ sessionId: string; key: number } | null>(null);
-  const streamAcc = useRef<Record<string, { turnId?:string; requestedModelRef?: string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
+  const streamAcc = useRef<Record<string, ChatTiming & { turnId?:string; requestedModelRef?: string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
   const answeredRef = useRef<Set<string>>(new Set());   // 已提交答案的 question id：重放/恢复不再重现
   // ---- 打字机：分批到达的 token 按节奏吐给界面 ----
   const typingBuf = useRef<Record<string, string>>({});
@@ -291,10 +293,12 @@ export default function App() {
   };
 
   const appendAssistant = useCallback((sessionId: string, msg: ChatMessage, sessionKey?: string) => {
+    const accumulated = streamAcc.current[sessionId];
+    const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg), ...msg };
     setSessions((prev) => {
       const next = prev.map((s) =>
         s.id === sessionId
-          ? { ...s, messages: [...s.messages, msg], sessionKey: sessionKey || s.sessionKey, pendingTurnId: undefined }
+          ? { ...s, messages: [...s.messages, completed], sessionKey: sessionKey || s.sessionKey, pendingTurnId: undefined }
           : s);
       saveSessions(next);
       return next;
@@ -330,15 +334,17 @@ export default function App() {
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
   ) => {
+    const startedAt = Date.now();
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
     setSessions((prev) => {
-      const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: turnId } : s));
+      const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: turnId,
+        messages: s.messages.map((m, index) => index === s.messages.length - 1 && m.role === 'user' ? { ...m, startedAt } : m) } : s));
       saveSessions(next); return next;
     });
-    const runAcc = { turnId, requestedModelRef: modelRef, requestedThinkingLevel: thinkingLevel, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc: ChatTiming & { turnId?: string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] } = { startedAt, turnId, requestedModelRef: modelRef, requestedThinkingLevel: thinkingLevel, content:'', thinking:'', steps:[], questions:[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((prev) => ({ ...prev, [sessionId]: { requestedModelRef: modelRef, content: '', thinking: '', activity: '', questions: [] } }));
+    setStreams((prev) => ({ ...prev, [sessionId]: { startedAt, requestedModelRef: modelRef, content: '', thinking: '', activity: '', questions: [] } }));
     // 打字机队列：流式事件按批到达（OpenClaw 攒批），前端按字符节奏显示，体验逐字浮现。
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
@@ -351,6 +357,7 @@ export default function App() {
         ensureTypingPump(sessionId);
       },
       (sessionKey) => {
+        Object.assign(runAcc, finishChatTiming(runAcc));
         // done 不能立即 flush——token 和 done 几乎同时到达（OpenClaw 攒批），
         // 立即 flush 会把整包瞬间冲出，打字机白做。等队列吐完再落盘。
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
@@ -364,6 +371,7 @@ export default function App() {
         });
       },
       (err) => {
+        Object.assign(runAcc, finishChatTiming(runAcc));
         if (streamAcc.current[sessionId] === runAcc) pauseChatQueue(sessionId, '本轮失败，队列已暂停。修复后可继续发送。');
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
@@ -437,6 +445,11 @@ export default function App() {
       },
       (event) => setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
         ? { ...p, [sessionId]: { ...p[sessionId], compaction: event } } : p),
+      (timing) => {
+        if (streamAcc.current[sessionId] !== runAcc) return;
+        Object.assign(runAcc, timing);
+        setStreams(p => p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], ...timing } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 
@@ -449,15 +462,15 @@ export default function App() {
     if (!last || last.role !== 'user') return;   // 没有悬空的用户消息 = 无需恢复
     let turnId = s.pendingTurnId;
     try { turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
-    const runAcc = { turnId, requestedModelRef: last.requestedModelRef, requestedThinkingLevel: last.requestedThinkingLevel, content:'', thinking:'', steps:[] as string[], questions:[] as ChatQuestion[] };
+    const runAcc: ChatTiming & { turnId?: string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] } = { startedAt: last.startedAt, turnId, requestedModelRef: last.requestedModelRef, requestedThinkingLevel: last.requestedThinkingLevel, content:'', thinking:'', steps:[], questions:[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((p) => ({ ...p, [sessionId]: { requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
+    setStreams((p) => ({ ...p, [sessionId]: { startedAt: last.startedAt, requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
     if (!turnId) {
       void fetchLastTurn(sessionId).then((r) => {
         if (streamAcc.current[sessionId] !== runAcc) return;
-        if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
+        if (r.status === 'done') appendAssistant(sessionId, { ...decodeChatTiming(r), role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
         clearStream(sessionId);
       }).catch(() => {if(streamAcc.current[sessionId]===runAcc)clearStream(sessionId);});
       return;
@@ -470,6 +483,7 @@ export default function App() {
         ensureTypingPump(sessionId);
       },
       (sessionKey) => {
+        Object.assign(runAcc, finishChatTiming(runAcc));
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
@@ -481,6 +495,7 @@ export default function App() {
         });
       },
       (err) => {
+        Object.assign(runAcc, finishChatTiming(runAcc));
         if (streamAcc.current[sessionId] === runAcc) pauseChatQueue(sessionId, '本轮失败，队列已暂停。修复后可继续发送。');
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
@@ -508,7 +523,7 @@ export default function App() {
         void fetchLastTurn(sessionId, turnId).then((r) => {
           if(streamAcc.current[sessionId]!==runAcc)return;
           if (r.status === 'done') {
-            appendAssistant(sessionId, { role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
+            appendAssistant(sessionId, { ...decodeChatTiming(r), role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
           } else {
             appendAssistant(sessionId, {
               role: 'assistant',
@@ -564,6 +579,11 @@ export default function App() {
       },
       (event) => setStreams(p => p[sessionId] && streamAcc.current[sessionId] === runAcc
         ? { ...p, [sessionId]: { ...p[sessionId], compaction: event } } : p),
+      (timing) => {
+        if (streamAcc.current[sessionId] !== runAcc) return;
+        Object.assign(runAcc, timing);
+        setStreams(p => p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], ...timing } } : p);
+      },
     );
   }, [appendAssistant, clearStream]);
 

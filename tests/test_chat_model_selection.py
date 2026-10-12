@@ -225,6 +225,11 @@ def test_explicit_model_reaches_existing_transport_and_recoverable_receipts(sand
     assert [event['data'] for event in replay if event['event'] == 'model_selection'] == selections
     assert saved['requestedModelRef'] == 'relay/model-b' and 'effectiveModelRef' not in saved
     assert saved['status'] == 'done' and events[-1]['event'] == replay[-1]['event'] == 'done'
+    timing_events = [json.loads(event['data']) for event in events if event['event'] == 'timing']
+    assert timing_events[0] == {'startedAt': saved['startedAt']}
+    assert timing_events[-1] == {'startedAt': saved['startedAt'], 'elapsedMs': saved['elapsedMs']}
+    assert saved['startedAt'] > 0 and saved['elapsedMs'] >= 0
+    assert [event['data'] for event in replay if event['event'] == 'timing'] == timing_events
     assert 'PRIVATE_' not in json.dumps(saved) + json.dumps(events)
     if transport == 'http':
         assert len(sandbox.requests) == 1
@@ -292,6 +297,7 @@ def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, 
         saved = await web.api_chat_last('model-session', 'native-turn')
         assert saved['text'] == 'native reply' and saved['clean_end'] and saved['error'] is None
         assert saved['gateway_run_id'] == 'native-run' and events[-1]['event'] == 'done'
+        assert saved['elapsedMs'] >= 0 and saved['startedAt'] > 0
         if streamed:
             assert [json.loads(e['data']) for e in events if e['event'] == 'text_snapshot'] == ['native reply']
             replay = await web.api_chat_job_stream('native-turn')

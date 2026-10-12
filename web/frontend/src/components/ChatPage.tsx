@@ -159,7 +159,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
   // ---- 对话态 ----
   const displayMessages: ChatMessage[] = [...session.messages];
-  if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '' });
+  if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '', startedAt: stream!.startedAt, elapsedMs: stream!.elapsedMs });
 
   return (
     <div className="chat-page chat-conversation-page">

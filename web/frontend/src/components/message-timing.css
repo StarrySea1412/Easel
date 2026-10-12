@@ -1,0 +1,2 @@
+.message-turn-elapsed { display: block; margin: 7px 0 0; color: var(--text-muted, #878b96); font-size: 11px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.typing-indicator ~ .message-turn-elapsed { margin-top: 8px; }

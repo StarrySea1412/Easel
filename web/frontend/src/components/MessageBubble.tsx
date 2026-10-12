@@ -6,6 +6,8 @@ import type { ChatMessage } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconCopy, IconCheck, IconRetry } from './icons';
 import './message-model-selection.css';
+import { formatChatElapsed } from '../lib/chatTiming';
+import './message-timing.css';
 
 export interface BubbleActions {
   onCopy: () => void | Promise<void>;
@@ -28,6 +30,20 @@ interface MessageBubbleProps {
 
 function DisclosureChevron({ expanded = false }: { expanded?: boolean }) {
   return <svg className={`model-thinking-chevron ${expanded ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m7 5 5 5-5 5" /></svg>;
+}
+
+function TurnElapsed({ startedAt, elapsedMs, running }: { startedAt?: number; elapsedMs?: number; running: boolean }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!running || startedAt === undefined || elapsedMs !== undefined) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running, startedAt, elapsedMs]);
+  const elapsed = elapsedMs ?? (running && startedAt !== undefined ? Math.max(0, now - startedAt) : undefined);
+  if (elapsed === undefined || !Number.isFinite(elapsed) || elapsed < 0) return null;
+  return <span className="message-turn-elapsed" aria-label={`本轮${running ? '已用时' : '耗时'}：${formatChatElapsed(elapsed)}`}
+    title="从本轮开始到返回结果、失败或停止，包含等待与执行时间。">{running ? '已用时' : '耗时'} {formatChatElapsed(elapsed)}</span>;
 }
 
 function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; streaming: boolean; backupSnapshot?: boolean }) {
@@ -157,6 +173,7 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
             <span className="typing-dot" />
           </div>
           <span className="model-thinking-wait">等待模型响应…</span>
+          <TurnElapsed startedAt={message.startedAt} elapsedMs={message.elapsedMs} running />
         </div>
       </div>
     );
@@ -172,6 +189,7 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
           {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.stage && <p className="chat-response-error-hint">失败阶段：{displayedError.stage==='model_response'?'模型响应':displayedError.stage==='agent_execution'?'Agent 执行':displayedError.stage}</p>}{(displayedError.channel || displayedError.modelRef) && <p className="chat-response-error-hint">渠道：{displayedError.channel || '未上报'}{displayedError.channelEndpoint ? ` · ${displayedError.channelEndpoint}` : ''} · 模型：{displayedError.modelRef || '未上报'}</p>}{displayedError.detail && <details className="chat-error-details"><summary>服务返回详情</summary><pre>{displayedError.detail}</pre></details>}{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
+        <TurnElapsed startedAt={message.startedAt} elapsedMs={message.elapsedMs} running={Boolean(isStreaming)} />
         {(actions || status) && <ActionBar actions={isStreaming ? undefined : actions} status={status} />}
       </div>
     </div>
