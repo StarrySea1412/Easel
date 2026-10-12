@@ -10,6 +10,8 @@
 
 # Easel 创作工作台
 
+> **2026-10-12 执行体验对标**：[Codex 执行过程差距与实施规划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/codex-execution-experience-assessment-2026-10-12.md)已完成，优先统一思考摘要/工作进度、终端输出与退出状态、文件差异和产物回执，再补实时事件、重启恢复与浏览器详情。官方事件、本地源码和隔离模拟记录的真实浏览器展示已分别核实；新执行 UI 尚未实施，不改原 Codex 接入计划，打包继续暂停。
+
 > **当前打包暂停，等待用户新指令。** [桌面应用、包体/启动与 ZCode / DeepSeek Harness 差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)已完成；建议先补齐执行/产物机制和优化重型运行组件，再验证 Windows WebView2 桌面窗口。仅评估和规划，未迁移到 Electron/Tauri、未修改现有 Codex 接入计划。
 
 > **2026-10-12 对话、技能与文件修正**：点击“对话”同步切换主内容并展开会话；技能详情“进入对话”仅带入技能与新草稿，由用户确认发送。Agent 获得不含密钥的配置状态及准确配置路径。回复中的本地产物核验存在且非空后才开放链接，缺失文件提示并可重查；共享保存脚本将实际本地文件或 HTTP(S) 下载保存到当前数据目录的主题子目录。真实隔离浏览器验证了技能草稿/刷新、Word 下载、HTML 预览/下载及 390px；本地 HTTP 下载与便携数据目录搬移检查通过，没有新增真实模型或付费生图调用。原缺失文件未找回，本轮没有重打旧 ZIP。功能位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10)，[进度与验收范围](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/secondary-development-progress.md)另记；main 仅同步首页说明。
