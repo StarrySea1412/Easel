@@ -10,6 +10,10 @@
 
 # Easel 创作工作台
 
+> **当前打包暂停，等待用户新指令。** [桌面应用、包体/启动与 ZCode / DeepSeek Harness 差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)已完成；建议先补齐执行/产物机制和优化重型运行组件，再验证 Windows WebView2 桌面窗口。仅评估和规划，未迁移到 Electron/Tauri、未修改现有 Codex 接入计划。
+
+> **2026-10-12 对话、技能与文件修正**：点击“对话”同步切换主内容并展开会话；技能详情“进入对话”仅带入技能与新草稿，由用户确认发送。Agent 获得不含密钥的配置状态及准确配置路径。回复中的本地产物核验存在且非空后才开放链接，缺失文件提示并可重查；共享保存脚本将实际本地文件或 HTTP(S) 下载保存到当前数据目录的主题子目录。真实隔离浏览器验证了技能草稿/刷新、Word 下载、HTML 预览/下载及 390px；本地 HTTP 下载与便携数据目录搬移检查通过，没有新增真实模型或付费生图调用。原缺失文件未找回，本轮没有重打旧 ZIP。功能位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10)，[进度与验收范围](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/secondary-development-progress.md)另记；main 仅同步首页说明。
+
 > **2026-10-12 本地更新**：对话生成中实时计时，结束、失败或停止后保留耗时，刷新及备份保留记录。思考强度默认“自适应最高”，按当前模型能力匹配，手动调整集中在对话框，不另设配置面板。当前 aihub 模型支持最高“高”，真实生成仍遇到源站 502。[耗时记录](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md) · [推理修复](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。源码在独立分支，未合并功能代码到 main，也未重新发布完整安装器。
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
