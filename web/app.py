@@ -681,7 +681,7 @@ _GUIDE_MEDIA = (
 )
 
 _GUIDE_TERMS = (
-    ("SKILL", "一张技能卡＝一项独立能力：看说明、就地配置、直接运行。"),
+    ("SKILL", "一张技能卡＝一项独立能力：看说明、就地配置、带入对话使用。"),
     ("Profile", "账号画像（定位/人设/受众）。技能会参考它来贴合你的风格，在「画像」页维护。"),
     ("API Key", "外部服务商发给你的密钥，填进本机设置后技能才能调用对应 AI 能力。"),
     ("生图", "用 AI 生成图片。需要先在「设置 → 生图」里配置好渠道。"),
@@ -873,7 +873,7 @@ def _skill_guide(skill: str, desc: str, body: str, path: Path,
     spec = SKILL_API_REQUIREMENTS.get(skill)
     api = {'label': spec['label'], 'configured': _skill_api_configured(skill, env)} if spec else None
 
-    how_to: list[str] = ['点下方「运行」，用一句话描述你要做的事，再点「执行」。']
+    how_to: list[str] = ['点下方「进入对话」，将技能与需求带入对话框，确认后再发送。']
     if inputs:
         how_to.append('先把这些说清楚：' + '、'.join(inputs[:4]) + '。')
     if api and not api['configured']:
@@ -3077,6 +3077,19 @@ def _chat_message(req: ChatRequest) -> str:
     if not message:
         raise HTTPException(400, "消息不能为空")
     specs = _selected_skill_specs(req)
+    message += (f'\n\n〔本轮文件交付规则〕持久产物目录是 {OUTPUTS_DIR}。'
+                '生成文件、从网站下载的文件或网页快照，都必须实际保存到该目录下的具体主题子目录，'
+                '不得留在临时目录、远端 sandbox 或技能源码目录；便携版使用当前数据目录，不能硬编码开发机盘符。'
+                '网页链接可以作为来源，但不等于已下载的文件；下载失败或工具无权限时如实说明。'
+                f'已有本地文件或 HTTP(S) 文件下载可用 "{sys.executable}" '
+                f'"{PROJECT_ROOT / "skills/shared/scripts/save_artifact.py"}" '
+                '--source "实际文件路径或下载地址" --output "outputs/具体主题/文件名"；'
+                f'执行环境设置 EASEL_DATA_DIR="{DATA_DIR}"。只保存真实来源；网页快照不等于完整离线网站。'
+                '交付前用工具确认文件存在、非空且格式正确，只为实际保存成功的文件提供 '
+                '[文件名称](outputs/具体主题/文件名) 链接；不要返回 file://、盘符绝对路径或虚构下载链接。')
+    configuration = _skill_configuration_context(specs)
+    if configuration:
+        message += '\n\n' + configuration
     if specs:
         message += '\n\n〔本轮指定技能〕\n' + '\n'.join(specs)
         message += '\n先读取对应 SKILL.md，按原文要求执行；无法执行时说明缺少什么，不要把读取说明当成执行成功。'
@@ -3099,6 +3112,39 @@ def _chat_message(req: ChatRequest) -> str:
     if requirements:
         message += '\n\n' + requirements
     return chat_turn_message(message, req.persona)
+
+
+def _skill_configuration_context(specs: dict[str, dict]) -> str:
+    """Share configuration presence and exact paths, never credential values.
+
+    Also covers an image skill chosen by the agent rather than by the picker.
+    Reading skill setup instructions does not establish a missing credential.
+    """
+    env = _read_env()
+    image_ready = all(_is_set(env.get(key)) for key in ('IMG_BASE_URL', 'IMG_MODEL', 'IMG_API_KEY'))
+    if not specs and not image_ready:
+        return ''
+    rows = []
+    for skill in specs:
+        if skill in SKILL_API_REQUIREMENTS:
+            state = '已填写配置，尚未证明本轮可调用' if _skill_api_configured(skill, env) else '配置不完整，需核验具体缺项'
+            rows.append(f'{skill}：{state}')
+    image_state = '已填写配置，尚未证明本轮可调用' if image_ready else '配置不完整，需核验具体缺项'
+    rows.append(f'共享生图通道（IMG_*）：{image_state}')
+    command = (f'"{sys.executable}" "{PROJECT_ROOT / "skills/shared/scripts/ai_image.py"}" '
+               f'check --dedicated-channel --env-file "{ENV_FILE}"')
+    return ('〔本轮技能配置状态 · 仅状态，不含密钥〕\n'
+            + '\n'.join(rows)
+            + f'\n源码根目录：{PROJECT_ROOT}；实际配置文件：{ENV_FILE}。'
+            '技能说明中的“需填写 Key”是前置要求，不是当前未配置的证据。'
+            '已配置的同一渠道应复用，不重复要求填写；不同渠道的 Key 不能相互替代。'
+            '网关进程环境或 workspace 中没找到 Key 不代表项目未配置，不得据此判定缺失。'
+            '工具使用以上项目路径与实际配置文件，通过脚本配置加载器读取；不要读取、输出或向用户索取密钥原文。'
+            f'生图先运行离线核验：{command}。后续出图也使用该准确源码脚本并传入同一个 --env-file，'
+            '不得换用 workspace 的旧脚本或借用聊天 Key。'
+            '只有实际检查缺项才提示补齐；若无工具权限无法核验，应说明无法核验，而非声称未配置。'
+            '离线配置齐全不等于联网可用；认证失败、额度不足、服务故障分别按真实回执说明，'
+            '没有成功工具回执与产物不能声称执行成功。')
 
 
 # 每个会话（session-key）一把锁：防止同一会话被两个并发的 openclaw agent 进程同时处理。
@@ -4290,7 +4336,7 @@ async def api_skill(req: SkillRequest):
     skill_full = find_skill(req.skill)
     if skill_full is None:
         raise HTTPException(404, f"SKILL '{req.skill}' 不存在")
-    message = f"{_persona_prefix(req.persona)}请执行 /{skill_full}，内容如下：\n\n{req.input}"
+    message = _chat_message(ChatRequest(message=req.input, persona=req.persona, selectedSkills=[skill_full]))
     # 统一给足超时：制作类 SKILL（生视频/多镜合成）可能跑很久，取安全上界
     timeout = TIMEOUT_PRODUCE
     loop = asyncio.get_event_loop()
@@ -4345,6 +4391,19 @@ async def api_output(path: str):
         return {"path": path, "content": full.read_text(encoding="utf-8"), "kind": "text", "isBinary": False}
     except UnicodeDecodeError:
         return {"path": path, "content": "", "kind": "binary", "isBinary": True}
+
+
+@app.get('/api/output-status')
+def api_output_status(path: str):
+    """Metadata only; never resolve arbitrary local paths from model output."""
+    try:
+        full = _safe_output_target(path)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return {'exists': False}
+        raise
+    exists = full.is_dir() or (full.is_file() and full.stat().st_size > 0)
+    return {'exists': exists, 'isDirectory': full.is_dir()}
 
 
 @app.get("/api/media/{path:path}")

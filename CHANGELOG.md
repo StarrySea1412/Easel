@@ -1,3 +1,12 @@
+# 2026-10-12
+
+- Fix navigation from Settings to Chat: activating the Chat rail entry now switches the main page and reveals the conversation list together; repeated activation keeps the selected session. Other navigation retains its compact-sidebar behavior.
+- Replace skill execution in the details drawer with a conversation handoff: retain input and selected skill in a new draft, preserve existing drafts, and send only from the composer. Missing API configuration does not block opening a draft.
+- Attach credential-free skill configuration status and exact runtime/configuration paths to chat and the legacy skill API, including image skills selected by the Agent. Setup instructions are not evidence of a missing key; offline presence is not proof of a successful API call.
+- Connect output-path conversion to assistant replies, check local targets through `/api/output-status`, and disable missing/unverified links with a recheck action. Existing absolute paths under outputs map to the content library; external sources retain their URLs.
+- Add `save_artifact.py` for local-file copies and HTTP(S) downloads into persistent topic directories. Reject empty/oversized files and overwrites, clean partial downloads, and support portable filesystems without hard links. Portable workspace guidance requires actual saved files before delivery.
+- Verification: 53 focused frontend checks passed, with the changed link checks rerun (6 passed); focused backend checks passed, including the final artifact/configuration subset (25 passed), and portable regressions passed (104 passed / 1 skipped). Production build and lint completed with existing warnings. Real isolated Chromium verified chat navigation, skill drafts/reload, Word downloads, HTML preview/download, missing links and 390px handoff; actual local HTTP downloads and data-directory relocation passed. No new real model/paid image request or rebuilt portable ZIP; the previously missing Word file is not recovered.
+
 ## 2026-10-10 最新便携交付回执
 
 - **本轮可交接文件**：`dist/portable-20261010/Easel-preview-2f1818d-c38a.zip`，Windows x64 便携预览版，1,169,390,503 字节。完整解压到短、可写目录（如 `C:\Easel`），再运行 `Easel.exe`；也可使用启动/检查/停止 CMD。

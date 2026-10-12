@@ -18,7 +18,7 @@ export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calend
 
 interface SidebarProps {
   currentPage: Page;
-  onPageChange: (page: Page) => void;
+  onPageChange: (page: Page, preserveConversations?: boolean) => void;
   personas: PersonaItem[];
   selectedPersona: string;
   onPersonaChange: (persona: string) => void;
@@ -110,7 +110,7 @@ export default function Sidebar({
   useEffect(() => {
     if (previousPage.current === currentPage) return;
     previousPage.current = currentPage;
-    // Every destination starts compact, including a return to chat.
+    // Page changes start compact unless explicit chat navigation preserves the list.
     if (conversationsRef.current?.contains(document.activeElement)) focusConversationToggle.current = true;
     setExpanded(false);
   }, [currentPage]);
@@ -121,7 +121,12 @@ export default function Sidebar({
     focusConversationToggle.current = false;
   }, [expanded]);
   const toggleToolbar = () => setToolbarExpanded((previous) => !previous);
-  const navigate = (page: Page) => {
+  const navigate = (page: Page, preserveConversations = false) => {
+    if (preserveConversations) {
+      changeExpanded(true);
+      onPageChange(page, true);
+      return;
+    }
     setExpanded(false);
     onPageChange(page);
   };
@@ -211,7 +216,7 @@ export default function Sidebar({
     );
   };
 
-  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={label} aria-label={label} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page)}><span className="nav-icon" aria-hidden="true">{icon}</span><span className="nav-item-label">{label}</span></button>;
+  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={label} aria-label={label} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}</span><span className="nav-item-label">{label}</span></button>;
   return (
     <div className={`sidebar-shell${expanded?' is-expanded':''}${toolbarExpanded?' is-toolbar-expanded':''}`}>
       {expanded&&<button type="button" className="sidebar-backdrop" aria-label="关闭侧边栏遮罩" onClick={closeSidebar} tabIndex={-1}/>}

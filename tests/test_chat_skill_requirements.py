@@ -57,6 +57,26 @@ def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, mon
     assert '配置不完整' in web._chat_message(request())
 
 
+def test_configuration_status_covers_nonvisual_and_automatically_chosen_skills(skills, monkeypatch):
+    monkeypatch.setattr(web, '_read_env', lambda: {'IMG_API_KEY': 'PRIVATE_KEY', 'IMG_BASE_URL': 'https://PRIVATE_URL', 'IMG_MODEL': 'PRIVATE_MODEL'})
+    for selected in (['skill-example'], []):
+        message = web._chat_message(request(selectedSkills=selected, skillRequirements={}))
+        assert '共享生图通道（IMG_*）：已填写配置' in message
+        assert '前置要求，不是当前未配置的证据' in message
+        assert 'PRIVATE_' not in message
+        assert f'--env-file "{web.ENV_FILE}"' in message
+        assert '同一个 --env-file' in message
+
+
+def test_legacy_skill_endpoint_uses_the_same_runtime_configuration(skills, monkeypatch):
+    monkeypatch.setattr(web, '_read_env', lambda: {'IMG_API_KEY': 'PRIVATE_KEY', 'IMG_BASE_URL': 'https://PRIVATE_URL', 'IMG_MODEL': 'image'})
+    calls = []
+    monkeypatch.setattr(web, 'run_agent_sync', lambda *args: calls.append(args) or 'fixture')
+    asyncio.run(web.api_skill(web.SkillRequest(skill='skill-example', input='草稿')))
+    assert '共享生图通道（IMG_*）：已填写配置' in calls[0][0]
+    assert 'PRIVATE_' not in calls[0][0]
+
+
 def test_requests_from_other_sessions_and_cleared_snapshots_do_not_reuse_prior_notes(skills):
     first = web._chat_message(request())
     second = web._chat_message(request(sessionId='session-b', skillRequirements={}))

@@ -34,7 +34,7 @@ import {
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
-import { clearChatDraft } from './lib/chatDrafts';
+import { clearChatDraft, setChatDraftText } from './lib/chatDrafts';
 import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispatchQueuedMessage, pauseChatQueue, clearChatQueue } from './lib/chatQueue';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
@@ -676,6 +676,21 @@ export default function App() {
     return sendUserAndStream(ns.id, t, [], undefined, undefined, skills, requirements, modelRef, thinkingLevel);
   }, [selectedPersona, sendUserAndStream, gatewayStatus]);
 
+  const handleSkillChat = useCallback((skill: string, input: string): boolean => {
+    const created = createSession(selectedPersona || undefined);
+    if (!writeSelectedSkills(created.id, [skill])) return false;
+    setChatDraftText(created.id, input);
+    try {
+      if (JSON.parse(localStorage.getItem(`easel:chat-draft:${created.id}`) || 'null')?.text !== input) return false;
+    } catch { return false; }
+    const next = [created, ...sessionsRef.current];
+    if (!saveSessions(next)) return false;
+    setSessions(next);
+    setActiveSessionId(created.id);
+    setCurrentPage('chat');
+    return true;
+  }, [selectedPersona, setCurrentPage]);
+
   const handleOfficeTask = useCallback(({ sessionId, message, modelRef }: OfficeTaskRequest): string | null => {
     if (!message.trim() || (modelRef !== undefined && (!/^[^\s/]+\/[^\s]+$/.test(modelRef) || modelRef.length > 500))) return null;
     let targetId = sessionId;
@@ -993,7 +1008,7 @@ export default function App() {
       case 'breakdown':
         return <BreakdownPage persona={selectedPersona} />;
       case 'skills':
-        return <SkillPage persona={selectedPersona} />;
+        return <SkillPage onOpenChat={handleSkillChat} />;
       case 'outputs':
         return <OutputsPage initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
@@ -1044,7 +1059,7 @@ export default function App() {
       <ToastHost />
       <Sidebar
         currentPage={currentPage}
-        onPageChange={(page) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page); }}
+        onPageChange={(page, preserveConversations = false) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page, preserveConversations); }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}

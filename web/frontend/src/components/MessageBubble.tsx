@@ -1,9 +1,9 @@
 import type { ChatErrorDetail } from '../lib/chatErrors';
 import { chatErrorDetail, chatErrorTitle, historicalGatewayAuthError } from '../lib/chatErrors';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
-import { renderMarkdown } from '../lib/sanitize';
+import OutputMessageContent from './OutputMessageContent';
 import { IconCopy, IconCheck, IconRetry } from './icons';
 import './message-model-selection.css';
 
@@ -95,10 +95,6 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
   },[backupSnapshot,sessionId,message.turnId,failureKey,shouldRecover]);
   const displayedError=recoveredError?.key===failureKey?recoveredError.error:sourceError ? chatErrorDetail(sourceError) : undefined;
   const displayedContent=historicalError?'':message.content;
-  const html = useMemo(() => {
-    if (message.role === 'user') return '';
-    return renderMarkdown(displayedContent, { allowMedia: !backupSnapshot });
-  }, [displayedContent, message.role, backupSnapshot]);
 
   // ---- 用户消息 ----
   if (message.role === 'user') {
@@ -168,7 +164,7 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
         <div className="message-bubble assistant">
           {livePanel}
           {execution}
-          {displayedContent && <div dangerouslySetInnerHTML={{ __html: html }} />}
+          {displayedContent && <OutputMessageContent content={displayedContent} inert={backupSnapshot} streaming={isStreaming} />}
           {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.stage && <p className="chat-response-error-hint">失败阶段：{displayedError.stage==='model_response'?'模型响应':displayedError.stage==='agent_execution'?'Agent 执行':displayedError.stage}</p>}{(displayedError.channel || displayedError.modelRef) && <p className="chat-response-error-hint">渠道：{displayedError.channel || '未上报'}{displayedError.channelEndpoint ? ` · ${displayedError.channelEndpoint}` : ''} · 模型：{displayedError.modelRef || '未上报'}</p>}{displayedError.detail && <details className="chat-error-details"><summary>服务返回详情</summary><pre>{displayedError.detail}</pre></details>}{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>

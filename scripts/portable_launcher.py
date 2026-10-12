@@ -364,6 +364,9 @@ def sync_workspace(bundle: Bundle, identity: dict, *, full: bool) -> None:
                             "easel-profiles/ 指 EASEL_DATA_DIR/profiles/；outputs/ 与 assets/ 分别指 "
                             "EASEL_DATA_DIR 下的同名目录，不能写到技能副本或源码目录。"
                             "运行 Python 使用 EASEL_PYTHON，Windows 参数含空格时按 PowerShell 参数形式引用。\n"
+                            "生成或下载的文件交付前必须保存到 outputs/<具体主题>/ 并核验存在、非空及格式。"
+                            "可使用共享 save_artifact.py 保存实际本地文件或 HTTP(S) 文件；网页快照不等于完整离线网站。"
+                            "回复使用 [文件名](outputs/具体主题/文件名)，不要返回临时 sandbox、file:// 或开发机绝对路径。\n"
                             ).encode("utf-8")
             _managed_file(bundle, identity, bundle.workspace / item.name, content)
     context = ("# 当前便携副本的运行路径\n\n"

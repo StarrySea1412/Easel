@@ -6,6 +6,14 @@
 >
 > [Operator guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [Acceptance sheet](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [Upstream compatibility](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
+# Chat, skills and file delivery fixes (2026-10-12)
+
+Selecting Chat from the toolbar now switches the main page and reveals the conversation list together. Selecting Chat again preserves the active session; other workspaces retain their existing sidebar behavior.
+
+Skill details now open a new conversation draft with the chosen skill and input. The model runs only after the user sends the draft. Agents receive current configuration presence and the correct configuration-file path, without credentials; a skill's setup instructions do not establish that a key is missing.
+
+Local artifact links are checked against the current data directory and enabled only for existing, nonempty files. Missing files show a warning and can be rechecked. The shared `save_artifact.py` saves actual local files or HTTP(S) downloads under `EASEL_DATA_DIR/outputs/<specific-topic>/`; keep the whole data directory when relocating a portable copy. Source websites, page snapshots and complete offline sites remain distinct. A real browser verified Word downloads, HTML preview/download, skill drafts and the 390px layout. No real model or paid image generation was invoked; these source changes are not in the existing ZIP, and the previously missing file has not been recovered.
+
 # Easel Creative Workspace
 
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.

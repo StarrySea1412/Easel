@@ -6,6 +6,14 @@
 >
 > [运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [功能验收单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [上游兼容报告](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
+# 对话、技能与文件交付修正（2026-10-12）
+
+点击工具栏“对话”会同时进入聊天并展开当前会话列表；再次点击不会丢失当前会话。其它工作区仍按原规则收起会话列。
+
+技能详情改为“进入对话”：新建草稿并带入技能和输入，确认发送后才调用模型。Agent 获得当前技能配置状态及正确配置文件路径，不含密钥；技能说明中的“需要 Key”不再作为未配置的证据。
+
+聊天中的本地产物链接会核验当前数据目录，存在且非空才可打开；缺失文件显示提示并可重新检查。共享 `save_artifact.py` 可保存实际本地文件或 HTTP(S) 下载到 `EASEL_DATA_DIR/outputs/<具体主题>/`，便携副本搬移时须保留整个数据目录。网站来源链接、网页快照与完整离线网站分别说明。真实浏览器已验证 Word 下载、HTML 预览/下载、技能草稿及 390px 布局；没有调用真实模型或付费生图，本轮源码变更尚未重新打入旧 ZIP，截图中的旧缺失文件未恢复。
+
 # Easel 创作工作台
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。

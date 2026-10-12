@@ -96,7 +96,8 @@ function transformLink(seg: string): string {
   if (!match) return seg;
   let target = match[2] || match[3];
   // 外部 URL、API 地址和已转换的锚点保持不变。
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('//') || target.startsWith('#') || target.startsWith('/api/')) return seg;
+  if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(target) && !target.startsWith('file:///')) || target.startsWith('//') || target.startsWith('#') || target.startsWith('/api/')) return seg;
+  if (target.startsWith('file:///')) target = target.slice('file://'.length);
   try { target = decodeURIComponent(target); } catch { return seg; }
   target = target.replace(ABS_PREFIX, 'outputs/').replace(/\\/g, '/');
   if (!target.startsWith('outputs/')) return seg;

@@ -12,7 +12,7 @@ import {
 } from './icons';
 
 interface SkillPageProps {
-  persona: string;
+  onOpenChat: (skill: string, input: string) => boolean;
 }
 
 type IconC = ComponentType<{ size?: number }>;
@@ -55,7 +55,7 @@ const LAYER_DESC: Record<string, string> = {
   publish: '发布层技能', attribute: '归因层技能', general: '通用技能', other: '技能',
 };
 
-export default function SkillPage({ persona }: SkillPageProps) {
+export default function SkillPage({ onOpenChat }: SkillPageProps) {
   const [skills, setSkills] = useState<SkillItem[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -90,7 +90,7 @@ export default function SkillPage({ persona }: SkillPageProps) {
       <div className="skills-page-head">
         <h1 className="page-title"><IconSkills size={22} aria-hidden={true} />技能库</h1>
         <p className="page-subtitle">
-          共 {skills === null ? '…' : skills.length} 个技能，按流水线层分区浏览。点卡片查看说明、就地运行；
+          共 {skills === null ? '…' : skills.length} 个技能，按流水线层分区浏览。点卡片查看说明，带入对话使用；
           标 <span className="badge badge-warn" style={{ padding: '1px 7px' }}>需 API</span> 的需先配置密钥
           {needApiCount > 0 && `（当前 ${needApiCount} 个待配置）`}。
         </p>
@@ -173,7 +173,7 @@ export default function SkillPage({ persona }: SkillPageProps) {
       {selected && (
         <SkillDrawer
           skillName={selected}
-          persona={persona}
+          onOpenChat={onOpenChat}
           onClose={() => setSelected(null)}
           onConfigured={load}
         />

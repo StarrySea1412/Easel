@@ -27,7 +27,7 @@ async function fixture(t, props = {}, preferences = {}) {
   const container = document.createElement('div'); document.body.append(container);
   let root = createRoot(container);
   const base = {
-    currentPage: 'chat', onPageChange: page => { visits.push(page); base.currentPage = page; root.render(createElement(Sidebar, base)); },
+    currentPage: 'chat', onPageChange: (page, preserveConversations = false) => { visits.push(page); window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } })); base.currentPage = page; root.render(createElement(Sidebar, base)); },
     personas: [], selectedPersona: '', onPersonaChange: () => {}, onNewProfile: () => {},
     sessions: [session('s1', '今天的对话'), session('s2', '此前的调研'), session('hidden', '未启用的空会话', { messages: [] })],
     activeSessionId: 's1', activeSessionHasMessages: true,
@@ -55,7 +55,7 @@ test('new installations start with both columns collapsed and reveal real conver
   assert.ok(view.container.querySelector('.sidebar-toolbar'));
   assert.equal(view.container.querySelector('.sidebar-conversations'), null);
   assert.equal(view.byLabel('展开对话列表').getAttribute('aria-expanded'), 'false');
-  await view.clickLabel('展开对话列表');
+  await view.clickLabel('对话');
   assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.container.querySelector('.sidebar-conversations .session-select'));
   assert.equal(view.byLabel('展开工具栏').getAttribute('aria-expanded'), 'false');
@@ -230,6 +230,33 @@ test('active workspaces inside More retain an explicit selected state', async t 
   assert.equal(current.textContent.trim(), '内容分析');
 });
 
+test('the chat navigation entry returns from settings and opens the conversation list', async t => {
+  const view = await fixture(t, { currentPage: 'settings' });
+  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  await act(async () => view.byLabel('对话').click());
+  assert.deepEqual(view.visits, ['chat']);
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  assert.equal(view.byLabel('对话').getAttribute('aria-current'), 'page');
+  assert.equal(view.container.querySelector('.sidebar-conversations .session-select').textContent, '今天的对话');
+});
+
+test('returning to chat retains the selected conversation', async t => {
+  const view = await fixture(t, { currentPage: 'settings', activeSessionId: 's2' });
+  await act(async () => view.byLabel('对话').click());
+  assert.deepEqual(view.visits, ['chat']);
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  assert.equal(view.container.querySelector('.session-item.active .session-select').textContent, '此前的调研');
+  await view.clickLabel('对话');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  assert.equal(view.container.querySelector('.session-item.active .session-select').textContent, '此前的调研');
+  assert.deepEqual(view.selected, []);
+  assert.equal(view.actions.newChats, 0);
+  await view.clickLabel('收起对话列表');
+  await view.clickLabel('对话');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  assert.equal(view.container.querySelector('.session-item.active .session-select').textContent, '此前的调研');
+});
+
 test('small-screen backdrop and Escape dismiss conversations while preserving toolbar state', async t => {
   t.mock.method(window, 'matchMedia', () => ({ matches: true }));
   const view = await fixture(t);
@@ -246,7 +273,7 @@ test('small-screen backdrop and Escape dismiss conversations while preserving to
   await view.clickLabel('展开对话列表');
   await view.clickLabel('对话');
   assert.deepEqual(view.visits, ['chat']);
-  assert.equal(view.container.querySelector('.sidebar-conversations'), null);
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.byLabel('工作台'));
 });
 
