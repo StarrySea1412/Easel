@@ -1,5 +1,6 @@
 # 2026-10-12
 
+- Record the user's packaging hold and a source/archive/official-document assessment of desktop options and gaps against ZCode and DeepSeek Harness. The roadmap prioritizes artifact/configuration contracts, recovery, measured startup/runtime slimming and browser integration before a desktop prototype. No new package, framework migration or change to the Codex integration plan.
 - Fix navigation from Settings to Chat: activating the Chat rail entry now switches the main page and reveals the conversation list together; repeated activation keeps the selected session. Other navigation retains its compact-sidebar behavior.
 - Replace skill execution in the details drawer with a conversation handoff: retain input and selected skill in a new draft, preserve existing drafts, and send only from the composer. Missing API configuration does not block opening a draft.
 - Attach credential-free skill configuration status and exact runtime/configuration paths to chat and the legacy skill API, including image skills selected by the Agent. Setup instructions are not evidence of a missing key; offline presence is not proof of a successful API call.

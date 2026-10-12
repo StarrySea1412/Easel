@@ -8,6 +8,8 @@
 
 # Chat, skills and file delivery fixes (2026-10-12)
 
+**Packaging is on hold until the user's next instruction.** The [desktop, footprint, startup and competitor assessment](docs/desktop-harness-assessment-2026-10-12.md) recommends improving execution/artifact contracts, splitting heavy capabilities and optimizing startup before testing a Windows WebView2 shell. No Electron/Tauri migration or change to the existing Codex integration plan was made.
+
 Selecting Chat from the toolbar now switches the main page and reveals the conversation list together. Selecting Chat again preserves the active session; other workspaces retain their existing sidebar behavior.
 
 Skill details now open a new conversation draft with the chosen skill and input. The model runs only after the user sends the draft. Agents receive current configuration presence and the correct configuration-file path, without credentials; a skill's setup instructions do not establish that a key is missing.
