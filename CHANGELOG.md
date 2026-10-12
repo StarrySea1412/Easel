@@ -74,6 +74,12 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 ## [Unreleased]
 
+### 2026-10-12 Codex execution experience assessment / 执行过程对标规划
+
+- Document official Codex item/reasoning/command/diff events and audit Easel's OpenClaw snapshots plus the existing Codex integration workspace without changing its plan. / 核实官方执行事件，对照现有 OpenClaw 快照和 Codex 工作区；不改接入计划。
+- Record display and state gaps: small truncated command titles, bounded history, output hidden by diffs, and missing process exit/background-session details. Prioritize unified operation cards, live events, file review and recovery. / 记录命令可读性、历史限额、diff 与输出互斥及进程状态缺口，规划统一操作卡、实时更新、文件审查和恢复。
+- Real Chromium inspected the existing desktop/390px UI with simulated records; no live model/tool task or new UI implementation. Packaging remains on hold. / 真实浏览器仅检查隔离模拟记录，无真实模型/工具任务、新 UI 实现或打包。
+
 ### 2026-10-10 paused guidance and queue menus / 暂停引导与队列菜单
 
 - Move the narrower queue above the composer; send the selected idle message without a stop request and retain paused neighbours. / 内收队列移至主输入框上方；空闲引导直接发送所选消息，邻居仍暂停。
