@@ -1,7 +1,7 @@
 import Select from './ui/Select';
 import type { useComposerModels } from '../hooks/useComposerModels';
 import { modelHealthLabel } from '../lib/modelHealth';
-import { IconCheck, IconInfo } from './icons';
+import { IconRefresh } from './icons';
 import { showToast } from '../lib/toast';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -23,6 +23,7 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
   const state = models.loading && slowLoading ? 'running' : connection?.state || 'unverified';
   const connectionLabel = state === 'running' ? '检测中' : state === 'success' ? '渠道已连通' : state === 'failed' ? '渠道检测失败' : '渠道未验证';
   const healthHint = `${channelName} · ${connectionLabel}。${connection?.detail || '尚未读取渠道模型列表。'} 模型推理：${healthLabel}${health?.detail ? ` · ${health.detail}` : ''}。点击查看渠道状态。`;
+  const dotState = health?.state === 'failed' || health?.stale ? 'failed' : health?.state === 'running' || state === 'running' ? 'running' : state === 'failed' ? 'failed' : state === 'success' ? 'success' : 'unverified';
   const unavailable = !models.loading && (Boolean(models.error) || !models.capability?.available);
   const [open, setOpen] = useState(false), [position, setPosition] = useState({ left: 12, top: 12 });
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null), id = useId();
@@ -46,15 +47,15 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
   }, [open]);
   return <div className="composer-model-picker">
-    <button ref={trigger} type="button" className={`composer-model-health ${state}`} aria-label={`渠道状态：${healthHint}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
+    <button ref={trigger} type="button" className={`composer-model-health ${dotState}`} aria-label={`模型与渠道状态：${healthHint}`} title={healthHint} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => setOpen(value => !value)} disabled={disabled}>
-      {state === 'success' ? <IconCheck size={13}/> : <IconInfo size={13}/>}<span className="composer-model-health-label">{connectionLabel}</span>
+      <span className="composer-model-status-dot" aria-hidden="true"/><span className="composer-model-health-label">{connectionLabel}；模型推理：{healthLabel}</span>
     </button>
     {open && createPortal(<div ref={panel} id={id} role="dialog" aria-label="渠道状态详情" className="composer-channel-popover" style={position}>
       <header><strong>{channelName}</strong><button type="button" aria-label="关闭渠道状态" onClick={() => { setOpen(false); trigger.current?.focus(); }}>×</button></header>
       <p>{connectionLabel} · {connection?.detail || '尚未读取渠道模型列表。'}</p>
       <p>模型推理：{healthLabel}{health?.detail ? ` · ${health.detail}` : ''}</p>
-      <button type="button" className="link-btn" disabled={state === 'running'} onClick={() => { models.refresh(); showToast('正在重新读取渠道模型列表…'); }}>重新读取渠道</button>
+      <button type="button" className="link-btn composer-channel-refresh" disabled={state === 'running'} onClick={() => { models.refresh(); showToast('正在重新读取渠道模型列表…'); }}><IconRefresh size={13}/>重新读取渠道</button>
     </div>, document.body)}
     <Select aria-label="本轮使用模型" value={models.modelRef} disabled={disabled}
       title="仅用于本轮消息；所选模型不可用时保留草稿" className="composer-model-select"

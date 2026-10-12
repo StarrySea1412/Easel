@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
-import InlineInfo from './InlineInfo';
 import {
   fetchTrends, fetchSchedule, fetchOutputs, fetchAccounts, fetchIdeas,
   fetchAnalyticsPlatforms, fetchAccountAnalytics,
@@ -100,7 +99,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   const [quickPreferredThinking, setQuickThinking] = useState<ThinkingPreference>(()=>loadThinkingLevel());
   const quickEffectiveModel = quickModels.selected || quickModels.options.find(option=>option.id===(quickModels.capability?.currentModelRef || quickModels.capability?.defaultModelRef));
   const quickSupportedThinking = quickEffectiveModel?.thinkingLevels;
-  const { level: quickThinking, notice: quickThinkingNotice } = useCompatibleThinking(quickPreferredThinking, quickSupportedThinking, setQuickThinking);
+  const { level: quickThinking } = useCompatibleThinking(quickPreferredThinking, quickSupportedThinking, setQuickThinking);
   const changeQuickThinking = (value: ThinkingPreference) => { setQuickThinking(value); const saved = saveThinkingLevel(value); showToast(saved ? `已选择思考强度：${THINKING_LABELS[value]}，下一轮生效` : '强度已在本页修改，但未能保存。', saved ? 'success' : 'error'); };
 
   const composingQuick = useRef(false);
@@ -269,7 +268,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
             <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
             <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} modelLabel={quickEffectiveModel?.model || '沿用会话模型'} />
-            {quickThinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{quickThinkingNotice}</InlineInfo></span>}
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →

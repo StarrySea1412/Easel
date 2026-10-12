@@ -6,12 +6,12 @@ import { renderMarkdown } from '../lib/sanitize';
 import { Sk } from './Skeleton';
 import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash } from './icons';
 
-const FILTERS: { key: string; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'audio', label: '音频' },
-  { key: 'text', label: '文档' },
+const FILTERS: { key: string; label: string; Icon: typeof IconOutputs }[] = [
+  { key: 'all', label: '全部', Icon: IconOutputs },
+  { key: 'image', label: '图片', Icon: IconImage },
+  { key: 'video', label: '视频', Icon: IconVideo },
+  { key: 'audio', label: '音频', Icon: IconMusic },
+  { key: 'text', label: '文档', Icon: IconFile },
 ];
 
 const KIND_LABEL: Record<string, string> = {
@@ -332,7 +332,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             <span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={13} /></span> 返回上级
           </button>}
           {FILTERS.map((f) => (
-            <button key={f.key} className={`chip ${filter === f.key ? 'active' : ''}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>{f.label}</button>
+            <button key={f.key} className={`chip gallery-filter-chip ${filter === f.key ? 'active' : ''}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}><f.Icon size={14} /><span>{f.label}</span></button>
           ))}
         </div>
         <input className="gallery-search" type="search" aria-label="搜索内容库" placeholder="搜索文件名、路径或生图提示词" value={query} onChange={(event) => setQuery(event.target.value)} />

@@ -10,7 +10,7 @@ import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker'
 import { useComposerModels } from '../hooks/useComposerModels';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
-import { IconArrowUp, IconStop, IconChevron } from './icons';
+import { IconArrowUp, IconStop, IconChevron, IconSpark, IconTerminal } from './icons';
 import ComposerAttachments from './ComposerAttachments';
 import ComposerAddMenu, { type ComposerUploadKind } from './ComposerAddMenu';
 import { loadThinkingLevel, saveThinkingLevel, resolveThinkingPreference, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
@@ -79,7 +79,7 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
   const models = useComposerModels(sessionId, engine);
   const effectiveModel = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const supportedThinking = effectiveModel?.thinkingLevels;
-  const { level: thinkingLevel, notice: thinkingNotice } = useCompatibleThinking(preferredThinking, supportedThinking, setThinkingLevel);
+  const { level: thinkingLevel } = useCompatibleThinking(preferredThinking, supportedThinking, setThinkingLevel);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null), folderInputRef = useRef<HTMLInputElement>(null);
@@ -274,8 +274,9 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
       <input ref={folderInputRef} type="file" multiple hidden {...{ webkitdirectory: '' }} onChange={event => uploadSelection(event, true)}/>
       <div className="composer-bar">
         <div className="composer-tools" hidden={editingQueue}>
-          <Select className="composer-engine" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping}
-            options={[{value:'openclaw',label:'OpenClaw'},{value:'codex',label:'Codex'}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
+          <Select className="composer-engine composer-engine-icon" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping}
+            title={`对话引擎：${engine === 'codex' ? 'Codex' : 'OpenClaw'}`}
+            options={[{value:'openclaw',label:'OpenClaw',icon:<IconSpark size={16}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           {engine === 'codex' ? <Select aria-label="本轮使用模型" value={models.modelRef} disabled={stopping || models.loading}
@@ -284,7 +285,6 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
           <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}
             supportedLevels={supportedThinking}
             modelLabel={models.selected?.model || (models.modelRef ? models.modelRef : '沿用会话模型')} />
-          {thinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{thinkingNotice}</InlineInfo></span>}
         </div>
         {editingQueue && <div className="composer-queue-edit-actions">
           <span>编辑待发送消息</span>
@@ -388,7 +388,7 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
         else if (event.key === 'ArrowUp') { event.preventDefault(); openMenu(); }
         else if (event.key === 'Escape') setOpen(false);
       }}>
-      <strong>{THINKING_LABELS[value]}</strong><IconChevron size={13} />
+      <strong>思考强度</strong><IconChevron size={13} />
     </button>
     {menuOpen && <div ref={menuRef} id={`${pickerId}-menu`} className="thinking-level-menu" role="dialog" aria-label="思考强度"
       style={{ left: menuPosition.left, right: 'auto', ...(menuPosition.below ? { top: 'calc(100% + 8px)', bottom: 'auto' } : {}) }}

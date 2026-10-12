@@ -127,6 +127,7 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
+  const [gatewayRetryToken, setGatewayRetryToken] = useState(0);
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const stopRequests = useRef<Record<string, object>>({});
@@ -221,21 +222,45 @@ export default function App() {
     }
   }, [activeSessionId]);
 
-  // Fetch status on mount — 真实反映 gateway 状态 + 首次引导检测
+  const retryGateway = useCallback(() => {
+    setGatewayStatus('connecting');
+    setGatewayRetryToken(value => value + 1);
+  }, []);
+
+  // 周期性读取网关状态：断开后退避重试，恢复后回到低频保活；不重发消息，也不重复启动网关进程。
   useEffect(() => {
-    fetchStatus()
-      .then((data) => {
+    let cancelled = false;
+    let inFlight = false;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (delay: number) => { if (!cancelled) timer = setTimeout(probe, delay); };
+    const probe = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      setGatewayStatus(previous => previous === 'connected' ? previous : 'connecting');
+      try {
+        const data = await fetchStatus();
+        if (cancelled) return;
         setPersonas(data.personas || []);
         setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
+        attempt = data.gateway ? 0 : attempt + 1;
         // 首次使用：没有任何个性化画像 且 未看过引导 → 推荐配置
         if ((data.personas || []).length === 0 && !onboardingSeen()) {
           setShowRecommend(true);
         }
-      })
-      .catch(() => {
+        schedule(data.gateway ? 15000 : Math.min(30000, 3000 * 2 ** Math.min(attempt - 1, 3)));
+      } catch {
+        if (cancelled) return;
         setGatewayStatus('disconnected');
-      });
-  }, []);
+        attempt += 1;
+        schedule(Math.min(30000, 3000 * 2 ** Math.min(attempt - 1, 3)));
+      } finally {
+        inFlight = false;
+      }
+    };
+    void probe();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [gatewayRetryToken]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
 
@@ -1118,6 +1143,7 @@ export default function App() {
         onSessionPin={handleSessionPin}
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
+        onGatewayRetry={retryGateway}
       />
       <main className="main-content">
         <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />

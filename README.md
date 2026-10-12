@@ -6,6 +6,12 @@
 >
 > [运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [功能验收单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [上游兼容报告](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
+# 2026-10-12 工具栏与内容库收敛
+
+聊天工具栏现在用图标切换 OpenClaw/Codex，入口只显示“思考强度”；模型旁用状态点表示渠道与推理状态，详细原因放在可访问弹层。网关状态集中到侧栏工具区，断开后自动退避重连并保留手动重试。内容库的全部、图片、视频、音频、文档筛选入口加入对应图标，图片与 AI 生图仍统一在图片分类下。
+
+本轮已完成前端生产构建；真实隔离浏览器继续覆盖已有桌面/390px、筛选、预览和下载回归。没有调用真实模型或付费服务，便携版打包仍暂停等待新指令。
+
 # 对话、技能与文件交付修正（2026-10-12）
 
 最新界面修正：工具操作默认显示小图标和一行摘要，点击展开命令、回执和文件差异；进度按实际记录顺序穿插，旧操作缺共同顺序时明确说明，避免重复进度。未选技能时“完成选择”禁用，预览不算选中；内容库统一“图片”分类，生成图片用“AI 生图”标签区分，工坊历史进入同一分类。42项前端、62项后端定向检查通过，构建/lint完成；真实隔离Chromium验证桌面/390px、键盘/复制/分页、文件跳转、图片预览/下载和Codex审批入口。工具及模型事件为模拟，实际本地文件/媒体与持久记录HTTP已检查；未发模型或付费请求。源码服务7880已加载新版，详见[验收记录](docs/execution-experience-implementation-2026-10-12.md)。

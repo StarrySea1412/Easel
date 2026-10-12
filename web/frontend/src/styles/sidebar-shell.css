@@ -17,8 +17,17 @@
 .sidebar-shell .nav-icon{display:flex;align-items:center;justify-content:center;width:19px;flex:none}
 .sidebar-toolbar .nav-item-label{display:none}
 .sidebar-shell.is-toolbar-expanded .sidebar-toolbar .nav-item-label{display:block;white-space:nowrap}
+.sidebar-shell.is-toolbar-expanded .sidebar-gateway-status{justify-content:flex-start;padding-left:10px}
 .sidebar-shell.is-toolbar-expanded .sidebar-toolbar .nav-item,.sidebar-shell.is-toolbar-expanded .sidebar-toolbar .sidebar-toggle{justify-content:flex-start;padding-left:10px}
 .sidebar-toolbar-bottom{display:flex;flex-direction:column;gap:5px;padding-top:12px}
+.sidebar-gateway-status{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:38px;padding:9px;border:0;border-radius:7px;background:transparent;color:var(--text-secondary);font:inherit;font-size:10px;cursor:pointer}
+.sidebar-gateway-status:hover:not(:disabled){background:var(--surface-hover);color:var(--text)}
+.sidebar-gateway-status:disabled{cursor:default}
+.sidebar-gateway-status .status-dot{width:7px;height:7px;box-shadow:none}
+.sidebar-gateway-status.connected .status-dot{background:var(--green)}
+.sidebar-gateway-status.disconnected .status-dot{background:var(--red)}
+.sidebar-gateway-status.connecting .status-dot{background:var(--amber,#ad7a25);animation:sidebar-gateway-pulse 1.4s ease-in-out infinite}
+@keyframes sidebar-gateway-pulse{50%{opacity:.4;transform:scale(.78)}}
 .sidebar-conversations{display:flex;flex-direction:column;flex:0 0 var(--sidebar-conversations-width);width:var(--sidebar-conversations-width);height:100%;min-width:0;background:var(--sidebar-bg)}
 .sidebar-shell .sidebar-header{display:block;flex:none;padding:13px 13px 12px;border:0}
 .sidebar-topline{display:flex;align-items:center;gap:8px;margin-bottom:15px}

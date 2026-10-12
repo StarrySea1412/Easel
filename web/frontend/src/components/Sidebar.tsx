@@ -34,6 +34,7 @@ interface SidebarProps {
   onSessionPin: (id: string, pinned: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
+  onGatewayRetry?: () => void;
   runningSessions?: string[];
   stoppingSessions?: string[];
 }
@@ -56,6 +57,7 @@ export default function Sidebar({
   onSessionPin,
   onNewChat,
   gatewayStatus,
+  onGatewayRetry,
   runningSessions = [],
   stoppingSessions = [],
 }: SidebarProps) {
@@ -236,6 +238,9 @@ export default function Sidebar({
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}
           </nav>
           <div className="sidebar-toolbar-bottom">
+            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击重试':'网关正在连接'} title={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击立即重试':'网关正在重连…'} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
+              <span className="status-dot" aria-hidden="true"/><span className="nav-item-label">{gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'网关重连中…'}</span>
+            </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {railItem('settings','设置',<IconGear size={19}/>)}
           </div>
@@ -253,7 +258,6 @@ export default function Sidebar({
             </section>
             {archived.length>0&&<><button className="archived-header" aria-expanded={showArchived} onClick={()=>setShowArchived(value=>!value)}><span className={`archived-chevron ${showArchived?'open':''}`}><IconChevron size={12}/></span>已归档 · {archived.length}</button>{showArchived&&archived.map(s=>renderItem(s,true))}</>}
           </div></div>
-          <div className="sidebar-status" title={gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'连接中…'}><span className={`status-dot ${gatewayStatus==='connected'?'':'offline'}`}/><span className="sidebar-status-label">{gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线':'连接中…'}</span></div>
         </section>}
       </aside>
       {expanded && hoveredSession && <SessionHoverCard key={hoveredSession.session.id} session={hoveredSession.session} anchor={hoveredSession.anchor}/>}

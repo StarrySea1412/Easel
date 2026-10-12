@@ -6,6 +6,12 @@
 >
 > [Operator guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [Acceptance sheet](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [Upstream compatibility](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
+# 2026-10-12 Toolbar and library refinement
+
+The chat toolbar now uses icons for the OpenClaw/Codex engine switch and keeps only “Thinking strength” visible. A compact status dot beside the model represents channel and inference state, with accessible details in a popover. Gateway status lives in the sidebar tool area, with backoff-based automatic reconnect and a manual retry. The content library filters for all, images, video, audio and documents now include matching icons; generated and ordinary images remain under one Images category.
+
+The frontend production build passed, and the existing isolated-browser coverage remains in place for desktop/390px layouts, filtering, preview and download. No live model or paid service was called; portable packaging remains paused until a new instruction.
+
 # Chat, skills and file delivery fixes (2026-10-12)
 
 Latest interface refinement: tools appear as a small icon and one-line summary, with commands, receipts and diffs available on expansion. Progress interleaves by recorded event order without duplication; legacy operations lacking a shared order are identified. Skill completion is disabled with zero selections, and preview does not select a skill. The library uses one Images category with an AI-generated tag; studio history opens the same category. All 42 focused frontend and 62 backend checks passed, plus build/lint. Real isolated Chromium covered desktop/390px, keyboard/copy/paging, file navigation, image preview/download and Codex approval controls. Engine events were simulated; actual local files/media and durable-journal HTTP were verified. No model or paid request was made. Source server 7880 runs the update; see the [verification record](docs/execution-experience-implementation-2026-10-12.md).
