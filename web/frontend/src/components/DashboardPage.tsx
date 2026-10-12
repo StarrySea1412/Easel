@@ -21,6 +21,7 @@ import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
 import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { loadThinkingLevel, saveThinkingLevel } from '../lib/thinkingLevel';
+import type { ThinkingPreference } from '../lib/thinkingLevel';
 import { ThinkingLevelPicker } from './ChatComposer';
 import { THINKING_LABELS } from '../lib/thinkingLevel';
 import type { ThinkingLevel } from '../lib/api';
@@ -96,11 +97,11 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   const quickText = quickDraft.text;
   const quickSkills = useComposerSkills(DASHBOARD_DRAFT_SCOPE, 'creation');
   const quickModels = useComposerModels(null);
-  const [quickPreferredThinking, setQuickThinking] = useState<ThinkingLevel>(()=>loadThinkingLevel());
+  const [quickPreferredThinking, setQuickThinking] = useState<ThinkingPreference>(()=>loadThinkingLevel());
   const quickEffectiveModel = quickModels.selected || quickModels.options.find(option=>option.id===(quickModels.capability?.currentModelRef || quickModels.capability?.defaultModelRef));
   const quickSupportedThinking = quickEffectiveModel?.thinkingLevels;
   const { level: quickThinking, notice: quickThinkingNotice } = useCompatibleThinking(quickPreferredThinking, quickSupportedThinking, setQuickThinking);
-  const changeQuickThinking = (value: ThinkingLevel) => { setQuickThinking(value); const saved = saveThinkingLevel(value); showToast(saved ? `已选择思考强度：${THINKING_LABELS[value]}，下一轮生效` : '强度已在本页修改，但未能保存。', saved ? 'success' : 'error'); };
+  const changeQuickThinking = (value: ThinkingPreference) => { setQuickThinking(value); const saved = saveThinkingLevel(value); showToast(saved ? `已选择思考强度：${THINKING_LABELS[value]}，下一轮生效` : '强度已在本页修改，但未能保存。', saved ? 'success' : 'error'); };
 
   const composingQuick = useRef(false);
   const setQuickText = (value: string | ((current: string) => string)) => {
@@ -267,7 +268,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             <div className="dash-composer-tools">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
             <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
-            <ThinkingLevelPicker value={quickThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} modelLabel={quickEffectiveModel?.model || '沿用会话模型'} />
+            <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} modelLabel={quickEffectiveModel?.model || '沿用会话模型'} />
             {quickThinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{quickThinkingNotice}</InlineInfo></span>}
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>

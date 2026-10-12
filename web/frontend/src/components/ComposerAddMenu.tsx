@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { IconFile, IconImage, IconOutputs, IconPlus, IconSkills } from './icons';
 
 export type ComposerUploadKind = 'media' | 'files' | 'folder';
-export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkills }: {
-  disabled: boolean; uploading: boolean; onUpload: (kind: ComposerUploadKind) => void; onSkills: () => void;
+export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkills, skillsDisabled = false }: {
+  disabled: boolean; uploading: boolean; onUpload: (kind: ComposerUploadKind) => void; onSkills: () => void; skillsDisabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 12, top: 12, maxHeight: 300 });
@@ -47,7 +47,7 @@ export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkill
       <button type="button" role="menuitem" onClick={() => choose(() => onUpload('files'))}><IconFile size={17}/><span>文件<small>文档、表格、PDF、音频等</small></span></button>
       <button type="button" role="menuitem" onClick={() => choose(() => onUpload('folder'))}><IconOutputs size={17}/><span>文件夹内素材<small>添加文件夹中支持的文件</small></span></button>
       <hr/>
-      <button type="button" role="menuitem" onClick={() => choose(onSkills)}><IconSkills size={17}/><span>创作技能<small>选择本机已安装的技能</small></span></button>
+      <button type="button" role="menuitem" disabled={skillsDisabled} onClick={() => choose(onSkills)}><IconSkills size={17}/><span>创作技能<small>{skillsDisabled ? 'Codex 技能适配待接通' : '选择本机已安装的技能'}</small></span></button>
     </div>, document.body)}
   </>;
 }

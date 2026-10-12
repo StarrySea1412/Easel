@@ -41,6 +41,7 @@ test('a failed refresh preserves real file diff receipts and offers recovery', a
   const view = await setup(t);
   const row = { id: 'write1', name: 'write', status: 'returned', command: '', path: 'proof.txt', output: '', diff: '+1 alpha\n+2 beta', added: 2, removed: 0, elapsedSeconds: .4 };
   await view.respond(0, payload('a', [row], ['记录尚未完整。']));
+  await act(async () => { const detail=view.container.querySelector('details.chat-execution-row');detail.open=true;detail.dispatchEvent(new window.Event('toggle')); });
   assert.match(view.container.textContent, /1 个文件有修改回执/);
   assert.match(view.container.textContent, /\+2 −0/);
   await view.click('重新读取');
@@ -55,4 +56,70 @@ test('an old session response cannot become current execution evidence', async t
   await view.respond(1, payload('b', [], ['CURRENT WARNING']));
   assert.match(view.container.textContent, /CURRENT WARNING/);
   assert.doesNotMatch(view.container.textContent, /OLD PRIVATE WARNING/);
+});
+
+const operation = (id, status = 'running', output = '') => ({id,name:'exec',kind:'command',status,command:'python task.py',path:'',output,diff:''});
+const emit = async data => act(async () => window.dispatchEvent(new window.CustomEvent('easel:execution', {detail:data})));
+const expand = async view => act(async () => {const detail=view.container.querySelector('details.chat-execution-row');detail.open=true;detail.dispatchEvent(new window.Event('toggle'));});
+
+test('live evidence wins over an earlier HTTP response and keeps expanded details', async t => {
+  const view = await setup(t);
+  await emit(payload('a',[operation('live','running','first')]));
+  await expand(view);
+  await view.respond(0,payload('a',[operation('live','running','stale')]));
+  assert.match(view.container.textContent,/first/);
+  assert.doesNotMatch(view.container.textContent,/stale/);
+  await emit(payload('a',[operation('live','completed','final')]));
+  assert.equal(view.container.querySelector('details.chat-execution-row').open,true);
+  assert.match(view.container.textContent,/final/);
+  await emit(payload('a',[operation('live','running','late')]));
+  assert.match(view.container.textContent,/执行已结束/);
+  assert.doesNotMatch(view.container.textContent,/late/);
+});
+
+test('diff and output coexist and command/output/diff copy independently', async t => {
+  const view = await setup(t), copied=[];
+  const original=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async text=>copied.push(text)}}});
+  t.after(()=>original?Object.defineProperty(globalThis,'navigator',original):delete globalThis.navigator);
+  await view.respond(0,payload('a',[{...operation('edit','completed','actual receipt'),diff:'-old\n+new',added:1,removed:1}]));
+  await expand(view);
+  assert.match(view.container.textContent,/actual receipt/);
+  assert.match(view.container.textContent,/\+new/);
+  for(const text of ['复制命令','复制输出','复制差异']) await view.click(text);
+  assert.deepEqual(copied,['python task.py','actual receipt','-old\n+new']);
+});
+
+test('paging retains 65 operations and loaded history after refreshing the latest page', async t => {
+  const view = await setup(t);
+  const rows=Array.from({length:65},(_,i)=>operation(String(i),'completed','row '+i));
+  await view.respond(0,{...payload('a',rows.slice(25)),total:65,nextBefore:25});
+  await view.click('加载较早记录');
+  assert.match(view.requests[1].url,/before=25/);
+  await view.respond(1,{...payload('a',rows.slice(0,25)),total:65,nextBefore:null});
+  await view.click('查看全部 65 项');
+  assert.equal(view.container.querySelectorAll('details.chat-execution-row').length,65);
+  await emit({...payload('a',rows.slice(25)),total:65,nextBefore:25});
+  assert.equal(view.container.querySelectorAll('details.chat-execution-row').length,65);
+  assert.doesNotMatch(view.container.textContent,/加载较早记录/);
+});
+
+test('foreign live events and malformed plan data cannot become evidence', async t => {
+  const view = await setup(t);
+  await emit(payload('foreign',[operation('private')]));
+  assert.equal(view.container.textContent,'');
+  await view.respond(0,{...payload('a',[operation('unknown','unconfirmed')]),plan:[{step:{private:'unsafe'},status:'completed'}]});
+  assert.match(view.container.textContent,/结果未确认/);
+  assert.doesNotMatch(view.container.textContent,/unsafe/);
+});
+
+test('returned receipts cannot be revived by delayed running or unconfirmed snapshots', async t => {
+  const view = await setup(t);
+  await view.respond(0,payload('a',[operation('receipt','returned','saved receipt')]));
+  await expand(view);
+  await emit(payload('a',[operation('receipt','running','late running')]));
+  await emit(payload('a',[operation('receipt','unconfirmed','late unknown')]));
+  assert.match(view.container.textContent,/saved receipt/);
+  assert.match(view.container.textContent,/工具已返回/);
+  assert.doesNotMatch(view.container.textContent,/late running|late unknown/);
 });

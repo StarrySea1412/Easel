@@ -7,6 +7,7 @@ import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
 import ChatExecutionPanel from './ChatExecutionPanel';
+import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
@@ -16,10 +17,11 @@ import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { loadComposerModel } from '../lib/composerModel';
-import { loadThinkingLevel } from '../lib/thinkingLevel';
+import { loadThinkingLevel, resolveThinkingPreference } from '../lib/thinkingLevel';
 import { fetchOfficeTaskModels } from '../lib/officeControls';
 
 interface ChatPageProps {
+  onEngineChange?: (engine:'openclaw'|'codex') => void;
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
   stopping?: boolean;
@@ -56,7 +58,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onSend, onStop, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -65,15 +67,16 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   useEffect(() => { suggestionMounted.current = true; return () => { suggestionMounted.current = false; }; }, []);
   const sendSuggestion = async (prompt: string) => {
     if (stream || stopping || session.importedFromBackup || suggestionPending.current) return;
+    if (session.engine === 'codex') { onSend(prompt); return; }
     const skills = readSelectedSkills(session.id), requirements = readSkillRequirements(session.id, skills);
     const modelRef = loadComposerModel();
-    if (!modelRef) { onSend(prompt, undefined, skills, requirements); return; }
     suggestionPending.current = true;
     try {
       const capability = await fetchOfficeTaskModels(session.id, new AbortController().signal);
       if (!suggestionMounted.current || suggestionContext.current.sessionId !== session.id || suggestionContext.current.blocked) return;
-      if (!capability.available || !capability.options.some(option => option.id === modelRef && option.configured)) { setSuggestionError('所选模型当前不可用，请在输入框刷新模型或改用会话配置。'); return; }
-      setSuggestionError(''); onSend(prompt, undefined, skills, requirements, loadThinkingLevel(), modelRef);
+      const effective = capability.options.find(option => option.id === (modelRef || capability.currentModelRef || capability.defaultModelRef) && option.configured);
+      if (!capability.available || (modelRef && !effective)) { setSuggestionError('所选模型当前不可用，请在输入框刷新模型或改用会话配置。'); return; }
+      setSuggestionError(''); onSend(prompt, undefined, skills, requirements, resolveThinkingPreference(loadThinkingLevel(), effective?.thinkingLevels), modelRef || undefined);
     } catch { if (suggestionMounted.current && suggestionContext.current.sessionId === session.id && !suggestionContext.current.blocked) setSuggestionError('模型选项暂不可核验，请在输入框刷新后重试。'); }
     finally { suggestionPending.current = false; }
   };
@@ -107,7 +110,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   };
   const isImported = session.importedFromBackup === true;
   const isStreaming = !isImported && !!stream;
-  const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported);
+  const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported || session.engine === 'codex');
   const isEmpty = session.messages.length === 0 && !isStreaming;
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
@@ -139,7 +142,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} sessionId={session.id} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -159,7 +162,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
   // ---- 对话态 ----
   const displayMessages: ChatMessage[] = [...session.messages];
-  if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '' });
+  if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '', startedAt: stream!.startedAt, elapsedMs: stream!.elapsedMs });
 
   return (
     <div className="chat-page chat-conversation-page">
@@ -223,8 +226,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-                execution={!isImported && msg.role === 'assistant' && auditTurn ? <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
-                status={!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
+                execution={!isImported && msg.role === 'assistant' && auditTurn ? session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
+                status={session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
               /></Fragment>
             );
           })}
@@ -239,7 +242,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         {!isImported && <div className="chat-input-inner">
           {stopping && <p className="composer-skills-note" role="status">正在请求停止，等待后端确认…</p>}
           {stopError && <div className="composer-upload-error" role="alert">{stopError}{isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
-       <ChatComposer key={session.id} sessionId={session.id} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
+       <ChatComposer key={session.id} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
         </div>}
       </div>}
     </div>

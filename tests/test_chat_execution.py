@@ -40,3 +40,16 @@ def test_exact_turn_returns_tool_time_and_returned_diff_without_guessing(tmp_pat
     assert not execution.snapshot('foreign', 'turn', audits, transcripts)['operations']
     assert not execution.snapshot('chat', 'other', audits, transcripts)['operations']
     with pytest.raises(Exception): execution.snapshot('../chat', 'turn', audits, transcripts)
+
+
+def test_inactive_journal_preserves_receipts_and_does_not_claim_process_still_running(tmp_path):
+    from easel.execution import begin, returned
+    unknown = begin('chat', 'turn', 'active', 'exec', {'command': 'unknown'})
+    saved = begin('chat', 'turn', 'file', 'write', {'path': 'outputs/topic/actual.txt'})
+    returned(saved, {'isError': False, 'content': 'returned'})
+    value = execution.snapshot('chat', 'turn', tmp_path / 'audits', tmp_path / 'transcripts',
+        journal=[unknown, saved], outputs=tmp_path / 'outputs')
+    assert value['operations'][0]['status'] == 'unconfirmed'
+    assert value['operations'][1]['status'] == 'returned'
+    assert value['operations'][1]['artifactPath'] == 'topic/actual.txt'
+    assert unknown['status'] == 'running'

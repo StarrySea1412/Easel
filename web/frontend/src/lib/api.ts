@@ -1,4 +1,6 @@
 import { decodeChatCompaction } from './chatCompaction';
+import { decodeChatTiming } from './chatTiming';
+import { publishExecution, decodeExecution } from './execution';
 import { makeChatError, type ChatErrorDetail } from './chatErrors';
 import type { SkillRequirements } from './selectedSkills';
 function getBasePath(): string {
@@ -821,6 +823,8 @@ export function streamChat(
   onSelectionOrThinking?: ((requestedModelRef: string | null) => void) | ThinkingLevel,
   onTextSnapshot?: (text: string) => void,
   onCompaction?: (event: import('./chatCompaction').ChatCompaction) => void,
+  onTiming?: (timing: import('./chatTiming').ChatTiming) => void,
+  engine: 'openclaw'|'codex' = 'openclaw',
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -853,7 +857,9 @@ export function streamChat(
         if (!currentEvent || dataLines.length === 0) return false;
         if (currentId > lastEventId) lastEventId = currentId;
         const data = dataLines.join('\n');
-        if (currentEvent === 'token') {
+        if (currentEvent === 'timing' && onTiming) {
+          try { onTiming(decodeChatTiming(JSON.parse(data))); } catch { /* malformed timing */ }
+        } else if (currentEvent === 'token') {
           try { onToken(JSON.parse(data) as string); } catch { onToken(data); }
         } else if (currentEvent === 'text_snapshot' && onTextSnapshot) {
           try { const text: unknown = JSON.parse(data); if (typeof text === 'string') onTextSnapshot(text); } catch { /* malformed snapshot */ }
@@ -865,6 +871,8 @@ export function streamChat(
           try { const event = decodeChatCompaction(JSON.parse(data)); if (event) onCompaction(event); } catch { /* invalid lifecycle */ }
         } else if (currentEvent === 'activity' && onActivity) {
           try { onActivity(JSON.parse(data) as string); } catch { onActivity(data); }
+        } else if (currentEvent === 'execution') {
+          try { publishExecution(JSON.parse(data)); } catch { /* invalid evidence */ }
         } else if (currentEvent === 'question' && onQuestion) {
           try {
             const question: unknown = JSON.parse(data);
@@ -937,7 +945,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
+              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -973,20 +981,17 @@ export function streamChat(
 }
 
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string; requestedModelRef?: string | null }> {
+export function fetchLastTurn(sessionId: string, turnId?: string): Promise<import('./chatTiming').ChatTiming & { status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string; requestedModelRef?: string | null }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }
 
-export interface ChatExecution {
-  sessionId: string; turnId: string; warnings: string[];
-  operations: { id: string; name: string; status: 'running' | 'returned' | 'failed' | 'unconfirmed'; command: string; path: string; output: string; diff: string; added?: number; removed?: number; elapsedSeconds?: number }[];
-}
-export async function fetchChatExecution(sessionId: string, turnId: string, signal?: AbortSignal): Promise<ChatExecution> {
-  const response = await fetch(`${BASE}/api/chat/execution/${encodeURIComponent(sessionId)}/${encodeURIComponent(turnId)}`, { signal, cache: 'no-store' });
+export type ChatExecution = import('./execution').ExecutionSnapshot;
+export async function fetchChatExecution(sessionId: string, turnId: string, signal?: AbortSignal, before?: number): Promise<ChatExecution> {
+  const response = await fetch(`${BASE}/api/chat/execution/${encodeURIComponent(sessionId)}/${encodeURIComponent(turnId)}${before!==undefined?`?before=${before}`:''}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error(`执行记录不可用（HTTP ${response.status}）`);
-  const value = await response.json() as ChatExecution;
-  if (value.sessionId !== sessionId || value.turnId !== turnId || !Array.isArray(value.operations) || value.operations.length > 40 || !Array.isArray(value.warnings)) throw new Error('执行记录不属于本轮');
+  const value = decodeExecution(await response.json());
+  if (!value || value.sessionId !== sessionId || value.turnId !== turnId) throw new Error('执行记录不属于本轮');
   return value;
 }
 

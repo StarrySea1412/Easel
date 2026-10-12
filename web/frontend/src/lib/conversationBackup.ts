@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatSession } from './store';
 import type { ThinkingLevel } from './api';
 import { historicalGatewayAuthError } from './chatErrors';
+import { decodeChatTiming } from './chatTiming';
 
 export const MAX_BACKUP_BYTES = 20 * 1024 * 1024;
 export const MAX_BACKUP_SESSIONS = 5000;
@@ -13,6 +14,7 @@ export interface BackupMessage {
   activity?: string;
   error?: string;
   requestedThinkingLevel?: ThinkingLevel;
+  elapsedMs?: number;
 }
 
 export interface BackupSession {
@@ -117,6 +119,11 @@ function validateBackup(value: unknown): ConversationBackup {
         role: message.role,
         content: textField(message.content, `${messagePath}.content`, budget),
       };
+      if (message.elapsedMs !== undefined) {
+        const timing = decodeChatTiming(message);
+        if (timing.elapsedMs === undefined) invalid(`${messagePath}.elapsedMs`, '必须是有效的非负耗时。');
+        result.elapsedMs = timing.elapsedMs;
+      }
       for (const field of ['thinking', 'activity', 'error'] as const) {
         if (message[field] !== undefined) result[field] = textField(message[field], `${messagePath}.${field}`, budget);
       }
@@ -151,6 +158,7 @@ function visibleMessage(message: ChatMessage): BackupMessage {
     content: historical ? '' : message.content,
     ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
     ...(message.activity !== undefined ? { activity: message.activity } : {}),
+    ...('elapsedMs' in decodeChatTiming(message) ? { elapsedMs: message.elapsedMs } : {}),
     ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),
     ...(historical || message.error ? { error: historical?.message ?? message.error!.message } : {}),
   };
@@ -231,6 +239,7 @@ export function createImportedSessions(backup: ConversationBackup, existingIds: 
         content: message.content,
         ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
         ...(message.activity !== undefined ? { activity: message.activity } : {}),
+        ...(message.elapsedMs !== undefined ? { elapsedMs: message.elapsedMs } : {}),
         ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),
         ...(message.error !== undefined ? { error: { message: message.error } } : {}),
       })),

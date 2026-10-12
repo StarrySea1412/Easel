@@ -3,8 +3,14 @@ import { fetchOfficeTaskModels, type OfficeModelCapability } from '../lib/office
 import { isCompleteModelRef, loadComposerModel, saveComposerModel } from '../lib/composerModel';
 import { fetchModelHealth, type ModelHealthSnapshot } from '../lib/modelHealth';
 import { fetchChannelConnection, type ChannelConnection } from '../lib/channelStatus';
+import { useCodexModels } from './useCodexModels';
 
-export function useComposerModels(sessionId: string | null) {
+export function useComposerModels(sessionId: string | null, engine: 'openclaw'|'codex' = 'openclaw') {
+  const openclaw = useOpenclawComposerModels(sessionId, engine === 'openclaw');
+  const codex = useCodexModels(engine === 'codex');
+  return engine === 'codex' ? codex : openclaw;
+}
+function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   const [modelRef, setModelRef] = useState(loadComposerModel);
   const [capability, setCapability] = useState<OfficeModelCapability | null>(null);
   const [health, setHealth] = useState<ModelHealthSnapshot | null>(null);
@@ -19,6 +25,7 @@ export function useComposerModels(sessionId: string | null) {
     return () => window.removeEventListener('easel:channel-names-changed', changed);
   }, []);
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController(); setLoading(true); setError('');
     fetchOfficeTaskModels(sessionId, controller.signal).then(value => { if (!controller.signal.aborted) setCapability(value); })
       .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂不可用。'); })
@@ -34,18 +41,19 @@ export function useComposerModels(sessionId: string | null) {
     readHealth();
     const timer = setInterval(readHealth, 60000);
     return () => { clearInterval(timer); controller.abort(); };
-  }, [sessionId, revision]);
+  }, [sessionId, revision, enabled]);
   const options = capability?.options.filter(option => option.configured && isCompleteModelRef(option.id)) || [];
   const selected = options.find(option => option.id === modelRef);
   const effectiveRef = selected?.id || capability?.currentModelRef || capability?.defaultModelRef || '';
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     setConnection(effectiveRef ? { modelRef: effectiveRef, state: 'running', channelName: '正在读取渠道', detail: '正在读取已保存渠道的模型列表…' } : null);
     if (effectiveRef) fetchChannelConnection(effectiveRef, controller.signal)
       .then(value => { if (!controller.signal.aborted) setConnection(value); })
       .catch(cause => { if (!controller.signal.aborted) setConnection({ modelRef: effectiveRef, state: 'failed', channelName: '渠道状态未知', detail: cause instanceof Error ? cause.message : '模型列表读取失败。' }); });
     return () => controller.abort();
-  }, [effectiveRef, revision]);
+  }, [effectiveRef, revision, enabled]);
   const ready = !modelRef || (!loading && capability?.available === true && Boolean(selected));
   const choose = (value: string) => {
     if (value && (!capability?.available || !options.some(option => option.id === value))) return;

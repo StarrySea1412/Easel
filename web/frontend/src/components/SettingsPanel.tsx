@@ -6,6 +6,7 @@ import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
 import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
+import CodexSettings from './CodexSettings';
 import ModelHealthPanel from './settings/ModelHealthPanel';
 import ChannelNameEditor from './settings/ChannelNameEditor';
 import ImageReverseSettings from './settings/ImageReverseSettings';
@@ -714,6 +715,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
                 {chan === 'chat' && (
                   <section className="st-panel active">
+                    <CodexSettings />
                     <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
                       savedPrimary={savedChatRows.find((row) => row.role === '主')} saving={saving} dirty={chatDirty}
                       saveNote={savedNote} labelFor={modelConfigLabel} onPrimary={setPrimaryRow} onSave={() => void saveCurrent()}

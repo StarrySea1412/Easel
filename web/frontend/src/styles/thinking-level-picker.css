@@ -47,6 +47,9 @@
 .thinking-level-picker.is-adaptive .thinking-level-slider { background:color-mix(in srgb,var(--text-tertiary) 34%,var(--surface-2)); }
 .thinking-level-supported { margin:0 0 10px; color:var(--text-tertiary); font-size:10px; line-height:1.5; }
 .thinking-level-adaptive:disabled { opacity:.45; cursor:default; }
+.thinking-level-modes { display:flex; gap:6px; justify-content:center; margin:7px 0; }
+.thinking-level-modes button { position:static; padding:4px 7px; border:0; border-radius:5px; background:var(--surface-2); color:var(--text-secondary); font:inherit; font-size:11px; cursor:pointer; }
+.thinking-level-modes button[aria-pressed="true"] { color:#3295ff; background:#3295ff12; }
 .thinking-level-trigger:focus-visible,.thinking-level-menu button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:3px; }
 .thinking-level-trigger>svg { flex:none; transform:rotate(90deg); }
 .thinking-level-trigger[aria-expanded=true]>svg { transform:rotate(-90deg); }

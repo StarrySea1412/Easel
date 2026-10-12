@@ -24,6 +24,17 @@ def test_output_metadata_checks_real_files_and_data_root(tmp_path, monkeypatch):
     assert exc.value.status_code == 403
 
 
+def test_root_artifact_is_visible_in_library_without_private_journals(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path)
+    (tmp_path / 'actual.txt').write_text('actual local file', encoding='utf-8')
+    (tmp_path / '_execution').mkdir()
+    (tmp_path / '_execution' / 'state.json').write_text('{}')
+    (tmp_path / '.private.txt').write_text('hidden')
+    tree = web.get_output_tree()
+    assert len(tree) == 1 and tree[0]['path'] == 'actual.txt'
+    assert tree[0]['type'] == 'file' and tree[0]['kind'] == 'text'
+
+
 @pytest.fixture
 def saver(tmp_path, monkeypatch):
     scripts = Path(__file__).resolve().parents[1] / 'skills/shared/scripts'

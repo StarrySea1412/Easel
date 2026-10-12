@@ -13,7 +13,8 @@ import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { IconArrowUp, IconStop, IconChevron } from './icons';
 import ComposerAttachments from './ComposerAttachments';
 import ComposerAddMenu, { type ComposerUploadKind } from './ComposerAddMenu';
-import { DEFAULT_THINKING_LEVEL, loadThinkingLevel, saveThinkingLevel, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
+import { loadThinkingLevel, saveThinkingLevel, resolveThinkingPreference, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
+import type { ThinkingPreference } from '../lib/thinkingLevel';
 import '../styles/chat-composer.css';
 import '../styles/thinking-level-picker.css';
 import { showToast } from '../lib/toast';
@@ -22,10 +23,15 @@ import { addChatDraftQuote } from '../lib/chatDrafts';
 import ChatQuoteDraft from './ChatQuoteDraft';
 import InlineInfo from './InlineInfo';
 import ChatQueueTray from './ChatQueueTray';
+import Select from './ui/Select';
+import CodexSettings from './CodexSettings';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { getChatQueue, subscribeChatQueue, pauseChatQueue, updateQueuedMessage } from '../lib/chatQueue';
 
 interface ChatComposerProps {
+  engine?: 'openclaw'|'codex';
+  engineLocked?: boolean;
+  onEngineChange?: (engine: 'openclaw'|'codex') => void;
   sessionId: string;
   compaction?: import('../lib/chatCompaction').ChatCompaction;
   hero?: boolean;
@@ -43,7 +49,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -67,10 +73,10 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
   };
   useEffect(() => { if (editingQueue) textareaRef.current?.focus(); }, [editingQueue, queueEdit?.id]);
   const [dragOver, setDragOver] = useState(false);
-  const [preferredThinking, setThinkingLevel] = useState<ThinkingLevel>(() => loadThinkingLevel());
+  const [preferredThinking, setThinkingLevel] = useState<ThinkingPreference>(() => loadThinkingLevel());
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
-  const models = useComposerModels(sessionId);
+  const models = useComposerModels(sessionId, engine);
   const effectiveModel = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const supportedThinking = effectiveModel?.thinkingLevels;
   const { level: thinkingLevel, notice: thinkingNotice } = useCompatibleThinking(preferredThinking, supportedThinking, setThinkingLevel);
@@ -93,7 +99,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
     window.addEventListener(CHAT_QUOTE_EVENT, quote);
     return () => window.removeEventListener(CHAT_QUOTE_EVENT, quote);
   }, [sessionId, editingQueue]);
-  const changeThinkingLevel = (value: ThinkingLevel) => {
+  const changeThinkingLevel = (value: ThinkingPreference) => {
     setThinkingLevel(value);
     // Persist explicit choices only. StrictMode replays mount effects, which
     // must never replace an unreadable preference with the fallback value.
@@ -192,7 +198,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     try {
-      const snapshot = skills.getSnapshot();
+      const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
       if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。请刷新模型选项或改用会话配置。'); return; }
@@ -236,7 +242,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       onDrop={onDrop}>
       <ChatCompactionIndicator event={compaction} />
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
-      {!editingQueue && <ComposerSkillChips skills={skills} />}
+      {!editingQueue && engine !== 'codex' && <ComposerSkillChips skills={skills} />}
       <textarea
         ref={textareaRef}
         id={inputId}
@@ -259,7 +265,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
         <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
         <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
       </div>}
-      {skills.notice && <p className="composer-skills-note" role="status">{skills.notice}
+      {engine !== 'codex' && skills.notice && <p className="composer-skills-note" role="status">{skills.notice}
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
@@ -268,10 +274,14 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
       <input ref={folderInputRef} type="file" multiple hidden {...{ webkitdirectory: '' }} onChange={event => uploadSelection(event, true)}/>
       <div className="composer-bar">
         <div className="composer-tools" hidden={editingQueue}>
-          <ComposerAddMenu disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
-          <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>
-          <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />
-          <ThinkingLevelPicker value={thinkingLevel} onChange={changeThinkingLevel} disabled={stopping}
+          <Select className="composer-engine" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping}
+            options={[{value:'openclaw',label:'OpenClaw'},{value:'codex',label:'Codex'}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
+          <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
+          {engine === 'codex' ? <Select aria-label="本轮使用模型" value={models.modelRef} disabled={stopping || models.loading}
+            options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
+            : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}
+          <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}
             supportedLevels={supportedThinking}
             modelLabel={models.selected?.model || (models.modelRef ? models.modelRef : '沿用会话模型')} />
           {thinkingNotice && <span className="composer-thinking-info"><InlineInfo hover label="思考档位已自动匹配">{thinkingNotice}</InlineInfo></span>}
@@ -292,6 +302,7 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
         {editingQueue ? 'Enter 保存 · Esc 取消 · Shift+Enter 换行' : stopping ? '正在等待停止确认' : isStreaming ? 'Enter 排队 · Shift+Enter 换行' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}
       </span>
       {!editingQueue && <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />}
+      {engine === 'codex' && <details><summary>Codex 设置与能力</summary><CodexSettings /></details>}
     </div>
     </div>
   );
@@ -300,13 +311,12 @@ function SessionChatComposer({ sessionId, compaction, hero = false, isStreaming,
 
 
 
-export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, supportedLevels }: { value: ThinkingLevel; onChange: (value: ThinkingLevel) => void; disabled: boolean; modelLabel: string; supportedLevels?: string[] }) {
+export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, supportedLevels }: { value: ThinkingPreference; onChange: (value: ThinkingPreference) => void; disabled: boolean; modelLabel: string; supportedLevels?: string[] }) {
   const [open, setOpen] = useState(false);
   const menuOpen = open && !disabled;
   const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive');
-  const resetLevel = supportedLevels?.length && !supportedLevels.includes(DEFAULT_THINKING_LEVEL)
-    ? THINKING_LEVELS.find(level => supportedLevels.includes(level)) : DEFAULT_THINKING_LEVEL;
-  const index = Math.max(0, strengthLevels.indexOf(value as Exclude<ThinkingLevel, 'adaptive'>));
+  const resolved = resolveThinkingPreference(value, supportedLevels);
+  const index = Math.max(0, strengthLevels.indexOf(resolved === 'adaptive' ? 'medium' : resolved || 'medium'));
   const availableIndexes = strengthLevels.flatMap((level, i) => !supportedLevels?.length || supportedLevels.includes(level) ? [i] : []);
   const minIndex = availableIndexes[0] ?? 0, maxIndex = availableIndexes.at(-1) ?? 0;
   const sliderIndex = Math.min(maxIndex, Math.max(minIndex, index));
@@ -384,15 +394,18 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
       style={{ left: menuPosition.left, right: 'auto', ...(menuPosition.below ? { top: 'calc(100% + 8px)', bottom: 'auto' } : {}) }}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); } }}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      <div className="thinking-level-heading"><strong>{THINKING_LABELS[value]}</strong>
-        <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title={supportedLevels?.length && !supportedLevels.includes('adaptive') ? '网关声明不支持自适应' : '由模型自动决定强度'} disabled={disabled || Boolean(supportedLevels?.length && !supportedLevels.includes('adaptive'))} onClick={() => onChange('adaptive')}>自适应</button>
-        <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title={resetLevel ? `恢复可用默认：${THINKING_LABELS[resetLevel]}` : '当前模型没有可用默认档位'} disabled={disabled || !resetLevel || value === resetLevel}
-          onClick={() => { if (resetLevel) onChange(resetLevel); sliderRef.current?.focus(); }}>
+      <div className="thinking-level-heading"><strong>{value === 'auto' && resolved ? `自动 · ${THINKING_LABELS[resolved]}` : THINKING_LABELS[value]}</strong>
+        <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title="恢复自适应最高" disabled={disabled || value === 'auto'}
+          onClick={() => { onChange('auto'); sliderRef.current?.focus(); }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 7a5 5 0 1 1 .9 4M3 2v5h5" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>
+      <div className="thinking-level-modes">
+        <button type="button" className="thinking-level-auto" aria-pressed={value === 'auto'} disabled={disabled} onClick={() => onChange('auto')}>自适应最高</button>
+        {supportedLevels?.includes('adaptive') && <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title="由模型自动决定强度" disabled={disabled} onClick={() => onChange('adaptive')}>模型自适应</button>}
+      </div>
       <div className="thinking-level-model"><span title={`所选模型：${modelLabel}`}>{modelLabel}</span><InlineInfo label="思考强度能力说明">
-        {supportedLevels?.length ? <>网关声明可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。不支持的档位已禁用。<br/>这是能力声明，非本轮调用实测。</> : <>能力信息尚未提供；当前选择用于下一轮请求。</>}
+        {supportedLevels?.length ? <>当前模型可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。自适应最高会选择其中最高档；手动调整对下一轮生效。<br/>这是能力声明，非本轮调用实测。</> : <>能力信息尚未提供；自适应最高会沿用模型默认，确认档位后自动匹配。</>}
       </InlineInfo></div>
       <div className="thinking-level-slider-wrap">
         {maxIndex < strengthLevels.length - 1 && <span className="thinking-level-unavailable" aria-hidden="true"/>}

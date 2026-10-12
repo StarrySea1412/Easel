@@ -6,8 +6,10 @@ import { hasChatDraft } from './chatDrafts';
 import { hasChatQueue } from './chatQueue';
 import { requirementsForSelection } from './selectedSkills';
 import type { SkillRequirements } from './selectedSkills';
+import { decodeChatTiming } from './chatTiming';
+import type { ChatTiming } from './chatTiming';
 
-export interface ChatMessage {
+export interface ChatMessage extends ChatTiming {
   role: 'user' | 'assistant';
   content: string;
   error?:ChatErrorDetail;
@@ -23,6 +25,7 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  engine?: 'openclaw' | 'codex';
   id: string;
   title: string;
   messages: ChatMessage[];
@@ -37,7 +40,7 @@ export interface ChatSession {
 }
 
 /** 进行中的流式状态（存于 App，不随页面切换/ChatPage 卸载而丢失）。 */
-export interface StreamState {
+export interface StreamState extends ChatTiming {
   compaction?: import('./chatCompaction').ChatCompaction;
   requestedModelRef?: string;
   content: string;
@@ -135,6 +138,7 @@ function generateId(): string {
 function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMessage | null {
   if (!record(value) || (value.role !== 'user' && value.role !== 'assistant')) return null;
   const message: ChatMessage = { role: value.role, content: typeof value.content === 'string' ? value.content : '' };
+  Object.assign(message, decodeChatTiming(value));
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];
   }
@@ -176,6 +180,7 @@ function decodeSessions(raw: string): ChatSession[] {
       title: typeof value.title === 'string' && value.title.trim() ? value.title : 'New Chat',
       created: typeof value.created === 'number' && Number.isFinite(value.created) ? value.created : 0,
     };
+    session.engine = value.engine === 'codex' ? 'codex' : 'openclaw';
     for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
     if (typeof value.archived === 'boolean') session.archived = value.archived;
     if (typeof value.pinnedAt === 'number' && Number.isFinite(value.pinnedAt) && value.pinnedAt > 0) session.pinnedAt = value.pinnedAt;

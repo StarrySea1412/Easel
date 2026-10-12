@@ -520,12 +520,16 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await asyncio.to_thread(_codex_service.close)
         await asyncio.to_thread(health.stop)
         await asyncio.to_thread(verification.stop)
         _stop_mp_login_on_shutdown()
 
 
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
+from easel.codex_service import CodexService
+_codex_service = CodexService(OUTPUTS_DIR)
+app.include_router(_codex_service.router())
 def _local_ports(env_port: str) -> set[str]:
     return {'7860', '7870', '5173', (env_port or '').strip() or '7860'}
 
@@ -1288,11 +1292,14 @@ def get_output_tree() -> list[dict]:
         return []
     items = []
     for e in sorted(OUTPUTS_DIR.iterdir()):
-        # 内容库只展示「项目目录」：跳过系统目录(_login/_publish/...)、隐藏项、
-        # 以及根目录散文件（按新规约产物必在项目目录内，根散文件=系统状态/残渣）。
+        # 跳过系统目录(_login/_publish/...)和隐藏项；outputs 根部的真实文件
+        # 也必须可见，否则执行卡核验成功后仍无法跳转到实际产物。
         if e.name.startswith('.') or e.name.startswith('_'):
             continue
-        if not e.is_dir() or e.name in SYSTEM_TOPLEVEL_DIRS:
+        if e.is_file():
+            items.append(_build_output_node(e, e.name))
+            continue
+        if e.name in SYSTEM_TOPLEVEL_DIRS:
             continue
         node = _build_output_node(e, e.name)
         meta = _read_project_meta(e)
@@ -2968,6 +2975,7 @@ class AttachmentRef(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    engine: Literal['openclaw', 'codex'] = 'openclaw'
     message: str
     persona: str | None = None
     sessionId: str | None = None
@@ -3374,6 +3382,8 @@ _STOPPED_CHAT: set = set()
 @app.get("/api/chat/last/{session_id}")
 async def api_chat_last(session_id: str, turn_id: str | None = None):
     """取某会话最近一轮的完整结果（SSE 断线后前端据此取回，避免丢结果）。"""
+    if _codex_service.owns(session_id):
+        return _codex_service.snapshot(session_id, turn_id)
     f = _turn_file(f"web:{session_id}")
     if not f.is_file():
         return {"status": "none", "text": ""}
@@ -3406,6 +3416,9 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
 @app.get("/api/chat/jobs/{turn_id}/stream")
 async def api_chat_job_stream(turn_id: str, after: int = 0):
     """Replay missed events, then tail this turn until its terminal event arrives."""
+    codex_session = _codex_service.turn_session(turn_id)
+    if codex_session:
+        return await _codex_service.stream(codex_session, turn_id, after)
     # A stale browser-side pendingTurnId must fail promptly instead of receiving
     # heartbeats forever. The frontend can then recover from the final snapshot.
     if not _job_event_file(turn_id).is_file():
@@ -3453,6 +3466,12 @@ async def api_chat_stream(req: ChatRequest):
     记下该文件尾偏移、实时 tail 之后追加的行，用 runId 闩锁隔离本轮，把 assistant_text_stream 的
     token delta 转成 SSE `token`、thinking delta 转成 `thinking`。stdout 仅留作错误/兜底。
     """
+    if req.sessionId:
+        _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
+    if req.engine == 'codex':
+        _attachment_context(req)
+        turn_id = await asyncio.to_thread(_codex_service.start, req)
+        return await _codex_service.stream(req.sessionId, turn_id)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
     requested_model_ref = req.modelRef
@@ -3482,6 +3501,21 @@ async def api_chat_stream(req: ChatRequest):
         sk = req.sessionId or f"web-{int(time.time() * 1000)}"
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
         turn_id = req.turnId or uuid.uuid4().hex
+        from easel.execution_store import ExecutionStore
+        execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        started_at_ms = int(time.time() * 1000)
+        started_monotonic = time.monotonic()
+        terminal_timing = None
+
+        def timing(terminal=False):
+            nonlocal terminal_timing
+            if terminal and terminal_timing is None:
+                terminal_timing = {'startedAt': started_at_ms,
+                                   'elapsedMs': max(0, int((time.monotonic() - started_monotonic) * 1000))}
+            return terminal_timing or {'startedAt': started_at_ms}
+
+        def save_turn(key, status, text, extra=None):
+            _save_turn(key, status, text, {**(extra or {}), **timing(status == 'done')})
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
@@ -3492,7 +3526,7 @@ async def api_chat_stream(req: ChatRequest):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
-        _save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
+        save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
                                          "requestedThinkingLevel": requested_thinking_level})
 
         event_path = _job_event_file(turn_id)
@@ -3504,6 +3538,8 @@ async def api_chat_stream(req: ChatRequest):
 
         def to_client(kind, text=None, **extra):
             nonlocal event_seq, turn_error
+            if kind in ('error', 'done'):
+                to_client('timing', timing(True))
             if kind == 'error' and isinstance(text, dict):
                 turn_error = text
             event_seq += 1
@@ -3518,7 +3554,17 @@ async def api_chat_stream(req: ChatRequest):
             client_q.put_nowait({"t": kind, "text": text, "id": event_seq, **extra})
 
         # 秒级反馈：发出即亮「已收到」，不等 agent 冷启动（首个 SSE 事件，随流回放必达）
+        to_client('timing', timing())
         to_client("activity", "⏳ 已收到，正在唤醒 agent…")
+
+        def tool_update(payload):
+            try:
+                value = execution_store.consume(payload)
+            except OSError:
+                loop.call_soon_threadsafe(to_client, 'activity', '执行记录保存失败；请检查数据目录。')
+                return
+            if value:
+                loop.call_soon_threadsafe(to_client, 'execution', value)
         if requested_model_ref is not None:
             to_client('model_selection', {'requestedModelRef': requested_model_ref})
 
@@ -3637,7 +3683,7 @@ async def api_chat_stream(req: ChatRequest):
             # flock 可能阻塞（等另一进程/标签跑完），放线程池避免卡住事件循环
             got = await loop.run_in_executor(None, xlock.acquire, min(TIMEOUT_CHAT, 300))
             if not got:
-                _save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
+                save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
                     "requestedModelRef": requested_model_ref,
                     "requestedThinkingLevel": requested_thinking_level,
@@ -3695,7 +3741,8 @@ async def api_chat_stream(req: ChatRequest):
                             params['model'] = requested_model_ref
                         proc = GatewayAgentProc(native_client,
                             lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
-                            on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event))
+                            on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event),
+                            on_tool=tool_update)
                     else:
                         proc = None
                     if proc is None:
@@ -3718,7 +3765,7 @@ async def api_chat_stream(req: ChatRequest):
                         )
                 except Exception as e:
                     error = gateway_error(type(e).__name__ + ': ' + str(e))
-                    _save_turn(pk, "done", "", {
+                    save_turn(pk, "done", "", {
                         "turn_id": turn_id, "clean_end": False, "stop_reason": "spawn_failed", "error": error,
                         "requestedModelRef": requested_model_ref,
                         "requestedThinkingLevel": requested_thinking_level,
@@ -3728,7 +3775,7 @@ async def api_chat_stream(req: ChatRequest):
             _RUNNING_CHAT[sk] = proc         # 注册运行中进程（HTTP 模式为伪进程），供 /api/chat/stop
             # 经 gateway 后客户端 stdout 没有 model-fetch 标记（那是独立跑 agent 才有），先立刻
             # 给一个「正在思考」活动指示，随后 token 从共享 raw stream 流进来接管显示。
-            to_client("activity", "🧠 正在思考…")
+            to_client("activity", "等待模型响应…")
 
             q = asyncio.Queue()
             SENTINEL = object()
@@ -3747,7 +3794,7 @@ async def api_chat_stream(req: ChatRequest):
                         if "model-fetch] start" in c:
                             run_info["fetch_count"] += 1
                             fc = run_info["fetch_count"]
-                            _emit("activity", "🧠 正在思考…" if fc == 1 else f"🔧 调用工具后继续推理（第 {fc} 步）…")
+                            _emit("activity", "等待模型响应…" if fc == 1 else f"工具返回后继续生成（第 {fc} 步）…")
                         elif "[agent]" in c and "delegat" in c.lower():
                             run_info["delegated"] = True
                             _emit("activity", "🛠️ 制作中…")
@@ -4108,7 +4155,7 @@ async def api_chat_stream(req: ChatRequest):
                 except Exception:
                     pass
                 # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
-                _save_turn(pk, "done", "".join(full_text), {
+                save_turn(pk, "done", "".join(full_text), {
                     "turn_id": turn_id,
                     "requestedModelRef": requested_model_ref,
                     "requestedThinkingLevel": requested_thinking_level,
@@ -4145,13 +4192,19 @@ async def api_chat_stream(req: ChatRequest):
                      and str(e.detail.get('code', '')).startswith('chat_model_')
                      else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
-            _save_turn(pk, 'done', ''.join(full_text), {
+            save_turn(pk, 'done', ''.join(full_text), {
                 'turn_id': turn_id, 'thinking': ''.join(full_thinking),
                 'requestedModelRef': requested_model_ref,
                 'requestedThinkingLevel': requested_thinking_level,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
             })
         finally:
+            try:
+                execution_store.finish()
+                to_client('execution', {'sessionId': sk, 'turnId': turn_id, 'source': 'gateway',
+                    'operations': list(execution_store.rows.values())[-100:]})
+            except OSError:
+                to_client('activity', '执行记录保存失败；本轮结束回执仍保留。')
             xlock.release()
             lock.release()
             _RUNNING_CHAT.pop(sk, None)
@@ -4195,7 +4248,7 @@ async def api_chat_stream(req: ChatRequest):
                 if time.monotonic() - idle_since >= 30:
                     idle_since = time.monotonic()
                     yield {"event": "heartbeat", "data": json.dumps(
-                        "仍在处理中，未卡住…（复杂或制作类任务会花点时间）", ensure_ascii=False)}
+                        "连接保持中 · 暂无新进度", ensure_ascii=False)}
                 continue
             if item is CLIENT_DONE:
                 break
@@ -4211,7 +4264,7 @@ async def api_chat_stream(req: ChatRequest):
                 yield {"id": str(item["id"]), "event": "question", "data": item["text"]}
             elif t == "error":
                 yield {"id": str(item["id"]), "event": "error", "data": json.dumps(item["text"], ensure_ascii=False)}
-            elif t == 'model_selection':
+            elif t in ('model_selection', 'timing', 'execution'):
                 yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
                 yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey")}, ensure_ascii=False)}
@@ -4281,6 +4334,8 @@ class StopRequest(BaseModel):
 async def api_chat_stop(req: StopRequest):
     """用户显式停止当前会话正在跑的对话 agent：终止进程 → supervisor 收尾释放会话锁 →
     下一句立刻能发（不再卡「上一条还在跑」）。仅此显式入口会杀进程；客户端断线不经此路径。"""
+    if req.sessionId and _codex_service.owns(req.sessionId):
+        return await asyncio.to_thread(_codex_service.stop, req.sessionId, req.turnId)
     sk = (req.sessionId or "").strip()
     proc = _RUNNING_CHAT.get(sk) if sk else None
     if req.turnId and _ACTIVE_SKILL_TURNS.get(sk) != req.turnId:
@@ -6734,12 +6789,18 @@ async def api_skill_audits(sessionId: str, turnId: str | None = None):
 
 
 @app.get('/api/chat/execution/{session_id}/{turn_id}')
-async def api_chat_execution(session_id: str, turn_id: str):
+async def api_chat_execution(session_id: str, turn_id: str, before: int | None = None, limit: int = 40):
     import chat_execution
+    from easel.execution_store import read as read_execution
+    if before is not None and before < 0 or not 1 <= limit <= 100:
+        raise HTTPException(400, '执行记录分页参数无效')
+    if _codex_service.owns(session_id):
+        return _codex_service.execution(session_id, turn_id, before, limit)
     process = _RUNNING_CHAT.get(session_id)
     live = process is not None and process.poll() is None and _ACTIVE_SKILL_TURNS.get(session_id) == turn_id
     result = await asyncio.to_thread(chat_execution.snapshot, session_id, turn_id,
-        OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR, live=live, credentials=gateway_credentials())
+        OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR, live=live, credentials=gateway_credentials(),
+        before=before, limit=limit, journal=read_execution(OUTPUTS_DIR, session_id, turn_id), outputs=OUTPUTS_DIR)
     if live and (_RUNNING_CHAT.get(session_id) is not process or _ACTIVE_SKILL_TURNS.get(session_id) != turn_id):
         result['operations'] = []
         result['warnings'] = ['执行轮次正在更新，请稍后查看。']
