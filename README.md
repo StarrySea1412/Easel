@@ -10,7 +10,7 @@
 
 # Easel 创作工作台
 
-> **2026-10-12 执行体验对标**：[Codex 执行过程差距与实施规划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/codex-execution-experience-assessment-2026-10-12.md)已完成，优先统一思考摘要/工作进度、终端输出与退出状态、文件差异和产物回执，再补实时事件、重启恢复与浏览器详情。官方事件、本地源码和隔离模拟记录的真实浏览器展示已分别核实；新执行 UI 尚未实施，不改原 Codex 接入计划，打包继续暂停。
+> **2026-10-12 执行展示首版已实现**：OpenClaw/Codex共用操作卡，完整命令、目录、输出、退出码和后台进程可查；文件diff与回执同显、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，中断未完成项标为未确认。后端112项、前端102项定向回归及构建通过，真实隔离Chromium检查键盘/复制/实时终态/分页、实际本地文件跳转及390px。引擎事件为模拟，没有新增真实模型或付费服务调用；远端恢复对账、完整浏览器闭环及Codex技能/办公室适配仍待完成。源码提交[11874bf7](https://github.com/StarrySea1412/Easel/commit/11874bf7741590d1ab6a68e23d48b1b481b508ae)，见[实现与验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)；main只同步首页说明，原接入计划保留，打包继续暂停。
 
 > **当前打包暂停，等待用户新指令。** [桌面应用、包体/启动与 ZCode / DeepSeek Harness 差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)已完成；建议先补齐执行/产物机制和优化重型运行组件，再验证 Windows WebView2 桌面窗口。仅评估和规划，未迁移到 Electron/Tauri、未修改现有 Codex 接入计划。
 
