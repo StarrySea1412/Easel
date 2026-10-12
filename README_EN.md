@@ -10,6 +10,8 @@
 
 # Easel Creative Workspace
 
+> **October 12, 2026 local update**: Conversations show a running timer and retain duration after completion, failure or stop, including refresh and backups. Reasoning defaults to the highest supported effort for the current model; manual choices stay in the composer, with no separate configuration panel. The current aihub model supports up to high, while live generation has still encountered upstream 502 errors. See the [duration record](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md) and [reasoning fix](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md). Feature code remains on a separate branch, with no functional merge into main or rebuilt installer release.
+
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.
 
 [简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/portable-model-import-fixes) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)

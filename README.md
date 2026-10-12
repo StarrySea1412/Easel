@@ -10,6 +10,8 @@
 
 # Easel 创作工作台
 
+> **2026-10-12 本地更新**：对话生成中实时计时，结束、失败或停止后保留耗时，刷新及备份保留记录。思考强度默认“自适应最高”，按当前模型能力匹配，手动调整集中在对话框，不另设配置面板。当前 aihub 模型支持最高“高”，真实生成仍遇到源站 502。[耗时记录](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md) · [推理修复](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。源码在独立分支，未合并功能代码到 main，也未重新发布完整安装器。
+
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/portable-model-import-fixes) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
