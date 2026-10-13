@@ -171,16 +171,16 @@ test('employee appearance is a reachable independent settings section without ad
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
 });
 
-test('settings opens general by default and the demo preference remains reachable from model configuration', async t => {
+test('settings opens more by default and the demo preference is grouped with storage controls', async t => {
   const view = await fixture(t);
   await view.render(1, view.props, 'default');
-  assert.equal(view.nav('通用设置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
   assert.deepEqual(view.harness.demoProps, view.demoDataPreference);
   const before = view.harness.calls.length;
   await view.click(view.nav('模型配置'));
   assert.equal(view.container.querySelector('[data-testid="demo-settings"]'), null);
-  await view.click(view.nav('通用设置'));
+  await view.click(view.nav('更多设置'));
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
   assert.equal(view.harness.calls.length, before);
 });

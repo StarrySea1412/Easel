@@ -29,7 +29,7 @@ import type {
   ImportSource, ImportPreview, ImportCandidate,
 } from '../lib/api';
 import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImports';
-import { IconGear, IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
+import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
 import { IconText, IconMic, IconMusic } from './icons';
 
 export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
@@ -84,11 +84,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   onOpenOffice?: () => void;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
-  const [sec, setSec] = useState<SettingsSection>(initialSection.startsWith('channel:') || initialSection === 'video' || initialSection === 'import' ? 'model' : initialSection);
+  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'video' || section === 'import' ? 'model' : section === 'general' ? 'more' : section;
+  const [sec, setSec] = useState<SettingsSection>(normalizeSection(initialSection));
   const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'video' ? 'video' : 'chat');
   const [importOpen, setImportOpen] = useState(initialSection === 'import');
   useEffect(() => {
-    setSec(initialSection.startsWith('channel:') || initialSection === 'video' || initialSection === 'import' ? 'model' : initialSection);
+    setSec(normalizeSection(initialSection));
     if (initialSection.startsWith('channel:')) setChan(initialSection.slice(8) as Chan);
     if (initialSection === 'video') setChan('video');
     if (initialSection === 'import') { setChan('chat'); setImportOpen(true); }
@@ -520,6 +521,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const saveImgChannel = useCallback(async () => {
     if (imgSavePending.current) return;
     setImgSaved('');
+    if (!imgModel.trim()) {
+      setImgSaved('请填写生图模型名称');
+      return;
+    }
     if (imgBaseChanged && !imgKey.trim()) {
       setImgSaved('Base URL 已更改，请重新填写对应服务商的 API Key');
       return;
@@ -527,7 +532,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
     imgSavePending.current = true;
     setImgSaving(true);
     try {
-      await saveImagegenChannel(imgBase.trim(), imgKey.trim());
+      await saveImagegenChannel(imgBase.trim(), imgKey.trim(), imgModel.trim());
       if (!mounted.current) return;
       setImgBaseSaved(imgBase.trim());
       if (imgKey.trim()) {
@@ -541,7 +546,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
       imgSavePending.current = false;
       if (mounted.current) setImgSaving(false);
     }
-  }, [imgBase, imgBaseChanged, imgKey]);
+  }, [imgBase, imgBaseChanged, imgKey, imgModel]);
 
   // Esc 不再关闭：设置已是独立页面，Esc 留给页面内控件
 
@@ -648,7 +653,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         <div className="settings-head">
           <div>
             <h2 className="settings-title">设置</h2>
-            <div className="settings-sub">通用设置 · 模型配置 · 环境安装 · 生图通道 · 更多</div>
+            <div className="settings-sub">模型、渠道、环境与更多设置</div>
           </div>
           <div className="settings-actions">
             {sec === 'model' && chan !== 'chat' && (
@@ -674,9 +679,6 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
         <div className="settings-body">
           <nav className="settings-nav">
-            <button aria-current={sec === 'general' ? 'page' : undefined} className={`snav${sec === 'general' ? ' active' : ''}`} onClick={() => setSec('general')}>
-              <IconGear size={16} />通用设置<small>演示数据开关</small>
-            </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型配置<small>六个通道</small>
             </button>
@@ -693,12 +695,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
               <IconSlidersHorizontal size={16} />员工角色卡<small>办公室展示形象</small>
             </button>
             <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />更多设置<small>保存位置与备份</small>
+              <IconEllipsis size={16} />更多设置<small>通用、保存位置与备份</small>
             </button>
           </nav>
 
           <div className="settings-main">
-          {sec === 'general' && <DemoDataSettingsCard {...demoDataPreference} />}
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
@@ -1044,11 +1045,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                     />
                   </SettingsField>
                   <SettingsField label="模型" horizontal>
-                    <span className="cell-text">{imgLoading ? '读取中…' : imgModel || '未读取到模型配置'}</span>
+                    <input className="mock" value={imgModel} aria-label="生图模型名称" placeholder="例如 gpt-image-1 或服务商模型 ID" disabled={imgLoading || imgSaving} onChange={(e) => setImgModel(e.target.value)} />
                   </SettingsField>
                   {imgSaved && <div className={`save-note${imgSaved.startsWith('保存失败') ? ' err' : ''}`}>{imgSaved}</div>}
                   <div className="img-chan-foot">
-                    <button className="btn btn-sm btn-primary" onClick={() => void saveImgChannel()} disabled={imgSaving || imgLoading || Boolean(imgLoadError) || !imgBase.trim() || (!imgKey.trim() && (!imgKeyMasked || imgBaseChanged))}>
+                    <button className="btn btn-sm btn-primary" onClick={() => void saveImgChannel()} disabled={imgSaving || imgLoading || Boolean(imgLoadError) || !imgBase.trim() || !imgModel.trim() || (!imgKey.trim() && (!imgKeyMasked || imgBaseChanged))}>
                       {imgSaving ? '保存中…' : '保存生图通道'}
                     </button>
                     <span className="hint">已有 Key 时留空会保留原值；保存后到「生图工坊」直接出图。</span>
@@ -1127,12 +1128,12 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
               </section>
             )}
 
-            {sec === 'more' && <section className="st-sec active settings-more-cards"><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
+          {sec === 'more' && <section className="st-sec active settings-more-cards"><DemoDataSettingsCard {...demoDataPreference} /><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
           </div>
         </div>
 
         <div className="settings-foot">
-          {sec === 'general' ? '通用设置保存在当前浏览器，同一地址下的其他标签页会同步更新。' : sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : '保存配置'}」。获取模型列表或选择候选不会自动保存。` : '修改后请使用对应的保存按钮；页面会显示保存结果。'}
+          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : '保存配置'}」。获取模型列表或选择候选不会自动保存。` : sec === 'more' ? '通用偏好保存在当前浏览器；文件位置与备份修改后会显示保存结果。' : '修改后请使用对应的保存按钮；页面会显示保存结果。'}
         </div>
       </div>
     </div>

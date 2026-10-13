@@ -57,15 +57,15 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
       <div className="activity-workspace">
         <header className="activity-heading">
           <div>
-            <p className="activity-kicker">ACTIVITY / 运行观测</p>
             <h1><IconHistory size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />运行记录</h1>
-            <p>看清用量，回到调用证据，定位需要关注的运行。</p>
           </div>
           <span className="activity-live-count">{Object.keys(liveStreams).length} 个会话正在运行</span>
         </header>
 
         <div className="activity-layout">
           <section className="activity-session-list" aria-label="运行会话筛选">
+            <details className="activity-filter-details" open={Boolean(search || filter !== 'all') || undefined}>
+            <summary>筛选会话 · {visible.length} / {sessions.length}</summary>
             <div className="activity-session-toolbar">
             <div className="activity-list-heading">
               <h2>会话</h2>
@@ -90,6 +90,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
               ))}
             </div>
             </div>
+            </details>
             <div className="activity-session-picker">
               <Select aria-label="运行会话" value={session?.id || ''} disabled={!visible.length}
                 onChange={setSelectedId} placeholder="选择会话"
@@ -102,9 +103,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
           <main className="activity-detail">
             <div className="activity-detail-heading">
               <div>
-                <p className="activity-kicker">SELECTED SESSION</p>
                 <h2>{session?.title || emptyTitle}</h2>
-                {session && <p>{session.importedFromBackup ? '备份内容仅供阅读，不作为执行证据。' : '模型用量与 Skill 执行证据分开核验。'}</p>}
+                {session?.importedFromBackup && <p>备份内容仅供阅读，不作为执行证据。</p>}
               </div>
               <div className="activity-detail-actions">
               {session && !session.importedFromBackup && onOpenOffice && <button type="button" className="btn btn-sm" onClick={() => onOpenOffice(session.id)}>查看会话工作室 ↗</button>}
@@ -145,7 +145,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
                       aria-controls={`activity-panel-${value}`}
                       onClick={() => setTab(value)}
                     >
-                      {value === 'usage' ? '用量与调用明细' : 'Skill 执行核验'}
+                      {value === 'usage' ? '用量' : '技能记录'}
                     </button>
                   ))}
                 </div>

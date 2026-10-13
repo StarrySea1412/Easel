@@ -377,3 +377,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Added Chinese and English documentation, examples, product showcases, and institutional branding.
 
 [0.1.0]: https://github.com/ZJU-REAL/Easel/releases/tag/v0.1.0
+
+## 2026-10-13
+
+- 收敛内容分析、运行记录与 Agent 工作室首屏：筛选、请求浏览和成员名单改为按需展开，减少重复说明。
+- 生图渠道模型名称与地址、密钥一次保存，设置页可直接完成配置。

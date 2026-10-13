@@ -109,16 +109,17 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
   const [panelChoice, setPanelChoice] = useState<OfficePanel>('details');
   const panel = panelChoice === 'compose' && (mode !== 'live' || !onStartTask) ? 'details' : panelChoice;
   const panels: { id: OfficePanel; label: string }[] = [
-    { id: 'details', label: '成员详情与模型' },
+    { id: 'details', label: '任务与成员' },
     { id: 'workflow', label: '协作进展' },
-    { id: 'outputs', label: '工作区产出' },
+    { id: 'outputs', label: '产出' },
     ...(mode === 'live' && onStartTask ? [{ id: 'compose' as const, label: '发起任务' }] : []),
   ];
   const pendingPanelFocus = useRef<OfficePanel | null>(null);
   const [panelNavigation, setPanelNavigation] = useState(0);
   const [compactLayout, setCompactLayout] = useState(false);
   const [rosterPreference, setRosterPreference] = useState<boolean | null>(null);
-  const rosterExpanded = rosterPreference ?? !compactLayout;
+  // Keep the first screen focused on the scene and current task.
+  const rosterExpanded = rosterPreference ?? false;
   const pendingSceneLocation = useRef(false);
   const [sceneNavigation, setSceneNavigation] = useState(0);
   const [compactAppearance, setCompactAppearance] = useState(false);

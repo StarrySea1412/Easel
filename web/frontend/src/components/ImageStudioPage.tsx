@@ -64,7 +64,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
 
   return <div className="page-scroll image-page">
     <header className="image-page-heading">
-      <div><p className="image-eyebrow">EASEL / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1><p className="page-subtitle">描述一个想法，创作图片或视频。</p></div>
+      <div><p className="image-eyebrow">EASEL / IMAGE STUDIO</p><h1 className="page-title">生图工坊</h1></div>
       <div className="image-heading-actions" role="group" aria-label="生图工坊快捷入口">
         <button type="button" className="btn image-heading-action" onClick={onOpenOutputs}><IconOutputs size={17} />作品</button>
         <button type="button" className="btn image-heading-action" aria-label={videoMode ? '视频通道设置' : '生图通道设置'} onClick={videoMode ? openVideoSettings : onOpenSettings}><IconGear size={17} /><span>设置</span></button>
@@ -78,7 +78,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
       <span>草稿和任务分别保留</span>
     </div>}
     {videoMode && video ? <VideoStudioPanel video={video} images={studio.gallery} onOpenSettings={openVideoSettings} /> : <>
-    <div className="image-local-toolbar">
+    <div className="image-local-toolbar image-mode-bar">
       <span>{studio.mode === 'reverse' ? '从图片提取提示词' : reference ? '修改图片' : '图片创作'}</span>
       {studio.mode === 'reverse'
         ? <button className="link-btn" disabled={studio.reverse.busy} onClick={() => studio.setMode(returnMode.current)}>← 返回图片创作</button>
@@ -140,11 +140,11 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           {belongsToDraft && job?.state === 'error' && <p className="image-error" role="alert">生成失败：{job.error || '请重试'}</p>}
         </form>
       </section>
-      <div className="image-service-status" role="status">
+      {(studio.loading || studio.galleryError || !studio.imgChannel?.configured) && <div className="image-service-status" role="status">
         {studio.loading ? <span>正在读取生图服务…</span> : studio.galleryError ? <><span>生图服务读取失败：{studio.galleryError}</span><button className="link-btn" onClick={() => void studio.refreshGallery()}>重试</button></>
-          : !studio.imgChannel?.configured ? <><span>首次使用，连接你的生图服务即可开始。</span><button className="link-btn" onClick={onOpenSettings}>连接生图服务 →</button></> : <span>生成的图片会自动保存到作品中。</span>}
-        {ratioMismatch && <span>服务返回的比例与所选 {size.label} 不同，画布已保留完整图片。</span>}
-      </div>
+          : <><span>首次使用，连接你的生图服务即可开始。</span><button className="link-btn" onClick={onOpenSettings}>连接生图服务 →</button></>}
+      </div>}
+      {ratioMismatch && <p className="image-field-hint">服务返回的比例与所选 {size.label} 不同，画布已保留完整图片。</p>}
       {studio.gallery.length > 0 && <section className="image-gallery" aria-label="历史图片图库"><div className="image-section-heading"><h2>最近作品</h2><button className="link-btn" onClick={onOpenOutputs}>查看全部 →</button></div><div className="image-gallery-grid">{studio.gallery.slice(0, 8).map(item => <button className="image-gallery-item" key={item.url} disabled={locked} aria-label={`用作参考图：${item.name}`} onClick={() => void studio.useGalleryReference(item)}><img src={item.url} alt={item.name} loading="lazy" /><span>{item.name}</span></button>)}</div></section>}
     </>}
     </>}

@@ -7,7 +7,9 @@
 .activity-heading p:not(.activity-kicker),.activity-detail-heading p:not(.activity-kicker) { color:var(--text-secondary); font-size:13px; line-height:1.8; margin:0; }
 .activity-live-count,.activity-session-state { font-size:11px; color:var(--text-secondary); border:1px solid var(--border); padding:8px 12px; border-radius:7px; background:var(--surface); white-space:nowrap; }
 .activity-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:26px; align-items:start; }
-.activity-session-list { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; }
+.activity-session-list { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 18px; }
+.activity-filter-details > summary { cursor:pointer; color:var(--text-secondary); font-size:12px; padding:4px 0 10px; }
+.activity-filter-details[open] > summary { color:var(--text); }
 .activity-session-toolbar { display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-bottom:14px; }
 .activity-list-heading { display:flex; align-items:center; gap:10px; flex-shrink:0; }
 .activity-list-heading h2 { font-size:14px; margin:0; font-weight:600; }.activity-list-heading span { font-size:11px; color:var(--text-secondary); }
@@ -34,3 +36,5 @@
 .activity-detail-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 
 .activity-session-picker { min-width:0; width:min(100%,480px); }.activity-session-picker .easel-select { width:100%; }.usage-table-scroll td small { display:block; color:var(--text-secondary); overflow-wrap:anywhere; }
+.usage-request-browser > summary { list-style:none; cursor:pointer; }
+.usage-request-browser > summary::-webkit-details-marker { display:none; }

@@ -1427,9 +1427,9 @@ export function scheduleStorageLocation(path:string):Promise<StorageLocation> {
 }
 export function cancelStorageLocation():Promise<StorageLocation> { return request('/api/storage/location',{method:'DELETE'}); }
 
-// 保存生图通道（IMG_*；IMG_MODEL 走 .env 默认 gpt-image-2）
-export function saveImagegenChannel(baseUrl: string, apiKey: string): Promise<{ ok: boolean }> {
-  const updates: Record<string, string> = { IMG_BASE_URL: baseUrl };
+// 一次保存渠道与模型；空密钥保留现有配置。
+export function saveImagegenChannel(baseUrl: string, apiKey: string, model: string): Promise<{ ok: boolean }> {
+  const updates: Record<string, string> = { IMG_BASE_URL: baseUrl, IMG_MODEL: model };
   // 空 key 表示沿用已保存的密钥，不能把它写回 .env，否则后端会删掉原值。
   if (apiKey.trim()) updates.IMG_API_KEY = apiKey;
   return request('/api/env', {
