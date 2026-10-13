@@ -261,13 +261,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             }}
             onCompositionStart={() => { composingQuick.current = true; }}
             onCompositionEnd={() => { composingQuick.current = false; }}
-            aria-describedby="quick-create-hint"
           />
           <div className="dash-composer-bar">
             <div className="dash-composer-tools">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
             <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
-            <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} modelLabel={quickEffectiveModel?.model || '沿用会话模型'} />
+            <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} />
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →
@@ -279,7 +278,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
               {persona && <span className="dash-persona" title={`当前画像：${persona}`}>{persona}</span>}
               {gatewayStatus !== 'connected' && <span className="dash-connection" role="status">{gatewayStatus === 'connecting' ? '正在连接…' : '助手未连接'}{gatewayStatus === 'disconnected' && <button type="button" className="link-btn" onClick={() => onNavigate('settings')}>检查设置</button>}</span>}
             </div>
-            <span className="dash-composer-hint" id="quick-create-hint">Enter 创作 · Shift+Enter 换行</span>
           </div>
         </div>
         {quickDraft.error && <p className="dash-composer-error" role="alert">{quickDraft.error}</p>}

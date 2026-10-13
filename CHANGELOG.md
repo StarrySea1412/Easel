@@ -1,5 +1,8 @@
 # 2026-10-13
 
+- Show the actual thinking level in home/chat composer triggers, retain the original slider, keep one auto option and omit the duplicate model row. Portal positioning prevents sidebar overlap; remove persistent keyboard hints without changing key handling. / 首页和对话入口直接显示思考档位，保留原滑条，只留一个自动选项，移除重复模型行；独立浮层避免侧栏遮挡，删除快捷键常驻提示并保留按键行为。
+- Verification: 62 related simulated checks passed; after updating an outdated accessible-value assertion, all 16 thinking-control checks passed. Production build and lint completed with warnings; real-browser checks covered home/chat, expanded-sidebar overlap, 390px bounds, trigger toggle and Escape. Other interface changes remain separate work; no model call or package. / 相关模拟检查62项通过，修正旧无障碍值断言后思考控件16项复跑通过；构建/lint完成并保留warning，真实浏览器已检查首页/对话、展开侧栏、390px边界、点击开关和Escape；其他整改继续，不调用模型、不打包。
+
 - Define 12 deployment tasks with dependencies, release artifacts, authentication and persistence checks, OpenClaw acceptance, optional Codex, ZIP/image verification, rollback gates and separate production authorization. Implementation and deployment remain pending.
 
 - Document the proposed independent Easel deployment on 192.168.0.138, based on the AI-skills runbooks, read-only host capacity/port/health checks and local Codex metadata. Cover Linux dependencies, authentication, persistent state, ZIP checksums, image rollback and acceptance gates. Codex is optional; no specific model blocks deployment. No production changes, package, model request or deployment acceptance was performed.

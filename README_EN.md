@@ -8,7 +8,13 @@
 >
 > [Operator guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [Acceptance sheet](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [Upstream compatibility](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
-# 2026-10-12 Toolbar and library refinement
+# 2026-10-13 Thinking control and menu fixes
+
+The home and chat composers display the current thinking level directly, retaining the original slider popup. The menu has one automatic option and no duplicate model-name row. Auto displays the highest declared supported level, or Auto when capabilities are unknown. Persistent Enter / Shift+Enter hints are removed from both composers; keyboard behavior remains available.
+
+Real-browser checks covered home/chat, the expanded sidebar, 390px menu bounds, trigger toggling and keyboard dismissal. Focused simulated checks and the production build passed. No model or paid service was called; other interface work and portable packaging are tracked separately.
+
+# 2026-10-12 Toolbar and library refinement (historical)
 
 The chat toolbar now uses icons for the OpenClaw/Codex engine switch and keeps only “Thinking strength” visible. A compact status dot beside the model represents channel and inference state, with accessible details in a popover. The sidebar gateway entry is explicitly marked OpenClaw, with backoff-based automatic reconnect and a manual retry. The content library filters for all, images, video, audio and documents now include matching icons; generated and ordinary images remain under one Images category.
 

@@ -330,7 +330,7 @@ test('Dashboard and a real ChatComposer restore separate drafts and requirement 
   assert.equal(view.container.querySelector('textarea').value, '会话里未发的消息');
   assert.deepEqual(view.chips(), [second.name]);
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
-  assert.deepEqual(view.h.chatSent[0], ['会话里未发的消息', [], [second.name], { [second.name]: '会话自己的要求' }, 'medium']);
+  assert.deepEqual(view.h.chatSent[0], ['会话里未发的消息', [], [second.name], { [second.name]: '会话自己的要求' }, undefined]);
   await view.render();
   assert.equal(view.input().value, '首页的独立草稿');
   assert.deepEqual(view.chips(), [first.name]);
@@ -471,7 +471,7 @@ for (const failedPart of ['selection', 'requirements']) test(`unreadable convers
   unavailable = false;
   await send();
   assert.deepEqual(view.chips(), [first.name]);
-  assert.deepEqual(view.h.chatSent, [[text, [], [first.name], requirement, 'medium']], 'the first retry sends the complete recovered snapshot');
+  assert.deepEqual(view.h.chatSent, [[text, [], [first.name], requirement, undefined]], 'the first retry sends the complete recovered snapshot');
   assert.deepEqual(view.storage.writes, []);
   assert.deepEqual(JSON.parse(view.storage.values.get(requirementKey(chat))), requirement);
 });
@@ -591,7 +591,7 @@ test('Dashboard exposes the shared thinking control and hands the selected level
   const trigger = view.container.querySelector('.thinking-level-trigger');
   assert.ok(trigger);
   await view.click(trigger);
-  const slider = view.container.querySelector('.thinking-level-menu input[type="range"]');
+  const slider = document.querySelector('.thinking-level-menu input[type="range"]');
   await view.key(slider, 'Home');
   await view.key(slider, 'Enter');
   await view.send();

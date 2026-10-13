@@ -21,7 +21,7 @@ import { showToast } from '../lib/toast';
 import { CHAT_QUOTE_EVENT, appendQuotedText } from '../lib/chatQuote';
 import { addChatDraftQuote } from '../lib/chatDrafts';
 import ChatQuoteDraft from './ChatQuoteDraft';
-import InlineInfo from './InlineInfo';
+import { createPortal } from 'react-dom';
 import ChatQueueTray from './ChatQueueTray';
 import Select from './ui/Select';
 import CodexSettings from './CodexSettings';
@@ -87,7 +87,6 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
   const composingRef = useRef(false);
   const dragDepthRef = useRef(0);
   const inputId = useId();
-  const hintId = `${inputId}-hint`;
   useEffect(() => {
     const quote = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId: string; text: string }>).detail;
@@ -255,7 +254,6 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
         onCompositionEnd={() => { composingRef.current = false; }}
         onPaste={onPaste}
         aria-label="创作消息"
-        aria-describedby={hintId}
         rows={2}
         autoFocus={hero}
       />
@@ -283,8 +281,7 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
             options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
             : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}
           <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}
-            supportedLevels={supportedThinking}
-            modelLabel={models.selected?.model || (models.modelRef ? models.modelRef : '沿用会话模型')} />
+            supportedLevels={supportedThinking} />
         </div>
         {editingQueue && <div className="composer-queue-edit-actions">
           <span>编辑待发送消息</span>
@@ -298,9 +295,6 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
         )}
         </div>
       </div>
-      <span className="composer-hint" id={hintId}>
-        {editingQueue ? 'Enter 保存 · Esc 取消 · Shift+Enter 换行' : stopping ? '正在等待停止确认' : isStreaming ? 'Enter 排队 · Shift+Enter 换行' : uploading ? '正在添加素材，请稍候' : 'Enter 发送 · Shift+Enter 换行'}
-      </span>
       {!editingQueue && <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />}
       {engine === 'codex' && <details><summary>Codex 设置与能力</summary><CodexSettings /></details>}
     </div>
@@ -311,11 +305,12 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
 
 
 
-export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, supportedLevels }: { value: ThinkingPreference; onChange: (value: ThinkingPreference) => void; disabled: boolean; modelLabel: string; supportedLevels?: string[] }) {
+export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels }: { value: ThinkingPreference; onChange: (value: ThinkingPreference) => void; disabled: boolean; supportedLevels?: string[] }) {
   const [open, setOpen] = useState(false);
   const menuOpen = open && !disabled;
   const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive');
   const resolved = resolveThinkingPreference(value, supportedLevels);
+  const displayLevel = resolved ? THINKING_LABELS[resolved] : value === 'auto' ? '自动' : THINKING_LABELS[value];
   const index = Math.max(0, strengthLevels.indexOf(resolved === 'adaptive' ? 'medium' : resolved || 'medium'));
   const availableIndexes = strengthLevels.flatMap((level, i) => !supportedLevels?.length || supportedLevels.includes(level) ? [i] : []);
   const minIndex = availableIndexes[0] ?? 0, maxIndex = availableIndexes.at(-1) ?? 0;
@@ -324,7 +319,7 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
   const sliderRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 0, below: false });
+  const [menuPosition, setMenuPosition] = useState({ left: 12, top: 12 });
   const pickerId = useId();
   const openMenu = () => {
     if (disabled) return;
@@ -335,15 +330,16 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
     const place = () => {
       const root = rootRef.current?.getBoundingClientRect(), menu = menuRef.current?.getBoundingClientRect();
       if (!root || !menu) return;
-      setMenuPosition({ left: Math.max(12, Math.min(root.right - menu.width, window.innerWidth - menu.width - 12)) - root.left,
-        below: root.top - menu.height - 8 < 12 && window.innerHeight - root.bottom > root.top });
+      const above = root.top - menu.height - 8;
+      const top = Math.max(12, above >= 12 ? above : root.bottom + menu.height + 8 <= window.innerHeight - 12 ? root.bottom + 8 : window.innerHeight - menu.height - 12);
+      setMenuPosition({ left: Math.max(12, Math.min(root.right - menu.width, window.innerWidth - menu.width - 12)), top });
     };
     place(); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
     return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
-  }, [menuOpen]);
+  }, [menuOpen, value, supportedLevels]);
   useEffect(() => {
     if (!menuOpen) return;
-    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false); };
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, [menuOpen]);
@@ -351,7 +347,10 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
     if (disabled) setOpen(false);
   }, [disabled]);
   useEffect(() => {
-    if (menuOpen) sliderRef.current?.focus();
+    if (menuOpen) {
+      if (sliderRef.current && !sliderRef.current.disabled) sliderRef.current.focus();
+      else menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
   }, [menuOpen]);
   const choose = (nextIndex: number) => {
     if (disabled) return;
@@ -381,42 +380,39 @@ export function ThinkingLevelPicker({ value, onChange, disabled, modelLabel, sup
   };
   return <div className={`thinking-level-picker${value === 'ultra' ? ' is-ultra' : ''}${value === 'adaptive' ? ' is-adaptive' : ''}`} ref={rootRef} style={{ '--thinking-progress': `${sliderIndex / (strengthLevels.length - 1) * 100}%`, '--thinking-available': `${maxIndex / (strengthLevels.length - 1) * 100}%` } as React.CSSProperties}>
     <button ref={triggerRef} type="button" className="thinking-level-trigger" disabled={disabled}
-      aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls={menuOpen ? `${pickerId}-menu` : undefined} aria-label={`思考强度：${THINKING_LABELS[value]}`} title="选择本轮思考强度；实际支持取决于模型"
+      aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls={menuOpen ? `${pickerId}-menu` : undefined} aria-label={`思考强度：${displayLevel}`} title={`思考强度：${displayLevel}${value === 'auto' ? '（自动选择最高支持档位）' : ''}`}
       onClick={() => open ? setOpen(false) : openMenu()}
       onKeyDown={(event) => {
         if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openMenu(); }
         else if (event.key === 'ArrowUp') { event.preventDefault(); openMenu(); }
         else if (event.key === 'Escape') setOpen(false);
       }}>
-      <strong>思考强度</strong><IconChevron size={13} />
+      <strong>{displayLevel}</strong><IconChevron size={13} />
     </button>
-    {menuOpen && <div ref={menuRef} id={`${pickerId}-menu`} className="thinking-level-menu" role="dialog" aria-label="思考强度"
-      style={{ left: menuPosition.left, right: 'auto', ...(menuPosition.below ? { top: 'calc(100% + 8px)', bottom: 'auto' } : {}) }}
+    {menuOpen && createPortal(<div ref={menuRef} id={`${pickerId}-menu`} className={`thinking-level-menu${value === 'ultra' ? ' is-ultra' : ''}${value === 'adaptive' ? ' is-adaptive' : ''}`} role="dialog" aria-label="思考强度"
+      style={{ ...menuPosition, '--thinking-progress': `${sliderIndex / (strengthLevels.length - 1) * 100}%`, '--thinking-available': `${maxIndex / (strengthLevels.length - 1) * 100}%` } as React.CSSProperties}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); } }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      <div className="thinking-level-heading"><strong>{value === 'auto' && resolved ? `自动 · ${THINKING_LABELS[resolved]}` : THINKING_LABELS[value]}</strong>
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
+      {(value !== 'auto' || resolved) && <div className="thinking-level-heading"><strong>{displayLevel}</strong>
         <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title="恢复自适应最高" disabled={disabled || value === 'auto'}
           onClick={() => { onChange('auto'); sliderRef.current?.focus(); }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 7a5 5 0 1 1 .9 4M3 2v5h5" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-      </div>
+      </div>}
       <div className="thinking-level-modes">
         <button type="button" className="thinking-level-auto" aria-pressed={value === 'auto'} disabled={disabled} onClick={() => onChange('auto')}>自适应最高</button>
         {supportedLevels?.includes('adaptive') && <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title="由模型自动决定强度" disabled={disabled} onClick={() => onChange('adaptive')}>模型自适应</button>}
       </div>
-      <div className="thinking-level-model"><span title={`所选模型：${modelLabel}`}>{modelLabel}</span><InlineInfo label="思考强度能力说明">
-        {supportedLevels?.length ? <>当前模型可选：{supportedLevels.map(level => THINKING_LABELS[level as ThinkingLevel]).join('、')}。自适应最高会选择其中最高档；手动调整对下一轮生效。<br/>这是能力声明，非本轮调用实测。</> : <>能力信息尚未提供；自适应最高会沿用模型默认，确认档位后自动匹配。</>}
-      </InlineInfo></div>
       <div className="thinking-level-slider-wrap">
         {maxIndex < strengthLevels.length - 1 && <span className="thinking-level-unavailable" aria-hidden="true"/>}
         {value === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
         <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={maxIndex || 1} step={1} value={sliderIndex}
           style={{width:maxIndex ? `calc(${maxIndex / (strengthLevels.length - 1) * 100}% + ${27 * (1 - maxIndex / (strengthLevels.length - 1))}px)` : '27px'}}
-          aria-label="思考强度" aria-valuetext={THINKING_LABELS[value]} aria-describedby={`${pickerId}-hint`} disabled={disabled || availableIndexes.length < 2}
+          aria-label="思考强度" aria-valuetext={displayLevel} aria-describedby={`${pickerId}-hint`} disabled={disabled || availableIndexes.length < 2}
           onChange={event => choose(Number(event.target.value))} onKeyDown={handleSliderKeyDown} />
         <div className="thinking-level-ticks">{strengthLevels.map((level, tick) => <button type="button" key={level} disabled={disabled || !availableIndexes.includes(tick)} aria-label={`选择${THINKING_LABELS[level]}思考强度`} aria-pressed={level===value} title={!availableIndexes.includes(tick) ? `${THINKING_LABELS[level]}：网关声明不支持` : THINKING_LABELS[level]} className={`${level === value ? 'is-current' : tick < sliderIndex ? 'is-filled' : ''}`} onClick={()=>choose(tick)}><span/></button>)}</div>
       </div>
       <span id={`${pickerId}-hint`} className="thinking-level-note">支持程度取决于模型，调整立即保存，对下一轮生效。</span>
-    </div>}
+    </div>, document.body)}
   </div>;
 }

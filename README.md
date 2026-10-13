@@ -8,7 +8,13 @@
 >
 > [运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [功能验收单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [上游兼容报告](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
-# 2026-10-12 工具栏与内容库收敛
+# 2026-10-13 思考入口与菜单修正
+
+首页和对话输入框直接显示当前思考档位（关闭、低、中、高等），保留原滑条菜单。菜单只保留一个自动选项，移除重复模型名称；自动模式有能力声明时显示最高支持档位，未知时显示自动。删除两处 Enter / Shift+Enter 常驻提示；快捷键行为保留。
+
+真实浏览器已检查首页/对话、侧栏展开、390px菜单边界、点击开关和键盘关闭；定向模拟检查与生产构建通过。此次未调用模型或付费服务，其他界面整改和便携打包继续单独跟踪。
+
+# 2026-10-12 工具栏与内容库收敛（历史）
 
 聊天工具栏现在用图标切换 OpenClaw/Codex，入口只显示“思考强度”；模型旁用状态点表示渠道与推理状态，详细原因放在可访问弹层。网关状态集中到侧栏工具区并明确标出 OpenClaw，断开后自动退避重连并保留手动重试。内容库的全部、图片、视频、音频、文档筛选入口加入对应图标，图片与 AI 生图仍统一在图片分类下。
 
