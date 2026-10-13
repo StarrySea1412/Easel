@@ -24,6 +24,7 @@ services:
       EASEL_EXTRA_HOSTS: ${EASEL_HOSTNAME:?Set the exact hostname or IP}
       EASEL_EXTRA_ORIGINS: https://${EASEL_HOSTNAME}:${EASEL_HTTPS_PORT:-8444}
       EASEL_ACCESS_FILE: /run/secrets/access.json
+      EASEL_MODEL_BOOTSTRAP_FILE: /run/secrets/model-bootstrap.json
       EASEL_AGENT_LIMIT: "1"
       EASEL_BROWSER_LIMIT: "1"
       EASEL_MEDIA_LIMIT: "1"
@@ -38,6 +39,7 @@ services:
       - ${EASEL_DATA_PATH:?Set the persistent data directory}:/data
       - ${EASEL_STATE_PATH:?Set the persistent state directory}:/state
       - ${EASEL_SECRETS_PATH:?Set the secrets directory}/access.json:/run/secrets/access.json:ro
+      - ${EASEL_SECRETS_PATH}/model-bootstrap.json:/run/secrets/model-bootstrap.json:ro
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -58,7 +60,7 @@ services:
       driver: json-file
       options: {max-size: 10m, max-file: "3"}
   proxy:
-    image: ${EASEL_NGINX_IMAGE:-nginx:1.29.2-alpine}
+    image: ${EASEL_NGINX_IMAGE:-nginx:1.29.2-alpine@sha256:61e01287e546aac28a3f56839c136b31f590273f3b41187a36f46f6a03bbfe22}
     restart: unless-stopped
     depends_on:
       app: {condition: service_healthy}
@@ -73,4 +75,3 @@ services:
     logging:
       driver: json-file
       options: {max-size: 5m, max-file: "3"}
-

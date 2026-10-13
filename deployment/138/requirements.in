@@ -3,4 +3,3 @@
 # on Linux x86_64 / CPython3.12, then freeze metadata versions and archive hashes.
 # Installation uses the committed requirements/linux-py312.lock, not this file.
 -e .
-

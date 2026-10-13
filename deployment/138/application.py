@@ -19,4 +19,3 @@ if os.environ.get('EASEL_CODEX_ENABLED', '0') != '1':
         'error': '此服务器未启用 Codex，请使用 OpenClaw。', 'skills': False, 'agentOffice': False}
 
 app = workspace.app
-

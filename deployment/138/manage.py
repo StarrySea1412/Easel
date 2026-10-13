@@ -52,6 +52,9 @@ def initialize(base: Path, isolated: bool):
     paths = layout(base, isolated)
     for path in paths.values():
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    model_file = paths['secrets'] / 'model-bootstrap.json'
+    if not model_file.exists():
+        model_file.write_text('{}\n')
     access = paths['secrets'] / 'access.json'
     if not access.exists():
         user = 'gaojitest' if isolated else 'easel-admin'
@@ -169,7 +172,7 @@ if __name__ == '__main__':
     parser.add_argument('--base', type=Path, default=Path('/home/ubuntu'))
     parser.add_argument('--isolated-test', action='store_true')
     parser.add_argument('--image')
-    parser.add_argument('--nginx', default='nginx:1.29.2-alpine')
+    parser.add_argument('--nginx', default='nginx:1.29.2-alpine@sha256:61e01287e546aac28a3f56839c136b31f590273f3b41187a36f46f6a03bbfe22')
     args = parser.parse_args()
     if args.operation == 'verify':
         verify(RELEASE)
