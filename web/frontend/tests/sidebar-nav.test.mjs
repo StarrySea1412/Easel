@@ -23,7 +23,10 @@ async function fixture(t, props = {}, preferences = {}) {
   for (const [key, value] of Object.entries(preferences)) localStorage.setItem(key, value);
   const visits = [], selected = [], requests = [];
   const actions = { newChats: 0, pins: [], archives: [], deleted: [] };
-  t.mock.method(globalThis, 'fetch', async url => { requests.push(url); return { ok: true, json: async () => [] }; });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url === '/api/version') return { ok: true, json: async () => ({ version: '0.2.7', revision: null, build: 'development', development: true }) };
+    requests.push(url); return { ok: true, json: async () => [] };
+  });
   const container = document.createElement('div'); document.body.append(container);
   let root = createRoot(container);
   const base = {

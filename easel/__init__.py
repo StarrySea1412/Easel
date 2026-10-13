@@ -1,3 +1,5 @@
 """Easel — 社媒内容工作流整合层 CLI"""
 
-__version__ = "0.2.6"
+from .version import application_version
+
+__version__ = application_version()

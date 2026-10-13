@@ -47,6 +47,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
+from easel.version import runtime_version
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
@@ -1357,6 +1358,11 @@ async def static_file(path: str):
     # HTML entrypoints must not be cached: the intro page is edited in-place during local development.
     headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"} if fp.suffix.lower() in {".html", ".htm"} else {}
     return FileResponse(fp, headers=headers)
+
+
+@app.get("/api/version")
+async def api_version():
+    return JSONResponse(runtime_version(PROJECT_ROOT), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/status")

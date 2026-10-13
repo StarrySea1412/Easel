@@ -1,8 +1,20 @@
 # Easel 在 192.168.0.138 的部署评估
 
-日期：2026-10-13（Asia/Shanghai）。状态：研究与实施建议，尚未部署。用户最新范围：先研究部署，暂不调整界面层级；不要求指定6.1 sol，Codex可用则保留，不可用则不阻塞OpenClaw主体。
+日期：2026-10-13（Asia/Shanghai）。本文保留最初部署研究，并增加实际实施状态。当前独立内网入口已运行；R119先交接链接/登录/真实输出/文件，R122继续固定版本切换与维护交接。未要求指定6.1 sol，Codex当前明确禁用，不阻塞OpenClaw主体；用户延后的完整恢复/资源/全菜单/运营平台专项保留未验。
 
-## 推荐方案
+## 当前实施与验收
+
+- 正式入口为`https://192.168.0.138:8444/`，独立Compose项目easel保留AI-skills原80/443。UID/GID1000、只读根、2GiB/2CPU、private Web/Gateway及独立data/state/secrets已实际运行。AI-skills原容器仍健康/运行，未以进程检查代替业务验收。
+- 已通过正式/隔离实际认证HTTP、独立Gateway、当前Windows用户安装并核验CA后真实浏览器登录/对话。用户R120指定当前内网入口的运行时账号覆盖；保留正常随机盐scrypt，不在源码、迁移或默认镜像植入固定账号，不扩展为公网凭据。
+- 一次真实OpenClaw任务39.22秒完成，原始回执含技能读取、终端执行和文件保存；159字节持久文件认证下载hash一致，应用重启后保留。网页web_fetch延迟发现兼容通过`tools.toolSearch=false`修正，JSON/HTML两次实际回执均HTTP200；既有显式工具偏好保留。
+- 内容库空筛选已修正并通过4项回归；先前c35e9851升级在依赖输入全一致后复用固定基础镜像，加入新源码/新版前端，1351运行源码摘要、正式/隔离健康、登录/Gateway/HTTP文件核对通过。最终发布`8b6bcea7a09a13e2598e44874a3b5cdddcc42a51`补齐显式附件响应，镜像`sha256:e35e5e74f9b20e5ba1b4b9587e68db4e22f0010da462ed56f6e4f96fe86cbc24`，源码目录`/home/ubuntu/Easel.new.8b6bcea7a09a`，快照`/home/ubuntu/easel-backups/20261013T084803Z.tar.gz`；激活日志Healthy，最终实时版本已核对正式/隔离e35e5e74镜像Healthy且重启0、1351运行源码摘要通过，toolSearch=false配置摘要一致，后续文档提交与运行身份分开。
+- 实际浏览器全部分类/项目及HTML iframe标记预览通过，真实附件下载159字节、SHA-256`d5b98a0721b00dd9521566e174f0579d5c07f9cfa6d5498f6d1185a00cfe757e`与服务器/容器原件一致。所选真实浏览器新建tab直接打开原文件URL，实际标记与中文/空格路径验证可见；原文件链接点击HTTP200，但IAB未暴露对应target-blank新页，保留该点击结果边界。
+- 8b6bcea7已实时核对正式/隔离均使用e35e5e74镜像、Healthy且重启0，1351运行源码摘要通过，OpenClaw toolSearch=false配置摘要保持一致。R123另在实现/定向测试v0.2.7版本可见：侧栏简短版本、轻量详情12位release-manifest构建SHA、认证/no-store版本接口、源码开发环境标记和窗口focus重读。更新界面仍需刷新，当前运行发行不含该新增功能，新发布回执另记。
+- 原D01–D12完整门槛保留在[任务清单](deployment-138-tasks-2026-10-13.md)。故障回退、15分钟资源、全菜单/390px、全面停止/恢复、运营平台与付费媒体仍未验；Codex禁用，便携/桌面打包暂停。
+
+English status: authenticated access, real model/tools, persistent-file HTTP checks, browser HTML preview and attachment download passed. Final release 8b6bcea7 live checks confirmed Healthy/zero restarts and source hashes; direct original-file URL opening passed. The clicked target-blank tab was not exposed by IAB and remains an observation boundary. Later documentation commits are separate from the running release. The following research-stage observations remain historical evidence.
+
+## 推荐方案（原研究，当前独立拓扑已采用）
 
 采用独立 Docker Compose 项目 `easel`，包含入口 nginx 和一个非root应用容器。FastAPI、OpenClaw Gateway及可选Codex运行时先放在同一应用容器，保留现有localhost/stdio通信方式；使用明确的进程管理与信号清理，不用后台脚本充当容器主进程。单个FastAPI worker，任务锁和活跃状态目前在进程内，不能直接增加worker。
 
@@ -57,7 +69,7 @@
 
 显式设置`EASEL_DATA_DIR=/data`、`EASEL_ROOT=/app`、`EASEL_OPENCLAW_STATE_DIR=/state/openclaw`、`OPENCLAW_STATE_DIR=/state/openclaw`、`OPENCLAW_CONFIG_PATH=/state/openclaw/openclaw.json`和`EASEL_CODEX_HOME=/state/codex`。Gateway端口明确配置且只内部可达，独立设备身份重新审批；不复用开发机和便携副本状态。浏览器profile实际路径逐平台核对并映射持久卷，不能认为全部已经服从DATA_DIR。
 
-入口认证可先用独立HTTPS nginx用户名/密码保护可信操作者的工作台，密码按正常哈希保存；不复用AI-skills Django认证，也不直接信任浏览器传来的身份头。生产凭据独立；`gaojitest/gaoji`仅可在隔离测试环境验收，不能作为该生产机入口的默认账号。
+入口由独立HTTPS nginx代理及应用登录认证保护，密码按正常随机盐scrypt保存；不复用AI-skills Django认证，不信任浏览器传来的身份头。默认生产准备生成独立凭据、隔离环境有测试管理员；R120后来明确要求当前138内网入口采用同一测试账号运行时覆盖，已验证且不植入源码/默认镜像。公网生产仍使用独立合规凭据。
 
 当前`TrustedHostMiddleware`与`local_write_guard`要求正确Host和精确Origin。入口示例需配置`EASEL_EXTRA_HOSTS=192.168.0.138`、`EASEL_EXTRA_ORIGINS=https://192.168.0.138:8444`并验证代理头/客户端地址；来源检查是CSRF/本地访问保护，不是身份认证。没有Origin的代理写请求与转发头必须专项检查，不能通过全面放开来源解决。
 
@@ -117,4 +129,4 @@ Codex验收门槛：Linux0.147.0启动/退出及协议初始化→实际模型�
 
 npm0.147.0元数据确认包含Linux x64/arm64别名产物；此前向不存在的独立包版本请求404，已用主包optionalDependencies澄清，不作为Linux不支持的证据。官方模型目录查找未取得完整正文，不据本机配置或第三方别名保证特定模型来源、可用性和计费。
 
-本轮已完成本地源码/文档审阅、只读SSH容量/端口/健康/出口检查及本机真实Codex元数据查询。未执行Linux安装、生成/上传发布ZIP、修改138反代、实际模型推理、平台发布、入口认证登录和部署浏览器验收。
+最初研究阶段仅完成本地源码/文档审阅、只读SSH容量/端口/健康/出口检查及本机真实Codex元数据查询，没有执行部署。之后R118–R122已授权并实际安装/发布独立Linux服务，Linux镜像、认证HTTPS、真实模型/工具/持久文件及浏览器登录/对话证据见上方当前状态；平台发布和延后专项继续未验。

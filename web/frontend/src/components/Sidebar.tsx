@@ -10,6 +10,7 @@ import {
 import { IconGear, IconImage } from './settingsIcons';
 import SidebarAccountPopover from './SidebarAccountPopover';
 import SidebarMoreMenu from './SidebarMoreMenu';
+import AppVersion from './AppVersion';
 import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
 import '../styles/sidebar-shell.css';
@@ -243,6 +244,7 @@ export default function Sidebar({
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {railItem('settings','设置',<IconGear size={19}/>)}
+            <AppVersion/>
           </div>
         </div>
         {expanded&&<section ref={conversationsRef} className="sidebar-conversations" aria-label="对话列表">
