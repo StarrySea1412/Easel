@@ -1,11 +1,9 @@
 """Prepare this server's independent workspace; preserve existing identity/config."""
 import json
-import hashlib
 import os
 from pathlib import Path
 import secrets
 import shutil
-import time
 
 ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
@@ -40,20 +38,8 @@ def bootstrap():
             value['models'] = {'mode': 'merge', 'providers': model['providers']}
             value['agents']['defaults']['model'] = {'primary': model['primary']}
             config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    identity = STATE / 'identity/device.json'
-    if not identity.exists():
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        key = Ed25519PrivateKey.generate()
-        public = key.public_key()
-        raw = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-        identity.parent.mkdir(exist_ok=True)
-        identity.write_text(json.dumps({'version': 1, 'deviceId': hashlib.sha256(raw).hexdigest(),
-            'publicKeyPem': public.public_bytes(serialization.Encoding.PEM,
-                serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
-            'privateKeyPem': key.private_bytes(serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode(),
-            'createdAtMs': int(time.time() * 1000)}, indent=2), encoding='utf-8')
+    # OpenClaw 2026.9.6 owns identity creation in state/openclaw.sqlite.
+    # Do not fabricate a retired device.json or modify its pairing tables.
     # Only server-managed directories are synchronized; state, MEMORY and identity stay.
     skill_destination = WORKSPACE / 'skills'
     skill_destination.mkdir(exist_ok=True)

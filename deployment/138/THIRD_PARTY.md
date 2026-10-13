@@ -7,6 +7,9 @@ attribution remains in `web/frontend/src/assets/platforms/`.
 OpenClaw 2026.9.6 and all its installed npm dependencies retain their package
 license files under `/opt/openclaw/node_modules/`. The complete dependency tree
 and registry integrity values are in `runtime-package-lock.json`.
+Build downloads use npmmirror for npm and Playwright's native pinned browser
+revisions; package lock integrity and normal HTTPS certificate checks remain
+enabled. Debian downloads use the Tsinghua mirror and Debian package signatures.
 The MCP SDK is explicitly pinned to 1.32.1 to fix GHSA-6qxp-vccf-f47h while
 retaining the OpenClaw protocol version selected for this deployment.
 

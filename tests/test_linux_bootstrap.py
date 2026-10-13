@@ -28,7 +28,13 @@ def test_server_bootstrap_retains_identity_config_and_user_data(tmp_path, monkey
     model_file.write_text(json.dumps({'providers': {'test': {'models': [{'id': 'sample'}]}}, 'primary': 'test/sample'}))
     monkeypatch.setenv('EASEL_MODEL_BOOTSTRAP_FILE', str(model_file))
     module.bootstrap()
-    identity = (module.STATE / 'identity/device.json').read_bytes()
+    assert not (module.STATE / 'identity/device.json').exists()
+    # Bootstrap must leave native OpenClaw identity storage alone. Actual native
+    # creation and Gateway pairing are verified separately in the Linux runtime.
+    identity_path = module.STATE / 'state/openclaw.sqlite'
+    identity_path.parent.mkdir(exist_ok=True)
+    identity_path.write_bytes(b'existing-native-state-fixture')
+    identity = identity_path.read_bytes()
     config_path = module.STATE / 'openclaw.json'
     config = json.loads(config_path.read_text())
     config['agents']['defaults']['model']['primary'] = 'test/user-selected'
@@ -37,7 +43,7 @@ def test_server_bootstrap_retains_identity_config_and_user_data(tmp_path, monkey
     memory = module.WORKSPACE / 'MEMORY.md'; memory.write_text('user memory')
     output = module.DATA / 'outputs/actual.txt'; output.write_text('actual file')
     module.bootstrap()
-    assert (module.STATE / 'identity/device.json').read_bytes() == identity
+    assert identity_path.read_bytes() == identity
     assert config_path.read_bytes() == expected_config
     assert memory.read_text() == 'user memory' and output.read_text() == 'actual file'
     assert (module.WORKSPACE / 'outputs').resolve() == (module.DATA / 'outputs').resolve()

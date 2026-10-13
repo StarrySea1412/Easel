@@ -41,8 +41,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY easel/ ./easel/
 COPY requirements/linux-py312.lock /tmp/requirements.lock
-RUN pip install --no-cache-dir -r /tmp/requirements.lock \
-    && python -m playwright install --with-deps chromium \
+RUN pip install --no-cache-dir -r /tmp/requirements.lock
+RUN PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright \
+    python -m playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 COPY web/ ./web/
 COPY scripts/ ./scripts/

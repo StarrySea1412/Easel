@@ -52,13 +52,22 @@ def run():
     from easel.gateway_questions import GatewayClient
     credentials = resolve_credentials()
     auth = {'password': credentials.password} if credentials.mode == 'password' else {'token': credentials.token}
-    client = GatewayClient(timeout=10, scopes=['operator.admin'], client_id='cli', client_mode='cli', auth=auth)
-    try:
-        client.connect()
-        if 'operator.admin' not in client.granted_scopes:
-            raise RuntimeError('Server CLI device needs approval in its independent Gateway.')
-    finally:
-        client.close()
+    # HTTP liveness precedes completion of native startup sidecars. Retry only
+    # that explicit transient response, never pairing/authentication failures.
+    while True:
+        client = GatewayClient(timeout=10, scopes=['operator.admin'], client_id='cli', client_mode='cli', auth=auth)
+        try:
+            client.connect()
+            if 'operator.admin' not in client.granted_scopes:
+                raise RuntimeError('Server CLI device needs approval in its independent Gateway.')
+            break
+        except Exception as error:
+            if ('startup-sidecars' not in str(error) or stopping
+                    or children[0].poll() is not None or time.monotonic() >= deadline):
+                raise
+            time.sleep(0.5)
+        finally:
+            client.close()
     children.append(subprocess.Popen([sys.executable, '-m', 'uvicorn', 'application:app', '--app-dir',
         str(ROOT / 'deployment/138'), '--host', '0.0.0.0', '--port', '7880', '--workers', '1',
         '--no-proxy-headers', '--log-level', 'warning'], cwd=ROOT, start_new_session=True))

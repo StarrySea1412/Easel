@@ -1,5 +1,7 @@
 # 2026-10-13
 
+- Let OpenClaw 2026.9.6 create its native SQLite identity and wait for the explicit startup-sidecars transient state. Temporary Linux Gateway/bridge startup and fixture persistence checks passed. Separate Python installation from browser downloads and select a measured faster Playwright mirror; actual deployment acceptance remains pending. / OpenClaw原生管理SQLite身份，监管程序等待明确的启动附属进程临时状态；临时Linux网关/桥接及数据保留检查通过。拆分Python安装与浏览器下载层，采用测速更快的Playwright镜像，正式部署验收待完成。
+
 - Make Linux release ZIP/receipt writes atomic, include npm/npx in the image, use a faster integrity-checked npm mirror and add installed-source hash verification. The previous image build exited 137; no running Easel service is claimed. / Linux发行ZIP/回执改为原子写入，镜像补齐npm/npx，使用仍校验锁文件摘要的npm镜像并新增运行源码核验。前次镜像构建退出137，尚无已运行Easel服务。
 
 - Pin the patched MCP SDK and refresh frontend dependency locks after verified npm audit findings; both lock trees now report zero known advisories. Correct TLS file mapping, persist the Linux HOME/browser directories and create an independent Ed25519 device identity without copying desktop state. Image/server compatibility remains under verification. / 根据实际npm审计锁定修复后的MCP SDK及前端依赖，两处依赖树当前均无已知公告；修正证书文件映射、Linux HOME/浏览器持久化与独立Ed25519身份生成，继续核验镜像及服务器兼容性。
