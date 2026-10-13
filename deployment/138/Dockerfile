@@ -28,7 +28,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONUTF8=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app:/app/web:/app/skills/shared/scripts
 RUN sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libgl1 libglib2.0-0 git ca-certificates bash tini fonts-noto-cjk \
+    ffmpeg libgl1 libglib2.0-0 git ca-certificates curl bash tini fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 easel && useradd --uid 1000 --gid easel --create-home easel
 COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
