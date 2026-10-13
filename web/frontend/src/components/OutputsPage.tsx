@@ -14,6 +14,11 @@ const FILTERS: { key: string; label: string; Icon: typeof IconOutputs }[] = [
   { key: 'text', label: '文档', Icon: IconFile },
 ];
 
+function normalizeFilter(value: string): string {
+  if (value === 'imagegen') return 'image';
+  return FILTERS.some((item) => item.key === value) ? value : 'all';
+}
+
 const KIND_LABEL: Record<string, string> = {
   article: '文章', 'xhs-note': '小红书', video: '视频', cards: '卡片',
   poster: '海报', audio: '音频', image: '图片', other: '其他',
@@ -101,7 +106,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState('');
   const [stack, setStack] = useState<string[]>([]);   // 当前所在的文件夹名称路径
-  const [filter, setFilter] = useState(initialFilter === 'imagegen' ? 'image' : initialFilter);
+  const [filter, setFilter] = useState(() => normalizeFilter(initialFilter));
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<OutputNode | null>(null);
   const [content, setContent] = useState('');
@@ -127,7 +132,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     window.addEventListener('easel:outputs-updated', load);
     return () => window.removeEventListener('easel:outputs-updated', load);
   }, [load]);
-  useEffect(() => { setFilter(initialFilter === 'imagegen' ? 'image' : initialFilter); setStack([]); }, [initialFilter]);
+  useEffect(() => { setFilter(normalizeFilter(initialFilter)); setStack([]); }, [initialFilter]);
 
   useEffect(() => {
     if (!selected) return;

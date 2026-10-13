@@ -27,6 +27,10 @@ def bootstrap():
         value = {'gateway': {'mode': 'local', 'port': 18789, 'bind': 'loopback',
             'auth': {'mode': 'token', 'token': secrets.token_urlsafe(48)},
             'http': {'endpoints': {'chatCompletions': {'enabled': True}}}},
+            # Custom OpenAI-compatible models may call catalog tools directly
+            # instead of using OpenClaw 2026.9.6's deferred tool_call surface.
+            # Expose direct schemas without changing the tool permission policy.
+            'tools': {'toolSearch': False},
             'agents': {'defaults': {'workspace': str(WORKSPACE), 'maxConcurrent': 1,
                 'subagents': {'maxConcurrent': 1}}}}
         config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')

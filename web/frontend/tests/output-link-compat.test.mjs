@@ -50,3 +50,30 @@ test('image category includes generated and ordinary images; legacy entry normal
   assert.deepEqual([...node.querySelectorAll('.gcard-kind')].map(el=>el.textContent),['图片','图片']);
   assert.equal([...node.querySelectorAll('.gcard-sub span')].filter(el=>el.textContent==='AI 生图').length,1);
 });
+
+test('empty or invalid entry filters show all projects and files, including after changing category', async t => {
+  const tree = [{name:'验收项目',type:'dir',path:'验收项目',children:[{name:'中文 文档.html',type:'file',kind:'text',path:'验收项目/中文 文档.html'}]},
+    {name:'import.png',type:'file',kind:'image',path:'import.png'}];
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>tree}));
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  t.after(async()=>{await act(async()=>root.unmount());node.remove();});
+  const names=()=>[...node.querySelectorAll('.gcard-name')].map(el=>el.textContent.trim()).sort();
+  const selected=()=>[...node.querySelectorAll('.gallery-filter-options .chip')].filter(el=>el.getAttribute('aria-pressed')==='true').map(el=>el.textContent);
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:''})));
+  assert.deepEqual(selected(),['全部']);
+  assert.deepEqual(names(),['import.png','验收项目']);
+  await act(async()=>[...node.querySelectorAll('.gcard-name')].find(el=>el.textContent.includes('验收项目')).click());
+  assert.deepEqual(names(),['中文 文档.html']);
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:'image'})));
+  assert.deepEqual(selected(),['图片']);
+  assert.deepEqual(names(),['import.png']);
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:'unknown'})));
+  assert.deepEqual(selected(),['全部']);
+  assert.deepEqual(names(),['import.png','验收项目']);
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:'text'})));
+  assert.deepEqual(selected(),['文档']);
+  assert.deepEqual(names(),['中文 文档.html']);
+  await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:''})));
+  assert.deepEqual(selected(),['全部']);
+  assert.deepEqual(names(),['import.png','验收项目']);
+});

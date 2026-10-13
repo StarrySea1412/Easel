@@ -47,6 +47,14 @@ browser profiles or platform cookies. The server creates its own Gateway token
 and CLI identity; loopback Gateway pairing must actually succeed before Web
 starts. Skill directories and server path guidance are managed by this release.
 
+New server configurations use `tools.toolSearch: false` so custom
+OpenAI-compatible models receive direct tool schemas. OpenClaw 2026.9.6 defaults
+to deferred tool discovery; some models call `web_fetch` directly and receive
+`Tool web_fetch not found` in that mode. This setting changes schema delivery,
+not execution permissions. Existing explicit operator settings are preserved.
+For an affected existing installation, back up its independent OpenClaw config,
+set this field to false, validate the config and verify an actual tool receipt.
+
 ## Activate and rollback
 
 ```sh

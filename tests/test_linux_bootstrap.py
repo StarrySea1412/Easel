@@ -37,6 +37,9 @@ def test_server_bootstrap_retains_identity_config_and_user_data(tmp_path, monkey
     identity = identity_path.read_bytes()
     config_path = module.STATE / 'openclaw.json'
     config = json.loads(config_path.read_text())
+    assert config['tools']['toolSearch'] is False
+    # An explicit later preference belongs to the operator and survives restart.
+    config['tools']['toolSearch'] = True
     config['agents']['defaults']['model']['primary'] = 'test/user-selected'
     config_path.write_text(json.dumps(config))
     expected_config = config_path.read_bytes()
