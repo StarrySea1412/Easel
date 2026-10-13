@@ -1,8 +1,6 @@
 > **138部署评估（2026-10-13）**：已只读核对生产机资源与现有AI-skills入口，建议独立Compose/HTTPS入口、持久数据与认证；OpenClaw先上线，Codex可选，指定6.1 sol不作为门槛。当前仅方案，尚未打包或部署。任务顺序与验收见[部署任务清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-tasks-2026-10-13.md)，依据见[部署评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-assessment-2026-10-13.md)。
 
-> **2026-10-10 修复便携交付**：本地未压缩 `Easel-fixed` 已完成整包搬移启动与受影响页面验收。修复共享脚本导入、首次设备配对、渠道名称保存，新增快速添加及 CC Switch / Magpie 导入；启动显示阶段，就绪打开页面。新版网关实际 aihub 对话成功，按用户要求生图不预配置；当前图片额度不足，不报告新版生图成功。OpenClaw 固定 2026.9.6，首次新路径加载仍需数分钟，运行中复用约4.4秒。搬移后对话复测出现连接重置；按追加要求提供同版私用ZIP。私用凭据不进入 Git。详见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
-
-> **历史便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
+> **最新便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
 
 > **最新收口**：当前模型厂商icon、超过3轮显示节点、紧凑工具执行、自动匹配可用思考档位/黄色info已完成；修正登录有效性缓存、B站失效回正、公众号会话区分，并在发布前逐平台在线检查。定向前端98项、后端250通过1跳过；真实小红书只读检查有效，无重复投稿。按最新授权开始生成dist新便携包，包的全量前端/启停回执单独记录。
 
@@ -10,23 +8,39 @@
 >
 > [运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md) · [功能验收单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/functional-acceptance-2026-10-09.md) · [上游兼容报告](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-compatibility-2026-10-10.md)
 
+# 2026-10-13 思考入口与菜单修正
+
+首页和对话输入框直接显示当前思考档位（关闭、低、中、高等），保留原滑条菜单。菜单只保留一个自动选项，移除重复模型名称；自动模式有能力声明时显示最高支持档位，未知时显示自动。删除两处 Enter / Shift+Enter 常驻提示；快捷键行为保留。
+
+真实浏览器已检查首页/对话、侧栏展开、390px菜单边界、点击开关和键盘关闭；定向模拟检查与生产构建通过。此次未调用模型或付费服务，其他界面整改和便携打包继续单独跟踪。
+
+# 2026-10-12 工具栏与内容库收敛（历史）
+
+聊天工具栏现在用图标切换 OpenClaw/Codex，入口只显示“思考强度”；模型旁用状态点表示渠道与推理状态，详细原因放在可访问弹层。网关状态集中到侧栏工具区并明确标出 OpenClaw，断开后自动退避重连并保留手动重试。内容库的全部、图片、视频、音频、文档筛选入口加入对应图标，图片与 AI 生图仍统一在图片分类下。
+
+本轮已完成前端生产构建；真实隔离浏览器继续覆盖已有桌面/390px、筛选、预览和下载回归。没有调用真实模型或付费服务，便携版打包仍暂停等待新指令。
+
+# 对话、技能与文件交付修正（2026-10-12）
+
+最新界面修正：工具操作默认显示小图标和一行摘要，点击展开命令、回执和文件差异；进度按实际记录顺序穿插，旧操作缺共同顺序时明确说明，避免重复进度。未选技能时“完成选择”禁用，预览不算选中；内容库统一“图片”分类，生成图片用“AI 生图”标签区分，工坊历史进入同一分类。42项前端、62项后端定向检查通过，构建/lint完成；真实隔离Chromium验证桌面/390px、键盘/复制/分页、文件跳转、图片预览/下载和Codex审批入口。工具及模型事件为模拟，实际本地文件/媒体与持久记录HTTP已检查；未发模型或付费请求。源码服务7880已加载新版，详见[验收记录](docs/execution-experience-implementation-2026-10-12.md)。
+
+**当前打包暂停，等待用户新指令。** 已完成[桌面选型、包体/启动和竞品差距评估](docs/desktop-harness-assessment-2026-10-12.md)：先补齐执行与产物机制、拆分重型能力和优化启动，Windows 桌面优先验证 WebView2；未迁移到 Electron/Tauri，也未修改既有 Codex 接入计划。
+
+已按 [Codex 执行体验规划](docs/codex-execution-experience-assessment-2026-10-12.md) 实现首版共享执行视图：OpenClaw/Codex 操作卡展示完整命令、目录、输出、退出码和后台进程；文件 diff 与回执同时可查、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，服务中断的未结束记录标为未确认。后端112项、前端102项定向回归及构建通过；真实 Chromium 验证键盘/复制/分页/实时终态、真实本地文件跳转及390px。模型端到端、Codex重启远端对账和完整浏览器操作闭环仍待验证，未调用真实模型或付费服务；见 [实现与验收记录](docs/execution-experience-implementation-2026-10-12.md)。源码已整合原Codex接入、计时与自适应最高实现，既有接入计划保留，便携包继续暂停。
+
+点击工具栏“对话”会同时进入聊天并展开当前会话列表；再次点击不会丢失当前会话。其它工作区仍按原规则收起会话列。
+
+技能详情改为“进入对话”：新建草稿并带入技能和输入，确认发送后才调用模型。Agent 获得当前技能配置状态及正确配置文件路径，不含密钥；技能说明中的“需要 Key”不再作为未配置的证据。
+
+聊天中的本地产物链接会核验当前数据目录，存在且非空才可打开；缺失文件显示提示并可重新检查。共享 `save_artifact.py` 可保存实际本地文件或 HTTP(S) 下载到 `EASEL_DATA_DIR/outputs/<具体主题>/`，便携副本搬移时须保留整个数据目录。网站来源链接、网页快照与完整离线网站分别说明。真实浏览器已验证 Word 下载、HTML 预览/下载、技能草稿及 390px 布局；没有调用真实模型或付费生图，本轮源码变更尚未重新打入旧 ZIP，截图中的旧缺失文件未恢复。
+
 # Easel 创作工作台
-
-> **2026-10-12 界面修正已完成**：执行操作改为小图标和一行摘要，点击展开命令、回执与diff；工作进度按记录顺序穿插，不重复显示，旧操作缺共同顺序时明确说明。技能未选中时禁用“完成选择”，预览不算选中；内容库统一“图片”分类，生成图片以“AI 生图”标签区分，工坊历史进入同一分类。前端42项、后端62项定向检查及构建通过，真实隔离Chromium验证桌面/390px、键盘/复制/分页/实时更新、实际文件跳转、图片预览下载和Codex审批入口。模型和工具事件为模拟，没有新增模型或付费请求。源码服务7880已更新，功能提交[aa98aab4](https://github.com/StarrySea1412/Easel/commit/aa98aab462dcdf8d3afcaa9a742378cf0c1704d0)；详见[验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)。main仅同步首页，便携打包继续暂停。
-
-> **2026-10-12 执行展示首版已实现**：OpenClaw/Codex共用操作卡，完整命令、目录、输出、退出码和后台进程可查；文件diff与回执同显、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，中断未完成项标为未确认。后端112项、前端102项定向回归及构建通过，真实隔离Chromium检查键盘/复制/实时终态/分页、实际本地文件跳转及390px。引擎事件为模拟，没有新增真实模型或付费服务调用；远端恢复对账、完整浏览器闭环及Codex技能/办公室适配仍待完成。源码提交[11874bf7](https://github.com/StarrySea1412/Easel/commit/11874bf7741590d1ab6a68e23d48b1b481b508ae)，见[实现与验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)；main只同步首页说明，原接入计划保留，打包继续暂停。
-
-> **当前打包暂停，等待用户新指令。** [桌面应用、包体/启动与 ZCode / DeepSeek Harness 差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)已完成；建议先补齐执行/产物机制和优化重型运行组件，再验证 Windows WebView2 桌面窗口。仅评估和规划，未迁移到 Electron/Tauri、未修改现有 Codex 接入计划。
-
-> **2026-10-12 对话、技能与文件修正**：点击“对话”同步切换主内容并展开会话；技能详情“进入对话”仅带入技能与新草稿，由用户确认发送。Agent 获得不含密钥的配置状态及准确配置路径。回复中的本地产物核验存在且非空后才开放链接，缺失文件提示并可重查；共享保存脚本将实际本地文件或 HTTP(S) 下载保存到当前数据目录的主题子目录。真实隔离浏览器验证了技能草稿/刷新、Word 下载、HTML 预览/下载及 390px；本地 HTTP 下载与便携数据目录搬移检查通过，没有新增真实模型或付费生图调用。原缺失文件未找回，本轮没有重打旧 ZIP。功能位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10)，[进度与验收范围](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/secondary-development-progress.md)另记；main 仅同步首页说明。
-
-> **2026-10-12 本地更新**：对话生成中实时计时，结束、失败或停止后保留耗时，刷新及备份保留记录。思考强度默认“自适应最高”，按当前模型能力匹配，手动调整集中在对话框，不另设配置面板。当前 aihub 模型支持最高“高”，真实生成仍遇到源站 502。[耗时记录](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/chat-duration-2026-10-12.md) · [推理修复](https://github.com/StarrySea1412/Easel/blob/codex/aihub-reasoning-2026-10-12/docs/aihub-reasoning-fix-2026-10-12.md)。源码在独立分支，未合并功能代码到 main，也未重新发布完整安装器。
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
-[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/portable-model-import-fixes) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
+[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
 
-> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/portable-model-import-fixes` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/upstream-compat-2026-10-10` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 >
 > Windows x64 历史便携候选为 `Easel-preview-76bbaf6-3fb7.zip`（约 1.06 GiB），已完成实际解压、完整文件校验、包内启动、两种 Chromium 运行和指定工作台入口的浏览器验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md)。
 >
