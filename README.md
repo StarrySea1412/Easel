@@ -1,3 +1,5 @@
+> **138部署评估（2026-10-13）**：已只读核对生产机资源与现有AI-skills入口，建议独立Compose/HTTPS入口、持久数据与认证；OpenClaw先上线，Codex可选，指定6.1 sol不作为门槛。当前仅方案，尚未打包或部署。任务顺序与验收见[部署任务清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-tasks-2026-10-13.md)，依据见[部署评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-assessment-2026-10-13.md)。
+
 > **2026-10-10 修复便携交付**：本地未压缩 `Easel-fixed` 已完成整包搬移启动与受影响页面验收。修复共享脚本导入、首次设备配对、渠道名称保存，新增快速添加及 CC Switch / Magpie 导入；启动显示阶段，就绪打开页面。新版网关实际 aihub 对话成功，按用户要求生图不预配置；当前图片额度不足，不报告新版生图成功。OpenClaw 固定 2026.9.6，首次新路径加载仍需数分钟，运行中复用约4.4秒。搬移后对话复测出现连接重置；按追加要求提供同版私用ZIP。私用凭据不进入 Git。详见[修复交付记录](https://github.com/StarrySea1412/Easel/blob/codex/portable-model-import-fixes/docs/portable-fixes-2026-10-10.md)。
 
 > **历史便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
