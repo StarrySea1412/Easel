@@ -4,6 +4,8 @@
 
 > **部署补齐方案**：[部署总结](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-summary-2026-10-13.md)按本地最新功能与服务器已发布修复统一收录、同提交构建前后端、隔离验收、备份切换和版本/功能对账整理；当前为方案，尚未执行下一次发布。
 
+> **网页研究失败调查**：真实会话46次调用中18次明确失败、8次curl管道掩盖错误；根因包括搜索未配置、猜测URL的404、Google地址安全拒绝和缺少curl。[调查记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/web-research-failure-investigation-2026-10-13.md)记录源码新增的失败原因展示、网页研究规则与镜像curl依赖；15项DOM及3项消息检查、TypeScript通过，尚未部署。搜索provider与浏览器真实验收仍待补齐。
+
 > **版本显示（R123，已部署/已验收）**：侧栏底部显示v0.2.7，轻量详情显示实际发行manifest构建1a324540854c。`GET /api/version`已验证未登录401、登录200、no-store与development=false；源码无manifest时准确标开发环境。切回窗口重读服务版本，更新界面仍需刷新。真实浏览器刷新、详情点击/Escape焦点还原及版本入口390px边界通过；25项后端、38项前端定向检查、tsc及服务器生产构建通过（保留既有chunk warning）。运行发布身份与后续文档提交分开。
 
 > **最新便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
