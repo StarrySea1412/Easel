@@ -2,6 +2,8 @@
 
 > **界面同步边界**：138固定v0.2.7/build1a324540854c未包含本地未提交UI；最新设置分组、紧凑生图/账号分析布局、技能推荐、工具汇总简化和用户OpenClaw SVG尚未同步，不能把核心登录/模型/文件部署写成全部最新功能已同步。本次仅只读核对，未部署或重启。
 
+> **部署补齐方案**：[部署总结](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-summary-2026-10-13.md)按本地最新功能与服务器已发布修复统一收录、同提交构建前后端、隔离验收、备份切换和版本/功能对账整理；当前为方案，尚未执行下一次发布。
+
 > **版本显示（R123，已部署/已验收）**：侧栏底部显示v0.2.7，轻量详情显示实际发行manifest构建1a324540854c。`GET /api/version`已验证未登录401、登录200、no-store与development=false；源码无manifest时准确标开发环境。切回窗口重读服务版本，更新界面仍需刷新。真实浏览器刷新、详情点击/Escape焦点还原及版本入口390px边界通过；25项后端、38项前端定向检查、tsc及服务器生产构建通过（保留既有chunk warning）。运行发布身份与后续文档提交分开。
 
 > **最新便携交付（2026-10-10）**：`Easel-preview-2f1818d-c38a.zip` 已生成于 `dist/portable-20261010/`，来源 `2f1818d4`。全量前端916通过，包体完整校验、空data首启、真实浏览器入口及隔离启停/重启通过。全新Windows与原生GUI双击仍待验；[运营手册](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)记录SHA256与边界。旧76bbaf6候选仅为历史记录。
