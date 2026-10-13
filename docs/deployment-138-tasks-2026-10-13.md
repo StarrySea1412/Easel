@@ -1,8 +1,14 @@
 # Easel 138部署任务清单
 
-日期：2026-10-13（Asia/Shanghai）。关联需求R110/R113/R118–R122，依据[部署评估](deployment-138-assessment-2026-10-13.md)。R118已授权实际部署，用户选择IP与独立证书；R119收敛首轮范围，R122要求继续完整部署交接但保留明确延后的专项。本清单保留原D01–D12，分别记录实现与实际验收。
+日期：2026-10-13（Asia/Shanghai）。关联需求R110/R113/R118–R123，依据[部署评估](deployment-138-assessment-2026-10-13.md)。R118已授权实际部署，用户选择IP与独立证书；R119收敛首轮范围，R122要求继续完整部署交接但保留明确延后的专项，R123版本可见已部署验收。本清单保留原D01–D12，分别记录实现与实际验收。
 
-当前工程：独立HTTPS入口已运行，认证HTTP、Gateway、真实模型/技能/终端/持久文件及浏览器登录/对话已有实际证据。先前c35e9851升级通过1351个运行源码摘要和正式/隔离健康、登录/Gateway/HTTP文件字节核对；最终附件修复发布为`8b6bcea7a09a13e2598e44874a3b5cdddcc42a51`，镜像`sha256:e35e5e74f9b20e5ba1b4b9587e68db4e22f0010da462ed56f6e4f96fe86cbc24`，源码目录`/home/ubuntu/Easel.new.8b6bcea7a09a`，激活日志已Healthy。真实浏览器全部分类/项目/HTML iframe标记预览及159字节附件下载通过，下载SHA-256与服务器/容器原件一致；最终实时版本核验及原文件URL直接浏览器打开已通过；链接点击target-blank页未被IAB暴露，保留此观察边界。完整恢复/资源/全入口专项未完成，不能写为全功能上线通过。运行方式见[RUNBOOK](../deployment/138/RUNBOOK.md)。
+前序8b6bcea7发布证据（历史，当前版本见下方v0.2.7回执）：独立HTTPS入口已运行，认证HTTP、Gateway、真实模型/技能/终端/持久文件及浏览器登录/对话已有实际证据。先前c35e9851升级通过1351个运行源码摘要和正式/隔离健康、登录/Gateway/HTTP文件字节核对；最终附件修复发布为`8b6bcea7a09a13e2598e44874a3b5cdddcc42a51`，镜像`sha256:e35e5e74f9b20e5ba1b4b9587e68db4e22f0010da462ed56f6e4f96fe86cbc24`，源码目录`/home/ubuntu/Easel.new.8b6bcea7a09a`，激活日志已Healthy。真实浏览器全部分类/项目/HTML iframe标记预览及159字节附件下载通过，下载SHA-256与服务器/容器原件一致；最终实时版本核验及原文件URL直接浏览器打开已通过；链接点击target-blank页未被IAB暴露，保留此观察边界。完整恢复/资源/全入口专项未完成，不能写为全功能上线通过。运行方式见[RUNBOOK](../deployment/138/RUNBOOK.md)。
+
+## v0.2.7最终运行回执（覆盖前序发行身份）
+
+R119/R122核心使用与R123版本可见交付已完成。实际运行release为`1a324540854c4fe082ee30ec0256942b8c6ef5da`，镜像`sha256:ac2b0d6e96ebd4250686380d82520d9498df3a20444154bb370b4dba3556bc8f`，源目录`/home/ubuntu/Easel.new.1a324540854c`，正式快照`/home/ubuntu/easel-backups/20261013T092340Z.tar.gz`。完整committed发行ZIP含1527源码文件，SHA-256`a897350bfef7273c716185bca26f0e47e9cae37622571dd50db068e6ef5f9ac9`；镜像/正式/隔离1355运行源码摘要全通过，两环境Healthy/重启0、实际登录/Gateway通过，toolSearch=false及原配置完整摘要保持。运行发行已推送且远端SHA一致，后续doc-only提交/main README同步独立记录。
+
+版本接口401/登录200/no-store、0.2.7/1a324540854c/development=false通过；侧栏版本、详情点击/Escape焦点还原、刷新和版本入口390px实测通过。25后端/38前端定向、tsc及服务器生产构建通过（既有chunk warning）。原159字节产物预览/attachment/hash持续一致；本次版本更新未重复模型调用，沿用前序实际模型/工具证据。完整D01–D12延后专项保留未验，不全部勾选。
 
 ## 当前验收矩阵（覆盖下方计划阶段状态）
 
@@ -10,22 +16,22 @@
 
 | ID | 已实现/已验证 | 待验或后续边界 |
 | --- | --- | --- |
-| D01 | 固定旧正式版与新版候选源码/镜像；现场容量与资源配置已查 | 新正式运行版本最终回执；代表性峰值观察延后 |
-| D02 | Linux镜像及依赖/Chromium冒烟通过；非root、全源码/技能和静态资源已入镜像；新版1351文件摘要通过 | 冷启动/RSS完整量化延后；不得把复用固定基础层描述为重装全部依赖 |
+| D01 | v0.2.7/1a324540固定源码/镜像/ZIP及实时发行回执；现场容量与资源配置已查 | 代表性峰值观察延后 |
+| D02 | Linux镜像及依赖/Chromium冒烟通过；非root、完整源码/技能/静态资源入镜像；v0.2.7的1355运行摘要通过 | 冷启动/RSS完整量化延后；固定基础层复用不等于重装依赖 |
 | D03 | 单worker、监管Gateway/Web、健康接口、限流定向检查；实际2GiB/2CPU/PIDs256/只读根/无Web或Gateway发布端口 | 真实故障/停止/资源名额释放全面专项延后 |
-| D04 | data/state/secrets分离；真实文件重启后保留，认证下载字节/hash一致 | 新版切换后复核文件/身份/配置；平台profile与客户端草稿迁移未验 |
+| D04 | data/state/secrets分离；真实文件重启/换版本后保留，下载字节/hash一致；最终toolSearch/config摘要保持 | 平台profile与客户端草稿迁移未验 |
 | D05 | 独立8444 HTTPS、认证与Origin拒绝、当前Windows用户安装CA后真实浏览器登录；R120内网账号覆盖 | 其他访问设备需核验并信任公共CA；公网不沿用内网弱口令 |
 | D06 | 独立Gateway/设备批准；真实模型/技能/终端/文件回执；延迟工具兼容修正后两次web_fetch HTTP200 | 运营平台登录/发布、付费媒体未验；缺凭据应准确未配置 |
-| D07 | ZIP/逐文件摘要/镜像ID/receipt；先前c35e9851运行摘要及升级核验；最终8b6bcea7激活日志Healthy | Git远端SHA同步；最终实时镜像/源码核验已通过；后续文档提交身份独立 |
-| D08 | 备份/切换/固定image回滚工具；隔离升级快照与previous receipt；最终正式停写快照20261013T084803Z.tar.gz | 回退位置最终核对；完整故障回退演练延后 |
+| D07 | 1a324540发行ZIP1527文件SHA/镜像ID/1355运行摘要；运行SHA推送且远端一致 | 后续文档提交身份独立；main README同步另记 |
+| D08 | 备份/切换/固定image回滚工具；隔离快照/previous receipt；正式快照20261013T092340Z.tar.gz | 完整故障回退演练延后，不把备份存在冒充演练通过 |
 | D09 | Easel独立服务未占用80/443，AI-skills原容器健康/运行 | AI-skills业务/浏览器回归未验，进程/HTTP观察不代替业务通过 |
 | D10 | 实际浏览器登录/对话/全部分类/项目/HTML iframe预览/附件下载通过，下载159字节且hash与服务器原件一致；空筛选4项回归 | 原文件URL直接浏览器打开通过；链接点击target-blank页未被IAB暴露；全菜单/390px/长SSE/恢复/15分钟资源延后 |
 | D11 | Codex明确禁用，不影响OpenClaw主体 | Linux Codex及Easel技能/办公室未验，不启用 |
-| D12 | 最终8b6bcea7激活日志Healthy；已有真实登录/网关/HTTP文件及浏览器HTML预览/附件下载证据 | 维护交接和文档Git/main首页同步待完成；实时版本及原文件URL直接打开已通过，链接点击新页边界保留 |
+| D12 | v0.2.7/1a324540正式/隔离健康、实际认证/Gateway/文件/版本UI通过，运行SHA远端一致；R119/R122核心使用完成 | 完整D项延后专项及后续文档/main同步独立记录；target-blank新页观察边界保留 |
 
-English scope: authenticated access, real model/tools, persistent-file HTTP hashes, production/isolated upgrades, browser HTML preview and actual attachment download passed. Final release 8b6bcea7 live checks confirmed Healthy/zero restarts and source hashes; direct original-file URL opening passed. The clicked target-blank tab was not exposed by IAB and remains an observation boundary. Deferred full-suite, recovery, resource and integration checks stay unverified.
+English scope: v0.2.7/build1a324540854c passed core-use delivery and version visibility, including authenticated/no-store API and real browser version controls. Both environments Healthy/zero restarts, 1,355 runtime hashes and pushed remote SHA match. Earlier actual model/tool evidence remains scoped; no model request was repeated. Deferred full-checklist items and target-blank tab observation remain unverified.
 
-R123版本可见正在实现/定向测试：v0.2.7侧栏底部简短版本，轻量详情展示发行manifest的12位构建SHA；GET /api/version受现有认证且no-store，无manifest源码标开发环境，窗口focus重读服务版本、更新界面仍需刷新。当前运行8b6bcea7未包含此功能，新发行/镜像回执另记，不以文档提交替代部署。
+R123版本可见已实现/已部署/已验收：v0.2.7侧栏底部简短版本，轻量详情展示实际manifest构建1a324540854c；认证/no-store版本接口已实测，无manifest源码标开发环境，focus重读服务版本、更新界面仍需刷新。运行发行和后续文档身份分开，不以文档提交替代部署。
 
 ## 交付目标和执行顺序
 
@@ -167,4 +173,4 @@ D09实际部署和D10必要模型小样本已由R118授权；平台发布和付�
 
 Codex未通过不构成主体上线阻断，但必须明确禁用及原因。
 
-当前状态：D01–D12按上方矩阵分别记录实现/实际验收，完整清单尚未全部通过，旧“部署验收0/12”已失效。最终8b6bcea7激活日志Healthy、浏览器预览与真实附件下载通过，实时版本及原文件URL直接打开已通过，维护/Git交接待完成；链接点击新页边界保留；本地模拟检查不累计为服务器验收。便携ZIP和安装器继续暂停。
+当前状态：v0.2.7/1a324540实时版本、R119/R122核心使用和R123版本可见交付完成，运行发行已推送且远端SHA一致，后续doc-only及main README同步独立记录。D01–D12按矩阵保留真实证据和延后专项，完整清单未全部通过；target-blank新页观察边界保留，便携ZIP/安装器继续暂停。

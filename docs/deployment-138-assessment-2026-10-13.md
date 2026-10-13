@@ -1,18 +1,24 @@
 # Easel 在 192.168.0.138 的部署评估
 
-日期：2026-10-13（Asia/Shanghai）。本文保留最初部署研究，并增加实际实施状态。当前独立内网入口已运行；R119先交接链接/登录/真实输出/文件，R122继续固定版本切换与维护交接。未要求指定6.1 sol，Codex当前明确禁用，不阻塞OpenClaw主体；用户延后的完整恢复/资源/全菜单/运营平台专项保留未验。
+日期：2026-10-13（Asia/Shanghai）。本文保留最初部署研究，并增加实际实施状态。当前独立内网入口运行v0.2.7，R119/R122核心使用及R123版本可见交付完成；延后专项仍保留。未要求指定6.1 sol，Codex当前明确禁用，不阻塞OpenClaw主体；用户延后的完整恢复/资源/全菜单/运营平台专项保留未验。
 
-## 当前实施与验收
+## 当前v0.2.7发布与验收
+
+- 运行release为`1a324540854c4fe082ee30ec0256942b8c6ef5da`，镜像`sha256:ac2b0d6e96ebd4250686380d82520d9498df3a20444154bb370b4dba3556bc8f`，源目录`/home/ubuntu/Easel.new.1a324540854c`，正式快照`/home/ubuntu/easel-backups/20261013T092340Z.tar.gz`；完整committed ZIP1527文件，SHA-256`a897350bfef7273c716185bca26f0e47e9cae37622571dd50db068e6ef5f9ac9`。镜像/正式/隔离1355运行源码摘要全通过，两环境Healthy/重启0、gaojitest登录/Gateway通过，运行发行已推送且远端SHA一致，后续doc-only/main README同步独立。
+- R123版本可见已部署/已验收：版本接口认证401/登录200/no-store与0.2.7/1a324540854c/development=false实测通过，侧栏版本、轻量详情、Escape焦点还原、刷新及版本入口390px实测通过。25后端/38前端定向、tsc和生产构建通过（既有chunk warning）；无manifest标开发环境，focus重读服务版本，更新界面仍需刷新。
+- 正式toolSearch=false配置SHA-256`10e9317f06a4c30a1b1f1934a3abe4268950b020a3cc539e20601077545a8f35`不变；原159字节产物预览/attachment/hash保持一致。本轮未重复模型调用，模型/网页工具沿用下方前序真实证据，R119/R122核心交付完成，完整D01–D12延后专项不冒充通过。
+
+## 前序发布证据（历史身份，不代表当前运行版本）
 
 - 正式入口为`https://192.168.0.138:8444/`，独立Compose项目easel保留AI-skills原80/443。UID/GID1000、只读根、2GiB/2CPU、private Web/Gateway及独立data/state/secrets已实际运行。AI-skills原容器仍健康/运行，未以进程检查代替业务验收。
 - 已通过正式/隔离实际认证HTTP、独立Gateway、当前Windows用户安装并核验CA后真实浏览器登录/对话。用户R120指定当前内网入口的运行时账号覆盖；保留正常随机盐scrypt，不在源码、迁移或默认镜像植入固定账号，不扩展为公网凭据。
 - 一次真实OpenClaw任务39.22秒完成，原始回执含技能读取、终端执行和文件保存；159字节持久文件认证下载hash一致，应用重启后保留。网页web_fetch延迟发现兼容通过`tools.toolSearch=false`修正，JSON/HTML两次实际回执均HTTP200；既有显式工具偏好保留。
 - 内容库空筛选已修正并通过4项回归；先前c35e9851升级在依赖输入全一致后复用固定基础镜像，加入新源码/新版前端，1351运行源码摘要、正式/隔离健康、登录/Gateway/HTTP文件核对通过。最终发布`8b6bcea7a09a13e2598e44874a3b5cdddcc42a51`补齐显式附件响应，镜像`sha256:e35e5e74f9b20e5ba1b4b9587e68db4e22f0010da462ed56f6e4f96fe86cbc24`，源码目录`/home/ubuntu/Easel.new.8b6bcea7a09a`，快照`/home/ubuntu/easel-backups/20261013T084803Z.tar.gz`；激活日志Healthy，最终实时版本已核对正式/隔离e35e5e74镜像Healthy且重启0、1351运行源码摘要通过，toolSearch=false配置摘要一致，后续文档提交与运行身份分开。
 - 实际浏览器全部分类/项目及HTML iframe标记预览通过，真实附件下载159字节、SHA-256`d5b98a0721b00dd9521566e174f0579d5c07f9cfa6d5498f6d1185a00cfe757e`与服务器/容器原件一致。所选真实浏览器新建tab直接打开原文件URL，实际标记与中文/空格路径验证可见；原文件链接点击HTTP200，但IAB未暴露对应target-blank新页，保留该点击结果边界。
-- 8b6bcea7已实时核对正式/隔离均使用e35e5e74镜像、Healthy且重启0，1351运行源码摘要通过，OpenClaw toolSearch=false配置摘要保持一致。R123另在实现/定向测试v0.2.7版本可见：侧栏简短版本、轻量详情12位release-manifest构建SHA、认证/no-store版本接口、源码开发环境标记和窗口focus重读。更新界面仍需刷新，当前运行发行不含该新增功能，新发布回执另记。
+- 前序8b6bcea7正式/隔离e35e5e74镜像、Healthy/重启0、1351源码和toolSearch=false配置摘要曾通过；该历史运行身份已由上方v0.2.7/1a324540替代，R123也已完成，不用旧身份描述当前发行。
 - 原D01–D12完整门槛保留在[任务清单](deployment-138-tasks-2026-10-13.md)。故障回退、15分钟资源、全菜单/390px、全面停止/恢复、运营平台与付费媒体仍未验；Codex禁用，便携/桌面打包暂停。
 
-English status: authenticated access, real model/tools, persistent-file HTTP checks, browser HTML preview and attachment download passed. Final release 8b6bcea7 live checks confirmed Healthy/zero restarts and source hashes; direct original-file URL opening passed. The clicked target-blank tab was not exposed by IAB and remains an observation boundary. Later documentation commits are separate from the running release. The following research-stage observations remain historical evidence.
+English status: current v0.2.7/build 1a324540854c passed core delivery and version visibility. Production/isolated are Healthy with zero restarts and all 1,355 runtime-source hashes verified. Authenticated/no-store version API, real browser version controls and persistent-file preview/attachment hashes passed. Earlier actual model/tool evidence remains scoped; no model request was repeated for the version update. Direct original-file URL opening passed, while the clicked target-blank tab was not exposed by IAB. Deferred full-checklist items remain unverified; later documentation commits are separate from runtime, and preceding-release observations above are historical.
 
 ## 推荐方案（原研究，当前独立拓扑已采用）
 

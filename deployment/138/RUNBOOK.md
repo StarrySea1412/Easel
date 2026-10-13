@@ -6,14 +6,21 @@ Codex is disabled until independently verified. Windows packaging remains paused
 
 ## Current release and evidence (2026-10-13)
 
-The final release source is `8b6bcea7a09a13e2598e44874a3b5cdddcc42a51`;
+The running release is v0.2.7, source
+`1a324540854c4fe082ee30ec0256942b8c6ef5da`;
 its image ID is
-`sha256:e35e5e74f9b20e5ba1b4b9587e68db4e22f0010da462ed56f6e4f96fe86cbc24`.
-The release directory is `/home/ubuntu/Easel.new.8b6bcea7a09a` and its
-activation snapshot is `/home/ubuntu/easel-backups/20261013T084803Z.tar.gz`.
+`sha256:ac2b0d6e96ebd4250686380d82520d9498df3a20444154bb370b4dba3556bc8f`.
+The release directory is `/home/ubuntu/Easel.new.1a324540854c` and its
+activation snapshot is `/home/ubuntu/easel-backups/20261013T092340Z.tar.gz`.
+The committed source ZIP contains 1,527 source files, SHA-256
+`a897350bfef7273c716185bca26f0e47e9cae37622571dd50db068e6ef5f9ac9`.
 Live checks confirmed both easel and easel-test use the image above, are Healthy
-with zero restarts and pass all 1,351 runtime-source hashes. The independent
-OpenClaw config retains `tools.toolSearch=false` with the same verified digest.
+with zero restarts and pass all 1,355 runtime-source hashes. Actual login and
+Gateway readiness passed in both environments. The independent OpenClaw config
+retains `tools.toolSearch=false`, SHA-256
+`10e9317f06a4c30a1b1f1934a3abe4268950b020a3cc539e20601077545a8f35`.
+The runtime release is pushed and its remote SHA matches. Main README-only
+synchronization and later documentation commits are recorded separately.
 Later documentation-only commits do not change the running release identity.
 The upgrade reuses the verified fixed previous image only after all dependency
 inputs were confirmed identical, then layers the new source and newly built
@@ -42,16 +49,24 @@ all menus/390px, platform integrations and paid media. R122 continues version
 activation and maintenance handoff without marking those checks passed. Keep
 the original D01–D12 checklist and each evidence class separate.
 
-## Visible version follow-up (R123, implementation in progress)
+## Visible version (R123, deployed and accepted)
 
-The planned v0.2.7 sidebar footer shows a short application version. Its light
+The v0.2.7 sidebar footer shows a short application version. Its light
 details show the 12-character build SHA from the installed release manifest.
 `GET /api/version` stays behind existing access authentication and returns
 `Cache-Control: no-store`; source checkouts without a manifest are marked as
 development environments. Returning focus to the window re-reads the server
 version; refreshing is still required to load an updated interface. This
-follow-up is being implemented and tested, and is not included in the running
-8b6bcea7 release yet. Record its actual release/image only after activation.
+feature is deployed as build `1a324540854c`. The authenticated endpoint returned
+0.2.7, that build SHA and development=false; unauthenticated401, authenticated200
+and no-store checks passed. Real browser refresh, details click/Escape focus
+restoration and 390px version-control bounds passed. Twenty-five focused backend
+and 38 frontend checks, TypeScript and server production build passed (existing
+chunk warning). This release preserves the original 159-byte artifact and
+matching preview/attachment SHA-256. No model request was repeated for the
+version update; actual model/tool evidence remains the earlier scoped checks.
+R119/R122 core delivery and R123 version visibility are complete; deferred
+full-checklist items remain unverified.
 
 ## Build and verify
 
