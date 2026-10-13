@@ -1,5 +1,7 @@
 # 2026-10-13
 
+- Make Linux release ZIP/receipt writes atomic, include npm/npx in the image, use a faster integrity-checked npm mirror and add installed-source hash verification. The previous image build exited 137; no running Easel service is claimed. / Linux发行ZIP/回执改为原子写入，镜像补齐npm/npx，使用仍校验锁文件摘要的npm镜像并新增运行源码核验。前次镜像构建退出137，尚无已运行Easel服务。
+
 - Pin the patched MCP SDK and refresh frontend dependency locks after verified npm audit findings; both lock trees now report zero known advisories. Correct TLS file mapping, persist the Linux HOME/browser directories and create an independent Ed25519 device identity without copying desktop state. Image/server compatibility remains under verification. / 根据实际npm审计锁定修复后的MCP SDK及前端依赖，两处依赖树当前均无已知公告；修正证书文件映射、Linux HOME/浏览器持久化与独立Ed25519身份生成，继续核验镜像及服务器兼容性。
 
 - Begin authorized independent Linux deployment: full Python/OpenClaw locks, nonroot image, supervised Gateway/Web, persistent data/browser/identity paths, authenticated HTTPS access and backend-completion admission. Add commit-only source ZIP hashes, independent IP CA/certificate, snapshot and image rollback tools. Eleven local tests passed; actual image/server/model/browser acceptance remains pending. Codex is disabled and portable packaging stays paused. / 开始已授权的独立Linux部署，增加完整依赖锁、非root镜像、进程监管、数据/浏览器/身份持久化、HTTPS登录认证与随后台完成释放的限流；发布工具只导出指定commit并核验摘要，支持独立IP证书、快照和镜像回退。11项本地检查通过，镜像/服务器/真实调用/浏览器待验，Codex禁用，便携打包暂停。

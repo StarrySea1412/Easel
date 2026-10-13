@@ -17,11 +17,10 @@ RUN sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc
     && rm -rf /var/lib/apt/lists/*
 COPY deployment/138/runtime-package.json ./package.json
 COPY deployment/138/runtime-package-lock.json ./package-lock.json
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --registry=https://registry.npmmirror.com --replace-registry-host=always \
+    && npm cache clean --force
 
 FROM ${PYTHON_IMAGE}
-ARG EASEL_RELEASE_SHA
-LABEL org.opencontainers.image.revision=${EASEL_RELEASE_SHA}
 ENV PYTHONUNBUFFERED=1 PYTHONUTF8=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/chromium HOME=/home/easel \
     EASEL_NODE_EXECUTABLE=/usr/local/bin/node \
@@ -33,8 +32,11 @@ RUN sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 easel && useradd --uid 1000 --gid easel --create-home easel
 COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=runtime /runtime/ /opt/openclaw/
-RUN ln -s /opt/openclaw/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
+RUN ln -s /opt/openclaw/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 WORKDIR /app
 COPY pyproject.toml ./
 COPY easel/ ./easel/
@@ -55,6 +57,8 @@ RUN pip install --no-deps . \
     && rm -rf web/frontend/node_modules \
     && ln -s /data/.env .env && ln -s /data/outputs outputs \
     && chmod -R a+rX /opt/chromium /app /opt/openclaw
+ARG EASEL_RELEASE_SHA
+LABEL org.opencontainers.image.revision=${EASEL_RELEASE_SHA}
 USER 1000:1000
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "/app/deployment/138/supervisor.py"]
