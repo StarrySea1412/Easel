@@ -41,6 +41,7 @@ function kindIcon(kind: string | undefined, size = 30) {
   return <IconFile size={size} />;
 }
 const isHtml = (name: string) => /\.html?$/i.test(name);
+const downloadUrl = (path: string) => `${mediaUrl(path)}?download=1`;
 const kindLabel = (f: OutputNode) =>
   f.kind === 'text' ? (isHtml(f.name) ? '卡片' : '文档')
     : f.kind === 'image' ? '图片' : f.kind === 'video' ? '视频' : f.kind === 'audio' ? '音频' : '文件';
@@ -247,12 +248,12 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     );
     if (selected.kind === 'text') {
       if (loading) return <div className="loading"><div className="spinner" />加载中…</div>;
-      if (contentError) return <div className="notice-error" role="alert">{contentError} <button className="btn btn-sm" onClick={() => open(selected)}>重试</button> <a href={url} download>下载文件</a></div>;
-      if (binaryContent) return <div>此文件无法作为文本预览。<a href={url} download>下载 {selected.name}</a></div>;
+      if (contentError) return <div className="notice-error" role="alert">{contentError} <button className="btn btn-sm" onClick={() => open(selected)}>重试</button> <a href={downloadUrl(selected.path)} download>下载文件</a></div>;
+      if (binaryContent) return <div>此文件无法作为文本预览。<a href={downloadUrl(selected.path)} download>下载 {selected.name}</a></div>;
       if (!content) return <div className="trend-empty">文件内容为空</div>;
       return <div className="outputs-viewer-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />;
     }
-    return <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>无法预览。<a href={url} download style={{ color: 'var(--accent-start)' }}>下载 {selected.name}</a></div>;
+    return <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>无法预览。<a href={downloadUrl(selected.path)} download style={{ color: 'var(--accent-start)' }}>下载 {selected.name}</a></div>;
   };
 
   /** 项目/文件夹卡片：顶层项目用展示头（标题/平台/状态/封面），嵌套子文件夹回退朴素样式。 */
@@ -417,7 +418,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             </div>
             <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <a className="btn btn-sm" href={mediaUrl(selected.path)} target="_blank" rel="noreferrer">打开原文件 ↗</a>
-              <a className="btn btn-sm" href={mediaUrl(selected.path)} download={selected.name}>下载文件</a>
+              <a className="btn btn-sm" href={downloadUrl(selected.path)} download={selected.name}>下载文件</a>
               <button className="btn btn-sm btn-danger" onClick={(e) => remove(selected, e)}><IconTrash size={13} /> 删除此文件</button>
             </div>
           </div>

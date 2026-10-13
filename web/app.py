@@ -4467,14 +4467,14 @@ def api_output_status(path: str):
 
 
 @app.get("/api/media/{path:path}")
-async def api_media(path: str):
+async def api_media(path: str, download: bool = False):
     """原样输出媒体文件（图片/视频/音频/HTML/PDF），供 <img>/<video>/iframe/下载。"""
     full = _safe_output_path(path)
     # HTML 预览会在本地被就地重新生成（如 gzh-design 重排/内联图片），必须禁缓存，
     # 否则浏览器/代理按启发式缓存旧版 → 内容库 iframe 打开的是过期预览（复制粘贴带旧图 URL）。
     headers = ({"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
                if full.suffix.lower() in {".html", ".htm"} else {})
-    return FileResponse(full, headers=headers)
+    return FileResponse(full, headers=headers, filename=full.name if download else None)
 
 
 # 系统数据目录/文件——不允许从内容库删除（删了会丢登录态/日历/发布记录）

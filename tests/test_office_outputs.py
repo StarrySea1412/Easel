@@ -139,4 +139,10 @@ def test_endpoint_hrefs_reuse_existing_media_path_guard(tmp_path):
         item, = response.json()['items']
         # Read synthetic fixture only to verify the advertised link is usable.
         assert client.get(item['href']).content == b'SYNTHETIC_CONTENT'
+        assert 'content-disposition' not in client.get(item['href']).headers
+        attachment = client.get(item['href'] + '?download=1')
+        assert attachment.content == b'SYNTHETIC_CONTENT'
+        assert attachment.headers['content-disposition'].startswith('attachment;')
+        assert 'final%20%23.txt' in attachment.headers['content-disposition']
+        assert client.get('/api/media/topic/%2e%2e/%2e%2e/outside.txt?download=1').status_code == 403
         assert client.get('/api/media/topic/%2e%2e/%2e%2e/outside.txt').status_code == 403

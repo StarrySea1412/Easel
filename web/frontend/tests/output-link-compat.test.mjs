@@ -32,6 +32,7 @@ test('real OutputsPage waits for the tree then opens the linked file preview', a
   await act(async()=>finishTree());
   assert.equal(handled,1); assert.match(node.textContent,/真实文档预览/);
   assert.equal(calls.some(url=>url.includes('project/readme.md')),true);
+  assert.equal(node.querySelector('a[download]').getAttribute('href'),'/api/media/project/readme.md?download=1');
   await act(async()=>root.unmount());node.remove();
 });
 
