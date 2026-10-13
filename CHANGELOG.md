@@ -1,5 +1,7 @@
 # 2026-10-13
 
+- Begin authorized independent Linux deployment: full Python/OpenClaw locks, nonroot image, supervised Gateway/Web, persistent data/browser/identity paths, authenticated HTTPS access and backend-completion admission. Add commit-only source ZIP hashes, independent IP CA/certificate, snapshot and image rollback tools. Eleven local tests passed; actual image/server/model/browser acceptance remains pending. Codex is disabled and portable packaging stays paused. / 开始已授权的独立Linux部署，增加完整依赖锁、非root镜像、进程监管、数据/浏览器/身份持久化、HTTPS登录认证与随后台完成释放的限流；发布工具只导出指定commit并核验摘要，支持独立IP证书、快照和镜像回退。11项本地检查通过，镜像/服务器/真实调用/浏览器待验，Codex禁用，便携打包暂停。
+
 - Show the actual thinking level in home/chat composer triggers, retain the original slider, keep one auto option and omit the duplicate model row. Portal positioning prevents sidebar overlap; remove persistent keyboard hints without changing key handling. / 首页和对话入口直接显示思考档位，保留原滑条，只留一个自动选项，移除重复模型行；独立浮层避免侧栏遮挡，删除快捷键常驻提示并保留按键行为。
 - Verification: 62 related simulated checks passed; after updating an outdated accessible-value assertion, all 16 thinking-control checks passed. Production build and lint completed with warnings; real-browser checks covered home/chat, expanded-sidebar overlap, 390px bounds, trigger toggle and Escape. Other interface changes remain separate work; no model call or package. / 相关模拟检查62项通过，修正旧无障碍值断言后思考控件16项复跑通过；构建/lint完成并保留warning，真实浏览器已检查首页/对话、展开侧栏、390px边界、点击开关和Escape；其他整改继续，不调用模型、不打包。
 
