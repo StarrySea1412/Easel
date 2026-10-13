@@ -4,6 +4,8 @@
 
 ## 当前v0.2.7发布与验收
 
+只读真实浏览器/HTTP核对补充：138固定v0.2.7/build1a324540854c未包含本地未提交UI，不能称全部最新功能已同步；设置分组、紧凑生图/账号分析布局、技能推荐、工具汇总简化和用户OpenClaw SVG仅在本地。前端构建时间较晚不表示内容更新，本地源码0.2.7但运行版本API404；本次没有部署/重启，原核心登录/模型/文件证据保持。
+
 - 运行release为`1a324540854c4fe082ee30ec0256942b8c6ef5da`，镜像`sha256:ac2b0d6e96ebd4250686380d82520d9498df3a20444154bb370b4dba3556bc8f`，源目录`/home/ubuntu/Easel.new.1a324540854c`，正式快照`/home/ubuntu/easel-backups/20261013T092340Z.tar.gz`；完整committed ZIP1527文件，SHA-256`a897350bfef7273c716185bca26f0e47e9cae37622571dd50db068e6ef5f9ac9`。镜像/正式/隔离1355运行源码摘要全通过，两环境Healthy/重启0、gaojitest登录/Gateway通过，运行发行已推送且远端SHA一致，后续doc-only/main README同步独立。
 - R123版本可见已部署/已验收：版本接口认证401/登录200/no-store与0.2.7/1a324540854c/development=false实测通过，侧栏版本、轻量详情、Escape焦点还原、刷新及版本入口390px实测通过。25后端/38前端定向、tsc和生产构建通过（既有chunk warning）；无manifest标开发环境，focus重读服务版本，更新界面仍需刷新。
 - 正式toolSearch=false配置SHA-256`10e9317f06a4c30a1b1f1934a3abe4268950b020a3cc539e20601077545a8f35`不变；原159字节产物预览/attachment/hash保持一致。本轮未重复模型调用，模型/网页工具沿用下方前序真实证据，R119/R122核心交付完成，完整D01–D12延后专项不冒充通过。

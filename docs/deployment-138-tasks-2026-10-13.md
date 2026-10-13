@@ -12,6 +12,8 @@ R119/R122核心使用与R123版本可见交付已完成。实际运行release为
 
 ## 当前验收矩阵（覆盖下方计划阶段状态）
 
+只读浏览器/HTTP核对确认：138固定v0.2.7/build1a324540854c未包含本地未提交UI，设置分组、紧凑生图/账号分析布局、技能推荐、工具汇总简化与用户OpenClaw SVG仍未同步。原R119核心登录/模型/文件交付证据保留，不能扩大为“全部最新功能已同步”；本次核对未部署/重启，本地虽源码0.2.7但运行版本API404。
+
 首轮按R119交付可访问链接、实际登录、真实OpenClaw输出与文件保存/打开/下载；R122继续完成固定版本切换及维护交接。用户延后的专项不消失，也不阻塞本轮基本使用交接。下面的原始复选框继续表示完整范围，只有整项条件全部满足才能勾选。
 
 | ID | 已实现/已验证 | 待验或后续边界 |
@@ -27,7 +29,7 @@ R119/R122核心使用与R123版本可见交付已完成。实际运行release为
 | D09 | Easel独立服务未占用80/443，AI-skills原容器健康/运行 | AI-skills业务/浏览器回归未验，进程/HTTP观察不代替业务通过 |
 | D10 | 实际浏览器登录/对话/全部分类/项目/HTML iframe预览/附件下载通过，下载159字节且hash与服务器原件一致；空筛选4项回归 | 原文件URL直接浏览器打开通过；链接点击target-blank页未被IAB暴露；全菜单/390px/长SSE/恢复/15分钟资源延后 |
 | D11 | Codex明确禁用，不影响OpenClaw主体 | Linux Codex及Easel技能/办公室未验，不启用 |
-| D12 | v0.2.7/1a324540正式/隔离健康、实际认证/Gateway/文件/版本UI通过，运行SHA远端一致；R119/R122核心使用完成 | 完整D项延后专项及后续文档/main同步独立记录；target-blank新页观察边界保留 |
+| D12 | v0.2.7/1a324540正式/隔离健康、实际认证/Gateway/文件/版本UI通过，运行SHA远端一致；R119/R122核心使用完成 | 本地未提交最新UI尚未同步；完整D项延后专项及后续文档/main同步独立记录；target-blank新页观察边界保留 |
 
 English scope: v0.2.7/build1a324540854c passed core-use delivery and version visibility, including authenticated/no-store API and real browser version controls. Both environments Healthy/zero restarts, 1,355 runtime hashes and pushed remote SHA match. Earlier actual model/tool evidence remains scoped; no model request was repeated. Deferred full-checklist items and target-blank tab observation remain unverified.
 

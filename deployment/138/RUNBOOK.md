@@ -6,6 +6,14 @@ Codex is disabled until independently verified. Windows packaging remains paused
 
 ## Current release and evidence (2026-10-13)
 
+Read-only browser/HTTP comparison confirmed a synchronization gap: the fixed
+v0.2.7/build 1a324540854c server release excludes uncommitted local UI. Local
+Settings grouping, compact image/account-analysis layout, skill suggestions,
+compact tool presentation and the user-provided OpenClaw SVG are not deployed
+on 138 yet. A newer build timestamp does not mean newer UI content. Local source
+is 0.2.7 but its running version API returns 404. This comparison changed or
+restarted no service; prior core login/model/file evidence remains valid.
+
 The running release is v0.2.7, source
 `1a324540854c4fe082ee30ec0256942b8c6ef5da`;
 its image ID is
