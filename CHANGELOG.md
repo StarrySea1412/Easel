@@ -1,3 +1,9 @@
+# 2026-10-13
+
+- Define 12 deployment tasks with dependencies, release artifacts, authentication and persistence checks, OpenClaw acceptance, optional Codex, ZIP/image verification, rollback gates and separate production authorization. Implementation and deployment remain pending.
+
+- Document the proposed independent Easel deployment on 192.168.0.138, based on the AI-skills runbooks, read-only host capacity/port/health checks and local Codex metadata. Cover Linux dependencies, authentication, persistent state, ZIP checksums, image rollback and acceptance gates. Codex is optional; no specific model blocks deployment. No production changes, package, model request or deployment acceptance was performed.
+
 # 2026-10-12
 
 - Compact the composer controls: icon-based OpenClaw/Codex selector, a stable “Thinking strength” trigger, model-adjacent status dot with accessible channel/inference details, and an explicitly marked OpenClaw sidebar gateway indicator with guarded backoff reconnect plus manual retry. Add icons to the content-library filters while keeping generated images under the shared Images category with their AI-generated tag. Production build passed; packaging remains paused and no live model request was made.
