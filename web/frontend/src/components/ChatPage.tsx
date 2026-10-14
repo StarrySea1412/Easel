@@ -37,7 +37,7 @@ interface ChatPageProps {
   ) => void; // 重试：仅对最后一轮
   onOpenAudit?: (turnId:string)=>void;
   onNewChat?: () => void;
-  onOpenModels?: () => void;
+  onOpenModels?: (modelRef?: string) => void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
 }
 

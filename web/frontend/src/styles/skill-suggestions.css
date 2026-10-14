@@ -1,0 +1,10 @@
+.composer-skill-suggestions{margin:8px 0;font-size:12px;line-height:1.6;min-width:0}
+.skill-suggestion-row,.skill-setup-prompts{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--text-secondary)}
+.skill-suggestion-row>span{font-size:11px;color:var(--text-tertiary)}
+.skill-suggestion-row button{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:16px;background:transparent;color:var(--text-secondary);font:inherit;cursor:pointer}
+.skill-suggestion-row button:hover:not(:disabled){background:var(--surface-2);color:var(--text)}
+.skill-suggestion-row small{font-size:10px;color:var(--text-tertiary)}
+.skill-setup-prompts{margin-top:5px;overflow-wrap:anywhere}
+.skill-setup-prompts button{margin-left:6px;padding:2px 4px;border:0;border-radius:4px;background:transparent;color:var(--accent,#507bb7);font:inherit;cursor:pointer}
+.composer-skill-suggestions button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.composer-skill-suggestions button:disabled{opacity:.5;cursor:default}

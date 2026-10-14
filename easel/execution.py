@@ -70,6 +70,13 @@ def set_text(row, field, value, credentials=None):
 
 def begin(session, turn, call, name, args, at=None, credentials=None, source='transcript'):
     args = args if isinstance(args, dict) else {}
+    # Some gateways wrap the real function in a generic tool_call event.
+    if name in ('tool_call', 'tool'):
+        function = args.get('function') if isinstance(args.get('function'), dict) else args
+        nested_name = function.get('name') or function.get('tool')
+        nested_args = function.get('arguments', function.get('input'))
+        if isinstance(nested_name, str) and nested_name.strip() and isinstance(nested_args, dict):
+            name, args = nested_name, nested_args
     name = name.split('.')[-1][:100]
     row = {'id': ident(session, turn, call), 'name': name, 'kind': kind(name, args),
            'status': 'running', 'command': '', 'path': '', 'cwd': '', 'output': '', 'diff': '',

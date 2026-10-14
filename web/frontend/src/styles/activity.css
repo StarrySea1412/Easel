@@ -38,3 +38,17 @@
 .activity-session-picker { min-width:0; width:min(100%,480px); }.activity-session-picker .easel-select { width:100%; }.usage-table-scroll td small { display:block; color:var(--text-secondary); overflow-wrap:anywhere; }
 .usage-request-browser > summary { list-style:none; cursor:pointer; }
 .usage-request-browser > summary::-webkit-details-marker { display:none; }
+.activity-turn-summary { margin:-8px 0 16px; color:var(--text-secondary); font-size:12px; }
+.activity-session-state.is-error { color:var(--red); }
+.activity-error-summary { padding:14px 16px; margin-bottom:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); font-size:13px; }
+.activity-error-summary > strong { color:var(--red); }
+.activity-error-summary p { line-height:1.7; overflow-wrap:anywhere; margin:8px 0; }
+.activity-error-summary summary,.usage-extra-metrics > summary { cursor:pointer; color:var(--text-secondary); font-size:12px; }
+.activity-error-summary pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.usage-extra-metrics { padding:8px 0 12px; }
+.usage-extra-metrics[open] > summary { margin-bottom:12px; }
+.activity-workspace { padding-top:24px; }
+.activity-heading { margin-bottom:16px; }
+.activity-heading h1 { margin-bottom:0; font-size:28px; }
+.activity-layout { gap:18px; }
+.activity-detail-heading { margin-bottom:16px; }

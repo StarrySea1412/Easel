@@ -43,6 +43,9 @@ function session(id = 'existing', content = '请保留我的消息') {
   return { id, title: 'Existing conversation', created: 123, messages: [{ role: 'user', content }] };
 }
 
+// Legacy saved records predate engine selection and normalize to OpenClaw.
+const loadedSession = (...args) => ({ ...session(...args), engine: 'openclaw' });
+
 test('importing the store neither resets history nor accesses browser storage', async () => {
   const storage = memoryStorage({ easel_sessions: JSON.stringify([session()]), easel_active_session: 'existing' });
   let tabReads = 0;
@@ -50,7 +53,7 @@ test('importing the store neither resets history nor accesses browser storage', 
   const { store } = await isolatedStore(storage);
   assert.deepEqual(storage.calls, []);
   assert.equal(tabReads, 0);
-  assert.deepEqual(store.loadSessions(), [session()]);
+  assert.deepEqual(store.loadSessions(), [loadedSession()]);
   assert.equal(store.loadActiveId(), 'existing');
   assert.equal(storage.values.has('easel_chat_reset_20260902'), false);
   assert.equal(storage.calls.some(([operation]) => operation === 'remove'), false);
@@ -65,7 +68,7 @@ test('one malformed record cannot hide healthy sessions or crash message renderi
   }];
   const { store } = await isolatedStore(memoryStorage({ easel_sessions: JSON.stringify(saved) }));
   const loaded = store.loadSessions();
-  assert.deepEqual(loaded[0], session());
+  assert.deepEqual(loaded[0], loadedSession());
   assert.equal(loaded[1].title, 'New Chat');
   assert.equal(loaded[1].created, 0);
   assert.equal(loaded[1].messages.length, 3);
@@ -106,7 +109,7 @@ for (const legacyKey of ['postcraft_sessions', 'easel-sessions']) {
     const raw = JSON.stringify([session()]);
     const storage = memoryStorage({ [legacyKey]: raw });
     const { store } = await isolatedStore(storage);
-    assert.deepEqual(store.loadSessions(), [session()]);
+    assert.deepEqual(store.loadSessions(), [loadedSession()]);
     assert.equal(storage.values.get('easel_sessions'), raw);
     assert.equal(storage.values.has(legacyKey), false);
     const write = storage.calls.findIndex(call => call[0] === 'set');
@@ -120,7 +123,7 @@ test('a migration write failure retains the source and still loads its conversat
   const storage = memoryStorage({ postcraft_sessions: raw });
   storage.failedKeys.set('easel_sessions', 'QuotaExceededError');
   const { store, persistence } = await isolatedStore(storage);
-  assert.deepEqual(store.loadSessions(), [session()]);
+  assert.deepEqual(store.loadSessions(), [loadedSession()]);
   assert.equal(storage.values.get('postcraft_sessions'), raw);
   assert.equal(storage.values.has('easel_sessions'), false);
   assert.equal(persistence.getLocalPersistenceStatus().unsaved, true);
@@ -160,7 +163,7 @@ test('a valid legacy fallback never overwrites unreadable current history or del
   const legacy = JSON.stringify([session('legacy-recovered')]);
   const storage = memoryStorage({ easel_sessions: broken, postcraft_sessions: legacy });
   const { store, persistence } = await isolatedStore(storage);
-  assert.deepEqual(store.loadSessions(), [session('legacy-recovered')]);
+  assert.deepEqual(store.loadSessions(), [loadedSession('legacy-recovered')]);
   assert.equal(storage.values.get('easel_sessions'), broken);
   assert.equal(storage.values.get('postcraft_sessions'), legacy);
   assert.equal(storage.calls.some(([operation]) => operation === 'set' || operation === 'remove'), false);
@@ -271,7 +274,7 @@ test('imported read-only records preserve literal attachment markers and remain 
   const storage = memoryStorage({ easel_sessions: JSON.stringify([original]) });
   const { store } = await isolatedStore(storage);
   const loaded = store.loadSessions();
-  assert.deepEqual(loaded, [{ ...session('backup-copy', '解释【附件素材】标记后的原文也必须保留'), importedFromBackup: true, backupIncomplete: true }]);
+  assert.deepEqual(loaded, [{ ...loadedSession('backup-copy', '解释【附件素材】标记后的原文也必须保留'), importedFromBackup: true, backupIncomplete: true }]);
   assert.equal(store.saveSessions(loaded), true);
   const reloaded = await isolatedStore(storage);
   assert.deepEqual(reloaded.store.loadSessions(), loaded);

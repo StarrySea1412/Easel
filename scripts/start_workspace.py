@@ -146,6 +146,19 @@ def wait_for_web(process, url: str, expected: bytes, *, timeout: float = 60) -> 
             stop_owned_child(process)
 
 
+def runtime_gateway_port(value) -> str | None:
+    """Only this installation's saved launch settings may override its port."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError('保存的网关端口无效；请检查本副本启动设置。')
+    raw = str(value).strip()
+    match = re.fullmatch(r'(?:\[[^\]]+\]:|[^:]+:)?(\d+)', raw)
+    if not match or not 1 <= int(match[1]) <= 65535:
+        raise ValueError('保存的网关端口无效；请检查本副本启动设置。')
+    return str(int(match[1]))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -170,10 +183,19 @@ def launch(root: Path, data: Path, args) -> int:
     settings = json.loads(runtime.read_text(encoding="utf-8-sig")) if runtime.is_file() else {}
     env["EASEL_OPENCLAW_STATE_DIR"] = str(settings.get("stateDir") or data / "openclaw")
     env["OPENCLAW_STATE_DIR"] = env["EASEL_OPENCLAW_STATE_DIR"]
+    env["OPENCLAW_CONFIG_PATH"] = str(Path(env["OPENCLAW_STATE_DIR"]) / "openclaw.json")
+    # Pin credentials to this installation; inherited gateway credentials may
+    # belong to a separately running source or portable copy.
+    env.pop("OPENCLAW_GATEWAY_TOKEN", None)
+    env.pop("OPENCLAW_GATEWAY_PASSWORD", None)
+    env["EASEL_GATEWAY_HOST"] = "127.0.0.1"
+    env.pop("OPENCLAW_GATEWAY_PORT", None)
+    env.pop("EASEL_GATEWAY_PORT", None)
     env["OPENCLAW_HOME"] = str(data / "openclaw-home")
     Path(env["OPENCLAW_HOME"]).mkdir(exist_ok=True)
-    if settings.get("gatewayPort"):
-        env["OPENCLAW_GATEWAY_PORT"] = str(settings["gatewayPort"])
+    gateway_port = runtime_gateway_port(settings.get("gatewayPort"))
+    if gateway_port:
+        env["OPENCLAW_GATEWAY_PORT"] = env["EASEL_GATEWAY_PORT"] = gateway_port
     node_marker = root / ".tools/node-dir.txt"
     node_dir = node_marker.read_text(encoding="utf-8-sig").strip() if node_marker.is_file() else ""
     env["PATH"] = os.pathsep.join((str(root / ".tools/npm"), node_dir, env.get("PATH", "")))
@@ -215,6 +237,18 @@ def launch(root: Path, data: Path, args) -> int:
             timeout=330, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
         if rc:
             raise RuntimeError(f"Gateway startup failed; see {logs / 'launch.log'}")
+        try:
+            device_result = subprocess.run([str(root / '.venv/Scripts/python.exe'), '-B', str(root / 'scripts/initialize_gateway_device.py')],
+                cwd=root, env=env, stdout=log, stderr=log, timeout=20,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if device_result.returncode:
+                notice = '设备连接尚未批准；继续启动工作台，可在对应网关检查设备授权。'
+                log.write((notice + '\n').encode('utf-8'))
+                print(notice, file=sys.stderr)
+        except (subprocess.TimeoutExpired, OSError):
+            notice = '设备连接初始化未完成；继续启动工作台，可在对应网关检查设备授权。'
+            log.write((notice + '\n').encode('utf-8'))
+            print(notice, file=sys.stderr)
         port = free_port(args.port)
         env["EASEL_PORT"] = str(port)
         python = root / ".venv/Scripts/python.exe"

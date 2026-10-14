@@ -17,7 +17,8 @@ import DashboardEmpty from './ui/DashboardEmpty';
 import { IconImage } from './settingsIcons';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
-import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker';
+import ComposerModelPicker from './ComposerModelPicker';
+import ComposerSkillSuggestions from './ComposerSkillSuggestions';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { loadThinkingLevel, saveThinkingLevel } from '../lib/thinkingLevel';
 import type { ThinkingPreference } from '../lib/thinkingLevel';
@@ -26,6 +27,7 @@ import { THINKING_LABELS } from '../lib/thinkingLevel';
 import type { ThinkingLevel } from '../lib/api';
 import { showToast } from '../lib/toast';
 import '../styles/chat-composer.css';
+import '../styles/dashboard-studio-entry.css';
 import { getChatDraft, subscribeChatDraft, setChatDraftText, setChatDraftError, clearChatDraft } from '../lib/chatDrafts';
 import { DASHBOARD_DRAFT_SCOPE, isDashboardDraftTextCleared } from '../lib/dashboardDraft';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -54,7 +56,7 @@ interface DashboardProps {
   persona: string;
   gatewayStatus: string;
   onNavigate: (page: Page) => void;
-  onOpenModels?: () => void;
+  onOpenModels?: (modelRef?: string) => void;
   onUseTopic: (title: string) => void;
   /** 工作台输入框直达创作：新开会话把这句话发给 Agent */
   onQuickPrompt: (text: string, selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
@@ -164,6 +166,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       .catch((e: unknown) => {
         if (!isCurrent()) return;
         setAnaErrors((old) => ({ ...old, [platform]: e instanceof Error ? e.message : '请求失败' }));
+        showToast(`抓取失败：${e instanceof Error ? e.message : '请求失败，请重试。'}`, 'error');
         setAnaData((d) => ({ ...d, [platform]: 'error' as const }));
       }).finally(() => { if (isCurrent()) anaPending.current.delete(platform); });
   };
@@ -262,6 +265,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             onCompositionStart={() => { composingQuick.current = true; }}
             onCompositionEnd={() => { composingQuick.current = false; }}
           />
+          <ComposerSkillSuggestions text={quickText} skills={quickSkills}/>
           <div className="dash-composer-bar">
             <div className="dash-composer-tools">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
@@ -272,13 +276,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
               开始创作 →
             </button>
           </div>
-          <div className="dash-composer-meta">
+          {(persona || gatewayStatus !== 'connected') && <div className="dash-composer-meta">
             <div className="dash-composer-status">
-              <ComposerModelStatus models={quickModels} onOpenModels={onOpenModels} />
               {persona && <span className="dash-persona" title={`当前画像：${persona}`}>{persona}</span>}
               {gatewayStatus !== 'connected' && <span className="dash-connection" role="status">{gatewayStatus === 'connecting' ? '正在连接…' : '助手未连接'}{gatewayStatus === 'disconnected' && <button type="button" className="link-btn" onClick={() => onNavigate('settings')}>检查设置</button>}</span>}
             </div>
-          </div>
+          </div>}
         </div>
         {quickDraft.error && <p className="dash-composer-error" role="alert">{quickDraft.error}</p>}
         {quickSkills.notice && <p className="composer-skills-note" role="status">{quickSkills.notice}
@@ -313,77 +316,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       </div>
 
       <div className="dash-grid">
-        <DashboardCard variant="studio" Icon={IconImage} title="生图工坊" ariaLabel="生图工坊入口">
-          <DashboardEmpty Icon={IconImage} title="给想象一块独立画布" description="描述画面、选择比例，生成封面与配图。任务进度和历史图片都在工坊里。" action="打开生图工坊" onAction={() => onNavigate('image')} />
-        </DashboardCard>
-
-        {/* 今日热点 */}
-        <DashboardCard variant="summary" Icon={IconFire} title="今日热点"
-          actions={<button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>}>
-          {trends === null && !loadErrors['热点'] && <SkeletonCard rows={6} title={false} />}
-          {loadErrors['热点'] && <DashboardEmpty Icon={IconFire} title="热点暂未加载" description="请检查网络连接后重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
-          {trends && !trends.some((g) => g.items.length > 0) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
-          {trends?.map((g) => (
-            <div key={g.platform} className="dash-trend-group">
-              <div className="dash-trend-plat">{g.label}
-                {g.fetchedAt && <span> · {g.status === 'stale' ? '上次可用' : g.status === 'cached' ? '缓存' : '获取于'} {new Date(g.fetchedAt * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
-              </div>
-              {g.error && <div className="dash-empty">{g.error.message}</div>}
-              {g.items.slice(0, 3).map((it, i) => (
-                <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
-                  <button className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</button>
-                </div>
-              ))}
-            </div>
-          ))}
-        </DashboardCard>
-
-        {/* 选题库 */}
-        <DashboardCard variant="summary" Icon={IconIdea} title="选题库 · 待做" ariaLabel="待做选题"
-          actions={<button className="dash-more" onClick={() => onNavigate('ideas')}>全部 →</button>}>
-          {!loaded['选题'] && <SkeletonCard rows={5} title={false} />}
-          {loadErrors['选题'] && <DashboardEmpty Icon={IconIdea} title="选题暂未加载" description="已有选题保留在选题库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
-          {loaded['选题'] && !loadErrors['选题'] && pendingIdeas.length === 0 && <DashboardEmpty Icon={IconIdea} title="为下一篇攒点灵感" description="记录一个想法，或从热点中收藏选题。" action="添加选题" onAction={() => onNavigate('ideas')} />}
-          {pendingIdeas.slice(0, 5).map((it) => (
-            <button key={it.id} className="dash-idea"
-              onClick={() => onUseTopic(it.title)} title="点击做成内容">
-              <span className="dash-idea-title">{it.title}</span>
-              {it.source && <span className="badge">{it.source}</span>}
-            </button>
-          ))}
-        </DashboardCard>
-
-        {/* 近期排期 */}
-        <DashboardCard variant="summary" Icon={IconCalendar} title="近期排期"
-          actions={<button className="dash-more" onClick={() => onNavigate('calendar')}>日历 →</button>}>
-          {schedule === null && !loadErrors['排期'] && <SkeletonCard rows={5} title={false} />}
-          {loadErrors['排期'] && <DashboardEmpty Icon={IconCalendar} title="排期暂未加载" description="暂时无法读取日历，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
-          {schedule !== null && upcoming.length === 0 && <DashboardEmpty Icon={IconCalendar} title="给创作一个时间" description="安排下一篇内容，让发布更有节奏。" action="安排日历" onAction={() => onNavigate('calendar')} />}
-          {upcoming.slice(0, 5).map((s) => (
-            <button key={s.id} className="dash-sched"
-              onClick={() => onNavigate('calendar')}>
-              <span className="dash-sched-date">{s.date.slice(5)}</span>
-              <span className="dash-sched-title">{s.platform ? `[${s.platform}] ` : ''}{s.title}</span>
-              <span className="badge">{STATUS_LABEL[s.status] || s.status}</span>
-            </button>
-          ))}
-        </DashboardCard>
-
-        {/* 最近产物 */}
-        <DashboardCard variant="summary" Icon={IconOutputs} title="最近产物"
-          actions={<button className="dash-more" onClick={() => onNavigate('outputs')}>内容库 →</button>}>
-          {outputs === null && !loadErrors['内容'] && <SkeletonCard rows={5} title={false} />}
-          {loadErrors['内容'] && <DashboardEmpty Icon={IconOutputs} title="内容暂未加载" description="暂时无法读取内容库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
-          {outputs !== null && recent.length === 0 && <DashboardEmpty Icon={IconOutputs} title="作品从这里积累" description="开始一段创作，生成的内容会保存到这里。" action="开始对话" onAction={() => onNavigate('chat')} />}
-          {recent.map((g) => (
-            <button key={g.name} className="dash-output"
-              onClick={() => onNavigate('outputs')}>
-              <span className="dash-output-name">{g.meta?.title || g.name}</span>
-              <span className="badge">{g.meta?.platform || (g.type === 'dir' ? `${g.fileCount ?? 0} 文件` : '单文件')}</span>
-            </button>
-          ))}
-        </DashboardCard>
-
         {/* 创作数据（归因层）：选平台自动拉取登录账号的粉丝/获赞/关注 + 多窗口增长 + 近7日环比 + 最新笔记 */}
         <DashboardCard variant="wide" Icon={IconAccounts} title="账号分析"
           actions={<div className="dash-card-actions">
@@ -511,7 +443,78 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             );
           })()}
         </DashboardCard>
+
+
+        {/* 今日热点 */}
+        <DashboardCard variant="summary" Icon={IconFire} title="今日热点"
+          actions={<button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>}>
+          {trends === null && !loadErrors['热点'] && <SkeletonCard rows={6} title={false} />}
+          {loadErrors['热点'] && <DashboardEmpty Icon={IconFire} title="热点暂未加载" description="请检查网络连接后重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {trends && !trends.some((g) => g.items.length > 0) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
+          {trends?.map((g) => (
+            <div key={g.platform} className="dash-trend-group">
+              <div className="dash-trend-plat">{g.label}
+                {g.fetchedAt && <span> · {g.status === 'stale' ? '上次可用' : g.status === 'cached' ? '缓存' : '获取于'} {new Date(g.fetchedAt * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+              </div>
+              {g.error && <div className="dash-empty">{g.error.message}</div>}
+              {g.items.slice(0, 3).map((it, i) => (
+                <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
+                  <button className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </DashboardCard>
+
+        {/* 选题库 */}
+        <DashboardCard variant="summary" Icon={IconIdea} title="选题库 · 待做" ariaLabel="待做选题"
+          actions={<button className="dash-more" onClick={() => onNavigate('ideas')}>全部 →</button>}>
+          {!loaded['选题'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['选题'] && <DashboardEmpty Icon={IconIdea} title="选题暂未加载" description="已有选题保留在选题库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {loaded['选题'] && !loadErrors['选题'] && pendingIdeas.length === 0 && <DashboardEmpty Icon={IconIdea} title="为下一篇攒点灵感" description="记录一个想法，或从热点中收藏选题。" action="添加选题" onAction={() => onNavigate('ideas')} />}
+          {pendingIdeas.slice(0, 5).map((it) => (
+            <button key={it.id} className="dash-idea"
+              onClick={() => onUseTopic(it.title)} title="点击做成内容">
+              <span className="dash-idea-title">{it.title}</span>
+              {it.source && <span className="badge">{it.source}</span>}
+            </button>
+          ))}
+        </DashboardCard>
+
+        {/* 近期排期 */}
+        <DashboardCard variant="summary" Icon={IconCalendar} title="近期排期"
+          actions={<button className="dash-more" onClick={() => onNavigate('calendar')}>日历 →</button>}>
+          {schedule === null && !loadErrors['排期'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['排期'] && <DashboardEmpty Icon={IconCalendar} title="排期暂未加载" description="暂时无法读取日历，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {schedule !== null && upcoming.length === 0 && <DashboardEmpty Icon={IconCalendar} title="给创作一个时间" description="安排下一篇内容，让发布更有节奏。" action="安排日历" onAction={() => onNavigate('calendar')} />}
+          {upcoming.slice(0, 5).map((s) => (
+            <button key={s.id} className="dash-sched"
+              onClick={() => onNavigate('calendar')}>
+              <span className="dash-sched-date">{s.date.slice(5)}</span>
+              <span className="dash-sched-title">{s.platform ? `[${s.platform}] ` : ''}{s.title}</span>
+              <span className="badge">{STATUS_LABEL[s.status] || s.status}</span>
+            </button>
+          ))}
+        </DashboardCard>
+
+        {/* 最近产物 */}
+        <DashboardCard variant="summary" Icon={IconOutputs} title="最近产物"
+          actions={<button className="dash-more" onClick={() => onNavigate('outputs')}>内容库 →</button>}>
+          {outputs === null && !loadErrors['内容'] && <SkeletonCard rows={5} title={false} />}
+          {loadErrors['内容'] && <DashboardEmpty Icon={IconOutputs} title="内容暂未加载" description="暂时无法读取内容库，请重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
+          {outputs !== null && recent.length === 0 && <DashboardEmpty Icon={IconOutputs} title="作品从这里积累" description="开始一段创作，生成的内容会保存到这里。" action="开始对话" onAction={() => onNavigate('chat')} />}
+          {recent.map((g) => (
+            <button key={g.name} className="dash-output"
+              onClick={() => onNavigate('outputs')}>
+              <span className="dash-output-name">{g.meta?.title || g.name}</span>
+              <span className="badge">{g.meta?.platform || (g.type === 'dir' ? `${g.fileCount ?? 0} 文件` : '单文件')}</span>
+            </button>
+          ))}
+        </DashboardCard>
+
+
       </div>
+      <button type="button" className="dash-studio-entry" onClick={() => onNavigate('image')}><IconImage size={18}/><span>生图工坊</span><span aria-hidden="true">→</span></button>
     </div>
   );
 }

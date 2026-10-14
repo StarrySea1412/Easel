@@ -281,12 +281,14 @@ export function fetchSkillDetail(name: string): Promise<SkillDetail> {
 }
 
 /** 保存 API key 到项目根 .env（仅注册表内变量）。返回各需 API 的 skill 是否已就绪。 */
-export function saveEnv(updates: Record<string, string>): Promise<{ ok: boolean; skills: Record<string, boolean> }> {
-  return request('/api/env', {
+export async function saveEnv(updates: Record<string, string>): Promise<{ ok: boolean; skills: Record<string, boolean> }> {
+  const result = await request<{ ok: boolean; skills: Record<string, boolean> }>('/api/env', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ updates }),
   });
+  window.dispatchEvent(new CustomEvent('easel:skill-configured'));
+  return result;
 }
 
 export function executeSkill(skill: string, input: string, persona?: string): Promise<SkillResponse> {
@@ -1428,15 +1430,11 @@ export function scheduleStorageLocation(path:string):Promise<StorageLocation> {
 export function cancelStorageLocation():Promise<StorageLocation> { return request('/api/storage/location',{method:'DELETE'}); }
 
 // 一次保存渠道与模型；空密钥保留现有配置。
-export function saveImagegenChannel(baseUrl: string, apiKey: string, model: string): Promise<{ ok: boolean }> {
+export async function saveImagegenChannel(baseUrl: string, apiKey: string, model: string): Promise<{ ok: boolean }> {
   const updates: Record<string, string> = { IMG_BASE_URL: baseUrl, IMG_MODEL: model };
   // 空 key 表示沿用已保存的密钥，不能把它写回 .env，否则后端会删掉原值。
   if (apiKey.trim()) updates.IMG_API_KEY = apiKey;
-  return request('/api/env', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ updates }),
-  });
+  return saveEnv(updates);
 }
 
 // ── 通知中心（邮箱通知可视化配置） ─────────────────────────

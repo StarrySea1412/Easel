@@ -3,6 +3,7 @@ import { fetchPersonaFiles, savePersonaFile, deletePersona, fetchAccountAnalytic
 import type { PersonaFile, AccountAnalytics } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconProfile, IconUserPlus, IconUserRound, IconEdit, IconTrash } from './icons';
+import { showToast as notifyFailure } from '../lib/toast';
 
 // 粉丝量级：把粉丝数映射成人话档位（画像里“粉丝量级”一栏要的是量级而非精确值）
 function fanTier(n: number): string {
@@ -126,7 +127,9 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
       setDrafts((p) => ({ ...p, [filename]: merged }));
       showToast(`已抓取并更新画像（粉丝 ${a.followers ?? 0}，已发表 ${a.posts ?? 0} 篇）✓`);
     } catch (e) {
-      showToast(e instanceof Error ? `抓取失败：${e.message}` : '抓取失败（可能未登录或平台改版）');
+      const message = e instanceof Error ? `抓取失败：${e.message}` : '抓取失败，请重试。';
+      showToast(message);
+      notifyFailure(message, 'error');
     } finally {
       setFetchingWx(false);
     }

@@ -73,7 +73,7 @@ async function fixture(t, patch = {}) {
 test('member selection, process and output actions retain their precise targets', async t => {
   const view = await fixture(t, { events: [event('failed-step', 'one', { status: 'failed', title: '只读文件失败，尚无结果' })] });
   assert.match(view.host.textContent, /报告错误/);
-  assert.match(view.host.textContent, /工具返回不等于任务完成/);
+  assert.equal(view.host.querySelector('.office-task-record-details').open, false);
   assert.match(view.host.textContent, /整个工作区/);
   assert.match(view.host.textContent, /工作中/);
   await selectOption(view.host.querySelector('[role="combobox"]'), 'two');

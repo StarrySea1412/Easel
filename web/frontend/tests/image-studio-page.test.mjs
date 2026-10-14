@@ -112,7 +112,7 @@ test('editing shows the original immediately and contextual suggestions disappea
   assert.equal(view.button('换背景'), undefined, 'suggestions cannot overwrite an existing description');
   await view.click(view.button('移除图片'));
   assert.equal(view.calls.cleared, 1);
-  assert.equal(view.container.querySelector('[aria-label="图片画布"] img'), null);
+  assert.equal(view.container.querySelector('[aria-label="图片画布"]'), null);
   assert.equal(view.container.querySelector('#image-prompt').value, view.calls.prompts[0], 'removing image preserves the description');
 });
 

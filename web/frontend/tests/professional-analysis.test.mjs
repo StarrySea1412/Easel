@@ -42,7 +42,7 @@ test('a response with a different platform or account is blocked instead of show
  const v=await fixture(t,{fetcher:async url=>url.endsWith('/accounts')?response({accounts:[account()]}):response(report('douyin'))});assert.match(v.container.querySelector('[role=alert]').textContent,/平台或账号不一致/);assert.equal(v.container.querySelector('.ca-topic-card'),null);assert.doesNotMatch(v.container.textContent,/douyin作品/);assert.throws(()=>validateAnalysisReport({...report(),professional:{...report().professional,scope:{platform:'xiaohongshu',accountId:'other'}}},'xiaohongshu','same-id'),/不一致/);
 });
 test('platform switch with the same account id discards a delayed previous report',async t=>{
- let finish;const v=await fixture(t,{fetcher:async url=>{if(url.endsWith('/accounts'))return response({accounts:[account(),account('douyin')]});const platform=new URL(url,'https://easel.test').searchParams.get('platform');return platform==='xiaohongshu'?new Promise(resolve=>{finish=resolve;}):response(report('douyin'));}});await act(async()=>{v.state.platform='douyin';v.render();});await act(async()=>finish(response(report())));assert.match(v.container.textContent,/douyin作品/);assert.doesNotMatch(v.container.textContent,/xiaohongshu作品/);assert.match(v.container.querySelector('a').href,/creator.douyin.com/);
+ let finish;const v=await fixture(t,{fetcher:async url=>{if(url.endsWith('/accounts'))return response({accounts:[account(),account('douyin')]});const platform=new URL(url,'https://easel.test').searchParams.get('platform');return platform==='xiaohongshu'?new Promise(resolve=>{finish=resolve;}):response(report('douyin'));}});await act(async()=>{v.state.platform='douyin';v.render();});await act(async()=>finish(response(report())));assert.match(v.container.textContent,/douyin作品/);assert.doesNotMatch(v.container.textContent,/xiaohongshu作品/);assert.ok(v.container.querySelector('a[href*="creator.douyin.com"]'));
 });
 test('a pending topic save cannot post a success notice into a newly selected platform',async t=>{
  let finish;const v=await fixture(t,{fetcher:async url=>{if(url.endsWith('/accounts'))return response({accounts:[account(),account('douyin')]});if(url.includes('/report?'))return response(report(new URL(url,'https://easel.test').searchParams.get('platform')));if(url.endsWith('/api/ideas'))return new Promise(resolve=>{finish=resolve;});throw new Error(url);}});await act(async()=>v.button('保存题材与证据').click());await act(async()=>{v.state.platform='douyin';v.render();});await act(async()=>finish(response({ok:true})));assert.doesNotMatch(v.container.textContent,/题材与当前证据快照已加入/);assert.match(v.container.textContent,/douyin作品/);
@@ -62,10 +62,10 @@ test('a connected platform automatically archives confirmed works once and disti
   throw new Error(url);
  }});
  assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
- assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/已载入 3 篇/);
  assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 尚未确认/);
  assert.match(v.container.querySelector('.ca-sync-card').textContent,/不代表全量/);
- assert.match(v.container.textContent,/先选一个问题/);
+ assert.ok(v.container.querySelector('[aria-label="选择复盘问题"]'));
  await act(async()=>v.render());
  assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
  assert.equal(v.state.requests.some(item=>item.url.endsWith('/insights')||item.url.endsWith('/interpret')),false);
@@ -80,7 +80,7 @@ test('opening cached confirmed works reads them without starting another collect
  }});
  assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,0);
  assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 37 篇/);
- assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/已载入 3 篇/);
  assert.match(v.container.querySelector('.ca-sync-card').textContent,/不代表全部历史/);
 });
 
@@ -93,8 +93,8 @@ test('failed synchronization keeps saved scope records and exposes explicit retr
   throw new Error(url);
  }});
  assert.match(v.container.querySelector('.ca-sync-card').textContent,/平台读取失败/);
- assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 3 篇/);
- assert.ok(v.button('重试读取作品'));
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/已载入 3 篇/);
+ assert.ok(v.button('重试读取'));
  assert.match(v.container.textContent,/xiaohongshu作品/);
  assert.equal(v.state.requests.filter(item=>item.url.endsWith('/sync')).length,1);
 });
@@ -160,6 +160,6 @@ test('an empty new login scope never leaves another saved account masquerading a
  assert.equal(v.container.querySelector('select').value,'new-login');
  assert.doesNotMatch(v.container.textContent,/xiaohongshu作品/);
  assert.match(v.container.querySelector('.ca-sync-card').textContent,/不能视为全历史为零/);
- assert.match(v.container.querySelector('.ca-sync-facts').textContent,/已载入 0 篇/);
+ assert.match(v.container.querySelector('.ca-sync-card').textContent,/已载入 0 篇/);
  assert.match(v.container.querySelector('.ca-sync-facts').textContent,/平台作品总量 尚未确认/);
 });

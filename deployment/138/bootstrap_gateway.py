@@ -5,6 +5,8 @@ from pathlib import Path
 import secrets
 import shutil
 
+from easel.web_runtime_config import configure_web_runtime
+
 ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
 STATE = Path(os.environ.get('EASEL_OPENCLAW_STATE_DIR', '/state/openclaw'))
@@ -33,6 +35,7 @@ def bootstrap():
             'tools': {'toolSearch': False},
             'agents': {'defaults': {'workspace': str(WORKSPACE), 'maxConcurrent': 1,
                 'subagents': {'maxConcurrent': 1}}}}
+        value, _ = configure_web_runtime(value)
         config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     model_file = Path(os.environ.get('EASEL_MODEL_BOOTSTRAP_FILE', '/run/secrets/model-bootstrap.json'))
     if model_file.is_file():

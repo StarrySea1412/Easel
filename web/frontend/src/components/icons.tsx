@@ -1,6 +1,7 @@
 // 轻量线性图标（Lucide 风格，MIT 路径），stroke=currentColor，自适应色。
 // 用来替换廉价的 emoji 图标，参考 ChatGPT / Stepfun 的简洁线性风格。
 import type { CSSProperties } from 'react';
+import openClawLogo from '../assets/openclaw.svg';
 interface P { size?: number; className?: string; strokeWidth?: number; style?: CSSProperties; 'aria-hidden'?: boolean; }
 
 const svg = (size = 18, sw = 1.8) => ({
@@ -232,12 +233,9 @@ export const IconSpark = ({ size, className, strokeWidth }: P) => (
     <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" />
   </svg>
 );
-/** OpenClaw gateway mark: a compact claw around the local gateway node. */
-export const IconOpenClaw = ({ size, className, strokeWidth }: P) => (
-  <svg {...svg(size, strokeWidth)} className={className}>
-    <circle cx="12" cy="12" r="2.2" />
-    <path d="M12 3.5v4M5.6 7.2l3.4 2M18.4 7.2l-3.4 2M5.6 16.8l3.4-2M18.4 16.8l-3.4-2M12 16.5v4" />
-  </svg>
+/** User-provided OpenClaw brand mark, shared by gateway and engine controls. */
+export const IconOpenClaw = ({ size = 18, className, style }: P) => (
+  <img src={openClawLogo} width={size} height={size} className={className} style={{ objectFit:'contain', flexShrink:0, ...style }} alt="" aria-hidden="true" />
 );
 export const IconKey = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>

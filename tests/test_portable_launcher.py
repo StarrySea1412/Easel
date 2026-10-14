@@ -412,6 +412,8 @@ def test_failed_config_validation_preserves_config_and_uses_exact_bundled_node(b
 
 def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monkeypatch):
     monkeypatch.setattr(launcher, "validate_config", lambda *a: None)
+    bootstrap_calls = []
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda command, **kw: bootstrap_calls.append((command, kw)) or subprocess.CompletedProcess(command, 0))
     gateway = process_record(bundle, "gateway", pid=722)
     observed = observed_services({"gateway": gateway})
     monkeypatch.setattr(launcher, "snapshot", lambda *a, **kw: observed)
@@ -428,7 +430,56 @@ def test_failed_web_launch_cleans_only_gateway_created_this_attempt(bundle, monk
     with pytest.raises(RuntimeError, match="web-start-failed"):
         launcher.start(bundle, no_browser=True)
     assert stopped == [gateway]
+    assert len(bootstrap_calls) == 1
+    assert bootstrap_calls[0][0] == [str(bundle.runtime['python']), '-B', '-s', str(bundle.app / 'scripts/initialize_gateway_device.py')]
+    assert bootstrap_calls[0][1]['env']['OPENCLAW_STATE_DIR'] == str(bundle.data / 'openclaw')
     assert launcher._read_json(bundle.data / launcher.STATE_FILE)["services"] == {}
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'oserror', 'unapproved'])
+def test_auxiliary_device_failure_keeps_portable_services_running(bundle, monkeypatch, failure):
+    monkeypatch.setattr(launcher, 'validate_config', lambda *a: None)
+    monkeypatch.setattr(launcher, 'snapshot', lambda *a, **kw: {'processes': {}, 'listeners': {}})
+    monkeypatch.setattr(launcher, '_stop_service', lambda *a, **kw: pytest.fail('auxiliary failure must not stop Gateway'))
+    calls = []
+    def run(command, **kwargs):
+        calls.append(('device', command, kwargs))
+        assert command == [str(bundle.runtime['python']), '-B', '-s', str(bundle.app / 'scripts/initialize_gateway_device.py')]
+        assert kwargs['timeout'] == 20
+        if failure == 'timeout':
+            raise subprocess.TimeoutExpired(['private-command-secret'], 20)
+        if failure == 'oserror':
+            raise OSError('private-path-secret')
+        return subprocess.CompletedProcess(command, 1)
+    monkeypatch.setattr(launcher.subprocess, 'run', run)
+    def launch(bundle, state, name, command, env, port, **kwargs):
+        calls.append((name, command, {'env': dict(env)}))
+        state['services'][name] = process_record(bundle, name, pid=722 if name == 'gateway' else 721, port=port)
+        launcher._save_state(bundle, state)
+    monkeypatch.setattr(launcher, '_launch_service', launch)
+    result = launcher.start(bundle, no_browser=True)
+    assert result['ok'] and result['running']
+    assert [kind for kind, *_ in calls] == ['gateway', 'device', 'web']
+    for _, _, kwargs in calls:
+        assert kwargs['env']['OPENCLAW_STATE_DIR'] == str(bundle.data / 'openclaw')
+        assert kwargs['env']['OPENCLAW_GATEWAY_PORT'] == str(result['gatewayPort'])
+        assert kwargs['env']['EASEL_GATEWAY_PORT'] == str(result['gatewayPort'])
+    assert set(launcher._read_json(bundle.data / launcher.STATE_FILE)['services']) == {'gateway', 'web'}
+    log = bundle.log_path.read_text(encoding='utf-8')
+    assert '继续启动工作台' in log and 'private-' not in log
+
+
+def test_real_portable_gateway_failure_blocks_web_and_device_setup(bundle, monkeypatch):
+    monkeypatch.setattr(launcher, 'validate_config', lambda *a: None)
+    monkeypatch.setattr(launcher, 'snapshot', lambda *a, **kw: {'processes': {}, 'listeners': {}})
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda *a, **kw: pytest.fail('device initialization must not run'))
+    def failed_gateway(bundle, state, name, command, env, port, **kwargs):
+        assert name == 'gateway'
+        raise RuntimeError('gateway-start-failed')
+    monkeypatch.setattr(launcher, '_launch_service', failed_gateway)
+    with pytest.raises(RuntimeError, match='gateway-start-failed'):
+        launcher.start(bundle, no_browser=True)
+    assert launcher._read_json(bundle.data / launcher.STATE_FILE)['services'] == {}
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process identity integration")

@@ -817,6 +817,16 @@ def start(bundle: Bundle, *, no_browser: bool = False) -> dict:
                                "gateway", "run", "--allow-unconfigured", "--bind", "loopback", "--port", str(gateway_port)]
                     _launch_service(bundle, state, "gateway", command, env, gateway_port)
                     started.append("gateway")
+                # Startup owns this connection. Settings/status reads never
+                # create pairing; the gateway applies its local auth policy.
+                try:
+                    device_result = subprocess.run([str(bundle.runtime['python']), '-B', '-s', str(bundle.app / 'scripts/initialize_gateway_device.py')],
+                                   cwd=bundle.app, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=20, creationflags=FLAGS)
+                    if device_result.returncode:
+                        log(bundle, '本副本设备连接尚未批准；继续启动工作台，请在对应网关检查设备授权。')
+                except (subprocess.TimeoutExpired, OSError):
+                    log(bundle, '本副本设备连接初始化未完成；继续启动工作台，请在对应网关检查设备授权。')
                 web_port, port_changed = select_web_port(bundle, identity)
                 env["EASEL_PORT"] = str(web_port)
                 expected = (bundle.app / "web/frontend/dist/index.html").read_bytes()

@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ReactNode } from 'react';
+import { showToast } from '../lib/toast';
 import '../styles/page-loading.css';
 
 export function PageLoading({ label }: { label: string }) {
@@ -20,6 +21,8 @@ export class PageBoundary extends Component<{
 
   static getDerivedStateFromError() { return { failed: true }; }
 
+  componentDidCatch() { showToast(this.props.label + '暂时无法打开，请重试或刷新页面。', 'error'); }
+
   render() {
     if (this.state.failed) {
       return (
@@ -27,6 +30,7 @@ export class PageBoundary extends Component<{
           <h2>{this.props.label}暂时无法打开</h2>
           <p>请检查连接后重试，也可以从侧栏打开其他页面。</p>
           <button type="button" className="btn" onClick={this.props.onRetry}>重新尝试</button>
+          <button type="button" className="btn btn-ghost" onClick={() => window.location.reload()}>刷新页面</button>
         </section>
       );
     }

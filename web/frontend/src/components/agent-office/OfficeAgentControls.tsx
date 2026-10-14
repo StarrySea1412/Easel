@@ -107,7 +107,7 @@ function LiveOfficeAgentControls({ agent, identity, stale, observationKey, onCha
     {stale && <p className="office-control-note" role="status">当前为上次快照，刷新协作记录后才能操作。</p>}
     {loading && <p className="office-control-note" role="status">正在核验可用控制…</p>}
     {controls && <>
-      <AgentModelRoutingSettings capability={controls.model} disabled={locked} saving={busy === 'model'} onSave={modelRef => void run('model', modelRef)} onOpenModelSettings={onOpenModelSettings} />
+      <details className="office-model-options"><summary>模型设置</summary><AgentModelRoutingSettings capability={controls.model} disabled={locked} saving={busy === 'model'} onSave={modelRef => void run('model', modelRef)} onOpenModelSettings={onOpenModelSettings} /></details>
       <div className="office-agent-stop">
         <h4>执行控制</h4>
         <p className="office-control-note">{controls.stop.scope === 'session' && isRoot ? '此操作停止当前会话整轮任务。' : stopAllowed ? '停止当前 Agent 及其派生任务，不停止父 Agent 或其他同级员工。' : controls.stop.reason}</p>

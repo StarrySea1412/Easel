@@ -12,6 +12,7 @@ import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
 import ToastHost from './components/ToastHost';
+import SkillDrawer from './components/SkillDrawer';
 import { showToast } from './lib/toast';
 import { steerQueuedMessage } from './lib/chatSteering';
 import type { Page } from './components/Sidebar';
@@ -90,17 +91,28 @@ export default function App() {
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
   const publishReceipts = usePublishReceipts();
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
+  const [settingsModelRef, setSettingsModelRef] = useState<string>();
+  const [skillConfiguration, setSkillConfiguration] = useState<string>();
   useEffect(() => {
     const open = (event: Event) => {
       const channel = (event as CustomEvent<unknown>).detail;
       if (typeof channel !== 'string' || !['chat', 'transcribe', 'speech', 'image', 'video', 'music', 'notify'].includes(channel)) return;
+      setSettingsModelRef(undefined);
       setSettingsSection(channel === 'notify' ? 'notify' : `channel:${channel}` as SettingsSection);
       setSettingsNavigationKey(key => key + 1);
       setCurrentPage('settings');
     };
     window.addEventListener('easel:open-skill-settings', open);
     return () => window.removeEventListener('easel:open-skill-settings', open);
+  }, []);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const name = (event as CustomEvent<unknown>).detail;
+      if (typeof name === 'string' && /^[a-zA-Z0-9_-]{1,120}$/.test(name)) setSkillConfiguration(name);
+    };
+    window.addEventListener('easel:open-skill-configuration', open);
+    return () => window.removeEventListener('easel:open-skill-configuration', open);
   }, []);
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
@@ -1013,7 +1025,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             onNavigate={setCurrentPage}
-            onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
+            onOpenModels={(modelRef) => { setSettingsModelRef(modelRef); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onUseTopic={handleUseTopic}
             onQuickPrompt={handleQuickPrompt}
           />
@@ -1033,7 +1045,7 @@ export default function App() {
             onStop={() => handleStopStream(activeSession.id)}
             onSteer={id => handleSteer(activeSession.id, id)}
             onNewChat={handleNewChat}
-            onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
+            onOpenModels={(modelRef) => { setSettingsModelRef(modelRef); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onOpenAudit={(turnId)=>{setActivityTarget({sessionId:activeSession.id,turnId,key:Date.now()});setCurrentPage('activity');}}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -1088,7 +1100,7 @@ export default function App() {
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':
-        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
+        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
           onExport: handleExportConversations,
           onExportRaw: exportRawConversationStorage,
           onImport: handleImportConversations,
@@ -1125,7 +1137,7 @@ export default function App() {
       <ToastHost />
       <Sidebar
         currentPage={currentPage}
-        onPageChange={(page, preserveConversations = false) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsSection('general'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page, preserveConversations); }}
+        onPageChange={(page, preserveConversations = false) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsModelRef(undefined); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page, preserveConversations); }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}
@@ -1177,6 +1189,9 @@ export default function App() {
       )}
 
       {/* 画像配置向导 */}
+      {skillConfiguration && <SkillDrawer skillName={skillConfiguration} onClose={() => setSkillConfiguration(undefined)}
+        onConfigured={() => window.dispatchEvent(new CustomEvent('easel:skill-configured'))}
+        onOpenChat={handleSkillChat} />}
       {showWizard && (
         <OnboardingWizard onClose={() => setShowWizard(false)} onCreated={handleProfileCreated} />
       )}

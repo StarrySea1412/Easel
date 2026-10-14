@@ -64,13 +64,11 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   return <div className="content-analysis-page">
     <div className="ca-workspace">
       <header className="ca-heading">
-        <div><p className="ca-kicker">CONTENT INSIGHTS / 创作复盘</p><h1><IconChart size={26} aria-hidden={true} style={{ verticalAlign: '-5px', marginRight: 8, color: 'var(--accent-start)' }} />内容分析</h1><p className="ca-subtitle">看懂哪篇做得好，知道下一篇怎么改。</p></div>
+        <div><h1><IconChart size={26} aria-hidden={true} style={{ verticalAlign: '-5px', marginRight: 8, color: 'var(--accent-start)' }} />内容分析</h1></div>
         <div className="ca-heading-actions"><button type="button" className="btn btn-sm" onClick={onNavigateAccounts}>管理账号</button><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateIdeas}>打开选题库 <span aria-hidden={true}>↗</span></button></div>
       </header>
 
-      <div className="ca-data-source"><div role="group" aria-label="分析数据来源">{demoEnabled && <button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>看演示数据</button>}<button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button></div><p>{dataSource === 'demo' ? '先用一份完整样例，看看分析能帮你做什么。' : '选平台后读取已有作品；支持的已登录账号会自动载入可确认归属的作品。'}</p></div>
-
-      {dataSource==='mine'&&<ol className="ca-start-steps" aria-label="内容分析使用步骤"><li><strong>1</strong><div>选择账号与作品<span>先确认正在分析谁、已读到多少篇</span></div></li><li><strong>2</strong><div>选择想解决的问题<span>看不懂标题、互动少，还是下一篇没方向？</span></div></li><li><strong>3</strong><div>看结论与下一步<span>打开依据，挑一项改动再验证</span></div></li></ol>}
+      {demoEnabled && <div className="ca-data-source"><div role="group" aria-label="分析数据来源"><button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button><button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>演示</button></div></div>}
 
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'ca-platform is-selected' : 'ca-platform'} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
@@ -79,8 +77,8 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       </section>
 
       <div className="ca-context">
-        <div className="ca-context-main"><span className="ca-context-format">{selected.format}</span><strong>{selected.name} · 本人内容</strong><span className={`ca-session ${available ? 'is-connected' : ''}`}>{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已保存登录状态 · 采集时核验' : '需要连接账号'}</span></div>
-        <button type="button" className="ca-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '刷新账号状态'}</button>
+        <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已保存登录状态' : '需要连接账号'}</span></div>
+        <button type="button" className="ca-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '刷新状态'}</button>
       </div>
       {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}</>}
 

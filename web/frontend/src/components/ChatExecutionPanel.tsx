@@ -4,11 +4,10 @@ import { decodeExecution, mergeOperations, mergeTimeline } from '../lib/executio
 import ExecutionOperation from './ExecutionOperation';
 import '../styles/chat-execution.css';
 
-export default function ChatExecutionPanel({ sessionId, turnId, streaming, onOpen, onProgressOwnership }: { sessionId: string; turnId: string; streaming: boolean; onOpen?: () => void; onProgressOwnership?: (owned:boolean)=>void }) {
-  const [snapshot,setSnapshot]=useState<ChatExecution|null>(null),[expanded,setExpanded]=useState(true);
+export default function ChatExecutionPanel({ sessionId, turnId, streaming, onProgressOwnership }: { sessionId: string; turnId: string; streaming: boolean; onOpen?: () => void; onProgressOwnership?: (owned:boolean)=>void }) {
+  const [snapshot,setSnapshot]=useState<ChatExecution|null>(null);
   const [readError,setReadError]=useState<{sessionId:string;turnId:string;message:string}|null>(null);
-  const [revision,setRevision]=useState(0),[loading,setLoading]=useState(false),[filter,setFilter]=useState('all');
-  useEffect(()=>{setExpanded(true);setFilter('all');},[sessionId,turnId]);
+  const [revision,setRevision]=useState(0),[loading,setLoading]=useState(false);
   useEffect(()=>{
     const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined,version=0;
     const update=(value:ChatExecution)=>setSnapshot(old=>old?.sessionId===sessionId&&old.turnId===turnId?{...old,...value,nextBefore:old.nextBefore===null?null:old.nextBefore===undefined?value.nextBefore:value.nextBefore===undefined?old.nextBefore:Math.min(old.nextBefore,value.nextBefore??0),operations:mergeOperations(old.operations,value.operations),timeline:mergeTimeline(old.timeline,value.timeline)}:value);
@@ -25,20 +24,15 @@ export default function ChatExecutionPanel({ sessionId, turnId, streaming, onOpe
   const note=[error,...(current?.warnings??[])].filter(Boolean).join(' ');
   const notice=note?<div className="chat-execution-note" role="status"><span>{note}</span> <button type="button" onClick={()=>setRevision(x=>x+1)}>重新读取</button></div>:null;
   const loadEarlier=async()=>{if(current?.nextBefore==null||loading)return;setLoading(true);try{const value=await fetchChatExecution(sessionId,turnId,undefined,current.nextBefore);setSnapshot(old=>old?.sessionId===sessionId&&old.turnId===turnId?{...old,nextBefore:value.nextBefore,operations:mergeOperations(value.operations,old.operations),timeline:mergeTimeline(old.timeline,value.timeline)}:old);}catch{setReadError({sessionId,turnId,message:'较早记录暂不可读，已有回执保留。'});}finally{setLoading(false);}};
-  if(!rows.length&&!current?.plan?.length&&!ownsProgress)return notice?<section className="chat-execution" aria-label="本轮执行记录提示">{notice}{onOpen&&<button type="button" onClick={onOpen}>运行记录 ↗</button>}</section>:null;
-  const files=new Set(rows.filter(row=>row.diff&&row.path).map(row=>row.path));
-  const filtered=filter==='all'?rows:rows.filter(row=>filter==='files'?row.kind==='file_change':filter==='commands'?row.kind==='command':row.kind==='browser'||row.kind==='search');
-  const visible=expanded?filtered:filtered.filter((row,index)=>index>=filtered.length-3||row.status==='running'||row.status==='failed');
-  const byId=new Map(visible.map(row=>[row.id,row]));
+  if(!rows.length&&!current?.plan?.length&&!ownsProgress)return notice?<section className="chat-execution" aria-label="本轮执行记录提示">{notice}</section>:null;
+  const byId=new Map(rows.map(row=>[row.id,row]));
   const linked=new Set(current?.timeline?.filter(entry=>entry.type==='operation').map(entry=>entry.operationId));
   const entries=current?.timeline?.filter(entry=>entry.type==='progress'||byId.has(entry.operationId||''))||[];
-  const unlinked=visible.filter(row=>!linked.has(row.id));
+  const unlinked=rows.filter(row=>!linked.has(row.id));
   return <section className="chat-execution" aria-label="本轮工具执行">
     {!current?.timeline?.length&&!!current?.progress?.length&&<details className="execution-progress"><summary>工作进度 · {current.progress.length} 条</summary><p className="execution-note">旧记录未保存进度与操作的共同顺序。</p>{current.progress.map((text,index)=><p key={index}>{text}</p>)}</details>}
     <div className="execution-timeline">{!!entries.length&&!!unlinked.length&&<p className="execution-note">以下旧操作未记录共同顺序，单独保留。</p>}{unlinked.map(row=><ExecutionOperation key={row.id} row={row} running={streaming}/>)}{entries.map(entry=>entry.type==='progress'?<p key={entry.id} className="execution-progress-text">{entry.text}</p>:<ExecutionOperation key={entry.id} row={byId.get(entry.operationId!)!} running={streaming}/>)}</div>
-    {!filtered.length&&filter!=='all'&&<p className="execution-note">本轮没有此类操作回执。</p>}
     {current?.plan&&current.plan.length>0&&<details className="execution-progress"><summary>任务计划 · {current.plan.length} 步</summary><ol className="execution-plan">{current.plan.map((step,i)=><li key={i}><span>{step.status==='completed'?'已完成':step.status==='inProgress'?'进行中':'待执行'}</span>{step.step}</li>)}</ol></details>}
-    <details className="execution-controls"><summary>执行详情 · {current?.total??rows.length} 项</summary><p className="execution-source">{current?.source==='gateway'||current?.source==='codex'?'引擎事件与实际回执':'会话回执 · 定期更新'}{!current?.timeline?.length?' · 旧记录无共同事件顺序':' · 按事件记录顺序'}{files.size>0&&` · ${files.size} 个文件有修改回执`}</p><div className="execution-filters" role="group" aria-label="筛选执行记录">{[['all','全部'],['commands','终端'],['files','文件'],['pages','网页']].map(([id,label])=><button type="button" key={id} aria-pressed={filter===id} onClick={()=>{setFilter(id);setExpanded(true);}}>{label}</button>)}</div>{filtered.length>3&&<button type="button" className="chat-execution-more" onClick={()=>setExpanded(x=>!x)}>{expanded?'只看最近 3 项':`查看全部 ${filtered.length} 项`}</button>}{onOpen&&<button type="button" onClick={onOpen}>运行记录 ↗</button>}</details>
     {current?.nextBefore!=null&&<button type="button" disabled={loading} className="chat-execution-more" onClick={()=>void loadEarlier()}>{loading?'正在读取…':'加载较早记录'}</button>}
     {notice}
   </section>;

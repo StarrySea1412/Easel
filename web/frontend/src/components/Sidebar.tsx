@@ -240,7 +240,7 @@ export default function Sidebar({
           </nav>
           <div className="sidebar-toolbar-bottom">
             <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击重试':'OpenClaw 网关正在连接'} title={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击立即重试':'OpenClaw 网关正在重连…'} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
-              <IconOpenClaw size={17}/><span className="status-dot" aria-hidden="true"/><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
+              <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {railItem('settings','设置',<IconGear size={19}/>)}

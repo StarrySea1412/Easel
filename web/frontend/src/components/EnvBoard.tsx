@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import type { EnvJob, EnvTool } from '../lib/api';
 import { IconInfo } from './icons';
 import { envJobActive, useEnvironmentJobs } from '../lib/useEnvironmentJobs';
+import { useDeploymentCapabilities } from '../lib/deploymentCapabilities';
 import '../styles/environment-install.css';
 import {
   IconHexagon, IconFilm, IconFileCode, IconAudioWaveform, IconDatabase,
@@ -107,18 +108,20 @@ function InstallMonitor({ jobs, disconnected, disabled, onRetry }: {
 
 /** Environment results, recipe explanations and reconnectable server jobs. */
 export default function EnvBoard({ tools, python, loading, error, onRefresh }: Props) {
+  const deployment = useDeploymentCapabilities();
   const controller = useEnvironmentJobs(onRefresh);
   const latestByTool = new Map<string, EnvJob>();
   controller.jobs.forEach(job => latestByTool.set(job.id, job));
   const jobs = [...latestByTool.values()];
   const anyRunning = controller.jobs.some(envJobActive);
-  const disabled = controller.submitting || !controller.loaded || !!controller.connectionError || !!controller.blockedReason;
+  const disabled = !deployment.environmentInstall || controller.submitting || !controller.loaded || !!controller.connectionError || !!controller.blockedReason;
   const total = tools.length;
   const okCount = tools.filter(tool => tool.state === 'ok').length;
   const installable = (tool: EnvTool) => tool.state !== 'no_dir' && !tool.needsDir;
   const pendingIds = (list: EnvTool[]) => list.filter(tool => tool.state !== 'ok' && installable(tool) && !tool.big).map(tool => tool.id);
 
   const installTool = (tool: EnvTool) => {
+    if (!deployment.environmentInstall) return;
     const previous = latestByTool.get(tool.id);
     if (previous?.state === 'fail') void controller.retry(previous.jobId);
     else void controller.install([tool.id]);
@@ -132,8 +135,8 @@ export default function EnvBoard({ tools, python, loading, error, onRefresh }: P
         <button className="btn btn-sm btn-primary" onClick={() => void controller.install(pendingIds(tools))}
           disabled={disabled || loading || anyRunning || !pendingIds(tools).length}>安装缺少项</button>
       </div>
-      <p className="env-intro">按要使用的功能补齐环境，标记为可选的库可以暂不安装。批量安装不包含大型转写模型。</p>
-      <details className="env-runtime">
+      <p className="env-intro">{deployment.mode === 'server' ? '服务器环境由管理员维护。' : deployment.mode === 'unknown' ? '正在确认运行环境，安装暂不可用。' : '按要使用的功能补齐环境，标记为可选的库可以暂不安装。批量安装不包含大型转写模型。'}</p>
+      {deployment.mode === 'local' && <details className="env-runtime">
         <summary>安装到哪里 · 重试与超时规则</summary>
         <dl>
           <dt>目标 Python</dt><dd>{python || '等待环境检测…'}</dd>
@@ -141,7 +144,7 @@ export default function EnvBoard({ tools, python, loading, error, onRefresh }: P
           <dt>重试规则</dt><dd>每次点击只运行一轮受控步骤。pip 默认源失败后可尝试镜像，每个源的网络重试最多 2 次、网络超时 30 秒；其他备用步骤和超时以任务记录为准。不会自动重新提交整轮安装，手动重试会记为新一轮。</dd>
           <dt>任务恢复</dt><dd>关闭或切换页面不会取消后台队列；返回后自动读取。网络恢复会继续取进度。服务重启后需重新检测环境，历史记录仅保留在当前服务。</dd>
         </dl>
-      </details>
+      </details>}
       {error && <div className="env-error" role="alert">{error}</div>}
       {controller.connectionError && <div className="env-connection" role="status">
         <strong>正在恢复进度连接</strong>
@@ -195,7 +198,7 @@ export default function EnvBoard({ tools, python, loading, error, onRefresh }: P
           </div>
         </div>;
       })}
-      <p className="foot-note">安装与检测均使用本机真实结果；不会自动登录、调用收费模型或向平台发布内容。</p>
+      <p className="foot-note">环境状态来自当前运行服务；不会自动登录、调用收费模型或向平台发布内容。</p>
     </section>
   );
 }

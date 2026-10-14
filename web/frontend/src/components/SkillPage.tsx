@@ -5,6 +5,7 @@ import type { SkillItem } from '../lib/api';
 import SkillDrawer from './SkillDrawer';
 import SkillDependencyBadges from './SkillDependencyBadges';
 import { displayName } from '../lib/skillDisplayNames';
+import { showToast } from '../lib/toast';
 import { Sk } from './Skeleton';
 import {
   IconSearch, IconCompass, IconSkills, IconSend, IconChart, IconLayers,
@@ -13,6 +14,7 @@ import {
 
 interface SkillPageProps {
   onOpenChat: (skill: string, input: string) => boolean;
+  initialSkill?: string;
 }
 
 type IconC = ComponentType<{ size?: number }>;
@@ -55,16 +57,22 @@ const LAYER_DESC: Record<string, string> = {
   publish: '发布层技能', attribute: '归因层技能', general: '通用技能', other: '技能',
 };
 
-export default function SkillPage({ onOpenChat }: SkillPageProps) {
+export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) {
   const [skills, setSkills] = useState<SkillItem[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = () => {
-    fetchSkills().then(setSkills).catch(() => { setSkills([]); setError('加载 SKILL 列表失败'); });
+    setError('');
+    return fetchSkills().then(value => { if (!Array.isArray(value)) throw new Error('技能目录格式无效'); setSkills(value); }).catch(reason => {
+      setSkills([]);
+      const message = '技能库加载失败：' + (reason instanceof Error ? reason.message : '请重试');
+      setError(message); showToast(message, 'error');
+    });
   };
-  useEffect(load, []);
+  useEffect(() => { void load(); }, []);
+  useEffect(() => { if (initialSkill) setSelected(initialSkill); }, [initialSkill]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -106,7 +114,7 @@ export default function SkillPage({ onOpenChat }: SkillPageProps) {
         </div>
       </div>
 
-      {error && <div style={{ color: 'var(--red)', maxWidth: 1100, margin: '16px auto' }}>{error}</div>}
+      {error && <div role="alert" style={{ color: 'var(--red)', maxWidth: 1100, margin: '16px auto' }}>{error}<button type="button" className="btn btn-sm" onClick={() => void load()}>重新读取</button></div>}
 
       <div className="skills-body">
         {skills === null && !error && (

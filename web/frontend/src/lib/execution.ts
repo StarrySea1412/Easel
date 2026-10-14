@@ -44,10 +44,16 @@ export function mergeTimeline(previous:ExecutionEntry[]|undefined,incoming:Execu
 const kinds:Record<string,string>={command:'终端',read:'读取',file_change:'文件',search:'搜索',browser:'浏览器',tool:'工具'};
 export function operationKind(row:Operation){return kinds[row.kind||'tool']||'工具';}
 export function operationTitle(row:Operation){
-  if(row.kind==='file_change')return `${({add:'新增',delete:'删除',modify:'修改',write:'写入',update:'修改'} as Record<string,string>)[row.changeKind||'']||'文件变化'} · ${row.path.split(/[\\/]/).pop()||row.name}`;
-  if(row.kind==='read')return row.path.split(/[\\/]/).pop()||row.name;
-  if(row.kind==='search')return row.query||row.url||row.name;
-  if(row.kind==='browser')return `${row.action||'页面操作'}${row.url?' · '+row.url:''}`;
-  if(row.kind==='command')return `${row.name==='process'?'读取进程状态':'运行命令'} · ${row.command.trim().split(/\s+/)[0]||row.name}`;
-  return row.name;
+  const filename=row.path.split(/[\\/]/).pop();
+  if(row.kind==='file_change')return `${({add:'新增文件',delete:'删除文件',modify:'修改文件',write:'写入文件',update:'修改文件'} as Record<string,string>)[row.changeKind||'']||'修改文件'}${filename?' · '+filename:''}`;
+  if(row.kind==='read')return `${filename==='SKILL.md'?'读取技能指南':/imageView|view_image/.test(row.name)?'查看图片':'读取文件'}${filename?' · '+filename:''}`;
+  if(row.kind==='search')return `${row.name==='web_fetch'?'读取网页':/grep|glob/.test(row.name)?'搜索文件':'搜索内容'}${row.query||row.url?' · '+(row.query||row.url):''}`;
+  if(row.kind==='browser'){
+    const action=({navigate:'打开网页',open:'打开网页',browser_navigate:'打开网页',click:'点击页面元素',browser_click:'点击页面元素',snapshot:'读取页面',browser_snapshot:'读取页面',screenshot:'截取页面',browser_screenshot:'截取页面',type:'填写页面',fill:'填写页面',scroll:'滚动页面'} as Record<string,string>)[row.action||row.name]||'浏览网页';
+    return `${action}${row.url?' · '+row.url:''}`;
+  }
+  if(row.kind==='command')return `${row.name==='process'?'读取进程状态':'执行命令'}${row.command.trim()?' · '+row.command.trim().split(/\s+/)[0]:''}`;
+  if(row.path)return `访问文件 · ${filename}`;
+  if(row.command)return `执行命令 · ${row.command.trim().split(/\s+/)[0]}`;
+  return ['tool_call','tool','mcpToolCall','dynamicToolCall'].includes(row.name)?'调用工具 · 操作详情未记录':`调用工具 · ${row.name}`;
 }

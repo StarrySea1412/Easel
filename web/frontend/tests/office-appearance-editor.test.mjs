@@ -61,6 +61,10 @@ async function fixture(t, overrides = {}) {
   let props = { sessions: [{ id: 'one', title: '测试会话', messages: [] }], activeSessionId: 'one', streams: {}, onOpenChat() {}, onOpenSettings() { harness.settings++; }, ...overrides };
   const render = async (patch = {}) => { props = { ...props, ...patch }; await act(async () => root.render(createElement(Page, props))); };
   await render();
+  // Editing tests explicitly open the optional office view before exercising
+  // renderer inputs. Entry remains collapsed and does not mount the scene.
+  assert.equal(harness.scene, null);
+  await act(async () => container.querySelector('.office-scene-toggle').click());
   t.after(async () => { await act(async () => root.unmount()); container.remove(); storage.fail = false; });
   return { container, harness, render,
     dialog: () => document.querySelector('[role="dialog"]'),

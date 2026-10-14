@@ -4,6 +4,14 @@
   container:office-page / inline-size;
 }
 .office-workspace { max-width:1760px;margin:0 auto;padding:22px 26px 18px; }
+.office-scene-section { border:1px solid var(--border); border-radius:12px; margin-top:18px; padding:0 14px; }
+.office-scene-toggle { display:flex; width:100%; align-items:center; gap:10px; padding:15px 0; border:0; background:transparent; color:var(--text); font:inherit; cursor:pointer; text-align:left; }
+.office-scene-toggle strong { font-size:14px; font-weight:600; }
+.office-scene-toggle > span { color:var(--text-secondary); font-size:12px; }
+.office-scene-toggle > span:last-child { margin-left:auto; }
+.office-scene-section .office-layout { margin-bottom:14px; }
+.office-call-history > summary,.office-model-options > summary { cursor:pointer; font-size:13px; color:var(--text-secondary); padding:10px 0; }
+.office-call-history[open] > summary { margin-bottom:8px; }
 .office-page-heading { display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px; }
 .office-heading-copy,.office-heading-tools { min-width:0; }
 .office-page-heading h1 { display:flex;align-items:center;gap:12px;margin:0;font-size:26px;font-weight:600;letter-spacing:-.035em;line-height:1.35; }

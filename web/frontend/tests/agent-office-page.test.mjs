@@ -21,7 +21,7 @@ const moduleUrl = (code) => `data:text/javascript;base64,${Buffer.from(code).toS
 const raw = fs.readFileSync(new URL('../src/components/AgentOfficePage.tsx', import.meta.url), 'utf8');
 let sequence = 0;
 
-async function fixture(t, overrides = {}, snapshots = {}) {
+async function fixture(t, overrides = {}, snapshots = {}, expandScene = true) {
   const harness = {
     snapshots, hookCalls: [], outputModes: [], leases: 0, releases: 0, refreshes: 0,
     scene: null, sceneHistory: [], sceneMounts: 0, sceneUnmounts: 0, frames: new Map(), nextFrame: 0,
@@ -84,6 +84,9 @@ async function fixture(t, overrides = {}, snapshots = {}) {
   const unmount = async () => { if (mounted) { await act(async () => root.unmount()); mounted = false; } };
   t.after(async () => { await unmount(); container.remove(); });
   await render();
+  // Existing scene/roster interaction cases deliberately opt into the optional
+  // view. Default-page coverage below verifies that it stays closed on entry.
+  if (expandScene) await act(async () => container.querySelector('.office-scene-toggle').click());
   return {
     harness, container, render, unmount,
     button: (text) => [...container.querySelectorAll('button')].find((button) => button.textContent.replace(/[▶Ⅱ↺⌖↗]/g, '').trim() === text),
@@ -102,6 +105,23 @@ async function fixture(t, overrides = {}, snapshots = {}) {
 function session(id, extra = {}) { return { id, title: `会话 ${id}`, created: 1, messages: [], ...extra }; }
 function snapshot(agents, extra = {}) { return { agents, loading: false, error: null, observedAt: '2026-09-30T08:00:00Z', coverage: '来自本轮结构化执行记录，未上报角色不补全', ...extra }; }
 function agent(id, extra = {}) { return { id, name: `Agent ${id}`, role: '协作角色', task: `正在处理任务 ${id}`, state: 'working', source: 'live', ...extra }; }
+
+test('entry shows task details before the optional scene without mounting WebGL', async t => {
+  const view = await fixture(t, {}, {}, false);
+  const toggle = view.container.querySelector('.office-scene-toggle');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(view.harness.sceneMounts, 0);
+  assert.ok(view.container.querySelector('.office-detail-workspace'));
+  assert.equal(view.container.querySelector('.office-call-history').open, false);
+  await view.click(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(view.harness.sceneMounts, 1);
+  assert.equal(view.container.querySelector('.office-members-browser').hidden, true);
+  await view.click(toggle);
+  assert.equal(view.harness.sceneUnmounts, 1);
+  assert.ok(view.container.querySelector('.office-detail-workspace'));
+  assert.deepEqual(view.harness.fetches, []);
+});
 
 test('a run-record link enters live mode for the exact session and preserves its turn when opening records', async t => {
   const opened = [];
@@ -135,7 +155,7 @@ test('disabled demos use only live data and output mode from the first render wh
   assert.ok(view.button('角色与工位样板'));
   assert.ok(view.button('模型厂商 3D 形象审核'));
   assert.doesNotMatch(view.container.textContent, /不得显示的模拟/);
-  await view.click(view.container.querySelector('.office-status-button'));
+  await view.click(view.button('查看工作过程'));
   const dialog = document.querySelector('[role="dialog"]');
   assert.match(dialog.textContent, /真实读取材料/);
   assert.doesNotMatch(dialog.textContent, /不得显示的模拟/);
@@ -163,7 +183,7 @@ test('disabling a paused demo closes its process and clears selection and focus 
   const view = await fixture(t);
   await view.click([...view.container.querySelectorAll('.office-member-list button')].find(button => button.textContent.includes('Quill')));
   await view.click(view.button('并行协作'));
-  await view.click(view.container.querySelector('.office-status-button'));
+  await view.click(view.button('查看工作过程'));
   assert.ok(document.querySelector('[role="dialog"]'));
   assert.equal(view.harness.scene.selectedId, 'writer');
   assert.equal(view.harness.scene.focusId, 'writer');
@@ -184,7 +204,7 @@ test('changing demo availability preserves an existing live selection, focus, pa
   await view.click(view.button('实时观测'));
   await view.click(view.container.querySelectorAll('.office-member-list button')[1]);
   await view.click(view.button('暂停动画'));
-  await view.click(view.container.querySelector('.office-status-button'));
+  await view.click(view.button('查看工作过程'));
   const dialog = document.querySelector('[role="dialog"]');
   await view.render({ demoEnabled: false });
   await view.render({ demoEnabled: true });
@@ -216,7 +236,7 @@ test('status opens exact employee process and changing the observed session clos
   view.harness.snapshots.one = snapshot([agent('root:one')], {turnId:'turn-one',events:[]});
   view.harness.snapshots.two = snapshot([agent('root:two')], {turnId:'turn-two',events:[]});
   await view.click(view.button('实时观测'));
-  await view.click(view.container.querySelector('.office-status-button'));
+  await view.click(view.button('查看工作过程'));
   assert.match(document.querySelector('[role="dialog"]').textContent,/turn-one/);
   assert.doesNotMatch(document.querySelector('[role="dialog"]').textContent,/turn-two/);
   await view.select('two');
@@ -546,7 +566,7 @@ test('demo stage navigation synchronizes task, events and scene time without los
   assert.equal(view.harness.scene.demoSeek.seconds, 0);
   assert.ok(view.harness.scene.demoSeek.revision > revision);
   assert.doesNotMatch(view.container.querySelector('.office-event-list').textContent, /演示 00:(1[89]|[234]\d)/);
-  assert.doesNotMatch(view.container.querySelector('.office-feedback').textContent, /已完成/);
+  assert.doesNotMatch(view.container.querySelector('.office-feedback')?.textContent || '', /已完成/);
   await view.input(range, '28.5');
   assert.equal(view.harness.scene.demoSeek.seconds, 28.5);
   assert.equal(view.harness.scene.paused, true);
@@ -579,7 +599,7 @@ test('demo time is resynchronized after team and mode changes without leaking se
 });
 
 test('task focus selects the same observed member for the scene, process and control target, and focuses the output region', async t => {
-  const view = await fixture(t, { demoEnabled: false }, { one: snapshot([agent('first'), agent('second')], {
+  const view = await fixture(t, { demoEnabled: false }, { one: snapshot([agent('first'), agent('second')], { turnId:'turn-one',
     events: [{ id: 'second-result', agentId: 'second', source: 'live', kind: 'result', status: 'returned', title: '已上报的第二位成员回执' }],
   }) });
   await view.input(view.container.querySelector('.office-task-focus [role="combobox"]'), 'second');

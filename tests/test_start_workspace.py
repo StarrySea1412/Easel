@@ -148,3 +148,104 @@ def test_restart_never_swallows_record_or_stop_errors(tmp_path, monkeypatch, bro
     monkeypatch.setattr(launcher.subprocess, 'run', lambda *_a, **_k: pytest.fail('must not start Gateway after restart failed'))
     with pytest.raises((RuntimeError, OSError)):
         launcher.main(['--root', str(root), '--data-dir', str(data), '--restart', '--no-browser'])
+
+
+@pytest.fixture
+def fresh_start(tmp_path, monkeypatch):
+    root = tmp_path / 'source'
+    (root / 'web/frontend/dist').mkdir(parents=True)
+    (root / 'web/frontend/dist/index.html').write_bytes(b'app')
+    data = tmp_path / 'data'
+    data.mkdir()
+    process = SimpleNamespace(pid=321)
+    calls = []
+    monkeypatch.setattr(launcher, 'free_port', lambda _: 7889)
+    monkeypatch.setattr(launcher, 'wait_for_web', lambda *_a, **_k: True)
+    monkeypatch.setattr(launcher, 'listener_info', lambda _: {
+        'pid': 321, 'parentId': 20, 'commandLine': f'python "{root / "web/app.py"}"'})
+    def popen(command, **kwargs):
+        calls.append(('web', command, kwargs))
+        return process
+    monkeypatch.setattr(launcher.subprocess, 'Popen', popen)
+    return root, data, calls
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'oserror', 'unapproved'])
+def test_auxiliary_device_failure_does_not_block_source_web(fresh_start, monkeypatch, capsys, failure):
+    root, data, calls = fresh_start
+    def run(command, **kwargs):
+        calls.append(('run', command, kwargs))
+        if command[-1] == 'start':
+            return SimpleNamespace(returncode=0)
+        assert command[-1] == str(root / 'scripts/initialize_gateway_device.py')
+        assert kwargs['timeout'] == 20
+        if failure == 'timeout':
+            raise subprocess.TimeoutExpired(['private-command-secret'], 20)
+        if failure == 'oserror':
+            raise OSError('private-path-secret')
+        return SimpleNamespace(returncode=1)
+    monkeypatch.setattr(launcher.subprocess, 'run', run)
+    assert launcher.main(['--root', str(root), '--data-dir', str(data), '--no-browser']) == 0
+    assert [kind for kind, *_ in calls] == ['run', 'run', 'web']
+    assert json.loads((data / 'workbench.json').read_text())['port'] == 7889
+    captured = capsys.readouterr()
+    log = (data / 'logs/launch.log').read_text(encoding='utf-8')
+    assert '继续启动工作台' in captured.err and '继续启动工作台' in log
+    assert 'private-' not in captured.err + log
+
+
+def test_real_gateway_failure_still_blocks_source_web(fresh_start, monkeypatch):
+    root, data, calls = fresh_start
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda *_a, **_k: SimpleNamespace(returncode=1))
+    with pytest.raises(RuntimeError, match='Gateway startup failed'):
+        launcher.main(['--root', str(root), '--data-dir', str(data), '--no-browser'])
+    assert calls == []
+    assert not (data / 'workbench.json').exists()
+
+
+@pytest.mark.parametrize('saved_port,expected_port', [(38100, '38100'), ('38100', '38100'),
+    ('127.0.0.1:38101', '38101'), ('[::1]:38102', '38102'), (None, None)])
+def test_source_gateway_uses_only_local_runtime_endpoint(fresh_start, monkeypatch, saved_port, expected_port):
+    root, data, calls = fresh_start
+    selected_state = data / 'custom-state'
+    selected_state.mkdir()
+    (selected_state / 'openclaw.json').write_text(json.dumps({'gateway': {'port': 38103}}))
+    settings = {'stateDir': str(selected_state)}
+    if saved_port is not None:
+        settings['gatewayPort'] = saved_port
+    (data / 'runtime-launch.json').write_text(json.dumps(settings))
+    for name, value in {
+        'EASEL_GATEWAY_HOST': 'other-host.invalid', 'OPENCLAW_GATEWAY_PORT': '44444',
+        'EASEL_GATEWAY_PORT': '44445', 'OPENCLAW_GATEWAY_TOKEN': 'other-token',
+        'OPENCLAW_GATEWAY_PASSWORD': 'other-password', 'OPENCLAW_CONFIG_PATH': 'other-config',
+        'OPENCLAW_STATE_DIR': 'other-state', 'EASEL_OPENCLAW_STATE_DIR': 'other-easel-state',
+    }.items():
+        monkeypatch.setenv(name, value)
+    def run(command, **kwargs):
+        calls.append(('run', command, kwargs))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(launcher.subprocess, 'run', run)
+    assert launcher.main(['--root', str(root), '--data-dir', str(data), '--no-browser']) == 0
+    assert [kind for kind, *_ in calls] == ['run', 'run', 'web']
+    for _, _, kwargs in calls:
+        env = kwargs['env']
+        assert env['EASEL_GATEWAY_HOST'] == '127.0.0.1'
+        assert env['OPENCLAW_STATE_DIR'] == env['EASEL_OPENCLAW_STATE_DIR'] == str(selected_state)
+        assert env['OPENCLAW_CONFIG_PATH'] == str(selected_state / 'openclaw.json')
+        assert 'OPENCLAW_GATEWAY_TOKEN' not in env and 'OPENCLAW_GATEWAY_PASSWORD' not in env
+        for key in ('OPENCLAW_GATEWAY_PORT', 'EASEL_GATEWAY_PORT'):
+            if expected_port:
+                assert env[key] == expected_port
+            else:
+                assert key not in env  # Both gateway and helper read this copy's config.
+    assert json.loads((selected_state / 'openclaw.json').read_text())['gateway']['port'] == 38103
+
+
+@pytest.mark.parametrize('invalid', [0, -1, 65536, True, '', 'broken', 1.5])
+def test_invalid_runtime_gateway_port_blocks_without_starting_services(fresh_start, monkeypatch, invalid):
+    root, data, calls = fresh_start
+    (data / 'runtime-launch.json').write_text(json.dumps({'gatewayPort': invalid}))
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda *_a, **_k: pytest.fail('invalid port must not start Gateway'))
+    with pytest.raises(ValueError, match='保存的网关端口无效'):
+        launcher.main(['--root', str(root), '--data-dir', str(data), '--no-browser'])
+    assert calls == []

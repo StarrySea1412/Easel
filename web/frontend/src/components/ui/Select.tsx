@@ -22,10 +22,11 @@ export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-l
   required?: boolean;
   className?: string;
   title?: string;
+  triggerIcon?: ReactNode;
 }
 
 /** Single-choice combobox. Focus stays on the trigger while navigating its listbox. */
-export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, ...aria }: SelectProps) {
+export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, triggerIcon, ...aria }: SelectProps) {
   const generatedId = useId();
   const triggerId = id || `select-${generatedId}`;
   const listId = `${triggerId}-options`;
@@ -177,7 +178,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       aria-required={required || undefined} disabled={disabled} {...aria}
       onClick={() => expanded ? setOpen(false) : show()} onKeyDown={onKeyDown}
       onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
-      <span className="easel-select-icon" aria-hidden="true">{selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
+      <span className="easel-select-icon" aria-hidden="true">{triggerIcon ?? selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
       <svg className="easel-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
     </button>
     {name && <input type="hidden" name={name} value={value} disabled={disabled} />}

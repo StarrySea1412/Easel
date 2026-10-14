@@ -48,6 +48,7 @@ from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
 from easel.version import runtime_version
+from easel.collection_errors import collection_failure
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
@@ -5563,7 +5564,7 @@ async def api_analytics(platform: str):
         ana_env["EASEL_ANALYTICS_MANAGED"] = "1"
     try:
         proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=ana_env,
-                                       capture_output=True, text=True, timeout=180)
+                                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "抓取超时（浏览器起不来或网络慢）")
     data = None
@@ -5648,8 +5649,8 @@ async def api_analytics(platform: str):
             # 这些旧快照仅按平台存储，无法核验是否同一账号；不能输出本人增长结论。
             data['growth'] = {window: None for window in ('last', 'day', 'week', 'month', 'year')}
         return data
-    detail = (proc.stderr or "").strip().splitlines()[-1:] or ["未取到数据"]
-    raise HTTPException(502, f"未取到数据（可能未登录或平台改版）：{detail[0][:120]}")
+    code, message = collection_failure(proc.stderr or '')
+    raise HTTPException(code, message)
 
 
 from content_analysis_routes import create_router as _content_analysis_router

@@ -125,7 +125,7 @@ test('App retains one global publish monitor on dashboard, settings and publish 
   await act(async () => harness.sidebar.onPageChange('settings'));
   assert.equal(harness.receiptCenter.model.open, open);
   assert.equal(harness.receiptCenter.model.isOpen, true);
-  assert.equal(harness.pages['设置'].initialSection, 'general');
+  assert.equal(harness.pages['设置'].initialSection, 'model');
   await act(async () => harness.receiptCenter.onConfigure());
   assert.equal(harness.pages['设置'].initialSection, 'notify');
   const navigationKey = harness.pages['设置'].navigationKey;
@@ -544,7 +544,7 @@ test('App shares the saved demo preference across settings, analysis and office 
   await navigate('agent-office');
   assert.equal(view.harness.pages['Agent 办公室'].demoEnabled, false);
   await navigate('settings');
-  assert.equal(view.harness.pages['设置'].initialSection, 'general');
+  assert.equal(view.harness.pages['设置'].initialSection, 'model');
   assert.equal(view.harness.pages['设置'].demoDataPreference.enabled, false);
   await act(async () => view.harness.pages['设置'].demoDataPreference.onChange(true));
   assert.equal(JSON.parse(view.values.get(key)).enabled, true);
@@ -558,7 +558,7 @@ test('App shares the saved demo preference across settings, analysis and office 
   await act(async () => view.harness.pages['Agent 办公室'].onOpenModels());
   assert.equal(view.harness.pages['设置'].initialSection, 'model', 'explicit model links keep their destination');
   await navigate('settings');
-  assert.equal(view.harness.pages['设置'].initialSection, 'general');
+  assert.equal(view.harness.pages['设置'].initialSection, 'model');
   assert.equal(view.harness.pages['设置'].demoDataPreference.enabled, false);
   assert.deepEqual(JSON.parse(view.values.get('easel_sessions')), [sourceSession]);
   assert.equal(view.harness.streams.length, 0);

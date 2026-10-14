@@ -70,6 +70,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
   // transition cleanup runs. Disabling examples must never paint a demo frame.
   const mode = demoEnabled ? chosenMode : 'live';
   const leavingDemo = chosenMode === 'demo' && mode === 'live';
+  const [sceneExpanded, setSceneExpanded] = useState(false);
   const [showStudy, setShowStudy] = useState(false);
   const [showProviders, setShowProviders] = useState(false);
   const [sessionChoice, setSessionChoice] = useState<string | null>(initialSessionId ?? (sessions.some(item => item.id === activeSessionId && !item.importedFromBackup) ? activeSessionId : null));
@@ -162,6 +163,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
     setSelectedId(id);
     if (focusId || locate) setFocusId(id);
     if (locate) {
+      setSceneExpanded(true);
       pendingSceneLocation.current = true;
       if (compactLayout) setRosterPreference(false);
       setSceneNavigation(value => value + 1);
@@ -231,7 +233,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
       const stageTop = previewElement.current.parentElement?.getBoundingClientRect().top ?? sceneRect.top;
       page.scrollTop = Math.max(0, page.scrollTop + stageTop - pageRect.top - 12);
     }
-  }, [sceneNavigation, rosterExpanded]);
+  }, [sceneNavigation, rosterExpanded, sceneExpanded]);
 
   useLayoutEffect(() => {
     const requested = pendingPanelFocus.current;
@@ -408,14 +410,81 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
 
         {mode === 'live' && live.identityScanLimited && <p className="office-coverage-note" role="status">记录扫描达到范围限制：这里的 {agents.length} 人是本次已观测名单，实际参与人数可能更多。</p>}
 
-        <div className="office-feedback" role="status" aria-live="polite" aria-atomic="true">{feedback?.scope === scope ? `${mode === 'demo' ? '演示反馈' : '最新记录'} · ${feedback.message}` : '选择成员可定位工位；点击状态查看工作过程。'}</div>
+        {feedback?.scope === scope && <div className="office-feedback" role="status" aria-live="polite" aria-atomic="true">{mode === 'demo' ? '演示反馈' : '最新记录'} · {feedback.message}</div>}
 
         {mode === 'live' && live.error && <div className="office-observation-error" role="alert">
           <div><strong>更新已中断{agents.length ? '，保留上次快照' : ''}</strong><p>{live.error}{agents.length ? '；下方状态并非当前实时执行状态。' : '；未填入模拟角色。'}</p></div>
           <button type="button" className="office-button" disabled={!sessionId || live.loading} onClick={live.refresh}>重新获取</button>
         </div>}
 
-        <div className="office-layout">
+        <section className="office-detail-workspace" ref={detailElement} aria-label="工作室详细信息">
+          <div className="office-detail-tabs" role="tablist" aria-label="工作室详情" onKeyDown={handlePanelKeys}>
+            {panels.map(item => <button key={item.id} type="button" role="tab" id={`${panelId}-tab-${item.id}`} aria-controls={`${panelId}-panel-${item.id}`} aria-selected={panel === item.id} tabIndex={panel === item.id ? 0 : -1} onClick={() => setPanelChoice(item.id)}>{item.label}</button>)}
+          </div>
+          <div className="office-detail-panel" id={`${panelId}-panel-details`} role="tabpanel" aria-labelledby={`${panelId}-tab-details`} hidden={panel !== 'details'} tabIndex={-1} ref={element => { panelElements.current.details = element; }}>
+            <OfficeTaskFocus agents={agents} events={allEvents} selectedId={selected?.id ?? null} mode={mode} stale={stale}
+              displayName={displayName} onSelect={selectAgent} onOpenProcess={openProcess} onOpenOutputs={() => openPanel('outputs')}
+              memberSummary={selected ? <section className="office-agent-detail" aria-label="选中成员当前任务">
+              <div className="office-selected-person"><div className="office-mini-person" aria-hidden="true"><i style={{ background: selected.appearance?.skinColor }} /><span style={{ background: selected.appearance?.shirtColor }} /></div><div><h3>{displayName(selected) || '未命名 Agent'}</h3></div><StateBadge state={selected.state} stale={stale} /></div>
+              {selected.action?.evidence !== 'unreported' && selected.action?.label && <p className="office-action-summary" aria-live="polite">{stale ? '上次记录：' : ''}{selected.action.label}<small>{selected.action.evidence === 'demo' ? '模拟动作' : stale ? '依据上次快照' : '依据后台记录'}</small></p>}
+              {selected.task && <div className="office-current-task"><span>{stale ? '快照中的任务' : '当前任务'}</span><p>{selected.task}</p></div>}
+              <details className="office-member-appearance"><summary>身份与角色外观</summary>
+              <dl className="office-agent-meta"><div><dt>角色</dt><dd>{selected.role || '未提供'}</dd></div><div><dt>协作上级</dt><dd>{parent?.name || (selected.parentId ? '未包含在当前记录中' : '未提供')}</dd></div><div><dt>记录来源</dt><dd>{selected.source === 'demo' ? '模拟任务脚本' : '后台观察记录'}</dd></div></dl>
+              <div className="office-appearance-binding"><label>员工角色卡<Select value={selected.appearance?.id || 'generic'} onChange={event => {
+                try { const saved = assignEmployeeAppearance(selected.id, event.target.value as EmployeeAppearanceId); setBindingNotice(saved ? '员工角色卡已保存。' : '已在当前窗口应用，但尚未保存到本地。'); }
+                catch (error) { setBindingNotice(error instanceof Error ? error.message : '员工绑定未保存。'); }
+              }}>{appearances.map(card => <option value={card.id} key={card.id}>{card.name} · {card.role}</option>)}</Select></label>
+                <button type="button" className="office-button" onClick={() => {
+                  if (!selected.appearance) return;
+                  scrollBeforeEdit.current = pageElement.current?.scrollTop ?? null;
+                  setProcessTarget(null);
+                  setBindingNotice('');
+                  const original = appearances.find(card => card.id === selected.appearance?.id) || selected.appearance;
+                  setAppearanceEdit({ agentId: selected.id, agentName: selected.name, live: selected.source === 'live', original: { ...original }, draft: { ...original } });
+                }}>编辑角色卡</button>
+                <small>角色卡修改外观与显示名；真实 Agent 身份：{selected.name}（{selected.id}）</small>
+                {bindingNotice && <p role="status">{bindingNotice}</p>}
+              </div>
+              </details>
+            </section> : <div className="office-no-selection"><span aria-hidden="true">○</span><p>等待可观察的成员</p><small>任务与状态将在这里显示。</small></div>}>
+              {selected && <>{mode === 'live' && sessionId && live.turnId && <OfficeAgentControls agent={selected} sessionId={sessionId} turnId={live.turnId} observationKey={live.observedAt} stale={stale} onChanged={live.refresh} onOpenModelSettings={onOpenModels} />}{(selected.task || selected.action?.evidence === 'observed' || selected.action?.evidence === 'demo') && <details className="office-work-preview-details"><summary>工作预览</summary><OfficeWorkPreview agent={selected} stale={stale} observedAt={live.observedAt} onOpen={() => openProcess(selected.id)} /></details>}</>}
+            </OfficeTaskFocus>
+            <details className="office-call-history" aria-label="Agent 调用记录"><summary>调用记录 · {events.length} 条{mode === 'demo' ? ' · 模拟' : ''}</summary>
+              <div className="office-calls-heading"><h3>调用记录 <small>{mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观察'}</small></h3>
+                <div role="group" aria-label="调用记录范围"><button type="button" aria-pressed={eventFilter === 'selected'} onClick={() => setEventFilter('selected')}>当前 Agent</button><button type="button" aria-pressed={eventFilter === 'all'} onClick={() => setEventFilter('all')}>全部</button></div>
+              </div>
+              <ol className="office-event-list">{events.map(event => <li key={event.id} className={`office-event-${event.status}`}>
+                <div><span>{agents.find(agent => agent.id === event.agentId)?.name}</span><time>{event.source === 'demo' ? `演示 ${clock(event.elapsedSeconds || 0)}` : event.at ? snapshotTime(event.at) : '时间未上报'}</time></div>
+                <p>{event.title}</p><small>{{ called: '已调用', returned: '已返回', failed: '返回错误', observed: '已观察' }[event.status]}</small>
+              </li>)}</ol>
+              {!events.length && <p className="office-no-events">{mode === 'demo' ? '该角色的模拟调用尚未开始。' : '尚未观察到该 Agent 的调用记录。子 Agent 内部工具记录暂不可见。'}</p>}
+              <p className="office-calls-note">{mode === 'demo' ? '调用与时间均为演示脚本。' : '仅列出有记录的调用与回执；已返回不代表执行成功。'}</p>
+            </details>
+          </div>
+          <div className="office-detail-panel" id={`${panelId}-panel-workflow`} role="tabpanel" aria-labelledby={`${panelId}-tab-workflow`} hidden={panel !== 'workflow'} tabIndex={-1} ref={element => { panelElements.current.workflow = element; }}>
+          <OfficeWorkflowPanel key={scope} agents={agents} events={allEvents} mode={mode} elapsed={elapsed} selectedId={selected?.id ?? null} stale={stale} onSelect={id => selectAgent(id, true)} onOpenProcess={openProcess} displayName={displayName} />
+          </div>
+          <div className="office-detail-panel" id={`${panelId}-panel-outputs`} role="tabpanel" aria-labelledby={`${panelId}-tab-outputs`} hidden={panel !== 'outputs'} tabIndex={-1} ref={element => { panelElements.current.outputs = element; }}>
+            <div className="office-output-anchor" ref={outputElement} tabIndex={-1} role="region" aria-label="工作区产出与文件位置"><OfficeOutputMonitor mode={mode} onOpenOutputs={onOpenOutputs} /></div>
+          </div>
+          {mode === 'live' && onStartTask && <div className="office-detail-panel" id={`${panelId}-panel-compose`} role="tabpanel" aria-labelledby={`${panelId}-tab-compose`} hidden={panel !== 'compose'} tabIndex={-1} ref={element => { panelElements.current.compose = element; }}>
+        {mode === 'live' && onStartTask && <OfficeTaskComposer session={availableSessions.find(session => session.id === sessionId) ?? null}
+          stream={sessionId ? streams[sessionId] : undefined} stopping={sessionId ? stoppingSessions?.[sessionId] : false} stopError={sessionId ? stopErrors?.[sessionId] : undefined}
+          onSubmit={request => {
+            const startedSessionId = onStartTask(request);
+            if (!startedSessionId) return false;
+            setSessionChoice(startedSessionId);
+            setSelectedId(null);setFocusId(null);setMemberQuery('');setProcessTarget(null);
+            return true;
+          }} onStop={onStopTask} onOpenModels={onOpenModels} onOpenChat={onOpenChat} />}
+
+          </div>}
+        </section>
+        <section className="office-scene-section" aria-label="办公室视图">
+          <button type="button" className="office-scene-toggle" aria-expanded={sceneExpanded} aria-controls={`${panelId}-scene`} onClick={()=>setSceneExpanded(value=>!value)}>
+            <span aria-hidden="true">⌘</span><strong>办公室视图</strong><span>{agents.length} 位成员 · {mode==='demo'?'模拟':'后台记录'}</span><span aria-hidden="true">{sceneExpanded?'⌃':'⌄'}</span>
+          </button>
+          {sceneExpanded && <div id={`${panelId}-scene`}><div className="office-layout">
           <aside className="office-inspector" aria-label="协作成员与定位">
             <div className="office-inspector-heading"><div><h2>协作成员 <span>{agents.length} 人 · {mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观测'}</span></h2></div><button type="button" className="office-button office-roster-toggle" aria-expanded={rosterExpanded} aria-controls={`${panelId}-roster`} onClick={() => setRosterPreference(!rosterExpanded)}>{rosterExpanded ? '收起名单' : '展开名单'}</button></div>
             <dl className="office-stats" aria-label={stale ? '上次快照统计' : '角色状态统计'}><div><dt>运行</dt><dd>{running}</dd></div><div><dt>等待</dt><dd>{waiting}</dd></div><div><dt>完成</dt><dd>{done}</dd></div></dl>
@@ -473,70 +542,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
             </div>
           </section>
 
-        </div>
-
-        <section className="office-detail-workspace" ref={detailElement} aria-label="工作室详细信息">
-          <div className="office-detail-tabs" role="tablist" aria-label="工作室详情" onKeyDown={handlePanelKeys}>
-            {panels.map(item => <button key={item.id} type="button" role="tab" id={`${panelId}-tab-${item.id}`} aria-controls={`${panelId}-panel-${item.id}`} aria-selected={panel === item.id} tabIndex={panel === item.id ? 0 : -1} onClick={() => setPanelChoice(item.id)}>{item.label}</button>)}
-          </div>
-          <div className="office-detail-panel" id={`${panelId}-panel-details`} role="tabpanel" aria-labelledby={`${panelId}-tab-details`} hidden={panel !== 'details'} tabIndex={-1} ref={element => { panelElements.current.details = element; }}>
-            <OfficeTaskFocus agents={agents} events={allEvents} selectedId={selected?.id ?? null} mode={mode} stale={stale}
-              displayName={displayName} onSelect={selectAgent} onOpenProcess={openProcess} onOpenOutputs={() => openPanel('outputs')}
-              memberSummary={selected ? <section className="office-agent-detail" aria-label="选中成员当前任务">
-              <div className="office-selected-person"><div className="office-mini-person" aria-hidden="true"><i style={{ background: selected.appearance?.skinColor }} /><span style={{ background: selected.appearance?.shirtColor }} /></div><div><span className="office-seat-label">工位 {String(agents.indexOf(selected) + 1).padStart(2, '0')}</span><h3>{displayName(selected) || '未命名 Agent'}</h3></div><button type="button" className="office-status-button" onClick={() => openProcess(selected.id)} aria-label={`查看${displayName(selected)}的思考与工作过程`}><StateBadge state={selected.state} stale={stale} /><span>查看过程 ↗</span></button></div>
-              {selected.action?.evidence !== 'unreported' && selected.action?.label && <p className="office-action-summary" aria-live="polite">{stale ? '上次记录：' : ''}{selected.action.label}<small>{selected.action.evidence === 'demo' ? '模拟动作' : stale ? '依据上次快照' : '依据后台记录'}</small></p>}
-              {selected.task && <div className="office-current-task"><span>{stale ? '快照中的任务' : '当前任务'}</span><p>{selected.task}</p></div>}
-              <details className="office-member-appearance"><summary>身份与角色外观</summary>
-              <dl className="office-agent-meta"><div><dt>角色</dt><dd>{selected.role || '未提供'}</dd></div><div><dt>协作上级</dt><dd>{parent?.name || (selected.parentId ? '未包含在当前记录中' : '未提供')}</dd></div><div><dt>记录来源</dt><dd>{selected.source === 'demo' ? '模拟任务脚本' : '后台观察记录'}</dd></div></dl>
-              <div className="office-appearance-binding"><label>员工角色卡<Select value={selected.appearance?.id || 'generic'} onChange={event => {
-                try { const saved = assignEmployeeAppearance(selected.id, event.target.value as EmployeeAppearanceId); setBindingNotice(saved ? '员工角色卡已保存。' : '已在当前窗口应用，但尚未保存到本地。'); }
-                catch (error) { setBindingNotice(error instanceof Error ? error.message : '员工绑定未保存。'); }
-              }}>{appearances.map(card => <option value={card.id} key={card.id}>{card.name} · {card.role}</option>)}</Select></label>
-                <button type="button" className="office-button" onClick={() => {
-                  if (!selected.appearance) return;
-                  scrollBeforeEdit.current = pageElement.current?.scrollTop ?? null;
-                  setProcessTarget(null);
-                  setBindingNotice('');
-                  const original = appearances.find(card => card.id === selected.appearance?.id) || selected.appearance;
-                  setAppearanceEdit({ agentId: selected.id, agentName: selected.name, live: selected.source === 'live', original: { ...original }, draft: { ...original } });
-                }}>编辑角色卡</button>
-                <small>角色卡修改外观与显示名；真实 Agent 身份：{selected.name}（{selected.id}）</small>
-                {bindingNotice && <p role="status">{bindingNotice}</p>}
-              </div>
-              </details>
-            </section> : <div className="office-no-selection"><span aria-hidden="true">○</span><p>等待可观察的成员</p><small>任务与状态将在这里显示。</small></div>}>
-              {selected && <><OfficeAgentControls agent={selected} sessionId={mode === 'live' ? sessionId : null} turnId={mode === 'live' ? live.turnId : null} observationKey={mode === 'live' ? live.observedAt : null} stale={stale} onChanged={live.refresh} onOpenModelSettings={onOpenModels} /><OfficeWorkPreview agent={selected} stale={stale} observedAt={live.observedAt} onOpen={() => openProcess(selected.id)} /></>}
-            </OfficeTaskFocus>
-            <section className="office-call-history" aria-label="Agent 调用记录">
-              <div className="office-calls-heading"><h3>调用记录 <small>{mode === 'demo' ? '模拟' : stale ? '上次快照' : '已观察'}</small></h3>
-                <div role="group" aria-label="调用记录范围"><button type="button" aria-pressed={eventFilter === 'selected'} onClick={() => setEventFilter('selected')}>当前 Agent</button><button type="button" aria-pressed={eventFilter === 'all'} onClick={() => setEventFilter('all')}>全部</button></div>
-              </div>
-              <ol className="office-event-list">{events.map(event => <li key={event.id} className={`office-event-${event.status}`}>
-                <div><span>{agents.find(agent => agent.id === event.agentId)?.name}</span><time>{event.source === 'demo' ? `演示 ${clock(event.elapsedSeconds || 0)}` : event.at ? snapshotTime(event.at) : '时间未上报'}</time></div>
-                <p>{event.title}</p><small>{{ called: '已调用', returned: '已返回', failed: '返回错误', observed: '已观察' }[event.status]}</small>
-              </li>)}</ol>
-              {!events.length && <p className="office-no-events">{mode === 'demo' ? '该角色的模拟调用尚未开始。' : '尚未观察到该 Agent 的调用记录。子 Agent 内部工具记录暂不可见。'}</p>}
-              <p className="office-calls-note">{mode === 'demo' ? '调用与时间均为演示脚本。' : '仅列出有记录的调用与回执；已返回不代表执行成功。'}</p>
-            </section>
-          </div>
-          <div className="office-detail-panel" id={`${panelId}-panel-workflow`} role="tabpanel" aria-labelledby={`${panelId}-tab-workflow`} hidden={panel !== 'workflow'} tabIndex={-1} ref={element => { panelElements.current.workflow = element; }}>
-          <OfficeWorkflowPanel key={scope} agents={agents} events={allEvents} mode={mode} elapsed={elapsed} selectedId={selected?.id ?? null} stale={stale} onSelect={id => selectAgent(id, true)} onOpenProcess={openProcess} displayName={displayName} />
-          </div>
-          <div className="office-detail-panel" id={`${panelId}-panel-outputs`} role="tabpanel" aria-labelledby={`${panelId}-tab-outputs`} hidden={panel !== 'outputs'} tabIndex={-1} ref={element => { panelElements.current.outputs = element; }}>
-            <div className="office-output-anchor" ref={outputElement} tabIndex={-1} role="region" aria-label="工作区产出与文件位置"><OfficeOutputMonitor mode={mode} onOpenOutputs={onOpenOutputs} /></div>
-          </div>
-          {mode === 'live' && onStartTask && <div className="office-detail-panel" id={`${panelId}-panel-compose`} role="tabpanel" aria-labelledby={`${panelId}-tab-compose`} hidden={panel !== 'compose'} tabIndex={-1} ref={element => { panelElements.current.compose = element; }}>
-        {mode === 'live' && onStartTask && <OfficeTaskComposer session={availableSessions.find(session => session.id === sessionId) ?? null}
-          stream={sessionId ? streams[sessionId] : undefined} stopping={sessionId ? stoppingSessions?.[sessionId] : false} stopError={sessionId ? stopErrors?.[sessionId] : undefined}
-          onSubmit={request => {
-            const startedSessionId = onStartTask(request);
-            if (!startedSessionId) return false;
-            setSessionChoice(startedSessionId);
-            setSelectedId(null);setFocusId(null);setMemberQuery('');setProcessTarget(null);
-            return true;
-          }} onStop={onStopTask} onOpenModels={onOpenModels} onOpenChat={onOpenChat} />}
-
-          </div>}
+        </div></div>}
         </section>
         <footer className="office-page-footnote"><span>EASEL OFFICE · 一起把想法变成作品</span><span>{mode === 'demo' ? '当前为演示空间，不触发模型任务' : '任务进展以后台记录为准，产出按工作区文件展示'}</span></footer>
       </div>

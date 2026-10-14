@@ -19,6 +19,9 @@ import sys
 import time
 from pathlib import Path
 
+# Isolated/embedded Python does not add the script directory to sys.path.
+# This is a bundled sibling module, not an external package to install.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import account_evidence as evidence
 
 PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])

@@ -143,5 +143,7 @@ def install_limits(workspace):
     async def readiness():
         status = await asyncio.to_thread(workspace.check_gateway)
         return {'web': True, 'gateway': bool(status), 'modelInference': 'not_probed',
+                'deployment': {'mode': 'server', 'readOnlyRoot': True,
+                               'environmentInstall': False, 'storageMigration': False},
                 'codex': os.environ.get('EASEL_CODEX_ENABLED', '0') == '1',
                 'resources': {name: {'capacity': pool.capacity, 'active': pool.active} for name, pool in pools.items()}}

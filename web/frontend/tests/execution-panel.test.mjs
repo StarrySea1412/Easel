@@ -21,11 +21,12 @@ async function setup(t) {
     respond: async (index, data) => act(async () => requests[index].resolve(new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } }))),
     click: async text => act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === text).click()) };
 }
-test('empty execution results retain backend warnings and can retry or open the matching record', async t => {
+test('empty execution results retain backend warnings and retry without an aggregate record link', async t => {
   const view = await setup(t);
   await view.respond(0, payload('a', [], ['执行记录正在更新，请稍后查看。']));
   assert.match(view.container.textContent, /执行记录正在更新/);
-  await view.click('运行记录 ↗'); assert.equal(view.opened(), 1);
+  assert.doesNotMatch(view.container.textContent, /运行记录 ↗|执行详情/);
+  assert.equal(view.opened(), 0);
   await view.click('重新读取'); assert.equal(view.requests.length, 2);
   await view.respond(1, payload()); assert.equal(view.container.textContent, '');
 });
@@ -42,7 +43,8 @@ test('a failed refresh preserves real file diff receipts and offers recovery', a
   const row = { id: 'write1', name: 'write', status: 'returned', command: '', path: 'proof.txt', output: '', diff: '+1 alpha\n+2 beta', added: 2, removed: 0, elapsedSeconds: .4 };
   await view.respond(0, payload('a', [row], ['记录尚未完整。']));
   await act(async () => { const detail=view.container.querySelector('details.chat-execution-row');detail.open=true;detail.dispatchEvent(new window.Event('toggle')); });
-  assert.match(view.container.textContent, /1 个文件有修改回执/);
+  assert.match(view.container.textContent, /proof.txt/);
+  assert.doesNotMatch(view.container.textContent, /个文件有修改回执|执行详情/);
   assert.match(view.container.textContent, /\+2 −0/);
   await view.click('重新读取');
   await act(async () => view.requests[1].reject(new Error('offline')));
@@ -97,8 +99,6 @@ test('paging retains 65 operations and loaded history after refreshing the lates
   await view.click('加载较早记录');
   assert.match(view.requests[1].url,/before=25/);
   await view.respond(1,{...payload('a',rows.slice(0,25)),total:65,nextBefore:null});
-  await view.click('只看最近 3 项');
-  await view.click('查看全部 65 项');
   assert.equal(view.container.querySelectorAll('details.chat-execution-row').length,65);
   await emit({...payload('a',rows.slice(25)),total:65,nextBefore:25});
   assert.equal(view.container.querySelectorAll('details.chat-execution-row').length,65);

@@ -76,21 +76,23 @@ function modelConfigLabel(row?: ModelRow) {
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'general', navigationKey = 0, conversationBackup, demoDataPreference, onOpenOffice }: {
+export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, targetModelRef, conversationBackup, demoDataPreference, onOpenOffice }: {
   initialSection?: SettingsSection;
   navigationKey?: number;
+  targetModelRef?: string;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
   demoDataPreference: ComponentProps<typeof DemoDataSettingsCard>;
   onOpenOffice?: () => void;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
-  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'video' || section === 'import' ? 'model' : section === 'general' ? 'more' : section;
+  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' ? 'more' : section;
   const [sec, setSec] = useState<SettingsSection>(normalizeSection(initialSection));
-  const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'video' ? 'video' : 'chat');
+  const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'image' ? 'image' : initialSection === 'video' ? 'video' : 'chat');
   const [importOpen, setImportOpen] = useState(initialSection === 'import');
   useEffect(() => {
     setSec(normalizeSection(initialSection));
     if (initialSection.startsWith('channel:')) setChan(initialSection.slice(8) as Chan);
+    if (initialSection === 'image') setChan('image');
     if (initialSection === 'video') setChan('video');
     if (initialSection === 'import') { setChan('chat'); setImportOpen(true); }
   }, [initialSection, navigationKey]);
@@ -136,10 +138,16 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
   const [savedChatRows, setSavedChatRows] = useState<ModelRow[]>([]);
   const [providerDetailsOpen, setProviderDetailsOpen] = useState(false);
+  const [modelLoading, setModelLoading] = useState(true);
+  const modelTestTarget = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!targetModelRef || modelLoading) return;
+    const timer = setTimeout(() => { modelTestTarget.current?.scrollIntoView?.({ block: 'center' }); modelTestTarget.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true }); }, 0);
+    return () => clearTimeout(timer);
+  }, [targetModelRef, navigationKey, modelLoading]);
   const [visionEditorIndex, setVisionEditorIndex] = useState(0);
   const [transRows, setTransRows] = useState<ModelRow[]>([]);
   const [mediaRows, setMediaRows] = useState<Record<string, ModelRow[]>>({});
-  const [modelLoading, setModelLoading] = useState(true);
   const [modelErr, setModelErr] = useState('');
   const [selftest, setSelftest] = useState<{ testedAt: number; byBase: Record<string, SelftestResult> } | null>(null);
   const [testing, setTesting] = useState(false);
@@ -653,10 +661,9 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         <div className="settings-head">
           <div>
             <h2 className="settings-title">设置</h2>
-            <div className="settings-sub">模型、渠道、环境与更多设置</div>
           </div>
           <div className="settings-actions">
-            {sec === 'model' && chan !== 'chat' && (
+            {sec === 'model' && chan !== 'chat' && chan !== 'image' && (
               <>
                 <button
                   className="btn btn-sm btn-primary"
@@ -680,23 +687,23 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
         <div className="settings-body">
           <nav className="settings-nav">
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
-              <IconSlidersHorizontal size={16} />模型配置<small>六个通道</small>
-            </button>
-            <button aria-current={sec === 'env' ? 'page' : undefined} className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
-              <IconPackage size={16} />环境安装<small>{total ? (okCount === total ? '全就绪' : `${okCount}/${total}`) : '…'}</small>
-            </button>
-            <button aria-current={sec === 'image' ? 'page' : undefined} className={`snav${sec === 'image' ? ' active' : ''}`} onClick={() => setSec('image')}>
-              <IconImage size={16} />生图通道<small>工作台直出</small>
-            </button>
-            <button aria-current={sec === 'notify' ? 'page' : undefined} className={`snav${sec === 'notify' ? ' active' : ''}`} onClick={() => setSec('notify')}>
-              <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
-            </button>
-            <button aria-current={sec === 'employees' ? 'page' : undefined} className={`snav${sec === 'employees' ? ' active' : ''}`} onClick={() => setSec('employees')}>
-              <IconSlidersHorizontal size={16} />员工角色卡<small>办公室展示形象</small>
+              <IconSlidersHorizontal size={16} />模型与渠道
             </button>
             <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />更多设置<small>通用、保存位置与备份</small>
+              <IconEllipsis size={16} />更多设置
             </button>
+            <details className="settings-secondary-nav" open={['env', 'notify', 'employees'].includes(sec) || undefined}>
+              <summary>其他设置</summary>
+              <button aria-current={sec === 'env' ? 'page' : undefined} className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
+                <IconPackage size={16} />环境安装<small>{total ? (okCount === total ? '全就绪' : `${okCount}/${total}`) : '…'}</small>
+              </button>
+              <button aria-current={sec === 'notify' ? 'page' : undefined} className={`snav${sec === 'notify' ? ' active' : ''}`} onClick={() => setSec('notify')}>
+                <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
+              </button>
+              <button aria-current={sec === 'employees' ? 'page' : undefined} className={`snav${sec === 'employees' ? ' active' : ''}`} onClick={() => setSec('employees')}>
+                <IconSlidersHorizontal size={16} />员工角色卡<small>办公室展示形象</small>
+              </button>
+            </details>
           </nav>
 
           <div className="settings-main">
@@ -716,11 +723,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
 
                 {chan === 'chat' && (
                   <section className="st-panel active">
-                    <CodexSettings />
                     <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
                       savedPrimary={savedChatRows.find((row) => row.role === '主')} saving={saving} dirty={chatDirty}
                       saveNote={savedNote} labelFor={modelConfigLabel} onPrimary={setPrimaryRow} onSave={() => void saveCurrent()}
                       onOpenImport={() => setImportOpen(true)} />
+                    <details className="model-settings-details"><summary>本机 Codex</summary><CodexSettings /></details>
                     <details className="model-settings-details model-inline-import" open={importOpen}
                       onToggle={(event) => setImportOpen(event.currentTarget.open)}>
                       <summary><IconUpload size={14} /> 从 CC Switch / OpenClaw 导入模型</summary>
@@ -887,6 +894,7 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
             </section>
                     </details>
                     <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}>＋ 添加供应商</button>
+                    {targetModelRef && <div ref={modelTestTarget} className="model-settings-details"><ModelHealthPanel key={targetModelRef} targetModelRef={targetModelRef} /></div>}
                     <details className="model-settings-details" open={providerDetailsOpen}
                       onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
                       <summary>编辑供应商、协议、地址与密钥</summary>
@@ -961,29 +969,6 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                   </section>
                 )}
 
-                {chan === 'image' && (
-                  <section className="st-panel active">
-                    <div className="panel-top">
-                      <span className={`pill ${mediaOk('image') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('image') ? '已配置' : '未配置'}</span>
-                      <span className="desc">展开后直接编辑模型、地址和 Key；保存后生效</span>
-                      <span className="spacer" />
-                    </div>
-                    {renderBoard(mediaRows.image || [], {
-                      onRow: (i, p) => updateMediaRow('image', i, p),
-                      media: true,
-                      channel: 'image',
-                      presets: presets.image,
-                      discovery: (i) => discover[`image:${i}`],
-                      onDiscover: (i) => void runDiscover('image', i, (mediaRows.image || [])[i]),
-                      onPickPreset: (i, p) => updateMediaRow('image', i, {
-                        baseUrl: p.baseUrl, protocol: p.protocol, adv: true,
-                      }),
-                    })}
-                    <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。预设只提供公开端点，能否枚举模型取决于服务商。</div>
-                    {reverseSettings}
-                  </section>
-                )}
-
                 {chan === 'video' && (
                   <section className="st-panel active">
                     <div className="panel-top">
@@ -1014,16 +999,16 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
             )}
 
             {/* ── 生图通道：工作台「生图工坊」直出图的专用 OpenAI 协议通道 ── */}
-            {sec === 'image' && (
+            {sec === 'model' && chan === 'image' && (
               <section className="st-sec active">
                 <div className="panel-top">
+                  <h3 className="settings-section-title">生图渠道</h3>
                   <span className={`pill ${!imgBaseChanged && imgBaseSaved && imgKeyMasked ? 'ok' : 'off'}`}><span className="dot" />{imgLoading ? '读取中…' : imgLoadError ? '读取失败' : imgBaseChanged || imgKey ? '尚未保存' : imgBaseSaved && imgKeyMasked ? '已配置 · 未验证' : '未配置'}</span>
-                  <span className="desc">OpenAI 协议（/v1/images/generations）；聚合站出图可能需要 1-8 分钟</span>
                   <span className="spacer" />
                 </div>
                 {imgLoadError && <div className="env-error" role="alert">{imgLoadError}</div>}
                 <div className="board img-chan">
-                  <SettingsField label="Base URL" horizontal>
+                  <SettingsField label="服务地址" horizontal>
                     <input
                       className="mock"
                       value={imgBase}
@@ -1040,11 +1025,11 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                       value={imgKey}
                       aria-label="生图 API Key"
                       disabled={imgLoading || imgSaving}
-                      placeholder={imgBaseChanged ? 'Base URL 已更改，请填写新服务商的 Key' : imgKeyMasked || '粘贴生图服务的 Key（QQ/聚合站的专属 Key，不是聊天 Key）'}
+                      placeholder={imgBaseChanged ? '服务地址已更改，请填写对应 Key' : imgKeyMasked ? '已保存，留空保留' : '填写服务商提供的 Key'}
                       onChange={(e) => setImgKey(e.target.value)}
                     />
                   </SettingsField>
-                  <SettingsField label="模型" horizontal>
+                  <SettingsField label="模型名称" horizontal>
                     <input className="mock" value={imgModel} aria-label="生图模型名称" placeholder="例如 gpt-image-1 或服务商模型 ID" disabled={imgLoading || imgSaving} onChange={(e) => setImgModel(e.target.value)} />
                   </SettingsField>
                   {imgSaved && <div className={`save-note${imgSaved.startsWith('保存失败') ? ' err' : ''}`}>{imgSaved}</div>}
@@ -1052,11 +1037,10 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
                     <button className="btn btn-sm btn-primary" onClick={() => void saveImgChannel()} disabled={imgSaving || imgLoading || Boolean(imgLoadError) || !imgBase.trim() || !imgModel.trim() || (!imgKey.trim() && (!imgKeyMasked || imgBaseChanged))}>
                       {imgSaving ? '保存中…' : '保存生图通道'}
                     </button>
-                    <span className="hint">已有 Key 时留空会保留原值；保存后到「生图工坊」直接出图。</span>
+                    <span className="hint">工坊和生图技能共用此配置。</span>
                   </div>
                 </div>
-                <div className="foot-note">与「模型配置 → 生图」的技能通道共享 IMG_* 配置：这里改了，技能生图也用同一通道。</div>
-                {reverseSettings}
+                <details className="model-settings-details"><summary>图片理解与提示词提取</summary>{reverseSettings}</details>
               </section>
             )}
 
@@ -1128,12 +1112,16 @@ export default function SettingsPanel({ initialSection = 'general', navigationKe
               </section>
             )}
 
-          {sec === 'more' && <section className="st-sec active settings-more-cards"><DemoDataSettingsCard {...demoDataPreference} /><ConversationBackupCard {...conversationBackup} /><StorageSettingsCard /></section>}
+          {sec === 'more' && <section className="st-sec active settings-more-cards">
+            <DemoDataSettingsCard {...demoDataPreference} />
+            <details><summary>保存位置</summary><StorageSettingsCard /></details>
+            <details><summary>会话备份</summary><ConversationBackupCard {...conversationBackup} /></details>
+          </section>}
           </div>
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : '保存配置'}」。获取模型列表或选择候选不会自动保存。` : sec === 'more' ? '通用偏好保存在当前浏览器；文件位置与备份修改后会显示保存结果。' : '修改后请使用对应的保存按钮；页面会显示保存结果。'}
+          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' ? '通用偏好保存在当前浏览器。' : '修改后请保存。'}
         </div>
       </div>
     </div>

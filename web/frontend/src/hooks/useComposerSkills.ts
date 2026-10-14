@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchSkills } from '../lib/api';
+import { fetchSkills, type SkillItem } from '../lib/api';
 import {
   readComposerSkillState, writeSelectedSkills, writeSkillRequirements,
   requirementsForSelection, MAX_SKILL_REQUIREMENT_LENGTH, MAX_SKILL_REQUIREMENTS_TOTAL,
@@ -18,6 +18,8 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
   const revision = useRef(0);
   const [storageNotice, setStorageNotice] = useState('');
   const [catalog, setCatalog] = useState<Set<string> | null>(null);
+  const [skillList, setSkillList] = useState<SkillItem[]>([]);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const scopeLabel = requirementScope === 'creation' ? '本次创作' : '本会话';
 
@@ -41,11 +43,19 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
       if (!Array.isArray(skills)) throw new Error('Invalid skill catalogue');
       // Directory responses describe availability; only user edits change picks.
       setCatalog(new Set(skills.map(skill => skill.name)));
+      setSkillList(skills);
       setCatalogFailed(false);
       retryRestore();
     }).catch(() => { if (!stale) { setCatalogFailed(true); retryRestore(); } });
     return () => { stale = true; };
-  }, [scope, retryRestore]);
+  }, [scope, retryRestore, catalogRevision]);
+
+  useEffect(() => {
+    const refresh = () => setCatalogRevision(value => value + 1);
+    window.addEventListener('easel:skill-configured', refresh);
+    window.addEventListener('easel:channel-names-changed', refresh);
+    return () => { window.removeEventListener('easel:skill-configured', refresh); window.removeEventListener('easel:channel-names-changed', refresh); };
+  }, []);
 
   useEffect(() => {
     window.addEventListener('focus', retryRestore);
@@ -96,6 +106,7 @@ export function useComposerSkills(scope: string, requirementScope: 'conversation
 
   return {
     selectedSkills, skillRequirements, requirementScope, saveSkillRequirement, restorePending, retryRestore,
+    skillList: catalogFailed ? [] : skillList,
     notice: restorePending ? '技能选择暂时无法读取，保存的选择和补充要求未被覆盖；请重试恢复。'
       : storageNotice || (catalogFailed ? '技能列表暂时无法读取，已保留当前选择。'
       : catalog && selectedSkills.some(name => !catalog.has(name)) ? '部分已选技能未出现在当前列表中，已保留选择；发送前请确认技能是否可用。' : ''),

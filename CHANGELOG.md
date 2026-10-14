@@ -1,3 +1,11 @@
+## 0.2.8 candidate · 2026-10-13
+
+- Synchronize compact Settings, dashboard, image studio, skill recommendations, analysis/office and tool presentation with their backend modules.
+- Display server mutation capabilities accurately; keep desktop installation/storage controls unavailable in read-only deployments.
+- Distinguish collection environment failures from login failures, decode tool wrappers, isolate startup credentials and keep the web UI accessible when the auxiliary device check fails.
+- Add curl and pinned official DuckDuckGo search support; candidate configuration preserves existing credentials and permission policy. Actual search/browser and production acceptance remain in progress.
+- Version 0.2.8 is a candidate until isolated and production checks are recorded. Portable packaging stays paused.
+
 # 2026-10-13
 
 - Investigated 46 real web-research calls: 18 explicit failures, eight curl pipelines masking missing curl, and 20 nonempty HTTP200 fetches. Added concise failed-row reasons, source/limited-retry/command rules and curl to the Dockerfile; 15 DOM/3 message checks and TypeScript passed. No server change or new release; search provider and native browser remain to be verified. / 核实多次网页失败，补失败短原因、真实来源与失败换方法规则、镜像curl依赖；搜索未配置/404/安全拒绝/命令缺失分别留证，源码检查通过但未部署。

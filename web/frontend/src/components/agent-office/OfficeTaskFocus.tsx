@@ -33,7 +33,7 @@ export default function OfficeTaskFocus({ agents, events, selectedId, mode, stal
   </label>;
   return <section className="office-task-focus" aria-labelledby={titleId}>
     <header className="office-task-focus-heading">
-      <div><h2 id={titleId}>任务进展与控制</h2></div>
+      <div><h2 id={titleId}>当前任务</h2></div>
       {picker}
       <span className="office-task-focus-source">{source}</span>
     </header>
@@ -45,13 +45,13 @@ export default function OfficeTaskFocus({ agents, events, selectedId, mode, stal
             <div><strong>{displayName(agent)}</strong><span className={`office-state office-state-${agent.state}`}><i aria-hidden="true" />{stale ? '快照 · ' : ''}{OFFICE_STATE_LABELS[agent.state]}</span></div>
             <p>{agent.task || '当前记录未提供任务描述。'}</p>
           </div>}
-          <dl className="office-task-focus-records">
+          {unreported && <div className="office-task-focus-idle"><strong>暂无任务记录</strong><p>收到该成员的任务与操作后显示。</p></div>}
+          {(!memberSummary || latestReturn) && <dl className="office-task-focus-records">
             {!memberSummary && <div><dt>{stale ? '上次记录的步骤' : '当前步骤'}</dt><dd>{agent.action?.evidence === 'observed' || agent.action?.evidence === 'demo' ? agent.action.label : '具体操作尚未上报'}<small>{mode === 'demo' ? '来自模拟脚本' : '依据当前成员的可见操作记录'}</small></dd></div>}
-            <div><dt>最近回执</dt><dd>{latestReturn ? <><span className={latestReturn.status === 'failed' ? 'office-task-focus-failed' : undefined}>{latestReturn.status === 'failed' ? '报告错误' : '已返回'}{mode === 'demo' ? ' · 模拟' : ''}</span><p>{latestReturn.title}</p><small>工具返回不等于任务完成；完整内容请查看过程。</small></> : <span title="没有回执记录不代表任务未执行。">未收到回执</span>}</dd></div>
-          </dl>
-          <OfficeModelIdentity agent={agent} stale={stale} />
+            {latestReturn && <div><dt>最近回执</dt><dd><span className={latestReturn.status === 'failed' ? 'office-task-focus-failed' : undefined}>{latestReturn.status === 'failed' ? '报告错误' : '已返回'}{mode === 'demo' ? ' · 模拟' : ''}</span><p>{latestReturn.title}</p></dd></div>}
+          </dl>}
           <div className="office-task-focus-actions"><button type="button" className="office-button" onClick={() => onOpenProcess(agent.id)}>查看工作过程 ↗</button><button type="button" className="office-button" onClick={onOpenOutputs}>查看产出与位置 ↓</button></div>
-          <p className="office-task-focus-note">{mode === 'demo' ? '过程和产出示例均为模拟，不触发模型调用。' : '产出区展示整个工作区的文件及路径，不自动归属于当前成员或本轮任务。'}</p>
+          <details className="office-task-record-details"><summary>模型与记录详情</summary><OfficeModelIdentity agent={agent} stale={stale} /><p className="office-task-focus-note">{mode === 'demo' ? '过程和产出示例均为模拟，不触发模型调用。' : '产出区展示整个工作区的文件及路径，不自动归属于当前成员或本轮任务。'}</p></details>
         </div>
         {children && <div className="office-task-focus-controls">{children}</div>}
       </div>

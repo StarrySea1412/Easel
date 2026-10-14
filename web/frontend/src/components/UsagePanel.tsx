@@ -53,13 +53,18 @@ function timeLabel(value: string) {
 }
 
 function MetricCards({ summary, compact=false }: { summary: Summary; compact?:boolean }) {
-  return <div className={`usage-metrics${compact?" is-compact":""}`}>{METRICS.map(([field, label]) => (
+  const cards = (metrics: typeof METRICS[number][]) => metrics.map(([field, label]) => (
     <div className={`usage-metric ${['totalTokens','inputTokens','outputTokens','recordedCostUsd'].includes(field)?'primary':'secondary'}`} key={field}>
       <span>{label}</span><strong>{display(summary[field], field)}</strong>
       <small>{summary.coverage[field] < summary.calls && summary[field] !== null
         ? `部分合计 · ${summary.coverage[field]}/${summary.calls} 次已上报` : summary[field] === null ? '没有可用记录' : '已记录合计'}</small>
     </div>
-  ))}</div>;
+  ));
+  if (compact) return <div className="usage-metrics is-compact">{cards([...METRICS])}</div>;
+  return <>
+    <div className="usage-metrics">{cards(METRICS.filter(([field])=>['totalTokens','inputTokens','outputTokens','recordedCostUsd'].includes(field)))}</div>
+    <details className="usage-extra-metrics"><summary>缓存与推理用量</summary><div className="usage-metrics is-compact">{cards(METRICS.filter(([field])=>['cacheReadTokens','cacheWriteTokens','reasoningTokens'].includes(field)))}</div></details>
+  </>;
 }
 
 /** Collapsible current-chat and whole-project usage. No prompt text is fetched. */

@@ -6,11 +6,13 @@ import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAtta
   appendChatDraftUploads, finishChatDraftUpload, clearChatDraft } from '../lib/chatDrafts';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
-import ComposerModelPicker, { ComposerModelStatus } from './ComposerModelPicker';
+import ComposerModelPicker from './ComposerModelPicker';
+import ComposerSkillSuggestions from './ComposerSkillSuggestions';
+import { createPortal } from 'react-dom';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
-import { IconArrowUp, IconStop, IconChevron, IconSpark, IconTerminal } from './icons';
+import { IconArrowUp, IconStop, IconChevron, IconOpenClaw, IconTerminal } from './icons';
 import ComposerAttachments from './ComposerAttachments';
 import ComposerAddMenu, { type ComposerUploadKind } from './ComposerAddMenu';
 import { loadThinkingLevel, saveThinkingLevel, resolveThinkingPreference, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
@@ -21,7 +23,6 @@ import { showToast } from '../lib/toast';
 import { CHAT_QUOTE_EVENT, appendQuotedText } from '../lib/chatQuote';
 import { addChatDraftQuote } from '../lib/chatDrafts';
 import ChatQuoteDraft from './ChatQuoteDraft';
-import { createPortal } from 'react-dom';
 import ChatQueueTray from './ChatQueueTray';
 import Select from './ui/Select';
 import CodexSettings from './CodexSettings';
@@ -40,7 +41,7 @@ interface ChatComposerProps {
   onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onStop: () => void;
   onSteer?: (id: string) => Promise<boolean>;
-  onOpenModels?: () => void;
+  onOpenModels?: (modelRef?: string) => void;
 }
 
 
@@ -258,6 +259,7 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
         autoFocus={hero}
       />
       {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
+      {!editingQueue && engine !== 'codex' && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
       {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
       {draft.missingAttachments.length > 0 && <div className="composer-skills-note" role="status">
         <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
@@ -274,7 +276,7 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
         <div className="composer-tools" hidden={editingQueue}>
           <Select className="composer-engine composer-engine-icon" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping}
             title={`对话引擎：${engine === 'codex' ? 'Codex' : 'OpenClaw'}`}
-            options={[{value:'openclaw',label:'OpenClaw',icon:<IconSpark size={16}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
+            options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           {engine === 'codex' ? <Select aria-label="本轮使用模型" value={models.modelRef} disabled={stopping || models.loading}
@@ -295,7 +297,6 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
         )}
         </div>
       </div>
-      {!editingQueue && <ComposerModelStatus models={models} disabled={isStreaming || stopping} onOpenModels={onOpenModels} />}
       {engine === 'codex' && <details><summary>Codex 设置与能力</summary><CodexSettings /></details>}
     </div>
     </div>

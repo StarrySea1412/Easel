@@ -47,7 +47,7 @@ test('configured complete models are keyboard selectable, stored explicitly and 
   await view.key('ArrowDown'); await view.key('Enter');
   assert.equal(view.values.get(KEY), REF); assert.match(view.container.textContent, /渠道已连通/);
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
-  assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, 'medium', REF]);
+  assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
 });
 
@@ -71,36 +71,37 @@ test('composer reads channel models by GET, refreshes status and stops reads aft
   t.mock.method(globalThis, 'clearInterval', timer => { timer.cleared = true; });
   const view = await fixture(t, REF); await view.render(); assert.match(view.container.textContent, /渠道已连通/);
   const timer = timers.find(item => !item.cleared); assert.ok(timer); assert.equal(timer.delay, 60000);
-  view.h.healthState = 'failed'; await act(async () => timer.callback()); assert.match(view.container.querySelector('.composer-model-health').getAttribute('aria-label'), /失败/);
+  view.h.healthState = 'failed'; await act(async () => timer.callback());
+  assert.match(view.container.querySelector('.composer-model-health-label').textContent, /失败/);
+  assert.ok(view.trigger().querySelector('.composer-model-health.failed'));
   assert.ok(view.calls.every(([, init]) => !init?.body), 'status refresh never probes a model');
   await view.unmount(); assert.equal(timer.cleared, true);
   const count = view.calls.length; await act(async () => timer.callback()); assert.equal(view.calls.length, count);
 });
 
-test('unavailable model choices explain the next step even without a saved override', async t => {
+test('unconfigured model entry opens settings directly without a separate warning row or probe', async t => {
   const view = await fixture(t); view.h.capability = false; let opened = 0;
+  view.h.options = [];
   await view.render({ onOpenModels: () => { opened++; } });
-  assert.match(view.container.querySelector('[role=status]').textContent, /重新读取/);
-  const button = [...view.container.querySelectorAll('button')].find(item => item.textContent === '配置模型');
+  assert.equal(view.container.querySelector('.composer-model-warning'), null);
+  const button = view.container.querySelector('[aria-label="模型设置"]');
   assert.ok(button); await act(async () => button.click()); assert.equal(opened, 1);
-  await view.key('ArrowDown');
-  assert.equal(document.querySelectorAll('.easel-select-option[aria-disabled=true]').length, 1);
   assert.equal(view.values.get(KEY), undefined);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance does not save or probe models');
 });
 
-test('channel details open only on click, omit duplicate native tooltip and close with Escape', async t => {
-  const view = await fixture(t, REF); await view.render();
-  const trigger = view.container.querySelector('.composer-model-health');
-  assert.equal(trigger.hasAttribute('title'), false); assert.equal(trigger.hasAttribute('data-tooltip'), false);
-  await act(async () => trigger.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true })));
-  assert.equal(document.querySelector('.composer-channel-popover'), null);
-  await act(async () => trigger.click());
-  const panel = document.querySelector('[role=dialog][aria-label="渠道状态详情"]');
-  assert.match(panel.textContent, /测试渠道/); assert.match(panel.textContent, /推理未测/);
-  assert.ok(parseFloat(panel.style.left) >= 12);
-  await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-  assert.equal(document.querySelector('.composer-channel-popover'), null);
+test('status belongs to the model selector and its settings action targets that model', async t => {
+  const view = await fixture(t, REF), opened=[];
+  await view.render({ onOpenModels: ref => opened.push(ref) });
+  assert.ok(view.trigger().querySelector('.composer-model-health'));
+  assert.equal(view.container.querySelector('button.composer-model-health'), null);
+  assert.match(document.getElementById(view.trigger().getAttribute('aria-describedby')).textContent, /测试渠道/);
+  await act(async () => view.trigger().click());
+  assert.doesNotMatch(document.querySelector('.easel-select-popup').textContent, /渠道状态与详情/);
+  await act(async () => [...document.querySelectorAll('.easel-select-option')].find(item => item.textContent.includes('模型设置')).click());
+  assert.deepEqual(opened, [REF]);
+  assert.equal(document.querySelector('[aria-label="渠道状态详情"]'), null);
+  assert.ok(view.calls.every(([, init]) => !init?.body));
 });
 
 test('running composer has one primary action and switches from stop to queue then back', async t => {

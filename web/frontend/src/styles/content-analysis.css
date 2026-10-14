@@ -19,6 +19,21 @@
 .ca-question-grid button[aria-pressed=true] { border-color: var(--accent-start); background: var(--surface-2); }
 .ca-question-grid strong { display: block; font-size: 13px; font-weight: 550; }
 .ca-question-grid span { display: block; font-size: 12px; line-height: 1.8; color: var(--text-secondary); margin-top: 7px; }
+.ca-start-card .ca-question-grid { margin:0 0 18px; }
+.ca-sync-details { margin-top:12px; padding-top:10px; border-top:1px solid var(--border); min-width:0; }
+.ca-sync-details > summary { cursor:pointer; font-size:12px; color:var(--text-secondary); }
+.ca-sync-card .ca-card-heading { margin-bottom:0; flex-wrap:wrap; gap:12px; }
+.ca-sync-card h2 { font-size:16px; margin-bottom:4px; }
+.ca-sync-card .ca-bench-actions { gap:8px; }
+.ca-sync-details .ca-account-filter { margin-top:12px; }
+.ca-workspace { padding-top:24px; }
+.ca-heading { margin-bottom:16px; }
+.ca-data-source { padding:0; margin:0 0 12px; }
+.ca-platform-picker { padding-bottom:8px; gap:4px; }
+.ca-platform { padding:7px 10px; }
+.ca-context { padding:8px 0; }
+.ca-view-nav { margin-bottom:16px; }
+.ca-stat-grid article { padding:14px; }
 .ca-analysis-details { min-width: 0; border: 1px solid var(--border); border-radius: 9px; padding: 15px; margin: 18px 0; }
 .ca-analysis-details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; line-height: 1.8; }
 .ca-analysis-details[open] > summary { margin-bottom: 18px; }

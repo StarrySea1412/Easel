@@ -112,12 +112,12 @@ test('more settings initially exposes both cards and its menu returns to the bac
   const view = await fixture(t);
   const more = view.nav('更多设置');
   assert.ok(more);
-  assert.match(more.textContent, /保存位置与备份/);
+  assert.equal(more.textContent, '更多设置');
   assert.equal(more.getAttribute('aria-current'), 'page');
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
   assert.ok(view.container.querySelector('[data-testid="storage-card"]'));
   assert.deepEqual(view.harness.backupProps, view.props);
-  await view.click(view.nav('模型配置'));
+  await view.click(view.nav('模型与渠道'));
   assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
   await view.click(more);
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
@@ -127,7 +127,7 @@ test('more settings initially exposes both cards and its menu returns to the bac
 
 test('a fresh navigation key restores the same more section with latest props without remounting settings state', async t => {
   const view = await fixture(t);
-  await view.click(view.nav('模型配置'));
+  await view.click(view.nav('模型与渠道'));
   const speech = [...view.container.querySelectorAll('.tab')].find(button => button.textContent === '配音');
   assert.ok(speech);
   await view.click(speech);
@@ -143,7 +143,7 @@ test('a fresh navigation key restores the same more section with latest props wi
   assert.equal(view.harness.backupProps.onExport, latest.onExport);
   assert.equal(view.harness.backupProps.onOpenSession, latest.onOpenSession);
 
-  await view.click(view.nav('模型配置'));
+  await view.click(view.nav('模型与渠道'));
   assert.equal(view.container.querySelector('.tab.active')?.textContent, '配音', 'channel state survives the external navigation');
   assert.equal(view.harness.calls.length, callsBeforeNavigation, 'settings initialization effects did not remount');
   await view.render(2, latest);
@@ -164,21 +164,22 @@ test('employee appearance is a reachable independent settings section without ad
   assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
   assert.equal(view.harness.calls.length, before);
   await act(async () => view.harness.employeeProps.onOpenModels());
-  assert.equal(view.nav('模型配置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.container.querySelector('.tab.active').textContent, '对话与脚本');
   await view.click(view.nav('更多设置'));
   assert.equal(view.container.querySelector('[data-testid="employee-settings"]'), null);
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
 });
 
-test('settings opens more by default and the demo preference is grouped with storage controls', async t => {
+test('settings opens models by default and the demo preference stays in more settings', async t => {
   const view = await fixture(t);
   await view.render(1, view.props, 'default');
-  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
+  await view.click(view.nav('更多设置'));
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
   assert.deepEqual(view.harness.demoProps, view.demoDataPreference);
   const before = view.harness.calls.length;
-  await view.click(view.nav('模型配置'));
+  await view.click(view.nav('模型与渠道'));
   assert.equal(view.container.querySelector('[data-testid="demo-settings"]'), null);
   await view.click(view.nav('更多设置'));
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
@@ -189,6 +190,41 @@ function notificationConfig(onDone = false) {
   const config = { EASEL_NOTIFY_EMAIL: 'saved@example.test', EASEL_NOTIFY_SMTP_HOST: 'smtp.example.test', EASEL_NOTIFY_ON_DONE: onDone ? '1' : '0' };
   return { apiSpec: { providers: [{ keys: Object.entries(config).map(([env, masked]) => ({ env, masked })) }] } };
 }
+
+test('legacy image links and image tab open a single channel form', async t => {
+  const view = await fixture(t);
+  await view.render(1, view.props, 'image');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('生图通道'), undefined);
+  assert.equal(view.nav('通用设置'), undefined);
+  assert.equal(view.container.querySelector('.tab.active').textContent, '生图');
+  assert.equal(view.container.querySelectorAll('[aria-label="生图模型名称"]').length, 1);
+  assert.equal(view.container.querySelector('.settings-actions').textContent.trim(), '');
+  await view.click(view.nav('更多设置'));
+  await view.click(view.nav('模型与渠道'));
+  assert.ok(view.container.querySelector('[aria-label="生图模型名称"]'));
+});
+
+test('image settings save model with the channel once and preserve an existing key', async t => {
+  const view = await fixture(t, {
+    fetchImagegenGallery: { channel: { baseUrl:'https://image.example.test/v1', keyMasked:'已保存', model:'image-a' } },
+    saveImagegenChannel: { ok:true },
+  });
+  await view.render(1, view.props, 'image');
+  const model = view.container.querySelector('[aria-label="生图模型名称"]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(model, 'image-b');
+    model.dispatchEvent(new window.Event('input', { bubbles:true }));
+  });
+  const save = [...view.container.querySelectorAll('button')].find(button=>button.textContent==='保存生图通道');
+  await act(async () => { save.click(); save.click(); });
+  assert.deepEqual(view.harness.calls.filter(call=>call.name==='saveImagegenChannel'), [
+    { name:'saveImagegenChannel', args:['https://image.example.test/v1', '', 'image-b'] },
+  ]);
+  assert.equal(view.harness.calls.some(call=>call.name==='saveImagegenModel'), false);
+  assert.equal(model.value, 'image-b');
+  assert.match(view.container.textContent, /已保存/);
+});
 
 test('notification test clearly uses saved settings and does not save pending form edits', async t => {
   const view = await fixture(t, {
@@ -237,13 +273,13 @@ test('default model selection is a draft until saved and survives the single imp
   await chooseLastModel(view);
   assert.match(view.container.querySelector('.model-default-current').textContent, /OpenAI · model-a/);
   assert.match(view.container.querySelector('.model-default-pending').textContent, /待保存：Anthropic · model-b/);
-  assert.match(view.container.querySelector('.model-default-pending').textContent, /保存前仍使用已保存默认：OpenAI · model-a/);
+  assert.match(view.container.querySelector('.model-default-pending').textContent, /保存前仍使用 OpenAI · model-a/);
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'applyImport', 'runChannelSelftest'].includes(call.name)), false);
   assert.equal(view.container.querySelectorAll('button').length > 0, true);
   await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
   assert.equal(view.container.querySelectorAll('.model-import-steps li').length, 3);
   await view.click(findButton(view, '收起导入'));
-  assert.equal(view.nav('模型配置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('配置导入'), undefined);
   assert.match(view.container.querySelector('button[aria-label="主模型"]').textContent, /model-b/);
   assert.equal(findButton(view, '保存并使用').disabled, false);
@@ -363,7 +399,7 @@ test('unconfigured models show why discovery is unavailable and expand their edi
 test('legacy import links open the single model page and expand its import workflow', async t => {
   const view = await fixture(t, { fetchImportSources: { sources: [] } });
   await view.render(1, view.props, 'import');
-  assert.equal(view.nav('模型配置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('配置导入'), undefined);
   assert.equal(view.container.querySelector('.model-inline-import').open, true);
   assert.ok(view.container.querySelector('.model-config-picker'));
@@ -517,7 +553,7 @@ test('transcription cards use natural roles and missing key guidance rather than
   assert.equal(view.nav('环境安装').getAttribute('aria-current'), 'page');
 });
 
-for (const [channel, label] of [['speech', '配音'], ['image', '生图'], ['video', '视频'], ['music', '音乐']]) test(`editable ${channel} models and addresses are available directly after expanding the provider`, async t => {
+for (const [channel, label] of [['speech', '配音'], ['video', '视频'], ['music', '音乐']]) test(`editable ${channel} models and addresses are available directly after expanding the provider`, async t => {
   const response = modelChannels(configuredRows());
   response.channels[channel].rows = [{ slot: 'editable-provider', order: 0, name: 'Editable provider', sub: channel,
     type: 'openai', model: 'configured-model', baseUrl: 'https://media.example.test/v1', keyMasked: 'sk***',

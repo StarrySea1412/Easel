@@ -5,6 +5,8 @@ import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from
 import UsagePanel from './UsagePanel';
 import SkillAuditPanel from './SkillAuditPanel';
 import { IconHistory } from './icons';
+import { formatChatElapsed } from '../lib/chatTiming';
+import { chatErrorTitle } from '../lib/chatErrors';
 import '../styles/activity.css';
 
 type Tab = 'usage' | 'audit';
@@ -43,6 +45,9 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
     search, filter, selectedId, activeSessionId, target,
   });
   const titles = Object.fromEntries(sessions.map((item) => [item.id, item.title]));
+  const latestReply = session?.messages.findLast(message => message.role === 'assistant');
+  const receiving = Boolean(session && liveStreams[session.id]);
+  const latestError = !receiving && !session?.importedFromBackup ? latestReply?.error : undefined;
   const emptyTitle = missingTarget
     ? '指定会话不可用'
     : sessions.length ? '没有匹配会话' : '还没有会话记录';
@@ -109,10 +114,23 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
               <div className="activity-detail-actions">
               {session && !session.importedFromBackup && onOpenOffice && <button type="button" className="btn btn-sm" onClick={() => onOpenOffice(session.id)}>查看会话工作室 ↗</button>}
               {session && (
-                <span className="activity-session-state">{session.importedFromBackup ? '备份副本' : liveStreams[session.id] ? '运行中' : '历史记录'}</span>
+                  <span className={`activity-session-state${latestError ? ' is-error' : ''}`}>{session.importedFromBackup ? '备份副本' : receiving ? '运行中' : latestError ? chatErrorTitle(latestError) : '历史记录'}</span>
               )}
               </div>
             </div>
+
+            {session && <p className="activity-turn-summary">{session.messages.filter(message=>message.role==='user').length} 轮对话
+              {!receiving && latestReply?.elapsedMs !== undefined && <> · 最近一轮 {formatChatElapsed(latestReply.elapsedMs)}</>}
+            </p>}
+            {latestError && <div className="activity-error-summary" role="status">
+              <strong>{chatErrorTitle(latestError)}</strong><p>{latestError.message}</p>
+              {(latestError.detail || latestError.stage || latestError.channel || latestError.modelRef) && <details><summary>失败详情</summary>
+                {latestError.stage && <p>失败阶段：{latestError.stage}</p>}
+                {latestError.channel && <p>渠道：{latestError.channel}</p>}
+                {latestError.modelRef && <p>模型：{latestError.modelRef}</p>}
+                {latestError.detail && <pre>{latestError.detail}</pre>}
+              </details>}
+            </div>}
 
             {session?.importedFromBackup ? (
               <div className="activity-start" role="status">
