@@ -434,3 +434,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 
 - 收敛内容分析、运行记录与 Agent 工作室首屏：筛选、请求浏览和成员名单改为按需展开，减少重复说明。
 - 生图渠道模型名称与地址、密钥一次保存，设置页可直接完成配置。
+# 2026-10-14 · 0.2.8 / 138 runtime repair
+
+- Fixed the 138 Agent failures: accurate skill/reference paths, read-only server workspace guidance, safe saved-script execution, curl/file availability, a reachable Bing RSS search provider, and a sandboxed Chromium sidecar with real renderer health checks.
+- Added actual installed OpenClaw/latest version detection and bounded official changelog evidence. The Environment Installation card can start a sourced Agent upgrade assessment; it never upgrades or restarts automatically.
+- Deployed and verified 0.2.8 on 138. OpenClaw remains pinned to 2026.9.6 while official latest is 2026.10.3. The Agent assessment separates official facts, conditional relevance, unknowns, compatibility gates and rollback triggers.

@@ -6,10 +6,11 @@ Codex is disabled until independently verified. Windows packaging remains paused
 
 ## October 14 candidate runtime repair
 
-The next 0.2.8 image includes the latest saved local UI, actual/current npm
+The active 0.2.8 image includes the latest saved local UI, actual/current npm
 OpenClaw versions and an Agent action that evaluates official release notes.
 It keeps OpenClaw pinned to 2026.9.6. Production activation and final receipts
-are recorded separately in `docs/runtime-repair-2026-10-14.md`.
+are recorded separately in `docs/runtime-repair-2026-10-14.md`. The active image
+is `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`.
 
 138 cannot reach DuckDuckGo. The Easel `free-search` plugin uses the reachable
 public Bing RSS endpoint with OpenClaw's public search SDK, bounded responses,

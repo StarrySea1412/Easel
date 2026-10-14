@@ -1,8 +1,8 @@
-> **138工具修复与版本评估候选（2026-10-14）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。源码检查通过，隔离/正式真实Agent验收与切换正在进行。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
+> **138工具修复与版本评估（2026-10-14，已部署）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。0.2.8正式/隔离真实Agent验收和切换已完成；OpenClaw继续固定2026.9.6。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
 
 > **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
 
-> **0.2.8 候选源码已保存并推送**：`cd866910` 收录最新界面、采集/工具解析和启动隔离修复，以及 curl 与固定官方免 Key 搜索插件配置；相关后端 131 项、前端全量 962 项通过。真实搜索、独立浏览器和完整发布验收仍待完成。138 最近已验的运行版本是 0.2.7 / build `1a324540854c`，本轮未重验或切换。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文既有部署回执属于历史版本。
+> **0.2.8 发布记录**：`cd866910` 是候选源码保存点；最终部署提交为 `0ba9fe20`，收录搜索、浏览器、工具执行和版本评估修复。真实搜索、独立浏览器和正式发布验收已完成。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文带日期的部署回执属于历史版本。
 
 > **138内网部署（2026-10-13）**：独立入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 已部署 **v0.2.7 / 构建1a324540854c**，正式/隔离镜像Healthy且重启0，1355运行源码摘要通过，运行发行SHA已推送并核对远端一致。认证、当前Windows用户CA信任、真实浏览器登录/对话、此前实际OpenClaw模型/技能/终端与两次web_fetch HTTP200均有证据，本次版本更新未重复请求模型。真实浏览器HTML预览、原文件URL直接打开及159字节附件下载已验证，最终版本持久文件hash一致；原文件链接target-blank点击的新页未被IAB暴露，保留观察边界。R119/R122核心使用交付完成，完整D01–D12的故障恢复/回滚演练、全菜单/390px、代表性负载、运营平台与付费媒体仍未验。OpenClaw默认、Codex禁用、便携打包暂停。[运行说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/deployment/138/RUNBOOK.md) · [部署任务清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-tasks-2026-10-13.md)。
 
@@ -216,3 +216,4 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)，感谢原作者及贡献者。原有功能、历史提交和必要资源保留；本仓库维护独立的创作工作台、办公室交互和可靠性改进，不代表上游官方发行。
 
 采用 [Apache License 2.0](LICENSE)，保留[原有致谢](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/ACKNOWLEDGMENTS.md)。OpenClaw、前端库及技能中的第三方组件继续遵循各自许可证；发布包保留所需许可证信息。
+> **138 已完成 0.2.8 发布（2026-10-14）**：正式入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 运行 `0ba9fe201ca384f40894545db068a093b0e21235` / image `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`，app/browser healthy、重启0。真实管理员 `gaojitest` / `gaoji` 登录、版本API、网关、旧产物摘要、附件下载和持久配置/设备身份均核对通过。Agent真实工具 read/ls/search/fetch/browser/write/exec 通过；138不可达DuckDuckGo已改为Easel自带Bing RSS provider。环境安装页显示OpenClaw当前 `2026.9.6`、官方最新 `2026.10.3`，可让Agent基于官方更新记录评估是否值得升级；不会自动升级。隔离评估建议以兼容验收和安全影响评估为门槛，当前保持2026.9.6。详情见[运行修复记录](docs/runtime-repair-2026-10-14.md)。
