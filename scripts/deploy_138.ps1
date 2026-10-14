@@ -150,8 +150,12 @@ if [ "$keep" != 1 ]; then rm -f "$archive"; fi
     $remoteScript = $remoteScript.Replace('__REVISION__', $revision)
 
     Write-Host 'Verifying and building on 138. This may take several minutes...'
-    $remoteScript | & $ssh @sshCommon $target 'tr -d "\r" | bash -s'
-    if ($LASTEXITCODE -ne 0) { throw "Remote release command failed with exit code $LASTEXITCODE." }
+    $runnerPath = Join-Path $root "dist\Easel-138-$short-$testLabel.sh"
+    $remoteRunner = "$RemoteReleases/Easel-138-$short-$testLabel.sh"
+    [IO.File]::WriteAllText($runnerPath, $remoteScript.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+    Invoke-Checked $scp ($sshCommon + @($runnerPath, "${target}:$remoteRunner"))
+    Invoke-Checked $ssh ($sshCommon + @($target, "bash '$remoteRunner'"))
+    Invoke-Checked $ssh ($sshCommon + @($target, "rm -f '$remoteRunner'"))
 
     if ($Activate) {
         Write-Host '138 release activated and login probe passed.' -ForegroundColor Green
