@@ -94,8 +94,10 @@ def env_file(base: Path, isolated: bool):
 
 def compose(base: Path, isolated: bool, source: Path, arguments):
     project = 'easel-test' if isolated else 'easel'
+    environment = dict(os.environ)
+    environment.setdefault('EASEL_BROWSER_SECCOMP_PATH', str(source / 'deployment/138/browser-seccomp.json'))
     return run(['docker', 'compose', '-p', project, '--env-file', str(env_file(base, isolated)),
-                '-f', str(source / 'deployment/138/compose.yaml'), *arguments])
+                '-f', str(source / 'deployment/138/compose.yaml'), *arguments], env=environment)
 
 
 def configure(base: Path, isolated: bool, image: str, nginx: str):
