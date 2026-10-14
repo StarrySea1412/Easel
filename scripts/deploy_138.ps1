@@ -55,7 +55,7 @@ try {
         throw "Working tree is dirty. Commit the release first, or explicitly use -AllowDirty (the selected commit is still the only shipped source)."
     }
 
-    $revision = (& $git -C $root rev-parse --verify ('{0}^{commit}' -f $Commit)).Trim()
+    $revision = (& $git -C $root rev-parse --verify ($Commit + '^{commit}')).Trim()
     if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') {
         throw "Cannot resolve commit '$Commit'."
     }
@@ -150,7 +150,7 @@ if [ "$keep" != 1 ]; then rm -f "$archive"; fi
     $remoteScript = $remoteScript.Replace('__REVISION__', $revision)
 
     Write-Host 'Verifying and building on 138. This may take several minutes...'
-    $remoteScript | & $ssh @sshCommon $target 'bash -s'
+    $remoteScript | & $ssh @sshCommon $target 'tr -d "\r" | bash -s'
     if ($LASTEXITCODE -ne 0) { throw "Remote release command failed with exit code $LASTEXITCODE." }
 
     if ($Activate) {
