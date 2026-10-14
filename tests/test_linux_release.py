@@ -64,3 +64,18 @@ def test_quick_deploy_script_keeps_candidate_default_and_sensitive_paths_outside
     assert 'BatchMode=yes' in script and 'sha256sum' in script
     guide = (ROOT / 'docs/deploy-138-quick-start.md').read_text(encoding='utf-8')
     assert '-Activate' in guide and 'OpenClaw 状态' in guide and '个人 outputs' in guide
+
+
+def test_image_dependency_reuse_requires_every_locked_input(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    baseline = {'files': {name: {'sha256': str(i), 'bytes': i, 'md5': str(i)}
+                          for i, name in enumerate(builder.DEPENDENCIES)}}
+    candidate = json.loads(json.dumps(baseline))
+    assert builder.compatible(candidate, baseline)
+    for name in builder.DEPENDENCIES:
+        changed = json.loads(json.dumps(candidate)); changed['files'][name]['sha256'] = 'changed'
+        assert not builder.compatible(changed, baseline)
+        missing = json.loads(json.dumps(candidate)); del missing['files'][name]
+        assert not builder.compatible(missing, baseline)

@@ -120,7 +120,7 @@ if [ "$activate" = 1 ]; then
   python3 "$stage/deployment/138/manage.py" prepare --base "$base" $test_arg
 fi
 python3 "$stage/deployment/138/manage.py" preflight --base "$base" $test_arg
-docker build -f "$stage/deployment/138/Dockerfile" --build-arg EASEL_RELEASE_SHA=__REVISION__ -t "$image" "$stage"
+python3 "$stage/deployment/138/build_image.py" --base "$base" --image "$image"
 
 if [ "$activate" = 1 ]; then
   python3 "$stage/deployment/138/manage.py" activate --base "$base" --image "$image" --nginx "$nginx" $test_arg

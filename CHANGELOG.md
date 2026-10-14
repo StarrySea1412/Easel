@@ -8,6 +8,7 @@
 
 - Verify and reuse an immutable stage for the same commit instead of deleting the isolated instance's active source. / 同一提交的候选目录校验后复用，不删除隔离实例正在使用的源码。
 - Wait for Compose health before the HTTPS probe, and print the matching isolated or production rollback command. / 激活后等待容器健康再请求HTTPS，回滚命令对应正式或隔离环境。
+- Resolve Git commit braces correctly in Windows PowerShell; upload an UTF-8/LF Bash runner and support the host's legacy Docker builder. Reuse a recorded fixed runtime only when every dependency input matches, while rebuilding application source and frontend. / 修正Windows提交解析、上传UTF-8/LF远端脚本、兼容旧Docker构建器；仅依赖全部一致时复用固定运行镜像，完整重建应用与前端。
 - Keep user frontend acceptance separate from logic and deployment checks. Actual activation receipts follow the runbook. / 前端交互验收由用户完成，逻辑与发布回执按运行手册单独记录。
 
 ## 2026-10-14 · Google News timeout cause / Google News超时原因

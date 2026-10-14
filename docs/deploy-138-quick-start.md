@@ -31,6 +31,7 @@
 - 默认是候选模式，不会停止容器、改 symlink、重启服务或写入生产配置。
 - 同一固定提交的远端目录只校验并复用，不先删除；隔离切换后的正式发布不会移除隔离实例的活动源码。校验失败停止，不能覆盖损坏或其他提交的目录。
 - 激活后等待Compose容器Healthy（最多240秒），然后才检查HTTPS登录页；回滚提示根据正式/隔离模式选择当前活动管理器及对应参数。
+- 镜像构建核对当前正式镜像的固定摘要和发行清单；Dockerfile、Node/Python锁文件及项目依赖声明全部一致时复用既有依赖，仍重建完整应用源码和前端。任一依赖变化走完整锁定构建，构建方式和基础镜像摘要写入远端 `image-build-receipt.json`。
 - `-Activate` 是唯一的正式切换开关；远端 `manage.py activate` 会先保存 data/state/secrets 停写备份，再切换 `Easel` symlink。
 - 源码只来自选定的已提交 Git SHA。工作树有未提交修改时脚本拒绝运行；`-AllowDirty` 只允许继续发布所选提交，未提交文件仍不会进入 ZIP。
 - 脚本不读取或传输本地 `.env`、OpenClaw 状态、浏览器 profile、平台 cookies、个人 outputs 或 SSH 私钥。
@@ -58,5 +59,7 @@
 ```
 
 The script verifies and reuses an existing stage for the same committed SHA, so a production run cannot delete an isolated instance's active source. It refuses damaged or mismatched stages, waits up to 240 seconds for Compose health after activation, and prints the correct production or isolated rollback command.
+
+When every Dockerfile and Node/Python dependency input matches the recorded live image, the builder reuses that fixed image's runtime while rebuilding the complete application source and frontend. Changed dependency inputs require a full locked build. The build receipt records its mode and baseline digest.
 
 The script uses the existing `ubuntu@192.168.0.138` SSH key, never copies credentials or personal runtime data, refuses a dirty tree by default, and leaves a candidate plus image for inspection if verification or the build fails before activation. Follow the [138 runbook](../deployment/138/RUNBOOK.md) for the remaining browser, login, Gateway, tool, rollback and load acceptance boundaries.
