@@ -1,6 +1,8 @@
-> **首页热点密度与来源图标（2026-10-14，本机已构建）**：今日热点复用微博/抖音图标，每源最多5条并带排名，按卡片宽度切换双列/单列，减少固定高度留白；保留时间、缓存、错误与选题入口。40项模拟回归、lint/生产构建及7880实际资源核对通过；页面验收由用户完成，本轮未部署138。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/dashboard-trends-2026-10-14.md)。
+> **138快速发布已实测（2026-10-14）**：0.2.8 / `12f144c8` 已通过快速入口先隔离再正式发布，包含超时提示及热点密度/平台图标；同一固定镜像、运行源码、登录/版本/网关、官方更新记录与两次真实Agent工具回执通过。前端交互由用户验收，OpenClaw仍为2026.9.6。[实际发布回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/quick-deploy-138-acceptance-2026-10-14.md)。
 
-> **Google News超时核查（2026-10-14）**：截图中的抓取失败已确认是 `request timed out`，138容器复测连接超时；搜索返回不足以证明近期没有重大新闻。源码补齐“网页请求超时”提示，17项前端回归与TypeScript通过，尚未部署此提示修复。[核查记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/huawei-fetch-failure-2026-10-14.md)。
+> **首页热点密度与来源图标（2026-10-14，本机与138已构建）**：今日热点复用微博/抖音图标，每源最多5条并带排名，按卡片宽度切换双列/单列，减少固定高度留白；保留时间、缓存、错误与选题入口。40项模拟回归、lint/生产构建及7880实际资源核对通过；随后已随固定提交12f144c8部署138，页面验收由用户完成。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/dashboard-trends-2026-10-14.md)。
+
+> **Google News超时核查（2026-10-14）**：截图中的抓取失败已确认是 `request timed out`，138容器复测连接超时；搜索返回不足以证明近期没有重大新闻。补齐“网页请求超时”提示，17项前端回归与TypeScript通过，已随12f144c8部署138，页面验收由用户完成。[核查记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/huawei-fetch-failure-2026-10-14.md)。
 
 > **138工具修复与版本评估（2026-10-14，已部署）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。0.2.8正式/隔离真实Agent验收和切换已完成；OpenClaw继续固定2026.9.6。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
 
