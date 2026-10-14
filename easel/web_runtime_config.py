@@ -8,6 +8,31 @@ import os
 from pathlib import Path
 
 PLUGIN_PATH = '/opt/openclaw/node_modules/@openclaw/duckduckgo-plugin'
+FREE_SEARCH_PATH = '/app/deployment/138/free-search'
+
+
+def configure_free_search(value: dict, *, allow_plugin=False) -> tuple[dict, list[str]]:
+    """Use the reachable public RSS provider without overriding operator policy."""
+    result = copy.deepcopy(value)
+    search = result.get('tools', {}).get('web', {}).get('search', {})
+    plugins = result.get('plugins', {})
+    if (search.get('provider') not in (None, '', 'duckduckgo', 'easel-search') or search.get('enabled') is False
+            or plugins.get('enabled') is False or 'easel-search' in plugins.get('deny', [])
+            or plugins.get('entries', {}).get('easel-search', {}).get('enabled') is False):
+        return result, []
+    before = copy.deepcopy(result)
+    allowed = plugins.get('allow')
+    if isinstance(allowed, list) and 'easel-search' not in allowed:
+        if not allow_plugin:
+            return result, []
+        allowed.append('easel-search')
+    plugins = result.setdefault('plugins', {})
+    paths = plugins.setdefault('load', {}).setdefault('paths', [])
+    if FREE_SEARCH_PATH not in paths:
+        paths.append(FREE_SEARCH_PATH)
+    plugins.setdefault('entries', {}).setdefault('easel-search', {})['enabled'] = True
+    result.setdefault('tools', {}).setdefault('web', {}).setdefault('search', {}).update(provider='easel-search', enabled=True)
+    return result, ['web search: enable public Bing RSS provider'] if result != before else []
 
 
 def configure_browser_runtime(value: dict, auth: dict) -> tuple[dict, list[str]]:

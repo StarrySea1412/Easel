@@ -4,6 +4,28 @@ This deployment serves trusted operators sharing one workspace. It is not a
 multi-tenant data-isolation system. Entry: `https://192.168.0.138:8444/`.
 Codex is disabled until independently verified. Windows packaging remains paused.
 
+## October 14 candidate runtime repair
+
+The next 0.2.8 image includes the latest saved local UI, actual/current npm
+OpenClaw versions and an Agent action that evaluates official release notes.
+It keeps OpenClaw pinned to 2026.9.6. Production activation and final receipts
+are recorded separately in `docs/runtime-repair-2026-10-14.md`.
+
+138 cannot reach DuckDuckGo. The Easel `free-search` plugin uses the reachable
+public Bing RSS endpoint with OpenClaw's public search SDK, bounded responses,
+source URLs and untrusted-content wrappers. Back up the independent config,
+then call `configure_free_search(..., allow_plugin=True)` for an explicitly
+authorized existing installation. Keep unrelated providers, model credentials
+and identity intact; remove temporary staged copies of the same plugin.
+The final read-only plugin path is `/app/deployment/138/free-search`.
+
+Chromium previously exhausted its 128 thread/PID allowance. The dedicated
+browser now allows 256 and limits Mesa worker threads to two. Authenticated
+health checks create a disposable blank page and evaluate JavaScript, in
+addition to checking CDP connectivity. Namespace and seccomp sandboxing remain
+enabled. One-off scripts and intermediate files belong under `/data/outputs`
+or disposable `/tmp`, because `/app` is read-only.
+
 ## Current release and evidence (2026-10-13)
 
 Read-only browser/HTTP comparison confirmed a synchronization gap: the fixed

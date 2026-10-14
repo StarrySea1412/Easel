@@ -1,0 +1,1 @@
+{"id":"easel-search","categories":["web"],"activation":{"onStartup":false},"contracts":{"webSearchProviders":["easel-search"]},"configSchema":{"type":"object","additionalProperties":false,"properties":{}}}

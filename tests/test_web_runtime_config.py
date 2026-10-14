@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from easel.runtime_limits import install_limits
-from easel.web_runtime_config import PLUGIN_PATH, configure_web_runtime, configure_browser_runtime
+from easel.web_runtime_config import PLUGIN_PATH, configure_web_runtime, configure_browser_runtime, configure_free_search, FREE_SEARCH_PATH
 from easel import web_runtime_config
 
 
@@ -43,6 +43,21 @@ def test_remote_browser_is_authenticated_and_keeps_operator_policy():
     assert configure_browser_runtime(disabled, auth) == (disabled, [])
     with pytest.raises(ValueError):
         configure_browser_runtime({}, {'username': 'test-browser', 'password': 'too-short'})
+
+
+def test_rss_provider_preserves_other_providers_permissions_and_credentials():
+    original = {'models': {'credentialFixture': 'private'}, 'tools': {'web': {'search': {'provider': 'duckduckgo', 'timeoutSeconds': 18}}}}
+    result, changes = configure_free_search(original)
+    assert result['tools']['web']['search'] == {'provider':'easel-search','enabled':True,'timeoutSeconds':18}
+    assert result['plugins']['load']['paths'] == [FREE_SEARCH_PATH]
+    assert result['models'] == original['models'] and 'private' not in str(changes)
+    assert original['tools']['web']['search']['provider'] == 'duckduckgo'
+    assert configure_free_search(result)[1] == []
+    for policy in ({'tools':{'web':{'search':{'provider':'brave'}}}}, {'tools':{'web':{'search':{'enabled':False}}}},
+                   {'plugins':{'enabled':False}}, {'plugins':{'deny':['easel-search']}}, {'plugins':{'allow':['duckduckgo']}}):
+        assert configure_free_search(policy) == (policy, [])
+    allowed,_ = configure_free_search({'plugins':{'allow':['duckduckgo']}},allow_plugin=True)
+    assert allowed['plugins']['allow'] == ['duckduckgo','easel-search']
 
 
 @pytest.mark.parametrize('original', [

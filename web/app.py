@@ -3114,6 +3114,10 @@ def _chat_message(req: ChatRequest) -> str:
                 f'执行环境设置 EASEL_DATA_DIR="{DATA_DIR}"。只保存真实来源；网页快照不等于完整离线网站。'
                 '交付前用工具确认文件存在、非空且格式正确，只为实际保存成功的文件提供 '
                 '[文件名称](outputs/具体主题/文件名) 链接；不要返回 file://、盘符绝对路径或虚构下载链接。')
+    if os.environ.get('EASEL_DEPLOYMENT_MODE') in {'production', 'isolated-test'}:
+        message += (f'\n〔服务器写入边界〕/app是只读源码目录，不能把临时脚本写入/app/scripts或技能目录。'
+                    f'本轮多行Python脚本、中间文件和最终产物都写入{OUTPUTS_DIR}/具体主题/，'
+                    '再用exec执行该脚本的实际绝对路径；可丢弃临时文件可用/tmp。')
     configuration = _skill_configuration_context(specs)
     if configuration:
         message += '\n\n' + configuration

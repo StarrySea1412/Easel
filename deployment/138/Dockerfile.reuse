@@ -19,7 +19,9 @@ WORKDIR /app
 # One copy avoids repeatedly scanning the large immutable dependency tree.
 COPY . ./
 COPY --from=frontend /build/dist/ ./web/frontend/dist/
-RUN python deployment/138/install_locked_plugin.py && pip install --no-deps . && chmod -R a+rX /app /opt/openclaw
+# Exported source is readable; the audited dependency image already has its
+# runtime permissions. Avoid copying the whole dependency tree for chmod.
+RUN python deployment/138/install_locked_plugin.py && pip install --no-deps . && chmod -R a+rX /app
 ARG EASEL_RELEASE_SHA
 LABEL org.opencontainers.image.revision=${EASEL_RELEASE_SHA}
 USER 1000:1000

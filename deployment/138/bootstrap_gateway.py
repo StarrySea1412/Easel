@@ -5,7 +5,7 @@ from pathlib import Path
 import secrets
 import shutil
 
-from easel.web_runtime_config import configure_web_runtime, configure_browser_runtime
+from easel.web_runtime_config import configure_web_runtime, configure_browser_runtime, configure_free_search
 
 ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
@@ -36,6 +36,7 @@ def bootstrap():
             'agents': {'defaults': {'workspace': str(WORKSPACE), 'maxConcurrent': 1,
                 'subagents': {'maxConcurrent': 1}}}}
         value, _ = configure_web_runtime(value)
+        value, _ = configure_free_search(value)
         config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     model_file = Path(os.environ.get('EASEL_MODEL_BOOTSTRAP_FILE', '/run/secrets/model-bootstrap.json'))
     if model_file.is_file():
@@ -80,6 +81,9 @@ def bootstrap():
         shutil.copyfile(source, destination)
     with (WORKSPACE / 'AGENTS.md').open('a', encoding='utf-8') as output:
         output.write('\n\n## Easel server paths\nProject code: `/app`; persistent data: `/data`.\n'
+            'The /app source tree is read-only. Save one-off Python scripts and intermediate files '
+            'alongside deliverables under /data/outputs/<topic>/, never under /app/scripts or skill source. '
+            'Execute the saved script by its actual absolute path. Disposable temporary files may use /tmp.\n'
             'Use EASEL_DATA_DIR and the actual /data/.env for offline configuration checks. '
             'Save actual output files under /data/outputs/<topic>/; verify files exist before linking them.\n')
     for name, target in [('outputs', DATA / 'outputs'), ('easel-profiles', DATA / 'profiles')]:

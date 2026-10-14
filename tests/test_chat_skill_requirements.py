@@ -46,6 +46,15 @@ def test_requirements_are_exact_user_context_without_writing_global_skill_files(
     assert 'shared' in message and '复杂多行Python先写脚本再执行' in message
 
 
+def test_server_commands_use_writable_output_scripts(skills, monkeypatch, tmp_path):
+    monkeypatch.setenv('EASEL_DEPLOYMENT_MODE', 'isolated-test')
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    message = web._chat_message(request())
+    assert '/app是只读源码目录' in message
+    assert '不能把临时脚本写入/app/scripts' in message
+    assert f'{tmp_path / "outputs"}/具体主题/' in message
+
+
 def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, monkeypatch):
     monkeypatch.setattr(web, '_read_env', lambda: {'IMG_API_KEY': 'PRIVATE_KEY', 'IMG_BASE_URL': 'https://PRIVATE_URL', 'IMG_MODEL': 'fixture'})
     visual = web._chat_message(request())

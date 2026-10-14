@@ -71,6 +71,7 @@ services:
     environment:
       EASEL_BROWSER_AUTH_FILE: /run/secrets/browser-auth.json
       EASEL_BROWSER_CDP_HOST: browser:18801
+      LP_NUM_THREADS: "2"
     volumes:
       - ${EASEL_SECRETS_PATH}/browser-auth.json:/run/secrets/browser-auth.json:ro
     read_only: true
@@ -79,7 +80,7 @@ services:
     shm_size: 256mb
     mem_limit: 768m
     cpus: 1.0
-    pids_limit: 128
+    pids_limit: 256
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
