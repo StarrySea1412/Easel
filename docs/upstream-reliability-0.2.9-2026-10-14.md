@@ -41,7 +41,12 @@ Profile锁覆盖本仓库小红书启动链路，外部工具仍由Chromium自�
 - `main` 仅同步双语首页和明确分支入口，不合并功能代码。
 - 未部署0.2.9到138、重启既有服务或发布新exe/安装器；完整便携打包保持此前暂停状态。
 - 原计划A的0.2.8运行修复已完成，正式提交为 `0ba9fe201ca384f40894545db068a093b0e21235`，OpenClaw仍固定2026.9.6，依据[运行回执](runtime-repair-2026-10-14.md)。原计划旧部署描述保留为历史比较基线。
+- 同时进行的快速发布任务后来记录0.2.8已更新至 `12f144c8848fc8a2fbc49a1acbfbbde1e63bb681`，收录热点/图标与超时提示；见[该任务实际回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/quick-deploy-138-acceptance-2026-10-14.md)。本轮读取回执以同步说明，没有重复服务器验收，也没有将本版代码混入该发行。
 - C共享资源路径、D真实文件画廊、E引擎契约、F新增引擎继续单独实施；自动审批、完整恢复/负载、平台/付费媒体和服务器Codex启用等历史未验项保持。
+
+Git回执：实现提交 `70991cc575e0393dc20bc096e6cf908225beeeca` 已推送并核对 `starry/codex/upstream-reliability-0.2.9`；main仅双语首页提交 `9136fcb2dd28861ee84d9f882ecf2f4c14fa3ece` 已推送并核对远端一致。首页同步基于其他任务新提交 `3443bac3` 重放，保留其部署说明，未强制推送或合并功能代码。后续文档回执提交与实现SHA分开。
+
+新增本地Markdown目标6项存在；独立分支的双语README、CHANGELOG、对比计划、本版记录及main双语README共7个在线Markdown源HTTP200，包含0.2.9说明，main同时保留12f144c8发布信息。这是HTTP与源码检查，没有报告真实浏览器链接、菜单或跳转验收。
 
 ## English
 

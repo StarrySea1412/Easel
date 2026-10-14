@@ -100,6 +100,8 @@ A已按原发布任务完成，B在独立分支按固定上游基线实施；运
 
 ## English comparison and adoption plan
 
+**Same-day implementation update:** retain the historical comparison below. Batch A completed the 0.2.8 runtime release; B is implemented in the independent 0.2.9 source candidate, with [adoption and validation boundaries](upstream-reliability-0.2.9-2026-10-14.md). C–F remain later batches. No 0.2.9 runtime or installer was released.
+
 Keep the fork's creator workflow and finish the current 0.2.8 candidate release first. Then adopt upstream reliability fixes in small commits. Upstream's common runtime architecture and neutral skill paths are useful, but they must preserve our durable execution evidence, account isolation, session ownership and permissions.
 
 **Verified source baselines.** On October 14, fetching both remotes confirmed upstream `bb3c8ff0463f36c202454d74171682ba6e470cb1` (source 0.3.0) and our functional branch `cd86691014022ad9a702935d886bdd2395283385` (candidate 0.2.8). Upstream has a v0.3.0 GitHub Release with zero attached assets, checked through the API. Our main branch started at `e8bdfeb5`; its documentation describes newer work, while the functional code remains on `codex/upstream-compat-2026-10-10`. The latest verified 138 runtime is still 0.2.7/build `1a324540854c`, with October 13 evidence; this comparison did not recheck or change it.
