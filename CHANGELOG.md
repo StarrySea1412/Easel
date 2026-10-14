@@ -7,6 +7,7 @@
 
 - Add a double-click CMD/PowerShell entry for the installed local project, defaulting to port 7880 and existing data, with verified instance reuse, browser opening and visible failure/log guidance. A small script ZIP is separate from a portable application. / 新增可双击本机快速入口，复用现有服务并打开页面，支持单独解压后定位本机项目和自定义路径；小包仅含脚本与说明。
 - Allow an explicit bounded gateway startup timeout; the quick entry waits up to 900 seconds to cover observed cold starts beyond the previous 300-second limit. / 增加有限的网关等待参数，快速入口等待15分钟，处理本机冷启动超过5分钟的实际情况。
+- 115 focused startup/endpoint/path checks and PowerShell syntax passed. Actual CMD reuse from System32 and an extracted Unicode path, missing-project errors and ZIP CRC/bytes passed; HTTP and the existing real browser page confirmed gateway readiness. Cold restart was not performed. / 115项定向检查及实际入口/解压/错误提示/小包校验通过，HTTP和真实页面确认服务可用；未重启当前服务或调用模型。
 
 ## 2026-10-14 · Upstream comparison / 上游对比规划
 

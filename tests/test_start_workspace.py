@@ -203,6 +203,31 @@ def test_real_gateway_failure_still_blocks_source_web(fresh_start, monkeypatch):
     assert not (data / 'workbench.json').exists()
 
 
+def test_extended_cold_start_wait_reaches_gateway_and_supervisor(fresh_start, monkeypatch):
+    root, data, calls = fresh_start
+    def run(command, **kwargs):
+        calls.append(('run', command, kwargs))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(launcher.subprocess, 'run', run)
+    assert launcher.main(['--root', str(root), '--data-dir', str(data),
+                          '--gateway-timeout', '900', '--no-browser']) == 0
+    gateway_call = calls[0][2]
+    assert gateway_call['timeout'] == 930
+    assert gateway_call['env']['EASEL_GATEWAY_STARTUP_TIMEOUT'] == '900'
+    assert json.loads((data / 'workbench.json').read_text())['port'] == 7889
+
+
+@pytest.mark.parametrize('timeout', ['29', '1801', 'invalid'])
+def test_invalid_cold_start_wait_never_launches_process(fresh_start, monkeypatch, timeout):
+    root, data, calls = fresh_start
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda *_a, **_k: pytest.fail('must not start Gateway'))
+    with pytest.raises(SystemExit) as error:
+        launcher.main(['--root', str(root), '--data-dir', str(data),
+                       '--gateway-timeout', timeout, '--no-browser'])
+    assert error.value.code == 2
+    assert not calls and not (data / 'workbench.json').exists()
+
+
 @pytest.mark.parametrize('saved_port,expected_port', [(38100, '38100'), ('38100', '38100'),
     ('127.0.0.1:38101', '38101'), ('[::1]:38102', '38102'), (None, None)])
 def test_source_gateway_uses_only_local_runtime_endpoint(fresh_start, monkeypatch, saved_port, expected_port):

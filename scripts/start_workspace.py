@@ -159,11 +159,20 @@ def runtime_gateway_port(value) -> str | None:
     return str(int(match[1]))
 
 
+def gateway_timeout(value: str) -> int:
+    seconds = int(value)
+    if not 30 <= seconds <= 1800:
+        raise argparse.ArgumentTypeError('Gateway timeout must be between 30 and 1800 seconds')
+    return seconds
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     ap.add_argument("--data-dir", type=Path)
     ap.add_argument("--port", type=int, default=int(os.environ.get("EASEL_PORT", "7860")))
+    ap.add_argument("--gateway-timeout", type=gateway_timeout, default=300,
+                    help="Gateway startup wait in seconds (30–1800; default 300)")
     ap.add_argument("--no-browser", action="store_true")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument('--restart', action='store_true')
@@ -231,10 +240,11 @@ def launch(root: Path, data: Path, args) -> int:
         raise RuntimeError('没有可复用的工作台。待迁移设置已保留；请重新启动并确认“重启并迁移”。')
     logs = data / "logs"
     logs.mkdir(exist_ok=True)
+    env['EASEL_GATEWAY_STARTUP_TIMEOUT'] = str(args.gateway_timeout)
     with (logs / "launch.log").open("ab") as log:
         rc = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
             "-File", str(root / "scripts/gateway.ps1"), "start"], cwd=root, env=env, stdout=log, stderr=log,
-            timeout=330, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
+            timeout=args.gateway_timeout + 30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
         if rc:
             raise RuntimeError(f"Gateway startup failed; see {logs / 'launch.log'}")
         try:

@@ -44,6 +44,15 @@ if (-not $Port) { $Port = ConvertTo-GatewayPort $env:EASEL_GATEWAY_PORT }
 if (-not $Port) { $Port = Get-ConfiguredPort $ConfigDir }
 if (-not $Port) { $Port = Get-ProfilePort $Profile }
 $env:OPENCLAW_GATEWAY_PORT = [string]$Port
+$StartupTimeout = 300
+if ($env:EASEL_GATEWAY_STARTUP_TIMEOUT) {
+    $requestedTimeout = 0
+    if (-not [int]::TryParse($env:EASEL_GATEWAY_STARTUP_TIMEOUT, [ref]$requestedTimeout) -or
+        $requestedTimeout -lt 30 -or $requestedTimeout -gt 1800) {
+        throw 'Gateway startup timeout must be between 30 and 1800 seconds.'
+    }
+    $StartupTimeout = $requestedTimeout
+}
 
 function Test-Gateway {
     try { Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing -TimeoutSec 2 | Out-Null; return $true }
@@ -88,7 +97,7 @@ switch ($args[0]) {
         Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $command `
             -WorkingDirectory $Root -RedirectStandardOutput $LogFile -RedirectStandardError $ErrorLogFile -WindowStyle Hidden | Out-Null
         $ready = $false
-        $deadline = [DateTime]::UtcNow.AddSeconds(300)
+        $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeout)
         while (-not $ready -and [DateTime]::UtcNow -lt $deadline) {
             if (Test-Gateway) { $ready = $true }
             else { Start-Sleep -Seconds 1 }
