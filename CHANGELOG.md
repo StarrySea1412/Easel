@@ -1,3 +1,9 @@
+## 2026-10-14 · Quick deploy activation follow-up / 快速发布激活补齐
+
+- Verify and reuse an immutable stage for the same commit instead of deleting the isolated instance's active source. / 同一提交的候选目录校验后复用，不删除隔离实例正在使用的源码。
+- Wait for Compose health before the HTTPS probe, and print the matching isolated or production rollback command. / 激活后等待容器健康再请求HTTPS，回滚命令对应正式或隔离环境。
+- Keep user frontend acceptance separate from logic and deployment checks. Actual activation receipts follow the runbook. / 前端交互验收由用户完成，逻辑与发布回执按运行手册单独记录。
+
 ## 2026-10-14 · Google News timeout cause / Google News超时原因
 
 - Confirm the screenshot failure with the original SQLite tool receipt and a bounded live-container network probe. / 从原始SQLite工具回执及容器网络探测确认Google News请求超时，无HTTP响应；未重新部署。

@@ -107,10 +107,15 @@ expected_sha='__ARCHIVE_SHA__'
 
 actual_sha=$(sha256sum "$archive" | awk '{print $1}')
 [ "$actual_sha" = "$expected_sha" ] || { echo "Archive SHA-256 mismatch" >&2; exit 1; }
-rm -rf "$stage"
-mkdir -m 700 -p "$stage"
-unzip -q "$archive" -d "$stage"
+if [ -e "$stage" ] || [ -L "$stage" ]; then
+  [ -d "$stage" ] && [ ! -L "$stage" ] || { echo "Unsafe existing release stage" >&2; exit 1; }
+  echo "Reusing existing immutable release stage"
+else
+  mkdir -m 700 -p "$stage"
+  unzip -q "$archive" -d "$stage"
+fi
 python3 "$stage/deployment/138/manage.py" verify
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["commit"] == sys.argv[2], "Existing stage belongs to another commit"' "$stage/release-manifest.json" '__REVISION__'
 if [ "$activate" = 1 ]; then
   python3 "$stage/deployment/138/manage.py" prepare --base "$base" $test_arg
 fi
@@ -123,6 +128,7 @@ if [ "$activate" = 1 ]; then
   secrets_suffix=''
   endpoint='192.168.0.138:8444'
   if [ "$test_arg" = '--isolated-test' ]; then project=easel-test; secrets_suffix='-test'; endpoint='127.0.0.1:8445'; fi
+  docker compose -p "$project" --env-file "$base/easel-secrets${secrets_suffix}/deployment.env" -f "$stage/deployment/138/compose.yaml" up -d --no-build --wait --wait-timeout 240
   docker compose -p "$project" --env-file "$base/easel-secrets${secrets_suffix}/deployment.env" -f "$stage/deployment/138/compose.yaml" ps
   curl --cacert "$base/easel-secrets${secrets_suffix}/easel-root-ca.crt" --fail --silent --show-error --output /dev/null "https://$endpoint/login"
   echo "138 activation and HTTPS login probe completed."
@@ -152,7 +158,8 @@ if [ "$keep" != 1 ]; then rm -f "$archive"; fi
     } else {
         Write-Host 'Candidate upload/build completed; production was not changed.' -ForegroundColor Green
     }
-    Write-Host "Rollback (if an activated release fails): ssh $target 'python3 $RemoteBase/Easel.previous/deployment/138/manage.py rollback'"
+    $activeLink = if ($IsolatedTest) { 'Easel-test' } else { 'Easel' }
+    Write-Host "Rollback (if an activated release fails): ssh $target 'python3 $RemoteBase/$activeLink/deployment/138/manage.py rollback --base $RemoteBase $testArg'"
     exit 0
 } catch {
     Write-Host ("138 quick deploy failed: " + $_.Exception.Message) -ForegroundColor Red
