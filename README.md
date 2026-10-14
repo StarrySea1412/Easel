@@ -1,3 +1,5 @@
+> **0.2.9上游跟进候选（2026-10-14）**：以ZJU-REAL/Easel的固定0.3.0源码为主线，落实计划B：扫码入口/登录判定、小红书本人身份/有界采集/Profile锁、Windows PATH与自定义模型思考能力/格式。保留定制创作者工作流、账号历史和凭据事务。[逐项跟进与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/upstream-reliability-0.2.9-2026-10-14.md)。源码在独立分支，未替换本机7880、部署138或发布安装器；C–F后续实施，页面效果由用户验收。
+
 > **138快速发布已实测（2026-10-14）**：0.2.8 / `12f144c8` 已通过快速入口先隔离再正式发布，包含超时提示及热点密度/平台图标；同一固定镜像、运行源码、登录/版本/网关、官方更新记录与两次真实Agent工具回执通过。前端交互由用户验收，OpenClaw仍为2026.9.6。[实际发布回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/quick-deploy-138-acceptance-2026-10-14.md)。
 
 > **首页热点密度与来源图标（2026-10-14，本机与138已构建）**：今日热点复用微博/抖音图标，每源最多5条并带排名，按卡片宽度切换双列/单列，减少固定高度留白；保留时间、缓存、错误与选题入口。40项模拟回归、lint/生产构建及7880实际资源核对通过；随后已随固定提交12f144c8部署138，页面验收由用户完成。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/dashboard-trends-2026-10-14.md)。
@@ -8,7 +10,7 @@
 
 > **138快速发布入口（2026-10-14）**：根目录 `Quick-Deploy-138.cmd` 可从固定 Git 提交构建、上传并在 138 远端校验/构建候选；只有显式加入 `-Activate` 才会备份并切换正式服务。默认不改运行中的服务，完整参数和回滚边界见[138快速发布说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deploy-138-quick-start.md)。
 
-> **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
+> **上游对比与跟进规划（2026-10-14）**：[比较与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/upstream-comparison-plan-2026-10-14.md)保留原始源码基线；A的0.2.8运行修复已完成，B已落实为本版可靠性源码候选。C共享路径、D真实文件画廊、E引擎契约、F新增引擎按依赖继续迭代，真实平台和发行验收分开记录。
 
 > **0.2.8 发布记录**：`cd866910` 是候选源码保存点；最终部署提交为 `0ba9fe20`，收录搜索、浏览器、工具执行和版本评估修复。真实搜索、独立浏览器和正式发布验收已完成。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文带日期的部署回执属于历史版本。
 
@@ -60,9 +62,9 @@
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
-[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
+[English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-reliability-0.2.9) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/CHANGELOG.md)
 
-> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-10**，介绍 `codex/upstream-compat-2026-10-10` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
+> 本项目由 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 仓库维护，基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 二次开发。本文更新于 **2026-10-14**，介绍 `codex/upstream-reliability-0.2.9` 的当前源码；`main` 首页同步展示项目说明，功能代码仍在开发分支。已有 0.2.6 EXE / ZIP 来自 `38e728c`，不包含后续工作台与办公室改动，尚未发布包含这些功能的新安装器。
 >
 > Windows x64 历史便携候选为 `Easel-preview-76bbaf6-3fb7.zip`（约 1.06 GiB），已完成实际解压、完整文件校验、包内启动、两种 Chromium 运行和指定工作台入口的浏览器验收。尚未公开发布；图形双击和全新 Windows 环境仍待验收。使用步骤、SHA-256 和逐项边界见 [便携预览说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md)。
 >
@@ -140,7 +142,7 @@ Windows x64 便携候选包含应用、前端、CPython 3.12.10、Node 24.19.0�
 Windows 首先准备 Git、Python 3.10+（建议 3.12）、Node.js 24.16+（24.x）或 26.1+、FFmpeg，并确认终端能找到这些命令。安装脚本会指出缺少的工具。
 
 ```bash
-git clone --branch codex/upstream-compat-2026-10-10 https://github.com/StarrySea1412/Easel.git
+git clone --branch codex/upstream-reliability-0.2.9 https://github.com/StarrySea1412/Easel.git
 cd Easel
 ```
 
@@ -151,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive 
 .\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
 
-已安装的定制分支项目可双击根目录 `Quick-Start-Easel.cmd` 快速打开，默认7880和现有data，已有服务会复用，冷启动最多等待15分钟。脚本不触发安装；快速入口源码位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10)，自定义路径、独立小包与排错方式见[快速启动说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md)。
+已安装的定制分支项目可双击根目录 `Quick-Start-Easel.cmd` 快速打开，默认7880和现有data，已有服务会复用，冷启动最多等待15分钟。脚本不触发安装；快速入口源码位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-reliability-0.2.9)，自定义路径、独立小包与排错方式见[快速启动说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md)。
 
 这条快速启动路径明确把平台登录/发布用的独立浏览器留待稍后安装，先打开基础工作台。安装记录会标明“浏览器已延后”，不会把它算作已安装；依赖该浏览器的平台操作需要补装后再使用。补装时运行下面的命令，已完成阶段会保留：
 
