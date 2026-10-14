@@ -1,3 +1,8 @@
+## 2026-10-14 · Upstream comparison / 上游对比规划
+
+- Compare upstream v0.3.0 / `bb3c8ff0` with saved candidate `cd866910`; document shared product direction, strengths, source evidence and phased acceptance. Prioritize the existing 0.2.8 release, then reliability fixes, shared paths, a real-file gallery and adapted runtimes. / 完成逐主题对比与分批验收计划，先收口候选部署再吸收可靠性修复；路径、画廊和引擎另批适配，保留创作者工作流与持久执行证据。
+- Synchronize bilingual project/report links and progress; correct candidate-source status and retain the latest verified server identity as 0.2.7/build `1a324540854c`. Historical candidate checks: 131 focused backend and 962 frontend tests passed. Upstream Release assets: zero. This is a documentation delivery, with no new runtime implementation, server switch or package release. / 同步双语入口与进度，区分已推送候选、历史自动化证据及实际运行发行；本次未部署或发布安装包。
+
 ## 0.2.8 candidate · 2026-10-13
 
 - Synchronize compact Settings, dashboard, image studio, skill recommendations, analysis/office and tool presentation with their backend modules.
