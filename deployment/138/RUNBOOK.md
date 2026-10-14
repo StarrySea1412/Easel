@@ -12,6 +12,13 @@ It keeps OpenClaw pinned to 2026.9.6. Production activation and final receipts
 are recorded separately in `docs/runtime-repair-2026-10-14.md`. The active image
 is `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`.
 
+From a Windows checkout, `Quick-Deploy-138.cmd` (implemented by
+`scripts/deploy_138.ps1`) chains the committed-source export, SSH/SCP transfer,
+remote manifest verification and Docker build. It stages a candidate by default;
+only `-Activate` runs the remote stop-write backup and symlink switch. Use
+`-IsolatedTest -Activate` for the separate test stack first. The full command
+reference and prerequisites are in `docs/deploy-138-quick-start.md`.
+
 138 cannot reach DuckDuckGo. The Easel `free-search` plugin uses the reachable
 public Bing RSS endpoint with OpenClaw's public search SDK, bounded responses,
 source URLs and untrusted-content wrappers. Back up the independent config,

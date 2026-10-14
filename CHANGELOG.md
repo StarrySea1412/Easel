@@ -3,6 +3,12 @@
 - Show the selected OpenClaw version and official latest release, with bounded official changelog evidence for Agent upgrade advice; keep existing chats and drafts. / 显示当前运行版与官方latest，Agent基于官方来源评估收益、风险与建议，不自动升级。
 - Give accurate skill/reference paths and independent-command guidance; install curl/file and pinned official search support, and connect a dedicated authenticated sandboxed Chromium container. / 修复路径与命令规则，补工具/搜索与独立浏览器；真实隔离及正式验收待回执。
 
+## 2026-10-14 · 138 quick deploy / 138 快速发布
+
+- Add a Windows PowerShell/CMD entry that exports a selected committed SHA, verifies the release archive remotely, builds the fixed Docker image and leaves a candidate by default. / 增加 Windows PowerShell/CMD 快速入口，固定提交导出、远端校验并构建镜像，默认只留下候选，不切换正式服务。
+- Require explicit `-Activate` for the remote stop-write backup and service switch; keep credentials, OpenClaw state, browser profiles, cookies and personal outputs outside the archive. / 正式停写备份和服务切换必须显式 `-Activate`；凭据、OpenClaw 状态、浏览器 profile、cookies 与个人产物不进入发布包。
+- Document SSH/SCP prerequisites, isolated-test usage, HTTPS login probing and rollback boundaries in [the quick deploy guide](docs/deploy-138-quick-start.md). / 在[快速发布说明](docs/deploy-138-quick-start.md)记录 SSH/SCP 前置条件、隔离验收、HTTPS 探针和回滚边界。
+
 ## 2026-10-14 · Local quick start / 本机快速启动
 
 - Add a double-click CMD/PowerShell entry for the installed local project, defaulting to port 7880 and existing data, with verified instance reuse, browser opening and visible failure/log guidance. A small script ZIP is separate from a portable application. / 新增可双击本机快速入口，复用现有服务并打开页面，支持单独解压后定位本机项目和自定义路径；小包仅含脚本与说明。

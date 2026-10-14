@@ -1,0 +1,58 @@
+# 138 快速发布 / Quick deploy to 138
+
+`Quick-Deploy-138.cmd` 和 `scripts/deploy_138.ps1` 把已有的 138 发布流程串成一个入口：固定 Git 提交、生成带 `release-manifest.json` 的 ZIP、传到 138、远端校验、构建固定镜像；只有显式使用 `-Activate` 才会停写备份并切换正式服务。
+
+## 快速用法
+
+在项目根目录打开 PowerShell：
+
+```powershell
+# 只构建、上传并在 138 远端构建候选；不影响正在运行的服务
+.\Quick-Deploy-138.cmd -Commit HEAD
+
+# 先完成候选流程，再执行远端备份、激活和 HTTPS /login 探针
+.\Quick-Deploy-138.cmd -Commit HEAD -Activate
+
+# 建议先在隔离实例验收
+.\Quick-Deploy-138.cmd -Commit HEAD -IsolatedTest -Activate
+```
+
+脚本默认使用 `ubuntu@192.168.0.138`、`/home/ubuntu`、`/home/ubuntu/easel-releases`，通过本机 OpenSSH 既有密钥认证。可按实际环境覆盖：
+
+```powershell
+.\scripts\deploy_138.ps1 `
+  -HostName 192.168.0.138 -UserName ubuntu `
+  -Commit 0ba9fe201ca384f40894545db068a093b0e21235 `
+  -RemoteBase /home/ubuntu -Activate
+```
+
+## 安全边界
+
+- 默认是候选模式，不会停止容器、改 symlink、重启服务或写入生产配置。
+- `-Activate` 是唯一的正式切换开关；远端 `manage.py activate` 会先保存 data/state/secrets 停写备份，再切换 `Easel` symlink。
+- 源码只来自选定的已提交 Git SHA。工作树有未提交修改时脚本拒绝运行；`-AllowDirty` 只允许继续发布所选提交，未提交文件仍不会进入 ZIP。
+- 脚本不读取或传输本地 `.env`、OpenClaw 状态、浏览器 profile、平台 cookies、个人 outputs 或 SSH 私钥。
+- 远端失败发生在激活前时，候选目录和镜像会保留，正式服务不变。激活后可按输出的命令调用上一版本 `manage.py rollback`；完整双版本故障回滚演练仍需单独验收。
+
+## 前置条件与验收
+
+本机需要 Git、Python（优先使用项目 `.venv`）、OpenSSH `ssh/scp`；138 需要 `ubuntu` 用户的 SSH 权限、Docker、`unzip`、`curl`，以及已经初始化的 `/home/ubuntu/easel-secrets`、TLS 和 OpenClaw 状态目录。脚本会在远端运行 `verify`、`preflight` 和 Docker 构建；只有 `-Activate` 才运行 `prepare` 并接触持久环境目录。正式模式最后请求受 HTTPS 保护的 `/login`，不会把未登录的 401 误判成失败服务。
+
+本入口不代替真实浏览器登录、Agent 工具、全菜单、代表性负载和恢复演练。部署成功只表示选定提交已通过发布清单校验、镜像构建、激活和 HTTPS 探针；仍按 [138 运行手册](../deployment/138/RUNBOOK.md) 完成版本、登录、网关、工具和页面逐项对账。
+
+## Quick deploy (English)
+
+`Quick-Deploy-138.cmd` and `scripts/deploy_138.ps1` chain the existing 138 release steps: export one committed Git SHA, create the manifest ZIP, upload it, verify it remotely and build the fixed image. Production backup and activation happen only with the explicit `-Activate` switch.
+
+```powershell
+# Stage and build a candidate; the running service is unchanged
+.\Quick-Deploy-138.cmd -Commit HEAD
+
+# Back up and activate the selected commit on 138
+.\Quick-Deploy-138.cmd -Commit HEAD -Activate
+
+# Run the same flow against the isolated instance first
+.\Quick-Deploy-138.cmd -Commit HEAD -IsolatedTest -Activate
+```
+
+The script uses the existing `ubuntu@192.168.0.138` SSH key, never copies credentials or personal runtime data, refuses a dirty tree by default, and leaves a candidate plus image for inspection if verification or the build fails before activation. Follow the [138 runbook](../deployment/138/RUNBOOK.md) for the remaining browser, login, Gateway, tool, rollback and load acceptance boundaries.

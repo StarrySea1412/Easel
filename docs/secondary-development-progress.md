@@ -547,3 +547,9 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 0.2.8 / build `0ba9fe201ca3` 已部署至 `https://192.168.0.138:8444/`，正式 app/browser healthy、重启0；image `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`，源码1385项摘要通过。
 - 真实正式Agent read5/ls1/search1/fetch1/browser2/write1/exec2 无错误；第二次正式任务脚本首次执行退出0并生成报告/HTML。环境页真实显示OpenClaw `2026.9.6`与官方latest `2026.10.3`，评估入口已验证。
 - 评估以官方记录为不可信参考，区分事实、条件性影响和未知；当前不自动升级OpenClaw，保持2026.9.6，升级前需隔离兼容验收和安全影响评估。
+
+## 2026-10-14 · 138 快速发布入口
+
+- 新增 `Quick-Deploy-138.cmd` / `scripts/deploy_138.ps1`：从固定 Git 提交生成带清单的 ZIP，校验本地与远端 SHA-256，上传到 138，运行 `verify`、`prepare`、`preflight` 并构建镜像。
+- 默认只构建远端候选，不停止或切换正式服务；显式 `-Activate` 才执行远端停写备份、symlink 切换和 HTTPS `/login` 探针；`-IsolatedTest` 可先复用同一流程验收隔离实例。
+- 入口与参数记录于 [138 快速发布说明](deploy-138-quick-start.md)。尚未在本轮实际触发生产切换；脚本验证与真实服务器执行分别记录，完整回滚/负载/全菜单边界继续保留。

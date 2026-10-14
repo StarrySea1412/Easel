@@ -52,3 +52,15 @@ def test_manifest_cannot_verify_files_outside_release(tmp_path):
         'files': {'../outside': {}}}))
     with pytest.raises(ValueError, match='Invalid release file'):
         manager.verify(release)
+
+
+def test_quick_deploy_script_keeps_candidate_default_and_sensitive_paths_outside_payload():
+    script = (ROOT / 'scripts/deploy_138.ps1').read_text(encoding='utf-8')
+    assert '[switch]$Activate' in script
+    assert "if ($Activate) { 'EXPLICITLY ENABLED' } else { 'candidate only' }" in script
+    assert 'python3 "$stage/deployment/138/manage.py" activate' in script
+    assert 'if [ "$activate" = 1 ]; then\n  python3 "$stage/deployment/138/manage.py" prepare' in script
+    assert "[switch]$KeepRemoteArchive" in script
+    assert 'BatchMode=yes' in script and 'sha256sum' in script
+    guide = (ROOT / 'docs/deploy-138-quick-start.md').read_text(encoding='utf-8')
+    assert '-Activate' in guide and 'OpenClaw 状态' in guide and '个人 outputs' in guide

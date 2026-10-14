@@ -1,5 +1,7 @@
 > **138工具修复与版本评估（2026-10-14，已部署）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。0.2.8正式/隔离真实Agent验收和切换已完成；OpenClaw继续固定2026.9.6。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
 
+> **138快速发布入口（2026-10-14）**：根目录 `Quick-Deploy-138.cmd` 可从固定 Git 提交构建、上传并在 138 远端校验/构建候选；只有显式加入 `-Activate` 才会备份并切换正式服务。默认不改运行中的服务，完整参数和回滚边界见[138快速发布说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deploy-138-quick-start.md)。
+
 > **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
 
 > **0.2.8 发布记录**：`cd866910` 是候选源码保存点；最终部署提交为 `0ba9fe20`，收录搜索、浏览器、工具执行和版本评估修复。真实搜索、独立浏览器和正式发布验收已完成。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文带日期的部署回执属于历史版本。
