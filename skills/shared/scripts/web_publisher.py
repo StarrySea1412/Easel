@@ -892,6 +892,15 @@ def _is_logged_in(page, cfg: dict) -> bool:
         url = (page.url or "").lower().rstrip("/")
     except Exception:
         url = ""
+    try:
+        from urllib.parse import urlsplit
+        location = urlsplit(url)
+        allowed_hosts = {urlsplit(cfg.get(key, '')).hostname for key in ('login_url', 'publish_url')}
+        if (location.scheme not in ('https', 'http') or not location.hostname
+                or location.hostname not in allowed_hosts or location.username or location.password):
+            return False
+    except ValueError:
+        return False
     # 1. URL 明确在登录/验证页（视频号→login.html、知乎→signin，实测）
     if any(m in url for m in _LOGIN_MARKERS):
         return False

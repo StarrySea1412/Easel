@@ -657,6 +657,58 @@ test('transcription saving protects editable fields until the server responds', 
   assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').length, 1);
 });
 
+async function chooseOptionByKeyboard(view, label, value) {
+  const select = view.container.querySelector(`button[aria-label="${label}"]`);
+  assert.ok(select);
+  await act(async () => select.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
+  const options = [...document.querySelectorAll(`[role="listbox"][aria-label="${label}"] [role="option"]`)];
+  const index = options.findIndex(option => option.dataset.value === value);
+  assert.ok(index >= 0);
+  for (const key of ['Home', ...Array(index).fill('ArrowDown'), 'Enter']) await act(async () => select.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+  assert.equal(select.getAttribute('aria-expanded'), 'false');
+}
+
+for (const [choice, thinking, format] of [['auto', null, ''], ['on', true, 'deepseek'], ['off', false, 'openai']]) {
+  test(`custom model ${choice} thinking choice is a keyboard-editable draft and survives saving without new credentials`, async t => {
+    const rows = [...configuredRows(), { slot: 'custom', order: 0, name: 'custom-provider', sub: '自定义',
+      type: 'openai', protocol: 'openai', model: 'custom-model', baseUrl: 'https://custom.example.test/v1',
+      keyMasked: 'masked-existing', role: '备', result: '已配置', thinking: true, thinkingFormat: 'openai' }];
+    const view = await fixture(t, { fetchModelChannels: modelChannels(rows),
+      saveModelConfig: (_channel, saved) => ({ ok: true, ...modelChannels(rows.map(row => row.slot === 'custom'
+        ? { ...row, thinking: saved.at(-1).thinking, thinkingFormat: saved.at(-1).thinkingFormat } : row)) }) });
+    await view.render(1, view.props, 'model');
+    const card = [...view.container.querySelectorAll('.provider-card')].at(-1);
+    await view.click(card.querySelector('.provider-toggle'));
+    assert.equal(card.querySelector('select'), null);
+    await chooseOptionByKeyboard(view, '思考能力', choice);
+    if (thinking === false) assert.equal(card.querySelector('button[aria-label="思考请求格式"]'), null);
+    else await chooseOptionByKeyboard(view, '思考请求格式', format);
+    await view.click(card.querySelector('.provider-toggle'));
+    await view.click(card.querySelector('.provider-toggle'));
+    assert.equal(card.querySelector('button[aria-label="思考能力"]').value, choice);
+    assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
+    await view.click(findButton(view, '保存并使用'));
+    const [channel, saved] = view.harness.calls.find(call => call.name === 'saveModelConfig').args;
+    assert.equal(channel, 'chat');
+    assert.equal(saved.at(-1).thinking, thinking);
+    assert.equal(saved.at(-1).thinkingFormat, format);
+    assert.equal(saved.at(-1).key, '');
+    assert.equal(saved.at(-1).baseUrl, rows.at(-1).baseUrl);
+    assert.equal(saved[0].thinking, undefined);
+    assert.equal(card.querySelector('button[aria-label="思考能力"]').value, choice);
+    assert.equal(view.harness.calls.some(call => ['runChannelSelftest', 'discoverModels'].includes(call.name)), false);
+  });
+}
+
+test('Anthropic-compatible custom models expose capability and use their native request format', async t => {
+  const rows = [{ ...configuredRows()[1], slot: 'custom', name: 'native-anthropic', protocol: 'anthropic', thinking: true }];
+  const view = await fixture(t, { fetchModelChannels: modelChannels(rows) });
+  await view.render(1, view.props, 'model');
+  await view.click(view.container.querySelector('.provider-toggle'));
+  assert.ok(view.container.querySelector('button[aria-label="思考能力"]'));
+  assert.equal(view.container.querySelector('button[aria-label="思考请求格式"]'), null);
+});
+
 test.after(async () => {
   await window.happyDOM.abort();
   window.close();

@@ -43,6 +43,7 @@ import login_qr  # noqa: E402
 import content_guard  # noqa: E402  出站内容安全闸门
 import publish_receipt  # noqa: E402
 import xhs_readback  # noqa: E402
+from profile_lock import launch_locked  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # 选择器集中维护（小红书改版时单点更新）。REF = xiaohongshu-mcp 对应源。
@@ -54,7 +55,9 @@ TITLE_MAX = 20  # 小红书标题上限（全角计法，见 calc_title_length�
 SELECTORS = {
     # 登录（REF login.go）
     "login_ok": ".main-container .user .link-wrapper .channel",
-    "qrcode": ".login-container .qrcode-img",
+    "qrcode": ".login-container .qrcode-img, .qrcode-img, [class*='qrcode' i] img, [class*='qrcode' i] canvas, .sso-login-wrapper img, .sso-login-wrapper canvas",
+    "login_entry": ".side-bar-component.login-btn, button.login-btn",
+    "qr_switch": "button:has-text('扫码登录'), [role='tab']:has-text('扫码登录'), .sso-login-wrapper > div > div > img",
     # 进页/切 tab（REF publish.go mustClickPublishTab）
     "upload_content": "div.upload-content",
     "creator_tab": "div.creator-tab",
@@ -444,7 +447,7 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None):
     else:
         # 显式直连：Chromium 级屏蔽系统/环境代理（开 VPN 也能用）——同抖音链兜底
         args.append("--no-proxy-server")
-    return p.chromium.launch_persistent_context(str(profile), **kwargs)
+    return launch_locked(profile, lambda: p.chromium.launch_persistent_context(str(profile), **kwargs))
 
 
 def cmd_check(_a) -> int:
@@ -559,6 +562,42 @@ def _login_page_closed(page) -> bool:
         return False
 
 
+def _login_visible(page) -> bool:
+    try:
+        location = urlsplit(page.url)
+        if (location.scheme != "https" or location.hostname not in ("www.xiaohongshu.com", "xiaohongshu.com", "creator.xiaohongshu.com")
+                or location.username or location.password or "/login" in location.path or "/website-login" in location.path):
+            return False
+        anchor = _query_safe(page, SELECTORS["login_ok"])
+        wall = _query_safe(page, '.login-container, .login-modal, .sso-login-wrapper')
+        return bool(anchor is not None and anchor.is_visible() and not (wall is not None and wall.is_visible()))
+    except Exception:
+        return False
+
+
+def _open_qr_login(page) -> None:
+    """Follow upstream login-dialog/QR-switch support without toggling a ready QR."""
+    def visible_qr():
+        qr = _query_safe(page, SELECTORS["qrcode"])
+        try:
+            return qr is not None and qr.is_visible()
+        except Exception:
+            return False
+
+    if visible_qr():
+        return
+    for selector in (SELECTORS["login_entry"], SELECTORS["qr_switch"]):
+        element = _query_safe(page, selector)
+        try:
+            if element is not None and element.is_visible():
+                element.click(timeout=3000)
+                page.wait_for_timeout(500)
+                if visible_qr():
+                    return
+        except Exception:
+            pass
+
+
 def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: int) -> str:
     """Observe manual login without clicking, reloading, or filling verification.
 
@@ -579,7 +618,7 @@ def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: 
                         and location.username is None and location.password is None)
         except (ValueError, AttributeError):
             official = False
-        if official and not verification and _query_safe(page, SELECTORS["login_ok"]) is not None:
+        if official and not verification and _login_visible(page):
             return "success"
         qr = _query_safe(page, SELECTORS["qrcode"]) if official and not verification else None
         captured = False
@@ -653,14 +692,14 @@ def cmd_login(a) -> int:
                 page.wait_for_timeout(800)
                 _stop_on_login_page_error(page, sf)
                 try:
-                    if page.query_selector(SELECTORS["login_ok"]) is not None:
+                    if _login_visible(page):
                         break  # 已登录
                 except Exception:
                     pass
 
             # 已登录直接返回（页面可能仍在跳转，查询失败按未登录继续走登录流程）
             try:
-                logged_in = page.query_selector(SELECTORS["login_ok"]) is not None
+                logged_in = _login_visible(page)
             except Exception:
                 logged_in = False
             if logged_in:
@@ -669,6 +708,7 @@ def cmd_login(a) -> int:
 
             # 抠二维码存 PNG（元素截图，不依赖 src 格式，最稳）
             try:
+                _open_qr_login(page)
                 qr = _wait_sel(page, SELECTORS["qrcode"], 20000, "登录二维码")
             except Exception:
                 # 超时后先复查是不是风险拦截页（重定向晚到的情况），别误报「页面结构变了」
@@ -694,7 +734,7 @@ def cmd_login(a) -> int:
             while time.time() < deadline:
                 _stop_on_login_page_error(page, sf)
                 try:
-                    logged_in = page.query_selector(SELECTORS["login_ok"]) is not None
+                    logged_in = _login_visible(page)
                 except Exception:
                     logged_in = False
                 if logged_in:
@@ -819,7 +859,7 @@ def _publish(a, kind: str) -> int:
             # context-destroyed；重试几次再据 url 判定「未登录」，避免误报。
             logged = False
             for _ in range(4):
-                if _query_safe(page, SELECTORS["login_ok"]) is not None:
+                if _login_visible(page):
                     logged = True
                     break
                 page.wait_for_timeout(500)

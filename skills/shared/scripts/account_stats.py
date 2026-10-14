@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Isolated/embedded Python does not add the script directory to sys.path.
 # This is a bundled sibling module, not an external package to install.
@@ -484,6 +485,218 @@ def _platform_logged_in(page, cfg: dict) -> bool:
     return False
 
 
+def _login_wall(page) -> bool:
+    if re.search(r"(passport|/login)", page.url or ""):
+        return True
+    try:
+        return any(element.is_visible() for element in page.query_selector_all(
+            'button:has-text("扫码登录"), [class*="login-btn"]'))
+    except Exception:
+        return False
+
+def _xhs_session(context) -> tuple[dict | None, bool]:
+    from xhs_account import CREATOR_ACCOUNT_URL, CREATOR_HOME_URL, EXPLORE_URL, _initial_state, _state_account
+
+    creator_expired = False
+    try:
+        response = context.request.get(
+            CREATOR_ACCOUNT_URL, headers={"Referer": CREATOR_HOME_URL}, timeout=5000)
+        if response.url != CREATOR_ACCOUNT_URL:
+            raise ValueError("Unexpected account redirect")
+        payload = response.json()
+        account = payload.get("data") if isinstance(payload, dict) else None
+        creator_expired = response.status == 401 and isinstance(payload, dict) and payload.get("success") is False
+        if (response.status == 200 and isinstance(payload, dict) and payload.get("success") is True
+                and isinstance(account, dict) and isinstance(account.get("userId"), str)
+                and re.fullmatch(r"[A-Za-z0-9_-]+", account["userId"])):
+            return account, True
+    except Exception:
+        pass
+    try:
+        response = context.request.get(EXPLORE_URL, timeout=4000)
+        current = urlparse(response.url)
+        if current.scheme != "https" or current.hostname != "www.xiaohongshu.com" or current.username or current.password:
+            raise ValueError("Unexpected web identity redirect")
+        if response.status == 200:
+            state = _initial_state(response.text())
+            account = _state_account(state)
+            if account is not None:
+                return account, False
+            current = urlparse(response.url)
+            user = state.get("user")
+            if creator_expired and (
+                    current.hostname == "www.xiaohongshu.com" and current.path.startswith("/login")
+                    or isinstance(user, dict) and user.get("loggedIn") is False):
+                return None, False
+    except Exception:
+        pass
+    if creator_expired:
+        return None, False
+    raise RuntimeError("小红书登录态暂时无法确认，请检查网络或平台维护状态后重试")
+
+def _xhs_profile_stats(state: dict, user_id: str) -> dict:
+    from xhs_account import _account_identity, _state_account, _unwrap_state
+
+    account = _state_account(state)
+    if account is not None and account["userId"] != user_id:
+        return {}
+    user = state.get("user")
+    profile = _unwrap_state(user.get("userPageData")) if isinstance(user, dict) else None
+    if not isinstance(profile, dict) or profile.get("userId", user_id) != user_id:
+        return {}
+    result = {}
+    basic = profile.get("basicInfo")
+    if isinstance(basic, dict):
+        result["nickname"] = _account_identity(basic)["name"]
+    interactions = profile.get("interactions")
+    if not isinstance(interactions, list):
+        return result
+    keys = {"fans": "followers", "follows": "following", "interaction": "likes"}
+    labels = {"粉丝": "followers", "关注": "following", "获赞与收藏": "likes"}
+    for item in interactions:
+        if not isinstance(item, dict):
+            continue
+        kind, label = item.get("type"), item.get("name")
+        key = (keys.get(kind) if isinstance(kind, str) else None) or (
+            labels.get(label) if isinstance(label, str) else None)
+        count = item.get("count")
+        if key and not isinstance(count, bool) and re.fullmatch(
+                r"\d+(?:\.\d+)?(?:[万亿wWkK千])?", str(count).replace(",", "").strip()):
+            result[key] = parse_num(count)
+    return result
+
+def _xhs_own_stats(context, account: dict) -> dict:
+    from xhs_account import EXPLORE_URL, _initial_state
+
+    user_id = account["userId"]
+    destination = f"https://www.xiaohongshu.com/user/profile/{user_id}"
+    try:
+        response = context.request.get(
+            destination, headers={"Referer": EXPLORE_URL}, timeout=4000)
+        current = urlparse(response.url)
+        if (response.status == 200 and current.scheme == "https" and current.hostname == "www.xiaohongshu.com"
+                and not current.username and not current.password
+                and current.path.rstrip("/") == urlparse(destination).path):
+            return _xhs_profile_stats(_initial_state(response.text()), user_id)
+    except Exception:
+        pass
+    return {}
+
+def _xhs_creator_overview(data) -> dict:
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    if isinstance(data.get("name"), str) and data["name"].strip():
+        result["nickname"] = data["name"].strip()[:80]
+    for source, target in (("fans_count", "followers"), ("faved_count", "likes"),
+                           ("follow_count", "following")):
+        value = data.get(source)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            result[target] = value
+    return result
+
+def _xhs_creator_metrics(data) -> list[dict]:
+    if not isinstance(data, dict) or not isinstance(data.get("seven"), dict):
+        return []
+    seven = data["seven"]
+    metrics = []
+    for label, key in (
+        ("曝光数", "impl_count"), ("观看数", "view_count"), ("点赞数", "like_count"),
+        ("评论数", "comment_count"), ("收藏数", "collect_count"), ("分享数", "share_count"),
+        ("净涨粉", "net_rise_fans_count"), ("主页访客", "home_view_count"),
+    ):
+        value = seven.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0 and key != "net_rise_fans_count":
+            continue
+        rate = seven.get(key + "_rate")
+        vs = ""
+        if (seven.get(key + "_rate_display") is True and isinstance(rate, (int, float))
+                and not isinstance(rate, bool) and float("-inf") < rate < float("inf")):
+            vs = f"{rate:+g}%"
+        metrics.append({"label": label, "value": value, "vs": vs})
+    return metrics
+
+def _xhs_creator_stats(context) -> dict:
+    from xhs_account import CREATOR_HOME_URL
+
+    try:
+        response = context.request.get(
+            "https://creator.xiaohongshu.com/api/galaxy/creator/home/personal_info",
+            headers={"Referer": CREATOR_HOME_URL}, timeout=4000)
+        if response.url != "https://creator.xiaohongshu.com/api/galaxy/creator/home/personal_info":
+            return {}
+        payload = response.json()
+        if response.status == 200 and isinstance(payload, dict) and payload.get("success") is True:
+            return _xhs_creator_overview(payload.get("data"))
+    except Exception:
+        pass
+    return {}
+
+
+def _scrape_xhs(context, page, result: dict) -> dict:
+    """Use authenticated owner evidence and bounded creator requests (upstream B)."""
+    from xhs_account import _account_identity
+    account, creator_logged_in = _xhs_session(context)
+    if account is None:
+        result["logged_in"] = False
+        return result
+    result["account_id"] = account["userId"]
+    result["nickname"] = _account_identity(account)["name"]
+    overview = _xhs_creator_stats(context) if creator_logged_in else {}
+    if not any(key in overview for key in ("followers", "likes", "following")):
+        overview = _xhs_own_stats(context, account)
+    result.update({key: value for key, value in overview.items() if value is not None and value != ""})
+    cfg = PLATFORMS["xiaohongshu"]
+    if not creator_logged_in:
+        # Public profile data is not a verified creator-note list. Preserve history.
+        raise RuntimeError("小红书创作中心登录态已失效，请重新连接后采集；历史数据已保留")
+
+    def received(response):
+        try:
+            location = urlparse(response.url)
+            if (location.scheme != "https" or location.hostname != "creator.xiaohongshu.com"
+                    or location.username or location.password or response.status != 200
+                    or location.path not in ("/api/galaxy/creator/home/personal_info",
+                                             "/api/galaxy/v2/creator/datacenter/account/base")):
+                return
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("success") is not True:
+                return
+            if location.path.endswith("/personal_info"):
+                result.update(_xhs_creator_overview(payload.get("data")))
+            else:
+                result["metrics"] = _xhs_creator_metrics(payload.get("data"))
+        except Exception:
+            pass
+
+    page.on("response", received)
+    try:
+        try:
+            page.goto(cfg["url"], wait_until="commit", timeout=8000)
+        except Exception:
+            if not _has_body(page):
+                raise
+        lines = _poll_stable(page, lambda _lines: tuple((m["label"], m["value"], m["vs"])
+                                                       for m in result["metrics"]) if result["metrics"] else None, 14000)
+        if _login_wall(page):
+            raise RuntimeError("小红书创作中心需要重新登录；历史数据已保留")
+        for key, labels in cfg["overview"].items():
+            if result[key] is None:
+                result[key] = num_by_label(lines, labels, "before")
+        result["posts"] = num_by_label(lines, ["笔记数", "作品数", "内容数"], "before")
+        if not any(result[key] is not None for key in ("followers", "likes", "following", "posts")) and not result["metrics"]:
+            raise RuntimeError("小红书已登录，但未取得创作数据；历史数据已保留，请稍后重试")
+        result["notes"] = _scrape_notes("xiaohongshu", page, cfg)
+        verified, creator_verified = _xhs_session(context)
+        if not creator_verified or not verified or verified["userId"] != result["account_id"]:
+            raise RuntimeError("采集期间小红书账号发生变化，未保存本次数据")
+        if not result["metrics"]:
+            result["warning"] = "已取得本人概览与笔记；创作中心近7日指标暂不可用，请稍后重试"
+        return result
+    finally:
+        page.remove_listener("response", received)
+
+
 def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) -> dict:
     from playwright.sync_api import sync_playwright
     cfg = PLATFORMS[platform]
@@ -495,10 +708,19 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
         kwargs = dict(headless=not headed, locale="zh-CN", args=LAUNCH_ARGS)
         if proxy:
             kwargs["proxy"] = {"server": proxy}
-        ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        if platform == "xiaohongshu":
+            from xhs_publish import _launch
+            ctx = _launch(p, headed, base, proxy)
+        else:
+            ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
         try:
-            page.goto(cfg["url"], wait_until="domcontentloaded", timeout=30000)
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            if platform == "xiaohongshu":
+                return _scrape_xhs(ctx, page, r)
+            page.goto(cfg["url"], wait_until="commit", timeout=12000)
+            if _login_wall(page):
+                r["logged_in"] = False
+                return r
             ov, d = cfg["overview"], cfg.get("overview_dir", "after")
             mets = cfg.get("metrics", [])
             manchor = cfg.get("metrics_anchor")
@@ -523,12 +745,11 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                     pass
             if clicked:
                 lines = _poll_stable(page, _sig, 6000)   # 点「累计」后重新等稳定
-            if re.search(r"(passport|/login)", page.url or "") or \
-               page.query_selector('button:has-text("扫码登录"), [class*="login-btn"]'):
+            if _login_wall(page):
                 r["logged_in"] = False
             if r["logged_in"]:
                 r["logged_in"] = _platform_logged_in(page, cfg)
-            if cfg.get("login_ok_selector") and not r["logged_in"]:
+            if not r["logged_in"]:
                 return r
             r["followers"] = num_by_label(lines, ov["followers"], d)
             r["likes"] = num_by_label(lines, ov["likes"], d)
@@ -598,19 +819,46 @@ def _poll_stable(page, sig, max_ms: int = 10000, step: int = 400) -> list[str]:
     避开「占位 0 → 真实值」的异步渲染坑；真·0 账号也会很快稳定。超时返回最后一次。"""
     prev = object()
     lines: list[str] = []
-    waited = 0
-    while waited < max_ms:
+    deadline = time.monotonic() + max_ms / 1000
+    while time.monotonic() < deadline:
         try:
-            lines = lines_of(page.inner_text("body"))
+            remaining = max(1, int((deadline - time.monotonic()) * 1000))
+            lines = lines_of(page.inner_text("body", timeout=min(1000, remaining)))
         except Exception:
             lines = []
         cur = sig(lines)
         if cur is not None and cur == prev:
             return lines
         prev = cur
-        page.wait_for_timeout(step)
-        waited += step
+        remaining = int((deadline - time.monotonic()) * 1000)
+        if remaining <= 0:
+            break
+        page.wait_for_timeout(min(step, remaining))
     return lines
+
+
+def is_public_xhs_note(note: dict) -> bool:
+    """Upstream published-note filter; unidentified/draft entries are not evidence."""
+    title = (note.get("title") or "").strip()
+    text = note.get("text") or ""
+    return bool(title and title not in ("无笔记标题", "无标题", "(无标题)")
+                and not (re.search(r"草稿|未发布|待发布", text) and "已发布" not in text)
+                and "/publish/publish" not in (note.get("href") or note.get("url") or ""))
+
+
+def _xhs_open_published_notes(page) -> None:
+    selected = page.evaluate("""() => {
+      const visible = e => e.getClientRects().length && !e.closest('.note-card');
+      const label = e => (e.innerText || e.textContent || '').trim() === '已发布';
+      const candidates = [...document.querySelectorAll('[role="tab"], .ant-tabs-tab, .tab, .tab-item, .tabs-item, button, .note-manager-tab')];
+      const tab = candidates.find(e => visible(e) && label(e))
+        || [...document.querySelectorAll('div, span, a')].find(e => visible(e) && label(e));
+      if (!tab) return false;
+      tab.click(); return true;
+    }""")
+    if not selected:
+        raise RuntimeError("未确认小红书已发布列表，未保存本次数据")
+    page.wait_for_timeout(1000)
 
 
 _XHS_NOTES_JS = """() => {
@@ -650,6 +898,7 @@ _XHS_NOTES_JS = """() => {
       .map(e => (e.textContent || '').replace(/^#/, '').trim()).filter(Boolean).slice(0, 8);
     out.push({
       title: (titleEl ? titleEl.textContent : '').trim().slice(0, 100),
+      text: (c.innerText || '').slice(0, 1000),
       noteId, href, tags,
       like, fav, cmt, publish,
       cover: img ? (img.src || '') : '',
@@ -769,6 +1018,7 @@ def _extract_note_tokens(data) -> dict:
 def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
     """抓最新已发布内容（标题 + 可点链接 + 每条数据）。各平台内容页与结构不同，分平台解析。"""
     if platform == "xiaohongshu":
+        listener = None
         try:
             import re as _re
             from urllib.parse import urlparse as _up, parse_qs as _pq
@@ -781,8 +1031,13 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                 except Exception:
                     pass
             page.on("response", _on_resp)
+            listener = _on_resp
             page.goto("https://creator.xiaohongshu.com/new/note-manager",
-                      wait_until="domcontentloaded", timeout=30000)
+                      wait_until="commit", timeout=8000)
+            if _login_wall(page):
+                raise RuntimeError("笔记管理登录已失效")
+            page.wait_for_selector(".note-card, [role='tab'], .ant-tabs-tab, .tab, .tab-item, .tabs-item, .note-manager-tab", timeout=6000)
+            _xhs_open_published_notes(page)
             try:
                 page.wait_for_selector(".note-card", timeout=6000)
             except Exception:
@@ -791,10 +1046,12 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
             out = []
             cards = page.evaluate(_XHS_NOTES_JS) or []
             if not cards:
-                body = page.inner_text("body")
+                body = page.inner_text("body", timeout=1000)
                 if re.search(r"(passport|/login)", page.url or "") or not re.search(r"暂无笔记|还没有发布|暂无内容|暂无作品", body):
                     raise RuntimeError("笔记列表未加载或登录已失效，未确认空列表")
             for n in cards:
+                if not is_public_xhs_note(n):
+                    continue
                 href = n.get("href") or ""
                 h_tok = h_nid = ""
                 if href:
@@ -832,13 +1089,17 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                     "metrics_raw": {"likes": n.get("like"), "collects": n.get("fav"), "comments": n.get("cmt")},
                     "stat": " · ".join(parts),
                 })
-            try:
-                page.remove_listener("response", _on_resp)
-            except Exception:
-                pass
+            if cards and not out:
+                raise RuntimeError("笔记列表未确认已发布内容，未保存本次快照")
             return out
         except Exception as exc:
             raise RuntimeError("小红书笔记列表采集失败，未保存本次快照") from exc
+        finally:
+            if listener is not None:
+                try:
+                    page.remove_listener("response", listener)
+                except Exception:
+                    pass
     if platform == "zhihu":
         try:
             page.goto("https://www.zhihu.com/creator/manage/creation/all",
@@ -961,6 +1222,8 @@ def cmd_fetch(a) -> int:
         "noteSnapshotCount": len(note_recs),
         "lastSnapshotAt": (note_recs[0]["fetched_at"] if note_recs else None),
     }
+    if s.get("warning"):
+        out["warning"] = s["warning"]
     print(json.dumps(out, ensure_ascii=False))
     return 0
 

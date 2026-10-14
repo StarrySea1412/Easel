@@ -13,6 +13,74 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'web'))
 import app as web
 import local_config_import as lci
+from pydantic import ValidationError
+
+
+@pytest.mark.parametrize('invalid', ['false', 0, 1, 'true'])
+def test_reasoning_declaration_requires_a_boolean(invalid):
+    with pytest.raises(ValidationError):
+        web.ModelSaveRow(thinking=invalid)
+
+
+def save_thinking(**changes):
+    return asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+        slot='custom', name='custom', model='custom-model', baseUrl='https://custom.example/v1', **changes)])))
+
+
+def test_reasoning_auto_detection_and_explicit_format_preserve_credentials(sandbox):
+    _, oc = sandbox
+    data = json.loads(oc.read_text(encoding='utf-8'))
+    data['models']['providers']['custom']['models'][0]['compat'] = {'supportsStore': False}
+    oc.write_text(json.dumps(data), encoding='utf-8')
+    result = save_thinking(thinking=True)
+    provider = json.loads(oc.read_text(encoding='utf-8'))['models']['providers']['custom']
+    assert provider['models'][0]['reasoning'] is True
+    assert provider['models'][0]['compat'] == {'supportsStore': False, 'supportsReasoningEffort': True}
+    assert provider['apiKey'] == 'custom-keep-key' and provider['headers'] == {'x-special': 'preserve'}
+    assert next(row for row in result['channels']['chat']['rows'] if row['name'] == 'custom')['thinking'] is True
+    save_thinking(thinking=True, thinkingFormat='deepseek')
+    assert json.loads(oc.read_text(encoding='utf-8'))['models']['providers']['custom']['models'][0]['compat']['thinkingFormat'] == 'deepseek'
+    save_thinking(thinking=True, thinkingFormat='')
+    assert 'thinkingFormat' not in json.loads(oc.read_text(encoding='utf-8'))['models']['providers']['custom']['models'][0]['compat']
+
+
+def test_disabled_and_auto_reasoning_only_change_owned_fields(sandbox):
+    _, oc = sandbox
+    save_thinking(thinking=True, thinkingFormat='qwen')
+    data = json.loads(oc.read_text(encoding='utf-8'))
+    entry = data['models']['providers']['custom']['models'][0]
+    entry['compat']['supportsStore'] = False
+    entry['compat']['reasoningEffortMap'] = {'high': 'medium'}
+    oc.write_text(json.dumps(data), encoding='utf-8')
+    save_thinking(thinking=False)
+    entry = json.loads(oc.read_text(encoding='utf-8'))['models']['providers']['custom']['models'][0]
+    assert entry['reasoning'] is False and entry['compat'] == {'supportsStore': False}
+    save_thinking(thinking=None)
+    entry = json.loads(oc.read_text(encoding='utf-8'))['models']['providers']['custom']['models'][0]
+    assert 'reasoning' not in entry and entry['compat'] == {'supportsStore': False}
+
+
+def test_legacy_model_save_preserves_declared_reasoning_and_invalid_format_writes_nothing(sandbox):
+    _, oc = sandbox
+    save_thinking(thinking=True, thinkingFormat='openrouter')
+    before = web._model_file_snapshot()
+    save_thinking()
+    assert web._model_file_snapshot() == before
+    with pytest.raises(web.HTTPException) as failure:
+        save_thinking(thinkingFormat='invented')
+    assert failure.value.status_code == 400 and web._model_file_snapshot() == before
+
+
+def test_non_reasoning_primary_defaults_to_off_without_changing_global_preference(sandbox):
+    _, oc = sandbox
+    save_thinking(thinking=False, primary=True)
+    assert web._agent_thinking_level() == 'off'
+    assert web.THINKING_LEVEL == 'medium'
+    assert web._agent_thinking_level(use_default=False) == 'medium'
+    assert web._agent_thinking_level('custom/custom-model', use_default=False) == 'off'
+    assert web._agent_thinking_level('missing/unknown', use_default=False) == 'medium'
+    save_thinking(thinking=True)
+    assert web._agent_thinking_level() == web.THINKING_LEVEL
 
 
 @pytest.fixture(autouse=True)

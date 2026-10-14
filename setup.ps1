@@ -67,10 +67,10 @@ function Use-NodeDir($Info) {
 }
 
 # The release owns its OpenClaw version. Never replace another app's global copy.
-$env:Path = "$NpmPrefix;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-    [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+$env:Path = "$NpmPrefix;" + $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+    [Environment]::GetEnvironmentVariable('Path', 'User')
 # 每个 phase 都由 install_runner 在独立的 PowerShell 进程里执行，而进程顶部的
-# PATH 重置把注册表 Machine/User PATH 排在继承值之前；这里统一选定兼容 Node 并
+# PATH 保留继承的进程目录优先，追加注册表 PATH；这里统一选定兼容 Node 并
 # 前置，保证本进程与后续 npm/openclaw 都解析到同一个运行时。
 $script:NodeInfo = Get-NodeInfo
 if ($script:NodeInfo -and (Test-NodeCompatible $script:NodeInfo.version)) { Use-NodeDir $script:NodeInfo }
@@ -165,7 +165,7 @@ function Ensure-Command($Name, $PackageId, $Hint) {
     Info "未找到 $Name，使用 winget 安装 $PackageId..."
     & winget install --id $PackageId --exact --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { Fail "$Name 自动安装失败。$Hint" }
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
     Require-Command $Name $Hint
 }
 function Read-EnvFile($Path) {
@@ -308,7 +308,7 @@ if (-not $pythonCommand) {
     Require-Command 'winget' '请安装 Windows App Installer。'
     & winget install --id Python.Python.3.12 --exact --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { Fail 'Python 3.12 安装失败。' }
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
     if (Get-Command py -ErrorAction SilentlyContinue) { $pythonCommand = (Get-Command py).Source; $pythonArgs = @('-3.12') }
     elseif (Get-Command python -ErrorAction SilentlyContinue) { $pythonCommand = (Get-Command python).Source; $pythonArgs = @() }
     else { Fail 'Python 已安装，但当前环境未找到；重新运行安装器。' }

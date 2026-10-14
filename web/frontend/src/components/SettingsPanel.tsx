@@ -413,6 +413,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         key2: r.keyNew2 || '',
         primary: r.role === '主',
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
+        thinking: channel === 'chat' && r.slot === 'custom' ? r.thinking : undefined,
+        thinkingFormat: channel === 'chat' && r.slot === 'custom' ? r.thinkingFormat : undefined,
       }));
     if (!payload.length) {
       setSavedNote('当前通道没有可保存的配置');

@@ -1171,6 +1171,8 @@ export interface ModelRow {
   deletable?: boolean;
   /** 预设带出的协议（仅本地态；缺省按 slot 推断）。 */
   protocol?: string;
+  thinking?: boolean | null;
+  thinkingFormat?: string;
 }
 
 // ── 服务商预设与模型发现（对应方案功能 C 第一步） ──
@@ -1308,6 +1310,8 @@ export interface ModelSaveRow {
   key2?: string;
   primary?: boolean;
   protocol?: string;
+  thinking?: boolean | null;
+  thinkingFormat?: string;
 }
 
 export interface ModelSaveResponse extends ModelChannelsResponse {

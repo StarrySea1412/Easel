@@ -1,3 +1,11 @@
+## 0.2.9 source candidate · 2026-10-14 / 上游可靠性跟进
+
+- Adapt upstream QR entry/anonymous redirect checks and bounded XHS identity/collection with cross-process profile ownership. / 吸收上游扫码入口、匿名跳转判定、小红书本人身份/有界采集及共享跨进程Profile锁；失败、账号变化和草稿列表不覆盖历史。
+- Preserve inherited Windows PATH and add custom-model reasoning capability and automatic/explicit request-format settings with existing credential transactions. / 保留安装进程PATH；自定义模型新增思考能力和自动/明确格式，复用凭据事务。
+- Keep stable authenticated userId separate from legacy displayed-ID history; retain existing session thinking policy when the model is unknown. / 稳定userId与旧显示账号号历史不自动合并；型号未知时保留既有会话思考策略。
+- Fixed upstream source is `bb3c8ff0` (0.3.0); C–F remain later batches. Source/build checks do not replace real platform/browser acceptance. No138 activation,7880 replacement or installer release. / 固定上游基线，后续路径/画廊/引擎另批实施；本轮未部署或打包。见[逐项记录 / record](docs/upstream-reliability-0.2.9-2026-10-14.md)。
+- Core backend232/frontend67 checks, lint and production build passed; installer27 checks plus a final isolated timing-test retry passed. / 核心后端232/前端67项、lint和生产构建通过；安装器27项及最后单项时序复验通过，原高负载失败过程保留在记录中。
+
 ## 2026-10-14 · Home trend density and icons / 首页热点密度与图标
 
 - Reuse Weibo/Douyin icons and render up to five ranked topics per source; adapt columns to card width and remove forced blank space. / 复用微博、抖音图标，每源最多5条带排名，按卡片宽度切换列数并移除强制留白。

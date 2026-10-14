@@ -1,3 +1,5 @@
+> **0.2.9 upstream-following candidate (October 14, 2026)**: implement batch B from fixed ZJU-REAL/Easel 0.3.0 source: QR entry/login evidence, bounded authenticated XHS collection and profile locking, inherited Windows PATH, and custom-model reasoning/automatic request-format settings. Preserve creator workflows, account history and credential transactions. [Adoption and validation record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/upstream-reliability-0.2.9-2026-10-14.md). Independent source branch; no local7880 replacement,138 activation or installer release. C–F remain later batches; visual acceptance belongs to the user.
+
 > **Home trend density and source icons (October 14, 2026, built locally)**: the home card reuses Weibo/Douyin icons, shows up to five ranked topics per source and switches between two and one columns according to card width, removing forced blank space. Source times, cache/errors and topic actions remain. Forty simulated checks, lint/build and actual 7880 resource verification passed; the user performs frontend acceptance. This task does not deploy the change to 138. [Implementation and evidence](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/dashboard-trends-2026-10-14.md).
 
 > **Google News timeout investigation (October 14, 2026)**: the failed fetch returned `request timed out`; a live 138 container probe also timed out while connecting. The search results cannot establish that no recent major news exists. Source now displays an exact localized timeout cause; 17 frontend checks and TypeScript passed. This display fix is not deployed. [Investigation](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/huawei-fetch-failure-2026-10-14.md).
@@ -6,7 +8,7 @@
 
 > **138 quick deploy entry (October 14, 2026)**: root `Quick-Deploy-138.cmd` exports one committed Git SHA, uploads it, and verifies/builds a remote candidate. Production backup and activation require the explicit `-Activate` switch; the default path leaves the running service unchanged. See the [138 quick deploy guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deploy-138-quick-start.md) for parameters and rollback boundaries.
 
-> **Upstream comparison and adoption plan (October 14, 2026)**: the [comparison report and phased plan](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md) compares upstream `bb3c8ff0` / v0.3.0 with our pushed `cd866910`. Finish the current candidate release, then adopt login, collection, PATH and model-configuration fixes; shared skills, an artifact gallery and multiple engines follow in compatible phases. These planned features have not been implemented in this turn.
+> **Upstream comparison and adoption plan (October 14, 2026)**: the [comparison and phased plan](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/upstream-comparison-plan-2026-10-14.md) retains the original source baselines. Batch A completed the0.2.8 runtime repair; B is implemented in this reliability source candidate. Shared paths, a real-file gallery, engine contracts and new engines follow as batches C–F with separate platform and release acceptance.
 
 > **0.2.8 release record**: `cd866910` is the saved candidate source; the final deployed commit is `0ba9fe20`, including search, browser, tool-execution and version-assessment repairs. Real search, isolated browser and full release acceptance passed. [Release record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md). Portable packaging remains paused. Dated deployment receipts below describe earlier releases.
 
@@ -58,9 +60,9 @@ Local artifact links are checked against the current data directory and enabled 
 
 A local creative workspace combining conversations, assets, content projects, and a 3D office of animal Agents. See tasks, observed operations, and workspace outputs in one place.
 
-[简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
+[简体中文](README.md) · [Current source](https://github.com/StarrySea1412/Easel/tree/codex/upstream-reliability-0.2.9) · [Report an issue](https://github.com/StarrySea1412/Easel/issues) · [Changelog](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/CHANGELOG.md)
 
-> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-10**. This page describes the current source on `codex/upstream-compat-2026-10-10`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
+> Maintained in [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel), based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel). Updated **2026-10-14**. This page describes the current source on `codex/upstream-reliability-0.2.9`; the `main` homepage carries the same project overview while feature code remains on the development branch. Existing 0.2.6 EXE / ZIP packages were built from `38e728c` and do not include the later workspace and office changes. No new installer containing these features has been released.
 >
 > The historical Windows x64 portable candidate is `Easel-preview-76bbaf6-3fb7.zip` (about 1.06 GiB). Actual extraction, full file verification, bundled startup, both Chromium variants and selected workbench entries in a real browser have passed. It has not been publicly released; graphical double-click testing and a clean Windows environment remain unverified. See the [portable preview guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/windows-portable.md) for usage, SHA-256 and detailed acceptance boundaries.
 >
@@ -132,7 +134,7 @@ Users supply their own model API keys. Optional Whisper and rembg model weights 
 ## Run the current source
 
 ```bash
-git clone --branch codex/upstream-compat-2026-10-10 https://github.com/StarrySea1412/Easel.git
+git clone --branch codex/upstream-reliability-0.2.9 https://github.com/StarrySea1412/Easel.git
 cd Easel
 ```
 

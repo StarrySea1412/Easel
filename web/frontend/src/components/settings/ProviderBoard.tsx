@@ -102,6 +102,18 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                   options={[{ value: 'openai', label: 'OpenAI 兼容', description: 'Chat Completions' }, { value: 'anthropic', label: 'Anthropic 兼容', description: 'Messages' }]}
                   onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
               </SettingsField>}
+              {isCustom && ops?.channel === 'chat' && <>
+                <SettingsField label="思考能力">
+                  <Select aria-label="思考能力" value={r.thinking == null ? 'auto' : r.thinking ? 'on' : 'off'}
+                    options={[{ value: 'auto', label: '自动判断' }, { value: 'on', label: '支持思考' }, { value: 'off', label: '不支持思考' }]}
+                    onChange={value => ops?.onRow?.(i, { thinking: value === 'auto' ? null : value === 'on' })} />
+                </SettingsField>
+                {r.thinking !== false && (r.protocol || r.type) !== 'anthropic' && <SettingsField label="思考请求格式">
+                  <Select aria-label="思考请求格式" value={r.thinkingFormat || ''}
+                    options={[{ value: '', label: '自动检测' }, ...['openai', 'openrouter', 'deepseek', 'together', 'qwen', 'qwen-chat-template', 'zai'].map(value => ({ value, label: value }))]}
+                    onChange={thinkingFormat => ops?.onRow?.(i, { thinkingFormat })} />
+                </SettingsField>}
+              </>}
               <SettingsField label="模型">
               {ed.model ? (
                 <span className="key-stack">

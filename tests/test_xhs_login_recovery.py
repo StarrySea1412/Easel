@@ -233,7 +233,7 @@ class InteractivePage(Page):
 
     def query_selector(self, selector):
         if selector == publisher.SELECTORS['login_ok']:
-            return object() if self.logged else None
+            return SimpleNamespace(is_visible=lambda: True) if self.logged else None
         if selector == publisher.SELECTORS['qrcode']:
             return self if self.qr else None
         raise AssertionError('Unexpected DOM access')

@@ -29,7 +29,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 import math
 from sse_starlette.sse import EventSourceResponse
 
@@ -1173,6 +1173,28 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
     }
 
 
+def _agent_thinking_level(model_ref: str | None = None, *, use_default: bool = True) -> str:
+    """Disable implicit effort only for a known model; preserve session overrides."""
+    if model_ref is None and not use_default:
+        return THINKING_LEVEL
+    try:
+        config = json.loads((openclaw_state_dir() / 'openclaw.json').read_text(encoding='utf-8'))
+        agents = config.get('agents', {})
+        reference = agents.get('defaults', {}).get('model', {})
+        for agent in agents.get('list', []):
+            if isinstance(agent, dict) and agent.get('id') == 'main' and agent.get('model'):
+                reference = agent['model']
+                break
+        primary = model_ref or (reference.get('primary', '') if isinstance(reference, dict) else reference)
+        provider, model_id = primary.split('/', 1)
+        for model in config.get('models', {}).get('providers', {}).get(provider, {}).get('models', []):
+            if isinstance(model, dict) and model.get('id') == model_id and model.get('reasoning') is False:
+                return 'off'
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    return THINKING_LEVEL
+
+
 def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None,
                    thinking_level: str | None = None) -> str:
     sk = session_id or f'web-{int(time.time() * 1000)}'
@@ -1186,7 +1208,7 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
         # Keep CLI setup inside the same safe error boundary as execution.
         cmd = openclaw_base_cmd() + ['--profile', OPENCLAW_PROFILE, 'agent', '--agent', 'main',
                '--session-key', f'agent:main:{sk}', '--session-id', _openclaw_session_id(sk),
-               '--thinking', thinking_level or THINKING_LEVEL,
+               '--thinking', thinking_level or _agent_thinking_level(use_default=session_id is None),
                '--timeout', str(timeout), '--message', msg]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=timeout + 30,
                            env=credentials.environment(_proxy_env()))
@@ -1725,10 +1747,14 @@ def _model_channels() -> dict:
                     continue
                 models = pv.get("models") if isinstance(pv.get("models"), list) else []
                 mid = models[0].get("id", "") if models and isinstance(models[0], dict) else ""
+                model_entry = models[0] if models and isinstance(models[0], dict) else {}
+                compat = model_entry.get('compat') if isinstance(model_entry.get('compat'), dict) else {}
                 custom_rows.append({
                     "slot": "custom", "order": 0, "name": pkey, "sub": "自定义",
                     "type": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
                     "protocol": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
+                    "thinking": model_entry.get('reasoning') if isinstance(model_entry.get('reasoning'), bool) else None,
+                    "thinkingFormat": compat.get('thinkingFormat', ''),
                     "model": mid or "", "baseUrl": pv.get("baseUrl") or "",
                     "keyMasked": _mask_key(str(pv.get("apiKey") or "")),
                     "role": "主" if primary == f"{pkey}/{mid}" else "备",
@@ -1846,6 +1872,10 @@ def _openclaw_provider_creds() -> dict[str, tuple[str, str]]:
         return {}
 
 
+THINKING_FORMATS = {'openai', 'openrouter', 'deepseek', 'together', 'qwen', 'qwen-chat-template', 'zai'}
+THINKING_COMPAT_KEYS = {'thinkingFormat', 'supportsReasoningEffort', 'supportedReasoningEfforts', 'reasoningEffortMap'}
+
+
 def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str], primary_ref: str) -> str:
     """同步 chat 供应商到 ~/.openclaw-easel/openclaw.json：更新/新增 + 删除多余自定义 + 主模型。
 
@@ -1911,6 +1941,35 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                     models[0]['name'] = model
                     changed = True
                 prov['models'] = models
+                if 'thinking' in vals or 'thinkingFormat' in vals:
+                    entry = models[0]
+                    before = json.dumps(entry, sort_keys=True)
+                    if 'thinking' in vals:
+                        if vals['thinking'] is None:
+                            entry.pop('reasoning', None)
+                        else:
+                            entry['reasoning'] = vals['thinking']
+                    compat = dict(entry.get('compat')) if isinstance(entry.get('compat'), dict) else {}
+                    if entry.get('reasoning') is False:
+                        for field in THINKING_COMPAT_KEYS:
+                            compat.pop(field, None)
+                    elif prov.get('api') == 'anthropic-messages':
+                        for field in THINKING_COMPAT_KEYS:
+                            compat.pop(field, None)
+                    else:
+                        if entry.get('reasoning') is True:
+                            compat.setdefault('supportsReasoningEffort', True)
+                        if 'thinkingFormat' in vals:
+                            if vals['thinkingFormat']:
+                                compat['thinkingFormat'] = vals['thinkingFormat']
+                            else:
+                                compat.pop('thinkingFormat', None)
+                    if compat:
+                        entry['compat'] = compat
+                    else:
+                        entry.pop('compat', None)
+                    if json.dumps(entry, sort_keys=True) != before:
+                        changed = True
         if primary_ref:
             ref = data.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})
             if ref.get('primary') != primary_ref:
@@ -1986,6 +2045,8 @@ class ModelSaveRow(BaseModel):
     key2: str = ""
     primary: bool = False
     protocol: str = ""
+    thinking: StrictBool | None = None
+    thinkingFormat: str | None = None
 
 
 class ModelSaveRequest(BaseModel):
@@ -2069,6 +2130,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
         base = (row.baseUrl or '').strip().rstrip('/')
         key = (row.key or '').strip()
         protocol = (row.protocol or '').strip().lower()
+        if row.thinkingFormat is not None and row.thinkingFormat not in THINKING_FORMATS | {''}:
+            raise HTTPException(400, '不支持的思考请求格式')
         if is_chat and slot in _CHAT_PROTOCOLS and protocol and protocol != _CHAT_PROTOCOLS[slot]:
             raise HTTPException(400, '服务商协议与目标槽位不匹配，请选择同协议的服务商')
         if is_chat and slot == 'custom' and protocol and protocol not in ('openai', 'anthropic'):
@@ -2136,6 +2199,10 @@ async def api_settings_models_save(req: ModelSaveRequest):
             if not model or not base:
                 raise HTTPException(400, f'自定义供应商「{name}」需要同时填模型和 Base URL')
             provider_updates[name] = {'model': model, 'base': base, 'key': key, 'protocol': protocol or 'openai'}
+            if 'thinking' in row.model_fields_set:
+                provider_updates[name]['thinking'] = row.thinking
+            if row.thinkingFormat is not None:
+                provider_updates[name]['thinkingFormat'] = row.thinkingFormat
             keep_custom.add(name)
             pkey = name
         # 同一条规矩也得覆盖 openclaw.json 这一侧：_sync_openclaw_chat 只在 key 非空时改
@@ -3770,7 +3837,7 @@ async def api_chat_stream(req: ChatRequest):
                         from easel.gateway_agent import GatewayAgentProc
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
                                   'sessionId': _openclaw_session_id(sk), 'message': message,
-                                  'thinking': requested_thinking_level or THINKING_LEVEL,
+                                  'thinking': requested_thinking_level or _agent_thinking_level(requested_model_ref, use_default=False),
                                   'deliver': False, 'timeout': TIMEOUT_CHAT,
                                   'idempotencyKey': turn_id}
                         if requested_model_ref is not None:
@@ -3785,7 +3852,7 @@ async def api_chat_stream(req: ChatRequest):
                         cmd = openclaw_base_cmd() + [
                             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                            "--thinking", requested_thinking_level or THINKING_LEVEL,
+                            "--thinking", requested_thinking_level or _agent_thinking_level(requested_model_ref, use_default=False),
                             "--timeout", str(TIMEOUT_CHAT), "--message", message,
                         ]
                         if requested_model_ref is not None:
