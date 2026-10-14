@@ -32,6 +32,8 @@
 - 上述是模拟React DOM与构建检查，未做真实浏览器交互验收；页面效果按用户偏好由用户确认。本轮没有修改搜索开关/provider/凭据、发送模型或搜索请求、重启或替换7880、部署138或发布安装器。独立分支源码修复不代表运行页面已更新或搜索已恢复。
 - 本机搜索启用及真实搜索验收仍待单独实施。若后续处理，需使用Windows实际可用的provider和依赖，不可照搬138专用Linux路径；138既有真实搜索成功回执不能替代本机验收。0.2.9计划B已交付，C–F与原有未验专项继续保留。
 
+Git交付：修复提交 `196015f6bb389e37191c39d4248b29e85af073ad` 已推送独立功能分支，main仅首页提交 `b35078878f80fad22d6bb021d27a705a29856c7f` 已推送；两处远端SHA核对一致。4个新增本地Markdown目标存在，7个在线Markdown源HTTP200且含预期内容；这不是浏览器交互或运行服务验收。后续文档回执与运行SHA分开记录。
+
 ## English
 
 The exact supplied wrapper ID matches this machine's project OpenClaw transcript. At 15:15:53 Beijing time, the parent `tool_call` requested `web_search`; its nested receipt failed after about 286ms. The API reports that search is disabled or no provider is available. The security notice is a content wrapper, not the failure cause. Current local configuration has a full tools profile but no explicit search declaration/provider; the combined error does not identify which runtime branch applied.
