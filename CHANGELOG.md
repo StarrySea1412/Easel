@@ -1,3 +1,13 @@
+## 2026-10-14 · Runtime repair and version assessment / 工具修复与版本评估
+
+- Show the selected OpenClaw version and official latest release, with bounded official changelog evidence for Agent upgrade advice; keep existing chats and drafts. / 显示当前运行版与官方latest，Agent基于官方来源评估收益、风险与建议，不自动升级。
+- Give accurate skill/reference paths and independent-command guidance; install curl/file and pinned official search support, and connect a dedicated authenticated sandboxed Chromium container. / 修复路径与命令规则，补工具/搜索与独立浏览器；真实隔离及正式验收待回执。
+
+## 2026-10-14 · Local quick start / 本机快速启动
+
+- Add a double-click CMD/PowerShell entry for the installed local project, defaulting to port 7880 and existing data, with verified instance reuse, browser opening and visible failure/log guidance. A small script ZIP is separate from a portable application. / 新增可双击本机快速入口，复用现有服务并打开页面，支持单独解压后定位本机项目和自定义路径；小包仅含脚本与说明。
+- Allow an explicit bounded gateway startup timeout; the quick entry waits up to 900 seconds to cover observed cold starts beyond the previous 300-second limit. / 增加有限的网关等待参数，快速入口等待15分钟，处理本机冷启动超过5分钟的实际情况。
+
 ## 2026-10-14 · Upstream comparison / 上游对比规划
 
 - Compare upstream v0.3.0 / `bb3c8ff0` with saved candidate `cd866910`; document shared product direction, strengths, source evidence and phased acceptance. Prioritize the existing 0.2.8 release, then reliability fixes, shared paths, a real-file gallery and adapted runtimes. / 完成逐主题对比与分批验收计划，先收口候选部署再吸收可靠性修复；路径、画廊和引擎另批适配，保留创作者工作流与持久执行证据。

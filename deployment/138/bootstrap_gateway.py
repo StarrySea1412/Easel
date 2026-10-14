@@ -5,7 +5,7 @@ from pathlib import Path
 import secrets
 import shutil
 
-from easel.web_runtime_config import configure_web_runtime
+from easel.web_runtime_config import configure_web_runtime, configure_browser_runtime
 
 ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
@@ -44,6 +44,12 @@ def bootstrap():
         if model.get('providers') and not value.get('models', {}).get('providers'):
             value['models'] = {'mode': 'merge', 'providers': model['providers']}
             value['agents']['defaults']['model'] = {'primary': model['primary']}
+            config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    browser_auth = os.environ.get('EASEL_BROWSER_AUTH_FILE')
+    if browser_auth:
+        value = json.loads(config.read_text(encoding='utf-8'))
+        value, changes = configure_browser_runtime(value, json.loads(Path(browser_auth).read_text()))
+        if changes:
             config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     # OpenClaw 2026.9.6 owns identity creation in state/openclaw.sqlite.
     # Do not fabricate a retired device.json or modify its pairing tables.

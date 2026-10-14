@@ -42,6 +42,8 @@ def test_requirements_are_exact_user_context_without_writing_global_skill_files(
     assert '未列出或已清除的要求不沿用历史值' in message
     assert json.loads(message.splitlines()[-1]) == {'card-quote': '本会话用简洁的中文，保留出处。'}
     assert all(path.read_text(encoding='utf-8') == text for path, text in skills.items())
+    assert str(next(iter(skills))) in message
+    assert 'shared' in message and '复杂多行Python先写脚本再执行' in message
 
 
 def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, monkeypatch):

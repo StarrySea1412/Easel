@@ -1,0 +1,35 @@
+# Use only after comparing the base Python lock, OpenClaw package/dependencies,
+# Node and Chromium versions against the selected release. Record the base ID.
+ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+ARG EASEL_DEPENDENCY_IMAGE
+FROM ${NODE_IMAGE} AS frontend
+WORKDIR /build
+COPY web/frontend/package*.json ./
+RUN npm ci
+COPY web/frontend/ ./
+COPY skills/ /skills/
+RUN npm run build
+
+FROM ${EASEL_DEPENDENCY_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends file && rm -rf /var/lib/apt/lists/*
+RUN rm -rf /app/easel /app/web /app/scripts /app/skills /app/profiles /app/openclaw /app/deployment
+WORKDIR /app
+COPY deployment/138/ ./deployment/138/
+RUN python deployment/138/install_locked_plugin.py
+COPY pyproject.toml ./
+COPY requirements/linux-py312.lock /tmp/requirements.lock
+COPY easel/ ./easel/
+COPY web/ ./web/
+COPY scripts/ ./scripts/
+COPY skills/ ./skills/
+COPY profiles/_template/ ./profiles/_template/
+COPY openclaw/workspace/ ./openclaw/workspace/
+COPY LICENSE release-manifest.json ./
+COPY --from=frontend /build/dist/ ./web/frontend/dist/
+RUN pip install --no-deps . && chmod -R a+rX /app /opt/openclaw
+ARG EASEL_RELEASE_SHA
+LABEL org.opencontainers.image.revision=${EASEL_RELEASE_SHA}
+USER 1000:1000
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "/app/deployment/138/supervisor.py"]

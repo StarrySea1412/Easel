@@ -10,6 +10,29 @@ from pathlib import Path
 PLUGIN_PATH = '/opt/openclaw/node_modules/@openclaw/duckduckgo-plugin'
 
 
+def configure_browser_runtime(value: dict, auth: dict) -> tuple[dict, list[str]]:
+    """Select the deployment-owned, authenticated remote browser profile."""
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]{8,64}', auth.get('username', '')) or not re.fullmatch(
+            r'[A-Za-z0-9_-]{32,128}', auth.get('password', '')):
+        raise ValueError('Invalid browser credential file')
+    result = copy.deepcopy(value)
+    browser = result.setdefault('browser', {})
+    if browser.get('enabled') is False:
+        return result, []
+    profile = {'cdpUrl': 'http://' + auth['username'] + ':' + auth['password'] + '@browser:18801',
+               'attachOnly': True}
+    before = copy.deepcopy(browser)
+    browser['enabled'] = True
+    browser.setdefault('profiles', {})['easel'] = profile
+    browser.setdefault('defaultProfile', 'easel')
+    policy = browser.setdefault('ssrfPolicy', {})
+    allowed = policy.setdefault('allowedHostnames', [])
+    if 'browser' not in allowed:
+        allowed.append('browser')
+    return result, ['browser: configure dedicated authenticated profile'] if browser != before else []
+
+
 def configure_web_runtime(value: dict, *, enable_search=False, allow_plugin=False) -> tuple[dict, list[str]]:
     """Fill missing defaults; explicit disabled search requires opt-in migration."""
     result = copy.deepcopy(value)

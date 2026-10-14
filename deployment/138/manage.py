@@ -104,7 +104,13 @@ def configure(base: Path, isolated: bool, image: str, nginx: str):
     if any(not re.fullmatch(r'[a-zA-Z0-9_./:@-]+', item) for item in (image, nginx)):
         raise ValueError('Invalid image reference.')
     paths = layout(base, isolated)
+    browser_auth = paths['secrets'] / 'browser-auth.json'
+    if not browser_auth.exists():
+        descriptor = os.open(browser_auth, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, 'w') as output:
+            json.dump({'username': 'easel-browser', 'password': secrets.token_urlsafe(48)}, output)
     values = {'EASEL_IMAGE': image, 'EASEL_NGINX_IMAGE': nginx,
+        'EASEL_BROWSER_SECCOMP_PATH': str(RELEASE / 'deployment/138/browser-seccomp.json'),
         'EASEL_HOSTNAME': '127.0.0.1' if isolated else '192.168.0.138',
         'EASEL_BIND_IP': '127.0.0.1' if isolated else '192.168.0.138', 'EASEL_HTTPS_PORT': '8445' if isolated else '8444',
         'EASEL_DEPLOYMENT_MODE': 'isolated-test' if isolated else 'production'}

@@ -1544,6 +1544,18 @@ async def api_env_tools(refresh: bool = False):
     return await asyncio.to_thread(_check_env_tools, refresh)
 
 
+@app.get('/api/env/openclaw')
+async def api_env_openclaw(refresh: bool = False):
+    from easel.openclaw_updates import update_info
+    return await asyncio.to_thread(update_info, refresh)
+
+
+@app.get('/api/env/openclaw/releases')
+async def api_env_openclaw_releases():
+    from easel.openclaw_updates import release_notes
+    return await asyncio.to_thread(release_notes)
+
+
 class EnvInstallRequest(BaseModel):
     model_config = {"extra": "forbid"}
     id: str | None = Field(default=None, max_length=64)
@@ -3107,6 +3119,13 @@ def _chat_message(req: ChatRequest) -> str:
         message += '\n\n' + configuration
     if specs:
         message += '\n\n〔本轮指定技能〕\n' + '\n'.join(specs)
+        message += '\n技能实际路径（以下为本轮已安装源码位置）：\n' + '\n'.join(
+            f'- {name}: {SKILLS_DIR / "openclaw" / name / "SKILL.md"}' for name in specs)
+        message += (f'\n本项目根目录：{PROJECT_ROOT}；共享参考目录：{SKILLS_DIR / "shared/references"}。'
+            'references/相对所读SKILL.md所在目录解析，../相对同一目录解析；skills/shared/相对项目根解析。'
+            '不要省略skills/openclaw中间层，不把共享参考文件拼到技能references目录。'
+            '每次exec是独立命令，上一调用的cd不保持；每次脚本使用准确绝对路径或在同一命令内cd项目根。'
+            '复杂多行Python先写脚本再执行，保留stderr和真实退出码。')
         message += '\n先读取对应 SKILL.md，按原文要求执行；无法执行时说明缺少什么，不要把读取说明当成执行成功。'
         visual = {'comparison-card', 'ai-image-gen', 'ecom-details-image', 'card-design'}
         if any(name in visual or name.startswith(('card-', 'poster-')) for name in specs):

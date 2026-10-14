@@ -1,4 +1,7 @@
 .env-monitor{padding:18px;margin:16px 0;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.env-openclaw{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:15px;margin-bottom:18px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.env-openclaw-name{display:grid;gap:4px;flex:1 1 170px;min-width:0}.env-openclaw-name>span{font-size:11px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.env-openclaw-versions{display:grid;gap:4px;font-size:12px;min-width:150px}.env-openclaw-versions>span+span{color:var(--text-secondary)}.env-openclaw-actions{display:flex;flex-wrap:wrap;gap:6px}.env-openclaw-note,.env-openclaw>.env-error{flex-basis:100%;margin:0;font-size:11px;color:var(--text-secondary);line-height:1.6}
 .env-monitor-heading,.env-job-summary,.env-job-list,.env-connection{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px}
 .env-monitor-heading h3{margin:0;font-size:14px}.env-monitor-heading>span,.env-requirement,.env-uses,.env-directory-hint{font-size:11px;color:var(--text-secondary)}
 .env-job-list{margin:12px 0}.env-job-list button{padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);cursor:pointer}.env-job-list button.selected{background:var(--surface-2)}.env-job-list button span{margin-left:8px;font-size:11px}

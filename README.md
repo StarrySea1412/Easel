@@ -1,3 +1,5 @@
+> **138工具修复与版本评估候选（2026-10-14）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。源码检查通过，隔离/正式真实Agent验收与切换正在进行。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
+
 > **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
 
 > **0.2.8 候选源码已保存并推送**：`cd866910` 收录最新界面、采集/工具解析和启动隔离修复，以及 curl 与固定官方免 Key 搜索插件配置；相关后端 131 项、前端全量 962 项通过。真实搜索、独立浏览器和完整发布验收仍待完成。138 最近已验的运行版本是 0.2.7 / build `1a324540854c`，本轮未重验或切换。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文既有部署回执属于历史版本。
@@ -140,6 +142,8 @@ Windows 10/11 使用 PowerShell：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive -DeferBrowser -DataDir .\data
 .\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
+
+已安装的本机项目可双击根目录 `Quick-Start-Easel.cmd` 快速打开，默认使用7880和现有data，已有服务会复用；冷启动最多等待15分钟，不触发依赖安装。快速启动小包可单独放在桌面，默认定位 `C:\project\Easel`；自定义路径和排错方式见[快速启动说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md)。
 
 这条快速启动路径明确把平台登录/发布用的独立浏览器留待稍后安装，先打开基础工作台。安装记录会标明“浏览器已延后”，不会把它算作已安装；依赖该浏览器的平台操作需要补装后再使用。补装时运行下面的命令，已完成阶段会保留：
 

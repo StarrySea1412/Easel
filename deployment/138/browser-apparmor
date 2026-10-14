@@ -1,0 +1,20 @@
+# Allow Chromium's user-namespace sandbox only in the dedicated browser container.
+# Load with: sudo apparmor_parser -r deployment/138/browser-apparmor
+# The container still runs as uid 1000, drops host capabilities and mounts no app data.
+#include <tunables/global>
+profile easel-browser flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  file,
+  network inet stream,
+  network inet6 stream,
+  network unix,
+  signal,
+  ptrace (read, trace) peer=easel-browser,
+  capability,
+  userns,
+  mount,
+  umount,
+  deny /sys/** wklx,
+  deny /proc/sys/** wklx,
+  deny /proc/sysrq-trigger rwklx,
+}

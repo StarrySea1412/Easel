@@ -1025,6 +1025,32 @@ export interface EnvToolsResponse {
   cachedAt?: number;
 }
 
+export interface OpenClawUpdate {
+  updateAvailable: boolean;
+  installedVersion: string | null;
+  installedPath: string | null;
+  installedState: 'ok' | 'missing' | 'unknown';
+  latestVersion: string | null;
+  latestState: 'ok' | 'unavailable';
+  latestError?: string;
+  releaseUrl: string | null;
+  registryUrl: string;
+  checkedAt: number;
+  notesState: 'ok' | 'partial' | 'empty' | 'unavailable';
+  notesTruncated: boolean;
+  rangeIncomplete?: boolean;
+  notesError?: string;
+  releases: { version: string; sourceUrl: string; text: string; truncated: boolean; unavailable?: boolean }[];
+}
+
+export function fetchOpenClawUpdate(refresh = false): Promise<OpenClawUpdate> {
+  return envRequest(`/api/env/openclaw${refresh ? '?refresh=1' : ''}`, undefined, 20000);
+}
+
+export function fetchOpenClawReleases(): Promise<OpenClawUpdate> {
+  return envRequest('/api/env/openclaw/releases', undefined, 60000);
+}
+
 export function fetchEnvTools(refresh = false): Promise<EnvToolsResponse> {
   return envRequest(`/api/env/tools${refresh ? '?refresh=1' : ''}`, undefined, 250000);
 }

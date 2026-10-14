@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from easel.runtime_limits import install_limits
-from easel.web_runtime_config import PLUGIN_PATH, configure_web_runtime
+from easel.web_runtime_config import PLUGIN_PATH, configure_web_runtime, configure_browser_runtime
 from easel import web_runtime_config
 
 
@@ -25,6 +25,24 @@ def test_defaults_add_pinned_provider_without_mutating_input():
     assert changes and 'never-print' not in json.dumps(changes)
     same, repeated = configure_web_runtime(result)
     assert same == result and repeated == []
+
+
+def test_remote_browser_is_authenticated_and_keeps_operator_policy():
+    auth = {'username': 'test-browser', 'password': 'x' * 48}
+    original = {'browser': {'defaultProfile': 'custom', 'ssrfPolicy': {'allowedHostnames': ['example.com']},
+                            'profiles': {'custom': {'cdpUrl': 'http://localhost:1234'}}}, 'secret': 'preserved'}
+    result, changes = configure_browser_runtime(original, auth)
+    assert result['browser']['defaultProfile'] == 'custom'
+    assert result['browser']['profiles']['custom'] == original['browser']['profiles']['custom']
+    assert result['browser']['profiles']['easel']['attachOnly'] is True
+    assert result['browser']['ssrfPolicy'] == {'allowedHostnames': ['example.com', 'browser']}
+    assert original['browser']['ssrfPolicy']['allowedHostnames'] == ['example.com']
+    assert result['secret'] == 'preserved' and 'x' * 48 not in str(changes)
+    assert configure_browser_runtime(result, auth)[1] == []
+    disabled = {'browser': {'enabled': False}}
+    assert configure_browser_runtime(disabled, auth) == (disabled, [])
+    with pytest.raises(ValueError):
+        configure_browser_runtime({}, {'username': 'test-browser', 'password': 'too-short'})
 
 
 @pytest.mark.parametrize('original', [

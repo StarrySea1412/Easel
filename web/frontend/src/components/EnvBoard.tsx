@@ -5,6 +5,7 @@ import { IconInfo } from './icons';
 import { envJobActive, useEnvironmentJobs } from '../lib/useEnvironmentJobs';
 import { useDeploymentCapabilities } from '../lib/deploymentCapabilities';
 import '../styles/environment-install.css';
+import OpenClawRuntimeCard from './OpenClawRuntimeCard';
 import {
   IconHexagon, IconFilm, IconFileCode, IconAudioWaveform, IconDatabase,
   IconPackage, IconMonitor, IconTv, IconGlobe, IconCompass, IconLibrary,
@@ -16,6 +17,7 @@ interface Props {
   loading: boolean;
   error: string;
   onRefresh: () => void;
+  onAssessUpdate?: (prompt: string) => boolean;
 }
 
 const ICONS: Record<string, ComponentType<{ size?: number }>> = {
@@ -107,7 +109,7 @@ function InstallMonitor({ jobs, disconnected, disabled, onRetry }: {
 }
 
 /** Environment results, recipe explanations and reconnectable server jobs. */
-export default function EnvBoard({ tools, python, loading, error, onRefresh }: Props) {
+export default function EnvBoard({ tools, python, loading, error, onRefresh, onAssessUpdate }: Props) {
   const deployment = useDeploymentCapabilities();
   const controller = useEnvironmentJobs(onRefresh);
   const latestByTool = new Map<string, EnvJob>();
@@ -128,6 +130,7 @@ export default function EnvBoard({ tools, python, loading, error, onRefresh }: P
   };
   return (
     <section className="st-env">
+      <OpenClawRuntimeCard onAssess={onAssessUpdate} />
       <div className="panel-top">
         <span className="pill sum">{loading ? '检测中…' : `已检测就绪 ${okCount} / ${total}`}</span>
         <span className="spacer" />

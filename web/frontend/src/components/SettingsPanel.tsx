@@ -76,13 +76,14 @@ function modelConfigLabel(row?: ModelRow) {
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, targetModelRef, conversationBackup, demoDataPreference, onOpenOffice }: {
+export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, targetModelRef, conversationBackup, demoDataPreference, onOpenOffice, onAssessUpdate }: {
   initialSection?: SettingsSection;
   navigationKey?: number;
   targetModelRef?: string;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
   demoDataPreference: ComponentProps<typeof DemoDataSettingsCard>;
   onOpenOffice?: () => void;
+  onAssessUpdate?: (prompt: string) => boolean;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
   const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' ? 'more' : section;
@@ -1108,6 +1109,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                   loading={envLoading}
                   error={envError}
                   onRefresh={() => void refreshEnv(true)}
+                  onAssessUpdate={onAssessUpdate}
                 />
               </section>
             )}

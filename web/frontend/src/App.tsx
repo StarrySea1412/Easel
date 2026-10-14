@@ -1100,7 +1100,7 @@ export default function App() {
       case 'profile':
         return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       case 'settings':
-        return <SettingsPanel demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
+        return <SettingsPanel onAssessUpdate={handleQuickPrompt} demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
           onExport: handleExportConversations,
           onExportRaw: exportRawConversationStorage,
           onImport: handleImportConversations,

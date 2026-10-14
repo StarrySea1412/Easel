@@ -1,3 +1,5 @@
+> **Runtime repair and update-assessment candidate (October 14, 2026)**: adds actual OpenClaw/latest versions, official release evidence and Agent advice; repairs skill paths, search configuration and command tools, with a dedicated sandboxed browser. Source checks passed; isolated/live Agent acceptance and activation are in progress. [Record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md).
+
 > **Upstream comparison and adoption plan (October 14, 2026)**: the [comparison report and phased plan](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md) compares upstream `bb3c8ff0` / v0.3.0 with our pushed `cd866910`. Finish the current candidate release, then adopt login, collection, PATH and model-configuration fixes; shared skills, an artifact gallery and multiple engines follow in compatible phases. These planned features have not been implemented in this turn.
 
 > **0.2.8 candidate source is saved and pushed**: `cd866910` includes the latest interface, collection/tool parsing and startup isolation fixes, plus curl and pinned official key-free search configuration. The earlier check completed 131 focused backend tests and 962 frontend tests. Real search, isolated browser and full release acceptance remain pending. The latest verified 138 runtime is 0.2.7 / build `1a324540854c`; it was not rechecked or switched in this turn. [Release record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md). Portable packaging remains paused. Existing deployment receipts below describe earlier releases.
@@ -134,6 +136,8 @@ Windows 10/11, in PowerShell. Install Git before cloning, plus Python 3.10+ (3.1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive -DeferBrowser -DataDir .\data
 .\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
+
+For an installed local project, double-click `Quick-Start-Easel.cmd`. It uses port7880 and the existing data, reuses a running workbench, and allows up to15 minutes for cold gateway startup without installing dependencies. The small launch ZIP can live on the desktop and defaults to `C:\project\Easel`; see the [quick-start guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md) for custom paths and troubleshooting.
 
 This quick-start path explicitly defers the dedicated browser used by platform login/publishing, so you can open the core workbench first. Installation records say that the browser was deferred, never that it was installed. Browser-dependent platform actions require completing this step later, while retaining completed stages:
 
