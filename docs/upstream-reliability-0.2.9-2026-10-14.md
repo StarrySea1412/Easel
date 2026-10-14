@@ -48,6 +48,10 @@ Git回执：实现提交 `70991cc575e0393dc20bc096e6cf908225beeeca` 已推送并
 
 新增本地Markdown目标6项存在；独立分支的双语README、CHANGELOG、对比计划、本版记录及main双语README共7个在线Markdown源HTTP200，包含0.2.9说明，main同时保留12f144c8发布信息。这是HTTP与源码检查，没有报告真实浏览器链接、菜单或跳转验收。
 
+后续补充：用户提供的 `tool_call` 回执暴露了通用工具名兼容缺口。严格匹配同一 OpenClaw API 安全包装和唯一的 `web_search is disabled or no provider is available.` 文本后，通用工具行现在显示“搜索服务未配置”；任意网页正文、错误包装不完整或非 API 来源仍显示通用提示。该修复只改变前端错误说明，不启用搜索、不写入 provider 凭据，也未部署7880或138。
+
+后续用户搜索错误核查已精确匹配本机15:15:53的父/嵌套工具记录；补齐通用工具名漏掉的已知搜索失败原因，18项前端检查、lint与生产构建通过。[独立核查记录](search-provider-failure-2026-10-14.md)保留配置缺口与运行边界；不改变本版计划B验收或后续C–F范围。
+
 ## English
 
 This 0.2.9 source candidate implements reliability batch B from upstream Easel at fixed commit `bb3c8ff0` (upstream 0.3.0): QR entry and positive login evidence, bounded XHS identity/creator collection, shared cross-process profile ownership, inherited Windows PATH preservation, and custom-model reasoning capability/automatic request-format controls. Existing credential transactions, account/source isolation, stale-result guards and durable execution records remain in use.

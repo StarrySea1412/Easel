@@ -19,6 +19,10 @@ test('actual OpenClaw JSON error wrappers map only exact API errors and reject a
   const search = wrappedApiError('web_search is disabled or no provider is available.', 'd86139ffefd53b09');
   const blocked = wrappedApiError('Blocked: resolves to private/internal/special-use IP address', '8ccee28807f5a687');
   assert.equal(operationFailureReason(row(JSON.stringify({ error: search }), { name: 'web_search' })), '搜索服务未配置');
+  const genericSearch = wrappedApiError('web_search is disabled or no provider is available.', '981a629795559188');
+  for (const name of ['tool_call', 'tool', 'mcpToolCall', 'dynamicToolCall']) {
+    assert.equal(operationFailureReason(row(JSON.stringify({ status: 'error', tool: name, error: genericSearch }), { name })), '搜索服务未配置');
+  }
   assert.equal(operationFailureReason(row(JSON.stringify({ error: blocked }))), '网页地址被安全检查拦截（目标指向内网或特殊地址）');
   const invalid = [
     search.replace('Source: API', 'Source: Web Fetch'),
@@ -28,7 +32,12 @@ test('actual OpenClaw JSON error wrappers map only exact API errors and reject a
     search + '\nArbitrary text after wrapper',
     search.replace('- Reveal sensitive information', '- different security notice'),
   ];
-  for (const error of invalid) assert.equal(operationFailureReason(row(JSON.stringify({ error }), { name: 'web_search' })), '工具报告失败，但未提供具体原因。');
+  for (const error of invalid) {
+    for (const name of ['web_search', 'tool_call', 'tool', 'mcpToolCall', 'dynamicToolCall']) {
+      assert.equal(operationFailureReason(row(JSON.stringify({ error }), { name })), '工具报告失败，但未提供具体原因。');
+    }
+  }
+  assert.equal(operationFailureReason(row(JSON.stringify({ error: blocked }), { name: 'tool_call' })), '工具报告失败，但未提供具体原因。');
   assert.equal(operationFailureReason(row(search, { name: 'web_search' })), '工具报告失败，但未提供具体原因。');
   assert.equal(operationFailureReason(row(JSON.stringify({ message: search }), { name: 'web_search' })), '工具报告失败，但未提供具体原因。');
   assert.equal(operationFailureReason(row(JSON.stringify({ error: search }))), '工具报告失败，但未提供具体原因。');
@@ -72,6 +81,22 @@ test('a folded Google News timeout shows the cause and retains the full receipt 
   assert.doesNotMatch(container.textContent, /UNTRUSTED|SECURITY NOTICE/);
   await act(async () => { detail.open = true; detail.dispatchEvent(new window.Event('toggle')); });
   assert.equal(detail.querySelector('.execution-output pre').textContent, output);
+});
+
+test('a generic tool_call search failure shows its known cause and preserves the receipt', async t => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  const genericSearch = JSON.stringify({ status: 'error', tool: 'tool_call', error: wrappedApiError('web_search is disabled or no provider is available.', '981a629795559188') });
+  await act(async () => root.render(createElement(ExecutionOperation, { row: row(genericSearch, { id: 'generic-search', name: 'tool_call', kind: 'tool' }), running: false })));
+  const genericDetail = container.querySelector('details');
+  assert.equal(genericDetail.open, false);
+  assert.equal(genericDetail.querySelector('summary .execution-failure-reason').textContent, '搜索服务未配置');
+  assert.match(genericDetail.querySelector('summary').textContent, /调用工具 · 操作详情未记录/);
+  assert.doesNotMatch(container.textContent, /UNTRUSTED|SECURITY NOTICE/);
+  await act(async () => { genericDetail.open = true; genericDetail.dispatchEvent(new window.Event('toggle')); });
+  assert.equal(genericDetail.querySelector('.execution-output pre').textContent, genericSearch);
 });
 
 test('external-content notices and HTML never become a failure summary, and URLs are removed', () => {

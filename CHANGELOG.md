@@ -1,5 +1,6 @@
 ## 0.2.9 source candidate · 2026-10-14 / 上游可靠性跟进
 
+- Explain the exact wrapped unavailable-search error for generic tool aliases, preserving strict external-content filtering and full receipts; 18 frontend checks, lint and build passed. The supplied receipt was traced to the local runtime; search configuration is unchanged and this display fix is not deployed. / 通用tool_call行补齐已知搜索错误提示；本机真实回执已匹配，18项前端检查与构建通过，搜索启用及运行部署独立待办。见[核查记录](docs/search-provider-failure-2026-10-14.md)。
 - Adapt upstream QR entry/anonymous redirect checks and bounded XHS identity/collection with cross-process profile ownership. / 吸收上游扫码入口、匿名跳转判定、小红书本人身份/有界采集及共享跨进程Profile锁；失败、账号变化和草稿列表不覆盖历史。
 - Preserve inherited Windows PATH and add custom-model reasoning capability and automatic/explicit request-format settings with existing credential transactions. / 保留安装进程PATH；自定义模型新增思考能力和自动/明确格式，复用凭据事务。
 - Keep stable authenticated userId separate from legacy displayed-ID history; retain existing session thinking policy when the model is unknown. / 稳定userId与旧显示账号号历史不自动合并；型号未知时保留既有会话思考策略。
