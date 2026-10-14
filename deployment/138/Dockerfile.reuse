@@ -15,19 +15,11 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends file && rm -rf /var/lib/apt/lists/*
 RUN rm -rf /app/easel /app/web /app/scripts /app/skills /app/profiles /app/openclaw /app/deployment
 WORKDIR /app
-COPY deployment/138/ ./deployment/138/
-RUN python deployment/138/install_locked_plugin.py
-COPY pyproject.toml ./
-COPY requirements/linux-py312.lock /tmp/requirements.lock
-COPY easel/ ./easel/
-COPY web/ ./web/
-COPY scripts/ ./scripts/
-COPY skills/ ./skills/
-COPY profiles/_template/ ./profiles/_template/
-COPY openclaw/workspace/ ./openclaw/workspace/
-COPY LICENSE release-manifest.json ./
+# The release exporter excludes credentials, user data and frontend dist.
+# One copy avoids repeatedly scanning the large immutable dependency tree.
+COPY . ./
 COPY --from=frontend /build/dist/ ./web/frontend/dist/
-RUN pip install --no-deps . && chmod -R a+rX /app /opt/openclaw
+RUN python deployment/138/install_locked_plugin.py && pip install --no-deps . && chmod -R a+rX /app /opt/openclaw
 ARG EASEL_RELEASE_SHA
 LABEL org.opencontainers.image.revision=${EASEL_RELEASE_SHA}
 USER 1000:1000
