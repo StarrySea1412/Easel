@@ -1,6 +1,12 @@
+> **Google News超时核查（2026-10-14）**：截图中的抓取失败已确认是 `request timed out`，138容器复测连接超时；搜索返回不足以证明近期没有重大新闻。源码补齐“网页请求超时”提示，17项前端回归与TypeScript通过，尚未部署此提示修复。[核查记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/huawei-fetch-failure-2026-10-14.md)。
+
+> **138工具修复与版本评估（2026-10-14，已部署）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。0.2.8正式/隔离真实Agent验收和切换已完成；OpenClaw继续固定2026.9.6。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
+
+> **138快速发布入口（2026-10-14）**：根目录 `Quick-Deploy-138.cmd` 可从固定 Git 提交构建、上传并在 138 远端校验/构建候选；只有显式加入 `-Activate` 才会备份并切换正式服务。默认不改运行中的服务，完整参数和回滚边界见[138快速发布说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deploy-138-quick-start.md)。
+
 > **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
 
-> **0.2.8 候选源码已保存并推送**：`cd866910` 收录最新界面、采集/工具解析和启动隔离修复，以及 curl 与固定官方免 Key 搜索插件配置；相关后端 131 项、前端全量 962 项通过。真实搜索、独立浏览器和完整发布验收仍待完成。138 最近已验的运行版本是 0.2.7 / build `1a324540854c`，本轮未重验或切换。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文既有部署回执属于历史版本。
+> **0.2.8 发布记录**：`cd866910` 是候选源码保存点；最终部署提交为 `0ba9fe20`，收录搜索、浏览器、工具执行和版本评估修复。真实搜索、独立浏览器和正式发布验收已完成。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文带日期的部署回执属于历史版本。
 
 > **138内网部署（2026-10-13）**：独立入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 已部署 **v0.2.7 / 构建1a324540854c**，正式/隔离镜像Healthy且重启0，1355运行源码摘要通过，运行发行SHA已推送并核对远端一致。认证、当前Windows用户CA信任、真实浏览器登录/对话、此前实际OpenClaw模型/技能/终端与两次web_fetch HTTP200均有证据，本次版本更新未重复请求模型。真实浏览器HTML预览、原文件URL直接打开及159字节附件下载已验证，最终版本持久文件hash一致；原文件链接target-blank点击的新页未被IAB暴露，保留观察边界。R119/R122核心使用交付完成，完整D01–D12的故障恢复/回滚演练、全菜单/390px、代表性负载、运营平台与付费媒体仍未验。OpenClaw默认、Codex禁用、便携打包暂停。[运行说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/deployment/138/RUNBOOK.md) · [部署任务清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-tasks-2026-10-13.md)。
 
