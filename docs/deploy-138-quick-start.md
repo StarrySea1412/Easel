@@ -2,6 +2,8 @@
 
 `Quick-Deploy-138.cmd` 和 `scripts/deploy_138.ps1` 把已有的 138 发布流程串成一个入口：固定 Git 提交、生成带 `release-manifest.json` 的 ZIP、传到 138、远端校验、构建固定镜像；只有显式使用 `-Activate` 才会停写备份并切换正式服务。
 
+2026-10-14实际隔离/正式运行均通过，同一固定镜像、HTTPS认证与真实Agent工具回执已核对；前端交互由用户验收。详见[实际发布回执](quick-deploy-138-acceptance-2026-10-14.md)。
+
 ## 快速用法
 
 在项目根目录打开 PowerShell：

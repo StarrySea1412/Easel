@@ -1,5 +1,7 @@
 # Easel 138 Linux deployment
 
+Latest verified 0.2.8 release: `12f144c8`, image `82cd8cbddf1a`. The Windows quick entry completed isolated/live activation, source/authentication/gateway/official-update checks and real Agent tool acceptance. Frontend interaction acceptance belongs to the user. [Actual receipt](../../docs/quick-deploy-138-acceptance-2026-10-14.md).
+
 This deployment serves trusted operators sharing one workspace. It is not a
 multi-tenant data-isolation system. Entry: `https://192.168.0.138:8444/`.
 Codex is disabled until independently verified. Windows packaging remains paused.

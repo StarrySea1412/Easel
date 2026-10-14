@@ -1,5 +1,7 @@
 # 138工具修复与OpenClaw更新评估 / Runtime repair and update assessment
 
+后续0.2.8快速发布已完成：`12f144c8` 收录超时提示及热点密度/图标，隔离和正式使用同一镜像；最新回执见[快速发布实测](quick-deploy-138-acceptance-2026-10-14.md)。以下保留首次工具修复和官方Agent评估的原始回执。Frontend interaction acceptance for the follow-up belongs to the user.
+
 2026-10-14，0.2.8 已切换到138正式环境并完成真实验收；OpenClaw仍固定2026.9.6，官方latest为2026.10.3，未自动升级OpenClaw。
 
 截图对应真实会话 `6a3bb3e1-bfb3-5417-abb0-5f85fe6378a0`。权威 transcript 确认技能读取和ls使用了缺少`openclaw/`层级的路径，共享标题参考也被拼到技能私有references；搜索明确报告未启用/provider缺失；复杂双引号多行Python中的反引号触发shell语法错误。另有curl/file缺失。修复提供准确技能路径、先写脚本再独立执行的规则和镜像工具。隔离实测发现138无法访问DuckDuckGo，最终采用基于OpenClaw公开SDK的Easel Bing RSS provider，保留真实来源与不可信文本标记，不借用其他项目服务。

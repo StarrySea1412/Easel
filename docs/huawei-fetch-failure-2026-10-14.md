@@ -8,7 +8,7 @@
 
 在正式运行容器 `easel-app-1` 内只读复测：DNS 成功解析；curl 使用 8 秒连接上限、15 秒总上限，约 8 秒后退出 28，报告无法连接目标 443 端口，未收到 HTTP 响应。此证据支持当前容器到 Google News 的连接不可用；无法据此确定是网络出口、目标侧或中间网络设备造成，也不能写成 Google 返回 403、429 或安全策略拒绝。
 
-正式运行镜像仍为 `easel:0ba9fe201ca3`。本轮没有重新部署。
+核查当时正式镜像为 `easel:0ba9fe201ca3`，核查未触发重新部署。随后提示修复已通过快速入口发布到 `12f144c8`，详见后续发布回执。
 
 ## 为什么界面没有显示原因
 
@@ -28,12 +28,12 @@
 
 ## 验证与交付边界
 
-17项前端定向检查及TypeScript编译通过，覆盖本次实际 API 超时格式、折叠行显示、展开保留完整回执，以及不匹配包装与外部正文拒绝。真实服务器证据属于只读 SQLite 核查和容器内网络探测；DOM 自动化不等同于真实浏览器或服务器上线验收。源码修复需另行发布后才能出现在 138 页面。
+17项前端定向检查及TypeScript编译通过，覆盖本次实际 API 超时格式、折叠行显示、展开保留完整回执，以及不匹配包装与外部正文拒绝。原核查属于只读 SQLite 核查和容器内网络探测；DOM 自动化不等同于真实浏览器验收。随后已在 `12f144c8` 正式发布中部署提示修复，运行源码/前端包及真实工具回执通过，[实际发布回执](quick-deploy-138-acceptance-2026-10-14.md)记录边界，页面交互由用户验收。
 
 ## English summary
 
 The Google News web_fetch failed with request timed out after about 30.7 seconds. A bounded probe inside the live 138 container resolved DNS successfully but could not connect to port 443 within eight seconds; curl exited 28 without an HTTP response. The evidence does not identify the network component responsible and does not establish an HTTP rejection or an SSRF block.
 
-The frontend discarded the actual timeout because its strict OpenClaw API wrapper allowlist covered only two other errors. The source fix adds an exact web_fetch timeout match and displays a short localized cause while keeping arbitrary external bodies filtered. This is an explanation fix, not a network fix, and it has not been deployed to 138.
+The frontend discarded the actual timeout because its strict OpenClaw API wrapper allowlist covered only two other errors. The source fix adds an exact web_fetch timeout match and displays a short localized cause while keeping arbitrary external bodies filtered. This explanation fix was subsequently deployed in `12f144c8`; Google News connectivity remains outside that display fix. The user performs frontend interaction acceptance.
 
 The same session contains 27 search returns, one Huawei newsroom HTTP 200 fetch with only a cookie notice/filter heading, and one failed Google News fetch. Searches produced only four distinct URL lists, largely home/product pages. The current Bing RSS provider declares only query/count and implements no date or freshness filter. These receipts cannot justify a claim that no recent major Huawei event exists. Search freshness and research quality remain follow-up work.

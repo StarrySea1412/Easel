@@ -1,3 +1,8 @@
+## 2026-10-14 · Quick deploy verified on 138 / 138快速发布实测完成
+
+- Activate 0.2.8 / 12f144c8 through the Windows quick entry in isolation and live with the same fixed image; verify 1388 runtime source hashes, authentication/version/gateway, official updates and preserved files. / Windows快速入口完成隔离及正式发布，同一固定镜像，1388项运行源码与认证/版本/网关、官方记录、持久文件核对通过。
+- Nine isolated and eleven live actual Agent tool returns passed with matching real report downloads. Timeout causes and home trend icons/density are deployed; the user performs frontend interaction acceptance. / 隔离9次、正式11次真实工具回执无错，报告下载一致；超时提示和热点密度/图标已部署，前端交互由用户验收。见[回执 / receipt](docs/quick-deploy-138-acceptance-2026-10-14.md)。
+
 ## 2026-10-14 · Home trend density and icons / 首页热点密度与图标
 
 - Reuse Weibo/Douyin icons and render up to five ranked topics per source; adapt columns to card width and remove forced blank space. / 复用微博、抖音图标，每源最多5条带排名，按卡片宽度切换列数并移除强制留白。
