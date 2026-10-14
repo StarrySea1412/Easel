@@ -4,6 +4,7 @@
 #include <tunables/global>
 profile easel-browser flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
+  #include <abstractions/nameservice>
   file,
   network inet stream,
   network inet6 stream,
