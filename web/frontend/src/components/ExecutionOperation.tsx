@@ -22,12 +22,13 @@ export function operationFailureReason(row: Operation): string {
       source = typeof text === 'string' ? text : '';
     }
   } catch { /* Plain text tool receipts are the usual result. */ }
-  // OpenClaw wraps its own API errors like external content. Only these two
-  // exact API messages are allowed; no website text or extra body is exposed.
+  // OpenClaw wraps its own API errors like external content. Only exact known
+  // API messages are allowed; no website text or extra body is exposed.
   if (jsonError && source.startsWith(apiErrorNotice)) {
-    const wrapped = /^\s*<<<EXTERNAL_UNTRUSTED_CONTENT id="([0-9a-f]{16})">>>\nSource: API\n---\n(web_search is disabled or no provider is available\.|Blocked: resolves to private\/internal\/special-use IP address)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>\s*$/.exec(source.slice(apiErrorNotice.length));
+    const wrapped = /^\s*<<<EXTERNAL_UNTRUSTED_CONTENT id="([0-9a-f]{16})">>>\nSource: API\n---\n(web_search is disabled or no provider is available\.|Blocked: resolves to private\/internal\/special-use IP address|request timed out)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>\s*$/.exec(source.slice(apiErrorNotice.length));
     if (wrapped?.[2] === 'web_search is disabled or no provider is available.' && row.name === 'web_search') return '搜索服务未配置';
     if (wrapped?.[2] === 'Blocked: resolves to private/internal/special-use IP address' && row.name === 'web_fetch') return '网页地址被安全检查拦截（目标指向内网或特殊地址）';
+    if (wrapped?.[2] === 'request timed out' && row.name === 'web_fetch') return '网页请求超时';
   }
   // External page bodies are never used as a failure explanation. Keep only
   // the tool's own prefix before its security notice, wrapper, or HTML.

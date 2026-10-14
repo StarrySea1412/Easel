@@ -1,3 +1,9 @@
+## 2026-10-14 · Google News timeout cause / Google News超时原因
+
+- Confirm the screenshot failure with the original SQLite tool receipt and a bounded live-container network probe. / 从原始SQLite工具回执及容器网络探测确认Google News请求超时，无HTTP响应；未重新部署。
+- Recognize the exact OpenClaw API timeout wrapper and show a short cause on folded failed fetch rows; retain external-body filtering. / 精确识别OpenClaw API超时包装，折叠失败行显示“网页请求超时”，保留外部正文过滤。
+- 17 focused frontend checks and TypeScript passed. Document the limits of the repeated homepage search results and the lack of implemented freshness filters. This source fix is not deployed to 138. / 17项定向前端检查及TypeScript通过；记录重复主页结果和未实现时效筛选的边界，本提示修复尚未部署138。
+
 ## 2026-10-14 · Runtime repair and version assessment / 工具修复与版本评估
 
 - Show the selected OpenClaw version and official latest release, with bounded official changelog evidence for Agent upgrade advice; keep existing chats and drafts. / 显示当前运行版与官方latest，Agent基于官方来源评估收益、风险与建议，不自动升级。

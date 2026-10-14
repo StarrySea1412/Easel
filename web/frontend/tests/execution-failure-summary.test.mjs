@@ -43,6 +43,37 @@ test('failed tool receipts expose short causes for missing providers, HTTP error
   assert.equal(operationFailureReason(row('/bin/sh: 1: curl: not found', { name: 'exec', kind: 'command', exitCode: 127 })), '终端命令不存在');
 });
 
+test('actual Google News timeout receipt is recognized without exposing arbitrary wrapper bodies', () => {
+  // Sanitized OpenClaw SQLite seq46 receipt from 138, October 14, 2026.
+  const timeout = wrappedApiError('request timed out', '31a231df1c54550e');
+  const receipt = JSON.stringify({ status: 'error', tool: 'web_fetch', error: timeout });
+  assert.equal(operationFailureReason(row(receipt)), '网页请求超时');
+  const invalid = [
+    timeout.replace('Source: API', 'Source: Web Fetch'),
+    timeout.replace('timed out\n<<<END', 'timed out\nArbitrary website content\n<<<END'),
+    timeout.replace('<<<END_EXTERNAL_UNTRUSTED_CONTENT id="31a231df1c54550e"', '<<<END_EXTERNAL_UNTRUSTED_CONTENT id="0000000000000000"'),
+    timeout + '\nArbitrary text after wrapper',
+  ];
+  for (const error of invalid) assert.equal(operationFailureReason(row(JSON.stringify({ error }))), '工具报告失败，但未提供具体原因。');
+  assert.equal(operationFailureReason(row(receipt, { name: 'web_search' })), '工具报告失败，但未提供具体原因。');
+  assert.equal(operationFailureReason(row(receipt, { status: 'returned' })), '');
+});
+
+test('a folded Google News timeout shows the cause and retains the full receipt behind expansion', async t => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  const output = JSON.stringify({ status: 'error', tool: 'web_fetch', error: wrappedApiError('request timed out', '31a231df1c54550e') });
+  await act(async () => root.render(createElement(ExecutionOperation, { row: row(output), running: false })));
+  const detail = container.querySelector('details');
+  assert.equal(detail.open, false);
+  assert.equal(detail.querySelector('summary .execution-failure-reason').textContent, '网页请求超时');
+  assert.doesNotMatch(container.textContent, /UNTRUSTED|SECURITY NOTICE/);
+  await act(async () => { detail.open = true; detail.dispatchEvent(new window.Event('toggle')); });
+  assert.equal(detail.querySelector('.execution-output pre').textContent, output);
+});
+
 test('external-content notices and HTML never become a failure summary, and URLs are removed', () => {
   const wrapper = 'Web fetch failed (404): SECURITY NOTICE: The following content is from an EXTERNAL, UNTRUSTED source.\n<<<EXTERNAL_UNTRUSTED_CONTENT id="web">>>\n404 Page Not Found <html><body>Arbitrary website text</body></html>\n<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>';
   assert.equal(operationFailureReason(row(wrapper)), '网页不存在（HTTP 404）');

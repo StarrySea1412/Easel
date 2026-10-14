@@ -1,3 +1,5 @@
+> **Google News超时核查（2026-10-14）**：截图中的抓取失败已确认是 `request timed out`，138容器复测连接超时；搜索返回不足以证明近期没有重大新闻。源码补齐“网页请求超时”提示，17项前端回归与TypeScript通过，尚未部署此提示修复。[核查记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/huawei-fetch-failure-2026-10-14.md)。
+
 > **138工具修复与版本评估（2026-10-14，已部署）**：增加OpenClaw实际版本/官方latest、官方记录与Agent更新建议；修复技能路径、搜索配置与命令工具，接入独立沙箱浏览器。0.2.8正式/隔离真实Agent验收和切换已完成；OpenClaw继续固定2026.9.6。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
 
 > **138快速发布入口（2026-10-14）**：根目录 `Quick-Deploy-138.cmd` 可从固定 Git 提交构建、上传并在 138 远端校验/构建候选；只有显式加入 `-Activate` 才会备份并切换正式服务。默认不改运行中的服务，完整参数和回滚边界见[138快速发布说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deploy-138-quick-start.md)。
