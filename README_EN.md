@@ -135,6 +135,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive 
 .\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
 
+Installed customized checkouts provide `Quick-Start-Easel.cmd`: double-click to use port 7880 and existing data, reuse a verified workbench, and allow up to 15 minutes for cold gateway startup. It does not install dependencies. The scripts are on the [development branch](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10); see the [quick-start guide](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md) for custom paths, the small script ZIP and troubleshooting.
+
 This quick-start path explicitly defers the dedicated browser used by platform login/publishing, so you can open the core workbench first. Installation records say that the browser was deferred, never that it was installed. Browser-dependent platform actions require completing this step later, while retaining completed stages:
 
 ```powershell

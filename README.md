@@ -141,6 +141,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -NonInteractive 
 .\.venv\Scripts\python.exe .\scripts\start_workspace.py --data-dir .\data --port 7860
 ```
 
+已安装的定制分支项目可双击根目录 `Quick-Start-Easel.cmd` 快速打开，默认7880和现有data，已有服务会复用，冷启动最多等待15分钟。脚本不触发安装；快速入口源码位于[开发分支](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10)，自定义路径、独立小包与排错方式见[快速启动说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-quick-start.md)。
+
 这条快速启动路径明确把平台登录/发布用的独立浏览器留待稍后安装，先打开基础工作台。安装记录会标明“浏览器已延后”，不会把它算作已安装；依赖该浏览器的平台操作需要补装后再使用。补装时运行下面的命令，已完成阶段会保留：
 
 ```powershell
