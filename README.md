@@ -1,6 +1,10 @@
+> **上游对比与跟进规划（2026-10-14）**：[对比报告与分批计划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/upstream-comparison-plan-2026-10-14.md)比较上游 `bb3c8ff0` / v0.3.0 与本仓库已推送的 `cd866910`。先完成当前候选部署，再吸收登录、采集、PATH 与模型配置修复；共享技能、产物画廊和多引擎按兼容性分批推进。报告中的跟进功能尚未实施。
+
+> **0.2.8 候选源码已保存并推送**：`cd866910` 收录最新界面、采集/工具解析和启动隔离修复，以及 curl 与固定官方免 Key 搜索插件配置；相关后端 131 项、前端全量 962 项通过。真实搜索、独立浏览器和完整发布验收仍待完成。138 最近已验的运行版本是 0.2.7 / build `1a324540854c`，本轮未重验或切换。[本次发布记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/full-release-2026-10-13.md)。便携打包继续暂停。下文既有部署回执属于历史版本。
+
 > **138内网部署（2026-10-13）**：独立入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 已部署 **v0.2.7 / 构建1a324540854c**，正式/隔离镜像Healthy且重启0，1355运行源码摘要通过，运行发行SHA已推送并核对远端一致。认证、当前Windows用户CA信任、真实浏览器登录/对话、此前实际OpenClaw模型/技能/终端与两次web_fetch HTTP200均有证据，本次版本更新未重复请求模型。真实浏览器HTML预览、原文件URL直接打开及159字节附件下载已验证，最终版本持久文件hash一致；原文件链接target-blank点击的新页未被IAB暴露，保留观察边界。R119/R122核心使用交付完成，完整D01–D12的故障恢复/回滚演练、全菜单/390px、代表性负载、运营平台与付费媒体仍未验。OpenClaw默认、Codex禁用、便携打包暂停。[运行说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/deployment/138/RUNBOOK.md) · [部署任务清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-tasks-2026-10-13.md)。
 
-> **界面同步边界**：138固定v0.2.7/build1a324540854c未包含本地未提交UI；最新设置分组、紧凑生图/账号分析布局、技能推荐、工具汇总简化和用户OpenClaw SVG尚未同步，不能把核心登录/模型/文件部署写成全部最新功能已同步。本次仅只读核对，未部署或重启。
+> **界面同步边界**：138最近已验的v0.2.7/build1a324540854c未包含工作分支最新UI；最新设置分组、紧凑生图/账号分析布局、技能推荐、工具汇总简化和用户OpenClaw SVG尚未同步。最新UI已保存为候选源码，实际服务尚待更新与验收。
 
 > **部署补齐方案**：[部署总结](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-summary-2026-10-13.md)按本地最新功能与服务器已发布修复统一收录、同提交构建前后端、隔离验收、备份切换和版本/功能对账整理；当前为方案，尚未执行下一次发布。
 
