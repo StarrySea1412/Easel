@@ -1,0 +1,15 @@
+.dash-card.dash-trends-card { min-height: 0; align-self: start; container-type: inline-size; }
+.dash-trends-card .dash-card-head { margin-bottom: 12px; }
+.dash-trends-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.dash-trends-card .dash-trend-group { min-width: 0; margin: 0; }
+.dash-trends-card .dash-trend-plat { display: flex; align-items: center; gap: 7px; padding: 0; margin: 0 0 4px; color: var(--text); font-size: 12px; line-height: 20px; }
+.dash-trend-icon { display: block; width: 20px; height: 20px; object-fit: contain; }
+.dash-trend-time { margin-bottom: 6px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+.dash-trends-card .dash-trend-title { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 5px; min-height: 32px; padding: 4px 0; line-height: 1.5; border-radius: 3px; }
+.dash-trend-rank { color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dash-trend-rank.top { color: var(--accent-start); }
+.dash-trend-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-trend-error { margin: 5px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+@container (min-width: 480px) {
+  .dash-trends-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+}

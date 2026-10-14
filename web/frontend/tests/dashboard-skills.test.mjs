@@ -110,6 +110,7 @@ async function fixture(t, initial = {}) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   const h = {
     accepted: true, sent: [], chatSent: [], requests: [], caughtErrors: [], catalogCalls: 0,
+    trends: initial.trends ?? [], topics: [], navigations: [],
     catalog: async () => [first, second],
     onQuick: null,
   };
@@ -119,7 +120,7 @@ async function fixture(t, initial = {}) {
     let data;
     if (path === '/api/skills') data = await h.catalog(++h.catalogCalls);
     else if (path.startsWith('/api/skill/')) data = skillDetail(decodeURIComponent(path.split('/').at(-1)));
-    else if (path.startsWith('/api/trends?')) data = { trends: [], updated: 0 };
+    else if (path.startsWith('/api/trends?')) data = { trends: h.trends, updated: 0 };
     else if (path === '/api/upload/limits') data = { max_mb: 50 };
     else if (['/api/schedule', '/api/outputs', '/api/accounts', '/api/ideas', '/api/analytics/platforms'].includes(path)) data = [];
     else throw new Error(`Unexpected request: ${path}`);
@@ -133,7 +134,7 @@ async function fixture(t, initial = {}) {
   const render = async (status = gatewayStatus) => {
     gatewayStatus = status;
     await act(async () => root.render(createElement(modules.Dashboard, {
-      persona: '', gatewayStatus, onNavigate() {}, onUseTopic() {},
+      persona: '', gatewayStatus, onNavigate: page => h.navigations.push(page), onUseTopic: title => h.topics.push(title),
       onQuickPrompt: (...args) => {
         h.sent.push(args.slice(0,3));
         h.sentRoute = args.slice(3);
@@ -581,6 +582,53 @@ for (const failedPart of ['text', 'skills', 'requirements']) test(`failed ${fail
   for (const [key, emptyValue] of [[draftKey(scope), storedDraft('')], [selectedKey(scope), '[]'], [requirementKey(scope), '{}']]) {
     if (key !== failedKey) assert.equal(view.storage.values.get(key), emptyValue, 'independent successful writes remain saved');
   }
+});
+
+test('Dashboard trends show five topics per source with identifying icons and preserve full topic actions', async t => {
+  const fetchedAt = 1791952080;
+  const trends = ['weibo', 'douyin'].map((platform, index) => ({
+    platform, label: index === 0 ? '微博' : '抖音', fetchedAt, status: index === 0 ? 'cached' : 'stale',
+    items: Array.from({ length: 6 }, (_, rank) => ({ title: `${platform} ${rank + 1} 完整热点标题`, url: 'https://example.test/topic' })),
+    ...(index === 1 ? { error: { message: '来源暂不可用，保留上次结果' } } : {}),
+  }));
+  const view = await fixture(t, { trends });
+  await view.render();
+  const card = view.container.querySelector('[aria-label="今日热点"]');
+  assert.ok(view.h.requests.some(([path]) => path === '/api/trends?platforms=weibo%2Cdouyin&limit=5'));
+  for (const group of trends) {
+    const section = card.querySelector(`[aria-label="${group.label}热点"]`);
+    const buttons = section.querySelectorAll('.dash-trend-title');
+    assert.equal(buttons.length, 5);
+    assert.ok(section.querySelector(`img[alt="${group.label}标志"]`).getAttribute('src'));
+    assert.equal(section.querySelector('time').dateTime, new Date(fetchedAt * 1000).toISOString());
+    assert.match(section.textContent, group.status === 'cached' ? /缓存/ : /上次可用/);
+    assert.ok(!section.textContent.includes(group.items[5].title));
+    assert.match(buttons[4].getAttribute('title'), new RegExp(group.items[4].title));
+    await view.focus(buttons[4]);
+    assert.equal(document.activeElement, buttons[4]);
+    await view.click(buttons[4]);
+  }
+  assert.deepEqual(view.h.topics, trends.map(group => group.items[4].title));
+  assert.match(card.textContent, /来源暂不可用，保留上次结果/);
+  await view.click(card.querySelector('.dash-more'));
+  assert.deepEqual(view.h.navigations, ['trends']);
+});
+
+test('Dashboard trends keep each source error visible when every source is empty and preserve the empty-state action', async t => {
+  const trends = [
+    { platform: 'weibo', label: '微博', items: [], error: { message: '微博来源限流' } },
+    { platform: 'douyin', label: '抖音', items: [], error: { message: '抖音来源连接失败' } },
+  ];
+  const view = await fixture(t, { trends });
+  await view.render();
+  const card = () => view.container.querySelector('[aria-label="今日热点"]');
+  for (const group of trends) assert.equal(card().querySelector(`[aria-label="${group.label}热点"] [role="status"]`).textContent, group.error.message);
+  assert.ok(!card().textContent.includes('暂无可用热点'));
+  view.h.trends = [];
+  await view.remount();
+  assert.match(card().textContent, /暂无可用热点/);
+  await view.click([...card().querySelectorAll('button')].find(button => button.textContent === '查看热点雷达'));
+  assert.deepEqual(view.h.navigations, ['trends']);
 });
 
 test.after(() => window.close());

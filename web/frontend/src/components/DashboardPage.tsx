@@ -14,6 +14,7 @@ import { SkeletonCard } from './Skeleton';
 import { IconText } from './icons';
 import DashboardCard from './ui/DashboardCard';
 import DashboardEmpty from './ui/DashboardEmpty';
+import PlatformIcon from './PlatformIcon';
 import { IconImage } from './settingsIcons';
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
@@ -28,6 +29,7 @@ import type { ThinkingLevel } from '../lib/api';
 import { showToast } from '../lib/toast';
 import '../styles/chat-composer.css';
 import '../styles/dashboard-studio-entry.css';
+import '../styles/dashboard-trends.css';
 import { getChatDraft, subscribeChatDraft, setChatDraftText, setChatDraftError, clearChatDraft } from '../lib/chatDrafts';
 import { DASHBOARD_DRAFT_SCOPE, isDashboardDraftTextCleared } from '../lib/dashboardDraft';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -129,7 +131,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
         .catch((e: unknown) => { if (alive) setLoadErrors((old) => ({ ...old, [key]: e instanceof Error ? e.message : '请求失败' })); })
         .finally(() => { if (alive) setLoaded((old) => ({ ...old, [key]: true })); });
     };
-    load('热点', fetchTrends('weibo,douyin', 6), (d) => setTrends(d.trends));
+    load('热点', fetchTrends('weibo,douyin', 5), (d) => setTrends(d.trends));
     load('排期', fetchSchedule(), setSchedule);
     load('内容', fetchOutputs(), setOutputs);
     load('账号', fetchAccounts(), setAccounts);
@@ -446,24 +448,33 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
 
 
         {/* 今日热点 */}
-        <DashboardCard variant="summary" Icon={IconFire} title="今日热点"
+        <DashboardCard variant="summary" className="dash-trends-card" Icon={IconFire} title="今日热点"
           actions={<button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>}>
           {trends === null && !loadErrors['热点'] && <SkeletonCard rows={6} title={false} />}
           {loadErrors['热点'] && <DashboardEmpty Icon={IconFire} title="热点暂未加载" description="请检查网络连接后重试。" action="重新加载" onAction={() => setRefreshKey((v) => v + 1)} />}
-          {trends && !trends.some((g) => g.items.length > 0) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
-          {trends?.map((g) => (
-            <div key={g.platform} className="dash-trend-group">
-              <div className="dash-trend-plat">{g.label}
-                {g.fetchedAt && <span> · {g.status === 'stale' ? '上次可用' : g.status === 'cached' ? '缓存' : '获取于'} {new Date(g.fetchedAt * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
-              </div>
-              {g.error && <div className="dash-empty">{g.error.message}</div>}
-              {g.items.slice(0, 3).map((it, i) => (
-                <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
-                  <button className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</button>
+          {trends && !trends.some((g) => g.items.length > 0 || g.error) && <DashboardEmpty Icon={IconFire} title="暂无可用热点" description="稍后刷新，或到热点雷达切换平台。" action="查看热点雷达" onAction={() => onNavigate('trends')} />}
+          {trends && trends.some((g) => g.items.length > 0 || g.error) && <div className="dash-trends-grid">
+            {trends.map((g) => (
+              <section key={g.platform} className="dash-trend-group" aria-label={`${g.label}热点`}>
+                <div className="dash-trend-plat">
+                  <span aria-hidden="true"><PlatformIcon platform={g.platform} name={g.label} className="dash-trend-icon" /></span>
+                  <span>{g.label}</span>
                 </div>
-              ))}
-            </div>
-          ))}
+                {g.fetchedAt && <div className="dash-trend-time">
+                  {g.status === 'stale' ? '上次可用' : g.status === 'cached' ? '缓存' : '获取于'} <time dateTime={new Date(g.fetchedAt * 1000).toISOString()}>{new Date(g.fetchedAt * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>
+                </div>}
+                {g.error && <div className="dash-trend-error" role="status">{g.error.message}</div>}
+                {!g.items.length && !g.error && <div className="dash-trend-error">此来源暂未返回热点</div>}
+                {g.items.slice(0, 5).map((it, i) => (
+                  <button key={`${it.title}-${i}`} className="dash-trend-title" title={`${it.title}（点击做成内容）`}
+                    aria-label={`${g.label}热点：${it.title}，点击做成内容`} onClick={() => onUseTopic(it.title)}>
+                    <span className={`dash-trend-rank${i < 3 ? ' top' : ''}`} aria-hidden="true">{i + 1}</span>
+                    <span className="dash-trend-text">{it.title}</span>
+                  </button>
+                ))}
+              </section>
+            ))}
+          </div>}
         </DashboardCard>
 
         {/* 选题库 */}

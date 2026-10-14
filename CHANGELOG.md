@@ -1,3 +1,9 @@
+## 2026-10-14 · Home trend density and icons / 首页热点密度与图标
+
+- Reuse Weibo/Douyin icons and render up to five ranked topics per source; adapt columns to card width and remove forced blank space. / 复用微博、抖音图标，每源最多5条带排名，按卡片宽度切换列数并移除强制留白。
+- Preserve full topic actions, cache times and per-source errors, including when all sources fail. / 保留完整标题选题动作、缓存时间与各源错误，全来源失败也显示原因。
+- Forty simulated regressions, targeted lint, production build and local 7880 resource/backend checks passed. User frontend acceptance remains separate; this task does not deploy to 138. / 40项模拟回归、定向lint、生产构建及本机资源/后端核对通过；前端由用户验收，本轮未部署138。见[记录 / record](docs/dashboard-trends-2026-10-14.md)。
+
 ## 2026-10-14 · Quick deploy activation follow-up / 快速发布激活补齐
 
 - Verify and reuse an immutable stage for the same commit instead of deleting the isolated instance's active source. / 同一提交的候选目录校验后复用，不删除隔离实例正在使用的源码。
