@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createIdea, stopChat, streamChat } from '../lib/api';
+import { createIdea, fetchLastTurn, stopChat, streamChat } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import {
   BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
@@ -7,8 +7,9 @@ import {
   verifyQuotes, verifyStructure,
 } from '../lib/breakdownReport';
 import {
-  addBreakdownRecord, loadBreakdownDraft, loadBreakdownHistory, newBreakdownRecord,
-  removeBreakdownRecord, saveBreakdownDraft, type BreakdownRecord,
+  ACTIVE_RUN_MAX_AGE_MS, addBreakdownRecord, clearActiveRun, loadActiveRun, loadBreakdownDraft,
+  loadBreakdownHistory, newBreakdownRecord, removeBreakdownRecord, saveActiveRun, saveBreakdownDraft,
+  type ActiveRun, type BreakdownRecord,
 } from '../lib/breakdownStore';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
@@ -55,9 +56,79 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
 
   useEffect(() => { saveBreakdownDraft(input); }, [input]);
 
+  // 生成中离开页面（切页/刷新）后回来：按同一 run 取回，不丢报告。
+  useEffect(() => {
+    const run = loadActiveRun();
+    if (!run) return;
+    if (Date.now() - run.startedAt > ACTIVE_RUN_MAX_AGE_MS) { clearActiveRun(); return; }
+    if (!input.trim()) setInput(run.material);
+    resumeRun(run);
+    // 只在挂载时尝试一次；resumeRun 引用新闭包不影响行为（内部只用 ref 与 setter）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 卸载只断开前端流：服务端跑到底，回本页再取回（停止仍走显式 stop）。
+  useEffect(() => () => { runRef.current?.abort(); }, []);
+
   const notify = (text: string, ok: boolean) => {
     setToast({ text, ok });
     setTimeout(() => setToast(undefined), 2600);
+  };
+
+  // 完成时直接写本地存储再回填状态：即使组件已卸载（生成中离开页面），报告也不会丢。
+  const persistHistory = (material: string, report: string) => {
+    const saved = addBreakdownRecord(loadBreakdownHistory(), newBreakdownRecord(material, report, ideaTitleFromReport(report)));
+    setHistory(saved);
+  };
+
+  // 离开页面后回来：按同一 run 续读任务流取回报告；流不可用则退回一次性取。
+  const resumeRun = (run: ActiveRun) => {
+    setLoading(true); setStreamText(''); setStatusNote('正在取回上次的拆解…'); setResult(''); setError('');
+    setAnalyzed(run.material);
+    runIdsRef.current = { sessionId: run.sessionId, turnId: run.turnId };
+    let acc = '';
+    runRef.current = streamChat(
+      '', persona, run.sessionId,
+      (chunk) => { acc += chunk; setStreamText(acc); },
+      () => {
+        runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
+        const text = acc.trim();
+        if (text) {
+          setResult(text); persistHistory(run.material, text); clearActiveRun();
+          notify('已取回上次的拆解报告', true);
+        } else void fetchRecovered(run);
+      },
+      () => { runRef.current = null; setLoading(false); setStreamText(''); setStatusNote(''); void fetchRecovered(run); },
+      undefined,
+      (status) => setStatusNote(status),
+      () => setStatusNote('连接中断，正在自动续接…'),
+      run.turnId, true, () => { void fetchRecovered(run); },
+    );
+  };
+
+  const fetchRecovered = async (run: ActiveRun) => {
+    setLoading(true); setStatusNote('正在取回上次的拆解…');
+    try {
+      const last = await fetchLastTurn(run.sessionId, run.turnId);
+      setLoading(false); setStatusNote('');
+      const text = (last.text || '').trim();
+      if (last.status === 'done' && text) {
+        setAnalyzed(run.material); setResult(text);
+        persistHistory(run.material, text); clearActiveRun();
+        notify('已取回上次的拆解报告', true);
+        return;
+      }
+      if (last.status === 'running') {
+        setError('上次的拆解还在生成；稍后回到本页会自动再取一次。');
+        return;
+      }
+      clearActiveRun();
+      setError('上次的拆解没有留下可恢复的报告。');
+    } catch (e) {
+      setLoading(false); setStatusNote('');
+      clearActiveRun();
+      setError(e instanceof Error ? e.message : '上次的拆解无法找回。');
+    }
   };
 
   const changeThinking = (value: ThinkingPreference) => {
@@ -79,22 +150,25 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
     const sessionId = `breakdown-${Date.now().toString(36)}`;  // 独立会话：不出现在对话列表，断线可按同一 run 续接
     const turnId = `${sessionId}-1`;
     runIdsRef.current = { sessionId, turnId };
+    saveActiveRun({ sessionId, turnId, material, startedAt: Date.now() });
     let acc = '';
     runRef.current = streamChat(
       buildBreakdownReportPrompt(material, persona), persona, sessionId,
       (chunk) => { acc += chunk; setStreamText(acc); },
       () => {
         runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
+        clearActiveRun();
         const text = acc.trim();
         // 失败文案与有效报告分开：没有正文时不生成报告面板。
         if (!text) setError('本次没有生成有效报告，请重试。');
         else {
           setResult(text);
-          setHistory(items => addBreakdownRecord(items, newBreakdownRecord(material, text, ideaTitleFromReport(text))));
+          persistHistory(material, text);
         }
       },
       (err) => {
         runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
+        clearActiveRun();
         setError(err instanceof Error && err.message ? err.message : '拆解失败，请重试');
       },
       undefined,
@@ -111,6 +185,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
     if (ids) void stopChat(ids.sessionId, ids.turnId).catch(() => { /* 后端可能已结束 */ });
     runRef.current?.abort();
     runRef.current = null;
+    clearActiveRun();
     setLoading(false); setStreamText(''); setStatusNote('');
     setError('已停止本次生成；材料已保留，可重试或修改后重发。');
   };
