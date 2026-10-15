@@ -5,7 +5,7 @@ import {
   BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
   looksLikeAgentFailure, materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem,
 } from '../lib/breakdownReport';
-import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry, IconSkills } from './icons';
+import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry } from './icons';
 
 interface BreakdownPageProps {
   persona: string;
@@ -103,44 +103,57 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
       </div>
 
       <div className="breakdown-body">
-        <div className={`breakdown-input${dragging ? ' drag-over' : ''}`}
+        {/* 与首页创作框同一张卡片语言：标签在卡内，工具行左侧、主按钮右侧 */}
+        <div className={`dash-composer breakdown-input${dragging ? ' drag-over' : ''}`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}>
-          <textarea className="field breakdown-textarea" value={input}
-            placeholder="把想研究的内容贴在这里：一段正文、分享文案，或者作品链接；也可以直接把文件拖进来…"
-            onChange={(e) => setInput(e.target.value)} />
-          <div className="breakdown-tools">
-            <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => fileRef.current?.click()}>
-              <IconFile size={13} /> 导入文本文件
-            </button>
-            {isExample && <span className="breakdown-chip">这是示例（虚构），可直接拆解或换成你的内容</span>}
+          <label className="dash-launch-label" htmlFor="breakdown-material">想拆解哪条内容？</label>
+          <div className="dash-launch">
+            <textarea id="breakdown-material" className="dash-launch-input breakdown-textarea" value={input}
+              placeholder="把正文、分享文案或链接贴在这里；也可以直接把文件拖进来…"
+              onChange={(e) => setInput(e.target.value)} />
+            <div className="dash-composer-bar">
+              <div className="dash-composer-tools">
+                <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => fileRef.current?.click()}>
+                  <IconFile size={13} /> 导入文本文件
+                </button>
+                {isExample && <span className="breakdown-chip">这是示例（虚构），可直接拆解或换成你的内容</span>}
+              </div>
+              <button type="button" className="btn btn-primary dash-launch-btn"
+                onClick={run} disabled={loading || !input.trim()}>
+                {loading ? '正在生成报告…' : '开始拆解 →'}
+              </button>
+            </div>
+            {(input.trim() !== '' || loading) && (
+              <div className="dash-composer-meta">
+                <div className="dash-composer-status">
+                  <span className="breakdown-material" role="status" aria-live="polite">
+                    <IconInfo size={12} />{materialLine(summary)}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
           <input ref={fileRef} type="file" className="breakdown-file" accept=".txt,.md,.markdown,.srt"
             aria-label="导入文本文件" tabIndex={-1}
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importFile(file); }} />
         </div>
 
-        {input.trim() !== '' && (
-          <div className="breakdown-material" role="status" aria-live="polite">
-            <IconInfo size={13} /><span>{materialLine(summary)}</span>
-          </div>
+        {input.trim() === '' && (
+          <button type="button" className="breakdown-example-link" onClick={loadExample}>没有素材？看看示例</button>
         )}
 
         <p className="breakdown-hint">会先给结论、再逐段讲怎么写、能学什么；缺表现数据时不会猜“为什么火”。</p>
 
-        <div className="breakdown-actions">
-          <button className="btn btn-primary" disabled={loading || !input.trim()} onClick={run}>
-            <IconSkills size={15} /> {loading ? '正在生成报告…' : '开始拆解'}
-          </button>
-          {result && <button className="btn" disabled={saving} onClick={saveToIdeas}>
-            <IconIdea size={14} /> {saving ? '保存中…' : '存入选题库'}
-          </button>}
-          {result && <button className="btn" onClick={copyReport}><IconCopy size={14} /> 复制报告</button>}
-          {(input || result || error) && <button className="btn btn-ghost" onClick={resetMaterial}>清空</button>}
-        </div>
-        {!input.trim() && (
-          <button type="button" className="breakdown-example-link" onClick={loadExample}>没有素材？看看示例</button>
+        {(result || input || error) && (
+          <div className="breakdown-actions">
+            {result && <button className="btn" disabled={saving} onClick={saveToIdeas}>
+              <IconIdea size={14} /> {saving ? '保存中…' : '存入选题库'}
+            </button>}
+            {result && <button className="btn" onClick={copyReport}><IconCopy size={14} /> 复制报告</button>}
+            <button className="btn btn-ghost" onClick={resetMaterial}>清空</button>
+          </div>
         )}
 
         {loading && <div className="loading" style={{ padding: 40 }}><div className="spinner" />正在生成内容拆解报告…</div>}

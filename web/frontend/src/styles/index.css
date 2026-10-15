@@ -1166,16 +1166,12 @@ textarea.field { resize: vertical; min-height: 90px; }
 .media-cell .media-vid { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; font-size: 22px; text-align: center; font-size: 11px; }
 .media-cell .media-check { position: absolute; top: 3px; right: 4px; background: var(--accent-end); color: #fff; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
 .breakdown-body { max-width: 900px; margin: 16px auto 0; }
-.breakdown-input { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color var(--t-fast), box-shadow var(--t-fast); }
-.breakdown-input:focus-within { border-color: var(--accent-start); box-shadow: 0 0 0 3px var(--accent-soft); }
 .breakdown-input.drag-over { border-color: var(--accent-start); border-style: dashed; background: var(--bg-subtle); }
-.breakdown-input .field { border: none; background: transparent; box-shadow: none; border-radius: var(--radius) var(--radius) 0 0; }
-.breakdown-textarea { min-height: 200px; resize: vertical; }
-.breakdown-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 8px 10px; }
+.breakdown-input .breakdown-textarea { min-height: 160px; }
 .breakdown-tool { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 4px 9px; }
 .breakdown-chip { font-size: 11.5px; color: var(--text-secondary); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
 .breakdown-file { display: none; }
-.breakdown-material { display: flex; gap: 7px; align-items: center; margin-top: 10px; padding: 0 2px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; }
+.breakdown-material { display: flex; align-items: center; gap: 6px; }
 .breakdown-material svg { flex-shrink: 0; }
 .breakdown-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .breakdown-example-link { margin-top: 12px; padding: 0; border: none; background: none; color: var(--text-secondary); font-size: 12.5px; cursor: pointer; }
