@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { runAgent, createIdea } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import {
-  BREAKDOWN_REPORT_TITLE, buildBreakdownReportPrompt, ideaTitleFromReport,
-  looksLikeAgentFailure, reportScopeNote,
+  BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
+  looksLikeAgentFailure, materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem,
 } from '../lib/breakdownReport';
-import { IconCopy, IconFire, IconIdea, IconSkills } from './icons';
+import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry, IconSkills, IconSpark } from './icons';
 
 interface BreakdownPageProps {
   persona: string;
@@ -18,11 +18,16 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<{ text: string; ok: boolean }>();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const summary = useMemo(() => summarizeMaterial(input), [input]);
+  const isExample = input === EXAMPLE_MATERIAL;
 
   const notify = (text: string, ok: boolean) => {
     setToast({ text, ok });
-    setTimeout(() => setToast(undefined), 2200);
+    setTimeout(() => setToast(undefined), 2600);
   };
 
   const run = async () => {
@@ -61,6 +66,33 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
     }
   };
 
+  const resetMaterial = () => { setResult(''); setError(''); setInput(''); setAnalyzed(''); };
+
+  const loadExample = () => {
+    setResult(''); setError(''); setAnalyzed(''); setInput(EXAMPLE_MATERIAL);
+    notify('已填入示例素材（虚构）：可直接拆解，或替换成你的内容', true);
+  };
+
+  const importFile = async (file: File) => {
+    const problem = textFileProblem(file);
+    if (problem) { notify(problem, false); return; }
+    try {
+      const text = await readTextFile(file);
+      if (!text.trim()) { notify('文件里没有可读取的文字', false); return; }
+      setResult(''); setError(''); setAnalyzed(''); setInput(text);
+      notify(`已导入 ${file.name}（仅文字内容）`, true);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : '文件读取失败，请改为直接粘贴内容。', false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) void importFile(file);
+    else notify('没有读到文件；也可以直接粘贴内容', false);
+  };
+
   return (
     <div className="page-scroll breakdown-page">
       <div className="page-head">
@@ -71,10 +103,35 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
       </div>
 
       <div className="breakdown-body">
-        <textarea className="field" style={{ minHeight: 160 }} value={input}
-          placeholder="把想拆解的正文 / 分享文案粘贴进来；也可以贴作品链接（能否读取以实际结果为准）…"
-          onChange={(e) => setInput(e.target.value)} />
-        <p className="breakdown-hint">生成的是完整《内容拆解报告》：摘要、逐段分析、创作方案和验证计划；缺少表现数据时不会判断“为什么火”。</p>
+        <div className={`breakdown-input${dragging ? ' drag-over' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}>
+          <textarea className="field breakdown-textarea" value={input}
+            placeholder="粘贴正文、分享文案，或贴作品链接；也可以把 .txt / .md / .srt 文件拖进来…"
+            onChange={(e) => setInput(e.target.value)} />
+          <div className="breakdown-tools">
+            <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => fileRef.current?.click()}>
+              <IconFile size={13} /> 导入文本文件
+            </button>
+            <button type="button" className="btn btn-ghost breakdown-tool" onClick={loadExample}>
+              <IconSpark size={13} /> 看个示例
+            </button>
+            {isExample && <span className="breakdown-chip">示例素材（虚构）· 可直接拆解或替换</span>}
+          </div>
+          <input ref={fileRef} type="file" className="breakdown-file" accept=".txt,.md,.markdown,.srt"
+            aria-label="导入文本文件" tabIndex={-1}
+            onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importFile(file); }} />
+        </div>
+
+        {input.trim() !== '' && (
+          <div className="breakdown-material" role="status" aria-live="polite">
+            <IconInfo size={13} /><span>{materialLine(summary)}</span>
+          </div>
+        )}
+
+        <p className="breakdown-hint">生成的是完整《内容拆解报告》：摘要、逐段分析、创作方案和验证计划；缺少表现数据时不会判断“为什么火”。目前只读取文字材料（正文／链接／文本文件），图片、PDF、视频后续版本支持。</p>
+
         <div className="breakdown-actions">
           <button className="btn btn-primary" disabled={loading || !input.trim()} onClick={run}>
             <IconSkills size={15} /> {loading ? '正在生成报告…' : '开始拆解'}
@@ -83,12 +140,16 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
             <IconIdea size={14} /> {saving ? '保存中…' : '存入选题库'}
           </button>}
           {result && <button className="btn" onClick={copyReport}><IconCopy size={14} /> 复制报告</button>}
-          {(result || error) && <button className="btn btn-ghost"
-            onClick={() => { setResult(''); setError(''); setInput(''); }}>清空</button>}
+          {(input || result || error) && <button className="btn btn-ghost" onClick={resetMaterial}>清空</button>}
         </div>
 
         {loading && <div className="loading" style={{ padding: 40 }}><div className="spinner" />正在生成内容拆解报告…</div>}
-        {error && !loading && <div className="notice-error" role="alert">{error}</div>}
+        {error && !loading && (
+          <div className="notice-error breakdown-error" role="alert">
+            <span>{error}</span>
+            <button className="btn btn-ghost breakdown-tool" onClick={run}><IconRetry size={13} /> 重试</button>
+          </div>
+        )}
         {result && !loading && (
           <div className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title"><IconFire size={14} /> {BREAKDOWN_REPORT_TITLE}</div>
