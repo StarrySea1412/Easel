@@ -32,6 +32,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   else if (specifier === './settings/ModelConfigPicker') target = await tsModuleUrl(new URL('../src/components/settings/ModelConfigPicker.tsx', import.meta.url));
   else if (specifier === './settings/ProviderBoard') target = await tsModuleUrl(new URL('../src/components/settings/ProviderBoard.tsx', import.meta.url));
   else if (specifier === './ui/Select') target = await tsModuleUrl(new URL('../src/components/ui/Select.tsx', import.meta.url));
+  else if (specifier === './settings/AppearanceSettings') target = await tsModuleUrl(new URL('../src/components/settings/AppearanceSettings.tsx', import.meta.url));
   else if (specifier === './icons' || specifier === './settingsIcons') target = await tsModuleUrl(new URL(`../src/components/${specifier.slice(2)}.tsx`, import.meta.url));
   else if (specifier === '../lib/modelImports') target = await tsModuleUrl(new URL('../src/lib/modelImports.ts', import.meta.url));
   else if (specifier === './settings/ConversationBackupCard') {
@@ -123,6 +124,19 @@ test('more settings initially exposes both cards and its menu returns to the bac
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
   assert.equal(more.getAttribute('aria-current'), 'page');
   assert.equal(view.harness.calls.length, 5);
+});
+
+test('appearance is reachable from settings and direct navigation without additional HTTP', async t => {
+  const view = await fixture(t);
+  const before = view.harness.calls.length;
+  await view.click(view.nav('外观'));
+  assert.equal(view.nav('外观').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('.appearance-card [role=combobox]'));
+  assert.equal(view.container.querySelector('[data-testid=backup-card]'), null);
+  await view.click(view.nav('模型与渠道'));
+  await view.render(1, view.props, 'appearance');
+  assert.ok(view.container.querySelector('.appearance-card'));
+  assert.equal(view.harness.calls.length, before);
 });
 
 test('a fresh navigation key restores the same more section with latest props without remounting settings state', async t => {

@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script id="easel-theme-init">
+// Apply the saved theme before styles and React paint the workspace.
+(function () {
+  var preference = 'system';
+  try {
+    var stored = localStorage.getItem('easel:theme');
+    if (stored === 'light' || stored === 'dark' || stored === 'system') preference = stored;
+  } catch { /* Restricted storage still follows the system for this visit. */ }
+  var dark = preference === 'dark' || (preference === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+})();
+    </script>
+    <style>html{background:#fff}html[data-theme="dark"]{background:#17181c}</style>
     <script>
       // 子路径代理下必须带结尾斜杠，否则相对资源路径(./assets)会解析到上一级 → 404 白屏。
       // 若当前路径无结尾斜杠且末段不像文件名(无扩展名)，自动补斜杠后重载。

@@ -1,5 +1,6 @@
 import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
+import AppearanceSettings from './settings/AppearanceSettings';
 import ConversationBackupCard from './settings/ConversationBackupCard';
 import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
 import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
@@ -32,7 +33,7 @@ import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImp
 import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
 import { IconText, IconMic, IconMusic } from './icons';
 
-export type SettingsSection = 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
+export type SettingsSection = 'appearance' | 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string; icon: ComponentType<{ size?: number }> }[] = [
@@ -692,6 +693,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
         <div className="settings-body">
           <nav className="settings-nav">
+            <button aria-current={sec === 'appearance' ? 'page' : undefined} className={`snav${sec === 'appearance' ? ' active' : ''}`} onClick={() => setSec('appearance')}>
+              <IconSlidersHorizontal size={16} />外观<small>浅色 / 夜间</small>
+            </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型与渠道
             </button>
@@ -713,6 +717,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
           </nav>
 
           <div className="settings-main">
+          {sec === 'appearance' && <AppearanceSettings />}
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
@@ -1128,7 +1133,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' ? '通用偏好保存在当前浏览器。' : '修改后请保存。'}
+          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' || sec === 'appearance' ? '通用偏好即时应用，保存在当前浏览器。' : '修改后请保存。'}
         </div>
       </div>
     </div>

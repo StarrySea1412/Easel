@@ -50,7 +50,7 @@
 .ca-context-format { font-size: 11px; color: var(--text-secondary); background: var(--surface-2); border-radius: 4px; padding: 5px 8px; }
 .ca-session { font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
 .ca-session::before { content: ''; height: 5px; width: 5px; background: currentColor; border-radius: 50%; flex-shrink: 0; }
-.ca-session.is-connected { color: #517253; }
+.ca-session.is-connected { color: var(--green); }
 .ca-text-button { border: 0; padding: 4px 0; background: transparent; color: var(--accent-start); font: inherit; font-size: 12px; cursor: pointer; text-align: left; line-height: 1.7; }
 .ca-text-button:hover { text-decoration: underline; }
 .ca-text-button:disabled { opacity: .6; cursor: wait; }
@@ -132,7 +132,7 @@
 .ca-bench-toolbar p:not(.ca-kicker) { margin:0; font-size:13px; color:var(--text-secondary); line-height:1.8; }
 .ca-bench-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .ca-bench-actions a { text-decoration:none; }
-.ca-bench-notice { background:#edf3eb; color:#416044; padding:12px 16px; border-radius:9px; font-size:13px; display:flex; justify-content:space-between; gap:18px; margin:15px 0; }
+.ca-bench-notice { background:var(--green-soft); color:var(--green); padding:12px 16px; border-radius:9px; font-size:13px; display:flex; justify-content:space-between; gap:18px; margin:15px 0; }
 .ca-account-filter { display:flex; align-items:center; flex-wrap:wrap; gap:18px; padding:14px 0 22px; }
 .ca-account-filter label { display:flex; align-items:center; flex-wrap:wrap; min-width:0; max-width:100%; gap:10px; font-size:12px; }
 .ca-account-filter span { color:var(--text-secondary); font-size:11px; }

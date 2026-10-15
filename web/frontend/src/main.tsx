@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
+import { initializeTheme } from './lib/theme'
+
+initializeTheme();
 
 export const BUILD_ID = 'subnav-1';
 // 打到控制台，便于确认浏览器加载的是最新前端（排查缓存旧包）

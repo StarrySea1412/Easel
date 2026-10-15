@@ -108,7 +108,7 @@
 .account-check-result { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 0; padding: 0; background: none; color: var(--text-secondary); font-size: 12px; line-height: 20px; text-align: left; overflow-wrap: anywhere; }
 .account-check-result > :last-child { min-width: 0; }
 .account-check-icon { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-hover); color: var(--text-secondary); }
-.account-check-result.is-success .account-check-icon { color: #15803d; background: color-mix(in srgb, #15803d 10%, var(--surface)); }
+.account-check-result.is-success .account-check-icon { color: var(--green); background: color-mix(in srgb, #15803d 10%, var(--surface)); }
 .account-check-result.is-error .account-check-icon, .account-check-result.is-expired .account-check-icon { color: var(--red); background: color-mix(in srgb, var(--red) 10%, var(--surface)); }
 .account-check-result.is-checking .account-check-icon svg { animation: account-check-spin 1s linear infinite; }
 .account-management-dialog .account-check-result { margin-top: 16px; }

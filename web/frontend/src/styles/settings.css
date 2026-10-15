@@ -119,13 +119,13 @@
 .settings-page .spacer { flex: 1; }
 .settings-page .pill { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 100%; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .settings-page .pill .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
-.settings-page .pill.ok { background: var(--green-soft); color: #15803d; }
+.settings-page .pill.ok { background: var(--green-soft); color: var(--green); }
 .settings-page .pill.ok .dot { background: var(--green); }
-.settings-page .pill.warn { background: var(--amber-soft); color: #b45309; }
+.settings-page .pill.warn { background: var(--amber-soft); color: var(--amber); }
 .settings-page .pill.warn .dot { background: var(--amber); }
 .settings-page .pill.off { background: var(--surface-hover); color: var(--text-secondary); }
 .settings-page .pill.off .dot { background: var(--border-strong); }
-.settings-page .pill.fail { background: var(--red-soft); color: #b91c1c; }
+.settings-page .pill.fail { background: var(--red-soft); color: var(--red); }
 .settings-page .pill.fail .dot { background: var(--red); }
 .settings-page .pill.sum { background: var(--accent-soft); color: var(--accent-end); font-weight: 650; }
 .settings-page .board { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -135,8 +135,8 @@
 .settings-page .cell-text { min-width: 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-page .cell-text.dim { color: var(--text-tertiary); font-style: italic; }
 .settings-page .key-mask { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11.5px; overflow-wrap: anywhere; }
-.settings-page .save-note { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; background: var(--green-soft); color: #15803d; font-size: 12.5px; overflow-wrap: anywhere; }
-.settings-page .save-note.err, .settings-page .env-error { background: var(--red-soft); color: #b91c1c; }
+.settings-page .save-note { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; background: var(--green-soft); color: var(--green); font-size: 12.5px; overflow-wrap: anywhere; }
+.settings-page .save-note.err, .settings-page .env-error { background: var(--red-soft); color: var(--red); }
 .settings-page .demo-data-settings { max-width: 900px; padding: clamp(16px, 3vw, 24px); }
 .settings-page .demo-data-settings h3 { margin: 0 0 8px; font-size: 18px; }
 .settings-page .demo-data-settings header p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
@@ -258,8 +258,8 @@
 .settings-page .add-row:hover { border-color: var(--accent-start); background: var(--accent-soft); }
 .settings-page .discover-row { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; min-width: 0; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--surface-hover); color: var(--text-secondary); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-page .discover-row > * { min-width: 0; max-width: 100%; }
-.settings-page .discover-row.ok { background: var(--green-soft); color: #15803d; }
-.settings-page .discover-row.bad { background: var(--amber-soft); color: #b45309; }
+.settings-page .discover-row.ok { background: var(--green-soft); color: var(--green); }
+.settings-page .discover-row.bad { background: var(--amber-soft); color: var(--amber); }
 .settings-page .discover-row .dr-src { margin-left: 6px; color: var(--text-tertiary); overflow-wrap: anywhere; }
 .settings-page .discover-row .dr-pick { display: flex; align-items: center; flex-wrap: wrap; flex: 1 1 240px; gap: 7px; min-width: 0; }
 .settings-page .discover-row .dr-pick .mock { flex: 1 1 180px; min-width: 0; max-width: 100%; }
@@ -294,7 +294,7 @@
 .settings-page .ii-app { color: var(--text-tertiary); font-size: 11.5px; font-weight: 400; }
 .settings-page .ii-base { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .settings-page .ii-meta { color: var(--text-tertiary); font-size: 11.5px; }
-.settings-page .ii-ov { color: #b45309; font-size: 11.5px; overflow-wrap: anywhere; }
+.settings-page .ii-ov { color: var(--amber); font-size: 11.5px; overflow-wrap: anywhere; }
 .settings-page .import-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; margin-top: 12px; }
 .settings-page .import-foot .hint { flex: 1 1 200px; font-size: 11.5px; }
 
@@ -323,8 +323,8 @@
 .settings-page .card .tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 9px; background: var(--accent-soft); color: var(--accent-end); }
 .settings-page .card .tile svg { flex: none; }
 .settings-page .card[data-state=missing] .tile, .settings-page .card[data-state=nodir] .tile { background: var(--surface-hover); color: var(--text-tertiary); }
-.settings-page .card[data-state=busy] .tile { background: var(--amber-soft); color: #b45309; }
-.settings-page .card[data-state=fail] .tile { background: var(--red-soft); color: #c02626; }
+.settings-page .card[data-state=busy] .tile { background: var(--amber-soft); color: var(--amber); }
+.settings-page .card[data-state=fail] .tile { background: var(--red-soft); color: var(--red); }
 .settings-page .badge.pill { padding: 3px 8px; border: 0; border-radius: 99px; font-size: 11px; }
 .settings-page .badge.pill .dot { width: 7px; height: 7px; }
 .settings-page .card-name { font-size: 13px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
@@ -335,9 +335,9 @@
 .settings-page .card[data-state=fail] .foot-status { color: var(--red); }
 .settings-page .card-foot .btn { padding: 4px 10px; border-radius: 7px; font-size: 12px; }
 .settings-page .card[data-state=busy] .card-foot .btn { border-color: var(--border); background: var(--surface-hover); color: var(--text-secondary); cursor: default; }
-.settings-page .btn-fill { border-color: var(--accent-end); background: var(--accent-end); color: #fff; }
+.settings-page .btn-fill { border-color: var(--accent-end); background: var(--accent-end); color: var(--on-accent); }
 .settings-page .btn-fill:hover:not(:disabled) { filter: brightness(.93); }
-.settings-page .btn-primary { border: 0; background: var(--text); color: #fff; box-shadow: none; }
+.settings-page .btn-primary { border: 0; background: var(--text); color: var(--on-accent); box-shadow: none; }
 .settings-page .btn-primary:hover:not(:disabled) { background: var(--button-hover); box-shadow: none; filter: none; }
 .settings-page .prog { display: flex; align-items: center; flex: 1 1 60px; gap: 7px; min-width: 0; }
 .settings-page .prog .bar { flex: 1; min-width: 20px; height: 5px; border-radius: 99px; background: var(--surface-hover); overflow: hidden; }

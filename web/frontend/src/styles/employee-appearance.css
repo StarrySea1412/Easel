@@ -34,7 +34,7 @@
 .employee-settings__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 24px; }
 .employee-settings__actions p { flex: 1; min-width: 180px; margin: 0; color: var(--text-tertiary); font-size: 12px; }
 .employee-settings__actions .btn { min-height: 38px; }
-.employee-settings__message { margin: 14px 0 0; padding: 12px 15px; border-radius: 10px; background: var(--green-soft); color: #267044; font-size: 13px; line-height: 1.7; }
-.employee-settings__message.is-error { background: var(--red-soft); color: #a13636; }
+.employee-settings__message { margin: 14px 0 0; padding: 12px 15px; border-radius: 10px; background: var(--green-soft); color: var(--green); font-size: 13px; line-height: 1.7; }
+.employee-settings__message.is-error { background: var(--red-soft); color: var(--red); }
 @container settings-page (max-width: 820px) { .employee-settings__grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .employee-settings__grid { grid-template-columns: minmax(0, 1fr); } .employee-card { padding: 16px; } }

@@ -1,3 +1,9 @@
+## 2026-10-16 · Notification refinement and night mode / 通知精修与夜间模式
+
+- Refine event hierarchy, date grouping, unread filters, accessible status actions, empty states and deliberate clear confirmation. / 改善通知层级、日期分组、未读筛选、可访问操作、空态及清空确认。
+- Add Settings → Appearance with persistent Light / Dark / Follow system, pre-paint theme initialization and cross-tab synchronization. Update shared colors and legacy office surfaces without recoloring media. / 设置新增外观，支持主题记忆、系统跟随、首屏初始化与跨标签同步，适配公共组件和旧办公室UI。
+- Frontend regression, build and focused desktop/390px browser checks; no paid inference,138 deployment or installer release. / 验证边界见[本轮记录](docs/appearance-notifications-2026-10-16.md)。
+
 ## 2026-10-16 · Edit sent messages / 历史消息重新编辑
 
 - Add inline Edit, Cancel and Send to historical user messages; sending creates a fresh branch with preceding visible context and session-owned attachment copies while preserving the source conversation. / 原位编辑历史用户消息，发送后带入此前可见文字与附件建立编辑分支，原记录保留并可返回。

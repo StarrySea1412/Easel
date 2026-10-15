@@ -12,7 +12,7 @@
 .xhs-message { padding: 12px 14px; border-radius: var(--radius); background: var(--accent-soft); margin-top: 14px; font-size: 13px; }
 .xhs-message-error { color: var(--red); background: var(--red-soft); }
 .xhs-message-error button { margin-left: 12px; }
-.xhs-message-warning { color: #865617; background: var(--amber-soft); }
+.xhs-message-warning { color: var(--amber); background: var(--amber-soft); }
 .xhs-account-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 0 14px; }
 .xhs-account-strip > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; overflow-wrap: anywhere; }
 .xhs-account-strip .badge { white-space: normal; flex-shrink: 0; }

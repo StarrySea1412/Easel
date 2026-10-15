@@ -13,7 +13,7 @@
 .usage-metric strong { color: var(--text); font-size: 17px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .usage-note, .usage-empty { margin: 10px 0; color: var(--text-tertiary); font-size: 11.5px; line-height: 1.7; overflow-wrap: anywhere; }
 .usage-empty { padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
-.usage-error { color: #b91c1c; font-size: 12px; }
+.usage-error { color: var(--red); font-size: 12px; }
 .usage-turn { border-top: 1px solid var(--border); }
 .usage-turn > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 12px 2px; cursor: pointer; font-size: 11.5px; color: var(--text-secondary); }
 .usage-turn > summary > strong { margin-left: auto; }

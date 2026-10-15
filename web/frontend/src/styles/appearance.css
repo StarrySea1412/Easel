@@ -1,0 +1,20 @@
+.appearance-card { max-width: 780px; padding: clamp(18px, 3vw, 30px); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.appearance-heading { display: flex; gap: 14px; align-items: center; margin-bottom: 28px; }
+.appearance-heading h3 { font-size: 18px; font-weight: 650; margin: 0 0 4px; }
+.appearance-heading p, .appearance-control p, .appearance-status { font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.appearance-icon { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-2); }
+.appearance-control { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.appearance-control label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.appearance-control .easel-select { width: 220px; max-width: 100%; flex: none; }
+.appearance-preview { display: flex; min-height: 230px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.appearance-preview-rail { display: flex; flex-direction: column; align-items: center; gap: 17px; width: 45px; padding: 20px 10px; border-right: 1px solid var(--border); background: var(--surface-2); }
+.appearance-preview-rail i { width: 14px; height: 14px; border: 2px solid var(--border-strong); border-radius: 5px; }
+.appearance-preview-rail i:first-child { background: var(--text); border-color: var(--text); margin-bottom: 10px; }
+.appearance-preview-page { display: flex; flex-direction: column; gap: 24px; flex: 1; min-width: 0; padding: 24px; }
+.appearance-preview-brand { font-size: 22px; font-family: Georgia, serif; font-style: italic; }
+.appearance-preview-brand > span { display: block; margin-top: 3px; color: var(--text-secondary); font: 11px/1.6 sans-serif; font-style: normal; }
+.appearance-preview-message { align-self: flex-end; padding: 9px 13px; max-width: 90%; border: 1px solid var(--border); border-radius: 10px 10px 3px 10px; background: var(--surface-2); font-size: 11px; }
+.appearance-preview-composer { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 12px; font-size: 11px; color: var(--text-tertiary); margin-top: auto; }
+.appearance-preview-composer b { display: grid; place-items: center; width: 25px; height: 25px; margin-left: auto; border-radius: 8px; background: var(--text); color: var(--on-accent); }
+.appearance-status { margin-top: 15px; }
+@media (max-width: 600px) { .appearance-control { align-items: stretch; flex-direction: column; gap: 12px; } .appearance-control .easel-select { width: 100%; } .appearance-preview-page { padding: 18px 12px; } }
