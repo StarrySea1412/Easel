@@ -5,7 +5,7 @@ import {
   BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
   looksLikeAgentFailure, materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem,
 } from '../lib/breakdownReport';
-import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry, IconSkills, IconSpark } from './icons';
+import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry, IconSkills } from './icons';
 
 interface BreakdownPageProps {
   persona: string;
@@ -98,7 +98,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
       <div className="page-head">
         <div>
           <h1 className="page-title"><IconFire size={21} /> 爆款拆解</h1>
-          <p className="page-subtitle">放入你想研究的正文、分享文案或作品链接：先看清原作怎么写，再提炼适合你的模板与选题。</p>
+          <p className="page-subtitle">放一条你想参考的内容，看看哪些写法适合你——正文、分享文案或链接都可以。</p>
         </div>
       </div>
 
@@ -108,16 +108,13 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}>
           <textarea className="field breakdown-textarea" value={input}
-            placeholder="粘贴正文、分享文案，或贴作品链接；也可以把 .txt / .md / .srt 文件拖进来…"
+            placeholder="把想研究的内容贴在这里：一段正文、分享文案，或者作品链接；也可以直接把文件拖进来…"
             onChange={(e) => setInput(e.target.value)} />
           <div className="breakdown-tools">
             <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => fileRef.current?.click()}>
               <IconFile size={13} /> 导入文本文件
             </button>
-            <button type="button" className="btn btn-ghost breakdown-tool" onClick={loadExample}>
-              <IconSpark size={13} /> 看个示例
-            </button>
-            {isExample && <span className="breakdown-chip">示例素材（虚构）· 可直接拆解或替换</span>}
+            {isExample && <span className="breakdown-chip">这是示例（虚构），可直接拆解或换成你的内容</span>}
           </div>
           <input ref={fileRef} type="file" className="breakdown-file" accept=".txt,.md,.markdown,.srt"
             aria-label="导入文本文件" tabIndex={-1}
@@ -130,7 +127,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
           </div>
         )}
 
-        <p className="breakdown-hint">生成的是完整《内容拆解报告》：摘要、逐段分析、创作方案和验证计划；缺少表现数据时不会判断“为什么火”。目前只读取文字材料（正文／链接／文本文件），图片、PDF、视频后续版本支持。</p>
+        <p className="breakdown-hint">会先给结论、再逐段讲怎么写、能学什么；缺表现数据时不会猜“为什么火”。</p>
 
         <div className="breakdown-actions">
           <button className="btn btn-primary" disabled={loading || !input.trim()} onClick={run}>
@@ -142,6 +139,9 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
           {result && <button className="btn" onClick={copyReport}><IconCopy size={14} /> 复制报告</button>}
           {(input || result || error) && <button className="btn btn-ghost" onClick={resetMaterial}>清空</button>}
         </div>
+        {!input.trim() && (
+          <button type="button" className="breakdown-example-link" onClick={loadExample}>没有素材？看看示例</button>
+        )}
 
         {loading && <div className="loading" style={{ padding: 40 }}><div className="spinner" />正在生成内容拆解报告…</div>}
         {error && !loading && (

@@ -61,14 +61,14 @@ export function summarizeMaterial(input: string): MaterialSummary {
   return { chars, paragraphs, links, shareCopy, kind };
 }
 
-/** 材料识别卡文案（输入区实时展示，只说页面真正判断得出的东西）。 */
+/** 材料识别卡文案（大白话：只说页面真正判断得出的东西）。 */
 export function materialLine(summary: MaterialSummary): string {
   if (summary.kind === 'empty') return '还没有材料：粘贴正文、分享文案或作品链接，也可以导入文本文件。';
-  if (summary.kind === 'link-only') return `识别到 ${summary.links} 条链接：能否读取以实际结果为准；同时粘贴正文，分析更完整。`;
-  const parts = [`正文约 ${summary.chars} 字`, `${summary.paragraphs} 段`];
-  if (summary.links > 0) parts.push(`含 ${summary.links} 条链接（分享文案与正文分开处理）`);
-  if (summary.shareCopy) parts.push('检测到分享口令文案');
-  return parts.join(' · ');
+  if (summary.kind === 'link-only') return `只收到 ${summary.links} 个链接：内容能不能读到要看实际结果；建议把正文也贴一份进来。`;
+  const parts = [`收到正文约 ${summary.chars} 字 · ${summary.paragraphs} 段`];
+  if (summary.links > 0) parts.push(`另有 ${summary.links} 个链接，能不能读到要看实际结果`);
+  if (summary.shareCopy) parts.push('含分享口令，会与正文分开看');
+  return parts.join('；');
 }
 
 /** 示例素材：虚构短文，供首次试用；与用户历史材料分开标注。 */

@@ -63,7 +63,10 @@ test('material recognition stays honest about links, share copy and file types',
   const linkOnly = reportLib.summarizeMaterial('https://www.xiaohongshu.com/explore/abc');
   assert.equal(linkOnly.kind, 'link-only');
   assert.equal(linkOnly.links, 1);
-  assert.ok(reportLib.materialLine(linkOnly).includes('以实际结果为准'));
+  const linkLine = reportLib.materialLine(linkOnly);
+  assert.ok(linkLine.includes('链接'));
+  assert.ok(linkLine.includes('实际结果'));
+  assert.ok(linkLine.includes('正文'));
 
   const mixed = reportLib.summarizeMaterial(
     '分享给你，快看\n\n这段正文有两个段落。\n\n第二段。\n\nhttps://v.douyin.com/xyz');
@@ -116,25 +119,29 @@ async function mount(t, respond) {
   return { container, writes, buttons, click, fill };
 }
 
-test('input panel recognizes material and loads the marked example', async t => {
+test('input panel offers a marked example when empty and recognizes material while typing', async t => {
   const view = await mount(t, async () => ({ response: '# 内容拆解报告：x' }));
-  assert.equal(view.container.querySelector('.breakdown-material'), null, 'no material card before input');
+  assert.equal(view.container.querySelector('.breakdown-material'), null, 'no material line before input');
 
+  // 空状态：示例入口可见，点击后填入虚构示例并明确标注
+  await view.click('看看示例');
+  const chip = view.container.querySelector('.breakdown-chip');
+  assert.ok(chip && chip.textContent.includes('虚构'), 'example is clearly marked as fictional');
+  assert.ok(view.container.querySelector('textarea').value.includes('桌面越收越乱'));
+  assert.equal(view.container.querySelector('.breakdown-example-link'), null, 'example entry hides once material exists');
+
+  // 有材料：识别行随输入更新，可被读屏宣读
   await view.fill('桌面越收越乱？我把桌子划成三个区。');
   const card = view.container.querySelector('.breakdown-material');
-  assert.ok(card, 'material card appears with input');
+  assert.ok(card, 'material line appears with input');
   assert.ok(card.textContent.includes('正文约'));
   assert.equal(card.getAttribute('role'), 'status');
 
-  await view.click('看个示例');
-  assert.ok(view.container.querySelector('.breakdown-chip').textContent.includes('虚构'),
-    'example is clearly marked as fictional');
-  assert.ok(view.container.querySelector('textarea').value.includes('桌面越收越乱'));
-
+  // 清空回到空状态：示例入口恢复
   await view.click('清空');
   assert.equal(view.container.querySelector('textarea').value, '');
-  assert.equal(view.container.querySelector('.breakdown-material'), null);
   assert.equal(view.container.querySelector('.breakdown-chip'), null);
+  assert.ok(view.container.querySelector('.breakdown-example-link'), 'example entry returns when empty');
 });
 
 test('breakdown page sends the report contract and renders the report as a report', async t => {
