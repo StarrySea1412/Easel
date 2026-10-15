@@ -254,6 +254,7 @@ test('breakdown page runs through the streaming task api with the workspace cont
   assert.ok(idea.body.note.includes('# 内容拆解报告：'));
   assert.equal(idea.body.source, '爆款拆解');
   assert.equal(view.buttons().some(b => b.textContent.includes('复制报告')), true);
+  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'finished runs leave no active-run record');
 });
 
 test('stream failures are an error with a retry, never a savable report', async t => {
@@ -359,4 +360,57 @@ test('link-only failures offer pasting the text instead', async t => {
   assert.ok(alert.textContent.includes('把正文粘贴进来再试'), 'link-only failure explains the fix');
   await view.click('补正文');
   assert.equal(document.activeElement, view.container.querySelector('textarea'), '补正文 focuses the composer');
+});
+
+test('an unfinished run is recovered after leaving the page and coming back', async t => {
+  window.localStorage.clear();
+  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
+    sessionId: 'breakdown-old', turnId: 'breakdown-old-1', material: '上次的材料：桌面越收越乱。', startedAt: Date.now(),
+  }));
+  const report = '# 内容拆解报告：取回\n\n## 报告摘要\n\n取回成功。';
+  const view = await mount(t, async (path) => (path === '/api/chat/jobs/breakdown-old-1/stream'
+    ? sse([sseToken(1, report), sseDone(2)]) : {}), { keepStorage: true });
+
+  assert.ok(view.writes.some(w => w.path === '/api/chat/jobs/breakdown-old-1/stream'), 'resume reads the job stream');
+  const body = view.container.querySelector('.skill-body-md');
+  assert.ok(body && body.textContent.includes('取回成功'), 'recovered report renders');
+  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'active run is cleared after recovery');
+  assert.ok(view.container.querySelector('.breakdown-history-toggle').textContent.includes('历史拆解 1 篇'),
+    'recovered report lands in history');
+  assert.equal(view.container.querySelector('textarea').value, '上次的材料：桌面越收越乱。',
+    'material restores when the draft is empty');
+});
+
+test('recovery falls back to the last-turn snapshot when the job stream is gone', async t => {
+  window.localStorage.clear();
+  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
+    sessionId: 'breakdown-gone', turnId: 'breakdown-gone-1', material: '材料', startedAt: Date.now(),
+  }));
+  const view = await mount(t, async (path) => {
+    if (path === '/api/chat/jobs/breakdown-gone-1/stream') return new Response('', { status: 404 });
+    if (path === '/api/chat/last/breakdown-gone') {
+      return { status: 'done', text: '# 内容拆解报告：快照\n\n## 报告摘要\n\n从快照取回。', turn_id: 'breakdown-gone-1' };
+    }
+    return {};
+  }, { keepStorage: true });
+
+  await view.flush();
+  await view.flush();
+  const body = view.container.querySelector('.skill-body-md');
+  assert.ok(body && body.textContent.includes('从快照取回'), 'snapshot fallback renders');
+  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'record cleared after fallback');
+});
+
+test('a stale active run is dropped instead of resurrected', async t => {
+  window.localStorage.clear();
+  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
+    sessionId: 'breakdown-stale', turnId: 'breakdown-stale-1', material: 'x',
+    startedAt: Date.now() - 48 * 60 * 60 * 1000,
+  }));
+  const view = await mount(t, async () => ({}), { keepStorage: true });
+  await view.flush();
+
+  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'stale record cleared');
+  assert.equal(view.writes.filter(w => w.path.includes('/api/chat/')).length, 0, 'no recovery request for stale runs');
+  assert.equal(view.container.querySelector('.notice-error'), null);
 });

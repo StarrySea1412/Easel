@@ -64,3 +64,29 @@ export function addBreakdownRecord(items: BreakdownRecord[], record: BreakdownRe
 export function removeBreakdownRecord(items: BreakdownRecord[], id: string): BreakdownRecord[] {
   return writeHistory(items.filter(item => item.id !== id));
 }
+
+/** 进行中的拆解任务：离开页面后回来按同一 run 取回（服务端任务流可续读）。 */
+export interface ActiveRun { sessionId: string; turnId: string; material: string; startedAt: number }
+
+const ACTIVE_KEY = 'easel_breakdown_active_run';
+export const ACTIVE_RUN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function loadActiveRun(): ActiveRun | null {
+  const result = readLocalValue(ACTIVE_KEY);
+  if (!result.ok || !result.value) return null;
+  try {
+    const parsed = JSON.parse(result.value) as Partial<ActiveRun> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (typeof parsed.sessionId !== 'string' || typeof parsed.turnId !== 'string'
+      || typeof parsed.material !== 'string' || typeof parsed.startedAt !== 'number') return null;
+    return { sessionId: parsed.sessionId, turnId: parsed.turnId, material: parsed.material, startedAt: parsed.startedAt };
+  } catch { return null; }
+}
+
+export function saveActiveRun(run: ActiveRun): boolean {
+  return writeLocalValue(ACTIVE_KEY, JSON.stringify(run));
+}
+
+export function clearActiveRun(): void {
+  writeLocalValue(ACTIVE_KEY, '');
+}
