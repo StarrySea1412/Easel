@@ -1,4 +1,4 @@
-> **爆款拆解优化方案（2026-10-15，尚未实施）**：当前源码支持直接贴正文，但缺少明确的材料读取、附件和有依据的结果流程。[调研与方案](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/viral-breakdown-optimization-plan-2026-10-15.md)建议统一接收正文/分享文案/链接，逐步补截图与文件，先确认实际材料再拆结构，把传播假设与表现数据分开，并分别保存模板、选题和报告。本轮仅中文文档，未修改运行服务，138等待用户上传指令。
+> **爆款拆解优化方案（2026-10-15，尚未实施）**：已自行查阅Grok Bot、Codex相关官方资料、Claude Code及DeepSeek Harness，结合内容产品调研，提出正文/分享文案/链接及分期截图文件输入、原作/结构/发现联动工作台、可暂停的结构讲解，以及任务记录与报告共用真实状态。[中文方案](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/viral-breakdown-optimization-plan-2026-10-15.md)区分引用定位、语义支持、原作声称和核验事实，附独立人工盲评与拟议发布门槛；当前没有真实分析质量成绩，不承诺爆款预测。动态示意使用虚构素材，本轮未修改业务功能或运行服务，138等待用户上传指令。
 
 > **交互能力规划（2026-10-15，尚未实施）**：[上下文容量面板](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/chat-context-capacity-plan-2026-10-15.md)先显示匹配会话的最近一次用量、有效上限与来源，区分累计消耗、预算估算和未知分类；[全局通知方案](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/global-notification-plan-2026-10-15.md)基于固定同类产品源码，规划持久通知、待处理及精确跳转。本轮仅文档/协议核查，138等待用户上传指令；内容库封面/数量与办公室返回会话缺陷仍待接续。
 
