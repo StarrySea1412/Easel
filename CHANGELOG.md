@@ -1,3 +1,9 @@
+## 2026-10-15 · Interaction plans / 交互能力方案（未实施）
+
+- Assess a composer context indicator using installed OpenClaw2026.9.6 reports and the locally exported Codex0.147.0 protocol. Keep last-request/context snapshots, effective budgets, cumulative usage and estimated categories distinct. / 核查固定本机协议，建议先做容量/来源/新鲜度，再补缓存覆盖与分类；不把累计消耗或字符占比当精确上下文。见[评估](docs/chat-context-capacity-plan-2026-10-15.md)。
+- Research pinned OpenHands, Open WebUI and LobeHub sources and propose durable notifications, idempotent reconciliation, replayable changes, operator scoping and pending-action navigation. / 保存[全局通知方案](docs/global-notification-plan-2026-10-15.md)，已读不解除待处理，站内通知与可选外部投递分别验收。
+- Documentation only: no runtime implementation, model/email request, service replacement or package. Await the user's138 upload instruction; retain library covers/counts and office navigation as pending tasks. / 本轮仅方案，不把共享未提交草稿标为完成，138等待用户指令，旧修复任务保留。
+
 ## 0.2.9 source candidate · 2026-10-14 / 上游可靠性跟进
 
 - Explain the exact wrapped unavailable-search error for generic tool aliases, preserving strict external-content filtering and full receipts; 18 frontend checks, lint and build passed. The supplied receipt was traced to the local runtime; search configuration is unchanged and this display fix is not deployed. / 通用tool_call行补齐已知搜索错误提示；本机真实回执已匹配，18项前端检查与构建通过，搜索启用及运行部署独立待办。见[核查记录](docs/search-provider-failure-2026-10-14.md)。

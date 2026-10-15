@@ -1,3 +1,5 @@
+> **交互能力规划（2026-10-15，尚未实施）**：[上下文容量面板](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/chat-context-capacity-plan-2026-10-15.md)先显示匹配会话的最近一次用量、有效上限与来源，区分累计消耗、预算估算和未知分类；[全局通知方案](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/global-notification-plan-2026-10-15.md)基于固定同类产品源码，规划持久通知、待处理及精确跳转。本轮仅文档/协议核查，138等待用户上传指令；内容库封面/数量与办公室返回会话缺陷仍待接续。
+
 > **本机搜索错误核查（2026-10-14）**：用户回执已匹配本机15:15:53的真实记录，搜索被禁用或无可用provider；`SECURITY NOTICE` 是包装提示。补齐通用 `tool_call` 行漏掉的搜索失败原因，18项前端回归、lint和构建通过。[证据与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/search-provider-failure-2026-10-14.md)。源码提示修复尚未部署，本机搜索配置与真实搜索验收仍待处理。
 
 > **0.2.9上游跟进候选（2026-10-14）**：以ZJU-REAL/Easel的固定0.3.0源码为主线，落实计划B：扫码入口/登录判定、小红书本人身份/有界采集/Profile锁、Windows PATH与自定义模型思考能力/格式。保留定制创作者工作流、账号历史和凭据事务。[逐项跟进与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-reliability-0.2.9/docs/upstream-reliability-0.2.9-2026-10-14.md)。源码在独立分支，未替换本机7880、部署138或发布安装器；C–F后续实施，页面效果由用户验收。
