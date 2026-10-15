@@ -83,6 +83,52 @@ def test_disconnect_reconciles_without_resending_prompt():
     assert calls == ['agent', 'chat.abort']
 
 
+def test_confirmed_abort_releases_receiver_even_when_final_never_arrives():
+    started, closed = threading.Event(), threading.Event()
+    calls, accepted = [], []
+    class Client:
+        def __init__(self, receiver=False): self.receiver = receiver
+        def _rpc(self, method, params, **kwargs):
+            calls.append(method)
+            if method == 'agent':
+                kwargs['on_accepted']({'runId': 'exact'})
+                started.set()
+                assert closed.wait(2)
+                raise OSError('receiver closed after confirmed abort')
+            return {'ok': True, 'aborted': True, 'runIds': ['exact']}
+        def close(self):
+            if self.receiver: closed.set()
+    proc = GatewayAgentProc(Client(True), Client, {'idempotencyKey': 'turn', 'agentId': 'main',
+        'sessionKey': 'agent:main:own'}, 100, on_accepted=accepted.append)
+    assert started.wait(1) and accepted == ['exact']
+    proc.terminate()
+    assert proc.wait(1) == 1 and not proc.clean_end
+    assert calls == ['agent', 'chat.abort']
+
+
+def test_stop_before_acceptance_waits_for_accepted_identity_before_abort():
+    dispatch, accept, ended = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    class Client:
+        def _rpc(self, method, params, **kwargs):
+            calls.append((method, params))
+            if method == 'agent':
+                dispatch.set()
+                assert accept.wait(2)
+                kwargs['on_accepted']({'runId': 'accepted-later'})
+                return {'status': 'error'}
+            return {'ok': True, 'aborted': True, 'runIds': ['accepted-later']}
+        def close(self): pass
+    proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'early', 'agentId': 'main',
+        'sessionKey': 'agent:main:own'}, 10)
+    assert dispatch.wait(1)
+    proc.terminate()
+    assert [method for method, _ in calls] == ['agent'] and proc.poll() is None
+    accept.set()
+    assert proc.wait(1) == 1
+    assert calls[-1][0] == 'chat.abort' and calls[-1][1]['runId'] == 'accepted-later'
+
+
 def test_compaction_events_are_forwarded_only_for_own_run_and_safe_lifecycle():
     class Client:
         def _rpc(self, method, params, **kw):

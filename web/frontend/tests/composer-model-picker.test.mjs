@@ -104,14 +104,15 @@ test('status belongs to the model selector and its settings action targets that 
   assert.ok(view.calls.every(([, init]) => !init?.body));
 });
 
-test('running composer has one primary action and switches from stop to queue then back', async t => {
+test('running composer keeps stop beside queue-send when a draft is present', async t => {
   const view = await fixture(t, REF); await view.render({ isStreaming: true });
   const actions = () => [...view.container.querySelectorAll('.composer-send-actions button')];
   assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
   await view.type('下一条独立消息');
-  assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '排队发送');
-  await act(async () => actions()[0].click());
+  assert.equal(actions().length, 2); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
+  assert.equal(actions()[1].getAttribute('aria-label'), '排队发送');
+  await act(async () => actions()[1].click());
   assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
   await view.type('停止中保留草稿'); await view.render({ stopping: true });
-  assert.equal(actions().length, 1); assert.equal(actions()[0].disabled, true);
+  assert.equal(actions().length, 2); assert.ok(actions().every(button => button.disabled));
 });

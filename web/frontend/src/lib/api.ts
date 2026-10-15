@@ -845,11 +845,12 @@ export function submitLoginSms(platform: string, code: string): Promise<{ ok: bo
 }
 
 /** 用户显式停止：终止后端正在跑的对话 agent，释放会话锁，令下一句能立刻发。 */
-export function stopChat(sessionId: string, turnId?: string): Promise<{ stopped: boolean }> {
+export function stopChat(sessionId: string, turnId?: string): Promise<{ stopped: boolean; status?: string }> {
   return request('/api/chat/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, ...(turnId ? { turnId } : {}) }),
+    signal: AbortSignal.timeout(50000),
   });
 }
 
@@ -858,11 +859,11 @@ export function streamChat(
   persona: string | undefined,
   sessionId: string,
   onToken: (chunk: string) => void,
-  onDone: (sessionKey?: string) => void,
+  onDone: (sessionKey?: string, outcome?: { stopped?: boolean }) => void,
   onError: (err: Error) => void,
   onThinking?: (chunk: string) => void,
   onActivity?: (status: string) => void,
-  onInterrupted?: () => void,
+  onInterrupted?: (note?: string) => void,
   turnId?: string,
   resumeOnly = false,
   onRecoveryUnavailable?: () => void,
@@ -949,7 +950,12 @@ export function streamChat(
           onError(makeChatError(detail));
           return true;
         } else if (currentEvent === 'done') {
-          try { onDone((JSON.parse(data) as { sessionKey?: string }).sessionKey); } catch { onDone(); }
+          try { const result = JSON.parse(data) as { sessionKey?: string; stopped?: boolean }; onDone(result.sessionKey, result); } catch { onDone(); }
+          return true;
+        } else if (currentEvent === 'recovery_required') {
+          let note = '本轮服务连接已失效，请停止核实或新建对话。';
+          try { const value = JSON.parse(data); if (typeof value === 'string') note = value; } catch { /* use bounded guidance */ }
+          onInterrupted?.(note);
           return true;
         }
         return false;

@@ -1,4 +1,5 @@
 import ChatCompactionIndicator from './ChatCompactionIndicator';
+import ChatContextUsage from './ChatContextUsage';
 import type { SkillRequirements } from '../lib/selectedSkills';
 import { useState, useRef, useEffect, useId, useLayoutEffect, useCallback, useSyncExternalStore } from 'react';
 import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAttachment,
@@ -30,6 +31,7 @@ import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { getChatQueue, subscribeChatQueue, pauseChatQueue, updateQueuedMessage } from '../lib/chatQueue';
 
 interface ChatComposerProps {
+  usageRefreshKey?: number;
   engine?: 'openclaw'|'codex';
   engineLocked?: boolean;
   onEngineChange?: (engine: 'openclaw'|'codex') => void;
@@ -50,7 +52,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -279,6 +281,7 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
             options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
+          <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
           {engine === 'codex' ? <Select aria-label="本轮使用模型" value={models.modelRef} disabled={stopping || models.loading}
             options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
             : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}
@@ -290,9 +293,9 @@ function SessionChatComposer({ sessionId, engine = 'openclaw', engineLocked = fa
           <button type="button" onClick={() => setQueueEdit(null)}>取消</button>
           <button type="button" onClick={handleSend} disabled={!input.trim() || input.length > 20000}>保存修改</button>
         </div>}
-        <div className="composer-send-actions" hidden={editingQueue}>{isStreaming && (stopping || (!input.trim() && !attachments.length && !draft.quotes?.length)) ? (
+        <div className="composer-send-actions" hidden={editingQueue}>{isStreaming && (
           <button type="button" className="send-btn" onClick={onStop} disabled={stopping} title={stopping ? '等待停止确认' : '停止生成'} aria-label={stopping ? '等待停止确认' : '停止生成'}><IconStop size={15} /></button>
-        ) : (
+        )}{(!isStreaming || Boolean(input.trim() || attachments.length || draft.quotes?.length)) && (
           <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length && !draft.quotes?.length) || uploading || stopping || draft.missingAttachments.length > 0} title={isStreaming ? '加入队列，本轮完成后发送' : '发送'} aria-label={isStreaming ? '排队发送' : '发送消息'}><IconArrowUp size={18} /></button>
         )}
         </div>

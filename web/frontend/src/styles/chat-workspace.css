@@ -20,6 +20,10 @@
 .chat-conversation-page .chat-conversation-body .chat-messages { padding:42px 32px 16px; scrollbar-gutter:stable both-edges; }
 .chat-page .chat-thread,.chat-page .chat-input-inner { width:100%; max-width:var(--chat-column-width); margin:0 auto; }
 .chat-conversation-page .chat-input-area { padding:10px 40px 22px; background:var(--bg); }
+.chat-stop-notice { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 8px; padding:9px 12px; border:1px solid var(--border); border-radius:10px; color:var(--text-secondary); background:var(--surface); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.chat-stop-notice p { flex:1 1 260px; margin:0; }
+.chat-stop-notice>div { display:flex; flex-wrap:wrap; gap:6px; }
+.chat-conversation-page .chat-input-area { max-height:65dvh; overflow-y:auto; }
 .chat-page .message-row { margin-bottom:26px; animation:none; }
 .chat-page .message-row.user { margin-top:12px; }
 .chat-page .msg-col { min-width:0; gap:8px; }

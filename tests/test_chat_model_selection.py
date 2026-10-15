@@ -141,6 +141,26 @@ async def collect_turn(model_ref='relay/model-b', turn='model-turn'):
     return events, await web.api_chat_last('model-session', turn)
 
 
+def test_stop_while_waiting_for_session_lock_cancels_only_queued_job(sandbox, monkeypatch):
+    async def exercise():
+        lock = asyncio.Lock()
+        await lock.acquire()
+        monkeypatch.setattr(web, '_session_lock', lambda _: lock)
+        old_process = object()
+        monkeypatch.setitem(web._RUNNING_CHAT, 'model-session', old_process)
+        monkeypatch.setitem(web._ACTIVE_SKILL_TURNS, 'model-session', 'older-turn')
+        response = await web.api_chat_stream(web.ChatRequest(message='not dispatched', sessionId='model-session',
+            turnId='queued-stop', modelRef='relay/model-b'))
+        await asyncio.sleep(0)
+        result = await web.api_chat_stop(web.StopRequest(sessionId='model-session', turnId='queued-stop'))
+        events = [event async for event in response.body_iterator]
+        assert result['stopped'] and json.loads(events[-1]['data'])['stopped'] is True
+        assert web._RUNNING_CHAT['model-session'] is old_process
+        assert web._ACTIVE_SKILL_TURNS['model-session'] == 'older-turn' and lock.locked()
+        assert 'queued-stop' not in web._CHAT_JOBS and not sandbox.requests
+    asyncio.run(exercise())
+
+
 def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks(sandbox):
     client = TestClient(web.app, base_url='http://127.0.0.1:7860', client=('127.0.0.1', 51234))
     response = client.get('/api/agent-office/models')

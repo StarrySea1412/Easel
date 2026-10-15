@@ -12,17 +12,20 @@ import time
 
 
 class GatewayAgentProc:
-    def __init__(self, client, client_factory, params, timeout, on_compaction=None, on_tool=None):
+    def __init__(self, client, client_factory, params, timeout, on_compaction=None, on_tool=None, on_accepted=None):
         self.client = client
         self.client_factory = client_factory
         self.params = dict(params)
         self.timeout = timeout
         self.on_compaction = on_compaction
         self.on_tool = on_tool
+        self.on_accepted = on_accepted
         self._office_run_id = params['idempotencyKey']
         self._done = threading.Event()
         self._stop = threading.Event()
         self._abort_lock = threading.Lock()
+        self._abort_confirmed = threading.Event()
+        self._accepted_run = threading.Event()
         self._lines = queue.Queue()
         self.stdout = self._stdout()
         self.error_text = None
@@ -41,8 +44,12 @@ class GatewayAgentProc:
     def _accepted(self, payload):
         if payload.get('runId'):
             self._office_run_id = payload['runId']
+            self._accepted_run.set()
+            if self.on_accepted is not None:
+                self.on_accepted(self._office_run_id)
         if self._stop.is_set():
-            self._abort()
+            if self._abort():
+                self.client.close()
 
     def _on_event(self, frame):
         if frame.get('event') != 'agent':
@@ -81,8 +88,14 @@ class GatewayAgentProc:
                     'runId': self._office_run_id,
                     'agentId': self.params['agentId'],
                 }, timeout=5)
-                return (isinstance(result, dict) and result.get('aborted') is True
-                        and ('runIds' not in result or self._office_run_id in result['runIds']))
+                confirmed = (isinstance(result, dict) and result.get('aborted') is True
+                             and self._office_run_id in result.get('runIds', []))
+                confirmed = confirmed or (isinstance(result, dict) and result.get('ok') is True
+                                           and result.get('aborted') is False and result.get('runIds') == []
+                                           and self._accepted_run.is_set())
+                if confirmed:
+                    self._abort_confirmed.set()
+                return confirmed
             finally:
                 client.close()
 
@@ -91,12 +104,15 @@ class GatewayAgentProc:
         # Never re-dispatch a paid request; retain the lock until abort or final.
         while True:
             try:
+                if self._abort_confirmed.is_set():
+                    return
                 if self._abort():
                     return
                 client = self.client_factory()
                 try:
                     result = client._rpc('agent.wait', {'runId': self._office_run_id, 'timeoutMs': 1000}, timeout=5)
-                    if isinstance(result, dict) and result.get('status') in ('ok', 'error'):
+                    if (isinstance(result, dict) and result.get('status') in ('ok', 'error')
+                            and result.get('runId') == self._office_run_id):
                         return
                 finally:
                     client.close()
@@ -140,9 +156,12 @@ class GatewayAgentProc:
 
     def terminate(self):
         self._stop.set()
-        if not self._done.is_set():
+        if not self._done.is_set() and self._accepted_run.is_set():
             try:
-                self._abort()
+                if self._abort():
+                    # An exact abort receipt is enough to stop waiting on a
+                    # receiver whose final response may never arrive.
+                    self.client.close()
             except Exception:
                 pass  # Worker waits for final or reconciles after disconnection.
 

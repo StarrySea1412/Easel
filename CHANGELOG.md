@@ -1,3 +1,9 @@
+## 2026-10-15 · Context details and usable stop recovery / 上下文细则与停止恢复
+
+- Move notifications to the left toolbar beside Settings; add an anchored composer context ring, six explicitly estimated/unknown categories and a cumulative usage/cost entry. / 通知移到设置旁，输入框增加上下文圆环/分类/费用入口，实际快照与累计用量分别统计。
+- End orphaned replay after Web restarts and reconcile exact runs on explicit stop; retain received text/thinking, handle queued cancellation and keep Stop visible beside queue-send. / 修复重启后旧任务无限恢复及无法停止，保存确切运行标识和已收到内容，支持排队取消、请求期限与保留记录新建，输入草稿不隐藏停止。
+- Frontend 1,002 tests, relevant backend regressions, lint/build and focused desktop/390px browser checks passed. No new paid generation, 138 deployment or package release. / 验证范围和已解除的真实旧任务见[本轮记录 / evidence](docs/context-usage-notifications-2026-10-15.md)。
+
 ## 2026-10-15 · Local workbench and GLM video / 本机工作台与GLM视频
 
 - Add anonymous official ClawHub skill search/details, separate from installed skills; bound requests, cache and rate limits, and display external author text safely. / 新增ClawHub公开检索/详情，区分已安装技能，限制请求/缓存并处理限流与过期请求，不安装或执行技能。

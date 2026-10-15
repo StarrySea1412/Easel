@@ -44,3 +44,20 @@ test('completed elapsed duration survives export/import while live start identif
   assert.throws(() => parseConversationBackup(JSON.stringify({ ...backup, sessions: [{ ...backup.sessions[0],
     messages: [{ role: 'assistant', content: '', elapsedMs: -3 }] }] })), /耗时/);
 });
+
+test('orphaned replay ends reconnecting with actionable recovery while retaining the controller', async t => {
+  let requests = 0, controller; const encoder = new TextEncoder();
+  t.mock.method(globalThis, 'fetch', async () => {
+    requests++;
+    return new Response(new ReadableStream({ start(stream) {
+      stream.enqueue(encoder.encode('event: recovery_required\ndata: "服务连接失效，请停止核实或新建对话。"\n\n'));
+    }}));
+  });
+  const note = await new Promise(resolve => {
+    controller = streamChat('', undefined, 'old-session', () => {}, () => assert.fail('not a completed run'),
+      () => assert.fail('do not discard its only stop target'), undefined, undefined, resolve, 'old-turn', true);
+  });
+  assert.match(note, /停止/); assert.equal(requests, 1);
+  assert.equal(controller.signal.aborted, false);
+  controller.abort();
+});

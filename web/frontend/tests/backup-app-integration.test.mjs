@@ -45,7 +45,7 @@ async function fixture(t, initial, realSidebar = false) {
   const api = url(`
     export const fetchStatus = async () => ({gateway: true, personas: [{name:'fixture'}]});
     export const fetchPersonas = async () => [];
-    export const fetchLastTurn = async (...args) => {globalThis.__backupApp.calls.push(['fetchLastTurn',...args]);return {status:'missing'};};
+    export const fetchLastTurn = async (...args) => {globalThis.__backupApp.calls.push(['fetchLastTurn',...args]);return globalThis.__backupApp.lastResponse ? globalThis.__backupApp.lastResponse(...args) : {status:'missing'};};
     export const stopChat = async (...args) => {globalThis.__backupApp.calls.push(['stopChat',...args]);return globalThis.__backupApp.stopResponse ? globalThis.__backupApp.stopResponse(...args) : {stopped:true};};
     export const deleteSession = async (...args) => {globalThis.__backupApp.calls.push(['deleteSession',...args]);};
     export const questionStatus = async () => ({});
@@ -727,4 +727,44 @@ test('settings navigation replaces the main page for current, other and toolbar 
  }
  await v.settings();await act(async()=>v.harness.sidebar.onPageChange('chat'));
  assert.equal(v.container.querySelector('.page-host').textContent,'对话');assert.equal(v.harness.streams.length,0);
+});
+
+test('orphaned recovery keeps its stop control and allows a new chat without discarding the old job', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('旧任务'));
+  const run = harness.streams[0], turn = harness.pages['对话'].session.pendingTurnId;
+  await act(async () => run.args[8]('本轮服务连接已失效，请重试停止或新建对话。'));
+  assert.match(harness.pages['对话'].stopError, /连接已失效/);
+  assert.equal(harness.pages['对话'].session.pendingTurnId, turn);
+  await act(async () => harness.pages['对话'].onNewChat());
+  assert.notEqual(harness.pages['对话'].session.id, 'original');
+  assert.equal(harness.sidebar.sessions.find(s => s.id === 'original').pendingTurnId, turn);
+  assert.equal(harness.streams.length, 1, 'new chat must not dispatch an automatic model request');
+});
+
+test('an already finished stop restores the saved answer instead of fabricating a stopped answer', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('恢复结束记录'));
+  const run = harness.streams[0], turn = harness.pages['对话'].session.pendingTurnId;
+  harness.stopResponse = async () => ({ stopped: true, status: 'already_finished' });
+  harness.lastResponse = async () => ({ status: 'done', turn_id: turn, text: '后端保留的正文', thinking: '保留思考' });
+  await act(async () => harness.pages['对话'].onStop());
+  const last = harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1);
+  assert.equal(last.content, '后端保留的正文'); assert.equal(last.thinking, '保留思考');
+  assert.notEqual(last.stopped, true); assert.equal(run.controller.signal.aborted, true);
+  assert.equal(harness.pages['对话'].stream, undefined);
+  await act(async () => harness.pages['对话'].onSend('可以继续'));
+  assert.equal(harness.streams.length, 2);
+});
+
+test('a confirmed stop terminal event wins the response race and remains marked stopped', async t => {
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onSessionSelect('original'));
+  await act(async () => harness.pages['对话'].onSend('结束回执'));
+  await act(async () => harness.streams[0].args[4]('original', { stopped: true }));
+  const last = harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1);
+  assert.equal(last.stopped, true); assert.match(last.content, /已停止/);
+  assert.equal(harness.pages['对话'].stream, undefined);
 });

@@ -18,6 +18,7 @@ import '../styles/sidebar-shell.css';
 export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
+  eventNotifications?: React.ReactNode;
   currentPage: Page;
   onPageChange: (page: Page, preserveConversations?: boolean) => void;
   personas: PersonaItem[];
@@ -41,6 +42,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({
+  eventNotifications,
   currentPage,
   onPageChange,
   personas,
@@ -243,6 +245,7 @@ export default function Sidebar({
               <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
+            {eventNotifications}
             {railItem('settings','设置',<IconGear size={19}/>)}
             <AppVersion/>
           </div>

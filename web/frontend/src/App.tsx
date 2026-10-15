@@ -430,14 +430,14 @@ export default function App() {
         typingBuf.current[sessionId] = (typingBuf.current[sessionId] || '') + chunk;
         ensureTypingPump(sessionId);
       },
-      (sessionKey) => {
+      (sessionKey, outcome) => {
         Object.assign(runAcc, finishChatTiming(runAcc));
         // done 不能立即 flush——token 和 done 几乎同时到达（OpenClaw 攒批），
         // 立即 flush 会把整包瞬间冲出，打字机白做。等队列吐完再落盘。
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '', turnId, requestedModelRef: a?.requestedModelRef,
+            role: 'assistant', content: a?.content || (outcome?.stopped ? '（已停止）' : ''), stopped: outcome?.stopped, turnId, requestedModelRef: a?.requestedModelRef,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -473,9 +473,10 @@ export default function App() {
       },
       // onInterrupted：SSE 被中断（长任务时代理掐断），但后端仍在跑并会落盘完整结果。
       // streamChat 会按 eventId 自动重连并补发遗漏事件；这里只更新用户可见状态。
-      () => {
+      (note) => {
+        if (note && streamAcc.current[sessionId] === runAcc) setStopErrors(previous => ({ ...previous, [sessionId]: note }));
         setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc
-          ? { ...p, [sessionId]: { ...p[sessionId], activity: '⏳ 连接中断，正在自动续接…' } } : p));
+          ? { ...p, [sessionId]: { ...p[sessionId], activity: note || '⏳ 连接中断，正在自动续接…' } } : p));
       },
       turnId,
       false,
@@ -557,12 +558,12 @@ export default function App() {
         typingBuf.current[sessionId] = (typingBuf.current[sessionId] || '') + chunk;
         ensureTypingPump(sessionId);
       },
-      (sessionKey) => {
+      (sessionKey, outcome) => {
         Object.assign(runAcc, finishChatTiming(runAcc));
         drainStreamRun(() => streamAcc.current[sessionId] === runAcc, () => Boolean(typingBuf.current[sessionId]), () => {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, {
-            role: 'assistant', content: a?.content || '（无输出）', turnId, requestedModelRef: a?.requestedModelRef,
+            role: 'assistant', content: a?.content || (outcome?.stopped ? '（已停止）' : '（无输出）'), stopped: outcome?.stopped, turnId, requestedModelRef: a?.requestedModelRef,
             thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined,
           }, sessionKey);
           clearStream(sessionId);
@@ -588,8 +589,11 @@ export default function App() {
         if (a.steps[a.steps.length - 1] !== status) a.steps.push(status);
         setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], activity: status } } : p));
       },
-      () => setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc
-        ? { ...p, [sessionId]: { ...p[sessionId], activity: '⏳ 正在自动续接…' } } : p)),
+      (note) => {
+        if (note && streamAcc.current[sessionId] === runAcc) setStopErrors(previous => ({ ...previous, [sessionId]: note }));
+        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc
+          ? { ...p, [sessionId]: { ...p[sessionId], activity: note || '⏳ 正在自动续接…' } } : p));
+      },
       turnId,
       true,
       () => {
@@ -825,8 +829,20 @@ export default function App() {
       if (stopRequests.current[sessionId] !== request) return false;
       if (streamAcc.current[sessionId] !== run) return !streamAcc.current[sessionId] && !streamCtl.current[sessionId];
       if (!result.stopped) {
-        setStopErrors((prev) => ({ ...prev, [sessionId]: '后端尚未确认本轮已停止。已保留连接和恢复记录，等待结果或重试停止。' }));
+        setStopErrors((prev) => ({ ...prev, [sessionId]: '后端尚未确认本轮已停止。可以重试停止，或保留记录新建对话；不会自动重发本轮。' }));
         return false;
+      }
+      if (result.status === 'already_finished') {
+        const saved = await fetchLastTurn(sessionId, run.turnId);
+        if (streamAcc.current[sessionId] !== run) return true;
+        if (saved.status !== 'done' || saved.turn_id !== run.turnId) throw new Error('结束记录尚不可读，请重试核实');
+        streamCtl.current[sessionId]?.abort();
+        clearTyping(sessionId); typingBuf.current[sessionId] = '';
+        appendAssistant(sessionId, { ...decodeChatTiming(saved), role: 'assistant', content: saved.text || '', error: saved.error,
+          thinking: saved.thinking || undefined, turnId: run.turnId, requestedModelRef: run.requestedModelRef });
+        clearStream(sessionId);
+        try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
+        return true;
       }
       streamCtl.current[sessionId]?.abort();
       flushTyping(sessionId);
@@ -844,8 +860,8 @@ export default function App() {
       return true;
     } catch (error) {
       if (streamAcc.current[sessionId] === run && stopRequests.current[sessionId] === request) {
-        const detail = error instanceof Error ? error.message : '连接失败';
-        setStopErrors((prev) => ({ ...prev, [sessionId]: `停止请求失败：${detail}。任务可能仍在运行，已保留连接和恢复记录，请重试停止。` }));
+        const detail = error instanceof Error ? error.name === 'TimeoutError' ? '请求超时' : error.message : '连接失败';
+        setStopErrors((prev) => ({ ...prev, [sessionId]: `停止请求失败：${detail}。后台状态未确认；可重试停止或保留记录新建对话。` }));
       }
       return false;
     } finally {
@@ -1193,9 +1209,7 @@ export default function App() {
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
         onGatewayRetry={retryGateway}
-      />
-      <main className="main-content">
-        <EventNotificationCenter onOpen={target => {
+        eventNotifications={<EventNotificationCenter onOpen={target => {
           if (target.page === 'chat' && target.sessionId) {
             if (!sessionsRef.current.some(session => session.id === target.sessionId)) { showToast('该会话已删除。', 'info'); return; }
             setActiveSessionId(target.sessionId);
@@ -1206,7 +1220,9 @@ export default function App() {
             setOutputJumpPath(target.path || '');
           }
           setCurrentPage(target.page);
-        }} />
+        }} />}
+      />
+      <main className="main-content">
         <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
         <PublishReceiptCenter model={publishReceipts} showEntry={false}
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}

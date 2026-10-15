@@ -3327,6 +3327,7 @@ class _CrossProcLock:
         self._path = _session_flock_path(sk)
         self._fh = None
         self.acquired = False
+        self.cancel_event = None
 
     def acquire(self, timeout: float = 300.0, poll: float = 0.5) -> bool:
         try:
@@ -3341,6 +3342,8 @@ class _CrossProcLock:
             return False  # 拿不到文件句柄就不强求（退化为仅 asyncio 锁）
         deadline = time.time() + timeout
         while True:
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                return False
             try:
                 if os.name == "nt":
                     self._fh.seek(0)
@@ -3459,6 +3462,8 @@ _BG_TASKS: set = set()
 # 正在跑的对话 openclaw 进程（sk→proc），供用户**显式「停止」**终止；断线**不**经此路径（断线不杀）。
 _RUNNING_CHAT: dict = {}
 _ACTIVE_SKILL_TURNS: dict[str, str] = {}
+# Include jobs waiting for a session lock, before a process exists.
+_CHAT_JOBS: dict[str, tuple[str, threading.Event]] = {}
 # 被用户显式停止的会话 key：supervisor 据此把本轮当作正常「已停止」收尾（不报「被中断」、释放会话锁）。
 _STOPPED_CHAT: set = set()
 
@@ -3527,6 +3532,12 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                     if event["event"] in ("done", "error"):
                         return
             else:
+                if turn_id not in _CHAT_JOBS:
+                    # The append-only log survived a web restart; its former
+                    # supervisor did not. Do not tail it forever or resubmit it.
+                    yield {'event': 'recovery_required', 'data': json.dumps(
+                        '本轮服务连接已失效，后台状态待核实。请重试停止以核实并结束，或保留记录新建对话。', ensure_ascii=False)}
+                    return
                 # Keep proxy connections active; reconnecting remains safe if it still drops.
                 if time.monotonic() - idle_since >= 15:
                     yield {"event": "ping", "data": "{}"}
@@ -3580,11 +3591,15 @@ async def api_chat_stream(req: ChatRequest):
     loop = asyncio.get_event_loop()
     client_q: asyncio.Queue = asyncio.Queue()
     CLIENT_DONE = object()
+    sk = req.sessionId or f"web-{int(time.time() * 1000)}"
+    turn_id = req.turnId or uuid.uuid4().hex
+    if turn_id in _CHAT_JOBS:
+        raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
+    cancel_job = threading.Event()
+    _CHAT_JOBS[turn_id] = (sk, cancel_job)
 
     async def supervisor():
-        sk = req.sessionId or f"web-{int(time.time() * 1000)}"
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
-        turn_id = req.turnId or uuid.uuid4().hex
         from easel.execution_store import ExecutionStore
         execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
         started_at_ms = int(time.time() * 1000)
@@ -3633,7 +3648,7 @@ async def api_chat_stream(req: ChatRequest):
             if kind == 'error' and isinstance(text, dict):
                 turn_error = text
             event_seq += 1
-            data = ({"sessionKey": extra.get("sessionKey")} if kind == "done" else text)
+            data = ({"sessionKey": extra.get("sessionKey"), "stopped": extra.get('stopped', False)} if kind == "done" else text)
             event = {"id": event_seq, "event": kind, "data": data}
             try:
                 with event_path.open("a", encoding="utf-8") as ef:
@@ -3766,12 +3781,30 @@ async def api_chat_stream(req: ChatRequest):
         # 双层锁：asyncio 锁管同 web 进程内并发；flock 跨进程锁管两个标签/gateway/cron 撞同一会话。
         lock = _session_lock(sk)
         xlock = _CrossProcLock(sk)
+        xlock.cancel_event = cancel_job
+        lock_acquired = False
+        user_stopped = False
+        def cancelled_before_start():
+            save_turn(pk, 'done', '', {'turn_id': turn_id, 'clean_end': False, 'stop_reason': 'user_stopped',
+                                      'requestedModelRef': requested_model_ref,
+                                      'requestedThinkingLevel': requested_thinking_level})
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
-        await lock.acquire()
         try:
+            while lock.locked() and not cancel_job.is_set():
+                await asyncio.sleep(0.1)
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
+            await lock.acquire()
+            lock_acquired = True
             # flock 可能阻塞（等另一进程/标签跑完），放线程池避免卡住事件循环
             got = await loop.run_in_executor(None, xlock.acquire, min(TIMEOUT_CHAT, 300))
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
             if not got:
                 save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
@@ -3798,16 +3831,20 @@ async def api_chat_stream(req: ChatRequest):
             # _resolve_transport 里既有 stat 又有阻塞 urllib 探针（最多 3s），必须丢线程：
             # 直接在协程里调会把整个事件循环——连同其它会话正在推的 SSE——一起卡住。
             audit_context = None
+            _ACTIVE_SKILL_TURNS[sk] = turn_id
             try:
                 audit_context = await asyncio.to_thread(skill_audit.begin, OUTPUTS_DIR, OPENCLAW_SESSIONS_DIR,
                                                          sk, turn_id, specs, req.message, await asyncio.to_thread(_channel_labels))
-                _ACTIVE_SKILL_TURNS[sk] = turn_id
             except Exception:
                 to_client('activity', '执行核验暂不可用；创作任务继续运行。')
             # The OpenAI-compatible gateway endpoint does not expose a documented
             # per-turn thinking field. Use the CLI when the user explicitly chose
             # a level so the value reaches OpenClaw's native --thinking option.
             is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
             # A queued turn must begin after the preceding turn's raw output.
             # The earlier pre-lock offset may belong to an entirely older run.
             try:
@@ -3820,6 +3857,12 @@ async def api_chat_stream(req: ChatRequest):
             else:
                 try:
                     native_client = await asyncio.to_thread(_native_agent_client, credentials)
+                    if cancel_job.is_set():
+                        if native_client is not None:
+                            native_client.close()
+                        user_stopped = True
+                        cancelled_before_start()
+                        return
                     if native_client is not None:
                         from easel.gateway_agent import GatewayAgentProc
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
@@ -3832,7 +3875,10 @@ async def api_chat_stream(req: ChatRequest):
                         proc = GatewayAgentProc(native_client,
                             lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
                             on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event),
-                            on_tool=tool_update)
+                            on_tool=tool_update,
+                            on_accepted=lambda run_id: loop.call_soon_threadsafe(
+                                save_turn, pk, 'running', '', {'turn_id': turn_id, 'gateway_run_id': run_id,
+                                'requestedModelRef': requested_model_ref, 'requestedThinkingLevel': requested_thinking_level}))
                     else:
                         proc = None
                     if proc is None:
@@ -3863,6 +3909,9 @@ async def api_chat_stream(req: ChatRequest):
                     to_client("error", error)
                     return
             _RUNNING_CHAT[sk] = proc         # 注册运行中进程（HTTP 模式为伪进程），供 /api/chat/stop
+            if cancel_job.is_set():
+                _STOPPED_CHAT.add(sk)
+                await asyncio.to_thread(proc.terminate)
             # 经 gateway 后客户端 stdout 没有 model-fetch 标记（那是独立跑 agent 才有），先立刻
             # 给一个「正在思考」活动指示，随后 token 从共享 raw stream 流进来接管显示。
             to_client("activity", "等待模型响应…")
@@ -4295,10 +4344,12 @@ async def api_chat_stream(req: ChatRequest):
             except OSError:
                 to_client('activity', '执行记录保存失败；本轮结束回执仍保留。')
             xlock.release()
-            lock.release()
-            _RUNNING_CHAT.pop(sk, None)
-            _ACTIVE_SKILL_TURNS.pop(sk, None)
-            to_client("done", sessionKey=sk)
+            if lock_acquired:
+                lock.release()
+                _RUNNING_CHAT.pop(sk, None)
+                _ACTIVE_SKILL_TURNS.pop(sk, None)
+            to_client("done", sessionKey=sk, stopped=user_stopped)
+            _CHAT_JOBS.pop(turn_id, None)
             client_q.put_nowait(CLIENT_DONE)
 
     # 把 run 跑在独立后台任务里（持强引用防 GC）——客户端断开不取消它。
@@ -4307,6 +4358,8 @@ async def api_chat_stream(req: ChatRequest):
 
     def _bg_done(t):
         _BG_TASKS.discard(t)
+        if _CHAT_JOBS.get(turn_id) == (sk, cancel_job):
+            _CHAT_JOBS.pop(turn_id, None)
         try:
             exc = t.exception()   # 取出异常避免「never retrieved」告警
         except Exception:
@@ -4356,7 +4409,7 @@ async def api_chat_stream(req: ChatRequest):
             elif t in ('model_selection', 'timing', 'execution'):
                 yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
-                yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey")}, ensure_ascii=False)}
+                yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey"), "stopped": item.get('stopped', False)}, ensure_ascii=False)}
 
     return EventSourceResponse(forward(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Content-Encoding": "identity"})
 
@@ -4427,8 +4480,20 @@ async def api_chat_stop(req: StopRequest):
         return await asyncio.to_thread(_codex_service.stop, req.sessionId, req.turnId)
     sk = (req.sessionId or "").strip()
     proc = _RUNNING_CHAT.get(sk) if sk else None
-    if req.turnId and _ACTIVE_SKILL_TURNS.get(sk) != req.turnId:
-        return {"stopped": False}
+    target_turn = req.turnId or _ACTIVE_SKILL_TURNS.get(sk)
+    job = _CHAT_JOBS.get(target_turn)
+    if job and job[0] == sk:
+        job[1].set()
+        if _ACTIVE_SKILL_TURNS.get(sk) != target_turn or proc is None:
+            deadline = time.monotonic() + 3
+            while target_turn in _CHAT_JOBS and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            return {'stopped': target_turn not in _CHAT_JOBS}
+    elif req.turnId and _ACTIVE_SKILL_TURNS.get(sk) != req.turnId:
+        if proc is not None:
+            return {"stopped": False}
+        from chat_recovery import stop_orphan
+        return await asyncio.to_thread(stop_orphan, sys.modules[__name__], sk, req.turnId)
     if proc is not None and proc.poll() is None:
         _STOPPED_CHAT.add(sk)          # 标记为用户停止，供 supervisor 正常收尾（不报「被中断」）
         try:
@@ -4451,7 +4516,10 @@ async def api_chat_stop(req: StopRequest):
         while _RUNNING_CHAT.get(sk) is proc and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
         return {"stopped": _RUNNING_CHAT.get(sk) is not proc}
-    return {"stopped": False}          # 没有在跑（可能已结束）→ 前端照常清理即可
+    if proc is None and target_turn:
+        from chat_recovery import stop_orphan
+        return await asyncio.to_thread(stop_orphan, sys.modules[__name__], sk, target_turn)
+    return {"stopped": False}
 
 
 @app.post("/api/chat")
@@ -7025,6 +7093,22 @@ async def api_skill_critique(req: SkillCritiqueRequest):
         return review
     finally:
         _SKILL_REVIEW_BUSY.discard(ident)
+
+
+@app.get('/api/usage/context')
+async def api_context_usage(sessionId: str, modelRef: str = ''):
+    from context_usage import collect_context
+    from usage_stats import collect_usage
+    import sqlite3
+    try:
+        result = await asyncio.to_thread(collect_context, openclaw_state_dir(), SESSIONS_DIR,
+                                         sessionId, modelRef,
+                                         lambda: collect_usage(PROJECT_ROOT, openclaw_state_dir(), SESSIONS_DIR, sessionId, 1, 0))
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+    except ValueError:
+        raise HTTPException(400, '上下文会话或模型标识无效') from None
+    except (OSError, sqlite3.Error):
+        raise HTTPException(503, '上下文快照暂不可读，请稍后重试') from None
 
 
 @app.get("/api/usage")

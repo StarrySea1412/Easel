@@ -6,7 +6,6 @@ import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCal
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
-import ChatUsageDialog from './ChatUsageDialog';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
@@ -116,7 +115,6 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
-      {!isImported && <ChatUsageDialog key={session.id} sessionId={session.id} refreshKey={session.messages.length} streaming={isStreaming} engine={session.engine} />}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>
@@ -144,7 +142,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -243,9 +241,12 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
       {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className={`chat-return-latest${isStreaming ? ' is-running' : ''}`} aria-label={isStreaming?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{isStreaming && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
         {!isImported && <div className="chat-input-inner">
-          {stopping && <p className="composer-skills-note" role="status">正在请求停止，等待后端确认…</p>}
-          {stopError && <div className="composer-upload-error" role="alert">{stopError}{isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
-       <ChatComposer key={session.id} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
+          {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
+            <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>
+            <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
+              {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
+          </div>}
+       <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
         </div>}
       </div>}
     </div>

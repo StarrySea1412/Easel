@@ -1,4 +1,6 @@
-> **本机功能收尾（2026-10-15）**：ClawHub公开技能检索、全局事件通知、对话消耗细则、模型上下文自定义、内容库封面/真实创建时间/分类数量和GLM异步视频协议已接入本机7880。相关回归、生产构建及真实只读接口检查通过；页面交互由用户验收，GLM真实生成待填视频Key后测试。通知仅保留本标签页历史，Codex用量未知。138未更新，便携打包仍暂停。[入口与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-workbench-features-2026-10-15.md)。
+> **本机界面与停止恢复纠正（2026-10-15）**：通知已移到左侧工具栏底部、设置旁；模型旁新增上下文圆环、六类构成及“消耗与费用明细”。占用采用最近快照，分类有报告时标注估算、缺数据明确未知。修复Web重启后旧任务无限恢复/无法停止、输入草稿隐藏停止按钮等问题，保留记录与新建对话出口。前端1002项回归、相关后端检查与构建通过，已检查桌面/390px入口。仅本机7880，138和安装包未更新。[实现与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-usage-notifications-2026-10-15.md)。
+>
+> ClawHub公开检索、模型上下文自定义、内容库封面/创建时间/数量及GLM异步视频协议的[此前交付记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-workbench-features-2026-10-15.md)仍适用。通知为同标签页历史，Codex用量和GLM真实视频生成仍待接入或验收；便携打包暂停。
 
 > **138快速发布已实测（2026-10-14）**：0.2.8 / `12f144c8` 已通过快速入口先隔离再正式发布，包含超时提示及热点密度/平台图标；同一固定镜像、运行源码、登录/版本/网关、官方更新记录与两次真实Agent工具回执通过。前端交互由用户验收，OpenClaw仍为2026.9.6。[实际发布回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/quick-deploy-138-acceptance-2026-10-14.md)。
 

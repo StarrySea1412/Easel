@@ -46,7 +46,7 @@ async function fixture(t, preference, { strict = false, selectedModel, otherMode
   let sessionId = `thinking-composer-${++sequence}`, busy = {};
   const render = async (patch = {}) => {
     busy = { ...busy, ...patch };
-    const node = createElement(Composer, { sessionId, isStreaming: false, ...busy, onStop() {}, onSend: (...args) => { sent.push(args); return true; } });
+    const node = createElement(Composer, { sessionId, isStreaming: false, ...busy, onStop: busy.onStop || (() => {}), onSend: (...args) => { sent.push(args); return true; } });
     await act(async () => root.render(strict ? createElement(StrictMode, null, node) : node));
   };
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
@@ -255,4 +255,15 @@ test('original slider popup escapes composer stacking context and omits the pers
   assert.ok(parseFloat(view.menu().style.top) >= 12);
   await act(async () => view.trigger().focus());
   await view.click(view.trigger()); assert.equal(view.menu(), null);
+});
+
+test('typing during generation keeps both the stop control and queue-send control available', async t => {
+  const view = await fixture(t, 'off'); let stops = 0;
+  await view.render({ isStreaming: true, onStop: () => { stops++; } });
+  await view.type('下一步的草稿');
+  const stop = view.container.querySelector('[aria-label="停止生成"]');
+  assert.ok(stop && !stop.disabled);
+  assert.ok(view.container.querySelector('[aria-label="排队发送"]'));
+  await view.click(stop); assert.equal(stops, 1);
+  assert.equal(view.container.querySelector('textarea').value, '下一步的草稿');
 });
