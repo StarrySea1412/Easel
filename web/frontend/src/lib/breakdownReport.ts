@@ -36,6 +36,73 @@ export function looksLikeAgentFailure(text: string): boolean {
   return /^[\u274c\u23f1\u23f3]/.test(text.trim());
 }
 
+/** 输入面板的材料识别：只做本地文本判断，不联网、不评价内容质量。 */
+export interface MaterialSummary {
+  chars: number;
+  paragraphs: number;
+  links: number;
+  shareCopy: boolean;
+  kind: 'empty' | 'text' | 'link-only' | 'text-with-link';
+}
+
+const URL_PATTERN = /https?:\/\/[^\s，。、；：""''（）()【】<>]+/g;
+
+export function summarizeMaterial(input: string): MaterialSummary {
+  const text = input.trim();
+  if (!text) return { chars: 0, paragraphs: 0, links: 0, shareCopy: false, kind: 'empty' };
+  const links = (text.match(URL_PATTERN) || []).length;
+  const withoutLinks = text.replace(URL_PATTERN, ' ').trim();
+  const chars = withoutLinks.replace(/\s/g, '').length;
+  const paragraphs = withoutLinks.split('\n').filter(line => line.trim()).length;
+  const kind = chars === 0 ? 'link-only' : links > 0 ? 'text-with-link' : 'text';
+  const shareCopy = /(复制|拷贝)[^\n]{0,12}(打开|app)/i.test(text)
+    || /(打开|搜索)[^\n]{0,8}(抖音|小红书|快手)/.test(text)
+    || /口令|分享给你/.test(text);
+  return { chars, paragraphs, links, shareCopy, kind };
+}
+
+/** 材料识别卡文案（输入区实时展示，只说页面真正判断得出的东西）。 */
+export function materialLine(summary: MaterialSummary): string {
+  if (summary.kind === 'empty') return '还没有材料：粘贴正文、分享文案或作品链接，也可以导入文本文件。';
+  if (summary.kind === 'link-only') return `识别到 ${summary.links} 条链接：能否读取以实际结果为准；同时粘贴正文，分析更完整。`;
+  const parts = [`正文约 ${summary.chars} 字`, `${summary.paragraphs} 段`];
+  if (summary.links > 0) parts.push(`含 ${summary.links} 条链接（分享文案与正文分开处理）`);
+  if (summary.shareCopy) parts.push('检测到分享口令文案');
+  return parts.join(' · ');
+}
+
+/** 示例素材：虚构短文，供首次试用；与用户历史材料分开标注。 */
+export const EXAMPLE_MATERIAL = [
+  '桌面越收越乱？我把桌子划成三个区，七天后不用每天大整理',
+  '',
+  '以前每到周日，我都会把桌子收得很空。可到了周三，充电线、杯子和没处理完的纸又堆回来了。这次我没再买收纳盒，而是先换了一个办法。',
+  '',
+  '我发现，自己总为了好看把东西塞进抽屉，第二天又全部翻出来。问题不是我不够勤快，是每样东西都没有固定的回家路线。',
+  '',
+  '第一个是工作区，只放今天正在用的东西；第二个是常驻区，给每天都会拿的东西留固定位置；第三个是空白区，收工时看它有没有重新空出来。',
+  '',
+  '试了一周，我不再每天把整张桌子翻一遍。整理不是让桌面一直像照片，而是明天不用重新找东西。',
+].join('\n');
+
+/** 文本文件导入的准入检查，返回 null 表示可以读取。 */
+export function textFileProblem(file: { name: string; size: number }): string | null {
+  if (!/\.(txt|md|markdown|srt)$/i.test(file.name.trim())) {
+    return '目前只支持 .txt / .md / .srt 文本文件；图片、PDF 等后续版本支持。';
+  }
+  if (file.size > 512 * 1024) return '文件超过 512KB：请截取主要内容后粘贴，或换更小的文件。';
+  return null;
+}
+
+/** 读取文本文件内容（仅本地读取文字，不上传服务器）。 */
+export function readTextFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('文件读取失败，请改为直接粘贴内容。'));
+    reader.readAsText(file);
+  });
+}
+
 /**
  * 构造《内容拆解报告》的一次性生成提示。
  * persona 只影响第 7 章（选题与创作简报），不改变正文分析范围。

@@ -5,11 +5,13 @@ import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 
 // 《内容拆解报告》契约：提示词固定章节与四要素、保留表现数据边界；
-// 页面把有效报告与失败文案分开（错误不可保存），标题取自报告而非输入首行。
-// 真实模型输出质量不在本套件范围（见 docs/viral-breakdown-optimization-plan-2026-10-15.md 的评测计划）。
+// 输入面板：材料识别、示例标注、文本文件导入；页面把有效报告与失败文案分开
+// （错误可重试、不可保存）。真实模型输出质量不在本套件范围（见总方案的评测计划）。
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
 globalThis.HTMLElement = window.HTMLElement;
+globalThis.FileReader = window.FileReader;
+globalThis.File = globalThis.File ?? window.File;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const { default: BreakdownPage } = await loadTsModule('../src/components/BreakdownPage.tsx', import.meta.url);
@@ -53,6 +55,40 @@ test('scope note and saved title follow the report, not the raw input', () => {
   assert.equal(reportLib.looksLikeAgentFailure('# 内容拆解报告：x'), false);
 });
 
+test('material recognition stays honest about links, share copy and file types', () => {
+  const empty = reportLib.summarizeMaterial('   ');
+  assert.equal(empty.kind, 'empty');
+  assert.ok(reportLib.materialLine(empty).includes('还没有材料'));
+
+  const linkOnly = reportLib.summarizeMaterial('https://www.xiaohongshu.com/explore/abc');
+  assert.equal(linkOnly.kind, 'link-only');
+  assert.equal(linkOnly.links, 1);
+  assert.ok(reportLib.materialLine(linkOnly).includes('以实际结果为准'));
+
+  const mixed = reportLib.summarizeMaterial(
+    '分享给你，快看\n\n这段正文有两个段落。\n\n第二段。\n\nhttps://v.douyin.com/xyz');
+  assert.equal(mixed.kind, 'text-with-link');
+  assert.equal(mixed.links, 1);
+  assert.equal(mixed.paragraphs, 3);
+  assert.equal(mixed.shareCopy, true);
+  assert.ok(mixed.chars > 10);
+  const line = reportLib.materialLine(mixed);
+  assert.ok(line.includes('链接'));
+  assert.ok(line.includes('分享口令'));
+
+  assert.equal(reportLib.textFileProblem({ name: 'notes.txt', size: 1000 }), null);
+  assert.equal(reportLib.textFileProblem({ name: 'a.MD', size: 1000 }), null);
+  assert.equal(reportLib.textFileProblem({ name: 'subtitle.srt', size: 1000 }), null);
+  assert.ok(reportLib.textFileProblem({ name: 'shot.png', size: 1000 }).includes('后续版本'));
+  assert.ok(reportLib.textFileProblem({ name: 'big.txt', size: 900000 }).includes('512KB'));
+  assert.ok(reportLib.EXAMPLE_MATERIAL.length > 80, 'example material is a usable sample');
+});
+
+test('text file reading returns local content without touching the server', async () => {
+  const file = new window.File(['一段从文件导入的正文'], 'note.txt', { type: 'text/plain' });
+  assert.equal(await reportLib.readTextFile(file), '一段从文件导入的正文');
+});
+
 async function mount(t, respond) {
   const writes = [];
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
@@ -80,6 +116,27 @@ async function mount(t, respond) {
   return { container, writes, buttons, click, fill };
 }
 
+test('input panel recognizes material and loads the marked example', async t => {
+  const view = await mount(t, async () => ({ response: '# 内容拆解报告：x' }));
+  assert.equal(view.container.querySelector('.breakdown-material'), null, 'no material card before input');
+
+  await view.fill('桌面越收越乱？我把桌子划成三个区。');
+  const card = view.container.querySelector('.breakdown-material');
+  assert.ok(card, 'material card appears with input');
+  assert.ok(card.textContent.includes('正文约'));
+  assert.equal(card.getAttribute('role'), 'status');
+
+  await view.click('看个示例');
+  assert.ok(view.container.querySelector('.breakdown-chip').textContent.includes('虚构'),
+    'example is clearly marked as fictional');
+  assert.ok(view.container.querySelector('textarea').value.includes('桌面越收越乱'));
+
+  await view.click('清空');
+  assert.equal(view.container.querySelector('textarea').value, '');
+  assert.equal(view.container.querySelector('.breakdown-material'), null);
+  assert.equal(view.container.querySelector('.breakdown-chip'), null);
+});
+
 test('breakdown page sends the report contract and renders the report as a report', async t => {
   const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n\n三句话摘要。\n\n## 8. 验证计划\n\n| 待验证问题 | 需要的材料或行动 | 结果能支持到什么程度 |';
   const view = await mount(t, async (path) => (path === '/api/chat' ? { response: report } : { id: 'idea-1' }));
@@ -106,7 +163,7 @@ test('breakdown page sends the report contract and renders the report as a repor
   assert.equal(view.buttons().some(b => b.textContent.includes('复制报告')), true);
 });
 
-test('agent failure text is shown as an error and cannot be saved as a report', async t => {
+test('agent failure text is an error with a retry, never a savable report', async t => {
   const view = await mount(t, async () => ({ response: '❌ 模型服务不可用，请检查配置' }));
   await view.fill('一段正文');
   await view.click('开始拆解');
@@ -116,4 +173,8 @@ test('agent failure text is shown as an error and cannot be saved as a report', 
   assert.ok(alert && alert.textContent.includes('模型服务不可用'));
   assert.equal(view.buttons().some(b => b.textContent.includes('存入选题库')), false);
   assert.equal(view.writes.length, 1, 'failure is not written anywhere');
+  assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material is kept for retry');
+
+  await view.click('重试');
+  assert.equal(view.writes.filter(w => w.path === '/api/chat').length, 2, 'retry re-runs the request');
 });
