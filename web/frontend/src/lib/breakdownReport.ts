@@ -127,6 +127,32 @@ export function verifyQuotes(report: string, material: string): QuoteCheck {
   return { total: quotes.length, found: quotes.length - missing.length, missing };
 }
 
+/** 报告结构程序检查：只核对章节关键词与发现四要素字段是否出现，不评价内容质量。 */
+export interface StructureCheck { missingSections: string[]; findings: number; incompleteFindings: number }
+
+const REQUIRED_SECTIONS = [
+  '报告摘要', '研究对象与材料范围', '内容定位', '标题与开头', '全文结构',
+  '关键发现', '表达方式', '可迁移方法与创作方案', '验证计划',
+];
+const FINDING_FIELDS = ['原文依据', '分析过程', '可能作用', '适用边界'];
+
+export function verifyStructure(report: string): StructureCheck {
+  const missingSections = REQUIRED_SECTIONS.filter(section => !report.includes(section));
+  const blocks = report.split(/\n(?=#{2,4}\s)/).filter(block => /^#{2,4}\s*发现/.test(block));
+  const incompleteFindings = blocks.filter(block => FINDING_FIELDS.some(field => !block.includes(field))).length;
+  return { missingSections, findings: blocks.length, incompleteFindings };
+}
+
+export function structureLine(check: StructureCheck): string {
+  const parts: string[] = [
+    check.missingSections.length === 0 ? '章节齐全' : `缺章节：${check.missingSections.join('、')}`,
+  ];
+  if (check.findings === 0) parts.push('没有识别到“发现”小节（报告要求 2–4 条）');
+  else if (check.incompleteFindings === 0) parts.push(`${check.findings} 条发现都带四要素`);
+  else parts.push(`${check.incompleteFindings}/${check.findings} 条发现四要素不全`);
+  return `结构检查：${parts.join('；')}（只核对章节与字段是否出现，不评价内容质量）。`;
+}
+
 /**
  * 构造《内容拆解报告》的一次性生成提示。
  * persona 只影响第 7 章（选题与创作简报），不改变正文分析范围。
