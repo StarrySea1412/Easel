@@ -1,8 +1,8 @@
-## 2026-10-15 · Interaction plans / 交互能力方案（未实施）
+## 2026-10-15 · 交互能力方案（未实施）
 
-- Assess a composer context indicator using installed OpenClaw2026.9.6 reports and the locally exported Codex0.147.0 protocol. Keep last-request/context snapshots, effective budgets, cumulative usage and estimated categories distinct. / 核查固定本机协议，建议先做容量/来源/新鲜度，再补缓存覆盖与分类；不把累计消耗或字符占比当精确上下文。见[评估](docs/chat-context-capacity-plan-2026-10-15.md)。
-- Research pinned OpenHands, Open WebUI and LobeHub sources and propose durable notifications, idempotent reconciliation, replayable changes, operator scoping and pending-action navigation. / 保存[全局通知方案](docs/global-notification-plan-2026-10-15.md)，已读不解除待处理，站内通知与可选外部投递分别验收。
-- Documentation only: no runtime implementation, model/email request, service replacement or package. Await the user's138 upload instruction; retain library covers/counts and office navigation as pending tasks. / 本轮仅方案，不把共享未提交草稿标为完成，138等待用户指令，旧修复任务保留。
+- 核查固定本机OpenClaw2026.9.6报告与Codex0.147.0导出协议，建议先做容量、来源、新鲜度，再补缓存覆盖与分类；不把累计消耗或字符占比当精确上下文。见[评估](docs/chat-context-capacity-plan-2026-10-15.md)。
+- 保存[全局通知方案](docs/global-notification-plan-2026-10-15.md)，基于固定OpenHands、Open WebUI、LobeHub源码规划持久通知、幂等对账、事件恢复及权限隔离；已读不解除待处理，站内通知与可选外部投递分别验收。
+- 本轮仅方案，不把共享未提交草稿标为完成；没有运行功能、模型/邮件请求、服务替换或新包。138等待用户指令，内容库封面/数量和办公室返回会话等旧任务保留。按用户最新要求，本轮及后续说明统一中文，保留历史英文内容。
 
 ## 0.2.9 source candidate · 2026-10-14 / 上游可靠性跟进
 
