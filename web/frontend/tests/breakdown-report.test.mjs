@@ -92,12 +92,37 @@ test('text file reading returns local content without touching the server', asyn
   assert.equal(await reportLib.readTextFile(file), '一段从文件导入的正文');
 });
 
+// 与工作台同源的执行控件：模型/思考强度来自能力接口与本地偏好（默认“自适应最高”）。
+const CAPABILITY = {
+  available: true, scope: 'next_turn', currentModelRef: 'relay/kimi-k3', defaultModelRef: 'relay/kimi-k3',
+  options: [{ id: 'relay/kimi-k3', provider: 'relay', model: 'kimi-k3', configured: true, channelName: '测试渠道', thinkingLevels: ['off'] }],
+};
+const HEALTH = { results: [], schedules: [], limit: { requests: 0, windowSeconds: 0, automaticModelsPerProvider: 0 }, staleAfterSeconds: 900, serverTime: 0 };
+const CONNECTION = { modelRef: 'relay/kimi-k3', state: 'unverified', channelName: '测试渠道', detail: '未验证' };
+
+function sse(frames, { keepOpen = false } = {}) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(encoder.encode(frame));
+      if (!keepOpen) controller.close();
+    },
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+const sseToken = (id, text) => `id: ${id}\nevent: token\ndata: ${JSON.stringify(text)}\n\n`;
+const sseDone = (id) => `id: ${id}\nevent: done\ndata: {}\n\n`;
+const sseError = (id, message) => `id: ${id}\nevent: error\ndata: ${JSON.stringify({ message })}\n\n`;
+
 async function mount(t, respond) {
   const writes = [];
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
     const path = new URL(String(input), window.location.href).pathname;
     writes.push({ path, method: options.method || 'GET', body: options.body ? JSON.parse(String(options.body)) : {} });
-    return new Response(JSON.stringify(await respond(path)));
+    if (path === '/api/agent-office/models') return new Response(JSON.stringify(CAPABILITY));
+    if (path === '/api/settings/models/health') return new Response(JSON.stringify(HEALTH));
+    if (path === '/api/settings/models/connection') return new Response(JSON.stringify(CONNECTION));
+    const result = await respond(path);
+    return result instanceof Response ? result : new Response(JSON.stringify(result));
   });
   const container = document.createElement('div');
   document.body.append(container);
@@ -105,18 +130,19 @@ async function mount(t, respond) {
   await act(async () => root.render(createElement(BreakdownPage, { persona: '画号A' })));
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   const buttons = () => [...container.querySelectorAll('button')];
+  const flush = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
   const click = async (label) => {
     const btn = buttons().find(b => b.textContent.includes(label));
     assert.ok(btn, `button present: ${label}`);
     await act(async () => { btn.focus(); btn.click(); });
-    await act(async () => {});
+    await flush();
   };
   const fill = async (value) => act(async () => {
     const area = container.querySelector('textarea');
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(area, value);
     area.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  return { container, writes, buttons, click, fill };
+  return { container, writes, buttons, click, fill, flush };
 }
 
 test('input panel offers a marked example when empty and recognizes material while typing', async t => {
@@ -144,18 +170,26 @@ test('input panel offers a marked example when empty and recognizes material whi
   assert.ok(view.container.querySelector('.breakdown-example-link'), 'example entry returns when empty');
 });
 
-test('breakdown page sends the report contract and renders the report as a report', async t => {
+test('breakdown page runs through the streaming task api with the workspace controls', async t => {
   const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n\n三句话摘要。\n\n## 8. 验证计划\n\n| 待验证问题 | 需要的材料或行动 | 结果能支持到什么程度 |';
-  const view = await mount(t, async (path) => (path === '/api/chat' ? { response: report } : { id: 'idea-1' }));
+  const view = await mount(t, async (path) => (path === '/api/chat/stream'
+    ? sse([sseToken(1, report), sseDone(2)]) : { id: 'idea-1' }));
   await view.fill('桌面越收越乱？我把桌子划成三个区。');
-  await view.click('开始拆解');
 
-  assert.equal(view.writes[0].path, '/api/chat');
-  assert.ok(view.writes[0].body.message.includes('## 4. 全文结构与关键转折'));
-  assert.ok(view.writes[0].body.message.includes('没有表现数据，不能判断它为什么火'));
-  assert.ok(view.writes[0].body.message.includes('桌面越收越乱？我把桌子划成三个区。'));
-  assert.equal(view.writes[0].body.persona, '画号A');
-  assert.ok(!view.writes[0].body.message.includes('4. **为什么会火**'), 'old six-point prompt is gone');
+  const tools = view.container.querySelector('.dash-composer-tools');
+  assert.ok(tools && tools.querySelector('[aria-label^="思考强度"]'), 'thinking control sits in the composer tools');
+  assert.ok(tools.querySelector('.composer-model-health-label'), 'model control sits in the composer tools');
+
+  await view.click('开始拆解');
+  const chat = view.writes.find(w => w.path === '/api/chat/stream');
+  assert.ok(chat, 'runs through the streaming task endpoint (same as the workspace composer)');
+  assert.ok(chat.body.message.includes('## 4. 全文结构与关键转折'));
+  assert.ok(chat.body.message.includes('没有表现数据，不能判断它为什么火'));
+  assert.ok(chat.body.message.includes('桌面越收越乱？我把桌子划成三个区。'));
+  assert.equal(chat.body.persona, '画号A');
+  assert.equal(chat.body.thinkingLevel, 'off', 'resolved thinking level follows the model capability');
+  assert.equal(chat.body.modelRef, undefined, 'default keeps the shared model');
+  assert.ok(String(chat.body.sessionId).startsWith('breakdown-'), 'breakdown run keeps its own session key');
 
   const title = view.container.querySelector('.panel-title');
   assert.ok(title && title.textContent.includes('内容拆解报告'));
@@ -170,8 +204,9 @@ test('breakdown page sends the report contract and renders the report as a repor
   assert.equal(view.buttons().some(b => b.textContent.includes('复制报告')), true);
 });
 
-test('agent failure text is an error with a retry, never a savable report', async t => {
-  const view = await mount(t, async () => ({ response: '❌ 模型服务不可用，请检查配置' }));
+test('stream failures are an error with a retry, never a savable report', async t => {
+  const view = await mount(t, async (path) => (path === '/api/chat/stream'
+    ? sse([sseError(1, '模型服务不可用，请检查配置')]) : { id: 'idea-1' }));
   await view.fill('一段正文');
   await view.click('开始拆解');
 
@@ -179,9 +214,28 @@ test('agent failure text is an error with a retry, never a savable report', asyn
   const alert = view.container.querySelector('.notice-error');
   assert.ok(alert && alert.textContent.includes('模型服务不可用'));
   assert.equal(view.buttons().some(b => b.textContent.includes('存入选题库')), false);
-  assert.equal(view.writes.length, 1, 'failure is not written anywhere');
+  assert.equal(view.writes.filter(w => w.path === '/api/ideas').length, 0, 'failure is not written anywhere');
   assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material is kept for retry');
 
   await view.click('重试');
-  assert.equal(view.writes.filter(w => w.path === '/api/chat').length, 2, 'retry re-runs the request');
+  assert.equal(view.writes.filter(w => w.path === '/api/chat/stream').length, 2, 'retry re-runs the request');
+});
+
+test('a running report shows progress and can be stopped for real', async t => {
+  const view = await mount(t, async (path) => {
+    if (path === '/api/chat/stream') return sse([sseToken(1, '# 内容拆解报告：正在写')], { keepOpen: true });
+    return { stopped: true };
+  });
+  await view.fill('一段正文');
+  await view.click('开始拆解');
+
+  assert.ok(view.container.querySelector('.breakdown-stream'), 'live progress panel shows while running');
+  assert.ok(view.container.querySelector('.breakdown-stream').textContent.includes('正在写'), 'tokens appear as they arrive');
+
+  await view.click('停止');
+  const stop = view.writes.find(w => w.path === '/api/chat/stop');
+  assert.ok(stop && String(stop.body.sessionId).startsWith('breakdown-'), 'stop reaches the backend run');
+  assert.ok(view.container.querySelector('.notice-error').textContent.includes('已停止'));
+  assert.equal(view.container.querySelector('.panel'), null, 'no report panel after stop');
+  assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material survives the stop');
 });
