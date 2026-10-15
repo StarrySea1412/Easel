@@ -3402,14 +3402,19 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     path = _job_event_file(turn_id)
     if not path.is_file():
         return []
-    events = []
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    events = []
+    # 单行损坏（半截写入/中断）只跳过该行：此前会因一行坏数据丢弃整段，断线续流将永远回放不出内容。
+    for line in text.splitlines():
+        try:
             event = json.loads(line)
             if int(event.get("id", 0)) > after:
                 events.append(event)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return []
+        except (ValueError, TypeError, AttributeError):
+            continue
     return events
 
 
@@ -6554,8 +6559,9 @@ async def api_schedule_context(days: int = 14):
     cmd = [sys.executable, str(SHARED_SCRIPTS / "calendar_ops.py"),
            "--data", str(SCHEDULE_FILE), "context", "--days", str(max(1, min(days, 90)))]
     try:
-        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                              capture_output=True, text=True, timeout=20)
+        # 阻塞调用必须出事件循环：否则拉一次排期摘要就会冻结所有实时流（含对话/拆解的 SSE）最长 20 秒。
+        proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                       capture_output=True, text=True, timeout=20)
         if proc.returncode == 0 and proc.stdout.strip():
             value = json.loads(proc.stdout)
             if isinstance(value, dict):

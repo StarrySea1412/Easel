@@ -288,9 +288,13 @@ def test_failed_platform_login_does_not_discard_imported_analysis(local, monkeyp
     ("暂无笔记", "https://creator.xiaohongshu.com/login", False),
 ])
 def test_empty_scrape_requires_an_explicit_empty_state(body, url, valid_empty):
+    # 新版流程先点「已发布」页签（该脚本返回布尔），再读笔记卡片（返回列表）。
+    def page_evaluate(script, *args, **kwargs):
+        return True if "已发布" in script else []
+
     page = SimpleNamespace(on=lambda *args: None, goto=lambda *args, **kwargs: None,
         wait_for_selector=lambda *args, **kwargs: None, wait_for_timeout=lambda *args: None,
-        evaluate=lambda *args: [], inner_text=lambda *args: body, url=url,
+        evaluate=page_evaluate, inner_text=lambda *args, **kwargs: body, url=url,
         remove_listener=lambda *args: None)
     if valid_empty:
         assert st._scrape_notes("xiaohongshu", page, {}) == []

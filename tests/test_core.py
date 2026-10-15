@@ -490,6 +490,38 @@ def test_job_events_resume_after_event_id(tmp_path, monkeypatch):
     assert resumed[0]["data"] == "后"
 
 
+def test_job_events_skip_torn_lines_instead_of_dropping_everything(tmp_path, monkeypatch):
+    # 半截写入的一行坏数据不能不再让整段续流回放为空（上游 #125 同类修复的本地版）。
+    monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path)
+    path = web._job_event_file("turn-torn")
+    path.parent.mkdir(parents=True)
+    first = json.dumps({"id": 1, "event": "token", "data": "前"}, ensure_ascii=False)
+    torn = '{"id": 2, "event": "to'
+    last = json.dumps({"id": 3, "event": "done", "data": {"sessionKey": "s"}}, ensure_ascii=False)
+    path.write_text("\n".join([first, torn, last]) + "\n", encoding="utf-8")
+
+    resumed = web._read_job_events("turn-torn")
+    assert [event["id"] for event in resumed] == [1, 3]
+
+
+def test_schedule_context_runs_subprocess_off_the_event_loop(tmp_path, monkeypatch):
+    # 排期摘要的阻塞调用必须走 to_thread：直接跑会冻结所有实时流（含拆解 SSE）。行为保持不变。
+    calls = []
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"days": ["余下 14 天"]}, ensure_ascii=False)
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _Proc()
+
+    monkeypatch.setattr(web.subprocess, "run", fake_run)
+    result = asyncio.run(web.api_schedule_context(7))
+    assert result == {"days": ["余下 14 天"]}
+    assert calls and "--days" in calls[0][0] and "7" in calls[0][0]
+
+
 def test_missing_job_stream_fails_promptly(tmp_path, monkeypatch):
     from fastapi import HTTPException
 

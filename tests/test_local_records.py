@@ -39,7 +39,7 @@ def api(tmp_path):
     ast.fix_missing_locations(module)
     app = FastAPI()
     namespace = {'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel, 'local_records': store,
-                 'uuid': uuid, 'time': time, 'IDEAS_FILE': tmp_path / '_ideas.json',
+                 'uuid': uuid, 'time': time, 'asyncio': asyncio, 'IDEAS_FILE': tmp_path / '_ideas.json',
                  'SCHEDULE_FILE': tmp_path / '_schedule.json', 'OUTPUTS_DIR': tmp_path,
                  'IDEA_STATUSES': {'pending', 'doing', 'done'}, 'SCHEDULE_KINDS': {'content', 'event'},
                  'SCHEDULE_STATUSES': {'idea', 'draft', 'scheduled', 'published'}}
