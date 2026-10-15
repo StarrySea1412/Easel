@@ -103,6 +103,30 @@ export function readTextFile(file: File): Promise<string> {
   });
 }
 
+/** 引用逐字校验：只检查各条发现“原文依据”里引号标注的句子是否逐字存在于材料。 */
+export interface QuoteCheck { total: number; found: number; missing: string[] }
+
+const QUOTE_IN_BLOCK = /[「“"]([^」”"\n]{4,120})[」”"]/g;
+
+export function verifyQuotes(report: string, material: string): QuoteCheck {
+  const lines = report.split('\n');
+  const quotes: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes('原文依据')) continue;
+    // 依据可能写在标记行，也可能跟在后面一两行（缩进或引用块）；遇到新条目/新标题即结束。
+    let block = lines[i];
+    for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+      if (/^\s*[-*]\s/.test(lines[j]) || /^#{1,6}\s/.test(lines[j])) break;
+      block += '\n' + lines[j];
+    }
+    for (const match of block.matchAll(QUOTE_IN_BLOCK)) quotes.push(match[1]);
+  }
+  const normalize = (value: string) => value.replace(/\s+/g, '');
+  const haystack = normalize(material);
+  const missing = quotes.filter(quote => !haystack.includes(normalize(quote)));
+  return { total: quotes.length, found: quotes.length - missing.length, missing };
+}
+
 /**
  * 构造《内容拆解报告》的一次性生成提示。
  * persona 只影响第 7 章（选题与创作简报），不改变正文分析范围。

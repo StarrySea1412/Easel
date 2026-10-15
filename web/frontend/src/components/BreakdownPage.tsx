@@ -1,10 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createIdea, stopChat, streamChat } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import {
   BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
-  materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem,
+  materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem, verifyQuotes,
 } from '../lib/breakdownReport';
+import {
+  addBreakdownRecord, loadBreakdownDraft, loadBreakdownHistory, newBreakdownRecord,
+  removeBreakdownRecord, saveBreakdownDraft, type BreakdownRecord,
+} from '../lib/breakdownStore';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { loadThinkingLevel, saveThinkingLevel, THINKING_LABELS } from '../lib/thinkingLevel';
@@ -18,7 +22,7 @@ interface BreakdownPageProps {
 }
 
 export default function BreakdownPage({ persona }: BreakdownPageProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(loadBreakdownDraft);   // 切页/刷新后恢复草稿
   const [analyzed, setAnalyzed] = useState('');
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
@@ -27,9 +31,12 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
   const [dragging, setDragging] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [statusNote, setStatusNote] = useState('');
+  const [history, setHistory] = useState<BreakdownRecord[]>(loadBreakdownHistory);
+  const [showHistory, setShowHistory] = useState(false);
   const [preferredThinking, setPreferredThinking] = useState<ThinkingPreference>(loadThinkingLevel);
   const [toast, setToast] = useState<{ text: string; ok: boolean }>();
   const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const runRef = useRef<AbortController | null>(null);
   const runIdsRef = useRef<{ sessionId: string; turnId: string } | null>(null);
 
@@ -40,7 +47,11 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
   const { level: thinkingLevel } = useCompatibleThinking(preferredThinking, supportedThinking, setPreferredThinking);
 
   const summary = useMemo(() => summarizeMaterial(input), [input]);
+  const analyzedSummary = useMemo(() => summarizeMaterial(analyzed), [analyzed]);
   const isExample = input === EXAMPLE_MATERIAL;
+  const quoteCheck = useMemo(() => (result ? verifyQuotes(result, analyzed) : null), [result, analyzed]);
+
+  useEffect(() => { saveBreakdownDraft(input); }, [input]);
 
   const notify = (text: string, ok: boolean) => {
     setToast({ text, ok });
@@ -60,20 +71,25 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
       setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“沿用会话模型”。');
       return;
     }
+    const material = input;
     setLoading(true); setResult(''); setError(''); setStreamText(''); setStatusNote('');
-    setAnalyzed(input);
+    setAnalyzed(material);
     const sessionId = `breakdown-${Date.now().toString(36)}`;  // 独立会话：不出现在对话列表，断线可按同一 run 续接
     const turnId = `${sessionId}-1`;
     runIdsRef.current = { sessionId, turnId };
     let acc = '';
     runRef.current = streamChat(
-      buildBreakdownReportPrompt(input, persona), persona, sessionId,
+      buildBreakdownReportPrompt(material, persona), persona, sessionId,
       (chunk) => { acc += chunk; setStreamText(acc); },
       () => {
         runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
+        const text = acc.trim();
         // 失败文案与有效报告分开：没有正文时不生成报告面板。
-        if (!acc.trim()) setError('本次没有生成有效报告，请重试。');
-        else setResult(acc.trim());
+        if (!text) setError('本次没有生成有效报告，请重试。');
+        else {
+          setResult(text);
+          setHistory(items => addBreakdownRecord(items, newBreakdownRecord(material, text, ideaTitleFromReport(text))));
+        }
       },
       (err) => {
         runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
@@ -95,6 +111,16 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
     runRef.current = null;
     setLoading(false); setStreamText(''); setStatusNote('');
     setError('已停止本次生成；材料已保留，可重试或修改后重发。');
+  };
+
+  const openRecord = (record: BreakdownRecord) => {
+    setInput(record.material); setAnalyzed(record.material); setResult(record.report);
+    setError(''); setStreamText(''); setStatusNote(''); setShowHistory(false);
+    notify('已载入历史报告（材料一并恢复，可重新拆解）', true);
+  };
+
+  const deleteRecord = (id: string) => {
+    setHistory(items => removeBreakdownRecord(items, id));
   };
 
   const saveToIdeas = async () => {
@@ -164,7 +190,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
           onDrop={handleDrop}>
           <label className="dash-launch-label" htmlFor="breakdown-material">想拆解哪条内容？</label>
           <div className="dash-launch">
-            <textarea id="breakdown-material" className="dash-launch-input breakdown-textarea" value={input}
+            <textarea id="breakdown-material" ref={textRef} className="dash-launch-input breakdown-textarea" value={input}
               placeholder="把正文、分享文案或链接贴在这里；也可以直接把文件拖进来…"
               onChange={(e) => setInput(e.target.value)} />
             <div className="dash-composer-bar">
@@ -197,6 +223,31 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importFile(file); }} />
         </div>
 
+        {history.length > 0 && (
+          <div className="breakdown-history">
+            <button type="button" className="breakdown-history-toggle" aria-expanded={showHistory}
+              onClick={() => setShowHistory(value => !value)}>
+              历史拆解 {history.length} 篇 {showHistory ? '· 收起' : '· 展开'}
+            </button>
+            {showHistory && (
+              <ul className="breakdown-history-list">
+                {history.map(item => (
+                  <li key={item.id}>
+                    <button type="button" className="breakdown-history-item" onClick={() => openRecord(item)}>
+                      <span className="breakdown-history-title">{item.title}</span>
+                      <span className="breakdown-history-date">
+                        {new Date(item.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </button>
+                    <button type="button" className="breakdown-history-remove" aria-label={`删除历史：${item.title}`}
+                      onClick={() => deleteRecord(item.id)}>删除</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {input.trim() === '' && !loading && (
           <button type="button" className="breakdown-example-link" onClick={loadExample}>没有素材？看看示例</button>
         )}
@@ -224,14 +275,36 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
         )}
         {error && !loading && (
           <div className="notice-error breakdown-error" role="alert">
-            <span>{error}</span>
-            <button className="btn btn-ghost breakdown-tool" onClick={run} disabled={!input.trim()}><IconRetry size={13} /> 重试</button>
+            <span>{error}{analyzedSummary.kind === 'link-only' ? '（你只提供了链接：如果链接没读到内容，请把正文粘贴进来再试。）' : ''}</span>
+            <span className="breakdown-error-actions">
+              {analyzedSummary.kind === 'link-only' && (
+                <button className="btn btn-ghost breakdown-tool" onClick={() => textRef.current?.focus()}>补正文</button>
+              )}
+              <button className="btn btn-ghost breakdown-tool" onClick={run} disabled={!input.trim()}><IconRetry size={13} /> 重试</button>
+            </span>
           </div>
         )}
         {result && !loading && (
           <div className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title"><IconFire size={14} /> {BREAKDOWN_REPORT_TITLE}</div>
             <p className="breakdown-report-note">{reportScopeNote(analyzed)}</p>
+            {quoteCheck && (
+              <>
+                <p className={`breakdown-quote-check${quoteCheck.missing.length ? ' warn' : ''}`}>
+                  {quoteCheck.total === 0
+                    ? '引文检查：报告里没有标注可核对的原文引用。'
+                    : quoteCheck.missing.length === 0
+                      ? `引文检查：${quoteCheck.total} 处原文引用都能在你给的材料里逐字找到（只证明文字一致，不代表解释成立）。`
+                      : `引文检查：${quoteCheck.total} 处引用里，${quoteCheck.missing.length} 处没能在材料中逐字找到（可能被概括或改写，请以原文为准）。`}
+                </p>
+                {quoteCheck.missing.length > 0 && (
+                  <details className="breakdown-quote-details">
+                    <summary>查看未找到的引用</summary>
+                    <ul>{quoteCheck.missing.map((quote, index) => <li key={index}>{quote}</li>)}</ul>
+                  </details>
+                )}
+              </>
+            )}
             <div className="skill-body-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(result) }} />
           </div>
         )}

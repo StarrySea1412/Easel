@@ -1182,6 +1182,24 @@ textarea.field { resize: vertical; min-height: 90px; }
 .breakdown-report-note { margin: 2px 0 12px; font-size: 12.5px; color: var(--text-tertiary); }
 .breakdown-stream { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
 .breakdown-stream-note { margin-left: 8px; font-size: 11.5px; font-weight: 400; color: var(--text-tertiary); }
+.breakdown-history { margin-top: 12px; }
+.breakdown-history-toggle { padding: 0; border: none; background: none; color: var(--text-secondary); font-size: 12.5px; cursor: pointer; }
+.breakdown-history-toggle:hover { color: var(--text); text-decoration: underline; }
+.breakdown-history-toggle:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 2px; border-radius: 4px; }
+.breakdown-history-list { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); max-height: 260px; overflow-y: auto; background: var(--bg-elev); }
+.breakdown-history-list li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.breakdown-history-list li:last-child { border-bottom: none; }
+.breakdown-history-item { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0; border: none; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+.breakdown-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.breakdown-history-item:hover .breakdown-history-title { text-decoration: underline; }
+.breakdown-history-date { flex-shrink: 0; color: var(--text-tertiary); font-size: 11.5px; }
+.breakdown-history-remove { flex-shrink: 0; padding: 2px 4px; border: none; background: none; color: var(--text-tertiary); font-size: 11.5px; cursor: pointer; }
+.breakdown-history-remove:hover { color: var(--red); }
+.breakdown-quote-check { margin: 0 0 10px; font-size: 12.5px; color: var(--text-secondary); }
+.breakdown-quote-check.warn { color: var(--red); }
+.breakdown-quote-details { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); }
+.breakdown-quote-details ul { margin: 6px 0 0 18px; }
+.breakdown-error-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .breakdown-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; max-width: none; margin: 14px 0 0; }
 .toast.err { border-color: var(--red-soft); }
 .toast.err .toast-icon { color: var(--red); }
