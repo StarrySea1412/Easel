@@ -1,4 +1,6 @@
 import { chatErrorDetail } from './lib/chatErrors';
+import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
+import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
 import type { ChatTiming } from './lib/chatTiming';
 import { drainStreamRun } from './lib/streamLifecycle';
@@ -407,6 +409,7 @@ export default function App() {
     skillRequirements: SkillRequirements = {},
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
+    history?: { role: 'user' | 'assistant'; content: string }[],
   ) => {
     const startedAt = Date.now();
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -526,6 +529,7 @@ export default function App() {
         setStreams(p => p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], ...timing } } : p);
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
+      history,
     );
   }, [appendAssistant, clearStream]);
 
@@ -714,7 +718,8 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments, selectedSkills, requirementSnapshot, modelRef, thinkingLevel);
+    const seed = cur ? editBranchSeed(cur, truncateAt ?? cur.messages.length) : undefined;
+    startStream(sessionId, agentMessage, persona, seed ? [...new Map([...seed.attachments, ...attachments].map(file => [file.path, file])).values()] : attachments, selectedSkills, requirementSnapshot, modelRef, thinkingLevel, seed?.history);
     return true;
   }, [selectedPersona, startStream]);
 
@@ -727,6 +732,42 @@ export default function App() {
     return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel);
   }, [sendUserAndStream]);
 
+  const editRequests = useRef(new Set<string>());
+  const handleEditMessage = useCallback(async (sessionId: string, userIndex: number, text: string, signal: AbortSignal) => {
+    if (editRequests.current.has(sessionId)) throw new Error('另一条消息正在准备编辑分支，请稍候。');
+    editRequests.current.add(sessionId);
+    try {
+      const source = sessionsRef.current.find(session => session.id === sessionId);
+      if (!source || streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]) throw new Error('请先停止或等待当前生成完成。');
+      if (getChatQueue(sessionId).items.length) throw new Error('请先处理当前对话的待发队列，再编辑历史消息。');
+      const plan = editBranchPlan(source, userIndex, text);
+      const result = await prepareChatBranch(sessionId, plan.attachments, signal);
+      if (signal.aborted || activeIdRef.current !== sessionId) return false;
+      const current = sessionsRef.current.find(session => session.id === sessionId);
+      if (!current || current.messages !== source.messages || current.pendingTurnId
+        || streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]
+        || getChatQueue(sessionId).items.length) throw new Error('原对话状态已变化，请重新打开编辑。');
+      const original = remapEditedMessage(plan.original, result.attachments);
+      const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine,
+        title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
+          { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
+            skillRequirements: original.skillRequirements, requestedModelRef: original.requestedModelRef, requestedThinkingLevel: original.requestedThinkingLevel }],
+        editBranch: { sourceSessionId: sessionId, prefixLength: plan.prefix.length } };
+      if (!writeSelectedSkills(branch.id, original.selectedSkills || [])
+        || !writeSkillRequirements(branch.id, original.skillRequirements || {})) throw new Error('无法保存分支技能配置，未发送。');
+      const next = [branch, ...sessionsRef.current];
+      if (!saveSessions(next)) throw new Error('无法保存编辑分支，未发送。请先恢复浏览器存储。');
+      sessionsRef.current = next;
+      setSessions(next);
+      activeIdRef.current = branch.id;
+      setActiveSessionId(branch.id);
+      const seed = editBranchSeed(branch, plan.prefix.length)!;
+      startStream(branch.id, plan.text, branch.persona, seed.attachments, original.selectedSkills,
+        original.skillRequirements, original.requestedModelRef, original.requestedThinkingLevel, seed.history);
+      return true;
+    } finally { editRequests.current.delete(sessionId); }
+  }, [startStream]);
+
   useEffect(() => {
     for (const session of sessionsRef.current) {
       if (session.importedFromBackup || session.archived || streamAcc.current[session.id] || streamCtl.current[session.id] || stopRequests.current[session.id]) continue;
@@ -735,7 +776,7 @@ export default function App() {
     }
   }, [streams, queueRevision, sendUserAndStream]);
 
-  // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
+  // Last-turn retry uses the same runtime; history editing forks separately.
   const handleResend = useCallback((
     sessionId: string,
     userIndex: number,
@@ -1095,6 +1136,8 @@ export default function App() {
             stopping={Boolean(stoppingSessions[activeSession.id])}
             stopError={stopErrors[activeSession.id]}
             onSend={(displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef)}
+            onEdit={(index, text, signal) => handleEditMessage(activeSession.id, index, text, signal)}
+            onOpenSource={id => { if (sessionsRef.current.some(session => session.id === id)) setActiveSessionId(id); else showToast('原对话已删除，当前编辑分支仍可继续。', 'info'); }}
             onStop={() => handleStopStream(activeSession.id)}
             onSteer={id => handleSteer(activeSession.id, id)}
             onNewChat={handleNewChat}

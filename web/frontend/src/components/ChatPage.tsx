@@ -28,6 +28,8 @@ interface ChatPageProps {
   stopError?: string;
   onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onStop: () => void;
+  onEdit?: (userIndex: number, text: string, signal: AbortSignal) => Promise<boolean>;
+  onOpenSource?: (sessionId: string) => void;
   onSteer?: (id: string) => Promise<boolean>;
   onResend: (
     userIndex: number,
@@ -58,7 +60,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -167,6 +169,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   return (
     <div className="chat-page chat-conversation-page">
       {header}
+      {session.editBranch && !isImported && <div className="chat-edit-branch-notice"><span>编辑分支 · 已带入此前可见消息，原对话保留</span>{onOpenSource && <button type="button" className="btn btn-sm" onClick={() => onOpenSource(session.editBranch!.sourceSessionId)}>查看原对话</button>}</div>}
       {isImported && <section className="chat-backup-notice" aria-label="导入记录说明">
         <div>
           <strong>备份导入的只读记录</strong>
@@ -190,15 +193,16 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             let actions;
             if (isFinal) {
               const copy = () => {if(!navigator.clipboard?.writeText)throw new Error('剪贴板不可用');const historical=msg.role==='assistant'&&!msg.error?historicalGatewayAuthError(msg.content):undefined;return navigator.clipboard.writeText(historical?['历史失败记录',historical.message,historical.code].join('\n\n'):msg.error?[msg.content,msg.error.message,msg.error.code].filter(Boolean).join('\n\n'):msg.content);};
-              // 只允许对「最后一轮」重试，契合 OpenClaw append-only 模型（不改写历史）；已移除编辑
+              // Retry appends to the same runtime; editing creates a fresh branch.
               const isLastFinal = i === session.messages.length - 1;
               if (msg.role === 'user') {
                 actions = {
                   onCopy: copy,
+                  onEdit: !isImported && onEdit ? (text: string, signal: AbortSignal) => onEdit(i, text, signal) : undefined,
                   onRetry: !isImported && isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
-                  canModify: !isImported && !isStreaming && !stopping,
+                  canModify: !isImported && !isStreaming && !stopping && !session.pendingTurnId,
                 };
               } else {
                 const pi = i - 1;

@@ -854,6 +854,11 @@ export function stopChat(sessionId: string, turnId?: string): Promise<{ stopped:
   });
 }
 
+export function prepareChatBranch(sourceSessionId: string, attachments: UploadedFile[], signal: AbortSignal): Promise<{ sessionId: string; attachments: Record<string, UploadedFile> }> {
+  return request('/api/chat/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceSessionId, attachments }), signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
+}
+
 export function streamChat(
   message: string,
   persona: string | undefined,
@@ -879,6 +884,7 @@ export function streamChat(
   onCompaction?: (event: import('./chatCompaction').ChatCompaction) => void,
   onTiming?: (timing: import('./chatTiming').ChatTiming) => void,
   engine: 'openclaw'|'codex' = 'openclaw',
+  history?: { role: 'user' | 'assistant'; content: string }[],
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -1004,7 +1010,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
+              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(history?.length ? { history } : {}), ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {

@@ -46,6 +46,12 @@ function session(id = 'existing', content = '请保留我的消息') {
 // Legacy saved records predate engine selection and normalize to OpenClaw.
 const loadedSession = (...args) => ({ ...session(...args), engine: 'openclaw' });
 
+test('edit branch source and bootstrap boundary survive a fresh storage decode',async()=>{
+ const saved={...session(),editBranch:{sourceSessionId:'original',prefixLength:0}};
+ const {store}=await isolatedStore(memoryStorage({easel_sessions:JSON.stringify([saved])}));
+ assert.deepEqual(store.loadSessions()[0].editBranch,saved.editBranch);
+});
+
 test('importing the store neither resets history nor accesses browser storage', async () => {
   const storage = memoryStorage({ easel_sessions: JSON.stringify([session()]), easel_active_session: 'existing' });
   let tabReads = 0;

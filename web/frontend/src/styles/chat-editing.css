@@ -1,0 +1,12 @@
+.chat-page .message-row.user.is-editing .msg-col.user { width:100%; max-width:100%; }
+.chat-message-editor { width:100%; min-width:0; box-sizing:border-box; padding:12px; border-radius:18px; background:var(--accent-soft); }
+.chat-message-editor textarea { display:block; width:100%; min-height:64px; max-height:40dvh; box-sizing:border-box; resize:vertical; padding:2px 0 10px; border:0; border-radius:4px; background:transparent; color:var(--text); font:inherit; line-height:1.7; }
+.chat-message-editor textarea:focus-visible { outline:2px solid var(--focus-ring); outline-offset:3px; }
+.chat-message-edit-actions { display:flex; justify-content:flex-end; gap:8px; }
+.chat-message-editor .chat-message-edit-send { background:var(--text); color:var(--bg); border-color:var(--text); }
+.chat-message-editor .chat-message-edit-send:hover { background:var(--text-secondary); color:var(--bg); border-color:var(--text-secondary); }
+.chat-message-edit-hint { margin:8px 0 0; color:var(--text-tertiary); font-size:11px; line-height:1.6; }
+.chat-message-edit-error { margin:8px 0 0; color:var(--danger, #c2413b); font-size:12px; overflow-wrap:anywhere; }
+.chat-message-edit-actions button { min-height:32px; }
+.chat-edit-branch-notice { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; padding:8px 24px; border-bottom:1px solid var(--border); color:var(--text-secondary); font-size:12px; }
+@media(max-width:600px) { .chat-edit-branch-notice { padding:8px 14px; } .chat-message-edit-actions button { min-height:40px; } }

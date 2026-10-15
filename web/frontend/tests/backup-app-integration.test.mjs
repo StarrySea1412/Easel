@@ -49,6 +49,7 @@ async function fixture(t, initial, realSidebar = false) {
     export const stopChat = async (...args) => {globalThis.__backupApp.calls.push(['stopChat',...args]);return globalThis.__backupApp.stopResponse ? globalThis.__backupApp.stopResponse(...args) : {stopped:true};};
     export const deleteSession = async (...args) => {globalThis.__backupApp.calls.push(['deleteSession',...args]);};
     export const questionStatus = async () => ({});
+    export const prepareChatBranch = async (...args) => {globalThis.__backupApp.calls.push(['prepareChatBranch',...args]);return globalThis.__backupApp.prepareBranch ? globalThis.__backupApp.prepareBranch(...args) : {sessionId:'edit-fixture',attachments:{}};};
     export const streamChat = (...args) => {const controller=new AbortController();globalThis.__backupApp.streams.push({args,controller});return controller;};
   `);
   const lazy = url(`import {createElement} from ${JSON.stringify(import.meta.resolve('react'))};
@@ -767,4 +768,54 @@ test('a confirmed stop terminal event wins the response race and remains marked 
   const last = harness.sidebar.sessions.find(s => s.id === 'original').messages.at(-1);
   assert.equal(last.stopped, true); assert.match(last.content, /已停止/);
   assert.equal(harness.pages['对话'].stream, undefined);
+});
+
+for (const engine of ['openclaw', 'codex']) test(`editing forks ${engine} at the selected message with exact earlier context and keeps the source intact`, async t => {
+  const original = { ...sourceSession, engine, messages: [...sourceSession.messages,
+    {role:'user',content:'需要修改的请求',requestedModelRef:'provider/model',requestedThinkingLevel:'high'},
+    {role:'assistant',content:'旧回答'}, {role:'user',content:'后续问题'}, {role:'assistant',content:'后续回答'}] };
+  const { harness, values } = await fixture(t, {easel_sessions:JSON.stringify([original]),easel_active_session:'original'});
+  await act(async()=>harness.sidebar.onSessionSelect('original'));
+  let accepted;await act(async()=>{accepted=await harness.pages['对话'].onEdit(2,'修改后的请求',new AbortController().signal);});
+  assert.equal(accepted,true);assert.equal(harness.streams.length,1);const stream=harness.streams[0];
+  assert.equal(stream.args[0],'修改后的请求');assert.equal(stream.args[2],'edit-fixture');assert.equal(stream.args[23],engine);
+  assert.deepEqual(stream.args[24],[{role:'user',content:'原提问'},{role:'assistant',content:'原回答'}]);
+  assert.equal(stream.args[17],'provider/model');assert.equal(stream.args[19],'high');
+  const branch=harness.pages['对话'].session;assert.equal(branch.id,'edit-fixture');assert.deepEqual(branch.messages.map(m=>m.content),['原提问','原回答','修改后的请求']);
+  assert.deepEqual(harness.sidebar.sessions.find(s=>s.id==='original').messages,original.messages);
+  assert.equal(JSON.parse(values.get('easel_sessions')).find(s=>s.id==='edit-fixture').editBranch.prefixLength,2);
+  await act(async()=>stream.args[4]());await act(async()=>harness.pages['对话'].onSend('新分支下一轮'));
+  assert.equal(harness.streams[1].args[24],undefined,'later requests must use the new runtime instead of injecting old history again');
+  await act(async()=>harness.pages['对话'].onOpenSource('original'));assert.equal(harness.pages['对话'].session.id,'original');
+});
+
+test('editing aborts stale preparation after session switches and refuses storage failures without inference',async t=>{
+  const other={id:'other-edit',title:'另一对话',created:1,messages:[]};
+  const {harness,storage}=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,other]),easel_active_session:'original'});
+  await act(async()=>harness.sidebar.onSessionSelect('original'));
+  let finish;harness.prepareBranch=()=>new Promise(resolve=>{finish=resolve;});
+  let pending;await act(async()=>{pending=harness.pages['对话'].onEdit(0,'迟到编辑',new AbortController().signal);});
+  await act(async()=>{await assert.rejects(harness.pages['对话'].onEdit(0,'重复编辑',new AbortController().signal),/另一条消息/);});
+  await act(async()=>harness.sidebar.onSessionSelect('other-edit'));
+  await act(async()=>finish({sessionId:'stale',attachments:{}}));assert.equal(await pending,false);assert.equal(harness.streams.length,0);
+  await act(async()=>harness.sidebar.onSessionSelect('original'));harness.prepareBranch=async()=>({sessionId:'quota-edit',attachments:{}});storage.quota=true;
+  await act(async()=>{await assert.rejects(harness.pages['对话'].onEdit(0,'存储失败',new AbortController().signal),/无法保存/);});
+  assert.equal(harness.streams.length,0);assert.equal(harness.pages['对话'].session.id,'original');
+});
+
+test('editing remaps prior and current attachments, keeps skill snapshots and retry retains the seed',async t=>{
+ const earlier={id:'old-a',name:'a.txt',path:'old/a'},current={id:'old-b',name:'b.txt',path:'old/b'};
+ const nextA={...earlier,id:'new-a',path:'new/a'},nextB={...current,id:'new-b',path:'new/b'};
+ const original={...sourceSession,messages:[{...sourceSession.messages[0],attachments:[earlier]},sourceSession.messages[1],
+   {role:'user',content:'需要编辑',attachments:[current],selectedSkills:['card-quote'],skillRequirements:{'card-quote':'保留出处'}}]};
+ const {harness}=await fixture(t,{easel_sessions:JSON.stringify([original]),easel_active_session:'original'});
+ await act(async()=>harness.sidebar.onSessionSelect('original'));
+ harness.prepareBranch=async(s,files)=>{assert.equal(s,'original');assert.deepEqual(files,[earlier,current]);return {sessionId:'files-edit',attachments:{'old/a':nextA,'old/b':nextB}};};
+ await act(async()=>harness.pages['对话'].onEdit(2,'编辑后的请求',new AbortController().signal));
+ assert.deepEqual(harness.streams[0].args[12],[nextA,nextB]);assert.deepEqual(harness.streams[0].args[16],{'card-quote':'保留出处'});
+ assert.deepEqual(harness.pages['对话'].session.messages[0].attachments,[nextA]);assert.deepEqual(harness.pages['对话'].session.messages[2].attachments,[nextB]);
+ await act(async()=>harness.streams[0].args[5](new Error('synthetic preflight failure')));
+ await act(async()=>harness.pages['对话'].onResend(2,'编辑后的请求',[nextB]));
+ assert.deepEqual(harness.streams[1].args[24],[{role:'user',content:'原提问'},{role:'assistant',content:'原回答'}]);
+ assert.deepEqual(harness.streams[1].args[12],[nextA,nextB]);
 });

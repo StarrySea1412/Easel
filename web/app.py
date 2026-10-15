@@ -3047,9 +3047,27 @@ class AttachmentRef(BaseModel):
     path: str
 
 
+class HistoryMessage(BaseModel):
+    role: Literal['user', 'assistant']
+    content: Annotated[str, Field(strict=True, max_length=200_000)]
+
+
+class ChatBranchRequest(BaseModel):
+    sourceSessionId: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
+    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=200)
+
+
+@app.post('/api/chat/branch')
+async def api_chat_branch(req: ChatBranchRequest):
+    from chat_branch import prepare
+    _attachment_scope(req.sourceSessionId)
+    return await asyncio.to_thread(prepare, sys.modules[__name__], req.sourceSessionId, req.attachments)
+
+
 class ChatRequest(BaseModel):
     engine: Literal['openclaw', 'codex'] = 'openclaw'
     message: str
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=200)
     persona: str | None = None
     sessionId: str | None = None
     turnId: str | None = None
@@ -3151,12 +3169,14 @@ def _attachment_context(req: ChatRequest) -> str:
 
 
 def _chat_message(req: ChatRequest) -> str:
+    from chat_branch import history_context
     context = _attachment_context(req)
     message = req.message.strip()
     if context:
         message = f"{message}\n\n{context}" if message else context
     if not message:
         raise HTTPException(400, "消息不能为空")
+    message = history_context(req.history) + message
     specs = _selected_skill_specs(req)
     message += (f'\n\n〔本轮文件交付规则〕持久产物目录是 {OUTPUTS_DIR}。'
                 '生成文件、从网站下载的文件或网页快照，都必须实际保存到该目录下的具体主题子目录，'
@@ -3565,6 +3585,11 @@ async def api_chat_stream(req: ChatRequest):
         _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
     if req.engine == 'codex':
         _attachment_context(req)
+        from chat_branch import history_context
+        if req.history:
+            if not req.message.strip() and not req.attachments:
+                raise HTTPException(400, '消息不能为空')
+            req = req.model_copy(update={'message': history_context(req.history) + req.message})
         turn_id = await asyncio.to_thread(_codex_service.start, req)
         return await _codex_service.stream(req.sessionId, turn_id)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）

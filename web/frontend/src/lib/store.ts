@@ -26,6 +26,7 @@ export interface ChatMessage extends ChatTiming {
 }
 
 export interface ChatSession {
+  editBranch?: { sourceSessionId: string; prefixLength: number };
   engine?: 'openclaw' | 'codex';
   id: string;
   title: string;
@@ -182,6 +183,11 @@ function decodeSessions(raw: string): ChatSession[] {
       created: typeof value.created === 'number' && Number.isFinite(value.created) ? value.created : 0,
     };
     session.engine = value.engine === 'codex' ? 'codex' : 'openclaw';
+    if (record(value.editBranch) && typeof value.editBranch.sourceSessionId === 'string'
+      && Number.isInteger(value.editBranch.prefixLength) && Number(value.editBranch.prefixLength) >= 0
+      && Number(value.editBranch.prefixLength) <= messages.length) {
+      session.editBranch = { sourceSessionId: value.editBranch.sourceSessionId, prefixLength: Number(value.editBranch.prefixLength) };
+    }
     for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
     if (typeof value.archived === 'boolean') session.archived = value.archived;
     if (typeof value.pinnedAt === 'number' && Number.isFinite(value.pinnedAt) && value.pinnedAt > 0) session.pinnedAt = value.pinnedAt;

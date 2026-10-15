@@ -1,3 +1,9 @@
+## 2026-10-16 · Edit sent messages / 历史消息重新编辑
+
+- Add inline Edit, Cancel and Send to historical user messages; sending creates a fresh branch with preceding visible context and session-owned attachment copies while preserving the source conversation. / 原位编辑历史用户消息，发送后带入此前可见文字与附件建立编辑分支，原记录保留并可返回。
+- Preserve per-message skill/model/thinking selections; guard active generation, queue, storage, duplicate and stale requests. Cancel remains usable during preparation. / 保留消息配置，处理生成/队列/存储/重复及过期请求，准备中仍可取消。
+- Relevant regressions, lint/build and desktop/390px browser checks completed without paid inference; local7880 only. / 真实生成尚未测试，138和安装包未更新；[行为与验证 / evidence](docs/chat-editing-2026-10-16.md)。
+
 ## 2026-10-15 · Context details and usable stop recovery / 上下文细则与停止恢复
 
 - Move notifications to the left toolbar beside Settings; add an anchored composer context ring, six explicitly estimated/unknown categories and a cumulative usage/cost entry. / 通知移到设置旁，输入框增加上下文圆环/分类/费用入口，实际快照与累计用量分别统计。

@@ -4,12 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
 import OutputMessageContent from './OutputMessageContent';
-import { IconCopy, IconCheck, IconRetry } from './icons';
+import { IconCopy, IconCheck, IconRetry, IconEdit } from './icons';
+import ChatMessageEditor from './ChatMessageEditor';
+import '../styles/chat-editing.css';
 import './message-model-selection.css';
 import { formatChatElapsed } from '../lib/chatTiming';
 import './message-timing.css';
 
 export interface BubbleActions {
+  onEdit?: (text: string, signal: AbortSignal) => Promise<boolean>;
   onCopy: () => void | Promise<void>;
   onRetry?: () => void;    // 仅最后一轮可用（append-only：不改写历史）
   canModify: boolean;      // 流式中禁用 retry
@@ -65,7 +68,7 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   </section>;
 }
 
-function ActionBar({ actions, status }: { actions?: BubbleActions; status?: ReactNode }) {
+function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; status?: ReactNode; onEdit?: () => void }) {
   const [copyStatus, setCopyStatus] = useState<'idle'|'copying'|'copied'|'failed'>('idle');
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(resetTimer.current), []);
@@ -86,6 +89,7 @@ function ActionBar({ actions, status }: { actions?: BubbleActions; status?: Reac
         {copyStatus==='copied' ? <IconCheck size={14} /> : <IconCopy size={14} />}<span>{copyStatus==='copied' ? '已复制' : copyStatus==='copying' ? '复制中…' : '复制'}</span>
       </button>}
       {copyStatus==='failed'&&<span className="msg-copy-error" role="status">复制失败，请允许剪贴板访问后重试。</span>}
+      {actions?.onEdit && <button type="button" className="msg-action" aria-label="重新编辑消息" disabled={!actions.canModify} onClick={onEdit} title={actions.canModify ? '重新编辑消息' : '请等待当前生成或停止处理结束'}><IconEdit size={14} /><span>编辑</span></button>}
       {actions?.onRetry && actions.canModify && (
         <button type="button" className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}
@@ -95,6 +99,9 @@ function ActionBar({ actions, status }: { actions?: BubbleActions; status?: Reac
 }
 
 export default function MessageBubble({ message, sessionId, isStreaming, thinking, activity, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
+  const [editing, setEditing] = useState(false);
+  const userRow = useRef<HTMLDivElement>(null);
+  const cancelEdit = () => { setEditing(false); requestAnimationFrame(() => userRow.current?.querySelector<HTMLButtonElement>('[aria-label="重新编辑消息"]')?.focus()); };
   const scope=executionScope||`${sessionId||''}:${message.turnId||''}`;
   const [progressOwner,setProgressOwner]=useState<{scope:string;owned:boolean}|null>(null);
   const onProgressOwnership=useCallback((owned:boolean)=>setProgressOwner(old=>old?.scope===scope&&old.owned===owned?old:{scope,owned}),[scope]);
@@ -124,11 +131,11 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
     // remain in session state for retry but never leak paths into the chat UI.
     if (!message.content.trim()) return null;
     return (
-      <div className="message-row user">
+      <div className={`message-row user${editing ? ' is-editing' : ''}`} ref={userRow}>
         <div className="msg-col user">
-          <div className="message-bubble user">{message.content}</div>
+          {editing && actions?.onEdit ? <ChatMessageEditor key={`${sessionId}:${message.content}`} text={message.content} disabled={!actions.canModify} onCancel={cancelEdit} onSend={actions.onEdit} /> : <div className="message-bubble user">{message.content}</div>}
           {!backupSnapshot && message.requestedModelRef && <p className="message-model-selection">本轮指定：{message.requestedModelRef}</p>}
-          {actions && <ActionBar actions={actions} />}
+          {actions && !editing && <ActionBar actions={actions} onEdit={() => setEditing(true)} />}
         </div>
       </div>
     );
