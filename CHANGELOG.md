@@ -1,3 +1,11 @@
+## 2026-10-15 · Local workbench and GLM video / 本机工作台与GLM视频
+
+- Add anonymous official ClawHub skill search/details, separate from installed skills; bound requests, cache and rate limits, and display external author text safely. / 新增ClawHub公开检索/详情，区分已安装技能，限制请求/缓存并处理限流与过期请求，不安装或执行技能。
+- Add global event history with accurate outcomes and destinations, plus current-session OpenClaw usage details; Codex usage remains explicitly unknown. / 新增全局事件通知及对应入口，准确区分停止/失败/发布状态；对话复用真实用量账本，缺字段与费用口径明确。
+- Save per-model context budgets transactionally, and show file/folder covers, actual birth times and consistent category counts. / 上下文窗口支持校验、清除及事务同步；内容库增加类型封面、真实创建时间与分类数量。
+- Adapt dedicated GLM video credentials to CogVideoX async submit/poll and bounded public-HTTPS downloads; validate text/image inputs and failures without paid calls. / 接入GLM文生/图生异步协议与受限下载，真实视频生成待用户填写凭据后测试。
+- Fix the Windows first-writer record-lock initialization race found in regression. Backend, frontend, lint/build and actual local read-only checks are recorded separately from user page acceptance. No 138 deployment or package release. / 修复Windows首次并发记录锁竞态；回归/构建/本机只读检查与用户页面验收分开，138和安装包未更新。见[验证记录 / evidence](docs/local-workbench-features-2026-10-15.md)。
+
 ## 2026-10-14 · Quick deploy verified on 138 / 138快速发布实测完成
 
 - Activate 0.2.8 / 12f144c8 through the Windows quick entry in isolation and live with the same fixed image; verify 1388 runtime source hashes, authentication/version/gateway, official updates and preserved files. / Windows快速入口完成隔离及正式发布，同一固定镜像，1388项运行源码与认证/版本/网关、官方记录、持久文件核对通过。

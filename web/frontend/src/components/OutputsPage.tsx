@@ -5,6 +5,7 @@ import type { OutputNode, OutputMeta } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { Sk } from './Skeleton';
 import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash } from './icons';
+import '../styles/output-covers.css';
 
 const FILTERS: { key: string; label: string; Icon: typeof IconOutputs }[] = [
   { key: 'all', label: '全部', Icon: IconOutputs },
@@ -75,9 +76,24 @@ function resolvePath(roots: OutputNode[], names: string[]): OutputNode[] {
 }
 
 function Thumb({ f, big }: { f: OutputNode | null; big?: boolean }) {
-  if (f && f.kind === 'image') return <img src={mediaUrl(f.path)} alt="" loading="lazy" style={{ objectFit: 'contain' }} />;
-  if (f && f.kind === 'video') return <video src={mediaUrl(f.path)} preload="metadata" muted />;
-  return <div className="gcard-ph">{kindIcon(f?.kind, big ? 34 : 30)}</div>;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [f?.path]);
+  if (!failed && f?.kind === 'image') return <img src={mediaUrl(f.path)} alt="" loading="lazy" style={{ objectFit: 'contain' }} onError={() => setFailed(true)} />;
+  if (!failed && f?.kind === 'video') return <video src={mediaUrl(f.path)} preload="metadata" muted onError={() => setFailed(true)} />;
+  const sample = f?.type === 'dir' ? allFiles(f.children || [])[0] : f;
+  const extension = sample?.name.includes('.') ? sample.name.split('.').at(-1)!.toUpperCase().slice(0, 10) : 'FILE';
+  const label = f?.type === 'dir' ? '文件夹' : extension === 'PY' ? 'Python' : extension === 'MD' ? 'Markdown' : sample ? kindLabel(sample) : '文件';
+  return <div className={`gcard-cover${sample?.preview ? ' has-text' : ''}`}>
+    <div className="gcard-cover-heading">{f?.type === 'dir' ? <IconFolder size={big ? 28 : 24} /> : kindIcon(sample?.kind, 24)}<span>{label}</span><b>{extension}</b></div>
+    {sample?.preview ? <pre>{sample.preview}</pre> : <div className="gcard-cover-symbol">{f?.type === 'dir' ? <IconFolder size={48} /> : kindIcon(sample?.kind, 48)}</div>}
+    <span className="gcard-cover-caption">{sample?.name || f?.name || '暂无内容'}</span>
+  </div>;
+}
+
+function CreatedTime({ node }: { node: OutputNode }) {
+  const date = node.createdAt && Number.isFinite(node.createdAt) && node.createdAt > 0 ? new Date(node.createdAt * 1000) : null;
+  return <div className="gcard-created">创建时间：{date && !Number.isNaN(date.getTime())
+    ? <time dateTime={date.toISOString()}>{date.toLocaleString('zh-CN', { hour12: false })}</time> : '未记录'}</div>;
 }
 
 function allFiles(nodes: OutputNode[]): OutputNode[] {
@@ -169,6 +185,11 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
       .sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   }, [currentNodes, filter, query, searching]);
   const generatedCount = useMemo(() => allFiles(roots).filter(generatedImage).length, [roots]);
+  const filterCounts = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase();
+    const matches = allFiles(currentNodes).filter(f => !term || `${f.name} ${f.path} ${f.generation?.prompt || ''}`.toLocaleLowerCase().includes(term));
+    return Object.fromEntries(FILTERS.map(f => [f.key, f.key === 'all' ? (term ? matches.length : currentNodes.length) : matches.filter(node => node.kind === f.key).length]));
+  }, [currentNodes, query]);
 
   const atTop = stack.length === 0;
   const atProjectRoot = stack.length === 1;
@@ -265,7 +286,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         <div className="gcard-thumb">
           <span className="gcard-kind">{m?.kind ? (KIND_LABEL[m.kind] || m.kind) : '文件夹'}</span>
           <button className="gcard-del" title="删除" onClick={(e) => remove(d, e)}><IconTrash size={14} /></button>
-          {cover ? <Thumb f={cover} big /> : <div className="gcard-ph"><IconFolder size={38} /></div>}
+          <Thumb f={cover || d} big />
         </div>
         <div className="gcard-meta">
           <button className="gcard-name" title={m?.title || d.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); enterDir(d.name); }}>
@@ -276,6 +297,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             {m?.status && <span style={statusBadge(m.status)}>{STATUS_LABEL[m.status] || m.status}</span>}
             <span>{d.fileCount ?? 0} 个文件</span>
           </div>
+          <CreatedTime node={d} />
         </div>
       </div>
     );
@@ -292,6 +314,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         <button className="gcard-name" title={f.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); void open(f); }}>{f.name}</button>
         {f.kind === 'image' && <div className="gcard-sub" style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>{generatedImage(f) && <span style={badge}>AI 生图</span>}<span>{imageDimensions(f) || '查看完整图片'}</span></div>}
         {f.generation?.prompt && <div className="gcard-sub" title={f.generation.prompt} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4 }}>{f.generation.prompt}</div>}
+        <CreatedTime node={f} />
       </div>
     </div>
   );
@@ -316,7 +339,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
           </h1>
           <p className="page-subtitle">
             {searching ? `共 ${files.length} 个结果，按最新保存排序${stack.length ? ' · 当前文件夹及子目录' : ''}` : atTop
-              ? `共 ${roots.length} 个项目 · ${generatedCount} 张 AI 生图。生成的图片和历史记录统一保存在这里。`
+              ? `${dirs.length} 个文件夹 · ${files.length} 个文件 · ${generatedCount} 张 AI 生图。生成的图片和历史记录统一保存在这里。`
               : `${dirs.length} 个文件夹 · ${files.length} 个文件（可继续点开子文件夹）`}
           </p>
         </div>
@@ -338,7 +361,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             <span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><IconChevron size={13} /></span> 返回上级
           </button>}
           {FILTERS.map((f) => (
-            <button key={f.key} className={`chip gallery-filter-chip ${filter === f.key ? 'active' : ''}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}><f.Icon size={14} /><span>{f.label}</span></button>
+            <button key={f.key} className={`chip gallery-filter-chip ${filter === f.key ? 'active' : ''}`} aria-label={`${f.label} ${filterCounts[f.key]}`} title={f.key === 'all' && !query.trim() ? '当前层级的文件与文件夹数量' : '包含当前文件夹及子目录中的匹配文件'} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}><f.Icon size={14} /><span>{f.label}</span><span className="gallery-filter-count">{filterCounts[f.key]}</span></button>
           ))}
         </div>
         <input className="gallery-search" type="search" aria-label="搜索内容库" placeholder="搜索文件名、路径或生图提示词" value={query} onChange={(event) => setQuery(event.target.value)} />

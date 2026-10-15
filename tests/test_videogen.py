@@ -70,7 +70,7 @@ def test_configuration_uses_video_settings_and_never_exposes_credentials():
     assert result["defaultProvider"] == "agnes"
     encoded = json.dumps(result)
     assert "test-private-key" not in encoded and "ark-secret" not in encoded
-    assert len(result["providers"]) == 6
+    assert len(result["providers"]) == 7
     ark = next(p for p in result["providers"] if p["id"] == "ark")
     assert ark["model"] == "doubao-seedance-1-0-lite-t2v" and ark["modes"] == ["text2video"]
     result = videogen.provider_config({"OPENAI_API_KEY": "chat-secret", "OPENAI_BASE_URL": "https://chat.test"})

@@ -264,6 +264,38 @@ async function chooseLastModel(view) {
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
 }
 
+test('custom context budgets validate before saving, serialize clearing and reset on model changes', async t => {
+  const rows = configuredRows().map(row => ({ ...row, contextWindow: 32768 }));
+  const view = await fixture(t, {
+    fetchModelChannels: modelChannels(rows),
+    saveModelConfig: async (_channel, saved) => ({ ...modelChannels(saved.map((row, i) => ({ ...rows[i], ...row }))), ok: true }),
+  });
+  await view.render(1, view.props, 'model');
+  const details = view.container.querySelector('.model-provider-editors').closest('details');
+  await view.click(details.querySelector('summary'));
+  await view.click(view.container.querySelector('.provider-toggle'));
+  const input = () => view.container.querySelector('[aria-label="上下文窗口（Token）"]');
+  const change = async (element, value) => act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, value);
+    element.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  assert.equal(input().value, '32768');
+  await change(input(), '1');
+  await view.click(findButton(view, '保存并使用'));
+  assert.match(view.container.textContent, /1024–10000000/);
+  assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
+  await change(input(), '131072');
+  await view.click(findButton(view, '保存并使用'));
+  assert.equal(view.harness.calls.find(call => call.name === 'saveModelConfig').args[1][0].contextWindow, 131072);
+  await change(input(), '');
+  await view.click(findButton(view, '保存并使用'));
+  assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').at(-1).args[1][0].contextWindow, null);
+  await change(input(), '65536');
+  const model = view.container.querySelector('input[aria-label="模型名称"]');
+  await change(model, 'new-model');
+  assert.equal(input().value, '');
+});
+
 test('default model selection is a draft until saved and survives the single import entry round trip', async t => {
   const view = await fixture(t, { fetchModelChannels: modelChannels(configuredRows()), fetchImportSources: { sources: [] } });
   await view.render(1, view.props, 'model');

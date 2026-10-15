@@ -9,6 +9,11 @@ from typing import Any
 from pathlib import Path
 
 
+GLM_VIDEO_MODELS = ("cogvideox-3", "cogvideox-2", "cogvideox-flash")
+GLM_VIDEO_DEFAULT_BASE = "https://open.bigmodel.cn/api/paas/v4"
+GLM_VIDEO_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
 def _key(env: str, label: str, *, required: bool = True, secret: bool = True,
          aliases: tuple[str, ...] = (), choices: tuple[str, ...] = ()) -> dict[str, Any]:
     return {
@@ -43,10 +48,18 @@ MODEL_GROUPS: dict[str, dict[str, Any]] = {
         "label": "AI 视频生成",
         "settings": [
             _key("VIDEO_PROVIDER", "默认视频 provider", required=False, secret=False,
-                 choices=("dashscope", "ark", "kling", "openai-compatible", "xhs-maas", "agnes")),
+                 choices=("dashscope", "ark", "kling", "openai-compatible", "xhs-maas", "agnes", "glm")),
             _key("VIDEO_CAPABILITIES_JSON", "模型能力覆盖 JSON", required=False, secret=False),
         ],
         "providers": [
+            {
+                "id": "glm", "name": "GLM / 智谱 CogVideoX", "keys": [
+                    _key("GLM_VIDEO_API_KEY", "智谱视频 API Key"),
+                    _key("GLM_VIDEO_MODEL", "视频模型", required=False, secret=False,
+                         choices=GLM_VIDEO_MODELS),
+                    _key("GLM_VIDEO_BASE_URL", "视频 API 根地址", required=False, secret=False),
+                ],
+            },
             {
                 "id": "dashscope", "name": "阿里通义万相 Wan", "keys": [
                     _key("DASHSCOPE_API_KEY", "DashScope API Key",

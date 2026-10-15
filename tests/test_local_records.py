@@ -173,7 +173,8 @@ def test_unversioned_or_wrong_file_snapshot_is_never_committed(tmp_path):
     assert not path.exists()
 
 
-def test_simultaneous_threads_cannot_both_commit_from_one_revision(tmp_path):
+@pytest.mark.parametrize('attempt', range(12))
+def test_simultaneous_threads_cannot_both_commit_from_one_revision(tmp_path, attempt):
     path = tmp_path / 'records.json'
     ready = threading.Barrier(2)
     def worker(ident):

@@ -58,9 +58,6 @@ def _write_lock(path: Path, label: str):
     if lock_path.is_symlink():
         raise RecordError(f'{label}锁文件是链接，未写入数据；请检查保存位置。')
     with lock_path.open('a+b') as handle:
-        if handle.tell() == 0:
-            handle.write(b'0')
-            handle.flush()
         handle.seek(0)
         try:
             if os.name == 'nt':
@@ -72,6 +69,13 @@ def _write_lock(path: Path, label: str):
         except OSError as exc:
             raise RecordConflict(f'{label}正在被其他操作保存，本次更改未保存；请稍后重试。') from exc
         try:
+            # Windows permits locking a byte past EOF. Initialize only after
+            # acquiring it: two new writers must not both flush that byte while
+            # one already holds the mandatory lock.
+            if os.fstat(handle.fileno()).st_size == 0:
+                handle.write(b'0')
+                handle.flush()
+                handle.seek(0)
             yield
         finally:
             # Closing the handle also releases the lock. An explicit unlock

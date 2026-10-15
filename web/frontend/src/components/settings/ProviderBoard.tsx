@@ -143,6 +143,12 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                   <span className="hint">当前通道使用预置模型，此配置入口不支持覆盖。需要其他模型时，可切换到支持自定义模型的提供商。</span></>
               )}
               </SettingsField>
+              {ops?.channel === 'chat' && <SettingsField label="上下文窗口（Token）">
+                <input className="mock" type="number" aria-label="上下文窗口（Token）" min="1024" max="10000000" step="1"
+                  value={r.contextWindow ?? ''} placeholder="留空使用运行时默认值"
+                  onChange={event => ops?.onRow?.(i, { contextWindow: event.target.value === '' ? null : Number(event.target.value) })} />
+                <span className="hint">按此渠道模型的实际能力填写；保存后用于后续请求的上下文预算。这里不会增加模型本身的容量。</span>
+              </SettingsField>}
               <SettingsField label="Base URL">
               {ed.base ? (
                 <input className="mock" aria-label="Base URL" value={r.baseUrl} placeholder={ops?.media && r.baseOptional !== false ? '留空使用提供商预置地址' : 'https://…'} onChange={(e) => ops?.onRow?.(i, { baseUrl: e.target.value })} />

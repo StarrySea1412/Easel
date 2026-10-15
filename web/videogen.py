@@ -28,18 +28,20 @@ RATIOS = ["16:9", "9:16", "1:1"]
 TERMINAL = {"done", "error", "cancelled"}
 CANCEL_HINT = "已停止本地等待和下载；服务商任务可能仍在生成并计费。"
 DEFAULT_MODELS = {
+    "glm": "cogvideox-3",
     "dashscope": "wan2.1-t2v-turbo", "ark": "doubao-seedance-1-0-lite-t2v",
     "openai-compatible": "", "xhs-maas": "happyhorse-1.0-t2v",
     "agnes": "agnes-video-2.5-flash", "kling": "",
 }
 MODEL_KEYS = {
+    "glm": ("GLM_VIDEO_MODEL",),
     "dashscope": ("DASHSCOPE_VIDEO_MODEL", "DASHSCOPE_MODEL"),
     "ark": ("ARK_MODEL",), "openai-compatible": ("VIDEO_MODEL", "VIDEO_MODEL_NAME"),
     "xhs-maas": ("XHS_MAAS_T2V_MODEL",), "agnes": ("AGNES_MODEL",),
 }
 # Conservative presets accepted by the adapters; actual model constraints are
 # still enforced by the provider. None omits --duration and uses its default.
-DURATIONS = {"dashscope": [5], "ark": [5, 10], "kling": [5, 10],
+DURATIONS = {"glm": [5, 10], "dashscope": [5], "ark": [5, 10], "kling": [5, 10],
              "openai-compatible": [4, 8, 12], "xhs-maas": [5, 10],
              "agnes": list(range(4, 13))}
 
@@ -82,6 +84,11 @@ def provider_config(env: dict[str, str]) -> dict:
         if len(modes) == 1:
             hint += " 当前模型仅用于" + ("文生视频。" if modes[0] == "text2video" else "图生视频。")
         ratios = RATIOS
+        if identifier == 'glm':
+            hint += ' 智谱异步视频协议，默认 cogvideox-3；提示词最多512字。使用视频API Key。'
+            if model not in {'cogvideox-3', 'cogvideox-2', 'cogvideox-flash'}:
+                ready.discard(identifier)
+                hint = '当前智谱适配支持 cogvideox-3、cogvideox-2 和 cogvideox-flash，请核对视频模型。'
         if identifier == "openai-compatible":
             ratios = ["16:9", "9:16"]
             hint += " 兼容历史 Videos 协议；参考图等比缩放并补黑边至所选画幅的 720p 尺寸。"
@@ -93,7 +100,7 @@ def provider_config(env: dict[str, str]) -> dict:
                 hint = "OpenAI 官方 Videos API 已于 2026-09-24 下线；请配置仍提供视频服务的兼容网关或选择其他服务。"
         providers.append({"id": identifier, "name": entry["name"], "configured": identifier in ready,
                           "model": model, "imageModel": image_model, "modes": modes,
-                          "ratios": ratios, "durations": DURATIONS[identifier], "hint": hint})
+                          "ratios": ratios, "durations": ([] if identifier == 'glm' and model != 'cogvideox-3' else DURATIONS[identifier]), "hint": hint})
     preferred = env.get("VIDEO_PROVIDER", "").strip()
     default = preferred if preferred in ready else next(iter(ready)) if len(ready) == 1 else ""
     return {"providers": providers, "defaultProvider": default,
@@ -246,6 +253,8 @@ class VideoService:
         provider = next((item for item in provider_config(env)["providers"] if item["id"] == req.provider), None)
         if not provider:
             raise HTTPException(400, "不支持的视频服务")
+        if req.provider == 'glm' and len(prompt) > 512:
+            raise HTTPException(400, '智谱视频提示词最多512字，请缩短后再提交。')
         if req.mode not in provider["modes"]:
             raise HTTPException(400, "当前视频模型不支持所选模式，请在设置中切换相应模型")
         if req.ratio not in provider["ratios"]:

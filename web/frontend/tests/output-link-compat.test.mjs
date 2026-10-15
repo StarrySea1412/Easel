@@ -46,7 +46,7 @@ test('image category includes generated and ordinary images; legacy entry normal
   await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:'imagegen'})));
   const chips=[...node.querySelectorAll('.gallery-filter-options .chip')];
   assert.equal(chips.some(chip=>chip.textContent==='AI 生图'),false);
-  assert.equal(chips.find(chip=>chip.textContent==='图片').getAttribute('aria-pressed'),'true');
+  assert.equal(chips.find(chip=>chip.querySelector('span')?.textContent==='图片').getAttribute('aria-pressed'),'true');
   assert.deepEqual([...node.querySelectorAll('.gcard-name')].map(el=>el.textContent).sort(),['generated.png','import.png']);
   assert.deepEqual([...node.querySelectorAll('.gcard-kind')].map(el=>el.textContent),['图片','图片']);
   assert.equal([...node.querySelectorAll('.gcard-sub span')].filter(el=>el.textContent==='AI 生图').length,1);
@@ -59,7 +59,7 @@ test('empty or invalid entry filters show all projects and files, including afte
   const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
   t.after(async()=>{await act(async()=>root.unmount());node.remove();});
   const names=()=>[...node.querySelectorAll('.gcard-name')].map(el=>el.textContent.trim()).sort();
-  const selected=()=>[...node.querySelectorAll('.gallery-filter-options .chip')].filter(el=>el.getAttribute('aria-pressed')==='true').map(el=>el.textContent);
+  const selected=()=>[...node.querySelectorAll('.gallery-filter-options .chip')].filter(el=>el.getAttribute('aria-pressed')==='true').map(el=>el.querySelector('span')?.textContent);
   await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:''})));
   assert.deepEqual(selected(),['全部']);
   assert.deepEqual(names(),['import.png','验收项目']);
@@ -77,4 +77,31 @@ test('empty or invalid entry filters show all projects and files, including afte
   await act(async()=>root.render(React.createElement(OutputsPage,{initialFilter:''})));
   assert.deepEqual(selected(),['全部']);
   assert.deepEqual(names(),['import.png','验收项目']);
+});
+
+test('file and folder covers, actual creation times and category counts agree with visible cards', async t => {
+  const tree = [{ name: 'project', type: 'dir', path: 'project', createdAt: 1700000000, children: [
+    { name: 'script.py', type: 'file', kind: 'text', path: 'project/script.py', preview: 'print("hello")', createdAt: 1700000001 },
+    { name: 'readme.md', type: 'file', kind: 'text', path: 'project/readme.md', preview: '# Hello', createdAt: null },
+    { name: 'nested', type: 'dir', path: 'project/nested', children: [{ name: 'a.mp4', type: 'file', kind: 'video', path: 'project/nested/a.mp4' }] },
+  ] }, { name: 'empty', type: 'dir', path: 'empty', children: [] },
+  { name: 'broken.png', type: 'file', kind: 'image', path: 'broken.png', createdAt: null }];
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => tree }));
+  const node = document.createElement('div'); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); });
+  await act(async () => root.render(React.createElement(OutputsPage)));
+  const counts = () => Object.fromEntries([...node.querySelectorAll('.gallery-filter-options .chip')].map(b =>
+    [b.querySelector('span').textContent, Number(b.querySelector('.gallery-filter-count').textContent)]));
+  assert.deepEqual(counts(), { 全部: 3, 图片: 1, 视频: 1, 音频: 0, 文档: 2 });
+  assert.equal(node.querySelector('time').dateTime, '2023-11-14T22:13:20.000Z');
+  assert.match(node.textContent, /创建时间：未记录/);
+  await act(async () => node.querySelector('img').dispatchEvent(new window.Event('error')));
+  assert.equal(node.querySelector('img'), null);
+  await act(async () => [...node.querySelectorAll('.gcard-name')].find(el => el.textContent.trim() === 'project').click());
+  assert.deepEqual(counts(), { 全部: 3, 图片: 0, 视频: 1, 音频: 0, 文档: 2 });
+  assert.match(node.textContent, /Python/);
+  assert.match(node.textContent, /Markdown/);
+  assert.match(node.textContent, /print\("hello"\)/);
+  await act(async () => [...node.querySelectorAll('.gallery-filter-options button')].find(b => b.getAttribute('aria-label') === '文档 2').click());
+  assert.equal(node.querySelectorAll('.gcard-name').length, 2);
 });

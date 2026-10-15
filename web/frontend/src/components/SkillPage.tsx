@@ -3,6 +3,8 @@ import type { ComponentType } from 'react';
 import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
 import SkillDrawer from './SkillDrawer';
+import ClawHubPanel from './ClawHubPanel';
+import RadioGroup from './ui/RadioGroup';
 import SkillDependencyBadges from './SkillDependencyBadges';
 import { displayName } from '../lib/skillDisplayNames';
 import { showToast } from '../lib/toast';
@@ -62,6 +64,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [source, setSource] = useState<'installed' | 'clawhub'>('installed');
 
   const load = () => {
     setError('');
@@ -72,7 +75,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
     });
   };
   useEffect(() => { void load(); }, []);
-  useEffect(() => { if (initialSkill) setSelected(initialSkill); }, [initialSkill]);
+  useEffect(() => { if (initialSkill) { setSource('installed'); setSelected(initialSkill); } }, [initialSkill]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -98,22 +101,29 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
       <div className="skills-page-head">
         <h1 className="page-title"><IconSkills size={22} aria-hidden={true} />技能库</h1>
         <p className="page-subtitle">
+          {source === 'clawhub' ? '从 OpenClaw 的公开技能目录查找更多能力，按作者和版本查看。' : <>
           共 {skills === null ? '…' : skills.length} 个技能，按流水线层分区浏览。点卡片查看说明，带入对话使用；
           标 <span className="badge badge-warn" style={{ padding: '1px 7px' }}>需 API</span> 的需先配置密钥
           {needApiCount > 0 && `（当前 ${needApiCount} 个待配置）`}。
+          </>}
         </p>
-        <div className="skill-search">
+        <RadioGroup value={source} onChange={value => { setSource(value); setSelected(null); }} aria-label="技能来源" className="skill-sources"
+          options={[{ value: 'installed', label: `已安装${skills ? ` · ${skills.length}` : ''}` }, { value: 'clawhub', label: 'ClawHub' }]} />
+        {source === 'installed' && <div className="skill-search">
           <span className="skill-search-ic"><IconSearch size={16} /></span>
           <input
             className="field"
             placeholder="搜索技能名或描述…"
+            aria-label="搜索已安装技能"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           {query && <button className="btn btn-ghost btn-sm" onClick={() => setQuery('')}>清除</button>}
-        </div>
+        </div>}
       </div>
 
+      {source === 'clawhub' && <ClawHubPanel />}
+      {source === 'installed' && <>
       {error && <div role="alert" style={{ color: 'var(--red)', maxWidth: 1100, margin: '16px auto' }}>{error}<button type="button" className="btn btn-sm" onClick={() => void load()}>重新读取</button></div>}
 
       <div className="skills-body">
@@ -156,8 +166,11 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
                   <div
                     key={s.name}
                     className="card card-hover skill-card"
+                    role="button"
+                    tabIndex={0}
                     style={{ ['--layer-color' as string]: meta.color }}
                     onClick={() => setSelected(s.name)}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelected(s.name); } }}
                   >
                     {alert && <div className="skill-card-alert" title="需要配置 API key">!</div>}
                     <div className="skill-card-icon" style={{ color: meta.color }}><Icon size={19} /></div>
@@ -177,6 +190,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           </section>
         ))}
       </div>
+      </>}
 
       {selected && (
         <SkillDrawer

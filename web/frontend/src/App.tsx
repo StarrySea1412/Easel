@@ -12,6 +12,8 @@ import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
 import ToastHost from './components/ToastHost';
+import EventNotificationCenter from './components/EventNotificationCenter';
+import { notificationOutputPath } from './lib/eventNotifications';
 import SkillDrawer from './components/SkillDrawer';
 import { showToast } from './lib/toast';
 import { steerQueuedMessage } from './lib/chatSteering';
@@ -286,6 +288,35 @@ export default function App() {
 
   // ---- 流式对话：状态与生命周期都放在 App（永不卸载），切页/切 ChatPage 都不中断/丢失 ----
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
+  const previousMediaStates = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const [type, job] of [['image', imageStudio.imgJob], ['video', videoStudio.job]] as const) {
+      if (!job) continue;
+      const id = `${type}:${job.jobId}`;
+      const previous = previousMediaStates.current.get(id);
+      previousMediaStates.current.set(id, job.state);
+      if (previousMediaStates.current.size > 100) previousMediaStates.current.delete(previousMediaStates.current.keys().next().value!);
+      if (previous !== 'running' || job.state === 'running') continue;
+      const outcome = job.state === 'done' ? '已完成' : job.state === 'cancelled' ? '已停止本地等待' : '失败';
+      showToast(`${type === 'image' ? '生图' : '生视频'} · ${outcome}`, job.state === 'done' ? 'success' : job.state === 'cancelled' ? 'info' : 'error',
+        undefined, `${id}:${job.state}`, job.state === 'done'
+          ? { page: 'outputs', filter: type, path: notificationOutputPath(job.url) }
+          : { page: 'image', medium: type });
+    }
+  }, [imageStudio.imgJob, videoStudio.job]);
+  useEffect(() => {
+    const outcomes = { published: '平台确认已发布', submitted: '已提交，待确认发布', draft: '已保存草稿', unverified: '发布状态待核验', failed: '发布失败' };
+    for (const receipt of publishReceipts.notices) {
+      if (receipt?.outcome) showToast(`${receipt.platform} · ${outcomes[receipt.outcome]}`, receipt.outcome === 'published' ? 'success' : receipt.outcome === 'failed' ? 'error' : 'info',
+        undefined, `publish:${receipt.receiptId}:${receipt.outcome}`, { page: 'publish' });
+    }
+  }, [publishReceipts.notices]);
+  useEffect(() => {
+    for (const [sessionId, stream] of Object.entries(streams)) {
+      for (const question of stream.questions || []) showToast(`${sessionsRef.current.find(item => item.id === sessionId)?.title || '对话'} · 需要回答`, 'info',
+        undefined, `question:${sessionId}:${question.id}`, { page: 'chat', sessionId });
+    }
+  }, [streams]);
   const queueRevision = useSyncExternalStore(subscribeChatQueue, getQueueRevision);
   const streamCtl = useRef<Record<string, AbortController>>({});
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
@@ -333,6 +364,11 @@ export default function App() {
   const appendAssistant = useCallback((sessionId: string, msg: ChatMessage, sessionKey?: string) => {
     const accumulated = streamAcc.current[sessionId];
     const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg), ...msg };
+    const session = sessionsRef.current.find(item => item.id === sessionId);
+    const stopped = msg.stopped === true;
+    const outcome = msg.error ? '失败' : stopped ? '已停止' : '已完成';
+    showToast(`${session?.title || '对话'} · ${outcome}`, msg.error ? 'error' : stopped ? 'info' : 'success', undefined,
+      `chat:${sessionId}:${msg.turnId || session?.pendingTurnId || msg.startedAt || 'legacy'}:${outcome}`, { page: 'chat', sessionId });
     setSessions((prev) => {
       const next = prev.map((s) =>
         s.id === sessionId
@@ -797,6 +833,7 @@ export default function App() {
       appendAssistant(sessionId, {
         role: 'assistant',
         content: (run.content || '') + '\n\n_（已停止）_',
+        stopped: true,
         turnId: run.turnId,
         requestedModelRef: run.requestedModelRef,
         thinking: run.thinking || undefined,
@@ -1158,6 +1195,18 @@ export default function App() {
         onGatewayRetry={retryGateway}
       />
       <main className="main-content">
+        <EventNotificationCenter onOpen={target => {
+          if (target.page === 'chat' && target.sessionId) {
+            if (!sessionsRef.current.some(session => session.id === target.sessionId)) { showToast('该会话已删除。', 'info'); return; }
+            setActiveSessionId(target.sessionId);
+          }
+          if (target.page === 'image' && target.medium) videoStudio.setViewMode(target.medium);
+          if (target.page === 'outputs') {
+            setOutputFilter(target.filter || 'all');
+            setOutputJumpPath(target.path || '');
+          }
+          setCurrentPage(target.page);
+        }} />
         <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
         <PublishReceiptCenter model={publishReceipts} showEntry={false}
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}

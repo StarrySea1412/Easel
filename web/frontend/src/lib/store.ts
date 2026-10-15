@@ -10,6 +10,7 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 
 export interface ChatMessage extends ChatTiming {
+  stopped?: boolean;
   role: 'user' | 'assistant';
   content: string;
   error?:ChatErrorDetail;

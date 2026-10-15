@@ -400,6 +400,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const saveCurrent = useCallback(async (channel: Chan = chan) => {
     if (modelSavePending.current || impApplying.current || modelLoading) return;
     const rows = channel === 'chat' ? chatRows : channel === 'transcribe' ? transRows : (mediaRows[channel] || []);
+    if (channel === 'chat' && rows.some(row => row.contextWindow != null && (!Number.isInteger(row.contextWindow) || row.contextWindow < 1024 || row.contextWindow > 10000000))) {
+      setSavedNote('上下文窗口须为1024–10000000之间的整数。'); return;
+    }
     const payload = rows
       .filter((r) => r.slot)
       .map((r) => ({
@@ -413,6 +416,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         key2: r.keyNew2 || '',
         primary: r.role === '主',
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
+        contextWindow: channel === 'chat' ? r.contextWindow : undefined,
       }));
     if (!payload.length) {
       setSavedNote('当前通道没有可保存的配置');
@@ -615,7 +619,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     patch: Partial<ModelRow>,
   ) => {
     if (['slot', 'name', 'baseUrl', 'protocol', 'type', 'keyNew', 'keyNew2'].some(key => key in patch)) clearModelDiscovery(channel, i);
-    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r,
+      ...(channel === 'chat' && patch.model !== undefined && patch.model !== r.model ? { contextWindow: undefined } : {}), ...patch } : r)));
   };
 
   const updateMediaRow = (ch: string, i: number, patch: Partial<ModelRow>) => {

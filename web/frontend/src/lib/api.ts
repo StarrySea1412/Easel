@@ -137,6 +137,8 @@ export interface OutputNode {
   type: 'dir' | 'file';
   path: string;              // outputs 下的相对路径，如 "short-drama/监控诡影/episodes/ep01"
   mtime?: number;
+  createdAt?: number | null;
+  preview?: string;
   kind?: FileKind;           // 仅 file
   size?: number;             // 仅 file
   children?: OutputNode[];   // 仅 dir
@@ -274,6 +276,55 @@ export function deleteIdea(id: string): Promise<{ ok: boolean }> {
 
 export function fetchSkills(): Promise<SkillItem[]> {
   return request<SkillItem[]>('/api/skills');
+}
+
+export interface ClawHubSkill {
+  id: string;
+  source: 'clawhub';
+  slug: string;
+  ownerHandle: string | null;
+  displayName: string;
+  summary: string;
+  version: string | null;
+  updatedAt: number | null;
+  canonicalUrl: string;
+  installationState: 'not_checked';
+}
+
+export interface ClawHubSearch {
+  source: 'clawhub';
+  query: string;
+  results: ClawHubSkill[];
+  count: number;
+  limit: number;
+  fetchedAt: string;
+  cacheHit: boolean;
+}
+
+export interface ClawHubDetail {
+  source: 'clawhub';
+  skill: ClawHubSkill & {
+    description: string;
+    descriptionTruncated: boolean;
+    topics: string[];
+    createdAt: number | null;
+    stats: Record<string, number | null> | null;
+  };
+  owner: { handle: string | null; displayName: string | null };
+  latestVersion: { version: string; createdAt: number | null; changelog: string } | null;
+  metadata: { os: string[]; systems: string[] } | null;
+  moderation: { isSuspicious: boolean; isMalwareBlocked: boolean; verdict: string | null; summary: string | null } | null;
+  fetchedAt: string;
+  cacheHit: boolean;
+}
+
+export function searchClawHub(query: string, signal?: AbortSignal): Promise<ClawHubSearch> {
+  return request(`/api/clawhub/search?${new URLSearchParams({ q: query, limit: '12' })}`, { signal });
+}
+
+export function fetchClawHubSkill(skill: ClawHubSkill, signal?: AbortSignal): Promise<ClawHubDetail> {
+  const params = skill.ownerHandle ? `?${new URLSearchParams({ owner: skill.ownerHandle })}` : '';
+  return request(`/api/clawhub/skills/${encodeURIComponent(skill.slug)}${params}`, { signal });
 }
 
 export function fetchSkillDetail(name: string): Promise<SkillDetail> {
@@ -1150,6 +1201,7 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
 
 export interface ModelRow {
+  contextWindow?: number | null;
   slot?: string;
   order: number;
   name: string;
@@ -1300,6 +1352,7 @@ export function applyImport(source: string, id: string, slot: string, path = '',
 }
 
 export interface ModelSaveRow {
+  contextWindow?: number | null;
   slot: string;
   name?: string;
   model: string;

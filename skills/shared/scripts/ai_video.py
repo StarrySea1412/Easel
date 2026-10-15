@@ -5,6 +5,8 @@
 配置来自环境变量或 .env（脚本从当前目录向上查找 .env）。
 
 Provider（--provider 或 env VIDEO_PROVIDER）：
+  glm               智谱 CogVideoX 异步视频。env GLM_VIDEO_API_KEY
+                    （可选 GLM_VIDEO_MODEL / GLM_VIDEO_BASE_URL）。默认 cogvideox-3。
   dashscope          阿里通义万相视频（Wan）。env DASHSCOPE_API_KEY
   ark                火山引擎 ARK（Seedance）。env ARK_API_KEY
   kling              快手可灵。env KLING_ACCESS_KEY / KLING_SECRET_KEY（JWT 鉴权）
@@ -33,8 +35,11 @@ import hashlib
 import hmac
 import http.client
 import io
+import ipaddress
+import socket
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -45,7 +50,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from model_registry import env_aliases, provider_ids, provider_required_env
+from model_registry import (GLM_VIDEO_DEFAULT_BASE, GLM_VIDEO_MAX_IMAGE_BYTES,
+                            GLM_VIDEO_MODELS, env_aliases, provider_ids,
+                            provider_required_env)
 
 try:
     # Windows 非交互式/管道 stdout 默认落到系统 ANSI 代码页（如 cp1252），打印中文
@@ -156,6 +163,8 @@ PROVIDERS = provider_ids("video")
 #   需 `probe-dialogue` 真机探针或 VIDEO_CAPABILITIES_JSON 确认后才置 True）。
 # 短剧会区分未实测默认与探针结论：未实测仍 native-first，探针确认不忠实才预留口型后配音。
 PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "glm": {"native_audio": True, "dialogue": False, "dialogue_faithful": False,
+            "audio_reference": False, "audio_field": "with_audio", "audio_location": "root"},
     "dashscope": {"native_audio": False, "dialogue": False, "dialogue_faithful": False, "audio_reference": False},
     "ark": {"native_audio": True, "dialogue": True, "dialogue_faithful": False, "audio_reference": False,
             "audio_field": "generate_audio", "audio_location": "root"},
@@ -296,6 +305,7 @@ def resolve_model(provider: str, explicit: str | None = None, *, image: bool = F
     if explicit and explicit.strip():
         return explicit.strip()
     env_names = {
+        "glm": ("GLM_VIDEO_MODEL",),
         "dashscope": ("DASHSCOPE_VIDEO_MODEL",),
         "ark": ("ARK_MODEL",),
         "openai-compatible": ("VIDEO_MODEL",),
@@ -307,6 +317,7 @@ def resolve_model(provider: str, explicit: str | None = None, *, image: bool = F
         if value:
             return value
     defaults = {
+        "glm": GLM_VIDEO_MODELS[0],
         "dashscope": DEFAULT_DASHSCOPE_MODEL,
         "ark": DEFAULT_ARK_MODEL,
         "openai-compatible": "",
@@ -713,7 +724,251 @@ def generate_agnes(args: argparse.Namespace, image: str | None) -> Path:
     return download_video(url, Path(args.output))
 
 
+# ── provider: glm（智谱 CogVideoX）─────────────────────────
+
+GLM_MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+
+
+def _glm_https_url(url: str):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+                or parsed.password is not None or parsed.fragment or port == 0
+                or re.search(r"[\x00-\x20\x7f\\]", url)):
+            raise ValueError
+        return parsed
+    except (ValueError, TypeError):
+        fail("智谱视频地址必须是无账号密码的有效 HTTPS 地址")
+
+
+class _GLMNoAPIRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Never forward the video API key to a redirect target or re-submit a POST.
+        return None
+
+
+def _glm_api_request(url: str, headers: dict[str, str], *, payload=None, timeout=60) -> dict:
+    _glm_https_url(url)
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET",
+                                     headers={"User-Agent": UA, "Content-Type": "application/json", **headers})
+    opener = urllib.request.build_opener(_GLMNoAPIRedirect())
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            fail("智谱视频接口响应过大，请核查服务地址")
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError
+    except urllib.error.HTTPError as exc:
+        hints = {401: "视频 API Key 无效或已过期", 403: "当前凭据无权访问视频服务",
+                 429: "视频服务限流，请核查并发额度后重试"}
+        hint = hints.get(exc.code, "请核查视频服务配置或服务商任务记录")
+        # Provider responses may echo credentials, prompts, or signed URLs.
+        fail(f"智谱视频接口返回 HTTP {exc.code}：{hint}；请求未自动重试")
+    except (ValueError, UnicodeError):
+        fail("智谱视频接口未返回有效的 JSON 对象，请核查视频服务地址")
+    except (OSError, urllib.error.URLError, http.client.HTTPException):
+        fail("智谱视频接口连接失败或超时；远端任务可能已受理，请先核查任务记录，避免重复提交")
+    if result.get("error"):
+        error = result["error"]
+        code = error.get("code") if isinstance(error, dict) else None
+        detail = f"（代码 {code}）" if isinstance(code, (str, int)) and re.fullmatch(r"[0-9]{1,12}", str(code)) else ""
+        fail(f"智谱视频接口返回错误{detail}，请核查模型配置或服务商任务记录")
+    return result
+
+
+def _glm_task_status(result: dict, *, submitted=False) -> str:
+    status = result.get("task_status")
+    if submitted and status is None:
+        return "PROCESSING"  # A task ID is sufficient to start the result query.
+    if not isinstance(status, str):
+        fail("智谱视频响应缺少有效的 task_status，未下载结果")
+    status = status.strip().upper()
+    if status in {"FAIL", "FAILED", "ERROR", "CANCELLED", "CANCELED"}:
+        fail(f"智谱视频任务失败（{status}），请查看服务商任务记录")
+    if status not in {"PROCESSING", "SUCCESS"}:
+        fail("智谱视频返回未知任务状态，已停止等待；请核查服务商任务记录")
+    return status
+
+
+def _glm_remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        fail("智谱视频任务等待超时；服务商可能仍在生成并计费，请先核查任务记录，避免重复提交")
+    return remaining
+
+
+def _glm_public_video_url(url: str):
+    parsed = _glm_https_url(url)
+    try:
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+            fail("智谱视频结果地址未通过公开网络检查")
+    except (OSError, ValueError):
+        fail("智谱视频结果地址无法解析")
+    return addresses
+
+
+class _GLMPublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        # Connect to the addresses just checked; do not resolve the hostname again
+        # after validation. TLS still verifies the original hostname and sends SNI.
+        authority = f"[{self.host}]" if ":" in self.host else self.host
+        addresses = _glm_public_video_url(f"https://{authority}:{self.port}")
+        error = OSError("无法连接视频下载地址")
+        for family, kind, protocol, _, address in addresses:
+            sock = socket.socket(family, kind, protocol)
+            try:
+                sock.settimeout(self.timeout)
+                sock.connect(address)
+                self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+                return
+            except OSError as exc:
+                sock.close()
+                error = exc
+        raise error
+
+
+class _GLMDownloadHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_GLMPublicHTTPSConnection, request, context=self._context)
+
+
+class _GLMVideoRedirect(urllib.request.HTTPRedirectHandler):
+    max_redirections = 5
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _glm_public_video_url(newurl)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected:
+            for header in ("Authorization", "Api-key", "X-api-key", "Cookie"):
+                redirected.remove_header(header)
+        return redirected
+
+
+def _download_glm_video(url: str, output: Path, timeout: float = 300) -> Path:
+    deadline = time.monotonic() + timeout
+    _glm_public_video_url(url)
+    # Direct connections let the downloader validate and pin every destination IP.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                         _GLMDownloadHTTPSHandler(), _GLMVideoRedirect())
+    temporary = output.with_name(output.name + ".glm-download")
+    created = False
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        request = urllib.request.Request(url, headers={"User-Agent": UA})
+        with opener.open(request, timeout=min(120, _glm_remaining(deadline))) as response:
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            if content_type in {"text/html", "application/json"} or content_type.startswith("image/"):
+                fail("智谱视频下载返回了网页、错误信息或图片，未保存为视频")
+            length = response.headers.get("Content-Length")
+            if length is not None and (not length.isdigit() or int(length) > GLM_MAX_DOWNLOAD_BYTES):
+                fail("智谱视频下载长度无效或超过 512MiB 上限")
+            total = 0
+            with temporary.open("xb") as stream:
+                created = True
+                while True:
+                    _glm_remaining(deadline)
+                    chunk = response.read(1024 * 1024)
+                    _glm_remaining(deadline)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > GLM_MAX_DOWNLOAD_BYTES:
+                        fail("智谱视频结果超过 512MiB 下载上限")
+                    stream.write(chunk)
+            if not total or (length is not None and total != int(length)):
+                fail("智谱视频下载为空或不完整，未保存为成功结果")
+        os.replace(temporary, output)
+    except (OSError, urllib.error.URLError, http.client.HTTPException):
+        fail("智谱视频下载失败或超时；远端任务可能已经完成，请查看服务商任务记录")
+    finally:
+        if created:
+            temporary.unlink(missing_ok=True)
+    return output
+
+
+def _glm_reference(image: str) -> str:
+    if image.startswith(("http://", "https://")):
+        try:
+            parsed = urllib.parse.urlsplit(image)
+            if (not parsed.hostname or parsed.username is not None or parsed.password is not None
+                    or parsed.port == 0 or re.search(r"[\x00-\x20\x7f\\]", image)):
+                raise ValueError
+        except ValueError:
+            fail("智谱参考图 URL 无效，请使用可访问的图片地址")
+        return image
+    from PIL import Image, ImageOps
+    buffer = io.BytesIO()
+    try:
+        with Image.open(image) as reference:
+            if getattr(reference, "n_frames", 1) != 1:
+                fail("智谱参考图须为单张静态图片")
+            reference = ImageOps.exif_transpose(reference)
+            mode = "RGBA" if "A" in reference.getbands() or "transparency" in reference.info else "RGB"
+            reference.convert(mode).save(buffer, format="PNG")
+    except (OSError, ValueError, Image.DecompressionBombError):
+        fail("智谱参考图无法读取")
+    if buffer.tell() > GLM_VIDEO_MAX_IMAGE_BYTES:
+        fail("智谱参考图转换为 PNG 后须不超过 5MiB，请压缩后再提交")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def generate_glm(args: argparse.Namespace, image: str | None) -> Path:
+    model = resolve_model("glm", args.model, image=image is not None)
+    if model not in GLM_VIDEO_MODELS:
+        fail("智谱视频适配支持 cogvideox-3、cogvideox-2、cogvideox-flash")
+    prompt = (args.prompt or "").strip()
+    if (not prompt and not image) or len(prompt) > 512:
+        fail("智谱视频提示词最多 512 字，提示词和参考图不能同时为空")
+    if args.duration is not None and (model != "cogvideox-3" or type(args.duration) is not int
+                                      or args.duration not in (5, 10)):
+        fail("只有 cogvideox-3 支持本适配中的 5/10 秒时长选项；其它模型使用服务端默认")
+    sizes = {"16:9": "1920x1080", "9:16": "1080x1920", "1:1": "1024x1024"}
+    if args.ratio is not None and args.ratio not in sizes:
+        fail("智谱视频画幅须为 16:9、9:16 或 1:1")
+    if args.timeout <= 0 or args.poll_interval < 0:
+        fail("智谱视频超时须大于零，轮询间隔不能为负数")
+    payload = {"model": model, "prompt": prompt, "fps": 30, "quality": "speed"}
+    if args.ratio:
+        payload["size"] = sizes[args.ratio]
+    if args.duration is not None:
+        payload["duration"] = args.duration
+    if image:
+        payload["image_url"] = _glm_reference(image)
+    _put_audio(payload, None, args, "glm", model)
+    base = (env_lookup("GLM_VIDEO_BASE_URL") or GLM_VIDEO_DEFAULT_BASE).rstrip("/")
+    if _glm_https_url(base).query:
+        fail("智谱视频 API 根地址不能包含查询参数")
+    headers = {"Authorization": "Bearer " + require_env("GLM_VIDEO_API_KEY")}
+    deadline = time.monotonic() + args.timeout
+    submitted = _glm_api_request(base + "/videos/generations", headers, payload=payload,
+                                 timeout=min(60, _glm_remaining(deadline)))
+    _glm_task_status(submitted, submitted=True)
+    identifier = submitted.get("id")
+    if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", identifier):
+        fail("智谱未返回有效的视频任务 ID，请先核查任务记录，避免重复提交")
+    print(f"  智谱任务已提交：{identifier}，正在查询结果", file=sys.stderr)
+    task_url = base + "/async-result/" + urllib.parse.quote(identifier, safe="")
+    while True:
+        result = _glm_api_request(task_url, headers, timeout=min(60, _glm_remaining(deadline)))
+        _glm_remaining(deadline)
+        if _glm_task_status(result) == "SUCCESS":
+            break
+        print("  智谱视频处理中...", file=sys.stderr)
+        time.sleep(min(args.poll_interval, _glm_remaining(deadline)))
+    videos = result.get("video_result")
+    url = videos[0].get("url") if isinstance(videos, list) and videos and isinstance(videos[0], dict) else None
+    if not isinstance(url, str) or not url:
+        fail("智谱任务成功但未返回视频下载地址，请查看服务商任务记录")
+    return _download_glm_video(url, Path(args.output), timeout=_glm_remaining(deadline))
+
+
 GENERATORS = {
+    "glm": generate_glm,
     "dashscope": generate_dashscope,
     "ark": generate_ark,
     "kling": generate_kling,

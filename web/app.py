@@ -68,6 +68,7 @@ from image_reverse import (
 )
 import model_health
 import channel_profiles
+from output_metadata import creation_time, text_cover
 try:
     from easel.gateway_questions import (
         GatewayClient, GatewayQuestionError, GatewayUnsupportedError,
@@ -1224,12 +1225,28 @@ def _file_kind(name: str) -> str:
 
 
 def _file_meta(f: Path, rel: str) -> dict:
+    created = None
     try:
         st = f.stat()
         mtime, size = int(st.st_mtime), st.st_size
+        created = creation_time(f, st)
     except OSError:
         mtime, size = 0, 0
-    return {'name': f.name, 'path': rel, 'kind': _file_kind(f.name), 'mtime': mtime, 'size': size}
+    kind = _file_kind(f.name)
+    return {'name': f.name, 'path': rel, 'kind': kind, 'mtime': mtime, 'size': size,
+            'createdAt': created, 'preview': text_cover(f) if kind == 'text' else ''}
+
+
+def _output_listing_entry(path: Path) -> bool:
+    """Do not follow links/junctions when exposing bounded text previews."""
+    try:
+        stat = path.lstat()
+        if path.is_symlink() or getattr(stat, 'st_file_attributes', 0) & 0x400:
+            return False
+        path.resolve(strict=True).relative_to(OUTPUTS_DIR.resolve())
+        return path.is_file() or path.is_dir()
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 def _build_output_node(path: Path, rel: str) -> dict:
@@ -1237,12 +1254,17 @@ def _build_output_node(path: Path, rel: str) -> dict:
     if path.is_dir():
         children = []
         for c in sorted(path.iterdir()):
-            if c.name.startswith('.'):   # 嵌套层只跳隐藏文件；_base.mp4 等以 _ 开头的产物要保留
+            if c.name.startswith('.') or not _output_listing_entry(c):   # 保留 _base.mp4 等实际产物
                 continue
-            children.append(_build_output_node(c, f'{rel}/{c.name}'))
-        mtime = max((x['mtime'] for x in children), default=int(path.stat().st_mtime))
+            try:
+                children.append(_build_output_node(c, f'{rel}/{c.name}'))
+            except OSError:  # A concurrent delete or unreadable folder must not hide the rest.
+                continue
+        stat = path.stat()
+        mtime = max((x['mtime'] for x in children), default=int(stat.st_mtime))
         file_count = sum(x.get('fileCount', 1) if x['type'] == 'dir' else 1 for x in children)
         return {'name': path.name, 'type': 'dir', 'path': rel, 'mtime': mtime,
+                'createdAt': creation_time(path, stat),
                 'children': children, 'fileCount': file_count}
     m = _file_meta(path, rel)
     m['type'] = 'file'
@@ -1296,7 +1318,7 @@ def get_output_tree() -> list[dict]:
     for e in sorted(OUTPUTS_DIR.iterdir()):
         # 跳过系统目录(_login/_publish/...)和隐藏项；outputs 根部的真实文件
         # 也必须可见，否则执行卡核验成功后仍无法跳转到实际产物。
-        if e.name.startswith('.') or e.name.startswith('_'):
+        if e.name.startswith('.') or e.name.startswith('_') or not _output_listing_entry(e):
             continue
         if e.is_file():
             items.append(_build_output_node(e, e.name))
@@ -1738,6 +1760,13 @@ def _model_channels() -> dict:
     except Exception:  # noqa: BLE001
         pass
     chat_rows.extend(custom_rows)
+    for row in chat_rows:
+        pkey = row['name'] if row.get('slot') == 'custom' else row.get('slot')
+        provider = providers.get(pkey)
+        models = provider.get('models') if isinstance(provider, dict) else []
+        models = models if isinstance(models, list) else []
+        selected = next((item for item in models if isinstance(item, dict) and item.get('id') == row['model']), {})
+        row['contextWindow'] = selected.get('contextWindow')
 
     sf = bool((env.get("SILICONFLOW_API_KEY") or "").strip())
     trans_rows = [
@@ -1901,14 +1930,20 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 prov['apiKey'] = key
                 changed = True
             if model:
-                models = prov.get('models') if isinstance(prov.get('models'), list) and prov.get('models') else [{}]
-                if not isinstance(models[0], dict):
-                    models = [{}]
-                if models[0].get('id') != model:
-                    models[0]['id'] = model
-                    changed = True
-                if not models[0].get('name'):
-                    models[0]['name'] = model
+                previous_models = prov.get('models') if isinstance(prov.get('models'), list) else []
+                target = next((dict(item) for item in previous_models if isinstance(item, dict) and item.get('id') == model), {'id': model, 'name': model})
+                if not target.get('name'):
+                    target['name'] = model
+                if 'contextWindow' in vals:
+                    window = vals['contextWindow']
+                    if window is None:
+                        target.pop('contextWindow', None)
+                    else:
+                        if isinstance(target.get('maxTokens'), int) and target['maxTokens'] > window:
+                            raise ValueError('上下文窗口不能小于此模型已配置的输出上限')
+                        target['contextWindow'] = window
+                models = [target, *[item for item in previous_models if isinstance(item, dict) and item.get('id') != model]]
+                if models != previous_models:
                     changed = True
                 prov['models'] = models
         if primary_ref:
@@ -1951,6 +1986,22 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
             before = _model_file_snapshot()
         except Exception:
             raise HTTPException(500, '无法读取现有配置，未保存；请检查配置文件和访问权限') from None
+        if providers:
+            config_bytes = before.get(openclaw_state_dir() / 'openclaw.json')
+            try:
+                existing = json.loads(config_bytes or b'{}').get('models', {}).get('providers', {})
+                for pkey, vals in providers.items():
+                    window = vals.get('contextWindow')
+                    if window is None:
+                        continue
+                    if not vals.get('model'):
+                        raise HTTPException(400, '请先填写模型名称，再设置上下文窗口')
+                    selected = next((item for item in existing.get(pkey, {}).get('models', [])
+                                     if isinstance(item, dict) and item.get('id') == vals['model']), {})
+                    if isinstance(selected.get('maxTokens'), int) and selected['maxTokens'] > window:
+                        raise HTTPException(400, '上下文窗口不能小于此模型已配置的输出上限')
+            except (ValueError, TypeError, AttributeError):
+                raise HTTPException(500, '无法读取现有模型配置，未保存；请检查 OpenClaw 配置') from None
         try:
             if updates:
                 _write_env_direct(updates)
@@ -1986,6 +2037,7 @@ class ModelSaveRow(BaseModel):
     key2: str = ""
     primary: bool = False
     protocol: str = ""
+    contextWindow: int | None = Field(default=None, ge=1024, le=10000000, strict=True)
 
 
 class ModelSaveRequest(BaseModel):
@@ -2164,6 +2216,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
                 if authoritative_base:
                     provider_updates[pkey]['base'] = base or authoritative_base
                     provider_updates[pkey]['key'] = _cur_env[_ke].strip()
+        if is_chat and pkey and 'contextWindow' in row.model_fields_set:
+            provider_updates[pkey]['contextWindow'] = row.contextWindow
         if is_chat and pkey and getattr(row, 'primary', False) and model:
             primary_ref = f'{pkey}/{model}'
     if not updates and not provider_updates and not primary_ref and not req.deletedProviders:
@@ -6522,6 +6576,9 @@ from videogen import VideoService, create_router as _videogen_router
 _VIDEO_SERVICE = VideoService(PROJECT_ROOT, lambda: OUTPUTS_DIR, lambda: IMAGEGEN_INPUT_DIR,
                               _read_env, _proxy_env)
 app.include_router(_videogen_router(_VIDEO_SERVICE))
+
+from clawhub import create_router as _clawhub_router
+app.include_router(_clawhub_router())
 
 
 def _imagegen_dimensions(path: Path) -> dict[str, int]:

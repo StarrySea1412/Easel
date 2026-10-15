@@ -6,6 +6,7 @@ import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCal
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
+import ChatUsageDialog from './ChatUsageDialog';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
@@ -115,6 +116,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
+      {!isImported && <ChatUsageDialog key={session.id} sessionId={session.id} refreshKey={session.messages.length} streaming={isStreaming} engine={session.engine} />}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>
