@@ -111,6 +111,26 @@ test('quote verification checks only 原文依据 quotes against the material', 
     'quotes without quote marks are not invented');
 });
 
+test('structure verification flags missing chapters and incomplete findings', () => {
+  const full = [
+    '## 报告摘要', '## 1. 研究对象与材料范围', '## 2. 内容定位与价值承诺', '## 3. 标题与开头的具体写法',
+    '## 4. 全文结构与关键转折', '## 5. 关键发现与替代解释',
+    '### 发现1：x', '- **原文依据**：“a”', '- **分析过程**：b', '- **可能作用**：c', '- **适用边界**：d',
+    '## 6. 表达方式与可信度', '## 7. 可迁移方法与创作方案', '## 8. 验证计划',
+  ].join('\n');
+  const ok = reportLib.verifyStructure(full);
+  assert.deepEqual(ok.missingSections, []);
+  assert.equal(ok.findings, 1);
+  assert.equal(ok.incompleteFindings, 0);
+  assert.ok(reportLib.structureLine(ok).includes('章节齐全'));
+  assert.ok(reportLib.structureLine(ok).includes('都带四要素'));
+
+  const bad = reportLib.verifyStructure('## 报告摘要\n### 发现1：x\n- **原文依据**：“a”\n');
+  assert.ok(bad.missingSections.includes('验证计划'));
+  assert.equal(bad.incompleteFindings, 1);
+  assert.ok(reportLib.structureLine(bad).includes('四要素不全'));
+});
+
 test('text file reading returns local content without touching the server', async () => {
   const file = new window.File(['一段从文件导入的正文'], 'note.txt', { type: 'text/plain' });
   assert.equal(await reportLib.readTextFile(file), '一段从文件导入的正文');
@@ -322,6 +342,12 @@ test('report quotes are verified against the submitted material', async t => {
   assert.ok(check.className.includes('warn'));
   const details = view.container.querySelector('.breakdown-quote-details');
   assert.ok(details && details.textContent.includes('材料里没有的句子'), 'missing quote is listed for review');
+
+  const structure = view.container.querySelector('.breakdown-structure-check');
+  assert.ok(structure, 'structure check line renders with the report');
+  assert.ok(structure.textContent.includes('缺章节'), 'missing chapters are named');
+  assert.ok(structure.textContent.includes('没有识别到'), 'missing findings section is named');
+  assert.ok(structure.className.includes('warn'));
 });
 
 test('link-only failures offer pasting the text instead', async t => {

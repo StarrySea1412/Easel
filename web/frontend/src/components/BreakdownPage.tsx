@@ -3,7 +3,8 @@ import { createIdea, stopChat, streamChat } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import {
   BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
-  materialLine, readTextFile, reportScopeNote, summarizeMaterial, textFileProblem, verifyQuotes,
+  materialLine, readTextFile, reportScopeNote, structureLine, summarizeMaterial, textFileProblem,
+  verifyQuotes, verifyStructure,
 } from '../lib/breakdownReport';
 import {
   addBreakdownRecord, loadBreakdownDraft, loadBreakdownHistory, newBreakdownRecord,
@@ -50,6 +51,7 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
   const analyzedSummary = useMemo(() => summarizeMaterial(analyzed), [analyzed]);
   const isExample = input === EXAMPLE_MATERIAL;
   const quoteCheck = useMemo(() => (result ? verifyQuotes(result, analyzed) : null), [result, analyzed]);
+  const structureCheck = useMemo(() => (result ? verifyStructure(result) : null), [result]);
 
   useEffect(() => { saveBreakdownDraft(input); }, [input]);
 
@@ -304,6 +306,11 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
                   </details>
                 )}
               </>
+            )}
+            {structureCheck && (
+              <p className={`breakdown-structure-check${structureCheck.missingSections.length || structureCheck.incompleteFindings || structureCheck.findings === 0 ? ' warn' : ''}`}>
+                {structureLine(structureCheck)}
+              </p>
             )}
             <div className="skill-body-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(result) }} />
           </div>
