@@ -1,0 +1,7 @@
+{
+  "id": "easel-agent-safety",
+  "name": "Easel Agent Safety",
+  "description": "Require the configured Agent startup model and bound delegation limits.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

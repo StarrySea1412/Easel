@@ -38,7 +38,8 @@ function TaskForm({ session, stream, stopping = false, stopError, onSubmit, onSt
   const recovering = Boolean(targetId && session?.pendingTurnId && session.messages.at(-1)?.role === 'user' && !stream);
   const busy = Boolean(targetId && (stream || stopping || recovering));
   const selected = capability?.options.find(option => option.id === selection.modelRef && option.provider === selection.provider && option.configured);
-  const specificReady = !loading && capability?.available && Boolean(selected);
+  const agentReady = capability?.agentRuntime ? capability.agentRuntime.ready : true;
+  const specificReady = !loading && agentReady && capability?.available && Boolean(selected);
   const last = session?.messages.at(-1);
   const requestedModel = stream?.requestedModelRef || last?.requestedModelRef;
 
@@ -56,7 +57,7 @@ function TaskForm({ session, stream, stopping = false, stopError, onSubmit, onSt
   useEffect(() => { if (!stream && !stopping) sending.current = false; }, [stream, stopping]);
 
   const submit = () => {
-    if (!message.trim() || busy || sending.current || (routeMode === 'specific' && !specificReady)) return;
+    if (!message.trim() || busy || sending.current || !agentReady || (routeMode === 'specific' && !specificReady)) return;
     sending.current = true;
     try {
       const accepted = onSubmit({ sessionId: targetId, message: message.trim(), ...(routeMode === 'specific' ? { modelRef: selection.modelRef } : {}) });
@@ -94,8 +95,9 @@ function TaskForm({ session, stream, stopping = false, stopError, onSubmit, onSt
         {!loading && capability?.available && selection.modelRef && !selected && <p className="office-control-error" role="alert">所选模型已不在当前可用配置中，请重新选择。原选择不会自动替换。</p>}
         <button type="button" className="office-control-link" disabled={loading || busy} onClick={() => setRevision(value => value + 1)}>刷新模型选项</button>
       </div>}
+      {!loading && !agentReady && <p className="office-control-error" role="alert">{capability?.agentRuntime?.reason || 'Agent 尚未配置启动模型，当前不会启动子 Agent。请先在设置 → Agent 协作中选择模型。'}</p>}
       <div className="office-task-actions">
-        <button type="submit" className="office-button office-button-primary" disabled={!message.trim() || busy || (routeMode === 'specific' && !specificReady)}>{targetId ? '发送到当前会话' : '开始任务'}</button>
+        <button type="submit" className="office-button office-button-primary" disabled={!message.trim() || busy || !agentReady || (routeMode === 'specific' && !specificReady)}>{targetId ? '发送到当前会话' : '开始任务'}</button>
         {session && onOpenChat && <button type="button" className="office-button" onClick={() => onOpenChat(session.id)}>打开对话</button>}
         {stream && session && onStop && <button type="button" className="office-button office-control-stop" disabled={stopping} onClick={() => onStop(session.id)}>{stopping ? '等待停止确认…' : '停止本轮任务'}</button>}
       </div>

@@ -1406,6 +1406,40 @@ export function fetchModelChannels(): Promise<ModelChannelsResponse> {
   return request('/api/settings/models');
 }
 
+export interface AgentRuntimeModelOption { id: string; provider: string; model: string; label: string; configured: boolean }
+export interface AgentRuntimeSettings {
+  enabled: boolean;
+  ready: boolean;
+  startupModel: string | null;
+  options: AgentRuntimeModelOption[];
+  maxConcurrent: number;
+  maxChildrenPerAgent: number;
+  maxSpawnDepth: number;
+  runTimeoutSeconds: number;
+  guard: 'strict_model' | 'strict_model_and_spawn_deny';
+  reason: string | null;
+  note?: string;
+}
+
+export function fetchAgentRuntimeSettings(): Promise<AgentRuntimeSettings> {
+  return request('/api/settings/agent-runtime');
+}
+
+export function saveAgentRuntimeSettings(value: {
+  enabled: boolean;
+  startupModel: string | null;
+  maxConcurrent: number;
+  maxChildrenPerAgent: number;
+  maxSpawnDepth: number;
+  runTimeoutSeconds: number;
+}): Promise<AgentRuntimeSettings> {
+  return request('/api/settings/agent-runtime', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+}
+
 // （保存接口见上方 saveModelConfig）
 
 export interface SelftestResult { baseUrl: string; ok: boolean; ms: number; detail?: string }

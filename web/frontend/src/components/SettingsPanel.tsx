@@ -1,6 +1,7 @@
 import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
 import AppearanceSettings from './settings/AppearanceSettings';
+import AgentRuntimeSettings from './settings/AgentRuntimeSettings';
 import ConversationBackupCard from './settings/ConversationBackupCard';
 import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
 import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
@@ -33,7 +34,7 @@ import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImp
 import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
 import { IconText, IconMic, IconMusic } from './icons';
 
-export type SettingsSection = 'appearance' | 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
+export type SettingsSection = 'appearance' | 'agent-runtime' | 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
 const CHANNELS: { id: Chan; label: string; icon: ComponentType<{ size?: number }> }[] = [
@@ -696,6 +697,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             <button aria-current={sec === 'appearance' ? 'page' : undefined} className={`snav${sec === 'appearance' ? ' active' : ''}`} onClick={() => setSec('appearance')}>
               <IconSlidersHorizontal size={16} />外观<small>浅色 / 夜间</small>
             </button>
+            <button aria-current={sec === 'agent-runtime' ? 'page' : undefined} className={`snav${sec === 'agent-runtime' ? ' active' : ''}`} onClick={() => setSec('agent-runtime')}>
+              <IconSlidersHorizontal size={16} />Agent 协作<small>速度 / 费用</small>
+            </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型与渠道
             </button>
@@ -718,6 +722,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
           <div className="settings-main">
           {sec === 'appearance' && <AppearanceSettings />}
+          {sec === 'agent-runtime' && <AgentRuntimeSettings onOpenModels={() => { setSec('model'); setChan('chat'); }} />}
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
@@ -1133,7 +1138,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' || sec === 'appearance' ? '通用偏好即时应用，保存在当前浏览器。' : '修改后请保存。'}
+          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' || sec === 'appearance' ? '通用偏好即时应用，保存在当前浏览器。' : sec === 'agent-runtime' ? 'Agent 设置保存后同步到 OpenClaw；网关重载后对新任务生效。' : '修改后请保存。'}
         </div>
       </div>
     </div>

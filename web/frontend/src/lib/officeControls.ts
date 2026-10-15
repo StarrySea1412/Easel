@@ -15,6 +15,7 @@ export interface OfficeModelCapability {
   defaultModelRef?: string;
   options: OfficeModelOption[];
   reason: string;
+  agentRuntime?: { ready: boolean; startupModel: string | null; reason: string | null };
 }
 export interface OfficeControls extends OfficeControlIdentity {
   model: OfficeModelCapability;
@@ -55,7 +56,12 @@ export function decodeOfficeModelCapability(value: unknown): OfficeModelCapabili
   return { available: model.available === true && scope !== 'unavailable', scope,
     currentModelRef: typeof model.currentModelRef === 'string' ? text(model.currentModelRef) : null,
     ...(typeof model.defaultModelRef === 'string' ? {defaultModelRef:text(model.defaultModelRef)} : {}),
-    options, reason: text(model.reason, '当前暂不支持指定模型。') };
+    options, reason: text(model.reason, '当前暂不支持指定模型。'),
+    ...(record(model.agentRuntime) ? { agentRuntime: {
+      ready: model.agentRuntime.ready === true,
+      startupModel: typeof model.agentRuntime.startupModel === 'string' ? text(model.agentRuntime.startupModel) : null,
+      reason: typeof model.agentRuntime.reason === 'string' ? text(model.agentRuntime.reason) : null,
+    } } : {}) };
 }
 
 export function decodeOfficeControls(value: unknown, expected: OfficeControlIdentity): OfficeControls {

@@ -495,3 +495,10 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Fixed the 138 Agent failures: accurate skill/reference paths, read-only server workspace guidance, safe saved-script execution, curl/file availability, a reachable Bing RSS search provider, and a sandboxed Chromium sidecar with real renderer health checks.
 - Added actual installed OpenClaw/latest version detection and bounded official changelog evidence. The Environment Installation card can start a sourced Agent upgrade assessment; it never upgrades or restarts automatically.
 - Deployed and verified 0.2.8 on 138. OpenClaw remains pinned to 2026.9.6 while official latest is 2026.10.3. The Agent assessment separates official facts, conditional relevance, unknowns, compatibility gates and rollback triggers.
+## 2026-10-16 · Agent parallelism and startup-model cost guard / Agent并行与启动模型费用保护
+
+- Add Settings → Agent collaboration with a required configured startup model, bounded concurrency, child count, depth and timeout. / 设置新增Agent协作，启动模型必须来自已配置完整模型，并限制并发、子任务、层级和超时。
+- Deny `sessions_spawn` when no startup model is saved; lock child tasks to the selected model and reject over-limit timeouts through a local OpenClaw 2026.9.6 safety plugin. / 未保存启动模型时阻断` sessions_spawn`，子任务锁定所选模型，安全插件拒绝超时越界，避免静默调用昂贵模型。
+- Local backend/frontend regression, lint/build, HTTP and browser entry checks passed. No paid inference, Agent task, 138 deployment or installer release. / 后端前端回归、lint/构建、HTTP与浏览器入口检查通过；未发起付费推理或Agent任务，138和安装包未更新。见[验证记录](docs/agent-runtime-safety-2026-10-16.md)。
+
+\n

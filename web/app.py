@@ -512,6 +512,8 @@ async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
     from easel.storage_location import apply_pending
     await asyncio.to_thread(apply_pending, DATA_DIR)
+    # Install the fail-closed Agent guard before serving any local request.
+    await asyncio.to_thread(_sync_agent_safety_guard)
     try:
         await asyncio.to_thread(_publish_receipt_store().recover_interrupted)
     except local_records.RecordError as exc:
@@ -1670,6 +1672,7 @@ def _mask_key(v: str) -> str:
 _CHAT_PROTOCOLS = {'openai': 'openai', 'anthropic': 'anthropic', 'relay': 'anthropic'}
 _CHAT_MODEL_KEYS = {'openai': 'OPENAI_MODEL', 'anthropic': 'ANTHROPIC_MODEL', 'relay': 'EASEL_LLM_MODEL'}
 _MODEL_CONFIG_LOCK = threading.RLock()
+AGENT_SAFETY_PLUGIN = PROJECT_ROOT / 'openclaw' / 'easel-agent-safety'
 
 
 def _chat_model(slot: str, env: dict, providers: dict | None = None) -> str:
@@ -1828,6 +1831,155 @@ def _model_channels() -> dict:
 async def api_settings_models():
     """模型通道：chat / transcribe（含可编辑的原值；key 只回脱敏）。"""
     return _model_channels()
+
+
+def _agent_runtime_config() -> dict:
+    """Return the cost and concurrency guard for OpenClaw sub-agents.
+
+    The guard is deliberately stored in the same OpenClaw config that the
+    gateway reads.  A missing startup model means ``sessions_spawn`` is denied
+    in ``tools.deny``; this prevents an agent from silently inheriting the
+    caller's (possibly expensive) model.
+    """
+    import office_controls
+
+    path = openclaw_state_dir() / 'openclaw.json'
+    try:
+        config = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+    except (OSError, ValueError):
+        config = {}
+    defaults = config.get('agents', {}).get('defaults', {}) if isinstance(config.get('agents'), dict) else {}
+    subagents = defaults.get('subagents', {}) if isinstance(defaults, dict) else {}
+    subagents = subagents if isinstance(subagents, dict) else {}
+    model = subagents.get('model')
+    if isinstance(model, dict):
+        model = model.get('primary')
+    model = model.strip() if isinstance(model, str) else ''
+    options = office_controls.configured_models(path)
+    option_ids = {row['id'] for row in options}
+    tools = config.get('tools', {}) if isinstance(config.get('tools'), dict) else {}
+    denied = tools.get('deny', []) if isinstance(tools.get('deny'), list) else []
+    enabled = bool(model and model in option_ids and 'sessions_spawn' not in denied)
+    return {
+        'enabled': enabled,
+        'ready': enabled,
+        'startupModel': model or None,
+        'options': options,
+        'maxConcurrent': _bounded_int(subagents.get('maxConcurrent'), 4, 1, 8),
+        'maxChildrenPerAgent': _bounded_int(subagents.get('maxChildrenPerAgent'), 3, 1, 5),
+        'maxSpawnDepth': _bounded_int(subagents.get('maxSpawnDepth'), 1, 0, 2),
+        'runTimeoutSeconds': _bounded_int(subagents.get('runTimeoutSeconds'), 900, 60, 3600),
+        'guard': 'strict_model_and_spawn_deny' if not enabled else 'strict_model',
+        'reason': None if enabled else '请先选择启动模型并保存；未配置前不会启动 Agent，也不会继承当前对话模型。',
+    }
+
+
+def _sync_agent_safety_guard() -> None:
+    """Install the local fail-closed hook and tool deny before Agent UI use."""
+    import office_controls
+
+    path = openclaw_state_dir() / 'openclaw.json'
+    with _MODEL_CONFIG_LOCK:
+        try:
+            config = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        except (OSError, ValueError):
+            return
+        changed = False
+        plugins = config.setdefault('plugins', {})
+        if isinstance(plugins, dict):
+            load = plugins.setdefault('load', {})
+            paths = load.setdefault('paths', []) if isinstance(load, dict) else []
+            if isinstance(load, dict) and isinstance(paths, list) and str(AGENT_SAFETY_PLUGIN) not in paths:
+                paths.append(str(AGENT_SAFETY_PLUGIN)); changed = True
+            allowed = plugins.setdefault('allow', [])
+            if isinstance(allowed, list) and 'easel-agent-safety' not in allowed:
+                allowed.append('easel-agent-safety'); changed = True
+        model = config.get('agents', {}).get('defaults', {}).get('subagents', {}).get('model') if isinstance(config.get('agents'), dict) else None
+        if isinstance(model, dict): model = model.get('primary')
+        options = office_controls.configured_models(path)
+        valid = isinstance(model, str) and model.strip() in {row['id'] for row in options}
+        tools = config.setdefault('tools', {})
+        if not isinstance(tools, dict): tools = {}; config['tools'] = tools
+        denied = tools.get('deny') if isinstance(tools.get('deny'), list) else []
+        next_denied = [item for item in denied if item != 'sessions_spawn']
+        if not valid: next_denied.append('sessions_spawn')
+        next_denied = list(dict.fromkeys(next_denied))
+        if next_denied != denied: tools['deny'] = next_denied; changed = True
+        if changed:
+            try: _atomic_model_bytes(path, json.dumps(config, ensure_ascii=False, indent=2).encode('utf-8'))
+            except OSError: pass
+
+
+def _bounded_int(value, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, value))
+
+
+class AgentRuntimeSettingsRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    enabled: bool = False
+    startupModel: str | None = Field(default=None, max_length=300)
+    maxConcurrent: int = Field(default=4, ge=1, le=8, strict=True)
+    maxChildrenPerAgent: int = Field(default=3, ge=1, le=5, strict=True)
+    maxSpawnDepth: int = Field(default=1, ge=0, le=2, strict=True)
+    runTimeoutSeconds: int = Field(default=900, ge=60, le=3600, strict=True)
+
+
+@app.get('/api/settings/agent-runtime')
+async def api_agent_runtime_settings():
+    return await asyncio.to_thread(_agent_runtime_config)
+
+
+@app.post('/api/settings/agent-runtime')
+async def api_agent_runtime_settings_save(req: AgentRuntimeSettingsRequest):
+    import office_controls
+
+    path = openclaw_state_dir() / 'openclaw.json'
+    model = (req.startupModel or '').strip()
+    options = office_controls.configured_models(path)
+    if req.enabled and model not in {row['id'] for row in options}:
+        raise HTTPException(400, '启动模型必须是已配置并可核验的完整渠道模型；未保存，也不会启动 Agent。')
+    with _MODEL_CONFIG_LOCK:
+        try:
+            config = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        except (OSError, ValueError):
+            raise HTTPException(500, '无法读取 OpenClaw 配置，未保存。') from None
+        agents = config.setdefault('agents', {})
+        defaults = agents.setdefault('defaults', {})
+        subagents = defaults.setdefault('subagents', {})
+        if not isinstance(subagents, dict):
+            subagents = {}
+            defaults['subagents'] = subagents
+        for key, value in {
+            'maxConcurrent': req.maxConcurrent,
+            'maxChildrenPerAgent': req.maxChildrenPerAgent,
+            'maxSpawnDepth': req.maxSpawnDepth,
+            'runTimeoutSeconds': req.runTimeoutSeconds,
+        }.items():
+            subagents[key] = value
+        tools = config.setdefault('tools', {})
+        if not isinstance(tools, dict):
+            tools = {}
+            config['tools'] = tools
+        denied = tools.get('deny') if isinstance(tools.get('deny'), list) else []
+        denied = [item for item in denied if item != 'sessions_spawn']
+        if req.enabled:
+            subagents['model'] = model
+        else:
+            subagents.pop('model', None)
+            denied.append('sessions_spawn')
+        tools['deny'] = list(dict.fromkeys(denied))
+        try:
+            _atomic_model_bytes(path, json.dumps(config, ensure_ascii=False, indent=2).encode('utf-8'))
+        except OSError:
+            raise HTTPException(500, 'OpenClaw 配置保存失败，未启用 Agent。') from None
+    result = _agent_runtime_config()
+    result['note'] = ('已启用严格启动模型；Agent 不会继承当前对话模型，也不启用备用模型。'
+                      if req.enabled else 'Agent 已关闭；sessions_spawn 已加入阻断列表，不会产生子任务调用。')
+    return result
 
 
 def _write_env_direct(updates: dict[str, str]) -> None:
@@ -7041,7 +7193,9 @@ class OfficeStopRequest(OfficeControlRequest):
 @app.get('/api/agent-office/models')
 async def api_office_models(sessionId: str | None = None):
     import office_controls
-    return await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId)
+    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId)
+    capability['agentRuntime'] = await asyncio.to_thread(_agent_runtime_config)
+    return capability
 
 
 @app.get('/api/agent-office/controls')
