@@ -10,6 +10,7 @@ import { loadTsModule } from './load-ts.mjs';
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
 globalThis.HTMLElement = window.HTMLElement;
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: window.localStorage });
 globalThis.FileReader = window.FileReader;
 globalThis.File = globalThis.File ?? window.File;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,6 +88,29 @@ test('material recognition stays honest about links, share copy and file types',
   assert.ok(reportLib.EXAMPLE_MATERIAL.length > 80, 'example material is a usable sample');
 });
 
+test('quote verification checks only 原文依据 quotes against the material', () => {
+  const report = [
+    '## 5. 关键发现',
+    '### 发现1：x',
+    '- **原文依据**：“我都会把桌子收得很空” 出自第一段',
+    '- **分析过程**：推断……',
+    '### 发现2：y',
+    '- **原文依据**：',
+    '  「周三，充电线又堆满」',
+  ].join('\n');
+  const material = '每到周日，我都会把桌子收得很空。到了周三，充电线又堆满。';
+  const check = reportLib.verifyQuotes(report, material);
+  assert.equal(check.total, 2);
+  assert.equal(check.missing.length, 0);
+
+  const bad = reportLib.verifyQuotes(report, '桌面越收越乱。');
+  assert.equal(bad.total, 2);
+  assert.equal(bad.missing.length, 2);
+
+  assert.equal(reportLib.verifyQuotes('- **原文依据**：没有引号的句子', material).total, 0,
+    'quotes without quote marks are not invented');
+});
+
 test('text file reading returns local content without touching the server', async () => {
   const file = new window.File(['一段从文件导入的正文'], 'note.txt', { type: 'text/plain' });
   assert.equal(await reportLib.readTextFile(file), '一段从文件导入的正文');
@@ -113,8 +137,9 @@ const sseToken = (id, text) => `id: ${id}\nevent: token\ndata: ${JSON.stringify(
 const sseDone = (id) => `id: ${id}\nevent: done\ndata: {}\n\n`;
 const sseError = (id, message) => `id: ${id}\nevent: error\ndata: ${JSON.stringify({ message })}\n\n`;
 
-async function mount(t, respond) {
+async function mount(t, respond, { keepStorage = false } = {}) {
   const writes = [];
+  if (!keepStorage) { try { window.localStorage.clear(); } catch { /* optional storage */ } }
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
     const path = new URL(String(input), window.location.href).pathname;
     writes.push({ path, method: options.method || 'GET', body: options.body ? JSON.parse(String(options.body)) : {} });
@@ -128,7 +153,14 @@ async function mount(t, respond) {
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(createElement(BreakdownPage, { persona: '画号A' })));
-  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  let unmounted = false;
+  const unmount = async () => {
+    if (unmounted) return;
+    unmounted = true;
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  t.after(unmount);
   const buttons = () => [...container.querySelectorAll('button')];
   const flush = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
   const click = async (label) => {
@@ -142,7 +174,7 @@ async function mount(t, respond) {
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(area, value);
     area.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  return { container, writes, buttons, click, fill, flush };
+  return { container, writes, buttons, click, fill, flush, unmount };
 }
 
 test('input panel offers a marked example when empty and recognizes material while typing', async t => {
@@ -238,4 +270,67 @@ test('a running report shows progress and can be stopped for real', async t => {
   assert.ok(view.container.querySelector('.notice-error').textContent.includes('已停止'));
   assert.equal(view.container.querySelector('.panel'), null, 'no report panel after stop');
   assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material survives the stop');
+});
+
+test('draft survives leaving the page and coming back', async t => {
+  window.localStorage.clear();
+  const first = await mount(t, async () => ({ id: 'x' }), { keepStorage: true });
+  await first.fill('这一段是没写完的草稿。');
+  await first.unmount();
+
+  const second = await mount(t, async () => ({ id: 'x' }), { keepStorage: true });
+  assert.equal(second.container.querySelector('textarea').value, '这一段是没写完的草稿。', 'draft is restored');
+  assert.ok(second.container.querySelector('.breakdown-material').textContent.includes('正文约'), 'material line follows the draft');
+});
+
+test('finished reports land in history and can be reopened or deleted', async t => {
+  const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n\n一。\n\n- **原文依据**：“桌面越来越乱”';
+  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseToken(1, report), sseDone(2)]) : { id: 'idea-1' }));
+  await view.fill('桌面越来越乱，我决定换个办法。');
+  await view.click('开始拆解');
+
+  const toggle = view.container.querySelector('.breakdown-history-toggle');
+  assert.ok(toggle && toggle.textContent.includes('历史拆解 1 篇'), 'finished report is stored in history');
+  await view.click('历史拆解');
+  assert.ok(view.container.querySelector('.breakdown-history-item').textContent.includes('内容拆解报告：桌面为什么越收越乱'));
+
+  await view.click('内容拆解报告：桌面为什么越收越乱');
+  assert.ok(view.container.querySelector('.skill-body-md').textContent.includes('报告摘要'), 'history reopens the report');
+  assert.equal(view.container.querySelector('textarea').value, '桌面越来越乱，我决定换个办法。', 'history restores the material');
+  assert.equal(view.container.querySelector('.breakdown-history-list'), null, 'history list collapses after opening');
+
+  await view.click('历史拆解');
+  await view.click('删除');
+  assert.equal(view.container.querySelector('.breakdown-history-toggle'), null, 'deleting the last record hides history');
+});
+
+test('report quotes are verified against the submitted material', async t => {
+  const report = [
+    '# 内容拆解报告：测试', '',
+    '## 5. 关键发现与替代解释', '',
+    '- **原文依据**：“桌面越来越乱” — 出自开头', '',
+    '- **原文依据**：“材料里没有的句子” — 出处不明', '',
+    '正文。',
+  ].join('\n');
+  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseToken(1, report), sseDone(2)]) : {}));
+  await view.fill('桌面越来越乱，我决定换个办法。');
+  await view.click('开始拆解');
+
+  const check = view.container.querySelector('.breakdown-quote-check');
+  assert.ok(check, 'quote check line renders with the report');
+  assert.ok(check.textContent.includes('2 处引用里，1 处没能在材料中逐字找到'));
+  assert.ok(check.className.includes('warn'));
+  const details = view.container.querySelector('.breakdown-quote-details');
+  assert.ok(details && details.textContent.includes('材料里没有的句子'), 'missing quote is listed for review');
+});
+
+test('link-only failures offer pasting the text instead', async t => {
+  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseError(1, '读取失败')]) : {}));
+  await view.fill('https://www.xiaohongshu.com/explore/abc');
+  await view.click('开始拆解');
+
+  const alert = view.container.querySelector('.notice-error');
+  assert.ok(alert.textContent.includes('把正文粘贴进来再试'), 'link-only failure explains the fix');
+  await view.click('补正文');
+  assert.equal(document.activeElement, view.container.querySelector('textarea'), '补正文 focuses the composer');
 });
