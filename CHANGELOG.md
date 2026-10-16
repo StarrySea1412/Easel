@@ -1,3 +1,8 @@
+## 2026-10-16 · DeepSeek Harness 对照调研 / DeepSeek Harness comparison
+
+- Compare the official DeepSeek Harness plugin/session/Agent/job/skill architecture with Easel's OpenClaw Gateway, Web supervisor, Agent Office and ClawHub boundaries. / 对照官方 DeepSeek Harness 的插件、会话、Agent、后台任务、技能和恢复语义，明确 Easel 当前 `chat_supervisor_lost` 的差异与优先借鉴项。
+- Recommend a durable run ledger and event-based recovery before considering plugin-runtime migration; no DSH dependency, model call, external plugin install, 138 deployment or installer release was made. / 优先建议补充逻辑轮次/run账本和事件化恢复，不直接移植 Cordis；本轮未引入 DSH、未调用模型、未安装外部插件、未部署138或更新安装包。[调研记录](docs/deepseek-harness-comparison-2026-10-16.md)。
+
 ## 2026-10-16 · Context windows and chat reports / 上下文窗口与拆解对话
 
 - Separate sourced windows, configured limits and old runtime budgets; add explicit empty-field filling without rewriting manual values. GLM-5.3 reference is 1M; relay entitlement remains unverified. / 纠正默认20万与模型窗口混淆，增加来源和设置入口。
