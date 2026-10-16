@@ -29,6 +29,8 @@ ClawHub 在 650px 以下改为全宽列表，点开后单独阅读详情。用�
 
 ## 交付与保留项
 
-功能分支为 `codex/upstream-compat-2026-10-10`，main 只同步双语首页公告，不合入本轮功能代码。Git 提交与推送回执在核对远端后补记。用户已有的 `docs/viral-breakdown-optimization-plan-2026-10-15.md` 未纳入本轮提交。
+功能与实现记录提交 `eab6fd10dd0f16b7fe3e9efd7efff43d569b7eda` 已推送至 `starry/codex/upstream-compat-2026-10-10`；main 的双语首页公告提交 `8b898e581199960f264d1bea4ddb5f1739ef291e` 已推送至 `starry/main`，两处均用 `git ls-remote` 核对完整 SHA。main 只更新双语 README，没有合入本轮功能代码。用户已有的 `docs/viral-breakdown-optimization-plan-2026-10-15.md` 未纳入本轮提交。
+
+默认分支中英文首页与功能分支本验收文档共 3 个 GitHub 页面均 HTTP 200，其原始 Markdown 已与各自 Git 内容逐字节核对；这是在线内容与可达性检查，不替代浏览器交互验收。本段及清单/进度回执沿功能分支另作纯文档提交，不改变本机运行代码或安装包。
 
 服务端持久通知、Codex 用量、真实计费/Agent性能/视频生成，以及需求总清单中的历史待办继续保留。本轮没有新增安装包，源码推送不代表服务器或安装器已经更新。
