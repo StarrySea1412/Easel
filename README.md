@@ -246,3 +246,4 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 > **工作进度时间线（2026-10-16）**：聊天进度现在只展示服务实际上报的有序事件；“请求已接收”“已进入运行器”“等待模型事件”等状态不再宣称 Agent 已被唤醒或模型正在思考。心跳单独标记，思考摘要与工作步骤分开，失败、停止、断线续接和备份记录有明确终态。前端1025项测试、构建、lint和Python语法检查通过；仅本机7880更新，未调用付费模型。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/work-progress-redesign-2026-10-16.md)。
 
 \n
+> **Agent运行账本（2026-10-16）**：聊天每个逻辑 `turnId` 现在持久记录 provider run、attempt、恢复关系、传输层、事件序号、终态和资源结算；同一轮重复 POST 会被拒绝，避免重连导致重复付费请求。`/api/chat/last` 和 `/api/chat/runs/{turnId}` 可读取账本状态。跨 Web/Gateway 重启自动接管、stall watchdog、压缩事务和真实重启验收仍待完成；本轮仅本机代码与隔离回归，未调用付费模型、未更新138或安装包。[实现与边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)

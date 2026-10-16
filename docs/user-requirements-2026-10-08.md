@@ -1561,3 +1561,11 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **已记录证据**：本机 SQLite 的 `agent:main:main` 会话含 31 个 `prompt.submitted`、31 个 `model.completed`、52 次工具调用和 155 条 transcript 事件；2026-10-16 Gateway 日志记录过重启恢复、长任务 `stopReason=length` 以及 stalled/finalization 失败。另发现旧启动器可能以不支持 schema 18 的 OpenClaw 2026.9.2 打开状态库，属于版本/状态目录不匹配的独立启动风险。
 - **最小修复顺序**：先增加项目级 durable run ledger（逻辑 `turnId`、provider run、`recoveryOf`、attempt、序号、终态、取消因果和 `resourceSettled`），再让 SSE 订阅 ledger 事件并把 Gateway recovery run 归并回原 turn；随后补齐 stall watchdog、compaction transaction 和版本启动闸门。未完成上述改造前，不宣称“重启后长任务可无损续跑”，也不自动重发可能已扣费的请求。
 - **调查记录**：新增 [Agent loop 与长对话可靠性调查](agent-loop-long-conversation-investigation-2026-10-16.md)。此前所有未完成清单继续保留。
+
+## 2026-10-16 继续收口 Agent loop 可靠性
+
+- **用户原话**："OK 继续吧"。沿用上一轮评估，优先处理 Agent loop 长任务可靠性，而不是把已有局部验收误报为全部完成。
+- **本轮验收条件**：为聊天运行增加可持久化的项目级 run ledger，至少记录逻辑 `turnId`、provider/Gateway run ID、恢复关系、attempt、事件序号、终态、取消原因、原始错误来源和资源是否结算；让状态查询/SSE 能基于 ledger 对账，避免 Web supervisor 重启后把已提交任务误报为连接失败或重复提交。
+- **执行边界**：仅本机代码与隔离测试；不调用付费模型、不重发已有任务、不安装外部技能、不重启或部署 138、不更新安装器或便携包；保留用户原有未跟踪文件 `docs/viral-breakdown-optimization-plan-2026-10-15.md`。
+- **当前状态**：待先核对现有聊天 API、Gateway recovery、事件存储和测试，再实施最小兼容改造；真实跨进程重启恢复仍需专门验收，不能由单元测试代替。
+- **本轮实现与验证回执**：已新增 `web/run_ledger.py` 和聊天接入，记录 accepted/supervisor/provider/transport/terminal 事件、provider run、attempt、恢复关系、事件序号、停止原因、错误来源和资源结算；同一 `turnId` 重复 POST fail-closed；`/api/chat/last` 附带账本并新增 `/api/chat/runs/{turnId}`。账本与聊天专项186项通过，Python全仓 **2889 passed / 9 skipped**，语法和 `git diff --check` 通过。仍未完成跨进程 recovery-run 接管、SSE完整账本投影、stall watchdog、compaction事务、启动版本闸门和真实重启验收；不自动重发已提交请求。

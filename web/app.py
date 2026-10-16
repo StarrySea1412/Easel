@@ -68,6 +68,7 @@ from image_reverse import (
 )
 import model_health
 import channel_profiles
+import run_ledger
 from output_metadata import creation_time, text_cover
 try:
     from easel.gateway_questions import (
@@ -250,6 +251,18 @@ PUBLISH_DIR = OUTPUTS_DIR / "_publish"   # 异步发布的状态/验证码文件
 PROFILE_BUILD_DIR = OUTPUTS_DIR / "_profile_build"   # 异步画像构建的状态文件（避免长请求被代理超时）
 DEBUG_DIR = OUTPUTS_DIR / "_debug"   # 诊断日志（对话流收尾情况等），_ 前缀不进内容库
 SESSIONS_DIR = OUTPUTS_DIR / "_sessions"   # 每会话最近一轮的完整结果，供 SSE 连接中断后前端取回
+_DEFAULT_SESSIONS_DIR = SESSIONS_DIR
+
+
+def _run_ledger_root() -> Path:
+    """Resolve the ledger beside the active session store.
+
+    Tests and isolated runners replace either OUTPUTS_DIR or SESSIONS_DIR; the
+    ledger must follow that same sandbox instead of leaking state into the
+    user's real data directory.
+    """
+    return SESSIONS_DIR if SESSIONS_DIR != _DEFAULT_SESSIONS_DIR else OUTPUTS_DIR / "_sessions"
+
 # 非 _ 前缀的历史系统目录（归因层数据），内容库不展示（真产物一律在项目目录内）
 SYSTEM_TOPLEVEL_DIRS = {"analytics"}
 LOGIN_TIMEOUT = 240
@@ -3695,7 +3708,8 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
         return _codex_service.snapshot(session_id, turn_id)
     f = _turn_file(f"web:{session_id}")
     if not f.is_file():
-        return {"status": "none", "text": ""}
+        ledger = run_ledger.read(_run_ledger_root(), turn_id) if turn_id else None
+        return {"status": "none", "text": "", **({"run": ledger} if ledger else {})}
     try:
         payload = json.loads(f.read_text(encoding="utf-8"))
         if turn_id and payload.get("turn_id") != turn_id:
@@ -3717,9 +3731,21 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
                 except (OSError, ValueError, KeyError, TypeError):
                     # Optional diagnostics must never erase the saved reply.
                     pass
+        ledger = run_ledger.read(_run_ledger_root(), payload.get('turn_id') or turn_id or '')
+        if ledger is not None:
+            payload['run'] = ledger
         return payload
     except Exception:
         return {"status": "none", "text": ""}
+
+
+@app.get("/api/chat/runs/{turn_id}")
+async def api_chat_run(turn_id: str):
+    """Return the durable identity/lifecycle row for one logical chat turn."""
+    record = run_ledger.read(_run_ledger_root(), turn_id)
+    if record is None:
+        raise HTTPException(404, "对话运行账本不存在或已失效")
+    return record
 
 
 @app.get("/api/chat/jobs/{turn_id}/stream")
@@ -3730,7 +3756,8 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
         return await _codex_service.stream(codex_session, turn_id, after)
     # A stale browser-side pendingTurnId must fail promptly instead of receiving
     # heartbeats forever. The frontend can then recover from the final snapshot.
-    if not _job_event_file(turn_id).is_file():
+    ledger = run_ledger.read(_run_ledger_root(), turn_id)
+    if not _job_event_file(turn_id).is_file() and ledger is None:
         raise HTTPException(404, "对话任务记录不存在或已失效")
 
     async def events():
@@ -3755,8 +3782,18 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                 if turn_id not in _CHAT_JOBS:
                     # The append-only log survived a web restart; its former
                     # supervisor did not. Do not tail it forever or resubmit it.
+                    latest_ledger = run_ledger.read(_run_ledger_root(), turn_id) or ledger or {}
+                    provider = latest_ledger.get('providerRunId')
+                    status = latest_ledger.get('status')
+                    if provider and status not in run_ledger.TERMINAL_STATUSES:
+                        message = (f'本轮后台运行已登记（provider run {provider}），但当前 Web 进程未接管；'
+                                   '不会自动重发，请先停止核实或保留记录后新建对话。')
+                    elif status in run_ledger.TERMINAL_STATUSES:
+                        message = '本轮已有持久终态，正在保留原始回执；不会自动重发。请刷新查看最近一轮。'
+                    else:
+                        message = '本轮服务连接已失效，后台状态待核实。请重试停止以核实并结束，或保留记录新建对话。'
                     yield {'event': 'recovery_required', 'data': json.dumps(
-                        '本轮服务连接已失效，后台状态待核实。请重试停止以核实并结束，或保留记录新建对话。', ensure_ascii=False)}
+                        message, ensure_ascii=False)}
                     return
                 # Keep proxy connections active; reconnecting remains safe if it still drops.
                 if time.monotonic() - idle_since >= 15:
@@ -3818,6 +3855,22 @@ async def api_chat_stream(req: ChatRequest):
     CLIENT_DONE = object()
     sk = req.sessionId or f"web-{int(time.time() * 1000)}"
     turn_id = req.turnId or uuid.uuid4().hex
+    existing_ledger = run_ledger.read(_run_ledger_root(), turn_id)
+    if existing_ledger is not None:
+        # A retry must use a new logical turn and point recoveryOf at the old
+        # one. Reusing an existing ID would risk sending a paid request twice.
+        if run_ledger.is_active(existing_ledger):
+            raise HTTPException(409, {
+                'code': 'chat_run_already_active', 'category': 'conflict', 'retryable': False,
+                'message': '该轮已有后台运行记录，请恢复现有连接或先停止核实。',
+                'turnId': turn_id,
+            })
+        raise HTTPException(409, {
+            'code': 'chat_run_already_settled', 'category': 'conflict', 'retryable': False,
+            'message': '该轮已有终态，请新建轮次继续，避免重复提交。', 'turnId': turn_id,
+        })
+    run_ledger.create(_run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
+                      model_ref=requested_model_ref, engine=req.engine)
     if turn_id in _CHAT_JOBS:
         raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
     cancel_job = threading.Event()
@@ -3852,6 +3905,8 @@ async def api_chat_stream(req: ChatRequest):
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
         save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
                                          "requestedThinkingLevel": requested_thinking_level})
+        run_ledger.mark(_run_ledger_root(), turn_id, event='supervisor_started', status='running',
+                        transport='pending')
 
         event_path = _job_event_file(turn_id)
         try:
@@ -3873,7 +3928,12 @@ async def api_chat_stream(req: ChatRequest):
             if kind == 'error' and isinstance(text, dict):
                 turn_error = text
             event_seq += 1
-            data = ({"sessionKey": extra.get("sessionKey"), "stopped": extra.get('stopped', False)} if kind == "done" else text)
+            if kind == "done":
+                data = {"sessionKey": extra.get("sessionKey")}
+                if extra.get('stopped') is True:
+                    data["stopped"] = True
+            else:
+                data = text
             event = {"id": event_seq, "event": kind, "data": data}
             try:
                 with event_path.open("a", encoding="utf-8") as ef:
@@ -3885,7 +3945,7 @@ async def api_chat_stream(req: ChatRequest):
 
         # 秒级反馈：记录请求已进入本轮事件流；不把“唤醒 agent”当成已发生的后台工作。
         to_client('timing', timing())
-        to_client("activity", "请求已接收，等待运行器确认")
+        to_client("activity", "请求已收到，等待运行器确认")
 
         def tool_update(payload):
             try:
@@ -3953,6 +4013,9 @@ async def api_chat_stream(req: ChatRequest):
                             if isinstance(response_id, str) and response_id.startswith('chatcmpl_'):
                                 run_info['run_id'] = response_id
                                 hproc._office_run_id = response_id
+                                run_ledger.mark(_run_ledger_root(), turn_id, event='provider_accepted',
+                                                status='running', provider_run_id=response_id,
+                                                transport='http')
                             for reasoning, snapshot, block, event_id in provider_reasoning(d):
                                 rc = reasoning_stream.push('http', reasoning, snapshot=snapshot, block=block, event_id=event_id)
                                 if rc:
@@ -4076,6 +4139,12 @@ async def api_chat_stream(req: ChatRequest):
                 raw_start_offset = SHARED_RAW_STREAM.stat().st_size
             except OSError:
                 raw_start_offset = 0
+            def _mark_gateway_acceptance(run_id):
+                save_turn(pk, 'running', '', {'turn_id': turn_id, 'gateway_run_id': run_id,
+                                              'requestedModelRef': requested_model_ref,
+                                              'requestedThinkingLevel': requested_thinking_level})
+                run_ledger.mark(_run_ledger_root(), turn_id, event='provider_accepted', status='running',
+                                provider_run_id=run_id, transport='native')
             if is_http:
                 # HTTP 直连常驻网关：无进程冷启动（agent 在 gateway 进程里跑）
                 proc = _GatewayHttpProc()
@@ -4102,8 +4171,7 @@ async def api_chat_stream(req: ChatRequest):
                             on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event),
                             on_tool=tool_update,
                             on_accepted=lambda run_id: loop.call_soon_threadsafe(
-                                save_turn, pk, 'running', '', {'turn_id': turn_id, 'gateway_run_id': run_id,
-                                'requestedModelRef': requested_model_ref, 'requestedThinkingLevel': requested_thinking_level}))
+                                _mark_gateway_acceptance, run_id))
                     else:
                         proc = None
                     if proc is None:
@@ -4134,6 +4202,8 @@ async def api_chat_stream(req: ChatRequest):
                     to_client("error", error)
                     return
             _RUNNING_CHAT[sk] = proc         # 注册运行中进程（HTTP 模式为伪进程），供 /api/chat/stop
+            run_ledger.mark(_run_ledger_root(), turn_id, event='transport_started', status='running',
+                            transport='http' if is_http else 'native')
             if cancel_job.is_set():
                 _STOPPED_CHAT.add(sk)
                 await asyncio.to_thread(proc.terminate)
@@ -4530,6 +4600,14 @@ async def api_chat_stream(req: ChatRequest):
                     "clean_end": clean_end,
                     "stop_reason": "user_stopped" if user_stopped else run_info.get("stop_reason"),
                 })
+                terminal_status = ('stopped' if user_stopped else
+                                   'failed' if turn_error is not None or not clean_end else 'completed')
+                run_ledger.mark(
+                    _run_ledger_root(), turn_id, event='terminal', status=terminal_status,
+                    provider_run_id=run_info.get('run_id'), last_event_id=event_seq,
+                    stop_reason='user_stopped' if user_stopped else run_info.get('stop_reason'),
+                    error=turn_error, settled=True, resource_settled=True,
+                )
                 if audit_context is not None:
                     try:
                         audit_context['record']['_usageObservations'] = usage_observations
@@ -4561,6 +4639,9 @@ async def api_chat_stream(req: ChatRequest):
                 'requestedThinkingLevel': requested_thinking_level,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
             })
+            run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                            error=error, stop_reason='supervisor_failed',
+                            settled=True, resource_settled=True)
         finally:
             try:
                 execution_store.finish()
@@ -4633,7 +4714,10 @@ async def api_chat_stream(req: ChatRequest):
             elif t in ('model_selection', 'timing', 'execution'):
                 yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
-                yield {"id": str(item["id"]), "event": "done", "data": json.dumps({"sessionKey": item.get("sessionKey"), "stopped": item.get('stopped', False)}, ensure_ascii=False)}
+                done = {"sessionKey": item.get("sessionKey")}
+                if item.get('stopped') is True:
+                    done["stopped"] = True
+                yield {"id": str(item["id"]), "event": "done", "data": json.dumps(done, ensure_ascii=False)}
 
     return EventSourceResponse(forward(), headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Content-Encoding": "identity"})
 

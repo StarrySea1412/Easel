@@ -544,3 +544,9 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Confirm normal multi-turn reuse: a stable OpenClaw session carries later prompts, tool calls and context compilation. / 确认正常多轮复用稳定 OpenClaw 会话，后续消息、工具调用和上下文编译都进入同一会话。
 - Document the real boundary: Easel's Web supervisor, SSE carrier and Gateway recovery run are not one durable state machine; `chat_supervisor_lost` is an outer reconciliation outcome, not proof that OpenClaw cannot run long conversations. / 记录真实边界：Easel Web supervisor、SSE 连接与 Gateway 恢复 run 尚未统一为持久状态机，`chat_supervisor_lost` 是外层对账结果，不是 OpenClaw 不支持长对话的证明。
 - Add a failure matrix and P0/P1/P2 repair order centered on a durable run ledger, recovery-attempt identity, stall/compaction events and startup version gates. No model call, paid retry, service restart or 138 deployment was made. / 增加故障矩阵和以持久 run 账本、恢复 attempt 身份、stall/compaction 事件及启动版本闸门为核心的修复顺序；本轮未调用模型、未付费重试、未重启服务或部署138。[调查记录](docs/agent-loop-long-conversation-investigation-2026-10-16.md)。
+## 2026-10-16 · Durable Agent run ledger / Agent 运行账本
+
+- Add a project-local per-turn ledger linking logical `turnId` to provider run identity, attempt, recovery relation, transport, event sequence, terminal state and resource settlement. / 增加项目级每轮运行账本，关联逻辑 `turnId`、provider run、attempt、恢复关系、传输层、事件序号、终态和资源结算。
+- Reject a second POST for an existing logical turn and expose read-only run state through `/api/chat/last` and `/api/chat/runs/{turnId}`. / 同一逻辑轮次重复提交会被拒绝，`/api/chat/last` 和 `/api/chat/runs/{turnId}` 提供只读账本状态，避免把重连误变成重复付费请求。
+- Keep cross-process takeover, stall watchdog, compaction transactions and real restart acceptance pending; no paid request, 138 deployment or installer release was made. / 跨进程接管、stall watchdog、压缩事务和真实重启验收仍待完成；本轮未调用付费模型、未部署138、未更新安装器。
+- Focused backend/chat regression and syntax checks passed; see [the run-ledger record](docs/agent-run-ledger-2026-10-16.md). / 后端聊天专项回归和语法检查通过，详见[运行账本记录](docs/agent-run-ledger-2026-10-16.md)。
