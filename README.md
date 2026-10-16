@@ -1,3 +1,5 @@
+> **工作进度时间线（2026-10-16）**：聊天进度只展示服务实际上报的有序事件；“请求已接收”“已进入运行器”“等待模型事件”不再宣称 Agent 已被唤醒或模型正在思考。心跳、思考摘要、完成/失败/停止/断线续接和备份记录分别标识。仅本机 7880 更新，未调用付费模型。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/work-progress-redesign-2026-10-16.md)。
+
 > **Agent并行与费用保护（2026-10-16）**：设置 → Agent 协作现在要求先选择已配置的启动模型，才能启用子 Agent；并发数、子任务数、嵌套层级和单任务上限均受约束。未配置时会在调用前阻断 `sessions_spawn`，不会静默继承当前对话的高价模型。仅本机7880已更新，未发起付费任务，138与安装包未更新。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-runtime-safety-2026-10-16.md)。
 
 > **通知精修与夜间模式（2026-10-16）**：事件通知增加全部/未读筛选、日期分组、状态卡片、清空确认和更清晰的阅读层级；入口仍在工具栏设置旁。设置新增“外观”，支持浅色、深色和跟随系统，自动记忆偏好并在首屏绘制前应用。仅本机7880，138与安装包未更新。[使用与验证](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/appearance-notifications-2026-10-16.md)。
