@@ -7281,7 +7281,8 @@ async def api_context_usage(sessionId: str, modelRef: str = ''):
     try:
         result = await asyncio.to_thread(collect_context, openclaw_state_dir(), SESSIONS_DIR,
                                          sessionId, modelRef,
-                                         lambda: collect_usage(PROJECT_ROOT, openclaw_state_dir(), SESSIONS_DIR, sessionId, 1, 0))
+                                         lambda: collect_usage(PROJECT_ROOT, openclaw_state_dir(), SESSIONS_DIR, sessionId, 1, 0),
+                                         SKILLS_DIR / 'openclaw')
         return JSONResponse(result, headers={'Cache-Control': 'no-store'})
     except ValueError:
         raise HTTPException(400, '上下文会话或模型标识无效') from None

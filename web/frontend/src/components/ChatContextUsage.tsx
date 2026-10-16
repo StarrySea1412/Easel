@@ -8,7 +8,10 @@ type Snapshot = {
   sessionId: string; modelRef: string; observedModelRef: string; capacity: number | null;
   capacitySource: string; usedTokens: number | null; usageSource: string; updatedAt: number | string | null;
   stale: boolean; breakdownStatus: string; note: string; breakdownNote: string;
-  breakdown: { key: string; label: string; tokens: number | null; percent: number | null }[];
+  runtimeStore?: string; readWarning?: string;
+  skills?: { installedCount: number | null; availableCount: number | null; listedCount: number | null; promptChars: number | null; source: string; note: string };
+  previousSnapshot?: { modelRef: string; usedTokens: number; updatedAt: number | string | null } | null;
+  breakdown: { key: string; label: string; tokens: number | null; percent: number | null; chars?: number | null; source?: string }[];
 };
 function compact(value: number | null | undefined) {
   if (value == null) return '—';
@@ -61,6 +64,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const label = known ? `上下文容量，${percent.toFixed(1)}% 已用` : used != null ? '上下文容量，容量尚未提供' : '上下文容量，占用尚未提供';
   const tone = known && percent >= 90 ? 'danger' : known && percent >= 75 ? 'warn' : '';
   const updated = data?.updatedAt ? new Date(data.updatedAt) : null;
+  const skills = data?.skills;
   return <>
     <button ref={button} type="button" className={`context-usage-trigger ${tone}${known ? '' : ' is-unknown'}`} aria-label={label} title={label}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>
@@ -83,12 +87,19 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
       {engine === 'codex' ? <p className="context-note">Codex 尚未提供上下文分类快照；未提供不代表零消耗。</p>
         : <>
           {error && <p role="alert" className="context-error">{error}{data ? ' · 下方保留上次快照' : ''}</p>}
-          <div className="context-breakdown-heading"><span>上下文构成</span><small>{data?.breakdownStatus === 'estimated' ? '估算占比' : '分类未提供'}</small></div>
-          <dl className="context-breakdown">{(data?.breakdown || ['消息', '系统工具', 'MCP 工具', '系统提示词', '技能', '其它'].map((label, index) => ({ key: String(index), label, tokens: null, percent: null }))).map((part, index) => <div key={part.key}>
-            <dt><i className={`context-category context-category-${index}`} />{part.label}</dt><dd>{part.percent == null ? <span>未提供</span> : <><strong>≈{part.percent.toFixed(1)}%</strong><small>≈{compact(part.tokens)} Token</small></>}</dd>
+          {data?.readWarning && <p className="context-note">{data.readWarning}</p>}
+          {data?.previousSnapshot && <p className="context-previous">上次会话快照：{compact(data.previousSnapshot.usedTokens)} Token <span>{data.previousSnapshot.modelRef}</span><small>切换模型后不沿用旧占比，等待新模型的请求快照。</small></p>}
+          <div className="context-breakdown-heading"><span>上下文构成</span><small>{data?.breakdownStatus === 'estimated' ? '估算占比' : data?.breakdownStatus === 'partial' ? '已知项估算' : data?.breakdownStatus === 'inconsistent' ? '报告待核对' : '等待分类报告'}</small></div>
+          <dl className="context-breakdown">{(data?.breakdown || ['消息', '系统工具', 'MCP 工具', '系统提示词', '技能', '其它'].map((label, index) => ({ key: String(index), label, tokens: null, percent: null, chars: null, source: 'unavailable' }))).map((part, index) => <div key={part.key}>
+            <dt><i className={`context-category context-category-${index}`} /><span>{part.label}{part.key === 'skills' && skills && <small>{skills.listedCount != null ? `${skills.listedCount} 项目录` : skills.availableCount != null ? `${skills.availableCount} 项会话登记` : skills.installedCount != null ? `${skills.installedCount} 项已安装` : ''}</small>}</span></dt>
+            <dd>{part.tokens == null ? <span>{part.key === 'skills' && skills?.installedCount != null ? '待会话加载' : '待运行时上报'}</span> : <><strong>{part.percent != null ? `≈${part.percent.toFixed(1)}%` : `≈${compact(part.tokens)} Token`}</strong><small>{part.percent != null ? `≈${compact(part.tokens)} Token` : used != null ? '不计算占比' : '总占用待上报'}</small></>}
+              {part.chars != null && <small className="context-part-source">{part.chars.toLocaleString('zh-CN')} 字符 · {part.source === 'session_skills' ? '会话技能快照' : '运行时报告'}</small>}</dd>
           </div>)}</dl>
+          {skills && skills.source !== 'unavailable' && <p className="context-skills-fact">{skills.promptChars != null ? <>已知技能目录 {skills.promptChars.toLocaleString('zh-CN')} 字符{skills.availableCount != null ? `，会话登记 ${skills.availableCount} 项` : ''}。{skills.listedCount == null ? '目录来自会话缓存，尚未确认本轮实际注入。' : '目录已由运行时上报。'}</> : skills.installedCount != null ? <>本机提供 {skills.installedCount} 项技能；会话尚未返回注入目录。</> : '会话技能目录等待运行时记录。'}正文按需读取，计入消息与工具回执。</p>}
           <details className="context-source"><summary>统计口径{data?.stale ? ' · 快照参考' : ''}</summary><p>{data?.note || '尚未收到本会话的上下文快照，不使用累计Token推算占用。'}</p>
-            <p>{data?.breakdownStatus === 'estimated' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '分类报告与快照不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
+            <p>{data?.breakdownStatus === 'estimated' || data?.breakdownStatus === 'partial' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '已知字符数保留；分类报告与总量不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
+            <p>字符数是本地记录值，Token按字符数÷4粗估；不同模型、中文和代码的分词会有差异。缺少分类只影响该项，已知项仍单独显示；未读的技能全文不计入。{data?.runtimeStore === 'sqlite' ? '当前会话读取 SQLite 存储。' : ''}</p>
+            {skills && <p>{skills.note}</p>}
             <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : data?.capacitySource === 'runtime' ? '取自运行时配置' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p></details>
         </>}
       <footer><button type="button" className="context-details" onClick={() => { dismiss(); setDetails(true); }}>消耗与费用明细 <span aria-hidden="true">↗</span></button>

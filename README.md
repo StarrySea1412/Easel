@@ -1,3 +1,5 @@
+> **上下文统计纠正（2026-10-16）**：修复只读旧 JSON 而漏掉当前 SQLite 会话记录的问题；上下文各分类独立显示，技能目录字符数、会话登记与本机已安装数量分别标明来源。缺少总量时仍显示已知项，模型切换单独保留上次快照；分类 Token 是估算，不冒充实际分词或账单。仅本机7880，138与安装包未更新。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-accounting-fix-2026-10-16.md)。
+
 > **工作台入口与消耗明细精修（2026-10-16）**：生图入口整合进“最近产物”卡片；创作技能弹窗增加 ClawHub 公开检索与作者详情；消耗明细改为专用空态、上报覆盖度、消耗总览与请求明细，费用返回 0 也不代表免费。55 项不同定向用例、lint/构建和本机只读接口通过；真实浏览器已点通指定入口，固定桌面/390px、深色与完整键盘复核仍待完成。仅本机7880，138与安装包未更新。[改动与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/workbench-usage-entry-refinement-2026-10-16.md)。
 
 > **通知精修与夜间模式（2026-10-16）**：事件通知增加全部/未读筛选、日期分组、状态卡片、清空确认和更清晰的阅读层级；入口仍在工具栏设置旁。设置新增“外观”，支持浅色、深色和跟随系统，自动记忆偏好并在首屏绘制前应用。仅本机7880，138与安装包未更新。[使用与验证](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/appearance-notifications-2026-10-16.md)。

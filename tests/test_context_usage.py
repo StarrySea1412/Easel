@@ -1,6 +1,8 @@
 """Context snapshots remain separate from cumulative/billable usage."""
 import json
 import sys
+import sqlite3
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -130,3 +132,127 @@ def test_unknown_model_identity_does_not_attach_a_snapshot_to_selected_model(sta
     value = collect_context(native, web, 'chat1', 'p/m')
     assert value['capacity'] == 100000 and value['usedTokens'] is None
     assert value['usageSource'] == 'model_changed'
+
+
+def sqlite_entry(native, entry, key='agent:main:chat1'):
+    path = native / 'agents/main/agent/openclaw-agent.sqlite'
+    path.parent.mkdir(exist_ok=True)
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS session_nodes(session_key TEXT PRIMARY KEY,entry_json TEXT)')
+        db.execute('INSERT INTO session_nodes VALUES(?,?)', (key, json.dumps(entry)))
+    return path
+
+
+def test_sqlite_current_entry_wins_over_legacy_and_does_not_mutate_database(state):
+    native, web, entry, _ = state
+    current = {**entry, 'totalTokens': 2000, 'skillsSnapshot': {'prompt': 'x' * 40, 'skills': [{'name': 'private-skill'}]}}
+    path = sqlite_entry(native, current)
+    sqlite_entry(native, {**entry, 'totalTokens': 999999}, 'agent:main:foreign')
+    before = hashlib.sha256(path.read_bytes()).digest()
+    value = collect_context(native, web, 'chat1')
+    assert value['runtimeStore'] == 'sqlite' and value['usedTokens'] == 2000
+    assert value['skills']['promptChars'] == 40 and value['skills']['listedCount'] == 1
+    assert value['skills']['availableCount'] == 1
+    assert 'private-skill' not in json.dumps(value)
+    assert hashlib.sha256(path.read_bytes()).digest() == before
+
+
+def test_migrated_store_never_resurrects_deleted_legacy_or_foreign_sessions(state):
+    native, web, entry, _ = state
+    sqlite_entry(native, entry, 'agent:main:foreign')
+    value = collect_context(native, web, 'chat1')
+    assert value['usedTokens'] is None and value['runtimeStore'] == 'sqlite'
+    assert value['skills']['promptChars'] is None
+    (web / 'web_chat1.json').unlink()
+    assert collect_context(native, web, 'chat1')['runtimeStore'] == 'none'
+
+
+def test_failed_session_still_knows_skill_catalog_without_claiming_actual_occupancy(state, tmp_path):
+    native, web, _, _ = state
+    sqlite_entry(native, {'skillsSnapshot': {'prompt': 'x' * 400, 'skills': [{}, {}]}})
+    skills = tmp_path / 'skills'
+    (skills / 'own').mkdir(parents=True)
+    (skills / 'own/SKILL.md').write_text('Full body must not be counted' * 100)
+    value = collect_context(native, web, 'chat1', skills_dir=skills)
+    part = next(p for p in value['breakdown'] if p['key'] == 'skills')
+    assert value['usedTokens'] is None and value['breakdownStatus'] == 'partial'
+    assert part['chars'] == 400 and part['tokens'] == 100 and part['percent'] is None
+    assert value['skills']['installedCount'] == 1 and value['skills']['availableCount'] == 2
+    assert value['skills']['listedCount'] is None and value['skills']['source'] == 'session_skills'
+
+
+def test_partial_report_retains_skill_and_workspace_facts_but_no_fake_residual(state):
+    native, web, entry, save = state
+    report = {**entry['systemPromptReport'], 'tools': {}}
+    save({**entry, 'systemPromptReport': report})
+    value = collect_context(native, web, 'chat1')
+    parts = {p['key']: p for p in value['breakdown']}
+    assert value['breakdownStatus'] == 'partial'
+    assert parts['skills']['tokens'] == 10 and parts['other']['tokens'] == 20
+    assert parts['messages']['tokens'] is None and parts['system_tools']['tokens'] is None
+
+
+def test_report_can_show_character_counts_before_a_usage_total_arrives(state):
+    native, web, entry, save = state
+    save({**entry, 'totalTokens': None})
+    value = collect_context(native, web, 'chat1')
+    assert value['usedTokens'] is None and value['breakdownStatus'] == 'partial'
+    assert next(p for p in value['breakdown'] if p['key'] == 'skills')['chars'] == 40
+    assert all(p['percent'] is None for p in value['breakdown'])
+
+
+def test_conflicting_total_preserves_known_characters_without_false_percentages(state):
+    native, web, entry, save = state
+    save({**entry, 'totalTokens': 1})
+    value = collect_context(native, web, 'chat1')
+    assert value['breakdownStatus'] == 'inconsistent'
+    assert next(p for p in value['breakdown'] if p['key'] == 'skills')['chars'] == 40
+    assert all(p['percent'] is None for p in value['breakdown'])
+
+
+def test_model_switch_keeps_labeled_previous_total_and_cached_skill_facts_separate(state):
+    native, web, entry, save = state
+    save({**entry, 'skillsSnapshot': {'prompt': 'x' * 40, 'skills': [{}]}})
+    value = collect_context(native, web, 'chat1', 'p/next')
+    assert value['usedTokens'] is None and value['previousSnapshot']['usedTokens'] == 1000
+    assert value['previousSnapshot']['modelRef'] == 'p/m' and value['capacity'] == 200000
+    assert value['skills']['source'] == 'session_skills'
+    assert all(p['percent'] is None for p in value['breakdown'])
+
+
+def test_unreadable_migrated_metadata_is_explained_without_reading_legacy(state):
+    native, web, _, _ = state
+    path = native / 'agents/main/agent/openclaw-agent.sqlite'
+    path.parent.mkdir()
+    path.write_bytes(b'corrupt')
+    value = collect_context(native, web, 'chat1')
+    assert value['usedTokens'] is None and value['readWarning']
+
+
+def test_fresh_session_lists_local_skills_without_adding_unloaded_bodies_to_total(state, tmp_path):
+    native, web, _, _ = state
+    skills = tmp_path / 'skills'
+    (skills / 'own').mkdir(parents=True)
+    (skills / 'own/SKILL.md').write_text('x' * 10000)
+    value = collect_context(native, web, 'fresh', skills_dir=skills)
+    assert value['usedTokens'] is None and all(p['tokens'] is None for p in value['breakdown'])
+    assert value['skills']['installedCount'] == 1 and value['skills']['promptChars'] is None
+
+
+def test_cached_prompt_uses_runtime_utf16_character_convention(state):
+    native, web, _, save = state
+    save({'skillsSnapshot': {'prompt': '技能😀', 'skills': []}})
+    value = collect_context(native, web, 'chat1')
+    assert value['skills']['promptChars'] == 4
+    assert next(p for p in value['breakdown'] if p['key'] == 'skills')['chars'] == 4
+
+
+def test_last_request_total_cannot_allocate_a_different_prompt_snapshot(state):
+    native, web, entry, save = state
+    save({**entry, 'totalTokens': None})
+    usage = lambda: {'turns': [{'calls': [{'timestamp': '2026-10-15', 'inputTokens': 300, 'provider': 'p', 'model': 'm'}]}]}
+    value = collect_context(native, web, 'chat1', usage_reader=usage)
+    assert value['usedTokens'] == 300 and value['usageSource'] == 'last_request'
+    assert value['breakdownStatus'] == 'partial'
+    assert all(p['percent'] is None for p in value['breakdown'])
+    assert next(p for p in value['breakdown'] if p['key'] == 'skills')['chars'] == 40

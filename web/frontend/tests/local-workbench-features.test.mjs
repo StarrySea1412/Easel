@@ -146,6 +146,47 @@ test('context request cancellation prevents an old model or session snapshot fro
   assert.equal(document.activeElement, trigger);
 });
 
+test('known skill characters remain visible without inventing a total or percentage', async t => {
+  const value = contextSnapshot({ usedTokens: null, usageSource: 'unavailable', breakdownStatus: 'partial', runtimeStore: 'sqlite',
+    skills: { installedCount: 5, availableCount: 4, listedCount: null, promptChars: 400, source: 'session_skills', note: '按需读取正文' },
+    breakdown: [{ key: 'skills', label: '技能', tokens: 100, percent: null, chars: 400, source: 'session_skills' }] });
+  t.mock.method(globalThis, 'fetch', async () => json(value));
+  const v = await view(t, Context, { sessionId: 's1' });
+  await v.click(v.node.querySelector('button'));
+  const panel = document.querySelector('.context-usage-panel');
+  assert.equal(panel.querySelector('[role="progressbar"]'), null);
+  assert.match(panel.textContent, /已知项估算/);
+  assert.match(panel.textContent, /≈100 Token/);
+  assert.match(panel.textContent, /400 字符/);
+  assert.match(panel.textContent, /4 项会话登记/);
+  assert.match(panel.textContent, /尚未确认本轮实际注入/);
+  assert.doesNotMatch(panel.querySelector('.context-breakdown').textContent, /未提供|%/);
+});
+
+test('a model change labels previous context separately from the selected model budget', async t => {
+  t.mock.method(globalThis, 'fetch', async () => json(contextSnapshot({ modelRef: 'p/next', usedTokens: null,
+    capacity: 200000, usageSource: 'model_changed', breakdown: [], breakdownStatus: 'unavailable',
+    previousSnapshot: { modelRef: 'p/m', usedTokens: 6100, updatedAt: 1792000000000 } })));
+  const v = await view(t, Context, { sessionId: 's1', modelRef: 'p/next' });
+  await v.click(v.node.querySelector('button'));
+  const panel = document.querySelector('.context-usage-panel');
+  assert.match(panel.querySelector('.context-previous').textContent, /6,100 Token.*p\/m/);
+  assert.equal(panel.querySelector('[role="progressbar"]'), null);
+  assert.match(panel.querySelector('.context-usage-total').textContent, /20万/);
+});
+
+test('a new session can show installed skill availability without claiming it is injected', async t => {
+  t.mock.method(globalThis, 'fetch', async () => json(contextSnapshot({ usedTokens: null, usageSource: 'unavailable',
+    breakdown: [{ key: 'skills', label: '技能', tokens: null, percent: null }], breakdownStatus: 'unavailable',
+    skills: { installedCount: 115, availableCount: null, listedCount: null, promptChars: null, source: 'installed_catalog', note: '不是已注入全文' } })));
+  const v = await view(t, Context, { sessionId: 'fresh' });
+  await v.click(v.node.querySelector('button'));
+  const panel = document.querySelector('.context-usage-panel');
+  assert.match(panel.textContent, /115 项已安装/);
+  assert.match(panel.textContent, /待会话加载/);
+  assert.match(panel.textContent, /会话尚未返回注入目录/);
+});
+
 test('context popover clamps to a 390px viewport and preserves an identified snapshot on refresh failure', async t => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? json(contextSnapshot()) : new Response('{}', { status: 503 }));

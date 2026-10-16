@@ -1,3 +1,9 @@
+## 2026-10-16 · Context accounting correction / 上下文统计来源纠正
+
+- Read current SQLite session metadata in addition to legacy JSON, scoped to project web sessions. / 修复当前运行时快照漏读，只读会话元数据、不返回提示词或凭据。
+- Preserve known categories independently, including skill-directory characters and installed/session/reported counts. Do not invent totals, percentages or loaded skill bodies. / 分别显示目录字符、技能数量与来源，部分报告不再导致整组未知。
+- Keep model-switch snapshots separate and explain token estimates. / 模型切换保留独立标注的上次占用，分类Token估算不等同真实分词或账单。详见[本轮验证与边界](docs/context-accounting-fix-2026-10-16.md)。仅本机7880，138与安装包不变。
+
 ## 2026-10-16 · Workbench entries and usage refinement / 工作台入口与消耗明细精修
 
 - Integrate the image studio launch into Recent outputs with a full-width action. / 生图入口整合到最近产物卡片，增加整行触达和键盘焦点。
