@@ -66,6 +66,34 @@ test('streaming with live activity shows the pulse and heartbeat hint, not the w
   assert.ok(container.querySelector('.streaming-cursor'), 'cursor shows during streaming');
 });
 
+test('work progress keeps the observed event order and labels heartbeat separately', async t => {
+  const container = await mount(t, {
+    message: { role: 'assistant', content: '部分回复' }, isStreaming: true,
+    activity: '已进入运行器，等待模型事件',
+    activitySteps: ['请求已接收，等待运行器确认', '已进入运行器，等待模型事件'],
+    stillWorking: '连接保持中 · 暂无新进度',
+  });
+  const panel = container.querySelector('.work-progress');
+  assert.ok(panel);
+  assert.equal(panel.querySelectorAll('.work-progress-step').length, 2);
+  assert.match(panel.textContent, /已接收请求/);
+  assert.match(panel.textContent, /最新事件 · 实时/);
+  assert.match(panel.textContent, /连接保持中/);
+  assert.match(panel.textContent, /心跳提示，不代表新的工作步骤/);
+  assert.equal(panel.querySelectorAll('.work-progress-step.is-current').length, 1);
+});
+
+test('finished work progress exposes a saved terminal state without a live pulse', async t => {
+  const container = await mount(t, {
+    message: { role: 'assistant', content: '', stopped: true, activity: '请求已接收，等待运行器确认\n正在自动续接' },
+  });
+  const panel = container.querySelector('.work-progress-history');
+  assert.ok(panel);
+  assert.match(panel.textContent, /已停止/);
+  assert.match(panel.textContent, /备份记录|服务事件/);
+  assert.equal(panel.querySelector('.live-pulse'), null);
+});
+
 test('persisted thinking panel labels estimated tokens and expands on click', async t => {
   const container = await mount(t, { message: { role: 'assistant', content: '答案', thinking: '推理过程' } });
   const toggle = container.querySelector('.model-thinking-toggle');

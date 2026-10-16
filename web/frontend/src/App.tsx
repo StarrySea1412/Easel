@@ -421,7 +421,7 @@ export default function App() {
     });
     const runAcc: ChatTiming & { turnId?: string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] } = { startedAt, turnId, requestedModelRef: modelRef, requestedThinkingLevel: thinkingLevel, content:'', thinking:'', steps:[], questions:[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((prev) => ({ ...prev, [sessionId]: { startedAt, requestedModelRef: modelRef, content: '', thinking: '', activity: '', questions: [] } }));
+    setStreams((prev) => ({ ...prev, [sessionId]: { startedAt, requestedModelRef: modelRef, content: '', thinking: '', activity: '', activitySteps: [], questions: [] } }));
     // 打字机队列：流式事件按批到达（OpenClaw 攒批），前端按字符节奏显示，体验逐字浮现。
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
@@ -472,14 +472,18 @@ export default function App() {
         const a = streamAcc.current[sessionId]; if (a !== runAcc) return;
         if (a.steps[a.steps.length - 1] !== status) a.steps.push(status);
         // 有真实活动状态 → 清掉防呆提示，让真实状态占据活动行
-        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], activity: status, stillWorking: undefined } } : p));
+        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], activity: status, activitySteps: [...a.steps], stillWorking: undefined } } : p));
       },
       // onInterrupted：SSE 被中断（长任务时代理掐断），但后端仍在跑并会落盘完整结果。
       // streamChat 会按 eventId 自动重连并补发遗漏事件；这里只更新用户可见状态。
       (note) => {
         if (note && streamAcc.current[sessionId] === runAcc) setStopErrors(previous => ({ ...previous, [sessionId]: note }));
-        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc
-          ? { ...p, [sessionId]: { ...p[sessionId], activity: note || '⏳ 连接中断，正在自动续接…' } } : p));
+        setStreams((p) => {
+          if (!p[sessionId] || streamAcc.current[sessionId] !== runAcc) return p;
+          const next = note || '连接中断，正在续接';
+          if (runAcc.steps[runAcc.steps.length - 1] !== next) runAcc.steps.push(next);
+          return { ...p, [sessionId]: { ...p[sessionId], activity: next, activitySteps: [...runAcc.steps] } };
+        });
       },
       turnId,
       false,
@@ -544,7 +548,7 @@ export default function App() {
     try { turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
     const runAcc: ChatTiming & { turnId?: string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] } = { startedAt: last.startedAt, turnId, requestedModelRef: last.requestedModelRef, requestedThinkingLevel: last.requestedThinkingLevel, content:'', thinking:'', steps:[], questions:[] };
     streamAcc.current[sessionId] = runAcc;
-    setStreams((p) => ({ ...p, [sessionId]: { startedAt: last.startedAt, requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
+    setStreams((p) => ({ ...p, [sessionId]: { startedAt: last.startedAt, requestedModelRef: last.requestedModelRef, content: '', thinking: '', activity: '正在接回上一轮结果', activitySteps: ['正在接回上一轮结果'], questions: [] } }));
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
     if (!turnId) {
@@ -591,12 +595,16 @@ export default function App() {
       (status) => {
         const a = streamAcc.current[sessionId]; if (a !== runAcc) return;
         if (a.steps[a.steps.length - 1] !== status) a.steps.push(status);
-        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], activity: status } } : p));
+        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc ? { ...p, [sessionId]: { ...p[sessionId], activity: status, activitySteps: [...a.steps] } } : p));
       },
       (note) => {
         if (note && streamAcc.current[sessionId] === runAcc) setStopErrors(previous => ({ ...previous, [sessionId]: note }));
-        setStreams((p) => (p[sessionId] && streamAcc.current[sessionId] === runAcc
-          ? { ...p, [sessionId]: { ...p[sessionId], activity: note || '⏳ 正在自动续接…' } } : p));
+        setStreams((p) => {
+          if (!p[sessionId] || streamAcc.current[sessionId] !== runAcc) return p;
+          const next = note || '正在自动续接';
+          if (runAcc.steps[runAcc.steps.length - 1] !== next) runAcc.steps.push(next);
+          return { ...p, [sessionId]: { ...p[sessionId], activity: next, activitySteps: [...runAcc.steps] } };
+        });
       },
       turnId,
       true,

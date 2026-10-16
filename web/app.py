@@ -3835,9 +3835,9 @@ async def api_chat_stream(req: ChatRequest):
                 pass
             client_q.put_nowait({"t": kind, "text": text, "id": event_seq, **extra})
 
-        # 秒级反馈：发出即亮「已收到」，不等 agent 冷启动（首个 SSE 事件，随流回放必达）
+        # 秒级反馈：记录请求已进入本轮事件流；不把“唤醒 agent”当成已发生的后台工作。
         to_client('timing', timing())
-        to_client("activity", "⏳ 已收到，正在唤醒 agent…")
+        to_client("activity", "请求已接收，等待运行器确认")
 
         def tool_update(payload):
             try:
@@ -4089,9 +4089,8 @@ async def api_chat_stream(req: ChatRequest):
             if cancel_job.is_set():
                 _STOPPED_CHAT.add(sk)
                 await asyncio.to_thread(proc.terminate)
-            # 经 gateway 后客户端 stdout 没有 model-fetch 标记（那是独立跑 agent 才有），先立刻
-            # 给一个「正在思考」活动指示，随后 token 从共享 raw stream 流进来接管显示。
-            to_client("activity", "等待模型响应…")
+            # 这里仅记录已进入运行器；模型是否开始思考要以实际事件流为准。
+            to_client("activity", "已进入运行器，等待模型事件")
 
             q = asyncio.Queue()
             SENTINEL = object()
@@ -4110,10 +4109,10 @@ async def api_chat_stream(req: ChatRequest):
                         if "model-fetch] start" in c:
                             run_info["fetch_count"] += 1
                             fc = run_info["fetch_count"]
-                            _emit("activity", "等待模型响应…" if fc == 1 else f"工具返回后继续生成（第 {fc} 步）…")
+                            _emit("activity", "等待模型事件" if fc == 1 else f"工具返回后继续生成（第 {fc} 步）")
                         elif "[agent]" in c and "delegat" in c.lower():
                             run_info["delegated"] = True
-                            _emit("activity", "🛠️ 制作中…")
+                            _emit("activity", "检测到 Agent 协作事件")
                         m = re.search(r"ended with stopReason=(\S+)", c)
                         if m:
                             run_info["stop_reason"] = m.group(1)

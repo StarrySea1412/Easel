@@ -235,4 +235,6 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 > **138 已完成 0.2.8 发布（2026-10-14）**：正式入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 运行 `0ba9fe201ca384f40894545db068a093b0e21235` / image `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`，app/browser healthy、重启0。真实管理员 `gaojitest` / `gaoji` 登录、版本API、网关、旧产物摘要、附件下载和持久配置/设备身份均核对通过。Agent真实工具 read/ls/search/fetch/browser/write/exec 通过；138不可达DuckDuckGo已改为Easel自带Bing RSS provider。环境安装页显示OpenClaw当前 `2026.9.6`、官方最新 `2026.10.3`，可让Agent基于官方更新记录评估是否值得升级；不会自动升级。隔离评估建议以兼容验收和安全影响评估为门槛，当前保持2026.9.6。详情见[运行修复记录](docs/runtime-repair-2026-10-14.md)。
 > **Agent并行与费用保护（2026-10-16）**：设置 → Agent 协作现在要求先选择已配置的启动模型，才能启用子 Agent；并发数、子任务数、嵌套层级和单任务上限均受约束。未配置时会在调用前阻断 `sessions_spawn`，不会静默继承当前对话的高价模型。仅本机7880已更新，未发起付费任务，138与安装包未更新。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-runtime-safety-2026-10-16.md)。
 
+> **工作进度时间线（2026-10-16）**：聊天进度现在只展示服务实际上报的有序事件；“请求已接收”“已进入运行器”“等待模型事件”等状态不再宣称 Agent 已被唤醒或模型正在思考。心跳单独标记，思考摘要与工作步骤分开，失败、停止、断线续接和备份记录有明确终态。前端1025项测试、构建、lint和Python语法检查通过；仅本机7880更新，未调用付费模型。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/work-progress-redesign-2026-10-16.md)。
+
 \n

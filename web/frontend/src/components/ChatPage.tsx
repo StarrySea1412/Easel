@@ -228,6 +228,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 isStreaming={live}
                 thinking={live ? stream!.thinking : ''}
                 activity={live ? stream!.activity : ''}
+                activitySteps={live ? stream!.activitySteps : undefined}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
                 executionScope={`${session.id}:${auditTurn||''}`}

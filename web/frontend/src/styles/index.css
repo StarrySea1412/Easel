@@ -689,6 +689,47 @@ textarea.field { resize: vertical; min-height: 90px; }
 
 /* 思考过程（流式）：默认折叠，正文出现后可展开查看 */
 .live-panel { margin-bottom: 10px; }
+.work-progress {
+  max-width: 560px;
+  margin: 0 0 14px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.work-progress-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:10px; }
+.work-progress-heading>div { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.work-progress-title { color:var(--text); font-size:12px; font-weight:600; }
+.work-progress-heading span { color:var(--text-tertiary); font-size:10px; line-height:1.5; }
+.work-progress-status { flex:none; color:var(--text-secondary); font-size:10px; font-weight:500; line-height:1.5; }
+.work-progress-status.is-running { color:var(--accent-start); }
+.work-progress-status.is-error { color:var(--danger, #b42318); }
+.work-progress-status.is-stopped { color:var(--text-secondary); }
+.work-progress-list { display:grid; gap:0; margin:0; padding:0; list-style:none; }
+.work-progress-step { position:relative; display:grid; grid-template-columns:18px minmax(0,1fr); gap:8px; min-height:34px; }
+.work-progress-step:not(:last-child)::before { content:""; position:absolute; top:16px; bottom:-1px; left:8px; width:1px; background:var(--border); }
+.work-progress-marker { position:relative; z-index:1; display:flex; align-items:center; justify-content:center; width:16px; height:16px; margin-top:1px; border:1px solid var(--border); border-radius:50%; background:var(--surface); color:var(--text-tertiary); font-size:10px; line-height:1; }
+.work-progress-step.is-current .work-progress-marker { border-color:var(--accent-start); color:var(--accent-start); box-shadow:0 0 0 3px var(--accent-soft); }
+.work-progress-step.is-terminal .work-progress-marker { border-color:var(--text-secondary); }
+.work-progress-step.is-error .work-progress-marker { border-color:var(--danger, #b42318); color:var(--danger, #b42318); }
+.work-progress-copy { min-width:0; display:flex; flex-direction:column; gap:1px; padding:0 0 9px; }
+.work-progress-step-title { overflow-wrap:anywhere; color:var(--text); font-size:12px; font-weight:500; line-height:1.45; }
+.work-progress-step.is-current .work-progress-step-title { color:var(--accent-start); }
+.work-progress-copy small { color:var(--text-tertiary); font-size:10px; line-height:1.4; }
+.work-progress-heartbeat { margin:4px 0 0 26px; color:var(--text-tertiary); font-size:10px; line-height:1.5; }
+.work-progress-heartbeat span { color:var(--text-secondary); margin-right:4px; }
+.work-progress-heartbeat small { display:block; color:var(--text-tertiary); }
+.work-progress-history { padding:0; overflow:hidden; }
+.work-progress-history>summary { display:flex; align-items:center; gap:8px; padding:9px 12px; color:var(--text-secondary); font-size:12px; cursor:pointer; list-style:none; }
+.work-progress-history>summary::-webkit-details-marker { display:none; }
+.work-progress-history>summary .model-thinking-chevron { flex:none; }
+.work-progress-history[open]>summary .model-thinking-chevron { transform:rotate(90deg); }
+.work-progress-history>summary small { margin-left:auto; color:var(--text-tertiary); font-size:10px; }
+.work-progress-history>summary .work-progress-status { margin-left:2px; }
+.work-progress-history>.work-progress-list,.work-progress-history>.work-progress-heartbeat { margin-left:12px; margin-right:12px; }
+.work-progress-history>.work-progress-list { padding-top:4px; }
+.work-progress-history>.work-progress-heartbeat { padding-bottom:10px; }
+.work-progress-step.is-empty .work-progress-step-title { color:var(--text-secondary); font-weight:400; }
 .live-activity {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;

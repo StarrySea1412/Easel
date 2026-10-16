@@ -501,4 +501,10 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Deny `sessions_spawn` when no startup model is saved; lock child tasks to the selected model and reject over-limit timeouts through a local OpenClaw 2026.9.6 safety plugin. / 未保存启动模型时阻断` sessions_spawn`，子任务锁定所选模型，安全插件拒绝超时越界，避免静默调用昂贵模型。
 - Local backend/frontend regression, lint/build, HTTP and browser entry checks passed. No paid inference, Agent task, 138 deployment or installer release. / 后端前端回归、lint/构建、HTTP与浏览器入口检查通过；未发起付费推理或Agent任务，138和安装包未更新。见[验证记录](docs/agent-runtime-safety-2026-10-16.md)。
 
+## 2026-10-16 · Honest work-progress timeline / 工作进度时间线
+
+- Replaced placeholder-like “waking the agent” and “thinking” activity text with ordered service events. / 将“唤醒 agent”“正在思考”等占位文案改为按顺序记录的服务事件。
+- Separated heartbeat notices and thinking summaries from actual work steps; missing events remain explicitly unknown. / 心跳提示与思考摘要和工作步骤分开；后台未上报时明确显示未知，不伪造进度。
+- Added completed, failed, stopped, reconnecting and backup-record states with narrow-screen layout coverage. Frontend tests (1025), build, lint and Python syntax checks passed; no paid task or 138 deployment. / 增加完成、失败、停止、重连和备份记录状态，并覆盖窄屏布局；前端1025项、构建、lint和Python语法检查通过，未发起付费任务或138部署。详见[工作进度记录](docs/work-progress-redesign-2026-10-16.md)。
+
 \n

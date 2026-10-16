@@ -53,6 +53,11 @@
 .chat-page .chat-skill-row { border-top:0; padding-top:0; }
 .chat-page .chat-return-latest { position:absolute; bottom:calc(100% + 3px); left:50%; transform:translateX(-50%); margin:0; white-space:nowrap; }
 @media(max-width:640px) {
+ .work-progress { max-width:none; padding:11px 12px 9px; }
+ .work-progress-heading { gap:10px; }
+ .work-progress-heading span { max-width:170px; }
+ .work-progress-history>summary { padding-left:10px; padding-right:10px; }
+ .work-progress-history>summary small { display:none; }
  .chat-header { min-height:48px; padding:8px 14px; gap:8px; }
  .chat-header-context { gap:7px; }
  .chat-header-status,.chat-new-button span { display:none; }

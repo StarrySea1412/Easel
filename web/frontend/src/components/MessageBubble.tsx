@@ -24,6 +24,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   thinking?: string;
   activity?: string;
+  activitySteps?: string[];
   stillWorking?: string;   // 防呆心跳提示（未卡住）；仅流式时的独立提示，不替代思考/活动
   actions?: BubbleActions;
   status?: ReactNode;
@@ -68,6 +69,75 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   </section>;
 }
 
+type WorkProgressProps = {
+  steps: string[];
+  streaming: boolean;
+  heartbeat?: string;
+  error?: boolean;
+  stopped?: boolean;
+  backupSnapshot?: boolean;
+};
+
+function normalizeProgressSteps(activity: string | undefined, activitySteps: string[] | undefined): string[] {
+  const activityValue: unknown = activity;
+  const fallback = Array.isArray(activityValue)
+    ? activityValue
+    : String(activity || '').split(/\r?\n/);
+  const source = activitySteps?.length ? activitySteps : fallback;
+  const result: string[] = [];
+  for (const value of source) {
+    let text = String(value || '').trim();
+    for (const prefix of ['⏳', '🛠️', '🧠', '✅', '⚠️']) {
+      while (text.startsWith(prefix)) text = text.slice(prefix.length).trimStart();
+    }
+    if (!text || result[result.length - 1] === text) continue;
+    result.push(text);
+  }
+  return result;
+}
+
+function progressLabel(text: string): string {
+  if (/已收到.*唤醒|唤醒\s*agent|请求已接收|已接收请求/i.test(text)) return '已接收请求';
+  if (/等待模型响应|等待模型服务返回/.test(text)) return '等待模型服务返回';
+  if (/工具返回后继续生成/.test(text)) return text.replace(/…+$/, '').trim();
+  if (/正在思考/.test(text)) return '服务已上报思考状态';
+  return text.replace(/…+$/, '').trim();
+}
+
+function WorkProgress({ steps, streaming, heartbeat, error, stopped, backupSnapshot }: WorkProgressProps) {
+  const status = error ? '失败' : stopped ? '已停止' : streaming ? '进行中' : '已完成';
+  const body = (
+    <>
+      {backupSnapshot && <p className="model-thinking-note work-progress-note">以下文字来自备份，未经本机后台核验。</p>}
+      <ol className="work-progress-list">
+        {steps.map((step, index) => {
+          const current = streaming && index === steps.length - 1;
+          return <li key={`${step}-${index}`} className={`work-progress-step${current ? ' is-current' : ' is-recorded'}`}>
+            <span className="work-progress-marker" aria-hidden="true">{current ? '·' : '✓'}</span>
+            <span className="work-progress-copy"><span className="work-progress-step-title">{progressLabel(step)}</span><small>{current ? '最新事件 · 实时' : backupSnapshot ? '备份记录 · 未核验' : '服务事件 · 已记录'}</small></span>
+          </li>;
+        })}
+        {!steps.length && <li className="work-progress-step is-empty">
+          <span className="work-progress-marker" aria-hidden="true">·</span>
+          <span className="work-progress-copy"><span className="work-progress-step-title">{streaming ? '等待首个服务事件' : '没有可展示的进度事件'}</span><small>{streaming ? '后台尚未返回可展示的进度' : '本轮未保存活动记录'}</small></span>
+        </li>}
+        {!streaming && (error || stopped) && <li className={`work-progress-step is-terminal${error ? ' is-error' : ''}`}>
+          <span className="work-progress-marker" aria-hidden="true">{error ? '!' : 'Ⅱ'}</span>
+          <span className="work-progress-copy"><span className="work-progress-step-title">{error ? '本轮失败' : '本轮已停止'}</span><small>终态已保存</small></span>
+        </li>}
+      </ol>
+      {streaming && !steps.length && <div className="typing-indicator" aria-hidden="true"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>}
+      {heartbeat && <p className="work-progress-heartbeat"><span>连接保持中</span>{heartbeat.replace(/^连接保持中\s*[·•]?\s*/, '')} <small>心跳提示，不代表新的工作步骤</small></p>}
+    </>
+  );
+  if (streaming) return <section className="work-progress" aria-label="工作进度">
+    <header className="work-progress-heading"><div><span className="work-progress-title">工作进度</span><span>仅展示服务实际上报的事件{!steps.length ? ' · 等待模型响应' : ''}</span></div><b className="work-progress-status is-running">{status}</b></header>{body}
+  </section>;
+  return <details className="thinking-block work-progress work-progress-history">
+    <summary className="message-disclosure-toggle"><DisclosureChevron /><span>{backupSnapshot ? '备份活动文字' : '工作进度'}</span><small>{steps.length ? `${steps.length} 条服务事件` : '无活动记录'}</small><b className={`work-progress-status${error ? ' is-error' : stopped ? ' is-stopped' : ''}`}>{status}</b></summary>{body}
+  </details>;
+}
+
 function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; status?: ReactNode; onEdit?: () => void }) {
   const [copyStatus, setCopyStatus] = useState<'idle'|'copying'|'copied'|'failed'>('idle');
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -98,7 +168,7 @@ function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; statu
   );
 }
 
-export default function MessageBubble({ message, sessionId, isStreaming, thinking, activity, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
+export default function MessageBubble({ message, sessionId, isStreaming, thinking, activity, activitySteps, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const userRow = useRef<HTMLDivElement>(null);
   const cancelEdit = () => { setEditing(false); requestAnimationFrame(() => userRow.current?.querySelector<HTMLButtonElement>('[aria-label="重新编辑消息"]')?.focus()); };
@@ -146,25 +216,11 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
   const effThinking = isStreaming ? (thinking || '') : (message.thinking || '');
   const liveActivity = isStreaming && !ownsProgress ? (activity || '') : '';
   const liveHint = isStreaming ? (stillWorking || '') : '';   // 防呆「未卡住」提示，附着显示、不顶掉真实状态
-  const doneSteps = !isStreaming && !ownsProgress ? (message.activity || '') : '';
+  const progressSteps = normalizeProgressSteps(isStreaming ? activity : message.activity, isStreaming ? activitySteps : undefined);
 
-  const livePanel = (effThinking || liveActivity || liveHint || doneSteps) ? (
+  const livePanel = (effThinking || liveActivity || liveHint || progressSteps.length || isStreaming) ? (
     <div className="live-panel">
-      {liveActivity ? (
-        <div className="live-activity">
-          <span className="live-pulse" />{liveActivity}
-          {liveHint && <span className="live-still"> · {liveHint}</span>}
-        </div>
-      ) : liveHint ? (
-        <div className="live-activity"><span className="live-pulse" />{liveHint}</div>
-      ) : null}
-      {doneSteps && (
-        <details className="thinking-block">
-          <summary className="message-disclosure-toggle"><DisclosureChevron /><span>{backupSnapshot ? '备份活动文字' : '工作进度'}</span></summary>
-          {backupSnapshot && <p className="model-thinking-note">以下文字来自备份，未经本机后台核验。</p>}
-          <div className="thinking-text">{doneSteps}</div>
-        </details>
-      )}
+      <WorkProgress steps={progressSteps} streaming={Boolean(isStreaming)} heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />
       {effThinking && (
         <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} backupSnapshot={backupSnapshot} />
       )}
@@ -176,12 +232,7 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
     return (
       <div className="message-row assistant">
         <div className="message-bubble assistant">
-          <div className="typing-indicator">
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-          </div>
-          <span className="model-thinking-wait">等待模型响应…</span>
+          <WorkProgress steps={progressSteps} streaming heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />
           <TurnElapsed startedAt={message.startedAt} elapsedMs={message.elapsedMs} running />
         </div>
       </div>
