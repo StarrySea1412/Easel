@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import type { ChatSession } from '../lib/store';
 import { fetchSkillRecords, skillState, type LiveSkillAudit } from '../lib/skillEvidence';
 import { displayName } from '../lib/skillDisplayNames';
+import {IconEdit} from './icons';
+import type {ReactNode} from 'react';
 
-export default function SessionHoverCard({ session, anchor }: { session: ChatSession; anchor: HTMLElement }) {
+export default function SessionHoverCard({ session, anchor, onRename, editor, onPointerEnter,onPointerLeave,onDismiss }: { session: ChatSession; anchor: HTMLElement;onRename?:()=>void;editor?:ReactNode;onPointerEnter?:()=>void;onPointerLeave?:()=>void;onDismiss?:()=>void }) {
   const [records, setRecords] = useState<LiveSkillAudit[]>([]), [status, setStatus] = useState('读取技能记录…');
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const card = useRef<HTMLDivElement>(null), id = useId();
@@ -38,10 +40,11 @@ export default function SessionHoverCard({ session, anchor }: { session: ChatSes
     };
     place();window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
     return ()=>{window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);};
-  }, [anchor, records, status]);
-  useEffect(()=>{anchor.setAttribute('aria-describedby',id);return()=>anchor.removeAttribute('aria-describedby');},[anchor,id]);
-  return createPortal(<div ref={card} id={id} role="tooltip" className="session-hover-card" style={position}>
-    <div className="session-hover-heading"><strong>{session.title}</strong><time>{new Date(session.created).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'})}</time></div>
+  }, [anchor, records, status, editor]);
+  useEffect(()=>{const attribute=onRename?'aria-controls':'aria-describedby';anchor.setAttribute(attribute,id);return()=>anchor.removeAttribute(attribute);},[anchor,id,onRename]);
+  return createPortal(<div ref={card} id={id} role={onRename?'dialog':'tooltip'} aria-label={onRename?`对话预览：${session.title}`:undefined} className={`session-hover-card${editor?' is-editing':''}`} style={position} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}
+    onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onDismiss?.();}}}>
+    {editor||<div className="session-hover-heading">{onRename?<button type="button" className="session-hover-rename" onClick={onRename} aria-label={`重命名对话：${session.title}`} title="点击修改对话名称"><strong>{session.title}</strong><IconEdit size={13}/></button>:<strong>{session.title}</strong>}<time>{new Date(session.created).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'})}</time></div>}
     {invoked.length>0 && <div className="session-hover-skills"><span>最近技能记录</span>{invoked.slice(0,4).map(item=><span key={item.skill} className="session-hover-skill" data-state={skillState(item).tone}>{displayName(item.skill)}<small>{skillState(item).label}</small></span>)}{invoked.length>4&&<small>另 {invoked.length-4} 项</small>}</div>}
     {selectedOnly.length>0 && <div className="session-hover-skills"><span>已选择</span>{selectedOnly.slice(0,4).map(skill=><span key={skill} className="session-hover-skill">{displayName(skill)}</span>)}{selectedOnly.length>4&&<small>另 {selectedOnly.length-4} 项</small>}</div>}
     {status && <p>{status}</p>}

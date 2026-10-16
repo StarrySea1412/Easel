@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
-  IconChat,
+  IconChat, IconEdit,
   IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice, IconOpenClaw,
 } from './icons';
@@ -65,6 +65,7 @@ export default function Sidebar({
   stoppingSessions = [],
 }: SidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamePlace, setRenamePlace] = useState<'row'|'preview'>('row');
   const [renameValue, setRenameValue] = useState('');
   const [titleGenerating, setTitleGenerating] = useState(false);
   const [titleError, setTitleError] = useState('');
@@ -74,6 +75,18 @@ export default function Sidebar({
   renameContext.current = { id: renamingId, value: renameValue };
   const [showArchived, setShowArchived] = useState(false);
   const [hoveredSession, setHoveredSession] = useState<{ session: ChatSession; anchor: HTMLElement } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const previewEditing = useRef(false);
+  previewEditing.current = Boolean(renamingId && renamePlace === 'preview');
+  const restoreRenameFocus = useRef<string|null>(null);
+  const cancelRename = useCallback((restore=false) => { if(restore)restoreRenameFocus.current=renameContext.current.id;renameGeneration.current++; setRenamingId(null); setTitleGenerating(false); setTitleError(''); },[]);
+  const keepHover = () => clearTimeout(hoverTimer.current);
+  const leaveHover = () => {
+    keepHover();
+    hoverTimer.current=setTimeout(()=>{if(!previewEditing.current)setHoveredSession(null);},180);
+  };
+  const openHover = (session:ChatSession,anchor:HTMLElement) => {keepHover();if(!previewEditing.current)setHoveredSession({session,anchor});};
+  useEffect(()=>()=>clearTimeout(hoverTimer.current),[]);
 
   // Layout starts compact on every mount; old saved expansion must not reopen it.
   const [expanded, setExpanded] = useState(false);
@@ -84,6 +97,12 @@ export default function Sidebar({
   const collapseToggleRef = useRef<HTMLButtonElement>(null);
   const recentRef = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef<HTMLElement>(null);
+  useLayoutEffect(()=>{
+    if(renamingId||!restoreRenameFocus.current)return;
+    const row=Array.from(conversationsRef.current?.querySelectorAll<HTMLElement>('[data-session-id]')||[]).find(item=>item.dataset.sessionId===restoreRenameFocus.current);
+    restoreRenameFocus.current=null;
+    row?.querySelector<HTMLButtonElement>('.session-select')?.focus({preventScroll:true});
+  },[renamingId,sessions]);
   const pinFocusId = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!pinFocusId.current) return;
@@ -95,9 +114,11 @@ export default function Sidebar({
 
   const changeExpanded = useCallback((next: boolean) => {
     setHoveredSession(null);
+    clearTimeout(hoverTimer.current);
+    if(!next)cancelRename();
     focusConversationToggle.current = true;
     setExpanded(next);
-  }, []);
+  }, [cancelRename]);
   const closeSidebar = useCallback(() => changeExpanded(false), [changeExpanded]);
   useEffect(() => {
     const collapse = (event: Event) => {
@@ -149,13 +170,25 @@ export default function Sidebar({
     return () => document.removeEventListener('keydown', escape);
   }, [expanded, closeSidebar]);
 
-  const cancelRename = () => { renameGeneration.current++; setRenamingId(null); setTitleGenerating(false); setTitleError(''); };
-  useEffect(() => { cancelRename(); }, [activeSessionId, currentPage]);
-  const startRename = (s: ChatSession) => { renameGeneration.current++; setRenamingId(s.id); setRenameValue(s.title); setTitleGenerating(false); setTitleError(''); };
+  useEffect(() => { cancelRename(); }, [activeSessionId, currentPage,cancelRename]);
+  const startRename = (s: ChatSession,place:'row'|'preview'='row') => { keepHover();if(place==='row')setHoveredSession(null);renameGeneration.current++; setRenamePlace(place);setRenamingId(s.id); setRenameValue(s.title); setTitleGenerating(false); setTitleError(''); };
   const commitRename = () => {
-    if (renamingId) onSessionRename(renamingId, renameValue);
-    cancelRename();
+    const title=renameValue.trim();
+    if(!title){setTitleError('标题不能为空，请输入名称或取消。');return;}
+    if (renamingId) onSessionRename(renamingId, title);
+    cancelRename(true);
   };
+  useEffect(()=>{
+    if(!hoveredSession)return;
+    const outside=(event:PointerEvent)=>{
+      const target=event.target as Node;
+      if(hoveredSession.anchor.closest('.session-item')?.contains(target)||document.querySelector('.session-hover-card')?.contains(target))return;
+      keepHover();setHoveredSession(null);
+      if(previewEditing.current)cancelRename();
+    };
+    document.addEventListener('pointerdown',outside);
+    return()=>document.removeEventListener('pointerdown',outside);
+  },[hoveredSession,cancelRename]);
   const generateTitle = async (session: ChatSession) => {
     if (!onGenerateSessionTitle || titleGenerating) return;
     const before = { ...renameContext.current };
@@ -175,19 +208,20 @@ export default function Sidebar({
   const recent = active.filter(s => !s.pinnedAt);
   const archived = sessions.filter((s) => s.archived);
 
-  const renderItem = (s: ChatSession, isArchived: boolean) => {
-    if (renamingId === s.id) {
-      return (
-        <div key={s.id} className="session-item session-rename-form">
+  const renameForm = (s:ChatSession,floating=false) => (
+        <div key={s.id} className={`session-rename-form ${floating?'session-hover-editor':'session-item'}`}>
           <input
             className="session-rename-input"
+            aria-label="对话名称"
+            maxLength={200}
             value={renameValue}
             autoFocus
-            onChange={(e) => { renameEditRevision.current++; setRenameValue(e.target.value); }}
+            onChange={(e) => { renameEditRevision.current++; setRenameValue(e.target.value);setTitleError(''); }}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              else if (e.key === 'Escape') cancelRename();
+              if(e.nativeEvent.isComposing||e.keyCode===229)return;
+              if (e.key === 'Enter') {e.preventDefault();commitRename();}
+              else if (e.key === 'Escape') {e.preventDefault();e.stopPropagation();cancelRename(true);}
             }}
           />
           {onGenerateSessionTitle && !s.importedFromBackup && s.messages.length > 0 && <button type="button" className="session-title-agent"
@@ -196,24 +230,27 @@ export default function Sidebar({
             {titleGenerating ? '命名中…' : 'Agent 命名建议'}
           </button>}
           <button type="button" className="session-title-save" onClick={commitRename}>保存标题</button>
-          <button type="button" className="session-title-save" onClick={cancelRename}>取消</button>
+          <button type="button" className="session-title-save" onClick={()=>cancelRename(true)}>取消</button>
           {titleError && <span role="alert" className="session-title-error">{titleError}</span>}
         </div>
       );
-    }
+  const renderItem = (s: ChatSession, isArchived: boolean) => {
+    if (renamingId === s.id&&renamePlace==='row')return renameForm(s);
     return (
       <div
         key={s.id}
         data-session-id={s.id}
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => selectSession(s.id)}
-        onPointerLeave={()=>setHoveredSession(null)}
+        onPointerEnter={keepHover}
+        onPointerLeave={leaveHover}
         onClickCapture={()=>setHoveredSession(null)}
         onFocusCapture={event=>{if(!(event.target as HTMLElement).classList.contains('session-select'))setHoveredSession(null);}}
-        onPointerOver={event=>{if(!(event.target as HTMLElement).closest('.session-select'))setHoveredSession(null);}}
+        onPointerOver={event=>{if(!(event.target as HTMLElement).closest('.session-select')&&!previewEditing.current)setHoveredSession(null);}}
       >
-        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')setHoveredSession({session:s,anchor:event.currentTarget});}} onFocus={event=>setHoveredSession({session:s,anchor:event.currentTarget})} onBlur={()=>setHoveredSession(null)} onKeyDown={event=>{if(event.key==='Escape')setHoveredSession(null);}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
+        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
         {!s.importedFromBackup && (runningSessions.includes(s.id) || stoppingSessions.includes(s.id)) && <span className="session-running-indicator" role="status" aria-label={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} title={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} />}
+        <button type="button" className="session-quick-rename" aria-label={`重命名对话：${s.title}`} title="重命名（F2）" onClick={event=>{event.stopPropagation();startRename(s);}}><IconEdit size={14}/></button>
         {!isArchived && <button type="button" className={`session-quick-pin${s.pinnedAt?' is-pinned':''}`} aria-label={`${s.pinnedAt?'取消置顶':'置顶'}对话：${s.title}`} title={s.pinnedAt?'取消置顶':'置顶'} onPointerEnter={()=>setHoveredSession(null)} onClick={event=>{event.stopPropagation();pinFocusId.current=s.id;onSessionPin(s.id,!s.pinnedAt);}}><SessionPinIcon unpin={Boolean(s.pinnedAt)}/></button>}
         <SessionActionsMenu session={s} onPin={() => { setHoveredSession(null);pinFocusId.current = s.id; onSessionPin(s.id, !s.pinnedAt); }}
           onRename={() => startRename(s)} onArchive={() => onSessionArchive(s.id, !isArchived)} onDelete={() => onSessionDelete(s.id)} />
@@ -266,7 +303,7 @@ export default function Sidebar({
           </div></div>
         </section>}
       </aside>
-      {expanded && hoveredSession && <SessionHoverCard key={hoveredSession.session.id} session={hoveredSession.session} anchor={hoveredSession.anchor}/>}
+      {expanded && hoveredSession && <SessionHoverCard key={hoveredSession.session.id} session={sessions.find(s=>s.id===hoveredSession.session.id)||hoveredSession.session} anchor={hoveredSession.anchor} onRename={()=>startRename(sessions.find(s=>s.id===hoveredSession.session.id)||hoveredSession.session,'preview')} editor={renamingId===hoveredSession.session.id&&renamePlace==='preview'?renameForm(hoveredSession.session,true):undefined} onPointerEnter={keepHover} onPointerLeave={leaveHover} onDismiss={()=>{cancelRename();hoveredSession.anchor.focus({preventScroll:true});setHoveredSession(null);}}/>}
     </div>
   );
 }

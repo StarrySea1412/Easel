@@ -88,7 +88,7 @@
 .sidebar-shell .session-quick-pin{display:flex;align-items:center;justify-content:center;flex:none;width:25px;height:26px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-tertiary);opacity:0;cursor:pointer}
 .session-item:hover .session-quick-pin,.session-item:focus-within .session-quick-pin,.sidebar-shell .session-quick-pin.is-pinned{opacity:1}
 .sidebar-shell .session-quick-pin:hover{background:var(--surface-hover);color:var(--text)}
-.session-hover-card{position:fixed;z-index:950;box-sizing:border-box;width:320px;max-width:calc(100vw - 24px);max-height:220px;overflow:hidden;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:0 4px 18px #00000012;font-size:12px;line-height:1.5;pointer-events:none}
+.session-hover-card{position:fixed;z-index:950;box-sizing:border-box;width:320px;max-width:calc(100vw - 24px);max-height:min(360px,calc(100dvh - 24px));overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:0 4px 18px #00000012;font-size:12px;line-height:1.5;pointer-events:auto}
 .session-hover-heading{display:flex;align-items:flex-start;gap:12px}
 .session-hover-heading strong{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-weight:550}
 .session-hover-heading time{flex:none;color:var(--text-tertiary);font-size:10px}
@@ -98,3 +98,14 @@
 .session-hover-skill small,.session-hover-card p{color:var(--text-tertiary);font-size:10px}
 .session-hover-card p{margin:6px 0 0}
 @media(hover:none),(max-width:760px){.sidebar-shell .session-quick-pin{opacity:1}}
+.sidebar-shell .session-quick-rename{display:flex;align-items:center;justify-content:center;flex:none;width:25px;height:26px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-tertiary);opacity:0;cursor:pointer}
+.session-item:hover .session-quick-rename,.session-item:focus-within .session-quick-rename{opacity:1}
+.sidebar-shell .session-quick-rename:hover{background:var(--surface-hover);color:var(--text)}
+.session-hover-rename{display:flex;align-items:flex-start;gap:7px;flex:1;min-width:0;text-align:left;border:0;padding:0;background:transparent;color:inherit;font:inherit;cursor:text}
+.session-hover-rename svg{flex:none;margin-top:2px;color:var(--text-tertiary)}
+.session-hover-rename:hover strong{text-decoration:underline;text-underline-offset:3px}
+.session-hover-rename:focus-visible,.session-hover-editor button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:3px;border-radius:3px}
+.session-hover-editor .session-rename-input{box-sizing:border-box;min-height:32px;background:var(--bg);font:inherit}
+.session-hover-editor .session-title-agent,.session-hover-editor .session-title-save{min-height:28px;background:var(--surface-2);cursor:pointer}
+.session-rename-form .session-title-error{color:var(--red)}
+@media(hover:none),(max-width:760px){.sidebar-shell .session-quick-rename{opacity:1}}

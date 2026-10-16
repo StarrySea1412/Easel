@@ -1,3 +1,9 @@
+## 2026-10-16 · Hover rename / 对话悬浮重命名
+
+- Add a hover/focus pencil and F2 shortcut; make preview titles editable inside the floating card. / 跨列表与浮层保留悬浮，编辑期间不因鼠标移出而消失。
+- Require explicit save, reject blank titles and respect IME composition; preserve current chat/draft and restore focus. / 保留原菜单与会话持久化，手工改名不调用模型。
+- Validate 49 focused checks, build/lint and isolated 390px light/dark browser paths. / [用法及验收](docs/session-hover-rename-2026-10-16.md)，仅本机7880，138/安装器未更新。
+
 ## 2026-10-16 · Conversation goal mode / 当前对话目标模式纠正
 
 - Move goal setup into the current chat with `/goal` and `/目标`; add a compact side panel for reported steps, elapsed time, pause/resume and blockers. / 按用户截图纠正主入口，定时任务保留独立管理。
