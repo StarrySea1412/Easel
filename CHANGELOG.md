@@ -1,3 +1,8 @@
+## 2026-10-16 · Chat artifact research / 对话产物链路调研
+
+- Trace generated files through Gateway/Codex adapters, chat history, previews and refresh; compare official Codex events with fixed DeepSeek Harness present/version/preview sources. / 定位文字交付、预览割裂与刷新缺口，核对138原会话106次实际工具调用。
+- Propose durable artifact identity/events, in-chat image/HTML previews, version/dependency refresh and shared generation jobs. Research only; no runtime change, paid call or138 deployment. / 本轮为方案；既有后端5项、链接4项通过，不代表新功能验收。[详细记录](docs/chat-artifact-harness-research-2026-10-16.md)。
+
 ## 2026-10-16 · DeepSeek Harness 对照调研 / DeepSeek Harness comparison
 
 - Compare the official DeepSeek Harness plugin/session/Agent/job/skill architecture with Easel's OpenClaw Gateway, Web supervisor, Agent Office and ClawHub boundaries. / 对照官方 DeepSeek Harness 的插件、会话、Agent、后台任务、技能和恢复语义，明确 Easel 当前 `chat_supervisor_lost` 的差异与优先借鉴项。
