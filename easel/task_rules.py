@@ -151,6 +151,12 @@ def check_goal(outputs, goal, text, reviewed=False):
         except (OSError, ValueError) as exc:
             c.update(state='error', detail='证据无法核验，请检查文件路径、格式与读写状态')
         checks.append(c)
-    fingerprint = hashlib.sha256(json.dumps({'checks':[(c['type'], c['state'], c['evidence']) for c in checks],
-        'steps':goal.get('steps', [])}, sort_keys=True).encode()).hexdigest()
+    # Keep the complete output hash above for audit. Rewording an answer or a
+    # plan is not progress toward a failed criterion. Stable completed step IDs
+    # describe reported work only, not independent quality verification.
+    evidence = [(c['type'], c['state'],
+                 c['evidence'] if c['type'] == 'file' else c.get('value', '') if c['state'] == 'passed' else '')
+                for c in checks]
+    completed = sorted(s['id'] for s in goal.get('steps', []) if s['status'] == 'completed')
+    fingerprint = hashlib.sha256(json.dumps({'checks': evidence, 'completedSteps': completed}, sort_keys=True).encode()).hexdigest()
     return checks, fingerprint

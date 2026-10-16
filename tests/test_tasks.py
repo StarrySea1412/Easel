@@ -153,7 +153,8 @@ def test_history_recheck_cannot_replace_new_current_goal(tmp_path):
     store=TaskStore(tmp_path)
     g,r=active(store)
     checks=[{**c,'state':'passed'} for c in g['criteria']]
-    store.finish(r['id'],owner='worker',checks=checks)
+    store.finish(r['id'],owner='worker',checks=[checks[0],{**checks[1],'state':'pending'}])
+    store.apply_checks(g['id'],checks,review=r['turnId'])
     new=store.create_goal(spec(),session='chat')
     checks[0]['state']='failed'
     with pytest.raises(TaskConflict):
@@ -168,9 +169,12 @@ def test_error_verification_blocks_and_no_progress_is_bounded(tmp_path):
     result = store.finish(r['id'], owner='worker', checks=[{'state': 'error', 'type': 'file'}])
     assert result['phase'] == 'verification_error'
     store.change_goal(g['id'], 'resume')
-    for _ in range(3):
+    for i in range(3):
         _, r = store.claim('worker')
-        store.finish(r['id'], owner='worker', checks=[{'state': 'failed', 'type': 'file'}], fingerprint='same')
+        store.bind_provider('chat', r['turnId'], f'provider-{i}')
+        store.guard('chat', f'provider-{i}', 'check-file', 'read')
+        checks, fingerprint = check_goal(tmp_path, g, '')
+        store.finish(r['id'], owner='worker', checks=checks, fingerprint=fingerprint)
     assert store.get('goals', g['id'])['phase'] == 'no_progress'
 
 
@@ -369,7 +373,8 @@ def test_step_reporting_keeps_work_separate_from_quality_and_blocks(tmp_path):
     assert receipt['completed']==1 and receipt['qualityApproved'] is False
     saved=store.get('goals',g['id']);assert saved['checks']==[]
     assert check_goal(tmp_path,g,'')[1]!=check_goal(tmp_path,saved,'')[1]
-    final=store.finish(r['id'],owner='worker',checks=[{'type':'review','state':'pending'}])
+    checks,_=check_goal(tmp_path,saved,'')
+    final=store.finish(r['id'],owner='worker',checks=checks)
     assert final['phase']=='waiting_input' and final['reason']=='缺少原始图片'
 
 
@@ -377,7 +382,7 @@ def test_passed_evidence_cannot_complete_unfinished_work_steps(tmp_path):
     store=TaskStore(tmp_path);g,r=active(store)
     store.guard('chat','provider','step-call','easel_goal_update')
     store.update_progress('chat','step-call',[{'id':'one','title':'检查实际成品','status':'in_progress'}])
-    checks=[{'type':'file','state':'passed'}]
+    checks=[{**g['criteria'][0],'state':'passed'},{**g['criteria'][1],'state':'pending'}]
     final=store.finish(r['id'],owner='worker',checks=checks)
     assert final['status']=='active' and final['phase']=='queued'
     rechecked=store.apply_checks(g['id'],checks)

@@ -1,3 +1,9 @@
+## 2026-10-17 · Goal reliability after harness research / 框架调研与目标可靠性
+
+- Audit official Grok Bot, DeepSeek Harness, Codex and ZCode sources; document current capabilities and remaining gaps. / 保留输入区目标与列表运行数、结果Badge。
+- Suppress automatic continuation without admitted work tools; stop treating reworded text or step descriptions as progress. Require complete checks, a successful current run and explicit matching human approval. / 失败、停止、漏项与核验异常不冒充完成。
+- Scope goal panel errors and pending state to their goal identity. / 66项后端、59项前端、构建/lint及隔离浏览器已验；7880后端未重启，无付费调用，138/安装器另验。[证据与边界](docs/harness-followup-2026-10-17.md)。
+
 ## 2026-10-16 · Inline goals and chat status / 输入区目标与对话状态
 
 - Replace the goal modal with an inline composer; keep current model, collapsed execution options, ordinary drafts and retry IDs. / 输入区直接设置，启动失败不重复创建，运行时保留暂停/停止入口。

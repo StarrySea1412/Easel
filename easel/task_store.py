@@ -19,6 +19,14 @@ def ident():
     return uuid.uuid4().hex
 
 
+def valid_checks(goal, checks):
+    """A partial/mismatched verification must never omit required criteria."""
+    return (isinstance(checks, list) and len(checks) == len(goal['criteria']) and
+            all(isinstance(c, dict) and c.get('state') in ('passed', 'failed', 'pending', 'error') and
+                all(c.get(k, '') == spec.get(k, '') for k in ('type', 'label', 'value'))
+                for c, spec in zip(checks, goal['criteria'])))
+
+
 class TaskStore:
     def __init__(self, outputs, clock=time.time):
         self.outputs = Path(outputs).resolve()
@@ -233,7 +241,7 @@ class TaskStore:
                     r = {'id': ident(), 'goalId': g['id'], 'sessionId': session,
                          'turnId': 'goal-' + ident(), 'iteration': g['iterations'] + 1,
                          'revision': g['revision'], 'stopEpoch': g['stopEpoch'], 'createdAt': self.clock()}
-                r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'])
+                r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'], workTools=0)
                 db.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
                            (r['id'], g['id'], session, r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
                 g.update(iterations=r['iteration'], phase='running', currentTurnId=r['turnId'])
@@ -286,8 +294,10 @@ class TaskStore:
                 g['phase'] = 'idle'  # A late result cannot restart a paused/replaced goal.
             elif state != 'completed':
                 g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
-            elif any(c['state'] == 'error' for c in (checks or [])):
-                g.update(status='blocked', phase='verification_error', reason='证据核验异常，已停止自动推进。')
+            elif not valid_checks(g, checks) or any(c['state'] == 'error' for c in checks):
+                g.update(status='blocked', phase='verification_error', reason='证据核验异常或验收项不完整，已停止自动推进。')
+            elif any(c['type'] == 'review' and c['state'] == 'passed' for c in checks) and g.get('reviewedTurnId') != r['turnId']:
+                g.update(status='blocked', phase='verification_error', reason='缺少当前轮次的用户质量确认，未完成目标。')
             elif any(s['status'] == 'blocked' for s in g.get('steps', [])):
                 blocked = next(s for s in g['steps'] if s['status'] == 'blocked')
                 g.update(status='blocked', phase='waiting_input', reason=blocked.get('detail') or blocked['title'])
@@ -299,7 +309,11 @@ class TaskStore:
                 g['noProgress'] = g['noProgress'] + 1 if g.get('lastFingerprint') == fingerprint else 0
                 g['lastFingerprint'] = fingerprint
                 g.update(phase='queued', reason='继续处理未通过的验收项。')
-                if g['noProgress'] >= 2:
+                # Count trusted admissions, not model-reported activity. Old
+                # runs without this field remain unknown rather than zero.
+                if r['iteration'] > 1 and r.get('workTools') == 0:
+                    g.update(status='blocked', phase='no_progress', reason='续跑轮未调用工作工具，已停止自动推进；请检查材料、工具能力或调整目标后继续。')
+                elif g['noProgress'] >= 2:
                     g.update(status='blocked', phase='no_progress', reason='连续两轮没有新的有效证据，已停止自动推进。')
             self._goal(db, g); self._event(db, g['sessionId'], 'run_settled', {'runId': run, 'status': g['status']})
             if g['status'] in ('completed', 'blocked'):
@@ -318,14 +332,28 @@ class TaskStore:
             g = self._get(db, 'goals', key)
             if db.execute("SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (key,)).fetchone():
                 raise TaskConflict('请等待后台结算再验收。')
-            if review:
-                g['reviewedTurnId'] = review
             if g['status'] == 'cancelled':
                 raise TaskConflict('已取消目标保留历史，不能重新验收。')
             if db.execute("SELECT 1 FROM goals WHERE session=? AND id<>? AND status NOT IN ('completed','cancelled')", (g['sessionId'], key)).fetchone():
                 raise TaskConflict('当前会话已有后续目标，历史目标不能改变当前执行状态。')
+            row = db.execute('SELECT data FROM runs WHERE goal=? AND turn=?', (key, g.get('currentTurnId'))).fetchone()
+            r = json.loads(row[0]) if row else None
+            if not r or r['state'] != 'completed' or r['revision'] != g['revision']:
+                raise TaskConflict('仅能验收当前版本中成功结束的轮次；失败或停止的记录请先处理并继续目标。')
+            if review and review != r['turnId']:
+                raise TaskConflict('质量确认与当前轮次不匹配，请重新查看结果。')
+            if not valid_checks(g, checks):
+                raise TaskConflict('验收项不完整或不匹配，未完成目标。')
+            errored = any(c['state'] == 'error' for c in checks)
+            if review and not errored:
+                g['reviewedTurnId'] = review
+            if not errored and any(c['type'] == 'review' and c['state'] == 'passed' for c in checks) and g.get('reviewedTurnId') != r['turnId']:
+                raise TaskConflict('缺少当前轮次的用户质量确认，未完成目标。')
             g['checks'] = checks
-            if checks and all(c['state'] == 'passed' for c in checks) and g.get('currentTurnId') and not any(s['status'] != 'completed' for s in g.get('steps', [])):
+            if errored:
+                g.update(status='blocked', phase='verification_error', reason='证据核验异常，未完成目标；请修复后重新核验。')
+                g.pop('reviewedTurnId', None)
+            elif checks and all(c['state'] == 'passed' for c in checks) and g.get('currentTurnId') and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='completed', phase='idle', reason='所有验收项通过。')
             elif g['status'] == 'completed':
                 g.update(status='blocked', phase='evidence_changed', reason='产物证据已变化，需要重新验收。')
@@ -454,5 +482,8 @@ class TaskStore:
                 g.update(status='blocked', phase='budget', reason='工具调用已达到目标上限，正在停止。'); self._goal(db, g)
                 return {'allowed': False, 'reason': '目标工具调用已达上限。'}
             db.execute('INSERT INTO tool_reservations VALUES(?,?)', (g['id'], reservation))
+            if tool not in ('easel_goal_update', 'easel_task_guard'):
+                r['workTools'] = r.get('workTools', 0) + 1
+                db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r), r['id']))
             g['toolsUsed'] += 1; self._goal(db, g)
             return {'allowed': True}

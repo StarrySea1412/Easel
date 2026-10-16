@@ -84,7 +84,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const inlineGoal=goalEditor&&!session.importedFromBackup?<ChatGoalComposer key={session.id+':'+(goalEditor.goal?.id||'new')} sessionId={session.id} engine={session.engine||'openclaw'} modelRef={loadComposerModel()||''} {...goalEditor} blocked={Boolean(stream||stopping||taskBusy)} onStop={stream?onStop:undefined} onClose={closeGoalEditor} onChanged={()=>onTaskChange?.()} onConfigured={goalEditor.onConfigured}/>:null;
   const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${goal&&panelOpen&&!goalEditor&&!session.importedFromBackup?' has-goal-panel':''}`}>
     {content}
-    {goal&&panelOpen&&!goalEditor&&!session.importedFromBackup&&<ChatGoalPanel goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>}
+    {goal&&panelOpen&&!goalEditor&&!session.importedFromBackup&&<ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>}
   </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
   const [suggestionError, setSuggestionError] = useState('');

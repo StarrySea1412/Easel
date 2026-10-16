@@ -69,6 +69,33 @@ function callbacks() {
   };
 }
 
+test('goal request errors and pending state stay scoped to their goal when switching chats or goals', async t => {
+  const originalObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  t.after(() => { globalThis.ResizeObserver = originalObserver; });
+  const view = fixture(t);
+  const actions = callbacks();
+  const session = {id:'goal-isolation',title:'目标隔离',created:1,messages:[{role:'assistant',content:'目标记录'}]};
+  const goal = {id:'failed-goal',sessionId:session.id,objective:'核验目标',status:'blocked',phase:'run_failed',
+    modelRef:'fixture/model',criteria:[{type:'review',label:'质量',value:''}],checks:[],currentTurnId:'turn',
+    iterations:1,maxIterations:5,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,reason:'失败'};
+  let rejectOld;
+  t.mock.method(globalThis,'fetch',async url=>{
+    if(String(url).includes('/api/tasks/goals/failed-goal/action'))return await new Promise(resolve=>{rejectOld=()=>resolve({ok:false,json:async()=>({detail:'旧目标不能验收'})});});
+    return {ok:true,json:async()=>({records:[]})};
+  });
+  const render = g=>view.render(createElement(ChatPage,{session,...actions.props,taskState:{goals:[g],runs:[],plans:[],serverTime:1}}));
+  await render(goal);
+  await view.click(view.container.querySelector('.chat-goal-panel-details summary'));
+  const recheck=[...view.container.querySelectorAll('.chat-goal-panel button')].find(b=>b.textContent==='重新核验结果');
+  await view.click(recheck);
+  assert.equal(recheck.disabled,true);
+  await render({...goal,id:'next-goal',phase:'review',reason:'等待验收'});
+  await act(async()=>rejectOld());
+  assert.equal(view.container.querySelector('.chat-goal-panel [role=alert]'),null);
+  assert.equal([...view.container.querySelectorAll('.chat-goal-panel button')].find(b=>b.textContent==='验收并完成目标').disabled,false);
+});
+
 const forgedStream = {
   content: '不应显示的实时正文', thinking: '不应显示的实时思考',
   activity: '不应显示的执行态', stillWorking: '不应显示的心跳',
