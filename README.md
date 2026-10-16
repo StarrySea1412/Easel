@@ -249,3 +249,5 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 > **Agent运行账本（2026-10-16）**：聊天每个逻辑 `turnId` 现在持久记录 provider run、attempt、恢复关系、传输层、事件序号、终态和资源结算；同一轮重复 POST 会被拒绝，避免重连导致重复付费请求。`/api/chat/last` 和 `/api/chat/runs/{turnId}` 可读取账本状态。跨 Web/Gateway 重启自动接管、stall watchdog、压缩事务和真实重启验收仍待完成；本轮仅本机代码与隔离回归，未调用付费模型、未更新138或安装包。[实现与边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
 
 > **账本驱动的停止核实（2026-10-16）**：Web 重启后，显式停止旧任务会优先使用持久账本中的 provider run，即使旧快照没有 `gateway_run_id` 也能精确核实；不会自动重发或宣称无损续跑。[记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
+
+> **停滞告警（2026-10-16）**：长任务默认180秒没有 provider 事件时记录一次可回放的 `stall_warning`，界面明确仍在等待，不自动终止或重发。完整恢复与压力验收仍待完成。[运行账本记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)

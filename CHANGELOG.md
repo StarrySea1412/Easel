@@ -555,3 +555,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 
 - Prefer the durable provider run identity when an orphaned Web supervisor is stopped after restart, and write the confirmed terminal state back to the ledger. / Web 重启后显式停止旧任务时优先使用持久账本中的 provider run，并把已确认终态同步回账本。
 - This is an explicit stop/reconcile path; automatic takeover and lossless continuation remain pending. / 这仍是用户显式停止/核实路径，自动接管与无损续跑继续待完成。
+
+## 2026-10-16 · Stall warning watchdog / 停滞告警
+
+- Record one durable `stall_warning` after a configurable no-event window (180 seconds by default), with the idle duration and last event sequence; the UI states that the provider is still being awaited. / 长任务在可配置无事件窗口（默认180秒）后记录一次 `stall_warning`，保存空闲时长和最后事件序号，并明确提示仍在等待 provider。
+- The warning never kills or resubmits a request; full recovery and pressure acceptance remain pending. / 告警不会终止或重发请求，完整恢复和压力验收仍待完成。

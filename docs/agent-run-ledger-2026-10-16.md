@@ -26,3 +26,8 @@
 
 - `chat_recovery.stop_orphan` 现在优先读取账本中的 `providerRunId`，在 Web 进程重启后仍可对精确后台 run 发起显式停止核实；停止或 supervisor 丢失后的终态同步回账本。
 - 新增重启后仅快照缺少 `gateway_run_id` 的回归，相关聊天恢复专项共 15 项通过。此路径仍是用户显式停止/核实，不会自动接管或重发请求。
+
+### Stall warning watchdog
+
+- 长任务现在在可配置的无事件窗口（默认 180 秒）后记录一次 `stall_warning`，账本保存空闲秒数和最后事件序号，前端收到明确的“仍等待 provider”状态。
+- 这只是可回放的观测告警，不会自动终止、重发或把长工具调用判定为失败；完整 stall recovery 仍待跨进程接管和真实压力验收。

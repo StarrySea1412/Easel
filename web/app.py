@@ -124,6 +124,11 @@ OPENCLAW_SESSIONS_DIR = openclaw_state_dir() / "agents" / "main" / "sessions"
 # 实测 transcript 里 assistant 只有 text 块、thinking 恒为 0）面板留空，调高档位也不会有内容。
 # 默认 medium：让支持思考的部署直接显示较完整思考；EASEL_THINKING_LEVEL 可覆盖（low 提速 / high 更详尽）。
 THINKING_LEVEL = (os.environ.get("EASEL_THINKING_LEVEL", "").strip() or "medium")
+try:
+    _STALL_WARNING_SECONDS = int(os.environ.get("EASEL_CHAT_STALL_WARNING_SECONDS", "180"))
+except ValueError:
+    _STALL_WARNING_SECONDS = 180
+STALL_WARNING_SECONDS = max(30, min(_STALL_WARNING_SECONDS, TIMEOUT_CHAT + 30))
 
 # gateway 进程把原始事件流（token/thinking/收尾）写到的**单个共享文件**。
 # 关键：`openclaw agent` 只是瘦客户端，没有 --raw-stream 标志——只有常驻 gateway 按它自己
@@ -3901,6 +3906,8 @@ async def api_chat_stream(req: ChatRequest):
         raw_text_stream = ThinkingTextStream()
         turn_error = None
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
+        last_progress_at = time.monotonic()
+        stall_warning_sent = False
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
         save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
@@ -3916,7 +3923,9 @@ async def api_chat_stream(req: ChatRequest):
             pass
 
         def to_client(kind, text=None, **extra):
-            nonlocal event_seq, turn_error
+            nonlocal event_seq, turn_error, last_progress_at
+            if kind not in ('timing', 'execution'):
+                last_progress_at = time.monotonic()
             if kind == 'activity' and isinstance(text, str):
                 try:
                     execution_store.progress(text)
@@ -4452,6 +4461,16 @@ async def api_chat_stream(req: ChatRequest):
                     try:
                         item = await asyncio.wait_for(q.get(), timeout=min(10, remaining))
                     except asyncio.TimeoutError:
+                        if (not stall_warning_sent and
+                                time.monotonic() - last_progress_at >= STALL_WARNING_SECONDS):
+                            stall_warning_sent = True
+                            idle_seconds = int(time.monotonic() - last_progress_at)
+                            run_ledger.mark(
+                                _run_ledger_root(), turn_id, event='stall_warning', status='running',
+                                last_event_id=event_seq, idleSeconds=idle_seconds,
+                            )
+                            to_client('activity',
+                                      f'运行已 {idle_seconds} 秒没有新事件，仍在等待 provider；未自动重发或终止。')
                         continue
                     if item is SENTINEL:
                         finished_producers += 1
