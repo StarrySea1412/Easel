@@ -15,7 +15,7 @@ import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
 import '../styles/sidebar-shell.css';
 
-export type Page = 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
+export type Page = 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
   eventNotifications?: React.ReactNode;
@@ -237,6 +237,7 @@ export default function Sidebar({
             {railItem('dashboard','工作台',<IconDashboard size={19}/>)}
             {railItem('chat','对话',<IconChat size={19}/>)}
             {railItem('image','生图工坊',<IconImage size={19}/>)}
+            {railItem('automation','目标与定时任务',<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2M17 4l2-2M5 4 3 2"/></svg>)}
             <SidebarMoreMenu currentPage={currentPage} onNavigate={navigate}/>
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}
           </nav>

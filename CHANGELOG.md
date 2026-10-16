@@ -1,3 +1,9 @@
+## 2026-10-16 · Goals and schedules implementation / 目标与定时任务首版
+
+- Add durable original-chat goals, evidence checks, human quality approval, model freezing and cumulative execution limits; retain unknown runs without automatic replay. / 增加停止屏障、人工接管、原生工具准入和生图预留，Token/金额暂不硬封顶。
+- Add timezone-aware schedules, next-run previews, pause/edit controls, missed-run policies, idempotent manual runs and original-chat history links. / 单个服务进程首版串行自动执行；编辑保留触发历史。
+- Validate backend95, frontend1048, final build/lint and isolated390px light/dark keyboard/chat paths; local7880 is ready. / 真实模型/账单、138、安装器及运营指标另验。[使用及验收](docs/schedules-goals-implementation-2026-10-16.md)。
+
 ## 2026-10-16 · Schedules and goals research / 定时任务与目标方案
 
 - Review official ZCode goal/automation/off-peak docs and pinned source; verify local OpenClaw scheduling method availability without creating jobs. / 核对独立验收、停止/续跑、持久认领及验收故障默认通过的取舍。

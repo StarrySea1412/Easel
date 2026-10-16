@@ -1,0 +1,421 @@
+"""Durable goal/automation admission. Never replay a dispatched model request."""
+from contextlib import contextmanager
+import json
+from pathlib import Path
+import re
+import sqlite3
+import time
+import uuid
+
+
+SAFE_ID = re.compile(r'[A-Za-z0-9_.-]{1,120}\Z')
+
+
+class TaskConflict(ValueError):
+    pass
+
+
+def ident():
+    return uuid.uuid4().hex
+
+
+class TaskStore:
+    def __init__(self, outputs, clock=time.time):
+        self.outputs = Path(outputs).resolve()
+        self.path = self.outputs / '_automation' / 'tasks.sqlite3'
+        self.clock = clock
+
+    @contextmanager
+    def db(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(self.path, timeout=15)
+        db.row_factory = sqlite3.Row
+        db.executescript('''
+          CREATE TABLE IF NOT EXISTS goals(id TEXT PRIMARY KEY, session TEXT, status TEXT, data TEXT);
+          CREATE UNIQUE INDEX IF NOT EXISTS one_current_goal ON goals(session)
+            WHERE status NOT IN ('completed','cancelled');
+          CREATE TABLE IF NOT EXISTS plans(id TEXT PRIMARY KEY, enabled INTEGER, due REAL, data TEXT);
+          CREATE INDEX IF NOT EXISTS plans_due ON plans(enabled,due);
+          CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, goal TEXT, session TEXT, turn TEXT UNIQUE,
+            state TEXT, owner TEXT, lease REAL, dispatched INTEGER DEFAULT 0, data TEXT);
+          CREATE UNIQUE INDEX IF NOT EXISTS one_live_task_session ON runs(session)
+            WHERE state IN ('queued','running','unconfirmed');
+          CREATE TABLE IF NOT EXISTS slots(plan TEXT, at REAL, run TEXT, PRIMARY KEY(plan,at));
+          CREATE TABLE IF NOT EXISTS manual_requests(plan TEXT, request TEXT, run TEXT,
+            PRIMARY KEY(plan,request));
+          CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, data TEXT);
+          CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            session TEXT, turn TEXT UNIQUE, data TEXT);
+          CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            session TEXT, kind TEXT, data TEXT, at REAL);
+          CREATE TABLE IF NOT EXISTS chat_leases(session TEXT PRIMARY KEY, turn TEXT, until REAL);
+          CREATE TABLE IF NOT EXISTS image_reservations(goal TEXT, request TEXT, PRIMARY KEY(goal,request));
+          CREATE TABLE IF NOT EXISTS tool_reservations(goal TEXT, call TEXT, PRIMARY KEY(goal,call));
+        ''')
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def _get(db, table, key):
+        row = db.execute(f'SELECT data FROM {table} WHERE id=?', (key,)).fetchone()
+        if not row:
+            raise TaskConflict('记录不存在或已移除。')
+        return json.loads(row[0])
+
+    def _goal(self, db, goal):
+        goal['updatedAt'] = self.clock()
+        db.execute('INSERT INTO goals VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET session=excluded.session,status=excluded.status,data=excluded.data',
+                   (goal['id'], goal['sessionId'], goal['status'], json.dumps(goal, ensure_ascii=False)))
+
+    def _event(self, db, session, kind, value):
+        db.execute('INSERT INTO events(session,kind,data,at) VALUES(?,?,?,?)',
+                   (session, kind, json.dumps(value, ensure_ascii=False), self.clock()))
+
+    def create_goal(self, spec, *, session=None, title=None, plan=None, db=None):
+        if db is None:
+            with self.db() as conn:
+                return self.create_goal(spec, session=session, title=title, plan=plan, db=conn)
+        session = session or 'task-' + ident()
+        if not SAFE_ID.fullmatch(session):
+            raise TaskConflict('无效会话。')
+        if db.execute("SELECT 1 FROM goals WHERE session=? AND status NOT IN ('completed','cancelled')", (session,)).fetchone():
+            raise TaskConflict('该会话已有目标，请先完成或取消。')
+        goal = {**spec, 'id': ident(), 'sessionId': session, 'title': title or spec['objective'][:50],
+                'planId': plan, 'revision': 1, 'stopEpoch': 0, 'status': 'draft', 'phase': 'idle',
+                'iterations': 0, 'activeSeconds': 0, 'createdAt': self.clock(), 'checks': [],
+                'noProgress': 0, 'reason': '', 'lastFingerprint': None, 'imagesUsed': 0, 'toolsUsed': 0}
+        self._goal(db, goal)
+        db.execute('INSERT OR IGNORE INTO sessions VALUES(?,?)', (session, json.dumps({
+            'id': session, 'title': title or spec['objective'][:50], 'engine': 'openclaw',
+            'created': int(self.clock() * 1000), 'messages': []}, ensure_ascii=False)))
+        self._event(db, session, 'goal_created', {'goalId': goal['id']})
+        scopes = self.path.parent / 'scopes'
+        scopes.mkdir(exist_ok=True)
+        (scopes / session).touch()
+        db.execute('INSERT INTO messages(session,turn,data) VALUES(?,?,?)', (session, 'goal-info-' + goal['id'], json.dumps({
+            'role': 'assistant', 'content': '目标已建立：' + goal['objective'], 'turnId': 'goal-info-' + goal['id'], 'taskGoalId': goal['id']}, ensure_ascii=False)))
+        return goal
+
+    def get(self, table, key):
+        if table not in ('goals', 'runs', 'plans'):
+            raise ValueError('invalid table')
+        with self.db() as db:
+            return self._get(db, table, key)
+
+    def block(self, key, reason, phase='admission'):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if g['status'] == 'active':
+                g.update(status='blocked', phase=phase, reason=reason)
+                self._goal(db, g)
+            return g
+
+    def snapshot(self, session=None):
+        with self.db() as db:
+            where, args = (' WHERE session=?', (session,)) if session else ('', ())
+            goals = [json.loads(r[0]) for r in db.execute('SELECT data FROM goals' + where + ' ORDER BY rowid DESC LIMIT 300', args)]
+            runs = [json.loads(r[0]) for r in db.execute('SELECT data FROM runs' + where + ' ORDER BY rowid DESC LIMIT 500', args)]
+            plans = [json.loads(r[0]) for r in db.execute('SELECT data FROM plans ORDER BY rowid DESC')]
+            return {'goals': goals,
+                    'plans': [p for p in plans if not session or p.get('sessionId') == session][:200],
+                    'runs': runs,
+                    'serverTime': self.clock(), 'budgetMode': 'iterations_time_tools_images',
+                    'limitations': 'Token及金额不提供硬封顶；子Agent在目标运行中禁用。质量项由用户验收。'}
+
+    def due_plans(self, now):
+        # Scheduling must not inherit the management page's history limit.
+        with self.db() as db:
+            return [json.loads(r[0]) for r in db.execute(
+                'SELECT data FROM plans WHERE enabled=1 AND due<=? ORDER BY due', (now,))]
+
+    def session_snapshots(self):
+        with self.db() as db:
+            rows = [json.loads(r[0]) for r in db.execute('SELECT data FROM sessions ORDER BY rowid DESC LIMIT 300')]
+            for s in rows:
+                s['messages'] = [json.loads(r[0]) for r in db.execute(
+                    'SELECT data FROM messages WHERE session=? ORDER BY seq', (s['id'],))]
+            return rows
+
+    def change_goal(self, key, action):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if g['status'] in ('completed', 'cancelled'):
+                if action == 'cancel' and g['status'] == 'cancelled':
+                    return g
+                raise TaskConflict('终态目标保留历史，不能修改执行状态；请新建目标。')
+            if action in ('pause', 'stop', 'cancel'):
+                g.update(status='cancelled' if action == 'cancel' else 'paused', reason='已取消' if action == 'cancel' else '已暂停自动推进')
+                g['stopEpoch'] += 1
+                # Queued work has not reached the provider, so cancellation is safe.
+                for row in db.execute("SELECT * FROM runs WHERE goal=? AND state='queued'", (key,)).fetchall():
+                    r = json.loads(row['data']); r.update(state='stopped', finishedAt=self.clock())
+                    db.execute("UPDATE runs SET state='stopped',data=? WHERE id=?", (json.dumps(r), row['id']))
+                if action != 'pause':
+                    g['cancelRequested'] = True
+            elif action in ('start', 'resume'):
+                if g['status'] == 'active':
+                    return g
+                if g['status'] in ('completed', 'cancelled'):
+                    raise TaskConflict('终态目标不能重新启动，请新建目标。')
+                if db.execute("SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (key,)).fetchone():
+                    raise TaskConflict('后台运行尚未结算；先核实或停止，不能重复提交。')
+                if g['iterations'] >= g['maxIterations'] or g['activeSeconds'] >= g['maxSeconds']:
+                    raise TaskConflict('已达到执行上限；请保留记录并新建有明确预算的目标。')
+                g.update(status='active', phase='queued', reason='', cancelRequested=False)
+            else:
+                raise TaskConflict('不支持的目标操作。')
+            self._goal(db, g); self._event(db, g['sessionId'], 'goal_' + action, {'goalId': key})
+            return g
+
+    def claim(self, owner):
+        with self.db() as db:
+            for row in db.execute("SELECT * FROM runs WHERE state='running' AND lease<?", (self.clock(),)).fetchall():
+                r = json.loads(row['data']); g = self._get(db, 'goals', row['goal'])
+                # Even before acknowledgement, the previous process may have sent it.
+                r.update(state='unconfirmed', reason='执行进程失联，未自动重发。')
+                db.execute("UPDATE runs SET state='unconfirmed',data=? WHERE id=?", (json.dumps(r), r['id']))
+                if g['status'] not in ('paused', 'cancelled'):
+                    g.update(status='blocked', phase='unconfirmed', reason=r['reason'])
+                self._goal(db, g)
+            for row in db.execute("SELECT data FROM goals WHERE status='active' ORDER BY rowid").fetchall():
+                g = json.loads(row[0]); session = g['sessionId']
+                if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed')", (session,)).fetchone():
+                    continue
+                if db.execute('SELECT 1 FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone():
+                    continue
+                row = db.execute("SELECT * FROM runs WHERE goal=? AND state='queued'", (g['id'],)).fetchone()
+                if row:
+                    r = json.loads(row['data'])
+                else:
+                    if g['iterations'] >= g['maxIterations'] or g['activeSeconds'] >= g['maxSeconds']:
+                        g.update(status='blocked', phase='budget', reason='已达到目标轮次或时长上限。'); self._goal(db, g); continue
+                    r = {'id': ident(), 'goalId': g['id'], 'sessionId': session,
+                         'turnId': 'goal-' + ident(), 'iteration': g['iterations'] + 1,
+                         'revision': g['revision'], 'stopEpoch': g['stopEpoch'], 'createdAt': self.clock()}
+                r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'])
+                db.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                           (r['id'], g['id'], session, r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
+                g.update(iterations=r['iteration'], phase='running', currentTurnId=r['turnId'])
+                self._goal(db, g)
+                return g, r
+
+    def heartbeat(self, run, owner):
+        with self.db() as db:
+            return db.execute("UPDATE runs SET lease=? WHERE id=? AND owner=? AND state='running'",
+                              (self.clock() + 90, run, owner)).rowcount == 1
+
+    def bind_provider(self, session, turn, provider):
+        with self.db() as db:
+            row = db.execute("SELECT data FROM runs WHERE session=? AND turn=? AND state='running'", (session, turn)).fetchone()
+            if not row:
+                return False
+            r = json.loads(row[0])
+            if r.get('providerRunId') and r['providerRunId'] != provider:
+                raise TaskConflict('运行器返回了不同的运行身份，未替换已确认记录。')
+            r['providerRunId'] = provider
+            db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r), r['id']))
+            return True
+
+    def running(self):
+        with self.db() as db:
+            return [json.loads(r[0]) for r in db.execute("SELECT data FROM runs WHERE state IN ('running','unconfirmed')")]
+
+    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True):
+        with self.db() as db:
+            r = self._get(db, 'runs', run)
+            if r.get('owner') != owner:
+                raise TaskConflict('运行所有权已变化，拒绝过期结果。')
+            if r['state'] not in ('running', 'unconfirmed'):
+                return self._get(db, 'goals', r['goalId'])
+            g = self._get(db, 'goals', r['goalId'])
+            r.update(state=state if resource_settled else 'unconfirmed', text=text[-200000:],
+                     finishedAt=self.clock(), checks=checks or [], reason=reason)
+            db.execute('UPDATE runs SET state=?,data=? WHERE id=?', (r['state'], json.dumps(r, ensure_ascii=False), run))
+            db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], r['turnId'], json.dumps({
+                'role': 'assistant', 'content': text or reason or ('本轮已停止，未自动续跑。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
+                'requestedModelRef': r.get('modelRef'), 'taskRunId': r['id']}, ensure_ascii=False)))
+            g['activeSeconds'] += max(0, self.clock() - r.get('countedAt', r['startedAt']))
+            r['countedAt'] = self.clock()
+            db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r, ensure_ascii=False), run))
+            if checks is not None:
+                g['checks'] = checks
+            if not resource_settled:
+                g.update(status='blocked', phase='unconfirmed', reason=reason or '外部资源未结算，未自动重发。')
+            elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
+                g['phase'] = 'idle'  # A late result cannot restart a paused/replaced goal.
+            elif state != 'completed':
+                g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
+            elif any(c['state'] == 'error' for c in (checks or [])):
+                g.update(status='blocked', phase='verification_error', reason='证据核验异常，已停止自动推进。')
+            elif checks and all(c['state'] == 'passed' for c in checks):
+                g.update(status='completed', phase='idle', reason='所有验收项通过。')
+            elif checks and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks):
+                g.update(status='blocked', phase='review', reason='自动检查已结束，等待用户验收。')
+            else:
+                g['noProgress'] = g['noProgress'] + 1 if g.get('lastFingerprint') == fingerprint else 0
+                g['lastFingerprint'] = fingerprint
+                g.update(phase='queued', reason='继续处理未通过的验收项。')
+                if g['noProgress'] >= 2:
+                    g.update(status='blocked', phase='no_progress', reason='连续两轮没有新的有效证据，已停止自动推进。')
+            self._goal(db, g); self._event(db, g['sessionId'], 'run_settled', {'runId': run, 'status': g['status']})
+            if g['status'] in ('completed', 'blocked'):
+                from easel.notifications import NotificationStore
+                try:
+                    NotificationStore(self.outputs).add([{'id':f"goal:{g['id']}:{r['id']}:{g['status']}",
+                        'message': ('目标已通过验收' if g['status'] == 'completed' else '目标需要处理') + ' · ' + g['title'][:100],
+                        'tone': 'success' if g['status'] == 'completed' else 'info', 'at':self.clock()*1000,
+                        'target':{'page':'chat','sessionId':g['sessionId']}}])
+                except (OSError, sqlite3.Error, ValueError):
+                    pass  # Notification availability must not roll back run settlement.
+            return g
+
+    def apply_checks(self, key, checks, *, review=None):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if db.execute("SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (key,)).fetchone():
+                raise TaskConflict('请等待后台结算再验收。')
+            if review:
+                g['reviewedTurnId'] = review
+            if g['status'] == 'cancelled':
+                raise TaskConflict('已取消目标保留历史，不能重新验收。')
+            if db.execute("SELECT 1 FROM goals WHERE session=? AND id<>? AND status NOT IN ('completed','cancelled')", (g['sessionId'], key)).fetchone():
+                raise TaskConflict('当前会话已有后续目标，历史目标不能改变当前执行状态。')
+            g['checks'] = checks
+            if checks and all(c['state'] == 'passed' for c in checks) and g.get('currentTurnId'):
+                g.update(status='completed', phase='idle', reason='所有验收项通过。')
+            elif g['status'] == 'completed':
+                g.update(status='blocked', phase='evidence_changed', reason='产物证据已变化，需要重新验收。')
+            elif checks and g.get('currentTurnId') and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks):
+                g.update(status='blocked', phase='review', reason='自动检查已结束，等待用户验收。')
+            self._goal(db, g)
+            return g
+
+    def reserve_chat(self, session, turn):
+        with self.db() as db:
+            if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('queued','running','unconfirmed')", (session,)).fetchone():
+                raise TaskConflict('目标仍有后台工作，请先停止目标并等待确认，再发送消息。')
+            row = db.execute('SELECT turn FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone()
+            if row and row[0] != turn:
+                raise TaskConflict('该会话仍有运行，请等待或停止。')
+            # Human input pauses automatic continuation before acquiring the session.
+            for row in db.execute("SELECT data FROM goals WHERE session=? AND status='active'", (session,)).fetchall():
+                g = json.loads(row[0]); g.update(status='paused', reason='用户接管对话，已暂停自动推进。'); g['stopEpoch'] += 1; self._goal(db, g)
+            db.execute('INSERT OR REPLACE INTO chat_leases VALUES(?,?,?)', (session, turn, self.clock() + 7200))
+
+    def release_chat(self, session, turn):
+        with self.db() as db:
+            db.execute('DELETE FROM chat_leases WHERE session=? AND turn=?', (session, turn))
+
+    def save_plan(self, data, next_at, key=None):
+        with self.db() as db:
+            previous = self._get(db, 'plans', key) if key else None
+            if previous and previous['enabled']:
+                raise TaskConflict('编辑前先暂停计划，当前运行会保留。')
+            p = {**data, 'id': key or ident(), 'nextAt': next_at, 'createdAt': previous['createdAt'] if previous else self.clock(),
+                 'revision': (previous['revision'] + 1) if previous else 1, 'lastResult': previous.get('lastResult') if previous else None,
+                 'history': previous.get('history', []) if previous else []}
+            db.execute('INSERT OR REPLACE INTO plans VALUES(?,?,?,?)', (p['id'], int(p['enabled']), p['nextAt'], json.dumps(p, ensure_ascii=False)))
+            return p
+
+    def trigger_plan(self, key, *, scheduled_at=None, request=None, next_at=None, missed=False, effective_at=None):
+        with self.db() as db:
+            p = self._get(db, 'plans', key)
+            if scheduled_at is not None:
+                if not p['enabled'] or p['nextAt'] != scheduled_at:
+                    return None
+                if db.execute('SELECT 1 FROM slots WHERE plan=? AND at=?', (key, scheduled_at)).fetchone():
+                    return None
+            elif request:
+                found = db.execute('SELECT run FROM manual_requests WHERE plan=? AND request=?', (key, request)).fetchone()
+                if found:
+                    return None
+            session = p.get('sessionId') or 'task-' + ident()
+            occupied = db.execute("SELECT 1 FROM goals WHERE session=? AND status NOT IN ('completed','cancelled')", (session,)).fetchone()
+            reason = '错过执行窗口，已跳过。' if missed else '绑定会话已有目标，本次跳过。' if occupied else ''
+            if scheduled_at is None and occupied:
+                raise TaskConflict(reason)
+            goal = None if reason else self.create_goal(p['goal'], session=session, title=p['title'], plan=key, db=db)
+            if goal:
+                goal.update(status='active', phase='queued'); self._goal(db, goal)
+            if scheduled_at is not None:
+                db.execute('INSERT INTO slots VALUES(?,?,?)', (key, scheduled_at, goal['id'] if goal else None))
+                p['nextAt'] = next_at
+                p['enabled'] = next_at is not None
+            else:
+                db.execute('INSERT INTO manual_requests VALUES(?,?,?)', (key, request, goal['id'] if goal else None))
+            p['lastResult'] = {'at': self.clock(), 'scheduledAt': effective_at if effective_at is not None else scheduled_at,
+                               'missedSince': scheduled_at if effective_at is not None and effective_at != scheduled_at else None,
+                               'trigger': 'schedule' if scheduled_at is not None else 'manual',
+                               'status': 'skipped' if reason else 'queued', 'reason': reason,
+                               'goalId': goal['id'] if goal else None, 'sessionId': session if goal else None}
+            history = (p.get('history') or []) + [p['lastResult']]
+            p['history'] = history[-100:]
+            db.execute('UPDATE plans SET enabled=?,due=?,data=? WHERE id=?', (int(p['enabled']), p['nextAt'], json.dumps(p, ensure_ascii=False), key))
+            return goal
+
+    def set_plan_enabled(self, key, enabled, next_at):
+        with self.db() as db:
+            p = self._get(db, 'plans', key); p.update(enabled=enabled, nextAt=next_at)
+            db.execute('UPDATE plans SET enabled=?,due=?,data=? WHERE id=?', (int(enabled), next_at, json.dumps(p, ensure_ascii=False), key))
+            return p
+
+    def reserve_image(self, session, turn, request, count=1):
+        request = turn + ':' + request
+        with self.db() as db:
+            row = db.execute('SELECT goal FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
+            if not row:
+                return
+            g = self._get(db, 'goals', row[0])
+            if db.execute('SELECT 1 FROM image_reservations WHERE goal=? AND request=?', (g['id'], request)).fetchone():
+                return
+            if g['status'] != 'active' or g['imagesUsed'] + count > g['maxImages']:
+                raise TaskConflict('目标已暂停或达到图片数量上限；未提交新的生图请求。')
+            db.execute('INSERT INTO image_reservations VALUES(?,?)', (g['id'], request))
+            g['imagesUsed'] += count
+            self._goal(db, g)
+
+    def image_allowed(self, session, turn):
+        with self.db() as db:
+            row = db.execute('SELECT goal,state FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
+            if not row:
+                return True
+            g = self._get(db, 'goals', row['goal'])
+            return g['status'] == 'active' and row['state'] == 'running'
+
+    def guard(self, session, provider_run, call, tool):
+        """Atomic before-tool admission, called by the native Gateway hook."""
+        with self.db() as db:
+            rows = db.execute('SELECT data FROM runs WHERE session=? ORDER BY rowid DESC', (session,)).fetchall()
+            runs = [json.loads(row[0]) for row in rows]
+            known = next((r for r in runs if provider_run and r.get('providerRunId') == provider_run), None)
+            r = known or next((r for r in runs if r['state'] in ('running', 'unconfirmed')), None)
+            if not r and runs and not db.execute('SELECT 1 FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone():
+                return {'allowed': False, 'reason': '目标轮次已经结束，未准入新的工具调用。'}
+            if not r:
+                return {'allowed': True}
+            g = self._get(db, 'goals', r['goalId'])
+            if not provider_run or not call or r['state'] != 'running' or g['status'] != 'active' or r['stopEpoch'] != g['stopEpoch']:
+                return {'allowed': False, 'reason': '目标已停止、状态未确认或调用缺少可核验身份。'}
+            if r.get('providerRunId') != provider_run:
+                return {'allowed': False, 'reason': '目标运行身份不匹配。'}
+            if tool in ('sessions_spawn', 'spawn_agent', 'subagents', 'cron', 'gateway', 'sessions_send'):
+                g.update(status='blocked', reason='目标尝试了未授权的派生或调度操作，已暂停。', phase='tool_policy'); self._goal(db, g)
+                return {'allowed': False, 'reason': '目标首版不允许派生 Agent、创建嵌套计划或修改网关。'}
+            if self.clock() - r['startedAt'] + g['activeSeconds'] >= g['maxSeconds']:
+                return {'allowed': False, 'reason': '目标执行时长已达上限。'}
+            reservation = provider_run + ':' + call
+            if db.execute('SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():
+                return {'allowed': True}
+            if g['toolsUsed'] >= g['maxTools']:
+                g.update(status='blocked', phase='budget', reason='工具调用已达到目标上限，正在停止。'); self._goal(db, g)
+                return {'allowed': False, 'reason': '目标工具调用已达上限。'}
+            db.execute('INSERT INTO tool_reservations VALUES(?,?)', (g['id'], reservation))
+            g['toolsUsed'] += 1; self._goal(db, g)
+            return {'allowed': True}

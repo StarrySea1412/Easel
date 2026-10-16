@@ -34,7 +34,7 @@ def scope(value):
 def private_output(root, path):
     """Keep internal delivery/job credentials out of legacy media/file routes."""
     relative = Path(path).resolve().relative_to(Path(root).resolve())
-    return bool(relative.parts and relative.parts[0] == '_artifacts')
+    return bool(relative.parts and relative.parts[0] in ('_artifacts', '_automation'))
 
 
 def file_path(root, value):

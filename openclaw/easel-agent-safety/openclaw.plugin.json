@@ -3,6 +3,6 @@
   "name": "Easel Agent Safety",
   "description": "Require the configured Agent startup model and bound delegation limits.",
   "activation": { "onStartup": true },
-  "contracts": { "tools": ["easel_present", "easel_generate_image"] },
+  "contracts": { "tools": ["easel_present", "easel_generate_image", "easel_task_guard"] },
   "configSchema": { "type": "object", "additionalProperties": false }
 }

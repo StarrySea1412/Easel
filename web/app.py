@@ -542,9 +542,11 @@ async def _lifespan(_app: FastAPI):
     health = _model_health_service()
     health.start()
     _image_worker().start()
+    _task_service.start()
     try:
         yield
     finally:
+        await _task_service.close()
         await asyncio.to_thread(_image_worker().stop)
         await asyncio.to_thread(_codex_service.close)
         await asyncio.to_thread(health.stop)
@@ -3824,6 +3826,31 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
 
 @app.post("/api/chat/stream")
 async def api_chat_stream(req: ChatRequest):
+    # Durable admission shared with automatic goals. Existing supervisor still
+    # owns the lease after the HTTP stream has been returned/disconnected.
+    from easel.task_store import TaskStore, TaskConflict
+    store = TaskStore(OUTPUTS_DIR)
+    req = req.model_copy(update={'sessionId': req.sessionId or uuid.uuid4().hex,
+                                 'turnId': req.turnId or uuid.uuid4().hex})
+    try:
+        store.reserve_chat(req.sessionId, req.turnId)
+    except TaskConflict as exc:
+        raise HTTPException(409, str(exc)) from None
+    release = lambda: store.release_chat(req.sessionId, req.turnId)
+    try:
+        if req.engine == 'codex':
+            # Codex has its own persistent execution fence; goals only admit
+            # OpenClaw-bound conversations, so do not extend its stream lifetime.
+            result = await start_chat_run(req)
+            release()
+            return result
+        return await start_chat_run(req, on_done=release)
+    except BaseException:
+        release()
+        raise
+
+
+async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     """SSE 真流式对话。
 
     `openclaw agent` CLI 会把整段模型输出缓冲到结束才打印（stdout 无增量）。真正跑模型的是
@@ -3971,7 +3998,8 @@ async def api_chat_stream(req: ChatRequest):
                     ef.flush()
             except OSError:
                 pass
-            client_q.put_nowait({"t": kind, "text": text, "id": event_seq, **extra})
+            if observe:
+                client_q.put_nowait({"t": kind, "text": text, "id": event_seq, **extra})
 
         # 秒级反馈：记录请求已进入本轮事件流；不把“唤醒 agent”当成已发生的后台工作。
         to_client('timing', timing())
@@ -4175,6 +4203,8 @@ async def api_chat_stream(req: ChatRequest):
                                               'requestedThinkingLevel': requested_thinking_level})
                 run_ledger.mark(_run_ledger_root(), turn_id, event='provider_accepted', status='running',
                                 provider_run_id=run_id, transport='native')
+                from easel.task_store import TaskStore
+                TaskStore(OUTPUTS_DIR).bind_provider(sk, turn_id, run_id)
             def _mark_compaction(compaction_event):
                 phase = compaction_event.get('phase') if isinstance(compaction_event, dict) else None
                 outcome = compaction_event.get('outcome') if isinstance(compaction_event, dict) else None
@@ -4709,7 +4739,8 @@ async def api_chat_stream(req: ChatRequest):
                 _ACTIVE_SKILL_TURNS.pop(sk, None)
             to_client("done", sessionKey=sk, stopped=user_stopped)
             _CHAT_JOBS.pop(turn_id, None)
-            client_q.put_nowait(CLIENT_DONE)
+            if observe:
+                client_q.put_nowait(CLIENT_DONE)
 
     # 把 run 跑在独立后台任务里（持强引用防 GC）——客户端断开不取消它。
     task = asyncio.create_task(supervisor())
@@ -4717,6 +4748,8 @@ async def api_chat_stream(req: ChatRequest):
 
     def _bg_done(t):
         _BG_TASKS.discard(t)
+        if on_done is not None:
+            on_done()
         if _CHAT_JOBS.get(turn_id) == (sk, cancel_job):
             _CHAT_JOBS.pop(turn_id, None)
         try:
@@ -4730,6 +4763,8 @@ async def api_chat_stream(req: ChatRequest):
             except Exception:
                 pass
     task.add_done_callback(_bg_done)
+    if not observe:
+        return {'turnId': turn_id, 'sessionId': sk}
 
     async def forward():
         """纯转发：从 client_q 取事件 yield 给浏览器。
@@ -4894,9 +4929,20 @@ async def api_chat(req: ChatRequest):
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
     # chat 可能中途触发制作层长任务 → 用 TIMEOUT_CHAT，与流式 /api/chat/stream 一致（勿用 300s）
-    result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT,
-                                        req.sessionId, req.thinkingLevel)
-    return {"response": result}
+    from easel.task_store import TaskStore, TaskConflict
+    store, turn = TaskStore(OUTPUTS_DIR), uuid.uuid4().hex
+    if req.sessionId:
+        try:
+            store.reserve_chat(req.sessionId, turn)
+        except TaskConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+    try:
+        result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT,
+                                            req.sessionId, req.thinkingLevel)
+        return {"response": result}
+    finally:
+        if req.sessionId:
+            store.release_chat(req.sessionId, turn)
 
 
 class SkillRequest(BaseModel):
@@ -7506,6 +7552,11 @@ async def api_usage_save_price(req: UsagePriceRequest):
         raise HTTPException(400, str(exc)) from None
     except OSError:
         raise HTTPException(500, '价格保存失败，请检查数据目录权限') from None
+
+
+from task_service import TaskService
+_task_service = TaskService(sys.modules[__name__])
+app.include_router(_task_service.router())
 
 
 if __name__ == "__main__":

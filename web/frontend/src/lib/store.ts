@@ -10,6 +10,8 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 
 export interface ChatMessage extends ChatTiming {
+  taskRunId?:string;
+  taskGoalId?:string;
   externalSource?: 'gateway-injected';
   kind?: 'breakdown'; // User material; the immediately following answer uses the report reader.
   stopped?: boolean;
@@ -147,7 +149,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   if (value.role === 'user' && value.kind === 'breakdown') message.kind = 'breakdown';
   if (value.stopped === true) message.stopped = true;
   Object.assign(message, decodeChatTiming(value));
-  for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
+  for (const key of ['agentContent', 'turnId', 'thinking', 'activity', 'taskRunId', 'taskGoalId'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];
   }
   if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');

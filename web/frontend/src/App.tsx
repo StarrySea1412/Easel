@@ -1,4 +1,5 @@
 import { chatErrorDetail } from './lib/chatErrors';
+import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
@@ -52,6 +53,7 @@ import { buildBreakdownReportPrompt } from './lib/breakdownReport';
 import type { ActiveRun } from './lib/breakdownStore';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
+const AutomationPage = createLazyPage('目标与定时任务', () => import('./components/AutomationPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
 const SkillPage = createLazyPage('技能库', () => import('./components/SkillPage'));
 const OutputsPage = createLazyPage('内容库', () => import('./components/OutputsPage'));
@@ -287,6 +289,17 @@ export default function App() {
   // 最新 sessions 的 ref，供回调里读取而不必进依赖数组（避免闭包过期/频繁重建）
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  const [tasks,setTasks]=useState<TaskSnapshot>({goals:[],plans:[],runs:[],serverTime:0});
+  const [taskRevision,setTaskRevision]=useState(0);
+  useEffect(()=>{
+    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;
+    async function poll(){try{
+      const [state,remote]=await Promise.all([taskRequest<TaskSnapshot>('',undefined,'GET',controller.signal),taskRequest<{sessions:ChatSession[]}>('/sessions',undefined,'GET',controller.signal)]);
+      if(controller.signal.aborted)return;
+      setTasks(state);setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);if(next!==old)saveSessions(next);return next;});
+    }catch{/* Keep the last confirmed snapshot; never infer completion from a failed read. */}finally{if(!controller.signal.aborted)timer=setTimeout(()=>void poll(),3000);}}
+    void poll();return()=>{controller.abort();clearTimeout(timer);};
+  },[taskRevision]);
 
   // 当前活跃会话 id 的 ref：供跨标签「谁在用会话 X」查询时即时应答（见挂载 effect）
   const activeIdRef = useRef<string | null>(activeSessionId);
@@ -1060,9 +1073,13 @@ export default function App() {
   }, [sessions]);
 
   const handleSessionDelete = useCallback((id: string) => {
+    const target = sessionsRef.current.find((s) => s.id === id);
+    if (!target?.importedFromBackup && target?.messages.some(m => m.taskGoalId || m.taskRunId)) {
+      showToast('这条对话包含服务端目标记录，请使用归档保留结果；归档不会停止计划或目标。', 'info');
+      return;
+    }
     if (!window.confirm('确定删除这条对话？')) return;
 
-    const target = sessionsRef.current.find((s) => s.id === id);
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
@@ -1175,6 +1192,9 @@ export default function App() {
           <ChatPage
             key={activeSession.id}
             session={activeSession}
+            taskState={tasks}
+            onTaskChange={()=>setTaskRevision(v=>v+1)}
+            onManageGoals={()=>setCurrentPage('automation')}
             onEngineChange={engine=>setSessions(prev=>{const next=prev.map(s=>s.id===activeSession.id&&!s.messages.length&&!s.pendingTurnId?{...s,engine}:s);saveSessions(next);return next;})}
             stream={streams[activeSession.id]}
             stopping={Boolean(stoppingSessions[activeSession.id])}
@@ -1217,6 +1237,8 @@ export default function App() {
         );
       case 'trends':
         return <TrendsPage onUseTopic={handleUseTopic} />;
+      case 'automation':
+        return <AutomationPage sessions={sessions} sessionId={activeSessionId} onOpen={id=>{void taskRequest<{sessions:ChatSession[]}>('/sessions').then(remote=>{setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);saveSessions(next);return next;});setTaskRevision(v=>v+1);setActiveSessionId(id);setCurrentPage('chat');}).catch(e=>showToast(e instanceof Error?e.message:'对话暂不可读','error'));}}/>;
       case 'ideas':
         return <IdeasPage onUseTopic={handleUseTopic} />;
       case 'calendar':

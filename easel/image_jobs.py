@@ -109,6 +109,9 @@ class ImageJobs:
                     raise ValueError('该请求标识已用于不同参数；未重复生成')
                 return self.public(row)
             host, config_id, limit = channel(config)
+            if session:
+                from easel.task_store import TaskStore
+                TaskStore(self.outputs).reserve_image(session, turn, request_id, count)
             ident = uuid.uuid4().hex
             data = {**normalized, 'jobId': ident, 'requestId': request_id, 'started': time.time(),
                     'url': None, 'error': None, 'limit': limit}
@@ -153,6 +156,12 @@ class ImageJobs:
                 return None
             for row in db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall():
                 data = json.loads(row['data'])
+                if data.get('sessionId'):
+                    from easel.task_store import TaskStore
+                    if not TaskStore(self.outputs).image_allowed(data['sessionId'], data['turnId']):
+                        data['error'] = '所属目标已停止或运行未确认；排队图片未提交供应商。'
+                        db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
+                        continue
                 if row['config'] != config_id:
                     data['error'] = '排队期间生图渠道或模型已变更；未提交到供应商，请确认配置后新建任务。'
                     db.execute("UPDATE jobs SET status='error', data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
