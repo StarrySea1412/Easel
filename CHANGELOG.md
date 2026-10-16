@@ -1,3 +1,8 @@
+## 2026-10-16 · Schedules and goals research / 定时任务与目标方案
+
+- Review official ZCode goal/automation/off-peak docs and pinned source; verify local OpenClaw scheduling method availability without creating jobs. / 核对独立验收、停止/续跑、持久认领及验收故障默认通过的取舍。
+- Propose evidence-based goals, original-chat delivery, explicit models/budgets, cancellation barriers and one scheduling authority. / 先执行底座、再定时管理、最后运营指标；[设计及验收门槛](docs/schedules-goals-research-2026-10-16.md)。Research only; no new runtime implementation, paid calls, host138 or package changes.
+
 ## 2026-10-16 · Refined notification inbox / 通知列表精修
 
 - Replace repeated bordered cards with compact rows, quieter metadata, direct detail actions and distinct status glyphs; preserve read state, filters, confirmation and persistence. / 调整信息密度与视觉层级，保留全部通知功能。
