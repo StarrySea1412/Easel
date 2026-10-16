@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
 import OutputMessageContent from './OutputMessageContent';
+import BreakdownReport from './BreakdownReport';
 import { IconCopy, IconCheck, IconRetry, IconEdit } from './icons';
 import ChatMessageEditor from './ChatMessageEditor';
 import '../styles/chat-editing.css';
@@ -19,6 +20,8 @@ export interface BubbleActions {
 }
 
 interface MessageBubbleProps {
+  reportMaterial?: string;
+  reportIncomplete?: boolean;
   message: ChatMessage;
   sessionId?: string;
   isStreaming?: boolean;
@@ -168,7 +171,7 @@ function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; statu
   );
 }
 
-export default function MessageBubble({ message, sessionId, isStreaming, thinking, activity, activitySteps, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
+export default function MessageBubble({ message, reportMaterial, reportIncomplete, sessionId, isStreaming, thinking, activity, activitySteps, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const userRow = useRef<HTMLDivElement>(null);
   const cancelEdit = () => { setEditing(false); requestAnimationFrame(() => userRow.current?.querySelector<HTMLButtonElement>('[aria-label="重新编辑消息"]')?.focus()); };
@@ -245,7 +248,9 @@ export default function MessageBubble({ message, sessionId, isStreaming, thinkin
         <div className="message-bubble assistant">
           {livePanel}
           {executionView}
-          {displayedContent && <OutputMessageContent content={displayedContent} inert={backupSnapshot} streaming={isStreaming} />}
+          {displayedContent && (reportMaterial !== undefined
+            ? <BreakdownReport material={reportMaterial} report={displayedContent} complete={!isStreaming && !displayedError && !message.stopped && !reportIncomplete} inert={backupSnapshot} />
+            : <OutputMessageContent content={displayedContent} inert={backupSnapshot} streaming={isStreaming} />)}
           {displayedError&&<section className="chat-response-error" role="alert"><strong>{chatErrorTitle(displayedError)}</strong><p>{displayedError.message}</p>{displayedError.stage && <p className="chat-response-error-hint">失败阶段：{displayedError.stage==='model_response'?'模型响应':displayedError.stage==='agent_execution'?'Agent 执行':displayedError.stage}</p>}{(displayedError.channel || displayedError.modelRef) && <p className="chat-response-error-hint">渠道：{displayedError.channel || '未上报'}{displayedError.channelEndpoint ? ` · ${displayedError.channelEndpoint}` : ''} · 模型：{displayedError.modelRef || '未上报'}</p>}{displayedError.detail && <details className="chat-error-details"><summary>服务返回详情</summary><pre>{displayedError.detail}</pre></details>}{displayedError.code&&<small>错误代码：{displayedError.code}</small>}{backupSnapshot ? <p className="chat-response-error-hint">这是备份中的失败记录，仅供查阅；需要继续时请新建对话。</p> : <>{displayedError.historical&&<p className="chat-response-error-hint">这是一条历史失败记录。修复认证配置后，可以重新发送或重试。</p>}{!displayedError.historical&&displayedError.category==='authentication'&&<p className="chat-response-error-hint">请先检查服务凭据与授权，再重新发送。</p>}</>}</section>}
           {isStreaming && <span className="streaming-cursor" />}
         </div>

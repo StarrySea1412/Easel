@@ -1,3 +1,5 @@
+> **上下文窗口与拆解对话（2026-10-16）**：区分原厂窗口、渠道配置和旧会话额度；GLM-5.3提供带出处的1M参考与空配置填入入口，保留用户限制。新拆解进入最近对话并嵌入原报告阅读界面，旧任务沿用同一ID恢复，材料/历史保留。当前渠道1M支持与真实模型质量未实测；仅本机7880，138和安装包不变。[实现、CC Switch对照与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-window-chat-breakdown-2026-10-16.md)。
+
 > **本机接续完善（2026-10-16）**：通知改为项目本机持久保存最近1000条；Codex接入实际用量通知、去重增量及历史下限，费用仍与账单区分。办公室顶部可返回所选对话；补齐两项0.2.9可靠性修复及RSS去重/时效源模块。已恢复7880，完成指定深色/实际390px/键盘入口复核；全界面、真实付费与新闻运行验收继续保留。仅本机，138和安装包未更新。[改动、证据与剩余清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-history-codex-usage-2026-10-16.md)。
 
 > **上下文统计纠正（2026-10-16）**：修复只读旧 JSON 而漏掉当前 SQLite 会话记录的问题；上下文各分类独立显示，技能目录字符数、会话登记与本机已安装数量分别标明来源。缺少总量时仍显示已知项，模型切换单独保留上次快照；分类 Token 是估算，不冒充实际分词或账单。仅本机7880，138与安装包未更新。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-accounting-fix-2026-10-16.md)。

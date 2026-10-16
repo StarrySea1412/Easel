@@ -278,6 +278,26 @@ async function chooseLastModel(view) {
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
 }
 
+test('known context reference fills only on request, keeps manual values and hides after a model change', async t => {
+  const rows = configuredRows().map(row => ({ ...row, model: 'glm-5.3', contextWindow: null,
+    contextReference: { modelId: 'glm-5.3', tokens: 1048576, label: '1M', source: '智谱', url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3', note: '渠道限制需核验' } }));
+  const view = await fixture(t, { fetchModelChannels: modelChannels(rows) });
+  await view.render(1, view.props, 'model');
+  await view.click(view.container.querySelector('.model-provider-editors').closest('details').querySelector('summary'));
+  await view.click(view.container.querySelector('.provider-toggle'));
+  const input = () => view.container.querySelector('[aria-label="上下文窗口（Token）"]');
+  assert.equal(input().value, '');
+  await view.click(findButton(view, '填入参考值，保存后生效'));
+  assert.equal(input().value, '1048576');
+  const card = view.container.querySelector('.provider-card');
+  assert.equal([...card.querySelectorAll('button')].some(button => button.textContent.includes('填入参考值')), false);
+  assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false, 'filling is a draft, never an automatic configuration write');
+  const model = view.container.querySelector('input[aria-label="模型名称"]');
+  await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(model, 'custom-alias'); model.dispatchEvent(new window.Event('input', { bubbles: true })); });
+  assert.equal(input().value, '');
+  assert.doesNotMatch(card.textContent, /原厂参考：1M/);
+});
+
 test('custom context budgets validate before saving, serialize clearing and reset on model changes', async t => {
   const rows = configuredRows().map(row => ({ ...row, contextWindow: 32768 }));
   const view = await fixture(t, {

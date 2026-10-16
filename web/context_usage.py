@@ -6,6 +6,7 @@ import math
 import re
 import sqlite3
 from pathlib import Path
+from model_metadata import context_reference
 
 SAFE_ID = re.compile(r'[A-Za-z0-9_.-]{1,120}\Z')
 CATEGORIES = [('messages', '消息'), ('system_tools', '系统工具'), ('mcp_tools', 'MCP 工具'),
@@ -136,12 +137,17 @@ def collect_context(state_dir: Path, web_sessions_dir: Path, session_id: str,
     pkey, _, model_id = selected_ref.partition('/')
     models = mapping(providers.get(pkey)).get('models', [])
     selected = next((item for item in models if isinstance(item, dict) and item.get('id') == model_id), {}) if isinstance(models, list) else {}
-    capacity = number(selected.get('contextWindow'))
-    capacity_source = 'model_config' if capacity else 'unavailable'
     mismatch = bool(entry and selected_ref and selected_ref != observed_ref)
-    if capacity is None and not mismatch:
-        capacity = number(entry.get('contextTokens')) or number(defaults.get('contextTokens'))
-        capacity_source = 'runtime' if capacity else 'unavailable'
+    reference = context_reference(model_id)
+    configured_window = number(selected.get('contextWindow')) or None
+    configured_limit = number(defaults.get('contextTokens')) or None
+    recorded_limit = (number(entry.get('contextTokens')) or None) if not mismatch else None
+    capacity = configured_window or (reference['tokens'] if reference else None)
+    capacity_source = 'model_config' if configured_window else 'official_reference' if reference else 'unavailable'
+    if configured_limit and (capacity is None or configured_limit < capacity):
+        capacity, capacity_source = configured_limit, 'runtime_config'
+    if capacity is None and recorded_limit:
+        capacity, capacity_source = recorded_limit, 'session_snapshot'
     previous = dict(modelRef=observed_ref, usedTokens=used, updatedAt=updated) if mismatch and used is not None and observed_ref else None
     if mismatch and used is not None:
         used, source = None, 'model_changed'
@@ -164,6 +170,8 @@ def collect_context(state_dir: Path, web_sessions_dir: Path, session_id: str,
                       note='技能目录按会话快照统计；按需读取的 SKILL.md 正文和参考文件计入消息/工具回执，不把全部已安装技能全文算作已注入。')
     return dict(sessionId=session_id, modelRef=selected_ref, observedModelRef=observed_ref,
                 capacity=capacity or None, capacitySource=capacity_source, usedTokens=used,
+                configuredWindow=configured_window, configuredLimit=configured_limit,
+                recordedLimit=recorded_limit, contextReference=reference,
                 usageSource=source, updatedAt=updated, stale=stale, breakdown=parts, breakdownStatus=status,
                 runtimeStore=store, readWarning=read_warning, skills=skill_info, previousSnapshot=previous,
                 note='占用来自最近一次运行时或请求输入快照，包含缓存；不是累计消耗，也不包含尚未提交的草稿。',

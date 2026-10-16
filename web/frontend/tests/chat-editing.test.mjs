@@ -93,3 +93,27 @@ test('branch banner returns to correct source and requests attach history to bot
  let request;globalThis.fetch=async(url,options)=>{request={url,body:JSON.parse(options.body)};return new Response(JSON.stringify({sessionId:'fresh',attachments:{}}));};
  await prepareChatBranch('original',[],new AbortController().signal);assert.equal(request.url,'/api/chat/branch');assert.deepEqual(request.body,{sourceSessionId:'original',attachments:[]});
 });
+
+test('only the answer to submitted breakdown material uses the report reader, with inert controls on backups', async t => {
+ const v=fixture(t);
+ const messages=[{role:'user',kind:'breakdown',content:'桌面越来越乱。'},
+  {role:'assistant',content:'# 内容拆解报告：桌面\n\n- **原文依据**：“桌面越来越乱”'},
+  {role:'user',content:'继续改写'}, {role:'assistant',content:'普通追问的回复'}];
+ await v.render({session:{...source(),messages}});
+ assert.equal(v.container.querySelectorAll('.breakdown-report').length,1);
+ assert.match(v.container.querySelector('.breakdown-quote-check').textContent,/1 处原文引用/);
+ assert.ok([...v.container.querySelectorAll('button')].some(button=>button.textContent.includes('存入选题库')));
+ await v.render({session:{...source(),messages,importedFromBackup:true}});
+ assert.equal(v.container.querySelectorAll('.breakdown-report').length,1);
+ assert.equal([...v.container.querySelectorAll('button')].some(button=>button.textContent.includes('存入选题库')),false);
+ await v.render({session:{...source(),messages:messages.slice(0,2),importedFromBackup:true,backupIncomplete:true}});
+ assert.match(v.container.querySelector('.breakdown-report').textContent,/部分内容/);
+ assert.equal(v.container.querySelector('.breakdown-quote-check'),null);
+ await v.render({session:{...source(),messages:[messages[0],{...messages[1],stopped:true}]}});
+ assert.match(v.container.querySelector('.breakdown-report').textContent,/部分内容/);
+ assert.equal(v.container.querySelector('.breakdown-quote-check'),null);
+ await v.render({session:{...source(),messages:messages.slice(0,1),pendingTurnId:'pending'},stream:{content:'# 内容拆解报告：生成中',thinking:'',activity:'进入运行器',questions:[]}});
+ assert.match(v.container.querySelector('.breakdown-report').textContent,/部分内容/);
+ assert.equal(v.container.querySelector('.breakdown-quote-check'),null);
+ assert.equal([...v.container.querySelectorAll('button')].some(button=>button.textContent.includes('存入选题库')),false);
+});

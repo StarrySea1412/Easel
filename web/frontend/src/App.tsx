@@ -47,6 +47,9 @@ import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispat
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
 import { requestConversationTitle } from './lib/conversationTitles';
+import { adoptBreakdownRun, createBreakdownSession, loadSessionsWithBreakdown, rememberBreakdownReport } from './lib/breakdownChat';
+import { buildBreakdownReportPrompt } from './lib/breakdownReport';
+import type { ActiveRun } from './lib/breakdownStore';
 
 const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
@@ -141,7 +144,7 @@ export default function App() {
   }, [setCurrentPage]);
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState('');
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
+  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsWithBreakdown());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [gatewayRetryToken, setGatewayRetryToken] = useState(0);
@@ -369,6 +372,7 @@ export default function App() {
     const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg), ...msg };
     const session = sessionsRef.current.find(item => item.id === sessionId);
     const stopped = msg.stopped === true;
+    if (!msg.error && !stopped) rememberBreakdownReport(session, msg.content, msg.turnId);
     const outcome = msg.error ? '失败' : stopped ? '已停止' : '已完成';
     showToast(`${session?.title || '对话'} · ${outcome}`, msg.error ? 'error' : stopped ? 'info' : 'success', undefined,
       `chat:${sessionId}:${msg.turnId || session?.pendingTurnId || msg.startedAt || 'legacy'}:${outcome}`, { page: 'chat', sessionId });
@@ -411,9 +415,10 @@ export default function App() {
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
     history?: { role: 'user' | 'assistant'; content: string }[],
+    preparedTurnId?: string,
   ) => {
     const startedAt = Date.now();
-    const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const turnId = preparedTurnId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === sessionId ? { ...s, pendingTurnId: turnId,
@@ -696,6 +701,7 @@ export default function App() {
     skillRequirements: SkillRequirements = {},
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
+    kind?: 'breakdown',
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -713,6 +719,7 @@ export default function App() {
           messages: [...base, {
             role: 'user',
             content: visible,
+            ...(kind ? { kind } : {}),
             selectedSkills,
             skillRequirements: requirementSnapshot,
             ...(modelRef !== undefined ? { requestedModelRef: modelRef } : {}),
@@ -760,6 +767,7 @@ export default function App() {
       const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine,
         title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
           { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
+            ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) } : {}),
             skillRequirements: original.skillRequirements, requestedModelRef: original.requestedModelRef, requestedThinkingLevel: original.requestedThinkingLevel }],
         editBranch: { sourceSessionId: sessionId, prefixLength: plan.prefix.length } };
       if (!writeSelectedSkills(branch.id, original.selectedSkills || [])
@@ -771,7 +779,7 @@ export default function App() {
       activeIdRef.current = branch.id;
       setActiveSessionId(branch.id);
       const seed = editBranchSeed(branch, plan.prefix.length)!;
-      startStream(branch.id, plan.text, branch.persona, seed.attachments, original.selectedSkills,
+      startStream(branch.id, branch.messages.at(-1)?.agentContent || plan.text, branch.persona, seed.attachments, original.selectedSkills,
         original.skillRequirements, original.requestedModelRef, original.requestedThinkingLevel, seed.history);
       return true;
     } finally { editRequests.current.delete(sessionId); }
@@ -797,7 +805,8 @@ export default function App() {
     const skillRequirements = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.skillRequirements || {};
     const modelRef = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedModelRef;
     const thinkingLevel = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedThinkingLevel;
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel);
+    const kind = sessionsRef.current.find(session => session.id === sessionId)?.messages[userIndex]?.kind;
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel, kind);
   }, [sendUserAndStream]);
 
   // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
@@ -840,6 +849,32 @@ export default function App() {
     setCurrentPage('chat');
     return true;
   }, [selectedPersona, setCurrentPage]);
+
+  const handleStartBreakdown = useCallback((material: string, modelRef?: string, thinkingLevel?: ThinkingLevel): boolean => {
+    if (!material.trim() || gatewayStatus !== 'connected') return false;
+    const session = createBreakdownSession(material, selectedPersona || undefined, modelRef, thinkingLevel);
+    const next = [session, ...sessionsRef.current];
+    // Persist the material AND recovery identity before starting any request.
+    if (!saveSessions(next)) return false;
+    sessionsRef.current = next;
+    setSessions(next);
+    setActiveSessionId(session.id);
+    setCurrentPage('chat');
+    startStream(session.id, session.messages[0].agentContent!, session.persona, [], [], {}, modelRef, thinkingLevel, undefined, session.pendingTurnId);
+    return true;
+  }, [selectedPersona, gatewayStatus, setCurrentPage, startStream]);
+
+  const handleOpenBreakdownRun = useCallback((run: ActiveRun): boolean => {
+    const next = adoptBreakdownRun(sessionsRef.current, run);
+    const target = next.find(session => session.id === run.sessionId);
+    if (!target || target.importedFromBackup || (next !== sessionsRef.current && !saveSessions(next))) return false;
+    sessionsRef.current = next;
+    setSessions(next);
+    setActiveSessionId(target.id);
+    setCurrentPage('chat');
+    resumePendingTurn(target.id);
+    return true;
+  }, [setCurrentPage, resumePendingTurn]);
 
   const handleOfficeTask = useCallback(({ sessionId, message, modelRef }: OfficeTaskRequest): string | null => {
     if (!message.trim() || (modelRef !== undefined && (!/^[^\s/]+\/[^\s]+$/.test(modelRef) || modelRef.length > 500))) return null;
@@ -1189,7 +1224,7 @@ export default function App() {
       case 'publish':
         return <PublishPage persona={selectedPersona} publishReceipts={publishReceipts} />;
       case 'breakdown':
-        return <BreakdownPage persona={selectedPersona} />;
+        return <BreakdownPage persona={selectedPersona} onStart={handleStartBreakdown} onOpenRun={handleOpenBreakdownRun} />;
       case 'skills':
         return <SkillPage onOpenChat={handleSkillChat} />;
       case 'outputs':

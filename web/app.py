@@ -1808,6 +1808,8 @@ def _model_channels() -> dict:
         models = models if isinstance(models, list) else []
         selected = next((item for item in models if isinstance(item, dict) and item.get('id') == row['model']), {})
         row['contextWindow'] = selected.get('contextWindow')
+        from model_metadata import context_reference
+        row['contextReference'] = context_reference(selected.get('id') or '')
 
     sf = bool((env.get("SILICONFLOW_API_KEY") or "").strip())
     trans_rows = [

@@ -10,6 +10,7 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 
 export interface ChatMessage extends ChatTiming {
+  kind?: 'breakdown'; // User material; the immediately following answer uses the report reader.
   stopped?: boolean;
   role: 'user' | 'assistant';
   content: string;
@@ -142,6 +143,8 @@ function generateId(): string {
 function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMessage | null {
   if (!record(value) || (value.role !== 'user' && value.role !== 'assistant')) return null;
   const message: ChatMessage = { role: value.role, content: typeof value.content === 'string' ? value.content : '' };
+  if (value.role === 'user' && value.kind === 'breakdown') message.kind = 'breakdown';
+  if (value.stopped === true) message.stopped = true;
   Object.assign(message, decodeChatTiming(value));
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];

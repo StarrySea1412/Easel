@@ -82,6 +82,34 @@ test('backup validation rejects unsupported thinking strength and accepts legacy
   assert.equal(parseConversationBackup(JSON.stringify(backup())).sessions[0].messages[0].requestedThinkingLevel, undefined);
 });
 
+test('stopped breakdown remains partial after backup roundtrip and cold reload, without executable state', async () => {
+  const original = session({ messages: [
+    { role: 'user', kind: 'breakdown', content: '材料', agentContent: '执行提示词' },
+    { role: 'assistant', content: '# 内容拆解报告：部分输出', stopped: true },
+  ] });
+  const [imported] = createImportedSessions(parseConversationBackup(JSON.stringify(createConversationBackup([original]))), []);
+  assert.equal(imported.messages[0].kind, 'breakdown');
+  assert.equal(imported.messages[0].agentContent, undefined);
+  assert.equal(imported.messages[1].stopped, true);
+  assert.equal(imported.pendingTurnId, undefined);
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem(key) { return values.get(key) ?? null; }, setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  } });
+  const { tsModuleUrl } = await import('./load-ts.mjs');
+  const storeUrl = await tsModuleUrl(new URL('../src/lib/store.ts', import.meta.url));
+  const store = await import(`${storeUrl}#stopped-save`);
+  assert.equal(store.saveSessions([imported]), true);
+  const [reloaded] = (await import(`${storeUrl}#stopped-reload`)).loadSessions();
+  assert.equal(reloaded.messages[1].stopped, true);
+  assert.equal(reloaded.importedFromBackup, true);
+  assert.equal(createConversationBackup([reloaded]).sessions[0].messages[1].stopped, true);
+  const invalid = backup();
+  invalid.sessions[0].messages[0].stopped = 'yes';
+  assert.throws(() => parseConversationBackup(JSON.stringify(invalid)), /stopped/);
+});
+
 test('export whitelist excludes identities, secrets, attachments and action identifiers', () => {
   const exported = createConversationBackup([session({
     persona: 'PERSONA_SECRET', sessionKey: 'SESSION_SECRET', pendingTurnId: 'TURN_SECRET',

@@ -9,6 +9,8 @@ type Snapshot = {
   capacitySource: string; usedTokens: number | null; usageSource: string; updatedAt: number | string | null;
   stale: boolean; breakdownStatus: string; note: string; breakdownNote: string;
   runtimeStore?: string; readWarning?: string;
+  configuredWindow?: number | null; configuredLimit?: number | null; recordedLimit?: number | null;
+  contextReference?: { tokens: number; label: string; source: string; url: string; checkedAt: string; note: string } | null;
   skills?: { installedCount: number | null; availableCount: number | null; listedCount: number | null; promptChars: number | null; source: string; note: string };
   previousSnapshot?: { modelRef: string; usedTokens: number; updatedAt: number | string | null } | null;
   breakdown: { key: string; label: string; tokens: number | null; percent: number | null; chars?: number | null; source?: string }[];
@@ -60,7 +62,10 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const capacity = data?.capacity;
   const percent = used != null && capacity ? used / capacity * 100 : null;
   const known = percent != null && Number.isFinite(percent);
-  const label = known ? `上下文容量，${percent.toFixed(1)}% 已用` : used != null ? '上下文容量，容量尚未提供' : '上下文容量，占用尚未提供';
+  const referenceOnly = data?.capacitySource === 'official_reference';
+  const recordedOnly = data?.capacitySource === 'session_snapshot' || data?.capacitySource === 'runtime';
+  const basis = referenceOnly ? '原厂标称窗口' : recordedOnly ? '会话记录额度' : data?.capacitySource === 'runtime_config' ? '配置的会话额度' : '配置的模型窗口';
+  const label = known ? `上下文容量，${percent.toFixed(1)}% 已用，按${basis}计算` : used != null ? '上下文容量，容量尚未提供' : '上下文容量，占用尚未提供';
   const tone = known && percent >= 90 ? 'danger' : known && percent >= 75 ? 'warn' : '';
   const updated = data?.updatedAt ? new Date(data.updatedAt) : null;
   const skills = data?.skills;
@@ -82,7 +87,14 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
       <div className="context-snapshot-line"><span>{data?.usageSource === 'model_changed' ? '模型已切换，等待新请求快照' : data?.usageSource === 'last_request' ? '上次请求输入' : data?.usageSource === 'runtime' ? '最近运行时快照' : '尚无可用快照'}{streaming ? ' · 生成中' : ''}</span>
         {updated && !Number.isNaN(updated.getTime()) && <time dateTime={updated.toISOString()}>{updated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}</div>
       {data?.modelRef && <p className="context-model" title={data.modelRef}>{data.modelRef}</p>}
-      {engine !== 'codex' && !capacity && onOpenModels && <button type="button" className="context-configure" onClick={() => { dismiss(); onOpenModels(data?.modelRef || modelRef || undefined); }}>设置模型上下文容量 ↗</button>}
+      {engine !== 'codex' && data && <div className="context-window-facts">
+        <p className="context-capacity-basis">{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{referenceOnly && ' · 渠道支持尚未核验'}</p>
+        {data.contextReference && <p>原厂标称 <strong>{data.contextReference.label}</strong> · <a href={data.contextReference.url} target="_blank" rel="noopener noreferrer">来源 ↗</a>{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}
+        {data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}
+        {data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}
+        {(referenceOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p className="context-window-warning">{referenceOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}
+      </div>}
+      {engine !== 'codex' && onOpenModels && <button type="button" className="context-configure" onClick={() => { dismiss(); onOpenModels(data?.modelRef || modelRef || undefined); }}>{capacity ? '核对模型上下文设置 ↗' : '设置模型上下文容量 ↗'}</button>}
       {engine === 'codex' ? <p className="context-note">Codex 尚未提供上下文分类快照；未提供不代表零消耗。</p>
         : <>
           {error && <p role="alert" className="context-error">{error}{data ? ' · 下方保留上次快照' : ''}</p>}
@@ -99,7 +111,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
             <p>{data?.breakdownStatus === 'estimated' || data?.breakdownStatus === 'partial' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '已知字符数保留；分类报告与总量不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
             <p>字符数是本地记录值，Token按字符数÷4粗估；不同模型、中文和代码的分词会有差异。缺少分类只影响该项，已知项仍单独显示；未读的技能全文不计入。{data?.runtimeStore === 'sqlite' ? '当前会话读取 SQLite 存储。' : ''}</p>
             {skills && <p>{skills.note}</p>}
-            <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : data?.capacitySource === 'runtime' ? '取自运行时配置' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p></details>
+            <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p></details>
         </>}
       <footer><button type="button" className="context-details" onClick={() => { dismiss(); setDetails(true); }}>消耗与费用明细 <span aria-hidden="true">↗</span></button>
         {engine !== 'codex' && <button type="button" disabled={pending} onClick={() => setRevision(value => value + 1)}>{pending ? '读取中…' : '刷新'}</button>}</footer>

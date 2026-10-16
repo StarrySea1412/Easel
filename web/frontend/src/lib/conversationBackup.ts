@@ -8,6 +8,8 @@ export const MAX_BACKUP_SESSIONS = 5000;
 export const MAX_BACKUP_MESSAGES = 100000;
 
 export interface BackupMessage {
+  kind?: 'breakdown';
+  stopped?: boolean;
   role: 'user' | 'assistant';
   content: string;
   thinking?: string;
@@ -119,6 +121,8 @@ function validateBackup(value: unknown): ConversationBackup {
         role: message.role,
         content: textField(message.content, `${messagePath}.content`, budget),
       };
+      if (message.role === 'user' && message.kind === 'breakdown') result.kind = 'breakdown';
+      if (message.stopped !== undefined) result.stopped = booleanField(message.stopped, `${messagePath}.stopped`);
       if (message.elapsedMs !== undefined) {
         const timing = decodeChatTiming(message);
         if (timing.elapsedMs === undefined) invalid(`${messagePath}.elapsedMs`, '必须是有效的非负耗时。');
@@ -155,6 +159,8 @@ function visibleMessage(message: ChatMessage): BackupMessage {
     : undefined;
   return {
     role: message.role,
+    ...(message.role === 'user' && message.kind === 'breakdown' ? { kind: 'breakdown' as const } : {}),
+    ...(message.stopped === true ? { stopped: true } : {}),
     content: historical ? '' : message.content,
     ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
     ...(message.activity !== undefined ? { activity: message.activity } : {}),
@@ -236,6 +242,8 @@ export function createImportedSessions(backup: ConversationBackup, existingIds: 
       backupIncomplete: session.incomplete === true,
       messages: session.messages.map((message) => ({
         role: message.role,
+        ...(message.kind === 'breakdown' ? { kind: 'breakdown' as const } : {}),
+        ...(message.stopped === true ? { stopped: true } : {}),
         content: message.content,
         ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
         ...(message.activity !== undefined ? { activity: message.activity } : {}),

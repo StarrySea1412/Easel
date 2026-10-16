@@ -99,6 +99,46 @@ def test_fresh_session_has_known_config_budget_without_claiming_zero_tokens(stat
     assert value['capacity'] == 100000 and value['usedTokens'] is None
 
 
+def test_glm_reference_does_not_mislabel_default_session_budget_or_mutate_config(state):
+    native, web, entry, save = state
+    config_path = native / 'openclaw.json'
+    config = json.loads(config_path.read_text())
+    config['agents']['defaults']['model']['primary'] = 'p/glm-5.3'
+    config['models']['providers']['p']['models'] = [{'id': 'glm-5.3'}]
+    config_path.write_text(json.dumps(config))
+    before = config_path.read_bytes()
+    save({**entry, 'model': 'glm-5.3', 'contextTokens': 200000})
+    value = collect_context(native, web, 'chat1')
+    assert value['capacity'] == 1048576 and value['capacitySource'] == 'official_reference'
+    assert value['recordedLimit'] == 200000 and value['configuredWindow'] is None
+    assert value['contextReference']['url'].startswith('https://docs.bigmodel.cn/')
+    assert config_path.read_bytes() == before
+
+
+def test_user_window_and_explicit_runtime_limit_override_reference(state):
+    native, web, _, _ = state
+    path = native / 'openclaw.json'
+    config = json.loads(path.read_text())
+    config['models']['providers']['p']['models'] = [{'id': 'glm-5.3', 'contextWindow': 262144}]
+    path.write_text(json.dumps(config))
+    value = collect_context(native, web, 'chat1', 'p/glm-5.3')
+    assert value['capacity'] == 262144 and value['capacitySource'] == 'model_config'
+    assert value['recordedLimit'] is None and value['usedTokens'] is None
+    config['agents']['defaults']['contextTokens'] = 131072
+    path.write_text(json.dumps(config))
+    value = collect_context(native, web, 'chat1', 'p/glm-5.3')
+    assert value['capacity'] == 131072 and value['capacitySource'] == 'runtime_config'
+    assert value['configuredWindow'] == 262144 and value['configuredLimit'] == 131072
+
+
+def test_unknown_alias_never_inherits_glm_family_window(state):
+    native, web, entry, save = state
+    save({**entry, 'model': 'glm-5.3-custom', 'contextTokens': 200000})
+    value = collect_context(native, web, 'chat1', 'p/glm-5.3-custom')
+    assert value['capacity'] == 200000 and value['capacitySource'] == 'session_snapshot'
+    assert value['contextReference'] is None
+
+
 def test_foreign_runtime_entry_is_not_read_without_a_project_marker(state):
     native, web, _, _ = state
     (web / 'web_chat1.json').unlink()

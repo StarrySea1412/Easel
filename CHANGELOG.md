@@ -1,3 +1,9 @@
+## 2026-10-16 · Context windows and chat reports / 上下文窗口与拆解对话
+
+- Separate sourced windows, configured limits and old runtime budgets; add explicit empty-field filling without rewriting manual values. GLM-5.3 reference is 1M; relay entitlement remains unverified. / 纠正默认20万与模型窗口混淆，增加来源和设置入口。
+- Start breakdowns in recent chats with the shared report reader, durable recovery, stop/retry/edit and ordinary follow-up. Adopt legacy jobs without another inference request; retain drafts/history, stopped flags and inert partial backup readers. / 拆解并入对话，报告排版、证据检查和操作保留。
+- Backend46 checks and the frontend1,038-case regression (one test assertion corrected and rerun) plus70 final focused checks passed; lint/build and specified390px dark/keyboard entries verified. No paid inference, deployment or package release. / 见[源码对照与验收记录](docs/context-window-chat-breakdown-2026-10-16.md)。
+
 ## 2026-10-16 · Persistent notifications and Codex usage / 通知持久化与Codex用量
 
 - Save up to 1,000 project-local notifications with read/clear synchronization and retry; record chat/publish outcomes without an open page. Other browser-observed events retain their existing scope. / 通知保存到本机数据库，支持重试与跨标签已读/清空；对话和发布终态后端记录，其它页面观察动态不扩大为全部离线采集。

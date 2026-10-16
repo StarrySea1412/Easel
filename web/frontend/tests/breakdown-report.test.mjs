@@ -144,21 +144,9 @@ const CAPABILITY = {
 const HEALTH = { results: [], schedules: [], limit: { requests: 0, windowSeconds: 0, automaticModelsPerProvider: 0 }, staleAfterSeconds: 900, serverTime: 0 };
 const CONNECTION = { modelRef: 'relay/kimi-k3', state: 'unverified', channelName: '测试渠道', detail: '未验证' };
 
-function sse(frames, { keepOpen = false } = {}) {
-  const encoder = new TextEncoder();
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const frame of frames) controller.enqueue(encoder.encode(frame));
-      if (!keepOpen) controller.close();
-    },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-}
-const sseToken = (id, text) => `id: ${id}\nevent: token\ndata: ${JSON.stringify(text)}\n\n`;
-const sseDone = (id) => `id: ${id}\nevent: done\ndata: {}\n\n`;
-const sseError = (id, message) => `id: ${id}\nevent: error\ndata: ${JSON.stringify({ message })}\n\n`;
-
-async function mount(t, respond, { keepStorage = false } = {}) {
+async function mount(t, respond, { keepStorage = false, onStart = () => true, onOpenRun = () => true } = {}) {
   const writes = [];
+  const starts = []; const opened = [];
   if (!keepStorage) { try { window.localStorage.clear(); } catch { /* optional storage */ } }
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
     const path = new URL(String(input), window.location.href).pathname;
@@ -172,7 +160,7 @@ async function mount(t, respond, { keepStorage = false } = {}) {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(createElement(BreakdownPage, { persona: '画号A' })));
+  await act(async () => root.render(createElement(BreakdownPage, { persona: '画号A', onStart: (...args) => { starts.push(args); return onStart(...args); }, onOpenRun: run => { opened.push(run); return onOpenRun(run); } })));
   let unmounted = false;
   const unmount = async () => {
     if (unmounted) return;
@@ -194,7 +182,7 @@ async function mount(t, respond, { keepStorage = false } = {}) {
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(area, value);
     area.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  return { container, writes, buttons, click, fill, flush, unmount };
+  return { container, writes, starts, opened, buttons, click, fill, flush, unmount };
 }
 
 test('input panel offers a marked example when empty and recognizes material while typing', async t => {
@@ -222,75 +210,27 @@ test('input panel offers a marked example when empty and recognizes material whi
   assert.ok(view.container.querySelector('.breakdown-example-link'), 'example entry returns when empty');
 });
 
-test('breakdown page runs through the streaming task api with the workspace controls', async t => {
-  const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n\n三句话摘要。\n\n## 8. 验证计划\n\n| 待验证问题 | 需要的材料或行动 | 结果能支持到什么程度 |';
-  const view = await mount(t, async (path) => (path === '/api/chat/stream'
-    ? sse([sseToken(1, report), sseDone(2)]) : { id: 'idea-1' }));
+test('material and model controls hand off once to the shared chat lifecycle, without a second request', async t => {
+  const view = await mount(t, async () => ({}));
   await view.fill('桌面越收越乱？我把桌子划成三个区。');
-
-  const tools = view.container.querySelector('.dash-composer-tools');
-  assert.ok(tools && tools.querySelector('[aria-label^="思考强度"]'), 'thinking control sits in the composer tools');
-  assert.ok(tools.querySelector('.composer-model-health-label'), 'model control sits in the composer tools');
-
+  assert.ok(view.container.querySelector('[aria-label^="思考强度"]'));
+  assert.ok(view.container.querySelector('.composer-model-health-label'));
   await view.click('开始拆解');
-  const chat = view.writes.find(w => w.path === '/api/chat/stream');
-  assert.ok(chat, 'runs through the streaming task endpoint (same as the workspace composer)');
-  assert.ok(chat.body.message.includes('## 4. 全文结构与关键转折'));
-  assert.ok(chat.body.message.includes('没有表现数据，不能判断它为什么火'));
-  assert.ok(chat.body.message.includes('桌面越收越乱？我把桌子划成三个区。'));
-  assert.equal(chat.body.persona, '画号A');
-  assert.equal(chat.body.thinkingLevel, 'off', 'resolved thinking level follows the model capability');
-  assert.equal(chat.body.modelRef, undefined, 'default keeps the shared model');
-  assert.ok(String(chat.body.sessionId).startsWith('breakdown-'), 'breakdown run keeps its own session key');
-
-  const title = view.container.querySelector('.panel-title');
-  assert.ok(title && title.textContent.includes('内容拆解报告'));
-  assert.ok(view.container.querySelector('.breakdown-report-note').textContent.includes('缺少表现数据'));
-  assert.ok(view.container.querySelector('.skill-body-md').textContent.includes('三句话摘要'));
-
-  await view.click('存入选题库');
-  const idea = view.writes.find(w => w.path === '/api/ideas');
-  assert.equal(idea.body.title, '内容拆解报告：桌面为什么越收越乱');
-  assert.ok(idea.body.note.includes('# 内容拆解报告：'));
-  assert.equal(idea.body.source, '爆款拆解');
-  assert.equal(view.buttons().some(b => b.textContent.includes('复制报告')), true);
-  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'finished runs leave no active-run record');
+  assert.equal(view.starts.length, 1);
+  assert.equal(view.starts[0][0], '桌面越收越乱？我把桌子划成三个区。');
+  assert.equal(view.starts[0][1], undefined);
+  assert.equal(view.starts[0][2], 'off');
+  assert.equal(view.writes.some(item => item.path.startsWith('/api/chat/')), false);
 });
 
-test('stream failures are an error with a retry, never a savable report', async t => {
-  const view = await mount(t, async (path) => (path === '/api/chat/stream'
-    ? sse([sseError(1, '模型服务不可用，请检查配置')]) : { id: 'idea-1' }));
-  await view.fill('一段正文');
-  await view.click('开始拆解');
-
-  assert.equal(view.container.querySelector('.panel'), null, 'no report panel for failures');
-  const alert = view.container.querySelector('.notice-error');
-  assert.ok(alert && alert.textContent.includes('模型服务不可用'));
-  assert.equal(view.buttons().some(b => b.textContent.includes('存入选题库')), false);
-  assert.equal(view.writes.filter(w => w.path === '/api/ideas').length, 0, 'failure is not written anywhere');
-  assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material is kept for retry');
-
+test('a rejected handoff keeps the material and offers a retry without a savable fake report', async t => {
+  const view = await mount(t, async () => ({}), { onStart: () => false });
+  await view.fill('一段正文'); await view.click('开始拆解');
+  assert.match(view.container.querySelector('[role="alert"]').textContent, /材料已保留/);
+  assert.equal(view.container.querySelector('textarea').value, '一段正文');
+  assert.equal(view.container.querySelector('.breakdown-report'), null);
   await view.click('重试');
-  assert.equal(view.writes.filter(w => w.path === '/api/chat/stream').length, 2, 'retry re-runs the request');
-});
-
-test('a running report shows progress and can be stopped for real', async t => {
-  const view = await mount(t, async (path) => {
-    if (path === '/api/chat/stream') return sse([sseToken(1, '# 内容拆解报告：正在写')], { keepOpen: true });
-    return { stopped: true };
-  });
-  await view.fill('一段正文');
-  await view.click('开始拆解');
-
-  assert.ok(view.container.querySelector('.breakdown-stream'), 'live progress panel shows while running');
-  assert.ok(view.container.querySelector('.breakdown-stream').textContent.includes('正在写'), 'tokens appear as they arrive');
-
-  await view.click('停止');
-  const stop = view.writes.find(w => w.path === '/api/chat/stop');
-  assert.ok(stop && String(stop.body.sessionId).startsWith('breakdown-'), 'stop reaches the backend run');
-  assert.ok(view.container.querySelector('.notice-error').textContent.includes('已停止'));
-  assert.equal(view.container.querySelector('.panel'), null, 'no report panel after stop');
-  assert.equal(view.container.querySelector('textarea').value, '一段正文', 'material survives the stop');
+  assert.equal(view.starts.length, 2);
 });
 
 test('draft survives leaving the page and coming back', async t => {
@@ -304,113 +244,30 @@ test('draft survives leaving the page and coming back', async t => {
   assert.ok(second.container.querySelector('.breakdown-material').textContent.includes('正文约'), 'material line follows the draft');
 });
 
-test('finished reports land in history and can be reopened or deleted', async t => {
-  const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n\n一。\n\n- **原文依据**：“桌面越来越乱”';
-  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseToken(1, report), sseDone(2)]) : { id: 'idea-1' }));
-  await view.fill('桌面越来越乱，我决定换个办法。');
-  await view.click('开始拆解');
-
-  const toggle = view.container.querySelector('.breakdown-history-toggle');
-  assert.ok(toggle && toggle.textContent.includes('历史拆解 1 篇'), 'finished report is stored in history');
-  await view.click('历史拆解');
-  assert.ok(view.container.querySelector('.breakdown-history-item').textContent.includes('内容拆解报告：桌面为什么越收越乱'));
-
-  await view.click('内容拆解报告：桌面为什么越收越乱');
-  assert.ok(view.container.querySelector('.skill-body-md').textContent.includes('报告摘要'), 'history reopens the report');
-  assert.equal(view.container.querySelector('textarea').value, '桌面越来越乱，我决定换个办法。', 'history restores the material');
-  assert.equal(view.container.querySelector('.breakdown-history-list'), null, 'history list collapses after opening');
-
-  await view.click('历史拆解');
-  await view.click('删除');
-  assert.equal(view.container.querySelector('.breakdown-history-toggle'), null, 'deleting the last record hides history');
-});
-
-test('report quotes are verified against the submitted material', async t => {
-  const report = [
-    '# 内容拆解报告：测试', '',
-    '## 5. 关键发现与替代解释', '',
-    '- **原文依据**：“桌面越来越乱” — 出自开头', '',
-    '- **原文依据**：“材料里没有的句子” — 出处不明', '',
-    '正文。',
-  ].join('\n');
-  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseToken(1, report), sseDone(2)]) : {}));
-  await view.fill('桌面越来越乱，我决定换个办法。');
-  await view.click('开始拆解');
-
-  const check = view.container.querySelector('.breakdown-quote-check');
-  assert.ok(check, 'quote check line renders with the report');
-  assert.ok(check.textContent.includes('2 处引用里，1 处没能在材料中逐字找到'));
-  assert.ok(check.className.includes('warn'));
-  const details = view.container.querySelector('.breakdown-quote-details');
-  assert.ok(details && details.textContent.includes('材料里没有的句子'), 'missing quote is listed for review');
-
-  const structure = view.container.querySelector('.breakdown-structure-check');
-  assert.ok(structure, 'structure check line renders with the report');
-  assert.ok(structure.textContent.includes('缺章节'), 'missing chapters are named');
-  assert.ok(structure.textContent.includes('没有识别到'), 'missing findings section is named');
-  assert.ok(structure.className.includes('warn'));
-});
-
-test('link-only failures offer pasting the text instead', async t => {
-  const view = await mount(t, async (path) => (path === '/api/chat/stream' ? sse([sseError(1, '读取失败')]) : {}));
-  await view.fill('https://www.xiaohongshu.com/explore/abc');
-  await view.click('开始拆解');
-
-  const alert = view.container.querySelector('.notice-error');
-  assert.ok(alert.textContent.includes('把正文粘贴进来再试'), 'link-only failure explains the fix');
-  await view.click('补正文');
-  assert.equal(document.activeElement, view.container.querySelector('textarea'), '补正文 focuses the composer');
-});
-
-test('an unfinished run is recovered after leaving the page and coming back', async t => {
+test('existing history reopens in the shared reader, preserves evidence checks and saves the real report', async t => {
   window.localStorage.clear();
-  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
-    sessionId: 'breakdown-old', turnId: 'breakdown-old-1', material: '上次的材料：桌面越收越乱。', startedAt: Date.now(),
-  }));
-  const report = '# 内容拆解报告：取回\n\n## 报告摘要\n\n取回成功。';
-  const view = await mount(t, async (path) => (path === '/api/chat/jobs/breakdown-old-1/stream'
-    ? sse([sseToken(1, report), sseDone(2)]) : {}), { keepStorage: true });
-
-  assert.ok(view.writes.some(w => w.path === '/api/chat/jobs/breakdown-old-1/stream'), 'resume reads the job stream');
-  const body = view.container.querySelector('.skill-body-md');
-  assert.ok(body && body.textContent.includes('取回成功'), 'recovered report renders');
-  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'active run is cleared after recovery');
-  assert.ok(view.container.querySelector('.breakdown-history-toggle').textContent.includes('历史拆解 1 篇'),
-    'recovered report lands in history');
-  assert.equal(view.container.querySelector('textarea').value, '上次的材料：桌面越收越乱。',
-    'material restores when the draft is empty');
+  const report = '# 内容拆解报告：桌面为什么越收越乱\n\n## 5. 关键发现与替代解释\n\n- **原文依据**：“桌面越来越乱”\n- **原文依据**：“不存在的句子”';
+  window.localStorage.setItem('easel_breakdown_history', JSON.stringify([{ id: 'old', title: '桌面报告', material: '桌面越来越乱，我决定换个办法。', report, at: 1 }]));
+  const view = await mount(t, async () => ({ id: 'idea-1' }), { keepStorage: true });
+  await view.click('历史拆解'); await view.click('桌面报告');
+  assert.equal(view.container.querySelector('textarea').value, '桌面越来越乱，我决定换个办法。');
+  assert.match(view.container.querySelector('.breakdown-quote-check').textContent, /2 处引用里，1 处/);
+  assert.match(view.container.querySelector('.breakdown-quote-details').textContent, /不存在的句子/);
+  assert.match(view.container.querySelector('.breakdown-structure-check').textContent, /缺章节/);
+  await view.click('存入选题库');
+  assert.equal(view.writes.find(item => item.path === '/api/ideas').body.note, report);
+  await view.click('历史拆解'); await view.click('删除');
+  assert.equal(view.container.querySelector('.breakdown-history-toggle'), null);
 });
 
-test('recovery falls back to the last-turn snapshot when the job stream is gone', async t => {
+test('legacy unfinished work opens the same identity in chat and is never silently restarted or discarded for age', async t => {
   window.localStorage.clear();
-  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
-    sessionId: 'breakdown-gone', turnId: 'breakdown-gone-1', material: '材料', startedAt: Date.now(),
-  }));
-  const view = await mount(t, async (path) => {
-    if (path === '/api/chat/jobs/breakdown-gone-1/stream') return new Response('', { status: 404 });
-    if (path === '/api/chat/last/breakdown-gone') {
-      return { status: 'done', text: '# 内容拆解报告：快照\n\n## 报告摘要\n\n从快照取回。', turn_id: 'breakdown-gone-1' };
-    }
-    return {};
-  }, { keepStorage: true });
-
-  await view.flush();
-  await view.flush();
-  const body = view.container.querySelector('.skill-body-md');
-  assert.ok(body && body.textContent.includes('从快照取回'), 'snapshot fallback renders');
-  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'record cleared after fallback');
-});
-
-test('a stale active run is dropped instead of resurrected', async t => {
-  window.localStorage.clear();
-  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify({
-    sessionId: 'breakdown-stale', turnId: 'breakdown-stale-1', material: 'x',
-    startedAt: Date.now() - 48 * 60 * 60 * 1000,
-  }));
+  const run = { sessionId: 'breakdown-old', turnId: 'breakdown-old-1', material: '上次材料', startedAt: Date.now() - 48 * 3600000 };
+  window.localStorage.setItem('easel_breakdown_active_run', JSON.stringify(run));
   const view = await mount(t, async () => ({}), { keepStorage: true });
-  await view.flush();
-
-  assert.equal(window.localStorage.getItem('easel_breakdown_active_run'), '', 'stale record cleared');
-  assert.equal(view.writes.filter(w => w.path.includes('/api/chat/')).length, 0, 'no recovery request for stale runs');
-  assert.equal(view.container.querySelector('.notice-error'), null);
+  assert.equal(view.writes.some(item => item.path.startsWith('/api/chat/')), false);
+  await view.click('在对话中查看上次拆解');
+  assert.deepEqual(view.opened, [run]);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem('easel_breakdown_active_run')), run);
+  assert.equal(view.starts.length, 0);
 });

@@ -223,6 +223,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
               <Fragment key={`${i}-${msg.role}`}>{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
+                reportMaterial={msg.role === 'assistant' && i > 0 && displayMessages[i - 1].role === 'user' && displayMessages[i - 1].kind === 'breakdown' ? displayMessages[i - 1].content : undefined}
+                reportIncomplete={isImported && session.backupIncomplete && isLast}
                 sessionId={session.id}
                 backupSnapshot={isImported}
                 isStreaming={live}

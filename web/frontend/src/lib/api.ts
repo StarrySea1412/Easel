@@ -1214,6 +1214,7 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 
 export interface ModelRow {
   contextWindow?: number | null;
+  contextReference?: { modelId: string; tokens: number; label: string; source: string; url: string; checkedAt: string; note: string } | null;
   slot?: string;
   order: number;
   name: string;

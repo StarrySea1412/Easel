@@ -50,6 +50,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
           const [quickEdit, setQuickEdit] = useState(false);
           const [quickHealth, setQuickHealth] = useState(false);
           const panelId = useId();
+          const reference = r.contextReference?.modelId === r.model ? r.contextReference : null;
           const cloud = ops?.channel === 'transcribe' && !subtitle && !local;
           const title = subtitle ? '自带字幕' : local ? '本地兜底' : cloud ? '云端转写' : r.name || '未命名供应商';
           const role = subtitle ? '优先读取 · 免配置' : local ? '云端不可用时接替' : cloud ? '需要 API Key'
@@ -145,9 +146,12 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
               </SettingsField>
               {ops?.channel === 'chat' && <SettingsField label="上下文窗口（Token）">
                 <input className="mock" type="number" aria-label="上下文窗口（Token）" min="1024" max="10000000" step="1"
-                  value={r.contextWindow ?? ''} placeholder="留空使用运行时默认值"
+                  value={r.contextWindow ?? ''} placeholder={reference ? `原厂参考 ${reference.label}，尚未写入配置` : '未配置；运行器可能使用通用默认值'}
                   onChange={event => ops?.onRow?.(i, { contextWindow: event.target.value === '' ? null : Number(event.target.value) })} />
                 <span className="hint">按此渠道模型的实际能力填写；保存后用于后续请求的上下文预算。这里不会增加模型本身的容量。</span>
+                {reference && <span className="hint">原厂参考：{reference.label}（{reference.tokens.toLocaleString('zh-CN')} Token） · <a href={reference.url} target="_blank" rel="noopener noreferrer">{reference.source} ↗</a>。{reference.note}
+                  {r.contextWindow == null && <button type="button" className="adv-btn" onClick={() => ops?.onRow?.(i, { contextWindow: reference.tokens })}>填入参考值，保存后生效</button>}
+                </span>}
               </SettingsField>}
               <SettingsField label="Base URL">
               {ed.base ? (

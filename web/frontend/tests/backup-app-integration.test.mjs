@@ -42,6 +42,10 @@ async function fixture(t, initial, realSidebar = false) {
   const steering = url(Buffer.from(steeringBase.slice(prefix.length), 'base64').toString().replaceAll(queueBase, queue)) + `#${fixtureId}`;
   const storeBase = await tsModuleUrl(new URL('lib/store.ts', base));
   const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts).replaceAll(queueBase, queue)) + `#${fixtureId}`;
+  const breakdownStoreBase = await tsModuleUrl(new URL('lib/breakdownStore.ts', base));
+  const breakdownStore = url(Buffer.from(breakdownStoreBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
+  const breakdownChatBase = await tsModuleUrl(new URL('lib/breakdownChat.ts', base));
+  const breakdownChat = url(Buffer.from(breakdownChatBase.slice(prefix.length), 'base64').toString().replaceAll(storeBase, store).replaceAll(breakdownStoreBase, breakdownStore)) + `#${fixtureId}`;
   const api = url(`
     export const fetchStatus = async () => ({gateway: true, personas: [{name:'fixture'}]});
     export const fetchPersonas = async () => [];
@@ -72,6 +76,7 @@ async function fixture(t, initial, realSidebar = false) {
     let target;
     if (!specifier.startsWith('.')) target = import.meta.resolve(specifier);
     else if (specifier === './lib/store') target = store;
+    else if (specifier === './lib/breakdownChat') target = breakdownChat;
     else if (specifier === './lib/chatDrafts') target = drafts;
     else if (specifier === './lib/chatQueue') target = queue;
     else if (specifier === './lib/chatSteering') target = steering;
@@ -101,6 +106,75 @@ async function fixture(t, initial, realSidebar = false) {
 const sourceSession = { id: 'original', title: '保留当前工作', created: 10, messages: [
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
+
+test('breakdown persists its recovery identity, runs once in a visible chat and retains normal follow-up', async t => {
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onPageChange('breakdown'));
+  let accepted;
+  await act(async () => { accepted = harness.pages['爆款拆解'].onStart('桌面越来越乱，划成三个区。', 'relay/glm-5.3', 'high'); });
+  assert.equal(accepted, true);
+  assert.equal(harness.streams.length, 1);
+  const session = harness.pages['对话'].session;
+  assert.equal(harness.sidebar.sessions[0].id, session.id);
+  assert.equal(session.messages[0].kind, 'breakdown');
+  assert.equal(session.messages[0].content, '桌面越来越乱，划成三个区。');
+  assert.match(harness.streams[0].args[0], /内容拆解报告/);
+  assert.equal(harness.streams[0].args[17], 'relay/glm-5.3');
+  assert.equal(harness.streams[0].args[19], 'high');
+  assert.equal(JSON.parse(values.get('easel_sessions'))[0].pendingTurnId, harness.streams[0].args[9]);
+  await act(async () => harness.sidebar.onPageChange('dashboard'));
+  assert.equal(harness.streams[0].controller.signal.aborted, false);
+  const report = '# 内容拆解报告：桌面\n\n## 报告摘要\n\n模拟报告';
+  await act(async () => { harness.streams[0].args[20](report); harness.streams[0].args[4](); });
+  assert.equal(JSON.parse(values.get('easel_breakdown_history'))[0].report, report);
+  await act(async () => harness.sidebar.onSessionSelect(session.id));
+  await act(async () => harness.pages['对话'].onSend('把第三点改写成脚本'));
+  assert.equal(harness.streams[1].args[2], session.id);
+  assert.equal(harness.streams[1].args[0], '把第三点改写成脚本');
+  assert.equal(harness.pages['对话'].session.messages.at(-1).kind, undefined);
+});
+
+test('a blocked persistence handoff sends nothing and preserves existing chats', async t => {
+  const { harness, storage } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
+  await act(async () => harness.sidebar.onPageChange('breakdown'));
+  storage.quota = true;
+  let accepted;
+  await act(async () => { accepted = harness.pages['爆款拆解'].onStart('材料'); });
+  assert.equal(accepted, false);
+  assert.equal(harness.streams.length, 0);
+  assert.equal(harness.sidebar.sessions.filter(item => item.messages.length).length, 1);
+});
+
+test('legacy breakdown is adopted with the original run id and resumed without posting another prompt', async t => {
+  const run = { sessionId: 'breakdown-existing', turnId: 'existing-turn', material: '原材料', startedAt: Date.now() - 48 * 3600000 };
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original', easel_breakdown_active_run: JSON.stringify(run) });
+  assert.ok(harness.sidebar.sessions.some(session => session.id === run.sessionId));
+  await act(async () => harness.sidebar.onSessionSelect(run.sessionId));
+  assert.equal(harness.streams.length, 1);
+  assert.equal(harness.streams[0].args[0], '');
+  assert.equal(harness.streams[0].args[9], run.turnId);
+  assert.equal(harness.streams[0].args[10], true);
+  await act(async () => { harness.streams[0].args[20]('# 内容拆解报告：恢复'); harness.streams[0].args[4](); });
+  assert.equal(harness.pages['对话'].session.messages.at(-1).content, '# 内容拆解报告：恢复');
+  assert.equal(values.get('easel_breakdown_active_run'), '');
+});
+
+test('editing breakdown material rebuilds the report request and keeps the source untouched', async t => {
+  const original = { id: 'report-chat', title: '拆解材料', created: 1, messages: [
+    { role: 'user', kind: 'breakdown', content: '旧材料', agentContent: '旧的报告提示词', requestedModelRef: 'relay/glm-5.3' },
+    { role: 'assistant', content: '# 内容拆解报告：旧报告' },
+  ] };
+  const { harness } = await fixture(t, { easel_sessions: JSON.stringify([original]), easel_active_session: original.id });
+  await act(async () => harness.sidebar.onSessionSelect(original.id));
+  let accepted;
+  await act(async () => { accepted = await harness.pages['对话'].onEdit(0, '新材料', new AbortController().signal); });
+  assert.equal(accepted, true);
+  assert.match(harness.streams[0].args[0], /新材料/);
+  assert.match(harness.streams[0].args[0], /内容拆解报告/);
+  assert.doesNotMatch(harness.streams[0].args[0], /旧材料/);
+  assert.equal(harness.pages['对话'].session.messages[0].kind, 'breakdown');
+  assert.equal(harness.sidebar.sessions.find(session => session.id === original.id).messages[0].content, '旧材料');
+});
 
 test('final snapshot discards pending typing and stale turns cannot replace a new answer', async t => {
   const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });

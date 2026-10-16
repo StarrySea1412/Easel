@@ -133,6 +133,22 @@ test('unknown context does not draw a fake zero and Codex requests its own sessi
   assert.ok(requests.at(-1).includes('sessionId=c1'));
 });
 
+test('official window is separate from the old session default and opens the configuration for the selected model', async t => {
+  t.mock.method(globalThis, 'fetch', async () => json(contextSnapshot({ modelRef: 'relay/glm-5.3',
+    capacity: 1048576, capacitySource: 'official_reference', recordedLimit: 200000, configuredWindow: null,
+    contextReference: { tokens: 1048576, label: '1M', source: '智谱', url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3' } })));
+  const opened = [];
+  const v = await view(t, Context, { sessionId: 's1', modelRef: 'relay/glm-5.3', onOpenModels: model => opened.push(model) });
+  assert.match(v.node.querySelector('button').getAttribute('aria-label'), /原厂标称窗口/);
+  await v.click(v.node.querySelector('button'));
+  const panel = document.querySelector('.context-usage-panel');
+  assert.match(panel.textContent, /原厂标称 1M/);
+  assert.match(panel.textContent, /最近会话记录额度：20万/);
+  assert.match(panel.textContent, /渠道支持尚未核验/);
+  await v.click(panel.querySelector('.context-configure'));
+  assert.deepEqual(opened, ['relay/glm-5.3']);
+});
+
 test('context request cancellation prevents an old model or session snapshot from replacing the selection', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => calls.push({ url, options, resolve })));

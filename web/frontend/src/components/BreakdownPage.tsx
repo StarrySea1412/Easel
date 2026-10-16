@@ -1,134 +1,46 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createIdea, fetchLastTurn, stopChat, streamChat } from '../lib/api';
-import { renderMarkdown } from '../lib/sanitize';
-import {
-  BREAKDOWN_REPORT_TITLE, EXAMPLE_MATERIAL, buildBreakdownReportPrompt, ideaTitleFromReport,
-  materialLine, readTextFile, reportScopeNote, structureLine, summarizeMaterial, textFileProblem,
-  verifyQuotes, verifyStructure,
-} from '../lib/breakdownReport';
-import {
-  ACTIVE_RUN_MAX_AGE_MS, addBreakdownRecord, clearActiveRun, loadActiveRun, loadBreakdownDraft,
-  loadBreakdownHistory, newBreakdownRecord, removeBreakdownRecord, saveActiveRun, saveBreakdownDraft,
-  type ActiveRun, type BreakdownRecord,
-} from '../lib/breakdownStore';
+import type { ThinkingLevel } from '../lib/api';
+import { EXAMPLE_MATERIAL, materialLine, readTextFile, summarizeMaterial, textFileProblem } from '../lib/breakdownReport';
+import { loadActiveRun, loadBreakdownDraft, loadBreakdownHistory, removeBreakdownRecord, saveBreakdownDraft, type ActiveRun, type BreakdownRecord } from '../lib/breakdownStore';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { loadThinkingLevel, saveThinkingLevel, THINKING_LABELS } from '../lib/thinkingLevel';
 import type { ThinkingPreference } from '../lib/thinkingLevel';
 import ComposerModelPicker from './ComposerModelPicker';
 import { ThinkingLevelPicker } from './ChatComposer';
-import { IconCopy, IconFile, IconFire, IconIdea, IconInfo, IconRetry, IconStop } from './icons';
+import BreakdownReport from './BreakdownReport';
+import { IconFile, IconFire, IconInfo, IconRetry } from './icons';
 
 interface BreakdownPageProps {
   persona: string;
+  onStart: (material: string, modelRef?: string, thinkingLevel?: ThinkingLevel) => boolean;
+  onOpenRun: (run: ActiveRun) => boolean;
 }
 
-export default function BreakdownPage({ persona }: BreakdownPageProps) {
-  const [input, setInput] = useState(loadBreakdownDraft);   // 切页/刷新后恢复草稿
+export default function BreakdownPage({ onStart, onOpenRun }: BreakdownPageProps) {
+  const [input, setInput] = useState(loadBreakdownDraft);
   const [analyzed, setAnalyzed] = useState('');
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [streamText, setStreamText] = useState('');
-  const [statusNote, setStatusNote] = useState('');
   const [history, setHistory] = useState<BreakdownRecord[]>(loadBreakdownHistory);
+  const [activeRun] = useState(loadActiveRun);
   const [showHistory, setShowHistory] = useState(false);
   const [preferredThinking, setPreferredThinking] = useState<ThinkingPreference>(loadThinkingLevel);
   const [toast, setToast] = useState<{ text: string; ok: boolean }>();
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const runRef = useRef<AbortController | null>(null);
-  const runIdsRef = useRef<{ sessionId: string; turnId: string } | null>(null);
-
-  // 与工作台/对话同源：模型列表与思考强度来自同一能力接口与同一偏好存储。
   const models = useComposerModels(null);
   const effectiveModel = models.selected || models.options.find(option => option.id === (models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const supportedThinking = effectiveModel?.thinkingLevels;
   const { level: thinkingLevel } = useCompatibleThinking(preferredThinking, supportedThinking, setPreferredThinking);
-
   const summary = useMemo(() => summarizeMaterial(input), [input]);
   const analyzedSummary = useMemo(() => summarizeMaterial(analyzed), [analyzed]);
   const isExample = input === EXAMPLE_MATERIAL;
-  const quoteCheck = useMemo(() => (result ? verifyQuotes(result, analyzed) : null), [result, analyzed]);
-  const structureCheck = useMemo(() => (result ? verifyStructure(result) : null), [result]);
-
   useEffect(() => { saveBreakdownDraft(input); }, [input]);
-
-  // 生成中离开页面（切页/刷新）后回来：按同一 run 取回，不丢报告。
-  useEffect(() => {
-    const run = loadActiveRun();
-    if (!run) return;
-    if (Date.now() - run.startedAt > ACTIVE_RUN_MAX_AGE_MS) { clearActiveRun(); return; }
-    if (!input.trim()) setInput(run.material);
-    resumeRun(run);
-    // 只在挂载时尝试一次；resumeRun 引用新闭包不影响行为（内部只用 ref 与 setter）。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 卸载只断开前端流：服务端跑到底，回本页再取回（停止仍走显式 stop）。
-  useEffect(() => () => { runRef.current?.abort(); }, []);
-
   const notify = (text: string, ok: boolean) => {
     setToast({ text, ok });
     setTimeout(() => setToast(undefined), 2600);
-  };
-
-  // 完成时直接写本地存储再回填状态：即使组件已卸载（生成中离开页面），报告也不会丢。
-  const persistHistory = (material: string, report: string) => {
-    const saved = addBreakdownRecord(loadBreakdownHistory(), newBreakdownRecord(material, report, ideaTitleFromReport(report)));
-    setHistory(saved);
-  };
-
-  // 离开页面后回来：按同一 run 续读任务流取回报告；流不可用则退回一次性取。
-  const resumeRun = (run: ActiveRun) => {
-    setLoading(true); setStreamText(''); setStatusNote('正在取回上次的拆解…'); setResult(''); setError('');
-    setAnalyzed(run.material);
-    runIdsRef.current = { sessionId: run.sessionId, turnId: run.turnId };
-    let acc = '';
-    runRef.current = streamChat(
-      '', persona, run.sessionId,
-      (chunk) => { acc += chunk; setStreamText(acc); },
-      () => {
-        runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
-        const text = acc.trim();
-        if (text) {
-          setResult(text); persistHistory(run.material, text); clearActiveRun();
-          notify('已取回上次的拆解报告', true);
-        } else void fetchRecovered(run);
-      },
-      () => { runRef.current = null; setLoading(false); setStreamText(''); setStatusNote(''); void fetchRecovered(run); },
-      undefined,
-      (status) => setStatusNote(status),
-      () => setStatusNote('连接中断，正在自动续接…'),
-      run.turnId, true, () => { void fetchRecovered(run); },
-    );
-  };
-
-  const fetchRecovered = async (run: ActiveRun) => {
-    setLoading(true); setStatusNote('正在取回上次的拆解…');
-    try {
-      const last = await fetchLastTurn(run.sessionId, run.turnId);
-      setLoading(false); setStatusNote('');
-      const text = (last.text || '').trim();
-      if (last.status === 'done' && text) {
-        setAnalyzed(run.material); setResult(text);
-        persistHistory(run.material, text); clearActiveRun();
-        notify('已取回上次的拆解报告', true);
-        return;
-      }
-      if (last.status === 'running') {
-        setError('上次的拆解还在生成；稍后回到本页会自动再取一次。');
-        return;
-      }
-      clearActiveRun();
-      setError('上次的拆解没有留下可恢复的报告。');
-    } catch (e) {
-      setLoading(false); setStatusNote('');
-      clearActiveRun();
-      setError(e instanceof Error ? e.message : '上次的拆解无法找回。');
-    }
   };
 
   const changeThinking = (value: ThinkingPreference) => {
@@ -138,61 +50,16 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
   };
 
   const run = () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim()) return;
     const snapshot = models.getSnapshot();
-    if (snapshot === null) {
-      setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“沿用会话模型”。');
-      return;
-    }
-    const material = input;
-    setLoading(true); setResult(''); setError(''); setStreamText(''); setStatusNote('');
-    setAnalyzed(material);
-    const sessionId = `breakdown-${Date.now().toString(36)}`;  // 独立会话：不出现在对话列表，断线可按同一 run 续接
-    const turnId = `${sessionId}-1`;
-    runIdsRef.current = { sessionId, turnId };
-    saveActiveRun({ sessionId, turnId, material, startedAt: Date.now() });
-    let acc = '';
-    runRef.current = streamChat(
-      buildBreakdownReportPrompt(material, persona), persona, sessionId,
-      (chunk) => { acc += chunk; setStreamText(acc); },
-      () => {
-        runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
-        clearActiveRun();
-        const text = acc.trim();
-        // 失败文案与有效报告分开：没有正文时不生成报告面板。
-        if (!text) setError('本次没有生成有效报告，请重试。');
-        else {
-          setResult(text);
-          persistHistory(material, text);
-        }
-      },
-      (err) => {
-        runRef.current = null; setLoading(false); setStreamText(''); setStatusNote('');
-        clearActiveRun();
-        setError(err instanceof Error && err.message ? err.message : '拆解失败，请重试');
-      },
-      undefined,
-      (status) => setStatusNote(status),
-      () => setStatusNote('连接中断，正在自动续接…'),
-      turnId, false, undefined, [], undefined, undefined, [], {},
-      snapshot.modelRef, thinkingLevel,
-    );
-  };
-
-  const stop = () => {
-    // 与对话同款显式停止：通知后端终止本轮 agent，再断开前端流。
-    const ids = runIdsRef.current;
-    if (ids) void stopChat(ids.sessionId, ids.turnId).catch(() => { /* 后端可能已结束 */ });
-    runRef.current?.abort();
-    runRef.current = null;
-    clearActiveRun();
-    setLoading(false); setStreamText(''); setStatusNote('');
-    setError('已停止本次生成；材料已保留，可重试或修改后重发。');
+    if (snapshot === null) { setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“沿用会话模型”。'); return; }
+    setError('');
+    if (!onStart(input, snapshot.modelRef, thinkingLevel)) setError('暂未创建拆解对话，请检查网关连接和浏览器存储后重试。材料已保留。');
   };
 
   const openRecord = (record: BreakdownRecord) => {
     setInput(record.material); setAnalyzed(record.material); setResult(record.report);
-    setError(''); setStreamText(''); setStatusNote(''); setShowHistory(false);
+    setError(''); setShowHistory(false);
     notify('已载入历史报告（材料一并恢复，可重新拆解）', true);
   };
 
@@ -200,29 +67,8 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
     setHistory(items => removeBreakdownRecord(items, id));
   };
 
-  const saveToIdeas = async () => {
-    if (!result || saving) return;
-    setSaving(true);
-    try {
-      await createIdea({ title: ideaTitleFromReport(result), note: result, source: '爆款拆解', status: 'pending' });
-      notify('已存入选题库', true);
-    } catch (e) {
-      notify(e instanceof Error ? e.message : '保存失败，请重试', false);
-    } finally { setSaving(false); }
-  };
-
-  const copyReport = async () => {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result);
-      notify('已复制报告', true);
-    } catch {
-      notify('复制失败，请手动选择报告文本', false);
-    }
-  };
-
   const resetMaterial = () => {
-    setResult(''); setError(''); setInput(''); setAnalyzed(''); setStreamText(''); setStatusNote('');
+    setResult(''); setError(''); setInput(''); setAnalyzed('');
   };
 
   const loadExample = () => {
@@ -276,16 +122,16 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
                   <IconFile size={13} /> 导入文本文件
                 </button>
                 {isExample && <span className="breakdown-chip">这是示例（虚构），可直接拆解或换成你的内容</span>}
-                <ComposerModelPicker models={models} disabled={loading} />
+                <ComposerModelPicker models={models}  />
                 <ThinkingLevelPicker value={preferredThinking} onChange={changeThinking}
-                  disabled={loading} supportedLevels={supportedThinking} />
+                  disabled={false} supportedLevels={supportedThinking} />
               </div>
               <button type="button" className="btn btn-primary dash-launch-btn"
-                onClick={loading ? stop : run} disabled={!loading && !input.trim()}>
-                {loading ? <><IconStop size={13} /> 停止</> : '开始拆解 →'}
+                onClick={run} disabled={!input.trim()}>
+                开始拆解 →
               </button>
             </div>
-            {(input.trim() !== '' || loading) && (
+            {input.trim() !== '' && (
               <div className="dash-composer-meta">
                 <div className="dash-composer-status">
                   <span className="breakdown-material" role="status" aria-live="polite">
@@ -325,32 +171,18 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
           </div>
         )}
 
-        {input.trim() === '' && !loading && (
+        {input.trim() === '' && (
           <button type="button" className="breakdown-example-link" onClick={loadExample}>没有素材？看看示例</button>
         )}
 
-        <p className="breakdown-hint">会先给结论、再逐段讲怎么写、能学什么；缺表现数据时不会猜“为什么火”。</p>
+        <p className="breakdown-hint">开始后进入最近对话，进度、停止和后续追问都在同一对话中；报告保留完整阅读与检查。缺表现数据时不会猜“为什么火”。</p>
 
-        {(result || input || error) && !loading && (
-          <div className="breakdown-actions">
-            {result && <button className="btn" disabled={saving} onClick={saveToIdeas}>
-              <IconIdea size={14} /> {saving ? '保存中…' : '存入选题库'}
-            </button>}
-            {result && <button className="btn" onClick={copyReport}><IconCopy size={14} /> 复制报告</button>}
-            <button className="btn btn-ghost" onClick={resetMaterial}>清空</button>
-          </div>
-        )}
-
-        {loading && (
-          <div className="panel" style={{ marginTop: 18 }}>
-            <div className="panel-title"><IconFire size={14} /> {BREAKDOWN_REPORT_TITLE}
-              <span className="breakdown-stream-note">生成中…</span>
-            </div>
-            <p className="breakdown-report-note">{statusNote || '正在生成报告；输出会逐步出现，可随时点“停止”。'}</p>
-            <div className="breakdown-stream">{streamText || '正在等待模型输出…'}</div>
-          </div>
-        )}
-        {error && !loading && (
+        {activeRun && <div className="panel breakdown-resume" role="status">
+          <p>上次的拆解已可并入最近对话；继续查看同一任务的进度或结果。</p>
+          <button type="button" className="btn" onClick={() => { if (!onOpenRun(activeRun)) setError('暂未能保存或打开上次的拆解对话，原任务记录仍保留。'); }}>在对话中查看上次拆解 →</button>
+        </div>}
+        {(result || input || error) && <div className="breakdown-actions"><button type="button" className="btn btn-ghost" onClick={resetMaterial}>清空</button></div>}
+        {error && (
           <div className="notice-error breakdown-error" role="alert">
             <span>{error}{analyzedSummary.kind === 'link-only' ? '（你只提供了链接：如果链接没读到内容，请把正文粘贴进来再试。）' : ''}</span>
             <span className="breakdown-error-actions">
@@ -361,35 +193,8 @@ export default function BreakdownPage({ persona }: BreakdownPageProps) {
             </span>
           </div>
         )}
-        {result && !loading && (
-          <div className="panel" style={{ marginTop: 18 }}>
-            <div className="panel-title"><IconFire size={14} /> {BREAKDOWN_REPORT_TITLE}</div>
-            <p className="breakdown-report-note">{reportScopeNote(analyzed)}</p>
-            {quoteCheck && (
-              <>
-                <p className={`breakdown-quote-check${quoteCheck.missing.length ? ' warn' : ''}`}>
-                  {quoteCheck.total === 0
-                    ? '引文检查：报告里没有标注可核对的原文引用。'
-                    : quoteCheck.missing.length === 0
-                      ? `引文检查：${quoteCheck.total} 处原文引用都能在你给的材料里逐字找到（只证明文字一致，不代表解释成立）。`
-                      : `引文检查：${quoteCheck.total} 处引用里，${quoteCheck.missing.length} 处没能在材料中逐字找到（可能被概括或改写，请以原文为准）。`}
-                </p>
-                {quoteCheck.missing.length > 0 && (
-                  <details className="breakdown-quote-details">
-                    <summary>查看未找到的引用</summary>
-                    <ul>{quoteCheck.missing.map((quote, index) => <li key={index}>{quote}</li>)}</ul>
-                  </details>
-                )}
-              </>
-            )}
-            {structureCheck && (
-              <p className={`breakdown-structure-check${structureCheck.missingSections.length || structureCheck.incompleteFindings || structureCheck.findings === 0 ? ' warn' : ''}`}>
-                {structureLine(structureCheck)}
-              </p>
-            )}
-            <div className="skill-body-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(result) }} />
-          </div>
-        )}
+        {result && <BreakdownReport material={analyzed} report={result} />}
+
       </div>
 
       {toast && <div className={`toast${toast.ok ? ' ok' : ' err'}`}>
