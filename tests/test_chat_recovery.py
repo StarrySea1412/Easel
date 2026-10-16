@@ -80,6 +80,20 @@ def test_already_saved_final_does_not_send_another_abort(lost):
     assert calls == [] and json.loads(marker.read_text(encoding='utf-8'))['text'] == 'complete'
 
 
+def test_orphan_stop_prefers_durable_provider_identity_after_web_restart(lost):
+    marker, events, calls, state = lost
+    marker.write_text(json.dumps({'status': 'running', 'turn_id': 'lost-turn'}))
+    web.run_ledger.create(web._run_ledger_root(), 'lost-turn', session_id='recovery-chat',
+                          session_key='agent:main:recovery-chat')
+    web.run_ledger.mark(web._run_ledger_root(), 'lost-turn', event='provider_accepted',
+                        status='running', provider_run_id='ledger-run', transport='native')
+    state['receipt'] = {'ok': True, 'aborted': True, 'runIds': ['ledger-run']}
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': True, 'status': 'stopped'}
+    assert calls[0][0] == 'chat.abort' and calls[0][1]['runId'] == 'ledger-run'
+    ledger = web.run_ledger.read(web._run_ledger_root(), 'lost-turn')
+    assert ledger['providerRunId'] == 'ledger-run' and ledger['status'] == 'stopped'
+
+
 @pytest.mark.parametrize('witnessed', [True, False])
 def test_legacy_run_requires_exact_gateway_stream_identity(lost, witnessed):
     marker, events, calls, state = lost

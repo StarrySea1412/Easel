@@ -44,7 +44,16 @@ def stop_orphan(web, session_id, turn_id):
             return {'stopped': False, 'status': 'superseded'}
         if marker.get('status') == 'done':
             return {'stopped': True, 'status': 'already_finished'}
-        run_id = marker.get('gateway_run_id') or _legacy_run_id(web, turn_id)
+        ledger = None
+        try:
+            ledger = web.run_ledger.read(web._run_ledger_root(), turn_id)
+        except (AttributeError, OSError, TypeError):
+            ledger = None
+        if isinstance(ledger, dict) and ledger.get('status') in web.run_ledger.TERMINAL_STATUSES:
+            return {'stopped': True, 'status': 'already_finished'}
+        run_id = (marker.get('gateway_run_id') or
+                  (ledger or {}).get('providerRunId') or
+                  _legacy_run_id(web, turn_id))
         if not isinstance(run_id, str) or not SAFE_ID.fullmatch(run_id):
             return {'stopped': False, 'status': 'unavailable'}
         client = web._native_agent_client(web.gateway_credentials())
@@ -81,6 +90,13 @@ def stop_orphan(web, session_id, turn_id):
         if json.loads(path.read_text(encoding='utf-8')).get('turn_id') != turn_id:
             return {'stopped': False, 'status': 'superseded'}
         web._save_turn(f'web:{session_id}', 'done', marker['text'], marker)
+        if isinstance(ledger, dict):
+            web.run_ledger.mark(
+                web._run_ledger_root(), turn_id, event='terminal',
+                status='stopped' if aborted else 'failed', provider_run_id=run_id,
+                stop_reason='user_stopped' if aborted else 'supervisor_lost',
+                error=None if aborted else error, settled=True, resource_settled=True,
+            )
         sequence = max((event.get('id', 0) for event in events), default=0)
         final = ([{'event': 'error', 'data': error}] if not aborted else [])
         final.append({'event': 'done', 'data': {'sessionKey': session_id, 'stopped': aborted}})

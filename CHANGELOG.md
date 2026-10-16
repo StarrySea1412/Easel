@@ -550,3 +550,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Reject a second POST for an existing logical turn and expose read-only run state through `/api/chat/last` and `/api/chat/runs/{turnId}`. / 同一逻辑轮次重复提交会被拒绝，`/api/chat/last` 和 `/api/chat/runs/{turnId}` 提供只读账本状态，避免把重连误变成重复付费请求。
 - Keep cross-process takeover, stall watchdog, compaction transactions and real restart acceptance pending; no paid request, 138 deployment or installer release was made. / 跨进程接管、stall watchdog、压缩事务和真实重启验收仍待完成；本轮未调用付费模型、未部署138、未更新安装器。
 - Focused backend/chat regression and syntax checks passed; see [the run-ledger record](docs/agent-run-ledger-2026-10-16.md). / 后端聊天专项回归和语法检查通过，详见[运行账本记录](docs/agent-run-ledger-2026-10-16.md)。
+
+## 2026-10-16 · Ledger-backed orphan stop / 账本驱动的旧任务停止核实
+
+- Prefer the durable provider run identity when an orphaned Web supervisor is stopped after restart, and write the confirmed terminal state back to the ledger. / Web 重启后显式停止旧任务时优先使用持久账本中的 provider run，并把已确认终态同步回账本。
+- This is an explicit stop/reconcile path; automatic takeover and lossless continuation remain pending. / 这仍是用户显式停止/核实路径，自动接管与无损续跑继续待完成。

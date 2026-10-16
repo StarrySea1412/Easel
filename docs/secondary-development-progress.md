@@ -648,3 +648,4 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 已实现：为每个逻辑 `turnId` 持久记录 provider/Gateway run、attempt、`recoveryOf`、传输层、事件序号、终态、停止原因、原始错误来源和 `resourceSettled`；重复轮次 POST fail-closed，`/api/chat/last` 附带账本，新增只读运行状态接口。
 - 已验证：账本、聊天恢复、Gateway Agent、模型选择、网关认证、推理流、问题重放与 core 专项共 **186 passed**；随后 Python 全仓回归 **2889 passed / 9 skipped**，语法与 `git diff --check` 通过。
 - 未完成：Web 重启后接管仍需 recovery-run 归并；SSE 尚未完全改为 ledger 投影；stall watchdog、compaction 事务、启动版本闸门和真实跨进程重启验收继续保留。仅本机代码与隔离测试，138、安装器和便携包不变。详见[Agent运行账本记录](agent-run-ledger-2026-10-16.md)。
+- 追加：旧 Web supervisor 的停止核实现在优先使用持久账本 provider run；快照缺少 `gateway_run_id` 时仍可精确调用 `chat.abort` 并回写终态。相关恢复专项通过；自动接管、无损续跑和 stall/compaction/version 账本仍待完成。
