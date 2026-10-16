@@ -539,3 +539,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 - Added completed, failed, stopped, reconnecting and backup-record states with narrow-screen layout coverage. Frontend tests (1025), build, lint and Python syntax checks passed; no paid task or 138 deployment. / 增加完成、失败、停止、重连和备份记录状态，并覆盖窄屏布局；前端1025项、构建、lint和Python语法检查通过，未发起付费任务或138部署。详见[工作进度记录](docs/work-progress-redesign-2026-10-16.md)。
 
 \n
+## 2026-10-16 · Agent loop and long-conversation reliability / Agent loop 与长对话可靠性
+
+- Confirm normal multi-turn reuse: a stable OpenClaw session carries later prompts, tool calls and context compilation. / 确认正常多轮复用稳定 OpenClaw 会话，后续消息、工具调用和上下文编译都进入同一会话。
+- Document the real boundary: Easel's Web supervisor, SSE carrier and Gateway recovery run are not one durable state machine; `chat_supervisor_lost` is an outer reconciliation outcome, not proof that OpenClaw cannot run long conversations. / 记录真实边界：Easel Web supervisor、SSE 连接与 Gateway 恢复 run 尚未统一为持久状态机，`chat_supervisor_lost` 是外层对账结果，不是 OpenClaw 不支持长对话的证明。
+- Add a failure matrix and P0/P1/P2 repair order centered on a durable run ledger, recovery-attempt identity, stall/compaction events and startup version gates. No model call, paid retry, service restart or 138 deployment was made. / 增加故障矩阵和以持久 run 账本、恢复 attempt 身份、stall/compaction 事件及启动版本闸门为核心的修复顺序；本轮未调用模型、未付费重试、未重启服务或部署138。[调查记录](docs/agent-loop-long-conversation-investigation-2026-10-16.md)。

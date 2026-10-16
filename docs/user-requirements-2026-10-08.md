@@ -1550,3 +1550,14 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **当前进度**：已固定官方 `master` 提交 `86a402200d95fecef4529d969836f1fe13c6cb0d`，核对 README、架构、持久 Session、Agent loop、jobs/subagent/skill/context/LLM、Conversation、Compaction 和插件管理文档，并与本项目 Web supervisor、OpenClaw Gateway、Agent Office、ClawHub 和最近对话逐项对照。
 - **本轮完成**：新增[对照调研记录](deepseek-harness-comparison-2026-10-16.md)和中英更新记录；结论是产品形态相似，但 DSH 的事件溯源/插件服务内核不能直接替换 Easel。优先建议项目级 run ledger、可回放 turn/step/settled 事件和恢复 run 关联，尚未修改运行逻辑。
 - **未完成项**：run ledger、统一事件投影和 DSH 之外的历史待办仍未实现；此前所有未完成清单继续保留。
+
+## 2026-10-16 Agent loop 多轮长对话可靠性核查
+
+- **用户原话要点**："这样子是否意味着，，我们的agent loop有问题呢，，我们这样子怎么能够执行多轮，且是长对话的？？"
+- **验收条件**：沿真实代码路径核对一次聊天轮次如何进入 OpenClaw、后续轮次如何复用同一会话、工具/子 Agent 如何归属、上下文窗口/压缩如何处理，以及 Web/Gateway/SSE 重启或断线后的恢复边界。明确区分 OpenClaw 内部 Agent loop 与 Easel 外层 supervisor/orchestration 的问题；说明当前可安全支持的多轮范围、会丢失或重复的场景和最小修复顺序。
+- **执行边界**：本轮优先只读源码、配置、已有运行记录和定向测试，不调用付费模型、不重发任务、不重启或部署 138；如需改代码，先形成可审阅的修复方案，不把调查结论冒充已实现。
+- **当前进度**：已沿 `api_chat_stream`、Gateway Agent、会话锁、OpenClaw SQLite、上下文统计和恢复代码完成链路核对；确认同一 `sessionKey`/稳定 `sessionId` 会复用 OpenClaw transcript，内部已有多轮模型请求、工具调用和 `context.compiled` 记录。问题集中在 Easel 外层 supervisor 的进程内状态、SSE 观察连接与 Gateway recovery run 没有统一对账；本轮没有重发或付费调用。
+- **调查结论**：正常运行时支持连续多轮和一次运行内多步工具调用；长对话的上下文由 OpenClaw 编译/压缩处理，但 Easel 当前只展示运行时快照/估算，尚无统一可恢复的压缩账本。Web 进程重启、Gateway 重启、监督线程丢失或长任务进入 `stopReason=length` 后，旧 `turnId` 与恢复 run 可能脱节，`chat_supervisor_lost` 是外层收尾语义，不等同于模型 loop 不支持多轮。
+- **已记录证据**：本机 SQLite 的 `agent:main:main` 会话含 31 个 `prompt.submitted`、31 个 `model.completed`、52 次工具调用和 155 条 transcript 事件；2026-10-16 Gateway 日志记录过重启恢复、长任务 `stopReason=length` 以及 stalled/finalization 失败。另发现旧启动器可能以不支持 schema 18 的 OpenClaw 2026.9.2 打开状态库，属于版本/状态目录不匹配的独立启动风险。
+- **最小修复顺序**：先增加项目级 durable run ledger（逻辑 `turnId`、provider run、`recoveryOf`、attempt、序号、终态、取消因果和 `resourceSettled`），再让 SSE 订阅 ledger 事件并把 Gateway recovery run 归并回原 turn；随后补齐 stall watchdog、compaction transaction 和版本启动闸门。未完成上述改造前，不宣称“重启后长任务可无损续跑”，也不自动重发可能已扣费的请求。
+- **调查记录**：新增 [Agent loop 与长对话可靠性调查](agent-loop-long-conversation-investigation-2026-10-16.md)。此前所有未完成清单继续保留。
