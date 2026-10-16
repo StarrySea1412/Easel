@@ -521,11 +521,13 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
               <span className="badge">{g.meta?.platform || (g.type === 'dir' ? `${g.fileCount ?? 0} 文件` : '单文件')}</span>
             </button>
           ))}
+          <button type="button" className="dash-studio-launch" onClick={() => onNavigate('image')}>
+            <span className="dash-studio-launch-icon" aria-hidden="true"><IconImage size={20} /></span>
+            <span className="dash-studio-launch-copy"><strong>开始生成图片</strong><small>用文字或参考图进入生图工坊，成品会回到这里</small></span>
+            <span className="dash-studio-launch-arrow" aria-hidden="true">→</span>
+          </button>
         </DashboardCard>
-
-
       </div>
-      <button type="button" className="dash-studio-entry" onClick={() => onNavigate('image')}><IconImage size={18}/><span>生图工坊</span><span aria-hidden="true">→</span></button>
     </div>
   );
 }

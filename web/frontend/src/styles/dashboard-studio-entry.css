@@ -1,3 +1,9 @@
-.dash-studio-entry{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:fit-content;max-width:100%;margin:18px 0 0;padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text-secondary);font:inherit;font-size:13px;cursor:pointer}
-.dash-studio-entry:hover{background:var(--surface-2);color:var(--text)}
-.dash-studio-entry:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.dash-studio-launch{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;margin-top:14px;padding:14px 15px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);color:var(--text);font:inherit;text-align:left;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),transform var(--t-fast)}
+.dash-studio-launch:hover{border-color:var(--accent-start);background:var(--accent-soft);transform:translateY(-1px)}
+.dash-studio-launch:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.dash-studio-launch-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border-radius:9px;background:var(--surface);color:var(--accent-end)}
+.dash-studio-launch-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.dash-studio-launch-copy strong{font-size:13px;font-weight:650}
+.dash-studio-launch-copy small{overflow:hidden;color:var(--text-secondary);font-size:11px;line-height:1.5;text-overflow:ellipsis;white-space:nowrap}
+.dash-studio-launch-arrow{flex:none;color:var(--accent-end);font-size:18px;line-height:1}
+@media (max-width:520px){.dash-studio-launch{gap:9px;padding:12px}.dash-studio-launch-copy small{white-space:normal}.dash-studio-launch-icon{width:32px;height:32px}}

@@ -65,7 +65,7 @@ test('embedded panel renders honest placeholders and call counts', async t => {
   await view.respondFirst();
   assert.match(view.text(), /总 Token/);
   assert.match(view.text(), /240/);
-  assert.match(view.text(), /2 次模型调用 · 2 次有 Token 记录 · 0 次未上报/);
+  assert.equal(view.container.querySelector('.usage-coverage-track').getAttribute('aria-label'), '2 次模型调用 · 2 次有 Token 记录 · 0 次未上报');
   assert.match(view.text(), /记录费用 · USD/);
   assert.match(view.text(), /未上报/, 'null metrics stay 未上报 instead of 0');
 });
@@ -120,7 +120,39 @@ test('partially priced summaries identify coverage rather than implying a comple
   payload.session.estimatedCostUsd = .015;
   payload.session.coverage.estimatedCostUsd = 1;
   const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
-  assert.match(view.container.querySelector('.usage-performance-summary').textContent, /渠道估算 \$0\.01500000 · 部分合计 · 1\/2 次已计价（非账单）/);
+  assert.match(view.container.querySelector('.usage-performance-summary').textContent, /渠道估算 · 非账单\$0\.01500000部分合计 · 1\/2 次已计价/);
+});
+
+test('empty scopes replace metrics, trends and filters with a truthful empty state and a project shortcut', async t => {
+  const payload = usagePayload('s1', { session: summary(0, null), turns: [], turnCount: 0 });
+  const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
+  assert.match(view.container.querySelector('.usage-empty-state').textContent, /本次会话暂无用量记录/);
+  for (const selector of ['.usage-metrics', '.usage-request-filters', '.usage-turns', '.usage-performance-summary']) assert.equal(view.container.querySelector(selector), null);
+  await view.click(view.find('查看整个项目'));
+  assert.match(view.text(), /1,200/);
+  assert.equal(view.container.querySelector('.usage-empty-state'), null);
+});
+
+test('request tabs change visible content, keep complete totals and support arrow-key navigation', async t => {
+  const payload = usagePayload('s1'); payload.session.reportedCalls = 1; payload.session.missingCalls = 1;
+  const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
+  const requestBrowser = view.container.querySelector('.usage-request-browser');
+  assert.equal(requestBrowser.hidden, true);
+  assert.equal(view.container.querySelector('.usage-coverage-track > span').style.width, '50%');
+  assert.match(view.container.querySelector('.usage-coverage-badge').textContent, /1 次未上报/);
+  const overview = [...view.container.querySelectorAll('.usage-view-tabs button')][0];
+  await act(async () => { overview.focus(); overview.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })); });
+  assert.equal(requestBrowser.hidden, false);
+  assert.equal(document.activeElement.getAttribute('aria-selected'), 'true');
+  assert.match(view.container.querySelector('.usage-coverage').textContent, /2 次调用/);
+  await view.click(view.find('消耗总览'));
+  assert.equal(requestBrowser.hidden, true);
+});
+
+test('a provider-recorded zero fee does not claim the requests were free', async t => {
+  const payload = usagePayload('s1'); payload.session.recordedCostUsd = 0;
+  const view = await fixture(t, { embedded: true }, payload); await view.respondFirst();
+  assert.match(view.container.querySelector('.usage-metrics').textContent, /记录返回 0 · 不代表免费/);
 });
 
 test('channel endpoint and grouping distinguish the same model across two routes', async t => {

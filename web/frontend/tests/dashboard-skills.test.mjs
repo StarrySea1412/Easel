@@ -220,6 +220,19 @@ test('Dashboard uses the actual picker, keeps existing text when choosing skills
   assert.equal(view.h.sent.length, 0);
 });
 
+test('recent outputs keeps the image studio launch inside the content card', async t => {
+  const view = await fixture(t);
+  await view.render();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  const launch = view.container.querySelector('.dash-studio-launch');
+  assert.ok(launch, 'image studio launch is part of the dashboard content area');
+  assert.equal(view.container.querySelector('.dash-studio-entry'), null, 'old detached launch is gone');
+  assert.match(launch.textContent, /开始生成图片/);
+  assert.match(launch.textContent, /生图工坊/);
+  await view.click(launch);
+  assert.deepEqual(view.h.navigations, ['image']);
+});
+
 test('click and keyboard reveal the real guide, while creation-scoped requirements save and cancel independently', async t => {
   const view = await fixture(t, { skills: [first.name], text: '准备发送的首页草稿' });
   await view.render();

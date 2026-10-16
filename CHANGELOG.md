@@ -1,3 +1,10 @@
+## 2026-10-16 · Workbench entries and usage refinement / 工作台入口与消耗明细精修
+
+- Integrate the image studio launch into Recent outputs with a full-width action. / 生图入口整合到最近产物卡片，增加整行触达和键盘焦点。
+- Add ClawHub search/details to the composer picker, with external identity separation, abort/retry handling and a narrow-screen list/detail flow. / 创作技能弹窗增加ClawHub公开检索、详情及窄屏阅读；不安装或选中外部技能。
+- Give usage a dedicated empty state, reporting coverage and overview/request tabs; make shared styles independent of the Activity page and distinguish zero recorded fees from free usage. / 消耗明细重做空态、覆盖度和总览/请求层级，修复聊天入口缺样式，明确0费用记录的口径。
+- 55 distinct focused checks and lint/build passed; local HTTP and specified real-browser entries verified. Fixed desktop/390px, dark mode and complete browser keyboard checks remain pending. No paid calls,138 deployment or installer release. / 详见[本轮记录 / evidence](docs/workbench-usage-entry-refinement-2026-10-16.md)。
+
 ## 2026-10-16 · Notification refinement and night mode / 通知精修与夜间模式
 
 - Refine event hierarchy, date grouping, unread filters, accessible status actions, empty states and deliberate clear confirmation. / 改善通知层级、日期分组、未读筛选、可访问操作、空态及清空确认。

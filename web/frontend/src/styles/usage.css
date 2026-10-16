@@ -30,3 +30,96 @@
 .usage-price-editor { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .usage-price-editor summary { cursor: pointer; font-size: 12px; }
 .usage-price-editor input { min-width: 0; width: 100%; }
+
+/* Shared by the chat drawer and activity page; no lazy page stylesheet required. */
+.usage-panel [hidden] { display: none !important; }
+.usage-panel.is-embedded { margin: 0; border: 0; background: transparent; border-radius: 0; }
+.usage-panel.is-embedded .usage-body { max-height: none; overflow: visible; padding: 0; }
+.usage-panel .usage-toolbar { gap: 14px; margin: 0 0 24px; }
+.usage-panel .usage-tabs { padding: 4px; gap: 3px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.usage-panel .usage-tabs button { min-height: 34px; padding: 6px 16px; border-radius: 7px; background: transparent; font-size: 12px; }
+.usage-panel .usage-tabs button[aria-selected=true] { color: var(--text); background: var(--surface); box-shadow: var(--shadow-sm); }
+.usage-refresh { display: flex; align-items: center; gap: 12px; }
+.usage-refresh > span { color: var(--text-tertiary); font-size: 11px; }
+.usage-refresh .btn { min-height: 34px; padding-inline: 12px; }
+.usage-empty-state { display: flex; flex-direction: column; align-items: center; padding: 44px 20px 48px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); text-align: center; }
+.usage-empty-icon { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 18px; color: var(--text-secondary); background: var(--surface); }
+.usage-empty-state h3 { margin: 0 0 11px; font-size: 17px; font-weight: 600; }
+.usage-empty-state p { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.9; }
+.usage-empty-state .btn { margin-top: 24px; min-height: 38px; gap: 14px; font-size: 12px; }
+.usage-coverage { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+.usage-coverage > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.usage-coverage strong { font-size: 16px; font-weight: 600; }
+.usage-coverage > div > span { color: var(--text-secondary); font-size: 11px; }
+.usage-coverage-badge { margin-left: auto; padding: 5px 8px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-2); font-size: 10px; }
+.usage-coverage-badge.is-partial { color: var(--amber); background: var(--amber-soft); }
+.usage-coverage-track { flex: 0 0 100%; height: 3px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.usage-coverage-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-start); }
+.usage-view-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 22px; }
+.usage-view-tabs button { padding: 0 0 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; color: var(--text-secondary); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.usage-view-tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent-start); font-weight: 600; }
+.usage-view-tabs button span { margin-left: 4px; color: var(--text-tertiary); font-size: 10px; font-variant-numeric: tabular-nums; }
+.usage-panel .usage-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.usage-panel .usage-metric { padding: 17px 15px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; }
+.usage-panel .usage-metric strong { margin-block: 5px; font-size: clamp(17px, 2.5vw, 25px); font-weight: 550; line-height: 1.3; letter-spacing: -.03em; }
+.usage-panel .usage-metric > span { color: var(--text-secondary); font-size: 11px; }
+.usage-panel .usage-metric small { font-size: 10px; }
+.usage-panel .usage-metrics.is-compact { grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); }
+.usage-panel .usage-metrics.is-compact .usage-metric { padding: 12px; background: var(--surface-2); }
+.usage-panel .usage-metrics.is-compact strong { font-size: 18px; }
+.usage-panel .usage-extra-metrics { padding: 16px 0 18px; }
+.usage-panel .usage-extra-metrics > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.usage-panel .usage-extra-metrics[open] > summary { margin-bottom: 14px; }
+.usage-panel .usage-performance-summary { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 18px; padding: 18px; margin: 0 0 24px; border-radius: 10px; background: var(--surface-2); }
+.usage-performance-summary > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.usage-performance-summary > div > span, .usage-performance-summary small { color: var(--text-secondary); font-size: 10px; line-height: 1.6; }
+.usage-performance-summary strong { color: var(--text); font-size: 14px; font-weight: 550; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.usage-panel .usage-trend { padding: 18px; margin: 24px 0; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; }
+.usage-panel .usage-trend-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.usage-panel .usage-trend-heading h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.usage-panel .usage-trend-heading > span { font-size: 10px; color: var(--text-tertiary); }
+.usage-bars { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0; }
+.usage-bar-item { flex: 1; min-width: 34px; text-align: center; font-size: 10px; color: var(--text-secondary); }
+.usage-bar-value { display: block; height: 20px; font-variant-numeric: tabular-nums; }
+.usage-bar-track { height: 96px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--border); margin: 6px 0; }
+.usage-bar-track > div { width: 65%; max-width: 30px; border-radius: 4px 4px 0 0; background: var(--accent-start); opacity: .75; }
+.usage-panel .usage-request-browser { padding: 0; margin: 0; border: 0; background: transparent; }
+.usage-panel .usage-request-filters { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: end; padding: 16px; border-radius: 10px; background: var(--surface-2); }
+.usage-panel .usage-request-filters label { min-width: 0; color: var(--text-secondary); font-size: 11px; }
+.usage-panel .usage-request-filters input, .usage-panel .usage-request-filters .easel-select { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 36px; margin-top: 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; }
+.usage-panel .usage-request-filters input { padding: 8px 10px; }
+.usage-panel .usage-request-filters > button { justify-self: start; }
+.usage-panel .usage-request-list > details { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 0 16px; }
+.usage-panel .usage-request-list > details > summary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px 14px; padding: 16px 0; cursor: pointer; list-style: none; }
+.usage-panel .usage-request-list summary::-webkit-details-marker { display: none; }
+.usage-panel .usage-request-list summary strong { color: var(--text); font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.usage-panel .usage-request-list summary > span { font-size: 10px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.usage-panel .usage-request-list summary > span:first-of-type { grid-column: 1; line-height: 1.6; }
+.usage-panel .usage-request-list summary > span:last-child { grid-column: 2; grid-row: 1; margin: 0; font-variant-numeric: tabular-nums; }
+.usage-panel .usage-request-list summary::after { content: '查看详情 ›'; grid-column: 2; grid-row: 2; color: var(--text-tertiary); font-size: 10px; text-align: right; }
+.usage-panel .usage-request-list details[open] > summary::after { content: '收起详情 ⌃'; }
+.usage-panel .usage-request-list dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin: 0 0 14px; padding: 16px; border-radius: 8px; background: var(--surface-2); font-size: 11px; line-height: 1.7; }
+.usage-panel .usage-request-list dt { color: var(--text-secondary); }
+.usage-panel .usage-request-list dd { margin: 4px 0 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.usage-panel .usage-turn-group { margin-top: 22px; border-top: 1px solid var(--border); }
+.usage-turn-group > summary { padding: 16px 0; font-size: 12px; cursor: pointer; }
+.usage-turn-group > summary > span { color: var(--text-tertiary); margin-left: 8px; font-size: 10px; }
+.usage-panel .usage-source-notes { margin-top: 24px; padding: 18px 0 0; border-top: 1px solid var(--border); }
+.usage-panel .usage-source-notes > summary { color: var(--text-secondary); font-size: 11px; cursor: pointer; line-height: 1.8; }
+.usage-source-notes > summary > span { float: right; color: var(--text-tertiary); font-size: 10px; }
+.usage-panel :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .usage-panel .usage-toolbar { align-items: flex-start; gap: 12px; }
+  .usage-refresh > span { display: none; }
+  .usage-panel .usage-tabs button { padding-inline: 11px; }
+  .usage-panel .usage-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+  .usage-panel .usage-performance-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px 12px; }
+  .usage-performance-summary > div:first-child { grid-column: 1 / -1; }
+  .usage-panel .usage-metric strong { font-size: 23px; }
+  .usage-panel .usage-request-filters { padding: 12px; gap: 10px; }
+  .usage-panel .usage-request-list > details { padding-inline: 12px; }
+  .usage-panel .usage-request-list dl { padding: 12px; gap: 12px; }
+  .usage-source-notes > summary > span { display: block; float: none; padding-left: 14px; margin-top: 3px; }
+  .usage-coverage-badge { margin-left: 0; }
+  .usage-empty-state { padding: 36px 16px; }
+}

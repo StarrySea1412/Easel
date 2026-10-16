@@ -1,0 +1,13 @@
+.chat-usage-dialog { width: min(920px, 100vw); max-width: 100vw; color: var(--text); }
+.chat-usage-dialog .drawer-header { gap: 20px; padding: 26px 30px 22px; align-items: flex-start; }
+.usage-dialog-kicker { display: block; margin-bottom: 7px; color: var(--text-tertiary); font-size: 11px; letter-spacing: .08em; }
+.chat-usage-dialog h2 { margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -.03em; }
+.chat-usage-dialog .usage-dialog-subtitle { margin: 7px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.chat-usage-dialog .icon-btn { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1px solid var(--border); border-radius: 50%; font-size: 20px; }
+.chat-usage-dialog .drawer-body { padding: 20px 30px 30px; }
+.chat-usage-scope { margin: 0 0 22px; color: var(--text-secondary); font-size: 12px; line-height: 1.8; }
+@media (max-width: 520px) {
+  .chat-usage-dialog .drawer-header { padding: 22px 20px 18px; }
+  .chat-usage-dialog h2 { font-size: 19px; }
+  .chat-usage-dialog .drawer-body { padding: 18px 20px 28px; }
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 
 import { createPortal } from 'react-dom';
 import UsagePanel from './UsagePanel';
 import '../styles/event-notifications.css';
+import '../styles/usage-dialog.css';
 
 export default function ChatUsageDialog({ sessionId, refreshKey, streaming, engine = 'openclaw', open: controlledOpen, onOpenChange, returnFocusRef }: {
   sessionId: string; refreshKey: number; streaming: boolean; engine?: 'openclaw' | 'codex';
@@ -45,11 +46,11 @@ export default function ChatUsageDialog({ sessionId, refreshKey, streaming, engi
   return <>{controlledOpen === undefined && <button ref={button} type="button" className="chat-new-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>消耗细则</button>}
     {open && createPortal(<div className="drawer-overlay" onClick={() => setOpen(false)}><div ref={dialog} className="drawer chat-usage-dialog"
       role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={scopeId} tabIndex={-1} onClick={event => event.stopPropagation()}>
-      <header className="drawer-header"><div><strong id={titleId}>消耗与费用明细</strong><p className="usage-dialog-subtitle">累计调用、缓存、推理和费用 · 与当前上下文容量分别统计</p></div><button type="button" className="icon-btn" aria-label="关闭消耗细则" onClick={() => setOpen(false)}>×</button></header>
+      <header className="drawer-header"><div><span className="usage-dialog-kicker">用量记录</span><h2 id={titleId}>消耗与费用明细</h2><p className="usage-dialog-subtitle">查看调用消耗、缓存与费用的实际记录</p></div><button type="button" className="icon-btn" aria-label="关闭消耗细则" onClick={() => setOpen(false)}>×</button></header>
       <div className="drawer-body">
         <p id={scopeId} className="chat-usage-scope">{engine === 'codex'
-          ? 'Codex 引擎尚未接入此用量账本，当前无法显示其 Token 和费用。未提供数据不代表没有消耗。'
-          : '仅统计本项目 OpenClaw 对话已上报的用量。未上报字段保持未知；记录费用和渠道估算均不代表服务商账单。'}</p>
+          ? 'Codex 用量尚未接入。当前无法读取 Token 和费用，缺少记录不代表没有消耗。'
+          : 'OpenClaw 已上报记录 · 累计消耗与当前上下文占用分别统计'}</p>
         {engine === 'openclaw' && <UsagePanel sessionId={sessionId} refreshKey={refreshKey} isStreaming={streaming} embedded />}
       </div>
     </div></div>, document.body)}

@@ -71,7 +71,7 @@ test('usage dialog scopes OpenClaw HTTP to current session and closes on session
   const trigger = v.node.querySelector('button');
   await v.click(trigger);
   assert.ok(requests.some(url => new URL(url, window.location.href).searchParams.get('sessionId') === 'session one'));
-  assert.match(document.body.textContent, /未上报字段保持未知/);
+  assert.match(document.body.textContent, /OpenClaw 已上报记录/);
   assert.equal(document.activeElement, document.querySelector('[role="dialog"]'));
   await act(async () => document.dispatchEvent(key('Tab')));
   assert.equal(document.activeElement.getAttribute('aria-label'), '关闭消耗细则');
@@ -86,8 +86,8 @@ test('Codex usage stays explicitly unknown without querying the OpenClaw ledger'
   t.mock.method(globalThis, 'fetch', () => assert.fail('no OpenClaw usage request for Codex'));
   const v = await view(t, Usage, { sessionId: 'c1', refreshKey: 0, streaming: false, engine: 'codex' });
   await v.click(v.node.querySelector('button'));
-  assert.match(document.body.textContent, /Codex 引擎尚未接入/);
-  assert.match(document.body.textContent, /未提供数据不代表没有消耗/);
+  assert.match(document.body.textContent, /Codex 用量尚未接入/);
+  assert.match(document.body.textContent, /缺少记录不代表没有消耗/);
 });
 
 const contextSnapshot = (patch = {}) => ({ sessionId: 's1', modelRef: 'p/m', observedModelRef: 'p/m',
@@ -109,7 +109,7 @@ test('context ring opens measured capacity and estimated categories, then hands 
   assert.match(panel.textContent, /≈90.0%/);
   await v.click(panel.querySelector('.context-details'));
   assert.equal(document.querySelector('.context-usage-panel'), null);
-  assert.match(document.querySelector('.chat-usage-dialog').textContent, /与当前上下文容量分别统计/);
+  assert.match(document.querySelector('.chat-usage-dialog').textContent, /与当前上下文占用分别统计/);
   assert.ok(requests.some(url => /api\/usage\?/.test(url) && url.includes('sessionId=s1')));
   await act(async () => document.dispatchEvent(key('Escape')));
   assert.equal(document.querySelector('.chat-usage-dialog'), null);
