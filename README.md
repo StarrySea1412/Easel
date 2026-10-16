@@ -1,3 +1,5 @@
+> **工作台入口与消耗明细精修（2026-10-16）**：生图入口整合进“最近产物”卡片；创作技能弹窗增加 ClawHub 公开检索与作者详情；消耗明细改为专用空态、上报覆盖度、消耗总览与请求明细，费用返回 0 也不代表免费。55 项不同定向用例、lint/构建和本机只读接口通过；真实浏览器已点通指定入口，固定桌面/390px、深色与完整键盘复核仍待完成。仅本机7880，138与安装包未更新。[改动与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/workbench-usage-entry-refinement-2026-10-16.md)。
+
 > **工作进度时间线（2026-10-16）**：聊天进度只展示服务实际上报的有序事件；“请求已接收”“已进入运行器”“等待模型事件”不再宣称 Agent 已被唤醒或模型正在思考。心跳、思考摘要、完成/失败/停止/断线续接和备份记录分别标识。仅本机 7880 更新，未调用付费模型。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/work-progress-redesign-2026-10-16.md)。
 
 > **Agent并行与费用保护（2026-10-16）**：设置 → Agent 协作现在要求先选择已配置的启动模型，才能启用子 Agent；并发数、子任务数、嵌套层级和单任务上限均受约束。未配置时会在调用前阻断 `sessions_spawn`，不会静默继承当前对话的高价模型。仅本机7880已更新，未发起付费任务，138与安装包未更新。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-runtime-safety-2026-10-16.md)。
