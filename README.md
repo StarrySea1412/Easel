@@ -1,4 +1,6 @@
-> **对话产物链路调研（2026-10-16）**：核实图片/HTML交付依赖文字路径、刷新只查存在性、后台注入未同步聊天等断点；对照Codex官方结构化事件和DeepSeek Harness的present/文件版本预览，给出产物登记、对话内预览、依赖刷新及共用生成工具的分步方案。当前为调研，尚未实现或部署；未调用付费模型。[证据、方案与验收条件](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/chat-artifact-harness-research-2026-10-16.md)。
+> **对话产物迭代（2026-10-16）**：图片、HTML和文件现在有独立持久交付记录，可在原对话内预览、下载及刷新真实内容；HTML的本地CSS/图片变化也会更新。聊天工具与生图工坊共用持久队列、固定请求去重及通道并发，超时未知结果不自动重发。后台注入有明确来源且文件存在时可补入原会话。隔离文件/API/浏览器及本机OpenClaw2026.9.6工具目录已验，7880已恢复；真实模型/供应商端到端与138另验。[实现、使用与边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/chat-artifact-iteration-2026-10-16.md)。
+
+> **对话产物链路调研（2026-10-16）**：核实图片/HTML交付依赖文字路径、刷新只查存在性、后台注入未同步聊天等断点；对照Codex官方结构化事件和DeepSeek Harness的present/文件版本预览，给出分步方案。本文保留首次调研证据，后续实现状态见上方迭代记录；未调用付费模型。[证据、方案与验收条件](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/chat-artifact-harness-research-2026-10-16.md)。
 
 > **上下文窗口与拆解对话（2026-10-16）**：区分原厂窗口、渠道配置和旧会话额度；GLM-5.3提供带出处的1M参考与空配置填入入口，保留用户限制。新拆解进入最近对话并嵌入原报告阅读界面，旧任务沿用同一ID恢复，材料/历史保留。当前渠道1M支持与真实模型质量未实测；仅本机7880，138和安装包不变。[实现、CC Switch对照与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-window-chat-breakdown-2026-10-16.md)。
 
