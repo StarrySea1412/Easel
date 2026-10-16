@@ -1,3 +1,8 @@
+## 2026-10-16 · Refined notification inbox / 通知列表精修
+
+- Replace repeated bordered cards with compact rows, quieter metadata, direct detail actions and distinct status glyphs; preserve read state, filters, confirmation and persistence. / 调整信息密度与视觉层级，保留全部通知功能。
+- Review official Linear/GitHub/Radix references and verify local real data plus isolated 390px light/dark and keyboard flows. / [调研、验收与边界](docs/notification-polish-2026-10-16.md)，仅本机7880，138/安装包不变。
+
 ## 2026-10-16 · Durable chat artifacts and image jobs / 对话产物与可靠生图任务
 
 - Add session/turn-bound file delivery, in-chat image/isolated HTML previews, downloads, byte hashes and local dependency refresh. / 新增真实文件校验、持久交付及原对话内预览，刷新不调用模型。

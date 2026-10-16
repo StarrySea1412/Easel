@@ -28,7 +28,7 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
   const visible = filter === 'unread' ? notices.filter(notice => !notice.read) : notices;
   const dismiss = useCallback(() => { setOpen(false); setConfirmClear(false); }, []);
   const close = () => { dismiss(); button.current?.focus(); };
-  const position = useAnchoredPanel(open, dismiss, button, panel, 'beside', 420);
+  const position = useAnchoredPanel(open, dismiss, button, panel, 'beside', 440);
   const markRead = (id?: string) => { markEventsRead(id); filterButton.current?.focus(); };
   return <div className="global-events">
     <button ref={button} type="button" className={'nav-item global-events-entry' + (open ? ' is-open' : '')} title={'事件通知，' + unread + ' 条未读'} aria-label={'事件通知，' + unread + ' 条未读'}
@@ -36,11 +36,11 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
       <span className="nav-icon" aria-hidden="true"><IconBell size={19} /></span><span className="nav-item-label">事件通知</span>{unread > 0 && <b className="event-unread-badge">{unread > 99 ? '99+' : unread}</b>}
     </button>
     {open && createPortal(<section ref={panel} id={panelId} className="global-events-panel" style={position} role="dialog" aria-labelledby={panelId + '-title'} tabIndex={-1}>
-      <header className="event-panel-header"><div className="event-heading"><span className="event-heading-icon" aria-hidden="true"><IconBell size={19} /></span>
-        <div><h2 id={panelId + '-title'}>事件通知</h2><p aria-live="polite">{unread ? unread + ' 条未读，掌握任务的每一步' : '任务动态，集中查看'}</p></div></div>
+      <header className="event-panel-header"><div className="event-heading"><span className="event-heading-icon" aria-hidden="true"><IconBell size={18} /></span>
+        <div><h2 id={panelId + '-title'}>事件通知</h2><p>对话、生成与发布的最新动态</p></div></div>
         <button className="event-icon-button" type="button" aria-label="关闭事件通知" title="关闭" onClick={close}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
       </header>
-      <div className="event-panel-toolbar"><div className="event-filters" role="group" aria-label="筛选事件">
+      <div className="event-panel-toolbar"><div className="event-filters" role="group" aria-label="筛选事件" aria-live="polite">
         <button ref={filter === 'all' ? filterButton : undefined} type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部<span>{notices.length}</span></button>
         <button ref={filter === 'unread' ? filterButton : undefined} type="button" aria-pressed={filter === 'unread'} onClick={() => setFilter('unread')}>未读<span>{unread}</span></button></div>
         <button type="button" className="event-mark-all" disabled={!unread} onClick={() => markRead()}><IconCheck size={14} />全部已读</button>
@@ -49,17 +49,19 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
         {visible.length ? <ol className="event-list">{visible.map((notice, index) => <li key={notice.id}>
           {(index === 0 || day(visible[index - 1].at) !== day(notice.at)) && <h3 className="event-date-heading">{dateLabel(notice.at)}</h3>}
           <article className={'event-card ' + notice.tone + (notice.read ? ' is-read' : ' is-unread')}>
-            <span className="event-notice-tone" aria-label={toneLabels[notice.tone]}>{notice.tone === 'success' ? <IconCheck size={16} /> : <IconInfo size={16} />}</span>
-            <div className="event-card-content"><div className="event-card-meta"><span>{sourceLabel(notice)}<span aria-hidden="true"> · </span>{toneLabels[notice.tone]}</span>
-              {!notice.read && <span className="event-unread-dot" title="未读" aria-label="未读" />}</div>
-              <p className="event-card-message">{notice.message}</p>
-              <div className="event-card-footer"><time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
-                {(notice.target || notice.action) && <button type="button" className="event-view" aria-label={'查看：' + notice.message} onClick={() => {
+            <span className="event-notice-tone" role="img" aria-label={toneLabels[notice.tone]} title={toneLabels[notice.tone]}>{notice.tone === 'success' ? <IconCheck size={16} /> : notice.tone === 'error' ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10.3 4-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4m0 3v1" /></svg> : <IconInfo size={16} />}</span>
+            <div className="event-card-content"><div className="event-card-meta"><span>{sourceLabel(notice)}</span>
+              <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time></div>
+              {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} onClick={() => {
                   markEventsRead(notice.id); close();
                   if (notice.target) onOpen(notice.target); else notice.action?.run();
-                }}>查看详情<IconChevron size={13} /></button>}
+                }}><span className="event-card-message">{notice.message}</span><IconChevron size={14} /></button>
+                : <p className="event-card-message">{notice.message}</p>}
+            </div>
+            <div className="event-row-state">
+                {!notice.read && <span className="event-unread-dot" title="未读" aria-label="未读" />}
                 <button type="button" className="event-icon-button event-mark-one" disabled={notice.read} aria-label={(notice.read ? '已读' : '标为已读') + '：' + notice.message} title={notice.read ? '已读' : '标为已读'} onClick={() => markRead(notice.id)}><IconCheck size={14} /></button>
-              </div></div>
+            </div>
           </article>
         </li>)}</ol> : <div className="event-empty" role="status"><span aria-hidden="true">{filter === 'unread' && notices.length ? <IconCheck size={27} /> : <IconBell size={27} />}</span>
           <h3>{filter === 'unread' && notices.length ? '都看过了' : '暂时没有新动态'}</h3><p>{filter === 'unread' && notices.length ? '所有通知已读，稍后再来看看。' : '对话、生成与发布的完成或失败，都会汇集在这里。'}</p>
@@ -68,7 +70,7 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
       <footer className="event-panel-footer">
         {confirmClear ? <div className="event-clear-confirm"><span>清空本工作台的通知记录？</span><button autoFocus type="button" onClick={() => { setConfirmClear(false); panel.current?.focus(); }}>取消</button>
           <button type="button" className="event-clear-danger" onClick={() => { clearEvents(); setConfirmClear(false); panel.current?.focus(); }}>确认清空</button></div> : <>
-          <details className="event-history-note"><summary><IconInfo size={13} /><span>{sync === 'saved' ? '已保存到本机 · 最近 1000 条' : sync === 'syncing' ? '正在同步通知' : sync === 'error' ? '同步失败 · 当前记录已保留' : '本机通知记录'}</span></summary><p>保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。</p>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</details>
+          <details className="event-history-note"><summary><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已保存到本机' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本机记录'}</span><IconChevron size={12} /></summary><p>最近1000条保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。</p>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</details>
           <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><IconTrash size={13} />清空</button></>}
       </footer>
     </section>, document.body)}
