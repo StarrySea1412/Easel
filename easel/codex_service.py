@@ -20,6 +20,8 @@ from sse_starlette.sse import EventSourceResponse
 from .codex_client import CodexClient, CodexError
 from .gateway_auth import redact_gateway_text
 from .execution import codex_rows, page, iso, public_text
+from .artifacts import ArtifactStore, PRESENT_TOOL
+from .image_jobs import ImageJobs, read_config, GENERATE_TOOL
 
 
 def safe(value):
@@ -273,9 +275,19 @@ class CodexService:
                       'approvalsReviewer': 'user', 'sandbox': 'workspace-write',
                       'config': {'web_search': 'cached'},
                       'developerInstructions': '你正在 Easel 本地工作台中协助用户。用中文回答。产出保存在当前工作目录。仅使用本轮明确提供的附件。思考摘要和工具记录以真实协议事件为准，不编造。'}
+            params['developerInstructions'] += ('保存产物后调用easel_present交付已有文件到当前对话；'
+                '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
+                'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'
+                'HTML使用自包含CSS/脚本或本地资源；预览隔离运行，不依赖外部CDN、联网接口或嵌套网页。')
+            ticket = ArtifactStore(self.outputs).bind(state['sessionId'], state['turn_id'])
+            script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/image_job.py'
+            params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
+                f'旧会话缺此工具时可执行 python "{script}" submit --ticket {ticket} --request-id "<固定标识>" --prompt "<提示词>"。'
+                '可能产生图片费用，只用专用生图通道，不改请求标识重试，不隐式换模型；任务完成后文件自动展示。')
             if state['threadId']:
                 response = client.rpc('thread/resume', {**params, 'threadId': state['threadId']})
             else:
+                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL]
                 response = client.rpc('thread/start', params)
             thread = response['thread']['id']
             with self.lock:
@@ -381,6 +393,13 @@ class CodexService:
             if isinstance(item.get('aggregatedOutput'), str):
                 item['aggregatedOutput'] = public_text(item['aggregatedOutput'])
             if item.get('id'):
+                if method == 'item/completed' and item.get('type') == 'commandExecution' and item.get('status') == 'completed':
+                    for line in str(raw_item.get('aggregatedOutput', '')).splitlines():
+                        if line.startswith('EASEL_PRESENT '):
+                            try:
+                                self._present_files(state, json.loads(line[len('EASEL_PRESENT '):]).get('files'), item['id'])
+                            except (ValueError, OSError, TypeError, KeyError):
+                                self._event(state, 'activity', '文件交付未通过校验，请核对实际路径和文件。')
                 old = next((i for i in state['items'] if i['id'] == item['id']), None)
                 if old is None:
                     item['_startedAt'] = iso(time.time()) if method == 'item/started' else None
@@ -447,6 +466,31 @@ class CodexService:
 
     def _request(self, run, event):
         method, params = event['method'], event.get('params') or {}
+        if method == 'item/tool/call' and params.get('tool') == 'easel_generate_image' and not params.get('namespace'):
+            try:
+                args = params.get('arguments')
+                if not isinstance(args, dict) or not isinstance(args.get('requestId'), str):
+                    raise ValueError('Invalid arguments')
+                state = run['state']
+                job = ImageJobs(self.outputs).submit({'prompt': args.get('prompt'), 'size': args.get('size', '1024x1024')},
+                    read_config(self.outputs.parent), session=state['sessionId'], turn=state['turn_id'], request_id=args['requestId'])
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'job': job}, ensure_ascii=False)}]}
+                self._event(state, 'activity', '生图任务已登记，等待专用图片通道执行；勿重复提交。')
+            except (ValueError, OSError, TypeError):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '生图任务未接受：请检查请求标识、提示词和专用图片通道配置，不自动回退或重试。'}]}
+            run['client'].reply(event['id'], result)
+            return False
+        if method == 'item/tool/call' and params.get('tool') == 'easel_present' and not params.get('namespace'):
+            try:
+                arguments = params.get('arguments')
+                if not isinstance(arguments, dict):
+                    raise ValueError('Invalid tool arguments')
+                values = self._present_files(run['state'], arguments.get('files'), params.get('callId'))
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'artifacts': values}, ensure_ascii=False)}]}
+            except (ValueError, OSError, TypeError, KeyError):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '交付失败：文件必须实际存在于当前工作目录，且不能是附件、隐藏文件或越界路径。'}]}
+            run['client'].reply(event['id'], result)
+            return False
         supported = {'item/commandExecution/requestApproval', 'item/fileChange/requestApproval',
                      'item/permissions/requestApproval', 'item/tool/requestUserInput', 'mcpServer/elicitation/request'}
         if method not in supported:
@@ -458,6 +502,23 @@ class CodexService:
         run['state']['pending'].append({'requestId': ident, 'method': method, 'params': safe(params)})
         self._event(run['state'], 'activity', 'Codex 等待你的审批或回答。')
         return False
+
+    def _present_files(self, state, files, call):
+        if not isinstance(files, list) or not 1 <= len(files) <= 16:
+            raise ValueError('Invalid delivery list')
+        workspace = Path(state['workspace']).resolve()
+        normalized = []
+        for entry in files:
+            if not isinstance(entry, dict) or not isinstance(entry.get('path'), str):
+                raise ValueError('Invalid file')
+            target = (workspace / entry['path']).resolve()
+            relative = target.relative_to(workspace)
+            if not relative.parts or relative.parts[0] == 'assets':
+                raise ValueError('Request attachments cannot be presented as generated files')
+            normalized.append({**entry, 'path': str(target)})
+        values = ArtifactStore(self.outputs).present(state['sessionId'], state['turn_id'], normalized, source='codex', call=call)
+        self._event(state, 'artifacts', {'artifacts': values})
+        return values
 
     def _active(self, req):
         run = self.active.get(req.sessionId)

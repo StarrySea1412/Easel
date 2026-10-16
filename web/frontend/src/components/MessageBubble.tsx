@@ -20,6 +20,7 @@ export interface BubbleActions {
 }
 
 interface MessageBubbleProps {
+  artifacts?: ReactNode;
   reportMaterial?: string;
   reportIncomplete?: boolean;
   message: ChatMessage;
@@ -171,7 +172,7 @@ function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; statu
   );
 }
 
-export default function MessageBubble({ message, reportMaterial, reportIncomplete, sessionId, isStreaming, thinking, activity, activitySteps, stillWorking, actions, status, execution, executionScope, backupSnapshot }: MessageBubbleProps) {
+export default function MessageBubble({ message, reportMaterial, reportIncomplete, sessionId, isStreaming, thinking, activity, activitySteps, stillWorking, actions, status, execution, executionScope, backupSnapshot, artifacts }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const userRow = useRef<HTMLDivElement>(null);
   const cancelEdit = () => { setEditing(false); requestAnimationFrame(() => userRow.current?.querySelector<HTMLButtonElement>('[aria-label="重新编辑消息"]')?.focus()); };
@@ -231,7 +232,7 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
   ) : null;
 
   // 等待回复中（还没有正文、思考、活动）
-  if (isStreaming && !message.content && !effThinking && !liveActivity && !liveHint && !execution) {
+  if (isStreaming && !message.content && !effThinking && !liveActivity && !liveHint && !execution && !artifacts) {
     return (
       <div className="message-row assistant">
         <div className="message-bubble assistant">
@@ -246,8 +247,10 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
     <div className="message-row assistant">
       <div className="msg-col assistant">
         <div className="message-bubble assistant">
+          {message.externalSource && <p className="chat-external-source">后台交付记录 · 原运行状态保留</p>}
           {livePanel}
           {executionView}
+          {artifacts}
           {displayedContent && (reportMaterial !== undefined
             ? <BreakdownReport material={reportMaterial} report={displayedContent} complete={!isStreaming && !displayedError && !message.stopped && !reportIncomplete} inert={backupSnapshot} />
             : <OutputMessageContent content={displayedContent} inert={backupSnapshot} streaming={isStreaming} />)}

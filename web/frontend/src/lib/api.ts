@@ -1458,6 +1458,7 @@ export interface ImagegenStart { jobId: string; state: string }
 export interface ImagegenJob {
   jobId: string;
   state: 'running' | 'done' | 'error';
+  phase?: 'queued' | 'running' | 'done' | 'error' | 'unconfirmed';
   prompt: string;
   url: string | null;
   error: string | null;
@@ -1500,7 +1501,7 @@ export function reverseImage(image: File, provider: string, instruction: string,
   return request('/api/image-reverse', { method: 'POST', body: data, signal });
 }
 
-export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string; model?: string } = {}): Promise<ImagegenStart> {
+export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string; model?: string; requestId?: string } = {}): Promise<ImagegenStart> {
   return request('/api/imagegen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1510,6 +1511,9 @@ export function startImagegen(prompt: string, size = '1024x1024', n = 1, options
 
 export function fetchImagegenJob(jobId: string): Promise<ImagegenJob> {
   return request(`/api/imagegen/${encodeURIComponent(jobId)}`);
+}
+export function acknowledgeImagegenJob(jobId: string): Promise<ImagegenJob> {
+  return request(`/api/imagegen/${encodeURIComponent(jobId)}/acknowledge`, { method: 'POST' });
 }
 
 export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[]; channel: ImagegenChannel }> {

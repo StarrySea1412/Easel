@@ -6,6 +6,8 @@ import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCal
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
+import ChatArtifacts from './ChatArtifacts';
+import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
@@ -61,6 +63,7 @@ function greeting(): string {
 }
 
 export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels }: ChatPageProps) {
+  const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -113,7 +116,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const isImported = session.importedFromBackup === true;
   const isStreaming = !isImported && !!stream;
   const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported || session.engine === 'codex');
-  const isEmpty = session.messages.length === 0 && !isStreaming;
+  const isEmpty = session.messages.length === 0 && !isStreaming && !deliveries.items.length && !deliveries.jobs.length && !deliveries.messages.length;
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
@@ -144,7 +147,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -164,6 +167,13 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
   // ---- 对话态 ----
   const displayMessages: ChatMessage[] = [...session.messages];
+  for (const message of deliveries.messages) {
+    if (!displayMessages.some(item => item.role === 'assistant' && (item.turnId === message.turnId || item.content === message.content))) displayMessages.push({ role: 'assistant', content: message.content, turnId: message.turnId, externalSource: 'gateway-injected' });
+  }
+  const knownTurns = new Set(displayMessages.filter(m => m.role === 'assistant').map(m => m.turnId));
+  for (const turnId of new Set([...deliveries.items, ...deliveries.jobs].map(item => item.turnId))) {
+    if (!knownTurns.has(turnId) && turnId !== session.pendingTurnId) displayMessages.push({ role: 'assistant', content: '', turnId });
+  }
   if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '', startedAt: stream!.startedAt, elapsedMs: stream!.elapsedMs });
 
   return (
@@ -185,6 +195,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         onPointerDown={event=>{if(event.target===event.currentTarget)navigationTarget.current=null;}}
         onKeyDown={event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)&&!(event.target as HTMLElement).closest('button,input,textarea,select,a,[contenteditable="true"]'))navigationTarget.current=null;}}>
         <div className="chat-thread">
+          {deliveries.note && <p role="status">{deliveries.note} <button type="button" className="link-btn" onClick={deliveries.retry}>重新读取产物</button></p>}
           {isImported && isEmpty && <p className="chat-backup-empty">这份备份没有可显示的消息。</p>}
           {displayMessages.map((msg, i) => {
             const isLast = i === displayMessages.length - 1;
@@ -223,6 +234,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
               <Fragment key={`${i}-${msg.role}`}>{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
+                artifacts={msg.role === 'assistant' && auditTurn ? <ChatArtifacts artifacts={deliveries.items.filter(item => item.turnId === auditTurn)} onUpdated={deliveries.updated} jobs={deliveries.jobs.filter(item => item.turnId === auditTurn)} onJobsChanged={deliveries.retry} /> : undefined}
                 reportMaterial={msg.role === 'assistant' && i > 0 && displayMessages[i - 1].role === 'user' && displayMessages[i - 1].kind === 'breakdown' ? displayMessages[i - 1].content : undefined}
                 reportIncomplete={isImported && session.backupIncomplete && isLast}
                 sessionId={session.id}
@@ -234,8 +246,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
                 executionScope={`${session.id}:${auditTurn||''}`}
-                execution={!isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
-                status={session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
+                execution={!msg.externalSource && !isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
+                status={!msg.externalSource && session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
               /></Fragment>
             );
           })}
@@ -253,7 +265,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-       <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
+       <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />
         </div>}
       </div>}
     </div>

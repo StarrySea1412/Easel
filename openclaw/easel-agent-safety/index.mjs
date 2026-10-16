@@ -1,3 +1,6 @@
+import { registerPresent } from './present.mjs';
+import { registerImage } from './image.mjs';
+
 function readModel(config) {
   const value = config?.agents?.defaults?.subagents?.model;
   if (typeof value === 'string') return value.trim();
@@ -15,6 +18,8 @@ export default {
   name: 'Easel Agent Safety',
   description: 'Require the configured Agent startup model and bound delegation limits.',
   register(api) {
+    registerPresent(api);
+    registerImage(api);
     api.on('before_tool_call', (event) => {
       if (event.toolName !== 'sessions_spawn' && event.toolName !== 'spawn_agent') return;
       const startupModel = readModel(api.config);

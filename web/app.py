@@ -51,6 +51,7 @@ from easel.version import runtime_version
 from easel.collection_errors import collection_failure
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
+from easel.artifacts import ArtifactStore, private_output
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
     sys.path.insert(0, str(PROJECT_ROOT / "mcp" / "easel-notify"))
@@ -540,9 +541,11 @@ async def _lifespan(_app: FastAPI):
     verification.start()
     health = _model_health_service()
     health.start()
+    _image_worker().start()
     try:
         yield
     finally:
+        await asyncio.to_thread(_image_worker().stop)
         await asyncio.to_thread(_codex_service.close)
         await asyncio.to_thread(health.stop)
         await asyncio.to_thread(verification.stop)
@@ -553,6 +556,10 @@ app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
 from easel.codex_service import CodexService
 _codex_service = CodexService(OUTPUTS_DIR)
 app.include_router(_codex_service.router())
+from easel.artifact_api import router as artifact_router
+from easel.chat_projection import project_injected, present_payloads
+app.include_router(artifact_router(lambda: OUTPUTS_DIR,
+    history=lambda session: project_injected(OUTPUTS_DIR, OPENCLAW_SESSIONS_DIR, session, gateway_credentials())))
 
 
 class NotificationBatch(BaseModel):
@@ -1398,6 +1405,8 @@ def _safe_output_path(rel: str) -> Path:
     root = OUTPUTS_DIR.resolve()
     if root != full and root not in full.parents:
         raise HTTPException(403, '非法路径')
+    if private_output(root, full):
+        raise HTTPException(403, '内部记录不可通过文件接口访问')
     if not full.is_file():
         raise HTTPException(404, '文件不存在')
     return full
@@ -3279,8 +3288,8 @@ class ChatRequest(BaseModel):
     message: str
     history: list[HistoryMessage] = Field(default_factory=list, max_length=200)
     persona: str | None = None
-    sessionId: str | None = None
-    turnId: str | None = None
+    sessionId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
+    turnId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
     modelRef: Annotated[str, Field(strict=True, min_length=1, max_length=300)] | None = None
     thinkingLevel: Literal['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'] | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
@@ -3876,6 +3885,18 @@ async def api_chat_stream(req: ChatRequest):
         })
     run_ledger.create(_run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
                       model_ref=requested_model_ref, engine=req.engine)
+    artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
+    present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
+    image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
+    message += (f'\n\n[Easel本轮文件交付]\n保存产物后，必须实际执行以下命令交付到当前对话；'
+                f'不依赖最终回复中的链接。命令只登记现有文件，不生成或扣费。\n'
+                f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
+                f'多个文件重复 --file 参数。若有easel_present工具可直接调用：ticket={artifact_ticket}，files为真实路径列表。'
+                f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
+                f'HTML预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
+                f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
+                f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
+                f'该调用可能产生图片费用，只用已配置图片通道；返回job后等待自动交付，勿换requestId重复提交。')
     if turn_id in _CHAT_JOBS:
         raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
     cancel_job = threading.Event()
@@ -4511,6 +4532,11 @@ async def api_chat_stream(req: ChatRequest):
                 if rc == 0 and isinstance(native_result, dict) and native_result.get('status') == 'ok':
                     result = native_result.get('result')
                     payloads = result.get('payloads', []) if isinstance(result, dict) else []
+                    delivered = await asyncio.to_thread(present_payloads, OUTPUTS_DIR, sk, turn_id,
+                                                        payloads, run_info.get('run_id'))
+                    if delivered:
+                        emitted = True
+                        to_client('artifacts', {'artifacts': delivered})
                     canonical = '\n'.join(row['text'] for row in payloads
                                           if isinstance(row, dict) and isinstance(row.get('text'), str) and not row.get('isError'))
                     if canonical:
@@ -4995,6 +5021,8 @@ def _safe_output_target(rel: str, *, must_exist: bool = True) -> Path:
     root = OUTPUTS_DIR.resolve()
     if full == root or root not in full.parents:
         raise HTTPException(403, '非法路径')
+    if private_output(root, full):
+        raise HTTPException(403, '内部记录不可通过文件接口访问')
     if must_exist and not full.exists():
         raise HTTPException(404, '不存在')
     return full
@@ -6977,7 +7005,16 @@ IDEA_STATUSES = {"pending", "doing", "done"}
 # 避免把 chat 中转误当生图端点）。聚合站生成可能要几分钟 → 任务化：POST 起线程，GET 轮询。
 IMAGEGEN_DIR = OUTPUTS_DIR / "AI生图"
 IMAGEGEN_INPUT_DIR = OUTPUTS_DIR / "_image_references"
-_IMAGEGEN_JOBS: dict[str, dict] = {}
+from easel.image_jobs import ImageJobs, ImageWorker
+_IMAGE_WORKER = None
+
+
+def _image_worker():
+    global _IMAGE_WORKER
+    if _IMAGE_WORKER is None:
+        _IMAGE_WORKER = ImageWorker(PROJECT_ROOT, lambda: OUTPUTS_DIR, _read_env,
+                                   lambda: child_env(PROJECT_ROOT), runner=lambda *a, **kw: subprocess.run(*a, **kw))
+    return _IMAGE_WORKER
 _IMAGEGEN_TIMEOUT = 900   # 秒；聚合站实测单张可到分钟级
 _IMAGEGEN_SIZES = {
     "auto",
@@ -7045,6 +7082,7 @@ class ImagegenRequest(BaseModel):
     referenceId: str | None = None
     maskId: str | None = None
     model: str | None = None
+    requestId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
 
 
 @app.post("/api/imagegen/references")
@@ -7103,69 +7141,34 @@ async def api_imagegen_start(req: ImagegenRequest):
         raise HTTPException(400, hint)
     if not model or len(model) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in model):
         raise HTTPException(400, "请填写 1–200 个字符的有效生图模型名称")
-    job_id = uuid.uuid4().hex[:12]
-    # 任务表容量护栏：只留最近 40 条
-    if len(_IMAGEGEN_JOBS) >= 40:
-        for k, _ in sorted(_IMAGEGEN_JOBS.items(), key=lambda kv: kv[1].get("started", 0))[:20]:
-            _IMAGEGEN_JOBS.pop(k, None)
-    _IMAGEGEN_JOBS[job_id] = {
-        "jobId": job_id, "state": "running", "prompt": prompt[:120], "size": size,
-        "started": time.time(), "url": None, "error": None,
-        "mode": req.mode, "referenceId": req.referenceId, "maskId": req.maskId,
-        "model": model,
-    }
-    IMAGEGEN_DIR.mkdir(parents=True, exist_ok=True)
-    out = IMAGEGEN_DIR / f"{time.strftime('%m%d-%H%M%S')}-{job_id[:4]}.png"
-    generation = {'prompt': prompt, 'size': size, 'model': model,
-                  'created': _IMAGEGEN_JOBS[job_id]['started'], 'jobId': job_id,
-                  'mode': req.mode, 'referenceId': req.referenceId, 'maskId': req.maskId}
-
-    def _run() -> None:
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "ai_image.py"), req.mode,
-               "--prompt", prompt, "--output", str(out),
-               "--size", size, "--n", str(max(1, min(4, req.n)))]
-        if reference:
-            cmd += ["--image", str(reference)]
-        if mask:
-            cmd += ["--mask", str(mask)]
-        try:
-            # Freeze the dedicated channel and selected model for this task.
-            # ai_image.py preserves explicit environment values when reading .env.
-            process_env = child_env(PROJECT_ROOT)
-            process_env.update({key: channel_env.get(key, "").strip() for key in ("IMG_BASE_URL", "IMG_API_KEY")})
-            process_env["IMG_MODEL"] = model
-            proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=process_env,
-                                  capture_output=True, text=True, timeout=_IMAGEGEN_TIMEOUT)
-            # The helper preserves URL image formats and numbers multi-image results.
-            # Match this job's unique stem instead of requiring the original .png path.
-            images = sorted(p for p in IMAGEGEN_DIR.glob(f"{out.stem}*")
-                            if p.is_file() and p.suffix.lower() in _IMAGEGEN_EXTS
-                            and p.stat().st_size > 0)
-            result = images[0] if images else None
-            ok = proc.returncode == 0 and result is not None
-            if ok:
-                for image in images:
-                    _imagegen_metadata_path(image).write_text(
-                        json.dumps(generation, ensure_ascii=False), encoding='utf-8')
-            _IMAGEGEN_JOBS[job_id].update({
-                "state": "done" if ok else "error",
-                "url": f"/api/media/{IMAGEGEN_DIR.name}/{result.name}" if ok else None,
-                "error": None if ok else (proc.stderr or proc.stdout or "生成失败")[-400:],
-                **(_imagegen_dimensions(result) if ok else {}),
-            })
-        except Exception as exc:  # noqa: BLE001 — 任务失败落状态，不崩进程
-            _IMAGEGEN_JOBS[job_id].update({"state": "error", "error": str(exc)[:400]})
-
-    threading.Thread(target=_run, daemon=True, name="easel-imagegen").start()
-    return {"jobId": job_id, "state": "running"}
+    frozen = {**channel_env, 'IMG_MODEL': model}
+    try:
+        job = ImageJobs(OUTPUTS_DIR).submit(req.model_dump(), frozen, request_id=req.requestId)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    # The lifecycle worker also polls durable submissions from agent tools.
+    _image_worker().tick()
+    return job
 
 
 @app.get("/api/imagegen/{job_id}")
 async def api_imagegen_status(job_id: str):
-    job = _IMAGEGEN_JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "任务不存在或已过期")
-    return job
+    try:
+        return ImageJobs(OUTPUTS_DIR).get(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/imagegen/{job_id}/acknowledge")
+async def api_imagegen_acknowledge(job_id: str):
+    """Human explicitly confirms provider reconciliation; never restarts a job."""
+    try:
+        return ImageJobs(OUTPUTS_DIR).acknowledge(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 
 
 class NotifyTestRequest(BaseModel):

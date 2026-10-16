@@ -50,12 +50,12 @@ def imagegen_stub(tmp_path, monkeypatch):
     })
     monkeypatch.setattr(web, "child_env", lambda *_: {})
     monkeypatch.setattr(web, "OUTPUTS_DIR", tmp_path / "outputs")
-    monkeypatch.setattr(web, "IMAGEGEN_DIR", tmp_path / "gallery")
-    monkeypatch.setattr(web, "_IMAGEGEN_JOBS", {})
+    monkeypatch.setattr(web, "IMAGEGEN_DIR", tmp_path / "outputs/AI生图")
+    monkeypatch.setattr(web, "_IMAGE_WORKER", None)
 
     class ImmediateThread:
         def __init__(self, *, target, **_):
-            self.target = target
+            self.target = lambda: target(*_.get("args", ()))
 
         def start(self):
             self.target()
@@ -95,7 +95,7 @@ def test_imagegen_rejects_invalid_size_before_starting_job(imagegen_stub, size):
         asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt="测试画面", size=size)))
     assert exc.value.status_code == 400
     assert not imagegen_stub
-    assert not web._IMAGEGEN_JOBS
+    assert not (web.OUTPUTS_DIR / "_artifacts/image-jobs.sqlite3").exists()
 
 
 @pytest.mark.parametrize("extension", ["jpg", "webp"])
@@ -122,7 +122,7 @@ def test_imagegen_preserves_provider_size_error(imagegen_stub, monkeypatch, size
     assert job["state"] == "error"
     assert job["size"] == size
     assert job["url"] is None
-    assert job["error"] == f"model does not support size {size}"
+    assert job["phase"] == "unconfirmed" and "未自动重试" in job["error"]
     assert "width" not in job and "height" not in job
 
 
@@ -132,7 +132,7 @@ def test_imagegen_retains_size_while_job_is_running(imagegen_stub, monkeypatch, 
 
     class DeferredThread:
         def __init__(self, *, target, **_):
-            pending.append(target)
+            pending.append(lambda: target(*_.get("args", ())))
 
         def start(self):
             pass
@@ -197,7 +197,7 @@ def test_imagegen_finds_numbered_results_for_multiple_images(imagegen_stub, monk
 
 
 def test_gallery_returns_real_dimensions_for_all_supported_image_formats(imagegen_stub):
-    web.IMAGEGEN_DIR.mkdir()
+    web.IMAGEGEN_DIR.mkdir(parents=True)
     expected = {}
     for index, extension in enumerate(("png", "jpg", "jpeg", "webp")):
         path = web.IMAGEGEN_DIR / f"image.{extension}"
@@ -213,7 +213,7 @@ def test_gallery_returns_real_dimensions_for_all_supported_image_formats(imagege
 
 
 def test_unreadable_gallery_image_does_not_break_listing(imagegen_stub):
-    web.IMAGEGEN_DIR.mkdir()
+    web.IMAGEGEN_DIR.mkdir(parents=True)
     (web.IMAGEGEN_DIR / "broken.png").write_bytes(b"not an image")
     images = asyncio.run(web.api_imagegen_gallery())["images"]
     assert len(images) == 1
@@ -240,7 +240,7 @@ def test_custom_model_reaches_provider_environment_and_saved_job_metadata(imageg
 def test_queued_image_keeps_channel_snapshot_when_settings_change(imagegen_stub, monkeypatch):
     pending, calls = [], []
     class Deferred:
-        def __init__(self, *, target, **_): pending.append(target)
+        def __init__(self, *, target, **_): pending.append(lambda: target(*_.get("args", ())))
         def start(self): pass
     monkeypatch.setattr(web.threading, 'Thread', Deferred)
     asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt='queued', model='chosen-model')))
@@ -259,7 +259,7 @@ def test_queued_image_keeps_channel_snapshot_when_settings_change(imagegen_stub,
 def test_custom_model_validation_prevents_provider_jobs(imagegen_stub, model):
     with pytest.raises(web.HTTPException):
         asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt='test', model=model)))
-    assert not imagegen_stub and not web._IMAGEGEN_JOBS
+    assert not imagegen_stub and not (web.OUTPUTS_DIR / "_artifacts/image-jobs.sqlite3").exists()
 
 
 def test_image_model_save_persists_without_overwriting_channel_credentials(tmp_path, monkeypatch):

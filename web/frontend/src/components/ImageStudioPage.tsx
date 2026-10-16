@@ -110,7 +110,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           </div></details>
           {studio.mask && reference && <p className="image-field-hint">已使用局部编辑蒙版，可在更多选项中移除。</p>}
           {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
-          {belongsToDraft && job?.state === 'error' && <p className="image-error" role="alert">生成失败：{job.error || '请重试'}</p>}
+          {belongsToDraft && job?.state === 'error' && <div className="image-error" role="alert"><p>{job.phase === 'unconfirmed' ? '生成结果未确认：' : '图片任务已结束：'}{job.error || '请核对任务状态'}</p>{job.phase === 'unconfirmed' && <button type="button" className="btn btn-sm" disabled={studio.imgSubmitting} onClick={() => void studio.acknowledgeJob()}>已核对供应商，解除占位</button>}</div>}
         </form>
         {(previewUrl || busy) && <div className="image-preview">
         <div className="image-canvas-toolbar">
@@ -131,7 +131,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
         <div className={`image-canvas${busy ? ' is-busy' : ''}`} aria-label="图片画布">
           {previewUrl ? <img className="image-canvas-picture" src={previewUrl} alt={original ? `原图：${reference!.name}` : job?.prompt || '生成结果'} />
             : null}
-          {busy && <div className="image-progress" role="status"><span className="image-progress-spinner" aria-hidden="true" /><strong>{studio.imgSubmitting ? '正在提交…' : `正在生成 · 已等待 ${studio.imgTick} 秒`}</strong><p>可以离开此页，回来继续查看。</p></div>}
+          {busy && <div className="image-progress" role="status"><span className="image-progress-spinner" aria-hidden="true" /><strong>{studio.imgSubmitting ? '正在提交…' : job?.phase === 'queued' ? `等待图片通道 · ${studio.imgTick} 秒` : `图片任务处理中 · 已等待 ${studio.imgTick} 秒`}</strong><p>可以离开此页，回来继续查看。不会因刷新重新生成。</p></div>}
           {dragging && <div className="image-drop-overlay">松开放入图片</div>}
         </div>
         </div>}

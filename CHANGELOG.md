@@ -1,3 +1,10 @@
+## 2026-10-16 · Durable chat artifacts and image jobs / 对话产物与可靠生图任务
+
+- Add session/turn-bound file delivery, in-chat image/isolated HTML previews, downloads, byte hashes and local dependency refresh. / 新增真实文件校验、持久交付及原对话内预览，刷新不调用模型。
+- Share the dedicated image channel between workbench and runtime tools, with SQLite jobs, request deduplication, channel queues and success-receipt recovery. xjbh≤1, mlgb7≤4; ambiguous outcomes reserve capacity until explicit reconciliation. / 不自动重发或切换昂贵模型。
+- Recover explicit Gateway injections and verified local structured media payloads; retain original run outcomes. / 后台交付与原轮次终态分开，旧链接只迁移可核验归属的文件。
+- Validate with real temporary files, fake providers and a real browser; live provider billing/quality, host138 and packages remain unverified/unchanged. / 详见[实现及验收记录](docs/chat-artifact-iteration-2026-10-16.md)。
+
 ## 2026-10-16 · Chat artifact research / 对话产物链路调研
 
 - Trace generated files through Gateway/Codex adapters, chat history, previews and refresh; compare official Codex events with fixed DeepSeek Harness present/version/preview sources. / 定位文字交付、预览割裂与刷新缺口，核对138原会话106次实际工具调用。

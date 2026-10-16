@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference, saveImagegenModel } from '../lib/api';
+import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference, saveImagegenModel, acknowledgeImagegenJob } from '../lib/api';
 import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel, ImagegenReference } from '../lib/api';
 import { restoreReference, validateReferenceFile, validateMaskFile } from '../lib/imageReferences';
 import { useImageReverse } from './useImageReverse';
@@ -18,6 +18,7 @@ export const IMAGE_SIZES: { id: string; label: string; ratio: string; use: strin
 ];
 const IMAGE_JOB_KEY = 'easel_imagegen_job';
 const IMAGE_DRAFT_KEY = 'easel_imagegen_draft';
+const IMAGE_REQUEST_KEY = 'easel_imagegen_pending_request';
 
 /** Choose a supported ratio; 'auto' is not a promise to preserve source size. */
 export function closestImageSize(width: number, height: number): string {
@@ -53,6 +54,7 @@ function restoreImageJob(): ImageStudioJob | null {
 }
 
 export function useImageStudio(active: boolean) {
+  const pendingRequest = useRef<{ signature?: string; id?: string } | null>(null);
   const reverse = useImageReverse(active);
   const [mode, setMode] = useState<'generate' | 'img2img' | 'reverse'>(()=>restoreImageDraft().mode);
   const [reference, setReference] = useState<ImagegenReference|null>(()=>restoreImageDraft().reference);
@@ -123,6 +125,7 @@ export function useImageStudio(active: boolean) {
           if (job.state === 'done' && activePage.current) void refreshGallery();
           return;
         }
+        if (job.phase && job.phase !== imgJob.phase) setImgJob({ ...job, size: imageSize(job.size || imgJob.size) });
       } catch (e) {
         if (!alive) return;
         if (e instanceof Error && 'status' in e && e.status === 404) {
@@ -156,9 +159,17 @@ export function useImageStudio(active: boolean) {
     setImgErr('');
     try {
       const options = { model: imgChannel.model, ...(mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const}) };
-      const { jobId } = await startImagegen(p, imgSize, 1, options);
+      const signature = JSON.stringify([p, imgSize, options]);
+      let previous = pendingRequest.current;
+      try { previous = previous || JSON.parse(sessionStorage.getItem(IMAGE_REQUEST_KEY) || 'null'); } catch { /* optional cache */ }
+      const requestId = previous?.signature === signature && typeof previous.id === 'string' ? previous.id : crypto.randomUUID();
+      pendingRequest.current = { signature, id: requestId };
+      try { sessionStorage.setItem(IMAGE_REQUEST_KEY, JSON.stringify({ signature, id: requestId })); } catch { /* server still deduplicates this submission */ }
+      const { jobId } = await startImagegen(p, imgSize, 1, { ...options, requestId });
       const job: ImageStudioJob = { jobId, state: 'running', prompt: p, size: imgSize, url: null, error: null, started: Date.now() / 1000, ...options };
       try { sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(job)); } catch { /* optional */ }
+      try { sessionStorage.removeItem(IMAGE_REQUEST_KEY); } catch { /* optional */ }
+      pendingRequest.current = null;
       if (mounted.current) setImgJob(job);
     } catch (e) {
       if (mounted.current) setImgErr(e instanceof Error ? e.message : '发起失败');
@@ -211,8 +222,17 @@ export function useImageStudio(active: boolean) {
   },[imgJob]);
   const clearReference = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running'){setReference(null);setMask(null);setMode('generate');}};
   const clearMask = () => {if(!referencePending.current&&!imgSubmitPending.current&&imgJob?.state!=='running')setMask(null);};
+  const acknowledgeJob = async () => {
+    if (imgJob?.phase !== 'unconfirmed' || imgSubmitPending.current) return;
+    imgSubmitPending.current = true; setImgSubmitting(true);
+    try {
+      const job = await acknowledgeImagegenJob(imgJob.jobId);
+      if (mounted.current) setImgJob({ ...job, size: imageSize(job.size) });
+    } catch { if (mounted.current) setImgErr('未能解除占位，请重新读取任务状态。'); }
+    finally { imgSubmitPending.current = false; if (mounted.current) setImgSubmitting(false); }
+  };
   return { reference,mask,referenceBusy,uploadReference,useGalleryReference,clearReference,clearMask,imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
-    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode, saveModel, modelSaving, modelError };
+    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode, saveModel, modelSaving, modelError, acknowledgeJob };
 }
 
 export type ImageStudioController = ReturnType<typeof useImageStudio>;

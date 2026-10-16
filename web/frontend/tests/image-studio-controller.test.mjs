@@ -80,7 +80,7 @@ test('uploading a reference selects its closest supported ratio and sends a real
 
   await f.run(s => s.fireImagegen());
   assert.deepEqual(JSON.parse(f.starts()[0].options.body), {
-    prompt: '把背景改成黄昏', size: '1536x864', n: 1, mode: 'img2img', referenceId: 'wide', model: 'test-model',
+    requestId: JSON.parse(f.starts()[0].options.body).requestId, prompt: '把背景改成黄昏', size: '1536x864', n: 1, mode: 'img2img', referenceId: 'wide', model: 'test-model',
   });
 });
 
@@ -94,7 +94,7 @@ test('clearing the reference clears its mask and the next generation sends no im
   assert.deepEqual(f.stored(), { ...draft(), mode: 'generate', reference: null, mask: null });
   await f.run(s => s.fireImagegen());
   assert.deepEqual(JSON.parse(f.starts()[0].options.body), {
-    prompt: draft().prompt, size: '1024x1024', n: 1, mode: 'text2img', model: 'test-model',
+    requestId: JSON.parse(f.starts()[0].options.body).requestId, prompt: draft().prompt, size: '1024x1024', n: 1, mode: 'text2img', model: 'test-model',
   });
 });
 
@@ -266,3 +266,17 @@ test('a legacy or malformed response with no model cannot authorize a generation
 });
 
 test.after(() => window.close());
+
+
+test('an ambiguous submit failure reuses the same durable request ID after a lost response', async t => {
+  const f = await fixture(t, { prompt: '请生成图片', mode: 'generate' });
+  await f.run(s => s.fireImagegen());
+  const first = f.starts()[0];
+  const id = JSON.parse(first.options.body).requestId;
+  assert.match(id, /^[a-z0-9-]{20,}$/i);
+  await f.reject(first, new Error('connection lost after submit'));
+  await f.run(s => s.fireImagegen());
+  assert.equal(JSON.parse(f.starts()[1].options.body).requestId, id);
+  await f.reply(f.starts()[1], json({jobId:'restored',state:'running'}));
+  assert.equal(f.state().imgJob.jobId, 'restored');
+});

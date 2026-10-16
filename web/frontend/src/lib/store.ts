@@ -10,6 +10,7 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 
 export interface ChatMessage extends ChatTiming {
+  externalSource?: 'gateway-injected';
   kind?: 'breakdown'; // User material; the immediately following answer uses the report reader.
   stopped?: boolean;
   role: 'user' | 'assistant';

@@ -24,15 +24,16 @@ def png(size=(30, 20), alpha=255):
 
 @pytest.fixture
 def studio(tmp_path, monkeypatch):
-    monkeypatch.setattr(web, "IMAGEGEN_INPUT_DIR", tmp_path / "references")
-    monkeypatch.setattr(web, "IMAGEGEN_DIR", tmp_path / "outputs")
-    monkeypatch.setattr(web, "_IMAGEGEN_JOBS", {})
+    monkeypatch.setattr(web, "OUTPUTS_DIR", tmp_path / "outputs")
+    monkeypatch.setattr(web, "IMAGEGEN_INPUT_DIR", tmp_path / "outputs/_image_references")
+    monkeypatch.setattr(web, "IMAGEGEN_DIR", tmp_path / "outputs/AI生图")
+    monkeypatch.setattr(web, "_IMAGE_WORKER", None)
     monkeypatch.setattr(web, "_read_env", lambda: {"IMG_BASE_URL": "https://images.example.test/v1",
         "IMG_MODEL": "image-test", "IMG_API_KEY": "fake-key"})
     monkeypatch.setattr(web, "child_env", lambda *_: {})
     calls = []
     class Inline:
-        def __init__(self, *, target, **_): self.target = target
+        def __init__(self, *, target, **_): self.target = lambda: target(*_.get("args", ()))
         def start(self): self.target()
     def generate(cmd, **_):
         calls.append(cmd)
