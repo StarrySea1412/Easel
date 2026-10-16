@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from easel.task_store import TaskStore, TaskConflict, SAFE_ID
-from easel.task_rules import GoalSpec, Schedule, next_time, latest_time, upcoming, check_goal
+from easel.task_rules import GoalSpec, Criterion, Schedule, next_time, latest_time, upcoming, check_goal
 from easel.image_jobs import ImageJobs
 
 log = logging.getLogger(__name__)
@@ -37,6 +37,12 @@ class PlanRequest(GoalRequest):
 class Action(BaseModel):
     model_config = {'extra': 'forbid'}
     action: Literal['start', 'resume', 'pause', 'stop', 'cancel', 'recheck', 'approve']
+
+
+class GoalRevision(BaseModel):
+    model_config = {'extra': 'forbid'}
+    objective: str = Field(min_length=3, max_length=6000)
+    criteria: list[Criterion] = Field(min_length=1, max_length=16)
 
 
 class PlanAction(BaseModel):
@@ -75,7 +81,7 @@ class TaskService:
             if not details:
                 details = json.loads(next(c['text'] for c in result.get('content', []) if c.get('type') == 'text'))
             expected = Path(web.OUTPUTS_DIR).resolve().parent
-            ready = payload.get('ok') is True and details.get('version') == 1 and Path(details['dataRoot']).resolve() == expected
+            ready = payload.get('ok') is True and details.get('version') == 2 and Path(details['dataRoot']).resolve() == expected
         except Exception:
             ready = False
         return {'ready': ready, 'reason': '' if ready else '网关尚未加载目标执行保护，或数据目录不一致。请在空闲时重启网关后重试。'}
@@ -164,8 +170,12 @@ class TaskService:
             prompt = ('[Easel 持久目标 / 第' + str(r['iteration']) + '轮]\n' + g['objective'] +
                 '\n验收标准：' + json.dumps(g['criteria'], ensure_ascii=False) +
                 '\n前次检查：' + json.dumps(g.get('checks', []), ensure_ascii=False) +
+                '\n当前步骤：' + json.dumps(g.get('steps', []), ensure_ascii=False) +
                 f"\n本目标最多{g['maxIterations']}轮、{g['maxSeconds']}秒、{g['maxTools']}次工具、{g['maxImages']}张图片。" +
-                '\n只处理尚未通过项，保存并交付真实文件；不要自称质量已通过，不派生Agent、不创建计划。需要用户输入时说明缺失信息。')
+                '\n先用 easel_goal_update 将目标拆为可执行步骤；推进时更新步骤状态，保留已完成步骤。'
+                '只报告实际做过的工作；卡在权限、材料或用户决策时将相关步骤设为blocked并说明缺失信息。'
+                '只处理尚未通过项，保存并交付真实文件；步骤completed只表示自报工作完成，不能替代质量验收。'
+                '不要自称质量已通过，不派生Agent、不创建计划。')
             req = web.ChatRequest(message=prompt, sessionId=g['sessionId'], turnId=r['turnId'], modelRef=g['modelRef'], thinkingLevel='low')
             await web.start_chat_run(req, observe=False)
             deadline = time.monotonic() + max(0, g['maxSeconds'] - g['activeSeconds'])
@@ -279,6 +289,16 @@ class TaskService:
                         if r['goalId'] == key:
                             await self.web.api_chat_stop(self.web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
                 return result
+            except (TaskConflict, ValueError) as exc:
+                conflict(exc)
+
+        @router.put('/goals/{key}')
+        def revise(key: str, req: GoalRevision):
+            try:
+                g = self.store.get('goals', key)
+                spec = {**g, 'objective':req.objective, 'criteria':[c.model_dump() for c in req.criteria]}
+                self.validate_goal(spec, g['sessionId'])
+                return self.store.revise_goal(key, req.objective, spec['criteria'])
             except (TaskConflict, ValueError) as exc:
                 conflict(exc)
 

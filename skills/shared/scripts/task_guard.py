@@ -14,5 +14,12 @@ if __name__ == '__main__':
     for name in ('session', 'run', 'call', 'tool'):
         parser.add_argument('--' + name, required=True)
     args = parser.parse_args()
-    result = TaskStore(data_root(ROOT) / 'outputs').guard(args.session, args.run, args.call, args.tool)
+    store = TaskStore(data_root(ROOT) / 'outputs')
+    if args.tool == '__update_progress':
+        try:
+            result = store.update_progress(args.session, args.call, json.load(sys.stdin)['steps'])
+        except ValueError:
+            result = {'ok':False, 'reason':'目标步骤更新未通过身份、状态或内容校验。'}
+    else:
+        result = store.guard(args.session, args.run, args.call, args.tool)
     print(json.dumps(result, ensure_ascii=False))

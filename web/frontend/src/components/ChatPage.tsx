@@ -7,8 +7,9 @@ import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
 import ChatArtifacts from './ChatArtifacts';
-import GoalCard from './GoalCard';
-import { taskStatus, type TaskSnapshot } from '../lib/tasks';
+import ChatGoalPanel from './ChatGoalPanel';
+import ChatGoalDialog from './ChatGoalDialog';
+import { type TaskSnapshot } from '../lib/tasks';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
@@ -27,7 +28,6 @@ import { fetchOfficeTaskModels } from '../lib/officeControls';
 interface ChatPageProps {
   taskState?:TaskSnapshot;
   onTaskChange?:()=>void;
-  onManageGoals?:()=>void;
   onEngineChange?: (engine:'openclaw'|'codex') => void;
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
@@ -67,11 +67,23 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onManageGoals }: ChatPageProps) {
-  const goal=taskState?.goals.find(g=>g.sessionId===session.id);
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange }: ChatPageProps) {
+  const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
+  const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
   const taskBusy=goal?.status==='active'||taskRuns.some(r=>['queued','running','unconfirmed'].includes(r.state));
-  const goalCard=goal&&!session.importedFromBackup?<div className="chat-goal-slot"><GoalCard goal={goal} runs={taskRuns} onChange={()=>onTaskChange?.()}/>{taskRuns.length>0&&<details><summary>目标执行记录 · {taskRuns.length} 轮</summary>{taskRuns.slice().reverse().map(r=><div key={r.id}><div className="task-run-row"><span>第 {r.iteration} 轮</span><span>{taskStatus[r.state]||r.state}</span></div><ChatExecutionPanel sessionId={session.id} turnId={r.turnId} streaming={r.state==='running'}/></div>)}</details>}</div>:null;
+  const [panelOpen,setPanelOpen]=useState(true);
+  const [goalEditor,setGoalEditor]=useState<{seed?:string;modelRef?:string;onConfigured?:()=>void}|null>(null);
+  useEffect(()=>{setPanelOpen(true);setGoalEditor(null);},[session.id]);
+  const openGoal=(seed?:string,modelRef?:string,onConfigured?:()=>void)=>{
+    setPanelOpen(true);
+    if(!goal||seed)setGoalEditor({seed,modelRef,onConfigured});
+  };
+  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${goal&&panelOpen&&!session.importedFromBackup?' has-goal-panel':''}`}>
+    {content}
+    {goal&&panelOpen&&!session.importedFromBackup&&<ChatGoalPanel goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({})}/>}
+    {goalEditor&&!session.importedFromBackup&&<ChatGoalDialog key={session.id+':'+(goal?.id||'new')} sessionId={session.id} engine={session.engine||'openclaw'} title={session.title} modelRef={loadComposerModel()||''} goal={goal&&!['completed','cancelled'].includes(goal.status)?goal:undefined} {...goalEditor} onClose={()=>setGoalEditor(null)} onChanged={()=>onTaskChange?.()} onConfigured={goalEditor.onConfigured}/>}
+  </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
@@ -129,7 +141,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
-      {!isImported&&session.engine!=='codex'&&onManageGoals&&<button type="button" className="chat-new-button" onClick={onManageGoals}>目标</button>}
+      {!isImported&&<button type="button" className="chat-new-button chat-goal-trigger" aria-expanded={Boolean(goal&&panelOpen)} onClick={()=>goal?setPanelOpen(v=>!v):setGoalEditor({})}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>
@@ -151,14 +163,13 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 
   // ---- 空态：居中欢迎页 ----
   if (isEmpty && !isImported) {
-    return (
+    return withGoal(
       <div className="chat-page chat-welcome-page">
         {header}
-        {goalCard}
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalBusy={taskBusy} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -187,10 +198,9 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   }
   if (isStreaming) displayMessages.push({ role: 'assistant', content: stream!.content || '', startedAt: stream!.startedAt, elapsedMs: stream!.elapsedMs });
 
-  return (
+  return withGoal(
     <div className="chat-page chat-conversation-page">
       {header}
-      {goalCard}
       {session.editBranch && !isImported && <div className="chat-edit-branch-notice"><span>编辑分支 · 已带入此前可见消息，原对话保留</span>{onOpenSource && <button type="button" className="btn btn-sm" onClick={() => onOpenSource(session.editBranch!.sourceSessionId)}>查看原对话</button>}</div>}
       {isImported && <section className="chat-backup-notice" aria-label="导入记录说明">
         <div>
@@ -243,7 +253,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
             const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
             return (
-              <Fragment key={`${i}-${msg.role}`}>{msg.taskRunId&&<div className="task-message-label">目标执行 · 第 {taskRuns.find(r=>r.id===msg.taskRunId)?.iteration||'—'} 轮</div>}{msg.taskGoalId&&<div className="task-message-label">目标记录</div>}{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
+              <Fragment key={`${i}-${msg.role}`}>{msg.taskRunId&&<div className="task-message-label">目标执行 · 第 {taskState?.runs.find(r=>r.id===msg.taskRunId)?.iteration||'—'} 轮</div>}{msg.taskGoalId&&<div className="task-message-label">目标记录</div>}{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
                 artifacts={msg.role === 'assistant' && auditTurn ? <ChatArtifacts artifacts={deliveries.items.filter(item => item.turnId === auditTurn)} onUpdated={deliveries.updated} jobs={deliveries.jobs.filter(item => item.turnId === auditTurn)} onJobsChanged={deliveries.retry} /> : undefined}
@@ -277,7 +287,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-       {taskBusy?<div className="task-composer-lock" role="status">目标仍有后台工作。请先停止目标，确认结算后继续对话。</div>:<ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} />}
+       {<ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalBusy={taskBusy} />}
         </div>}
       </div>}
     </div>

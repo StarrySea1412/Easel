@@ -7,6 +7,8 @@ globalThis.window=new Window({url:'https://easel.test/'});globalThis.document=wi
 const {createRoot}=await import('react-dom/client');
 const {mergeTaskSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
+const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
+const {default:GoalDialog}=await loadTsModule('../src/components/ChatGoalDialog.tsx',import.meta.url);
 const goal={id:'goal',sessionId:'chat',title:'验收目标',objective:'生成选题并交付文件',modelRef:'fixture/model',status:'blocked',phase:'review',iterations:2,maxIterations:5,activeSeconds:20,maxSeconds:1200,maxTools:40,maxImages:0,criteria:[{type:'file',label:'文件',value:'topic/page.html'},{type:'review',label:'质量',value:''}],checks:[{state:'passed',detail:'已核验'},{state:'pending',detail:'等待确认'}],currentTurnId:'turn',reason:'等待用户验收'};
 test('task history merges into original chat without replacing local messages or duplicate turn replay',()=>{
   const local=[{id:'chat',title:'原对话名称',messages:[{role:'user',content:'原消息',turnId:'old'}]}];
@@ -39,5 +41,36 @@ test('failed start keeps error visible and does not report completion',async t=>
   await act(async()=>root.render(createElement(GoalCard,{goal:{...goal,status:'draft',phase:'idle'},runs:[],onChange:()=>refresh++})));
   await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='启动目标').click());
   assert.equal(host.querySelector('[role=alert]').textContent,'保护未加载');assert.equal(refresh,0);
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('conversation goal panel shows reported steps and blockers separately from quality acceptance',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let changed=0;
+  const requests=[];t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push(JSON.parse(options.body));return new Response('{}');});
+  const g={...goal,status:'active',phase:'running',steps:[{id:'a',title:'核对材料',status:'completed'},{id:'b',title:'生成页面',status:'in_progress'},{id:'c',title:'等待截图',status:'blocked',detail:'需要提供原图'}]};
+  await act(async()=>root.render(createElement(GoalPanel,{goal:g,runs:[],onChanged:()=>changed++,onClose:()=>{},onEdit:()=>{}})));
+  assert.match(host.textContent,/1\/3/);assert.match(host.textContent,/需要提供原图/);assert.match(host.textContent,/最终验收单独确认/);
+  assert.equal(host.querySelectorAll('li.completed').length,1);
+  await act(async()=>host.querySelector('[aria-label="暂停目标"]').click());assert.equal(requests[0].action,'stop');assert.equal(changed,1);
+  assert.ok(!host.textContent.includes('100%'));
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('goal setup binds current chat, stays saved after failed start and retries without creating a duplicate',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const requests=[];let closed=0,configured=0;
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,currentModelRef:'fixture/model',options:[{id:'fixture/model',configured:true,label:'模拟模型'}]}));
+    requests.push({url,body:JSON.parse(options.body),method:options.method});
+    if(String(url).endsWith('/goals'))return new Response(JSON.stringify({...goal,id:'created'}));
+    if(requests.length===2)return new Response(JSON.stringify({detail:'执行保护暂不可用'}),{status:409});
+    return new Response('{}');
+  });
+  await act(async()=>root.render(createElement(GoalDialog,{sessionId:'original-chat',title:'原对话',engine:'openclaw',seed:'完成原对话的8张卡片',modelRef:'fixture/model',onClose:()=>closed++,onChanged:()=>{},onConfigured:()=>configured++})));
+  const form=document.querySelector('[role=dialog] form');
+  await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.equal(requests[0].body.sessionId,'original-chat');assert.equal(requests[0].body.goal.modelRef,'fixture/model');assert.equal(configured,1);assert.equal(closed,0);
+  assert.match(document.querySelector('[role=alert]').textContent,/已保存/);
+  await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.equal(requests.filter(r=>String(r.url).endsWith('/goals')).length,1);assert.equal(closed,1);
   await act(async()=>root.unmount());host.remove();
 });

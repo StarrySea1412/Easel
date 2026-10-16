@@ -1,3 +1,9 @@
+## 2026-10-16 · Conversation goal mode / 当前对话目标模式纠正
+
+- Move goal setup into the current chat with `/goal` and `/目标`; add a compact side panel for reported steps, elapsed time, pause/resume and blockers. / 按用户截图纠正主入口，定时任务保留独立管理。
+- Persist `easel_goal_update` steps using trusted tool admission and stop/revision barriers; preserve cumulative limits on revision and separate work completion from human quality approval. / 未收到步骤不造计划，未完成步骤不提前完成目标。
+- Verify focused backend/frontend checks, build/lint and isolated desktop/390px light/dark keyboard paths. / 本机7880可验；[实现与边界](docs/conversation-goal-mode-2026-10-16.md)，无付费调用，138/安装器未更新。
+
 ## 2026-10-16 · Goals and schedules implementation / 目标与定时任务首版
 
 - Add durable original-chat goals, evidence checks, human quality approval, model freezing and cumulative execution limits; retain unknown runs without automatic replay. / 增加停止屏障、人工接管、原生工具准入和生图预留，Token/金额暂不硬封顶。

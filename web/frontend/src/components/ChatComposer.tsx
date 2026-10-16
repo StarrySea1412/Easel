@@ -29,8 +29,13 @@ import Select from './ui/Select';
 import CodexSettings from './CodexSettings';
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { getChatQueue, subscribeChatQueue, pauseChatQueue, updateQueuedMessage } from '../lib/chatQueue';
+import ComposerGoalMenu from './ComposerGoalMenu';
+import {goalCommand,suggestsGoal} from '../lib/goalCommand';
+import '../styles/chat-goal.css';
 
 interface ChatComposerProps {
+  goalBusy?:boolean;
+  onGoal?:(seed?:string,modelRef?:string,onConfigured?:()=>void)=>void;
   usageRefreshKey?: number;
   engine?: 'openclaw'|'codex';
   engineLocked?: boolean;
@@ -52,7 +57,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false,onGoal }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -90,6 +95,15 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   const composingRef = useRef(false);
   const dragDepthRef = useRef(0);
   const inputId = useId();
+  const [dismissedCommand,setDismissedCommand]=useState<string|null>(null);
+  const commandOpen=Boolean(onGoal&&!editingQueue&&suggestsGoal(input)&&dismissedCommand!==input);
+  const openGoal=()=>{
+    if(!onGoal)return;
+    const commandText=input,seed=goalCommand(input)||'';
+    const currentRef=models.modelRef||models.capability?.currentModelRef||models.capability?.defaultModelRef||'';
+    setDismissedCommand(input);
+    onGoal(seed,currentRef,()=>{if(getChatDraft(sessionId).text===commandText&&(goalCommand(commandText)!==null||suggestsGoal(commandText)))setChatDraftText(sessionId,'');});
+  };
   useEffect(() => {
     const quote = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId: string; text: string }>).detail;
@@ -194,6 +208,8 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       else setChatDraftError(sessionId, '修改未保存，请检查输入或浏览器存储。');
       return;
     }
+    if(onGoal&&(goalCommand(input)!==null||input.trim()==='/')){openGoal();return;}
+    if(goalBusy){setChatDraftError(sessionId,'目标正在推进，请先暂停目标再发送；草稿已保留。');return;}
     const submitted = getChatDraft(sessionId);
     const trimmed = submitted.quotes?.length ? `${submitted.quotes.map((text, index) => `引用 ${index + 1}：\n${appendQuotedText('', text).trim()}`).join('\n\n')}\n\n${submitted.text.trim()}`.trim() : submitted.text.trim();
     if ((!trimmed && submitted.attachments.length === 0) || stopping || submitted.uploading
@@ -214,6 +230,12 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if(composingRef.current||e.nativeEvent.isComposing||e.keyCode===229)return;
+    if(commandOpen){
+      if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();return;}
+      if(e.key==='Escape'){e.preventDefault();setDismissedCommand(input);return;}
+      if((e.key==='Enter'||e.key==='Tab')&&!e.shiftKey){e.preventDefault();openGoal();return;}
+    }
     if (editingQueue && e.key === 'Escape') { e.preventDefault(); setQueueEdit(null); return; }
     if (e.key === 'Enter' && !e.shiftKey && !composingRef.current && !e.nativeEvent.isComposing && e.keyCode !== 229) {
       e.preventDefault();
@@ -243,6 +265,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       }}
       onDrop={onDrop}>
       <ChatCompactionIndicator event={compaction} />
+      {commandOpen&&<ComposerGoalMenu id={`${inputId}-commands`} anchor={textareaRef} onChoose={openGoal}/>}
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
       {!editingQueue && engine !== 'codex' && <ComposerSkillChips skills={skills} />}
       <textarea
@@ -257,6 +280,10 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
         onCompositionEnd={() => { composingRef.current = false; }}
         onPaste={onPaste}
         aria-label="创作消息"
+        aria-haspopup={onGoal?'listbox':undefined}
+        aria-expanded={onGoal?commandOpen:undefined}
+        aria-controls={commandOpen?`${inputId}-commands`:undefined}
+        aria-activedescendant={commandOpen?`${inputId}-commands-goal`:undefined}
         rows={2}
         autoFocus={hero}
       />
@@ -271,6 +298,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
+      {goalBusy&&<p className="composer-skills-note" role="status">目标持续推进中。可输入 /goal 查看目标；暂停后发送消息，草稿会保留。</p>}
       <input ref={fileInputRef} type="file" multiple hidden onChange={uploadSelection}/>
       <input ref={mediaInputRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.mp4,.mov,.webm,.m4v" multiple hidden onChange={uploadSelection}/>
       <input ref={folderInputRef} type="file" multiple hidden {...{ webkitdirectory: '' }} onChange={event => uploadSelection(event, true)}/>
@@ -296,7 +324,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
         <div className="composer-send-actions" hidden={editingQueue}>{isStreaming && (
           <button type="button" className="send-btn" onClick={onStop} disabled={stopping} title={stopping ? '等待停止确认' : '停止生成'} aria-label={stopping ? '等待停止确认' : '停止生成'}><IconStop size={15} /></button>
         )}{(!isStreaming || Boolean(input.trim() || attachments.length || draft.quotes?.length)) && (
-          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length && !draft.quotes?.length) || uploading || stopping || draft.missingAttachments.length > 0} title={isStreaming ? '加入队列，本轮完成后发送' : '发送'} aria-label={isStreaming ? '排队发送' : '发送消息'}><IconArrowUp size={18} /></button>
+          <button type="button" className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length && !draft.quotes?.length) || uploading || stopping || draft.missingAttachments.length > 0 || (goalBusy&&goalCommand(input)===null&&input.trim()!=='/')} title={goalBusy?'先暂停目标后发送':isStreaming ? '加入队列，本轮完成后发送' : '发送'} aria-label={isStreaming ? '排队发送' : '发送消息'}><IconArrowUp size={18} /></button>
         )}
         </div>
       </div>

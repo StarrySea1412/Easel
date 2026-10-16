@@ -18,6 +18,27 @@ const { THINKING_LEVELS, resolveThinkingPreference } = await loadTsModule('../sr
 const KEY = 'easel_thinking_preference';
 let sequence = 0;
 
+test('slash goal opens in current conversation and preserves the command until saved without sending a model message',async t=>{
+  const view=await fixture(t,'low');const opened=[];
+  await view.render({onGoal:(...args)=>opened.push(args)});
+  await view.type('/');assert.match(document.querySelector('[role=listbox]').textContent,/设置要持续追求的目标/);
+  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.equal(view.sent.length,0);assert.equal(opened.length,1);assert.equal(view.container.querySelector('textarea').value,'/');
+  await act(async()=>opened[0][2]());assert.equal(view.container.querySelector('textarea').value,'');
+  await view.type('/goal 完成原对话的卡片');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.equal(opened[1][0],'完成原对话的卡片');assert.equal(view.sent.length,0);
+});
+
+test('Escape dismisses slash menu, regular draft and goal busy state never lose text',async t=>{
+  const view=await fixture(t,'low');await view.render({goalBusy:true,onGoal:()=>{}});
+  await view.type('/g');await view.key(view.container.querySelector('textarea'),'Escape');
+  assert.equal(document.querySelector('[role=listbox]'),null);assert.equal(view.container.querySelector('textarea').value,'/g');
+  await view.type('保留我在目标运行中写下的内容');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.equal(view.sent.length,0);assert.equal(view.container.querySelector('textarea').value,'保留我在目标运行中写下的内容');
+  assert.match(view.container.textContent,/先暂停目标/);
+});
+
 test('only Ultra enables the highlighted theme and particles, and leaving Ultra removes them', async t => {
   const view = await fixture(t, 'high'); await view.render(); await view.click(view.trigger());
   assert.equal(view.container.querySelector('.is-ultra'), null);

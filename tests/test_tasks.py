@@ -341,3 +341,44 @@ def test_old_session_and_due_plan_survive_management_history_limits(tmp_path):
     assert not any(g['id'] == old['id'] for g in store.snapshot()['goals'])
     assert store.snapshot('old-chat')['goals'][0]['id'] == old['id']
     assert store.due_plans(1001)[0]['id'] == plan['id']
+
+
+def test_goal_revision_requires_settlement_and_preserves_budget(tmp_path):
+    store=TaskStore(tmp_path)
+    g,r=active(store,maxImages=1)
+    store.guard('chat','provider','read-call','read')
+    store.reserve_image('chat',r['turnId'],'image-call')
+    with pytest.raises(TaskConflict):store.revise_goal(g['id'],'修改持续目标',g['criteria'])
+    store.change_goal(g['id'],'stop')
+    with pytest.raises(TaskConflict):store.revise_goal(g['id'],'修改持续目标',g['criteria'])
+    store.finish(r['id'],owner='worker',state='stopped')
+    revised=store.revise_goal(g['id'],'修改持续目标',g['criteria'])
+    assert (revised['iterations'],revised['toolsUsed'],revised['imagesUsed'])==(1,1,1)
+    assert revised['revision']==2 and revised['currentTurnId'] is None
+    assert revised['activeSeconds']>0 and revised['steps']==[]
+
+
+def test_step_reporting_keeps_work_separate_from_quality_and_blocks(tmp_path):
+    store=TaskStore(tmp_path);g,r=active(store)
+    steps=[{'id':'one','title':'检查材料','status':'completed'}, {'id':'two','title':'等待用户提供文件','status':'blocked','detail':'缺少原始图片'}]
+    with pytest.raises(TaskConflict):store.update_progress('chat','step-call',steps)
+    store.guard('chat','provider','wrong-tool','read')
+    with pytest.raises(TaskConflict):store.update_progress('chat','wrong-tool',steps)
+    assert store.guard('chat','provider','step-call','easel_goal_update')['allowed']
+    receipt=store.update_progress('chat','step-call',steps)
+    assert receipt['completed']==1 and receipt['qualityApproved'] is False
+    saved=store.get('goals',g['id']);assert saved['checks']==[]
+    assert check_goal(tmp_path,g,'')[1]!=check_goal(tmp_path,saved,'')[1]
+    final=store.finish(r['id'],owner='worker',checks=[{'type':'review','state':'pending'}])
+    assert final['phase']=='waiting_input' and final['reason']=='缺少原始图片'
+
+
+def test_passed_evidence_cannot_complete_unfinished_work_steps(tmp_path):
+    store=TaskStore(tmp_path);g,r=active(store)
+    store.guard('chat','provider','step-call','easel_goal_update')
+    store.update_progress('chat','step-call',[{'id':'one','title':'检查实际成品','status':'in_progress'}])
+    checks=[{'type':'file','state':'passed'}]
+    final=store.finish(r['id'],owner='worker',checks=checks)
+    assert final['status']=='active' and final['phase']=='queued'
+    rechecked=store.apply_checks(g['id'],checks)
+    assert rechecked['status']!='completed'

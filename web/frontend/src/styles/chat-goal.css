@@ -1,0 +1,42 @@
+.chat-goal-workspace{display:flex;flex:1;min-height:0;min-width:0;height:100%;position:relative;background:var(--bg)}
+.chat-goal-workspace>.chat-page{flex:1;min-width:0;width:0}
+.chat-goal-trigger>span{display:inline!important}
+.chat-goal-panel{display:flex;flex-direction:column;align-self:flex-start;flex-shrink:0;box-sizing:border-box;width:308px;max-height:calc(100% - 32px);margin:16px 16px 16px 0;border:1px solid var(--border-strong);border-radius:16px;background:var(--surface);color:var(--text);font-size:12px;overflow:hidden}
+.chat-goal-panel>header{display:flex;align-items:center;gap:12px;padding:12px 14px 5px;color:var(--text-secondary);flex-shrink:0}
+.chat-goal-panel>header strong{font-size:12px;font-weight:500}.chat-goal-panel>header time{color:var(--text-tertiary);font-size:10px;font-variant-numeric:tabular-nums}
+.chat-goal-panel>header>div{display:flex;margin-left:auto;gap:2px}
+.chat-goal-panel button:not(.btn){border:0;background:transparent;color:var(--text-secondary);font:inherit;cursor:pointer;border-radius:5px;padding:5px 7px}
+.chat-goal-panel button:hover{background:var(--surface-2)}.chat-goal-panel button:disabled{opacity:.45;cursor:default}
+.chat-goal-panel button:focus-visible,.chat-goal-panel summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.chat-goal-panel-body{overflow:auto;padding:0 14px 10px;min-height:0}
+.chat-goal-target{padding:12px 0 16px}.chat-goal-target>div{display:flex;gap:9px;align-items:flex-start}
+.goal-symbol{font-size:19px;color:var(--text-tertiary);line-height:1.3;flex:none}
+.chat-goal-target h3{font-size:13px;font-weight:500;line-height:1.65;margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.chat-goal-state{display:block;color:var(--text-tertiary);font-size:10px;margin:9px 0 0 27px}
+.chat-goal-state.active,.chat-goal-state.completed{color:var(--green)}.chat-goal-state.blocked{color:var(--amber)}
+.chat-goal-progress{border-top:1px solid var(--border);padding:15px 0 0}
+.chat-goal-section-heading{display:flex;gap:20px;color:var(--text-tertiary);font-size:11px;margin-bottom:13px}
+.chat-goal-progress ol{padding:0;margin:0;list-style:none}.chat-goal-progress li{display:flex;gap:9px;padding:0 0 15px;line-height:1.6;overflow-wrap:anywhere}
+.chat-goal-step-mark{flex:none;font-size:14px;color:var(--text-tertiary);width:14px}.completed .chat-goal-step-mark{color:var(--green)}.in_progress .chat-goal-step-mark{color:var(--accent)}.blocked .chat-goal-step-mark{color:var(--amber)}
+.chat-goal-progress li p{margin:0;font-size:12px}.chat-goal-progress li.completed p{color:var(--text-tertiary);text-decoration:line-through;text-decoration-color:var(--border-strong)}
+.chat-goal-progress li small{display:block;color:var(--text-tertiary);font-size:10px;margin-top:4px;white-space:pre-wrap}
+.chat-goal-no-steps,.chat-goal-reason{font-size:11px;line-height:1.7;color:var(--text-secondary);margin:0 0 12px;overflow-wrap:anywhere}
+.chat-goal-inline-actions{display:flex;gap:7px;flex-wrap:wrap}.chat-goal-panel-details{border-top:1px solid var(--border);margin-top:12px;padding-top:12px;color:var(--text-tertiary);font-size:10px;line-height:1.7}
+.chat-goal-panel-details summary{cursor:pointer}.chat-goal-panel-details p{margin:9px 0;overflow-wrap:anywhere}.chat-goal-panel-details ul{list-style:none;padding:0}.chat-goal-panel-details small{display:block;padding-left:12px}
+.chat-goal-panel>footer{border-top:1px solid var(--border);padding:12px 14px;display:flex;gap:10px;color:var(--text-tertiary);font-size:10px;flex-shrink:0}
+.composer-command-menu{position:fixed;z-index:1100;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:14px;background:var(--surface);padding:5px;box-shadow:0 6px 24px #00000012;color:var(--text)}
+.composer-command-heading{font-size:10px;color:var(--text-tertiary);padding:7px 10px}
+.composer-command-menu button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px;border:0;border-radius:9px;background:var(--surface-2);color:var(--text);cursor:pointer}
+.composer-command-menu button>span:nth-child(2){display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}.composer-command-menu strong{font-size:12px;font-weight:500}.composer-command-menu small{font-size:11px;color:var(--text-tertiary)}.composer-command-menu kbd{margin-left:auto;flex:none;font-family:inherit;font-size:10px;color:var(--text-tertiary)}
+.chat-goal-backdrop{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;background:#00000035;padding:20px}
+.chat-goal-dialog{box-sizing:border-box;width:540px;max-width:100%;max-height:calc(100dvh - 40px);overflow:auto;border:1px solid var(--border-strong);border-radius:18px;background:var(--surface);padding:24px;color:var(--text);box-shadow:0 16px 64px #00000024}
+.chat-goal-dialog-heading{display:flex;justify-content:space-between;gap:12px}.chat-goal-dialog-heading span{font-size:10px;color:var(--text-tertiary)}.chat-goal-dialog h2{font-size:20px;margin:8px 0 0;font-weight:550;letter-spacing:-.3px}
+.chat-goal-dialog-heading button{align-self:flex-start;border:0;background:transparent;color:var(--text-secondary);font-size:23px;cursor:pointer;padding:0 4px}
+.chat-goal-dialog>p,.chat-goal-settings p{color:var(--text-secondary);font-size:12px;line-height:1.7;margin:14px 0}
+.chat-goal-objective-label{display:flex;flex-direction:column;font-size:12px;gap:9px}.chat-goal-objective-label textarea{resize:vertical;box-sizing:border-box;width:100%;min-height:112px;padding:12px;border:1px solid var(--border-strong);border-radius:9px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.7}
+.chat-goal-model{display:flex;align-items:center;gap:18px;margin:18px 0;font-size:11px}.chat-goal-model>span{flex:none;color:var(--text-secondary)}.chat-goal-model>strong{font-weight:400;overflow-wrap:anywhere}.chat-goal-model .easel-select{min-width:0;flex:1;max-width:100%}
+.chat-goal-settings{font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:14px}.chat-goal-settings summary{cursor:pointer}.chat-goal-budget{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.chat-goal-budget label{display:grid;gap:6px}.chat-goal-budget input{box-sizing:border-box;width:100%;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text)}
+.chat-goal-quality{display:block;color:var(--text-tertiary);font-size:10px;line-height:1.7;margin:15px 0}
+.chat-goal-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;flex-wrap:wrap}.chat-goal-dialog :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+@media(max-width:1000px){.chat-goal-panel{position:absolute;z-index:30;right:12px;top:58px;width:296px;max-width:calc(100% - 24px);max-height:calc(100% - 82px);margin:0;box-shadow:0 8px 32px #00000018}}
+@media(max-width:560px){.chat-goal-backdrop{padding:12px}.chat-goal-dialog{padding:20px 16px;max-height:calc(100dvh - 24px);border-radius:14px}.chat-goal-budget{grid-template-columns:repeat(2,minmax(0,1fr))}.chat-goal-dialog-actions .btn{min-height:38px}.chat-goal-panel{right:10px;top:54px;width:300px}.chat-goal-panel>header button{min-width:30px;min-height:30px}}

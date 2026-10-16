@@ -109,6 +109,40 @@ class TaskStore:
         with self.db() as db:
             return self._get(db, table, key)
 
+    def revise_goal(self, key, objective, criteria):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if g['status'] in ('active', 'completed', 'cancelled') or db.execute(
+                    "SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed','queued')", (key,)).fetchone():
+                raise TaskConflict('请先停止并等待结算，再修改未完成目标。')
+            g.update(objective=objective, title=objective[:50], criteria=criteria, checks=[], steps=[],
+                     revision=g['revision'] + 1, stopEpoch=g['stopEpoch'] + 1,
+                     phase='idle', noProgress=0, lastFingerprint=None, reviewedTurnId=None, currentTurnId=None,
+                     reason='目标已修改，确认后继续；累计限额保留。')
+            self._goal(db, g)
+            self._event(db, g['sessionId'], 'goal_revised', {'goalId':key, 'revision':g['revision']})
+            return g
+
+    def update_progress(self, session, call, steps):
+        from easel.task_rules import GoalProgress
+        progress = GoalProgress(steps=steps).model_dump()['steps']
+        with self.db() as db:
+            row = db.execute("SELECT data FROM runs WHERE session=? AND state='running'", (session,)).fetchone()
+            if not row:
+                raise TaskConflict('没有可更新的目标运行。')
+            r = json.loads(row[0]); g = self._get(db, 'goals', r['goalId'])
+            reservation = (r.get('providerRunId') or '') + ':easel_goal_update:' + call
+            if not r.get('providerRunId') or not db.execute(
+                    'SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():
+                raise TaskConflict('步骤更新没有匹配当前运行的工具准入记录。')
+            if g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
+                raise TaskConflict('目标已停止或修改，拒绝晚到的步骤更新。')
+            g.update(steps=progress, progressUpdatedAt=self.clock(), progressSource='agent')
+            self._goal(db, g)
+            self._event(db, session, 'goal_progress', {'goalId':g['id'], 'runId':r['id'], 'steps':progress})
+            return {'ok':True, 'goalId':g['id'], 'completed':sum(s['status']=='completed' for s in progress),
+                    'total':len(progress), 'qualityApproved':False}
+
     def block(self, key, reason, phase='admission'):
         with self.db() as db:
             g = self._get(db, 'goals', key)
@@ -254,9 +288,12 @@ class TaskStore:
                 g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
             elif any(c['state'] == 'error' for c in (checks or [])):
                 g.update(status='blocked', phase='verification_error', reason='证据核验异常，已停止自动推进。')
-            elif checks and all(c['state'] == 'passed' for c in checks):
+            elif any(s['status'] == 'blocked' for s in g.get('steps', [])):
+                blocked = next(s for s in g['steps'] if s['status'] == 'blocked')
+                g.update(status='blocked', phase='waiting_input', reason=blocked.get('detail') or blocked['title'])
+            elif checks and all(c['state'] == 'passed' for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='completed', phase='idle', reason='所有验收项通过。')
-            elif checks and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks):
+            elif checks and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='blocked', phase='review', reason='自动检查已结束，等待用户验收。')
             else:
                 g['noProgress'] = g['noProgress'] + 1 if g.get('lastFingerprint') == fingerprint else 0
@@ -288,11 +325,11 @@ class TaskStore:
             if db.execute("SELECT 1 FROM goals WHERE session=? AND id<>? AND status NOT IN ('completed','cancelled')", (g['sessionId'], key)).fetchone():
                 raise TaskConflict('当前会话已有后续目标，历史目标不能改变当前执行状态。')
             g['checks'] = checks
-            if checks and all(c['state'] == 'passed' for c in checks) and g.get('currentTurnId'):
+            if checks and all(c['state'] == 'passed' for c in checks) and g.get('currentTurnId') and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='completed', phase='idle', reason='所有验收项通过。')
             elif g['status'] == 'completed':
                 g.update(status='blocked', phase='evidence_changed', reason='产物证据已变化，需要重新验收。')
-            elif checks and g.get('currentTurnId') and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks):
+            elif checks and g.get('currentTurnId') and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='blocked', phase='review', reason='自动检查已结束，等待用户验收。')
             self._goal(db, g)
             return g
@@ -410,7 +447,7 @@ class TaskStore:
                 return {'allowed': False, 'reason': '目标首版不允许派生 Agent、创建嵌套计划或修改网关。'}
             if self.clock() - r['startedAt'] + g['activeSeconds'] >= g['maxSeconds']:
                 return {'allowed': False, 'reason': '目标执行时长已达上限。'}
-            reservation = provider_run + ':' + call
+            reservation = provider_run + ':' + tool + ':' + call
             if db.execute('SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():
                 return {'allowed': True}
             if g['toolsUsed'] >= g['maxTools']:

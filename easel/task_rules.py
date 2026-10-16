@@ -33,6 +33,27 @@ class GoalSpec(BaseModel):
     maxImages: int = Field(default=0, ge=0, le=16, strict=True)
 
 
+class GoalStep(BaseModel):
+    model_config = {'extra': 'forbid'}
+    id: str = Field(min_length=1, max_length=80, pattern=r'^[A-Za-z0-9_.-]+$')
+    title: str = Field(min_length=1, max_length=300)
+    status: Literal['pending', 'in_progress', 'completed', 'blocked'] = 'pending'
+    detail: str = Field(default='', max_length=1200)
+
+
+class GoalProgress(BaseModel):
+    model_config = {'extra': 'forbid'}
+    steps: list[GoalStep] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode='after')
+    def unique_ids(self):
+        if len({s.id for s in self.steps}) != len(self.steps):
+            raise ValueError('步骤ID不能重复')
+        if sum(s.status == 'in_progress' for s in self.steps) > 1:
+            raise ValueError('每次仅一个进行中步骤')
+        return self
+
+
 class Schedule(BaseModel):
     model_config = {'extra': 'forbid'}
     kind: Literal['once', 'interval', 'daily', 'workdays', 'weekly']
@@ -130,5 +151,6 @@ def check_goal(outputs, goal, text, reviewed=False):
         except (OSError, ValueError) as exc:
             c.update(state='error', detail='证据无法核验，请检查文件路径、格式与读写状态')
         checks.append(c)
-    fingerprint = hashlib.sha256(json.dumps([(c['type'], c['state'], c['evidence']) for c in checks], sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'checks':[(c['type'], c['state'], c['evidence']) for c in checks],
+        'steps':goal.get('steps', [])}, sort_keys=True).encode()).hexdigest()
     return checks, fingerprint

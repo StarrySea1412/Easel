@@ -1194,7 +1194,6 @@ export default function App() {
             session={activeSession}
             taskState={tasks}
             onTaskChange={()=>setTaskRevision(v=>v+1)}
-            onManageGoals={()=>setCurrentPage('automation')}
             onEngineChange={engine=>setSessions(prev=>{const next=prev.map(s=>s.id===activeSession.id&&!s.messages.length&&!s.pendingTurnId?{...s,engine}:s);saveSessions(next);return next;})}
             stream={streams[activeSession.id]}
             stopping={Boolean(stoppingSessions[activeSession.id])}
