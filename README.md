@@ -1,3 +1,5 @@
+> **执行框架调研与目标可靠性（2026-10-17）**：核实Grok Bot、DeepSeek Harness、Codex和ZCode的目标、持久事件、停止与验收机制；修复换措辞冒充进展、无工作工具反复续跑、失败/停止轮误验收、验收漏项和目标间错误串联。66项后端/59项前端、构建/lint及隔离浏览器通过。7880未重启后端，新后端修复需空闲时正常重启；无付费调用，138/安装器另验。[证据、差距及验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/harness-followup-2026-10-17.md)。
+
 > **输入区目标与会话状态（2026-10-16）**：目标设置直接在当前对话输入区完成，移除额外弹窗；描述目标后沿用当前模型开始，执行选项默认折叠，退出保留普通草稿。对话入口及列表展示去重运行数，新增完成/失败标记并区分停止、待核实、待输入和目标待验收。89项定向回归与隔离390px浅深色/键盘通过，本机7880可验；真实模型/账单、138和安装器另验。[用法及验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/inline-goals-session-status-2026-10-16.md)。
 
 > **对话悬浮重命名（2026-10-16）**：列表悬浮/聚焦显示铅笔，F2直接修改；悬浮预览的标题也可在卡片内编辑，跨间隙移动不立即消失。Enter保存、Escape取消，保留当前对话与草稿，窄屏入口常显。49项专项、构建/lint与隔离390px浅深色/键盘路径通过；本机7880可验，手工改名不调用模型，138/安装器未更新。[使用及验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/session-hover-rename-2026-10-16.md)。
