@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 
 // Actual components and hooks in a simulated DOM. Use jsdom for DOMPurify:
@@ -265,4 +265,42 @@ test('Activity keeps imported snapshots out of live counts and never mounts usag
 
 test.after(async () => {
   window.close();
+});
+
+
+test('inline goal survives goal-created polling, retries the saved ID and restores the ordinary draft without a modal',async t=>{
+  const observer=globalThis.ResizeObserver;globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+  const raf=globalThis.requestAnimationFrame;globalThis.requestAnimationFrame=callback=>{callback();return 1;};
+  t.after(()=>{globalThis.ResizeObserver=observer;globalThis.requestAnimationFrame=raf;});
+  const {setChatDraftText,getChatDraft}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
+  const session={id:'inline-goal-poll',title:'保留原对话',created:1,messages:[]};
+  setChatDraftText(session.id,'这段普通草稿需要保留');
+  const g={id:'saved-goal',sessionId:session.id,title:'目标',objective:'完成内容卡片',modelRef:'fixture/model',status:'draft',phase:'idle',iterations:0,maxIterations:5,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,criteria:[{type:'review',label:'质量',value:''}],checks:[],reason:''};
+  let created=false,attempts=0,createCount=0;
+  const view=fixture(t);
+  t.mock.method(globalThis,'fetch',async url=>{
+    const path=String(url);
+    if(path.includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/model',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));
+    if(path.endsWith('/api/tasks/goals')){created=true;createCount++;return new Response(JSON.stringify(g));}
+    if(path.endsWith('/action')){attempts++;return attempts===1?new Response(JSON.stringify({detail:'执行保护暂不可用'}),{status:409}):new Response('{}');}
+    return new Response(JSON.stringify({records:[],items:[],jobs:[],messages:[],skills:[],version:'test'}));
+  });
+  function Harness(){
+    const [current,setCurrent]=useState(session),[taskState,setTaskState]=useState({goals:[],runs:[],plans:[],serverTime:0});
+    return createElement(ChatPage,{session:current,taskState,...callbacks().props,onTaskChange:()=>{
+      if(created){setCurrent({...session,messages:[{role:'assistant',content:'目标已建立',turnId:'goal-info-saved-goal',taskGoalId:g.id}]});setTaskState({goals:[g],runs:[],plans:[],serverTime:1});}
+    }});
+  }
+  await view.render(createElement(Harness));
+  await view.click(view.container.querySelector('.chat-goal-trigger'));
+  assert.equal(document.querySelector('[role=dialog]'),null);
+  const input=view.container.querySelector('textarea');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(input,'完成内容卡片');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  const submit=()=>act(async()=>view.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  await submit();
+  assert.equal(view.container.querySelector('textarea'),input,'polling must not remount the pending setup');
+  assert.match(view.container.textContent,/重试启动/);assert.match(view.container.textContent,/执行保护暂不可用/);
+  assert.equal(createCount,1);assert.equal(getChatDraft(session.id).text,'这段普通草稿需要保留');
+  await submit();assert.equal(createCount,1);assert.equal(attempts,2);
+  assert.equal(view.container.querySelector('[aria-label="创作消息"]').value,'这段普通草稿需要保留');
 });

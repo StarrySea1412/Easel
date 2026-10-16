@@ -1,3 +1,9 @@
+## 2026-10-16 · Inline goals and chat status / 输入区目标与对话状态
+
+- Replace the goal modal with an inline composer; keep current model, collapsed execution options, ordinary drafts and retry IDs. / 输入区直接设置，启动失败不重复创建，运行时保留暂停/停止入口。
+- Show deduplicated running counts on the chat icon and list; add completion/failure badges and separate stopped, queued, unconfirmed and goal review states. / 状态来自最近轮次回执，不推测旧消息或备份完成。
+- 89 focused checks and isolated 390px light/dark keyboard paths passed; build/lint passed with 18 existing warnings. / [用法与验收边界](docs/inline-goals-session-status-2026-10-16.md)，仅本机7880，138/安装器另验。
+
 ## 2026-10-16 · Hover rename / 对话悬浮重命名
 
 - Add a hover/focus pencil and F2 shortcut; make preview titles editable inside the floating card. / 跨列表与浮层保留悬浮，编辑期间不因鼠标移出而消失。

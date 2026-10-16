@@ -8,7 +8,7 @@ const {createRoot}=await import('react-dom/client');
 const {mergeTaskSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
-const {default:GoalDialog}=await loadTsModule('../src/components/ChatGoalDialog.tsx',import.meta.url);
+const {default:GoalComposer}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
 const goal={id:'goal',sessionId:'chat',title:'验收目标',objective:'生成选题并交付文件',modelRef:'fixture/model',status:'blocked',phase:'review',iterations:2,maxIterations:5,activeSeconds:20,maxSeconds:1200,maxTools:40,maxImages:0,criteria:[{type:'file',label:'文件',value:'topic/page.html'},{type:'review',label:'质量',value:''}],checks:[{state:'passed',detail:'已核验'},{state:'pending',detail:'等待确认'}],currentTurnId:'turn',reason:'等待用户验收'};
 test('task history merges into original chat without replacing local messages or duplicate turn replay',()=>{
   const local=[{id:'chat',title:'原对话名称',messages:[{role:'user',content:'原消息',turnId:'old'}]}];
@@ -59,18 +59,46 @@ test('conversation goal panel shows reported steps and blockers separately from 
 test('goal setup binds current chat, stays saved after failed start and retries without creating a duplicate',async t=>{
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const requests=[];let closed=0,configured=0;
   t.mock.method(globalThis,'fetch',async(url,options={})=>{
-    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,currentModelRef:'fixture/model',options:[{id:'fixture/model',configured:true,label:'模拟模型'}]}));
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/model',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true,label:'模拟模型'}]}));
     requests.push({url,body:JSON.parse(options.body),method:options.method});
     if(String(url).endsWith('/goals'))return new Response(JSON.stringify({...goal,id:'created'}));
     if(requests.length===2)return new Response(JSON.stringify({detail:'执行保护暂不可用'}),{status:409});
     return new Response('{}');
   });
-  await act(async()=>root.render(createElement(GoalDialog,{sessionId:'original-chat',title:'原对话',engine:'openclaw',seed:'完成原对话的8张卡片',modelRef:'fixture/model',onClose:()=>closed++,onChanged:()=>{},onConfigured:()=>configured++})));
-  const form=document.querySelector('[role=dialog] form');
+  await act(async()=>root.render(createElement(GoalComposer,{sessionId:'original-chat',engine:'openclaw',seed:'完成原对话的8张卡片',modelRef:'fixture/model',onClose:()=>closed++,onChanged:()=>{},onConfigured:()=>configured++})));
+  assert.equal(document.querySelector('[role=dialog]'),null,'goal setup stays in composer without modal or focus trap');
+  assert.equal(document.querySelector('details').open,false,'execution options are optional');
+  const form=host.querySelector('form');
   await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
   assert.equal(requests[0].body.sessionId,'original-chat');assert.equal(requests[0].body.goal.modelRef,'fixture/model');assert.equal(configured,1);assert.equal(closed,0);
   assert.match(document.querySelector('[role=alert]').textContent,/已保存/);
   await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
   assert.equal(requests.filter(r=>String(r.url).endsWith('/goals')).length,1);assert.equal(closed,1);
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('inline goal keyboard supports IME, multiline and escape without sending a model request',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let closed=0;const requests=[];
+  t.mock.method(globalThis,'fetch',async url=>{requests.push(String(url));return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/model',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));});
+  await act(async()=>root.render(createElement(GoalComposer,{sessionId:'keyboard',engine:'openclaw',seed:'检查中文排版',onClose:()=>closed++,onChanged:()=>{}})));
+  const input=host.querySelector('textarea');
+  for(const options of [{key:'Enter',isComposing:true},{key:'Enter',shiftKey:true}]){
+    const event=new window.KeyboardEvent('keydown',{...options,bubbles:true,cancelable:true});await act(async()=>input.dispatchEvent(event));assert.equal(event.defaultPrevented,false);
+  }
+  assert.equal(requests.length,1);await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));assert.equal(closed,1);
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('inline goal never silently substitutes an unavailable explicit model and does not run while blocked',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/expensive',options:[{id:'fixture/expensive',provider:'fixture',model:'expensive',configured:true}]}));});
+  const props={sessionId:'safe',engine:'openclaw',seed:'只用指定模型',modelRef:'fixture/missing',onClose:()=>{},onChanged:()=>{}};
+  await act(async()=>root.render(createElement(GoalComposer,props)));
+  assert.match(host.querySelector('[role=alert]').textContent,/不会自动更换模型/);
+  assert.equal(host.querySelector('button[type=submit]')?.disabled??host.querySelector('.btn-primary').disabled,true);
+  await act(async()=>host.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.equal(requests.length,1);
+  await act(async()=>root.render(createElement(GoalComposer,{...props,blocked:true})));
+  assert.match(host.textContent,/请先暂停/);assert.equal(host.querySelector('.btn-primary').disabled,true);
   await act(async()=>root.unmount());host.remove();
 });

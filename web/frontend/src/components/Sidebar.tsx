@@ -13,6 +13,8 @@ import SidebarMoreMenu from './SidebarMoreMenu';
 import AppVersion from './AppVersion';
 import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
+import {sessionStatuses} from '../lib/sessionStatus';
+import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
 export type Page = 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
@@ -39,6 +41,7 @@ interface SidebarProps {
   onGatewayRetry?: () => void;
   runningSessions?: string[];
   stoppingSessions?: string[];
+  taskState?: TaskSnapshot;
 }
 
 export default function Sidebar({
@@ -63,7 +66,10 @@ export default function Sidebar({
   onGatewayRetry,
   runningSessions = [],
   stoppingSessions = [],
+  taskState,
 }: SidebarProps) {
+  const statuses=sessionStatuses(sessions,runningSessions,stoppingSessions,taskState);
+  const runningCount=[...statuses.values()].filter(s=>s.kind==='running'||s.kind==='stopping').length;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamePlace, setRenamePlace] = useState<'row'|'preview'>('row');
   const [renameValue, setRenameValue] = useState('');
@@ -236,6 +242,7 @@ export default function Sidebar({
       );
   const renderItem = (s: ChatSession, isArchived: boolean) => {
     if (renamingId === s.id&&renamePlace==='row')return renameForm(s);
+    const state=statuses.get(s.id);
     return (
       <div
         key={s.id}
@@ -248,8 +255,10 @@ export default function Sidebar({
         onFocusCapture={event=>{if(!(event.target as HTMLElement).classList.contains('session-select'))setHoveredSession(null);}}
         onPointerOver={event=>{if(!(event.target as HTMLElement).closest('.session-select')&&!previewEditing.current)setHoveredSession(null);}}
       >
-        <button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
-        {!s.importedFromBackup && (runningSessions.includes(s.id) || stoppingSessions.includes(s.id)) && <span className="session-running-indicator" role="status" aria-label={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} title={stoppingSessions.includes(s.id) ? '正在停止' : '正在对话'} />}
+        <div className="session-row-content"><button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button>
+        {state&&<span className={`session-status-badge is-${state.kind}`} title={state.detail} aria-label={state.kind==='running'?'正在对话':state.kind==='stopping'?'正在停止':state.label}>
+          <span className={state.kind==='running'||state.kind==='stopping'?'session-running-indicator':'session-status-mark'} aria-hidden="true">{state.kind==='completed'?'✓':state.kind==='failed'?'!':state.kind==='stopped'?'■':state.kind==='review'?'◇':state.kind==='paused'?'Ⅱ':''}</span>{state.label}
+        </span>}</div>
         <button type="button" className="session-quick-rename" aria-label={`重命名对话：${s.title}`} title="重命名（F2）" onClick={event=>{event.stopPropagation();startRename(s);}}><IconEdit size={14}/></button>
         {!isArchived && <button type="button" className={`session-quick-pin${s.pinnedAt?' is-pinned':''}`} aria-label={`${s.pinnedAt?'取消置顶':'置顶'}对话：${s.title}`} title={s.pinnedAt?'取消置顶':'置顶'} onPointerEnter={()=>setHoveredSession(null)} onClick={event=>{event.stopPropagation();pinFocusId.current=s.id;onSessionPin(s.id,!s.pinnedAt);}}><SessionPinIcon unpin={Boolean(s.pinnedAt)}/></button>}
         <SessionActionsMenu session={s} onPin={() => { setHoveredSession(null);pinFocusId.current = s.id; onSessionPin(s.id, !s.pinnedAt); }}
@@ -258,7 +267,7 @@ export default function Sidebar({
     );
   };
 
-  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={label} aria-label={label} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}</span><span className="nav-item-label">{label}</span></button>;
+  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={page==='chat'?`${label} · ${runningCount}个正在运行`:label} aria-label={label} aria-description={page==='chat'?`${runningCount}个对话正在运行`:undefined} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}{page==='chat'&&runningCount>0&&<span className="sidebar-running-count">{runningCount}</span>}</span><span className="nav-item-label">{label}</span></button>;
   return (
     <div className={`sidebar-shell${expanded?' is-expanded':''}${toolbarExpanded?' is-toolbar-expanded':''}`}>
       {expanded&&<button type="button" className="sidebar-backdrop" aria-label="关闭侧边栏遮罩" onClick={closeSidebar} tabIndex={-1}/>}
@@ -268,7 +277,7 @@ export default function Sidebar({
             <button type="button" className="sidebar-toggle sidebar-tool-toggle" aria-label={toolbarExpanded?'收起工具栏':'展开工具栏'} title={toolbarExpanded?'收起工具栏':'展开工具栏'} aria-expanded={toolbarExpanded} onClick={toggleToolbar}>
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d={toolbarExpanded?'m16 9-3 3 3 3':'m13 9 3 3-3 3'}/></svg><span className="nav-item-label">工具栏</span>
             </button>
-            {!expanded&&<button ref={toggleRef} type="button" className="sidebar-toggle sidebar-conversations-toggle" aria-label="展开对话列表" title="展开对话列表" aria-expanded={false} onClick={()=>changeExpanded(true)}><IconNewChat size={19}/><span className="nav-item-label">对话列表</span></button>}
+            {!expanded&&<button ref={toggleRef} type="button" className="sidebar-toggle sidebar-conversations-toggle" aria-label="展开对话列表" title={`展开对话列表 · ${runningCount}个正在运行`} aria-expanded={false} onClick={()=>changeExpanded(true)}><IconNewChat size={19}/><span className="nav-item-label">对话列表</span></button>}
           </div>
           <nav className="sidebar-nav" aria-label="主导航">
             {railItem('dashboard','工作台',<IconDashboard size={19}/>)}
@@ -292,6 +301,7 @@ export default function Sidebar({
           <header className="sidebar-header"><div className="sidebar-topline"><div className="sidebar-logo"><img className="sidebar-logo-icon" src="./static/easel-icon-transparent.png" alt=""/><h1>Easel</h1></div><button ref={collapseToggleRef} type="button" className="sidebar-toggle" aria-label="收起对话列表" title="收起对话列表" aria-expanded={true} onClick={closeSidebar}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16m7 5-3 3 3 3"/></svg></button></div>
             <button type="button" className="new-chat-btn sidebar-new-chat" onClick={onNewChat} title="新建对话"><IconNewChat size={16}/>新建对话</button>
             <Select className="persona-select" aria-label="创作画像" value={selectedPersona} onChange={e=>{if(e.target.value==='__new__'){onNewProfile();return;}onPersonaChange(e.target.value);}} disabled={activeSessionHasMessages} title={activeSessionHasMessages?'当前对话已绑定画像，请先新建对话再切换画像':'选择用户画像'}><option value="">通用模式</option>{personas.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}<option value="__new__">+ 新建画像…</option></Select>
+            <div className="sidebar-run-summary" role="status" aria-label={`正在运行的对话：${runningCount}`} title="按对话去重，包含尚未停止确认及已归档的执行；排队和待核实不计入"><span className={runningCount?'is-running':''}/><strong>{runningCount}</strong> 个运行中</div>
           </header>
           <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section">
             {pinned.length > 0 && <section className="sidebar-pinned" aria-label="置顶对话"><div className="sidebar-section-header"><span className="sidebar-section-title">置顶</span><span className="sidebar-session-count">{pinned.length}</span></div>{pinned.map(s=>renderItem(s,false))}</section>}

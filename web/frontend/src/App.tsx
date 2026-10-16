@@ -1306,6 +1306,7 @@ export default function App() {
         sessions={sessions}
         runningSessions={Object.keys(streams)}
         stoppingSessions={Object.keys(stoppingSessions).filter(id => stoppingSessions[id])}
+        taskState={tasks}
         activeSessionId={activeSessionId}
         activeSessionHasMessages={activeSession ? activeSession.messages.length > 0 : false}
         onSessionSelect={handleSessionSelect}

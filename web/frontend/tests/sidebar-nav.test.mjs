@@ -303,6 +303,24 @@ test('conversation loading follows each running session and disappears when its 
  await view.update({stoppingSessions:[]});assert.equal(view.container.querySelector('.session-running-indicator'),null);
 });
 
+test('sidebar counts actual running chats once, retains folded count and updates completion/failure badges',async t=>{
+ const done={role:'assistant',content:'已交付',turnId:'done'};
+ const sessions=[session('s1','今天的对话',{messages:[done]}),session('s2','此前的调研',{messages:[done]}),session('backup','备份',{messages:[done],importedFromBackup:true})];
+ const view=await fixture(t,{sessions,runningSessions:['s1','s1','backup'],taskState:{goals:[{id:'g',sessionId:'s1',status:'active'}],runs:[],plans:[],serverTime:1}});
+ assert.equal(view.container.querySelector('.sidebar-running-count').textContent,'1');
+ await view.clickLabel('展开对话列表');
+ assert.match(view.byLabel('正在运行的对话：1').textContent,/1.*运行中/);
+ assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,'运行中');
+ assert.match(view.container.querySelector('[data-session-id=s2] .session-status-badge').textContent,/已完成/);
+ assert.equal(view.container.querySelector('[data-session-id=backup] .session-status-badge'),null);
+ await view.update({runningSessions:[],taskState:{goals:[],runs:[],plans:[],serverTime:2},sessions:sessions.map(s=>s.id==='s1'?{...s,messages:[{...done,error:{message:'服务中断'}}]}:s)});
+ assert.ok(view.byLabel('正在运行的对话：0'));
+ assert.match(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,/失败/);
+ assert.equal(view.container.querySelector('.sidebar-running-count'),null);assert.deepEqual(view.selected,[]);
+ await view.remount();await view.clickLabel('展开对话列表');
+ assert.match(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,/失败/);
+});
+
 test('pinning moves one conversation into its own section without selecting it or losing running state', async t => {
   const view = await fixture(t, { runningSessions: ['s2'] });
   await view.clickLabel('展开对话列表');
