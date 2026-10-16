@@ -1,4 +1,4 @@
-> **定时任务与目标方案（2026-10-16，尚未实现）**：核对ZCode官方目标/自动化文档及固定源码，建议将时间触发、证据验收目标和单次运行分开，结果回到原对话，共用模型/预算/停止与产物账本。先补目标执行底座，再做定时管理；本轮未创建任务、付费执行或部署138。[调研、取舍与实施门槛](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/schedules-goals-research-2026-10-16.md)。
+> **目标与定时任务首版（2026-10-16）**：已实现原对话目标、文件/文字证据检查与人工质量确认、暂停/恢复/未知不重发，以及带时区预览和漏跑规则的定时计划。明确指定模型，限制轮次/时长/工具/生图；Token和金额暂不硬封顶，自动目标首版串行。后端95项、前端1048项及隔离浏览器通过，本机7880入口可用；真实模型效果/费用、138与安装器另验。[使用、实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/schedules-goals-implementation-2026-10-16.md)。
 
 > **通知列表精修（2026-10-16）**：调研Linear/GitHub通知组织与Radix键盘规范后，移除重复厚卡片，采用紧凑列表、细分隔线、正文/来源/时间层级和直接详情操作。保留筛选、已读、清空确认及持久记录。7880真实数据、隔离390px浅/深色和键盘路径已验；138/安装包未更新。[调研、实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/notification-polish-2026-10-16.md)。
 
