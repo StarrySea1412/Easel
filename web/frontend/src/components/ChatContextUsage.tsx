@@ -37,7 +37,6 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const error = failure?.key === requestKey ? failure.message : '';
   useEffect(() => { setOpen(false); setDetails(false); }, [sessionId, engine]);
   useEffect(() => {
-    if (engine === 'codex') { setPending(false); return; }
     const controller = new AbortController();
     setPending(true); setFailure(null);
     const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
@@ -53,7 +52,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
     return () => controller.abort();
   }, [sessionId, modelRef, engine, requestKey, refreshKey, streaming, revision]);
   useEffect(() => {
-    if (!open || !streaming || engine === 'codex') return;
+    if (!open || !streaming) return;
     const timer = setInterval(() => setRevision(value => value + 1), 15000);
     return () => clearInterval(timer);
   }, [open, streaming, engine]);

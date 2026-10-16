@@ -183,7 +183,7 @@ def test_sqlite_usage_is_project_scoped_deduplicated_and_prices_preserve_snapsho
         {'kind': 'output', 'ts': start + 2000}, {'kind': 'end', 'ts': end}]}))
     data = collect(sandbox)
     assert data['session']['calls'] == 1 and data['session']['totalTokens'] == 1500
-    assert data['sourceCount'] == 1 and data['sourceCounts'] == {'jsonl': 0, 'sqliteSessions': 1}
+    assert data['sourceCount'] == 1 and data['sourceCounts'] == {'jsonl': 0, 'sqliteSessions': 1, 'codexTurns': 0}
     call = data['turns'][0]['calls'][0]
     assert call['firstTokenMs'] == 2000 and call['speedSource'] == 'stream'
     assert abs(call['outputTokensPerSecond'] - 62.5) < .01

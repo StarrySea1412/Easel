@@ -353,7 +353,18 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                     attach_channel(call, snapshots.get(web_id, []), old)
                     _enrich(call, prices, old, observations.get(web_id, ()))
                     db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
+        from easel.codex_usage import calls as codex_calls
+        observed_codex, codex_issues, codex_source_count = codex_calls(web_sessions_dir.parent)
+        issues.extend(codex_issues)
+        for call in observed_codex:
+            call['timestamp'] = _timestamp(call['timestamp'])
+            attach_channel(call, [])
+            saved = db.execute('SELECT payload FROM calls WHERE id=?', (call['id'],)).fetchone()
+            _enrich(call, prices, json.loads(saved[0]) if saved else None)
+            db.execute('INSERT OR REPLACE INTO calls VALUES (?,?)', (call['id'], json.dumps(call)))
         all_calls = [json.loads(row[0]) for row in db.execute('SELECT payload FROM calls')]
+        if any(call.get('engine') == 'codex' and call.get('usageComplete') is not True for call in all_calls):
+            issues.append('部分 Codex 历史仅有最后一次请求快照，汇总为已知下限，不能代表整轮消耗。')
         # Newly saved prices may fill missing estimates even when transcripts
         # have not changed. Existing estimates keep their original snapshot.
         for call in all_calls:
@@ -388,12 +399,13 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
         'channelNote': '渠道标识取自实际调用记录；地址来自当轮配置快照，仅显示域名。旧记录缺少快照时标为地址未记录，不用当前配置猜填；同渠道模型价格与当时快照独立保存。',
         'turns': turns[offset:offset + limit], 'turnCount': len(turns), 'offset': offset, 'limit': limit,
         'sessions': by_session[:100], 'sessionCount': len(by_session),
-        'sourceCount': source_count + len(sqlite_sessions),
-        'sourceCounts': {'jsonl': source_count, 'sqliteSessions': len(sqlite_sessions)},
+        'sourceCount': source_count + len(sqlite_sessions) + codex_source_count,
+        'sourceCounts': {'jsonl': source_count, 'sqliteSessions': len(sqlite_sessions), 'codexTurns': codex_source_count},
         'updatedAt': int(time.time()), 'issues': sorted(set(issues)),
-        'scope': '本 Easel 项目已创建的 Web 对话；仅读取其专用 OpenClaw profile，已累计记录在删除会话后仍保留。',
+        'recordUnit': 'usage_events' if any(call.get('engine') == 'codex' for call in (current if session_id else all_calls)) else 'requests',
+        'scope': '本 Easel 项目的 OpenClaw 专用 profile 和本机 Codex 绑定；不扫描全局 Codex 历史，已累计账本在删除会话后仍保留。',
         'note': '输入含缓存；缓存和推理为子项，不重复加入总量。未上报字段显示为未上报，汇总只累计已知值。',
-        'costNote': '记录费用来自 OpenClaw usage.cost，非账单金额；记录为0可能因为网关未配置价格，不能据此判断免费。渠道估算费用独立展示，缺少价格或用量时不猜算。',
+        'costNote': '记录费用来自 OpenClaw usage.cost，非账单金额；0不代表免费。Codex 仅累计实际用量通知，不上报实际账单；历史最后请求快照仅为下限。统计记录可能涵盖多次请求，不能当作供应商请求次数。缺价格或用量不猜算。',
         'performanceNote': '参考 CC Switch：速度=输出Token÷(耗时−首个输出延迟)，输出至少100且生成窗口至少100ms；无首字计时仅在输出至少200、耗时至少1s时估算（含等待）。汇总按总输出÷总窗口加权，非逐条平均。',
         'pricingNote': '自定义价格以 USD/百万Token计，普通输入=输入总量−缓存读−缓存写；四项费用相加后乘倍率。缺价格/缓存用量不估算；成功估算保留当时价格快照，非供应商账单。',
     }

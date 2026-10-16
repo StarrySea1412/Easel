@@ -1,3 +1,5 @@
+> **本机接续完善（2026-10-16）**：通知改为项目本机持久保存最近1000条；Codex接入实际用量通知、去重增量及历史下限，费用仍与账单区分。办公室顶部可返回所选对话；补齐两项0.2.9可靠性修复及RSS去重/时效源模块。已恢复7880，完成指定深色/实际390px/键盘入口复核；全界面、真实付费与新闻运行验收继续保留。仅本机，138和安装包未更新。[改动、证据与剩余清单](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-history-codex-usage-2026-10-16.md)。
+
 > **上下文统计纠正（2026-10-16）**：修复只读旧 JSON 而漏掉当前 SQLite 会话记录的问题；上下文各分类独立显示，技能目录字符数、会话登记与本机已安装数量分别标明来源。缺少总量时仍显示已知项，模型切换单独保留上次快照；分类 Token 是估算，不冒充实际分词或账单。仅本机7880，138与安装包未更新。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-accounting-fix-2026-10-16.md)。
 
 > **工作台入口与消耗明细精修（2026-10-16）**：生图入口整合进“最近产物”卡片；创作技能弹窗增加 ClawHub 公开检索与作者详情；消耗明细改为专用空态、上报覆盖度、消耗总览与请求明细，费用返回 0 也不代表免费。55 项不同定向用例、lint/构建和本机只读接口通过；真实浏览器已点通指定入口，固定桌面/390px、深色与完整键盘复核仍待完成。仅本机7880，138与安装包未更新。[改动与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/workbench-usage-entry-refinement-2026-10-16.md)。
@@ -8,7 +10,7 @@
 
 > **本机界面与停止恢复纠正（2026-10-15）**：通知已移到左侧工具栏底部、设置旁；模型旁新增上下文圆环、六类构成及“消耗与费用明细”。占用采用最近快照，分类有报告时标注估算、缺数据明确未知。修复Web重启后旧任务无限恢复/无法停止、输入草稿隐藏停止按钮等问题，保留记录与新建对话出口。前端1002项回归、相关后端检查与构建通过，已检查桌面/390px入口。仅本机7880，138和安装包未更新。[实现与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/context-usage-notifications-2026-10-15.md)。
 >
-> ClawHub公开检索、模型上下文自定义、内容库封面/创建时间/数量及GLM异步视频协议的[此前交付记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-workbench-features-2026-10-15.md)仍适用。通知为同标签页历史，Codex用量和GLM真实视频生成仍待接入或验收；便携打包暂停。
+> ClawHub公开检索、模型上下文自定义、内容库封面/创建时间/数量及GLM异步视频协议的[此前交付记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/local-workbench-features-2026-10-15.md)仍适用。通知持久化与Codex数值用量已在本机补齐，历史缺失及GLM真实视频仍待验收；便携打包暂停。
 
 > **138快速发布已实测（2026-10-14）**：0.2.8 / `12f144c8` 已通过快速入口先隔离再正式发布，包含超时提示及热点密度/平台图标；同一固定镜像、运行源码、登录/版本/网关、官方更新记录与两次真实Agent工具回执通过。前端交互由用户验收，OpenClaw仍为2026.9.6。[实际发布回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/quick-deploy-138-acceptance-2026-10-14.md)。
 

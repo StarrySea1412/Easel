@@ -15,7 +15,7 @@ import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from '
 import Sidebar from './components/Sidebar';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
-import { notificationOutputPath } from './lib/eventNotifications';
+import { notificationOutputPath, startEventSync } from './lib/eventNotifications';
 import SkillDrawer from './components/SkillDrawer';
 import { showToast } from './lib/toast';
 import { steerQueuedMessage } from './lib/chatSteering';
@@ -86,6 +86,7 @@ function markOnboardingSeen() {
 }
 
 export default function App() {
+  useEffect(() => startEventSync(), []);
   const [currentPage, setPageState] = useState<Page>('dashboard');
   const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
     window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));

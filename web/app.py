@@ -535,6 +535,44 @@ app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
 from easel.codex_service import CodexService
 _codex_service = CodexService(OUTPUTS_DIR)
 app.include_router(_codex_service.router())
+
+
+class NotificationBatch(BaseModel):
+    notices: list[dict] = Field(default_factory=list, max_length=1000)
+
+
+class NotificationRead(BaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+@app.get('/api/notifications')
+async def api_notifications():
+    from easel.notifications import NotificationStore
+    return JSONResponse(await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).list), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/notifications')
+async def api_notifications_add(req: NotificationBatch):
+    from easel.notifications import NotificationStore
+    try:
+        await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).add, req.notices)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {'ok': True}
+
+
+@app.post('/api/notifications/read')
+async def api_notifications_read(req: NotificationRead):
+    from easel.notifications import NotificationStore
+    await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).read, req.id)
+    return {'ok': True}
+
+
+@app.delete('/api/notifications')
+async def api_notifications_clear():
+    from easel.notifications import NotificationStore
+    await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).clear)
+    return {'ok': True}
 def _local_ports(env_port: str) -> set[str]:
     return {'7860', '7870', '5173', (env_port or '').strip() or '7860'}
 
@@ -3564,14 +3602,18 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     path = _job_event_file(turn_id)
     if not path.is_file():
         return []
-    events = []
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return []
+    events = []
+    for line in text.splitlines():
+        try:
             event = json.loads(line)
             if int(event.get("id", 0)) > after:
                 events.append(event)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return []
+        except (ValueError, TypeError, AttributeError):
+            continue
     return events
 
 
@@ -3623,6 +3665,10 @@ def _save_turn(sk: str, status: str, text: str, extra: dict | None = None) -> No
         tmp = _turn_file(sk).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, _turn_file(sk))
+        if status == 'done' and sk.startswith('web:') and payload.get('turn_id'):
+            from easel.notifications import chat_finished
+            chat_finished(OUTPUTS_DIR, sk[4:], payload['turn_id'],
+                          failed=bool(payload.get('error')), stopped=payload.get('stopped') is True)
     except Exception:
         pass
 
@@ -6065,6 +6111,17 @@ def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
                       'updatedAt': publish_receipts._now(base.get('updatedAt')),
                       'storageWarning': '发布回执未能保存；请先核对平台结果，避免重复发布。'}
         _PUBLISH_VOLATILE[receipt_id] = result
+        outcome = result.get('outcome')
+        descriptions = {'published': '平台确认已发布', 'submitted': '已提交，待确认发布', 'draft': '已保存草稿', 'unverified': '发布状态待核验', 'failed': '发布失败'}
+        if outcome in descriptions:
+            try:
+                from easel.notifications import NotificationStore
+                NotificationStore(OUTPUTS_DIR).add([dict(id=f'publish:{receipt_id}:{outcome}',
+                    message=f"{result.get('platform', '发布')} · {descriptions[outcome]}",
+                    tone='success' if outcome == 'published' else 'error' if outcome == 'failed' else 'info',
+                    at=int(time.time() * 1000), target=dict(page='publish'))])
+            except Exception:
+                pass  # A notification failure must not alter a publish receipt.
         return dict(result)
 
 
@@ -6785,8 +6842,8 @@ async def api_schedule_context(days: int = 14):
     cmd = [sys.executable, str(SHARED_SCRIPTS / "calendar_ops.py"),
            "--data", str(SCHEDULE_FILE), "context", "--days", str(max(1, min(days, 90)))]
     try:
-        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                              capture_output=True, text=True, timeout=20)
+        proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                       capture_output=True, text=True, timeout=20)
         if proc.returncode == 0 and proc.stdout.strip():
             value = json.loads(proc.stdout)
             if isinstance(value, dict):
@@ -7279,6 +7336,10 @@ async def api_context_usage(sessionId: str, modelRef: str = ''):
     from usage_stats import collect_usage
     import sqlite3
     try:
+        if _codex_service.owns(sessionId):
+            from easel.codex_usage import context
+            result = context(_codex_service.snapshot(sessionId), sessionId, modelRef)
+            return JSONResponse(result, headers={'Cache-Control': 'no-store'})
         result = await asyncio.to_thread(collect_context, openclaw_state_dir(), SESSIONS_DIR,
                                          sessionId, modelRef,
                                          lambda: collect_usage(PROJECT_ROOT, openclaw_state_dir(), SESSIONS_DIR, sessionId, 1, 0),

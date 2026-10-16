@@ -49,9 +49,9 @@ export default function ChatUsageDialog({ sessionId, refreshKey, streaming, engi
       <header className="drawer-header"><div><span className="usage-dialog-kicker">用量记录</span><h2 id={titleId}>消耗与费用明细</h2><p className="usage-dialog-subtitle">查看调用消耗、缓存与费用的实际记录</p></div><button type="button" className="icon-btn" aria-label="关闭消耗细则" onClick={() => setOpen(false)}>×</button></header>
       <div className="drawer-body">
         <p id={scopeId} className="chat-usage-scope">{engine === 'codex'
-          ? 'Codex 用量尚未接入。当前无法读取 Token 和费用，缺少记录不代表没有消耗。'
+          ? 'Codex 实际用量通知 · 历史记录可能不完整，费用不等于实际账单'
           : 'OpenClaw 已上报记录 · 累计消耗与当前上下文占用分别统计'}</p>
-        {engine === 'openclaw' && <UsagePanel sessionId={sessionId} refreshKey={refreshKey} isStreaming={streaming} embedded />}
+        <UsagePanel sessionId={sessionId} refreshKey={refreshKey} isStreaming={streaming} embedded />
       </div>
     </div></div>, document.body)}
   </>;

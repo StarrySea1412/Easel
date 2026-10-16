@@ -8,6 +8,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import sqlite3
 import threading
 import time
 import uuid
@@ -249,6 +250,8 @@ class CodexService:
                      'items': [], 'pending': [], 'seq': 0, 'requestedModelRef': selected,
                      'requestedThinkingLevel': req.thinkingLevel, 'workspace': str(workspace),
                      'webSearch': 'cached', 'startedAt': int(time.time() * 1000), 'threadId': binding.get('threadId')}
+            state['usageCursor'] = binding.get('usageCursor') if binding.get('threadId') else dict.fromkeys(
+                ('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens', 'totalTokens'), 0)
             binding['lastTurnId'] = tid
             self._write(self.folder(sid) / 'session.json', binding)
             self._persist(state)
@@ -319,6 +322,12 @@ class CodexService:
                 self._execution_event(state)
                 self._event(state, 'timing', {'startedAt': state['startedAt'], 'elapsedMs': state['elapsedMs']})
                 self._event(state, 'error' if state.get('error') else 'done', state.get('error') or {'sessionKey': 'codex:' + (thread or '')})
+                try:
+                    from .notifications import chat_finished
+                    chat_finished(self.outputs, state['sessionId'], state['turn_id'],
+                                  failed=bool(state.get('error')), stopped=state.get('outcome') == 'interrupted')
+                except (OSError, ValueError, sqlite3.Error):
+                    pass  # A notification failure must never prevent task cleanup.
             if client:
                 if thread:
                     client.unsubscribe(thread)
@@ -409,7 +418,14 @@ class CodexService:
             state['plan'] = safe(params.get('plan') or [])
             self._execution_event(state)
         elif method == 'thread/tokenUsage/updated':
-            state['tokenUsage'] = safe(params.get('tokenUsage'))
+            from .codex_usage import observe
+            observe(state, params.get('tokenUsage'))
+            state['usageAt'] = int(time.time() * 1000)
+            self._persist(state)
+            binding = self.binding(state['sessionId'])
+            if binding and binding.get('threadId') == state.get('threadId'):
+                binding['usageCursor'] = state.get('usageCursor')
+                self._write(self.folder(state['sessionId']) / 'session.json', binding)
         elif method == 'turn/diff/updated':
             state['diff'] = safe(params.get('diff', ''))
         elif method == 'serverRequest/resolved':

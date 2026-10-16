@@ -11,13 +11,19 @@ export type EventNotice = {
 };
 
 const key = 'easel:event-notifications';
-const limit = 100;
-const seenLimit = 1000;
+const limit = 1000;
+const seenLimit = 10000;
 let notices: EventNotice[] = [];
 // Keep deduplication separate from the visible history. Clearing the panel must
 // not replay a still-pending question or an already-announced publish receipt.
 let seen = new Set<string>();
 const listeners = new Set<() => void>();
+type Operation = { method: 'POST' | 'DELETE'; suffix?: string; body?: unknown };
+let pending: Operation[] = [];
+let syncState = 'local';
+let active = 0;
+let syncing: Promise<void> | null = null;
+export const readEventSync = () => syncState;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,14 +76,65 @@ try {
   }
   const storedSeen = record(stored) && Array.isArray(stored.seen) ? stored.seen.filter(validId) : [];
   seen = new Set([...notices.map(notice => notice.id), ...storedSeen].slice(0, seenLimit));
+  if (record(stored) && stored.version === 2 && Array.isArray(stored.pending)) {
+    pending = stored.pending.filter((op): op is Operation => record(op) && (op.method === 'POST' || op.method === 'DELETE') && (!op.suffix || op.suffix === '/read')).slice(0, 2000);
+  } else if (notices.length) pending.push({ method: 'POST', body: { notices } });
 } catch { /* Storage restrictions or corrupt history must not interrupt tasks. */ }
 
 function changed() {
   try {
-    sessionStorage.setItem(key, JSON.stringify({ version: 1,
-      notices: notices.map(({ action: _action, ...notice }) => notice), seen: [...seen] }));
+    sessionStorage.setItem(key, JSON.stringify({ version: 2,
+      notices: notices.map(({ action: _action, ...notice }) => notice), seen: [...seen], pending }));
   } catch { /* Keep events in memory when this browser cannot persist them. */ }
   listeners.forEach(listener => listener());
+}
+function queue(operation: Operation) {
+  pending.push(operation);
+  changed();
+  if (active) void syncEvents();
+}
+
+/** Server state is authoritative, including tombstones and cross-tab read state. */
+export function syncEvents(): Promise<void> {
+  if (syncing) return syncing;
+  syncing = (async () => {
+    syncState = 'syncing'; changed();
+    const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+    const request = async (suffix = '', init: RequestInit = {}) => {
+      const response = await fetch(`${base}/api/notifications${suffix}`, { ...init, cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw Error('通知同步失败');
+      return response;
+    };
+    try {
+      do {
+        while (pending.length) {
+          const operation = pending[0];
+          await request(operation.suffix, { method: operation.method, headers: { 'Content-Type': 'application/json' }, ...(operation.body ? { body: JSON.stringify(operation.body) } : {}) });
+          pending.shift(); changed();
+        }
+        const data = await (await request()).json();
+        if (!record(data) || !Array.isArray(data.notices) || !Array.isArray(data.seen)) throw Error('通知记录格式无效');
+        if (pending.length) continue;
+        const actions = new Map(notices.map(notice => [notice.id, notice.action]));
+        notices = data.notices.filter((row): row is EventNotice => record(row) && validId(row.id) && typeof row.message === 'string' && ['info', 'success', 'error'].includes(String(row.tone)) && typeof row.at === 'number' && Number.isFinite(row.at) && row.at > 0)
+          .slice(0, limit).map(row => ({ ...row, target: targetFrom(row.target), action: actions.get(row.id) }));
+        seen = new Set(data.seen.filter(validId).slice(0, seenLimit));
+      } while (pending.length);
+      syncState = 'saved';
+    } catch { syncState = 'error'; }
+    finally { syncing = null; changed(); }
+  })();
+  return syncing;
+}
+
+export function startEventSync() {
+  active++;
+  void syncEvents();
+  const refresh = () => { if (document.visibilityState !== 'hidden') void syncEvents(); };
+  const timer = window.setInterval(refresh, 15000);
+  window.addEventListener('online', refresh);
+  document.addEventListener('visibilitychange', refresh);
+  return () => { active--; window.clearInterval(timer); window.removeEventListener('online', refresh); document.removeEventListener('visibilitychange', refresh); };
 }
 export const subscribeEvents = (listener: () => void) => {
   listeners.add(listener);
@@ -91,15 +148,16 @@ export function recordEvent(message: string, tone: ToastTone, action?: ToastNoti
   seen = new Set([identifier, ...seen].slice(0, seenLimit));
   notices = [{ id: identifier, message: message.slice(0, 600), tone, at: Date.now(), read: false,
     action, target: targetFrom(target) }, ...notices].slice(0, limit);
-  changed();
+  const { action: _action, ...persisted } = notices[0];
+  queue({ method: 'POST', body: { notices: [persisted] } });
   return true;
 }
 export function markEventsRead(id?: string): void {
   if (!notices.some(notice => !notice.read && (!id || notice.id === id))) return;
   notices = notices.map(notice => !id || id === notice.id ? { ...notice, read: true } : notice);
-  changed();
+  queue({ method: 'POST', suffix: '/read', body: id ? { id } : {} });
 }
 export function clearEvents(): void {
   notices = [];
-  changed();
+  queue({ method: 'DELETE' });
 }

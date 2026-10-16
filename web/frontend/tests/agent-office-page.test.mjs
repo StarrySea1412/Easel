@@ -128,6 +128,8 @@ test('a run-record link enters live mode for the exact session and preserves its
   const view = await fixture(t, { initialSessionId: 'two', sessions: [session('one'), session('two')], onOpenActivity: (...args) => opened.push(args) }, { two: snapshot([agent('worker')], { turnId: 'turn-two' }) });
   assert.ok(view.harness.hookCalls.every(call => call.enabled && call.sessionId === 'two'));
   assert.equal(view.harness.frames.size, 0);
+  await view.click(view.button('返回所选对话'));
+  assert.deepEqual(view.harness.opened, ['two']);
   await view.click(view.button('查看运行记录'));
   assert.deepEqual(opened, [['two', 'turn-two']]);
 });

@@ -38,7 +38,7 @@ def api(tmp_path):
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), *nodes], type_ignores=[])
     ast.fix_missing_locations(module)
     app = FastAPI()
-    namespace = {'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel, 'local_records': store,
+    namespace = {'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel, 'local_records': store, 'asyncio': asyncio,
                  'uuid': uuid, 'time': time, 'IDEAS_FILE': tmp_path / '_ideas.json',
                  'SCHEDULE_FILE': tmp_path / '_schedule.json', 'OUTPUTS_DIR': tmp_path,
                  'IDEA_STATUSES': {'pending', 'doing', 'done'}, 'SCHEDULE_KINDS': {'content', 'event'},

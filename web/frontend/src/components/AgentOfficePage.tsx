@@ -406,6 +406,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
               {availableSessions.map((session) => <option key={session.id} value={session.id}>{session.title || '未命名会话'}{streams[session.id] ? ' · 对话接收中' : ''}</option>)}
             </Select>
           </label>}
+          {mode === 'live' && <button type="button" className="office-button" disabled={!sessionId} onClick={() => { if (sessionId) onOpenChat(sessionId); }}>返回所选对话<span aria-hidden="true"> ↗</span></button>}
         </section>
 
         {mode === 'live' && live.identityScanLimited && <p className="office-coverage-note" role="status">记录扫描达到范围限制：这里的 {agents.length} 人是本次已观测名单，实际参与人数可能更多。</p>}

@@ -32,12 +32,12 @@ test('notification clear, bounded history and reload retain deduplication and sa
   assert.equal(events.recordEvent('完成', 'success', undefined, 'same', { page: 'chat', sessionId: 's1' }), true);
   events.clearEvents();
   assert.equal(events.recordEvent('完成', 'success', undefined, 'same'), false);
-  for (let i = 0; i < 110; i++) events.recordEvent(`事件${i}`, 'info', undefined, `bound-${i}`);
-  assert.equal(events.readEvents().length, 100);
+  for (let i = 0; i < 1010; i++) events.recordEvent(`事件${i}`, 'info', undefined, `bound-${i}`);
+  assert.equal(events.readEvents().length, 1000);
   events.markEventsRead();
   assert.ok(events.readEvents().every(row => row.read));
   const reloaded = await import(`${await tsModuleUrl(new URL('../src/lib/eventNotifications.ts', import.meta.url))}#reload`);
-  assert.equal(reloaded.readEvents().length, 100);
+  assert.equal(reloaded.readEvents().length, 1000);
   assert.equal(reloaded.recordEvent('完成', 'success', undefined, 'same'), false);
   assert.equal(events.notificationOutputPath('/api/media/project/a%20b.mp4'), 'project/a b.mp4');
   for (const path of ['https://evil.example/api/media/a.mp4', '/api/media/a%2F..%2Fb', '/api/media/a%5Cb', '/api/media/a%00b']) {
@@ -82,12 +82,14 @@ test('usage dialog scopes OpenClaw HTTP to current session and closes on session
   assert.equal(document.querySelector('[role="dialog"]'), null);
 });
 
-test('Codex usage stays explicitly unknown without querying the OpenClaw ledger', async t => {
-  t.mock.method(globalThis, 'fetch', () => assert.fail('no OpenClaw usage request for Codex'));
+test('Codex usage reads the shared project ledger and preserves failures as unknown', async t => {
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async url => { requests.push(String(url)); return new Response('{}', { status: 503 }); });
   const v = await view(t, Usage, { sessionId: 'c1', refreshKey: 0, streaming: false, engine: 'codex' });
   await v.click(v.node.querySelector('button'));
-  assert.match(document.body.textContent, /Codex 用量尚未接入/);
-  assert.match(document.body.textContent, /缺少记录不代表没有消耗/);
+  assert.match(document.body.textContent, /Codex 实际用量通知/);
+  assert.match(document.body.textContent, /用量读取失败/);
+  assert.ok(requests.some(url => url.includes('/api/usage?sessionId=c1')));
 });
 
 const contextSnapshot = (patch = {}) => ({ sessionId: 's1', modelRef: 'p/m', observedModelRef: 'p/m',
@@ -116,7 +118,7 @@ test('context ring opens measured capacity and estimated categories, then hands 
   assert.equal(document.activeElement, trigger);
 });
 
-test('unknown context does not draw a fake zero and Codex never reads an OpenClaw snapshot', async t => {
+test('unknown context does not draw a fake zero and Codex requests its own session snapshot', async t => {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async url => { requests.push(String(url)); return json(contextSnapshot({ usedTokens: null, breakdownStatus: 'unavailable', breakdown: [], usageSource: 'unavailable' })); });
   const v = await view(t, Context, { sessionId: 's1' });
@@ -127,7 +129,8 @@ test('unknown context does not draw a fake zero and Codex never reads an OpenCla
   await act(async () => v.root.render(createElement(Context, { sessionId: 'c1', engine: 'codex' })));
   await v.click(v.node.querySelector('button'));
   assert.match(document.querySelector('.context-usage-panel').textContent, /Codex 尚未提供/);
-  assert.equal(requests.length, before);
+  assert.equal(requests.length, before + 1);
+  assert.ok(requests.at(-1).includes('sessionId=c1'));
 });
 
 test('context request cancellation prevents an old model or session snapshot from replacing the selection', async t => {

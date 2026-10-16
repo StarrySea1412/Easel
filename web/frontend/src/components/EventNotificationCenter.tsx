@@ -1,7 +1,7 @@
 import { useCallback, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPanel } from '../hooks/useAnchoredPanel';
-import { clearEvents, markEventsRead, readEvents, subscribeEvents, type EventNotice, type NoticeTarget } from '../lib/eventNotifications';
+import { clearEvents, markEventsRead, readEvents, readEventSync, syncEvents, subscribeEvents, type EventNotice, type NoticeTarget } from '../lib/eventNotifications';
 import { IconBell } from './settingsIcons';
 import { IconCheck, IconChevron, IconInfo, IconTrash } from './icons';
 import '../styles/event-notifications.css';
@@ -16,6 +16,7 @@ function dateLabel(at: number) {
 
 export default function EventNotificationCenter({ onOpen }: { onOpen: (target: NoticeTarget) => void }) {
   const notices = useSyncExternalStore(subscribeEvents, readEvents);
+  const sync = useSyncExternalStore(subscribeEvents, readEventSync);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [confirmClear, setConfirmClear] = useState(false);
@@ -65,9 +66,9 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
           {filter === 'unread' && notices.length > 0 && <button type="button" className="event-view" onClick={() => setFilter('all')}>查看全部事件<IconChevron size={13} /></button>}</div>}
       </div>
       <footer className="event-panel-footer">
-        {confirmClear ? <div className="event-clear-confirm"><span>清空本标签页的通知记录？</span><button autoFocus type="button" onClick={() => { setConfirmClear(false); panel.current?.focus(); }}>取消</button>
+        {confirmClear ? <div className="event-clear-confirm"><span>清空本工作台的通知记录？</span><button autoFocus type="button" onClick={() => { setConfirmClear(false); panel.current?.focus(); }}>取消</button>
           <button type="button" className="event-clear-danger" onClick={() => { clearEvents(); setConfirmClear(false); panel.current?.focus(); }}>确认清空</button></div> : <>
-          <details className="event-history-note"><summary><IconInfo size={13} /><span>仅保存本标签页最近 100 条</span></summary><p>刷新后保留；关闭页面期间的新事件不会收录。清空记录不会停止任务。</p></details>
+          <details className="event-history-note"><summary><IconInfo size={13} /><span>{sync === 'saved' ? '已保存到本机 · 最近 1000 条' : sync === 'syncing' ? '正在同步通知' : sync === 'error' ? '同步失败 · 当前记录已保留' : '本机通知记录'}</span></summary><p>保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。</p>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</details>
           <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><IconTrash size={13} />清空</button></>}
       </footer>
     </section>, document.body)}

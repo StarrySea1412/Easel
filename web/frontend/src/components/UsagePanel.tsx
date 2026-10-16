@@ -25,6 +25,7 @@ type Usage = {
   sessions: { sessionId: string; summary: Summary; lastAt: string }[];
   scope: string; note: string; costNote: string; issues: string[];
   performanceNote?: string; pricingNote?: string; channelNote?: string;
+  recordUnit?: string;
   channels?: Record<'session' | 'project', { id: string; name: string; endpoint: string | null; source: string; models: string[]; summary: Summary }[]>;
 };
 
@@ -123,6 +124,7 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
   }, [sessionId, refreshKey, isStreaming, open, offset, revision]);
   useEffect(()=>{if(!isStreaming||!open||loading)return;const timer=setTimeout(refresh,5000);return()=>clearTimeout(timer);},[isStreaming,open,loading,revision,refresh]);
   const current = data?.sessionId === sessionId ? data : null;
+  const unit = current?.recordUnit === 'usage_events' ? '用量事件' : '调用';
   const summary = current?.[scope];
   const trend = current?.turns.slice().reverse()||[];
   const allCalls = current?.turns.flatMap(turn=>turn.calls)||[];
@@ -162,7 +164,7 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
           {scope === 'session' ? <div hidden={view !== 'requests'} className="usage-turns"><details className="usage-turn-group"><summary>按轮次查看 <span>{current.turns.length} 轮 · 当前页</span></summary>
             {current.turns.map((turn) => <details className="usage-turn" key={turn.id}>
               <summary><span>{turn.unattributed ? '未关联轮次' : `第 ${turn.number} 轮`}</span><span>{timeLabel(turn.timestamp)}</span>
-                <strong>{display(turn.summary.totalTokens, 'totalTokens')} Token</strong><span>{turn.calls.length} 次调用</span></summary>
+                <strong>{display(turn.summary.totalTokens, 'totalTokens')} Token</strong><span>{turn.calls.length} 条{unit}记录</span></summary>
               <MetricCards summary={turn.summary} compact />
               <div className="usage-table-scroll"><table><caption>本轮模型调用明细</caption><thead><tr>
                 <th>模型 / 消耗渠道</th>{METRICS.map(([field, label]) => <th key={field}>{label}</th>)}
@@ -184,7 +186,7 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
               <td>{display(session.summary.recordedCostUsd, 'recordedCostUsd')}</td><td>{timeLabel(session.lastAt)}</td>
             </tr>)}</tbody></table></div>}
           </>}
-          <details className="usage-source-notes"><summary>数据来源与统计口径 <span>OpenClaw · 非服务商账单</span></summary><p className="usage-note">未上报字段保留未知，记录费用与渠道估算均不代表服务商账单。输入包含缓存，缓存与推理不会重复累加到总量。</p>{current.issues.map((issue) => <p className="usage-note" key={issue}>{issue}</p>)}
+          <details className="usage-source-notes"><summary>数据来源与统计口径 <span>OpenClaw / Codex · 非服务商账单</span></summary><p className="usage-note">未上报字段保留未知，记录费用与渠道估算均不代表服务商账单。输入包含缓存，缓存与推理不会重复累加到总量。Codex 按用量事件统计，一条记录可能包含多次请求。</p>{current.issues.map((issue) => <p className="usage-note" key={issue}>{issue}</p>)}
           <p className="usage-note">{current.channelNote}</p><p className="usage-note">{current.note}</p><p className="usage-note">{current.costNote}</p><p className="usage-note">{current.performanceNote}</p><p className="usage-note">{current.pricingNote}</p>
           <p className="usage-note">{current.scope}</p><p className="usage-note">更新于 {new Date(current.updatedAt*1000).toLocaleString('zh-CN')}</p></details>
         </> : !error && <p className="usage-note" role="status">正在读取本项目的用量记录…</p>}

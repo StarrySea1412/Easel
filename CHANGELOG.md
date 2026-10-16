@@ -1,3 +1,10 @@
+## 2026-10-16 · Persistent notifications and Codex usage / 通知持久化与Codex用量
+
+- Save up to 1,000 project-local notifications with read/clear synchronization and retry; record chat/publish outcomes without an open page. Other browser-observed events retain their existing scope. / 通知保存到本机数据库，支持重试与跨标签已读/清空；对话和发布终态后端记录，其它页面观察动态不扩大为全部离线采集。
+- Import actual Codex usage notifications with saved thread baselines, replay deduplication and explicit historical lower bounds; expose last-request context without inventing category tokenization or invoices. / Codex用量接入项目账本，区分累计增量、最后请求下限与上下文快照；未知费用/分类不猜填。
+- Add Office return-to-chat; preserve valid replay around corrupt lines and move calendar subprocess work off the event loop. RSS source adds canonical deduplication and dated freshness filters, without enabling or deploying it. / 办公室增加返回入口，移植两项0.2.9可靠性修复；新闻修改只验证源模块。
+- Backend checks, all 1,036 frontend checks, lint/build and specified actual desktop/390px dark/keyboard entries passed. No new paid task,138 activation or installer release. / 详细边界见[本轮验收记录](docs/local-history-codex-usage-2026-10-16.md)。
+
 ## 2026-10-16 · Context accounting correction / 上下文统计来源纠正
 
 - Read current SQLite session metadata in addition to legacy JSON, scoped to project web sessions. / 修复当前运行时快照漏读，只读会话元数据、不返回提示词或凭据。
