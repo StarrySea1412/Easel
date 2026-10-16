@@ -560,3 +560,8 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 
 - Record one durable `stall_warning` after a configurable no-event window (180 seconds by default), with the idle duration and last event sequence; the UI states that the provider is still being awaited. / 长任务在可配置无事件窗口（默认180秒）后记录一次 `stall_warning`，保存空闲时长和最后事件序号，并明确提示仍在等待 provider。
 - The warning never kills or resubmits a request; full recovery and pressure acceptance remain pending. / 告警不会终止或重发请求，完整恢复和压力验收仍待完成。
+
+## 2026-10-16 · Compaction lifecycle in the run ledger / 压缩生命周期入账本
+
+- Persist OpenClaw compaction start/end and reported outcomes alongside the logical run while preserving the existing SSE display. / 将 OpenClaw 压缩 start/end 及 outcome 与逻辑轮次一起持久保存，保留现有 SSE 展示。
+- This is observability only; cross-process compaction transactions and provider-exact token accounting remain pending. / 当前是可观测性记录，跨进程压缩事务和供应商精确 Token 账本仍待完成。

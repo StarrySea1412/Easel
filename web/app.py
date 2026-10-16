@@ -4154,6 +4154,15 @@ async def api_chat_stream(req: ChatRequest):
                                               'requestedThinkingLevel': requested_thinking_level})
                 run_ledger.mark(_run_ledger_root(), turn_id, event='provider_accepted', status='running',
                                 provider_run_id=run_id, transport='native')
+            def _mark_compaction(compaction_event):
+                phase = compaction_event.get('phase') if isinstance(compaction_event, dict) else None
+                outcome = compaction_event.get('outcome') if isinstance(compaction_event, dict) else None
+                run_ledger.mark(
+                    _run_ledger_root(), turn_id,
+                    event=f'compaction_{phase}' if phase in ('start', 'end') else 'compaction_update',
+                    status='running', compactionPhase=phase, compactionOutcome=outcome,
+                )
+                to_client('compaction', compaction_event)
             if is_http:
                 # HTTP 直连常驻网关：无进程冷启动（agent 在 gateway 进程里跑）
                 proc = _GatewayHttpProc()
@@ -4177,7 +4186,7 @@ async def api_chat_stream(req: ChatRequest):
                             params['model'] = requested_model_ref
                         proc = GatewayAgentProc(native_client,
                             lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
-                            on_compaction=lambda event: loop.call_soon_threadsafe(to_client, 'compaction', event),
+                            on_compaction=lambda event: loop.call_soon_threadsafe(_mark_compaction, event),
                             on_tool=tool_update,
                             on_accepted=lambda run_id: loop.call_soon_threadsafe(
                                 _mark_gateway_acceptance, run_id))

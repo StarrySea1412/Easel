@@ -31,3 +31,8 @@
 
 - 长任务现在在可配置的无事件窗口（默认 180 秒）后记录一次 `stall_warning`，账本保存空闲秒数和最后事件序号，前端收到明确的“仍等待 provider”状态。
 - 这只是可回放的观测告警，不会自动终止、重发或把长工具调用判定为失败；完整 stall recovery 仍待跨进程接管和真实压力验收。
+
+### Compaction lifecycle events
+
+- OpenClaw compaction `start`/`end` events now enter the same ledger as `compaction_start`/`compaction_end`, including the reported outcome, while the existing SSE display remains unchanged.
+- This records an observable compression lifecycle; it does not yet make compaction a cross-process transaction or prove provider token accounting.

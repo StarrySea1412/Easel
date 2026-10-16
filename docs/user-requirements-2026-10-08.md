@@ -1571,3 +1571,4 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **本轮实现与验证回执**：已新增 `web/run_ledger.py` 和聊天接入，记录 accepted/supervisor/provider/transport/terminal 事件、provider run、attempt、恢复关系、事件序号、停止原因、错误来源和资源结算；同一 `turnId` 重复 POST fail-closed；`/api/chat/last` 附带账本并新增 `/api/chat/runs/{turnId}`。账本与聊天专项186项通过，Python全仓 **2889 passed / 9 skipped**，语法和 `git diff --check` 通过。仍未完成跨进程 recovery-run 接管、SSE完整账本投影、stall watchdog、compaction事务、启动版本闸门和真实重启验收；不自动重发已提交请求。
 - **追加实现**：`chat_recovery.stop_orphan` 现优先读取持久账本的 `providerRunId`，即使 Web 重启后旧会话快照没有 `gateway_run_id`，用户仍可对精确后台 run 显式停止并把终态写回账本；新增恢复专项通过。自动接管和无损续跑仍未完成。
 - **追加实现**：长任务新增可配置的 stall warning watchdog，默认无事件180秒后写入 `stall_warning` 账本事件并提示仍在等待 provider；不自动终止或重发。完整 stall recovery 和真实压力验收仍保留。
+- **追加实现**：OpenClaw compaction start/end 事件现在同步写入本轮账本，保留阶段和 outcome；现有 SSE 展示不变。跨进程压缩事务和供应商精确 Token 账本仍未完成。

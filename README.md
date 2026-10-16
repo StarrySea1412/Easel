@@ -251,3 +251,5 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 > **账本驱动的停止核实（2026-10-16）**：Web 重启后，显式停止旧任务会优先使用持久账本中的 provider run，即使旧快照没有 `gateway_run_id` 也能精确核实；不会自动重发或宣称无损续跑。[记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
 
 > **停滞告警（2026-10-16）**：长任务默认180秒没有 provider 事件时记录一次可回放的 `stall_warning`，界面明确仍在等待，不自动终止或重发。完整恢复与压力验收仍待完成。[运行账本记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
+
+> **压缩生命周期入账本（2026-10-16）**：OpenClaw 的 compaction start/end 与 outcome 现在和逻辑轮次一起持久保存，便于长对话回放；这仍不是跨进程事务，也不等同供应商精确 Token。[运行账本记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
