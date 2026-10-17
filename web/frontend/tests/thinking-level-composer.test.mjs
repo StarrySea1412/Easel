@@ -23,12 +23,57 @@ test('slash goal opens in current conversation and preserves the command until s
   const view=await fixture(t,'low');const opened=[];
   await view.render({onGoal:(...args)=>opened.push(args)});
   await view.type('/');assert.match(document.querySelector('[role=listbox]').textContent,/设置要持续追求的目标/);
-  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  assert.match(document.querySelector('[role=listbox]').textContent,/定时任务/);
   await view.key(view.container.querySelector('textarea'),'Enter');
-  assert.equal(view.sent.length,0);assert.equal(opened.length,1);assert.equal(view.container.querySelector('textarea').value,'/');
-  await act(async()=>opened[0][2]());assert.equal(view.container.querySelector('textarea').value,'');
+  assert.equal(view.sent.length,0);assert.equal(opened.length,1);assert.equal(opened[0][0],'');
+  assert.equal(view.container.querySelector('textarea').value,'');
   await view.type('/goal 完成原对话的卡片');await view.key(view.container.querySelector('textarea'),'Enter');
   assert.equal(opened[1][0],'完成原对话的卡片');assert.equal(view.sent.length,0);
+});
+
+test('goal lifecycle commands pause, resume and clear without sending model messages',async t=>{
+  const view=await fixture(t,'low');const actions=[];
+  await view.render({onGoal:()=>{},goalStatus:'active',onGoalAction:action=>actions.push(action)});
+  await view.type('/goal pause');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(actions,['pause']);assert.equal(view.sent.length,0);
+  assert.equal(view.container.querySelector('textarea').value,'');
+  await view.type('/goal 继续');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(actions,['pause','resume']);
+  await view.type('/目标 清除');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(actions,['pause','resume','clear']);
+  assert.equal(view.sent.length,0);
+});
+
+test('slash menu lists lifecycle commands by goal status and selects them with the keyboard',async t=>{
+  const view=await fixture(t,'low');const actions=[],viewed=[];
+  await view.render({onGoal:()=>{},goalStatus:'paused',onGoalAction:action=>actions.push(action),onGoalView:()=>viewed.push(1)});
+  await view.type('/');
+  const menu=document.querySelector('[role=listbox]');
+  assert.match(menu.textContent,/继续目标/);assert.match(menu.textContent,/清除目标/);
+  assert.doesNotMatch(menu.textContent,/暂停目标/);
+  assert.match(menu.querySelector('[role=option][aria-selected=true]').textContent,/目标/);
+  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  assert.match(document.querySelector('[role=option][aria-selected=true]').textContent,/继续目标/);
+  await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(actions,['resume']);assert.deepEqual(viewed,[]);
+  await view.type('/');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(viewed,[1]);assert.deepEqual(actions,['resume']);
+  await view.type('/');await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(actions,['resume','clear']);
+  assert.equal(view.sent.length,0);
+});
+
+test('slash schedule command seeds the plan draft and opens the automation entry',async t=>{
+  const view=await fixture(t,'low');const drafts=[];
+  await view.render({onGoal:()=>{},onScheduleDraft:text=>drafts.push(text)});
+  await view.type('/定时 每周一整理热点');await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(drafts,['每周一整理热点']);assert.equal(view.sent.length,0);
+  await view.type('/');await view.key(view.container.querySelector('textarea'),'ArrowUp');
+  await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.deepEqual(drafts,['每周一整理热点','']);
+  assert.equal(view.sent.length,0);
 });
 
 test('embedded goal keeps the ordinary composer tools and toggles back to the saved draft', async t => {

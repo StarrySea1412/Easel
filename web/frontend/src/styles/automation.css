@@ -18,6 +18,8 @@
 .task-status { font-size:11px; white-space:nowrap; background:var(--surface-2); color:var(--text-secondary); border:1px solid var(--border); border-radius:5px; padding:4px 7px }
 .task-status.active { color:var(--green); border-color:var(--green); background:var(--green-soft) }
 .task-status.blocked { color:var(--amber); background:var(--amber-soft) }.task-status.completed { color:var(--green) }
+.task-status.is-attention { color:var(--amber); border-color:var(--amber); background:var(--amber-soft) }
+.task-chips { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end }
 .goal-objective { font-size:13px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text-secondary); margin:16px 0 22px }
 .task-evidence-heading { display:flex; justify-content:space-between; font-size:12px; gap:10px }
 .task-evidence-heading span { color:var(--text-tertiary); font-size:11px }

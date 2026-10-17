@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from easel.task_rules import GoalSpec, Schedule, next_time, latest_time, check_goal
+from easel.task_rules import GoalSpec, Schedule, next_time, latest_time, upcoming, check_goal
 from easel.task_store import TaskStore, TaskConflict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
@@ -68,19 +68,22 @@ def test_owner_fencing_and_restart_unknown_not_replayed(tmp_path):
     assert store.snapshot()['goals'][0]['status'] == 'blocked'
 
 
-def test_human_input_pauses_between_rounds_but_cannot_race_running(tmp_path):
+def test_human_input_takes_priority_without_cancelling_goal(tmp_path):
     store = TaskStore(tmp_path)
     g = store.create_goal(spec(), session='chat')
     store.change_goal(g['id'], 'start')
     store.reserve_chat('chat', 'human')
+    # The goal stays active: the held chat lease defers continuation instead of
+    # cancelling the objective.
     assert store.claim('worker') is None
-    assert store.get('goals', g['id'])['status'] == 'paused'
+    assert store.get('goals', g['id'])['status'] == 'active'
     store.release_chat('chat', 'human')
-    store.change_goal(g['id'], 'resume')
     _, r = store.claim('worker')
     with pytest.raises(TaskConflict):
         store.reserve_chat('chat', 'human2')
     store.finish(r['id'], owner='worker', state='stopped')
+    # Interruptions pause the objective; the records remain resumable.
+    assert store.get('goals', g['id'])['status'] == 'paused'
 
 
 def test_tools_and_images_reserve_atomically_with_idempotency(tmp_path):
@@ -149,6 +152,38 @@ def test_review_then_completion_and_budget_cannot_reset(tmp_path):
     assert store.apply_checks(g['id'], checks)['phase'] == 'evidence_changed'
 
 
+def test_budget_limit_stops_with_one_deterministic_wrapup(tmp_path):
+    store = TaskStore(tmp_path)
+    g, r = active(store, maxIterations=1)
+    checks = [{**g['criteria'][0], 'state': 'failed'}, {**g['criteria'][1], 'state': 'pending'}]
+    store.finish(r['id'], owner='worker', checks=checks)
+    assert store.claim('worker') is None
+    saved = store.get('goals', g['id'])
+    assert (saved['status'], saved['phase']) == ('blocked', 'budget')
+    messages = [m for m in store.session_snapshots()[0]['messages'] if m.get('turnId') == 'goal-budget-' + g['id']]
+    assert len(messages) == 1
+    assert '这不是完成' in messages[0]['content'] and '下一步' in messages[0]['content']
+    # A repeated limit check must not duplicate the wrap-up or change state.
+    store.conclude_budget(g['id'], '重复调用')
+    messages = [m for m in store.session_snapshots()[0]['messages'] if m.get('turnId') == 'goal-budget-' + g['id']]
+    assert len(messages) == 1
+
+
+def test_tool_limit_wrapup_and_late_settlement_keeps_budget(tmp_path):
+    store = TaskStore(tmp_path)
+    g, r = active(store, maxTools=1)
+    assert store.guard('chat', 'provider', 'one', 'read')['allowed']
+    assert not store.guard('chat', 'provider', 'two', 'exec')['allowed']
+    saved = store.get('goals', g['id'])
+    assert (saved['status'], saved['phase']) == ('blocked', 'budget')
+    wrap = [m for m in store.session_snapshots()[0]['messages'] if m.get('turnId') == 'goal-budget-' + g['id']]
+    assert len(wrap) == 1 and '工具1/1' in wrap[0]['content']
+    # A late settlement cannot revive the stopped goal or erase the budget phase.
+    store.finish(r['id'], owner='worker', state='stopped')
+    saved = store.get('goals', g['id'])
+    assert (saved['status'], saved['phase']) == ('blocked', 'budget')
+
+
 def test_history_recheck_cannot_replace_new_current_goal(tmp_path):
     store=TaskStore(tmp_path)
     g,r=active(store)
@@ -189,6 +224,28 @@ def ts(value):
 ])
 def test_wall_clock_schedules(kind, start, expected):
     assert next_time({'kind': kind}, ts(start)) == ts(expected)
+
+
+def test_monthly_schedule_skips_short_months():
+    rule = {'kind': 'monthly', 'timezone': 'Asia/Shanghai', 'time': '09:00', 'day': 1}
+    # 2026-10-20 08:00 Asia/Shanghai -> next slot is 2026-11-01 09:00 CST.
+    assert next_time(rule, ts('2026-10-20T00:00:00+00:00')) == ts('2026-11-01T01:00:00+00:00')
+    rule['day'] = 31
+    assert next_time(rule, ts('2026-01-30T00:00:00+00:00')) == ts('2026-01-31T01:00:00+00:00')
+    # February has no 31st; the rule skips it instead of clamping to Feb 28.
+    assert next_time(rule, ts('2026-02-01T00:00:00+00:00')) == ts('2026-03-31T01:00:00+00:00')
+    assert latest_time(rule, ts('2026-03-15T00:00:00+00:00')) == ts('2026-01-31T01:00:00+00:00')
+    assert latest_time(rule, ts('2026-01-15T00:00:00+00:00')) == ts('2025-12-31T01:00:00+00:00')
+    assert upcoming(rule, ts('2026-03-15T00:00:00+00:00'), 2) == [
+        ts('2026-03-31T01:00:00+00:00'), ts('2026-05-31T01:00:00+00:00')]
+
+
+def test_monthly_dst_missing_time_is_skipped():
+    rule = {'kind': 'monthly', 'timezone': 'America/New_York', 'time': '02:30', 'day': 10}
+    # 2024-03-10 02:30 does not exist (spring forward); 2024-04-10 runs normally.
+    assert next_time(rule, ts('2024-03-01T00:00:00+00:00')) == ts('2024-04-10T06:30:00+00:00')
+    with pytest.raises(ValidationError):
+        Schedule(kind='monthly', day=32)
 
 
 def test_dst_missing_hour_skipped_and_fold_only_once():

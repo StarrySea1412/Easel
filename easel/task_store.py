@@ -159,6 +159,35 @@ class TaskStore:
                 self._goal(db, g)
             return g
 
+    @staticmethod
+    def _budget_summary(g, reason):
+        done = sum(s['status'] == 'completed' for s in g.get('steps', []))
+        passed = sum(c.get('state') == 'passed' for c in g.get('checks', []))
+        return ('目标已达执行上限，已停止自动推进（这不是完成）。\n'
+                f"目标：{g['title']}\n"
+                f"用量：{g['iterations']}/{g['maxIterations']}轮 · {int(g['activeSeconds'])}/{g['maxSeconds']}秒 · "
+                f"工具{g['toolsUsed']}/{g['maxTools']} · 生图{g['imagesUsed']}/{g['maxImages']}\n"
+                f"进度：步骤{done}/{len(g.get('steps', []))}完成 · 验收{passed}/{len(g['criteria'])}通过\n"
+                f"阻塞：{reason}\n"
+                '下一步：核对验收记录与产物；需要继续时请调整执行上限后新建目标。')
+
+    def _conclude_budget(self, db, g, reason):
+        """Limit reached: stop substantive work and leave one honest wrap-up."""
+        g.update(status='blocked', phase='budget', reason=reason)
+        text = self._budget_summary(g, reason)
+        db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], 'goal-budget-' + g['id'], json.dumps({
+            'role': 'assistant', 'content': text, 'turnId': 'goal-budget-' + g['id'], 'taskGoalId': g['id']}, ensure_ascii=False)))
+        self._goal(db, g)
+        self._event(db, g['sessionId'], 'goal_budget', {'goalId': g['id'], 'reason': reason})
+        return g
+
+    def conclude_budget(self, key, reason):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if g['status'] != 'active':
+                return g
+            return self._conclude_budget(db, g, reason)
+
     def snapshot(self, session=None):
         with self.db() as db:
             where, args = (' WHERE session=?', (session,)) if session else ('', ())
@@ -237,7 +266,7 @@ class TaskStore:
                     r = json.loads(row['data'])
                 else:
                     if g['iterations'] >= g['maxIterations'] or g['activeSeconds'] >= g['maxSeconds']:
-                        g.update(status='blocked', phase='budget', reason='已达到目标轮次或时长上限。'); self._goal(db, g); continue
+                        self._conclude_budget(db, g, '已达到目标轮次或时长上限。'); continue
                     r = {'id': ident(), 'goalId': g['id'], 'sessionId': session,
                          'turnId': 'goal-' + ident(), 'iteration': g['iterations'] + 1,
                          'revision': g['revision'], 'stopEpoch': g['stopEpoch'], 'createdAt': self.clock()}
@@ -281,7 +310,7 @@ class TaskStore:
                      finishedAt=self.clock(), checks=checks or [], reason=reason)
             db.execute('UPDATE runs SET state=?,data=? WHERE id=?', (r['state'], json.dumps(r, ensure_ascii=False), run))
             db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], r['turnId'], json.dumps({
-                'role': 'assistant', 'content': text or reason or ('本轮已停止，未自动续跑。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
+                'role': 'assistant', 'content': text or reason or ('本轮被中断，目标已暂停，可从当前记录继续。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
                 'requestedModelRef': r.get('modelRef'), 'taskRunId': r['id']}, ensure_ascii=False)))
             g['activeSeconds'] += max(0, self.clock() - r.get('countedAt', r['startedAt']))
             r['countedAt'] = self.clock()
@@ -291,7 +320,13 @@ class TaskStore:
             if not resource_settled:
                 g.update(status='blocked', phase='unconfirmed', reason=reason or '外部资源未结算，未自动重发。')
             elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
-                g['phase'] = 'idle'  # A late result cannot restart a paused/replaced goal.
+                # A late result cannot restart a paused/replaced goal; an already
+                # written budget wrap-up keeps its phase.
+                if g['phase'] != 'budget':
+                    g['phase'] = 'idle'
+            elif state == 'stopped':
+                # Interruptions pause the objective; records stay valid for resume.
+                g.update(status='paused', phase='idle', reason=reason or '本轮被中断，目标已暂停；继续时从当前记录恢复。')
             elif state != 'completed':
                 g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
             elif not valid_checks(g, checks) or any(c['state'] == 'error' for c in checks):
@@ -365,13 +400,12 @@ class TaskStore:
     def reserve_chat(self, session, turn):
         with self.db() as db:
             if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('queued','running','unconfirmed')", (session,)).fetchone():
-                raise TaskConflict('目标仍有后台工作，请先停止目标并等待确认，再发送消息。')
+                raise TaskConflict('目标轮次正在运行或等待结算，本条消息尚未发送；请稍候，或先在目标面板暂停。')
             row = db.execute('SELECT turn FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone()
             if row and row[0] != turn:
                 raise TaskConflict('该会话仍有运行，请等待或停止。')
-            # Human input pauses automatic continuation before acquiring the session.
-            for row in db.execute("SELECT data FROM goals WHERE session=? AND status='active'", (session,)).fetchall():
-                g = json.loads(row[0]); g.update(status='paused', reason='用户接管对话，已暂停自动推进。'); g['stopEpoch'] += 1; self._goal(db, g)
+            # Human input takes priority without cancelling the goal: holding the
+            # chat lease defers continuation to the next idle safe boundary.
             db.execute('INSERT OR REPLACE INTO chat_leases VALUES(?,?,?)', (session, turn, self.clock() + 7200))
 
     def release_chat(self, session, turn):
@@ -479,7 +513,7 @@ class TaskStore:
             if db.execute('SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():
                 return {'allowed': True}
             if g['toolsUsed'] >= g['maxTools']:
-                g.update(status='blocked', phase='budget', reason='工具调用已达到目标上限，正在停止。'); self._goal(db, g)
+                self._conclude_budget(db, g, '工具调用已达到目标上限，正在停止。')
                 return {'allowed': False, 'reason': '目标工具调用已达上限。'}
             db.execute('INSERT INTO tool_reservations VALUES(?,?)', (g['id'], reservation))
             if tool not in ('easel_goal_update', 'easel_task_guard'):

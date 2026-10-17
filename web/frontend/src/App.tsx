@@ -129,6 +129,7 @@ export default function App() {
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
   const [outputFilter, setOutputFilter] = useState('');
   const [outputJumpPath, setOutputJumpPath] = useState('');
+  const [automationDraft, setAutomationDraft] = useState<{objective?:string;title?:string}|null>(null);
   useEffect(() => {
     const navigateOutput = () => {
       if (!window.location.hash.startsWith('#/outputs/')) return;
@@ -1226,6 +1227,7 @@ export default function App() {
                 }
               }
             }}
+            onScheduleDraft={(text) => { setAutomationDraft(text ? { objective: text } : {}); setCurrentPage('automation'); }}
           />
         ) : (
           <section className="chat-page chat-no-session" aria-label="开始新对话">
@@ -1237,7 +1239,7 @@ export default function App() {
       case 'trends':
         return <TrendsPage onUseTopic={handleUseTopic} />;
       case 'automation':
-        return <AutomationPage sessions={sessions} sessionId={activeSessionId} onOpen={id=>{void taskRequest<{sessions:ChatSession[]}>('/sessions').then(remote=>{setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);saveSessions(next);return next;});setTaskRevision(v=>v+1);setActiveSessionId(id);setCurrentPage('chat');}).catch(e=>showToast(e instanceof Error?e.message:'对话暂不可读','error'));}}/>;
+        return <AutomationPage sessions={sessions} sessionId={activeSessionId} initialDraft={automationDraft} onDraftConsumed={()=>setAutomationDraft(null)} onOpen={id=>{void taskRequest<{sessions:ChatSession[]}>('/sessions').then(remote=>{setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);saveSessions(next);return next;});setTaskRevision(v=>v+1);setActiveSessionId(id);setCurrentPage('chat');}).catch(e=>showToast(e instanceof Error?e.message:'对话暂不可读','error'));}}/>;
       case 'ideas':
         return <IdeasPage onUseTopic={handleUseTopic} />;
       case 'calendar':

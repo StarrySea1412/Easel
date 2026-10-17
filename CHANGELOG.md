@@ -1,3 +1,11 @@
+## 2026-10-17 · Goals and schedules aligned with Codex / 目标与定时任务对标 Codex
+
+- Add the Codex lifecycle command surface: `/goal` views the current goal, `/goal pause|resume|clear` (暂停/继续/清除) act locally without sending model messages, and the `/` menu lists the commands that match the goal's state with keyboard selection. / 增加 Codex 生命周期命令面：`/goal` 查看当前目标，`/goal pause|resume|clear`（暂停/继续/清除）在对话内本地执行不发给模型，`/` 菜单按目标状态列出可用命令并支持键盘选择。
+- User messages now take priority without cancelling the goal; only a live goal round blocks sending, and interruptions pause the objective so it can resume from the recorded state. / 用户消息优先且不再取消目标，仅目标轮次运行中暂不能插话；中断即暂停目标，可从当前记录继续。
+- Reaching any execution limit stops substantive work with one deterministic wrap-up (usage, progress, blocker, next step) and never marks the goal complete. / 达到轮次/时长/工具上限时写入一次确定性收尾（用量、进度、阻塞、下一步），明确“达上限≠完成”。
+- Scheduled plans add a monthly rule (day of month 1–31, short months skipped, DST-safe preview) and a “needs attention” marker from the latest run; `/定时 <text>` opens the plan form prefilled from chat. / 定时计划新增每月规则（1–31 号、短月跳过、DST 安全预览）与按最近运行标记“需要处理”；对话内 `/定时 <正文>` 打开预填的计划表单。
+- Verified 118 backend checks, 1,072 frontend tests, production build, lint (existing warnings only) and isolated browser acceptance on 7896, which caught and fixed a cancelled goal still showing the budget label. No paid model, 138 deployment or installer update. / 已验证 118 项后端、前端 1072 项、生产构建、lint（仅既有警告）与 7896 隔离浏览器验收；验收中发现并修复“已取消目标仍显示已达执行上限”，未调用付费模型、未部署 138、未更新安装包。
+
 ## 2026-10-17 · Inline goal composer correction / 目标入口纠正
 
 ### 2026-10-17 · Conversation status dots / 对话状态点

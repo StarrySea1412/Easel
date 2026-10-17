@@ -9,6 +9,8 @@ import MessageBubble from './MessageBubble';
 import ChatArtifacts from './ChatArtifacts';
 import ChatGoalPanel from './ChatGoalPanel';
 import { type TaskSnapshot, type TaskGoal } from '../lib/tasks';
+import { taskRequest } from '../lib/tasks';
+import { showToast } from '../lib/toast';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
@@ -47,6 +49,7 @@ interface ChatPageProps {
   onNewChat?: () => void;
   onOpenModels?: (modelRef?: string) => void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
+  onScheduleDraft?: (text: string) => void;            // 对话内提交定时任务草稿（App 切到定时任务页）
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
@@ -66,18 +69,38 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
-  const taskBusy=goal?.status==='active'||taskRuns.some(r=>['queued','running','unconfirmed'].includes(r.state));
+  const taskLive=taskRuns.some(r=>['queued','running','unconfirmed'].includes(r.state));
+  const taskBusy=goal?.status==='active'||taskLive;
+  const goalActive=goal?.status==='active';
   const [panelOpen,setPanelOpen]=useState(true);
   const [goalEditor,setGoalEditor]=useState<{seed?:string;modelRef?:string;onConfigured?:()=>void;goal?:TaskGoal;welcome?:boolean}|null>(null);
   useEffect(()=>{setPanelOpen(true);setGoalEditor(null);},[session.id]);
   const openGoal=(seed?:string,modelRef?:string,onConfigured?:()=>void)=>{
     setPanelOpen(true);
-    if(taskBusy){setGoalEditor(null);return;}
+    if(taskLive){setGoalEditor(null);return;}
     if(!goal||seed||['completed','cancelled'].includes(goal.status))setGoalEditor({seed,modelRef,onConfigured,goal:goal&&!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty});
+  };
+  /** Codex-style /goal with no text: view the current goal, otherwise start setup. */
+  const viewGoal=()=>{
+    if(goal&&!['completed','cancelled'].includes(goal.status)){setPanelOpen(true);setGoalEditor(null);}
+    else openGoal();
+  };
+  /** Local lifecycle actions from /goal pause|resume|clear and the command menu. */
+  const runGoalAction=async(action:'pause'|'resume'|'clear')=>{
+    if(!goal){showToast('当前对话还没有目标；输入 /goal 描述目标后再操作。','info');return;}
+    if(action==='pause'&&!goalActive){showToast('目标当前不在推进中。','info');return;}
+    if(action==='resume'&&goalActive){showToast('目标已在推进中。','info');return;}
+    try{
+      // pause reuses the panel's stop path so a live round is interrupted too.
+      const mapped=action==='pause'?'stop':action==='resume'?(goal.status==='draft'?'start':'resume'):'cancel';
+      await taskRequest(`/goals/${goal.id}/action`,{action:mapped});
+      onTaskChange?.();
+      showToast(action==='pause'?'目标已暂停；继续时输入 /goal resume。':action==='resume'?'目标已继续，将从当前记录恢复。':'目标已清除，历史与产物记录保留。','success');
+    }catch(e){showToast(e instanceof Error?e.message:'目标操作失败，请重试。','error');}
   };
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
   const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${goal&&panelOpen&&!goalEditor&&!session.importedFromBackup?' has-goal-panel':''}`}>
@@ -171,7 +194,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskBusy} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           {!goalEditor&&<div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -289,7 +312,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskBusy} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} />
         </div>}
       </div>}
     </div>

@@ -56,12 +56,13 @@ class GoalProgress(BaseModel):
 
 class Schedule(BaseModel):
     model_config = {'extra': 'forbid'}
-    kind: Literal['once', 'interval', 'daily', 'workdays', 'weekly']
+    kind: Literal['once', 'interval', 'daily', 'workdays', 'weekly', 'monthly']
     timezone: str = 'Asia/Shanghai'
     at: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     minutes: int = Field(default=60, ge=5, le=10080, strict=True)
     time: str = Field(default='09:00', pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     weekdays: list[int] = Field(default_factory=lambda: [0], min_length=1, max_length=7)
+    day: int = Field(default=1, ge=1, le=31, strict=True)
 
     @model_validator(mode='after')
     def validate_rule(self):
@@ -88,6 +89,23 @@ def next_time(rule, after):
     tz = ZoneInfo(s.timezone)
     local = datetime.fromtimestamp(after, tz)
     h, m = map(int, s.time.split(':'))
+    if s.kind == 'monthly':
+        # Same shape as Codex's monthly example (BYMONTHDAY=1;BYHOUR=9). Months
+        # without the selected day are skipped, not clamped.
+        for delta in range(15):
+            index = local.year * 12 + (local.month - 1) + delta
+            year, month = divmod(index, 12)
+            try:
+                candidate = datetime(year, month + 1, s.day, h, m, tzinfo=tz, fold=0)
+            except ValueError:
+                continue
+            ts = candidate.timestamp()
+            roundtrip = datetime.fromtimestamp(ts, tz)
+            if roundtrip.replace(tzinfo=None) != candidate.replace(tzinfo=None):
+                continue
+            if ts > after:
+                return ts
+        return None
     for delta in range(9):
         date = local.date() + timedelta(days=delta)
         if s.kind == 'workdays' and date.weekday() > 4:
@@ -124,6 +142,14 @@ def latest_time(rule, now):
         if s.kind == 'once':
             return s.at
         return s.at + int((now - s.at) // (s.minutes * 60)) * s.minutes * 60
+    if s.kind == 'monthly':
+        current, latest = now - 70 * 86400, None
+        for _ in range(5):
+            current = next_time(s, current)
+            if current is None or current > now:
+                break
+            latest = current
+        return latest
     current, latest = now - 9 * 86400, None
     for _ in range(12):
         current = next_time(s, current)

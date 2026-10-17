@@ -76,7 +76,11 @@ def test_failed_or_stopped_round_cannot_be_approved_by_api(tmp_path, state):
             assert response.status_code == 409
             assert '成功结束' in response.json()['detail']
     saved = store.get('goals', g['id'])
-    assert saved['phase'] == 'run_failed' and saved['status'] == 'blocked'
+    if state == 'stopped':
+        # Interruptions pause the objective instead of failing it.
+        assert saved['status'] == 'paused' and saved['phase'] == 'idle'
+    else:
+        assert saved['phase'] == 'run_failed' and saved['status'] == 'blocked'
     assert not saved.get('reviewedTurnId')
     assert not marker.exists()
 

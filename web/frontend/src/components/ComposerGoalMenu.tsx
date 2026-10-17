@@ -1,7 +1,8 @@
 import {useLayoutEffect,useRef,useState,type RefObject} from 'react';
 import {createPortal} from 'react-dom';
 
-export default function ComposerGoalMenu({id,anchor,onChoose}:{id:string;anchor:RefObject<HTMLTextAreaElement|null>;onChoose:()=>void}) {
+export interface ComposerCommandItem { id:string; label:string; hint:string; keys:string }
+export default function ComposerGoalMenu({id,anchor,items,selected,onSelect,onChoose}:{id:string;anchor:RefObject<HTMLTextAreaElement|null>;items:ComposerCommandItem[];selected:number;onSelect:(index:number)=>void;onChoose:(id:string)=>void}) {
   const menu=useRef<HTMLDivElement>(null);
   const [position,setPosition]=useState({left:12,top:12,width:300});
   useLayoutEffect(()=>{
@@ -10,11 +11,11 @@ export default function ComposerGoalMenu({id,anchor,onChoose}:{id:string;anchor:
       setPosition({left:Math.max(12,Math.min(a.left,window.innerWidth-width-12)),top:Math.max(12,a.top-m.offsetHeight-8),width});};
     place();window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
     return()=>{window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);};
-  },[anchor]);
+  },[anchor,items.length]);
   return createPortal(<div ref={menu} id={id} className="composer-command-menu" role="listbox" aria-label="对话命令" style={position}>
     <div className="composer-command-heading">对话命令</div>
-    <button id={`${id}-goal`} type="button" role="option" aria-selected="true" onMouseDown={e=>e.preventDefault()} onClick={onChoose}>
-      <span className="goal-symbol" aria-hidden="true">◎</span><span><strong>目标</strong><small>设置要持续追求的目标</small></span><kbd>/goal</kbd>
-    </button>
+    {items.map((item,index)=><button key={item.id} id={`${id}-${item.id}`} type="button" role="option" aria-selected={index===selected} onMouseEnter={()=>onSelect(index)} onMouseDown={e=>e.preventDefault()} onClick={()=>onChoose(item.id)}>
+      <span className="goal-symbol" aria-hidden="true">◎</span><span><strong>{item.label}</strong><small>{item.hint}</small></span><kbd>{item.keys}</kbd>
+    </button>)}
   </div>,document.body);
 }

@@ -5,7 +5,7 @@ import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'https://easel.test/'});globalThis.document=window.document;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
-const {mergeTaskSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
+const {mergeTaskSessions,planNeedsAttention}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
 const {default:GoalOptions}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
@@ -97,4 +97,30 @@ test('inline goal never silently substitutes an unavailable explicit model and d
   await act(async()=>root.render(createElement(GoalComposer,{...props,blocked:true})));
   assert.match(host.textContent,/请先暂停/);assert.equal(host.querySelector('.btn-primary').disabled,true);
   await act(async()=>root.unmount());host.remove();
+});
+
+test('budget-limited goal shows the limit state and active goals explain user-message priority',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  await act(async()=>root.render(createElement(GoalPanel,{goal:{...goal,status:'blocked',phase:'budget',reason:'已达到目标轮次或时长上限。'},runs:[],onChanged:()=>{},onClose:()=>{},onEdit:()=>{}})));
+  assert.match(host.textContent,/已达执行上限/);
+  assert.match(host.textContent,/已达到目标轮次或时长上限。/);
+  assert.ok(!host.textContent.includes('已完成'));
+  await act(async()=>root.render(createElement(GoalPanel,{goal:{...goal,status:'active',phase:'queued',reason:''},runs:[],onChanged:()=>{},onClose:()=>{},onEdit:()=>{}})));
+  assert.match(host.textContent,/你的消息会优先处理/);
+  assert.match(host.textContent,/\/goal pause/);
+  // A terminal goal keeps its real state even when the phase still says budget.
+  await act(async()=>root.render(createElement(GoalPanel,{goal:{...goal,status:'cancelled',phase:'budget',reason:'已取消'},runs:[],onChanged:()=>{},onClose:()=>{},onEdit:()=>{}})));
+  assert.match(host.textContent,/已取消/);
+  assert.ok(!host.textContent.includes('已达执行上限'));
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('plan attention follows the latest triggered run without inventing unread state',()=>{
+  const schedule={kind:'monthly',timezone:'Asia/Shanghai',time:'09:00',minutes:60,weekdays:[0],day:1};
+  const history=[{at:1,status:'queued',reason:'',trigger:'schedule',goalId:'g1'}];
+  const plan={id:'p1',title:'月度盘点',enabled:true,nextAt:2,goal,schedule,missedPolicy:'skip',freshnessSeconds:900,history};
+  assert.equal(planNeedsAttention(plan,[{...goal,id:'g1',status:'active'}]),false);
+  assert.equal(planNeedsAttention(plan,[{...goal,id:'g1',status:'blocked'}]),true);
+  assert.equal(planNeedsAttention(plan,[]),false);
+  assert.equal(planNeedsAttention({...plan,history:[]},[{...goal,id:'g1',status:'blocked'}]),false);
 });

@@ -188,7 +188,7 @@ class TaskService:
                 if not stopping and (current['status'] != 'active' or expired):
                     stopping = True
                     if expired:
-                        await asyncio.to_thread(store.block, g['id'], '已达到目标时长上限，正在停止后台运行。', 'budget')
+                        await asyncio.to_thread(store.conclude_budget, g['id'], '已达到目标时长上限，正在停止后台运行。')
                     await web.api_chat_stop(web.StopRequest(sessionId=g['sessionId'], turnId=r['turnId']))
                 if await self.settle(r):
                     return
