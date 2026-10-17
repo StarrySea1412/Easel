@@ -1,3 +1,10 @@
+## 2026-10-18 · “Skill 核验”改为悬停展示并先回答“有没有调用”
+
+- `ChatSkillEvidence` 重写：芯片改为 hover/focus 弹出浮层（`useAnchoredPanel` 定位 above、外点/Escape/page-navigation 关闭；指针可移入浮层不消失，220ms 离开延迟；点击切换“钉住”供触屏）；删除内联点击展开与 `.chat-skill-tooltip` 单行气泡。
+- 首次打开自动加载本轮核验（`autoLoaded` 只触发一次；失败显示“重新读取”，不循环请求）；摘要行优先回答调用结果：「本轮已调用：A、B」或「本轮未观察到 Skill 调用证据」或「未找到本轮持久核验记录…不代表没有执行」；行内改为非折叠 div，已调用技能排前，保留执行成功（有证据）/失败/已尝试/已读取说明/未见证据 的区分与证据条目；“查看运行记录 →”保留。
+- CSS：`.chat-skill-evidence` 增加 `.is-floating`（`position:fixed; z-index:60; max-height:min(60vh,420px); overflow:auto`），新增 `.chat-skill-verdict`，`.chat-skill-row summary` 改 `.chat-skill-row-head`，清理 tooltip 与内联容器死样式。
+- 测试：`message-bubble` 两用例重写/新增——hover 打开+离开 220ms 后关闭+“已读取说明≠调用”；未加载记录时 hover 自动加载一次并显示「本轮已调用：card-quote」与证据。前端全量 1087 项、构建、lint（0错误/18既有warning）通过。
+
 ## 2026-10-18 · 通知面板行右侧改版
 
 - `EventNotificationCenter`：未读点从右侧状态列移入元信息行的右组（`.event-meta-right`，时间右侧内联）；右侧 `.event-row-state` 只保留“标为已读”勾按钮。

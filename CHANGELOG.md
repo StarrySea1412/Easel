@@ -1,3 +1,8 @@
+## 2026-10-18 · Skill verification opens on hover and leads with what was called / “Skill 核验”改为悬停展示并先回答“有没有调用”
+
+- The chip's evidence panel no longer needs a click: hover or focus opens a floating panel (the pointer can move into it; click pins it for touch; Escape/outside closes), and it loads the turn's audit automatically on first open — showing “本轮已调用：A、B” with per-skill 执行成功（有证据）/失败/已尝试/已读取说明 states plus evidence bullets, or the honest “未观察到 Skill 调用证据 / 未找到本轮记录” line; 查看运行记录 stays. / 芯片证据面板不再需要点击：悬停或聚焦弹出浮层（指针可移入；点击可钉住供触屏；Escape/外点关闭），首次打开自动加载本轮核验——先给出“本轮已调用：A、B”，逐技能显示执行成功（有证据）/失败/已尝试/已读取说明与证据条目，或如实显示“未观察到调用证据/未找到本轮记录”；“查看运行记录 →”保留。
+- Reading a guide is explicitly not an invocation; a failed load offers 重新读取 instead of looping requests. 1,087 frontend tests, build, lint (0 errors). / 读取说明不等于执行；加载失败提供“重新读取”而不循环请求。前端 1087 项、构建、lint（0 错误）。
+
 ## 2026-10-18 · One right-edge action per notification row / 通知行右侧不再竖排堆叠
 
 - The unread dot moved next to the timestamp in the meta line, and the right column now holds only the centered “mark read” check — no more dot stacked above the check. Unread/read semantics, aria labels, filters and “全部已读” stay unchanged. / 未读点移到元信息行时间右侧，右侧只保留居中的“标为已读”勾按钮，不再上下堆叠；未读/已读语义、无障碍标签、过滤与“全部已读”不变。

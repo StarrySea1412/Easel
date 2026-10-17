@@ -135,7 +135,7 @@ test('assistant error renders an alert with code and authentication guidance', a
   assert.match(alert.textContent, /请先检查服务凭据与授权/);
 });
 
-test('skill status shares the copy/retry action bar; explanation is a tooltip and evidence opens on request', async t => {
+test('skill status shares the copy/retry action bar; the evidence panel opens on hover with the invocation verdict', async t => {
   const container = await mount(t, {
     message: { role: 'assistant', content: '内容' },
     actions: { onCopy() {}, onRetry() {}, canModify: true },
@@ -149,14 +149,41 @@ test('skill status shares the copy/retry action bar; explanation is a tooltip an
   assert.equal(container.querySelectorAll('.msg-actions').length, 1);
   assert.ok(bar.contains(icon));
   assert.equal(bar.querySelectorAll('.msg-action').length, 2);
-  assert.equal(container.querySelector('.chat-skill-evidence'), null);
   assert.equal(icon.getAttribute('aria-expanded'), 'false');
-  assert.match(container.querySelector('[role="tooltip"]').textContent, /card-quote：已读取说明/);
-  assert.equal(icon.getAttribute('aria-describedby'), container.querySelector('[role="tooltip"]').id);
-  await act(async () => icon.click());
+  assert.equal(document.querySelector('.chat-skill-evidence'), null);
+  assert.match(icon.getAttribute('aria-label'), /card-quote：已读取说明/);
+  await act(async () => { icon.dispatchEvent(new window.PointerEvent('pointerover', { bubbles: true })); });
   assert.equal(icon.getAttribute('aria-expanded'), 'true');
-  assert.ok(bar.querySelector('.chat-skill-evidence'));
-  assert.match(bar.textContent, /选择 Skill 或读取说明不等于执行成功/);
-  await act(async () => icon.click());
-  assert.equal(container.querySelector('.chat-skill-evidence'), null);
+  const panel = document.querySelector('.chat-skill-evidence');
+  assert.ok(panel, 'hover opens the floating evidence panel');
+  assert.match(panel.textContent, /本轮未观察到 Skill 调用证据/, 'reading a guide is not an invocation');
+  assert.match(panel.textContent, /选择 Skill 或读取说明不等于执行成功/);
+  await act(async () => { icon.dispatchEvent(new window.PointerEvent('pointerout', { bubbles: true })); });
+  await act(async () => new Promise(resolve => setTimeout(resolve, 260)));
+  assert.equal(document.querySelector('.chat-skill-evidence'), null, 'leaving the pointer closes the panel');
+});
+
+test('opening an unloaded skill verdict loads the audit once and reports what was actually called', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /\/api\/skill-audits\?/);
+    calls += 1;
+    return { ok: true, json: async () => ({ records: [{ sessionId: 'sample', turnId: 'turn', status: 'complete', invocation: [{ skill: 'card-quote', status: 'executed', evidence: [{ summary: '调用了 card-quote 工具' }] }] }] }) };
+  });
+  const container = await mount(t, {
+    message: { role: 'assistant', content: '内容' },
+    status: createElement(ChatSkillEvidence, { sessionId: 'sample', turnId: 'turn', streaming: false, selectedSkills: ['card-quote'] }),
+  });
+  const icon = container.querySelector('.chat-skill-status-icon');
+  await act(async () => { icon.dispatchEvent(new window.PointerEvent('pointerover', { bubbles: true })); });
+  await act(async () => new Promise(resolve => setTimeout(resolve, 30)));
+  const panel = document.querySelector('.chat-skill-evidence');
+  assert.ok(panel, 'the panel opens without a click');
+  assert.equal(calls, 1, 'opening loads the audit automatically, once');
+  assert.match(panel.textContent, /本轮已调用：card-quote/);
+  assert.match(panel.textContent, /执行成功（有证据）/);
+  assert.match(panel.textContent, /调用了 card-quote 工具/);
+  await act(async () => { panel.dispatchEvent(new window.PointerEvent('pointerout', { bubbles: true })); });
+  await act(async () => new Promise(resolve => setTimeout(resolve, 260)));
+  assert.equal(document.querySelector('.chat-skill-evidence'), null);
 });
