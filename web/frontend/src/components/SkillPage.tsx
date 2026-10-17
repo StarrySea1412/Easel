@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import type { ComponentType } from 'react';
 import { fetchSkills } from '../lib/api';
 import type { SkillItem } from '../lib/api';
@@ -96,8 +96,50 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
   const orderedLayers = [...LAYERS, OTHER].filter((l) => grouped[l.key]?.length);
   const needApiCount = (skills || []).filter((s) => s.needsApi && !s.apiConfigured).length;
 
+  // 左侧分区侧边栏：锚点跳转 + 滚动跟随高亮（页面自身是滚动容器）。
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [activeSection, setActiveSection] = useState('');
+  const layerSignature = orderedLayers.map((layer) => layer.key).join('|');
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const keys = layerSignature ? layerSignature.split('|') : [];
+    const update = () => {
+      let current = keys[0] || '';
+      for (const key of keys) {
+        const node = sectionRefs.current[key];
+        if (node && node.offsetTop - 32 <= page.scrollTop) current = key;
+      }
+      setActiveSection(current);
+    };
+    update();
+    page.addEventListener('scroll', update, { passive: true });
+    return () => page.removeEventListener('scroll', update);
+  }, [layerSignature]);
+  const jumpToSection = (key: string) => {
+    const node = sectionRefs.current[key];
+    setActiveSection(key);
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const showSectionNav = source === 'installed' && skills !== null && orderedLayers.length > 0;
+  const currentSection = activeSection || orderedLayers[0]?.key || '';
   return (
-    <div className="skills-page">
+    <div className="skills-page" ref={pageRef}>
+      <div className={`skills-layout${showSectionNav ? '' : ' is-single'}`}>
+        {showSectionNav && <nav className="skills-section-nav" aria-label="技能分区导航">
+          {orderedLayers.map((layer) => (
+            <button key={layer.key} type="button" className={`skills-nav-item${currentSection === layer.key ? ' is-active' : ''}`}
+              aria-current={currentSection === layer.key ? 'true' : undefined} onClick={() => jumpToSection(layer.key)}>
+              <span className="skills-nav-ic" style={{ color: layer.color }}><layer.Icon size={14} /></span>
+              <span>{layer.label}</span>
+              <small>{grouped[layer.key].length}</small>
+            </button>
+          ))}
+          <button type="button" className="skills-nav-top" onClick={() => pageRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}>回到顶部 ↑</button>
+        </nav>}
+        <div className="skills-main">
       <div className="skills-page-head">
         <h1 className="page-title"><IconSkills size={22} aria-hidden={true} />技能库</h1>
         <p className="page-subtitle">
@@ -151,7 +193,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
         )}
 
         {orderedLayers.map((layer) => (
-          <section key={layer.key}>
+          <section key={layer.key} ref={(node) => { sectionRefs.current[layer.key] = node; }}>
             <div className="section-title">
               <span className="section-ic" style={{ color: layer.color }}><layer.Icon size={15} /></span>
               {layer.label}
@@ -200,6 +242,8 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           onConfigured={load}
         />
       )}
+        </div>
+      </div>
     </div>
   );
 }

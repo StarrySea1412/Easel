@@ -1,3 +1,10 @@
+## 2026-10-18 · 技能库分区侧边栏（锚点跳转＋滚动跟随）
+
+- `SkillPage`：整页改为 `skills-layout` 网格（左 184px 侧栏＋主列；未显示侧栏时 `is-single` 单列，外观不变）；新增 `.skills-section-nav`（层图标/名称/计数、`aria-current` 高亮、点击 `scrollIntoView` 平滑跳转、“回到顶部”）；`skills-page` 作为滚动容器监听滚动计算当前分区；分区 `<section>` 增加 ref；<900px 隐藏侧栏。
+- `index.css` 追加侧栏与网格样式（粘性、焦点环、窄屏隐藏）。
+- 测试：新增 `skill-page-sections.test.mjs`——断言条目与计数、初始高亮第一分区、点击跳转（`scrollIntoView` 断言）与高亮跟随（显式注入 offsetTop，规避 jsdom 无布局）；前端全量 1097 项、构建、lint（0错误/18既有warning）通过。
+- 7880 重建 dist 后浏览器核对（侧栏出现、点击“发布/发现”跳转、高亮跟随）+ 截图。
+
 ## 2026-10-18 · 容量依据收进 ⓘ 悬停
 
 - `ChatContextUsage`：`.context-window-facts` 块移除；总量行右侧新增 `InlineInfo`（label=容量依据说明，wide）承载占比依据、原厂标称＋来源地址（纯文本）、运行器/会话限制与警告；`.context-usage-total` 增加 `.context-total-right` 内联组；`context-usage.css` 删除 facts 死样式。

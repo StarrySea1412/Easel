@@ -1,3 +1,8 @@
+## 2026-10-18 · A jump sidebar for the 技能库 sections / 技能库分区侧边栏直接跳转
+
+- The empty left gutter of 技能库 is now a sticky section sidebar: one row per pipeline layer (icon, name, count) that jumps straight to that section, plus 回到顶部; scrolling keeps the current section highlighted (`aria-current`), keyboard reachable, hidden under 900px without touching the existing layout. / 技能库左侧留白改为粘性分区侧边栏：每个流水线层一行（图标＋名称＋计数），点击直接跳到对应分区，并带“回到顶部”；滚动时高亮当前分区（`aria-current`）、键盘可达，<900px 隐藏且不影响现有布局。
+- 1,097 frontend tests (new deterministic section-nav case with injected geometry), build, lint (0 errors). / 前端 1097 项（新增分区导航用例，显式注入几何使滚动高亮可断言）、构建、lint（0 错误）。
+
 ## 2026-10-18 · Capacity basis moves into an ⓘ hover / “容量依据”收进 ⓘ 悬停
 
 - The context-usage panel no longer keeps the capacity-basis block on screen: an ⓘ beside the used/total percentage carries the basis line, the official window with its source address (plain text, since hover tooltips are not clickable), the runner/session limits and the early-compaction warning. The “核对模型上下文设置” button and the existing 统计口径 ⓘ stay. / 上下文容量面板不再常驻容量依据块：占用总量旁新增 ⓘ，悬停/聚焦展示占比依据、原厂标称与来源地址（纯文本——悬停浮层不可点击，如实说明）、运行器/会话限制与提前压缩警告；“核对模型上下文设置”按钮与既有 统计口径 ⓘ 不变。

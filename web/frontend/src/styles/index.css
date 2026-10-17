@@ -1650,3 +1650,20 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .model-thinking-text { font-size:12px; color:var(--text-secondary); white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; max-height:360px; overflow-y:auto; }
 .model-thinking-wait { color:var(--text-secondary); font-size:12px; }
 @media(prefers-reduced-motion:reduce) { .model-thinking-chevron { transition:none; } }
+
+/* ---- 技能库分区侧边栏（锚点跳转 + 滚动跟随） ---- */
+.skills-layout { display: grid; grid-template-columns: 184px minmax(0, 1fr); gap: 28px; max-width: 1400px; margin: 0 auto; align-items: start; }
+.skills-layout.is-single { grid-template-columns: minmax(0, 1fr); }
+.skills-section-nav { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.skills-nav-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.skills-nav-item:hover { background: var(--surface-2); color: var(--text); }
+.skills-nav-item.is-active { background: var(--surface-2); color: var(--text); font-weight: 550; }
+.skills-nav-item small { margin-left: auto; color: var(--text-tertiary); font-size: 10px; font-variant-numeric: tabular-nums; }
+.skills-nav-ic { display: inline-flex; flex: none; }
+.skills-nav-top { margin-top: 6px; padding: 6px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary); font: inherit; font-size: 11px; cursor: pointer; text-align: left; }
+.skills-nav-top:hover { background: var(--surface-2); color: var(--text); }
+.skills-nav-item:focus-visible, .skills-nav-top:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .skills-layout { grid-template-columns: minmax(0, 1fr); }
+  .skills-section-nav { display: none; }
+}
