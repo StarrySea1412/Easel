@@ -8,6 +8,7 @@ import StudioMediaSource from './StudioMediaSource';
 import StudioModelControl from './StudioModelControl';
 import { useStudioMediaInput } from '../hooks/useStudioMediaInput';
 import { firstStudioMedia, STUDIO_MEDIA_ACCEPT } from '../lib/studioClipboard';
+import ComfyVideoWorkflowPanel from './ComfyVideoWorkflowPanel';
 
 const EXAMPLES = [
   ['电影镜头', '清晨薄雾中的森林，镜头缓慢向前推进，阳光穿过树叶，电影质感。'],
@@ -15,8 +16,8 @@ const EXAMPLES = [
   ['让图片动起来', '保持主体外观与构图，镜头缓慢推进，加入轻微自然运动，画面流畅稳定。'],
 ];
 
-export default function VideoStudioPanel({ video, images, onOpenSettings }: {
-  video: VideoStudioController; images: ImagegenGalleryItem[]; onOpenSettings: () => void;
+export default function VideoStudioPanel({ video, images, onOpenSettings, sessionId }: {
+  video: VideoStudioController; images: ImagegenGalleryItem[]; onOpenSettings: () => void; sessionId?: string | null;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -76,6 +77,7 @@ export default function VideoStudioPanel({ video, images, onOpenSettings }: {
         {result && playbackError === result && <p className="image-error" role="alert">浏览器无法播放这个视频，请下载后查看，或重新生成。</p>}
       </form>
     </section>
+    <ComfyVideoWorkflowPanel prompt={video.prompt} locked={locked} sessionId={sessionId} />
     <div className="image-service-status" role="status">{video.loading ? <span>正在读取视频服务…</span> : video.configError ? <><span>视频服务读取失败：{video.configError}</span><button type="button" className="link-btn" onClick={() => void video.refresh()}>重试读取视频服务</button></>
       : !provider?.configured ? <><span>连接视频服务后，就能在这里直接生成。</span><button type="button" className="link-btn" onClick={onOpenSettings}>连接视频服务 →</button></> : <span>{provider.name} · {video.config?.billingHint}</span>}</div>
     {images.length > 0 && <details className="video-source-gallery"><summary>从最近图片选择视频参考</summary><div className="image-gallery-grid">{images.slice(0, 8).map(item => <button type="button" className="image-gallery-item" key={item.url} disabled={locked} aria-label={`用图片生成视频：${item.name}`} onClick={() => void video.useGalleryReference(item)}><img src={item.url} alt={item.name} loading="lazy" /><span>{item.name}</span></button>)}</div></details>}

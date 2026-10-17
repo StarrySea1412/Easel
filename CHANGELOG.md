@@ -20,6 +20,19 @@
 - Scheduled plans add a monthly rule (day of month 1–31, short months skipped, DST-safe preview) and a “needs attention” marker from the latest run; `/定时 <text>` opens the plan form prefilled from chat. / 定时计划新增每月规则（1–31 号、短月跳过、DST 安全预览）与按最近运行标记“需要处理”；对话内 `/定时 <正文>` 打开预填的计划表单。
 - Verified 118 backend checks, 1,072 frontend tests, production build, lint (existing warnings only) and isolated browser acceptance on 7896, which caught and fixed a cancelled goal still showing the budget label. No paid model, 138 deployment or installer update. / 已验证 118 项后端、前端 1072 项、生产构建、lint（仅既有警告）与 7896 隔离浏览器验收；验收中发现并修复“已取消目标仍显示已达执行上限”，未调用付费模型、未部署 138、未更新安装包。
 
+## 2026-10-17 · Conversation status dots moved to the left / 对话状态点左置
+
+- Move each session status dot before the title in the sidebar, with a fixed flex slot so completed, failed and running states remain aligned when titles truncate. / 将每条会话状态点移动到侧栏标题之前，并用固定弹性占位保持标题截断时的对齐。
+- Preserve the real status normalization, tooltip/error detail, accessible label, running count, hover rename, pinning and keyboard behavior. / 保留真实状态归一、悬浮提示/错误详情、无障碍名称、运行计数、悬浮重命名、置顶和键盘操作。
+- Verified 32 focused sidebar tests, production build, lint (existing warnings only), diff check, and the local 7895 browser at desktop and 390px. / 已验证32项侧栏专项、生产构建、lint（仅既有警告）、diff检查，以及7895桌面和390px页面。
+
+## 2026-10-17 · ComfyUI 视频工作流与电影镜头提示词
+
+- Add a fail-closed ComfyUI API workflow adapter with node validation, prompt/history/view polling, cancellation semantics, MP4 verification and ArtifactStore registration. / 增加 fail-closed 的 ComfyUI API 工作流适配器，支持节点校验、prompt/history/view 轮询、取消语义、MP4 校验和 ArtifactStore 登记。
+- Add bounded cinematic prompt fields inspired by Melies' camera-language taxonomy, and add an inline ComfyUI panel in the video studio. / 增加参考 Melies 镜头语言分类的有界提示词字段，并在视频工坊加入 ComfyUI 面板。
+- Render delivered video artifacts with native controls and refresh/download actions. / 对话产物中的视频支持原生播放、刷新和下载。
+- Verified 5 backend ComfyUI tests, 1,066 frontend tests, TypeScript production build, Python compilation and diff checks. No real provider call, 138 deployment or installer release. / 已验证5项 ComfyUI 后端测试、前端1066项、生产构建、Python编译和diff检查；未调用真实服务、未部署138、未更新安装包。
+
 ## 2026-10-17 · Inline goal composer correction / 目标入口纠正
 
 ### 2026-10-17 · Conversation status dots / 对话状态点

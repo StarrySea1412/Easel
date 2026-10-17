@@ -36,6 +36,18 @@ test('HTML is visible without assistant prose, remains sandboxed and refreshes i
   assert.ok(view.requests.every(request => !/imagegen|chat\/stream/.test(request.url)));
 });
 
+test('video artifacts render an inline player and keep the refresh path', async t => {
+  const video = artifact({ name: 'result.mp4', mimeType: 'video/mp4', size: 1024 });
+  const view = await setup(t, [video]);
+  const player = view.container.querySelector('video');
+  assert.ok(player);
+  assert.equal(player.controls, true);
+  assert.match(player.getAttribute('aria-label'), /播放/);
+  assert.match(view.container.querySelector('footer a').textContent, /视频/);
+  await view.refresh();
+  assert.match(view.requests[0].url, /\/refresh\?/);
+});
+
 test('same-version image retry replaces failed image and deletion removes live preview', async t => {
   const image = artifact({ name: 'image.png', mimeType: 'image/png' });
   const view = await setup(t, [image]);

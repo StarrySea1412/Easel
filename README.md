@@ -96,6 +96,8 @@
 
 # Easel 创作工作台
 
+> **ComfyUI 视频工作流（2026-10-17）**：视频工坊已支持配置本地/局域网 ComfyUI API-format workflow，按电影镜头字段组织提示词，提交后读取队列历史并在校验 MP4 后登记到原对话产物；对话内视频可直接播放、刷新和下载。未配置 ComfyUI 时不会自动调用付费视频服务。配置字段、节点要求和验证边界见 [ComfyUI 视频工作流记录](docs/comfyui-video-workflow-2026-10-17.md)。
+
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
 [English](README_EN.md) · [当前源码](https://github.com/StarrySea1412/Easel/tree/codex/upstream-compat-2026-10-10) · [本仓库反馈](https://github.com/StarrySea1412/Easel/issues) · [更新记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)
@@ -259,7 +261,7 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 
 > **目标入口纠正（2026-10-17）**：目标设置回到当前聊天 composer 内，以同一个输入框和底部工具栏完成 `/goal`、目标编辑与启动；普通草稿、素材、技能、模型和停止入口保留，执行选项默认折叠，Escape 可返回普通对话。仅本机与隔离模拟验收，未启动付费目标、未更新 138 或安装包。[实现与验收边界](docs/goal-composer-correction-2026-10-17.md)
 
-> **对话状态点（2026-10-17）**：侧栏现在用紧凑圆点表达最近一轮状态：完成为绿点、失败为红点、运行中为蓝点；悬浮提示和无障碍名称仍保留完整状态与失败原因。
+> **对话状态点（2026-10-17）**：侧栏现在把紧凑圆点直接放在每条会话标题最左侧：完成为绿点、失败为红点、运行中为蓝点；悬浮提示和无障碍名称仍保留完整状态与失败原因。
 
 ## 来源与许可证
 

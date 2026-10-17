@@ -27,9 +27,9 @@ const EDIT_EXAMPLES = [
   ['转为插画', '保留主体和构图，改成细腻的手绘插画风格。'],
 ];
 
-export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings }: {
+export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings, sessionId }: {
   studio: ImageStudioController; onOpenSettings: () => void; onOpenOutputs: () => void; onOpenModels: () => void;
-  video?: VideoStudioController; onOpenVideoSettings?: () => void;
+  video?: VideoStudioController; onOpenVideoSettings?: () => void; sessionId?: string | null;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -76,7 +76,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
         {value:'video',ariaLabel:'视频',label:<>视频{video.busy&&<span className="studio-running-dot" style={{background:'currentColor'}} title="视频生成中" aria-label="视频生成中"/>}</>},
       ]}/>
     </div>}
-    {videoMode && video ? <VideoStudioPanel video={video} images={studio.gallery} onOpenSettings={openVideoSettings} /> : <>
+    {videoMode && video ? <VideoStudioPanel video={video} images={studio.gallery} onOpenSettings={openVideoSettings} sessionId={sessionId} /> : <>
     {studio.mode === 'reverse' && <div className="image-local-toolbar"><button className="link-btn" disabled={studio.reverse.busy} onClick={() => studio.setMode(returnMode.current)}>← 返回图片创作</button></div>}
     {studio.mode === 'reverse' ? <ImageReversePanel studio={studio} onOpenSettings={onOpenSettings} /> : <>
       <section className={`image-creation${dragging ? ' is-dragging' : ''}`} aria-label="图片创作工作区"

@@ -1188,7 +1188,7 @@ export default function App() {
           />
         );
       case 'image':
-        return <ImageStudioPage studio={imageStudio} video={videoStudio} onOpenVideoSettings={() => { setSettingsSection('video'); setCurrentPage('settings'); }} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter(videoStudio.viewMode === 'video' ? 'video' : 'image'); setCurrentPage('outputs'); }} />;
+        return <ImageStudioPage studio={imageStudio} video={videoStudio} sessionId={activeSessionId} onOpenVideoSettings={() => { setSettingsSection('video'); setCurrentPage('settings'); }} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter(videoStudio.viewMode === 'video' ? 'video' : 'image'); setCurrentPage('outputs'); }} />;
       case 'chat':
         return activeSession ? (
           <ChatPage

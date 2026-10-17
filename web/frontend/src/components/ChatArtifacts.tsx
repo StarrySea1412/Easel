@@ -33,14 +33,15 @@ function ArtifactCard({ artifact, onUpdated }: { artifact: ChatArtifact; onUpdat
     const timer = setInterval(() => { if (visible && document.visibilityState !== 'hidden' && !controller.current?.signal.aborted && !busy) void latestRefresh.current(true); }, 8000);
     return () => { observer.disconnect(); clearInterval(timer); };
   }, [artifact.id, artifact.sessionId, busy]);
-  const image = artifact.mimeType.startsWith('image/') && artifact.mimeType !== 'image/svg+xml', html = artifact.mimeType === 'text/html';
+  const image = artifact.mimeType.startsWith('image/') && artifact.mimeType !== 'image/svg+xml', html = artifact.mimeType === 'text/html', video = artifact.mimeType.startsWith('video/');
   const url = artifactUrl(artifact, 'file', attempt);
   return <article ref={element} className={`chat-artifact${html ? ' is-html' : ''}`} aria-label={`产物：${artifact.name}`}>
-    <header><div><strong title={artifact.name}>{artifact.name}</strong><small>{artifact.description || (html ? 'HTML · 可交互预览' : image ? '图片' : artifact.mimeType)} · {(artifact.size / 1024).toFixed(1)} KB</small></div><button type="button" onClick={() => void refresh()} aria-disabled={busy} aria-busy={busy} aria-label={`刷新${artifact.name}`} title="重新读取已保存文件，不调用模型">{busy ? '读取中…' : '刷新预览'}</button></header>
+    <header><div><strong title={artifact.name}>{artifact.name}</strong><small>{artifact.description || (html ? 'HTML · 可交互预览' : image ? '图片' : video ? '视频 · 可直接播放' : artifact.mimeType)} · {(artifact.size / 1024).toFixed(1)} KB</small></div><button type="button" onClick={() => void refresh()} aria-disabled={busy} aria-busy={busy} aria-label={`刷新${artifact.name}`} title="重新读取已保存文件，不调用模型">{busy ? '读取中…' : '刷新预览'}</button></header>
     {artifact.status === 'ready' && image && !failed && <a href={url} target="_blank" rel="noreferrer" aria-label={`打开图片${artifact.name}`}><img key={`${artifact.version}:${attempt}`} src={url} alt={artifact.name} loading="lazy" onError={() => setFailed(true)} /></a>}
     {artifact.status === 'ready' && html && <details open className="chat-artifact-html"><summary>页面预览</summary><iframe key={`${artifact.version}:${attempt}`} src={artifactUrl(artifact, 'preview', attempt)} sandbox="allow-scripts" title={`预览${artifact.name}`} onError={() => setFailed(true)} /><p>独立预览 · 页面内联网请求和嵌套网页不可用</p></details>}
+    {artifact.status === 'ready' && video && <video key={`${artifact.version}:${attempt}`} className="chat-artifact-video" src={url} controls playsInline preload="metadata" aria-label={`播放${artifact.name}`} onError={() => setFailed(true)} />}
     {(failed || artifact.status !== 'ready') && <p className="chat-artifact-error" role="status">{artifact.status === 'missing' ? '文件已移动或删除' : artifact.error || '预览加载失败，请刷新重试'}</p>}
-    <footer><a href={`${url}&download=true`}>下载{html ? ' HTML' : '原文件'}</a><span role="status">{note}</span></footer>
+    <footer><a href={`${url}&download=true`}>下载{html ? ' HTML' : video ? ' 视频' : '原文件'}</a><span role="status">{note}</span></footer>
   </article>;
 }
 function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => void }) {
@@ -62,6 +63,6 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
 }
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;
-  const singleVisual = artifacts.filter(item => item.mimeType.startsWith('image/')).length <= 1;
+  const singleVisual = artifacts.filter(item => item.mimeType.startsWith('image/') || item.mimeType.startsWith('video/')).length <= 1;
   return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}`} aria-label="本轮生成文件">{jobs.filter(job => job.phase !== 'done' || job.error).map(job => <ImageJob key={job.jobId} job={job} onChanged={onJobsChanged} />)}{artifacts.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
 }

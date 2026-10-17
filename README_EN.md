@@ -245,7 +245,7 @@ CI runs for `main` and `codex/**` branches. Windows installer builds are manual 
 
 > **Corrected inline goal entry (October 17, 2026)**: goal setup is back inside the current chat composer. `/goal`, the same textarea, toolbar, model, attachments, skills and stop controls are preserved; execution options are collapsed by default and Escape returns to ordinary chat. Verified locally and with an isolated fixture only; no paid goal, host 138 or installer was updated. [Implementation and boundaries](docs/goal-composer-correction-2026-10-17.md)
 
-> **Conversation status dots (October 17, 2026)**: the sidebar now uses compact semantic dots for the latest turn: green for completed, red for failed, and blue for running. Full status text and failure context remain available through tooltips and accessible labels.
+> **Conversation status dots (October 17, 2026)**: the sidebar places a compact semantic dot immediately to the left of each conversation title: green for completed, red for failed, and blue for running. Full status text and failure context remain available through tooltips and accessible labels.
 
 ## Attribution and license
 
@@ -265,3 +265,4 @@ Based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel), with thanks to its
 > **Stall warning (October 16, 2026)**: after 180 seconds without a provider event by default, a replayable `stall_warning` records the idle duration and the UI says it is still waiting. It never kills or resubmits the request; full recovery and load acceptance remain pending. [Run-ledger record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
 
 > **Compaction lifecycle in the ledger (October 16, 2026)**: OpenClaw compaction start/end and outcomes now persist with the logical run for long-chat replay. This is observability, not a cross-process transaction or provider-exact token accounting. [Run-ledger record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-run-ledger-2026-10-16.md)
+> **ComfyUI video workflows (2026-10-17)**: The video studio can use a configured local/LAN ComfyUI API-format workflow, organize prompts with bounded cinematic camera fields, poll queue history, verify MP4 output, and register it in the originating chat artifact store. Delivered videos play, refresh, and download inline. No ComfyUI configuration means no automatic paid-provider fallback. See the [ComfyUI video workflow record](docs/comfyui-video-workflow-2026-10-17.md) for configuration and validation limits.

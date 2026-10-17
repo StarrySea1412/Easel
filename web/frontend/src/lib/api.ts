@@ -1550,6 +1550,46 @@ export function startVideogen(options: { prompt: string; mode: VideogenMode; pro
 export function fetchVideogenJob(jobId: string): Promise<VideogenJob> { return request(`/api/videogen/${encodeURIComponent(jobId)}`); }
 export function cancelVideogenJob(jobId: string): Promise<VideogenJob> { return request(`/api/videogen/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }); }
 
+export interface ComfyVideoConfig {
+  configured: boolean;
+  baseUrl: string;
+  workflowPath: string;
+  workflowNodeCount: number;
+  promptNodes: string[];
+  promptNode: string;
+  error: string | null;
+  note: string;
+}
+export interface ComfyVideoJob {
+  jobId: string;
+  state: 'running' | 'done' | 'error' | 'cancelled';
+  promptId?: string;
+  prompt: string;
+  negativePrompt?: string;
+  cinematic?: Record<string, string>;
+  sessionId?: string | null;
+  turnId?: string | null;
+  started: number;
+  finished?: number | null;
+  url: string | null;
+  error: string | null;
+  filename?: string;
+}
+export function fetchComfyVideoConfig(): Promise<ComfyVideoConfig> { return request('/api/comfyui/video/config'); }
+export function checkComfyVideoHealth(): Promise<{ ok: boolean; kind: string; detail: string; system?: Record<string, unknown> }> { return request('/api/comfyui/video/health'); }
+export function startComfyVideo(options: {
+  prompt: string; negativePrompt?: string; cinematic?: Record<string, string>; workflow?: Record<string, unknown>;
+  promptNodeId?: string; negativeNodeId?: string; overrides?: Record<string, string | number | boolean>;
+  sessionId?: string; turnId?: string;
+}): Promise<{ jobId: string; state: 'running' }> {
+  return request('/api/comfyui/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
+}
+export function fetchComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { return request(`/api/comfyui/video/${encodeURIComponent(jobId)}`); }
+export function cancelComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { return request(`/api/comfyui/video/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }); }
+export function previewComfyPrompt(prompt: string, cinematic: Record<string, string> = {}, negativePrompt = ''): Promise<{ prompt: string; cinematic: Record<string, string> }> {
+  return request('/api/comfyui/video/prompt-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, cinematic, negativePrompt }) });
+}
+
 export interface StorageLocation {
   logicalPath:string; currentPath:string; pendingPath:string|null;
   status:'ready'|'pending_restart'|'failed'; error:string|null; requiresRestart:boolean;
