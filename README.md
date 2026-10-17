@@ -263,6 +263,8 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 
 当前本地验证不等于真实模型推理、多 Agent 联动、所有平台发布或新安装包升级已经验收。本轮没有自有管理员账号系统。
 
+> **目标入口纠正（2026-10-17）**：目标设置回到当前聊天 composer 内，沿用同一个输入框与工具栏；执行选项默认折叠，普通草稿、模型与素材入口保留。详情及本轮边界见[工作分支记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/goal-composer-correction-2026-10-17.md)。
+
 ## 来源与许可证
 
 本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)，感谢原作者及贡献者。原有功能、历史提交和必要资源保留；本仓库维护独立的创作工作台、办公室交互和可靠性改进，不代表上游官方发行。
