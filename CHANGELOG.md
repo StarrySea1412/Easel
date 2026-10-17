@@ -1,6 +1,6 @@
 ## 2026-10-18 · Skills nav jump fix / 技能库侧栏跳转修复
 
-- Jumping now scrolls the known page container with rect math instead of relying on `scrollIntoView` (whose smooth animation no-ops in this embedded environment); a 450ms fallback lands the position when smooth scrolling is unavailable, and the scroll-follow highlight uses the same rect math instead of `offsetParent`-based offsets. Verified live: clicking 发布 21 moves the page from 0 to the section. / 跳转改为精确滚动已知容器（rect 计算），不再依赖嵌入环境里会失效的 `scrollIntoView` 平滑动画；450ms 兜底落位；滚动跟随高亮同样改用 rect 判定（不再依赖 offsetParent）。7880 实测：点“发布 21”页面从 0 滚到该分区。
+- Jumping scrolls the known page container with rect math instead of `scrollIntoView`, and lands instantly (smooth animation proved to be throttled in the embedded/background environment). The scroll-follow highlight uses the same rect math. Verified live: clicking 发布 21 moves the page to the section, 发现 brings it back. / 跳转改为精确滚动已知容器（rect 计算）并**即时落位**——实测平滑动画在嵌入/后台环境会被节流推迟；滚动跟随高亮用同一 rect 判定。7880 实点“发布 21”滚到位、“发现”滚回顶。
 
 ## 2026-10-18 · A jump sidebar for the 技能库 sections / 技能库分区侧边栏直接跳转
 

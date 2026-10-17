@@ -124,16 +124,11 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
     const page = pageRef.current;
     setActiveSection(key);
     if (!node || !page) return;
-    // 直接滚动已知容器；平滑动画在部分嵌入环境不生效时，短延时后落位兜底。
+    // “直接跳转”：即时落到目标位置（平滑动画在嵌入/后台环境会被节流推迟）。
     const target = Math.max(0, Math.min(
       page.scrollTop + node.getBoundingClientRect().top - page.getBoundingClientRect().top - 12,
       page.scrollHeight - page.clientHeight));
-    if (typeof page.scrollTo === 'function') {
-      try { page.scrollTo({ top: target, behavior: 'smooth' }); } catch { page.scrollTop = target; }
-      window.setTimeout(() => { if (page.isConnected && Math.abs(page.scrollTop - target) > 4) page.scrollTop = target; }, 450);
-    } else {
-      page.scrollTop = target;
-    }
+    page.scrollTop = target;
   };
 
   const showSectionNav = source === 'installed' && skills !== null && orderedLayers.length > 0;
