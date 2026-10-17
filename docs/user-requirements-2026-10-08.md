@@ -1872,3 +1872,10 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **验收条件**：①技能库左侧空白列放置分区侧边栏：每个分区一行（图标＋名称＋计数），点击直接滚动到对应分区（含“回到顶部”）；②当前可视分区高亮（滚动跟随），桌面粘性定位；③窄屏（<900px）隐藏该列且不挤压内容（保持现有响应式）；④键盘可达（Tab 聚焦、Enter 跳转）、aria 语义（nav + aria-current）；⑤回归/构建/lint、7880 浏览器核对（点击跳转与高亮），文档与 Git 同步。
 - **执行顺序与边界**：登记 → 页面结构与样式 → 侧边栏组件与滚动逻辑 → 测试 → 回归/构建/lint → 文档与 Git → 7880 核对。仅前端技能库页；不调用付费模型、不改 138/安装包；保留并发未提交工作。
 - **当前状态**：已实施并验收。技能库改为 `skills-layout` 网格：左侧 184px 粘性分区侧边栏（层图标＋名称＋计数、`aria-current` 高亮、点击 `scrollIntoView` 平滑跳转、“回到顶部 ↑”），滚动时高亮跟随（`skills-page` 作为滚动容器监听）；ClawHub/加载态走 `is-single` 单列外观不变；<900px 侧栏隐藏。测试：新增 `skill-page-sections.test.mjs`（条目/计数/初始高亮/点击跳转与高亮跟随，显式注入 offsetTop 使滚动逻辑在 jsdom 下可确定性断言）；前端全量 1097 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浏览器核对发现 `scrollIntoView` 平滑滚动在嵌入环境不生效（高亮动了、页面没滚），随即修复：改为精确滚动 `skills-page` 容器（rect 计算目标）；实测发现平滑动画在嵌入/后台环境会被节流推迟（第一次点击的滚动在第二次点击后才落地），按“直接跳转”的本意改为**即时落位**（`scrollTop=target`，不做动画）；滚动跟随高亮用同一 rect 判定。未调用付费模型、未部署138、未更新安装包；chat budget/Gateway 等并发未提交工作未改动。
+## 2026-10-18 PPT 生成能力调研与方案（当前最高优先，先调研）
+
+- **用户原话**：“调研一下，，我们这个调用生成PPT，应该怎么办”。
+- **任务**：①盘点 Easel 现有能力（Office 产物预览、产物登记、技能机制、依赖可用性）；②调研参考实现（本机 ZCode presentations 插件、Claude/ZCode pptx 技能、ClawHub 外部技能、竞品做法）；③产出调研与设计文档：调用路径（技能／MCP／内置）、渲染器选型、产物与预览接入、验收条件与不做清单；④方向确认后实施。
+- **验收条件（调研阶段）**：`docs/pptx-generation-research-2026-10-18.md` 成稿并推送，含现状核查、方案矩阵与推荐、MVP 验收草案、依赖与风险（尽量不新增重依赖，优先本机已有能力）。
+- **执行顺序与边界**：登记 → 本机核查（含 ClawHub 检索）→ 文档 → 方向确认/实施。只读调研优先；不调用付费模型、不改 138/安装包；保留并发未提交工作。
+- **当前状态**：调研完成（2026-10-18），待“开做”即实施。结论见[调研与方案](pptx-generation-research-2026-10-18.md)：①现状——产物登记/聊天气泡图片内嵌已有（2026-10-17 核查），Office 生成器缺失；本机有 Playwright+Chromium（doc-convert 的 HTML→PDF/PNG 管线可用）与 Node，但无 pandoc/LibreOffice/pdftoppm、未装 python-pptx；ClawHub 可检索到现成演示技能（pptx、md-to-slides、claw-presentation-creator 等）。②参考——ZCode 官方 presentations/pptx 技能（pptxgenjs/python-pptx 生成、LibreOffice/pdftoppm 出预览；Proprietary，架构可参考不可照搬）。③推荐方案 A：内置自研 `pptx-slides` 技能——**一份 Markdown 大纲 → deck.pptx（python-pptx，内置主题）＋ deck.html → slide-NN.png/deck.pdf（复用 Chromium 管线）**，产物走现有 ArtifactStore 登记与预览；仅新增 python-pptx 一条轻依赖；方案 B（安装 ClawHub 技能）与 C（MCP 形态）列为备选，D（现状）不满足一等体验。④MVP 验收与不做清单已列（不做模板市场/转场动画/pptx 反向渲染）。
