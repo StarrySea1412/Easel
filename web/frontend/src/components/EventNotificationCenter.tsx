@@ -62,7 +62,7 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
           <article className={'event-card ' + notice.tone + (notice.read ? ' is-read' : ' is-unread')}>
             <span className="event-notice-tone" role="img" aria-label={toneLabels[notice.tone]} title={toneLabels[notice.tone]}>{notice.tone === 'success' ? <IconCheck size={16} /> : notice.tone === 'error' ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10.3 4-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4m0 3v1" /></svg> : <IconInfo size={16} />}</span>
             <div className="event-card-content"><div className="event-card-meta"><span>{sourceLabel(notice)}</span>
-              <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time></div>
+              <span className="event-meta-right"><time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>{!notice.read && <span className="event-unread-dot" title="未读" aria-label="未读" />}</span></div>
               {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} onClick={() => {
                   markEventsRead(notice.id); close();
                   if (notice.target) onOpen(notice.target); else notice.action?.run();
@@ -70,7 +70,6 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
                 : <p className="event-card-message">{notice.message}</p>}
             </div>
             <div className="event-row-state">
-                {!notice.read && <span className="event-unread-dot" title="未读" aria-label="未读" />}
                 <button type="button" className="event-icon-button event-mark-one" disabled={notice.read} aria-label={(notice.read ? '已读' : '标为已读') + '：' + notice.message} title={notice.read ? '已读' : '标为已读'} onClick={() => markRead(notice.id)}><IconCheck size={14} /></button>
             </div>
           </article>

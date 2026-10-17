@@ -1,3 +1,10 @@
+## 2026-10-18 · 通知面板行右侧改版
+
+- `EventNotificationCenter`：未读点从右侧状态列移入元信息行的右组（`.event-meta-right`，时间右侧内联）；右侧 `.event-row-state` 只保留“标为已读”勾按钮。
+- `event-notifications.css`：`.event-row-state` 由 28px 竖排（`flex-direction:column; gap:5px; padding-top:6px`）改为居中单列（`align-self:center`），删除 `:has(.event-unread-dot)` 的 padding 补丁，新增 `.event-meta-right` 内联组。
+- 行为不变：未读/已读语义、`aria-label`、点击标记已读、全部已读、过滤与悬停。
+- 前端全量 1086 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浏览器核对（点与勾不再上下堆叠、已读行仅灰色勾）＋截图留档。
+
 ## 2026-10-17 · 去掉会话行内重复的重命名图标
 
 - `Sidebar.tsx` 删除行内 `.session-quick-rename` 按钮（IconEdit）与不再使用的 IconEdit 导入；悬停卡片标题上的 `.session-hover-rename` 保留为唯一可见重命名入口，F2 与“…”菜单内重命名不变（`startRename` 的 row/preview 两条路径都保留）。

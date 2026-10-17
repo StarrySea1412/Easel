@@ -1,3 +1,8 @@
+## 2026-10-18 · One right-edge action per notification row / 通知行右侧不再竖排堆叠
+
+- The unread dot moved next to the timestamp in the meta line, and the right column now holds only the centered “mark read” check — no more dot stacked above the check. Unread/read semantics, aria labels, filters and “全部已读” stay unchanged. / 未读点移到元信息行时间右侧，右侧只保留居中的“标为已读”勾按钮，不再上下堆叠；未读/已读语义、无障碍标签、过滤与“全部已读”不变。
+- 1,086 frontend tests, build, lint (0 errors). / 前端 1086 项、构建、lint（0 错误）。
+
 ## 2026-10-17 · One rename entry per row / 会话行不再重复“重命名”图标
 
 - The session row no longer shows its own rename pencil on hover — the hover card's title (with its pencil) is the single visible rename entry, alongside F2 and the “…” menu; the row keeps the pin, running indicator and the menu. Dead row-button styles removed. / 悬停会话行不再显示行内重命名铅笔——悬停卡片标题（带铅笔）成为唯一可见入口，F2 与“…”菜单重命名不变；行内保留置顶、运行指示与“…”菜单，行内按钮死样式已清理。
