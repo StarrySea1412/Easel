@@ -1,3 +1,8 @@
+## 2026-10-18 · Capacity basis moves into an ⓘ hover / “容量依据”收进 ⓘ 悬停
+
+- The context-usage panel no longer keeps the capacity-basis block on screen: an ⓘ beside the used/total percentage carries the basis line, the official window with its source address (plain text, since hover tooltips are not clickable), the runner/session limits and the early-compaction warning. The “核对模型上下文设置” button and the existing 统计口径 ⓘ stay. / 上下文容量面板不再常驻容量依据块：占用总量旁新增 ⓘ，悬停/聚焦展示占比依据、原厂标称与来源地址（纯文本——悬停浮层不可点击，如实说明）、运行器/会话限制与提前压缩警告；“核对模型上下文设置”按钮与既有 统计口径 ⓘ 不变。
+- Dead `.context-window-facts` styles removed; the panel test now asserts the block is gone from the visible panel and present in the hover. 1,096 frontend tests, build, lint (0 errors). / 清理死样式；用例改为断言可见面板不含该块、悬停内含全部段落。前端 1096 项、构建、lint（0 错误）。
+
 ## 2026-10-18 · Conversation share MCP: complete share, takeover, load-back / 对话分享 MCP：完整分享、接管与回传
 
 - New `web/conversation_share.py` (store + routes under `<DATA_DIR>/conversation-shares/`) and an stdio MCP server `mcp/conversation_share_mcp.py` (newline JSON-RPC, zero deps, same convention as easel-notify): `share_conversation` publishes the complete transcript, `read_conversation_share` gives an external model the full context to take over, `append_to_shared_conversation` records its output, and `easel-share://<token>` exposes it as a resource. / 新增分享存储与路由（`<DATA_DIR>/conversation-shares/`）和 stdio MCP 服务（逐行 JSON-RPC、零依赖、与 easel-notify 同约定）：`share_conversation` 发布完整快照，`read_conversation_share` 让外部模型拿到全量上下文接管，`append_to_shared_conversation` 记录接管产出，`easel-share://<token>` 作为资源只读暴露。

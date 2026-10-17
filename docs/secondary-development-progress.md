@@ -1,3 +1,9 @@
+## 2026-10-18 · 容量依据收进 ⓘ 悬停
+
+- `ChatContextUsage`：`.context-window-facts` 块移除；总量行右侧新增 `InlineInfo`（label=容量依据说明，wide）承载占比依据、原厂标称＋来源地址（纯文本）、运行器/会话限制与警告；`.context-usage-total` 增加 `.context-total-right` 内联组；`context-usage.css` 删除 facts 死样式。
+- 测试：`local-workbench-features` 官方窗口用例改为“面板可见区不含渠道支持提示 → 聚焦 ⓘ 后浮层含全部段落”；前端全量 1096 项、构建、lint（0错误/18既有warning）通过。
+- 7880 重建 dist 后浏览器核对（块消失、ⓘ 悬停内容齐全）+ 截图。
+
 ## 2026-10-18 · 对话分享 MCP（完整分享＋接管＋回传）
 
 - 调研：`docs/conversation-share-mcp-research-2026-10-18.md`（ZCode 3.15.3 asar 实证：`conversation-share` 发布流、`public_importable` 导入式分享、产物随分享上传、任务分叉 `forkedFromTaskId`；Cursor/VS Code/Claude Code 官方页；不可达页面如实标注）。结论：完整分享与接管有先例，**回传原对话没有竞品在做**。

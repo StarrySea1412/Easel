@@ -86,7 +86,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
         <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p>
       </InlineInfo></h2><button type="button" className="context-close" aria-label="关闭上下文容量" onClick={() => { dismiss(); button.current?.focus(); }}>×</button></header>
       <div className="context-usage-total" title={used == null ? '占用未提供' : `${used.toLocaleString()} / ${capacity?.toLocaleString() || '容量未知'} Token`}>
-        <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>
+        <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><span className="context-total-right"><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>{engine !== 'codex' && data && <InlineInfo label="容量依据说明" hover wide><p>{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{referenceOnly && ' · 渠道支持尚未核验'}</p>{data.contextReference && <p>原厂标称 <strong>{data.contextReference.label}</strong> · 来源 {data.contextReference.url}{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}{data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}{data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}{(referenceOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p>{referenceOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}</InlineInfo>}</span>
       </div>
       <div className="context-capacity-track" role={known ? 'progressbar' : undefined} aria-label="上下文已用比例" aria-valuenow={known ? Math.min(100, percent) : undefined} aria-valuemin={known ? 0 : undefined} aria-valuemax={known ? 100 : undefined}>
         <span style={{ width: known ? `${Math.min(100, percent)}%` : '0%' }} />
@@ -94,13 +94,6 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
       <div className="context-snapshot-line"><span>{data?.usageSource === 'model_changed' ? '模型已切换，等待新请求快照' : data?.usageSource === 'last_request' ? '上次请求输入' : data?.usageSource === 'runtime' ? '最近运行时快照' : '尚无可用快照'}{data?.stale ? ' · 快照参考' : ''}{streaming ? ' · 生成中' : ''}</span>
         {updated && !Number.isNaN(updated.getTime()) && <time dateTime={updated.toISOString()}>{updated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}</div>
       {data?.modelRef && <p className="context-model" title={data.modelRef}>{data.modelRef}</p>}
-      {engine !== 'codex' && data && <div className="context-window-facts">
-        <p className="context-capacity-basis">{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{referenceOnly && ' · 渠道支持尚未核验'}</p>
-        {data.contextReference && <p>原厂标称 <strong>{data.contextReference.label}</strong> · <a href={data.contextReference.url} target="_blank" rel="noopener noreferrer">来源 ↗</a>{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}
-        {data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}
-        {data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}
-        {(referenceOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p className="context-window-warning">{referenceOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}
-      </div>}
       {engine !== 'codex' && onOpenModels && <button type="button" className="context-configure" onClick={() => { dismiss(); onOpenModels(data?.modelRef || modelRef || undefined); }}>{capacity ? '核对模型上下文设置 ↗' : '设置模型上下文容量 ↗'}</button>}
       {engine === 'codex' ? <p className="context-note">Codex 尚未提供上下文分类快照；未提供不代表零消耗。</p>
         : <>

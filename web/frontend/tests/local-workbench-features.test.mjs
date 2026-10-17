@@ -142,9 +142,13 @@ test('official window is separate from the old session default and opens the con
   assert.match(v.node.querySelector('button').getAttribute('aria-label'), /原厂标称窗口/);
   await v.click(v.node.querySelector('button'));
   const panel = document.querySelector('.context-usage-panel');
-  assert.match(panel.textContent, /原厂标称 1M/);
-  assert.match(panel.textContent, /最近会话记录额度：20万/);
-  assert.match(panel.textContent, /渠道支持尚未核验/);
+  assert.doesNotMatch(panel.textContent, /渠道支持尚未核验/, 'the capacity basis block no longer sits in the panel');
+  await act(async () => { document.querySelector('[aria-label="容量依据说明"]').focus(); });
+  const tip = document.querySelector('.inline-info-tooltip');
+  assert.ok(tip, 'the info hover opens with the capacity basis');
+  assert.match(tip.textContent, /原厂标称 1M/);
+  assert.match(tip.textContent, /最近会话记录额度：20万/);
+  assert.match(tip.textContent, /渠道支持尚未核验/);
   await v.click(panel.querySelector('.context-configure'));
   assert.deepEqual(opened, ['relay/glm-5.3']);
 });
