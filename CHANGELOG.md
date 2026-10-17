@@ -1,3 +1,9 @@
+## 2026-10-17 · ClawHub skill search can be bookmarked / ClawHub 技能检索可收藏
+
+- Search results and details in both ClawHub surfaces — the 技能库 panel and the chat composer's skill picker — now carry a ☆ toggle; the 技能库 panel adds a 我的收藏 section (查看详情、移除收藏、官方页面). / 技能库 ClawHub 面板与对话技能选择器两处的搜索结果和详情都加了 ☆ 收藏开关；技能库面板新增“我的收藏”区（查看详情、移除收藏、官方页面）。
+- Favorites are local bookmarks of public metadata only (`easel:skill-favorites`, 100 max) and never install or run anything; a failed local save keeps the star honest and reports it. / 收藏只是公开元数据的本地书签（`easel:skill-favorites`，最多 100 条），绝不安装或运行；本地保存失败时不虚标“已收藏”并如实提示。
+- 1,086 frontend tests (favorites round-trip and storage-failure cases added), build, lint (0 errors) and browser checks. / 前端 1086 项（新增收藏持久化与存储失败用例）、构建、lint（0 错误）与浏览器核对。
+
 ## 2026-10-17 · Explicit starts only, and status dots as real signals / 只有显式入口新增对话，状态点只在有真实结果时出现
 
 - Only the two explicit entries add a conversation row — the sidebar 新建对话 button and the dashboard 开始创作 composer. 看热点“一键做成内容”、技能开聊 and 爆款拆解 now merge into the selected conversation (with a fresh row only when there is nothing safe to merge into: no selection, a backup import, or a still-running session). / 只有两个显式入口会新增列表条目——侧栏“新建对话”和工作台“开始创作”；看热点“一键做成内容”、技能开聊、爆款拆解并入当前选中的对话（没有可安全并入的会话时才新建：未选中、备份导入或仍在运行）。

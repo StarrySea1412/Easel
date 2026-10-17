@@ -134,3 +134,6 @@
   .skill-picker-content.is-clawhub .brush-body { padding:12px; }
   .skill-picker-content.is-clawhub .brush-clawhub-detail { border-left:0; }
 }
+
+.clawhub-fav-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.clawhub-fav-toggle.is-on { color: var(--amber); }

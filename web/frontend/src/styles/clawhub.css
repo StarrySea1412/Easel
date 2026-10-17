@@ -35,3 +35,13 @@
   .clawhub-detail, .clawhub-card { padding: 15px; }
   .clawhub-detail-head { flex-wrap: wrap; }
 }
+
+/* ---- 我的收藏：本地书签的公开元数据 ---- */
+.clawhub-favorites { margin: 18px auto 0; max-width: 1100px; }
+.clawhub-favorites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.clawhub-favorites-head h2 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 15px; color: var(--text); }
+.clawhub-favorites-head h2 svg { color: var(--amber); }
+.clawhub-favorites-head span { font-size: 12px; color: var(--text-tertiary); }
+.clawhub-fav { display: inline-flex; align-items: center; gap: 5px; }
+.clawhub-fav.is-on { color: var(--amber); }
+.clawhub-detail-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

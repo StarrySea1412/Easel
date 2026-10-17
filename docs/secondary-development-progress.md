@@ -1,3 +1,11 @@
+## 2026-10-17 · ClawHub 技能检索收藏
+
+- 新增 `lib/skillFavorites.ts`：本地书签（`easel:skill-favorites`，100 条上限），只保存公开元数据（id/slug/displayName/ownerHandle/summary/version/updatedAt/canonicalUrl/savedAt），读取做字段校验与截断，写入走 `localPersistence`（失败返回 false，绝不虚标已收藏）；模块级 store + `useSyncExternalStore`，两处面板星标实时同步。
+- 技能库 `ClawHubPanel`：搜索结果卡片与详情头部加 ☆ 收藏/已收藏开关（`aria-pressed`、键盘可达、toast 反馈）；新增“我的收藏”区（名称、作者/slug、摘要、版本/更新、查看详情（复用详情流程）、移除收藏、官方页面），空时不占位。
+- 对话技能选择器 `BrushEntry`：ClawHub 结果行与详情头部同样加收藏开关（与技能库共用同一存储）。
+- 新增 `IconStar`（支持 filled）；样式追加到 clawhub.css 与 skill-picker.css（收藏态琥珀色）。
+- 测试：新增 `clawhub-favorites.test.mjs`（收藏写入/我的收藏渲染/移除/新模块读回持久化/存储失败保持诚实＋持久化状态如实上报）；前端全量 1086 项、构建、lint（0错误/18既有warning）通过。
+
 ## 2026-10-17 · 会话列表只显式新增；状态点改为真实结果信号
 
 - 新增条目规则：`lib/sessionMerge.ts` 的 `pickMergeTarget`（选中会话存在且非备份导入、无待恢复轮次、未在流式中才可并入）接入 `App.tsx` 的三个入口——热点“一键做成内容”（`handleUseTopic`）、技能开聊（`handleSkillChat`）、爆款拆解（`handleStartBreakdown`，`createBreakdownSession` 新增可选 `base`，并入时保留原标题与引擎、仅追加拆解轮次）；工作台“开始创作”和侧栏“新建对话”仍是仅有的两个显式新建入口。
