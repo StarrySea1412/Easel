@@ -1,7 +1,9 @@
 import { useCallback, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPanel } from '../hooks/useAnchoredPanel';
-import { clearEvents, markEventsRead, readEvents, readEventSync, syncEvents, subscribeEvents, type EventNotice, type NoticeTarget } from '../lib/eventNotifications';
+import { clearEvents, markEventsRead, readEvents, readEventSync, removeEvents, syncEvents, subscribeEvents, type EventNotice, type NoticeTarget } from '../lib/eventNotifications';
+import { isLegacyTransientNotice } from '../lib/noticeFormat';
+import { showToast } from '../lib/toast';
 import { IconBell } from './settingsIcons';
 import { IconCheck, IconChevron, IconInfo, IconTrash } from './icons';
 import '../styles/event-notifications.css';
@@ -26,10 +28,18 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
   const panelId = useId();
   const unread = notices.filter(notice => !notice.read).length;
   const visible = filter === 'unread' ? notices.filter(notice => !notice.read) : notices;
+  const noise = notices.filter(notice => isLegacyTransientNotice(notice.message));
   const dismiss = useCallback(() => { setOpen(false); setConfirmClear(false); }, []);
   const close = () => { dismiss(); button.current?.focus(); };
   const position = useAnchoredPanel(open, dismiss, button, panel, 'beside', 440);
   const markRead = (id?: string) => { markEventsRead(id); filterButton.current?.focus(); };
+  const cleanNoise = async () => {
+    const removable = notices.filter(notice => isLegacyTransientNotice(notice.message));
+    if (!removable.length) return;
+    const done = await removeEvents(removable.map(notice => notice.id));
+    showToast(done ? `已清理 ${removable.length} 条提示记录。` : '清理未生效：服务暂不支持或未能确认，记录保持原样。', done ? 'success' : 'error');
+    panel.current?.focus();
+  };
   return <div className="global-events">
     <button ref={button} type="button" className={'nav-item global-events-entry' + (open ? ' is-open' : '')} title={'事件通知，' + unread + ' 条未读'} aria-label={'事件通知，' + unread + ' 条未读'}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? dismiss() : setOpen(true)}>
@@ -70,8 +80,11 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
       <footer className="event-panel-footer">
         {confirmClear ? <div className="event-clear-confirm"><span>清空本工作台的通知记录？</span><button autoFocus type="button" onClick={() => { setConfirmClear(false); panel.current?.focus(); }}>取消</button>
           <button type="button" className="event-clear-danger" onClick={() => { clearEvents(); setConfirmClear(false); panel.current?.focus(); }}>确认清空</button></div> : <>
-          <details className="event-history-note"><summary><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已保存到本机' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本机记录'}</span><IconChevron size={12} /></summary><p>最近1000条保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。</p>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</details>
-          <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><IconTrash size={13} />清空</button></>}
+          <details className="event-history-note"><summary><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已保存到本机' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本机记录'}</span><IconChevron size={12} /></summary><p>最近1000条保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。瞬时确认提示不再进入通知，旧版本留下的这类记录可用“清理提示记录”移除。</p>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</details>
+          <div className="event-footer-actions">
+            {noise.length > 0 && <button type="button" className="event-clean-noise" title="瞬时确认提示不再进入通知；这些是旧版本留下的记录" onClick={cleanNoise}>清理 {noise.length} 条提示记录</button>}
+            <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><IconTrash size={13} />清空</button>
+          </div></>}
       </footer>
     </section>, document.body)}
   </div>;

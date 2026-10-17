@@ -572,6 +572,11 @@ class NotificationRead(BaseModel):
     id: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
+class NotificationCleanup(BaseModel):
+    """Targeted removal of confirmed-noise records; absent ids keep the clear-all behavior."""
+    ids: list[str] | None = Field(default=None, max_length=2000)
+
+
 @app.get('/api/notifications')
 async def api_notifications():
     from easel.notifications import NotificationStore
@@ -592,6 +597,17 @@ async def api_notifications_add(req: NotificationBatch):
 async def api_notifications_read(req: NotificationRead):
     from easel.notifications import NotificationStore
     await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).read, req.id)
+    return {'ok': True}
+
+
+@app.post('/api/notifications/remove')
+async def api_notifications_remove(req: NotificationCleanup):
+    """Targeted removal on its own route: a backend without it must fail closed
+    instead of letting an ids body fall through to the clear-all DELETE."""
+    from easel.notifications import NotificationStore
+    if req.ids is None:
+        raise HTTPException(400, '缺少要清理的通知 id')
+    await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).remove, req.ids)
     return {'ok': True}
 
 

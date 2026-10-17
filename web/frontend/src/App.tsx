@@ -17,6 +17,7 @@ import Sidebar from './components/Sidebar';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
 import { notificationOutputPath, startEventSync } from './lib/eventNotifications';
+import { noticeSubject } from './lib/noticeFormat';
 import SkillDrawer from './components/SkillDrawer';
 import { showToast } from './lib/toast';
 import { steerQueuedMessage } from './lib/chatSteering';
@@ -333,7 +334,7 @@ export default function App() {
   }, [publishReceipts.notices]);
   useEffect(() => {
     for (const [sessionId, stream] of Object.entries(streams)) {
-      for (const question of stream.questions || []) showToast(`${sessionsRef.current.find(item => item.id === sessionId)?.title || '对话'} · 需要回答`, 'info',
+      for (const question of stream.questions || []) showToast(`${noticeSubject(sessionsRef.current.find(item => item.id === sessionId)?.title, '对话')} · 需要回答`, 'info',
         undefined, `question:${sessionId}:${question.id}`, { page: 'chat', sessionId });
     }
   }, [streams]);
@@ -388,7 +389,7 @@ export default function App() {
     const stopped = msg.stopped === true;
     if (!msg.error && !stopped) rememberBreakdownReport(session, msg.content, msg.turnId);
     const outcome = msg.error ? '失败' : stopped ? '已停止' : '已完成';
-    showToast(`${session?.title || '对话'} · ${outcome}`, msg.error ? 'error' : stopped ? 'info' : 'success', undefined,
+    showToast(`${noticeSubject(session?.title, '对话')} · ${outcome}`, msg.error ? 'error' : stopped ? 'info' : 'success', undefined,
       `chat:${sessionId}:${msg.turnId || session?.pendingTurnId || msg.startedAt || 'legacy'}:${outcome}`, { page: 'chat', sessionId });
     setSessions((prev) => {
       const next = prev.map((s) =>

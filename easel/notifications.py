@@ -81,6 +81,18 @@ class NotificationStore:
                 row['read'] = True
                 db.execute('UPDATE notices SET payload=? WHERE id=?', (json.dumps(row, ensure_ascii=False), key))
 
+    def remove(self, ids):
+        """Delete specific notices. Tombstones keep stale clients from reviving them."""
+        wanted = [i for i in (ids or []) if isinstance(i, str) and 0 < len(i) <= 1000]
+        if not wanted:
+            return 0
+        with self.database() as db, db:
+            marks = ','.join('?' * len(wanted))
+            removed = db.execute(f'DELETE FROM notices WHERE id IN ({marks})', wanted).rowcount
+            for ident in wanted:
+                db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (ident, time.time() * 1000))
+            return removed
+
     def clear(self):
         with self.database() as db, db:
             db.execute('DELETE FROM notices')

@@ -1,3 +1,10 @@
+## 2026-10-17 · Notification inbox cleanup and refinement / 通知收件箱清理与精修
+
+- Only durable events (stable id + jump target) enter the notification inbox; confirmation toasts stay transient, so the inbox no longer stacks duplicate, low-value noise (Apple HIG: repeated notifications fill Notification Center). / 只有持久事件（稳定 id + 跳转目标）进入通知收件箱；确认类提示仅临时弹窗，收件箱不再堆积重复与低价值噪音（Apple HIG：重复通知会塞满通知中心）。
+- Add a verified one-tap cleanup for records that older builds persisted from confirmation toasts. It posts to a dedicated `POST /api/notifications/remove` route, so a backend that has not been restarted fails closed instead of clearing everything; removed ids get tombstones so stale tabs cannot revive them. / 为旧版本遗留的提示类记录增加“验证式一键清理”：专用 `POST /api/notifications/remove` 路由，未重启的后端安全失败、绝不退化为清空全部；删除的 id 写入墓碑，旧标签页无法复活。
+- Bound notification subjects (whitespace collapse, URL → hostname, 24-char clamp); tighten the panel (header 90→67px, one-line rows 79→65px, sticky date groups, semantic colors only for real outcomes) and move toasts to consistent SVG icons. / 通知标题做空白归一、URL 主机化与 24 字截断；面板头部 90→67px、单行行高 79→65px、日期分组吸顶、语义色只给真实结果；Toast 换用一致的 SVG 图标。
+- Verified 88 backend checks, 1,076 frontend tests, production build, lint (existing warnings only) and isolated browser acceptance on 7897 (cleanup 7→3 rows, transient toast never recorded, tombstone blocks stale re-push, 390px no overflow). No paid model, 138 deployment or installer update. / 已验证 88 项后端、前端 1076 项、生产构建、lint（仅既有警告）与 7897 隔离浏览器（清理 7→3、瞬时提示不进箱、墓碑防复活、390px 无溢出）；未调用付费模型、未部署 138、未更新安装包。
+
 ## 2026-10-17 · Goals and schedules aligned with Codex / 目标与定时任务对标 Codex
 
 - Add the Codex lifecycle command surface: `/goal` views the current goal, `/goal pause|resume|clear` (暂停/继续/清除) act locally without sending model messages, and the `/` menu lists the commands that match the goal's state with keyboard selection. / 增加 Codex 生命周期命令面：`/goal` 查看当前目标，`/goal pause|resume|clear`（暂停/继续/清除）在对话内本地执行不发给模型，`/` 菜单按目标状态列出可用命令并支持键盘选择。

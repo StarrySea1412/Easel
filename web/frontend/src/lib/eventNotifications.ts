@@ -95,11 +95,14 @@ function queue(operation: Operation) {
 }
 
 /** Server state is authoritative, including tombstones and cross-tab read state. */
+function notificationsBase() {
+  return window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+}
 export function syncEvents(): Promise<void> {
   if (syncing) return syncing;
   syncing = (async () => {
     syncState = 'syncing'; changed();
-    const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+    const base = notificationsBase();
     const request = async (suffix = '', init: RequestInit = {}) => {
       const response = await fetch(`${base}/api/notifications${suffix}`, { ...init, cache: 'no-store', signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw Error('通知同步失败');
@@ -154,8 +157,28 @@ export function recordEvent(message: string, tone: ToastTone, action?: ToastNoti
 }
 export function markEventsRead(id?: string): void {
   if (!notices.some(notice => !notice.read && (!id || notice.id === id))) return;
-  notices = notices.map(notice => !id || id === notice.id ? { ...notice, read: true } : notice);
+  notices = notices.map(notice => !id || notice.id === id ? { ...notice, read: true } : notice);
   queue({ method: 'POST', suffix: '/read', body: id ? { id } : {} });
+}
+/** Verified targeted removal via its own route: a stale backend without it fails
+ *  closed instead of letting an ids body fall through to the clear-all DELETE. */
+export async function removeEvents(ids: string[]): Promise<boolean> {
+  const wanted = new Set(ids.filter(validId));
+  if (!wanted.size) return false;
+  try {
+    const response = await fetch(`${notificationsBase()}/api/notifications/remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [...wanted] }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return false;
+  } catch { return false; }
+  const before = notices.length;
+  notices = notices.filter(notice => !wanted.has(notice.id));
+  if (notices.length !== before) changed();
+  return true;
 }
 export function clearEvents(): void {
   notices = [];
