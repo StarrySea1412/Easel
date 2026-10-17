@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchClawHubSkill, searchClawHub } from '../lib/api';
 import type { ClawHubDetail, ClawHubSearch, ClawHubSkill } from '../lib/api';
 import { IconSearch, IconSkills, IconStar } from './icons';
+import { Sk } from './Skeleton';
 import { favoriteAsSkill, isSkillFavorite, removeSkillFavorite, toggleSkillFavorite, useSkillFavorites } from '../lib/skillFavorites';
 import type { SkillFavorite } from '../lib/skillFavorites';
 import { showToast } from '../lib/toast';
@@ -120,7 +121,8 @@ export default function ClawHubPanel() {
       {pending ? '正在检索 ClawHub…' : result ? `“${result.query}” · 返回 ${result.results.length} 条${result.results.length >= result.limit ? '，可细化关键词继续查找' : ''}${result.cacheHit ? ' · 最近缓存' : ''}` : '输入技能名称或描述用途后开始搜索。'}
     </div>
 
-    {favorites.length > 0 && <section className="clawhub-favorites" aria-label="我的收藏">
+    {pending && <div className="clawhub-grid clawhub-skeleton-grid" aria-hidden="true">{[0,1,2].map(i=><div key={i} className="card clawhub-card is-skeleton"><Sk w="34%" h={12} style={{ marginBottom: 12 }} /><Sk w="52%" h={15} style={{ marginBottom: 8 }} /><Sk w="30%" h={11} style={{ marginBottom: 12 }} /><Sk w="94%" h={11} style={{ marginBottom: 6 }} /><Sk w="70%" h={11} style={{ marginBottom: 12 }} /><Sk w="40%" h={10} /></div>)}</div>}
+{favorites.length > 0 && <section className="clawhub-favorites" aria-label="我的收藏">
       <div className="clawhub-favorites-head">
         <h2><IconStar size={15} filled aria-hidden={true} />我的收藏</h2>
         <span>{favorites.length} 个 · 只保存在本机</span>
@@ -146,7 +148,7 @@ export default function ClawHubPanel() {
         <h2 id="clawhub-detail-title" ref={heading} tabIndex={-1}>{selected.displayName}</h2>
         <div className="clawhub-detail-actions">{favoriteButton(selected)}<button type="button" className="btn btn-ghost btn-sm" onClick={closeDetail}>关闭详情</button></div>
       </div>
-      {detailPending && <p role="status">正在读取作者说明…</p>}
+      {detailPending && <div className="clawhub-detail-skeleton" role="status"><span className="sr-only">正在读取作者说明…</span><Sk w="46%" h={15} style={{ marginBottom: 10 }} /><Sk w="30%" h={11} style={{ marginBottom: 16 }} /><div className="clawhub-skeleton-row"><Sk w={84} h={12} /><Sk w={84} h={12} /><Sk w={84} h={12} /></div><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="88%" h={11} style={{ marginBottom: 8 }} /><Sk w="62%" h={11} /></div>}
       {detailError && <div role="alert" className="clawhub-error">{detailError} <button type="button" className="btn btn-sm" onClick={() => void openDetail(selected, true)}>重试详情</button></div>}
       {detail && <>
         <dl className="clawhub-metadata">

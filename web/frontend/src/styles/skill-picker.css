@@ -137,3 +137,6 @@
 
 .clawhub-fav-toggle { display: inline-flex; align-items: center; gap: 4px; }
 .clawhub-fav-toggle.is-on { color: var(--amber); }
+
+.brush-clawhub-skeleton-list { display: grid; gap: 10px; }
+.brush-clawhub-item.is-skeleton { pointer-events: none; }

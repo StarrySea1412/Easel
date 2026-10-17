@@ -45,3 +45,6 @@
 .clawhub-fav { display: inline-flex; align-items: center; gap: 5px; }
 .clawhub-fav.is-on { color: var(--amber); }
 .clawhub-detail-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.clawhub-skeleton-grid .clawhub-card { pointer-events: none; }
+.clawhub-skeleton-row { display: flex; gap: 10px; margin: 2px 0 16px; }

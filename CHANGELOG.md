@@ -1,3 +1,8 @@
+## 2026-10-18 · ClawHub loading states get real skeletons / ClawHub 搜索与详情加载改用骨架屏
+
+- Both ClawHub surfaces — the 技能库 panel and the chat composer's skill picker — now show shimmer skeletons while loading: three result/card skeletons during search and a title/meta/body skeleton while the author notes load, instead of a lone text line above empty space. The loading text stays in the accessibility tree (`role=status` + `.sr-only`). / 技能库面板与对话技能选择器两处：搜索中显示 3 个结果/卡片骨架，详情加载显示标题/元信息/正文骨架（shimmer），不再是一行字加空白；加载文案保留在无障碍树（`role=status` + `.sr-only`）。
+- 1,087 frontend tests, build, lint (0 errors). / 前端 1087 项、构建、lint（0 错误）。
+
 ## 2026-10-18 · Skill verification opens on hover and leads with what was called / “Skill 核验”改为悬停展示并先回答“有没有调用”
 
 - The chip's evidence panel no longer needs a click: hover or focus opens a floating panel (the pointer can move into it; click pins it for touch; Escape/outside closes), and it loads the turn's audit automatically on first open — showing “本轮已调用：A、B” with per-skill 执行成功（有证据）/失败/已尝试/已读取说明 states plus evidence bullets, or the honest “未观察到 Skill 调用证据 / 未找到本轮记录” line; 查看运行记录 stays. / 芯片证据面板不再需要点击：悬停或聚焦弹出浮层（指针可移入；点击可钉住供触屏；Escape/外点关闭），首次打开自动加载本轮核验——先给出“本轮已调用：A、B”，逐技能显示执行成功（有证据）/失败/已尝试/已读取说明与证据条目，或如实显示“未观察到调用证据/未找到本轮记录”；“查看运行记录 →”保留。

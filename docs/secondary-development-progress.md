@@ -1,3 +1,10 @@
+## 2026-10-18 · ClawHub 搜索/详情加载骨架屏
+
+- `BrushEntry`（对话技能选择器）：搜索中由一行“正在检索 ClawHub…”改为 `.brush-clawhub-skeleton-list`（3 个 `.brush-clawhub-item.is-skeleton`，内嵌 `Sk` 线条 + shimmer）；详情加载由一行文字改为 `.clawhub-detail-skeleton`（标题/副题/三格元信息/四行正文骨架）。
+- `ClawHubPanel`（技能库）：搜索中在结果区渲染 3 张 `.clawhub-card.is-skeleton` 骨架卡（`aria-hidden`，live 状态行保留播报）；详情加载同样用 `.clawhub-detail-skeleton`。
+- `index.css` 增全局 `.sr-only` 工具类；加载文案以 `role=status` + `.sr-only` 保留（textContent 不变，既有测试与读屏播报不受影响）；skill-picker.css/clawhub.css 增加骨架容器与 `pointer-events:none` 规则。
+- 前端全量 1087 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浏览器核对（搜索中与详情中均出现骨架，结果/详情到达后替换）＋截图（视时序尽力抓取）。
+
 ## 2026-10-18 · “Skill 核验”改为悬停展示并先回答“有没有调用”
 
 - `ChatSkillEvidence` 重写：芯片改为 hover/focus 弹出浮层（`useAnchoredPanel` 定位 above、外点/Escape/page-navigation 关闭；指针可移入浮层不消失，220ms 离开延迟；点击切换“钉住”供触屏）；删除内联点击展开与 `.chat-skill-tooltip` 单行气泡。

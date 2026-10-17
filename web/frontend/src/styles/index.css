@@ -1426,6 +1426,8 @@ textarea.field { resize: vertical; min-height: 90px; }
   animation: sk-shimmer 1.4s infinite;
 }
 @keyframes sk-shimmer { 100% { transform: translateX(100%); } }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .sk-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); }
 .sk-image {
   position: relative; width: 100%; max-width: 420px; margin: 12px auto 0; display: block;
