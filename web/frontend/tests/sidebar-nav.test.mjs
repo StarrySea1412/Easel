@@ -427,3 +427,12 @@ test('sidebar offers a one-click theme toggle that persists and re-labels', asyn
     assert.match(toasts.at(-1) || '', /未能保存到本机/);
   } finally { window.removeEventListener('easel:toast', listener); }
 });
+
+test('side chat sessions stay out of the main conversation list', async t => {
+  const done={role:'assistant',content:'已交付',turnId:'done'};
+  const sessions=[session('s1','今天的对话',{messages:[done]}),session('child','辅助对话',{parentSessionId:'s1',messages:[done]})];
+  const view=await fixture(t,{sessions,runningSessions:[],taskState:{goals:[],runs:[],plans:[],serverTime:1}});
+  await view.clickLabel('展开对话列表');
+  assert.ok(view.container.querySelector('[data-session-id="s1"]'));
+  assert.equal(view.container.querySelector('[data-session-id="child"]'),null,'side chat stays out of the session list');
+});

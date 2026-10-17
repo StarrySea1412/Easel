@@ -1,3 +1,11 @@
+## 2026-10-18 · 对话侧边面板与辅助对话（方案 C 首版）
+
+- `ChatSession` 新增 `parentSessionId`（子会话标记）；`lib/sideChat.ts`（归属/序号/上一轮引用）与 `/side`、`/btw` 命令前缀；Sidebar 主列表、归档与状态点统一改用 `listedSessions`（过滤子会话）。
+- ChatPage：右侧面板容器（标签 辅助对话/目标、收起、宽度拖拽并以 `easel:chat-panel-width` 本机记忆、窄屏 900px 以下变为浮层）；头部新增“辅助对话”按钮；两个 ChatComposer 都接了 `onSideChat`（命令菜单新增“辅助对话”项）。SideChatThread：独立线程（MessageBubble 复用）、订阅草稿存储、引用列表可见可移除、Enter 发送、生成中可停止。
+- App：`ensureSideChat`（不存在则创建子会话并持久化，失败如实提示）、`handleSideSend`（走既有 `sendUserAndStream`，不引入新链路）、`handleSideStop`、`handleQuoteFromMain`（上一轮 → 侧边草稿引用）、`handleQuoteToMain`（侧边答复 → 主草稿引用）。
+- 测试：新增 `side-chat.test.mjs`（归属/序号/引用/A 语法）；composer `/side` 菜单项用例；sidebar 子会话不进主列表用例。前端全量 1092 项、构建、lint（0错误/18既有warning）通过。
+- 边界（首版未做）：每父会话仅一个辅助对话（多子会话/序号切换留待扩展）；自动化页会话选择器未过滤子会话；不自动把父会话内容注入侧边提示词（只做显式引用）。
+
 ## 2026-10-18 · ClawHub 统计数字展示
 
 - 后端 `web/clawhub.py`：`_STAT_KEYS` 增 `comments`；新增 `_row_stats(row)`（优先顶层 `stats`，否则取检索行的 `native.skill.stats`）；`_summary` 让检索结果携带 `stats`，详情改用它。上游没有 GitHub 式 issues（只有 comments），按事实展示评论数。

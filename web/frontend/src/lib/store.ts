@@ -41,6 +41,7 @@ export interface ChatSession {
   pendingTurnId?: string; // 进行中的可重连 job；浏览器重开后继续按 eventId 续流
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
   pinnedAt?: number; // Local pin order, independent of streaming or active selection.
+  parentSessionId?: string; // 辅助对话：挂在父会话下的子会话，只出现在侧边栏面板里
   importedFromBackup?: boolean; // 只读备份记录，不关联后台上下文或恢复任务
   backupIncomplete?: boolean; // 备份时仍在进行，仅保留已收到的内容
 }

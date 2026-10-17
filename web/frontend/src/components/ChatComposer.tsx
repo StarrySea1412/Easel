@@ -43,6 +43,7 @@ interface ChatComposerProps {
   onGoalAction?:(action:'pause'|'resume'|'clear')=>void;
   onGoalView?:()=>void;
   onScheduleDraft?:(text:string)=>void;
+  onSideChat?:()=>void;                  // 打开侧边栏的辅助对话（父会话的子会话）
   goalEditor?:GoalEditor|null;
   onGoalClose?:()=>void;
   onGoalChanged?:()=>void;
@@ -67,7 +68,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -122,8 +123,9 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
     if(goalStatus&&['draft','paused','blocked'].includes(goalStatus))items.push({id:'goal-resume',label:'继续目标',hint:'从当前记录恢复执行',keys:'/goal resume'});
     if(goalStatus&&!terminal)items.push({id:'goal-clear',label:'清除目标',hint:'结束当前目标并保留历史',keys:'/goal clear'});
     items.push({id:'schedule',label:'定时任务',hint:'按计划重复执行，先到定时任务页确认时间与模型',keys:'/定时'});
+    if(onSideChat)items.push({id:'side',label:'辅助对话',hint:'在侧边栏开一个不打断主对话的子对话',keys:'/side'});
     return items;
-  },[goalStatus]);
+  },[goalStatus,onSideChat]);
   const commandOpen=Boolean(onGoal&&!goalEditor&&!editingQueue&&suggestsCommand(input)&&dismissedCommand!==input);
   useEffect(()=>{if(commandOpen)setCommandIndex(0);},[commandOpen]);
   const clearCommandDraft=(commandText:string)=>{if(getChatDraft(sessionId).text===commandText){setChatDraftText(sessionId,'');setDismissedCommand(null);}};
@@ -151,6 +153,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
     setDismissedCommand(commandText);
     if(id==='goal'){if(onGoalView)onGoalView();else openGoal();clearCommandDraft(commandText);return;}
     clearCommandDraft(commandText);
+    if(id==='side'){onSideChat?.();return;}
     if(id==='goal-pause'){onGoalAction?.('pause');return;}
     if(id==='goal-resume'){onGoalAction?.('resume');return;}
     if(id==='goal-clear'){onGoalAction?.('clear');return;}

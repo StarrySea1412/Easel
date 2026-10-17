@@ -18,6 +18,9 @@ import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
 import '../styles/chat-workspace.css';
+import { getChatDraft, setChatDraftText, removeChatDraftQuote, subscribeChatDraft } from '../lib/chatDrafts';
+import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
+import '../styles/chat-side-panel.css';
 import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
 import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
@@ -50,6 +53,12 @@ interface ChatPageProps {
   onOpenModels?: (modelRef?: string) => void;
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
   onScheduleDraft?: (text: string) => void;            // 对话内提交定时任务草稿（App 切到定时任务页）
+  sideSession?: ChatSession;                            // 辅助对话（父会话的子会话），只在侧边面板里展示
+  onSideChat?: () => void;                              // 打开侧边面板并确保子会话存在
+  onSideSend?: (text: string) => void;                  // 发消息到辅助对话
+  onSideStop?: () => void;                              // 停止辅助对话的生成
+  onQuoteFromMain?: () => void;                         // 主对话上一轮 → 辅助对话草稿引用
+  onQuoteToMain?: () => void;                           // 辅助对话最后答复 → 主对话草稿引用
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
@@ -69,7 +78,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSession, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -78,15 +87,24 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const goalActive=goal?.status==='active';
   const [panelOpen,setPanelOpen]=useState(true);
   const [goalEditor,setGoalEditor]=useState<{seed?:string;modelRef?:string;onConfigured?:()=>void;goal?:TaskGoal;welcome?:boolean}|null>(null);
+  const [panelTab,setPanelTab]=useState<'goal'|'side'>('goal');
+  const PANEL_WIDTH_KEY='easel:chat-panel-width';
+  const [panelWidth,setPanelWidth]=useState(()=>{const {ok,value}=readLocalValue(PANEL_WIDTH_KEY);const n=value?Number(value):NaN;return ok&&Number.isFinite(n)&&n>=280&&n<=560?n:340;});
+  const panelWidthRef=useRef(panelWidth);panelWidthRef.current=panelWidth;
+  const startPanelResize=(event:React.PointerEvent)=>{event.preventDefault();const startX=event.clientX,startW=panelWidthRef.current;
+    const move=(moveEvent:PointerEvent)=>setPanelWidth(Math.max(280,Math.min(560,startW-(moveEvent.clientX-startX))));
+    const finish=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);writeLocalValue(PANEL_WIDTH_KEY,String(Math.round(panelWidthRef.current)));};
+    window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);};
+  const openSidePanel=()=>{setPanelTab('side');setPanelOpen(true);onSideChat?.();};
   useEffect(()=>{setPanelOpen(true);setGoalEditor(null);},[session.id]);
   const openGoal=(seed?:string,modelRef?:string,onConfigured?:()=>void)=>{
-    setPanelOpen(true);
+    setPanelOpen(true);setPanelTab('goal');
     if(taskLive){setGoalEditor(null);return;}
     if(!goal||seed||['completed','cancelled'].includes(goal.status))setGoalEditor({seed,modelRef,onConfigured,goal:goal&&!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty});
   };
   /** Codex-style /goal with no text: view the current goal, otherwise start setup. */
   const viewGoal=()=>{
-    if(goal&&!['completed','cancelled'].includes(goal.status)){setPanelOpen(true);setGoalEditor(null);}
+    if(goal&&!['completed','cancelled'].includes(goal.status)){setPanelOpen(true);setPanelTab('goal');setGoalEditor(null);}
     else openGoal();
   };
   /** Local lifecycle actions from /goal pause|resume|clear and the command menu. */
@@ -103,9 +121,22 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     }catch(e){showToast(e instanceof Error?e.message:'目标操作失败，请重试。','error');}
   };
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
-  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${goal&&panelOpen&&!goalEditor&&!session.importedFromBackup?' has-goal-panel':''}`}>
+  const panelVisible=panelOpen&&!goalEditor&&!session.importedFromBackup;
+  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&panelTab==='side'&&sideSession?' has-side-panel':''}`}>
     {content}
-    {goal&&panelOpen&&!goalEditor&&!session.importedFromBackup&&<ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>}
+    {panelVisible&&(goal||sideSession)&&<aside className="chat-side-panel" style={{width:panelWidth}} aria-label="对话侧边面板">
+      <header className="chat-side-panel-head">
+        <div className="chat-side-panel-tabs" role="tablist" aria-label="侧边面板">
+          <button type="button" role="tab" aria-selected={panelTab==='side'} className={panelTab==='side'?'is-on':''} onClick={()=>{setPanelTab('side');onSideChat?.();}}>辅助对话</button>
+          {goal&&<button type="button" role="tab" aria-selected={panelTab==='goal'} className={panelTab==='goal'?'is-on':''} onClick={()=>setPanelTab('goal')}>目标</button>}
+        </div>
+        <button type="button" className="chat-side-panel-close" aria-label="收起侧边面板" title="收起" onClick={()=>setPanelOpen(false)}>×</button>
+      </header>
+      {panelTab==='goal'&&goal
+        ? <ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>
+        : sideSession?<SideChatThread session={sideSession} onSend={onSideSend} onStop={onSideStop} onQuoteFromMain={onQuoteFromMain} onQuoteToMain={onQuoteToMain}/>:<p className="chat-side-panel-empty">正在准备辅助对话…</p>}
+      <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
+    </aside>}
   </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
   const [suggestionError, setSuggestionError] = useState('');
@@ -166,6 +197,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
+      {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openSidePanel} aria-expanded={panelVisible&&panelTab==='side'}><span aria-hidden="true">◫</span> 辅助对话</button>}
       {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelOpen} onClick={()=>setPanelOpen(v=>!v)}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
@@ -194,7 +226,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           {!goalEditor&&<div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -312,9 +344,52 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} />
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} />
         </div>}
       </div>}
     </div>
   );
+}
+
+/** 辅助对话线程：父会话的子会话，独立记录，不打断主对话。 */
+function SideChatThread({ session, onSend, onStop, onQuoteFromMain, onQuoteToMain }: {
+  session: ChatSession; onSend?: (text: string) => void; onStop?: () => void; onQuoteFromMain?: () => void; onQuoteToMain?: () => void;
+}) {
+  const [draft, setDraft] = useState(() => getChatDraft(session.id));
+  useEffect(() => {
+    const refresh = () => setDraft(getChatDraft(session.id));
+    refresh();
+    return subscribeChatDraft(session.id, refresh);
+  }, [session.id]);
+  const setText = (value: string) => { setChatDraftText(session.id, value); setDraft(getChatDraft(session.id)); };
+  const busy = Boolean(session.pendingTurnId);
+  const lastAssistant = [...session.messages].reverse().find(message => message.role === 'assistant' && (message.content || '').trim());
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const text = draft.text.trim();
+    if (!text || busy || !onSend) return;
+    const quotes = draft.quotes || [];
+    onSend(quotes.length ? ['引用：', ...quotes, '', text].join('\n') : text);
+    setText('');
+    quotes.forEach(() => removeChatDraftQuote(session.id, 0));
+  };
+  return <div className="side-chat">
+    <p className="side-chat-note">向这里提问不会进入主对话；需要时把结论引用回主对话。</p>
+    <div className="side-chat-thread" role="log" aria-label="辅助对话消息">
+      {!session.messages.length && !busy && <p className="side-chat-empty">还没有消息。可以问一个旁支问题，或先把主对话的上一轮引用进来。</p>}
+      {session.messages.map((message, index) => <MessageBubble key={message.turnId || `${index}-${message.role}`} message={message} />)}
+      {busy && <p className="side-chat-running" role="status">正在生成…{onStop && <button type="button" className="link-btn" onClick={onStop}>停止</button>}</p>}
+    </div>
+    <div className="side-chat-actions">
+      <button type="button" className="link-btn" disabled={!onQuoteFromMain} onClick={onQuoteFromMain}>引用主对话上一轮</button>
+      <button type="button" className="link-btn" disabled={!lastAssistant || !onQuoteToMain} onClick={onQuoteToMain}>引用到主对话</button>
+    </div>
+    <form className="side-chat-composer" onSubmit={submit}>
+      {(draft.quotes || []).length > 0 && <ul className="side-chat-quotes">{(draft.quotes || []).map((quote, index) => <li key={index}><span>{quote.length > 90 ? `${quote.slice(0, 90)}…` : quote}</span><button type="button" aria-label="移除引用" onClick={() => { removeChatDraftQuote(session.id, index); setDraft(getChatDraft(session.id)); }}>×</button></li>)}</ul>}
+      <textarea value={draft.text} rows={2} maxLength={4000} placeholder="问一个旁支问题…（Enter 发送，Shift+Enter 换行）" aria-label="辅助对话输入"
+        onChange={event => setText(event.target.value)}
+        onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(event); } }}/>
+      <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !draft.text.trim()}>发送</button>
+    </form>
+  </div>;
 }

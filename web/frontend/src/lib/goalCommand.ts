@@ -36,7 +36,7 @@ export function goalCommand(text: string): string | null {
   return parsed && parsed.kind === 'set' ? parsed.text : null;
 }
 
-const COMMAND_PREFIXES = ['g', 'go', 'goa', 'goal', 's', 'sc', 'sch', 'sche', 'sched', 'schedul', 'schedule',
+const COMMAND_PREFIXES = ['g', 'go', 'goa', 'goal', 'side', 'btw', '/side', 's', 'sc', 'sch', 'sche', 'sched', 'schedul', 'schedule',
   '目', '目标', '定', '定时', '计', '计划'];
 
 export function suggestsCommand(text: string): boolean {

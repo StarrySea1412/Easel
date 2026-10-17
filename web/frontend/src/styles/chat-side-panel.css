@@ -1,0 +1,29 @@
+/* 对话侧边面板：辅助对话与目标共用右侧容器（方案 C）。 */
+.chat-side-panel { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--surface); position: relative; }
+.chat-side-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.chat-side-panel-tabs { display: flex; gap: 4px; }
+.chat-side-panel-tabs button { border: 0; background: transparent; color: var(--text-tertiary); font: inherit; font-size: 12px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.chat-side-panel-tabs button.is-on { background: var(--surface-2); color: var(--text); font-weight: 550; }
+.chat-side-panel-tabs button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.chat-side-panel-close { border: 0; background: transparent; color: var(--text-tertiary); font-size: 16px; line-height: 1; width: 26px; height: 26px; border-radius: var(--radius-xs); cursor: pointer; }
+.chat-side-panel-close:hover { background: var(--surface-hover); color: var(--text); }
+.chat-side-panel-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.chat-side-panel-resize:hover { background: color-mix(in srgb, var(--accent-end) 35%, transparent); }
+.chat-side-panel-empty { padding: 16px 14px; color: var(--text-tertiary); font-size: 12px; }
+.side-chat { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.side-chat-note { margin: 0; padding: 9px 12px 0; color: var(--text-tertiary); font-size: 10px; line-height: 1.7; }
+.side-chat-thread { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 8px; }
+.side-chat-thread .message-bubble { max-width: 100%; }
+.side-chat-empty { margin: 14px 2px; color: var(--text-tertiary); font-size: 12px; line-height: 1.8; }
+.side-chat-running { margin: 8px 2px; color: var(--text-secondary); font-size: 11px; display: flex; align-items: center; gap: 8px; }
+.side-chat-actions { display: flex; gap: 14px; padding: 8px 12px; border-top: 1px dashed var(--border); }
+.side-chat-composer { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 12px; }
+.side-chat-composer textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px; max-height: 140px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; line-height: 1.6; }
+.side-chat-composer textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.side-chat-composer .btn { align-self: flex-end; }
+.side-chat-quotes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.side-chat-quotes li { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; background: var(--surface-2); border-radius: var(--radius-xs); color: var(--text-secondary); font-size: 10px; line-height: 1.6; }
+.side-chat-quotes li button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 12px; line-height: 1; }
+@media (max-width: 900px) {
+  .chat-side-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 40; max-width: 100%; box-shadow: -12px 0 32px #0003; }
+}

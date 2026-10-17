@@ -71,7 +71,9 @@ export default function Sidebar({
   stoppingSessions = [],
   taskState,
 }: SidebarProps) {
-  const statuses=sessionStatuses(sessions,runningSessions,stoppingSessions,taskState);
+  // 辅助对话（子会话）只在侧边面板里出现，不进主列表。
+  const listedSessions = sessions.filter((s) => !s.parentSessionId);
+  const statuses=sessionStatuses(listedSessions,runningSessions,stoppingSessions,taskState);
   const runningCount=[...statuses.values()].filter(s=>s.kind==='running'||s.kind==='stopping').length;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamePlace, setRenamePlace] = useState<'row'|'preview'>('row');
@@ -212,10 +214,10 @@ export default function Sidebar({
     } finally { if (renameGeneration.current === generation) setTitleGenerating(false); }
   };
 
-  const active = sessions.filter((s) => !s.archived && (s.pinnedAt || s.messages.length > 0 || s.id === activeSessionId));
+  const active = listedSessions.filter((s) => !s.archived && (s.pinnedAt || s.messages.length > 0 || s.id === activeSessionId));
   const pinned = active.filter(s => s.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!);
   const recent = active.filter(s => !s.pinnedAt);
-  const archived = sessions.filter((s) => s.archived);
+  const archived = listedSessions.filter((s) => s.archived);
 
   const renameForm = (s:ChatSession,floating=false) => (
         <div key={s.id} className={`session-rename-form ${floating?'session-hover-editor':'session-item'}`}>

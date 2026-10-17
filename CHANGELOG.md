@@ -1,3 +1,9 @@
+## 2026-10-18 · Side panel with an auxiliary chat (variant C, MVP) / 对话侧边面板与辅助对话（方案 C 首版）
+
+- The chat page gains a right side panel: collapsible, resizable (width persisted locally), tabbed — 辅助对话 plus 目标 (the existing goal panel moves in as its tab; the 查看当前目标 button still opens it). / 对话页新增右侧面板：可收起、可调宽（宽度本机记忆）、多标签——“辅助对话”与“目标”（原目标面板并入为标签，“查看当前目标”行为不变）。
+- 辅助对话 is a child session of the current conversation (research: ZCode's selection-side-chat + Cursor's /side): entries are the header button and the composer command menu (/side, /btw); it keeps its own transcript, never joins the main message flow, and stays out of the session list. The parent's last exchange can be quoted into the side draft, and the side reply can be quoted back into the main draft — both explicit, nothing is injected automatically. / 辅助对话是当前会话的子会话（依据 ZCode selection-side-chat 与 Cursor /side 的调研）：入口为头部按钮与命令菜单（/side、/btw）；独立记录、不进入主消息流、不出现在会话列表；可把主对话上一轮引用进侧边草稿、把侧边答复引用回主草稿——均为显式操作，不自动注入。
+- No paid model call is made by opening the panel; sending still goes through the normal gateway path. 1,092 frontend tests, build, lint (0 errors). / 打开面板不产生任何模型调用；发送仍走既有网关链路。前端 1092 项、构建、lint（0 错误）。
+
 ## 2026-10-18 · ClawHub counters are visible / ClawHub 统计数字可见
 
 - The registry's public counters — downloads, installs, stars, versions and comments — are now fully mapped by the backend (comments was dropped before) and search results carry them too (from `native.skill.stats`). There is no GitHub-style issue tracker upstream, so the UI shows the real comment count instead of inventing one. / 上游公开计数（下载/安装/星标/版本/评论）已完整映射（此前丢了评论），检索结果也携带统计（取自 `native.skill.stats`）；上游没有 GitHub 式 issues，界面展示真实的评论数而非虚构。

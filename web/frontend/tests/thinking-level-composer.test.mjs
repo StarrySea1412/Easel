@@ -398,3 +398,15 @@ test('typing during generation keeps both the stop control and queue-send contro
   await view.click(stop); assert.equal(stops, 1);
   assert.equal(view.container.querySelector('textarea').value, '下一步的草稿');
 });
+
+test('slash side opens the auxiliary chat without sending a model message',async t=>{
+  const view=await fixture(t,'low');let opened=0;
+  await view.render({onGoal:()=>{},onSideChat:()=>{opened++;}});
+  await view.type('/side');
+  assert.match(document.querySelector('[role=listbox]').textContent,/辅助对话/);
+  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  await view.key(view.container.querySelector('textarea'),'ArrowDown');
+  await view.key(view.container.querySelector('textarea'),'Enter');
+  assert.equal(opened,1);assert.equal(view.sent.length,0);
+  assert.equal(view.container.querySelector('textarea').value,'');
+});

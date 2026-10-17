@@ -1,5 +1,6 @@
 import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
+import { lastExchangeQuote, sideChatOf, sideChatTitle } from './lib/sideChat';
 import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
@@ -45,7 +46,7 @@ import {
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
-import { clearChatDraft, setChatDraftText } from './lib/chatDrafts';
+import { addChatDraftQuote, clearChatDraft, setChatDraftText } from './lib/chatDrafts';
 import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispatchQueuedMessage, dispatchSelectedQueuedMessage, pauseChatQueue, clearChatQueue } from './lib/chatQueue';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
@@ -998,6 +999,49 @@ export default function App() {
     }
   }, [appendAssistant, clearStream]);
 
+  // 辅助对话（侧边面板的子会话）：确保存在、转发消息、双向引用；主线程消息流不受影响。
+  const ensureSideChat = useCallback((): string | undefined => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    if (!active) return undefined;
+    const existing = sideChatOf(active, sessionsRef.current);
+    if (existing) return existing.id;
+    const child = { ...createSession(), parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
+    const next = [child, ...sessionsRef.current];
+    if (!saveSessions(next)) { showToast('辅助对话未能保存到本机', 'error'); return undefined; }
+    sessionsRef.current = next;
+    setSessions(next);
+    return child.id;
+  }, [activeSessionId]);
+  const handleSideSend = useCallback((text: string) => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    if (!active) return;
+    let child = sideChatOf(active, sessionsRef.current);
+    if (!child) { const id = ensureSideChat(); child = sessionsRef.current.find(item => item.id === id); }
+    if (child) sendUserAndStream(child.id, text);
+  }, [activeSessionId, ensureSideChat, sendUserAndStream]);
+  const handleSideStop = useCallback(() => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
+    if (child) void handleStopStream(child.id);
+  }, [activeSessionId, handleStopStream]);
+  const handleQuoteFromMain = useCallback(() => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
+    if (!active || !child) return;
+    const quote = lastExchangeQuote(active);
+    if (!quote) { showToast('主对话还没有可引用的内容', 'info'); return; }
+    addChatDraftQuote(child.id, quote);
+  }, [activeSessionId]);
+  const handleQuoteToMain = useCallback(() => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
+    if (!active || !child) return;
+    const reply = [...child.messages].reverse().find(message => message.role === 'assistant' && (message.content || '').trim());
+    if (!reply) { showToast('辅助对话还没有可引用的回答', 'info'); return; }
+    addChatDraftQuote(active.id, (reply.content || '').slice(0, 600));
+  }, [activeSessionId]);
+
+
   const handleSteer = useCallback(async (sessionId: string, id: string) => {
     if (sessionsRef.current.find(s=>s.id===sessionId)?.engine === 'codex') {
       const item=getChatQueue(sessionId).items.find(row=>row.id===id), run=streamAcc.current[sessionId];
@@ -1217,6 +1261,12 @@ export default function App() {
             key={activeSession.id}
             session={activeSession}
             taskState={tasks}
+            sideSession={sideChatOf(activeSession, sessions)}
+            onSideChat={()=>{ensureSideChat();}}
+            onSideSend={handleSideSend}
+            onSideStop={handleSideStop}
+            onQuoteFromMain={handleQuoteFromMain}
+            onQuoteToMain={handleQuoteToMain}
             onTaskChange={()=>setTaskRevision(v=>v+1)}
             onEngineChange={engine=>setSessions(prev=>{const next=prev.map(s=>s.id===activeSession.id&&!s.messages.length&&!s.pendingTurnId?{...s,engine}:s);saveSessions(next);return next;})}
             stream={streams[activeSession.id]}
