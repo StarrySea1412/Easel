@@ -487,6 +487,19 @@ SKILL_API_REQUIREMENTS: dict[str, dict] = {
             },
         ],
     },
+    # ComfyUI 视频工作流：本地/局域网节点服务与 API-format workflow，全部可选。
+    "comfyui-video-workflow": {
+        "label": "ComfyUI 视频工作流（本地节点服务）",
+        "providers": [{"id": "comfyui", "name": "ComfyUI API 工作流",
+                        "keys": [
+                            _k("COMFYUI_BASE_URL", "ComfyUI 地址（如 http://127.0.0.1:8188）", required=False, secret=False),
+                            _k("COMFYUI_WORKFLOW_PATH", "API 工作流 JSON 路径", required=False, secret=False),
+                            _k("COMFYUI_VIDEO_PROMPT_NODE", "正向提示词节点 ID（可空，单节点时自动识别）", required=False, secret=False),
+                            _k("COMFYUI_VIDEO_NEGATIVE_NODE", "负向提示词节点 ID（可空）", required=False, secret=False),
+                            _k("COMFYUI_CLIENT_ID", "ComfyUI 客户端标识（可空）", required=False, secret=False),
+                            _k("COMFYUI_API_KEY", "ComfyUI API Key（可选）", required=False),
+                        ]}],
+    },
     # 论文解读：MinerU 与生图均为可选（缺 MinerU 用 pdfplumber 兜底、缺生图用信息图/图表）。
     # 全 key 可选 → 不误报感叹号；但仍进注册表以便就地填 MINERU_API_TOKEN（无其它叶子 skill 承载它）。
     "paper-explainer": {
@@ -7624,16 +7637,3 @@ if __name__ == "__main__":
         print(f"  {proxy_url}")
     print()
     uvicorn.run(app, host=os.environ.get("EASEL_HOST", "0.0.0.0"), port=port, log_level="warning")
-    # ComfyUI 视频工作流：本地/局域网节点服务与 API-format workflow，全部可选。
-    "comfyui-video-workflow": {
-        "label": "ComfyUI 视频工作流（本地节点服务）",
-        "providers": [{"id": "comfyui", "name": "ComfyUI API 工作流",
-                        "keys": [
-                            _k("COMFYUI_BASE_URL", "ComfyUI 地址（如 http://127.0.0.1:8188）", required=False, secret=False),
-                            _k("COMFYUI_WORKFLOW_PATH", "API 工作流 JSON 路径", required=False, secret=False),
-                            _k("COMFYUI_VIDEO_PROMPT_NODE", "正向提示词节点 ID（可空，单节点时自动识别）", required=False, secret=False),
-                            _k("COMFYUI_VIDEO_NEGATIVE_NODE", "负向提示词节点 ID（可空）", required=False, secret=False),
-                            _k("COMFYUI_CLIENT_ID", "ComfyUI 客户端标识（可空）", required=False, secret=False),
-                            _k("COMFYUI_API_KEY", "ComfyUI API Key（可选）", required=False),
-                        ]}],
-    },
