@@ -1,3 +1,11 @@
+## 2026-10-18 · 对话分享 MCP（完整分享＋接管＋回传）
+
+- 调研：`docs/conversation-share-mcp-research-2026-10-18.md`（ZCode 3.15.3 asar 实证：`conversation-share` 发布流、`public_importable` 导入式分享、产物随分享上传、任务分叉 `forkedFromTaskId`；Cursor/VS Code/Claude Code 官方页；不可达页面如实标注）。结论：完整分享与接管有先例，**回传原对话没有竞品在做**。
+- 后端：`web/conversation_share.py`（存储＋校验＋四条路由，`DATA_DIR/conversation-shares/`）；`web/app.py` 挂载路由；`mcp/conversation_share_mcp.py` stdio MCP（工具 4 个＋资源 `easel-share://`，零依赖，注册命令写入调研文档）。
+- 前端：`lib/conversationShare.ts`（完整载荷、接口、`mergeShareAppends` 去重合并）；ChatPage 头部「分享」/「加载接管内容」与消息“来自分享接管”标注；`ChatSession.share`、`loadedShareAppends`、`ChatMessage.shareAppend` 入 `decodeSessions` 白名单——**顺带修复上轮 `parentSessionId` 被白名单丢弃（子会话刷新后回主列表）的缺陷**。
+- 测试：后端 10 项（存储 6＋MCP stdio 全链路 4）、前端 1096 项（新增分享 3＋持久化往返 1）、构建/lint 通过。
+- 边界：7880 后端需空闲重启后分享路由生效；无鉴权（本地 token 访问，与既有本地 API 同策略）；不做公网分享与 Web 预览页。
+
 ## 2026-10-18 · 对话侧边面板与辅助对话（方案 C 首版）
 
 - `ChatSession` 新增 `parentSessionId`（子会话标记）；`lib/sideChat.ts`（归属/序号/上一轮引用）与 `/side`、`/btw` 命令前缀；Sidebar 主列表、归档与状态点统一改用 `listedSessions`（过滤子会话）。

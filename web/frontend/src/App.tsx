@@ -1,6 +1,7 @@
 import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
 import { lastExchangeQuote, sideChatOf, sideChatTitle } from './lib/sideChat';
+import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
 import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
@@ -826,6 +827,40 @@ export default function App() {
     sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel, kind);
   }, [sendUserAndStream]);
 
+  // 对话分享（完整快照）与接管回传（外部模型追加 → 加载回原对话，去重并标注来源）。
+  const handleShareConversation = useCallback(async () => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    if (!active) return;
+    if (active.importedFromBackup) { showToast('备份导入的对话不支持分享', 'info'); return; }
+    try {
+      const share = await createConversationShare(active);
+      const next = sessionsRef.current.map(item => item.id === active.id ? { ...item, share: { token: share.token, title: share.title, createdAt: share.createdAt } } : item);
+      if (!saveSessions(next)) showToast('分享已创建，但本机未能记录 token；请先复制保留。', 'error');
+      else showToast(`已生成完整分享（${share.messageCount} 条消息）· token ${share.token}`, 'success');
+      sessionsRef.current = next;
+      setSessions(next);
+    } catch (cause) {
+      showToast(cause instanceof Error ? cause.message : '分享创建失败', 'error');
+    }
+  }, [activeSessionId]);
+  const handleLoadShareAppends = useCallback(async () => {
+    const active = sessionsRef.current.find(item => item.id === activeSessionId);
+    const share = active?.share;
+    if (!active || !share) return;
+    try {
+      const { appends } = await fetchShareAppends(share.token);
+      const merged = mergeShareAppends(active, appends);
+      if (!merged.added) { showToast('没有新的接管内容', 'info'); return; }
+      const next = sessionsRef.current.map(item => item.id === active.id ? merged.session : item);
+      if (!saveSessions(next)) { showToast('接管内容未能保存到本机；请保留当前页面。', 'error'); return; }
+      sessionsRef.current = next;
+      setSessions(next);
+      showToast(`已加载 ${merged.added} 条接管内容`, 'success');
+    } catch (cause) {
+      showToast(cause instanceof Error ? cause.message : '接管内容读取失败', 'error');
+    }
+  }, [activeSessionId]);
+
   // 非显式入口（看热点一键做成内容、技能开聊、爆款拆解）并入当前选中的对话；
   // 只有侧栏“新建对话”与工作台“开始创作”会新增列表条目。
   const mergeTarget = useCallback((): ChatSession | undefined => {
@@ -1267,6 +1302,8 @@ export default function App() {
             onSideStop={handleSideStop}
             onQuoteFromMain={handleQuoteFromMain}
             onQuoteToMain={handleQuoteToMain}
+            onShare={handleShareConversation}
+            onLoadShare={handleLoadShareAppends}
             onTaskChange={()=>setTaskRevision(v=>v+1)}
             onEngineChange={engine=>setSessions(prev=>{const next=prev.map(s=>s.id===activeSession.id&&!s.messages.length&&!s.pendingTurnId?{...s,engine}:s);saveSessions(next);return next;})}
             stream={streams[activeSession.id]}

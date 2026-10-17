@@ -10,6 +10,7 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 
 export interface ChatMessage extends ChatTiming {
+  shareAppend?: { token: string; appendId: string; at: number; source: { model: string; harness: string } }; // 来自分享接管的回传标记
   taskRunId?:string;
   taskGoalId?:string;
   externalSource?: 'gateway-injected';
@@ -42,6 +43,8 @@ export interface ChatSession {
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
   pinnedAt?: number; // Local pin order, independent of streaming or active selection.
   parentSessionId?: string; // 辅助对话：挂在父会话下的子会话，只出现在侧边栏面板里
+  share?: { token: string; title: string; createdAt: number }; // 对话分享：完整快照的本地 token
+  loadedShareAppends?: string[]; // 已回传合并过的追加 id（去重，重复加载不产生重复消息）
   importedFromBackup?: boolean; // 只读备份记录，不关联后台上下文或恢复任务
   backupIncomplete?: boolean; // 备份时仍在进行，仅保留已收到的内容
 }
@@ -166,6 +169,11 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
       && typeof file.id === 'string' && typeof file.name === 'string' && typeof file.path === 'string');
   }
   if (typeof value.error === 'string' || (record(value.error) && typeof value.error.message === 'string')) message.error = chatErrorDetail(value.error);
+  if (record(value.shareAppend) && typeof value.shareAppend.token === 'string' && typeof value.shareAppend.appendId === 'string'
+    && typeof value.shareAppend.at === 'number' && record(value.shareAppend.source)) {
+    message.shareAppend = { token: value.shareAppend.token, appendId: value.shareAppend.appendId, at: value.shareAppend.at,
+      source: { model: typeof value.shareAppend.source.model === 'string' ? value.shareAppend.source.model : '', harness: typeof value.shareAppend.source.harness === 'string' ? value.shareAppend.source.harness : '' } };
+  }
   if (migrateAttachmentText && message.role === 'user' && !message.agentContent && message.content.includes('【附件素材】')) {
     message.agentContent = message.content;
     message.content = message.content.split('【附件素材】', 1)[0].trim();
@@ -198,6 +206,11 @@ function decodeSessions(raw: string): ChatSession[] {
       session.editBranch = { sourceSessionId: value.editBranch.sourceSessionId, prefixLength: Number(value.editBranch.prefixLength) };
     }
     for (const key of ['persona', 'sessionKey', 'pendingTurnId'] as const) if (typeof value[key] === 'string') session[key] = value[key];
+    if (typeof value.parentSessionId === 'string' && value.parentSessionId.trim()) session.parentSessionId = value.parentSessionId;
+    if (record(value.share) && typeof value.share.token === 'string' && typeof value.share.title === 'string' && typeof value.share.createdAt === 'number') {
+      session.share = { token: value.share.token, title: value.share.title, createdAt: value.share.createdAt };
+    }
+    if (Array.isArray(value.loadedShareAppends)) session.loadedShareAppends = value.loadedShareAppends.filter((id): id is string => typeof id === 'string');
     if (typeof value.archived === 'boolean') session.archived = value.archived;
     if (typeof value.pinnedAt === 'number' && Number.isFinite(value.pinnedAt) && value.pinnedAt > 0) session.pinnedAt = value.pinnedAt;
     if (value.importedFromBackup === true) {

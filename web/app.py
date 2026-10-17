@@ -7146,6 +7146,9 @@ app.include_router(_videogen_router(_VIDEO_SERVICE))
 from clawhub import create_router as _clawhub_router
 app.include_router(_clawhub_router())
 
+from conversation_share import ConversationShareStore as _ConversationShareStore, create_router as _conversation_share_router
+app.include_router(_conversation_share_router(_ConversationShareStore(DATA_DIR / 'conversation-shares')))
+
 
 def _imagegen_dimensions(path: Path) -> dict[str, int]:
     """Expose actual image dimensions without resizing or assuming the provider obeyed size."""

@@ -59,6 +59,8 @@ interface ChatPageProps {
   onSideStop?: () => void;                              // 停止辅助对话的生成
   onQuoteFromMain?: () => void;                         // 主对话上一轮 → 辅助对话草稿引用
   onQuoteToMain?: () => void;                           // 辅助对话最后答复 → 主对话草稿引用
+  onShare?: () => void;                                 // 把当前对话的完整快照发布为分享
+  onLoadShare?: () => void;                             // 把接管回传内容合并进当前对话
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
@@ -78,7 +80,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSession, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSession, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -197,6 +199,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
+      {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
+      {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}
       {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openSidePanel} aria-expanded={panelVisible&&panelTab==='side'}><span aria-hidden="true">◫</span> 辅助对话</button>}
       {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelOpen} onClick={()=>setPanelOpen(v=>!v)}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
@@ -310,7 +314,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
             const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
             return (
-              <Fragment key={`${i}-${msg.role}`}>{msg.taskRunId&&<div className="task-message-label">目标执行 · 第 {taskState?.runs.find(r=>r.id===msg.taskRunId)?.iteration||'—'} 轮</div>}{msg.taskGoalId&&<div className="task-message-label">目标记录</div>}{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
+              <Fragment key={`${i}-${msg.role}`}>{msg.taskRunId&&<div className="task-message-label">目标执行 · 第 {taskState?.runs.find(r=>r.id===msg.taskRunId)?.iteration||'—'} 轮</div>}{msg.taskGoalId&&<div className="task-message-label">目标记录</div>}{msg.shareAppend&&<div className="task-message-label share-append-label">来自分享接管 · {msg.shareAppend.source?.model||msg.shareAppend.source?.harness||'外部模型'} · {new Date(msg.shareAppend.at*1000).toLocaleString('zh-CN',{hour12:false})}</div>}{msg.role==='user'&&<div className="chat-turn-anchor" tabIndex={-1} aria-label={`第 ${nodes.find(node=>node.messageIndex===i)?.number||1} 轮对话`} ref={element=>{if(element)turnRefs.current.set(i,element);else turnRefs.current.delete(i);}}/>}<MessageBubble
                 key={`${i}-${msg.role}`}
                 message={msg}
                 artifacts={msg.role === 'assistant' && auditTurn ? <ChatArtifacts artifacts={deliveries.items.filter(item => item.turnId === auditTurn)} onUpdated={deliveries.updated} jobs={deliveries.jobs.filter(item => item.turnId === auditTurn)} onJobsChanged={deliveries.retry} /> : undefined}
