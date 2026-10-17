@@ -49,6 +49,9 @@ test('the section sidebar lists each layer with counts and jumps on click', asyn
   await act(async () => { page.dispatchEvent(new window.Event('scroll')); });
   assert.equal(items[1].getAttribute('aria-current'), 'true', 'the highlight follows scrolling');
 
+  await act(async () => nav.querySelector('.skills-nav-top').click());
+  assert.equal(items[0].getAttribute('aria-current'), 'true', 'back-to-top restores the first highlight');
+
   await act(async () => items[0].click());
   assert.equal(items[0].getAttribute('aria-current'), 'true', 'clicking jumps straight back to the first section');
   assert.equal(items[1].getAttribute('aria-current'), null);
