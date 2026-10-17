@@ -312,6 +312,9 @@ test('sidebar counts actual running chats once, retains folded count and updates
  assert.match(view.byLabel('正在运行的对话：1').textContent,/1.*运行中/);
  assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'正在对话');
  assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-dot'),null);
+ const firstRowContent=view.container.querySelector('[data-session-id=s1] .session-row-content');
+ assert.ok(firstRowContent.firstElementChild.classList.contains('session-status-badge'));
+ assert.ok(firstRowContent.firstElementChild.nextElementSibling.classList.contains('session-select'));
  assert.equal(view.container.querySelector('[data-session-id=s2] .session-status-badge').getAttribute('aria-label'),'已完成');
  assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-dot'));
  assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-badge').classList.contains('is-completed'));
