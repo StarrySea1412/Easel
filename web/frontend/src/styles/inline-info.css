@@ -9,3 +9,8 @@
 .inline-info.is-hover>button:hover,.inline-info.is-hover>button:focus-visible { background:var(--surface-2);color:var(--text-secondary); }
 .inline-info.is-hover>button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
 .inline-info-tooltip { position:fixed;right:auto;z-index:1200;pointer-events:none; }
+
+.inline-info-content.is-wide{width:min(380px,calc(100vw - 70px))}
+.inline-info-content p{margin:6px 0}
+.inline-info-content p:first-child{margin-top:0}
+.inline-info-content p:last-child{margin-bottom:0}

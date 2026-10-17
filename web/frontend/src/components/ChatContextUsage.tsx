@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPanel } from '../hooks/useAnchoredPanel';
 import ChatUsageDialog from './ChatUsageDialog';
+import InlineInfo from './InlineInfo';
 import '../styles/context-usage.css';
 
 type Snapshot = {
@@ -77,14 +78,20 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
       </svg><span className="context-trigger-percent">{known ? `${Math.round(percent)}%` : '—'}</span>
     </button>
     {open && createPortal(<section ref={panel} id={id} className={`context-usage-panel ${tone}`} role="dialog" aria-label="上下文容量" tabIndex={-1} style={position}>
-      <header><h2>上下文容量</h2><button type="button" className="context-close" aria-label="关闭上下文容量" onClick={() => { dismiss(); button.current?.focus(); }}>×</button></header>
+      <header><h2>上下文容量<InlineInfo label="统计口径说明" hover wide>
+        <p>{data?.note || '尚未收到本会话的上下文快照，不使用累计Token推算占用。'}</p>
+        <p>{data?.breakdownStatus === 'estimated' || data?.breakdownStatus === 'partial' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '已知字符数保留；分类报告与总量不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
+        <p>字符数是本地记录值，Token按字符数÷4粗估；不同模型、中文和代码的分词会有差异。缺少分类只影响该项，已知项仍单独显示；未读的技能全文不计入。{data?.runtimeStore === 'sqlite' ? '当前会话读取 SQLite 存储。' : ''}</p>
+        {skills && <p>{skills.note}</p>}
+        <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p>
+      </InlineInfo></h2><button type="button" className="context-close" aria-label="关闭上下文容量" onClick={() => { dismiss(); button.current?.focus(); }}>×</button></header>
       <div className="context-usage-total" title={used == null ? '占用未提供' : `${used.toLocaleString()} / ${capacity?.toLocaleString() || '容量未知'} Token`}>
         <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>
       </div>
       <div className="context-capacity-track" role={known ? 'progressbar' : undefined} aria-label="上下文已用比例" aria-valuenow={known ? Math.min(100, percent) : undefined} aria-valuemin={known ? 0 : undefined} aria-valuemax={known ? 100 : undefined}>
         <span style={{ width: known ? `${Math.min(100, percent)}%` : '0%' }} />
       </div>
-      <div className="context-snapshot-line"><span>{data?.usageSource === 'model_changed' ? '模型已切换，等待新请求快照' : data?.usageSource === 'last_request' ? '上次请求输入' : data?.usageSource === 'runtime' ? '最近运行时快照' : '尚无可用快照'}{streaming ? ' · 生成中' : ''}</span>
+      <div className="context-snapshot-line"><span>{data?.usageSource === 'model_changed' ? '模型已切换，等待新请求快照' : data?.usageSource === 'last_request' ? '上次请求输入' : data?.usageSource === 'runtime' ? '最近运行时快照' : '尚无可用快照'}{data?.stale ? ' · 快照参考' : ''}{streaming ? ' · 生成中' : ''}</span>
         {updated && !Number.isNaN(updated.getTime()) && <time dateTime={updated.toISOString()}>{updated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>}</div>
       {data?.modelRef && <p className="context-model" title={data.modelRef}>{data.modelRef}</p>}
       {engine !== 'codex' && data && <div className="context-window-facts">
@@ -107,11 +114,6 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
               {part.chars != null && <small className="context-part-source">{part.chars.toLocaleString('zh-CN')} 字符 · {part.source === 'session_skills' ? '会话技能快照' : '运行时报告'}</small>}</dd>
           </div>)}</dl>
           {skills && skills.source !== 'unavailable' && <p className="context-skills-fact">{skills.promptChars != null ? <>已知技能目录 {skills.promptChars.toLocaleString('zh-CN')} 字符{skills.availableCount != null ? `，会话登记 ${skills.availableCount} 项` : ''}。{skills.listedCount == null ? '目录来自会话缓存，尚未确认本轮实际注入。' : '目录已由运行时上报。'}</> : skills.installedCount != null ? <>本机提供 {skills.installedCount} 项技能；会话尚未返回注入目录。</> : '会话技能目录等待运行时记录。'}正文按需读取，计入消息与工具回执。</p>}
-          <details className="context-source"><summary>统计口径{data?.stale ? ' · 快照参考' : ''}</summary><p>{data?.note || '尚未收到本会话的上下文快照，不使用累计Token推算占用。'}</p>
-            <p>{data?.breakdownStatus === 'estimated' || data?.breakdownStatus === 'partial' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '已知字符数保留；分类报告与总量不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
-            <p>字符数是本地记录值，Token按字符数÷4粗估；不同模型、中文和代码的分词会有差异。缺少分类只影响该项，已知项仍单独显示；未读的技能全文不计入。{data?.runtimeStore === 'sqlite' ? '当前会话读取 SQLite 存储。' : ''}</p>
-            {skills && <p>{skills.note}</p>}
-            <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p></details>
         </>}
       <footer><button type="button" className="context-details" onClick={() => { dismiss(); setDetails(true); }}>消耗与费用明细 <span aria-hidden="true">↗</span></button>
         {engine !== 'codex' && <button type="button" disabled={pending} onClick={() => setRevision(value => value + 1)}>{pending ? '读取中…' : '刷新'}</button>}</footer>

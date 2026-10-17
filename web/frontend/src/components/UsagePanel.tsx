@@ -1,6 +1,7 @@
 import { NativeSelect as Select } from './ui/Select';
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { IconCoins } from './icons';
+import InlineInfo from './InlineInfo';
 import '../styles/usage.css';
 import UsagePriceEditor from './UsagePriceEditor';
 
@@ -186,9 +187,15 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
               <td>{display(session.summary.recordedCostUsd, 'recordedCostUsd')}</td><td>{timeLabel(session.lastAt)}</td>
             </tr>)}</tbody></table></div>}
           </>}
-          <details className="usage-source-notes"><summary>数据来源与统计口径 <span>OpenClaw / Codex · 非服务商账单</span></summary><p className="usage-note">未上报字段保留未知，记录费用与渠道估算均不代表服务商账单。输入包含缓存，缓存与推理不会重复累加到总量。Codex 按用量事件统计，一条记录可能包含多次请求。</p>{current.issues.map((issue) => <p className="usage-note" key={issue}>{issue}</p>)}
-          <p className="usage-note">{current.channelNote}</p><p className="usage-note">{current.note}</p><p className="usage-note">{current.costNote}</p><p className="usage-note">{current.performanceNote}</p><p className="usage-note">{current.pricingNote}</p>
-          <p className="usage-note">{current.scope}</p><p className="usage-note">更新于 {new Date(current.updatedAt*1000).toLocaleString('zh-CN')}</p></details>
+          <div className="usage-source-notes">
+            <p className="usage-source-line">数据来源与统计口径 <span>OpenClaw / Codex · 非服务商账单</span><InlineInfo label="数据来源与统计口径" hover wide>
+              <p className="usage-note">未上报字段保留未知，记录费用与渠道估算均不代表服务商账单。输入包含缓存，缓存与推理不会重复累加到总量。Codex 按用量事件统计，一条记录可能包含多次请求。</p>
+              <p className="usage-note">{current.channelNote}</p><p className="usage-note">{current.note}</p><p className="usage-note">{current.costNote}</p><p className="usage-note">{current.performanceNote}</p><p className="usage-note">{current.pricingNote}</p>
+              <p className="usage-note">{current.scope}</p>
+            </InlineInfo></p>
+            {current.issues.map((issue) => <p className="usage-note" key={issue}>{issue}</p>)}
+            <p className="usage-note">更新于 {new Date(current.updatedAt*1000).toLocaleString('zh-CN')}</p>
+          </div>
         </> : !error && <p className="usage-note" role="status">正在读取本项目的用量记录…</p>}
       </div>}
     </section>

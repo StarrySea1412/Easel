@@ -1,3 +1,11 @@
+## 2026-10-17 · 统计口径等详细说明改为 ⓘ 悬停
+
+- `InlineInfo` 新增可选 `wide`（`width:min(380px,calc(100vw - 70px))`，配 `p` 间距样式），默认宽度与行为不变，定位逻辑沿用 `offsetWidth/offsetHeight` 动态计算。
+- `ChatContextUsage`：删除 `统计口径 · 快照参考` 折叠块；“上下文容量”标题旁 ⓘ 悬停承载全部 5 段口径（动态 note、分类/字符说明、技能 note、容量来源）；`快照参考`（stale）标记移入快照行保持可见；`context-usage.css` 清理 `.context-source` 死样式。
+- `UsagePanel`：`数据来源与统计口径` 折叠块改为页脚可见行（标题＋“OpenClaw / Codex · 非服务商账单”＋ⓘ），动态 `issues` 与“更新于”保持可见，静态说明（渠道/note/成本/性能/定价/范围）进 ⓘ；`usage.css` 的 summary 规则替换为 `.usage-source-line`。
+- 核查：其余 `<details>`（证据列表、图库、版本更新说明、触发历史、比较组、采集证据等）均为数据型展开，不属于“详细说明”，不同步改造。
+- 前端全量 1086 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浏览器核对（ⓘ 悬停显示全部文案、折叠块消失、键盘/触屏可达）＋截图。
+
 ## 2026-10-17 · ClawHub 技能检索收藏
 
 - 新增 `lib/skillFavorites.ts`：本地书签（`easel:skill-favorites`，100 条上限），只保存公开元数据（id/slug/displayName/ownerHandle/summary/version/updatedAt/canonicalUrl/savedAt），读取做字段校验与截断，写入走 `localPersistence`（失败返回 false，绝不虚标已收藏）；模块级 store + `useSyncExternalStore`，两处面板星标实时同步。

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { IconInfo } from './icons';
 import '../styles/inline-info.css';
 
-export default function InlineInfo({ label, children, hover = false, onShow }: { label: string; children: React.ReactNode; hover?: boolean; onShow?: () => void }) {
+export default function InlineInfo({ label, children, hover = false, wide = false, onShow }: { label: string; children: React.ReactNode; hover?: boolean; wide?: boolean; onShow?: () => void }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 12, top: 12 });
   const trigger = useRef<HTMLButtonElement>(null), tip = useRef<HTMLDivElement>(null);
@@ -23,7 +23,7 @@ export default function InlineInfo({ label, children, hover = false, onShow }: {
     <button ref={trigger} type="button" aria-label={label} aria-describedby={open ? id : undefined}
       onPointerEnter={event => {if(event.pointerType !== 'touch')show();}} onPointerLeave={() => setOpen(false)}
       onFocus={show} onBlur={() => setOpen(false)} onKeyDown={event => {if(event.key === 'Escape'){event.preventDefault();event.stopPropagation();setOpen(false);}}}><IconInfo size={13}/></button>
-    {open && createPortal(<div ref={tip} id={id} className="inline-info-content inline-info-tooltip" role="tooltip" style={position}>{children}</div>,document.body)}
+    {open && createPortal(<div ref={tip} id={id} className={`inline-info-content inline-info-tooltip${wide ? ' is-wide' : ''}`} role="tooltip" style={position}>{children}</div>,document.body)}
   </span>;
   return <details className="inline-info"><summary aria-label={label} title={label}><IconInfo size={13}/></summary>
     <div className="inline-info-content" role="note">{children}</div>

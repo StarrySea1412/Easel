@@ -105,8 +105,8 @@
 .usage-turn-group > summary { padding: 16px 0; font-size: 12px; cursor: pointer; }
 .usage-turn-group > summary > span { color: var(--text-tertiary); margin-left: 8px; font-size: 10px; }
 .usage-panel .usage-source-notes { margin-top: 24px; padding: 18px 0 0; border-top: 1px solid var(--border); }
-.usage-panel .usage-source-notes > summary { color: var(--text-secondary); font-size: 11px; cursor: pointer; line-height: 1.8; }
-.usage-source-notes > summary > span { float: right; color: var(--text-tertiary); font-size: 10px; }
+.usage-panel .usage-source-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.8; }
+.usage-source-line > span { color: var(--text-tertiary); font-size: 10px; }
 .usage-panel :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 @media (max-width: 600px) {
   .usage-panel .usage-toolbar { align-items: flex-start; gap: 12px; }

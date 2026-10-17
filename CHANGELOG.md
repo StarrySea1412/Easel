@@ -1,3 +1,9 @@
+## 2026-10-17 · Dense explanation text now lives in ⓘ hovers / 详细口径说明收进 ⓘ 悬停
+
+- The context-usage panel's “统计口径 · 快照参考” block is gone: the ⓘ next to 上下文容量 carries all five paragraphs (dynamic note, breakdown note, char/token estimate, skills note, capacity source) on hover/focus, and the 快照参考 (stale) marker moved onto the snapshot line so it stays visible. / 上下文容量面板的“统计口径 · 快照参考”折叠块移除：标题旁 ⓘ 悬停/聚焦承载全部 5 段（动态 note、分类说明、字符换算、技能注记、容量来源），`快照参考`（stale）标记移到快照行保持可见。
+- The usage panel footer keeps the “数据来源与统计口径 · OpenClaw / Codex · 非服务商账单” line, live issues and the update time visible; the static notes (channel/cost/performance/pricing/scope) moved into the ⓘ hover. / 用量面板页脚保留“数据来源与统计口径 · OpenClaw / Codex · 非服务商账单”可见行、动态 issues 与更新时间；静态说明（渠道/成本/性能/定价/范围）进入 ⓘ 悬停。
+- `InlineInfo` gained an opt-in `wide` tooltip; everything else about the shared component is unchanged. 1,086 frontend tests, build, lint (0 errors) and browser checks. / `InlineInfo` 新增可选 `wide` 宽条（多段文案适配）；共享组件其余行为不变。前端 1086 项、构建、lint（0 错误）与浏览器核对。
+
 ## 2026-10-17 · ClawHub skill search can be bookmarked / ClawHub 技能检索可收藏
 
 - Search results and details in both ClawHub surfaces — the 技能库 panel and the chat composer's skill picker — now carry a ☆ toggle; the 技能库 panel adds a 我的收藏 section (查看详情、移除收藏、官方页面). / 技能库 ClawHub 面板与对话技能选择器两处的搜索结果和详情都加了 ☆ 收藏开关；技能库面板新增“我的收藏”区（查看详情、移除收藏、官方页面）。
