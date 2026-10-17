@@ -10,7 +10,8 @@ function bounded(value: string, fallback: number, min: number, max: number) {
 
 export default function AgentRuntimeSettings({ onOpenModels }: { onOpenModels?: () => void }) {
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
-  const [enabled, setEnabled] = useState(false);
+  // Multiagent defaults to on: saving keeps it enabled unless the user turns it off.
+  const [enabled, setEnabled] = useState(true);
   const [startupModel, setStartupModel] = useState('');
   const [maxConcurrent, setMaxConcurrent] = useState(4);
   const [maxChildrenPerAgent, setMaxChildrenPerAgent] = useState(3);
@@ -22,7 +23,12 @@ export default function AgentRuntimeSettings({ onOpenModels }: { onOpenModels?: 
   const [error, setError] = useState('');
 
   const apply = (value: RuntimeSettings) => {
-    setSettings(value); setEnabled(value.enabled); setStartupModel(value.startupModel || '');
+    setSettings(value);
+    // A never-configured workspace presents the default: on, pending one save.
+    setEnabled(value.enabled || value.defaulted === true);
+    // It also starts on its main model: preselect it so one save turns
+    // multiagent on without a hidden model choice.
+    setStartupModel(value.startupModel || value.suggestedModel || '');
     setMaxConcurrent(value.maxConcurrent); setMaxChildrenPerAgent(value.maxChildrenPerAgent);
     setMaxSpawnDepth(value.maxSpawnDepth); setRunTimeoutSeconds(value.runTimeoutSeconds);
   };
@@ -50,12 +56,12 @@ export default function AgentRuntimeSettings({ onOpenModels }: { onOpenModels?: 
   };
 
   return <section className="agent-runtime-settings" aria-labelledby="agent-runtime-title">
-    <header><div><h3 id="agent-runtime-title">Agent 协作与费用保护</h3><p>让独立任务并行执行，但先锁定启动模型，再允许 Agent 调用。</p></div>
+    <header><div><h3 id="agent-runtime-title">Agent 协作（Multiagent）</h3><p>默认启动：未专门选择时子 Agent 跟随当前主模型，可在此改为专用快速模型。</p></div>
       <span className={`agent-runtime-badge${settings?.ready ? ' is-ready' : ''}`}>{loading ? '核验中…' : settings?.ready ? '已启用' : '未启用'}</span></header>
-    <div className="agent-runtime-warning" role="note"><strong>安全规则</strong><span>未配置启动模型时，后台会阻断 <code>sessions_spawn</code>，不会继承当前对话的高价模型，也不会自动重试。</span></div>
-    <label className="agent-runtime-toggle"><input type="checkbox" checked={enabled} disabled={loading || saving || !startupModel} onChange={event => setEnabled(event.target.checked)} /><span><strong>启用 Agent 协作</strong><small>只有保存后才生效；关闭时阻断子 Agent 启动。</small></span></label>
-    <div className="agent-runtime-field"><label htmlFor="agent-startup-model">启动模型</label><Select id="agent-startup-model" value={startupModel} disabled={loading || saving} onChange={setStartupModel} options={options} placeholder="选择已配置的低成本模型" />
-      <small>建议选择专门的快速模型。此模型会写入 OpenClaw 的 subagents.model，并禁用备用模型回退。</small></div>
+    <div className="agent-runtime-warning" role="note"><strong>安全规则</strong><span>子 Agent 只使用这里指定的启动模型，不会继承当前对话的高价模型；未配置启动模型时后台会阻断 <code>sessions_spawn</code>，也不会自动重试。</span></div>
+    <label className="agent-runtime-toggle"><input type="checkbox" checked={enabled} disabled={loading || saving || !startupModel} onChange={event => setEnabled(event.target.checked)} /><span><strong>启用 Agent 协作</strong><small>默认开启；保存后生效，关闭时阻断子 Agent 启动。</small></span></label>
+    <div className="agent-runtime-field"><label htmlFor="agent-startup-model">启动模型</label><Select id="agent-startup-model" value={startupModel} disabled={loading || saving} onChange={setStartupModel} options={options} placeholder="默认跟随当前主模型" />
+      <small>默认使用当前主模型{settings?.defaulted ? '（未保存前按主模型预选）' : ''}；建议改为专门的快速模型。此模型会写入 OpenClaw 的 subagents.model，并禁用备用模型回退。</small></div>
     <div className="agent-runtime-grid">
       <label>并行 Agent 数<input type="number" min={1} max={8} value={maxConcurrent} disabled={loading || saving} onChange={event => setMaxConcurrent(bounded(event.target.value, 4, 1, 8))} /><small>1–8，越高越快也越消耗额度</small></label>
       <label>单个父 Agent 子任务数<input type="number" min={1} max={5} value={maxChildrenPerAgent} disabled={loading || saving} onChange={event => setMaxChildrenPerAgent(bounded(event.target.value, 3, 1, 5))} /><small>1–5，避免一次爆发</small></label>

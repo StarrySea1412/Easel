@@ -126,16 +126,30 @@ test('more settings initially exposes both cards and its menu returns to the bac
   assert.equal(view.harness.calls.length, 5);
 });
 
-test('appearance is reachable from settings and direct navigation without additional HTTP', async t => {
+test('appearance lives under 更多设置 and legacy appearance links map there without additional HTTP', async t => {
   const view = await fixture(t);
   const before = view.harness.calls.length;
-  await view.click(view.nav('外观'));
-  assert.equal(view.nav('外观').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('外观'), undefined, 'the standalone appearance entry is gone');
+  await view.click(view.nav('更多设置'));
+  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
   assert.ok(view.container.querySelector('.appearance-card [role=combobox]'));
-  assert.equal(view.container.querySelector('[data-testid=backup-card]'), null);
+  assert.ok(view.container.querySelector('[data-testid=backup-card]'));
   await view.click(view.nav('模型与渠道'));
   await view.render(1, view.props, 'appearance');
   assert.ok(view.container.querySelector('.appearance-card'));
+  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
+  assert.equal(view.harness.calls.length, before);
+});
+
+test('multiagent controls live in the model channel page and legacy agent links map there', async t => {
+  const view = await fixture(t);
+  const before = view.harness.calls.length;
+  await view.click(view.nav('模型与渠道'));
+  assert.ok(view.container.querySelector('.agent-runtime-panel'), 'agent collaboration card sits under the chat channel');
+  await view.render(1, view.props, 'agent-runtime');
+  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('.agent-runtime-panel'));
+  assert.equal(view.nav('Agent 协作'), undefined, 'the standalone agent entry is gone');
   assert.equal(view.harness.calls.length, before);
 });
 

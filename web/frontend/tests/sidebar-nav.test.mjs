@@ -402,3 +402,27 @@ test('conversation menu supports keyboard navigation, dismissal and the existing
   assert.deepEqual(calls, [['archive', 's2', true], ['delete', 's2'], ['rename', 's2', '此前的调研']]);
   assert.deepEqual(view.selected, []);
 });
+
+test('sidebar offers a one-click theme toggle that persists and re-labels', async t => {
+  const view = await fixture(t);
+  const toggle = view.container.querySelector('.sidebar-theme-toggle');
+  assert.ok(toggle, 'theme toggle is present in the rail');
+  assert.match(toggle.getAttribute('aria-label'), /当前浅色.*切换为深色/);
+  await act(async () => { toggle.click(); await new Promise(resolve => setTimeout(resolve)); });
+  assert.equal(document.documentElement.dataset.theme, 'dark');
+  assert.equal(localStorage.getItem('easel:theme'), 'dark');
+  assert.match(toggle.getAttribute('aria-label'), /当前深色.*切换为浅色/);
+  await act(async () => { toggle.click(); await new Promise(resolve => setTimeout(resolve)); });
+  assert.equal(document.documentElement.dataset.theme, 'light');
+  assert.equal(localStorage.getItem('easel:theme'), 'light');
+  assert.deepEqual(view.requests, []);
+  // A browser that refuses to persist still switches for this visit and says so.
+  const toasts = []; const listener = event => toasts.push(event.detail.message);
+  window.addEventListener('easel:toast', listener);
+  t.mock.method(window.localStorage, 'setItem', () => { throw Error('denied'); });
+  try {
+    await act(async () => { toggle.click(); await new Promise(resolve => setTimeout(resolve)); });
+    assert.equal(document.documentElement.dataset.theme, 'dark');
+    assert.match(toasts.at(-1) || '', /未能保存到本机/);
+  } finally { window.removeEventListener('easel:toast', listener); }
+});

@@ -88,7 +88,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   onAssessUpdate?: (prompt: string) => boolean;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
-  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' ? 'more' : section;
+  // Legacy 'appearance' now lives in 更多设置 and 'agent-runtime' in 模型与渠道.
+  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' || section === 'appearance' ? 'more' : section === 'agent-runtime' ? 'model' : section;
   const [sec, setSec] = useState<SettingsSection>(normalizeSection(initialSection));
   const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'image' ? 'image' : initialSection === 'video' ? 'video' : 'chat');
   const [importOpen, setImportOpen] = useState(initialSection === 'import');
@@ -97,6 +98,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     if (initialSection.startsWith('channel:')) setChan(initialSection.slice(8) as Chan);
     if (initialSection === 'image') setChan('image');
     if (initialSection === 'video') setChan('video');
+    if (initialSection === 'agent-runtime') setChan('chat');
     if (initialSection === 'import') { setChan('chat'); setImportOpen(true); }
   }, [initialSection, navigationKey]);
   const mounted = useRef(false);
@@ -694,12 +696,6 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
         <div className="settings-body">
           <nav className="settings-nav">
-            <button aria-current={sec === 'appearance' ? 'page' : undefined} className={`snav${sec === 'appearance' ? ' active' : ''}`} onClick={() => setSec('appearance')}>
-              <IconSlidersHorizontal size={16} />外观<small>浅色 / 夜间</small>
-            </button>
-            <button aria-current={sec === 'agent-runtime' ? 'page' : undefined} className={`snav${sec === 'agent-runtime' ? ' active' : ''}`} onClick={() => setSec('agent-runtime')}>
-              <IconSlidersHorizontal size={16} />Agent 协作<small>速度 / 费用</small>
-            </button>
             <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
               <IconSlidersHorizontal size={16} />模型与渠道
             </button>
@@ -721,8 +717,6 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
           </nav>
 
           <div className="settings-main">
-          {sec === 'appearance' && <AppearanceSettings />}
-          {sec === 'agent-runtime' && <AgentRuntimeSettings onOpenModels={() => { setSec('model'); setChan('chat'); }} />}
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
@@ -951,6 +945,12 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                   </section>
                 )}
 
+                {chan === 'chat' && (
+                  <section className="st-panel active agent-runtime-panel">
+                    <AgentRuntimeSettings />
+                  </section>
+                )}
+
                 {chan === 'transcribe' && (
                   <section className="st-panel active">
                     <div className="panel-top">
@@ -1130,6 +1130,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             )}
 
           {sec === 'more' && <section className="st-sec active settings-more-cards">
+            <AppearanceSettings />
             <DemoDataSettingsCard {...demoDataPreference} />
             <details><summary>保存位置</summary><StorageSettingsCard /></details>
             <details><summary>会话备份</summary><ConversationBackupCard {...conversationBackup} /></details>
@@ -1138,7 +1139,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。` : sec === 'more' || sec === 'appearance' ? '通用偏好即时应用，保存在当前浏览器。' : sec === 'agent-runtime' ? 'Agent 设置保存后同步到 OpenClaw；网关重载后对新任务生效。' : '修改后请保存。'}
+          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。Agent 协作保存后同步到 OpenClaw，网关重载后对新任务生效。` : sec === 'more' ? '通用偏好即时应用，保存在当前浏览器。' : '修改后请保存。'}
         </div>
       </div>
     </div>

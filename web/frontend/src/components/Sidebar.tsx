@@ -1,5 +1,5 @@
 import { NativeSelect as Select } from './ui/Select';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
@@ -7,7 +7,9 @@ import {
   IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice, IconOpenClaw,
 } from './icons';
-import { IconGear, IconImage } from './settingsIcons';
+import { IconGear, IconImage, IconMoon, IconSun } from './settingsIcons';
+import { readTheme, setThemePreference, subscribeTheme } from '../lib/theme';
+import { showToast } from '../lib/toast';
 import SidebarAccountPopover from './SidebarAccountPopover';
 import SidebarMoreMenu from './SidebarMoreMenu';
 import AppVersion from './AppVersion';
@@ -267,6 +269,12 @@ export default function Sidebar({
     );
   };
 
+  const theme = useSyncExternalStore(subscribeTheme, readTheme);
+  const themeNext: 'light' | 'dark' = theme.resolved === 'dark' ? 'light' : 'dark';
+  const toggleTheme = () => {
+    setThemePreference(themeNext);
+    if (!readTheme().persisted) showToast(`主题已切换为${themeNext === 'dark' ? '深色' : '浅色'}，但未能保存到本机。`, 'error');
+  };
   const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={page==='chat'?`${label} · ${runningCount}个正在运行`:label} aria-label={label} aria-description={page==='chat'?`${runningCount}个对话正在运行`:undefined} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}{page==='chat'&&runningCount>0&&<span className="sidebar-running-count">{runningCount}</span>}</span><span className="nav-item-label">{label}</span></button>;
   return (
     <div className={`sidebar-shell${expanded?' is-expanded':''}${toolbarExpanded?' is-toolbar-expanded':''}`}>
@@ -293,6 +301,9 @@ export default function Sidebar({
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {eventNotifications}
+            <button type="button" className="nav-item sidebar-theme-toggle" aria-label={`主题：当前${theme.resolved==='dark'?'深色':'浅色'}${theme.preference==='system'?'（跟随系统）':''}，点击切换为${themeNext==='dark'?'深色':'浅色'}`} title={`切换为${themeNext==='dark'?'深色':'浅色'}模式（当前${theme.resolved==='dark'?'深色':'浅色'}${theme.preference==='system'?'，跟随系统':''}；更多外观选项在设置 → 更多设置）`} onClick={toggleTheme}>
+              <span className="nav-icon" aria-hidden="true">{theme.resolved==='dark'?<IconSun size={19}/>:<IconMoon size={19}/>}</span><span className="nav-item-label">{themeNext==='dark'?'深色':'浅色'}</span>
+            </button>
             {railItem('settings','设置',<IconGear size={19}/>)}
             <AppVersion/>
           </div>

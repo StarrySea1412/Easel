@@ -1,3 +1,10 @@
+## 2026-10-17 · Settings reorg: theme placement and default-on multiagent / 设置页整理：主题归位与 multiagent 默认启动
+
+- Move dark mode out of its standalone 外观 page: the appearance card now lives in 更多设置, and the sidebar gains a one-click light/dark toggle (system-following switches by current appearance; a browser that cannot persist says so). / 深色模式移出独立“外观”页：外观卡片进入“更多设置”，侧栏新增一键浅/深切换（跟随系统时按当前显示切换；无法持久化时如实提示）。
+- Multiagent (Agent 协作) defaults to on: a workspace that never saved the card starts on its configured main model at the next backend start (default limits, spawn deny lifted); explicit choices, including an explicit disable, are never overridden. / multiagent（Agent 协作）默认启动：从未保存过的环境在下一次后端启动时按已配置主模型自动启用（默认限额、解除 spawn 阻断）；显式选择（含显式关闭）永不被覆盖。
+- The Agent card moves into 模型与渠道 → 对话通道; the toggle presents the default on with the main model preselected, the badge stays honest (未启用 until the config really allows spawn), and saving still requires an explicitly configured startup model. / “Agent 协作”卡片移入“模型与渠道 → 对话通道”；开关默认勾选并预选主模型，徽标保持诚实（配置真实允许前显示未启用），保存仍要求明确选择已配置的启动模型。
+- Verified 171 backend checks, 1,078 frontend tests, build/lint and isolated browser acceptance on 7898 (real components + real backend functions: toggle, save, auto-seed default, legacy deep links, 390px). No paid model, 138 deployment or installer update. / 已验证 171 项后端、前端 1078 项、构建/lint 与 7898 隔离浏览器（真组件+真后端函数：切换、保存、启动自播种默认、旧深链映射、390px）；未调用付费模型、未部署 138、未更新安装包。
+
 ## 2026-10-17 · Notification inbox cleanup and refinement / 通知收件箱清理与精修
 
 - Only durable events (stable id + jump target) enter the notification inbox; confirmation toasts stay transient, so the inbox no longer stacks duplicate, low-value noise (Apple HIG: repeated notifications fill Notification Center). / 只有持久事件（稳定 id + 跳转目标）进入通知收件箱；确认类提示仅临时弹窗，收件箱不再堆积重复与低价值噪音（Apple HIG：重复通知会塞满通知中心）。

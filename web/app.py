@@ -1934,28 +1934,44 @@ def _agent_runtime_config() -> dict:
     except (OSError, ValueError):
         config = {}
     defaults = config.get('agents', {}).get('defaults', {}) if isinstance(config.get('agents'), dict) else {}
-    subagents = defaults.get('subagents', {}) if isinstance(defaults, dict) else {}
-    subagents = subagents if isinstance(subagents, dict) else {}
+    defaults = defaults if isinstance(defaults, dict) else {}
+    raw_subagents = defaults.get('subagents')
+    subagents = raw_subagents if isinstance(raw_subagents, dict) else {}
     model = subagents.get('model')
     if isinstance(model, dict):
         model = model.get('primary')
     model = model.strip() if isinstance(model, str) else ''
+    primary = defaults.get('model')
+    if isinstance(primary, dict):
+        primary = primary.get('primary')
+    primary = primary.strip() if isinstance(primary, str) else ''
     options = office_controls.configured_models(path)
     option_ids = {row['id'] for row in options}
+    # A workspace that never saved this card starts on its configured main model
+    # (multiagent defaults to on); an explicit choice, including an explicit
+    # disable, is never overridden here. `enabled` still reflects what the
+    # gateway config really allows; the suggestion only preselects the picker.
+    defaulted = not isinstance(raw_subagents, dict)
+    suggested = primary if defaulted and primary in option_ids else ''
+    display_model = model or suggested
     tools = config.get('tools', {}) if isinstance(config.get('tools'), dict) else {}
     denied = tools.get('deny', []) if isinstance(tools.get('deny'), list) else []
     enabled = bool(model and model in option_ids and 'sessions_spawn' not in denied)
     return {
         'enabled': enabled,
         'ready': enabled,
-        'startupModel': model or None,
+        'startupModel': display_model or None,
+        'suggestedModel': suggested or None,
+        'defaulted': defaulted,
         'options': options,
         'maxConcurrent': _bounded_int(subagents.get('maxConcurrent'), 4, 1, 8),
         'maxChildrenPerAgent': _bounded_int(subagents.get('maxChildrenPerAgent'), 3, 1, 5),
         'maxSpawnDepth': _bounded_int(subagents.get('maxSpawnDepth'), 1, 0, 2),
         'runTimeoutSeconds': _bounded_int(subagents.get('runTimeoutSeconds'), 900, 60, 3600),
         'guard': 'strict_model_and_spawn_deny' if not enabled else 'strict_model',
-        'reason': None if enabled else '请先选择启动模型并保存；未配置前不会启动 Agent，也不会继承当前对话模型。',
+        'reason': None if enabled else ('已默认启用：启动模型跟随当前主模型，保存本卡后生效。'
+                                       if suggested
+                                       else '请先选择启动模型并保存；未配置前不会启动 Agent，也不会继承当前对话模型。'),
     }
 
 
@@ -1979,10 +1995,31 @@ def _sync_agent_safety_guard() -> None:
             allowed = plugins.setdefault('allow', [])
             if isinstance(allowed, list) and 'easel-agent-safety' not in allowed:
                 allowed.append('easel-agent-safety'); changed = True
-        model = config.get('agents', {}).get('defaults', {}).get('subagents', {}).get('model') if isinstance(config.get('agents'), dict) else None
+        agents = config.setdefault('agents', {})
+        if not isinstance(agents, dict):
+            agents = {}
+            config['agents'] = agents
+        defaults = agents.setdefault('defaults', {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+            agents['defaults'] = defaults
+        raw_subagents = defaults.get('subagents')
+        model = raw_subagents.get('model') if isinstance(raw_subagents, dict) else None
         if isinstance(model, dict): model = model.get('primary')
         options = office_controls.configured_models(path)
-        valid = isinstance(model, str) and model.strip() in {row['id'] for row in options}
+        option_ids = {row['id'] for row in options}
+        valid = isinstance(model, str) and model.strip() in option_ids
+        if not valid and not isinstance(raw_subagents, dict):
+            # Multiagent defaults to on: a workspace that never made a subagent
+            # choice starts on its configured main model, not on inheritance.
+            primary = defaults.get('model')
+            if isinstance(primary, dict): primary = primary.get('primary')
+            primary = primary.strip() if isinstance(primary, str) else ''
+            if primary in option_ids:
+                defaults['subagents'] = {'model': primary, 'maxConcurrent': 4, 'maxChildrenPerAgent': 3,
+                                         'maxSpawnDepth': 1, 'runTimeoutSeconds': 900}
+                valid = True
+                changed = True
         tools = config.setdefault('tools', {})
         if not isinstance(tools, dict): tools = {}; config['tools'] = tools
         denied = tools.get('deny') if isinstance(tools.get('deny'), list) else []
@@ -2005,7 +2042,9 @@ def _bounded_int(value, fallback: int, minimum: int, maximum: int) -> int:
 
 class AgentRuntimeSettingsRequest(BaseModel):
     model_config = {"extra": "forbid"}
-    enabled: bool = False
+    # Multiagent defaults to on; the save endpoint still requires an explicitly
+    # configured startup model whenever enabled is true.
+    enabled: bool = True
     startupModel: str | None = Field(default=None, max_length=300)
     maxConcurrent: int = Field(default=4, ge=1, le=8, strict=True)
     maxChildrenPerAgent: int = Field(default=3, ge=1, le=5, strict=True)

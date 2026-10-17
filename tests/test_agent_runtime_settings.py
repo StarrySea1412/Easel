@@ -52,3 +52,45 @@ def test_agent_runtime_save_requires_exact_model_and_denies_spawn_when_disabled(
     data = json.loads(config.read_text(encoding='utf-8'))
     assert data['agents']['defaults']['subagents']['model'] == 'cheap/fast'
     assert 'sessions_spawn' not in data['tools']['deny']
+
+
+def test_multiagent_defaults_on_with_the_main_model(tmp_path, monkeypatch):
+    state = tmp_path / 'state'
+    state.mkdir()
+    config = state / 'openclaw.json'
+    config.write_text(json.dumps({'agents': {'defaults': {'model': {'primary': 'cheap/fast'}}}, 'tools': {}}), encoding='utf-8')
+    monkeypatch.setattr(web, 'openclaw_state_dir', lambda: state)
+    monkeypatch.setattr('office_controls.configured_models', lambda path: [
+        {'id': 'cheap/fast', 'provider': 'cheap', 'model': 'fast', 'label': 'cheap · fast', 'configured': True},
+    ])
+    # Before the guard runs, the card already preselects the main model.
+    value = web._agent_runtime_config()
+    assert value['defaulted'] is True
+    assert value['suggestedModel'] == 'cheap/fast'
+    assert value['startupModel'] == 'cheap/fast'
+    assert value['enabled'] is False and value['guard'] == 'strict_model_and_spawn_deny'
+    assert '主模型' in (value['reason'] or '')
+    web._sync_agent_safety_guard()
+    data = json.loads(config.read_text(encoding='utf-8'))
+    assert data['agents']['defaults']['subagents']['model'] == 'cheap/fast'
+    assert 'sessions_spawn' not in data.get('tools', {}).get('deny', [])
+    value = web._agent_runtime_config()
+    assert value['enabled'] is True and value['ready'] is True and value['defaulted'] is False
+
+
+def test_explicit_subagent_choice_is_never_overridden_by_the_default(tmp_path, monkeypatch):
+    state = tmp_path / 'state'
+    state.mkdir()
+    config = state / 'openclaw.json'
+    config.write_text(json.dumps({'agents': {'defaults': {'model': {'primary': 'cheap/fast'},
+        'subagents': {'maxConcurrent': 2}}}, 'tools': {'deny': ['sessions_spawn']}}), encoding='utf-8')
+    monkeypatch.setattr(web, 'openclaw_state_dir', lambda: state)
+    monkeypatch.setattr('office_controls.configured_models', lambda path: [
+        {'id': 'cheap/fast', 'provider': 'cheap', 'model': 'fast', 'label': 'cheap · fast', 'configured': True},
+    ])
+    web._sync_agent_safety_guard()
+    data = json.loads(config.read_text(encoding='utf-8'))
+    assert 'model' not in data['agents']['defaults']['subagents'], 'an explicit disable keeps spawn blocked'
+    assert 'sessions_spawn' in data['tools']['deny']
+    value = web._agent_runtime_config()
+    assert value['defaulted'] is False and value['enabled'] is False and value['suggestedModel'] is None

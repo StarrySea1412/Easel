@@ -95,7 +95,7 @@ function TaskForm({ session, stream, stopping = false, stopError, onSubmit, onSt
         {!loading && capability?.available && selection.modelRef && !selected && <p className="office-control-error" role="alert">所选模型已不在当前可用配置中，请重新选择。原选择不会自动替换。</p>}
         <button type="button" className="office-control-link" disabled={loading || busy} onClick={() => setRevision(value => value + 1)}>刷新模型选项</button>
       </div>}
-      {!loading && !agentReady && <p className="office-control-error" role="alert">{capability?.agentRuntime?.reason || 'Agent 尚未配置启动模型，当前不会启动子 Agent。请先在设置 → Agent 协作中选择模型。'}</p>}
+      {!loading && !agentReady && <p className="office-control-error" role="alert">{capability?.agentRuntime?.reason || 'Agent 尚未配置启动模型，当前不会启动子 Agent。请在设置 → 模型与渠道中启用 Agent 协作。'}</p>}
       <div className="office-task-actions">
         <button type="submit" className="office-button office-button-primary" disabled={!message.trim() || busy || !agentReady || (routeMode === 'specific' && !specificReady)}>{targetId ? '发送到当前会话' : '开始任务'}</button>
         {session && onOpenChat && <button type="button" className="office-button" onClick={() => onOpenChat(session.id)}>打开对话</button>}

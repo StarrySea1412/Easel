@@ -1412,6 +1412,8 @@ export interface AgentRuntimeSettings {
   enabled: boolean;
   ready: boolean;
   startupModel: string | null;
+  suggestedModel?: string | null;
+  defaulted?: boolean;
   options: AgentRuntimeModelOption[];
   maxConcurrent: number;
   maxChildrenPerAgent: number;
