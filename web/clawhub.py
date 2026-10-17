@@ -70,11 +70,23 @@ def _canonical(row, owner, slug):
     return ORIGIN + expected
 
 
-def _stats(row):
-    stats = row.get('stats')
+_STAT_KEYS = ('downloads', 'stars', 'installs', 'versions', 'comments')
+
+
+def _stats(stats):
     if not isinstance(stats, dict):
         return None
-    return {key: _number(stats.get(key)) for key in ('downloads', 'stars', 'installs', 'versions')}
+    return {key: _number(stats.get(key)) for key in _STAT_KEYS}
+
+
+def _row_stats(row):
+    """Search rows keep stats under native.skill; detail rows carry them directly."""
+    stats = row.get('stats')
+    if not isinstance(stats, dict):
+        native = row.get('native')
+        skill = native.get('skill') if isinstance(native, dict) else None
+        stats = skill.get('stats') if isinstance(skill, dict) else None
+    return _stats(stats)
 
 
 def _summary(row, owner=None):
@@ -94,6 +106,8 @@ def _summary(row, owner=None):
         'version': _text(row.get('version'), 128) or None,
         'updatedAt': _number(row.get('updatedAt')),
         'canonicalUrl': _canonical(row, owner, slug),
+        # Public counters only (downloads/installs/stars/versions/comments).
+        'stats': _row_stats(row),
         # Same names in Easel and ClawHub do not establish install provenance.
         'installationState': 'not_checked',
     }
@@ -149,7 +163,7 @@ def _detail_result(payload, requested_owner, requested_slug):
         'descriptionTruncated': isinstance(description, str) and len(description) > MAX_DESCRIPTION_CHARS,
         'topics': _string_list(row.get('topics')),
         'createdAt': _number(row.get('createdAt')),
-        'stats': _stats(row),
+        'stats': _row_stats(row),
     })
     metadata = payload.get('metadata')
     metadata = {'os': _string_list(metadata.get('os')), 'systems': _string_list(metadata.get('systems'))} if isinstance(metadata, dict) else None

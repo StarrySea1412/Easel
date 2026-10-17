@@ -12,7 +12,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 1024 });
 const { createRoot } = await import('react-dom/client');
 const { default: Picker } = await loadTsModule('../src/components/BrushEntry.tsx', import.meta.url);
-const external = { id: 'alice/card-quote', slug: 'card-quote', displayName: 'External Quote', ownerHandle: 'alice', summary: '<img src=x onerror=bad()>', version: '1.2.3', updatedAt: 1792000000000, canonicalUrl: 'https://clawhub.ai/alice/card-quote' };
+const external = { id: 'alice/card-quote', slug: 'card-quote', displayName: 'External Quote', ownerHandle: 'alice', summary: '<img src=x onerror=bad()>', version: '1.2.3', updatedAt: 1792000000000, canonicalUrl: 'https://clawhub.ai/alice/card-quote', stats: { downloads: 5609, installs: 148, stars: 7, versions: 7, comments: 3 } };
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
 async function fixture(t) {
@@ -49,6 +49,7 @@ test('picker searches ClawHub, keeps external identity separate, retries details
   await v.reply(0, { query: 'quote', results: [external], limit: 12 });
   assert.equal(document.querySelector('.skill-picker img'), null);
   assert.match(document.querySelector('.brush-clawhub-item').textContent, /alice\/card-quote/);
+  assert.match(document.querySelector('.brush-clawhub-item').textContent, /下载 5,609 · 评论 3/, 'public counters show on the result row');
   assert.equal(document.querySelector('.brush-item'), null, 'same slug does not become a local selectable skill');
   const opener = document.querySelector('.brush-clawhub-open'); await v.click(opener);
   assert.match(v.calls[1].url, /card-quote\?owner=alice/);
@@ -57,6 +58,10 @@ test('picker searches ClawHub, keeps external identity separate, retries details
   await v.reply(2, { skill: { ...external, description: '<script>bad()</script>', topics: ['writing'] }, owner: { handle: 'alice' }, latestVersion: { version: '1.2.3', changelog: 'Improved' } });
   assert.equal(document.querySelector('.skill-picker script'), null);
   assert.match(document.querySelector('.brush-clawhub-detail').textContent, /尚未在 Easel 中验证/);
+  const detailText = document.querySelector('.brush-clawhub-detail').textContent;
+  assert.match(detailText, /下载 5,609/, 'detail lists downloads');
+  assert.match(detailText, /安装 148/, 'detail lists installs');
+  assert.match(detailText, /评论 3/, 'detail lists comments as the registry counter, not an invented issue tracker');
   await act(async () => document.querySelector('.brush-clawhub-detail h3').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   assert.ok(document.querySelector('.skill-picker'), 'Escape closes details first');
   assert.equal(document.activeElement, opener);

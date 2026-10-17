@@ -1,3 +1,10 @@
+## 2026-10-18 · ClawHub 统计数字展示
+
+- 后端 `web/clawhub.py`：`_STAT_KEYS` 增 `comments`；新增 `_row_stats(row)`（优先顶层 `stats`，否则取检索行的 `native.skill.stats`）；`_summary` 让检索结果携带 `stats`，详情改用它。上游没有 GitHub 式 issues（只有 comments），按事实展示评论数。
+- 前端：`api.ts` 增 `ClawHubStats` 类型并挂到 `ClawHubSkill.stats`（可选）与详情；新增 `lib/clawHubStats.ts`（中文标签、万位压缩、缺项省略、顺序固定）；`ClawHubPanel` 结果卡与详情、`BrushEntry` 结果行与详情分别渲染“下载 X · 评论 Y”与全量统计行；clawhub.css／skill-picker.css 增对应样式。
+- 测试：后端新增 `test_public_counters_flow_through_search_and_detail_without_inventing_issues`（19 项全过）；前端 `skill-picker-clawhub` 与 `clawhub-favorites` 增统计断言（1087 项全过）、lint/build 通过。
+- 7880 边界：详情四项计数在前端更新后立即可见；评论数与检索行统计需空闲重启后端后生效（未主动重启）。
+
 ## 2026-10-18 · ClawHub 搜索/详情加载骨架屏
 
 - `BrushEntry`（对话技能选择器）：搜索中由一行“正在检索 ClawHub…”改为 `.brush-clawhub-skeleton-list`（3 个 `.brush-clawhub-item.is-skeleton`，内嵌 `Sk` 线条 + shimmer）；详情加载由一行文字改为 `.clawhub-detail-skeleton`（标题/副题/三格元信息/四行正文骨架）。

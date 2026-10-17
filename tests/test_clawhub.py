@@ -117,3 +117,23 @@ def test_detail_checks_author_and_slug_and_never_uses_external_canonical_url():
 def test_main_app_mounts_read_only_catalog_routes():
     routes = {path: set(operations) for path, operations in web.app.openapi()['paths'].items() if path.startswith('/api/clawhub')}
     assert routes == {'/api/clawhub/search': {'get'}, '/api/clawhub/skills/{slug}': {'get'}}
+
+
+def test_public_counters_flow_through_search_and_detail_without_inventing_issues():
+    row = {**item(), 'downloads': 5609,
+           'native': {'skill': {'stats': {'comments': 3, 'downloads': 5609, 'installs': 148, 'stars': 7, 'versions': 7}}}}
+    client = clawhub.ClawHubClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={'results': [row]})))
+    async def run_search():
+        found = await client.search('research')
+        stats = found['results'][0]['stats']
+        assert stats == {'downloads': 5609, 'stars': 7, 'installs': 148, 'versions': 7, 'comments': 3}
+        assert 'issues' not in stats
+    asyncio.run(run_search())
+
+    payload = {'skill': {**item(), 'stats': {'downloads': 10, 'stars': 1, 'installs': 2, 'versions': 3, 'comments': 0}},
+               'owner': {'handle': 'alice'}}
+    client = clawhub.ClawHubClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+    async def run_detail():
+        result = await client.detail('research', 'alice')
+        assert result['skill']['stats'] == {'downloads': 10, 'stars': 1, 'installs': 2, 'versions': 3, 'comments': 0}
+    asyncio.run(run_detail())

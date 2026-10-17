@@ -1,3 +1,9 @@
+## 2026-10-18 · ClawHub counters are visible / ClawHub 统计数字可见
+
+- The registry's public counters — downloads, installs, stars, versions and comments — are now fully mapped by the backend (comments was dropped before) and search results carry them too (from `native.skill.stats`). There is no GitHub-style issue tracker upstream, so the UI shows the real comment count instead of inventing one. / 上游公开计数（下载/安装/星标/版本/评论）已完整映射（此前丢了评论），检索结果也携带统计（取自 `native.skill.stats`）；上游没有 GitHub 式 issues，界面展示真实的评论数而非虚构。
+- Both ClawHub surfaces show “下载 X · 评论 Y” on result rows and the full set on the detail pane (missing values are omitted, 万-compressed). Note: the 7880 backend needs a restart for comments/search-row counters; the detail's downloads/installs/stars/versions show immediately. / 两处结果行显示“下载 X · 评论 Y”，详情显示全量（缺项省略、万位压缩）。7880 旧后端需重启后评论与检索行统计生效，详情的下载/安装/星标/版本立即生效。
+- clawhub pytest 19, 1,087 frontend tests, build, lint (0 errors). / clawhub 后端 19 项、前端 1087 项、构建、lint（0 错误）。
+
 ## 2026-10-18 · ClawHub loading states get real skeletons / ClawHub 搜索与详情加载改用骨架屏
 
 - Both ClawHub surfaces — the 技能库 panel and the chat composer's skill picker — now show shimmer skeletons while loading: three result/card skeletons during search and a title/meta/body skeleton while the author notes load, instead of a lone text line above empty space. The loading text stays in the accessibility tree (`role=status` + `.sr-only`). / 技能库面板与对话技能选择器两处：搜索中显示 3 个结果/卡片骨架，详情加载显示标题/元信息/正文骨架（shimmer），不再是一行字加空白；加载文案保留在无障碍树（`role=status` + `.sr-only`）。

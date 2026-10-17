@@ -1834,3 +1834,11 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **验收条件**：①未读点移到元信息行（时间右侧的右组内联），右侧只保留居中的“标为已读”勾按钮，竖排堆叠消失；②未读/已读语义、aria-label、点击标记已读、“全部已读”、过滤与悬停行为不变；③回归/构建/lint、7880 浏览器核对（行右侧整洁、点与勾不再上下堆叠），文档与 Git 同步。
 - **执行顺序与边界**：登记 → TSX（点移入元信息右组）与 CSS（state 列居中单按钮、清理 padding 补丁）→ 回归/构建/lint → 7880 核对与截图 → 文档与 Git。仅前端；不调用付费模型、不改 138/安装包；保留并发未提交工作与已登记的 Skill 核验任务。
 - **当前状态**：已实施并验收。未读点移入元信息行右组（`.event-meta-right`：时间右侧内联），`.event-row-state` 改为居中单按钮；`event-notifications.css` 清理竖排规则与 `:has` padding 补丁；未读/已读语义、`aria-label`、点击标记已读、全部已读、过滤与悬停不变。前端全量 1086 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浏览器核对（点与勾不再上下堆叠、已读行仅灰色勾）。未调用付费模型、未部署138、未更新安装包；chat budget/Gateway 等并发未提交工作未改动；已登记的“Skill 核验改悬停”任务继续保留待实施。
+
+## 2026-10-18 ClawHub 技能显示下载/评论等统计（当前最高优先）
+
+- **用户原话**：“检索到的clawhub的skill显示还是有问题。。skill的多少download和issue咋没有显示啊”（附图为详情“作者说明”面板）。
+- **现状核查**：上游（clawhub.ai `/api/v1`）详情 `skill.stats = {comments, downloads, installs, stars, versions}`、检索行在 `native.skill.stats` 同构且顶层另有 `downloads`；本项目后端 `web/clawhub.py` 的 `_stats` 只映射 downloads/stars/installs/versions（**丢 comments**）且仅用于详情（检索行完全没有 stats）；前端两处详情/结果从未渲染这些数字。注意：上游没有 GitHub 式 issues，用户所说“issue”对应 **comments（评论数）**——按上游事实展示评论，不虚构 issues。
+- **验收条件**：①后端 `_stats` 增 `comments`；`_summary` 让检索结果也携带 stats（优先顶层 `stats`，否则 `native.skill.stats`）；②前端两处详情显示统计行「下载 · 安装 · 星标 · 版本 · 评论」（只显示非空项、万位压缩）；③两处搜索结果行显示「下载 X · 评论 Y」（缺项省略）；④后端单测覆盖 stats 透传与 comments；前端用例覆盖展示；⑤回归（pytest clawhub + npm test/lint/build）、7880 核对（详情统计行立即生效；**检索行 stats 与评论数需后端重启后生效**，如实说明）；文档与 Git 同步。
+- **执行顺序与边界**：登记 → 后端映射与测试 → 前端类型/助手/两处渲染与样式/测试 → 回归 → 文档与 Git → 重建 dist 与 7880 核对（后端不主动重启）。仅只读展示；不安装/不运行外部技能、不调用付费模型、不改 138/安装包；保留并发未提交工作。
+- **当前状态**：已实施并验收。①后端 `_STAT_KEYS` 增 `comments`，新增 `_row_stats`（顶层 `stats` 或 `native.skill.stats`），`_summary` 让检索结果携带 stats、详情复用；②前端新增 `ClawHubStats` 类型与 `lib/clawHubStats.ts`（下载/安装/星标/版本/评论中文标签、万位压缩、缺项省略），`ClawHubPanel` 与 `BrushEntry` 的结果行显示“下载 X · 评论 Y”、详情显示全量统计行；③上游无 GitHub 式 issues，按事实展示评论数。测试：后端 19 项（新增 stats 透传与 comments 断言）、前端 1087 项（检索/详情统计断言）、lint/build 通过；7880 详情四项计数即时可见，评论与检索行统计待后端空闲重启（未主动重启）。未调用付费模型、未部署138、未更新安装包；chat budget/Gateway 等并发未提交工作未改动。

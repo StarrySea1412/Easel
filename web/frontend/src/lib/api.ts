@@ -278,6 +278,14 @@ export function fetchSkills(): Promise<SkillItem[]> {
   return request<SkillItem[]>('/api/skills');
 }
 
+export interface ClawHubStats {
+  downloads: number | null;
+  installs: number | null;
+  stars: number | null;
+  versions: number | null;
+  comments: number | null;
+}
+
 export interface ClawHubSkill {
   id: string;
   source: 'clawhub';
@@ -288,6 +296,7 @@ export interface ClawHubSkill {
   version: string | null;
   updatedAt: number | null;
   canonicalUrl: string;
+  stats?: ClawHubStats | null;
   installationState: 'not_checked';
 }
 
@@ -308,7 +317,7 @@ export interface ClawHubDetail {
     descriptionTruncated: boolean;
     topics: string[];
     createdAt: number | null;
-    stats: Record<string, number | null> | null;
+    stats: ClawHubStats | null;
   };
   owner: { handle: string | null; displayName: string | null };
   latestVersion: { version: string; createdAt: number | null; changelog: string } | null;

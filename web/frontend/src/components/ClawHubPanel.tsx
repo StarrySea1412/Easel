@@ -4,6 +4,7 @@ import type { ClawHubDetail, ClawHubSearch, ClawHubSkill } from '../lib/api';
 import { IconSearch, IconSkills, IconStar } from './icons';
 import { Sk } from './Skeleton';
 import { favoriteAsSkill, isSkillFavorite, removeSkillFavorite, toggleSkillFavorite, useSkillFavorites } from '../lib/skillFavorites';
+import { clawHubStatItems, formatClawHubStatLine } from '../lib/clawHubStats';
 import type { SkillFavorite } from '../lib/skillFavorites';
 import { showToast } from '../lib/toast';
 import '../styles/clawhub.css';
@@ -36,6 +37,7 @@ export default function ClawHubPanel() {
   const heading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const favorites = useSkillFavorites();
+  const detailStats = clawHubStatItems(detail?.skill.stats);
 
   /** Bookmarks the public metadata only; a failed local save never fakes a saved state. */
   const toggleFavorite = (skill: ClawHubSkill) => {
@@ -156,6 +158,7 @@ export default function ClawHubPanel() {
           <div><dt>版本</dt><dd>{detail.latestVersion?.version || detail.skill.version || '未提供'}</dd></div>
           <div><dt>更新</dt><dd>{dateLabel(detail.skill.updatedAt)}</dd></div>
         </dl>
+        {detailStats.length > 0 && <p className="clawhub-stats">{detailStats.map(item => <span key={item.key}>{item.label} {item.text}</span>)}</p>}
         {(detail.moderation?.isMalwareBlocked || detail.moderation?.isSuspicious) && <div className="clawhub-error" role="note">
           {detail.moderation.isMalwareBlocked ? 'ClawHub 标记：已阻止的技能。' : 'ClawHub 标记：该技能存在可疑内容。'} {detail.moderation.summary}
         </div>}
@@ -176,6 +179,7 @@ export default function ClawHubPanel() {
         <h2>{skill.displayName}</h2>
         <p className="clawhub-owner">{skill.ownerHandle ? `${skill.ownerHandle}/${skill.slug}` : skill.slug}</p>
         <p className="clawhub-summary">{skill.summary || '暂无摘要，查看详情了解用途。'}</p>
+        {formatClawHubStatLine(skill.stats, ['downloads', 'comments']) && <p className="clawhub-stats is-compact">{formatClawHubStatLine(skill.stats, ['downloads', 'comments'])}</p>}
         <p className="clawhub-note">版本 {skill.version || '未提供'} · 更新 {dateLabel(skill.updatedAt)}</p>
         <div className="clawhub-actions">
           {favoriteButton(skill)}

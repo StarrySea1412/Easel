@@ -17,7 +17,7 @@ const favoritesLib = await loadTsModule('../src/lib/skillFavorites.ts', import.m
 const persistence = await loadTsModule('../src/lib/localPersistence.ts', import.meta.url);
 
 const KEY = favoritesLib.SKILL_FAVORITES_KEY;
-const external = { id: 'alice/card-quote', source: 'clawhub', slug: 'card-quote', displayName: 'Card Quote', ownerHandle: 'alice',
+const external = { id: 'alice/card-quote', source: 'clawhub', slug: 'card-quote', displayName: 'Card Quote', ownerHandle: 'alice', stats: { downloads: 5609, installs: 148, stars: 7, versions: 7, comments: 3 },
   summary: '把金句排成卡片', version: '1.2.3', updatedAt: 1792000000000, canonicalUrl: 'https://clawhub.ai/alice/card-quote', installationState: 'not_checked' };
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
@@ -51,6 +51,7 @@ test('search results can be favorited, listed under 我的收藏, removed, and s
   await v.search('quote');
   const card = v.node.querySelector('.clawhub-card');
   assert.ok(card, 'the result card renders');
+  assert.match(card.textContent, /下载 5,609 · 评论 3/, 'public counters show on the panel card');
   assert.equal(card.querySelector('.clawhub-fav').getAttribute('aria-pressed'), 'false');
   await v.click(card.querySelector('.clawhub-fav'));
   const stored = JSON.parse(window.localStorage.getItem(KEY));

@@ -140,3 +140,5 @@
 
 .brush-clawhub-skeleton-list { display: grid; gap: 10px; }
 .brush-clawhub-item.is-skeleton { pointer-events: none; }
+
+.brush-clawhub-stats { margin: 6px 0 0; color: var(--text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
