@@ -310,15 +310,19 @@ test('sidebar counts actual running chats once, retains folded count and updates
  assert.equal(view.container.querySelector('.sidebar-running-count').textContent,'1');
  await view.clickLabel('展开对话列表');
  assert.match(view.byLabel('正在运行的对话：1').textContent,/1.*运行中/);
- assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,'运行中');
- assert.match(view.container.querySelector('[data-session-id=s2] .session-status-badge').textContent,/已完成/);
+ assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'正在对话');
+ assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-dot'),null);
+ assert.equal(view.container.querySelector('[data-session-id=s2] .session-status-badge').getAttribute('aria-label'),'已完成');
+ assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-dot'));
+ assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-badge').classList.contains('is-completed'));
  assert.equal(view.container.querySelector('[data-session-id=backup] .session-status-badge'),null);
  await view.update({runningSessions:[],taskState:{goals:[],runs:[],plans:[],serverTime:2},sessions:sessions.map(s=>s.id==='s1'?{...s,messages:[{...done,error:{message:'服务中断'}}]}:s)});
  assert.ok(view.byLabel('正在运行的对话：0'));
- assert.match(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,/失败/);
+ assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'失败');
+ assert.ok(view.container.querySelector('[data-session-id=s1] .session-status-badge').classList.contains('is-failed'));
  assert.equal(view.container.querySelector('.sidebar-running-count'),null);assert.deepEqual(view.selected,[]);
  await view.remount();await view.clickLabel('展开对话列表');
- assert.match(view.container.querySelector('[data-session-id=s1] .session-status-badge').textContent,/失败/);
+ assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'失败');
 });
 
 test('pinning moves one conversation into its own section without selecting it or losing running state', async t => {

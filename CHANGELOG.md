@@ -1,5 +1,10 @@
 ## 2026-10-17 · Inline goal composer correction / 目标入口纠正
 
+### 2026-10-17 · Conversation status dots / 对话状态点
+
+- Replaced visible sidebar completion/failure labels with compact semantic status dots: green for completed, red for failed, blue for running, and amber/gray for intermediate or stopped states.
+- Kept status text in `title` and accessible labels so the compact list does not lose meaning or failure context.
+
 - Restored goal setup to the existing chat composer instead of a replacement form: one textarea, preserved draft, toolbar, model, attachments, skills and stop path.
 - Added collapsed execution options, explicit model lock after save, idempotent retry, IME-safe Enter/Shift+Enter/Escape handling, and the existing conversation goal panel.
 - Verified 1,065 frontend tests, production build, lint (existing warnings only), 7880 entry behavior, and isolated goal execution with HTML preview and progress states. No paid model, 138 deployment or installer update.

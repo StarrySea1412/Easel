@@ -239,6 +239,8 @@ CI runs for `main` and `codex/**` branches. Windows installer builds are manual 
 
 > **Corrected inline goal entry (October 17, 2026)**: goal setup is back inside the current chat composer. `/goal`, the same textarea, toolbar, model, attachments, skills and stop controls are preserved; execution options are collapsed by default and Escape returns to ordinary chat. Verified locally and with an isolated fixture only; no paid goal, host 138 or installer was updated. [Implementation and boundaries](docs/goal-composer-correction-2026-10-17.md)
 
+> **Conversation status dots (October 17, 2026)**: the sidebar now uses compact semantic dots for the latest turn: green for completed, red for failed, and blue for running. Full status text and failure context remain available through tooltips and accessible labels.
+
 ## Attribution and license
 
 Based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel), with thanks to its authors and contributors. This repository maintains its own workspace experience, office interactions and reliability changes; it is not an official upstream release.
