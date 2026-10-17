@@ -1,3 +1,11 @@
+## 2026-10-17 · 会话列表只显式新增；状态点改为真实结果信号
+
+- 新增条目规则：`lib/sessionMerge.ts` 的 `pickMergeTarget`（选中会话存在且非备份导入、无待恢复轮次、未在流式中才可并入）接入 `App.tsx` 的三个入口——热点“一键做成内容”（`handleUseTopic`）、技能开聊（`handleSkillChat`）、爆款拆解（`handleStartBreakdown`，`createBreakdownSession` 新增可选 `base`，并入时保留原标题与引擎、仅追加拆解轮次）；工作台“开始创作”和侧栏“新建对话”仍是仅有的两个显式新建入口。
+- 状态点规则：删除 `sessionStatus.ts` 中“普通聊天结束=已完成”的分支——普通聊天不再显示任何点；任务 run 完成（无目标时）与目标通过验收显示绿点，失败保持红点，运行/停止中照旧，待验收/暂停/待输入/阻塞等需处理状态不变。
+- 运行图标：新增 `IconLoader`（Lucide 风格弧线，stroke 2.2），侧栏运行/停止中的会话行由脉冲蓝点改为转圈 loading 图标（`.session-status-badge .session-running-indicator` spin 动画，停止中减速 1.5s，`prefers-reduced-motion` 下静止）；`session-status-pulse` 关键帧移除。
+- 测试：session-status 更新（普通聊天结束=无点、任务 run 完成=绿）；sidebar-nav 徽标用例改为任务型绿点并断言普通聊天无点；新增 session-merge（7 断言）与 breakdown-merge（并入保留身份/无 base 照旧）测试；backup-app-integration 拆解用例改为断言“并入选中会话、不新增行”。前端全量 1084 项、构建、lint（0错误/18既有warning）通过。
+- 未尽事项（后续可做）：技能开聊/拆解在目标执行中的会话上仍走新建（安全回退）；历史遗留的重复会话不自动清理。
+
 ## 2026-10-17 · 界面“更 pro”：圆角阶梯与字号收敛
 
 - 圆角统一：`index.css` 定义 6/8/12/16/20 + pill(999) 五档 token（`--radius-xs/sm/md/lg/xl/pill`，`--radius` 保留为 8px 兼容别名）；65 个 CSS 文件 713 处 border-radius 全部替换为 token（含 `4px 4px 0 0` 等多值、`var(--radius-xl, 20px)` 回退写法、`--radius-full` 幽灵 token、100px/25px 胶囊），仅保留装饰性 2/3px 小形状与 50% 圆形。

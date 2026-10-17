@@ -45,9 +45,12 @@ export function sessionStatus(session:ChatSession,running:ReadonlySet<string>,st
     // Goal creation and a finished work iteration are not goal completion.
     return;
   }
-  if(last.taskGoalId||last.taskRunId)return;
-  // Persisted turn receipts remain useful after refresh; legacy untracked prose does not.
-  if(last.externalSource!=='gateway-injected'&&(last.turnId||last.elapsedMs!==undefined)&&!last.turnId?.startsWith('goal-info-'))return states.completed;
+  if(last.taskGoalId||last.taskRunId){
+    // A finished task run is a real outcome worth a green dot; a plain chat
+    // turn simply ending is not — those rows stay clean.
+    if(run?.state==='completed')return {...states.completed,detail:'本轮任务已完成'};
+    return;
+  }
 }
 
 export function sessionStatuses(sessions:ChatSession[],runningIds:string[]=[],stoppingIds:string[]=[],tasks?:TaskSnapshot):Map<string,SessionStatus> {

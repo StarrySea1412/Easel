@@ -107,7 +107,7 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
-test('breakdown persists its recovery identity, runs once in a visible chat and retains normal follow-up', async t => {
+test('breakdown merges into the selected chat, persists its recovery identity, runs once and retains normal follow-up', async t => {
   const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
   await act(async () => harness.sidebar.onPageChange('breakdown'));
   let accepted;
@@ -115,9 +115,12 @@ test('breakdown persists its recovery identity, runs once in a visible chat and 
   assert.equal(accepted, true);
   assert.equal(harness.streams.length, 1);
   const session = harness.pages['对话'].session;
-  assert.equal(harness.sidebar.sessions[0].id, session.id);
-  assert.equal(session.messages[0].kind, 'breakdown');
-  assert.equal(session.messages[0].content, '桌面越来越乱，划成三个区。');
+  assert.equal(session.id, 'original', 'the breakdown merges into the selected conversation');
+  assert.equal(harness.sidebar.sessions.length, 1, 'no new conversation row is added');
+  assert.equal(harness.sidebar.sessions[0].id, 'original');
+  const turn = session.messages.at(-1);
+  assert.equal(turn.kind, 'breakdown');
+  assert.equal(turn.content, '桌面越来越乱，划成三个区。');
   assert.match(harness.streams[0].args[0], /内容拆解报告/);
   assert.equal(harness.streams[0].args[17], 'relay/glm-5.3');
   assert.equal(harness.streams[0].args[19], 'high');

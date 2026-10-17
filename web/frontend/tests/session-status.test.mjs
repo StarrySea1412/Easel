@@ -16,7 +16,8 @@ test('running counts deduplicate regular/goal streams and keep stopping until co
   assert.equal(sessionStatuses(chats,[],[],snapshot()).size,0);
 });
 test('badges follow latest turn receipts and persistable errors, never old prose, pending replies or stopped results',()=>{
-  assert.equal(state(chat('done',[user,answer])),'completed');
+  assert.equal(state(chat('done',[user,answer])),undefined,'a plain chat turn ending is not a green-dot outcome');
+  assert.equal(state(chat('run',[{...answer,taskRunId:'run'}]),snapshot([],[{id:'run',goalId:'',sessionId:'run',state:'completed'}])),'completed','a finished task run is a real outcome');
   assert.equal(state(chat('error',[user,{...answer,content:'部分输出',error:{message:'连接因重启中断'}}])),'failed');
   assert.equal(state(chat('stop',[user,{...answer,stopped:true}])),'stopped');
   assert.equal(state(chat('next',[user,answer,user])),undefined);
@@ -40,8 +41,8 @@ test('goal iteration completion is separate from review, input, pause, failure a
   assert.equal(state(session,snapshot()),undefined,'missing goal snapshot cannot turn iteration into goal success');
   assert.equal(state(chat('a',[{...answer,taskGoalId:'g'}]),snapshot([{...g,status:'draft',phase:'idle'}])),undefined);
 });
-test('old terminal goal runs cannot override the latest ordinary chat or a newer unanswered user message',()=>{
+test('old terminal goal runs cannot turn the latest ordinary chat into a badge',()=>{
   const tasks=snapshot([{id:'g',sessionId:'a',status:'completed'}],[{id:'old',goalId:'g',sessionId:'a',state:'failed'}]);
-  assert.equal(state(chat('a',[user,answer]),tasks),'completed');
+  assert.equal(state(chat('a',[user,answer]),tasks),undefined,'the old run stays untouched and the plain chat stays clean');
   assert.equal(state(chat('a',[answer,user]),tasks),undefined);
 });

@@ -1,3 +1,9 @@
+## 2026-10-17 · Explicit starts only, and status dots as real signals / 只有显式入口新增对话，状态点只在有真实结果时出现
+
+- Only the two explicit entries add a conversation row — the sidebar 新建对话 button and the dashboard 开始创作 composer. 看热点“一键做成内容”、技能开聊 and 爆款拆解 now merge into the selected conversation (with a fresh row only when there is nothing safe to merge into: no selection, a backup import, or a still-running session). / 只有两个显式入口会新增列表条目——侧栏“新建对话”和工作台“开始创作”；看热点“一键做成内容”、技能开聊、爆款拆解并入当前选中的对话（没有可安全并入的会话时才新建：未选中、备份导入或仍在运行）。
+- Status dots became signals instead of decoration: a plain finished chat no longer keeps a permanent green dot; green shows for a finished task run or an accepted goal, red stays for failures, and running/stopping rows now use a spinning loading icon instead of a pulsing dot. / 状态点从装饰变回信号：普通聊天结束不再常驻绿点；任务执行完成或目标通过验收才亮绿，失败保持红点；运行/停止中的行改用转圈的 loading 图标，不再用脉冲圆点。
+- 1,084 frontend tests, build, lint (0 errors) and browser checks on the sidebar list. / 前端 1084 项、构建、lint（0 错误）与侧栏列表浏览器核对。
+
 ## 2026-10-17 · The goal chip appears only in conversations that have a goal / “目标”按钮只在有目标的对话中出现
 
 - The composer's 目标 chip no longer sits in goal-less conversations: it shows only while the conversation has a goal (any status) or while goal setup is open, and setting stays on `/goal`, `/目标` or the `/` command menu (the typed text becomes the objective). / 没有目标的对话不再常驻“目标”按钮：仅当对话已有目标（任意状态）或正在设置目标时显示；设置入口保持 `/goal`、`/目标` 或 `/` 命令菜单（输入内容即目标）。

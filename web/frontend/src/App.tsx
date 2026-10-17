@@ -1,4 +1,5 @@
 import { chatErrorDetail } from './lib/chatErrors';
+import { pickMergeTarget } from './lib/sessionMerge';
 import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
@@ -824,15 +825,24 @@ export default function App() {
     sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel, kind);
   }, [sendUserAndStream]);
 
-  // 热点「一键做成内容」：新开会话，把选题作为指令发出去，跳到对话页。
+  // 非显式入口（看热点一键做成内容、技能开聊、爆款拆解）并入当前选中的对话；
+  // 只有侧栏“新建对话”与工作台“开始创作”会新增列表条目。
+  const mergeTarget = useCallback((): ChatSession | undefined => {
+    const busy = (id: string) => Boolean(streamCtl.current[id] || streamAcc.current[id] || stopRequests.current[id]);
+    return pickMergeTarget(sessionsRef.current, activeSessionId, busy);
+  }, [activeSessionId]);
+
+  // 热点「一键做成内容」：并入当前对话（没有才新开），把选题作为指令发出去，跳到对话页。
   const handleUseTopic = useCallback((title: string) => {
     const prompt = `围绕当前热点「${title}」：先判断它适不适合我的账号赛道；若合适，给 2-3 个差异化的二创角度，并把你最推荐的那条写成可直接发布的文案初稿。`;
+    const target = mergeTarget();
+    if (target) { setCurrentPage('chat'); sendUserAndStream(target.id, prompt); return; }
     const ns = createSession(selectedPersona || undefined);
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
     sendUserAndStream(ns.id, prompt);
-  }, [selectedPersona, sendUserAndStream]);
+  }, [selectedPersona, sendUserAndStream, mergeTarget]);
 
   // 工作台「一句话开干」：用户输入什么就发什么，不再替用户编排指令（v2 直达创作入口）。
   const handleQuickPrompt = useCallback((text: string, selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string) => {
@@ -851,6 +861,16 @@ export default function App() {
   }, [selectedPersona, sendUserAndStream, gatewayStatus]);
 
   const handleSkillChat = useCallback((skill: string, input: string): boolean => {
+    const merged = mergeTarget();
+    if (merged) {
+      if (!writeSelectedSkills(merged.id, [skill])) return false;
+      setChatDraftText(merged.id, input);
+      try {
+        if (JSON.parse(localStorage.getItem(`easel:chat-draft:${merged.id}`) || 'null')?.text !== input) return false;
+      } catch { return false; }
+      setCurrentPage('chat');
+      return true;
+    }
     const created = createSession(selectedPersona || undefined);
     if (!writeSelectedSkills(created.id, [skill])) return false;
     setChatDraftText(created.id, input);
@@ -863,21 +883,23 @@ export default function App() {
     setActiveSessionId(created.id);
     setCurrentPage('chat');
     return true;
-  }, [selectedPersona, setCurrentPage]);
+  }, [selectedPersona, setCurrentPage, mergeTarget]);
 
   const handleStartBreakdown = useCallback((material: string, modelRef?: string, thinkingLevel?: ThinkingLevel): boolean => {
     if (!material.trim() || gatewayStatus !== 'connected') return false;
-    const session = createBreakdownSession(material, selectedPersona || undefined, modelRef, thinkingLevel);
-    const next = [session, ...sessionsRef.current];
+    const base = mergeTarget();
+    const session = createBreakdownSession(material, selectedPersona || undefined, modelRef, thinkingLevel, base);
+    const next = base ? sessionsRef.current.map(item => item.id === session.id ? session : item) : [session, ...sessionsRef.current];
     // Persist the material AND recovery identity before starting any request.
     if (!saveSessions(next)) return false;
     sessionsRef.current = next;
     setSessions(next);
     setActiveSessionId(session.id);
     setCurrentPage('chat');
-    startStream(session.id, session.messages[0].agentContent!, session.persona, [], [], {}, modelRef, thinkingLevel, undefined, session.pendingTurnId);
+    const turn = session.messages.at(-1)!;
+    startStream(session.id, turn.agentContent!, session.persona, [], [], {}, modelRef, thinkingLevel, undefined, session.pendingTurnId);
     return true;
-  }, [selectedPersona, gatewayStatus, setCurrentPage, startStream]);
+  }, [selectedPersona, gatewayStatus, setCurrentPage, startStream, mergeTarget]);
 
   const handleOpenBreakdownRun = useCallback((run: ActiveRun): boolean => {
     const next = adoptBreakdownRun(sessionsRef.current, run);

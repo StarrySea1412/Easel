@@ -5,12 +5,15 @@ import { buildBreakdownReportPrompt, ideaTitleFromReport } from './breakdownRepo
 import { addBreakdownRecord, clearActiveRun, loadActiveRun, loadBreakdownHistory } from './breakdownStore';
 import type { ActiveRun } from './breakdownStore';
 
-export function createBreakdownSession(material: string, persona?: string, modelRef?: string, thinkingLevel?: ThinkingLevel): ChatSession {
-  const session = createSession(persona);
+export function createBreakdownSession(material: string, persona?: string, modelRef?: string, thinkingLevel?: ThinkingLevel, base?: ChatSession): ChatSession {
+  const session = base ?? createSession(persona);
   const turnId = `${session.id}-breakdown-${Date.now().toString(36)}`;
-  return { ...session, engine: 'openclaw', title: `拆解 · ${material.trim().split(/\r?\n/)[0].slice(0, 28)}`,
+  // With a base the breakdown merges into the selected conversation: the
+  // existing title and engine stay, only the turn is appended.
+  return { ...session, engine: base ? session.engine : 'openclaw',
+    title: base ? session.title : `拆解 · ${material.trim().split(/\r?\n/)[0].slice(0, 28)}`,
     pendingTurnId: turnId,
-    messages: [{ role: 'user', kind: 'breakdown', content: material, agentContent: buildBreakdownReportPrompt(material, persona),
+    messages: [...session.messages, { role: 'user', kind: 'breakdown', content: material, agentContent: buildBreakdownReportPrompt(material, persona),
       requestedModelRef: modelRef, requestedThinkingLevel: thinkingLevel, startedAt: Date.now() }] };
 }
 

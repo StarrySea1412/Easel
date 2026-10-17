@@ -305,8 +305,8 @@ test('conversation loading follows each running session and disappears when its 
 
 test('sidebar counts actual running chats once, retains folded count and updates completion/failure badges',async t=>{
  const done={role:'assistant',content:'已交付',turnId:'done'};
- const sessions=[session('s1','今天的对话',{messages:[done]}),session('s2','此前的调研',{messages:[done]}),session('backup','备份',{messages:[done],importedFromBackup:true})];
- const view=await fixture(t,{sessions,runningSessions:['s1','s1','backup'],taskState:{goals:[{id:'g',sessionId:'s1',status:'active'}],runs:[],plans:[],serverTime:1}});
+ const sessions=[session('s1','今天的对话',{messages:[done]}),session('s2','此前的调研',{messages:[{...done,taskRunId:'run-2'}]}),session('s3','闲聊',{messages:[done]}),session('backup','备份',{messages:[done],importedFromBackup:true})];
+ const view=await fixture(t,{sessions,runningSessions:['s1','s1','backup'],taskState:{goals:[{id:'g',sessionId:'s1',status:'active'}],runs:[{id:'run-2',goalId:'',sessionId:'s2',state:'completed'}],plans:[],serverTime:1}});
  assert.equal(view.container.querySelector('.sidebar-running-count').textContent,'1');
  await view.clickLabel('展开对话列表');
  assert.match(view.byLabel('正在运行的对话：1').textContent,/1.*运行中/);
@@ -318,6 +318,7 @@ test('sidebar counts actual running chats once, retains folded count and updates
  assert.equal(view.container.querySelector('[data-session-id=s2] .session-status-badge').getAttribute('aria-label'),'已完成');
  assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-dot'));
  assert.ok(view.container.querySelector('[data-session-id=s2] .session-status-badge').classList.contains('is-completed'));
+ assert.equal(view.container.querySelector('[data-session-id=s3] .session-status-badge'),null,'a plain finished chat shows no dot');
  assert.equal(view.container.querySelector('[data-session-id=backup] .session-status-badge'),null);
  await view.update({runningSessions:[],taskState:{goals:[],runs:[],plans:[],serverTime:2},sessions:sessions.map(s=>s.id==='s1'?{...s,messages:[{...done,error:{message:'服务中断'}}]}:s)});
  assert.ok(view.byLabel('正在运行的对话：0'));

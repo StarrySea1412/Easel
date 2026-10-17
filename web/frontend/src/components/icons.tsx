@@ -15,6 +15,11 @@ export const IconChat = ({ size, className, strokeWidth }: P) => (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
+export const IconLoader = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className} aria-hidden="true">
+    <path d="M21 12a9 9 0 1 1-9-9" />
+  </svg>
+);
 export const IconAgentOffice = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="M3 8v9l9 5 9-5V8M12 13v9" />

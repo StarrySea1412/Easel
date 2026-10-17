@@ -6,6 +6,7 @@ import {
   IconChat, IconEdit,
   IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice, IconOpenClaw,
+  IconLoader,
 } from './icons';
 import { IconGear, IconImage, IconMoon, IconSun } from './settingsIcons';
 import { readTheme, setThemePreference, subscribeTheme } from '../lib/theme';
@@ -258,7 +259,7 @@ export default function Sidebar({
         onPointerOver={event=>{if(!(event.target as HTMLElement).closest('.session-select')&&!previewEditing.current)setHoveredSession(null);}}
       >
         <div className="session-row-content">{state&&<span className={`session-status-badge is-${state.kind}`} title={`${state.label}：${state.detail}`} aria-label={state.kind==='running'?'正在对话':state.kind==='stopping'?'正在停止':state.label}>
-          <span className={state.kind==='running'||state.kind==='stopping'?'session-running-indicator':'session-status-dot'} aria-hidden="true" />
+          {state.kind==='running'||state.kind==='stopping'?<IconLoader size={10} strokeWidth={2.2} className="session-running-indicator"/>:<span className="session-status-dot" aria-hidden="true" />}
           <span className="session-status-label">{state.label}</span>
         </span>}<button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button></div>
         <button type="button" className="session-quick-rename" aria-label={`重命名对话：${s.title}`} title="重命名（F2）" onClick={event=>{event.stopPropagation();startRename(s);}}><IconEdit size={14}/></button>
