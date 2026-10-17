@@ -145,7 +145,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
               <small>{grouped[layer.key].length}</small>
             </button>
           ))}
-          <button type="button" className="skills-nav-top" onClick={() => pageRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}>回到顶部 ↑</button>
+          <button type="button" className="skills-nav-top" onClick={() => { if (pageRef.current) pageRef.current.scrollTop = 0; }}>回到顶部 ↑</button>
         </nav>}
         <div className="skills-main">
       <div className="skills-page-head">
