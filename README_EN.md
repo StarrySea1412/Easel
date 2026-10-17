@@ -247,6 +247,8 @@ CI runs for `main` and `codex/**` branches. Windows installer builds are manual 
 
 > **Corrected inline goal entry (October 17, 2026)**: goal setup now uses the existing chat composer and toolbar, with collapsed execution options and the ordinary draft, model and attachment entry points preserved. See the [development-branch verification record](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/goal-composer-correction-2026-10-17.md).
 
+Conversation status in the sidebar uses compact semantic dots: green for completed, red for failed, and blue for running. Tooltips and accessible names retain the full status and failure context.
+
 ## Attribution and license
 
 Based on [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel), with thanks to its authors and contributors. This repository maintains its own workspace experience, office interactions and reliability changes; it is not an official upstream release.
