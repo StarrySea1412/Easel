@@ -7,7 +7,7 @@
 ## 勘察结论
 
 - 深色模式当前独占设置页的“外观”导航（`AppearanceSettings`：跟随系统/浅色/深色 + 预览 + 状态行），与“更多设置”同级。
-- multiagent 现状：`AgentRuntimeSettings` 独占“Agent 协作”导航；启用语义由 OpenClaw 配置决定——`agents.defaults.subagents.model` 必须是已配置模型且 `tools.deny` 不含 `sessions_spawn`；启动守卫 `_sync_agent_safety_guard` 在无有效启动模型时写入阻断，防止子 Agent 继承主对话的高价模型。本机 `data/openclaw/openclaw.json` 当时 `subagents` 为空、deny 含 `sessions_spawn`，即 multiagent 关闭；主模型可由 `agents.defaults.model.primary` 确定。
+- multiagent 现状：`AgentRuntimeSettings` 独占“Agent 协作”导航；启用语义由 OpenClaw 配置决定——`agents.defaults.subagents.model` 必须是已配置模型且 `tools.deny` 不含 `sessions_spawn`；启动守卫 `_sync_agent_safety_guard` 在无有效启动模型时写入阻断，防止子 Agent 继承主对话的高价模型。**运行实例的实际状态目录是 `~/.openclaw-easel`**（`easel/openclaw_workspace.state_dir`：`EASEL_OPENCLAW_STATE_DIR` 未设置时取用户主目录；`data/openclaw/openclaw.json` 是数据目录布局下的另一份副本，本机运行实例并不读取它）。交付当日核对：本机 `~/.openclaw-easel/openclaw.json` 中 multiagent 已由用户配置为启用（`subagents.model=openai/deepseek-v4-flash`、`deny` 为空，文件当日 13:33 更新），与用户“手动配置后才可用”的反馈一致；主模型可由 `agents.defaults.model.primary` 确定。
 
 ## 实施内容
 
@@ -37,6 +37,6 @@
 
 ## 边界与保留项
 
-- 未调用付费模型、未部署 138、未更新安装包；未修改本机 `data/openclaw/openclaw.json`（自播种在下一次后端正常启动时发生，本轮不强制重启用户进程）。
-- 本机 7880 后端为空配置环境：重启后端后 multiagent 将按主模型自动默认启用（可在模型与渠道页改为专用快速模型或关闭）；未重启前页面显示“默认启用待保存”。
-- 显式关闭过 multiagent 的环境不会被默认化覆盖；如需恢复默认启动，在该卡片重新勾选保存即可。
+- 未调用付费模型、未部署 138、未更新安装包；未修改本机 `~/.openclaw-easel/openclaw.json`（自播种只发生在“从未配置”的环境下一次后端正常启动时）。
+- 本机 multiagent 已处于启用状态（用户既有配置，启动模型 `openai/deepseek-v4-flash`）：重启后端后新守卫不会覆盖该显式配置；页面在“模型与渠道 → 对话通道”显示“已启用”，可在此更换为专用快速模型或关闭。
+- 未配置过 multiagent 的环境（无 `subagents` 键）在后端重启后按主模型自动默认启用；显式关闭过的环境不会被默认化覆盖，重新勾选保存即可恢复。
