@@ -6,6 +6,7 @@ import type { ImagegenGalleryItem } from '../lib/api';
 import { IconImage } from './settingsIcons';
 import StudioMediaSource from './StudioMediaSource';
 import StudioModelControl from './StudioModelControl';
+import InlineInfo from './InlineInfo';
 import { useStudioMediaInput } from '../hooks/useStudioMediaInput';
 import { firstStudioMedia, STUDIO_MEDIA_ACCEPT } from '../lib/studioClipboard';
 import ComfyVideoWorkflowPanel from './ComfyVideoWorkflowPanel';
@@ -70,7 +71,7 @@ export default function VideoStudioPanel({ video, images, onOpenSettings, sessio
         <StudioMediaSource media={media} locked={locked} />
         <div className="video-provider-row"><label className="image-ratio-select"><span>视频服务</span><Select aria-label="视频服务" disabled={locked || video.loading} value={video.providerId} onChange={event => video.selectProvider(event.target.value)}>{!video.config?.providers.length && <option value="">尚未连接</option>}{video.config?.providers.map(item => <option key={item.id} value={item.id}>{item.name}{!item.configured ? ' · 未配置' : ''}</option>)}</Select></label><button type="button" className="link-btn" onClick={onOpenSettings}>配置视频服务 ↗</button></div>
         {provider && !supported && <p className="image-field-hint" role="status">当前模型仅支持{provider.modes.includes('image2video') ? '图生视频，请添加参考图' : '文生视频，请移除参考图或更换视频服务'}。</p>}
-        <details className="image-advanced"><summary>模型与生成说明</summary><div className="image-advanced-body"><p>当前模型：{(reference ? provider?.imageModel : provider?.model) || '服务默认模型'}。{provider?.hint}</p><p>{video.config?.billingHint || '提交任务会调用已配置的视频服务，可能产生费用。'}</p><p>Ctrl / ⌘ + Enter 生成 · 描述最多 2000 字 · 生成结果保存到作品中</p></div></details>
+        <div className="image-advanced-line"><span>模型与生成说明</span><InlineInfo label="模型与生成说明" hover><p>当前模型：{(reference ? provider?.imageModel : provider?.model) || '服务默认模型'}。{provider?.hint}</p><p>{video.config?.billingHint || '提交任务会调用已配置的视频服务，可能产生费用。'}</p><p>Ctrl / ⌘ + Enter 生成 · 描述最多 2000 字 · 生成结果保存到作品中</p></InlineInfo></div>
         {video.error && <p className="image-error" role="alert">{video.error}</p>}
         {job?.state === 'error' && <p className="image-error" role="alert">视频生成失败：{job.error || '请重试'}</p>}
         {job?.state === 'cancelled' && <p className="image-field-hint" role="status">{job.error || video.config?.cancelHint || '已停止本地等待。'}</p>}

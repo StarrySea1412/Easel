@@ -10,6 +10,8 @@ import copy
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -60,6 +62,7 @@ class ComfyVideoRequest(BaseModel):
     overrides: dict[str, Any] = Field(default_factory=dict)
     sessionId: str | None = Field(default=None, max_length=120)
     turnId: str | None = Field(default=None, max_length=200)
+    demo: bool = False
 
 
 def _base_url(env: dict[str, str]) -> str:
@@ -188,17 +191,19 @@ def _bytes_request(url: str, *, headers: dict[str, str] | None = None, timeout: 
 
 
 class ComfyVideoService:
-    def __init__(self, project_root, output_getter, env_getter, request_json=_json_request, request_bytes=_bytes_request):
+    def __init__(self, project_root, output_getter, env_getter, request_json=_json_request, request_bytes=_bytes_request, demo_render=None):
         self.root = Path(project_root).resolve()
         self.output_getter = output_getter
         self.env_getter = env_getter
         self.request_json = request_json
         self.request_bytes = request_bytes
+        self.demo_render = demo_render
         self.jobs: dict[str, dict[str, Any]] = {}
         self.events: dict[str, threading.Event] = {}
         self.lock = threading.RLock()
         self.timeout = 1800
         self.poll_interval = 2
+        self.demo_delay = 0.8
 
     @property
     def directory(self) -> Path:
@@ -246,7 +251,8 @@ class ComfyVideoService:
                 "workflowNodeCount": len(workflow or {}), "promptNodes": nodes,
                 "promptNode": env.get("COMFYUI_VIDEO_PROMPT_NODE", "") or (nodes[0] if len(nodes) == 1 else ""),
                 "error": error or None,
-                "note": "ComfyUI 只使用已配置工作流，不会自动切换到付费视频服务。"}
+                "demoAvailable": bool(shutil.which("ffmpeg")),
+                "note": "ComfyUI 只使用已配置工作流，不会自动切换到付费视频服务；未配置时可用本地模拟运行体验流程。"}
 
     def health(self) -> dict[str, Any]:
         env = self._env(); base = _base_url(env)
@@ -260,8 +266,6 @@ class ComfyVideoService:
 
     def start(self, req: ComfyVideoRequest) -> dict[str, str]:
         env = self._env(); base = _base_url(env)
-        if not base:
-            raise HTTPException(400, "ComfyUI 未配置，请设置 COMFYUI_BASE_URL")
         if req.sessionId:
             try:
                 scope(req.sessionId)
@@ -272,6 +276,10 @@ class ComfyVideoService:
         prompt = build_cinematic_prompt(req.prompt, req.cinematic)
         if not prompt:
             raise HTTPException(400, "请填写视频提示词")
+        if req.demo:
+            return self._start_demo(req, prompt)
+        if not base:
+            raise HTTPException(400, "ComfyUI 未配置，请设置 COMFYUI_BASE_URL；想先体验流程可用面板里的本地模拟运行")
         try:
             workflow = load_workflow(self.root, env, req.workflow)
             prepared = prepare_workflow(workflow, prompt=prompt, negative=req.negativePrompt,
@@ -292,7 +300,7 @@ class ComfyVideoService:
         with self.lock:
             self._load()
             ident = uuid.uuid4().hex
-            job = {"jobId": ident, "state": "running", "promptId": prompt_id,
+            job = {"jobId": ident, "state": "running", "mode": "live", "promptId": prompt_id,
                    "prompt": prompt, "negativePrompt": req.negativePrompt,
                    "cinematic": normalize_cinematic_brief(req.cinematic),
                    "sessionId": req.sessionId, "turnId": req.turnId or f"comfy-{ident}",
@@ -301,6 +309,22 @@ class ComfyVideoService:
             event = threading.Event(); self.jobs[ident] = job; self.events[ident] = event; self._save(job)
         threading.Thread(target=self._run, args=(dict(job), event, env), daemon=True,
                          name=f"easel-comfy-{ident[:8]}").start()
+        return {"jobId": ident, "state": "running"}
+
+    def _start_demo(self, req: ComfyVideoRequest, prompt: str) -> dict[str, str]:
+        """Local placeholder run so the panel stays usable without ComfyUI."""
+        with self.lock:
+            self._load()
+            ident = uuid.uuid4().hex
+            job = {"jobId": ident, "state": "running", "mode": "demo", "promptId": f"demo-{ident[:12]}",
+                   "prompt": prompt, "negativePrompt": req.negativePrompt,
+                   "cinematic": normalize_cinematic_brief(req.cinematic),
+                   "sessionId": req.sessionId, "turnId": req.turnId or f"comfy-{ident}",
+                   "started": time.time(), "finished": None, "url": None, "error": None,
+                   "filename": f"demo-{time.strftime('%m%d-%H%M%S')}-{ident[:8]}.mp4"}
+            event = threading.Event(); self.jobs[ident] = job; self.events[ident] = event; self._save(job)
+        threading.Thread(target=self._run_demo, args=(dict(job), event), daemon=True,
+                         name=f"easel-comfy-demo-{ident[:8]}").start()
         return {"jobId": ident, "state": "running"}
 
     def _history(self, env: dict[str, str], prompt_id: str) -> dict[str, Any] | None:
@@ -380,6 +404,50 @@ class ComfyVideoService:
             else:
                 self._finish(ident, state="error", url=None, error=str(exc)[:600])
 
+    def _render_demo(self, target: Path) -> None:
+        """Render an obviously synthetic placeholder clip; never a model output."""
+        if self.demo_render is not None:
+            self.demo_render(target)
+            return
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise ComfyError("模拟运行需要本机 ffmpeg；安装后重试，或配置 ComfyUI 后提交真实任务")
+        command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                   "-f", "lavfi", "-i", "testsrc2=duration=4:size=768x432:rate=24",
+                   "-pix_fmt", "yuv420p", str(target)]
+        try:
+            completed = subprocess.run(command, capture_output=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ComfyError("模拟视频渲染失败") from exc
+        if completed.returncode != 0 or not target.is_file():
+            raise ComfyError("模拟视频渲染失败：ffmpeg 未生成文件")
+
+    def _run_demo(self, job: dict[str, Any], event: threading.Event) -> None:
+        ident = job["jobId"]
+        try:
+            if event.wait(self.demo_delay):
+                self._finish(ident, state="cancelled", url=None, error="已取消模拟任务；未生成占位视频。")
+                return
+            self.directory.mkdir(parents=True, exist_ok=True)
+            target = self.directory / job["filename"]
+            self._render_demo(target)
+            validate_mp4(target)
+            if event.is_set():
+                target.unlink(missing_ok=True)
+                self._finish(ident, state="cancelled", url=None, error="已取消模拟任务；占位视频已清理。")
+                return
+            relative = target.relative_to(self.output_getter().resolve()).as_posix()
+            if job.get("sessionId") and job.get("turnId"):
+                ArtifactStore(self.output_getter()).present(job["sessionId"], job["turnId"],
+                    [{"path": relative, "description": "模拟输出：本地占位视频（非模型生成）"}],
+                    source="comfyui-demo", call=str(job.get("promptId") or ident))
+            self._finish(ident, state="done", url=f"/api/media/{urllib.parse.quote(relative)}", error=None)
+        except Exception as exc:
+            if event.is_set():
+                self._finish(ident, state="cancelled", url=None, error="已取消模拟任务。")
+            else:
+                self._finish(ident, state="error", url=None, error=str(exc)[:600])
+
     def _finish(self, ident: str, *, state: str, url: str | None, error: str | None) -> None:
         with self.lock:
             job = self.jobs.get(ident)
@@ -412,7 +480,9 @@ class ComfyVideoService:
             if job["state"] in TERMINAL:
                 return dict(job)
             self.events.setdefault(ident, threading.Event()).set()
-            job.update(state="cancelled", url=None, error="已停止本地轮询；ComfyUI 队列可能仍在运行。", finished=time.time())
+            message = ("已取消模拟任务；未生成占位视频。" if job.get("mode") == "demo"
+                       else "已停止本地轮询；ComfyUI 队列可能仍在运行。")
+            job.update(state="cancelled", url=None, error=message, finished=time.time())
             self._save(job)
             return dict(job)
 

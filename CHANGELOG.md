@@ -1,3 +1,10 @@
+## 2026-10-17 · ComfyUI demo mode and info-hover explanations / ComfyUI 模拟运行与说明悬浮展示
+
+- The ComfyUI panel stays usable without a configured workflow: a local “模拟运行” renders an ffmpeg placeholder clip (clearly badged 模拟, labelled in the artifact registry as non-model output) through the same job lifecycle, with cancellation that leaves no file; live submission stays fail-closed and is still the only paid path. / 未配置工作流时面板仍可用：本地“模拟运行”经同一作业生命周期生成清晰标注的占位视频（琥珀“模拟”徽标，产物登记注明非模型输出），取消不留文件；真实提交仍保持 fail-closed，且始终是唯一付费通道。
+- Explanations moved out of collapsed blocks: the ComfyUI heading, cinematic-parameter summary, video-studio “模型与生成说明” and the notification footer storage note now use the info-icon hover/focus tooltip (`InlineInfo hover`). / 解释性文案移出折叠：ComfyUI 标题、镜头参数摘要、视频工坊“模型与生成说明”和通知面板存储说明改用 ⓘ 图标 + 悬停/聚焦浮层。
+- First commit the pending workspace ComfyUI work on its own (`bd26881c`, plus a placement fix `fd3f058b`) so this round builds on a committed base without touching the outstanding chat-budget work. / 先把并发未提交的 ComfyUI 工作单独提交（`bd26881c`，另有归位修复 `fd3f058b`），本轮在其已提交基线上推进，未触碰仍待提交的 chat budget 工作。
+- Verified 57 backend checks (8 ComfyUI, incl. demo completion/cancel/fail-closed), 1,082 frontend tests, build/lint and isolated browser acceptance on 7899 (real service + real panel: demo run, media playback, artifact rows, demo-aware cancel, info tooltips, dark and 390px). No real ComfyUI or paid model call; no 138 deployment or installer update. / 已验证 57 项后端（ComfyUI 8 项，含模拟完成/取消/fail-closed）、前端 1082 项、构建/lint 与 7899 隔离浏览器（真服务+真面板：模拟运行、媒体播放、产物登记、取消文案、ⓘ 浮层、深色与 390px）；未调用真实 ComfyUI 或付费模型、未部署 138、未更新安装包。
+
 ## 2026-10-17 · Settings reorg: theme placement and default-on multiagent / 设置页整理：主题归位与 multiagent 默认启动
 
 - Move dark mode out of its standalone 外观 page: the appearance card now lives in 更多设置, and the sidebar gains a one-click light/dark toggle (system-following switches by current appearance; a browser that cannot persist says so). / 深色模式移出独立“外观”页：外观卡片进入“更多设置”，侧栏新增一键浅/深切换（跟随系统时按当前显示切换；无法持久化时如实提示）。

@@ -1559,10 +1559,12 @@ export interface ComfyVideoConfig {
   promptNode: string;
   error: string | null;
   note: string;
+  demoAvailable?: boolean;
 }
 export interface ComfyVideoJob {
   jobId: string;
   state: 'running' | 'done' | 'error' | 'cancelled';
+  mode?: 'live' | 'demo';
   promptId?: string;
   prompt: string;
   negativePrompt?: string;
@@ -1580,7 +1582,7 @@ export function checkComfyVideoHealth(): Promise<{ ok: boolean; kind: string; de
 export function startComfyVideo(options: {
   prompt: string; negativePrompt?: string; cinematic?: Record<string, string>; workflow?: Record<string, unknown>;
   promptNodeId?: string; negativeNodeId?: string; overrides?: Record<string, string | number | boolean>;
-  sessionId?: string; turnId?: string;
+  sessionId?: string; turnId?: string; demo?: boolean;
 }): Promise<{ jobId: string; state: 'running' }> {
   return request('/api/comfyui/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
 }

@@ -88,7 +88,7 @@
 .image-attached-reference img { width:39px; height:39px; object-fit:cover; border-radius:6px; }.image-attached-reference>span { min-width:0; flex:1; }
 .image-attached-reference strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
 .image-attached-reference small { display:block; margin-top:4px; font-size:11px; color:var(--text-secondary); }
-.image-advanced { font-size:11px; color:var(--text-secondary); margin-top:13px; }.image-advanced summary { width:fit-content; padding:6px 0; cursor:pointer; }
+.image-advanced { font-size:11px; color:var(--text-secondary); margin-top:13px; }.image-advanced summary { width:fit-content; padding:6px 0; cursor:pointer; }.image-advanced-line { display:flex; align-items:center; gap:2px; margin-top:12px; color:var(--text-secondary); font-size:11px; }
 .image-advanced-body { padding:8px 0; font-size:12px; line-height:1.8; }.image-advanced-body p { margin:0 0 10px; overflow-wrap:anywhere; }
 .image-mask { border-top:1px solid var(--border); padding:12px 0; }.image-mask>label { color:var(--text); font-size:12px; font-weight:550; }.image-mask p { margin-top:6px; }.image-mask input { max-width:100%; font:inherit; }
 .image-mask-file { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }

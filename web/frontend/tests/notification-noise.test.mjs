@@ -119,3 +119,17 @@ test('cleanup removes only confirmed noise, verifies via its own route and never
   const listed = await (await fetch('/api/notifications')).json();
   assert.deepEqual(listed.notices.map(row => row.id), ['real-done']);
 });
+
+test('storage explanation is an info trigger instead of a collapsed block', async t => {
+  const node = await mount(t);
+  await act(async () => node.querySelector('button').click());
+  const trigger = document.querySelector('[aria-label="通知存储说明"]');
+  assert.ok(trigger, 'the explanation moved to an info trigger');
+  assert.equal(document.querySelector('.event-history-note details'), null);
+  await act(async () => trigger.focus());
+  const tip = document.querySelector('.inline-info-tooltip');
+  assert.ok(tip, 'hover/focus opens the tooltip');
+  assert.match(tip.textContent, /最近1000条/);
+  await act(async () => trigger.blur());
+  assert.equal(document.querySelector('.inline-info-tooltip'), null);
+});
