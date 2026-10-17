@@ -295,13 +295,12 @@ test.after(async () => {
 });
 
 
-test('inline goal survives goal-created polling, retries the saved ID and restores the ordinary draft without a modal',async t=>{
+test('inline goal setup survives goal-created polling, retries the saved ID and returns the composer without a modal',async t=>{
   const observer=globalThis.ResizeObserver;globalThis.ResizeObserver=class{observe(){}disconnect(){}};
   const raf=globalThis.requestAnimationFrame;globalThis.requestAnimationFrame=callback=>{callback();return 1;};
   t.after(()=>{globalThis.ResizeObserver=observer;globalThis.requestAnimationFrame=raf;});
-  const {setChatDraftText,getChatDraft}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
+  const {getChatDraft}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
   const session={id:'inline-goal-poll',title:'保留原对话',created:1,messages:[]};
-  setChatDraftText(session.id,'这段普通草稿需要保留');
   const g={id:'saved-goal',sessionId:session.id,title:'目标',objective:'完成内容卡片',modelRef:'fixture/model',status:'draft',phase:'idle',iterations:0,maxIterations:5,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,criteria:[{type:'review',label:'质量',value:''}],checks:[],reason:''};
   let created=false,attempts=0,createCount=0;
   const view=fixture(t);
@@ -319,15 +318,20 @@ test('inline goal survives goal-created polling, retries the saved ID and restor
     }});
   }
   await view.render(createElement(Harness));
-  await view.click(view.container.querySelector('.composer-goal-btn'));
+  // A conversation without a goal has no chip; `/goal <text>` seeds the objective.
+  assert.equal(view.container.querySelector('.composer-goal-btn'),null,'no goal means no goal chip');
+  const commandInput=view.container.querySelector('textarea');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(commandInput,'/goal 完成内容卡片');commandInput.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await act(async()=>{commandInput.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));});
+  assert.equal(view.container.querySelector('.composer-goal-btn')?.getAttribute('aria-label'),'退出目标设置','/goal opens the goal setup');
   assert.equal(document.querySelector('[role=dialog]'),null);
   const input=view.container.querySelector('textarea');
-  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(input,'完成内容卡片');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  assert.equal(input.value,'完成内容卡片','the command text becomes the objective');
   const submit=()=>act(async()=>view.container.querySelector('[aria-label="开始目标"], [aria-label="重试启动目标"]').click());
   await submit();
   assert.equal(view.container.querySelector('textarea'),input,'polling must not remount the pending setup');
   assert.ok(view.container.querySelector('[aria-label="重试启动目标"]'));assert.match(view.container.textContent,/执行保护暂不可用/);
-  assert.equal(createCount,1);assert.equal(getChatDraft(session.id).text,'这段普通草稿需要保留');
+  assert.equal(createCount,1);assert.equal(getChatDraft(session.id).text,'');
   await submit();assert.equal(createCount,1);assert.equal(attempts,2);
-  assert.equal(view.container.querySelector('[aria-label="创作消息"]').value,'这段普通草稿需要保留');
+  assert.equal(view.container.querySelector('[aria-label="创作消息"]').value,'');
 });

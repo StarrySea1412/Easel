@@ -22,6 +22,7 @@ let sequence = 0;
 test('slash goal opens in current conversation and preserves the command until saved without sending a model message',async t=>{
   const view=await fixture(t,'low');const opened=[];
   await view.render({onGoal:(...args)=>opened.push(args)});
+  assert.equal(view.container.querySelector('.composer-goal-btn'),null,'a conversation without a goal shows no goal chip');
   await view.type('/');assert.match(document.querySelector('[role=listbox]').textContent,/设置要持续追求的目标/);
   assert.match(document.querySelector('[role=listbox]').textContent,/定时任务/);
   await view.key(view.container.querySelector('textarea'),'Enter');
@@ -34,6 +35,7 @@ test('slash goal opens in current conversation and preserves the command until s
 test('goal lifecycle commands pause, resume and clear without sending model messages',async t=>{
   const view=await fixture(t,'low');const actions=[];
   await view.render({onGoal:()=>{},goalStatus:'active',onGoalAction:action=>actions.push(action)});
+  assert.equal(view.container.querySelector('.composer-goal-btn')?.getAttribute('aria-label'),'设置或查看目标','a conversation with a goal keeps its chip');
   await view.type('/goal pause');await view.key(view.container.querySelector('textarea'),'Enter');
   assert.deepEqual(actions,['pause']);assert.equal(view.sent.length,0);
   assert.equal(view.container.querySelector('textarea').value,'');

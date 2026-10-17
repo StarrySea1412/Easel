@@ -1,3 +1,7 @@
+## 2026-10-17 · The goal chip appears only in conversations that have a goal / “目标”按钮只在有目标的对话中出现
+
+- The composer's 目标 chip no longer sits in goal-less conversations: it shows only while the conversation has a goal (any status) or while goal setup is open, and setting stays on `/goal`, `/目标` or the `/` command menu (the typed text becomes the objective). / 没有目标的对话不再常驻“目标”按钮：仅当对话已有目标（任意状态）或正在设置目标时显示；设置入口保持 `/goal`、`/目标` 或 `/` 命令菜单（输入内容即目标）。
+
 ## 2026-10-17 · Pro polish: one radius ladder, no half-pixel type / 界面“更 pro”：圆角与字号收敛
 
 - Every `border-radius` now comes from one ladder — 6 / 8 / 12 / 16 / 20 px plus pill (`--radius-xs/sm/md/lg/xl/pill`; `--radius` kept as an 8px alias) — replacing 12 mixed raw values across 65 CSS files; only intentional 2/3px decorative dots and 50% circles stay raw. / 全库 border-radius 收敛为 6/8/12/16/20 + pill 五档 token（`--radius` 保留为 8px 兼容别名），替换 65 个 CSS 文件中的 12 种混杂数值；仅保留装饰性 2/3px 小形状与 50% 圆形。
