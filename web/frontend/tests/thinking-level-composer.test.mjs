@@ -12,6 +12,7 @@ globalThis.document = window.document;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: window.navigator });
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+globalThis.requestAnimationFrame = callback => { callback(); return 1; };
 const { createRoot } = await import('react-dom/client');
 const { default: Composer } = await loadTsModule('../src/components/ChatComposer.tsx', import.meta.url);
 const { THINKING_LEVELS, resolveThinkingPreference } = await loadTsModule('../src/lib/thinkingLevel.ts', import.meta.url);
@@ -28,6 +29,68 @@ test('slash goal opens in current conversation and preserves the command until s
   await act(async()=>opened[0][2]());assert.equal(view.container.querySelector('textarea').value,'');
   await view.type('/goal 完成原对话的卡片');await view.key(view.container.querySelector('textarea'),'Enter');
   assert.equal(opened[1][0],'完成原对话的卡片');assert.equal(view.sent.length,0);
+});
+
+test('embedded goal keeps the ordinary composer tools and toggles back to the saved draft', async t => {
+  const view = await fixture(t, 'low', { selectedModel: { id: 'fixture/model', provider: 'fixture', model: 'model', configured: true } });
+  let closed = 0;
+  await view.render();
+  await view.type('普通草稿必须完整保留');
+  const originalInput=view.container.querySelector('textarea'),originalComposer=view.container.querySelector('.chat-composer');
+  await view.render({
+    goalEditor: { seed: '完成原对话中的卡片', modelRef: 'fixture/model' },
+    onGoal: () => {},
+    onGoalClose: () => { closed++; },
+  });
+  assert.ok(view.container.querySelector('.chat-composer'));
+  assert.ok(view.container.querySelector('[aria-label="对话引擎"]'));
+  assert.ok(view.container.querySelector('[aria-label="添加素材或技能"]'));
+  assert.ok(view.container.querySelector('[aria-label="本轮使用模型"], [aria-label="模型设置"]'));
+  assert.ok(view.container.querySelector('[aria-label="要持续追求的目标"]'));
+  assert.equal(view.container.querySelector('textarea'),originalInput);
+  assert.equal(view.container.querySelector('.chat-composer'),originalComposer);
+  assert.ok(view.container.querySelector('[aria-label="开始目标"]'));
+  assert.ok(view.container.querySelector('.thinking-level-trigger'));
+  assert.ok(view.container.querySelector('.chat-goal-settings'));
+  assert.equal(view.container.querySelector('.chat-goal-settings').open,false);
+  assert.equal(view.container.querySelector('form'),null);
+  assert.equal(view.container.querySelector('[aria-label="创作消息"]'), null);
+  const toggle = view.container.querySelector('.composer-goal-btn');
+  assert.equal(toggle.getAttribute('aria-label'), '退出目标设置');
+  await view.click(toggle);
+  assert.equal(closed, 1);
+  await view.render({goalEditor:null});
+  assert.equal(view.container.querySelector('textarea'),originalInput);
+  assert.equal(originalInput.value,'普通草稿必须完整保留');
+  assert.equal(view.sent.length,0);
+});
+
+test('goal keyboard keeps IME and Shift+Enter, exits with Escape and submits only the goal on Enter',async t=>{
+  const view=await fixture(t,'low',{selectedModel:{id:'fixture/model',provider:'fixture',model:'model',configured:true}});
+  await view.render();await view.type('原消息');let closed=0;
+  await view.render({goalEditor:{seed:'检查中文排版'},onGoal:()=>{},onGoalClose:()=>closed++});
+  const input=view.container.querySelector('textarea');
+  for(const options of [{isComposing:true},{shiftKey:true}])assert.equal((await view.key(input,'Enter',options)).defaultPrevented,false);
+  assert.equal(view.sent.length,0);
+  const writes=[];t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(options.method==='POST'){writes.push({url,body:JSON.parse(options.body)});return {ok:true,json:async()=>({id:'goal-keyboard'})};}
+    return {ok:true,json:async()=>({})};
+  });
+  assert.equal((await view.key(input,'Enter')).defaultPrevented,true);
+  assert.equal(writes.length,2);assert.equal(writes[0].body.goal.objective,'检查中文排版');
+  assert.equal(writes[0].body.goal.modelRef,'fixture/model');assert.equal(writes[1].body.action,'start');
+  assert.equal(view.sent.length,0);assert.equal(closed,1);
+  await view.render({goalEditor:null});assert.equal(input.value,'原消息');
+  await view.render({goalEditor:{seed:'取消的新目标'}});
+  await view.key(input,'Escape');assert.equal(closed,2);assert.equal(writes.length,2);
+});
+
+test('goal mode retains stop and prevents starting while an ordinary run is streaming',async t=>{
+  const view=await fixture(t,'low',{selectedModel:{id:'fixture/model',provider:'fixture',model:'model',configured:true}});
+  let stopped=0;await view.render({isStreaming:true,onStop:()=>stopped++,goalEditor:{seed:'后续目标'},onGoal:()=>{}});
+  assert.equal(view.container.querySelector('[aria-label="开始目标"]').disabled,true);
+  await view.click(view.container.querySelector('[aria-label="停止生成"]'));
+  assert.equal(stopped,1);assert.equal(view.sent.length,0);
 });
 
 test('Escape dismisses slash menu, regular draft and goal busy state never lose text',async t=>{

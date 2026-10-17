@@ -319,14 +319,14 @@ test('inline goal survives goal-created polling, retries the saved ID and restor
     }});
   }
   await view.render(createElement(Harness));
-  await view.click(view.container.querySelector('.chat-goal-trigger'));
+  await view.click(view.container.querySelector('.composer-goal-btn'));
   assert.equal(document.querySelector('[role=dialog]'),null);
   const input=view.container.querySelector('textarea');
   await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(input,'完成内容卡片');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
-  const submit=()=>act(async()=>view.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  const submit=()=>act(async()=>view.container.querySelector('[aria-label="开始目标"], [aria-label="重试启动目标"]').click());
   await submit();
   assert.equal(view.container.querySelector('textarea'),input,'polling must not remount the pending setup');
-  assert.match(view.container.textContent,/重试启动/);assert.match(view.container.textContent,/执行保护暂不可用/);
+  assert.ok(view.container.querySelector('[aria-label="重试启动目标"]'));assert.match(view.container.textContent,/执行保护暂不可用/);
   assert.equal(createCount,1);assert.equal(getChatDraft(session.id).text,'这段普通草稿需要保留');
   await submit();assert.equal(createCount,1);assert.equal(attempts,2);
   assert.equal(view.container.querySelector('[aria-label="创作消息"]').value,'这段普通草稿需要保留');

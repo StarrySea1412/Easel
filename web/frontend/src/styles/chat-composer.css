@@ -37,6 +37,12 @@
 .chat-composer .composer-attach-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:6px 9px; border:0; border-radius:8px; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
 .chat-composer .composer-attach-btn:hover:not(:disabled) { color:var(--text); background:var(--surface-2); }
 .chat-composer .composer-attach-btn:disabled { cursor:default; opacity:.5; }
+.chat-composer .composer-goal-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:34px; padding:6px 9px; border:0; border-radius:8px; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
+.chat-composer .composer-goal-btn:hover:not(:disabled),.chat-composer .composer-goal-btn.is-active { color:var(--text); background:var(--surface-2); }
+.chat-composer .composer-goal-btn:disabled { cursor:default; opacity:.5; }
+.chat-composer .composer-goal-btn.is-active { background:var(--accent-soft); }
+.composer-goal-exit { color:var(--text-tertiary); font-size:14px; padding-left:2px; }
+.chat-composer .composer-goal-locked-model { max-width:210px; min-width:0; border-color:transparent; background:transparent; font-size:12px; }
 .chat-composer .send-btn { width:34px; height:34px; border-radius:50%; flex-shrink:0; box-shadow:none; }
 .chat-composer .send-btn:disabled { opacity:1; color:var(--text-tertiary); background:var(--surface-hover); }
 .chat-composer .composer-selected-skills { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; margin:0 4px 10px; }

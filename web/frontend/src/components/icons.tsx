@@ -155,6 +155,11 @@ export const IconCompass = ({ size, className, strokeWidth }: P) => (
     <circle cx="12" cy="12" r="10" /><path d="m16.2 7.8-2.1 6.4-6.4 2.1 2.1-6.4z" />
   </svg>
 );
+export const IconTarget = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><path d="M12 2v2M22 12h-2M12 22v-2M2 12h2" />
+  </svg>
+);
 export const IconLayout = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <rect x="3" y="3" width="18" height="18" rx="2.5" /><path d="M3 9h18M9 21V9" />

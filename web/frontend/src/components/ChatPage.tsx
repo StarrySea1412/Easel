@@ -8,7 +8,6 @@ import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
 import MessageBubble from './MessageBubble';
 import ChatArtifacts from './ChatArtifacts';
 import ChatGoalPanel from './ChatGoalPanel';
-import ChatGoalComposer from './ChatGoalComposer';
 import { type TaskSnapshot, type TaskGoal } from '../lib/tasks';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
@@ -81,7 +80,6 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     if(!goal||seed||['completed','cancelled'].includes(goal.status))setGoalEditor({seed,modelRef,onConfigured,goal:goal&&!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty});
   };
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
-  const inlineGoal=goalEditor&&!session.importedFromBackup?<ChatGoalComposer key={session.id+':'+(goalEditor.goal?.id||'new')} sessionId={session.id} engine={session.engine||'openclaw'} modelRef={loadComposerModel()||''} {...goalEditor} blocked={Boolean(stream||stopping||taskBusy)} onStop={stream?onStop:undefined} onClose={closeGoalEditor} onChanged={()=>onTaskChange?.()} onConfigured={goalEditor.onConfigured}/>:null;
   const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${goal&&panelOpen&&!goalEditor&&!session.importedFromBackup?' has-goal-panel':''}`}>
     {content}
     {goal&&panelOpen&&!goalEditor&&!session.importedFromBackup&&<ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>}
@@ -145,7 +143,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
-      {!isImported&&<button type="button" className="chat-new-button chat-goal-trigger" aria-expanded={Boolean(goalEditor||goal&&panelOpen)} onClick={()=>goal?setPanelOpen(v=>!v):setGoalEditor({welcome:isEmpty})}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
+      {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelOpen} onClick={()=>setPanelOpen(v=>!v)}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>
@@ -173,7 +171,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-hero">
           <h1 className="chat-hero-title">{greeting()}</h1>
           <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          {inlineGoal||<ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalBusy={taskBusy} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />}
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskBusy} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
           {!goalEditor&&<div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
@@ -291,7 +289,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-       {inlineGoal||<ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalBusy={taskBusy} />}
+          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskBusy} />
         </div>}
       </div>}
     </div>

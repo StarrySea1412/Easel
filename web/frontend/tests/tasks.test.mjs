@@ -8,7 +8,15 @@ const {createRoot}=await import('react-dom/client');
 const {mergeTaskSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
-const {default:GoalComposer}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
+const {default:GoalOptions}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
+const {useChatGoalComposer}=await loadTsModule('../src/hooks/useChatGoalComposer.ts',import.meta.url);
+// Exercise goal persistence independently; shared input/keyboard behavior is in composer tests.
+function GoalComposer({seed,goal,modelRef='',onConfigured,blocked=false,...props}){
+  const state=useChatGoalComposer({...props,modelRef,blocked,editor:{seed,goal,onConfigured}});
+  return createElement('form',{onSubmit:event=>{event.preventDefault();void state.save();}},
+    createElement(GoalOptions,{state,goal,blocked,onExit:props.onClose}),
+    createElement('button',{type:'submit',className:'btn-primary',disabled:!state.canSubmit},state.label));
+}
 const goal={id:'goal',sessionId:'chat',title:'验收目标',objective:'生成选题并交付文件',modelRef:'fixture/model',status:'blocked',phase:'review',iterations:2,maxIterations:5,activeSeconds:20,maxSeconds:1200,maxTools:40,maxImages:0,criteria:[{type:'file',label:'文件',value:'topic/page.html'},{type:'review',label:'质量',value:''}],checks:[{state:'passed',detail:'已核验'},{state:'pending',detail:'等待确认'}],currentTurnId:'turn',reason:'等待用户验收'};
 test('task history merges into original chat without replacing local messages or duplicate turn replay',()=>{
   const local=[{id:'chat',title:'原对话名称',messages:[{role:'user',content:'原消息',turnId:'old'}]}];
@@ -74,18 +82,6 @@ test('goal setup binds current chat, stays saved after failed start and retries 
   assert.match(document.querySelector('[role=alert]').textContent,/已保存/);
   await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
   assert.equal(requests.filter(r=>String(r.url).endsWith('/goals')).length,1);assert.equal(closed,1);
-  await act(async()=>root.unmount());host.remove();
-});
-
-test('inline goal keyboard supports IME, multiline and escape without sending a model request',async t=>{
-  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let closed=0;const requests=[];
-  t.mock.method(globalThis,'fetch',async url=>{requests.push(String(url));return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/model',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));});
-  await act(async()=>root.render(createElement(GoalComposer,{sessionId:'keyboard',engine:'openclaw',seed:'检查中文排版',onClose:()=>closed++,onChanged:()=>{}})));
-  const input=host.querySelector('textarea');
-  for(const options of [{key:'Enter',isComposing:true},{key:'Enter',shiftKey:true}]){
-    const event=new window.KeyboardEvent('keydown',{...options,bubbles:true,cancelable:true});await act(async()=>input.dispatchEvent(event));assert.equal(event.defaultPrevented,false);
-  }
-  assert.equal(requests.length,1);await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));assert.equal(closed,1);
   await act(async()=>root.unmount());host.remove();
 });
 

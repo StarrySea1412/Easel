@@ -675,6 +675,13 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 新增 `Quick-Deploy-138.cmd` / `scripts/deploy_138.ps1`：从固定 Git 提交生成带清单的 ZIP，校验本地与远端 SHA-256，上传到 138，运行 `verify`、`prepare`、`preflight` 并构建镜像。
 - 默认只构建远端候选，不停止或切换正式服务；显式 `-Activate` 才执行远端停写备份、symlink 切换和 HTTPS `/login` 探针；`-IsolatedTest` 可先复用同一流程验收隔离实例。
 - 入口与参数记录于 [138 快速发布说明](deploy-138-quick-start.md)。尚未在本轮实际触发生产切换；脚本验证与真实服务器执行分别记录，完整回滚/负载/全菜单边界继续保留。
+## 2026-10-17 · Inline goal composer correction / 目标入口纠正
+
+- 用户纠正了目标入口：目标应是原聊天输入框的模式，不能替换成独立表单或额外 modal。
+- 已完成：同一 textarea 与 composer 外壳；普通草稿进出目标保留；附件、技能、模型、访问状态、发送/停止区域保留；执行选项默认折叠；Enter 启动、Shift+Enter 换行、Escape 返回；保存后模型锁定，失败重试不重复创建。
+- 已验收：前端全量 1065 项通过；生产构建、lint（仅既有 warning）与 diff check 通过；7880 真实入口保留暂停队列并完成目标进出；7895 隔离模拟验证斜杠菜单、键盘、工具菜单、模型选择、运行数、HTML 预览/刷新入口、阻塞状态。
+- 边界：未启动真实目标或付费模型，未修改 138/安装包；本机浏览器视口在请求 390px 后报告 487 CSS px，精确390px实测受浏览器视口控制限制，仍需设备复核。
+
 ## 2026-10-16 · Agent并行提速与启动模型费用保护
 
 - 已实现：设置→Agent协作要求从已配置模型中选择启动模型，写入 OpenClaw `agents.defaults.subagents.model`；未保存时 `sessions_spawn` fail-closed，办公室任务入口同时阻断。

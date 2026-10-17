@@ -1,3 +1,9 @@
+## 2026-10-17 · Inline goal composer correction / 目标入口纠正
+
+- Restored goal setup to the existing chat composer instead of a replacement form: one textarea, preserved draft, toolbar, model, attachments, skills and stop path.
+- Added collapsed execution options, explicit model lock after save, idempotent retry, IME-safe Enter/Shift+Enter/Escape handling, and the existing conversation goal panel.
+- Verified 1,065 frontend tests, production build, lint (existing warnings only), 7880 entry behavior, and isolated goal execution with HTML preview and progress states. No paid model, 138 deployment or installer update.
+
 ## 2026-10-17 · Goal reliability after harness research / 框架调研与目标可靠性
 
 - Audit official Grok Bot, DeepSeek Harness, Codex and ZCode sources; document current capabilities and remaining gaps. / 保留输入区目标与列表运行数、结果Badge。

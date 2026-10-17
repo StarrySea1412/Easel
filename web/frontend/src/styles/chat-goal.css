@@ -28,13 +28,23 @@
 .composer-command-heading{font-size:10px;color:var(--text-tertiary);padding:7px 10px}
 .composer-command-menu button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px;border:0;border-radius:9px;background:var(--surface-2);color:var(--text);cursor:pointer}
 .composer-command-menu button>span:nth-child(2){display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}.composer-command-menu strong{font-size:12px;font-weight:500}.composer-command-menu small{font-size:11px;color:var(--text-tertiary)}.composer-command-menu kbd{margin-left:auto;flex:none;font-family:inherit;font-size:10px;color:var(--text-tertiary)}
-.chat-goal-composer{box-sizing:border-box;width:100%;min-width:0;max-height:min(480px,65dvh);overflow:auto;padding:14px 16px 10px;border:1px solid var(--border-strong);border-radius:16px;background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
-.chat-goal-composer-heading{display:flex;align-items:center;gap:10px;font-size:10px;color:var(--text-tertiary)}.chat-goal-mode{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:6px;background:var(--accent-soft);color:var(--text);font-size:11px}.chat-goal-composer-heading>button{margin-left:auto;border:0;background:transparent;color:var(--text-secondary);font-size:20px;line-height:1;cursor:pointer;padding:4px}
-.chat-goal-composer .chat-goal-input{display:block;box-sizing:border-box;width:100%;min-height:90px;max-height:200px;resize:vertical;margin:10px 0 4px;padding:4px 0;border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-size:14px;line-height:1.7}.chat-goal-input::placeholder{color:var(--text-tertiary)}
-.chat-goal-composer-bar{display:flex;align-items:center;gap:12px;justify-content:space-between}.chat-goal-current-model{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:11px}.chat-goal-composer-bar .btn{flex:none;min-height:34px;font-size:12px}
-.chat-goal-settings{margin-top:10px;padding-top:9px;border-top:1px solid var(--border);font-size:11px;color:var(--text-secondary)}.chat-goal-settings summary{cursor:pointer;min-height:20px}.chat-goal-settings summary>span{font-size:10px;color:var(--text-tertiary);margin-left:6px}.chat-goal-settings p{font-size:11px;line-height:1.7}
-.chat-goal-model{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:11px}.chat-goal-model>span{flex:none}.chat-goal-model .easel-select{min-width:0;flex:1;max-width:100%}
-.chat-goal-budget{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}.chat-goal-budget label{display:grid;gap:6px}.chat-goal-budget input{box-sizing:border-box;width:100%;padding:7px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text)}
-.chat-goal-composer-hint{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:7px;color:var(--text-tertiary);font-size:10px}.chat-goal-composer-hint small{font-size:inherit}.chat-goal-composer-hint button,.chat-goal-composer .task-error button{border:0;background:transparent;color:var(--accent-start);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:3px}.chat-goal-composer .task-error{font-size:11px;line-height:1.6;overflow-wrap:anywhere}.chat-goal-composer .task-error button{margin-left:8px}.chat-goal-composer :focus-visible{outline:2px solid var(--focus-ring);outline-offset:3px}.chat-goal-composer .chat-goal-input:focus-visible{outline:1px solid var(--border-strong);outline-offset:4px;border-radius:4px}.chat-goal-composer button:disabled{opacity:.5;cursor:default}
+/* Goal settings share the original message input and toolbar. */
+.composer-goal-options{min-width:0;margin:0 4px 8px;color:var(--text-secondary)}
+.composer-goal-options .chat-goal-settings{margin:0;font-size:11px;max-height:260px;overflow:auto;scrollbar-width:thin}
+.chat-goal-settings summary{cursor:pointer;min-height:22px;line-height:22px;color:var(--text-tertiary)}
+.chat-goal-settings summary>span{font-size:10px;margin-left:7px}
+.chat-goal-settings[open] summary{margin-bottom:10px}
+.chat-goal-settings p{font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+.chat-goal-metric{display:grid;gap:5px;margin:2px 0 8px;font-size:11px}
+.chat-goal-metric span{display:flex;align-items:center;gap:6px}.chat-goal-metric small{color:var(--text-tertiary);font-size:10px}
+.chat-goal-metric input{box-sizing:border-box;width:100%;min-width:0;padding:7px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--text);font:inherit;font-size:12px}
+.chat-goal-budget{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+.chat-goal-budget label{display:grid;gap:6px}.chat-goal-budget input{box-sizing:border-box;min-width:0;width:100%;padding:7px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font:inherit}
+.chat-goal-current-model{color:var(--text-secondary);overflow-wrap:anywhere}
+.chat-goal-keyboard-hint{display:block;margin:8px 0;font-size:10px;color:var(--text-tertiary)}
+.composer-goal-options .task-error,.composer-goal-options .task-reason{font-size:11px;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}
+.composer-goal-options .task-error .link-btn{margin-left:8px}
+.composer-goal-options :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.composer-goal-options button:disabled{opacity:.5;cursor:default}
 @media(max-width:1000px){.chat-goal-panel{position:absolute;z-index:30;right:12px;top:58px;width:296px;max-width:calc(100% - 24px);max-height:calc(100% - 82px);margin:0;box-shadow:0 8px 32px #00000018}}
-@media(max-width:560px){.chat-goal-composer{padding:12px}.chat-goal-composer-heading>span:nth-child(2){display:none}.chat-goal-budget{grid-template-columns:repeat(2,minmax(0,1fr))}.chat-goal-panel{right:10px;top:54px;width:300px}.chat-goal-panel>header button{min-width:30px;min-height:30px}}
+@media(max-width:560px){.chat-goal-budget{grid-template-columns:repeat(2,minmax(0,1fr))}.chat-goal-panel{right:10px;top:54px;width:300px}.chat-goal-panel>header button{min-width:30px;min-height:30px}}
