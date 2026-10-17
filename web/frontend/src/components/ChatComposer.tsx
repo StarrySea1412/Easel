@@ -333,7 +333,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
         ref={textareaRef}
         id={inputId}
         className="chat-input"
-        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '描述你的目标，并设定可衡量的结果，以获得最佳效果' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
+        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '描述你想完成的目标；完成以交付证据和你的确认为准' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
         value={displayedInput}
         disabled={Boolean(goalEditor&&goalState.fieldsLocked)}
         maxLength={goalEditor?6000:undefined}
