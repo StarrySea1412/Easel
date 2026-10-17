@@ -103,20 +103,26 @@ test('hover preview stays reachable across the pointer gap and edits its title w
   assert.equal(saved.length,1);
 });
 
-test('quick rename rejects blank titles, ignores composing Enter and cancels without closing the narrow sidebar',async t=>{
+test('hover-card rename rejects blank titles, ignores composing Enter and cancels without closing the narrow sidebar',async t=>{
   t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({records:[]})}));
   t.mock.method(window,'matchMedia',()=>({matches:true}));
   const saved=[],selected=[];
   const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:'other',activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
   await act(async()=>view.container.querySelector('[aria-label="展开对话列表"]').click());
-  await act(async()=>view.container.querySelector('.session-quick-rename').click());
-  const input=view.container.querySelector('input.session-rename-input');
+  // The row keeps no quick-rename button; the hover card's title pencil is the entry.
+  assert.equal(view.container.querySelector('.session-quick-rename'),null,'no duplicate rename icon in the row');
+  const title=view.container.querySelector('.session-select');
+  await act(async()=>title.focus());
+  const card=()=>document.querySelector('.session-hover-card');
+  await act(async()=>card().querySelector('.session-hover-rename').click());
+  const input=card().querySelector('input.session-rename-input');
+  assert.ok(input,'the card hosts the rename editor');
   await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true})));
   assert.deepEqual(saved,[]);
   await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'   ');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
   await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
-  assert.match(view.container.querySelector('[role=alert]').textContent,/标题不能为空/);assert.deepEqual(saved,[]);
+  assert.match(document.querySelector('[role=alert]').textContent,/标题不能为空/);assert.deepEqual(saved,[]);
   await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
-  assert.equal(view.container.querySelector('input.session-rename-input'),null);
+  assert.equal(document.querySelector('input.session-rename-input'),null);
   assert.ok(view.container.querySelector('.sidebar-conversations'));assert.deepEqual(selected,[]);
 });

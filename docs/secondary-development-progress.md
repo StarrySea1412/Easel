@@ -1,3 +1,10 @@
+## 2026-10-17 · 去掉会话行内重复的重命名图标
+
+- `Sidebar.tsx` 删除行内 `.session-quick-rename` 按钮（IconEdit）与不再使用的 IconEdit 导入；悬停卡片标题上的 `.session-hover-rename` 保留为唯一可见重命名入口，F2 与“…”菜单内重命名不变（`startRename` 的 row/preview 两条路径都保留）。
+- `sidebar-shell.css` 清理 `.session-quick-rename` 三条规则与对应媒体查询条目（顺手合并重复的置顶媒体规则）。
+- 测试：`session-hover` 用例改为经卡片重命名进入，并断言行内不存在 `.session-quick-rename`；前端全量 1086 项、构建、lint（0错误/18既有warning）通过。
+- 7880 重建 dist 后浏览器核对：悬停行只剩置顶/“…”与运行指示，卡片重命名可编辑保存。
+
 ## 2026-10-17 · 统计口径等详细说明改为 ⓘ 悬停
 
 - `InlineInfo` 新增可选 `wide`（`width:min(380px,calc(100vw - 70px))`，配 `p` 间距样式），默认宽度与行为不变，定位逻辑沿用 `offsetWidth/offsetHeight` 动态计算。

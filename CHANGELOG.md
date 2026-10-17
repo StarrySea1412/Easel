@@ -1,3 +1,8 @@
+## 2026-10-17 · One rename entry per row / 会话行不再重复“重命名”图标
+
+- The session row no longer shows its own rename pencil on hover — the hover card's title (with its pencil) is the single visible rename entry, alongside F2 and the “…” menu; the row keeps the pin, running indicator and the menu. Dead row-button styles removed. / 悬停会话行不再显示行内重命名铅笔——悬停卡片标题（带铅笔）成为唯一可见入口，F2 与“…”菜单重命名不变；行内保留置顶、运行指示与“…”菜单，行内按钮死样式已清理。
+- 1,086 frontend tests (sidebar hover case now enters rename through the card), build, lint (0 errors). / 前端 1086 项（会话悬停用例改为卡片重命名路径）、构建、lint（0 错误）。
+
 ## 2026-10-17 · Dense explanation text now lives in ⓘ hovers / 详细口径说明收进 ⓘ 悬停
 
 - The context-usage panel's “统计口径 · 快照参考” block is gone: the ⓘ next to 上下文容量 carries all five paragraphs (dynamic note, breakdown note, char/token estimate, skills note, capacity source) on hover/focus, and the 快照参考 (stale) marker moved onto the snapshot line so it stays visible. / 上下文容量面板的“统计口径 · 快照参考”折叠块移除：标题旁 ⓘ 悬停/聚焦承载全部 5 段（动态 note、分类说明、字符换算、技能注记、容量来源），`快照参考`（stale）标记移到快照行保持可见。

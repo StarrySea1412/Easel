@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
-  IconChat, IconEdit,
+  IconChat,
   IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice, IconOpenClaw,
   IconLoader,
@@ -262,7 +262,6 @@ export default function Sidebar({
           {state.kind==='running'||state.kind==='stopping'?<IconLoader size={10} strokeWidth={2.2} className="session-running-indicator"/>:<span className="session-status-dot" aria-hidden="true" />}
           <span className="session-status-label">{state.label}</span>
         </span>}<button className="session-item-title session-select" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }}>{s.title}</button></div>
-        <button type="button" className="session-quick-rename" aria-label={`重命名对话：${s.title}`} title="重命名（F2）" onClick={event=>{event.stopPropagation();startRename(s);}}><IconEdit size={14}/></button>
         {!isArchived && <button type="button" className={`session-quick-pin${s.pinnedAt?' is-pinned':''}`} aria-label={`${s.pinnedAt?'取消置顶':'置顶'}对话：${s.title}`} title={s.pinnedAt?'取消置顶':'置顶'} onPointerEnter={()=>setHoveredSession(null)} onClick={event=>{event.stopPropagation();pinFocusId.current=s.id;onSessionPin(s.id,!s.pinnedAt);}}><SessionPinIcon unpin={Boolean(s.pinnedAt)}/></button>}
         <SessionActionsMenu session={s} onPin={() => { setHoveredSession(null);pinFocusId.current = s.id; onSessionPin(s.id, !s.pinnedAt); }}
           onRename={() => startRename(s)} onArchive={() => onSessionArchive(s.id, !isArchived)} onDelete={() => onSessionDelete(s.id)} />
