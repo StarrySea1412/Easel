@@ -75,7 +75,7 @@ test('goal setup binds current chat, stays saved after failed start and retries 
   });
   await act(async()=>root.render(createElement(GoalComposer,{sessionId:'original-chat',engine:'openclaw',seed:'完成原对话的8张卡片',modelRef:'fixture/model',onClose:()=>closed++,onChanged:()=>{},onConfigured:()=>configured++})));
   assert.equal(document.querySelector('[role=dialog]'),null,'goal setup stays in composer without modal or focus trap');
-  assert.equal(document.querySelector('details').open,false,'execution options are optional');
+  assert.equal(document.querySelector('details'),null,'goal mode exposes no settings form');
   const form=host.querySelector('form');
   await act(async()=>form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
   assert.equal(requests[0].body.sessionId,'original-chat');assert.equal(requests[0].body.goal.modelRef,'fixture/model');assert.equal(configured,1);assert.equal(closed,0);

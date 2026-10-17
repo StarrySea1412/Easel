@@ -6,7 +6,7 @@
 .task-eyebrow { font-size:11px; letter-spacing:.08em; color:var(--text-tertiary) }
 .automation-boundary { border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin-bottom:28px; background:var(--surface-2) }
 .automation-boundary strong { font-size:13px }.automation-boundary p { margin-bottom:0 }
-.automation-sections { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:28px }
+.automation-sections { display:grid; grid-template-columns:minmax(0,1fr); gap:28px }
 .automation-section-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px }
 .automation-section-heading h2 { font-size:16px; margin:0 }.automation-section-heading>span { font-size:12px; color:var(--text-tertiary) }
 .automation-empty { border:1px dashed var(--border-strong); border-radius:12px; padding:30px 22px; min-height:188px }

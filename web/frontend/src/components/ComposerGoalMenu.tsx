@@ -7,8 +7,12 @@ export default function ComposerGoalMenu({id,anchor,items,selected,onSelect,onCh
   const [position,setPosition]=useState({left:12,top:12,width:300});
   useLayoutEffect(()=>{
     const place=()=>{const a=anchor.current?.closest('.chat-composer')?.getBoundingClientRect(),m=menu.current;if(!a||!m)return;
-      const width=Math.min(a.width,window.innerWidth-24);
-      setPosition({left:Math.max(12,Math.min(a.left,window.innerWidth-width-12)),top:Math.max(12,a.top-m.offsetHeight-8),width});};
+      // Stay inside the conversation column: never overlap the sidebar or the
+      // session list, match the composer width, and drop up when needed.
+      const panel=anchor.current?.closest('.chat-page')?.getBoundingClientRect();
+      const minLeft=(panel?panel.left:0)+8, maxRight=(panel?panel.right:window.innerWidth)-8;
+      const width=Math.min(a.width,Math.max(240,maxRight-minLeft));
+      setPosition({left:Math.max(minLeft,Math.min(a.left,maxRight-width)),top:Math.max(12,a.top-m.offsetHeight-8),width});};
     place();window.addEventListener('resize',place);window.addEventListener('scroll',place,true);
     return()=>{window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);};
   },[anchor,items.length]);

@@ -1,3 +1,11 @@
+## 2026-10-17 · Goals live in the conversation / 目标归于对话
+
+- The command menu now stays inside the conversation column (anchored to the composer, width follows the composer, never overlapping the sidebar or session list) and drops up when space is tight. / “对话命令”菜单只在对话区内弹出（锚定输入框、宽度随输入框，不压侧栏与会话列），空间不足时向上弹出。
+- Goal mode aligned with Codex: the composer text is the goal; the 可衡量结果/执行选项 settings form is gone; completion defaults to delivered evidence + explicit user confirmation; limits keep the product defaults (5 rounds / 20 min / 40 tools / 0 images, still recorded). Model confirmation and stop/verification semantics are unchanged. / 目标对齐 Codex：输入框内容即目标；去掉“可衡量结果/执行选项”设置表单；完成默认=交付证据+用户确认；上限沿用默认（5轮/20分钟/40工具/0图，记录中保留）。模型确认与停止/验收语义不变。
+- The 定时任务 page keeps only scheduled plans: the goals list and the goal-creation branch are removed — goals are managed entirely in conversations. / “定时任务”页只留定时计划：移除“对话目标”列表与目标创建分支，目标完全由对话管理。
+- Read the local ZCode 3.15.3 bundles (read-only; extracts in an ignored output dir) and recorded how ZCode implements goals (`session/goal` protocol, goalStats, independent verification timeline) and its “进程” panel (the TodoWrite list in the status panel) in a comparison doc. / 只读解析本机 ZCode 3.15.3 bundle，记录目标（`session/goal` 协议、goalStats、独立验收时间线）与“进程”（状态面板里的 TodoWrite 待办列表）实现，形成对照文档。
+- Verified 1,082 frontend tests, production build, lint (existing warnings only) and real-browser checks of the menu position, goal composer and 定时任务 page. No paid model, host 138 or installer changes. / 前端 1082 项、生产构建、lint（仅既有警告）与真实浏览器核对菜单定位、目标输入区与定时任务页；未调用付费模型、未改 138 与安装包。
+
 ## 2026-10-17 · ComfyUI demo mode and info-hover explanations / ComfyUI 模拟运行与说明悬浮展示
 
 - The ComfyUI panel stays usable without a configured workflow: a local “模拟运行” renders an ffmpeg placeholder clip (clearly badged 模拟, labelled in the artifact registry as non-model output) through the same job lifecycle, with cancellation that leaves no file; live submission stays fail-closed and is still the only paid path. / 未配置工作流时面板仍可用：本地“模拟运行”经同一作业生命周期生成清晰标注的占位视频（琥珀“模拟”徽标，产物登记注明非模型输出），取消不留文件；真实提交仍保持 fail-closed，且始终是唯一付费通道。
