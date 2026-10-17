@@ -1,3 +1,7 @@
+## 2026-10-18 · Skills nav jump fix / 技能库侧栏跳转修复
+
+- Jumping now scrolls the known page container with rect math instead of relying on `scrollIntoView` (whose smooth animation no-ops in this embedded environment); a 450ms fallback lands the position when smooth scrolling is unavailable, and the scroll-follow highlight uses the same rect math instead of `offsetParent`-based offsets. Verified live: clicking 发布 21 moves the page from 0 to the section. / 跳转改为精确滚动已知容器（rect 计算），不再依赖嵌入环境里会失效的 `scrollIntoView` 平滑动画；450ms 兜底落位；滚动跟随高亮同样改用 rect 判定（不再依赖 offsetParent）。7880 实测：点“发布 21”页面从 0 滚到该分区。
+
 ## 2026-10-18 · A jump sidebar for the 技能库 sections / 技能库分区侧边栏直接跳转
 
 - The empty left gutter of 技能库 is now a sticky section sidebar: one row per pipeline layer (icon, name, count) that jumps straight to that section, plus 回到顶部; scrolling keeps the current section highlighted (`aria-current`), keyboard reachable, hidden under 900px without touching the existing layout. / 技能库左侧留白改为粘性分区侧边栏：每个流水线层一行（图标＋名称＋计数），点击直接跳到对应分区，并带“回到顶部”；滚动时高亮当前分区（`aria-current`）、键盘可达，<900px 隐藏且不影响现有布局。

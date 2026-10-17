@@ -1,5 +1,7 @@
 ## 2026-10-18 · 技能库分区侧边栏（锚点跳转＋滚动跟随）
 
+- 跳转修复（7880 核对发现）：`scrollIntoView` 的平滑滚动在嵌入环境不生效——改为 `page.scrollTo({top,behavior:'smooth'})`＋`getBoundingClientRect` 精确目标＋450ms 落位兜底；滚动跟随高亮同步改为 rect 判定；用例注入矩形覆盖“滚动后高亮切换”与“点击跳回第一段”。前端 1097 项、构建/lint 通过；7880 实测点击“发布 21”滚动到位。
+
 - `SkillPage`：整页改为 `skills-layout` 网格（左 184px 侧栏＋主列；未显示侧栏时 `is-single` 单列，外观不变）；新增 `.skills-section-nav`（层图标/名称/计数、`aria-current` 高亮、点击 `scrollIntoView` 平滑跳转、“回到顶部”）；`skills-page` 作为滚动容器监听滚动计算当前分区；分区 `<section>` 增加 ref；<900px 隐藏侧栏。
 - `index.css` 追加侧栏与网格样式（粘性、焦点环、窄屏隐藏）。
 - 测试：新增 `skill-page-sections.test.mjs`——断言条目与计数、初始高亮第一分区、点击跳转（`scrollIntoView` 断言）与高亮跟随（显式注入 offsetTop，规避 jsdom 无布局）；前端全量 1097 项、构建、lint（0错误/18既有warning）通过。
