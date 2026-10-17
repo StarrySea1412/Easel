@@ -1,7 +1,7 @@
 .image-reverse-workspace { align-items: start; }
-.image-upload-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; margin-top: 22px; padding: 26px 18px; border: 1px dashed var(--border-strong); border-radius: 12px; background: var(--surface-2); color: var(--text-secondary); text-align: center; }
+.image-upload-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; margin-top: 22px; padding: 26px 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-secondary); text-align: center; }
 .image-upload-zone:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
-.image-upload-zone > img { display: block; max-width: 100%; max-height: 240px; border-radius: 8px; object-fit: contain; }
+.image-upload-zone > img { display: block; max-width: 100%; max-height: 240px; border-radius: var(--radius-sm); object-fit: contain; }
 .image-upload-zone > p { margin: 0; max-width: 100%; font-size: 12px; overflow-wrap: anywhere; }
 .image-upload-zone > span { font-size: 11px; }
 .image-upload-button { cursor: pointer; }
@@ -15,7 +15,7 @@
 .image-controls #reverse-instruction { min-height: 92px; margin-bottom: 18px; }
 .image-reverse-result { min-height: 480px; }
 .image-reverse-result .image-empty { min-height: 360px; }
-.image-source { display: inline-flex; flex: none; padding: 4px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-end) !important; font-size: 11px; }
+.image-source { display: inline-flex; flex: none; padding: 4px 9px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-end) !important; font-size: 11px; }
 .image-reverse-result #reverse-prompt { min-height: 260px; }
 .image-reverse-result #reverse-negative { min-height: 90px; }
 .image-controls > .image-match-ratio { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }

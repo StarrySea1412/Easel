@@ -1,9 +1,9 @@
-.office-task-focus { margin:0 0 14px;padding:18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);min-width:0; }
+.office-task-focus { margin:0 0 14px;padding:18px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--text);min-width:0; }
 .office-task-focus-heading { display:flex;align-items:center;flex-wrap:wrap;gap:12px 20px;margin-bottom:16px; }
 .office-task-focus-heading > div { min-width:0; }
 .office-task-focus-heading .office-eyebrow { color:var(--text-tertiary);font-size:11px;margin-bottom:5px; }
 .office-task-focus-heading h2 { margin:0;font-size:18px;font-weight:600;line-height:1.5; }
-.office-task-focus-source { padding:5px 9px;border-radius:6px;background:var(--surface-2);color:var(--text-secondary);font-size:12px;overflow-wrap:anywhere; }
+.office-task-focus-source { padding:5px 9px;border-radius:var(--radius-xs);background:var(--surface-2);color:var(--text-secondary);font-size:12px;overflow-wrap:anywhere; }
 .office-task-focus-team { margin:8px 0 15px;color:var(--text-secondary);font-size:12px;line-height:1.8; }
 .office-task-focus-member { display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px;flex:1 1 300px;font-size:12px;color:var(--text-secondary);max-width:440px;min-width:0; }
 .office-task-focus-source { margin-left:auto; }
@@ -21,7 +21,7 @@
 .office-task-focus .office-model-identity--unreported { display:flex;flex-wrap:wrap;gap:4px 12px;margin:0;padding:0;border:0;background:transparent; }
 .office-task-focus .office-model-identity--unreported strong { border:0;padding:0;font-size:12px; }
 .office-task-focus-summary,.office-task-focus-controls { min-width:0; }
-.office-task-focus-current { padding:14px;background:var(--surface-2);border-radius:10px; }
+.office-task-focus-current { padding:14px;background:var(--surface-2);border-radius:var(--radius-md); }
 .office-task-focus-current > div { display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap; }
 .office-task-focus-current strong { font-size:14px;overflow-wrap:anywhere; }
 .office-task-focus-current > p { margin:9px 0 0;font-size:14px;line-height:1.8;overflow-wrap:anywhere; }
@@ -38,7 +38,7 @@
 .office-task-focus-note,.office-task-focus-empty { margin:10px 0 0;color:var(--text-secondary);font-size:12px;line-height:1.8; }
 .office-task-focus-empty .office-button { margin-top:12px; }
 .office-task-focus-controls > .office-agent-controls { margin:0;padding-top:0;border-top:0; }
-.office-task-focus-controls > .office-control-note { padding:14px;margin:0;background:var(--surface-2);border-radius:10px; }
+.office-task-focus-controls > .office-control-note { padding:14px;margin:0;background:var(--surface-2);border-radius:var(--radius-md); }
 .office-task-focus .office-model-identity { background:var(--surface-2);border-color:var(--border); }
 .office-task-focus .office-model-identity.office-model-identity--unreported { background:transparent; }
 .office-task-focus button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:3px; }
@@ -48,7 +48,7 @@
 .office-task-focus .office-selected-person { justify-content:flex-start; }
 .office-task-focus .office-selected-person > .office-state { margin-left:auto; }
 .office-task-focus .office-agent-detail { padding-bottom:12px; }
-.office-task-focus-idle { padding:20px 16px;margin:4px 0 14px;border-radius:9px;background:var(--surface-2);font-size:13px; }
+.office-task-focus-idle { padding:20px 16px;margin:4px 0 14px;border-radius:var(--radius-sm);background:var(--surface-2);font-size:13px; }
 .office-task-focus-idle p { margin:6px 0 0;font-size:12px;color:var(--text-secondary); }
 .office-task-record-details { margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary); }
 .office-task-record-details > summary,.office-work-preview-details > summary { cursor:pointer;width:fit-content; }
@@ -64,7 +64,7 @@
   .office-task-focus-source { order:1; }
   .office-task-focus-member { order:2;flex-basis:100%; }
   .office-task-focus-layout.is-unreported .office-task-focus-summary { grid-template-columns:minmax(0,1fr); }
-  .office-task-focus { padding:16px;border-radius:13px; }
+  .office-task-focus { padding:16px;border-radius:var(--radius-md); }
   .office-task-focus-heading h2 { font-size:18px; }
   .office-task-focus-records > div { grid-template-columns:70px minmax(0,1fr);gap:8px; }
   .office-task-focus-member { max-width:none; }

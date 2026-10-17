@@ -26,7 +26,7 @@ function TrendSkeleton({ label }: { label: string }) {
   return <div className="trend-skeleton" role="status" aria-label={`正在获取${label}`}>
     <span className="trend-loading-label">正在获取{label}…</span>
     {Array.from({ length: 7 }, (_, index) => <div className="trend-skeleton-row" key={index} aria-hidden="true">
-      <Sk w={20} h={20} r={5} />
+      <Sk w={20} h={20} r="var(--radius-xs)" />
       <div><Sk w={`${94 - (index % 3) * 12}%`} h={13} /><Sk w="35%" h={9} /></div>
     </div>)}
   </div>;

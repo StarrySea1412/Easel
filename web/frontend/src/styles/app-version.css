@@ -1,14 +1,14 @@
-.app-version-trigger{flex:none;max-width:100%;min-height:24px;padding:4px 0;border:0;border-radius:5px;background:transparent;color:var(--text-tertiary);font:inherit;font-size:10px;line-height:1.4;letter-spacing:0;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.app-version-trigger{flex:none;max-width:100%;min-height:24px;padding:4px 0;border:0;border-radius:var(--radius-xs);background:transparent;color:var(--text-tertiary);font:inherit;font-size:10px;line-height:1.4;letter-spacing:0;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .sidebar-toolbar:has(.app-version-trigger){overflow-y:auto;scrollbar-width:none}
 .app-version-trigger:hover,.app-version-trigger[aria-expanded=true]{background:var(--surface-hover);color:var(--text-secondary)}
 .app-version-trigger>small{display:block;font-size:9px;line-height:1.4;letter-spacing:0}
 .app-version-trigger:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
 .sidebar-shell.is-toolbar-expanded .app-version-trigger{text-align:left;padding-inline:10px}
-.app-version-details{position:fixed;z-index:95;box-sizing:border-box;max-height:calc(100dvh - 24px);overflow:auto;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);box-shadow:var(--shadow-md);font-size:12px;line-height:1.5}
+.app-version-details{position:fixed;z-index:95;box-sizing:border-box;max-height:calc(100dvh - 24px);overflow:auto;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);box-shadow:var(--shadow-md);font-size:12px;line-height:1.5}
 .app-version-details:focus{outline:none}
 .app-version-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}
 .app-version-heading strong{font-size:12px;font-weight:550}
-.app-version-heading button{display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer}
+.app-version-heading button{display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:var(--radius-xs);background:transparent;color:var(--text-secondary);cursor:pointer}
 .app-version-heading button:hover{background:var(--surface-hover)}
 .app-version-heading button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
 .app-version-details dl{display:flex;flex-direction:column;gap:7px;margin:0}

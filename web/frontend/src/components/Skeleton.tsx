@@ -1,5 +1,5 @@
 /** 骨架屏：数据加载期间的占位微光条/卡片，替代"加载中…"文本，消除白屏突兀感。 */
-export function Sk({ w = '100%', h = 14, r = 7, style }: {
+export function Sk({ w = '100%', h = 14, r = 'var(--radius-sm)', style }: {
   w?: number | string; h?: number | string; r?: number | string; style?: React.CSSProperties;
 }) {
   return <span className="sk" style={{ width: w, height: h, borderRadius: r, ...style }} />;

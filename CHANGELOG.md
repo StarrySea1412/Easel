@@ -1,3 +1,10 @@
+## 2026-10-17 · Pro polish: one radius ladder, no half-pixel type / 界面“更 pro”：圆角与字号收敛
+
+- Every `border-radius` now comes from one ladder — 6 / 8 / 12 / 16 / 20 px plus pill (`--radius-xs/sm/md/lg/xl/pill`; `--radius` kept as an 8px alias) — replacing 12 mixed raw values across 65 CSS files; only intentional 2/3px decorative dots and 50% circles stay raw. / 全库 border-radius 收敛为 6/8/12/16/20 + pill 五档 token（`--radius` 保留为 8px 兼容别名），替换 65 个 CSS 文件中的 12 种混杂数值；仅保留装饰性 2/3px 小形状与 50% 圆形。
+- Half-pixel font sizes are gone: 11.5 → 11 / 12.5 → 12 / 13.5 → 13 (rounded down, so no text grows or re-wraps). / 半像素字号去除：11.5→11、12.5→12、13.5→13（向下取整，不引入任何文字变大与换行风险）。
+- Monospace collapsed to a single `--font-mono` stack (was three variants); inline TSX radii (buttons, badges, skeleton) use the tokens as well. / 等宽字体统一为 `--font-mono`（原 3 种写法）；TSX 内联圆角（按钮、徽标、骨架屏）同步走 token。
+- No functional or interaction change. 1,082 frontend tests, build, lint (0 errors) and dark/light + 390px browser checks on 工作台/对话/设置/定时任务. / 功能与交互零变化；前端 1082 项、构建、lint（0 错误）与浅/深色、390px 浏览器核对。
+
 ## 2026-10-17 · Goals live in the conversation / 目标归于对话
 
 - The command menu now stays inside the conversation column (anchored to the composer, width follows the composer, never overlapping the sidebar or session list) and drops up when space is tight. / “对话命令”菜单只在对话区内弹出（锚定输入框、宽度随输入框，不压侧栏与会话列），空间不足时向上弹出。

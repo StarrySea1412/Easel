@@ -1,6 +1,6 @@
 .publish-receipts-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; flex: 0 0 auto; min-width: 0; padding: 7px 18px; color: var(--text-secondary); background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; }
 .publish-receipts-entry { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 5px 0; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 550; cursor: pointer; }
-.publish-receipts-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; padding: 1px 5px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-start); font-variant-numeric: tabular-nums; }
+.publish-receipts-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; padding: 1px 5px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-start); font-variant-numeric: tabular-nums; }
 .publish-receipts-summary { display: flex; align-items: center; flex: 1 1 160px; flex-wrap: wrap; gap: 5px 12px; min-width: 0; line-height: 1.6; }
 .publish-receipts-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(100%, 540px); }
 .publish-receipts-summary a, .publish-receipt-link { color: var(--accent-start); text-decoration: underline; text-underline-offset: 3px; }
@@ -20,11 +20,11 @@
 .publish-receipts-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
 .publish-receipts-footer p { flex: 1 1 280px; }
 .publish-receipts-footer button { flex-shrink: 0; }
-.publish-receipt { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 15px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.publish-receipt { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 15px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .publish-receipt-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .publish-receipt-platform { display: inline-flex; align-items: center; gap: 7px; font-weight: 550; }
-.publish-receipt-platform .platform-icon { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
-.publish-receipt-status { padding: 2px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-secondary); font-weight: 550; }
+.publish-receipt-platform .platform-icon { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
+.publish-receipt-status { padding: 2px 7px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--text-secondary); font-weight: 550; }
 .publish-receipt.tone-success .publish-receipt-status { color: var(--green); }
 .publish-receipt.tone-error .publish-receipt-status { color: var(--red); }
 .publish-receipt.tone-warning .publish-receipt-status, .publish-receipt.tone-pending .publish-receipt-status { color: var(--accent-start); }
@@ -49,7 +49,7 @@
 .publish-receipt-sms button { flex-shrink: 0; white-space: normal; }
 .publish-receipt-sms p { margin-bottom: 0; font-size: 11px; color: var(--text-secondary); }
 .publish-receipt-sms [role="alert"] { color: var(--red); }
-.publish-receipts-issues { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.publish-receipts-issues { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .publish-receipts-issues h3 { margin: 0; font-size: 14px; }
 .publish-receipts-progress { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
 .publish-receipts-bar button:focus-visible, .publish-receipts-bar a:focus-visible, .publish-receipts-modal :is(button, input, a):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }

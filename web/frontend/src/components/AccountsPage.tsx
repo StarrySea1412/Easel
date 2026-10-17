@@ -556,7 +556,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   placeholder="短信验证码" inputMode="numeric" autoFocus
                   style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center',
                     letterSpacing: 6, fontSize: 20, padding: '10px 12px',
-                    border: '1px solid var(--border)', borderRadius: 8 }} />
+                    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }} />
                 {smsErr && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>{smsErr}</div>}
                 <button className="btn btn-primary btn-block" style={{ marginTop: 12 }}
                   disabled={smsBusy} onClick={submitSms}>
@@ -602,27 +602,27 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         <div className="overlay" onClick={closeCred}>
           <div className="modal" style={{ width: 420, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 4px' }}>配置 {cred.name}</h3>
-            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
               公众号用官方接口发布，需填开发者凭证（公众平台 → 设置与开发 → 开发接口管理）。<br />
               需把本服务器出口 IP 加入公众号「IP 白名单」，否则报 40164。文章发到<b>草稿箱</b>，群发请到 mp 后台确认。
             </div>
-            {credMsg && <div style={{ fontSize: 12.5, color: 'var(--green)', marginBottom: 10 }}>{credMsg}</div>}
+            {credMsg && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 10 }}>{credMsg}</div>}
             <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>AppID</label>
             <input value={credForm.appId} autoFocus
               onChange={(e) => setCredForm((f) => ({ ...f, appId: e.target.value.trim() }))}
               placeholder="wx..." style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14 }} />
+                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
             <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>AppSecret</label>
             <input value={credForm.appSecret} type="password"
               onChange={(e) => setCredForm((f) => ({ ...f, appSecret: e.target.value.trim() }))}
               placeholder="开发者密钥（不会回显）" style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14 }} />
+                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
             <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>默认作者（可选）</label>
             <input value={credForm.author}
               onChange={(e) => setCredForm((f) => ({ ...f, author: e.target.value }))}
               placeholder="文章署名" style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 4px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14 }} />
-            {credErr && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>{credErr}</div>}
+                margin: '4px 0 4px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
+            {credErr && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{credErr}</div>}
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button className="btn btn-primary" style={{ flex: 1 }} disabled={credBusy} onClick={submitCred}>
                 {credBusy ? '验证中…' : '保存并验证'}

@@ -1,17 +1,17 @@
-.skill-audit-panel { flex: none; min-width: 0; margin: 4px clamp(14px, 3vw, 28px) 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.skill-audit-panel { flex: none; min-width: 0; margin: 4px clamp(14px, 3vw, 28px) 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .skill-audit-toggle { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 13px; border: 0; border-radius: inherit; background: transparent; color: var(--text-secondary); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .skill-audit-toggle > :last-child { margin-left: auto; }
 .skill-audit-body { padding: 4px 14px 14px; max-height: min(60vh, 600px); overflow: auto; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
 .skill-audit-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.skill-audit-note, .skill-audit-empty { margin: 10px 0; color: var(--text-tertiary); font-size: 11.5px; line-height: 1.7; }
-.skill-audit-empty { padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.skill-audit-note, .skill-audit-empty { margin: 10px 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.7; }
+.skill-audit-empty { padding: 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 .skill-audit-error { color: var(--red); font-size: 12px; line-height: 1.6; }
 .skill-audit-turn { border-top: 1px solid var(--border); }
-.skill-audit-turn > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 12px 2px; cursor: pointer; font-size: 11.5px; }
+.skill-audit-turn > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 12px 2px; cursor: pointer; font-size: 11px; }
 .skill-audit-turn > summary > :last-child { margin-left: auto; color: var(--accent-end); }
 .skill-audit-body h3 { margin: 18px 0 8px; font-size: 13px; color: var(--text); }
 .skill-audit-body h4 { margin: 12px 0 6px; font-size: 12px; }
-.skill-audit-item { background: var(--surface-2); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.skill-audit-item { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px; margin: 8px 0; }
 .skill-audit-item-heading { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
 .skill-audit-item-heading > span { color: var(--text-tertiary); }
 .skill-audit-body ul { padding-left: 20px; line-height: 1.7; }
@@ -19,12 +19,12 @@
 .skill-audit-critique { white-space: pre-wrap; line-height: 1.8; padding: 0 10px 12px; }
 .skill-audit-critique small { color: var(--text-tertiary); }
 .skill-audit-toggle:focus-visible, .skill-audit-turn > summary:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }
-.chat-skill-evidence { margin:0 0 20px 0; max-width:760px; border:1px solid var(--border); border-radius:9px; padding:12px 15px; background:var(--surface); }
+.chat-skill-evidence { margin:0 0 20px 0; max-width:760px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 15px; background:var(--surface); }
 .chat-skill-heading { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:11px; }.chat-skill-heading strong { font-weight:550; }.chat-skill-heading>span { color:var(--text-tertiary);font-size:10px; }.chat-skill-heading>button { margin-left:auto;font-size:11px; }
 .chat-skill-row { margin-top:10px; border-top:1px solid var(--border); padding-top:10px; }.chat-skill-row summary { display:flex; justify-content:space-between; gap:12px; cursor:pointer; font-size:11px; color:var(--text-secondary); line-height:1.7; }.chat-skill-row ul { font-size:11px; color:var(--text-secondary); line-height:1.9; overflow-wrap:anywhere; padding-left:18px; }.skill-state { font-size:10px; white-space:nowrap; }.skill-state.success { color:var(--green); }.skill-state.error { color:var(--red); }.skill-state.pending { color:var(--amber); }.skill-state.loaded,.skill-state.unknown { color:var(--text-tertiary); }
 
 .chat-skill-compact { display:contents; }
-.chat-skill-status-icon { flex:0 0 28px; width:28px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:6px; background:transparent; color:var(--text-tertiary); cursor:pointer; }
+.chat-skill-status-icon { flex:0 0 28px; width:28px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:var(--radius-xs); background:transparent; color:var(--text-tertiary); cursor:pointer; }
 .chat-skill-status-icon:hover { background:var(--surface-2); }
 .chat-skill-status-icon.success { color:var(--green); }.chat-skill-status-icon.error { color:var(--red); }.chat-skill-status-icon.pending { color:var(--amber); }
 .chat-skill-status-icon:focus-visible { outline:2px solid var(--accent-end); outline-offset:2px; }
@@ -34,5 +34,5 @@
 .msg-actions .chat-skill-compact { display:contents; margin:0; }
 .msg-actions .chat-skill-evidence { flex:1 0 100%; min-width:0; box-sizing:border-box; }
 .chat-skill-status-icon { position:relative; }
-.chat-skill-tooltip { display:none; position:absolute; z-index:20; bottom:calc(100% + 5px); left:0; width:240px; max-width:calc(100vw - 60px); padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text-secondary); box-shadow:0 4px 16px #0001; font-size:11px; line-height:1.6; text-align:left; overflow-wrap:anywhere; pointer-events:none; }
+.chat-skill-tooltip { display:none; position:absolute; z-index:20; bottom:calc(100% + 5px); left:0; width:240px; max-width:calc(100vw - 60px); padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text-secondary); box-shadow:0 4px 16px #0001; font-size:11px; line-height:1.6; text-align:left; overflow-wrap:anywhere; pointer-events:none; }
 .chat-skill-status-icon:hover .chat-skill-tooltip,.chat-skill-status-icon:focus-visible .chat-skill-tooltip { display:block; }

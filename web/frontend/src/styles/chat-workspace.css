@@ -6,21 +6,21 @@
 .chat-header h2 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:550; color:var(--text); }
 .chat-header-actions { display:flex; align-items:center; gap:12px; flex:none; }
 .chat-header-status { color:var(--text-secondary); font-size:11px; }
-.chat-new-button { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:0; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; border-radius:7px; cursor:pointer; }
+.chat-new-button { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:0; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; border-radius:var(--radius-sm); cursor:pointer; }
 .chat-new-button:hover { background:var(--surface-2); }
 .chat-page button:focus-visible,.chat-page summary:focus-visible { outline:2px solid var(--focus-ring); outline-offset:3px; }
 .chat-welcome-page .chat-hero { max-width:calc(var(--chat-column-width) + 48px); padding:40px 24px 15vh; gap:16px; animation:none; }
 .chat-page .chat-hero-title { font-family:inherit; font-size:clamp(24px,2.7vw,32px); font-weight:550; letter-spacing:-.8px; }
 .chat-page .chat-hero-sub { font-size:13px; color:var(--text-secondary); margin:-4px 0 12px; }
 .chat-page .suggestions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:2px 0 0; }
-.chat-page .suggestion-card { display:flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid var(--border); border-radius:9px; background:transparent; color:var(--text-secondary); font:inherit; cursor:pointer; backdrop-filter:none; }
+.chat-page .suggestion-card { display:flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; cursor:pointer; backdrop-filter:none; }
 .chat-page .suggestion-card:hover { background:var(--surface-2); color:var(--text); }
 .chat-page .suggestion-title { font-size:12px; font-weight:400; color:inherit; }
 .chat-page .suggestion-icon { display:flex; }
 .chat-conversation-page .chat-conversation-body .chat-messages { padding:42px 32px 16px; scrollbar-gutter:stable both-edges; }
 .chat-page .chat-thread,.chat-page .chat-input-inner { width:100%; max-width:var(--chat-column-width); margin:0 auto; }
 .chat-conversation-page .chat-input-area { padding:10px 40px 22px; background:var(--bg); }
-.chat-stop-notice { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 8px; padding:9px 12px; border:1px solid var(--border); border-radius:10px; color:var(--text-secondary); background:var(--surface); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.chat-stop-notice { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 8px; padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius-md); color:var(--text-secondary); background:var(--surface); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
 .chat-stop-notice p { flex:1 1 260px; margin:0; }
 .chat-stop-notice>div { display:flex; flex-wrap:wrap; gap:6px; }
 .chat-conversation-page .chat-input-area { max-height:65dvh; overflow-y:auto; }
@@ -29,9 +29,9 @@
 .chat-page .msg-col { min-width:0; gap:8px; }
 .chat-page .msg-col.user { max-width:min(640px,86%); }
 .chat-page .message-bubble { font-size:15px; line-height:1.85; }
-.chat-page .message-bubble.user { padding:10px 17px; border:0; border-radius:18px; background:var(--accent-soft); color:var(--text); box-shadow:none; white-space:pre-wrap; }
+.chat-page .message-bubble.user { padding:10px 17px; border:0; border-radius:var(--radius-lg); background:var(--accent-soft); color:var(--text); box-shadow:none; white-space:pre-wrap; }
 .chat-page .message-bubble.assistant p { margin-bottom:14px; }
-.chat-page .message-bubble.assistant pre { border:1px solid var(--border); background:var(--code-bg); border-radius:12px; }
+.chat-page .message-bubble.assistant pre { border:1px solid var(--border); background:var(--code-bg); border-radius:var(--radius-md); }
 .chat-page .message-bubble.assistant table { display:block; max-width:100%; overflow-x:auto; }
 .chat-page .message-bubble.assistant a { text-decoration:underline; text-underline-offset:3px; }
 .chat-page .msg-actions { padding:0; }

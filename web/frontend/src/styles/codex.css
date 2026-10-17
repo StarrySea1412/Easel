@@ -1,8 +1,8 @@
-.codex-settings,.codex-run-panel{margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:12px;font-size:13px;line-height:1.6;min-width:0}
+.codex-settings,.codex-run-panel{margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);font-size:13px;line-height:1.6;min-width:0}
 .codex-settings h3{margin:0 0 8px}.codex-settings p,.codex-run-panel p{margin:6px 0}
-.codex-actions{display:flex;gap:8px;flex-wrap:wrap}.codex-actions button,.codex-request button{padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}
+.codex-actions{display:flex;gap:8px;flex-wrap:wrap}.codex-actions button,.codex-request button{padding:5px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;color:inherit;cursor:pointer}
 .codex-actions button:disabled{opacity:.5;cursor:default}.codex-run-panel pre,.codex-request pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font-size:12px}
-.codex-request{padding:12px;margin:8px 0;border:1px solid var(--border);border-radius:8px}.codex-request fieldset{border:0;padding:5px 0}.codex-request input{display:block;max-width:100%;width:100%;margin:8px 0;padding:8px;box-sizing:border-box}.codex-request button[aria-pressed=true]{outline:2px solid currentColor}.codex-run-panel summary{cursor:pointer}.codex-reasoning-state{color:var(--text-secondary)}
+.codex-request{padding:12px;margin:8px 0;border:1px solid var(--border);border-radius:var(--radius-sm)}.codex-request fieldset{border:0;padding:5px 0}.codex-request input{display:block;max-width:100%;width:100%;margin:8px 0;padding:8px;box-sizing:border-box}.codex-request button[aria-pressed=true]{outline:2px solid currentColor}.codex-run-panel summary{cursor:pointer}.codex-reasoning-state{color:var(--text-secondary)}
 .composer-engine{max-width:160px}.composer-tools{flex-wrap:wrap}
 .composer-engine-icon{width:34px;max-width:34px;min-width:34px;padding:5px 6px;justify-content:center;gap:3px}
 .composer-engine-icon .easel-select-value{display:none}

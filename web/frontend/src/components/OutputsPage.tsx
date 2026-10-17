@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = { draft: '草稿', ready: '待发',
 const STATUS_COLOR: Record<string, string> = { draft: '#94a3b8', ready: '#d97706', published: '#16a34a' };
 
 const badge: CSSProperties = {
-  fontSize: 11, padding: '1px 7px', borderRadius: 999,
+  fontSize: 11, padding: '1px 7px', borderRadius: 'var(--radius-pill)',
   background: 'rgba(0,0,0,0.05)', color: 'var(--text-secondary)', whiteSpace: 'nowrap',
 };
 const statusBadge = (s: string): CSSProperties => ({
@@ -400,7 +400,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         <div className="gallery-grid">
           {treeLoading && Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="card gcard">
-              <Sk h={130} r={10} style={{ display: 'block', marginBottom: 10 }} />
+              <Sk h={130} r="var(--radius-md)" style={{ display: 'block', marginBottom: 10 }} />
               <Sk w="70%" h={13} style={{ marginBottom: 8, display: 'block' }} />
               <Sk w="40%" h={11} style={{ display: 'block' }} />
             </div>

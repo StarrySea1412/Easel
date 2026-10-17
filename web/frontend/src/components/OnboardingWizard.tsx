@@ -102,7 +102,7 @@ export default function OnboardingWizard({ onClose, onCreated }: OnboardingWizar
   const label: React.CSSProperties = { display: 'block', marginTop: 16, fontSize: 13, color: 'var(--text-secondary)' };
 
   const chip = (active: boolean): React.CSSProperties => ({
-    padding: '6px 13px', borderRadius: 999, fontSize: 13, cursor: 'pointer',
+    padding: '6px 13px', borderRadius: 'var(--radius-pill)', fontSize: 13, cursor: 'pointer',
     border: '1px solid var(--border)',
     background: active ? 'var(--accent-gradient)' : 'var(--bg-elev)',
     color: active ? '#fff' : 'var(--text)',

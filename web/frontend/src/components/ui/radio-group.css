@@ -1,4 +1,4 @@
-.easel-radio-group{display:inline-flex;align-items:stretch;gap:0;max-width:100%;border:1px solid var(--border);border-radius:8px;background:var(--surface);overflow:hidden;isolation:isolate}
+.easel-radio-group{display:inline-flex;align-items:stretch;gap:0;max-width:100%;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);overflow:hidden;isolation:isolate}
 .easel-radio-group>.easel-radio-option{display:flex;align-items:center;justify-content:center;gap:7px;flex:1;min-width:0;min-height:36px;margin:0;padding:8px 23px;border:0;border-radius:0;background:transparent;color:var(--text-secondary);font:inherit;font-size:13px;line-height:1.5;white-space:nowrap;cursor:pointer;box-shadow:none;transition:background .14s,color .14s}
 .easel-radio-group>.easel-radio-option+.easel-radio-option{border-left:1px solid var(--border)}
 .easel-radio-group>.easel-radio-option:hover:not(:disabled){background:var(--surface-2);color:var(--text)}

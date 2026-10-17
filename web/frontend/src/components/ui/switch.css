@@ -7,7 +7,7 @@
   min-height: 44px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
 }
@@ -19,7 +19,7 @@
   padding: 3px;
   box-sizing: border-box;
   border: 1px solid var(--border-strong);
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: var(--surface-hover);
   transition: background var(--t-fast), border-color var(--t-fast);
 }

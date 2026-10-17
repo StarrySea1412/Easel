@@ -10,7 +10,7 @@
 }
 .page-loading p { margin: 0; font-size: 13px; line-height: 1.8; }
 .page-loading-placeholder { display: grid; gap: 12px; width: min(280px, 70vw); }
-.page-loading-placeholder .sk { height: 12px; border-radius: 6px; }
+.page-loading-placeholder .sk { height: 12px; border-radius: var(--radius-xs); }
 .page-loading-placeholder .sk:first-child { width: 55%; height: 18px; }
 .page-loading-placeholder .sk:last-child { width: 80%; }
 .page-load-error h2 { margin: 0; color: var(--text); font-size: 18px; font-weight: 550; }

@@ -1,6 +1,6 @@
 .chat-page .message-row.user.is-editing .msg-col.user { width:100%; max-width:100%; }
-.chat-message-editor { width:100%; min-width:0; box-sizing:border-box; padding:12px; border-radius:18px; background:var(--accent-soft); }
-.chat-message-editor textarea { display:block; width:100%; min-height:64px; max-height:40dvh; box-sizing:border-box; resize:vertical; padding:2px 0 10px; border:0; border-radius:4px; background:transparent; color:var(--text); font:inherit; line-height:1.7; }
+.chat-message-editor { width:100%; min-width:0; box-sizing:border-box; padding:12px; border-radius:var(--radius-lg); background:var(--accent-soft); }
+.chat-message-editor textarea { display:block; width:100%; min-height:64px; max-height:40dvh; box-sizing:border-box; resize:vertical; padding:2px 0 10px; border:0; border-radius:var(--radius-xs); background:transparent; color:var(--text); font:inherit; line-height:1.7; }
 .chat-message-editor textarea:focus-visible { outline:2px solid var(--focus-ring); outline-offset:3px; }
 .chat-message-edit-actions { display:flex; justify-content:flex-end; gap:8px; }
 .chat-message-editor .chat-message-edit-send { background:var(--text); color:var(--bg); border-color:var(--text); }

@@ -1,3 +1,12 @@
+## 2026-10-17 · 界面“更 pro”：圆角阶梯与字号收敛
+
+- 圆角统一：`index.css` 定义 6/8/12/16/20 + pill(999) 五档 token（`--radius-xs/sm/md/lg/xl/pill`，`--radius` 保留为 8px 兼容别名）；65 个 CSS 文件 713 处 border-radius 全部替换为 token（含 `4px 4px 0 0` 等多值、`var(--radius-xl, 20px)` 回退写法、`--radius-full` 幽灵 token、100px/25px 胶囊），仅保留装饰性 2/3px 小形状与 50% 圆形。
+- 字号去半像素：11.5→11、12.5→12、13.5→13 共 89 处（含 TSX 内联 fontSize），向下取整避免换行与溢出回归。
+- 等宽字体统一：`--font-mono`（'SF Mono','Fira Code','Consolas',monospace）替换多种写法共 16 处（含 `font:` 简写）。
+- TSX 内联圆角同步 token：Skeleton 默认值、Trends/Outputs/Skill 骨架屏、AccountsPage 输入框、Onboarding、ErrorBoundary、OutputsPage 徽标（999→pill）。
+- 审计闭环：替换后 `border-radius` 值集合仅剩 token/0/2px/3px/50%/inherit；图标体系经核查本就统一（56 图标共用 strokeWidth 1.8，2 处按尺寸合理覆写），未动。
+- 前端全量 1082 项、构建、lint（0错误/18既有warning）通过；7880 重建 dist 后浅/深色与 390px 对工作台/对话/设置/定时任务逐页核对，无功能与交互变化。
+
 ## 2026-10-17 · 目标归于对话与命令菜单定位
 
 - “对话命令”菜单改为只在对话区内弹出：锚定 `.chat-composer`、宽度随输入框、左右边界收在对话页内（不再压侧栏与会话列），空间不足向上弹出。

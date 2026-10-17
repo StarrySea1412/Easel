@@ -133,7 +133,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
             <div className="skill-grid">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="card skill-card">
-                  <Sk w={38} h={38} r={10} style={{ marginBottom: 12 }} />
+                  <Sk w={38} h={38} r="var(--radius-md)" style={{ marginBottom: 12 }} />
                   <Sk w="55%" h={14} style={{ marginBottom: 8 }} />
                   <Sk w="40%" h={10} style={{ marginBottom: 12 }} />
                   <Sk w="95%" h={11} style={{ marginBottom: 7 }} />

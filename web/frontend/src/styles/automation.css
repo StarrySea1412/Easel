@@ -4,18 +4,18 @@
 .automation-header h1 { font-size:28px; letter-spacing:-.8px; margin:8px 0 }
 .automation-header p,.automation-form fieldset>p,.automation-boundary p,.automation-empty p { color:var(--text-secondary); font-size:13px; line-height:1.7; margin:7px 0 }
 .task-eyebrow { font-size:11px; letter-spacing:.08em; color:var(--text-tertiary) }
-.automation-boundary { border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin-bottom:28px; background:var(--surface-2) }
+.automation-boundary { border:1px solid var(--border); border-radius:var(--radius-md); padding:16px 20px; margin-bottom:28px; background:var(--surface-2) }
 .automation-boundary strong { font-size:13px }.automation-boundary p { margin-bottom:0 }
 .automation-sections { display:grid; grid-template-columns:minmax(0,1fr); gap:28px }
 .automation-section-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px }
 .automation-section-heading h2 { font-size:16px; margin:0 }.automation-section-heading>span { font-size:12px; color:var(--text-tertiary) }
-.automation-empty { border:1px dashed var(--border-strong); border-radius:12px; padding:30px 22px; min-height:188px }
+.automation-empty { border:1px dashed var(--border-strong); border-radius:var(--radius-md); padding:30px 22px; min-height:188px }
 .automation-empty strong { font-size:15px }.automation-empty .btn { margin-top:12px }
-.goal-card,.plan-card { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:20px; margin-bottom:16px; min-width:0 }
+.goal-card,.plan-card { border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); padding:20px; margin-bottom:16px; min-width:0 }
 .task-card-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px }
 .task-card-heading h3 { font-size:16px; font-weight:600; line-height:1.45; margin:5px 0 0; overflow-wrap:anywhere }
 .task-card-heading h2 { font-size:18px; margin:0 }
-.task-status { font-size:11px; white-space:nowrap; background:var(--surface-2); color:var(--text-secondary); border:1px solid var(--border); border-radius:5px; padding:4px 7px }
+.task-status { font-size:11px; white-space:nowrap; background:var(--surface-2); color:var(--text-secondary); border:1px solid var(--border); border-radius:var(--radius-xs); padding:4px 7px }
 .task-status.active { color:var(--green); border-color:var(--green); background:var(--green-soft) }
 .task-status.blocked { color:var(--amber); background:var(--amber-soft) }.task-status.completed { color:var(--green) }
 .task-status.is-attention { color:var(--amber); border-color:var(--amber); background:var(--amber-soft) }
@@ -31,7 +31,7 @@
 .goal-limits { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:0 0 16px }
 .goal-limits dt { font-size:10px; color:var(--text-tertiary); margin-bottom:5px }.goal-limits dd { margin:0; font-size:11px; font-variant-numeric:tabular-nums }
 .task-model { font-size:11px; color:var(--text-tertiary); overflow-wrap:anywhere; margin:10px 0 14px }
-.task-reason { font-size:12px; line-height:1.65; color:var(--text-secondary); background:var(--surface-2); padding:10px 12px; border-radius:6px; overflow-wrap:anywhere }
+.task-reason { font-size:12px; line-height:1.65; color:var(--text-secondary); background:var(--surface-2); padding:10px 12px; border-radius:var(--radius-xs); overflow-wrap:anywhere }
 .task-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap }.task-actions>span { font-size:12px; color:var(--text-tertiary) }
 .task-error { font-size:13px; color:var(--red); line-height:1.65; overflow-wrap:anywhere }
 .plan-card>p { font-size:12px; color:var(--text-secondary); line-height:1.7 }
@@ -39,16 +39,16 @@
 .plan-card summary { cursor:pointer; color:var(--text-secondary) }
 .plan-history { padding:0; list-style:none; margin:8px 0 0 }.plan-history li { border-top:1px solid var(--border); padding:12px 0 }
 .plan-history li>div { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between }.plan-history p { color:var(--text-tertiary); line-height:1.6 }
-.automation-form { border:1px solid var(--border-strong); border-radius:12px; background:var(--surface); padding:24px; margin-bottom:30px }
+.automation-form { border:1px solid var(--border-strong); border-radius:var(--radius-md); background:var(--surface); padding:24px; margin-bottom:30px }
 .automation-form>label,.automation-fields>label { display:flex; flex-direction:column; gap:8px; margin:18px 0; font-size:12px; min-width:0 }
-.automation-form input:not([type=checkbox]),.automation-form textarea { box-sizing:border-box; width:100%; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--border-strong); border-radius:6px; padding:10px 12px; font:inherit; font-size:13px }
+.automation-form input:not([type=checkbox]),.automation-form textarea { box-sizing:border-box; width:100%; min-width:0; background:var(--bg); color:var(--text); border:1px solid var(--border-strong); border-radius:var(--radius-xs); padding:10px 12px; font:inherit; font-size:13px }
 .automation-form input:focus-visible,.automation-form textarea:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px }
 .automation-form textarea { resize:vertical; line-height:1.6 }.automation-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px }
 .automation-form fieldset { border:0; border-top:1px solid var(--border); padding:20px 0; margin:8px 0 }.automation-form legend { font-size:13px; font-weight:600; padding:0 12px 0 0 }
 .criterion-row { display:grid; grid-template-columns:minmax(150px,1fr) minmax(110px,1fr) minmax(120px,1fr) auto; gap:8px; align-items:center; margin:12px 0 }.criterion-row>.btn:last-child { grid-column:4 }
 .automation-budget { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px }.automation-budget label { font-size:12px; display:flex; flex-direction:column; gap:9px }
 .automation-form fieldset>label { display:grid; gap:8px; font-size:12px; margin:14px 0 }.task-weekdays { display:flex; flex-wrap:wrap; gap:12px; margin:18px 0; font-size:12px }.task-weekdays label { display:flex; align-items:center; gap:5px }
-.schedule-preview { background:var(--surface-2); border-radius:8px; padding:14px 16px; font-size:12px; line-height:1.8; margin-top:20px }.schedule-preview ol { padding-left:20px; margin:8px 0 0 }
+.schedule-preview { background:var(--surface-2); border-radius:var(--radius-sm); padding:14px 16px; font-size:12px; line-height:1.8; margin-top:20px }.schedule-preview ol { padding-left:20px; margin:8px 0 0 }
 .chat-goal-slot { width:100%; max-height:45vh; overflow:auto; flex-shrink:0; padding:12px 24px 0; box-sizing:border-box }.chat-goal-slot>.goal-card { max-width:850px; margin:0 auto 10px; padding:16px }.chat-goal-slot .goal-limits { margin-bottom:8px }.chat-goal-slot .goal-objective { margin:10px 0 }
 .chat-goal-slot details>summary { font-size:12px; color:var(--text-secondary); cursor:pointer; margin-bottom:12px }
 .task-run-row { display:flex; gap:12px; font-size:12px; color:var(--text-secondary); padding:8px 0; border-top:1px solid var(--border) }

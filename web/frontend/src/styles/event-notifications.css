@@ -1,11 +1,11 @@
 .global-events { display: contents; }
 .global-events-entry { position: relative; }
 .global-events-entry.is-open { background: var(--surface-hover); color: var(--text); }
-.global-events-entry .event-unread-badge { position: absolute; top: 1px; right: 0; min-width: 15px; padding: 0 4px; border: 2px solid var(--sidebar-bg); border-radius: 20px; font-size: 9px; line-height: 15px; text-align: center; background: var(--text); color: var(--on-accent); }
+.global-events-entry .event-unread-badge { position: absolute; top: 1px; right: 0; min-width: 15px; padding: 0 4px; border: 2px solid var(--sidebar-bg); border-radius: var(--radius-xl); font-size: 9px; line-height: 15px; text-align: center; background: var(--text); color: var(--on-accent); }
 .sidebar-shell.is-toolbar-expanded .event-unread-badge { right: 5px; }
-.global-events-panel { position: fixed; z-index: 1200; display: flex; flex-direction: column; width: min(440px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: min(640px, calc(100dvh - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lg); color: var(--text); font-size: 12px; }
+.global-events-panel { position: fixed; z-index: 1200; display: flex; flex-direction: column; width: min(440px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: min(640px, calc(100dvh - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--text); font-size: 12px; }
 .global-events-panel[tabindex]:focus { outline: none; }
-.global-events-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.global-events-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
 .global-events-panel button:disabled { opacity: .5; cursor: default; }
 .global-events-panel button:not(:disabled):hover { color: var(--text); background: var(--surface-hover); }
 .global-events-panel :is(button, summary):focus-visible, .global-events button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -19,7 +19,7 @@
 .event-panel-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--border); }
 .event-filters { display: flex; gap: 18px; }
 .event-filters button { position: relative; gap: 6px; min-height: 38px; padding: 4px 1px; border-radius: 0; }
-.event-filters button span { min-width: 18px; padding: 0 4px; border-radius: 5px; background: var(--surface-2); font-size: 10px; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+.event-filters button span { min-width: 18px; padding: 0 4px; border-radius: var(--radius-xs); background: var(--surface-2); font-size: 10px; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
 .global-events-panel .event-filters button:hover { background: transparent; }
 .event-filters button[aria-pressed="true"] { color: var(--text); font-weight: 600; }
 .event-filters button[aria-pressed="true"]::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; border-radius: 2px; background: var(--text); }
