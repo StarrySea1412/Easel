@@ -1,3 +1,9 @@
+## 2026-10-18 · 侧边栏“对话”入口总览所有会话状态
+
+- `Sidebar.tsx`：复用 `sessionStatuses` 的同一份 `statuses`，新增聚合视图——按紧急度排序（running→stopping→failed→blocked→review→waiting→unconfirmed→queued→paused→stopped→completed），`≤3` 全显示、超出取前 2 加“+N”；摘要按状态标签计数（“运行中 · 失败 2 · 已完成”）写入按钮 `title`（hover）与 `aria-description`（读屏）。
+- 入口角标：原 `.sidebar-running-count` 数字角标（仅运行计数）替换为 `.sidebar-status-overview` 聚合角标——复用列表同款 `.session-status-badge is-*` 与 `.session-running-indicator`（running/stopping 旋转 loading、其余为状态点），普通闲聊与导入备份无状态故不显示，无状态时入口无任何角标；运行计数仍在展开列表的运行摘要与“展开对话列表”提示中。
+- 测试：更新两处旧角标断言；新增「紧急度排序＋闲聊排除＋≤3 全显示＋超出 +N＋全无状态角标消失」用例；前端全量 1103 项、lint 18 既有警告、构建通过。7880 需重建 dist 后可见（纯前端）。
+
 ## 2026-10-18 · 模型菜单：“自动沿用”＋“模型设置”固定底栏
 
 - 共享 `Select` 新增可选 `footer`（`SelectFooterOption`）：底栏条目渲染在 `.easel-select-footer`（不在滚动区）、候选列表移入 `.easel-select-options`（`overflow-y:auto`）独立滚动，弹层改 flex 列布局、`overflow:hidden` 由圆角裁切；翻转/定位高度改为「候选 scrollHeight + 底栏 offsetHeight」估算。

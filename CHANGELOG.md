@@ -1,3 +1,9 @@
+## 2026-10-18 · Sidebar 对话 entry overviews every conversation status / 侧边栏“对话”入口总览所有会话状态
+
+- The rail's 对话 entry now carries the same status vocabulary as the conversation list: a spinning loader while a conversation runs (or stops), and colored dots for real outcomes (green 已完成, red 失败/需处理, amber 待验收/待输入/排队/待核实, gray 已停止/已暂停). / 工具栏“对话”入口使用与对话列表完全相同的状态语言：进行中/停止中显示旋转 loading 图标，真实结果用状态点（完成绿、失败/需处理红、待验收/待输入/排队/待核实琥珀、已停止/已暂停灰）。
+- It overviews ALL conversations: statuses are ordered by urgency (running → failed → … → completed), up to three chips render in full and a compact “+N” appears beyond that; hover and the accessibility description summarize per-state counts (“运行中 · 失败 2 · 已完成”). Plain chats and imported backups stay clean, so the entry is unmarked when nothing has an outcome. / 覆盖全部会话：按紧急度排序（运行中→失败→…→已完成），≤3 个全显示、超出显示“+N”；hover 与读屏给出逐状态计数（如“运行中 · 失败 2 · 已完成”）。普通闲聊与导入备份不显示；无任何状态时入口保持干净。
+- The numeric running badge was replaced by this cluster (the count still lives in the expanded list's run summary). 1,103 frontend tests, lint (0 errors), build pass. / 原数字角标由该聚合角标取代（运行计数在展开列表的运行摘要中保留）。前端 1103 项测试、lint（0 错误）、构建通过。
+
 ## 2026-10-18 · Model menu: 自动沿用 plus a pinned 模型设置 footer / 模型菜单：“自动沿用”＋“模型设置”固定底栏
 
 - The first entry of 本轮使用模型 is now 自动沿用 (was 沿用会话模型); the same wording is used in the breakdown fallback hint and the settings “saved default” note. / “本轮使用模型”首项文案改为“自动沿用”（原“沿用会话模型”）；拆解页回退提示与设置面板“已保存默认”指引同步改为“自动沿用”。

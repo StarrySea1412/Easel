@@ -307,7 +307,11 @@ test('sidebar counts actual running chats once, retains folded count and updates
  const done={role:'assistant',content:'已交付',turnId:'done'};
  const sessions=[session('s1','今天的对话',{messages:[done]}),session('s2','此前的调研',{messages:[{...done,taskRunId:'run-2'}]}),session('s3','闲聊',{messages:[done]}),session('backup','备份',{messages:[done],importedFromBackup:true})];
  const view=await fixture(t,{sessions,runningSessions:['s1','s1','backup'],taskState:{goals:[{id:'g',sessionId:'s1',status:'active'}],runs:[{id:'run-2',goalId:'',sessionId:'s2',state:'completed'}],plans:[],serverTime:1}});
- assert.equal(view.container.querySelector('.sidebar-running-count').textContent,'1');
+ const overview=view.container.querySelector('.sidebar-status-overview');
+ assert.ok(overview,'chat entry overviews every conversation status');
+ assert.ok(overview.querySelector('.session-status-badge.is-running .session-running-indicator'),'running shows the loading spinner');
+ assert.ok(overview.querySelector('.session-status-badge.is-completed .session-status-dot'),'completed shows the green dot');
+ assert.equal(view.byLabel('对话').getAttribute('aria-description'),'对话总览：运行中 · 已完成');
  await view.clickLabel('展开对话列表');
  assert.match(view.byLabel('正在运行的对话：1').textContent,/1.*运行中/);
  assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'正在对话');
@@ -324,9 +328,30 @@ test('sidebar counts actual running chats once, retains folded count and updates
  assert.ok(view.byLabel('正在运行的对话：0'));
  assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'失败');
  assert.ok(view.container.querySelector('[data-session-id=s1] .session-status-badge').classList.contains('is-failed'));
- assert.equal(view.container.querySelector('.sidebar-running-count'),null);assert.deepEqual(view.selected,[]);
+ const after=view.container.querySelector('.sidebar-status-overview');
+ assert.deepEqual([...after.querySelectorAll('.session-status-badge')].map(item=>[...item.classList].find(name=>name.startsWith('is-'))),['is-failed']);
+ assert.equal(view.byLabel('对话').getAttribute('aria-description'),'对话总览：失败');assert.deepEqual(view.selected,[]);
  await view.remount();await view.clickLabel('展开对话列表');
  assert.equal(view.container.querySelector('[data-session-id=s1] .session-status-badge').getAttribute('aria-label'),'失败');
+});
+
+test('chat entry overviews all statuses, caps the cluster with +N and stays clean without outcomes',async t=>{
+ const done={role:'assistant',content:'已交付',turnId:'done'};
+ const sessions=[session('s1','一',{messages:[done]}),session('s2','二',{messages:[{...done,taskRunId:'run-2'}]}),session('s3','三',{messages:[{...done,error:{message:'服务中断'}}]}),session('plain','闲聊',{messages:[done]})];
+ const view=await fixture(t,{sessions,runningSessions:['s1'],taskState:{goals:[],runs:[{id:'run-2',goalId:'',sessionId:'s2',state:'completed'}],plans:[],serverTime:1}});
+ const chips=()=>[...view.container.querySelectorAll('.sidebar-status-overview .session-status-badge')].map(item=>[...item.classList].find(name=>name.startsWith('is-')));
+ assert.deepEqual(chips(),['is-running','is-failed','is-completed'],'urgency order; the plain chat is excluded');
+ assert.equal(view.container.querySelector('.sidebar-overview-more'),null,'three statuses are shown in full');
+ assert.equal(view.byLabel('对话').getAttribute('aria-description'),'对话总览：运行中 · 失败 · 已完成');
+ assert.equal(view.byLabel('对话').getAttribute('title'),'对话 · 运行中 · 失败 · 已完成');
+ await view.update({sessions:[...sessions,session('s4','四',{messages:[{...done,error:{message:'超时'}}]})]});
+ assert.deepEqual(chips(),['is-running','is-failed'],'over the cap only the two most urgent stay visible');
+ assert.equal(view.container.querySelector('.sidebar-overview-more').textContent,'+2');
+ assert.equal(view.byLabel('对话').getAttribute('aria-description'),'对话总览：运行中 · 失败 2 · 已完成');
+ await view.update({sessions:[session('s1','一',{messages:[done]})],runningSessions:[],taskState:{goals:[],runs:[],plans:[],serverTime:2}});
+ assert.equal(view.container.querySelector('.sidebar-status-overview'),null,'no outcomes means no badge at all');
+ assert.equal(view.byLabel('对话').getAttribute('aria-description'),null);
+ assert.equal(view.byLabel('对话').getAttribute('title'),'对话');
 });
 
 test('pinning moves one conversation into its own section without selecting it or losing running state', async t => {

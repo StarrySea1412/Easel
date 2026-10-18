@@ -17,6 +17,7 @@ import AppVersion from './AppVersion';
 import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
 import {sessionStatuses} from '../lib/sessionStatus';
+import type {SessionStatusKind} from '../lib/sessionStatus';
 import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
@@ -75,6 +76,14 @@ export default function Sidebar({
   const listedSessions = sessions.filter((s) => !s.parentSessionId);
   const statuses=sessionStatuses(listedSessions,runningSessions,stoppingSessions,taskState);
   const runningCount=[...statuses.values()].filter(s=>s.kind==='running'||s.kind==='stopping').length;
+  // “对话”入口总览：与列表同一套状态（进行中用 loading 图标、其余用状态点），
+  // 按紧急度排序，紧凑展示（≤3 全显示，超出取前 2 加“+N”），摘要供 hover/读屏。
+  const STATUS_PRIORITY: SessionStatusKind[]=['running','stopping','failed','blocked','review','waiting','unconfirmed','queued','paused','stopped','completed'];
+  const statusOverview=[...statuses.entries()].map(([id,state])=>({id,state}))
+    .sort((a,b)=>STATUS_PRIORITY.indexOf(a.state.kind)-STATUS_PRIORITY.indexOf(b.state.kind));
+  const overviewShown=statusOverview.length<=3?statusOverview:statusOverview.slice(0,2);
+  const overviewHidden=statusOverview.length-overviewShown.length;
+  const overviewSummary=(()=>{const counts=new Map<string,number>();for(const {state} of statusOverview)counts.set(state.label,(counts.get(state.label)??0)+1);return [...counts].map(([label,n])=>n>1?`${label} ${n}`:label).join(' · ');})();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamePlace, setRenamePlace] = useState<'row'|'preview'>('row');
   const [renameValue, setRenameValue] = useState('');
@@ -277,7 +286,12 @@ export default function Sidebar({
     setThemePreference(themeNext);
     if (!readTheme().persisted) showToast(`主题已切换为${themeNext === 'dark' ? '深色' : '浅色'}，但未能保存到本机。`, 'error');
   };
-  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={page==='chat'?`${label} · ${runningCount}个正在运行`:label} aria-label={label} aria-description={page==='chat'?`${runningCount}个对话正在运行`:undefined} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}{page==='chat'&&runningCount>0&&<span className="sidebar-running-count">{runningCount}</span>}</span><span className="nav-item-label">{label}</span></button>;
+  const railItem = (page: Page, label: string, icon: React.ReactNode) => <button type="button" className={`nav-item${currentPage===page?' active':''}`} title={page==='chat'&&overviewSummary?`${label} · ${overviewSummary}`:label} aria-label={label} aria-description={page==='chat'&&overviewSummary?`对话总览：${overviewSummary}`:undefined} aria-current={currentPage===page?'page':undefined} onClick={()=>navigate(page, page === 'chat')}><span className="nav-icon" aria-hidden="true">{icon}{page==='chat'&&statusOverview.length>0&&<span className="sidebar-status-overview">
+    {overviewShown.map(({id,state})=><span key={id} className={`session-status-badge is-${state.kind}`} title={`${state.label}：${state.detail}`}>
+      {state.kind==='running'||state.kind==='stopping'?<IconLoader size={10} strokeWidth={2.2} className="session-running-indicator"/>:<span className="session-status-dot"/>}
+    </span>)}
+    {overviewHidden>0&&<span className="sidebar-overview-more">+{overviewHidden}</span>}
+  </span>}</span><span className="nav-item-label">{label}</span></button>;
   return (
     <div className={`sidebar-shell${expanded?' is-expanded':''}${toolbarExpanded?' is-toolbar-expanded':''}`}>
       {expanded&&<button type="button" className="sidebar-backdrop" aria-label="关闭侧边栏遮罩" onClick={closeSidebar} tabIndex={-1}/>}
