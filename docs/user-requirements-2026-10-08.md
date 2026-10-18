@@ -1879,3 +1879,11 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - **验收条件（调研阶段）**：`docs/pptx-generation-research-2026-10-18.md` 成稿并推送，含现状核查、方案矩阵与推荐、MVP 验收草案、依赖与风险（尽量不新增重依赖，优先本机已有能力）。
 - **执行顺序与边界**：登记 → 本机核查（含 ClawHub 检索）→ 文档 → 方向确认/实施。只读调研优先；不调用付费模型、不改 138/安装包；保留并发未提交工作。
 - **当前状态**：调研完成（2026-10-18），待“开做”即实施。结论见[调研与方案](pptx-generation-research-2026-10-18.md)：①现状——产物登记/聊天气泡图片内嵌已有（2026-10-17 核查），Office 生成器缺失；本机有 Playwright+Chromium（doc-convert 的 HTML→PDF/PNG 管线可用）与 Node，但无 pandoc/LibreOffice/pdftoppm、未装 python-pptx；ClawHub 可检索到现成演示技能（pptx、md-to-slides、claw-presentation-creator 等）。②参考——ZCode 官方 presentations/pptx 技能（pptxgenjs/python-pptx 生成、LibreOffice/pdftoppm 出预览；Proprietary，架构可参考不可照搬）。③推荐方案 A：内置自研 `pptx-slides` 技能——**一份 Markdown 大纲 → deck.pptx（python-pptx，内置主题）＋ deck.html → slide-NN.png/deck.pdf（复用 Chromium 管线）**，产物走现有 ArtifactStore 登记与预览；仅新增 python-pptx 一条轻依赖；方案 B（安装 ClawHub 技能）与 C（MCP 形态）列为备选，D（现状）不满足一等体验。④MVP 验收与不做清单已列（不做模板市场/转场动画/pptx 反向渲染）。
+
+## 2026-10-18 ComfyUI 模拟运行在 7880 实装（后端重启）
+
+- **用户原话**：“这个就应该有comfyUI的模拟界面！！！而不是说一定得连接才能生成啊”（截图为视频工坊 ComfyUI 面板：无法读取配置、点击后 “Not Found”）。
+- **核查结论**：模拟运行能力早在 2026-10-17 已实现并提交（后端 `web/comfyui.py` demo 模式 + 前端“模拟运行”按钮），但 7880 上运行的后端是 10-16 启动的旧进程，缺少 `/api/comfyui/*` 路由——前端点击即 404 “Not Found”；各轮文档均标注“需空闲重启后端后生效”，本轮按用户要求执行重启并验收。
+- **验收条件**：①重启后 `/api/comfyui/status` 可读、面板不再提示“后端未更新”；②未配置 ComfyUI 情况下点击“模拟运行”能走完 提交→运行→完成，产物为琥珀“模拟”徽标的本地占位视频（ffmpeg 本机渲染、非模型生成），可预览/下载/取消，产物登记到原对话；③真实提交仍 fail-closed（未配置绝不调用付费通道）；④文档与 Git 同步（如仅运维重启则记录不改代码）。
+- **执行顺序与边界**：登记 → 诊断（进程/路由/ffmpeg）→ 重启 7880（同启动器同参数）→ 就绪校验 → 浏览器核对 → 文档。仅本机运维与验证；不调用付费模型、不改 138/安装包；并发未提交工作不动。
+- **当前状态**：已实施并验收（运维重启，无代码改动）。旧 web 进程 PID 5808（+venv 父 36344，启动器已退出成孤儿树）已停止，按同参数重启：`EASEL_PORT=7880 EASEL_DATA_DIR=C:\project\Easel\data .venv/Scripts/python.exe web/app.py`（新 PID 12376，网关 PID 31240 全程未动、会话状态保留）。验证：`/api/comfyui/video/config` 200（`configured:false`、`demoAvailable:true`、如实提示未配置）、`/api/comfyui/video/health` 200；视频工坊实测：填入提示词→“模拟运行”约 4 秒完成，产物为琥珀“模拟”徽标占位视频（`/api/media/AI生视频/comfyui/demo-1018-080322-a6c8b928.mp4`，HTTP 200、501KB）＋“下载视频”＋非模型生成免责声明；真实提交保持 fail-closed（未配置即禁用）。附带收益：重启后 `/api/conversation-shares` 也随新代码生效（200），对话分享/加载接管内容在 7880 可用。说明：新进程同样加载主工作树（含用户并发未提交的 chat budget 工作），与以往启动路径一致、未额外改动任何文件。
