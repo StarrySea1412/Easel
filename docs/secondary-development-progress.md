@@ -1,3 +1,7 @@
+## 2026-10-18 · 模型菜单“自动沿用”去掉说明文字
+
+- `ComposerModelPicker.tsx`：首项 `{ value: '', label: '自动沿用' }` 去掉 `description`（原“未单独指定时使用设置中的默认模型”）；“模型设置”底栏与其余条目说明不变。用例增加“自动沿用无说明行”断言。前端全量 1104 项、lint 18 既有警告、构建通过；7880 重建 dist 后核对菜单外观。
+
 ## 2026-10-18 · 事件通知行精简：跳转即已读、✅ 只 hover 出现
 
 - `EventNotificationCenter.tsx`：消息链接移除尾部 `IconChevron`（保留 hover 下划线提示）；行右侧 `.event-row-state` 的已读勾改为仅在未读时渲染（已读行无灰色禁用位），文案只保留“标为已读”（不再有 disabled 的“已读”态）。点击消息维持既有链路：`markEventsRead(id)` → 关闭面板 → `onOpen(target)`／`action.run()`，即“点击跳转就是已读”。

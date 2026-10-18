@@ -1,3 +1,7 @@
+## 2026-10-18 · 自动沿用 drops its hint line / “自动沿用”去掉说明文字
+
+- The model menu's first entry now reads just 自动沿用 — the “未单独指定时使用设置中的默认模型” line was redundant for a one-word concept, and other entries keep their descriptions. / 模型菜单首项只保留“自动沿用”四字，去掉“未单独使用设置中的默认模型”这行说明；其余条目说明不变。1,104 frontend tests, lint (0 errors), build pass. / 前端 1104 项测试、lint（0 错误）、构建通过。
+
 ## 2026-10-18 · Quieter notification rows: jump = read, hover-only check / 通知行精简：跳转即已读、✅ 只在 hover 出现
 
 - The row's right edge drops the jump chevron and the always-on check: clicking the message already jumps and marks the notice read, so the check now only appears while the row is hovered (or keyboard-focused) and read rows render no check at all — no grey placeholder. The state column keeps its width so rows stay aligned. / 行右侧去掉跳转箭头 › 与常驻已读勾 ✓：点击消息本身就是“跳转＋标为已读”，✅ 只在行 hover（或键盘聚焦）时出现，已读行完全不渲染勾（不再有灰色占位）；右侧列保留占位宽度，行不跳动。

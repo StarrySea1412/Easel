@@ -30,7 +30,7 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
     <span id={`${id}-status`} className="composer-model-health-label">{healthHint}</span>
     {!models.loading && !models.options.length && onOpenModels ? <button type="button" className="easel-select composer-model-select" aria-label="模型设置" aria-describedby={`${id}-status`} disabled={disabled} onClick={() => onOpenModels(targetRef)}>{icon}<span className="easel-select-value">选择模型</span><IconChevron size={12}/></button> : <Select aria-label="本轮使用模型" aria-describedby={`${id}-status`} value={models.modelRef} disabled={disabled}
       className="composer-model-select" triggerIcon={icon}
-      options={[{ value: '', label: '自动沿用', description: '未单独指定时使用设置中的默认模型' }, ...models.options.map(option => ({ value: option.id, label: option.model,
+      options={[{ value: '', label: '自动沿用' }, ...models.options.map(option => ({ value: option.id, label: option.model,
         description: models.loading ? '正在读取模型状态…' : !models.capability?.available ? '请在模型设置中检查连接'
           : `渠道：${option.channelName || '未命名渠道'} · 仅用于本轮消息`, disabled: models.loading || !models.capability?.available }))]}
       footer={onOpenModels ? { label: '模型设置', description: '配置与测试当前模型', onActivate: () => onOpenModels(targetRef) } : undefined}

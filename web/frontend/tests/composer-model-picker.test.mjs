@@ -113,6 +113,8 @@ test('model menu renames the default to 自动沿用 and pins 模型设置 as a 
   const footerWrap = popup.querySelector('.easel-select-footer');
   assert.ok(scroller && footerWrap, 'candidates scroll inside .easel-select-options while .easel-select-footer stays pinned');
   assert.deepEqual([...scroller.querySelectorAll('.easel-select-option-label')].map(el => el.textContent), ['自动沿用', 'vendor/model:v2']);
+  assert.equal(scroller.firstElementChild.querySelector('.easel-select-option-description'), null, '自动沿用 carries no hint line');
+  assert.equal(scroller.textContent.includes('未单独指定时使用设置中的默认模型'), false);
   assert.equal(scroller.textContent.includes('模型设置'), false, 'the manage entry is not part of the scrolling list');
   const footerItem = footerWrap.querySelector('[role=option]');
   assert.match(footerItem.textContent, /模型设置/);
