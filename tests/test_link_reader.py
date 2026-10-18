@@ -38,10 +38,26 @@ def test_reader_falls_back_to_browser_when_http_is_blocked():
         return {'title': '问题标题', 'text': '正文' * 220, 'chars': 440, 'url': url}
 
     reader = link_reader.LinkReader(http_fetch=http, browser_fetch=browser)
-    result = reader.read('https://www.zhihu.com/question/1')
+    result = reader.read('https://example.com/question/1')
     assert result['ok'] and result['source'] == 'browser' and result['title'] == '问题标题'
-    assert calls == [('http', 'https://www.zhihu.com/question/1'),
-                     ('browser', 'https://www.zhihu.com/question/1')]
+    assert calls == [('http', 'https://example.com/question/1'),
+                     ('browser', 'https://example.com/question/1')]
+
+
+def test_rule_hosts_skip_http_and_use_the_browser_ladder():
+    calls = []
+
+    def http(_url):
+        calls.append('http')
+        raise AssertionError('有站点规则的域名不应走普通 HTTP')
+
+    def browser(url):
+        calls.append('browser')
+        return {'title': '问题', 'text': '正文' * 400, 'chars': 800, 'url': url}
+
+    reader = link_reader.LinkReader(http_fetch=http, browser_fetch=browser)
+    result = reader.read('https://www.zhihu.com/question/1')
+    assert result['ok'] and result['source'] == 'browser' and calls == ['browser']
 
 
 def test_redirect_guard_errors_stop_before_the_browser():
@@ -80,7 +96,7 @@ def test_reader_reports_honest_failure_and_bad_urls():
     reader = link_reader.LinkReader(
         http_fetch=lambda _url: (_ for _ in ()).throw(RuntimeError('HTTP 403 Forbidden')),
         browser_fetch=broken)
-    result = reader.read('https://www.zhihu.com/question/1')
+    result = reader.read('https://example.com/question/1')
     assert not result['ok'] and result['source'] is None
     assert '浏览器启动失败' in result['reason'] and 'HTTP 403' in result['reason']
     assert '粘贴进来再试' in result['reason'], '失败时给出可操作替代'
@@ -89,10 +105,29 @@ def test_reader_reports_honest_failure_and_bad_urls():
     assert not reader.read('x')['ok']
 
 
+def test_shell_pages_below_the_read_threshold_are_not_results():
+    reader = link_reader.LinkReader(
+        http_fetch=lambda url: {'title': 't', 'text': 'x' * 50, 'chars': 50, 'url': url},
+        browser_fetch=lambda url: {'title': 'shell', 'text': 'x' * 50, 'chars': 50, 'url': url})
+    result = reader.read('https://example.com/a')
+    assert not result['ok'], '两级都低于接受门槛时按失败处理，不把空壳当正文'
+    assert '粘贴进来再试' in (result['reason'] or '')
+
+
 def test_reader_bounds_text_length():
     reader = link_reader.LinkReader(
         http_fetch=lambda url: {'title': 't', 'text': 'w' * 100_000, 'chars': 100_000, 'url': url},
         browser_fetch=lambda url: {'title': '', 'text': '', 'chars': 0, 'url': url})
     result = reader.read('https://example.com/long')
     assert result['ok'] and result['chars'] == link_reader.MAX_TEXT_CHARS
+
+
+def test_profile_mapping_prefers_the_built_in_logged_in_profiles(tmp_path):
+    (tmp_path / 'ZhihuProfile').mkdir()
+    (tmp_path / 'XiaohongshuProfile').mkdir()
+    assert link_reader.profile_for_url('https://www.zhihu.com/question/1', root=tmp_path).name == 'ZhihuProfile'
+    assert link_reader.profile_for_url('https://zhuanlan.zhihu.com/p/1', root=tmp_path).name == 'ZhihuProfile'
+    assert link_reader.profile_for_url('https://www.xiaohongshu.com/explore/x', root=tmp_path).name == 'XiaohongshuProfile'
+    assert link_reader.profile_for_url('https://www.douyin.com/video/1', root=tmp_path) is None, '缺失的登录配置目录回退匿名通道'
+    assert link_reader.profile_for_url('https://www.bilibili.com/video/BV1', root=tmp_path) is None, '未映射的站点没有内置配置'
 
