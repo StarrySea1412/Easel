@@ -68,6 +68,8 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
   const [meta, setMeta] = useState<SkillMetaState | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [classify, setClassify] = useState<{ open: boolean; mode: 'rules' | 'ai'; pending: boolean; error: string; result: SkillClassifyResult | null; applying: boolean }>({ open: false, mode: 'rules', pending: false, error: '', result: null, applying: false });
+  const classifyRef = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (classify.open) classifyRef.current?.focus(); }, [classify.open]);
   const loadMeta = () => fetchSkillMeta().then(setMeta).catch(() => {});
   const metaFor = (name: string): SkillMetaEntry => (meta?.skills?.[name] || {});
   const labelFor = (name: string) => metaFor(name).displayName || displayName(name);
@@ -221,7 +223,10 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
         </div>}
       </div>
 
-      {classify.open && <section className="skill-classify" aria-label="自动标签分类">
+      {classify.open && <div className="drawer-overlay" onClick={() => setClassify(value => ({ ...value, open: false, result: null, error: '' }))}>
+        <section className="skill-classify" role="dialog" aria-modal="true" aria-label="自动标签分类" tabIndex={-1} ref={classifyRef}
+          onClick={event => event.stopPropagation()}
+          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setClassify(value => ({ ...value, open: false, result: null, error: '' })); } }}>
         <div className="skill-classify-head"><strong>自动标签分类</strong><span>结果只补齐缺口：不会覆盖你已手动设置的分类与标签。</span><button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: false, result: null, error: '' }))}>关闭</button></div>
         <div className="skill-classify-actions">
           <button type="button" className="btn btn-primary btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('rules')}>离线规则分类</button>
@@ -239,7 +244,8 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           </ul>
           <div className="skill-classify-foot"><span>{Object.keys(classify.result.suggestions).length} 项将写入标签与分类（合并）</span><button type="button" className="btn btn-primary btn-sm" disabled={classify.applying} onClick={() => void applyClassify()}>{classify.applying ? '正在应用…' : '应用'}</button></div>
         </>}
-      </section>}
+        </section>
+      </div>}
 
       {source === 'clawhub' && <ClawHubPanel />}
       {source === 'installed' && <>

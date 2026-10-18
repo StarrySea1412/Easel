@@ -1675,7 +1675,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .skill-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; line-height: 1.7; white-space: nowrap; }
 .skill-tag.is-category { background: rgba(80, 123, 183, .14); color: var(--accent-end, #507bb7); }
 .skill-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
-.skill-classify { max-width: 1100px; margin: 14px auto; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.skill-classify { width: min(720px, 92vw); max-height: 80vh; overflow: auto; margin: auto; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lg); outline: none; }
 .skill-classify-head { display: flex; align-items: center; gap: 10px; }
 .skill-classify-head strong { font-size: 13px; }
 .skill-classify-head span { flex: 1; color: var(--text-tertiary); font-size: 11px; }
