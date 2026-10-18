@@ -66,7 +66,6 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
   const [selected, setSelected] = useState<string | null>(null);
   const [source, setSource] = useState<'installed' | 'clawhub'>('installed');
   const [meta, setMeta] = useState<SkillMetaState | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState('');
   const [classify, setClassify] = useState<{ open: boolean; mode: 'rules' | 'ai'; pending: boolean; error: string; result: SkillClassifyResult | null; applying: boolean }>({ open: false, mode: 'rules', pending: false, error: '', result: null, applying: false });
   const classifyRef = useRef<HTMLElement | null>(null);
   useEffect(() => { if (classify.open) classifyRef.current?.focus(); }, [classify.open]);
@@ -88,17 +87,13 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (!q) return skills || [];
     return (skills || []).filter((s) => {
       const entry = meta?.skills?.[s.name];
-      if (categoryFilter) {
-        const current = entry?.categoryId || '';
-        if (categoryFilter === 'uncategorized' ? current !== '' : current !== categoryFilter) return false;
-      }
-      if (!q) return true;
       const description = entry?.description || s.description || '';
       return s.name.toLowerCase().includes(q) || description.toLowerCase().includes(q) || (entry?.displayName || displayName(s.name)).toLowerCase().includes(q);
     });
-  }, [skills, query, meta, categoryFilter]);
+  }, [skills, query, meta]);
 
   const grouped = useMemo(() => {
     const g: Record<string, SkillItem[]> = {};
@@ -209,8 +204,6 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
         </p>
         <RadioGroup value={source} onChange={value => { setSource(value); setSelected(null); }} aria-label="技能来源" className="skill-sources"
           options={[{ value: 'installed', label: `已安装${skills ? ` · ${skills.length}` : ''}` }, { value: 'clawhub', label: 'ClawHub' }]} />
-        {source === 'installed' && skills !== null && <RadioGroup value={categoryFilter} onChange={setCategoryFilter} aria-label="技能分类筛选" className="skill-category-filter"
-          options={[{ value: '', label: '全部分类' }, ...(meta?.categories || []).map(c => ({ value: c.id, label: c.label })), { value: 'uncategorized', label: '未分类' }]} />}
         {source === 'installed' && <div className="skill-search">
           <span className="skill-search-ic"><IconSearch size={16} /></span>
           <input

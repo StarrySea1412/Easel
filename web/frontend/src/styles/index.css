@@ -1669,7 +1669,6 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 }
 
 /* ---- 技能分类与标签（覆盖层） ---- */
-.skill-category-filter { margin: 14px auto 0; max-width: 1100px; }
 .skill-meta-actions { display: flex; align-items: center; gap: 10px; max-width: 1100px; margin: 10px auto 0; }
 .skill-meta-note { color: var(--text-tertiary); font-size: 11px; }
 .skill-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; line-height: 1.7; white-space: nowrap; }

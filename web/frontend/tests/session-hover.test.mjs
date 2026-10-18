@@ -126,3 +126,19 @@ test('hover-card rename rejects blank titles, ignores composing Enter and cancel
   assert.equal(document.querySelector('input.session-rename-input'),null);
   assert.ok(view.container.querySelector('.sidebar-conversations'));assert.deepEqual(selected,[]);
 });
+
+test('double-clicking a session title renames it in place without selecting a chat',async t=>{
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({records:[]})}));
+  const saved=[],selected=[];
+  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:'other',activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
+  await act(async()=>view.container.querySelector('[aria-label="展开对话列表"]').click());
+  const title=view.container.querySelector('.session-select');
+  assert.equal(title.getAttribute('title'),'单击打开 · 双击重命名（F2）');
+  await act(async()=>title.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=view.container.querySelector('input.session-rename-input');
+  assert.ok(input,'double-click opens the inline rename editor');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'双击改名');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+  assert.deepEqual(saved,[{id:session.id,title:'双击改名'}]);
+  assert.deepEqual(selected,[],'a lone double-click does not select the chat');
+});

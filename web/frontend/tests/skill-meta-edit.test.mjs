@@ -57,14 +57,7 @@ test('tags render, the category filter narrows the grid, and auto-classify merge
   const quote = cards().find(card => card.textContent.includes('card-quote'));
   assert.match(quote.textContent, /设计/, 'tags from the metadata layer render on the card');
 
-  // 分类筛选：选“我的专栏”只剩 mystery
-  const filterButtons = [...node.querySelectorAll('.skill-category-filter button, .skill-category-filter [role="radio"]')];
-  const mine = filterButtons.find(b => b.textContent.trim() === '我的专栏');
-  assert.ok(mine, 'custom category appears in the filter');
-  await act(async () => mine.click());
-  assert.deepEqual(cards().map(card => card.textContent.includes('mystery')), [true]);
-  await act(async () => filterButtons.find(b => b.textContent.trim() === '全部分类').click());
-  assert.equal(cards().length, 3);
+  assert.equal(node.querySelector('.skill-category-filter'), null, 'the installed tab keeps only the search box');
 
   // 自动分类：离线规则 → 预览 → 应用（合并写回）
   await act(async () => [...node.querySelectorAll('button')].find(b => b.textContent.trim() === '自动分类').click());
