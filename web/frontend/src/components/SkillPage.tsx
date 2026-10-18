@@ -164,6 +164,11 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
       setClassify(value => ({ ...value, applying: false, error: cause instanceof Error ? cause.message : '应用失败' }));
     }
   };
+  /** 打开弹层就直接给出离线识别结果（零成本且确定性），需要时再换 AI。 */
+  const openClassify = () => {
+    setClassify(value => ({ ...value, open: true, mode: 'rules', error: '', result: null }));
+    void runClassify('rules');
+  };
   const jumpToSection = (key: string) => {
     const node = sectionRefs.current[key];
     const page = pageRef.current;
@@ -218,7 +223,7 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           {query && <button className="btn btn-ghost btn-sm" onClick={() => setQuery('')}>清除</button>}
         </div>}
         {source === 'installed' && <div className="skill-meta-actions">
-          <button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: true }))}>自动分类</button>
+          <button type="button" className="btn btn-sm" onClick={openClassify}>自动分类</button>
           <span className="skill-meta-note">离线规则零成本；“用 AI 识别”会调用你配置的默认模型。</span>
         </div>}
       </div>
@@ -227,9 +232,10 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
         <section className="skill-classify" role="dialog" aria-modal="true" aria-label="自动标签分类" tabIndex={-1} ref={classifyRef}
           onClick={event => event.stopPropagation()}
           onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setClassify(value => ({ ...value, open: false, result: null, error: '' })); } }}>
-        <div className="skill-classify-head"><strong>自动标签分类</strong><span>结果只补齐缺口：不会覆盖你已手动设置的分类与标签。</span><button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: false, result: null, error: '' }))}>关闭</button></div>
+        <div className="skill-classify-head"><strong>自动标签分类</strong><span>打开即按离线规则识别；“用 AI 识别”会调用你配置的默认模型。</span><button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: false, result: null, error: '' }))}>关闭</button></div>
+        <p className="skill-classify-note">已安装技能的分区（发现 / 策划 / 制作 …）来自各自 SKILL.md，是固定维度；这里生成的是可编辑的标签与分类建议——应用时只补齐缺口，不会覆盖你已手动设置的分类与标签，也不改动 SKILL.md。</p>
         <div className="skill-classify-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('rules')}>离线规则分类</button>
+          <button type="button" className="btn btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('rules')}>重新识别（离线规则）</button>
           <button type="button" className="btn btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('ai')}>用 AI 识别</button>
           {classify.pending && <span role="status">正在识别…</span>}
         </div>

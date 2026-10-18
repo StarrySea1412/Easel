@@ -1679,6 +1679,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .skill-classify-head { display: flex; align-items: center; gap: 10px; }
 .skill-classify-head strong { font-size: 13px; }
 .skill-classify-head span { flex: 1; color: var(--text-tertiary); font-size: 11px; }
+.skill-classify-note { margin: 8px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.7; }
 .skill-classify-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .skill-classify-actions [role="status"] { color: var(--text-secondary); font-size: 11px; }
 .skill-classify-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }

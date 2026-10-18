@@ -68,11 +68,11 @@ test('tags render, the category filter narrows the grid, and auto-classify merge
 
   // 自动分类：离线规则 → 预览 → 应用（合并写回）
   await act(async () => [...node.querySelectorAll('button')].find(b => b.textContent.trim() === '自动分类').click());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 30)));
   const panel = node.querySelector('.skill-classify');
   assert.ok(panel, 'the classify panel opens');
-  await act(async () => [...panel.querySelectorAll('button')].find(b => b.textContent.trim() === '离线规则分类').click());
-  await act(async () => new Promise(resolve => setTimeout(resolve, 30)));
-  assert.match(panel.textContent, /画幅转换/, 'suggestions use the display name');
+  assert.match(panel.textContent, /画幅转换/, 'opening the dialog classifies immediately with the offline rules');
+  assert.ok([...panel.querySelectorAll('button')].some(b => b.textContent.trim() === '用 AI 识别'), 'AI stays available as an upgrade');
   assert.match(panel.textContent, /视频/);
   const applies = metaFetches;
   await act(async () => [...panel.querySelectorAll('button')].find(b => b.textContent.trim() === '应用').click());
