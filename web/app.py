@@ -7236,6 +7236,10 @@ _VIDEO_SERVICE = VideoService(PROJECT_ROOT, lambda: OUTPUTS_DIR, lambda: IMAGEGE
                               _read_env, _proxy_env)
 app.include_router(_videogen_router(_VIDEO_SERVICE))
 
+from comfyui import ComfyVideoService, create_router as _comfyui_router
+_COMFYUI_VIDEO_SERVICE = ComfyVideoService(PROJECT_ROOT, lambda: OUTPUTS_DIR, _read_env)
+app.include_router(_comfyui_router(_COMFYUI_VIDEO_SERVICE))
+
 from clawhub import create_router as _clawhub_router
 app.include_router(_clawhub_router())
 
