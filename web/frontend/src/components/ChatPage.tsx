@@ -26,6 +26,7 @@ import type { SkillRequirements } from '../lib/selectedSkills';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { loadComposerModel } from '../lib/composerModel';
+import { markSessionSeen } from '../lib/seenStatus';
 import { loadThinkingLevel, resolveThinkingPreference } from '../lib/thinkingLevel';
 import { fetchOfficeTaskModels } from '../lib/officeControls';
 
@@ -99,6 +100,12 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);};
   const openSidePanel=()=>{setPanelTab('side');setPanelOpen(true);onSideChat?.();};
   useEffect(()=>{setPanelOpen(true);setGoalEditor(null);},[session.id]);
+  // 正在查看＝已读：会话终态角标（失败/已停止/已完成）在看过后不再保留（见 lib/seenStatus）；
+  // deps 含最后一条消息的 turnId，同长度的重试替换也能被计为已读。
+  useEffect(()=>{
+    if(!session.importedFromBackup) markSessionSeen(session);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[session.id,session.messages.length,session.messages.at(-1)?.turnId]);
   const openGoal=(seed?:string,modelRef?:string,onConfigured?:()=>void)=>{
     setPanelOpen(true);setPanelTab('goal');
     if(taskLive){setGoalEditor(null);return;}

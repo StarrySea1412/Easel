@@ -1,5 +1,5 @@
 import { NativeSelect as Select } from './ui/Select';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
@@ -18,6 +18,7 @@ import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
 import {sessionStatuses} from '../lib/sessionStatus';
 import type {SessionStatusKind} from '../lib/sessionStatus';
+import {readSeenStatuses, subscribeSeenStatuses} from '../lib/seenStatus';
 import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
@@ -74,7 +75,11 @@ export default function Sidebar({
 }: SidebarProps) {
   // 辅助对话（子会话）只在侧边面板里出现，不进主列表。
   const listedSessions = sessions.filter((s) => !s.parentSessionId);
-  const statuses=sessionStatuses(listedSessions,runningSessions,stoppingSessions,taskState);
+  // 已读状态（lib/seenStatus）是外部存储：终态点“看过即清除”，变化时重算角标。
+  const seenStatuses = useSyncExternalStore(subscribeSeenStatuses, readSeenStatuses);
+  const statuses = useMemo(
+    () => sessionStatuses(listedSessions, runningSessions, stoppingSessions, taskState, seenStatuses),
+    [listedSessions, runningSessions, stoppingSessions, taskState, seenStatuses]);
   const runningCount=[...statuses.values()].filter(s=>s.kind==='running'||s.kind==='stopping').length;
   // “对话”入口总览：与列表同一套状态（进行中用 loading 图标、其余用状态点），
   // 按紧急度排序，紧凑展示（≤3 全显示，超出取前 2 加“+N”），摘要供 hover/读屏。

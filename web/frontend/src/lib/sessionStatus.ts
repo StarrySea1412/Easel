@@ -1,5 +1,6 @@
 import type {ChatSession} from './store';
 import type {TaskSnapshot} from './tasks';
+import {statusSignature} from './seenStatus';
 
 export type SessionStatusKind='running'|'stopping'|'queued'|'unconfirmed'|'completed'|'failed'|'stopped'|'review'|'waiting'|'blocked'|'paused';
 export interface SessionStatus {kind:SessionStatusKind;label:string;detail:string}
@@ -18,7 +19,7 @@ const states:Record<SessionStatusKind,SessionStatus>={
 };
 
 /** Never infer success from old text, an imported backup or a disconnected stream. */
-export function sessionStatus(session:ChatSession,running:ReadonlySet<string>,stopping:ReadonlySet<string>,tasks?:TaskSnapshot):SessionStatus|undefined {
+function computeSessionStatus(session:ChatSession,running:ReadonlySet<string>,stopping:ReadonlySet<string>,tasks?:TaskSnapshot):SessionStatus|undefined {
   if(session.importedFromBackup)return;
   if(stopping.has(session.id))return states.stopping;
   if(running.has(session.id))return states.running;
@@ -53,8 +54,15 @@ export function sessionStatus(session:ChatSession,running:ReadonlySet<string>,st
   }
 }
 
-export function sessionStatuses(sessions:ChatSession[],runningIds:string[]=[],stoppingIds:string[]=[],tasks?:TaskSnapshot):Map<string,SessionStatus> {
+/** 终态角标（失败/已停止/已完成）＝“看过即清除”的提示：打开/停留查看该会话、或标记对应通知已读后不再显示；出现新结局时重新出现。实时状态（进行中/停止中/排队/待核实/目标相位）不受影响。 */
+export function sessionStatus(session:ChatSession,running:ReadonlySet<string>,stopping:ReadonlySet<string>,tasks?:TaskSnapshot,seen?:Readonly<Record<string,string>>):SessionStatus|undefined {
+  const state=computeSessionStatus(session,running,stopping,tasks);
+  if(state&&(state.kind==='failed'||state.kind==='stopped'||state.kind==='completed')&&seen?.[session.id]===statusSignature(session))return;
+  return state;
+}
+
+export function sessionStatuses(sessions:ChatSession[],runningIds:string[]=[],stoppingIds:string[]=[],tasks?:TaskSnapshot,seen?:Readonly<Record<string,string>>):Map<string,SessionStatus> {
   const running=new Set(runningIds),stopping=new Set(stoppingIds),result=new Map<string,SessionStatus>();
-  for(const session of sessions){const state=sessionStatus(session,running,stopping,tasks);if(state)result.set(session.id,state);}
+  for(const session of sessions){const state=sessionStatus(session,running,stopping,tasks,seen);if(state)result.set(session.id,state);}
   return result;
 }

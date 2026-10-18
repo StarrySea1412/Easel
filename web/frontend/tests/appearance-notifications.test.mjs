@@ -152,3 +152,20 @@ test('jumping marks the notice read and the status dot sits in the right slot', 
   assert.deepEqual(opened, [{ page: 'chat', sessionId: 's9' }]);
   assert.equal(document.querySelector('.global-events-panel'), null);
 });
+
+test('marking notices read acknowledges their chat sessions', async t => {
+  events.clearEvents();
+  events.recordEvent('失败的任务', 'error', undefined, 'ack-one', { page: 'chat', sessionId: 's7' });
+  events.recordEvent('生成完成', 'success', undefined, 'ack-image', { page: 'image', medium: 'image' });
+  const acked = [];
+  const v = await view(t, Center, { onOpen: () => {}, onNoticeAcknowledged: id => acked.push(id) });
+  await v.click(v.node.querySelector('button'));
+  const row = [...document.querySelectorAll('.event-card')].find(card => card.textContent.includes('失败的任务'));
+  await v.click(row.querySelector('.event-mark-one'));
+  assert.deepEqual(acked, ['s7'], '单条勾选只联动其所属对话会话');
+  assert.equal(events.readEvents().find(item => item.id === 'ack-one').read, true);
+  await act(async () => events.recordEvent('第二个失败', 'error', undefined, 'ack-two', { page: 'chat', sessionId: 's8' }));
+  await v.click(buttonText('全部已读'));
+  assert.deepEqual(acked, ['s7', 's8'], '全部已读联动每个未读对话会话一次');
+  assert.equal(events.readEvents().find(item => item.id === 'ack-image').read, true, '非对话通知只标读不联动');
+});

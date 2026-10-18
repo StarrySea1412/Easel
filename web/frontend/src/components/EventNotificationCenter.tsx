@@ -17,7 +17,7 @@ function dateLabel(at: number) {
   return day(at) === day(today.getTime()) ? '今天' : day(at) === day(yesterday.getTime()) ? '昨天' : new Date(at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function EventNotificationCenter({ onOpen }: { onOpen: (target: NoticeTarget) => void }) {
+export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }: { onOpen: (target: NoticeTarget) => void; onNoticeAcknowledged?: (sessionId: string) => void }) {
   const notices = useSyncExternalStore(subscribeEvents, readEvents);
   const sync = useSyncExternalStore(subscribeEvents, readEventSync);
   const [open, setOpen] = useState(false);
@@ -33,7 +33,19 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
   const dismiss = useCallback(() => { setOpen(false); setConfirmClear(false); }, []);
   const close = () => { dismiss(); button.current?.focus(); };
   const position = useAnchoredPanel(open, dismiss, button, panel, 'beside', 440);
-  const markRead = (id?: string) => { markEventsRead(id); filterButton.current?.focus(); };
+  const markRead = (id?: string) => {
+    // “标为已读/全部已读”同时把对应会话的终态角标记为已读（侧边栏红/绿点随之清除）。
+    const acknowledged = id ? notices.filter(notice => notice.id === id) : notices.filter(notice => !notice.read);
+    markEventsRead(id);
+    if (onNoticeAcknowledged) {
+      const seen = new Set<string>();
+      for (const notice of acknowledged) {
+        const sessionId = notice.target?.page === 'chat' ? notice.target.sessionId : undefined;
+        if (sessionId && !seen.has(sessionId)) { seen.add(sessionId); onNoticeAcknowledged(sessionId); }
+      }
+    }
+    filterButton.current?.focus();
+  };
   const cleanNoise = async () => {
     const removable = notices.filter(notice => isLegacyTransientNotice(notice.message));
     if (!removable.length) return;

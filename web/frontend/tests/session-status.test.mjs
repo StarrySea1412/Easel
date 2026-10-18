@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {loadTsModule} from './load-ts.mjs';
 const {sessionStatuses}=await loadTsModule('../src/lib/sessionStatus.ts',import.meta.url);
+const {markSessionSeen,readSeenStatuses}=await loadTsModule('../src/lib/seenStatus.ts',import.meta.url);
 const user={role:'user',content:'继续处理'};
 const answer={role:'assistant',content:'文件已交付',turnId:'turn-1',elapsedMs:500};
 const chat=(id,messages=[],extra={})=>({id,title:id,created:1,messages,...extra});
 const snapshot=(goals=[],runs=[])=>({goals,runs,plans:[],serverTime:1});
-const state=(session,tasks)=>sessionStatuses([session],[],[],tasks).get(session.id)?.kind;
+const state=(session,tasks,seen)=>sessionStatuses([session],[],[],tasks,seen).get(session.id)?.kind;
 
 test('running counts deduplicate regular/goal streams and keep stopping until confirmed, including archived chats',()=>{
   const chats=[chat('a'),chat('b',[],{archived:true}),chat('backup',[],{importedFromBackup:true})];
@@ -45,4 +46,26 @@ test('old terminal goal runs cannot turn the latest ordinary chat into a badge',
   const tasks=snapshot([{id:'g',sessionId:'a',status:'completed'}],[{id:'old',goalId:'g',sessionId:'a',state:'failed'}]);
   assert.equal(state(chat('a',[user,answer]),tasks),undefined,'the old run stays untouched and the plain chat stays clean');
   assert.equal(state(chat('a',[answer,user]),tasks),undefined);
+});
+test('seen terminal badges clear on read and return with a new outcome; live states never clear',()=>{
+  const failed=chat('seen-failure',[user,{...answer,content:'部分输出',error:{message:'连接因重启中断'}}]);
+  assert.equal(state(failed),'failed','未读过时显示失败角标');
+  markSessionSeen(failed);
+  const seenAfterFailure=readSeenStatuses();
+  assert.equal(state(failed,undefined,seenAfterFailure),undefined,'看过该终态后角标清除');
+  const again=chat('seen-failure',[user,{...answer,content:'部分输出',error:{message:'连接因重启中断'}},user,{...answer,turnId:'turn-2',error:{message:'第二次失败'}}]);
+  assert.equal(state(again,undefined,seenAfterFailure),'failed','新的失败结局重新显示角标');
+  const stopped=chat('seen-stop',[user,{...answer,stopped:true}]);
+  assert.equal(state(stopped),'stopped');
+  markSessionSeen(stopped);
+  assert.equal(state(stopped,undefined,readSeenStatuses()),undefined,'已停止角标同样“看过即清除”');
+  const run={...answer,taskRunId:'run'};
+  const completed=chat('seen-run',[run]);
+  const tasks=snapshot([],[{id:'run',goalId:'',sessionId:'seen-run',state:'completed'}]);
+  assert.equal(state(completed,tasks),'completed');
+  markSessionSeen(completed);
+  assert.equal(state(completed,tasks,readSeenStatuses()),undefined,'绿色完成角标同样“看过即清除”');
+  const pending=chat('seen-pending',[user,answer],{pendingTurnId:'new'});
+  markSessionSeen(pending);
+  assert.equal(state(pending,undefined,readSeenStatuses()),'unconfirmed','待核实是实时状态，不被已读清除');
 });

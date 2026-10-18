@@ -21,6 +21,7 @@ import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
 import { notificationOutputPath, startEventSync } from './lib/eventNotifications';
 import { noticeSubject } from './lib/noticeFormat';
+import { markSessionSeenById } from './lib/seenStatus';
 import SkillDrawer from './components/SkillDrawer';
 import { showToast } from './lib/toast';
 import { steerQueuedMessage } from './lib/chatSteering';
@@ -1430,7 +1431,9 @@ export default function App() {
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
         onGatewayRetry={retryGateway}
-        eventNotifications={<EventNotificationCenter onOpen={target => {
+        eventNotifications={<EventNotificationCenter
+          onNoticeAcknowledged={sessionId => markSessionSeenById(sessionId, sessionsRef.current)}
+          onOpen={target => {
           if (target.page === 'chat' && target.sessionId) {
             if (!sessionsRef.current.some(session => session.id === target.sessionId)) { showToast('该会话已删除。', 'info'); return; }
             setActiveSessionId(target.sessionId);
