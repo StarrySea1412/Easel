@@ -68,7 +68,7 @@ interface ChatPageProps {
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
-import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus, IconChat, IconTarget } from './icons';
+import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus, IconChat, IconTarget, IconArrowUp } from './icons';
 import type { ComponentType } from 'react';
 type Suggestion = { Icon: ComponentType<{ size?: number }>; title: string; prompt: string };
 const SUGGESTIONS: Suggestion[] = [
@@ -428,16 +428,20 @@ function SideChatThread({ session, onSend, onStop, onQuoteFromMain, onQuoteToMai
       {session.messages.map((message, index) => <MessageBubble key={message.turnId || `${index}-${message.role}`} message={message} />)}
       {busy && <p className="side-chat-running" role="status">正在生成…{onStop && <button type="button" className="link-btn" onClick={onStop}>停止</button>}</p>}
     </div>
-    <div className="side-chat-actions">
-      <button type="button" className="link-btn" disabled={!onQuoteFromMain} onClick={onQuoteFromMain}>引用主对话上一轮</button>
-      <button type="button" className="link-btn" disabled={!lastAssistant || !onQuoteToMain} onClick={onQuoteToMain}>引用到主对话</button>
-    </div>
     <form className="side-chat-composer" onSubmit={submit}>
       {(draft.quotes || []).length > 0 && <ul className="side-chat-quotes">{(draft.quotes || []).map((quote, index) => <li key={index}><span>{quote.length > 90 ? `${quote.slice(0, 90)}…` : quote}</span><button type="button" aria-label="移除引用" onClick={() => { removeChatDraftQuote(session.id, index); setDraft(getChatDraft(session.id)); }}>×</button></li>)}</ul>}
-      <textarea value={draft.text} rows={2} maxLength={4000} placeholder="问一个旁支问题…（Enter 发送，Shift+Enter 换行）" aria-label="辅助对话输入"
-        onChange={event => setText(event.target.value)}
-        onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(event); } }}/>
-      <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !draft.text.trim()}>发送</button>
+      <div className="side-chat-input-box">
+        <textarea value={draft.text} rows={2} maxLength={4000} placeholder="问一个旁支问题…（Enter 发送，Shift+Enter 换行）" aria-label="辅助对话输入"
+          onChange={event => setText(event.target.value)}
+          onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(event); } }}/>
+        <div className="side-chat-bar">
+          <div className="side-chat-actions">
+            <button type="button" className="side-chat-action" disabled={!onQuoteFromMain} onClick={onQuoteFromMain}>引用主对话上一轮</button>
+            <button type="button" className="side-chat-action" disabled={!lastAssistant || !onQuoteToMain} onClick={onQuoteToMain}>引用到主对话</button>
+          </div>
+          <button type="submit" className="send-btn" disabled={busy || !draft.text.trim()} aria-label="发送" title={busy ? '正在生成' : '发送'}><IconArrowUp size={16}/></button>
+        </div>
+      </div>
     </form>
   </div>;
 }

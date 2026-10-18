@@ -39,11 +39,21 @@
 .side-chat-thread .message-bubble { max-width: 100%; }
 .side-chat-empty { margin: 14px 2px; color: var(--text-tertiary); font-size: 12px; line-height: 1.8; }
 .side-chat-running { margin: 8px 2px; color: var(--text-secondary); font-size: 11px; display: flex; align-items: center; gap: 8px; }
-.side-chat-actions { display: flex; gap: 14px; padding: 8px 12px; border-top: 1px dashed var(--border); }
-.side-chat-composer { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 12px; }
-.side-chat-composer textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px; max-height: 140px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; line-height: 1.6; }
-.side-chat-composer textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.side-chat-composer .btn { align-self: flex-end; }
+/* 底部输入区：与主输入框同语言——单面圆角容器、focus-within 高亮、无拖拽角；
+   引用操作是容器内的安静工具按钮，发送是与主输入框一致的圆形 ↑。 */
+.side-chat-composer { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
+.side-chat-input-box { padding: 9px 9px 7px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.side-chat-input-box:focus-within { border-color: var(--border-strong); box-shadow: 0 0 0 1px var(--border-strong); }
+.side-chat-composer textarea { display: block; width: 100%; box-sizing: border-box; min-height: 42px; max-height: 140px; padding: 2px 2px 8px; border: 0; border-radius: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.6; resize: none; overflow-y: auto; outline: none; }
+.side-chat-composer textarea::placeholder { color: var(--text-tertiary); opacity: .72; }
+.side-chat-composer textarea:focus-visible { outline: none; }
+.side-chat-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.side-chat-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.side-chat-action { min-height: 26px; padding: 3px 7px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.side-chat-action:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.side-chat-action:disabled { opacity: .5; cursor: default; }
+.side-chat-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.side-chat-composer .send-btn { width: 30px; height: 30px; border-radius: 50%; box-shadow: none; }
 .side-chat-quotes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .side-chat-quotes li { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; background: var(--surface-2); border-radius: var(--radius-xs); color: var(--text-secondary); font-size: 10px; line-height: 1.6; }
 .side-chat-quotes li button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 12px; line-height: 1; }
