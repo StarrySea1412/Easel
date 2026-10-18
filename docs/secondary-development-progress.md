@@ -890,3 +890,10 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 追加：旧 Web supervisor 的停止核实现在优先使用持久账本 provider run；快照缺少 `gateway_run_id` 时仍可精确调用 `chat.abort` 并回写终态。相关恢复专项通过；自动接管、无损续跑和 stall/compaction/version 账本仍待完成。
 - 追加：长任务增加一次性 `stall_warning` 观测告警（默认无事件180秒），记录空闲秒数和最后事件序号，不自动杀请求或重发；完整 stall recovery 与真实压力验收仍待完成。
 - 追加：OpenClaw compaction start/end 与 outcome 进入本轮 run ledger，SSE 展示保持不变；跨进程压缩事务和供应商精确 Token 仍待完成。
+
+## 2026-10-18 · 长对话可靠性收口与本机磁盘清理
+
+- 已实现：聊天提交前保守上下文预算闸门（超预算 413 `chat_context_budget`，不发 provider 请求）与长任务输出边界提示；native Gateway `stopReason` 补读（`max_output_tokens`→`max_tokens`）写入 run_info 与持久账本；前端非流式调用路径透出结构化错误 `message`；ComfyUI 服务路由接线入 `web/app.py`（此前仅存在于未提交工作区）。
+- 已验证：后端专项 20 项通过；后端全量 **2934 passed / 6 failed / 9 errors**（余下红灯均为 HEAD 既有、与本轮无关：`test_output_image_library` 9 errors、`test_office_outputs`/`test_pytest_collection` 各 1 fail、`test_web_security` 2 fail、`test_chat_skill_requirements[patch4/5]` 2 fail）；前端全量 1107 项、lint 0 错误/18 既有 warning、构建通过并重建 dist。
+- 本机磁盘清理（用户授权）：C: 从 0 恢复到约 106GB——rollout 旧会话日志约 102GB、Temp 约 2.2GB、旧 exec/artifacts 约 1GB、npm 缓存、v2 旧 crash/logs、6 个干净 worktree 约 2.8GB、video-agent 无引用孤儿上传 315MB；满盘期间被截断的需求文档已从 git HEAD 恢复，事故与恢复见需求清单条目。
+- 交付边界：仅本机代码与运维清理；138 与安装包未动；渠道真实 `contextWindow`/输出上限未确认（不凭空填 1M/200k）；真实长会话压测未做。提交 `a0520988`（可靠性）、`7399db28`（ComfyUI 接线）、`fbda1c2b`（清理文档）。详见[需求清单](user-requirements-2026-10-08.md)。
