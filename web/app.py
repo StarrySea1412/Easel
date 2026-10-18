@@ -1009,22 +1009,49 @@ def _skill_guide(skill: str, desc: str, body: str, path: Path,
     }
 
 
+_SKILL_META_STORE = None
+
+
+def _skill_meta_store():
+    global _SKILL_META_STORE
+    if _SKILL_META_STORE is None:
+        from skill_meta import SkillMetaStore
+        _SKILL_META_STORE = SkillMetaStore(DATA_DIR / 'skill-meta.json')
+    return _SKILL_META_STORE
+
+
 def get_skills() -> list[dict]:
     env = _read_env()
     result = []
     sd = SKILLS_DIR / 'openclaw'
+    overrides = {}
+    try:
+        overrides = _skill_meta_store().read().get('skills') or {}
+    except Exception:  # 元数据损坏不影响技能目录本身
+        overrides = {}
     if sd.is_dir():
         for d in sorted(sd.iterdir()):
             if d.is_dir() and (d / 'SKILL.md').is_file():
                 desc, layer, _ = _parse_skill_md(d / 'SKILL.md')
                 needs_api = d.name in SKILL_API_REQUIREMENTS
-                result.append({
+                entry = {
                     'name': d.name,
                     'description': desc,
                     'layer': layer,
                     'needsApi': needs_api,
                     'apiConfigured': _skill_api_configured(d.name, env) if needs_api else True,
-                })
+                }
+                extra = overrides.get(d.name)
+                if isinstance(extra, dict):  # 覆盖层：调色板与编辑保存的标签/分类/名称
+                    if isinstance(extra.get('displayName'), str) and extra['displayName']:
+                        entry['displayName'] = extra['displayName']
+                    if isinstance(extra.get('description'), str) and extra['description']:
+                        entry['description'] = extra['description']
+                    if isinstance(extra.get('tags'), list):
+                        entry['tags'] = extra['tags']
+                    if isinstance(extra.get('categoryId'), str) and extra['categoryId']:
+                        entry['categoryId'] = extra['categoryId']
+                result.append(entry)
     return result
 
 
@@ -6322,6 +6349,10 @@ app.include_router(_content_analysis_router(
     and platform not in _ACCOUNT_CLEARING,
     generation_getter=_content_analysis_session_generation))
 app.include_router(_conversation_titles_router(_conversation_title_runner))
+
+from skill_meta import create_router as _skill_meta_router
+app.include_router(_skill_meta_router(_skill_meta_store(), get_skills,
+                                     runner=lambda prompt: _conversation_title_runner(prompt, timeout=60)))
 
 from storage_location_routes import create_router as _storage_location_router
 app.include_router(_storage_location_router(lambda: DATA_DIR))

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { ComponentType } from 'react';
-import { fetchSkills } from '../lib/api';
-import type { SkillItem } from '../lib/api';
+import { fetchSkills, fetchSkillMeta, saveSkillMeta, classifySkills } from '../lib/api';
+import type { SkillItem, SkillMetaEntry, SkillMetaState, SkillClassifyResult } from '../lib/api';
 import SkillDrawer from './SkillDrawer';
 import ClawHubPanel from './ClawHubPanel';
 import RadioGroup from './ui/RadioGroup';
@@ -65,6 +65,13 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [source, setSource] = useState<'installed' | 'clawhub'>('installed');
+  const [meta, setMeta] = useState<SkillMetaState | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [classify, setClassify] = useState<{ open: boolean; mode: 'rules' | 'ai'; pending: boolean; error: string; result: SkillClassifyResult | null; applying: boolean }>({ open: false, mode: 'rules', pending: false, error: '', result: null, applying: false });
+  const loadMeta = () => fetchSkillMeta().then(setMeta).catch(() => {});
+  const metaFor = (name: string): SkillMetaEntry => (meta?.skills?.[name] || {});
+  const labelFor = (name: string) => metaFor(name).displayName || displayName(name);
+  const categoryLabel = (id?: string | null) => id ? (meta?.categories.find(c => c.id === id)?.label || '') : '';
 
   const load = () => {
     setError('');
@@ -74,15 +81,22 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
       setError(message); showToast(message, 'error');
     });
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); void loadMeta(); }, []);
   useEffect(() => { if (initialSkill) { setSource('installed'); setSelected(initialSkill); } }, [initialSkill]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return skills || [];
-    return (skills || []).filter((s) =>
-      s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q) || displayName(s.name).toLowerCase().includes(q));
-  }, [skills, query]);
+    return (skills || []).filter((s) => {
+      const entry = meta?.skills?.[s.name];
+      if (categoryFilter) {
+        const current = entry?.categoryId || '';
+        if (categoryFilter === 'uncategorized' ? current !== '' : current !== categoryFilter) return false;
+      }
+      if (!q) return true;
+      const description = entry?.description || s.description || '';
+      return s.name.toLowerCase().includes(q) || description.toLowerCase().includes(q) || (entry?.displayName || displayName(s.name)).toLowerCase().includes(q);
+    });
+  }, [skills, query, meta, categoryFilter]);
 
   const grouped = useMemo(() => {
     const g: Record<string, SkillItem[]> = {};
@@ -119,6 +133,35 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
     page.addEventListener('scroll', update, { passive: true });
     return () => page.removeEventListener('scroll', update);
   }, [layerSignature]);
+  const runClassify = async (mode: 'rules' | 'ai') => {
+    setClassify(value => ({ ...value, mode, pending: true, error: '' }));
+    try {
+      const items = (skills || []).map(s => ({ name: s.name, description: metaFor(s.name).description || s.description || '' }));
+      const result = await classifySkills(mode, items);
+      setClassify(value => ({ ...value, pending: false, result }));
+    } catch (cause) {
+      setClassify(value => ({ ...value, pending: false, result: null, error: cause instanceof Error ? cause.message : '识别失败' }));
+    }
+  };
+  const applyClassify = async () => {
+    const suggestions = classify.result?.suggestions || {};
+    const entries = Object.entries(suggestions);
+    if (!entries.length) return;
+    setClassify(value => ({ ...value, applying: true, error: '' }));
+    try {
+      for (const [name, suggestion] of entries) {
+        const current = metaFor(name);
+        const tags = [...new Set([...(current.tags || []), ...suggestion.tags])];
+        // 合并而非覆盖：已有分类/标签保留，只补齐缺口。
+        await saveSkillMeta(name, { tags, categoryId: current.categoryId || suggestion.categoryId || '' });
+      }
+      await loadMeta();
+      setClassify(value => ({ ...value, applying: false, result: null }));
+      showToast(`已应用 ${entries.length} 项标签与分类`, 'success');
+    } catch (cause) {
+      setClassify(value => ({ ...value, applying: false, error: cause instanceof Error ? cause.message : '应用失败' }));
+    }
+  };
   const jumpToSection = (key: string) => {
     const node = sectionRefs.current[key];
     const page = pageRef.current;
@@ -159,6 +202,8 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
         </p>
         <RadioGroup value={source} onChange={value => { setSource(value); setSelected(null); }} aria-label="技能来源" className="skill-sources"
           options={[{ value: 'installed', label: `已安装${skills ? ` · ${skills.length}` : ''}` }, { value: 'clawhub', label: 'ClawHub' }]} />
+        {source === 'installed' && skills !== null && <RadioGroup value={categoryFilter} onChange={setCategoryFilter} aria-label="技能分类筛选" className="skill-category-filter"
+          options={[{ value: '', label: '全部分类' }, ...(meta?.categories || []).map(c => ({ value: c.id, label: c.label })), { value: 'uncategorized', label: '未分类' }]} />}
         {source === 'installed' && <div className="skill-search">
           <span className="skill-search-ic"><IconSearch size={16} /></span>
           <input
@@ -170,7 +215,31 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           />
           {query && <button className="btn btn-ghost btn-sm" onClick={() => setQuery('')}>清除</button>}
         </div>}
+        {source === 'installed' && <div className="skill-meta-actions">
+          <button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: true }))}>自动分类</button>
+          <span className="skill-meta-note">离线规则零成本；“用 AI 识别”会调用你配置的默认模型。</span>
+        </div>}
       </div>
+
+      {classify.open && <section className="skill-classify" aria-label="自动标签分类">
+        <div className="skill-classify-head"><strong>自动标签分类</strong><span>结果只补齐缺口：不会覆盖你已手动设置的分类与标签。</span><button type="button" className="btn btn-sm" onClick={() => setClassify(value => ({ ...value, open: false, result: null, error: '' }))}>关闭</button></div>
+        <div className="skill-classify-actions">
+          <button type="button" className="btn btn-primary btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('rules')}>离线规则分类</button>
+          <button type="button" className="btn btn-sm" disabled={classify.pending || classify.applying} onClick={() => void runClassify('ai')}>用 AI 识别</button>
+          {classify.pending && <span role="status">正在识别…</span>}
+        </div>
+        {classify.error && <p role="alert" className="task-error">{classify.error}</p>}
+        {classify.result && <>
+          <ul className="skill-classify-list">
+            {Object.entries(classify.result.suggestions).map(([name, suggestion]) => <li key={name}>
+              <span className="skill-classify-name">{labelFor(name)}</span>
+              <span className="skill-tag is-category">{categoryLabel(suggestion.categoryId) || '未分类'}</span>
+              {suggestion.tags.map(tag => <span className="skill-tag" key={tag}>{tag}</span>)}
+            </li>)}
+          </ul>
+          <div className="skill-classify-foot"><span>{Object.keys(classify.result.suggestions).length} 项将写入标签与分类（合并）</span><button type="button" className="btn btn-primary btn-sm" disabled={classify.applying} onClick={() => void applyClassify()}>{classify.applying ? '正在应用…' : '应用'}</button></div>
+        </>}
+      </section>}
 
       {source === 'clawhub' && <ClawHubPanel />}
       {source === 'installed' && <>
@@ -224,9 +293,10 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
                   >
                     {alert && <div className="skill-card-alert" title="需要配置 API key">!</div>}
                     <div className="skill-card-icon" style={{ color: meta.color }}><Icon size={19} /></div>
-                    <div className="skill-card-name">{displayName(s.name)}</div>
+                    <div className="skill-card-name">{labelFor(s.name)}</div>
                     <div className="skill-card-rawname">{s.name}</div>
-                    <div className="skill-card-desc">{s.description?.trim() || LAYER_DESC[layer.key]}</div>
+                    <div className="skill-card-desc">{metaFor(s.name).description || s.description?.trim() || LAYER_DESC[layer.key]}</div>
+                    {(metaFor(s.name).tags?.length || categoryLabel(metaFor(s.name).categoryId)) ? <div className="skill-card-tags">{categoryLabel(metaFor(s.name).categoryId) && <span className="skill-tag is-category">{categoryLabel(metaFor(s.name).categoryId)}</span>}{(metaFor(s.name).tags || []).map(tag => <span className="skill-tag" key={tag}>{tag}</span>)}</div> : null}
                     <div className="skill-card-foot">
                       <SkillDependencyBadges skill={s} />
                       {s.needsApi && (s.apiConfigured
@@ -248,6 +318,9 @@ export default function SkillPage({ onOpenChat, initialSkill }: SkillPageProps) 
           onOpenChat={onOpenChat}
           onClose={() => setSelected(null)}
           onConfigured={load}
+          meta={metaFor(selected)}
+          categories={meta?.categories || []}
+          onMetaSaved={() => void loadMeta()}
         />
       )}
         </div>

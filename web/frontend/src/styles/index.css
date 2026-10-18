@@ -1667,3 +1667,28 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   .skills-layout { grid-template-columns: minmax(0, 1fr); }
   .skills-section-nav { display: none; }
 }
+
+/* ---- 技能分类与标签（覆盖层） ---- */
+.skill-category-filter { margin: 14px auto 0; max-width: 1100px; }
+.skill-meta-actions { display: flex; align-items: center; gap: 10px; max-width: 1100px; margin: 10px auto 0; }
+.skill-meta-note { color: var(--text-tertiary); font-size: 11px; }
+.skill-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; line-height: 1.7; white-space: nowrap; }
+.skill-tag.is-category { background: rgba(80, 123, 183, .14); color: var(--accent-end, #507bb7); }
+.skill-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.skill-classify { max-width: 1100px; margin: 14px auto; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.skill-classify-head { display: flex; align-items: center; gap: 10px; }
+.skill-classify-head strong { font-size: 13px; }
+.skill-classify-head span { flex: 1; color: var(--text-tertiary); font-size: 11px; }
+.skill-classify-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.skill-classify-actions [role="status"] { color: var(--text-secondary); font-size: 11px; }
+.skill-classify-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.skill-classify-list li { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.skill-classify-name { min-width: 140px; color: var(--text); }
+.skill-classify-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.skill-classify-foot span { color: var(--text-tertiary); font-size: 11px; }
+.drawer-meta-edit { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.drawer-meta-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.drawer-meta-edit input, .drawer-meta-edit textarea { width: 100%; box-sizing: border-box; min-height: 30px; padding: 6px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+.drawer-meta-new, .drawer-meta-actions { display: flex; align-items: center; gap: 8px; }
+.drawer-meta-new input { flex: 1; }
+.drawer-meta-actions span { color: var(--text-tertiary); font-size: 11px; }

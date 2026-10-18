@@ -1,7 +1,8 @@
 import { NativeSelect as Select } from './ui/Select';
+import AppSelect from './ui/Select';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchSkillDetail, saveEnv } from '../lib/api';
-import type { SkillDetail } from '../lib/api';
+import { fetchSkillDetail, saveEnv, saveSkillMeta, createSkillCategory } from '../lib/api';
+import type { SkillDetail, SkillCategory, SkillMetaEntry } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillDependencyBadges from './SkillDependencyBadges';
@@ -11,9 +12,12 @@ interface SkillDrawerProps {
   onOpenChat: (skill: string, input: string) => boolean;
   onClose: () => void;
   onConfigured: () => void;   // 保存 API 后通知父组件刷新卡片状态
+  meta?: SkillMetaEntry;      // 分类与标签（覆盖层）
+  categories?: SkillCategory[];
+  onMetaSaved?: () => void;   // 保存后通知父组件刷新
 }
 
-export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigured }: SkillDrawerProps) {
+export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigured, meta, categories = [], onMetaSaved }: SkillDrawerProps) {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loadErr, setLoadErr] = useState('');
 
@@ -23,6 +27,51 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
   const [savedMsg, setSavedMsg] = useState('');
 
   // Prepare a conversation draft; only the composer may send it.
+  // 分类与标签编辑（写覆盖层，不动第三方 SKILL.md 本体）
+  const [catSel, setCatSel] = useState('');
+  const [tagsText, setTagsText] = useState('');
+  const [displayInput, setDisplayInput] = useState('');
+  const [descInput, setDescInput] = useState('');
+  const [newCategory, setNewCategory] = useState('');
+  const [metaSaving, setMetaSaving] = useState(false);
+  const [metaMsg, setMetaMsg] = useState('');
+  // 值依赖：meta 对象每次渲染都是新引用，先取成字符串再进依赖，避免覆盖正在输入的内容。
+  const metaCategoryId = meta?.categoryId || '';
+  const metaTagsText = (meta?.tags || []).join('、');
+  const metaDisplayName = meta?.displayName || '';
+  const metaDescription = meta?.description || '';
+  useEffect(() => {
+    setCatSel(metaCategoryId);
+    setTagsText(metaTagsText);
+    setDisplayInput(metaDisplayName);
+    setDescInput(metaDescription);
+    setMetaMsg('');
+  }, [skillName, metaCategoryId, metaTagsText, metaDisplayName, metaDescription]);
+  const parseTags = () => tagsText.split(/[、,，]/).map(tag => tag.trim()).filter(Boolean).slice(0, 8);
+  const createCategory = async () => {
+    const label = newCategory.trim();
+    if (!label) return;
+    try {
+      const created = await createSkillCategory(label);
+      setNewCategory('');
+      setCatSel(created.id);
+      setMetaMsg('分类已创建并选用，点“保存”后生效');
+      onMetaSaved?.();
+    } catch (cause) {
+      setMetaMsg(cause instanceof Error ? cause.message : '分类创建失败');
+    }
+  };
+  const saveMeta = async () => {
+    setMetaSaving(true); setMetaMsg('');
+    try {
+      await saveSkillMeta(skillName, { tags: parseTags(), categoryId: catSel || '', displayName: displayInput, description: descInput });
+      setMetaMsg('已保存，卡片与搜索会使用这里的覆盖内容');
+      onMetaSaved?.();
+    } catch (cause) {
+      setMetaMsg(cause instanceof Error ? cause.message : '保存失败');
+    } finally { setMetaSaving(false); }
+  };
+
   const [input, setInput] = useState('');
   const [runErr, setRunErr] = useState('');
   const reqSeq = useRef(0);
@@ -103,6 +152,17 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
         </div>
 
         <div className="drawer-body">
+          <section className="drawer-meta-edit" aria-label="分类与标签">
+            <div className="panel-title">分类与标签</div>
+            <label>分类
+              <AppSelect aria-label="技能分类" value={catSel} options={[{ value: '', label: '未分类' }, ...categories.map(c => ({ value: c.id, label: c.label + (c.preset ? '（预设）' : '') }))]} onChange={setCatSel} placeholder="未分类" />
+            </label>
+            <div className="drawer-meta-new"><input aria-label="新建分类名称" value={newCategory} maxLength={20} placeholder="新建分类，例如：我的专栏" onChange={e => setNewCategory(e.target.value)} /><button type="button" className="btn btn-sm" disabled={!newCategory.trim()} onClick={() => void createCategory()}>新建并选用</button></div>
+            <label>标签<input aria-label="技能标签" value={tagsText} maxLength={200} placeholder="用、分隔，最多 8 个，例如：小红书、文案" onChange={e => setTagsText(e.target.value)} /></label>
+            <label>显示名（覆盖卡片标题）<input aria-label="技能显示名" value={displayInput} maxLength={60} placeholder={displayName(skillName)} onChange={e => setDisplayInput(e.target.value)} /></label>
+            <label>描述（覆盖卡片与搜索）<textarea aria-label="技能描述" value={descInput} maxLength={300} rows={2} placeholder="留空则使用 SKILL.md 原文描述" onChange={e => setDescInput(e.target.value)} /></label>
+            <div className="drawer-meta-actions"><button type="button" className="btn btn-primary btn-sm" disabled={metaSaving} onClick={() => void saveMeta()}>{metaSaving ? '保存中…' : '保存'}</button>{metaMsg && <span role="status">{metaMsg}</span>}</div>
+          </section>
           {detail && <SkillDependencyBadges skill={detail} detail={detail} />}
           {loadErr && <div style={{ color: 'var(--red)', fontSize: 14 }}>{loadErr}</div>}
 
@@ -321,6 +381,7 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
             )}
             <textarea
               ref={inputRef}
+          aria-label="带入对话的输入"
               className="field"
               placeholder="输入内容，例如主题 / 素材 / 要求…"
               value={input}

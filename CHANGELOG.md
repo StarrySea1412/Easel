@@ -1,3 +1,9 @@
+## 2026-10-18 · Editable skill metadata with tags, presets and auto-classification / 技能可编辑元数据：标签、预设分类与自动分类
+
+- Skills now carry an editable metadata layer (`<DATA_DIR>/skill-meta.json`): display name, description, tags and category, merged into `/api/skills` without touching third-party SKILL.md files; a 分类筛选 row and tag chips appear on the 技能库 grid, and each card's drawer hosts the editor with preset + custom categories (新建并选用). / 技能新增可编辑元数据层（`<DATA_DIR>/skill-meta.json`）：显示名、描述、标签、分类，合并进 `/api/skills`、不改第三方 SKILL.md 本体；技能库出现分类筛选与卡片标签，抽屉内可编辑（预设分类＋自定义“新建并选用”）。
+- 自动分类 offers an offline rule engine (zero cost, keyword rules → tags with a preset category) and a “用 AI 识别” path that calls your configured default model through the existing single-completion runner; results preview before applying and only fill gaps —手动设置过的分类与标签永不被覆盖. / 自动分类提供离线规则（零成本，关键字→标签＋预设分类）与“用 AI 识别”（经既有单次补全通道调用你配置的默认模型）；结果先预览后应用、只补齐缺口，手动设置过的分类与标签不被覆盖。
+- Backend: `web/skill_meta.py` (store + validation + rules/AI classify) with four routes; tests: skill-meta backend pytest 5, frontend 1,098 (filters, chips, classify preview/apply). / 后端 `web/skill_meta.py`（存储/校验/规则与 AI 分类）四条路由；后端 5 项、前端 1098 项测试。7880 需重启后端后新路由生效。
+
 ## 2026-10-18 · Skills nav jump fix / 技能库侧栏跳转修复
 
 - Jumping scrolls the known page container with rect math instead of `scrollIntoView`, and lands instantly (smooth animation proved to be throttled in the embedded/background environment). The scroll-follow highlight uses the same rect math. Verified live: clicking 发布 21 moves the page to the section, 发现 brings it back. / 跳转改为精确滚动已知容器（rect 计算）并**即时落位**——实测平滑动画在嵌入/后台环境会被节流推迟；滚动跟随高亮用同一 rect 判定。7880 实点“发布 21”滚到位、“发现”滚回顶。

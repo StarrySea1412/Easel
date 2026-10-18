@@ -22,7 +22,7 @@ test('skill handoff carries input without executing, even with missing API confi
   const root = createRoot(container);
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   await act(async () => root.render(createElement(SkillDrawer, { skillName: 'ai-image-gen', onOpenChat: (...args) => { handoffs.push(args); return accepted; }, onClose: () => closed++, onConfigured: () => {} })));
-  const textarea = container.querySelector('textarea');
+  const textarea = container.querySelector('textarea[aria-label="带入对话的输入"]');
   await act(async () => {
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(textarea, '  一张小猫封面  ');
     textarea.dispatchEvent(new window.Event('input', { bubbles: true }));

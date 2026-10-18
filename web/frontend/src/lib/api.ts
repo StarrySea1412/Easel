@@ -341,6 +341,34 @@ export function fetchSkillDetail(name: string): Promise<SkillDetail> {
 }
 
 /** 保存 API key 到项目根 .env（仅注册表内变量）。返回各需 API 的 skill 是否已就绪。 */
+export interface SkillCategory { id: string; label: string; preset?: boolean }
+export interface SkillMetaEntry { displayName?: string; description?: string; tags?: string[]; categoryId?: string | null }
+export interface SkillMetaState { skills: Record<string, SkillMetaEntry>; categories: SkillCategory[] }
+export interface SkillClassifySuggestion { tags: string[]; categoryId?: string | null }
+export interface SkillClassifyResult { mode: 'rules' | 'ai'; suggestions: Record<string, SkillClassifySuggestion> }
+
+export function fetchSkillMeta(): Promise<SkillMetaState> { return request('/api/skills/meta'); }
+
+export function saveSkillMeta(name: string, entry: SkillMetaEntry): Promise<SkillMetaEntry> {
+  return request(`/api/skill/${encodeURIComponent(name)}/meta`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry),
+  });
+}
+
+export function createSkillCategory(label: string): Promise<SkillCategory> {
+  return request('/api/skill-categories', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }),
+  });
+}
+
+/** 自动标签分类：rules 走离线规则（零成本），ai 会调用你配置的默认模型。 */
+export function classifySkills(mode: 'rules' | 'ai', items?: Array<{ name: string; description: string }>): Promise<SkillClassifyResult> {
+  return request('/api/skills/classify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, ...(items ? { items } : {}) }),
+  });
+}
+
 export async function saveEnv(updates: Record<string, string>): Promise<{ ok: boolean; skills: Record<string, boolean> }> {
   const result = await request<{ ok: boolean; skills: Record<string, boolean> }>('/api/env', {
     method: 'POST',
