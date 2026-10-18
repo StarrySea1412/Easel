@@ -125,7 +125,7 @@ test('notification receives new events while filtered, preserves long text and r
   assert.equal(document.activeElement, v.node.querySelector('button'));
 });
 
-test('jumping marks the notice read and the check stays out of the row until hover', async t => {
+test('jumping marks the notice read and the status dot sits in the right slot', async t => {
   events.clearEvents();
   events.recordEvent('已完成的任务', 'success', undefined, 'ux-read-row'); events.markEventsRead();
   events.recordEvent('失败任务提示', 'error', undefined, 'ux-unread-row', { page: 'chat', sessionId: 's9' });
@@ -137,6 +137,15 @@ test('jumping marks the notice read and the check stays out of the row until hov
   assert.equal(readCard.querySelector('.event-mark-one'), null, 'read rows render no check at all');
   assert.ok(unreadCard.querySelector('.event-row-state .event-mark-one'), 'unread rows keep the revealable check');
   assert.equal(unreadCard.querySelector('.event-mark-one').hasAttribute('disabled'), false);
+  // 读态点＝右侧唯一槽位里的状态指示：未读实心、已读弱化；不再挂在时间行上。
+  const readDot = readCard.querySelector('.event-row-state .event-read-state.is-read');
+  const unreadDot = unreadCard.querySelector('.event-row-state .event-read-state.is-unread');
+  assert.ok(readDot && unreadDot, 'both rows carry a read-state dot in the right slot');
+  assert.equal(readDot.getAttribute('aria-label'), '已读');
+  assert.equal(unreadDot.getAttribute('aria-label'), '未读');
+  assert.ok(unreadDot.parentElement.querySelector('.event-mark-one'), 'dot and check share the row-state slot');
+  assert.equal(unreadCard.querySelector('.event-card-meta .event-read-state'), null, 'the dot no longer sits next to the time');
+  assert.ok(unreadCard.querySelector('.event-card-meta time'), 'time stays in the meta line');
   assert.equal(unreadCard.querySelector('.event-message-link svg'), null, 'the jump link no longer draws a chevron');
   await v.click(unreadCard.querySelector('.event-message-link'));
   assert.equal(events.readEvents().find(item => item.id === 'ux-unread-row').read, true, 'clicking to jump is the read action');

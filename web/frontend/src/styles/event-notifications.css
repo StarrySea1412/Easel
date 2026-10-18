@@ -35,19 +35,22 @@
 .event-card.success .event-notice-tone { background: var(--green-soft); color: var(--green); }
 .event-card-content { flex: 1; min-width: 0; }
 .event-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-tertiary); font-size: 10px; line-height: 18px; }
-.event-meta-right { display: inline-flex; align-items: center; gap: 6px; }
 .event-card time { color: var(--text-tertiary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .event-card-message { display: block; margin-top: 3px; font-size: 13px; line-height: 1.7; font-weight: 500; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--text); text-align: left; }
 .event-card.is-read .event-card-message { color: var(--text-secondary); font-weight: 400; }
 .global-events-panel .event-message-link { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px; padding: 0; text-align: left; border-radius: 3px; }
 .global-events-panel .event-message-link:hover { background: transparent; }
 .event-message-link:hover .event-card-message { text-decoration: underline; text-underline-offset: 3px; }
-.event-row-state { display: flex; align-items: center; justify-content: center; align-self: center; flex: none; min-width: 28px; }
-.event-unread-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text); flex: none; }
+/* 右侧状态列＝唯一槽位：读态点与“标为已读”勾叠放在同一格，垂直居中、固定宽，无布局跳动。 */
+.event-row-state { display: grid; place-items: center; align-self: center; flex: none; min-width: 28px; }
+.event-row-state > * { grid-area: 1 / 1; }
+.event-read-state { width: 7px; height: 7px; border-radius: 50%; background: var(--text); }
+.event-read-state.is-read { width: 5px; height: 5px; background: var(--text-tertiary); opacity: .55; }
 .event-row-state .event-icon-button { width: 28px; height: 28px; }
 /* 点击跳转即已读；✅ 只在行 hover / 键盘聚焦时显现（占位与可聚焦性保留，不使用过渡——嵌入/后台环境会节流动画）。 */
 .global-events-panel .event-mark-one { color: var(--text-tertiary); opacity: 0; pointer-events: none; }
 .event-card:hover .event-mark-one, .event-card:focus-within .event-mark-one { opacity: 1; pointer-events: auto; }
+.event-card:hover .event-read-state.is-unread, .event-card:focus-within .event-read-state.is-unread { opacity: 0; }
 .event-empty { display: flex; flex-direction: column; align-items: center; padding: 36px 22px; text-align: center; }
 .event-empty > span { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 15px; border-radius: 50%; color: var(--text-secondary); background: var(--surface-2); }
 .event-empty h3 { font-size: 14px; font-weight: 600; }
