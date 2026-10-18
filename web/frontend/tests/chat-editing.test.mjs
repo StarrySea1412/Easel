@@ -101,7 +101,7 @@ test('only the answer to submitted breakdown material uses the report reader, wi
   {role:'user',content:'继续改写'}, {role:'assistant',content:'普通追问的回复'}];
  await v.render({session:{...source(),messages}});
  assert.equal(v.container.querySelectorAll('.breakdown-report').length,1);
- assert.match(v.container.querySelector('.breakdown-quote-check').textContent,/1 处原文引用/);
+ assert.match(v.container.querySelector('.breakdown-quote-check').textContent,/1 处引用.*1 处逐字找到/);
  assert.ok([...v.container.querySelectorAll('button')].some(button=>button.textContent.includes('存入选题库')));
  await v.render({session:{...source(),messages,importedFromBackup:true}});
  assert.equal(v.container.querySelectorAll('.breakdown-report').length,1);

@@ -103,8 +103,9 @@ export function readTextFile(file: File): Promise<string> {
   });
 }
 
-/** 引用逐字校验：只检查各条发现“原文依据”里引号标注的句子是否逐字存在于材料。 */
-export interface QuoteCheck { total: number; found: number; missing: string[] }
+/** 引用逐字校验：只检查各条发现“原文依据”里引号标注的句子是否逐字存在于材料。
+ *  省略号拼接的引用按片段核对：片段都在材料里时单列为“拼接”，既不算逐字也不当“找不到”。 */
+export interface QuoteCheck { total: number; found: number; stitched: number; missing: string[] }
 
 const QUOTE_IN_BLOCK = /[「“"]([^」”"\n]{4,120})[」”"]/g;
 
@@ -123,8 +124,16 @@ export function verifyQuotes(report: string, material: string): QuoteCheck {
   }
   const normalize = (value: string) => value.replace(/\s+/g, '');
   const haystack = normalize(material);
-  const missing = quotes.filter(quote => !haystack.includes(normalize(quote)));
-  return { total: quotes.length, found: quotes.length - missing.length, missing };
+  let found = 0;
+  let stitched = 0;
+  const missing: string[] = [];
+  for (const quote of quotes) {
+    if (haystack.includes(normalize(quote))) { found += 1; continue; }
+    const fragments = quote.split(/\.{2,}|…+/).map(normalize).filter(fragment => fragment.length >= 4);
+    if (fragments.length >= 2 && fragments.every(fragment => haystack.includes(fragment))) { stitched += 1; continue; }
+    missing.push(quote);
+  }
+  return { total: quotes.length, found, stitched, missing };
 }
 
 /** 报告结构程序检查：只核对章节关键词与发现四要素字段是否出现，不评价内容质量。 */

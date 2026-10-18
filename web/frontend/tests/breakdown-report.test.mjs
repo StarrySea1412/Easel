@@ -111,6 +111,24 @@ test('quote verification checks only 原文依据 quotes against the material', 
     'quotes without quote marks are not invented');
 });
 
+test('ellipsis-stitched quotes list fragments-in-material separately from missing ones', () => {
+  const material = '巴黎普通人穿着zara开着破破烂烂的雪铁龙，看着全世界的有钱人在巴黎挥金如土。现在马克龙只有三个选择：派出军队或者谈判。';
+  const stitchedReport = '- **原文依据**：“巴黎普通人穿着zara…挥金如土…马克龙只有三个选择”';
+  const stitched = reportLib.verifyQuotes(stitchedReport, material);
+  assert.equal(stitched.total, 1);
+  assert.equal(stitched.stitched, 1, 'all fragments present counts as stitched, not verbatim');
+  assert.equal(stitched.found, 0);
+  assert.equal(stitched.missing.length, 0);
+
+  const absent = reportLib.verifyQuotes('- **原文依据**：“完全不存在的句子甲…完全不存在的句子乙”', material);
+  assert.equal(absent.stitched, 0);
+  assert.equal(absent.missing.length, 1, 'absent fragments still count as missing');
+
+  const partial = reportLib.verifyQuotes('- **原文依据**：“挥金如土…完全不存在的句子乙”', material);
+  assert.equal(partial.stitched, 0, 'a missing fragment downgrades the whole quote');
+  assert.equal(partial.missing.length, 1);
+});
+
 test('structure verification flags missing chapters and incomplete findings', () => {
   const full = [
     '## 报告摘要', '## 1. 研究对象与材料范围', '## 2. 内容定位与价值承诺', '## 3. 标题与开头的具体写法',

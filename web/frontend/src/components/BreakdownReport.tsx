@@ -31,10 +31,14 @@ export default function BreakdownReport({ material, report, complete = true, ine
     <p className="breakdown-report-note">{reportScopeNote(material)}</p>
     {quotes && <>
       <p className={`breakdown-quote-check${quotes.missing.length ? ' warn' : ''}`}>
-        {quotes.total === 0 ? '引文检查：报告里没有标注可核对的原文引用。' : quotes.missing.length === 0
-          ? `引文检查：${quotes.total} 处原文引用都能在你给的材料里逐字找到（只证明文字一致，不代表解释成立）。`
-          : `引文检查：${quotes.total} 处引用里，${quotes.missing.length} 处没能在材料中逐字找到（可能被概括或改写，请以原文为准）。`}
+        {quotes.total === 0 ? '引文检查：报告里没有标注可核对的原文引用。'
+          : `引文检查：${quotes.total} 处引用里，${[
+              quotes.found ? `${quotes.found} 处逐字找到（只证明文字一致，不代表解释成立）` : '',
+              quotes.stitched ? `${quotes.stitched} 处为省略号拼接（各片段均在材料中，按原文核对）` : '',
+              quotes.missing.length ? `${quotes.missing.length} 处没能在材料中逐字找到（可能被概括或改写，请以原文为准）` : '',
+            ].filter(Boolean).join('，')}。`}
       </p>
+      {quotes.stitched > 0 && <p className="breakdown-quote-stitched">拼接引用按省略号分段核对，每个片段都能在材料中逐字找到；仍建议对照原文阅读。</p>}
       {quotes.missing.length > 0 && <details className="breakdown-quote-details"><summary>查看未找到的引用</summary><ul>{quotes.missing.map((quote, i) => <li key={i}>{quote}</li>)}</ul></details>}
     </>}
     {structure && <p className={`breakdown-structure-check${structure.missingSections.length || structure.incompleteFindings || structure.findings === 0 ? ' warn' : ''}`}>{structureLine(structure)}</p>}
