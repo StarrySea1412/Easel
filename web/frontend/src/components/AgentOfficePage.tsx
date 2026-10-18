@@ -133,7 +133,7 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
   const appearances = useEmployeeAppearances();
   const assignments = useEmployeeAssignments();
   const elapsedRef = useRef(0);
-  const availableSessions = useMemo(() => sessions.filter((session) => !session.importedFromBackup), [sessions]);
+  const availableSessions = useMemo(() => sessions.filter((session) => !session.importedFromBackup && !session.parentSessionId), [sessions]);
   const sessionId = sessionChoice
     ? availableSessions.find((session) => session.id === sessionChoice)?.id ?? null
     : availableSessions.find((session) => session.id === activeSessionId)?.id ?? availableSessions[0]?.id ?? null;

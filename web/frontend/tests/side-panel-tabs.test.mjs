@@ -90,3 +90,33 @@ test('each side chat tab closes from its own button and the panel keeps an empty
   await view.click(button);
   assert.deepEqual(created, ['open', 'create']);
 });
+
+test('a side chat tab renames by double-click; Enter saves, Escape and blank titles keep the old name', async t => {
+  const view = fixture(t);
+  const renamed = [];
+  await view.render(createElement(ChatPage, { session: parent, sideSessions: [sideA], onSideRename: (id, title) => renamed.push([id, title]) }));
+  const dblClick = element => act(async () => element.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true })));
+  const type = (input, value) => act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, value);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  const key = (element, value) => act(async () => element.dispatchEvent(new window.KeyboardEvent('keydown', { key: value, bubbles: true })));
+  await dblClick(view.container.querySelector('.chat-side-tab'));
+  let input = view.container.querySelector('.chat-side-tab-rename');
+  assert.ok(input && input.value === sideA.title, 'double-click opens the box with the current title');
+  await type(input, '选题讨论');
+  await key(input, 'Enter');
+  assert.deepEqual(renamed, [['s1', '选题讨论']]);
+  assert.equal(view.container.querySelector('.chat-side-tab-rename'), null, 'the box closes after saving');
+  assert.equal(view.container.querySelector('.chat-side-tab').textContent, '辅助对话', 'the label stays controlled by props until the caller updates');
+  await dblClick(view.container.querySelector('.chat-side-tab'));
+  input = view.container.querySelector('.chat-side-tab-rename');
+  await type(input, '不会保存的名字');
+  await key(input, 'Escape');
+  assert.deepEqual(renamed, [['s1', '选题讨论']], 'Escape cancels without renaming');
+  await dblClick(view.container.querySelector('.chat-side-tab'));
+  input = view.container.querySelector('.chat-side-tab-rename');
+  await type(input, '   ');
+  await key(input, 'Enter');
+  assert.deepEqual(renamed, [['s1', '选题讨论']], 'a blank title keeps the old name');
+});

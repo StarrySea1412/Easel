@@ -63,6 +63,7 @@ interface ChatPageProps {
   onQuoteFromMain?: (childId: string) => void;          // 主对话上一轮 → 该辅助对话草稿引用
   onQuoteToMain?: (childId: string) => void;            // 该辅助对话最后答复 → 主对话草稿引用
   onSideClose?: (childId: string) => void;              // 关闭（删除）指定辅助对话；主对话内容不受影响
+  onSideRename?: (childId: string, title: string) => void; // 重命名指定辅助对话的标签
   onShare?: () => void;                                 // 把当前对话的完整快照发布为分享
   onLoadShare?: () => void;                             // 把接管回传内容合并进当前对话
 }
@@ -84,7 +85,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onShare, onLoadShare }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -97,6 +98,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   // 辅助对话多实例：activeSideId=当前标签；未指定时回退到最近创建的一个。
   const [activeSideId,setActiveSideId]=useState<string|null>(null);
   const [tabPickerOpen,setTabPickerOpen]=useState(false);
+  const [sideRenameId,setSideRenameId]=useState<string|null>(null);
   const addTabRef=useRef<HTMLButtonElement>(null);
   const tabPickerRef=useRef<HTMLDivElement>(null);
   const closeTabPicker=useCallback(()=>setTabPickerOpen(false),[]);
@@ -154,7 +156,17 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
           {sideSessions.map(side=>{
             const on=panelTab==='side'&&activeSide?.id===side.id;
             return <span key={side.id} className={'chat-side-tab-wrap'+(on?' is-on':'')}>
-              <button type="button" role="tab" aria-selected={on} className={'chat-side-tab'+(on?' is-on':'')} onClick={()=>{setPanelTab('side');setActiveSideId(side.id);}}>{side.title}</button>
+              {sideRenameId===side.id
+                ? <input className="chat-side-tab-rename" defaultValue={side.title} autoFocus aria-label={'重命名：'+side.title}
+                    onBlur={()=>setSideRenameId(null)}
+                    onKeyDown={event=>{
+                      if(event.key==='Enter'){event.preventDefault();const title=event.currentTarget.value.trim();setSideRenameId(null);if(title&&title!==side.title)onSideRename?.(side.id,title);}
+                      if(event.key==='Escape'){event.preventDefault();setSideRenameId(null);}
+                    }}/>
+                : <button type="button" role="tab" aria-selected={on} className={'chat-side-tab'+(on?' is-on':'')} title={`${side.title} · 双击重命名（F2）`}
+                    onClick={()=>{setPanelTab('side');setActiveSideId(side.id);}}
+                    onDoubleClick={()=>setSideRenameId(side.id)}
+                    onKeyDown={event=>{ if(event.key==='F2'){event.preventDefault();setSideRenameId(side.id);} }}>{side.title}</button>}
               {onSideClose&&<button type="button" className="chat-side-tab-close" aria-label={'关闭：'+side.title} title="关闭辅助对话（主对话内容不受影响）" onClick={()=>onSideClose(side.id)}>×</button>}
             </span>;
           })}

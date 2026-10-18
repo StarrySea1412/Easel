@@ -15,6 +15,7 @@
 .chat-side-tab-close:hover { background: var(--surface-hover); color: var(--text); }
 .chat-side-tab-add { flex: none; width: 24px; height: 24px; margin-left: 2px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-tertiary); font-size: 15px; line-height: 1; cursor: pointer; }
 .chat-side-tab-add:hover { background: var(--surface-hover); color: var(--text); }
+.chat-side-tab-rename { width: 104px; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .chat-side-panel-close { border: 0; background: transparent; color: var(--text-tertiary); font-size: 16px; line-height: 1; width: 26px; height: 26px; border-radius: var(--radius-xs); cursor: pointer; }
 .chat-side-panel-close:hover { background: var(--surface-hover); color: var(--text); }
 .chat-side-panel-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }

@@ -1094,6 +1094,16 @@ export default function App() {
     setSessions(next);
     showToast('辅助对话已关闭；主对话内容不受影响。', 'info');
   }, [handleStopStream]);
+  const handleSideRename = useCallback((childId: string, title: string) => {
+    const clean = title.trim();
+    const child = sessionsRef.current.find(item => item.id === childId);
+    if (!child?.parentSessionId || !clean || clean === child.title) return;
+    const next = sessionsRef.current.map(item => item.id === childId ? { ...item, title: clean } : item);
+    if (!saveSessions(next)) { showToast('重命名未能保存；请保留当前页面。', 'error'); return; }
+    sessionsRef.current = next;
+    setSessions(next);
+    showToast('已重命名辅助对话', 'success');
+  }, []);
 
 
   const handleSteer = useCallback(async (sessionId: string, id: string) => {
@@ -1322,6 +1332,7 @@ export default function App() {
             onQuoteFromMain={handleQuoteFromMain}
             onQuoteToMain={handleQuoteToMain}
             onSideClose={handleSideClose}
+            onSideRename={handleSideRename}
             onShare={handleShareConversation}
             onLoadShare={handleLoadShareAppends}
             onTaskChange={()=>setTaskRevision(v=>v+1)}
