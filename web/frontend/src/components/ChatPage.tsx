@@ -29,6 +29,7 @@ import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { loadComposerModel } from '../lib/composerModel';
 import { markSessionSeen } from '../lib/seenStatus';
+import { computeSideOrder } from '../lib/sideChat';
 import { loadThinkingLevel, resolveThinkingPreference } from '../lib/thinkingLevel';
 import { fetchOfficeTaskModels } from '../lib/officeControls';
 
@@ -64,6 +65,7 @@ interface ChatPageProps {
   onQuoteToMain?: (childId: string) => void;            // 该辅助对话最后答复 → 主对话草稿引用
   onSideClose?: (childId: string) => void;              // 关闭（删除）指定辅助对话；主对话内容不受影响
   onSideRename?: (childId: string, title: string) => void; // 重命名指定辅助对话的标签
+  onSideReorder?: (orderedIds: string[]) => void;       // 拖拽/键盘调整后的辅助对话标签顺序
   onShare?: () => void;                                 // 把当前对话的完整快照发布为分享
   onLoadShare?: () => void;                             // 把接管回传内容合并进当前对话
 }
@@ -85,7 +87,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onShare, onLoadShare }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -99,6 +101,20 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const [activeSideId,setActiveSideId]=useState<string|null>(null);
   const [tabPickerOpen,setTabPickerOpen]=useState(false);
   const [sideRenameId,setSideRenameId]=useState<string|null>(null);
+  const [dragSideId,setDragSideId]=useState<string|null>(null);
+  const [sideDrop,setSideDrop]=useState<{id:string;after:boolean}|null>(null);
+  // 拖拽/键盘平移标签：把某标签移到目标之前/之后，顺序交由调用方持久化。
+  const applySideOrder=(draggedId:string,targetId:string,after:boolean)=>{
+    const ids=sideSessions.map(item=>item.id);
+    const next=computeSideOrder(ids,draggedId,targetId,after);
+    if(next.join('|')!==ids.join('|'))onSideReorder?.(next);
+  };
+  const moveSideChat=(sideId:string,offset:number)=>{
+    const ids=sideSessions.map(item=>item.id);
+    const to=ids.indexOf(sideId)+offset;
+    if(to<0||to>=ids.length)return;
+    applySideOrder(sideId,ids[to],offset>0);
+  };
   const addTabRef=useRef<HTMLButtonElement>(null);
   const tabPickerRef=useRef<HTMLDivElement>(null);
   const closeTabPicker=useCallback(()=>setTabPickerOpen(false),[]);
@@ -155,7 +171,11 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <div className="chat-side-panel-tabs" role="tablist" aria-label="侧边面板">
           {sideSessions.map(side=>{
             const on=panelTab==='side'&&activeSide?.id===side.id;
-            return <span key={side.id} className={'chat-side-tab-wrap'+(on?' is-on':'')}>
+            const drop=sideDrop?.id===side.id?(sideDrop.after?' is-drop-after':' is-drop-before'):'';
+            return <span key={side.id} className={'chat-side-tab-wrap'+(on?' is-on':'')+drop}
+              onDragOver={event=>{ if(!dragSideId||dragSideId===side.id)return; event.preventDefault(); const rect=event.currentTarget.getBoundingClientRect(); setSideDrop({id:side.id,after:event.clientX>rect.left+rect.width/2}); }}
+              onDragLeave={event=>{ if(sideDrop?.id===side.id&&!event.currentTarget.contains(event.relatedTarget as Node|null))setSideDrop(null); }}
+              onDrop={event=>{ if(!dragSideId)return; event.preventDefault(); const rect=event.currentTarget.getBoundingClientRect(); const after=event.clientX>rect.left+rect.width/2; const dragged=dragSideId; setDragSideId(null); setSideDrop(null); applySideOrder(dragged,side.id,after); }}>
               {sideRenameId===side.id
                 ? <input className="chat-side-tab-rename" defaultValue={side.title} autoFocus aria-label={'重命名：'+side.title}
                     onBlur={()=>setSideRenameId(null)}
@@ -163,10 +183,17 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                       if(event.key==='Enter'){event.preventDefault();const title=event.currentTarget.value.trim();setSideRenameId(null);if(title&&title!==side.title)onSideRename?.(side.id,title);}
                       if(event.key==='Escape'){event.preventDefault();setSideRenameId(null);}
                     }}/>
-                : <button type="button" role="tab" aria-selected={on} className={'chat-side-tab'+(on?' is-on':'')} title={`${side.title} · 双击重命名（F2）`}
+                : <button type="button" role="tab" aria-selected={on} className={'chat-side-tab'+(on?' is-on':'')+(dragSideId===side.id?' is-dragging':'')} title={`${side.title} · 双击重命名（F2）· 拖拽排序（Alt+←/→）`}
+                    draggable
+                    onDragStart={event=>{ setDragSideId(side.id); setSideDrop(null); event.dataTransfer.effectAllowed='move'; try{event.dataTransfer.setData('text/easel-side-tab',side.id);}catch{/* 受限环境允许空 dataTransfer */} }}
+                    onDragEnd={()=>{ setDragSideId(null); setSideDrop(null); }}
                     onClick={()=>{setPanelTab('side');setActiveSideId(side.id);}}
                     onDoubleClick={()=>setSideRenameId(side.id)}
-                    onKeyDown={event=>{ if(event.key==='F2'){event.preventDefault();setSideRenameId(side.id);} }}>{side.title}</button>}
+                    onKeyDown={event=>{
+                      if(event.key==='F2'){event.preventDefault();setSideRenameId(side.id);}
+                      if(event.altKey&&event.key==='ArrowLeft'){event.preventDefault();moveSideChat(side.id,-1);}
+                      if(event.altKey&&event.key==='ArrowRight'){event.preventDefault();moveSideChat(side.id,1);}
+                    }}>{side.title}</button>}
               {onSideClose&&<button type="button" className="chat-side-tab-close" aria-label={'关闭：'+side.title} title="关闭辅助对话（主对话内容不受影响）" onClick={()=>onSideClose(side.id)}>×</button>}
             </span>;
           })}

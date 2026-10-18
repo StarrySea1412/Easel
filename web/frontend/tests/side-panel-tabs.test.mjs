@@ -120,3 +120,29 @@ test('a side chat tab renames by double-click; Enter saves, Escape and blank tit
   await key(input, 'Enter');
   assert.deepEqual(renamed, [['s1', '选题讨论']], 'a blank title keeps the old name');
 });
+
+test('side chat tabs reorder by drag and by Alt+arrow keys', async t => {
+  const view = fixture(t);
+  const orders = [];
+  await view.render(createElement(ChatPage, { session: parent, sideSessions: [sideA, sideB], onSideReorder: ids => orders.push(ids.join(',')) }));
+  const fire = (element, type, props = {}) => act(async () => {
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, props);
+    element.dispatchEvent(event);
+  });
+  let tabs = [...view.container.querySelectorAll('.chat-side-tab')];
+  await fire(tabs[1], 'dragstart', { dataTransfer: { effectAllowed: '', setData() {} } });
+  const firstWrap = view.container.querySelector('.chat-side-tab-wrap');
+  await fire(firstWrap, 'dragover', { clientX: 0 });
+  assert.ok(firstWrap.classList.contains('is-drop-before'), 'the left half shows the insert-before indicator');
+  await fire(firstWrap, 'drop', { clientX: 0 });
+  assert.deepEqual(orders, ['s2,s1'], 'dropping on the left half inserts before the target');
+  orders.length = 0;
+  tabs = [...view.container.querySelectorAll('.chat-side-tab')];
+  const key = (element, props) => act(async () => element.dispatchEvent(new window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...props })));
+  await key(tabs[0], { key: 'ArrowRight', altKey: true });
+  assert.deepEqual(orders, ['s2,s1'], 'Alt+→ moves the first tab to the right');
+  orders.length = 0;
+  await key(tabs[0], { key: 'ArrowLeft', altKey: true });
+  assert.deepEqual(orders, [], 'an edge tab cannot move further left');
+});

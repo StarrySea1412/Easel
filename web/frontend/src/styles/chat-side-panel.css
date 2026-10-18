@@ -13,6 +13,10 @@
 .chat-side-tab-close { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-tertiary); font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; pointer-events: none; }
 .chat-side-tab-wrap:hover .chat-side-tab-close, .chat-side-tab-wrap.is-on .chat-side-tab-close { opacity: 1; pointer-events: auto; }
 .chat-side-tab-close:hover { background: var(--surface-hover); color: var(--text); }
+.chat-side-tab.is-dragging { opacity: .55; }
+.chat-side-tab-wrap.is-drop-before::before, .chat-side-tab-wrap.is-drop-after::after { content: ''; position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 2px; background: var(--text); }
+.chat-side-tab-wrap.is-drop-before::before { left: -1px; }
+.chat-side-tab-wrap.is-drop-after::after { right: -1px; }
 .chat-side-tab-add { flex: none; width: 24px; height: 24px; margin-left: 2px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-tertiary); font-size: 15px; line-height: 1; cursor: pointer; }
 .chat-side-tab-add:hover { background: var(--surface-hover); color: var(--text); }
 .chat-side-tab-rename { width: 104px; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; outline: none; }

@@ -36,9 +36,13 @@ test('empty side chats survive persistence while duplicate main placeholders sti
   const blankB = { id: 'mb', title: 'New Chat', created: 5, messages: [] };
   assert.equal(saveSessions([sideB, sideA, parent, blankA, blankB]), true);
   // 断言写入存储的内容（loadSessions 会命中内存缓存，验证的是持久化规则本身）。
-  const stored = JSON.parse(window.localStorage.getItem('easel_sessions') || '[]');
+  let stored = JSON.parse(window.localStorage.getItem('easel_sessions') || '[]');
   assert.deepEqual(stored.map(session => session.id), ['sb', 'sa', 'pp', 'ma'],
     'explicitly created side chats persist even while empty; duplicate main placeholders still prune to the first');
+  // 标签顺序（sideOrder）随存储往返：保存后仍在写入内容里。
+  assert.equal(saveSessions([{ ...sideB, sideOrder: 0 }, { ...sideA, sideOrder: 1 }, parent, blankA, blankB]), true);
+  stored = JSON.parse(window.localStorage.getItem('easel_sessions') || '[]');
+  assert.equal(stored.find(session => session.id === 'sb').sideOrder, 0, 'the tab order survives persistence');
   // 空的父会话只要有辅助对话就必须保留（父 id 稳定，子会话才不孤儿）。
   const emptyParent = { id: 'pe', title: 'New Chat', created: 6, messages: [] };
   const childOfEmpty = { id: 'sc', title: '辅助对话', created: 7, messages: [], parentSessionId: 'pe' };

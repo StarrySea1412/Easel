@@ -5,10 +5,22 @@ import type { ChatSession } from './store';
  * session list, keeps its own transcript in the side panel, and the parent's
  * content is only pulled in when the user explicitly quotes it.
  */
-/** All side chats of a parent session, oldest first (tab order). */
+/** All side chats of a parent session, in tab order (sideOrder wins, then creation time). */
 export function sideChatsOf(session: ChatSession, sessions: ChatSession[]): ChatSession[] {
   return sessions.filter(item => item.parentSessionId === session.id)
-    .slice().sort((a, b) => a.created - b.created);
+    .slice()
+    .sort((a, b) => (a.sideOrder ?? Number.MAX_SAFE_INTEGER) - (b.sideOrder ?? Number.MAX_SAFE_INTEGER)
+      || a.created - b.created);
+}
+
+/** 拖拽后的新顺序：把 draggedId 移到 targetId 之前/之后，返回完整 id 顺序（无效输入原样返回）。 */
+export function computeSideOrder(ids: string[], draggedId: string, targetId: string, after: boolean): string[] {
+  if (draggedId === targetId || !ids.includes(draggedId) || !ids.includes(targetId)) return ids;
+  const rest = ids.filter(id => id !== draggedId);
+  const targetIndex = rest.indexOf(targetId);
+  if (targetIndex < 0) return ids;
+  rest.splice(after ? targetIndex + 1 : targetIndex, 0, draggedId);
+  return rest;
 }
 
 /** The side chat opened by default: the most recently created one. */

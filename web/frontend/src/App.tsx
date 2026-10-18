@@ -1104,6 +1104,21 @@ export default function App() {
     setSessions(next);
     showToast('已重命名辅助对话', 'success');
   }, []);
+  const handleSideReorder = useCallback((orderedIds: string[]) => {
+    const order = new Map(orderedIds.map((id, index) => [id, index]));
+    let changed = false;
+    const next = sessionsRef.current.map(item => {
+      if (!item.parentSessionId || !order.has(item.id)) return item;
+      const sideOrder = order.get(item.id) as number;
+      if (item.sideOrder === sideOrder) return item;
+      changed = true;
+      return { ...item, sideOrder };
+    });
+    if (!changed) return;
+    if (!saveSessions(next)) { showToast('顺序未能保存；请保留当前页面。', 'error'); return; }
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
 
 
   const handleSteer = useCallback(async (sessionId: string, id: string) => {
@@ -1333,6 +1348,7 @@ export default function App() {
             onQuoteToMain={handleQuoteToMain}
             onSideClose={handleSideClose}
             onSideRename={handleSideRename}
+            onSideReorder={handleSideReorder}
             onShare={handleShareConversation}
             onLoadShare={handleLoadShareAppends}
             onTaskChange={()=>setTaskRevision(v=>v+1)}

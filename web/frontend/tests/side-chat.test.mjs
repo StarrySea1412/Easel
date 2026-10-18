@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {loadTsModule} from './load-ts.mjs';
 
-// 辅助对话（侧边面板子会话）的纯逻辑：归属、序号、多实例顺序、上一轮引用与 /side 语法。
-const {sideChatOf,sideChatsOf,sideChatTitle,lastExchangeQuote}=await loadTsModule('../src/lib/sideChat.ts',import.meta.url);
+// 辅助对话（侧边面板子会话）的纯逻辑：归属、序号、多实例顺序、标签顺序与 /side 语法。
+const {sideChatOf,sideChatsOf,sideChatTitle,computeSideOrder,lastExchangeQuote}=await loadTsModule('../src/lib/sideChat.ts',import.meta.url);
 const {suggestsCommand}=await loadTsModule('../src/lib/goalCommand.ts',import.meta.url);
 
 const parent={id:'p',title:'主对话',created:1,messages:[{role:'user',content:'帮我写文案'},{role:'assistant',content:'好的'}]};
@@ -41,4 +41,15 @@ test('slash grammar recognizes the side chat commands',()=>{
   assert.equal(suggestsCommand('/btw'),true);
   assert.equal(suggestsCommand('/s'),true);
   assert.equal(suggestsCommand('/su'),false);
+});
+
+test('tab order honors sideOrder and computeSideOrder inserts before or after the target',()=>{
+  const second={id:'c2',title:'辅助对话 2',created:3,parentSessionId:'p'};
+  const forced=[{...child,sideOrder:1},{...second,sideOrder:0}];
+  assert.deepEqual(sideChatsOf(parent,[forced[0],forced[1]]).map(s=>s.id),['c2','c1'],'sideOrder wins over creation time');
+  const ids=['s1','s2','s3'];
+  assert.deepEqual(computeSideOrder(ids,'s3','s1',false),['s3','s1','s2'],'insert before the target');
+  assert.deepEqual(computeSideOrder(ids,'s1','s3',true),['s2','s3','s1'],'insert after the target');
+  assert.deepEqual(computeSideOrder(ids,'s2','s2',true),ids,'the same id keeps the order');
+  assert.deepEqual(computeSideOrder(ids,'missing','s1',true),ids,'unknown ids keep the order');
 });
