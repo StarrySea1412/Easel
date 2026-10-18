@@ -62,6 +62,7 @@ except Exception:  # 邮箱通知未安装/依赖缺失：钩子降级为空操�
     _notify_email_web_turn = None  # type: ignore
 from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, valid_persona_name, _FILE_ORDER
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
+from chat_budget import LONG_TASK_OUTPUT_RULE, admit
 from image_reverse import (
     Provider as ImageReverseProvider, reverse_image,
     MAX_BYTES as IMAGE_REVERSE_MAX_BYTES, MAX_PIXELS as IMAGE_REVERSE_MAX_PIXELS,
@@ -3539,6 +3540,10 @@ def _chat_message(req: ChatRequest) -> str:
     requirements = _skill_requirements_context(req, specs)
     if requirements:
         message += '\n\n' + requirements
+    # Long outputs are persisted as files in batches instead of being pushed
+    # through one provider response. This is guidance, not a claim about the
+    # provider's native output limit.
+    message += '\n\n' + LONG_TASK_OUTPUT_RULE
     return chat_turn_message(message, req.persona)
 
 
@@ -3967,6 +3972,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         return await _codex_service.stream(req.sessionId, turn_id)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
+    admission = admit(message)
+    if not admission.admitted:
+        raise HTTPException(413, {
+            'code': 'chat_context_budget',
+            'category': 'context_budget',
+            'retryable': True,
+            'message': ('本轮上下文已接近运行时安全预算，未提交模型请求；请先让当前会话总结/压缩，'
+                        '或新建对话后分批继续，避免触发模型输出截断。'),
+            **admission.public(),
+        })
     requested_model_ref = req.modelRef
     requested_thinking_level = req.thinkingLevel
     import office_controls
@@ -4652,6 +4667,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         pass
                 sr = run_info.get("stop_reason")
                 native_result = getattr(proc, 'result', None)
+                native_stop_reason = getattr(proc, 'stop_reason', None)
+                if not sr and isinstance(native_stop_reason, str):
+                    run_info['stop_reason'] = native_stop_reason
+                    sr = native_stop_reason
                 if hasattr(proc, 'clean_end'):
                     run_info['run_id'] = proc._office_run_id
                 if rc == 0 and isinstance(native_result, dict) and native_result.get('status') == 'ok':

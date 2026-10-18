@@ -43,6 +43,20 @@ def test_native_preserves_request_and_final_text():
     assert proc._office_run_id == 'exact-run' and proc.clean_end
 
 
+def test_native_preserves_structured_output_limit_reason():
+    class Client:
+        def _rpc(self, method, params, **kw):
+            kw['on_accepted']({'runId': 'length-run', 'status': 'accepted'})
+            return {'status': 'ok', 'result': {
+                'payloads': [{'text': '部分回复', 'finish_reason': 'length'}],
+                'incomplete_details': {'reason': 'max_output_tokens'},
+            }}
+        def close(self): pass
+    proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'length-turn',
+        'agentId': 'main', 'sessionKey': 'agent:main:chat'}, 10)
+    assert proc.wait(1) == 0 and proc.stop_reason == 'max_tokens'
+
+
 def test_stop_targets_accepted_run_and_waits_for_terminal():
     started, release = threading.Event(), threading.Event()
     calls = []

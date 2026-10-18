@@ -11,6 +11,36 @@ import threading
 import time
 
 
+def _normalized_stop_reason(value, depth=0):
+    """Extract a bounded provider terminal reason from a Gateway result."""
+    if depth > 4:
+        return None
+    if isinstance(value, dict):
+        for key in ('stopReason', 'stop_reason', 'finishReason', 'finish_reason'):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate:
+                return 'max_tokens' if candidate == 'max_output_tokens' else candidate
+        incomplete = value.get('incomplete_details')
+        if isinstance(incomplete, dict) and incomplete.get('reason') == 'max_output_tokens':
+            return 'max_tokens'
+        for key in ('result', 'message', 'response', 'payload', 'data'):
+            found = _normalized_stop_reason(value.get(key), depth + 1)
+            if found:
+                return found
+        payloads = value.get('payloads')
+        if isinstance(payloads, list):
+            for payload in payloads[:32]:
+                found = _normalized_stop_reason(payload, depth + 1)
+                if found:
+                    return found
+    elif isinstance(value, list):
+        for item in value[:32]:
+            found = _normalized_stop_reason(item, depth + 1)
+            if found:
+                return found
+    return None
+
+
 class GatewayAgentProc:
     def __init__(self, client, client_factory, params, timeout, on_compaction=None, on_tool=None, on_accepted=None):
         self.client = client
@@ -30,6 +60,7 @@ class GatewayAgentProc:
         self.stdout = self._stdout()
         self.error_text = None
         self.result = None
+        self.stop_reason = None
         self.clean_end = False
         self.returncode = None
         threading.Thread(target=self._run, daemon=True, name='easel-agent-rpc').start()
@@ -124,6 +155,7 @@ class GatewayAgentProc:
         try:
             self.result = self.client._rpc('agent', self.params, timeout=self.timeout + 30,
                                            expect_final=True, on_accepted=self._accepted, on_event=self._on_event)
+            self.stop_reason = _normalized_stop_reason(self.result)
             if not isinstance(self.result, dict) or self.result.get('status') != 'ok':
                 self.error_text = str((self.result or {}).get('summary', 'Gateway returned no final agent result')) if isinstance(self.result, dict) else 'Gateway returned no final agent result'
                 self.returncode = 1

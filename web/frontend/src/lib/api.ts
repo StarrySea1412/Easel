@@ -22,7 +22,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
       const j = await res.json();
       const returned = j && (j.detail || j.message);
       detail = typeof returned === 'string' ? returned : Array.isArray(returned)
-        ? returned.map((item: { msg?: string }) => item.msg || '请求字段不符合要求').join('；') : '';
+        ? returned.map((item: { msg?: string }) => item.msg || '请求字段不符合要求').join('；')
+        : returned && typeof returned === 'object' && typeof (returned as { message?: unknown }).message === 'string'
+          ? (returned as { message: string }).message : '';
     } catch {
       /* 响应体不是 JSON，忽略 */
     }
