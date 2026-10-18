@@ -897,3 +897,9 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 已验证：后端专项 20 项通过；后端全量 **2934 passed / 6 failed / 9 errors**（余下红灯均为 HEAD 既有、与本轮无关：`test_output_image_library` 9 errors、`test_office_outputs`/`test_pytest_collection` 各 1 fail、`test_web_security` 2 fail、`test_chat_skill_requirements[patch4/5]` 2 fail）；前端全量 1107 项、lint 0 错误/18 既有 warning、构建通过并重建 dist。
 - 本机磁盘清理（用户授权）：C: 从 0 恢复到约 106GB——rollout 旧会话日志约 102GB、Temp 约 2.2GB、旧 exec/artifacts 约 1GB、npm 缓存、v2 旧 crash/logs、6 个干净 worktree 约 2.8GB、video-agent 无引用孤儿上传 315MB；满盘期间被截断的需求文档已从 git HEAD 恢复，事故与恢复见需求清单条目。
 - 交付边界：仅本机代码与运维清理；138 与安装包未动；渠道真实 `contextWindow`/输出上限未确认（不凭空填 1M/200k）；真实长会话压测未做。提交 `a0520988`（可靠性）、`7399db28`（ComfyUI 接线）、`fbda1c2b`（清理文档）。详见[需求清单](user-requirements-2026-10-08.md)。
+
+## 2026-10-18 · PPT 生成（pptx-slides 技能，方案 A）
+
+- 已实现：`skills/shared/scripts/pptx_build.py`（Markdown 大纲 → `deck.pptx`（python-pptx，16:9 深色封面＋浅色内容页，三色主题，CJK latin/ea/cs 字体名）＋ `deck.html`＋逐页 `slide-NN.png`＋`deck.pdf`；`--skip-render` 无 Chromium 降级）；`skills/openclaw/pptx-slides/SKILL.md`（自研：触发词/大纲格式/设计规范/失败路径）＋ `EASEL-META.md`；依赖仅新增 `python-pptx`（pyproject 已声明）。
+- 已验证：`selftest` 全链路（含 pptx 读回与真实 Chromium 渲染）；`tests/test_pptx_build.py` **12 项**；样例 5 页逐页目检（修复封面备注归属、署名合并、引用页引号重复 3 处）；7880 `/api/skills` 识别新技能、`/api/media` 对 png/pdf/pptx 全 **200**；后端全量 **2946 passed（+12）/ 6 failed / 9 errors**（既有红灯不变）。
+- 交付边界：离线零付费模型；不做模板市场/转场动画/pptx 反向渲染；未改 138/安装包；示例产物在 `outputs/_pptx-slides-qa-2026-10-18/`（本机 QA，不入库）。调研与方案见[生成 PPT 的调研与方案](pptx-generation-research-2026-10-18.md)。
