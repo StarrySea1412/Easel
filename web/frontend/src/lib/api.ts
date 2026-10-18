@@ -1636,6 +1636,22 @@ export function fetchComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { retu
 export function cancelComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { return request(`/api/comfyui/video/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }); }
 export interface ComfyVideoSnapshot { config: ComfyVideoConfig; jobs: ComfyVideoJob[]; }
 export function fetchComfyVideoSnapshot(): Promise<ComfyVideoSnapshot> { return request('/api/comfyui/video'); }
+
+export interface LinkReadResult {
+  ok: boolean;
+  source: 'http' | 'browser' | null;
+  title: string;
+  text: string;
+  chars: number;
+  url: string;
+  reason: string | null;
+}
+/** 受控读取一条链接的标题与正文（服务端普通 HTTP 优先、反爬站点回退本机有头浏览器）；读取不调用任何模型。 */
+export function readBreakdownLink(url: string): Promise<LinkReadResult> {
+  return request('/api/breakdown/link', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+  });
+}
 export function previewComfyPrompt(prompt: string, cinematic: Record<string, string> = {}, negativePrompt = ''): Promise<{ prompt: string; cinematic: Record<string, string> }> {
   return request('/api/comfyui/video/prompt-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, cinematic, negativePrompt }) });
 }

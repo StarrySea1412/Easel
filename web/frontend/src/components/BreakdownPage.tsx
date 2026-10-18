@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ThinkingLevel } from '../lib/api';
+import { readBreakdownLink, type ThinkingLevel } from '../lib/api';
+import { composeLinkedMaterial, firstUrl } from '../lib/breakdownLink';
 import { EXAMPLE_MATERIAL, materialLine, readTextFile, summarizeMaterial, textFileProblem } from '../lib/breakdownReport';
 import { loadActiveRun, loadBreakdownDraft, loadBreakdownHistory, removeBreakdownRecord, saveBreakdownDraft, type ActiveRun, type BreakdownRecord } from '../lib/breakdownStore';
 import { useComposerModels } from '../hooks/useComposerModels';
@@ -37,6 +38,11 @@ export default function BreakdownPage({ onStart, onOpenRun }: BreakdownPageProps
   const summary = useMemo(() => summarizeMaterial(input), [input]);
   const analyzedSummary = useMemo(() => summarizeMaterial(analyzed), [analyzed]);
   const isExample = input === EXAMPLE_MATERIAL;
+  // 受控链接读取：检测到链接时提供显式“读取链接”（不触发模型）；材料变化时失效已读结果。
+  const [linkMaterial, setLinkMaterial] = useState<{ url: string; title: string; chars: number; text: string } | null>(null);
+  const [reading, setReading] = useState(false);
+  const detectedUrl = useMemo(() => firstUrl(input), [input]);
+  useEffect(() => { if (linkMaterial && linkMaterial.url !== detectedUrl) setLinkMaterial(null); }, [detectedUrl, linkMaterial]);
   useEffect(() => { saveBreakdownDraft(input); }, [input]);
   const notify = (text: string, ok: boolean) => {
     setToast({ text, ok });
@@ -49,12 +55,42 @@ export default function BreakdownPage({ onStart, onOpenRun }: BreakdownPageProps
     notify(saved ? `已选择思考强度：${THINKING_LABELS[value]}，本次拆解生效` : '强度已在本页修改，但未能保存。', saved);
   };
 
-  const run = () => {
-    if (!input.trim()) return;
+  const readLink = async (): Promise<{ url: string; title: string; chars: number; text: string } | null> => {
+    const url = detectedUrl;
+    if (!url || reading) return null;
+    setReading(true); setError('');
+    try {
+      const result = await readBreakdownLink(url);
+      if (result.ok && result.text) {
+        const material = { url, title: result.title, chars: result.chars, text: result.text };
+        setLinkMaterial(material);
+        notify(`已读取链接：${result.title || url}（${result.chars} 字）`, true);
+        return material;
+      }
+      setLinkMaterial(null);
+      setError(`链接没有读到正文：${result.reason || '站点未返回内容'}。把正文粘贴进来即可继续拆解。`);
+      return null;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '链接读取失败；把正文粘贴进来即可继续拆解。');
+      return null;
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const run = async () => {
+    if (!input.trim() || reading) return;
+    let material = input;
+    if (detectedUrl) {
+      const linked = linkMaterial && linkMaterial.url === detectedUrl ? linkMaterial : await readLink();
+      if (!linked) return; // 读取失败：错误已展示，材料保留，引导补正文
+      material = composeLinkedMaterial(input, linked.title, linked.text);
+    }
     const snapshot = models.getSnapshot();
     if (snapshot === null) { setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“自动沿用”。'); return; }
     setError('');
-    if (!onStart(input, snapshot.modelRef, thinkingLevel)) setError('暂未创建拆解对话，请检查网关连接和浏览器存储后重试。材料已保留。');
+    setAnalyzed(material);
+    if (!onStart(material, snapshot.modelRef, thinkingLevel)) setError('暂未创建拆解对话，请检查网关连接和浏览器存储后重试。材料已保留。');
   };
 
   const openRecord = (record: BreakdownRecord) => {
@@ -121,14 +157,25 @@ export default function BreakdownPage({ onStart, onOpenRun }: BreakdownPageProps
                 <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => fileRef.current?.click()}>
                   <IconFile size={13} /> 导入文本文件
                 </button>
+                {detectedUrl && !linkMaterial && (
+                  <button type="button" className="btn btn-ghost breakdown-tool" onClick={() => void readLink()} disabled={reading}>
+                    {reading ? '正在读取链接…' : '读取链接'}
+                  </button>
+                )}
+                {linkMaterial && (
+                  <span className="breakdown-chip" role="status">
+                    已读取：{linkMaterial.title || linkMaterial.url}（{linkMaterial.chars} 字）
+                    <button type="button" className="breakdown-chip-x" aria-label="移除已读取链接" title="移除已读取的链接正文" onClick={() => setLinkMaterial(null)}>×</button>
+                  </span>
+                )}
                 {isExample && <span className="breakdown-chip">这是示例（虚构），可直接拆解或换成你的内容</span>}
                 <ComposerModelPicker models={models}  />
                 <ThinkingLevelPicker value={preferredThinking} onChange={changeThinking}
                   disabled={false} supportedLevels={supportedThinking} />
               </div>
               <button type="button" className="btn btn-primary dash-launch-btn"
-                onClick={run} disabled={!input.trim()}>
-                开始拆解 →
+                onClick={() => void run()} disabled={!input.trim() || reading}>
+                {reading ? '正在读取链接…' : '开始拆解 →'}
               </button>
             </div>
             {input.trim() !== '' && (

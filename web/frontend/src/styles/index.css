@@ -1264,7 +1264,9 @@ textarea.field { resize: vertical; min-height: 90px; }
 .breakdown-body { margin-top: 16px; }
 .breakdown-input.drag-over { border-color: var(--accent-start); border-style: dashed; background: var(--bg-subtle); }
 .breakdown-tool { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 9px; }
-.breakdown-chip { font-size: 11px; color: var(--text-secondary); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 2px 9px; }
+.breakdown-chip { font-size: 11px; color: var(--text-secondary); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 2px 9px; display: inline-flex; align-items: center; gap: 6px; max-width: 460px; }
+.breakdown-chip-x { border: 0; background: transparent; color: var(--text-tertiary); font-size: 12px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.breakdown-chip-x:hover { color: var(--text); }
 .breakdown-file { display: none; }
 .breakdown-material { display: flex; align-items: center; gap: 6px; }
 .breakdown-material svg { flex-shrink: 0; }

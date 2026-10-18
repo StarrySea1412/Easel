@@ -63,6 +63,7 @@ except Exception:  # 邮箱通知未安装/依赖缺失：钩子降级为空操�
 from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, valid_persona_name, _FILE_ORDER
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
 from chat_budget import LONG_TASK_OUTPUT_RULE, admit
+from link_reader import LinkReader
 from image_reverse import (
     Provider as ImageReverseProvider, reverse_image,
     MAX_BYTES as IMAGE_REVERSE_MAX_BYTES, MAX_PIXELS as IMAGE_REVERSE_MAX_PIXELS,
@@ -630,6 +631,22 @@ async def api_notifications_clear():
     from easel.notifications import NotificationStore
     await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).clear)
     return {'ok': True}
+
+
+_LINK_READER = LinkReader()
+
+
+class LinkReadRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+
+
+@app.post('/api/breakdown/link')
+async def api_breakdown_link(req: LinkReadRequest):
+    """受控读取一条链接的标题与正文（普通 HTTP 优先，反爬站点回退本机有头浏览器）。
+    读取本身不调用任何模型；读不到时如实返回原因，由页面引导补正文。"""
+    return await asyncio.to_thread(_LINK_READER.read, req.url)
+
+
 def _local_ports(env_port: str) -> set[str]:
     return {'7860', '7870', '5173', (env_port or '').strip() or '7860'}
 
