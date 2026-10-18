@@ -27,3 +27,22 @@ test('child sessions, share tokens and appended markers survive a storage round 
   assert.equal(appended.shareAppend?.source.model, 'glm-5.3');
   assert.equal(byId.p1.share, undefined);
 });
+
+test('empty side chats survive persistence while duplicate main placeholders still prune', () => {
+  const parent = { id: 'pp', title: '主对话', created: 1, messages: [{ role: 'user', content: '问' }] };
+  const sideA = { id: 'sa', title: '辅助对话', created: 2, messages: [], parentSessionId: 'pp' };
+  const sideB = { id: 'sb', title: '辅助对话 2', created: 3, messages: [], parentSessionId: 'pp' };
+  const blankA = { id: 'ma', title: 'New Chat', created: 4, messages: [] };
+  const blankB = { id: 'mb', title: 'New Chat', created: 5, messages: [] };
+  assert.equal(saveSessions([sideB, sideA, parent, blankA, blankB]), true);
+  // 断言写入存储的内容（loadSessions 会命中内存缓存，验证的是持久化规则本身）。
+  const stored = JSON.parse(window.localStorage.getItem('easel_sessions') || '[]');
+  assert.deepEqual(stored.map(session => session.id), ['sb', 'sa', 'pp', 'ma'],
+    'explicitly created side chats persist even while empty; duplicate main placeholders still prune to the first');
+  // 空的父会话只要有辅助对话就必须保留（父 id 稳定，子会话才不孤儿）。
+  const emptyParent = { id: 'pe', title: 'New Chat', created: 6, messages: [] };
+  const childOfEmpty = { id: 'sc', title: '辅助对话', created: 7, messages: [], parentSessionId: 'pe' };
+  assert.equal(saveSessions([childOfEmpty, emptyParent, blankA, blankB]), true);
+  const kept = JSON.parse(window.localStorage.getItem('easel_sessions') || '[]').map(session => session.id);
+  assert.ok(kept.includes('pe') && kept.includes('sc'), 'the parent of a side chat survives even when it is empty');
+});

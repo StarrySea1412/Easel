@@ -5,8 +5,15 @@ import type { ChatSession } from './store';
  * session list, keeps its own transcript in the side panel, and the parent's
  * content is only pulled in when the user explicitly quotes it.
  */
+/** All side chats of a parent session, oldest first (tab order). */
+export function sideChatsOf(session: ChatSession, sessions: ChatSession[]): ChatSession[] {
+  return sessions.filter(item => item.parentSessionId === session.id)
+    .slice().sort((a, b) => a.created - b.created);
+}
+
+/** The side chat opened by default: the most recently created one. */
 export function sideChatOf(session: ChatSession, sessions: ChatSession[]): ChatSession | undefined {
-  return sessions.find(item => item.parentSessionId === session.id);
+  return sideChatsOf(session, sessions).at(-1);
 }
 
 export function sideChatTitle(parent: ChatSession, sessions: ChatSession[]): string {

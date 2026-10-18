@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {loadTsModule} from './load-ts.mjs';
 
-// 辅助对话（侧边面板子会话）的纯逻辑：归属、序号、上一轮引用与 /side 语法。
-const {sideChatOf,sideChatTitle,lastExchangeQuote}=await loadTsModule('../src/lib/sideChat.ts',import.meta.url);
+// 辅助对话（侧边面板子会话）的纯逻辑：归属、序号、多实例顺序、上一轮引用与 /side 语法。
+const {sideChatOf,sideChatsOf,sideChatTitle,lastExchangeQuote}=await loadTsModule('../src/lib/sideChat.ts',import.meta.url);
 const {suggestsCommand}=await loadTsModule('../src/lib/goalCommand.ts',import.meta.url);
 
 const parent={id:'p',title:'主对话',created:1,messages:[{role:'user',content:'帮我写文案'},{role:'assistant',content:'好的'}]};
@@ -15,6 +15,15 @@ test('a side chat belongs to its parent session and never to another one',()=>{
   assert.equal(sideChatOf(child,[parent,child]),undefined,'a side chat cannot own a side chat');
   assert.equal(sideChatTitle(parent,[parent]),'辅助对话');
   assert.equal(sideChatTitle(parent,[parent,child]),'辅助对话 2');
+});
+
+test('a parent can own multiple side chats, oldest first for tabs and newest as the default',()=>{
+  const second={id:'c2',title:'辅助对话 2',created:3,parentSessionId:'p'};
+  assert.deepEqual(sideChatsOf(parent,[parent,second,child]).map(s=>s.id),['c1','c2']);
+  assert.equal(sideChatOf(parent,[parent,second,child])?.id,'c2','the default tab is the most recently created side chat');
+  assert.deepEqual(sideChatsOf(parent,[parent]),[]);
+  assert.deepEqual(sideChatsOf(child,[parent,child,second]),[],'children only belong to the parent session');
+  assert.deepEqual(sideChatsOf(parent,[{id:'other',parentSessionId:'x',created:1,messages:[]}]),[]);
 });
 
 test('the parent quote keeps the last exchange and stays bounded',()=>{

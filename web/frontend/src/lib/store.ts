@@ -247,7 +247,13 @@ export function loadSessions(): ChatSession[] {
 /** Prune duplicate empty placeholders only; never silently truncate real history. */
 function prune(sessions: ChatSession[]): ChatSession[] {
   let keptEmpty = false;
+  // 有辅助对话的父会话必须保留：父 id 不被持久化就会在每次刷新时重新生成，
+  // 子会话（携带旧父 id）会变成孤儿、标签消失。
+  const parents = new Set(sessions.map((s) => s.parentSessionId).filter((id): id is string => Boolean(id)));
   const pruned = sessions.filter((s) => {
+    // 辅助对话（子会话）是用户显式开的旁支：即使还没有消息也逐个保留（有独立的关闭入口），
+    // 否则多开两个空辅助对话会在保存时被静默丢掉。
+    if (s.parentSessionId || parents.has(s.id)) return true;
     if (s.archived || s.pinnedAt || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;

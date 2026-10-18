@@ -1,6 +1,6 @@
 import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
-import { lastExchangeQuote, sideChatOf, sideChatTitle } from './lib/sideChat';
+import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib/sideChat';
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
 import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
@@ -1035,7 +1035,8 @@ export default function App() {
     }
   }, [appendAssistant, clearStream]);
 
-  // 辅助对话（侧边面板的子会话）：确保存在、转发消息、双向引用；主线程消息流不受影响。
+  // 辅助对话（侧边面板的子会话）：多实例（每个父会话可开多个）、转发消息、双向引用；
+  // 主线程消息流不受影响。mode='create' 总是新建，'open'（默认）复用最近的。
   const ensureSideChat = useCallback((): string | undefined => {
     const active = sessionsRef.current.find(item => item.id === activeSessionId);
     if (!active) return undefined;
@@ -1048,34 +1049,51 @@ export default function App() {
     setSessions(next);
     return child.id;
   }, [activeSessionId]);
-  const handleSideSend = useCallback((text: string) => {
+  const newSideChat = useCallback((): string | undefined => {
     const active = sessionsRef.current.find(item => item.id === activeSessionId);
-    if (!active) return;
-    let child = sideChatOf(active, sessionsRef.current);
-    if (!child) { const id = ensureSideChat(); child = sessionsRef.current.find(item => item.id === id); }
-    if (child) sendUserAndStream(child.id, text);
-  }, [activeSessionId, ensureSideChat, sendUserAndStream]);
-  const handleSideStop = useCallback(() => {
-    const active = sessionsRef.current.find(item => item.id === activeSessionId);
-    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
-    if (child) void handleStopStream(child.id);
-  }, [activeSessionId, handleStopStream]);
-  const handleQuoteFromMain = useCallback(() => {
-    const active = sessionsRef.current.find(item => item.id === activeSessionId);
-    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
-    if (!active || !child) return;
-    const quote = lastExchangeQuote(active);
-    if (!quote) { showToast('主对话还没有可引用的内容', 'info'); return; }
-    addChatDraftQuote(child.id, quote);
+    if (!active) return undefined;
+    const child = { ...createSession(), parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
+    const next = [child, ...sessionsRef.current];
+    if (!saveSessions(next)) { showToast('辅助对话未能保存到本机', 'error'); return undefined; }
+    sessionsRef.current = next;
+    setSessions(next);
+    return child.id;
   }, [activeSessionId]);
-  const handleQuoteToMain = useCallback(() => {
-    const active = sessionsRef.current.find(item => item.id === activeSessionId);
-    const child = active ? sideChatOf(active, sessionsRef.current) : undefined;
-    if (!active || !child) return;
+  const handleOpenSideChat = useCallback((mode?: 'open' | 'create'): string | undefined => (
+    mode === 'create' ? newSideChat() : ensureSideChat()
+  ), [ensureSideChat, newSideChat]);
+  const handleSideSend = useCallback((childId: string, text: string) => {
+    if (!sessionsRef.current.some(item => item.id === childId)) return;
+    sendUserAndStream(childId, text);
+  }, [sendUserAndStream]);
+  const handleSideStop = useCallback((childId: string) => {
+    if (sessionsRef.current.some(item => item.id === childId)) void handleStopStream(childId);
+  }, [handleStopStream]);
+  const handleQuoteFromMain = useCallback((childId: string) => {
+    const child = sessionsRef.current.find(item => item.id === childId);
+    const parent = child?.parentSessionId ? sessionsRef.current.find(item => item.id === child.parentSessionId) : undefined;
+    if (!parent) return;
+    const quote = lastExchangeQuote(parent);
+    if (!quote) { showToast('主对话还没有可引用的内容', 'info'); return; }
+    addChatDraftQuote(childId, quote);
+  }, []);
+  const handleQuoteToMain = useCallback((childId: string) => {
+    const child = sessionsRef.current.find(item => item.id === childId);
+    if (!child?.parentSessionId) return;
     const reply = [...child.messages].reverse().find(message => message.role === 'assistant' && (message.content || '').trim());
     if (!reply) { showToast('辅助对话还没有可引用的回答', 'info'); return; }
-    addChatDraftQuote(active.id, (reply.content || '').slice(0, 600));
-  }, [activeSessionId]);
+    addChatDraftQuote(child.parentSessionId, (reply.content || '').slice(0, 600));
+  }, []);
+  const handleSideClose = useCallback((childId: string) => {
+    const child = sessionsRef.current.find(item => item.id === childId);
+    if (!child?.parentSessionId) return;
+    void handleStopStream(childId);
+    const next = sessionsRef.current.filter(item => item.id !== childId);
+    if (!saveSessions(next)) { showToast('关闭未能保存到本机', 'error'); return; }
+    sessionsRef.current = next;
+    setSessions(next);
+    showToast('辅助对话已关闭；主对话内容不受影响。', 'info');
+  }, [handleStopStream]);
 
 
   const handleSteer = useCallback(async (sessionId: string, id: string) => {
@@ -1297,12 +1315,13 @@ export default function App() {
             key={activeSession.id}
             session={activeSession}
             taskState={tasks}
-            sideSession={sideChatOf(activeSession, sessions)}
-            onSideChat={()=>{ensureSideChat();}}
+            sideSessions={sideChatsOf(activeSession, sessions)}
+            onSideChat={handleOpenSideChat}
             onSideSend={handleSideSend}
             onSideStop={handleSideStop}
             onQuoteFromMain={handleQuoteFromMain}
             onQuoteToMain={handleQuoteToMain}
+            onSideClose={handleSideClose}
             onShare={handleShareConversation}
             onLoadShare={handleLoadShareAppends}
             onTaskChange={()=>setTaskRevision(v=>v+1)}
