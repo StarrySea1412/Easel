@@ -162,3 +162,19 @@ def test_demo_flag_keeps_live_requests_fail_closed_without_config(tmp_path):
     with pytest.raises(Exception) as failure:
         service.start(comfyui.ComfyVideoRequest(prompt="x", demo=False))
     assert getattr(failure.value, "status_code", None) == 400
+
+
+def test_demo_frame_carries_the_actual_prompt_and_cinematic(tmp_path):
+    from PIL import Image
+    frame = tmp_path / "frame.png"
+    comfyui._demo_frame("海边日落，海浪轻拍沙滩", {"movement": "缓慢拉远", "lighting": "柔光"}, frame)
+    assert frame.is_file() and frame.stat().st_size > 2000
+    with Image.open(frame) as image:
+        assert image.size == (768, 432)
+    other = tmp_path / "other.png"
+    comfyui._demo_frame("完全不同的一段提示词", None, other)
+    assert other.read_bytes() != frame.read_bytes(), "不同输入应产生不同的占位帧"
+    # 超长提示词按行截断，不抛错、不留帧内溢出（大小有界）。
+    long_frame = tmp_path / "long.png"
+    comfyui._demo_frame("很长的提示词内容" * 200, {"style": "纪录片"}, long_frame)
+    assert long_frame.is_file() and long_frame.stat().st_size < 2_000_000

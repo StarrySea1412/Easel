@@ -52,6 +52,7 @@
 .video-gallery-item .video-gallery-preview { margin:0; position:relative; aspect-ratio:16/9; border-radius:var(--radius-sm); overflow:hidden; background:var(--surface-2); border:1px solid var(--border); }
 .video-gallery-preview video { width:100%; height:100%; object-fit:cover; }
 .video-gallery-preview i { position:absolute; inset:0; display:grid; place-items:center; font-style:normal; color:white; text-shadow:0 1px 6px #000; font-size:23px; }
+.video-gallery-demo-badge { position:absolute; top:6px; left:6px; z-index:1; padding:2px 8px; border-radius:var(--radius-pill); background:#c47a12; color:#fff; font-size:10px; line-height:1.6; letter-spacing:.04em; }
 @media(max-width:600px) { .studio-medium-switch>span { margin-left:auto; font-size:10px; }.studio-medium-switch button { padding:9px 19px; }.video-provider-row :is(select, .easel-select) { max-width:200px; }.video-gallery-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .image-creation { border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); overflow:hidden; box-shadow:0 5px 24px #18181b04; }
 .image-creation.is-dragging { outline:2px solid var(--accent-start); outline-offset:3px; }

@@ -1634,6 +1634,8 @@ export function startComfyVideo(options: {
 }
 export function fetchComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { return request(`/api/comfyui/video/${encodeURIComponent(jobId)}`); }
 export function cancelComfyVideoJob(jobId: string): Promise<ComfyVideoJob> { return request(`/api/comfyui/video/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }); }
+export interface ComfyVideoSnapshot { config: ComfyVideoConfig; jobs: ComfyVideoJob[]; }
+export function fetchComfyVideoSnapshot(): Promise<ComfyVideoSnapshot> { return request('/api/comfyui/video'); }
 export function previewComfyPrompt(prompt: string, cinematic: Record<string, string> = {}, negativePrompt = ''): Promise<{ prompt: string; cinematic: Record<string, string> }> {
   return request('/api/comfyui/video/prompt-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, cinematic, negativePrompt }) });
 }

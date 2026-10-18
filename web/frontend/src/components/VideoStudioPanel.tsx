@@ -1,8 +1,10 @@
 import AspectRatioIcon from './AspectRatioIcon';
 import { NativeSelect as Select } from './ui/Select';
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { VideoStudioController } from '../hooks/useVideoStudio';
 import type { ImagegenGalleryItem } from '../lib/api';
+import { fetchComfyVideoSnapshot, type ComfyVideoJob } from '../lib/api';
+import { mergeStudioVideos } from '../lib/studioVideoMerge';
 import { IconImage } from './settingsIcons';
 import StudioMediaSource from './StudioMediaSource';
 import StudioModelControl from './StudioModelControl';
@@ -23,6 +25,17 @@ export default function VideoStudioPanel({ video, images, onOpenSettings, sessio
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [playbackError, setPlaybackError] = useState('');
+  // ComfyUI（模拟/真实）产物并入「最近视频」：与视频服务作品同库展示、可点播。
+  const [comfyJobs, setComfyJobs] = useState<ComfyVideoJob[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => { try { const next = await fetchComfyVideoSnapshot(); if (alive) setComfyJobs(next.jobs || []); } catch { /* 图库静默降级；ComfyUI 面板仍有独立错误通道 */ } };
+    void load();
+    const onUpdate = () => { void load(); };
+    window.addEventListener('easel:outputs-updated', onUpdate);
+    return () => { alive = false; window.removeEventListener('easel:outputs-updated', onUpdate); };
+  }, []);
+  const gallery = useMemo(() => mergeStudioVideos(video.config?.videos || [], comfyJobs), [video.config?.videos, comfyJobs]);
   const { reference, job, provider, busy } = video;
   const media = useStudioMediaInput(video.uploadReference, video.locked, reference?.id ?? null);
   const locked = video.locked || media.processing;
@@ -82,6 +95,6 @@ export default function VideoStudioPanel({ video, images, onOpenSettings, sessio
     <div className="image-service-status" role="status">{video.loading ? <span>正在读取视频服务…</span> : video.configError ? <><span>视频服务读取失败：{video.configError}</span><button type="button" className="link-btn" onClick={() => void video.refresh()}>重试读取视频服务</button></>
       : !provider?.configured ? <><span>连接视频服务后，就能在这里直接生成。</span><button type="button" className="link-btn" onClick={onOpenSettings}>连接视频服务 →</button></> : <span>{provider.name} · {video.config?.billingHint}</span>}</div>
     {images.length > 0 && <details className="video-source-gallery"><summary>从最近图片选择视频参考</summary><div className="image-gallery-grid">{images.slice(0, 8).map(item => <button type="button" className="image-gallery-item" key={item.url} disabled={locked} aria-label={`用图片生成视频：${item.name}`} onClick={() => void video.useGalleryReference(item)}><img src={item.url} alt={item.name} loading="lazy" /><span>{item.name}</span></button>)}</div></details>}
-    {!!video.config?.videos.length && <section className="image-gallery" aria-label="历史视频图库"><div className="image-section-heading"><h2>最近视频</h2><span>点击作品，在上方画布播放</span></div><div className="image-gallery-grid video-gallery-grid">{video.config.videos.slice(0, 8).map(item => <button type="button" className="image-gallery-item video-gallery-item" key={item.url} disabled={locked} aria-label={`播放视频：${item.name}`} onClick={() => video.previewJob(item.generation)}><span className="video-gallery-preview"><video src={item.url} preload="metadata" muted playsInline aria-hidden="true" /><i aria-hidden="true">▶</i></span><span>{item.name}</span></button>)}</div></section>}
+    {!!gallery.length && <section className="image-gallery" aria-label="历史视频图库"><div className="image-section-heading"><h2>最近视频</h2><span>点击作品，在上方画布播放</span></div><div className="image-gallery-grid video-gallery-grid">{gallery.slice(0, 8).map(item => <button type="button" className="image-gallery-item video-gallery-item" key={item.url} disabled={locked} aria-label={`播放${item.demo ? '模拟' : ''}视频：${item.name}`} onClick={() => video.previewJob(item.generation)}><span className="video-gallery-preview"><video src={item.url} preload="metadata" muted playsInline aria-hidden="true" /><i aria-hidden="true">▶</i>{item.demo && <span className="video-gallery-demo-badge">模拟</span>}</span><span>{item.name}</span></button>)}</div></section>}
   </>;
 }

@@ -25,9 +25,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 try:
-    from .cinematic_prompt import build_cinematic_prompt, normalize_cinematic_brief
+    from .cinematic_prompt import FIELDS as CINEMATIC_FIELDS, build_cinematic_prompt, normalize_cinematic_brief
 except ImportError:  # Loaded as a top-level module by the legacy web launcher.
-    from cinematic_prompt import build_cinematic_prompt, normalize_cinematic_brief
+    from cinematic_prompt import FIELDS as CINEMATIC_FIELDS, build_cinematic_prompt, normalize_cinematic_brief
 from easel.artifacts import ArtifactStore, scope
 def validate_mp4(path: Path) -> None:
     """Reuse the existing strict validator without importing videogen at module load."""
@@ -36,6 +36,78 @@ def validate_mp4(path: Path) -> None:
     except ImportError:  # Loaded as a top-level module by the legacy web launcher.
         from videogen import validate_mp4 as _validate
     _validate(path)
+
+_DEMO_FONT_CANDIDATES = (
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\msyhbd.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+)
+
+
+def _demo_font(size: int):
+    from PIL import ImageFont
+    for path in _DEMO_FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # 旧 Pillow 的 load_default 没有 size 参数
+        return ImageFont.load_default()
+
+
+def _wrap_text(draw, text: str, font, max_px: float, max_lines: int) -> list[str]:
+    """贪心按像素换行；超出上限的行尾加省略号。"""
+    lines: list[str] = []
+    current = ""
+    consumed = 0
+    for char in text:
+        candidate = current + char
+        if current and draw.textlength(candidate, font=font) > max_px:
+            lines.append(current)
+            current = char
+        else:
+            current = candidate
+        consumed += 1
+        if len(lines) == max_lines:
+            break
+    if len(lines) < max_lines and current:
+        lines.append(current)
+    if lines and consumed < len(text):
+        lines[-1] = lines[-1][:-1] + "…" if lines[-1] else "…"
+    return lines
+
+
+def _demo_frame(prompt: str, cinematic: Any, target: Path) -> None:
+    """渲染占位帧：把实际输入（提示词与已填写的镜头语言参数）写进画面。"""
+    from PIL import Image, ImageDraw
+    width, height = 768, 432
+    image = Image.new("RGB", (width, height), "#0f172a")
+    draw = ImageDraw.Draw(image)
+    title_font, sub_font, body_font, small_font = (_demo_font(24), _demo_font(14), _demo_font(19), _demo_font(13))
+    margin = 36
+    max_px = width - margin * 2
+    draw.rectangle((0, 0, width, 5), fill="#f59e0b")
+    draw.text((margin, 26), "Easel · ComfyUI 模拟输出", font=title_font, fill="#f8fafc")
+    draw.text((margin, 60), "非模型生成 · 本地占位视频", font=sub_font, fill="#f59e0b")
+    draw.text((margin, 98), "提示词", font=small_font, fill="#94a3b8")
+    body = _wrap_text(draw, prompt or "（未填写提示词）", body_font, max_px, 7)
+    y = 120
+    for line in body:
+        draw.text((margin, y), line, font=body_font, fill="#e2e8f0")
+        y += 27
+    brief = normalize_cinematic_brief(cinematic)
+    labels = dict(CINEMATIC_FIELDS)
+    summary = " · ".join(f"{labels.get(key, key)}：{value}" for key, value in brief.items()) or "未填写镜头语言参数（可选）"
+    draw.text((margin, 330), "镜头语言", font=small_font, fill="#94a3b8")
+    summary_y = 350
+    for line in _wrap_text(draw, summary, sub_font, max_px, 2):
+        draw.text((margin, summary_y), line, font=sub_font, fill="#cbd5e1")
+        summary_y += 20
+    draw.text((margin, 398), time.strftime("模拟运行不调用任何模型服务 · %m-%d %H:%M"), font=small_font, fill="#64748b")
+    image.save(target, format="PNG")
 
 SAFE_NODE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
@@ -404,21 +476,36 @@ class ComfyVideoService:
             else:
                 self._finish(ident, state="error", url=None, error=str(exc)[:600])
 
-    def _render_demo(self, target: Path) -> None:
-        """Render an obviously synthetic placeholder clip; never a model output."""
+    def _render_demo(self, target: Path, job: dict[str, Any] | None = None) -> None:
+        """Render an obviously synthetic placeholder clip; never a model output.
+
+        占位画面会写入本次实际输入（提示词与已填写的镜头语言参数），让模拟运行
+        也能完整演练“输入 → 产物”的链路；帧渲染失败时回退到无文字的测试图案。
+        """
         if self.demo_render is not None:
             self.demo_render(target)
             return
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise ComfyError("模拟运行需要本机 ffmpeg；安装后重试，或配置 ComfyUI 后提交真实任务")
-        command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                   "-f", "lavfi", "-i", "testsrc2=duration=4:size=768x432:rate=24",
-                   "-pix_fmt", "yuv420p", str(target)]
+        job = job or {}
+        frame = target.with_suffix(".png")
+        try:
+            _demo_frame(str(job.get("prompt") or ""), job.get("cinematic"), frame)
+            command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                       "-loop", "1", "-i", str(frame), "-t", "4", "-r", "24",
+                       "-pix_fmt", "yuv420p", str(target)]
+        except Exception:
+            frame.unlink(missing_ok=True)
+            command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                       "-f", "lavfi", "-i", "testsrc2=duration=4:size=768x432:rate=24",
+                       "-pix_fmt", "yuv420p", str(target)]
         try:
             completed = subprocess.run(command, capture_output=True, timeout=120)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ComfyError("模拟视频渲染失败") from exc
+        finally:
+            frame.unlink(missing_ok=True)
         if completed.returncode != 0 or not target.is_file():
             raise ComfyError("模拟视频渲染失败：ffmpeg 未生成文件")
 
@@ -430,7 +517,7 @@ class ComfyVideoService:
                 return
             self.directory.mkdir(parents=True, exist_ok=True)
             target = self.directory / job["filename"]
-            self._render_demo(target)
+            self._render_demo(target, job)
             validate_mp4(target)
             if event.is_set():
                 target.unlink(missing_ok=True)

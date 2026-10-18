@@ -89,7 +89,7 @@ export default function ComfyVideoWorkflowPanel({ prompt, locked, sessionId }: {
   return <section className="comfy-workflow-panel" aria-label="ComfyUI 视频工作流">
     <div className="comfy-workflow-heading"><div>
       <h2>ComfyUI 视频工作流<InlineInfo label="ComfyUI 工作流说明" hover>
-        <p>使用你配置的 API 工作流与本地/局域网节点服务；提交后 Easel 轮询队列，校验 MP4 后登记到原对话产物。</p>
+        <p>使用你配置的 API 工作流与本地/局域网节点服务；提交后 Easel 轮询队列，校验 MP4 后登记到原对话产物。模拟与真实结果都会进入下方「最近视频」图库（模拟带“模拟”徽标），可直接在画布播放。</p>
         <p>启用真实提交需要两项配置：<code>COMFYUI_BASE_URL</code>（例如 http://127.0.0.1:8188）与 <code>COMFYUI_WORKFLOW_PATH</code>（API 格式的 workflow JSON）。提示词节点可留空，工作流里只有一个文本节点时自动识别。</p>
         <p>未配置时不会调用其他付费视频通道；“模拟运行”在本地生成明确标注的占位视频（需要本机 ffmpeg），只用于体验完整流程，不是任何模型服务的产物。</p>
       </InlineInfo></h2>
