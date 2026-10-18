@@ -428,6 +428,13 @@ export function deleteOutput(path: string): Promise<{ ok: boolean; deleted: stri
   return request(`/api/output/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE' });
 }
 
+/** 重命名内容库文件或目录（保留扩展名；后端校验冲突与受保护数据）。 */
+export function renameOutput(path: string, name: string): Promise<{ ok: boolean; renamed: string; old: string }> {
+  return request(`/api/output/${path.split('/').map(encodeURIComponent).join('/')}/rename`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+  });
+}
+
 export interface UploadedFile { id: string; name: string; path: string; }
 
 /** OpenClaw's canonical per-turn reasoning levels. */

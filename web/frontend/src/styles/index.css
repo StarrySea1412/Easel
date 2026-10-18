@@ -1380,6 +1380,15 @@ textarea.field { resize: vertical; min-height: 90px; }
   background: rgba(0,0,0,0.55); color: #fff; cursor: pointer; transition: background var(--t-fast); }
 .gcard:hover .gcard-del { display: inline-flex; }
 .gcard-del:hover { background: var(--red); }
+/* 内容库卡片重命名按钮与行内输入（hover 显现，位于删除键左侧） */
+.gcard-rename { position: absolute; top: 6px; right: 36px; z-index: 2; width: 26px; height: 26px;
+  display: none; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: none;
+  background: rgba(0,0,0,0.55); color: #fff; cursor: pointer; transition: background var(--t-fast); }
+.gcard:hover .gcard-rename { display: inline-flex; }
+.gcard-rename:hover { background: var(--accent-start, var(--accent)); }
+.gcard-rename-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 3px 8px;
+  border: 1px solid var(--accent-start); border-radius: var(--radius-sm); background: var(--bg-input, var(--surface));
+  color: var(--text-primary); outline: none; }
 
 /* 技能库中文展示名（中文大字 + 原名小字） */
 .skill-card-rawname { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); margin-top: -3px; letter-spacing: 0; }

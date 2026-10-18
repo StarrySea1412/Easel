@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { fetchOutputs, fetchOutputContent, mediaUrl, deleteOutput } from '../lib/api';
+import { fetchOutputs, fetchOutputContent, mediaUrl, deleteOutput, renameOutput } from '../lib/api';
 import type { OutputNode, OutputMeta } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { Sk } from './Skeleton';
-import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash } from './icons';
+import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash, IconEdit } from './icons';
 import '../styles/output-covers.css';
 
 const FILTERS: { key: string; label: string; Icon: typeof IconOutputs }[] = [
@@ -225,6 +225,33 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     }
   }, [load]);
 
+  // 内容库重命名：行内改名，Enter 保存、Esc 取消；后端保留扩展名并校验冲突。
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const startRename = useCallback((node: OutputNode, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingPath(node.path);
+    setRenameValue(node.name);
+  }, []);
+  const commitRename = useCallback(async (node: OutputNode) => {
+    const name = renameValue.trim();
+    setRenamingPath(null);
+    if (!name || name === node.name) return;
+    try {
+      await renameOutput(node.path, name);
+      load();
+    } catch (err) {
+      alert((err as Error).message || '重命名失败');
+    }
+  }, [renameValue, load]);
+  const renameEditor = (node: OutputNode) => (
+    <input className="gcard-rename-input" autoFocus maxLength={80} aria-label={`重命名 ${node.name}`} value={renameValue}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setRenameValue(e.target.value)}
+      onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); void commitRename(node); } if (e.key === 'Escape') { e.preventDefault(); setRenamingPath(null); } }}
+      onBlur={() => setRenamingPath(null)} />
+  );
+
   const open = useCallback(async (f: OutputNode) => {
     const seq = ++reqSeq.current;
     setSelected(f); setContent(''); setContentError(''); setBinaryContent(false); setLoading(false); setCopyStatus('');
@@ -286,12 +313,13 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         <div className="gcard-thumb">
           <span className="gcard-kind">{m?.kind ? (KIND_LABEL[m.kind] || m.kind) : '文件夹'}</span>
           <button className="gcard-del" title="删除" onClick={(e) => remove(d, e)}><IconTrash size={14} /></button>
+          <button className="gcard-rename" title="重命名" onClick={(e) => startRename(d, e)}><IconEdit size={14} /></button>
           <Thumb f={cover || d} big />
         </div>
         <div className="gcard-meta">
-          <button className="gcard-name" title={m?.title || d.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); enterDir(d.name); }}>
+          {renamingPath === d.path ? renameEditor(d) : <button className="gcard-name" title={m?.title || d.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); enterDir(d.name); }}>
             {!m && <IconFolder size={13} />} {m?.title || d.name}
-          </button>
+          </button>}
           <div className="gcard-sub" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             {m?.platform && <span style={badge}>{m.platform}</span>}
             {m?.status && <span style={statusBadge(m.status)}>{STATUS_LABEL[m.status] || m.status}</span>}
@@ -308,10 +336,11 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
       <div className="gcard-thumb">
         <span className="gcard-kind">{kindLabel(f)}</span>
         <button className="gcard-del" title="删除" onClick={(e) => remove(f, e)}><IconTrash size={14} /></button>
+        <button className="gcard-rename" title="重命名" onClick={(e) => startRename(f, e)}><IconEdit size={14} /></button>
         <Thumb f={f} />
       </div>
       <div className="gcard-meta">
-        <button className="gcard-name" title={f.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); void open(f); }}>{f.name}</button>
+        {renamingPath === f.path ? renameEditor(f) : <button className="gcard-name" title={f.name} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); void open(f); }}>{f.name}</button>}
         {f.kind === 'image' && <div className="gcard-sub" style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>{generatedImage(f) && <span style={badge}>AI 生图</span>}<span>{imageDimensions(f) || '查看完整图片'}</span></div>}
         {f.generation?.prompt && <div className="gcard-sub" title={f.generation.prompt} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4 }}>{f.generation.prompt}</div>}
         <CreatedTime node={f} />

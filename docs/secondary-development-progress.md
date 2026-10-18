@@ -1,3 +1,10 @@
+## 2026-10-18 · 内容库支持重新命名
+
+- 后端 `POST /api/output/{path}/rename`（web/app.py，紧邻删除路由）：复用 `_safe_output_target`（仅内容库内、越界 403、不存在 404）与 `_is_protected`（系统数据 403）；空名/`.`/`..`/路径分隔符/冒号 400、超长 422/400、同名冲突 409；文件保留原扩展名（输入显式同后缀不重复追加）、目录整棵改名；生图提示词旁车（`.<name>.easel-image.json`）随图片迁移——原实现把 `is_file()` 检查放在 `rename()` 之后导致旁车不动，被单测暴露后改为改名前提早取值。
+- 前端：`api.ts` 新增 `renameOutput()`；`OutputsPage` 卡片 hover 出现“重命名”（垃圾桶左侧，`IconEdit`），点击进入行内编辑器（Enter 保存 / Esc 取消 / 失焦取消 / 与原名相同不发请求），保存后 `load()` 刷新；`.gcard-rename`、`.gcard-rename-input` 按既有卡片操作样式（`--radius-sm`、暗色可读）。
+- 测试：后端 `tests/test_outputs_rename.py` 5 项（扩展名保留与显式后缀、空/分隔符/超长拒绝、409 冲突、受保护与越界、目录改名＋旁车迁移）；前端新增 `tests/outputs-rename.test.mjs`（jsdom——happy-dom 下 React 受控输入的 onChange 会在下一个事件才被值追踪触发，断言不可靠，故换 jsdom；覆盖 Enter 提交 URL/请求体、列表刷新、Esc 取消、同名不发请求），全量 1101 项、lint 18 既有警告、构建通过。
+- 基线如实记录：`tests/test_output_image_library.py`（9 errors+1 fail，引用 fc9ecf88 已移除的 `_IMAGEGEN_JOBS`）与 `tests/test_office_outputs.py`（1 fail）在本轮改动前的 HEAD 即红（主检出复跑一致），与本轮无关、未在本次修改。7880 需重启后端后新路由生效。
+
 ## 2026-10-18 · 技能可编辑元数据与自动分类
 
 - 后端 `web/skill_meta.py`：`<DATA_DIR>/skill-meta.json` 覆盖层（显示名/描述/标签/分类，8 个预设分类＋自定义），校验（标签≤8、分类必须存在、名称去重 409）；自动分类 `rules`（关键字规则＋分类优先级）与 `ai`（注入 runner，失败/输出不可解析如实报 409/502，不伪造）；四条路由接入 app.py。

@@ -5201,6 +5201,49 @@ async def api_output_delete(path: str):
     return {"ok": True, "deleted": path, "kind": "dir" if is_dir else "file"}
 
 
+class OutputRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+@app.post("/api/output/{path:path}/rename")
+async def api_output_rename(path: str, req: OutputRenameRequest):
+    """重命名内容库里的文件或目录：保留扩展名、仅限内容库内、系统数据受保护、同名冲突如实报错。"""
+    full = _safe_output_target(path)
+    if _is_protected(full):
+        raise HTTPException(403, '系统数据受保护，不可从内容库重命名')
+    raw = req.name.strip()
+    if not raw or raw in {'.', '..'} or any(ch in raw for ch in ('/', chr(92))) or ':' in raw:
+        raise HTTPException(400, '名称不能为空，且不能包含路径分隔符')
+    if full.is_file():
+        ext = full.suffix
+        stem = raw[:-len(ext)] if ext and raw.lower().endswith(ext.lower()) else raw
+        stem = stem.strip()
+        if not stem:
+            raise HTTPException(400, '名称不能为空')
+        new_name = f'{stem}{ext}'
+    else:
+        new_name = raw
+    if len(new_name) > 120:
+        raise HTTPException(400, '名称过长（最多 120 字）')
+    target = full.parent / new_name
+    if target != full and target.exists():
+        raise HTTPException(409, '同名文件或目录已存在，请换一个名称')
+    if target == full:
+        return {"ok": True, "renamed": path, "old": path, "kind": "dir" if full.is_dir() else "file"}
+    is_file = full.is_file()
+    try:
+        full.rename(target)
+        # 生图提示词旁车随图片一起改名（须在改名后仍用旧路径推算旁车）
+        if is_file and full.parent.name in {IMAGEGEN_DIR.name, 'images'}:
+            legacy = _imagegen_metadata_path(full)
+            if legacy.exists():
+                legacy.rename(_imagegen_metadata_path(target))
+    except OSError as e:
+        raise HTTPException(500, f'重命名失败：{e}')
+    rel = target.relative_to(OUTPUTS_DIR).as_posix()
+    return {"ok": True, "renamed": rel, "old": path, "kind": "dir" if not is_file else "file"}
+
+
 @app.post("/api/upload")
 async def api_upload(
     files: list[UploadFile] = File(...),

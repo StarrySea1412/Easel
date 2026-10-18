@@ -1,3 +1,9 @@
+## 2026-10-18 · Rename in the outputs library / 内容库支持重新命名
+
+- Every card in 内容库 now offers 重命名 beside 删除: the name becomes an inline editor (Enter saves, Escape or blur cancels, an unchanged name sends nothing) and the list reloads with the new name; folder cards rename whole directories. / 内容库卡片在“删除”旁新增“重命名”：名称就地变输入框（Enter 保存、Esc/失焦取消、与原名相同不发请求），保存后列表刷新；文件夹卡片整目录改名。
+- Backend `POST /api/output/{path}/rename` reuses the delete route's guards — outputs-only targets, 403 on protected system data, 400 on blank names or path separators, real 409 on collisions — and keeps the original extension so typing “会议记录” for `notes.md` yields `会议记录.md` (an explicitly typed suffix is not doubled). Image-generation prompt sidecars (`.<name>.easel-image.json`) move with their image. / 后端 `POST /api/output/{path}/rename` 复用删除路由的防护——仅限内容库内、系统数据 403、空名/路径分隔符 400、同名冲突如实 409——并保留原扩展名（`notes.md` 输入“会议记录”得到 `会议记录.md`，显式带后缀不重复追加）；生图提示词旁车随图片一起改名。
+- Tests: backend 5 (`tests/test_outputs_rename.py`), frontend 1,101 (new jsdom `outputs-rename` flow: Enter posts the right URL/body and refreshes, Escape cancels, same-name no-op). The 7880 backend needs a restart for the new route. / 后端 5 项（`tests/test_outputs_rename.py`）、前端 1101 项（新增 jsdom 改名流程：Enter 按正确 URL/请求体提交并刷新、Esc 取消、同名不发请求）。7880 需重启后端后新路由生效。
+
 ## 2026-10-18 · Editable skill metadata with tags, presets and auto-classification / 技能可编辑元数据：标签、预设分类与自动分类
 
 - Skills now carry an editable metadata layer (`<DATA_DIR>/skill-meta.json`): display name, description, tags and category, merged into `/api/skills` without touching third-party SKILL.md files; a 分类筛选 row and tag chips appear on the 技能库 grid, and each card's drawer hosts the editor with preset + custom categories (新建并选用). / 技能新增可编辑元数据层（`<DATA_DIR>/skill-meta.json`）：显示名、描述、标签、分类，合并进 `/api/skills`、不改第三方 SKILL.md 本体；技能库出现分类筛选与卡片标签，抽屉内可编辑（预设分类＋自定义“新建并选用”）。
