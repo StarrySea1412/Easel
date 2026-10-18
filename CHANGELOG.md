@@ -1,3 +1,9 @@
+## 2026-10-18 · Model menu: 自动沿用 plus a pinned 模型设置 footer / 模型菜单：“自动沿用”＋“模型设置”固定底栏
+
+- The first entry of 本轮使用模型 is now 自动沿用 (was 沿用会话模型); the same wording is used in the breakdown fallback hint and the settings “saved default” note. / “本轮使用模型”首项文案改为“自动沿用”（原“沿用会话模型”）；拆解页回退提示与设置面板“已保存默认”指引同步改为“自动沿用”。
+- 模型设置（管理模型）moved out of the scrolling candidate list into a pinned footer separated by a rule, so it stays reachable no matter how many models exist; the candidate list above scrolls on its own. / “模型设置（管理模型）”从可滚动候选列表中移出，成为带分隔线的固定底栏——模型再多也不随列表滚走，上方的候选列表独立滚动。
+- Implemented as an optional `footer` on the shared Select (virtual last entry for keyboard navigation): Arrow keys reach it from the last model, Home/End/Enter work, `aria-activedescendant` points at it, and selects without a footer render exactly as before. 1,102 frontend tests, lint (0 errors) and build pass. / 以共享 Select 的可选 `footer` 实现（键盘导航视作列表末尾虚拟条目）：方向键从最后一个模型可移到它、Home/End/Enter 可用、`aria-activedescendant` 指向底栏；无 footer 的其它下拉外观与行为不变。前端 1102 项、lint（0 错误）、构建通过。
+
 ## 2026-10-18 · Rename in the outputs library / 内容库支持重新命名
 
 - Every card in 内容库 now offers 重命名 beside 删除: the name becomes an inline editor (Enter saves, Escape or blur cancels, an unchanged name sends nothing) and the list reloads with the new name; folder cards rename whole directories. / 内容库卡片在“删除”旁新增“重命名”：名称就地变输入框（Enter 保存、Esc/失焦取消、与原名相同不发请求），保存后列表刷新；文件夹卡片整目录改名。

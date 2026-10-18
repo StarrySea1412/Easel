@@ -52,7 +52,7 @@ export default function BreakdownPage({ onStart, onOpenRun }: BreakdownPageProps
   const run = () => {
     if (!input.trim()) return;
     const snapshot = models.getSnapshot();
-    if (snapshot === null) { setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“沿用会话模型”。'); return; }
+    if (snapshot === null) { setError('所选模型暂时不可用于本轮：请刷新模型选项，或改回“自动沿用”。'); return; }
     setError('');
     if (!onStart(input, snapshot.modelRef, thinkingLevel)) setError('暂未创建拆解对话，请检查网关连接和浏览器存储后重试。材料已保留。');
   };

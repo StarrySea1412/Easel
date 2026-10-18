@@ -442,7 +442,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       else setMediaRows((rows) => ({ ...rows, [channel]: d.channels[channel]?.rows || [] }));
       clearImportPreview();
       setSavedNote(channel === 'chat'
-        ? `✓ 已保存默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。请回到对话选择“沿用会话模型”；实际调用以执行回执为准。${d.note ? ` ${d.note}` : ''}`
+        ? `✓ 已保存默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。请回到对话选择“自动沿用”；实际调用以执行回执为准。${d.note ? ` ${d.note}` : ''}`
         : d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
     } catch (e) {

@@ -1,3 +1,10 @@
+## 2026-10-18 · 模型菜单：“自动沿用”＋“模型设置”固定底栏
+
+- 共享 `Select` 新增可选 `footer`（`SelectFooterOption`）：底栏条目渲染在 `.easel-select-footer`（不在滚动区）、候选列表移入 `.easel-select-options`（`overflow-y:auto`）独立滚动，弹层改 flex 列布局、`overflow:hidden` 由圆角裁切；翻转/定位高度改为「候选 scrollHeight + 底栏 offsetHeight」估算。
+- 键盘不回归：底栏作为列表末尾虚拟条目参与方向键/Home/End/typeahead/Enter（`entries` 数组）；`aria-activedescendant` 由 `options[activeIndex]` 改为 `entries[activeIndex]`（新增用例先命中此缺陷：End 到底栏后 activedescendant 为空）；滚动跟随只作用于候选容器，激活底栏时跳过。
+- `ComposerModelPicker`：首项“沿用会话模型”→“自动沿用”；“模型设置”由 options 内的 `__manage_models__` 伪选项改为 `footer`（`onActivate` 打开设置，携带当前模型 Ref）；`BreakdownPage` 回退提示与 `SettingsPanel` 保存指引同步改名。
+- 测试：`composer-model-picker.test.mjs` 新增「底栏在滚动区外/首项文案/End 可达且 Enter 激活」用例；前端全量 1102 项、lint 18 既有警告、构建通过。7880 需重建 dist 后可见（纯前端，无需重启后端）。
+
 ## 2026-10-18 · 内容库支持重新命名
 
 - 后端 `POST /api/output/{path}/rename`（web/app.py，紧邻删除路由）：复用 `_safe_output_target`（仅内容库内、越界 403、不存在 404）与 `_is_protected`（系统数据 403）；空名/`.`/`..`/路径分隔符/冒号 400、超长 422/400、同名冲突 409；文件保留原扩展名（输入显式同后缀不重复追加）、目录整棵改名；生图提示词旁车（`.<name>.easel-image.json`）随图片迁移——原实现把 `is_file()` 检查放在 `rename()` 之后导致旁车不动，被单测暴露后改为改名前提早取值。

@@ -104,6 +104,27 @@ test('status belongs to the model selector and its settings action targets that 
   assert.ok(view.calls.every(([, init]) => !init?.body));
 });
 
+test('model menu renames the default to 自动沿用 and pins 模型设置 as a fixed footer outside the scrolling list', async t => {
+  const view = await fixture(t, REF), opened = [];
+  await view.render({ onOpenModels: ref => opened.push(ref) });
+  await act(async () => view.trigger().click());
+  const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
+  const scroller = popup.querySelector('.easel-select-options');
+  const footerWrap = popup.querySelector('.easel-select-footer');
+  assert.ok(scroller && footerWrap, 'candidates scroll inside .easel-select-options while .easel-select-footer stays pinned');
+  assert.deepEqual([...scroller.querySelectorAll('.easel-select-option-label')].map(el => el.textContent), ['自动沿用', 'vendor/model:v2']);
+  assert.equal(scroller.textContent.includes('模型设置'), false, 'the manage entry is not part of the scrolling list');
+  const footerItem = footerWrap.querySelector('[role=option]');
+  assert.match(footerItem.textContent, /模型设置/);
+  await view.key('End');
+  assert.equal(view.trigger().getAttribute('aria-activedescendant'), footerItem.id, 'End reaches the pinned footer');
+  assert.equal(footerItem.classList.contains('is-active'), true);
+  await view.key('Enter');
+  assert.deepEqual(opened, [REF]);
+  assert.equal(document.querySelector('.easel-select-popup'), null);
+  assert.ok(view.calls.every(([, init]) => !init?.body));
+});
+
 test('running composer keeps stop beside queue-send when a draft is present', async t => {
   const view = await fixture(t, REF); await view.render({ isStreaming: true });
   const actions = () => [...view.container.querySelectorAll('.composer-send-actions button')];

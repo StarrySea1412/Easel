@@ -11,6 +11,15 @@ export interface SelectOption {
   disabled?: boolean;
 }
 
+/** 固定底栏条目：不参与选中值，点击/回车执行动作（如“模型设置”）。 */
+export interface SelectFooterOption {
+  label: string;
+  description?: string;
+  icon?: ReactNode;
+  disabled?: boolean;
+  onActivate: () => void;
+}
+
 export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-labelledby' | 'aria-describedby' | 'aria-invalid'> {
   id?: string;
   name?: string;
@@ -23,44 +32,53 @@ export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-l
   className?: string;
   title?: string;
   triggerIcon?: ReactNode;
+  footer?: SelectFooterOption;
 }
 
 /** Single-choice combobox. Focus stays on the trigger while navigating its listbox. */
-export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, triggerIcon, ...aria }: SelectProps) {
+export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, triggerIcon, footer, ...aria }: SelectProps) {
   const generatedId = useId();
   const triggerId = id || `select-${generatedId}`;
   const listId = `${triggerId}-options`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const footerWrapRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const searchRef = useRef({ text: '', time: 0 });
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 320 });
+  // 键盘导航把固定底栏当作列表末尾的虚拟条目（与旧“模型设置在列表内”的手感一致）。
+  const entries: (SelectOption & { onActivate?: () => void })[] = footer
+    ? [...options, { value: '__select_footer__', label: footer.label, description: footer.description, icon: footer.icon, disabled: footer.disabled, onActivate: footer.onActivate }]
+    : [...options];
+  const footerIndex = footer ? options.length : -1;
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selected = options[selectedIndex];
   const expanded = open && !disabled && options.length > 0;
 
   function show(direction: 1 | -1 = 1) {
-    if (disabled || !options.length) return;
-    const enabled = options.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
+    if (disabled || !entries.length) return;
+    const enabled = entries.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
     setActiveIndex(selected && !selected.disabled ? selectedIndex : (direction === 1 ? enabled[0] : enabled.at(-1)) ?? -1);
     searchRef.current = { text: '', time: 0 };
     setOpen(true);
   }
 
   function choose(index: number) {
-    const option = options[index];
+    const option = entries[index];
     if (!option || option.disabled) return;
     setOpen(false);
     triggerRef.current?.focus({ preventScroll: true });
+    if (option.onActivate) { option.onActivate(); return; }
     if (option.value !== value) onChange(option.value);
   }
 
   function move(direction: 1 | -1) {
-    for (let step = 1; step <= options.length; step++) {
-      const index = (activeIndex + direction * step + options.length) % options.length;
-      if (!options[index].disabled) { setActiveIndex(index); return; }
+    for (let step = 1; step <= entries.length; step++) {
+      const index = (activeIndex + direction * step + entries.length) % entries.length;
+      if (!entries[index].disabled) { setActiveIndex(index); return; }
     }
   }
 
@@ -80,7 +98,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       if (!expanded) show();
-      const enabled = options.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
+      const enabled = entries.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
       setActiveIndex((event.key === 'Home' ? enabled[0] : enabled.at(-1)) ?? -1);
       return;
     }
@@ -100,9 +118,9 @@ export default function Select({ id, name, value, options, onChange, placeholder
       const repeated = [...query].every((letter) => letter === query[0]);
       const prefix = repeated ? query[0] : query;
       const from = expanded ? activeIndex : selectedIndex;
-      for (let offset = repeated ? 1 : 0; offset < options.length + (repeated ? 1 : 0); offset++) {
-        const index = (Math.max(from, 0) + offset) % options.length;
-        const option = options[index];
+      for (let offset = repeated ? 1 : 0; offset < entries.length + (repeated ? 1 : 0); offset++) {
+        const index = (Math.max(from, 0) + offset) % entries.length;
+        const option = entries[index];
         if (option && !option.disabled && option.label.toLocaleLowerCase().startsWith(prefix)) { setActiveIndex(index); break; }
       }
     }
@@ -128,7 +146,10 @@ export default function Select({ id, name, value, options, onChange, placeholder
       const upwards = below < 220 && above > below;
       const maxHeight = Math.max(80, Math.min(320, upwards ? above : below));
       const width = Math.max(0, Math.min(Math.max(rect.width, 240), viewportWidth - margin * 2));
-      const popupHeight = Math.min(popupRef.current?.scrollHeight || maxHeight, maxHeight);
+      // 高度由“可滚动的候选列表 + 固定底栏”组成，翻转定位按两者之和估算。
+      const optionsHeight = scrollRef.current?.scrollHeight ?? 0;
+      const footerHeight = footerWrapRef.current?.offsetHeight ?? 0;
+      const popupHeight = Math.min((optionsHeight + footerHeight) || maxHeight, maxHeight);
       setPosition({
         top: upwards ? Math.max(margin, rect.top - popupHeight - gap) : rect.bottom + gap,
         left: Math.max(margin, Math.min(rect.left, viewportWidth - width - margin)),
@@ -160,21 +181,21 @@ export default function Select({ id, name, value, options, onChange, placeholder
 
   useEffect(() => {
     if (!expanded) return;
-    const popup = popupRef.current;
+    const scroller = scrollRef.current;
     const option = optionRefs.current[activeIndex];
-    if (!popup || !option) return;
-    // Scroll only the options panel; never move the page or its containing form.
+    // 固定底栏不在滚动区内，激活时无需滚动；其余只滚动候选列表，绝不移动页面。
+    if (!scroller || !option || activeIndex >= options.length) return;
     const top = option.offsetTop;
     const bottom = top + option.offsetHeight;
-    if (top < popup.scrollTop) popup.scrollTop = top;
-    else if (bottom > popup.scrollTop + popup.clientHeight) popup.scrollTop = bottom - popup.clientHeight;
-  }, [expanded, activeIndex]);
+    if (top < scroller.scrollTop) scroller.scrollTop = top;
+    else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+  }, [expanded, activeIndex, options.length]);
 
   return <>
     <button ref={triggerRef} id={triggerId} type="button" role="combobox" value={value} title={title}
       className={`easel-select ${expanded ? 'is-open' : ''} ${className}`.trim()}
       aria-expanded={expanded} aria-haspopup="listbox" aria-controls={expanded ? listId : undefined}
-      aria-activedescendant={expanded && options[activeIndex] ? `${listId}-${activeIndex}` : undefined}
+      aria-activedescendant={expanded && entries[activeIndex] ? `${listId}-${activeIndex}` : undefined}
       aria-required={required || undefined} disabled={disabled} {...aria}
       onClick={() => expanded ? setOpen(false) : show()} onKeyDown={onKeyDown}
       onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
@@ -185,14 +206,24 @@ export default function Select({ id, name, value, options, onChange, placeholder
     {expanded && createPortal(<div ref={popupRef} id={listId} role="listbox"
       aria-label={aria['aria-label']} aria-labelledby={aria['aria-labelledby'] || (!aria['aria-label'] ? triggerId : undefined)}
       className="easel-select-popup" style={position}>
-      {options.map((option, index) => <div key={option.value} ref={(node) => { optionRefs.current[index] = node; }}
-        id={`${listId}-${index}`} role="option" data-value={option.value} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
-        className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
-        onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
-        onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-        {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
-        {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
-      </div>)}
+      <div ref={scrollRef} className="easel-select-options" role="presentation">
+        {options.map((option, index) => <div key={option.value} ref={(node) => { optionRefs.current[index] = node; }}
+          id={`${listId}-${index}`} role="option" data-value={option.value} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
+          className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
+          onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
+          onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
+          {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
+          {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
+        </div>)}
+      </div>
+      {footer && <div ref={footerWrapRef} className="easel-select-footer" role="presentation">
+        <div id={`${listId}-${footerIndex}`} role="option" data-value="__select_footer__" aria-disabled={footer.disabled || undefined}
+          className={`easel-select-option is-footer${activeIndex === footerIndex ? ' is-active' : ''}${footer.disabled ? ' is-disabled' : ''}`}
+          onPointerMove={() => { if (!footer.disabled) setActiveIndex(footerIndex); }}
+          onMouseDown={(event) => event.preventDefault()} onClick={() => choose(footerIndex)}>
+          {footer.icon && <span className="easel-select-icon" aria-hidden="true">{footer.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{footer.label}</span>{footer.description && <span className="easel-select-option-description">{footer.description}</span>}</span>
+        </div>
+      </div>}
     </div>, document.body)}
   </>;
 }
