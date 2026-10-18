@@ -1,3 +1,9 @@
+## 2026-10-18 · 事件通知行精简：跳转即已读、✅ 只 hover 出现
+
+- `EventNotificationCenter.tsx`：消息链接移除尾部 `IconChevron`（保留 hover 下划线提示）；行右侧 `.event-row-state` 的已读勾改为仅在未读时渲染（已读行无灰色禁用位），文案只保留“标为已读”（不再有 disabled 的“已读”态）。点击消息维持既有链路：`markEventsRead(id)` → 关闭面板 → `onOpen(target)`／`action.run()`，即“点击跳转就是已读”。
+- `event-notifications.css`：`.event-mark-one` 改 `opacity:0;pointer-events:none`（未读行保留占位与可聚焦性），`.event-card:hover .event-mark-one, .event-card:focus-within .event-mark-one` 显现；`.event-row-state` 增加 `min-width:28px` 保持行对齐；移除 `.event-message-link > svg` 与 `:disabled` 死样式，`prefers-reduced-motion` 下关闭过渡。
+- 测试：新增「已读行无勾 / 未读行保留可显勾 / 消息链接无箭头 / 点击跳转即已读并回调目标」用例；前端全量 1104 项、lint 18 既有警告、构建通过。7880 需重建 dist 后可见（纯前端）。
+
 ## 2026-10-18 · 侧边栏“对话”入口总览所有会话状态
 
 - `Sidebar.tsx`：复用 `sessionStatuses` 的同一份 `statuses`，新增聚合视图——按紧急度排序（running→stopping→failed→blocked→review→waiting→unconfirmed→queued→paused→stopped→completed），`≤3` 全显示、超出取前 2 加“+N”；摘要按状态标签计数（“运行中 · 失败 2 · 已完成”）写入按钮 `title`（hover）与 `aria-description`（读屏）。

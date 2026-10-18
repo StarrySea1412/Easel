@@ -1,3 +1,8 @@
+## 2026-10-18 · Quieter notification rows: jump = read, hover-only check / 通知行精简：跳转即已读、✅ 只在 hover 出现
+
+- The row's right edge drops the jump chevron and the always-on check: clicking the message already jumps and marks the notice read, so the check now only appears while the row is hovered (or keyboard-focused) and read rows render no check at all — no grey placeholder. The state column keeps its width so rows stay aligned. / 行右侧去掉跳转箭头 › 与常驻已读勾 ✓：点击消息本身就是“跳转＋标为已读”，✅ 只在行 hover（或键盘聚焦）时出现，已读行完全不渲染勾（不再有灰色占位）；右侧列保留占位宽度，行不跳动。
+- Keyboard path unchanged: Tab reaches the check, `:focus-within` reveals it, and clicking it still returns focus to the filter button. 1,104 frontend tests, lint (0 errors), build pass. / 键盘路径不变：Tab 可聚焦该勾、`:focus-within` 使其显现、点击后焦点回到筛选按钮。前端 1104 项测试、lint（0 错误）、构建通过。
+
 ## 2026-10-18 · Sidebar 对话 entry overviews every conversation status / 侧边栏“对话”入口总览所有会话状态
 
 - The rail's 对话 entry now carries the same status vocabulary as the conversation list: a spinning loader while a conversation runs (or stops), and colored dots for real outcomes (green 已完成, red 失败/需处理, amber 待验收/待输入/排队/待核实, gray 已停止/已暂停). / 工具栏“对话”入口使用与对话列表完全相同的状态语言：进行中/停止中显示旋转 loading 图标，真实结果用状态点（完成绿、失败/需处理红、待验收/待输入/排队/待核实琥珀、已停止/已暂停灰）。

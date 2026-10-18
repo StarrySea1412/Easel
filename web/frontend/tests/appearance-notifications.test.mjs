@@ -124,3 +124,22 @@ test('notification receives new events while filtered, preserves long text and r
   assert.equal(document.querySelector('.global-events-panel'), null);
   assert.equal(document.activeElement, v.node.querySelector('button'));
 });
+
+test('jumping marks the notice read and the check stays out of the row until hover', async t => {
+  events.clearEvents();
+  events.recordEvent('已完成的任务', 'success', undefined, 'ux-read-row'); events.markEventsRead();
+  events.recordEvent('失败任务提示', 'error', undefined, 'ux-unread-row', { page: 'chat', sessionId: 's9' });
+  const opened = [];
+  const v = await view(t, Center, { onOpen: target => opened.push(target) });
+  await v.click(v.node.querySelector('button'));
+  const readCard = [...document.querySelectorAll('.event-card')].find(card => card.classList.contains('is-read'));
+  const unreadCard = [...document.querySelectorAll('.event-card')].find(card => card.classList.contains('is-unread'));
+  assert.equal(readCard.querySelector('.event-mark-one'), null, 'read rows render no check at all');
+  assert.ok(unreadCard.querySelector('.event-row-state .event-mark-one'), 'unread rows keep the revealable check');
+  assert.equal(unreadCard.querySelector('.event-mark-one').hasAttribute('disabled'), false);
+  assert.equal(unreadCard.querySelector('.event-message-link svg'), null, 'the jump link no longer draws a chevron');
+  await v.click(unreadCard.querySelector('.event-message-link'));
+  assert.equal(events.readEvents().find(item => item.id === 'ux-unread-row').read, true, 'clicking to jump is the read action');
+  assert.deepEqual(opened, [{ page: 'chat', sessionId: 's9' }]);
+  assert.equal(document.querySelector('.global-events-panel'), null);
+});

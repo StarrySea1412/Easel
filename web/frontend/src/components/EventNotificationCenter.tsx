@@ -66,11 +66,12 @@ export default function EventNotificationCenter({ onOpen }: { onOpen: (target: N
               {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} onClick={() => {
                   markEventsRead(notice.id); close();
                   if (notice.target) onOpen(notice.target); else notice.action?.run();
-                }}><span className="event-card-message">{notice.message}</span><IconChevron size={14} /></button>
+                }}><span className="event-card-message">{notice.message}</span></button>
                 : <p className="event-card-message">{notice.message}</p>}
             </div>
             <div className="event-row-state">
-                <button type="button" className="event-icon-button event-mark-one" disabled={notice.read} aria-label={(notice.read ? '已读' : '标为已读') + '：' + notice.message} title={notice.read ? '已读' : '标为已读'} onClick={() => markRead(notice.id)}><IconCheck size={14} /></button>
+                {/* 点击跳转即已读；勾选只在行 hover / 键盘聚焦时出现，已读行不再渲染。 */}
+                {!notice.read && <button type="button" className="event-icon-button event-mark-one" aria-label={'标为已读：' + notice.message} title="标为已读" onClick={() => markRead(notice.id)}><IconCheck size={14} /></button>}
             </div>
           </article>
         </li>)}</ol> : <div className="event-empty" role="status"><span aria-hidden="true">{filter === 'unread' && notices.length ? <IconCheck size={27} /> : <IconBell size={27} />}</span>

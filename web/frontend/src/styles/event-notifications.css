@@ -41,13 +41,14 @@
 .event-card.is-read .event-card-message { color: var(--text-secondary); font-weight: 400; }
 .global-events-panel .event-message-link { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px; padding: 0; text-align: left; border-radius: 3px; }
 .global-events-panel .event-message-link:hover { background: transparent; }
-.event-message-link > svg { flex: none; margin-top: 8px; color: var(--text-tertiary); }
 .event-message-link:hover .event-card-message { text-decoration: underline; text-underline-offset: 3px; }
-.event-row-state { display: flex; align-items: center; align-self: center; flex: none; }
+.event-row-state { display: flex; align-items: center; justify-content: center; align-self: center; flex: none; min-width: 28px; }
 .event-unread-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text); flex: none; }
 .event-row-state .event-icon-button { width: 28px; height: 28px; }
-.global-events-panel .event-mark-one { color: var(--text-tertiary); }
-.global-events-panel .event-mark-one:disabled { opacity: .45; }
+/* 点击跳转即已读；✅ 只在行 hover / 键盘聚焦时显现（占位与可聚焦性保留）。 */
+.global-events-panel .event-mark-one { color: var(--text-tertiary); opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.event-card:hover .event-mark-one, .event-card:focus-within .event-mark-one { opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .global-events-panel .event-mark-one { transition: none; } }
 .event-empty { display: flex; flex-direction: column; align-items: center; padding: 36px 22px; text-align: center; }
 .event-empty > span { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 15px; border-radius: 50%; color: var(--text-secondary); background: var(--surface-2); }
 .event-empty h3 { font-size: 14px; font-weight: 600; }
