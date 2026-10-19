@@ -7,6 +7,7 @@ COPY web/frontend/package*.json ./
 RUN npm ci
 COPY web/frontend/ ./
 COPY skills/ /skills/
+COPY pyproject.toml /pyproject.toml
 RUN npm run build
 
 FROM ${NODE_IMAGE} AS runtime

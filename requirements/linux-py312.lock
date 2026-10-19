@@ -1,5 +1,8 @@
 # Ubuntu24.04 / CPython3.12 x86_64; resolved with pip --report, 2026-10-13.
 # Full pyproject dependencies; no model weights or CUDA packages.
+# 2026-10-19: add python-pptx and its XlsxWriter dependency; retain all existing pins.
+python-pptx==1.0.2 --hash=sha256:160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba
+xlsxwriter==3.2.9 --hash=sha256:9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3
 aiodns==4.0.4 --hash=sha256:c24dd605bac70a1676ce503f967a98483ff163507198557d8e9db16267e6cfd2
 aiohappyeyeballs==2.7.1 --hash=sha256:9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472
 aiohttp==3.14.5 --hash=sha256:20f085697d7e911f1f73c43ed03fafbed1e7121797e2eb5428efa80398060584

@@ -1,3 +1,9 @@
+## 0.3.2 · 2026-10-19 · Linux deployment compatibility / Linux部署兼容
+
+- Include the product version source in the Docker frontend stage; lock PPTX runtime dependencies with wheel hashes. / Docker前端补版本源，Linux锁补PPTX依赖及校验值。
+- Connect browser panels to the authenticated sandbox sidecar; connection failures do not launch Chromium inside the app container. / 浏览器面板复用鉴权沙箱，连接失败明确报错。
+- Audit host138 disk usage and remove only identified unused build artifacts. New image activation remains pending. / 现场核对138磁盘，定向处理无引用构建产物；新镜像尚未激活。[Evidence / 证据](docs/deployment-138-preparation-2026-10-19.md)。
+
 ## 0.3.1 · 2026-10-19 · Explicit chat request protocols / 对话请求协议设置
 
 - Expose the shared protocol selector for built-in and custom chat channels; persist the selected API and use it for discovery, saved probes and OpenClaw requests. No provider-name inference or fallback between protocols. / 所有对话渠道明确选协议，保存、发现、检测与后续请求一致，不按名称猜测或跨协议重试。

@@ -1,8 +1,10 @@
+> **138更新准备 · 0.3.2（2026-10-19）**：补Linux构建版本源、PPTX依赖锁及沙箱浏览器连接。138仍运行0.2.8；已核对磁盘并定向处理无引用构建产物，完整构建/激活待空间余量确认。[准备与实测](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/deployment-138-preparation-2026-10-19.md)。
+
 > **请求协议设置 · 0.3.1（2026-10-19）**：所有对话渠道都可明确选择 OpenAI Chat Completions / Anthropic Messages，保存和刷新回读、模型列表、测活与OpenClaw配置采用同一协议；不按供应商名称猜测或失败后切换。网关管理项显示只读说明，未知API保留原值。后端定向225项、前端定向72项及构建/lint通过；隔离真实浏览器已验键盘、保存与刷新及浅深色，390px设置页另验。未调用真实模型、重启用户服务、部署138或更新安装包。[实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/model-protocol-settings-2026-10-19.md)。
 
 > **浏览器外壳与Jev评估（2026-10-19）**：浏览器改为单行紧凑工具栏与贴边网页，正文/元素/日志按需展开；面板标签和网页标签具有默认图标，站点图标加载中或失败时也保留回退。前端全量1148项、最后定向23项、后端定向29项及构建/lint通过；桌面浅深色与图标已验，本次390px视口覆盖未生效，窄屏视觉验收仍待补。[实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-redesign-version-2026-10-19.md)。Jev适合以后试验中文内容质检，当前不作为核心依赖，未安装或调用模型。[选型判断](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/jev-evaluation-2026-10-19.md)。
 
-> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.1**，相对 138 最近核验的 0.2.8 属于大模块更新；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。是否已安装到 138 以运行 API 的版本、build/revision 为准；**本轮没有部署 138 或更新安装包**。详细信息见[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)。
+> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.2**，相对 138 最近核验的 0.2.8 属于大模块更新；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。是否已安装到 138 以运行 API 的版本、build/revision 为准；**本轮没有部署 138 或更新安装包**。详细信息见[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)。
 
 > **真实浏览器与页面分析（2026-10-19）**：新增面板 → 浏览器现有真实隔离Chromium、多网页标签、导航/前后退/刷新、截图点击、DOM填写及操作后观察，正文/元素/日志按页面版本展示；页面、选区、元素和截图可显式加入原主草稿。新Codex线程用动态工具，旧线程/OpenClaw通过本机CLI桥接访问同一网页，站点控制由用户开启。40项后端、58项前端定向、构建/lint及桌面浅深色/390px界面通过；CLI同页操作已验，真实模型分析质量待验。后端正常重启后生效，本轮未重启用户服务、部署138或更新安装器。Subagent持久目录/追问/取消结算P0仍保留。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-runtime-2026-10-19.md)。
 

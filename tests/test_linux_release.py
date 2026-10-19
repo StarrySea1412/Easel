@@ -9,6 +9,23 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_linux_lock_covers_product_runtime_dependencies():
+    import re
+    import tomllib
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    project = tomllib.loads((ROOT / 'pyproject.toml').read_text(encoding='utf-8'))['project']
+    pins = {canonicalize_name(name): version for name, version in re.findall(
+        r'^([\w.-]+)==([^\s]+)', (ROOT / 'requirements/linux-py312.lock').read_text(), re.M)}
+    for value in project['dependencies']:
+        dependency = Requirement(value)
+        if dependency.marker and not dependency.marker.evaluate({'sys_platform': 'linux', 'python_version': '3.12'}):
+            continue
+        assert canonicalize_name(dependency.name) in pins, dependency.name
+        assert pins[canonicalize_name(dependency.name)] in dependency.specifier, dependency.name
+
+
 def load(name):
     spec = importlib.util.spec_from_file_location(name, ROOT / 'deployment/138' / (name + '.py'))
     module = importlib.util.module_from_spec(spec)

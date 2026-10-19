@@ -6,6 +6,7 @@ never own its lifetime; cancelling an operation never means rolling back a site.
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
@@ -193,6 +194,16 @@ class BrowserService:
             options = {'headless': True, 'timeout': 8000}
             if self.launch:
                 self.browser = await self.launch(self.playwright)
+            elif endpoint := os.environ.get('EASEL_BROWSER_CDP_ENDPOINT'):
+                # The deployment owns the sandboxed sidecar and credentials.
+                # Never fall back to launching Chromium in the app container.
+                auth = json.loads(Path(os.environ['EASEL_BROWSER_AUTH_FILE']).read_text(encoding='utf-8'))
+                if not re.fullmatch(r'[A-Za-z0-9_-]{8,64}', auth.get('username', '')) or not re.fullmatch(
+                        r'[A-Za-z0-9_-]{32,128}', auth.get('password', '')):
+                    raise ValueError('Invalid browser credential file')
+                encoded = base64.b64encode((auth['username'] + ':' + auth['password']).encode()).decode('ascii')
+                self.browser = await self.playwright.chromium.connect_over_cdp(
+                    endpoint, headers={'Authorization': 'Basic ' + encoded}, timeout=8000)
             else:
                 errors = []
                 for channel in (None, 'msedge', 'chrome'):

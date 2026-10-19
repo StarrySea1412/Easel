@@ -28,6 +28,7 @@ services:
       EASEL_ACCESS_FILE: /run/secrets/access.json
       EASEL_MODEL_BOOTSTRAP_FILE: /run/secrets/model-bootstrap.json
       EASEL_BROWSER_AUTH_FILE: /run/secrets/browser-auth.json
+      EASEL_BROWSER_CDP_ENDPOINT: http://browser:18801
       EASEL_AGENT_LIMIT: "1"
       EASEL_BROWSER_LIMIT: "1"
       EASEL_MEDIA_LIMIT: "1"
