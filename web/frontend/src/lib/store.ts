@@ -44,6 +44,7 @@ export interface ChatSession {
   pinnedAt?: number; // Local pin order, independent of streaming or active selection.
   parentSessionId?: string; // 辅助对话：挂在父会话下的子会话，只出现在侧边栏面板里
   sideOrder?: number; // 辅助对话标签顺序（同一父会话内 0 起；缺省按创建时间）
+  sideClosed?: boolean; // 关闭标签保留子会话、草稿和后台任务，可从打开标签页恢复
   share?: { token: string; title: string; createdAt: number }; // 对话分享：完整快照的本地 token
   loadedShareAppends?: string[]; // 已回传合并过的追加 id（去重，重复加载不产生重复消息）
   importedFromBackup?: boolean; // 只读备份记录，不关联后台上下文或恢复任务
@@ -215,6 +216,7 @@ function decodeSessions(raw: string): ChatSession[] {
     if (typeof value.archived === 'boolean') session.archived = value.archived;
     if (typeof value.pinnedAt === 'number' && Number.isFinite(value.pinnedAt) && value.pinnedAt > 0) session.pinnedAt = value.pinnedAt;
     if (typeof value.sideOrder === 'number' && Number.isFinite(value.sideOrder) && value.sideOrder >= 0) session.sideOrder = value.sideOrder;
+    if (value.sideClosed === true) session.sideClosed = true;
     if (value.importedFromBackup === true) {
       session.importedFromBackup = true;
       session.backupIncomplete = value.backupIncomplete === true;

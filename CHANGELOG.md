@@ -1,3 +1,12 @@
+## 2026-10-19 · Auxiliary chat and Subagent observability / 辅助对话与子任务观测
+
+- Reuse the main composer in auxiliary chats, with child-scoped attachments/skills/model/effort, streaming, questions, Codex approvals, stop retry and artifacts. Only accepted sends clear the child draft. / 辅助对话复用主输入区，接入素材、技能、模型、思考强度、流式状态、问答、Codex审批、停止重试及产物；仅接收成功清理子草稿。
+- Persist closed tabs and reopen the original session; inherit the parent engine/persona and reconnect pending child turns. / 关闭标签保留记录及后台任务，重开原会话；新建继承父引擎/画像，刷新恢复既有子轮次。
+- Add identity/time-checked child reply summaries and spawn/status events to Agent Office. A reply is separate from completion; parent end does not prove child termination. / 办公室新增核验身份与时间的子回复及委派/状态事件；回复不等于完成，父轮结束不推定子任务停止。
+- Research Codex, DeepSeek Harness, Grok Bot and installed ZCode 3.16.1; document remaining durable-directory, follow-up and cancellation-settlement gaps. No live model call, backend restart, host 138 deployment or new installer. / 调研四个产品并明确持久目录、追问及取消结算差距；未调用真实模型、重启后端、部署138或更新安装包。[Details / 详情](docs/sidechat-subagent-deepening-2026-10-19.md).
+- Validation: 1,136 frontend tests and 159 targeted backend tests passed; build and lint passed (18 existing warnings). / 验证：前端全量1136项、后端定向159项、构建与lint通过（18个既有warning）。
+
+
 ## 2026-10-18 · 自动沿用 drops its hint line / “自动沿用”去掉说明文字
 
 - The model menu's first entry now reads just 自动沿用 — the “未单独指定时使用设置中的默认模型” line was redundant for a one-word concept, and other entries keep their descriptions. / 模型菜单首项只保留“自动沿用”四字，去掉“未单独使用设置中的默认模型”这行说明；其余条目说明不变。1,104 frontend tests, lint (0 errors), build pass. / 前端 1104 项测试、lint（0 错误）、构建通过。

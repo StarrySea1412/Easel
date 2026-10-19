@@ -6,8 +6,8 @@ import type { ChatSession } from './store';
  * content is only pulled in when the user explicitly quotes it.
  */
 /** All side chats of a parent session, in tab order (sideOrder wins, then creation time). */
-export function sideChatsOf(session: ChatSession, sessions: ChatSession[]): ChatSession[] {
-  return sessions.filter(item => item.parentSessionId === session.id)
+export function sideChatsOf(session: ChatSession, sessions: ChatSession[], includeClosed = false): ChatSession[] {
+  return sessions.filter(item => item.parentSessionId === session.id && (includeClosed || !item.sideClosed))
     .slice()
     .sort((a, b) => (a.sideOrder ?? Number.MAX_SAFE_INTEGER) - (b.sideOrder ?? Number.MAX_SAFE_INTEGER)
       || a.created - b.created);

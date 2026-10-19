@@ -55,6 +55,15 @@ test('a child never inherits the root thinking or activities, including matching
   assert.match(child.explanation, /不使用主 Agent/);
 });
 
+test('child reply is shown as a receipt summary without using parent thinking or executing HTML',async t=>{
+  const view=await fixture(t,{agent:{...childAgent,latestReply:{text:'子任务结果 <script>plain text</script>',at:'2026-10-19T02:00:00Z',source:'parent_tool_receipt',truncated:true}}});
+  const dialog=view.dialog();
+  assert.equal(dialog.querySelector('[data-testid="office-child-reply"]').textContent,'子任务结果 <script>plain text</script>');
+  assert.equal(dialog.querySelector('script'),null);
+  assert.doesNotMatch(dialog.textContent,/模型实际返回的当前思考/);
+  assert.match(dialog.textContent,/摘要已达到 1600 字上限/);
+});
+
 test('model thinking remains unavailable when the service sends status text only', () => {
   const result = selectOfficeProcess({ agent: { ...rootAgent, state: 'thinking' }, session, stream: { ...stream, thinking: '', stillWorking: '正在思考…' }, turnId: 'turn-current' });
   assert.equal(result.thinking, '');

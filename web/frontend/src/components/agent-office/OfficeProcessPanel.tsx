@@ -163,6 +163,11 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
           <div><dt>轮次</dt><dd>{agent.source === 'demo' ? '预设模拟轮次' : turnId || '未提供轮次标识'}</dd></div>
           <div><dt>当前任务</dt><dd>{agent.task || '尚未上报任务说明'}</dd></div>
         </dl>
+        {agent.source==='live'&&agent.parentId&&<section className="office-process-section" aria-label="子 Agent 最新回复">
+          <div className="office-process-section-heading"><h3>子任务最新回复</h3><span>{agent.latestReply ? new Date(agent.latestReply.at).toLocaleString('zh-CN',{hour12:false}) : '尚未收到'}</span></div>
+          <p className="office-process-note">来自父会话工具回执中已确认子身份的回复摘要。回复与任务完成分别核验。</p>
+          {agent.latestReply?<><div className="office-process-text" data-testid="office-child-reply">{agent.latestReply.text}</div>{agent.latestReply.truncated&&<p className="office-process-note">摘要已达到 1600 字上限。</p>}</>:<p className="office-process-empty">当前记录没有该子 Agent 可核验的回复正文。</p>}
+        </section>}
         {process.error && <section className="office-process-error" aria-label="本轮错误"><strong>本轮已记录错误</strong><p>{process.error.message}</p>{process.error.code && <code>{process.error.code}</code>}</section>}
         <section className="office-process-section" aria-labelledby={`${titleId}-thinking`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-thinking`}>{agent.source === 'demo' ? '模拟过程摘要' : '模型返回的思考'}</h3><span>{process.origin === 'stream' ? '本轮实时返回' : process.origin === 'history' ? '本轮已保存' : agent.source === 'demo' ? '模拟数据' : '未提供'}</span></div>

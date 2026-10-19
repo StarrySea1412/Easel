@@ -16,6 +16,7 @@ export interface OfficeAgent {
   action?: OfficeAction;
   appearance?: EmployeeAppearance;
   observedModel?: OfficeObservedModel;
+  latestReply?: { text: string; at: string; source: 'parent_tool_receipt'; truncated: boolean };
 }
 
 export interface OfficeSnapshot {
@@ -76,6 +77,9 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
       state: Object.hasOwn(STATUS_MAP, String(item.status)) ? STATUS_MAP[String(item.status)] : 'unknown',
       source: 'live',
       observedModel: decodeObservedModel(item.observedModel),
+      ...(item.role==='subagent' && record(item.latestReply) && item.latestReply.source==='parent_tool_receipt'
+        && typeof item.latestReply.text==='string' && typeof item.latestReply.at==='string' && Number.isFinite(Date.parse(item.latestReply.at))
+        ? {latestReply:{text:shortText(item.latestReply.text,'',1600),at:item.latestReply.at,source:'parent_tool_receipt' as const,truncated:item.latestReply.truncated===true}} : {}),
       ...(typeof item.parentId === 'string' ? { parentId: item.parentId } : {}),
       ...(typeof item.updatedAt === 'string' && Number.isFinite(Date.parse(item.updatedAt)) ? { updatedAt: item.updatedAt } : {}),
       ...(typeof item.evidence === 'string' ? { evidence: shortText(item.evidence) } : {}),

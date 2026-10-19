@@ -231,8 +231,19 @@ def _identities(value: dict, tool: str = '') -> list[str]:
     return [value[key] for key in keys if isinstance(value.get(key), str) and IDENTITY.fullmatch(value[key])]
 
 
-def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[dict]:
+def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycle: list[dict] | None = None) -> list[dict]:
     calls, children, identities, created_at = {}, {}, {}, {}
+    transitions = {}
+
+    def record_transition(ident, call_id, kind, title, event, message, state='observed'):
+        stamp = _timestamp(event.get('timestamp') or message.get('timestamp'))
+        if stamp is None:
+            return
+        at = datetime.fromtimestamp(stamp, timezone.utc).isoformat()
+        event_id = hashlib.sha256(f'{root_id}\0{call_id}\0{ident}\0{kind}'.encode()).hexdigest()[:24]
+        transitions[event_id] = {'id': event_id, 'agentId': ident, 'kind': kind, 'title': title,
+                                 'status': state, 'at': at}
+        children[ident]['updatedAt'] = at
     for event in events:
         message = event.get('message', event)
         if not isinstance(message, dict):
@@ -272,6 +283,7 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                     created_at[ident] = _timestamp(event.get('timestamp') or message.get('timestamp'))
                 for key in raw_ids:
                     identities[key] = ident
+                record_transition(ident, call_id, 'spawn', '委派已接受；完成状态等待后续回执。', event, message)
             elif tool in ('subagents', 'sessions_list'):
                 # Only update already-confirmed children; a list can contain
                 # unrelated sessions, and must never introduce their identities.
@@ -282,8 +294,15 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                     for item in items:
                         if not isinstance(item, dict):
                             continue
-                        ident = next((identities[key] for key in _identities(item) if key in identities), None)
-                        if ident is None:
+                        reported_ids = _identities(item)
+                        matching = {identities[key] for key in reported_ids if key in identities}
+                        if len(matching) != 1:
+                            continue
+                        ident = next(iter(matching))
+                        # Conflicting strong identifiers cannot borrow a known
+                        # run ID to attach another session's reply or state.
+                        if any(key in item and (not isinstance(item[key], str) or identities.get(item[key]) != ident)
+                               for key in ('childSessionKey', 'childSessionId', 'sessionKey', 'sessionId', 'runId')):
                             continue
                         reported = item.get('status') or item.get('state')
                         state = {'running': 'running', 'thinking': 'thinking', 'waiting': 'waiting',
@@ -292,11 +311,17 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                                  'stopped': 'stopped', 'cancelled': 'stopped', 'canceled': 'stopped'}.get(reported) if isinstance(reported, str) else None
                         if state:
                             children[ident].update(status=state, evidence='当前会话工具回执明确上报的子 Agent 最近状态。')
+                            labels = {'running': '运行中', 'thinking': '思考中', 'waiting': '等待中', 'completed': '已完成', 'failed': '失败', 'stopped': '已停止'}
+                            record_transition(ident, call_id, 'status', f'子任务上报：{labels[state]}', event, message, 'failed' if state == 'failed' else 'observed')
                         # Bare list/spawn "model" fields can be configured
                         # routing. Require a matching child's dated assistant
                         # execution receipt, bounded by creation and this return.
-                        assistant = item.get('lastAssistantMessage')
-                        if isinstance(assistant, dict) and assistant.get('role') == 'assistant':
+                        receipts = [item.get('lastAssistantMessage')]
+                        if isinstance(item.get('messages'), list):
+                            receipts += item['messages'][-8:]
+                        for assistant in receipts:
+                            if not isinstance(assistant, dict) or assistant.get('role') != 'assistant':
+                                continue
                             # A nested receipt naming another session/run cannot
                             # borrow the identity of its enclosing list item.
                             receipt_keys = ('sessionKey', 'sessionId', 'runId', 'agentId', 'agent_id')
@@ -313,6 +338,19 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str]) -> list[
                                 previous = children[ident]['observedModel']
                                 if observed['source'] == 'observed' and (not previous['observedAt'] or observed['observedAt'] >= previous['observedAt']):
                                     children[ident]['observedModel'] = observed
+                                content = assistant.get('content')
+                                text = content if isinstance(content, str) else '\n'.join(block.get('text', '') for block in content
+                                    if isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str)) if isinstance(content, list) else ''
+                                safe = _safe_text(text, 1600)
+                                previous_reply = children[ident].get('latestReply')
+                                if safe and (not previous_reply or stamp >= previous_reply['_timestamp']):
+                                    children[ident]['latestReply'] = {'text': safe, 'at': datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
+                                        'source': 'parent_tool_receipt', 'truncated': len(' '.join(text.split())) > 1600, '_timestamp': stamp}
+    for child in children.values():
+        if child.get('latestReply'):
+            child['latestReply'].pop('_timestamp', None)
+    if lifecycle is not None:
+        lifecycle.extend(list(transitions.values())[-MAX_PUBLIC_EVENTS:])
     return list(children.values())
 
 
@@ -436,7 +474,8 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
     root = {'id': root_id, 'parentId': None, 'role': 'root', 'name': '主 Agent',
             'task': _safe_text(audit.get('_request')) if audit else '', 'status': state, 'evidence': evidence,
             'observedModel': latest_observation(events)}
-    children = _child_agents(events, root_id, warnings)
+    lifecycle: list[dict] = []
+    children = _child_agents(events, root_id, warnings, lifecycle)
     if not live or terminal_marker:
         # Parent-turn history is not a current observation of a child process.
         # Keep explicit child endings, but never animate an old active receipt
@@ -446,11 +485,13 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
             previous = active_labels.get(child['status'])
             if previous:
                 child.update(status='unknown', evidence=f'本轮观测已结束；该子 Agent 最近上报为“{previous}”，当前状态未确认。')
+    public_events = [*_public_events(events, root_id, turn_id), *lifecycle]
+    public_events.sort(key=lambda item: _timestamp(item.get('at')) or 0)
     return {
         'sessionId': session_id, 'turnId': turn_id or None, 'observedAt': datetime.now(timezone.utc).isoformat(),
         'source': 'local_session_trace' if events else 'local_session_state',
         'agents': [root, *children], 'links': [{'from': child['parentId'], 'to': child['id']} for child in children],
-        'events': _public_events(events, root_id, turn_id),
+        'events': public_events[-MAX_PUBLIC_EVENTS:],
         'coverage': {'subagents': 'observed' if children else 'not_observed',
                      'observedAgentCount': len(children) + 1,
                      'identityScanLimited': bool(warnings.intersection({TRACE_LIMIT_WARNING, RECORD_LIMIT_WARNING})),

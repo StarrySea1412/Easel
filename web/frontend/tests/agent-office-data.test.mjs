@@ -67,6 +67,18 @@ test('unknown statuses are never promoted to completion and unproven relationshi
   assert.match(result.coverage, /未观察到/);
 });
 
+test('child reply summaries require a dated explicit receipt and remain independent of completion',()=>{
+  const raw=teamPayload(2);
+  raw.agents[1].latestReply={text:'已找到材料',at:'2026-10-19T02:00:00Z',source:'parent_tool_receipt',truncated:false,raw:'PRIVATE_OUTPUT'};
+  let decoded=decodeOfficeSnapshot(raw,'one');
+  assert.equal(decoded.agents[1].state,'working');assert.equal(decoded.agents[1].latestReply.text,'已找到材料');
+  assert.equal(decoded.agents[1].latestReply.raw,undefined);
+  for(const patch of [{source:'assistant_prose'},{at:'invalid'}]){
+    raw.agents[1].latestReply={...raw.agents[1].latestReply,...patch};
+    decoded=decodeOfficeSnapshot(raw,'one');assert.equal(decoded.agents[1].latestReply,undefined);
+  }
+});
+
 test('demo choreography is deterministic, has stable identities and never impersonates live evidence', () => {
   const initial = createDemoOfficeAgents(0);
   const issue = createDemoOfficeAgents(34);

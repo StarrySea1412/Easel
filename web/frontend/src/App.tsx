@@ -706,7 +706,10 @@ export default function App() {
 
   // 活跃会话确定后（含挂载首刷）尝试恢复它悬空的一轮
   useEffect(() => {
-    if (activeSessionId) resumePendingTurn(activeSessionId);
+    if (activeSessionId) {
+      resumePendingTurn(activeSessionId);
+      for (const child of sessionsRef.current.filter(item=>item.parentSessionId===activeSessionId)) resumePendingTurn(child.id);
+    }
   }, [activeSessionId, resumePendingTurn]);
 
   // 落用户消息（可选先把 messages 截断到 truncateAt）→ 启动流。retry/edit 都走这里。
@@ -1037,12 +1040,21 @@ export default function App() {
 
   // 辅助对话（侧边面板的子会话）：多实例（每个父会话可开多个）、转发消息、双向引用；
   // 主线程消息流不受影响。mode='create' 总是新建，'open'（默认）复用最近的。
+  const handleQuestionAnswered = useCallback((sessionId: string, qid: string) => {
+    answeredRef.current.add(qid);
+    const accumulator = streamAcc.current[sessionId];
+    if (!accumulator) return;
+    const kept = accumulator.questions.filter(question=>question.id!==qid);
+    if (kept.length===accumulator.questions.length) return;
+    accumulator.questions=kept;
+    setStreams(previous=>previous[sessionId]?{...previous,[sessionId]:{...previous[sessionId],questions:[...kept]}}:previous);
+  }, []);
   const ensureSideChat = useCallback((): string | undefined => {
     const active = sessionsRef.current.find(item => item.id === activeSessionId);
     if (!active) return undefined;
     const existing = sideChatOf(active, sessionsRef.current);
     if (existing) return existing.id;
-    const child = { ...createSession(), parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
+    const child = { ...createSession(active.persona), engine: active.engine || 'openclaw' as const, parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
     const next = [child, ...sessionsRef.current];
     if (!saveSessions(next)) { showToast('辅助对话未能保存到本机', 'error'); return undefined; }
     sessionsRef.current = next;
@@ -1052,7 +1064,7 @@ export default function App() {
   const newSideChat = useCallback((): string | undefined => {
     const active = sessionsRef.current.find(item => item.id === activeSessionId);
     if (!active) return undefined;
-    const child = { ...createSession(), parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
+    const child = { ...createSession(active.persona), engine: active.engine || 'openclaw' as const, parentSessionId: active.id, title: sideChatTitle(active, sessionsRef.current) };
     const next = [child, ...sessionsRef.current];
     if (!saveSessions(next)) { showToast('辅助对话未能保存到本机', 'error'); return undefined; }
     sessionsRef.current = next;
@@ -1062,10 +1074,11 @@ export default function App() {
   const handleOpenSideChat = useCallback((mode?: 'open' | 'create'): string | undefined => (
     mode === 'create' ? newSideChat() : ensureSideChat()
   ), [ensureSideChat, newSideChat]);
-  const handleSideSend = useCallback((childId: string, text: string) => {
-    if (!sessionsRef.current.some(item => item.id === childId)) return;
-    sendUserAndStream(childId, text);
-  }, [sendUserAndStream]);
+  const handleSideSend = useCallback((childId: string, text: string, attachments?: UploadedFile[], skills?: string[], requirements?: SkillRequirements, thinking?: ThinkingLevel, model?: string) => {
+    const child = sessionsRef.current.find(item => item.id === childId);
+    if (!child?.parentSessionId || child.parentSessionId !== activeIdRef.current) return false;
+    return handleSendMessage(childId, text, attachments, skills, requirements, thinking, model);
+  }, [handleSendMessage]);
   const handleSideStop = useCallback((childId: string) => {
     if (sessionsRef.current.some(item => item.id === childId)) void handleStopStream(childId);
   }, [handleStopStream]);
@@ -1087,13 +1100,19 @@ export default function App() {
   const handleSideClose = useCallback((childId: string) => {
     const child = sessionsRef.current.find(item => item.id === childId);
     if (!child?.parentSessionId) return;
-    void handleStopStream(childId);
-    const next = sessionsRef.current.filter(item => item.id !== childId);
+    const next = sessionsRef.current.map(item => item.id === childId ? {...item, sideClosed:true} : item);
     if (!saveSessions(next)) { showToast('关闭未能保存到本机', 'error'); return; }
     sessionsRef.current = next;
     setSessions(next);
-    showToast('辅助对话已关闭；主对话内容不受影响。', 'info');
-  }, [handleStopStream]);
+    showToast('标签已关闭，记录和草稿已保留；可从“＋”重新打开。', 'info');
+  }, []);
+  const handleSideReopen = useCallback((childId: string) => {
+    const child = sessionsRef.current.find(item => item.id === childId);
+    if (!child?.parentSessionId || child.parentSessionId !== activeIdRef.current) return false;
+    const next = sessionsRef.current.map(item=>item.id===childId?{...item,sideClosed:false}:item);
+    if (!saveSessions(next)) { showToast('重新打开未能保存', 'error'); return false; }
+    sessionsRef.current = next; setSessions(next); return true;
+  }, []);
   const handleSideRename = useCallback((childId: string, title: string) => {
     const clean = title.trim();
     const child = sessionsRef.current.find(item => item.id === childId);
@@ -1341,6 +1360,13 @@ export default function App() {
             session={activeSession}
             taskState={tasks}
             sideSessions={sideChatsOf(activeSession, sessions)}
+            closedSideSessions={sideChatsOf(activeSession, sessions, true).filter(item=>item.sideClosed)}
+            onSideReopen={handleSideReopen}
+            sideStreams={streams}
+            sideStoppingSessions={stoppingSessions}
+            sideStopErrors={stopErrors}
+            onSideQuestionAnswered={handleQuestionAnswered}
+            onSideSteer={handleSteer}
             onSideChat={handleOpenSideChat}
             onSideSend={handleSideSend}
             onSideStop={handleSideStop}
@@ -1367,23 +1393,7 @@ export default function App() {
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
             )}
-            onQuestionAnswered={(qid) => {
-              answeredRef.current.add(qid);
-              // 已答题从流式状态中移除——切走/切回会话都不再重现（组件内部 state 会在重挂时清零，只藏不移除没用）
-              const a = streamAcc.current[activeSession.id];
-              if (a) {
-                const before = a.questions.length;
-                const kept = a.questions.filter((q) => q.id !== qid);
-                if (kept.length !== before) {
-                  a.questions = kept;
-                  setStreams((p) => {
-                    const cur = p[activeSession.id];
-                    if (!cur) return p;
-                    return { ...p, [activeSession.id]: { ...cur, questions: [...kept] } };
-                  });
-                }
-              }
-            }}
+            onQuestionAnswered={qid=>handleQuestionAnswered(activeSession.id,qid)}
             onScheduleDraft={(text) => { setAutomationDraft(text ? { objective: text } : {}); setCurrentPage('automation'); }}
           />
         ) : (

@@ -1,5 +1,7 @@
 # 对话页新增侧边栏：调研与设计（2026-10-18）
 
+> **2026-10-19 复核**：本轮重新读取已安装 ZCode **3.16.1**，确认辅助对话与子智能体目录是不同面板类型；Codex 官方 Subagents/Projects 文档现在可经官方 Learn 页面读取，下面保留 10 月 18 日 3.15.3 的历史取证。最新实现、来源与未完成项见[深化调研](sidechat-subagent-deepening-2026-10-19.md)。
+
 > 用户原话：“看看能否在对话中，新增一个侧边栏，参考页面如上，，你得调研好，，其他的harness有什么”（截图为 ZCode 内置浏览器的标签菜单：重命名 / 置顶 / **新建侧边聊天（Alt+Shift+S）** / 分叉 / 添加计划任务… / 复制 / **移至右侧面板** / 在新窗口中打开 / 归档，右上角高亮侧栏开关图标）。
 > 调研方式：只读解析本机 ZCode 3.15.3 `app.asar`（`C:\Users\l\AppData\Local\Programs\ZCode\resources\app.asar`，抽取件在忽略目录 `outputs/zcode-research-2026-10-18/`）+ 官方文档联网读取（各条目标注来源与时间）。不改动任何本机应用。
 
@@ -50,7 +52,7 @@ sidePane.openFile 打开文件（从 workspace 搜索文件在面板打开，含
 | **Cursor** | ✅ 有侧边聊天（最接近的参考） | 输入框打 `/side` 或 `/btw`（或聊天面板顶部 + 按钮）开侧边聊天：“在不打断主对话的情况下提问或调查”；它是**独立的持久对话**，把父线程作为**隐藏参考上下文**、有自己的 transcript，可在主线程用 @ 提及它把上下文取回；Agent 本身位于 sidepane（Cmd+I）；面板还支持排队消息/立即发送(Cmd+Enter)/steering/会话搜索(Cmd+K) | cursor.com/docs/agent/overview（WebFetch 2026-10-18） |
 | **VS Code Copilot Chat** | ✅ 面板式 | Chat view“在编辑器旁”、Inline chat 就地编辑、Agents window 跨会话管理、sessions 在 Chat view 与 Agents window 间保持上下文 | code.visualstudio.com/docs/copilot/overview（WebFetch 2026-10-18） |
 | **Claude Code** | ➖ 无专用侧栏 | VS Code 扩展为“编辑器内联 diff、@ 提及、计划审阅、会话历史”（命令面板 New Tab）；JetBrains 插件交互式 diff；桌面应用可并排多会话、审阅 diff、定时任务 | code.claude.com/docs/en/overview（WebFetch 2026-10-18） |
-| **Codex** | ⚠️ 未能取得官方页面（developers.openai.com 与本机下载在本环境均 403，如实标注） | 按既有认识（未核对）：CLI 终端优先、无侧栏；IDE 扩展带侧栏任务面板；桌面应用有右侧审阅(diff)面。**实施前如需引用请以官方文档为准** | 本机网络受阻，未引用 |
+| **Codex** | ✅ 2026-10-19 已取得官方 Subagents/Projects 文档 | 独立子线程、摘要回传、切换/追加指令/停止/关闭；项目内独立聊天保留历史。文档不证明其具有截图中的专用侧边聊天，不能把两种功能等同。10 月 18 日页面 403 是当时访问限制，现已复核 | [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)、[Projects](https://learn.chatgpt.com/docs/projects) |
 
 ## 4. Easel 现状可复用点
 

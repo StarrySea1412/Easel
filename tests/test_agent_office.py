@@ -88,6 +88,71 @@ def test_spawn_receipt_confirms_identity_and_parent_but_not_completion(sandbox, 
     assert 'childSessionKey' not in serialized and 'agent:main:subagent:child1' not in serialized
 
 
+def test_child_reply_and_lifecycle_are_scoped_dated_redacted_and_not_completion(sandbox):
+    stamp = time.time() - 20
+    append(sandbox['trace'], [call(stamp=stamp), result(stamp=stamp + 1),
+        call('list', 'sessions_list', {}, stamp=stamp + 2), result('list', {'sessions': [
+            {'sessionKey': 'foreign', 'status': 'completed', 'messages': [
+                {'role': 'assistant', 'timestamp': stamp + 3, 'content': 'FOREIGN_REPLY'}]},
+            {'sessionKey': 'agent:main:subagent:child1', 'status': 'running', 'messages': [
+                {'role': 'assistant', 'timestamp': stamp + 3, 'content': [
+                    {'type': 'thinking', 'thinking': 'PRIVATE_REASONING'},
+                    {'type': 'text', 'text': '已整理资料 token=PRIVATE_REPLY_TOKEN'}]}]},
+        ]}, stamp=stamp + 4)])
+    value = snapshot(sandbox, live=True)
+    child = value['agents'][1]
+    assert child['status'] == 'running'
+    assert child['latestReply']['source'] == 'parent_tool_receipt'
+    assert child['latestReply']['text'] == '已整理资料 token=[已隐藏]'
+    assert child['updatedAt'] == datetime.fromtimestamp(stamp + 4, timezone.utc).isoformat()
+    own = [event for event in value['events'] if event['agentId'] == child['id']]
+    assert [event['kind'] for event in own] == ['spawn', 'status']
+    assert len({event['id'] for event in value['events']}) == len(value['events'])
+    assert value['events'] == snapshot(sandbox, live=True)['events']
+    serialized = json.dumps(value)
+    assert all(secret not in serialized for secret in ('FOREIGN_REPLY', 'PRIVATE_REPLY_TOKEN', 'PRIVATE_REASONING'))
+
+
+@pytest.mark.parametrize('patch', [
+    {'timestamp': None}, {'timestamp': 'bad'}, {'timestamp': 1}, {'timestamp': time.time() + 60},
+    {'runId': 'foreign'}, {'sessionKey': 'foreign'}, {'role': 'user'},
+])
+def test_child_reply_rejects_unbounded_or_foreign_messages(sandbox, patch):
+    stamp = time.time() - 20
+    reply = {'role': 'assistant', 'timestamp': stamp + 3, 'content': 'DO_NOT_SHOW_REPLY', **patch}
+    append(sandbox['trace'], [call(stamp=stamp), result(stamp=stamp + 1),
+        call('list', 'sessions_list', {}, stamp=stamp + 2), result('list', {'sessions': [
+            {'sessionKey': 'agent:main:subagent:child1', 'messages': [reply]},
+        ]}, stamp=stamp + 4)])
+    assert 'latestReply' not in snapshot(sandbox, live=True)['agents'][1]
+
+
+def test_latest_child_reply_is_bounded_and_old_receipts_cannot_replace_it(sandbox):
+    stamp = time.time() - 20
+    append(sandbox['trace'], [call(stamp=stamp), result(stamp=stamp + 1),
+        call('list', 'subagents', {}, stamp=stamp + 2), result('list', {'recent': [
+            {'sessionKey': 'agent:main:subagent:child1', 'status': 'completed', 'lastAssistantMessage': {
+                'role': 'assistant', 'timestamp': stamp + 4, 'content': '新回复' * 1000}},
+        ]}, stamp=stamp + 5), call('older', 'sessions_list', {}, stamp=stamp + 6), result('older', {'sessions': [
+            {'sessionKey': 'agent:main:subagent:child1', 'lastAssistantMessage': {
+                'role': 'assistant', 'timestamp': stamp + 3, 'content': '旧回复'}},
+        ]}, stamp=stamp + 7)])
+    reply = snapshot(sandbox, live=True)['agents'][1]['latestReply']
+    assert len(reply['text']) == 1600 and reply['truncated'] is True
+    assert reply['text'].startswith('新回复') and '_timestamp' not in reply
+
+
+def test_list_item_cannot_borrow_a_known_run_to_attribute_a_foreign_reply(sandbox):
+    stamp = time.time() - 20
+    append(sandbox['trace'], [call(stamp=stamp), result(stamp=stamp + 1),
+        call('list', 'sessions_list', {}, stamp=stamp + 2), result('list', {'sessions': [
+            {'runId': 'run-child1', 'sessionKey': 'foreign-child', 'status': 'completed', 'lastAssistantMessage': {
+                'role': 'assistant', 'timestamp': stamp + 3, 'content': 'FOREIGN_REPLY'}},
+        ]}, stamp=stamp + 4)])
+    child = snapshot(sandbox, live=True)['agents'][1]
+    assert 'latestReply' not in child and child['status'] == 'unknown'
+
+
 @pytest.mark.parametrize('status,expected', [('running', 'running'), ('done', 'completed'), ('failed', 'failed'), ('stopped', 'stopped')])
 def test_only_explicit_status_reports_for_confirmed_children_update_office(sandbox, status, expected):
     append(sandbox['trace'], [call(), result(), call('list', 'subagents', {'action': 'list'}), result('list', {

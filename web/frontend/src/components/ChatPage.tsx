@@ -18,7 +18,6 @@ import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
 import '../styles/chat-workspace.css';
-import { getChatDraft, setChatDraftText, removeChatDraftQuote, subscribeChatDraft } from '../lib/chatDrafts';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import { createPortal } from 'react-dom';
 import { useAnchoredPanel } from '../hooks/useAnchoredPanel';
@@ -58,12 +57,19 @@ interface ChatPageProps {
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
   onScheduleDraft?: (text: string) => void;            // 对话内提交定时任务草稿（App 切到定时任务页）
   sideSessions?: ChatSession[];                         // 辅助对话（父会话的子会话，可有多个），只在侧边面板里展示
+  closedSideSessions?: ChatSession[];
+  onSideReopen?: (childId: string) => boolean;
+  sideStreams?: Record<string, StreamState>;
+  sideStoppingSessions?: Record<string, boolean>;
+  sideStopErrors?: Record<string, string>;
+  onSideQuestionAnswered?: (childId: string, questionId: string) => void;
+  onSideSteer?: (childId: string, messageId: string) => Promise<boolean>;
   onSideChat?: (mode?: 'open' | 'create') => string | undefined; // 打开侧边面板：open=复用最近/没有则新建；create=总是新建。返回要激活的子会话 id
-  onSideSend?: (childId: string, text: string) => void; // 发消息到指定辅助对话
+  onSideSend?: (childId: string, displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
   onSideStop?: (childId: string) => void;               // 停止指定辅助对话的生成
   onQuoteFromMain?: (childId: string) => void;          // 主对话上一轮 → 该辅助对话草稿引用
   onQuoteToMain?: (childId: string) => void;            // 该辅助对话最后答复 → 主对话草稿引用
-  onSideClose?: (childId: string) => void;              // 关闭（删除）指定辅助对话；主对话内容不受影响
+  onSideClose?: (childId: string) => void;              // 关闭标签并保留记录与后台任务
   onSideRename?: (childId: string, title: string) => void; // 重命名指定辅助对话的标签
   onSideReorder?: (orderedIds: string[]) => void;       // 拖拽/键盘调整后的辅助对话标签顺序
   onShare?: () => void;                                 // 把当前对话的完整快照发布为分享
@@ -71,7 +77,7 @@ interface ChatPageProps {
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
-import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus, IconChat, IconTarget, IconArrowUp } from './icons';
+import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus, IconChat, IconTarget } from './icons';
 import type { ComponentType } from 'react';
 type Suggestion = { Icon: ComponentType<{ size?: number }>; title: string; prompt: string };
 const SUGGESTIONS: Suggestion[] = [
@@ -87,7 +93,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
+export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -194,7 +200,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                       if(event.altKey&&event.key==='ArrowLeft'){event.preventDefault();moveSideChat(side.id,-1);}
                       if(event.altKey&&event.key==='ArrowRight'){event.preventDefault();moveSideChat(side.id,1);}
                     }}>{side.title}</button>}
-              {onSideClose&&<button type="button" className="chat-side-tab-close" aria-label={'关闭：'+side.title} title="关闭辅助对话（主对话内容不受影响）" onClick={()=>onSideClose(side.id)}>×</button>}
+              {onSideClose&&<button type="button" className="chat-side-tab-close" aria-label={'关闭：'+side.title} title="关闭标签并保留记录（后台任务继续）" onClick={()=>onSideClose(side.id)}>×</button>}
             </span>;
           })}
           {goal&&<button type="button" role="tab" aria-selected={panelTab==='goal'} className={'chat-side-tab'+(panelTab==='goal'?' is-on':'')} onClick={()=>setPanelTab('goal')}>目标</button>}
@@ -204,8 +210,10 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
       </header>
       {panelTab==='goal'&&goal
         ? <ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>
-        : activeSide?<SideChatThread key={activeSide.id} session={activeSide}
-            onSend={(text)=>onSideSend?.(activeSide.id,text)} onStop={()=>onSideStop?.(activeSide.id)}
+        : activeSide?<SideChatThread key={activeSide.id} session={activeSide} stream={sideStreams[activeSide.id]} stopping={Boolean(sideStoppingSessions[activeSide.id])} stopError={sideStopErrors[activeSide.id]}
+            onQuestionAnswered={qid=>onSideQuestionAnswered?.(activeSide.id,qid)} onSteer={onSideSteer?id=>onSideSteer(activeSide.id,id):undefined}
+            onSend={(text,attachments,skills,requirements,thinking,model)=>onSideSend?.(activeSide.id,text,attachments,skills,requirements,thinking,model) ?? false}
+            onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button></div>}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
@@ -221,6 +229,9 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
         <span className="chat-side-tab-picker-icon" aria-hidden="true"><IconTarget size={16}/></span>
         <span className="chat-side-tab-picker-label">目标<small>{goal?'查看或继续当前目标':'当前没有目标'}</small></span>
       </button>
+      {closedSideSessions.length>0&&<><h4>重新打开</h4>{closedSideSessions.map(side=><button type="button" role="menuitem" className="chat-side-tab-picker-row" key={side.id} onClick={()=>{if(onSideReopen?.(side.id)){setTabPickerOpen(false);setPanelTab('side');setPanelOpen(true);setActiveSideId(side.id);}}}>
+        <span className="chat-side-tab-picker-icon" aria-hidden="true"><IconChat size={16}/></span><span className="chat-side-tab-picker-label">{side.title}<small>{side.pendingTurnId?'后台任务尚未结束':'记录和草稿已保留'}</small></span>
+      </button>)}</>}
     </div>, document.body)}
   </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
@@ -439,48 +450,40 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
 }
 
 /** 辅助对话线程：父会话的子会话，独立记录，不打断主对话。 */
-function SideChatThread({ session, onSend, onStop, onQuoteFromMain, onQuoteToMain }: {
-  session: ChatSession; onSend?: (text: string) => void; onStop?: () => void; onQuoteFromMain?: () => void; onQuoteToMain?: () => void;
+function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswered, onSteer, onSend, onStop, onOpenModels, onQuoteFromMain, onQuoteToMain }: {
+  session: ChatSession; stream?: StreamState; stopping: boolean; stopError?: string;
+  onQuestionAnswered?: ChatPageProps['onQuestionAnswered']; onSteer?: ChatPageProps['onSteer'];
+  onSend: ChatPageProps['onSend']; onStop?: () => void; onOpenModels?: ChatPageProps['onOpenModels'];
+  onQuoteFromMain?: () => void; onQuoteToMain?: () => void;
 }) {
-  const [draft, setDraft] = useState(() => getChatDraft(session.id));
-  useEffect(() => {
-    const refresh = () => setDraft(getChatDraft(session.id));
-    refresh();
-    return subscribeChatDraft(session.id, refresh);
-  }, [session.id]);
-  const setText = (value: string) => { setChatDraftText(session.id, value); setDraft(getChatDraft(session.id)); };
-  const busy = Boolean(session.pendingTurnId);
+  const busy = Boolean(stream || session.pendingTurnId);
   const lastAssistant = [...session.messages].reverse().find(message => message.role === 'assistant' && (message.content || '').trim());
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    const text = draft.text.trim();
-    if (!text || busy || !onSend) return;
-    const quotes = draft.quotes || [];
-    onSend(quotes.length ? ['引用：', ...quotes, '', text].join('\n') : text);
-    setText('');
-    quotes.forEach(() => removeChatDraftQuote(session.id, 0));
-  };
+  const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, busy);
+  const thread = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useEffect(() => { if (follow.current && thread.current) thread.current.scrollTop = thread.current.scrollHeight; }, [session.messages.length, stream?.content, stream?.thinking, stream?.activity, stream?.stillWorking, stream?.questions]);
   return <div className="side-chat">
-    <p className="side-chat-note">向这里提问不会进入主对话；需要时把结论引用回主对话。</p>
-    <div className="side-chat-thread" role="log" aria-label="辅助对话消息">
+    <p className="side-chat-note">独立记录与草稿 · {session.engine === 'codex' ? 'Codex' : 'OpenClaw'} · 主对话内容需明确引用</p>
+    <div className="side-chat-thread" ref={thread} onScroll={()=>{const el=thread.current;if(el)follow.current=isChatAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);}} role="log" aria-label="辅助对话消息">
       {!session.messages.length && !busy && <p className="side-chat-empty">还没有消息。可以问一个旁支问题，或先把主对话的上一轮引用进来。</p>}
-      {session.messages.map((message, index) => <MessageBubble key={message.turnId || `${index}-${message.role}`} message={message} />)}
-      {busy && <p className="side-chat-running" role="status">正在生成…{onStop && <button type="button" className="link-btn" onClick={onStop}>停止</button>}</p>}
+      {session.messages.map((message, index) => <MessageBubble key={`${index}-${message.role}`} message={message} sessionId={session.id}
+        artifacts={message.role==='assistant'&&message.turnId?<ChatArtifacts artifacts={deliveries.items.filter(item=>item.turnId===message.turnId)} jobs={deliveries.jobs.filter(item=>item.turnId===message.turnId)} onUpdated={deliveries.updated} onJobsChanged={deliveries.retry}/>:undefined}/>)}
+      {stream && <MessageBubble message={{role:'assistant',content:stream.content}} sessionId={session.id} isStreaming thinking={stream.thinking} activity={stream.activity} activitySteps={stream.activitySteps} stillWorking={stream.stillWorking}
+        artifacts={<ChatArtifacts artifacts={deliveries.items.filter(item=>item.turnId===session.pendingTurnId)} jobs={deliveries.jobs.filter(item=>item.turnId===session.pendingTurnId)} onUpdated={deliveries.updated} onJobsChanged={deliveries.retry}/>}
+        executionScope={`${session.id}:${session.pendingTurnId||''}`}
+        execution={session.pendingTurnId?onProgressOwnership=>session.engine==='codex'?<CodexRunPanel sessionId={session.id} turnId={session.pendingTurnId!} streaming onProgressOwnership={onProgressOwnership}/>:<ChatExecutionPanel sessionId={session.id} turnId={session.pendingTurnId!} streaming onProgressOwnership={onProgressOwnership}/>:undefined}/>}
+      {stream&&Boolean(stream.questions?.length)&&<QuestionCards questions={stream.questions||[]} onDone={qid=>onQuestionAnswered?.(qid)}/>}
+      {busy && !stream && <p className="side-chat-running" role="status">正在恢复本轮连接…</p>}
+      {deliveries.note&&<p role="status">{deliveries.note} <button type="button" className="link-btn" onClick={deliveries.retry}>重新读取产物</button></p>}
     </div>
-    <form className="side-chat-composer" onSubmit={submit}>
-      {(draft.quotes || []).length > 0 && <ul className="side-chat-quotes">{(draft.quotes || []).map((quote, index) => <li key={index}><span>{quote.length > 90 ? `${quote.slice(0, 90)}…` : quote}</span><button type="button" aria-label="移除引用" onClick={() => { removeChatDraftQuote(session.id, index); setDraft(getChatDraft(session.id)); }}>×</button></li>)}</ul>}
-      <div className="side-chat-input-box">
-        <textarea value={draft.text} rows={2} maxLength={4000} placeholder="问一个旁支问题…（Enter 发送，Shift+Enter 换行）" aria-label="辅助对话输入"
-          onChange={event => setText(event.target.value)}
-          onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(event); } }}/>
-        <div className="side-chat-bar">
-          <div className="side-chat-actions">
-            <button type="button" className="side-chat-action" disabled={!onQuoteFromMain} onClick={onQuoteFromMain}>引用主对话上一轮</button>
-            <button type="button" className="side-chat-action" disabled={!lastAssistant || !onQuoteToMain} onClick={onQuoteToMain}>引用到主对话</button>
-          </div>
-          <button type="submit" className="send-btn" disabled={busy || !draft.text.trim()} aria-label="发送" title={busy ? '正在生成' : '发送'}><IconArrowUp size={16}/></button>
-        </div>
+    <div className="side-chat-composer">
+      {(stopping||stopError)&&<div className="chat-stop-notice" role={stopError?'alert':'status'}><p>{stopping?'正在请求停止，等待后端确认…':stopError}</p>{stopError&&busy&&<button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}</div>}
+      <div className="side-chat-actions">
+        <button type="button" className="side-chat-action" disabled={!onQuoteFromMain} onClick={onQuoteFromMain}>引用主对话上一轮</button>
+        <button type="button" className="side-chat-action" disabled={!lastAssistant || !onQuoteToMain} onClick={onQuoteToMain}>引用到主对话</button>
       </div>
-    </form>
+      <ChatComposer sessionId={session.id} engine={session.engine || 'openclaw'} engineLocked isStreaming={busy} stopping={stopping}
+        usageRefreshKey={session.messages.length} compaction={stream?.compaction} onSend={onSend} onStop={()=>onStop?.()} onSteer={onSteer} onOpenModels={onOpenModels}/>
+    </div>
   </div>;
 }

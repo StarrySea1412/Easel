@@ -53,3 +53,11 @@ test('tab order honors sideOrder and computeSideOrder inserts before or after th
   assert.deepEqual(computeSideOrder(ids,'s2','s2',true),ids,'the same id keeps the order');
   assert.deepEqual(computeSideOrder(ids,'missing','s1',true),ids,'unknown ids keep the order');
 });
+
+test('closing a tab hides it from open tabs but retains its identity for reopening and numbering',()=>{
+  const closed={...child,sideClosed:true};
+  assert.deepEqual(sideChatsOf(parent,[parent,closed]),[]);
+  assert.equal(sideChatOf(parent,[closed]),undefined);
+  assert.deepEqual(sideChatsOf(parent,[closed],true).map(item=>item.id),[child.id]);
+  assert.equal(sideChatTitle(parent,[closed]),'辅助对话 2');
+});
