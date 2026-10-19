@@ -1,3 +1,5 @@
+> **对话行为与进度胶囊 · 0.4.0（2026-10-20，源码交付）**：OpenClaw 主/子 Agent 行为直接显示在对应对话轮次，使用龙虾图标及已观测渠道/模型标识，与办公室共用操作语义。右上角胶囊展开结构化 checklist、当前步骤、完成数和耗时；长任务获得主动规划指引，工具结束不会自动勾选。新增运行记录中的任务汇总、问题编号详情和白名单诊断复制；修复 Windows 浏览器启动及自动适配抹掉报错。后端102项、前端全量1180项及最终定向回归通过；真实隔离Chromium与实际390 CSS像素布局已验，Agent数据为受控fixture，未调用付费模型。**138继续暂停部署**，其最后核验版本为0.3.5 / `193278acf42f`，真实平台发布和安装器未验收。[研究、实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/chat-progress-capsule-2026-10-20.md)。
+
 > **登录态刷新与失败追踪 · 0.3.6（2026-10-19，源码未部署）**：账号页、发布页可见时每分钟检查，在线结论缓存缩短至2分钟；切回窗口/恢复网络触发刷新，过期或检查失败不计为确认在线。发布前继续强制检查身份；账号/媒体拦截、提交错误和新失败回执补报错误编号。ClawHub同名多作者下载已固定作者，API失败保留阶段、状态和运行版本，不采正文/凭据。按用户要求暂停部署，138仍0.3.5 / `193278acf42f`，真实多平台发布未验收，安装器未更新。[根因、验证与后续部署说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/clawhub-failure-events-2026-10-19.md)。
 
 
@@ -11,7 +13,7 @@
 
 > **浏览器外壳与Jev评估（2026-10-19）**：浏览器改为单行紧凑工具栏与贴边网页，正文/元素/日志按需展开；面板标签和网页标签具有默认图标，站点图标加载中或失败时也保留回退。前端全量1148项、最后定向23项、后端定向29项及构建/lint通过；桌面浅深色与图标已验。原390px覆盖未生效的问题已在本次138验收补查：真实390px面板布局、网页截图和元素入口通过，完整窄屏流程仍未全验。[此前实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-redesign-version-2026-10-19.md)。Jev适合以后试验中文内容质检，当前不作为核心依赖，未安装或调用模型。[选型判断](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/jev-evaluation-2026-10-19.md)。
 
-> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.5**，138隔离和正式均运行 **0.3.5 / 193278acf42f**，app/browser Healthy、零重启；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。部署以运行 API 的版本、build/revision 为准，最终文档提交与运行源码提交分别识别；**安装包未更新**。下面各条“未部署138”描述对应其历史开发阶段，当前部署状态以上述发布回执为准；[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)保留评估时快照。
+> **版本与更新判断（2026-10-19历史快照）**：该次核验时开发分支 `codex/upstream-compat-2026-10-10` 源码版本为 **0.3.5**，138隔离和正式均运行 **0.3.5 / 193278acf42f**，app/browser Healthy、零重启；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。部署以运行 API 的版本、build/revision 为准，最终文档提交与运行源码提交分别识别；**安装包未更新**。下面各条“未部署138”描述对应其历史开发阶段，当前部署状态以上述发布回执为准；[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)保留评估时快照。
 
 > **真实浏览器与页面分析（2026-10-19）**：新增面板 → 浏览器现有真实隔离Chromium、多网页标签、导航/前后退/刷新、截图点击、DOM填写及操作后观察，正文/元素/日志按页面版本展示；页面、选区、元素和截图可显式加入原主草稿。新Codex线程用动态工具，旧线程/OpenClaw通过本机CLI桥接访问同一网页，站点控制由用户开启。40项后端、58项前端定向、构建/lint及桌面浅深色/390px界面通过；CLI同页操作已验，真实模型分析质量待验。后端正常重启后生效，本轮未重启用户服务、部署138或更新安装器。Subagent持久目录/追问/取消结算P0仍保留。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-runtime-2026-10-19.md)。
 
