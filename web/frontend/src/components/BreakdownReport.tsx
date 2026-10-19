@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createIdea } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
-import { BREAKDOWN_REPORT_TITLE, ideaTitleFromReport, reportScopeNote, structureLine, verifyQuotes, verifyStructure } from '../lib/breakdownReport';
+import { BREAKDOWN_REPORT_TITLE, ideaTitleFromReport, reportScopeNote, structureLine, unwrapReportFence, verifyQuotes, verifyStructure } from '../lib/breakdownReport';
 import { IconCopy, IconFire, IconIdea } from './icons';
 
 /** The same report reader for chat turns and reports saved before chat integration. */
@@ -10,20 +10,21 @@ export default function BreakdownReport({ material, report, complete = true, ine
 }) {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
-  const quotes = useMemo(() => complete ? verifyQuotes(report, material) : null, [complete, report, material]);
-  const structure = useMemo(() => complete ? verifyStructure(report) : null, [complete, report]);
-  const html = useMemo(() => renderMarkdown(report), [report]);
+  const body = useMemo(() => unwrapReportFence(report), [report]);
+  const quotes = useMemo(() => complete ? verifyQuotes(body, material) : null, [complete, body, material]);
+  const structure = useMemo(() => complete ? verifyStructure(body) : null, [complete, body]);
+  const html = useMemo(() => renderMarkdown(body), [body]);
   const save = async () => {
     if (saving || !complete || inert) return;
     setSaving(true);
     try {
-      await createIdea({ title: ideaTitleFromReport(report), note: report, source: '爆款拆解', status: 'pending' });
+      await createIdea({ title: ideaTitleFromReport(body), note: body, source: '爆款拆解', status: 'pending' });
       setNotice('已存入选题库');
     } catch (cause) { setNotice(cause instanceof Error ? cause.message : '保存失败，请重试'); }
     finally { setSaving(false); }
   };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(report); setNotice('已复制报告'); }
+    try { await navigator.clipboard.writeText(body); setNotice('已复制报告'); }
     catch { setNotice('复制失败，请手动选择报告文本'); }
   };
   return <section className="panel breakdown-report" aria-label={BREAKDOWN_REPORT_TITLE}>

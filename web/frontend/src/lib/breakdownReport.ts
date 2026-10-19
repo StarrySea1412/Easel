@@ -31,6 +31,26 @@ export function ideaTitleFromReport(result: string): string {
   return BREAKDOWN_REPORT_TITLE;
 }
 
+/**
+ * 模型偶尔把整篇报告包进一个 Markdown 代码栅栏（```markdown … ```），
+ * 直接渲染会整篇变成代码块、正文以源码示人。只解包两种形状：
+ * ①开头是栅栏、末尾是成对闭合；②开头是栅栏、全文再无其他栅栏（漏了闭合）。
+ * 正文内部（不在开头）的普通代码块不受影响；拿不准时原样返回。
+ */
+export function unwrapReportFence(result: string): string {
+  const trimmed = result.replace(/^\s+/, '');
+  const opener = /^(`{3,}|~{3,})[ \t]*[A-Za-z0-9_+-]*[ \t]*\r?\n/.exec(trimmed);
+  if (!opener) return result;
+  const marker = opener[1][0];
+  const body = trimmed.slice(opener[0].length);
+  const fences = [...body.matchAll(new RegExp(`^[ \\t]*${marker}{3,}[ \\t]*$`, 'gm'))];
+  if (!fences.length) return body.replace(/\s+$/, '');
+  const last = fences[fences.length - 1];
+  const cut = last.index ?? 0;
+  if (!/^\s*$/.test(body.slice(cut + last[0].length))) return result;
+  return body.slice(0, cut).replace(/\s+$/, '');
+}
+
 /** 模型返回以这些前缀开头时是执行失败的通用文案（后端 run_agent_sync），不是报告。 */
 export function looksLikeAgentFailure(text: string): boolean {
   return /^[\u274c\u23f1\u23f3]/.test(text.trim());
@@ -171,7 +191,7 @@ export function buildBreakdownReportPrompt(input: string, persona?: string): str
   const personaLine = persona
     ? `【创作者画像】第 7 章结合画像「${persona}」：选题与创作简报要贴合这位创作者的领域与受众；画像里没有的信息按通用处理，不要编造画像内容。`
     : '【创作者画像】未提供：第 7 章按通用创作者给方向，并注明“未做个人化”。';
-  return `你是中文内容研究编辑，为创作者完成一次专业的内容拆解：直接交付一份可连续阅读的《内容拆解报告》，不是聊天式回答，全程使用中文。
+  return `你是中文内容研究编辑，为创作者完成一次专业的内容拆解：直接交付一份可连续阅读的《内容拆解报告》，不是聊天式回答，全程使用中文。正文从“# 内容拆解报告：…”这一行直接开始；整篇不要用代码块或任何代码栅栏包裹。
 
 【本次材料】
 """

@@ -35,6 +35,7 @@ test('report prompt carries the fixed chapters, the four finding fields and the 
   assert.ok(prompt.includes('画像「画号A」'));
   assert.ok(prompt.includes('多篇'), 'multi-work guard stays in the contract');
   assert.ok(prompt.includes('已读取链接内容'), 'link-read disclosure stays in the contract');
+  assert.ok(prompt.includes('不要用代码块'), 'whole-report code fences stay forbidden');
 
   const withoutPersona = reportLib.buildBreakdownReportPrompt('一段正文');
   assert.ok(withoutPersona.includes('未做个人化'));
@@ -276,6 +277,33 @@ test('existing history reopens in the shared reader, preserves evidence checks a
   assert.equal(view.writes.find(item => item.path === '/api/ideas').body.note, report);
   await view.click('历史拆解'); await view.click('删除');
   assert.equal(view.container.querySelector('.breakdown-history-toggle'), null);
+});
+
+test('a whole-report code fence is unwrapped before rendering and saving', () => {
+  const fenced = '```markdown\n# 内容拆解报告：桌面\n\n## 报告摘要\n正文。\n```';
+  assert.equal(reportLib.unwrapReportFence(fenced), '# 内容拆解报告：桌面\n\n## 报告摘要\n正文。');
+  assert.equal(reportLib.unwrapReportFence('```\n# 内容拆解报告：桌面\n```'), '# 内容拆解报告：桌面');
+  assert.equal(reportLib.unwrapReportFence('```markdown\n# 内容拆解报告：桌面\n正文漏了闭合栅栏'),
+    '# 内容拆解报告：桌面\n正文漏了闭合栅栏');
+  const plain = '# 内容拆解报告：桌面\n\n## 报告摘要\n正文。';
+  assert.equal(reportLib.unwrapReportFence(plain), plain, '普通报告原样返回');
+  const inner = '# 内容拆解报告：桌面\n\n示例：\n```js\nconsole.log(1)\n```\n结束。';
+  assert.equal(reportLib.unwrapReportFence(inner), inner, '内文代码块保持原样');
+});
+
+test('a fenced stored report renders as markdown and saves the unwrapped body', async t => {
+  window.localStorage.clear();
+  const inner = '# 内容拆解报告：桌面为什么越收越乱\n\n## 报告摘要\n正文。\n\n## 5. 关键发现与替代解释\n\n- **原文依据**：“桌面越来越乱”';
+  window.localStorage.setItem('easel_breakdown_history', JSON.stringify([{ id: 'fenced', title: '桌面报告', material: '桌面越来越乱，我决定换个办法。', report: '```markdown\n' + inner + '\n```', at: 1 }]));
+  const view = await mount(t, async () => ({ id: 'idea-1' }), { keepStorage: true });
+  await view.click('历史拆解'); await view.click('桌面报告');
+  const report = view.container.querySelector('.breakdown-report');
+  assert.ok(report.querySelector('h2'), '标题按 Markdown 渲染而不是代码');
+  assert.equal(report.querySelector('code'), null, '整篇不再落入代码块');
+  assert.ok(report.textContent.includes('报告摘要'));
+  assert.ok(!report.textContent.includes('##'), '不再展示 Markdown 源码');
+  await view.click('存入选题库');
+  assert.equal(view.writes.find(item => item.path === '/api/ideas').body.note, inner);
 });
 
 test('legacy unfinished work opens the same identity in chat and is never silently restarted or discarded for age', async t => {
