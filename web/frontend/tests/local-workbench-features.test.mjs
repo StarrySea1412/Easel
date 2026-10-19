@@ -153,6 +153,27 @@ test('official window is separate from the old session default and opens the con
   assert.deepEqual(opened, ['relay/glm-5.3']);
 });
 
+test('runner default and old-session capacity are visibly marked as not the model limit', async t => {
+  let snapshot = {};
+  t.mock.method(globalThis, 'fetch', async () => json(contextSnapshot(snapshot)));
+  const open = async patch => {
+    snapshot = patch;
+    const v = await view(t, Context, { sessionId: 's1', modelRef: 'p/m' });
+    await v.click(v.node.querySelector('.context-usage-trigger'));
+    return document.querySelector('.context-usage-panel');
+  };
+  const limited = await open({ capacity: 200000, capacitySource: 'runtime_config', configuredWindow: null, configuredLimit: 200000 });
+  assert.match(limited.querySelector('.context-capacity-source').textContent, /运行器会话额度/);
+  assert.match(limited.querySelector('.context-capacity-source').textContent, /不是模型上限/);
+  await act(async () => document.dispatchEvent(key('Escape')));
+  assert.equal(document.querySelector('.context-usage-panel'), null);
+  const recorded = await open({ capacity: 200000, capacitySource: 'session_snapshot', recordedLimit: 200000, configuredWindow: null });
+  assert.match(recorded.querySelector('.context-capacity-source').textContent, /旧会话记录/);
+  await act(async () => document.dispatchEvent(key('Escape')));
+  const configured = await open({ capacity: 1048576, capacitySource: 'model_config' });
+  assert.equal(configured.querySelector('.context-capacity-source'), null, 'a configured model window is not marked as a runner default');
+});
+
 test('context request cancellation prevents an old model or session snapshot from replacing the selection', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => calls.push({ url, options, resolve })));

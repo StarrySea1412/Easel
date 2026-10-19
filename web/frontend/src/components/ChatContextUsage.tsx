@@ -63,9 +63,15 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const capacity = data?.capacity;
   const percent = used != null && capacity ? used / capacity * 100 : null;
   const known = percent != null && Number.isFinite(percent);
-  const referenceOnly = data?.capacitySource === 'official_reference';
-  const recordedOnly = data?.capacitySource === 'session_snapshot' || data?.capacitySource === 'runtime';
-  const basis = referenceOnly ? '原厂标称窗口' : recordedOnly ? '会话记录额度' : data?.capacitySource === 'runtime_config' ? '配置的会话额度' : '配置的模型窗口';
+  const capacitySource = data?.capacitySource;
+  const referenceOnly = capacitySource === 'official_reference';
+  const runtimeLimited = capacitySource === 'runtime_config';
+  const recordedOnly = capacitySource === 'session_snapshot';
+  const basis = referenceOnly ? '原厂标称窗口' : recordedOnly ? '会话记录额度' : runtimeLimited ? '配置的会话额度' : '配置的模型窗口';
+  const capacityNote = capacity == null ? null
+    : runtimeLimited ? '容量为运行器会话额度（达到即触发压缩），不是模型上限；可在渠道设置中补齐模型窗口'
+    : recordedOnly ? '容量仅取自旧会话记录，不是模型上限'
+    : referenceOnly ? '容量为原厂标称窗口，尚未对本渠道核验' : null;
   const label = known ? `上下文容量，${percent.toFixed(1)}% 已用，按${basis}计算` : used != null ? '上下文容量，容量尚未提供' : '上下文容量，占用尚未提供';
   const tone = known && percent >= 90 ? 'danger' : known && percent >= 75 ? 'warn' : '';
   const updated = data?.updatedAt ? new Date(data.updatedAt) : null;
@@ -88,6 +94,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
       <div className="context-usage-total" title={used == null ? '占用未提供' : `${used.toLocaleString()} / ${capacity?.toLocaleString() || '容量未知'} Token`}>
         <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><span className="context-total-right"><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>{engine !== 'codex' && data && <InlineInfo label="容量依据说明" hover wide><p>{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{referenceOnly && ' · 渠道支持尚未核验'}</p>{data.contextReference && <p>原厂标称 <strong>{data.contextReference.label}</strong> · 来源 {data.contextReference.url}{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}{data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}{data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}{(referenceOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p>{referenceOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}</InlineInfo>}</span>
       </div>
+      {capacityNote && <p className="context-capacity-source warn">{capacityNote}</p>}
       <div className="context-capacity-track" role={known ? 'progressbar' : undefined} aria-label="上下文已用比例" aria-valuenow={known ? Math.min(100, percent) : undefined} aria-valuemin={known ? 0 : undefined} aria-valuemax={known ? 100 : undefined}>
         <span style={{ width: known ? `${Math.min(100, percent)}%` : '0%' }} />
       </div>

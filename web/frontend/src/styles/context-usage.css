@@ -11,4 +11,6 @@
 .context-usage-panel .context-configure{font-size:11px;color:var(--accent-start);padding:0}
 .context-usage-panel:focus{outline:none}
 .context-total-right{display:inline-flex;align-items:center;gap:6px}
+.context-capacity-source{margin:-5px 0 10px;font-size:11px;line-height:1.5;color:var(--text-tertiary)}
+.context-capacity-source.warn{color:var(--amber,#ad7a25)}
 @media(max-width:480px){.context-trigger-percent{display:none}.context-usage-trigger{padding:4px;min-width:30px}.context-usage-panel{padding:15px}.context-breakdown dd{gap:7px}}
