@@ -4,7 +4,7 @@
 - 创作框支持按明确作者和固定版本“导入并选择”；文件存放在持久数据目录，保存失败或风险拦截不计入选择；已导入项可选择/移除并保持真实显示名。Imports persist with owner/version provenance and resolve to actual source paths in both Web and CLI.
 - 导入仅保存文件，不执行脚本或安装钩子；限制归档体积/数量并拒绝越界路径和链接，不覆盖内置或其他作者技能。Import never executes hooks or shadows bundled skills.
 - 模型列表和推理检测带明确Easel User-Agent，兼容拒绝默认Python标识的上游。Model probes explicitly identify the Easel client.
-- 验证：后端定向144项、前端ClawHub8项通过；生产build/lint通过（0错误，20条warning）；真实浏览器与138发布结果见部署记录。These checks do not establish external skill execution or all application workflows.
+- 验证：后端定向144项、前端ClawHub/收藏/依赖11项通过；生产build/lint通过（0错误，20条warning）。138正式已运行0.3.3/dd33c38f02e4，HTTPS/登录/网关、199个原文件摘要、完整最小模型对话和ClawHub导入选择/刷新留存通过，390px技能选择及浏览器面板已核对。[发布回执](docs/release-138-0.3.3-2026-10-19.md)记录启动租约恢复及首次导入目录提示等限制。Production activation and focused UI checks passed; external skill execution, all workflows and installers remain outside acceptance.
 
 ## 0.3.2 · 2026-10-19 · Linux deployment compatibility / Linux部署兼容
 
