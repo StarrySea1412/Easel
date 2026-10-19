@@ -222,7 +222,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
-      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
+      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
   </div>;

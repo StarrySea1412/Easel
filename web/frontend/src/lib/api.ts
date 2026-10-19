@@ -3,6 +3,7 @@ import { decodeChatTiming } from './chatTiming';
 import { publishExecution, decodeExecution } from './execution';
 import { makeChatError, type ChatErrorDetail } from './chatErrors';
 import type { SkillRequirements } from './selectedSkills';
+import { decodeBrowserState, type BrowserState, type BrowserCommand, type BrowserJob } from './browser';
 function getBasePath(): string {
   const path = window.location.pathname;
   const cleaned = path.replace(/\/index\.html$/, '').replace(/\/$/, '');
@@ -1651,6 +1652,28 @@ export function readBreakdownLink(url: string, signal?: AbortSignal): Promise<Li
   return request('/api/breakdown/link', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }), signal,
   });
+}
+const browserPath = (sessionId: string) => `/api/browser/sessions/${encodeURIComponent(sessionId)}`;
+export async function fetchBrowserState(sessionId: string, signal?: AbortSignal): Promise<BrowserState> {
+  return decodeBrowserState(await request(browserPath(sessionId), { signal }), sessionId);
+}
+export function runBrowserCommand(sessionId: string, command: BrowserCommand): Promise<BrowserJob> {
+  return request(`${browserPath(sessionId)}/commands`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(command) });
+}
+export function cancelBrowserCommand(sessionId: string, requestId: string): Promise<BrowserJob> {
+  return request(`${browserPath(sessionId)}/commands/${encodeURIComponent(requestId)}/cancel`, {method:'POST'});
+}
+export async function setBrowserControl(sessionId: string, url: string, enabled: boolean): Promise<BrowserState> {
+  return decodeBrowserState(await request(`${browserPath(sessionId)}/control`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,enabled})}),sessionId);
+}
+export async function closeBrowserSession(sessionId: string): Promise<BrowserState> {
+  return decodeBrowserState(await request(browserPath(sessionId), {method:'DELETE'}),sessionId);
+}
+export function browserImageUrl(sessionId: string, tabId: string, snapshotId: string): string {
+  return `${BASE}${browserPath(sessionId)}/tabs/${encodeURIComponent(tabId)}/snapshots/${encodeURIComponent(snapshotId)}/image`;
+}
+export function attachBrowserScreenshot(sessionId: string, tabId: string, snapshotId: string): Promise<{file:UploadedFile;snapshotId:string}> {
+  return request(`${browserPath(sessionId)}/tabs/${encodeURIComponent(tabId)}/snapshots/${encodeURIComponent(snapshotId)}/attachment`, {method:'POST'});
 }
 export function previewComfyPrompt(prompt: string, cinematic: Record<string, string> = {}, negativePrompt = ''): Promise<{ prompt: string; cinematic: Record<string, string> }> {
   return request('/api/comfyui/video/prompt-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, cinematic, negativePrompt }) });

@@ -4,8 +4,14 @@ import { addChatDraftQuote, setChatDraftText } from '../lib/chatDrafts';
 import { browserPageQuote } from '../lib/chatPanels';
 import { IconCompass } from './icons';
 import { showToast } from '../lib/toast';
+import ChatLiveBrowser from './ChatLiveBrowser';
 
-export default function ChatBrowserPanel({ sessionId }: { sessionId: string }) {
+export default function ChatBrowserPanel({sessionId, active = true}: {sessionId:string;active?:boolean}) {
+  const [mode,setMode]=useState<'browser'|'reader'>('browser');
+  return <div className="chat-browser-workspace"><div className="browser-mode-tabs"><button type="button" aria-pressed={mode==='browser'} onClick={()=>setMode('browser')}>交互浏览</button><button type="button" aria-pressed={mode==='reader'} onClick={()=>setMode('reader')}>正文读取</button></div><div hidden={mode!=='browser'}><ChatLiveBrowser sessionId={sessionId} active={active&&mode==='browser'}/></div><div hidden={mode!=='reader'}><ChatPageReader sessionId={sessionId}/></div></div>;
+}
+
+export function ChatPageReader({ sessionId }: { sessionId: string }) {
   const [url,setUrl]=useState(''), [busy,setBusy]=useState(false), [error,setError]=useState('');
   const [snapshot,setSnapshot]=useState<{page: LinkReadResult; at: string}|null>(null);
   const controller=useRef<AbortController|null>(null);

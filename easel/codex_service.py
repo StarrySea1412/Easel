@@ -22,6 +22,8 @@ from .gateway_auth import redact_gateway_text
 from .execution import codex_rows, page, iso, public_text
 from .artifacts import ArtifactStore, PRESENT_TOOL
 from .image_jobs import ImageJobs, read_config, GENERATE_TOOL
+from .browser_tools import BROWSER_TOOL
+from .browser_runtime import BrowserError
 
 
 def safe(value):
@@ -61,6 +63,7 @@ class CodexService:
         self.lock = threading.RLock()
         self.active: dict[str, dict] = {}
         self.metadata_client = None
+        self.browser_service = None
         self._recover()
 
     def _recover(self):
@@ -234,7 +237,7 @@ class CodexService:
                 raise HTTPException(409, '此会话上一轮仍在运行。')
             workspace = self.outputs / 'codex' / key(sid)[:24]
             workspace.mkdir(parents=True, exist_ok=True)
-            manifest = []
+            manifest, images = [], []
             for attachment in req.attachments:
                 # Ownership is checked by the existing upload validator before this method.
                 source = (self.outputs / attachment.path).resolve()
@@ -244,6 +247,8 @@ class CodexService:
                 target.parent.mkdir(exist_ok=True)
                 shutil.copy2(source, target)
                 manifest.append(target.relative_to(workspace).as_posix())
+                if source.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}:
+                    images.append(str(target))
             text = req.message
             if manifest:
                 text += '\n\n本轮附件（位于当前工作目录）：\n' + '\n'.join(manifest)
@@ -260,6 +265,7 @@ class CodexService:
             self._event(state, 'timing', {'startedAt': state['startedAt']})
             self._event(state, 'activity', 'Codex 正在启动；等待实际事件。')
             run = {'state': state, 'client': None, 'queue': None, 'requests': {},
+                   'inputImages': images, 'browserJobs': set(), 'browserFinished': False, 'browserStop':threading.Event(),
                    'startedMonotonic': time.monotonic(),
                    'finished': threading.Event(), 'controlLock': threading.Lock()}
             self.active[sid] = run
@@ -279,6 +285,9 @@ class CodexService:
                 '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
                 'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'
                 'HTML使用自包含CSS/脚本或本地资源；预览隔离运行，不依赖外部CDN、联网接口或嵌套网页。')
+            if self.browser_service:
+                from .browser_bridge import instructions
+                params['developerInstructions'] += instructions(state['sessionId'])
             ticket = ArtifactStore(self.outputs).bind(state['sessionId'], state['turn_id'])
             script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/image_job.py'
             params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
@@ -287,7 +296,7 @@ class CodexService:
             if state['threadId']:
                 response = client.rpc('thread/resume', {**params, 'threadId': state['threadId']})
             else:
-                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL]
+                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
                 response = client.rpc('thread/start', params)
             thread = response['thread']['id']
             with self.lock:
@@ -298,7 +307,8 @@ class CodexService:
                 self._write(self.folder(state['sessionId']) / 'session.json', binding)
             events = client.subscribe(thread)
             run['queue'] = events
-            started = client.rpc('turn/start', {'threadId': thread, 'input': [{'type': 'text', 'text': text}],
+            started = client.rpc('turn/start', {'threadId': thread, 'input': [{'type': 'text', 'text': text}] +
+                [{'type':'localImage','path':path} for path in run.get('inputImages',[])],
                 'model': model['model'], 'effort': (state['requestedThinkingLevel'] or model['defaultEffort']).replace('off', 'none'),
                 'summary': 'auto'})
             state['codexTurnId'] = started['turn']['id']
@@ -318,6 +328,7 @@ class CodexService:
             with self.lock:
                 state.update(outcome='unconfirmed', error={'message': safe(str(exc))[:1500]})
         finally:
+            self._cancel_browser_jobs(run)
             with self.lock:
                 state['elapsedMs'] = max(0, round((time.monotonic() - run['startedMonotonic']) * 1000))
                 state['status'] = 'done'
@@ -466,6 +477,25 @@ class CodexService:
 
     def _request(self, run, event):
         method, params = event['method'], event.get('params') or {}
+        if method == 'item/tool/call' and params.get('tool') == 'easel_browser' and not params.get('namespace'):
+            if not self.browser_service:
+                run['client'].reply(event['id'], {'success':False,'contentItems':[{'type':'inputText','text':'当前浏览器服务不可用。'}]})
+                return False
+            args = params.get('arguments')
+            if not isinstance(args, dict):
+                run['client'].reply(event['id'], {'success':False,'contentItems':[{'type':'inputText','text':'浏览器参数必须是对象。'}]})
+                return False
+            if args.get('action') not in ('state','image') and not args.get('requestId'):
+                run['client'].reply(event['id'], {'success':False,'contentItems':[{'type':'inputText','text':'操作必须提供固定requestId，避免重复执行。'}]})
+                return False
+            request_id = args.get('requestId') or 'codex-' + uuid.uuid4().hex
+            if not isinstance(request_id,str):
+                run['client'].reply(event['id'], {'success':False,'contentItems':[{'type':'inputText','text':'requestId必须是字符串。'}]})
+                return False
+            args = {**args, 'requestId':request_id}
+            run.setdefault('browserJobs',set()).add(request_id)
+            threading.Thread(target=self._browser_tool_worker,args=(run,event,args),daemon=True,name='easel-codex-browser').start()
+            return False
         if method == 'item/tool/call' and params.get('tool') == 'easel_generate_image' and not params.get('namespace'):
             try:
                 args = params.get('arguments')
@@ -502,6 +532,51 @@ class CodexService:
         run['state']['pending'].append({'requestId': ident, 'method': method, 'params': safe(params)})
         self._event(run['state'], 'activity', 'Codex 等待你的审批或回答。')
         return False
+
+    def _browser_tool_worker(self, run, event, args):
+        try:
+            with self.lock:
+                if run.get('browserFinished'):
+                    run.setdefault('browserJobs',set()).discard(args['requestId'])
+                    return
+                # Submit under the same lock used by stop, so cancellation cannot
+                # run before the host has registered this browser operation.
+                future = self.browser_service.submit('bound_tool', run['state']['sessionId'], args, run.setdefault('browserStop',threading.Event()))
+            result = future.result(timeout=40)
+        except Exception as exc:
+            if isinstance(exc, TimeoutError):
+                try:
+                    self.browser_service.call('cancel',run['state']['sessionId'],args['requestId'])
+                except (BrowserError, TimeoutError):
+                    pass
+            text = str(exc) if isinstance(exc, BrowserError) else '浏览器工具未完成，请先重新观察；不要重复执行未确认操作。'
+            result = {'success':False,'contentItems':[{'type':'inputText','text':public_text(text,limit=800)}]}
+        try:
+            run['client'].reply(event['id'],result)
+        except (OSError, CodexError, RuntimeError):
+            pass
+        finally:
+            with self.lock:
+                run.setdefault('browserJobs',set()).discard(args['requestId'])
+
+    def _cancel_browser_jobs(self, run):
+        with self.lock:
+            run['browserFinished'] = True
+            run.setdefault('browserStop',threading.Event()).set()
+            ids = list(run.get('browserJobs',()))
+        if self.browser_service:
+            for request_id in ids:
+                try:
+                    self.browser_service.call('cancel',run['state']['sessionId'],request_id)
+                except (BrowserError, TimeoutError):
+                    pass
+            # Older resumed threads use the CLI bridge, whose calls do not
+            # appear as dynamic tool requests on this App Server connection.
+            if self.browser_service.has_pages(run['state']['sessionId']):
+                try:
+                    self.browser_service.call('cancel_agents',run['state']['sessionId'])
+                except (BrowserError, TimeoutError):
+                    pass
 
     def _present_files(self, state, files, call):
         if not isinstance(files, list) or not 1 <= len(files) <= 16:
@@ -595,6 +670,7 @@ class CodexService:
             if not state.get('codexTurnId'):
                 return {'stopped': False}
             client, thread, turn = run['client'], state['threadId'], state['codexTurnId']
+        self._cancel_browser_jobs(run)
         with run['controlLock']:
             client.rpc('turn/interrupt', {'threadId': thread, 'turnId': turn})
         return {'stopped': run['finished'].wait(35)}

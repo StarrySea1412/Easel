@@ -9,7 +9,7 @@ globalThis.document=window.document;
 globalThis.localStorage=window.localStorage;
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
-const {default:Panel}=await loadTsModule('../src/components/ChatBrowserPanel.tsx',import.meta.url);
+const {ChatPageReader:Panel}=await loadTsModule('../src/components/ChatBrowserPanel.tsx',import.meta.url);
 const {getChatDraft,setChatDraftText}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
 
 async function setup(t,id){

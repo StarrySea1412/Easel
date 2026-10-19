@@ -564,6 +564,7 @@ async def _lifespan(_app: FastAPI):
         await _task_service.close()
         await asyncio.to_thread(_image_worker().stop)
         await asyncio.to_thread(_codex_service.close)
+        await asyncio.to_thread(_browser_service.close)
         await asyncio.to_thread(health.stop)
         await asyncio.to_thread(verification.stop)
         _stop_mp_login_on_shutdown()
@@ -573,6 +574,11 @@ app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
 from easel.codex_service import CodexService
 _codex_service = CodexService(OUTPUTS_DIR)
 app.include_router(_codex_service.router())
+from easel.browser_runtime import BrowserService
+from browser_api import router as browser_router
+_browser_service = BrowserService(OUTPUTS_DIR)
+_codex_service.browser_service = _browser_service
+app.include_router(browser_router(_browser_service))
 from easel.artifact_api import router as artifact_router
 from easel.chat_projection import project_injected, present_payloads
 app.include_router(artifact_router(lambda: OUTPUTS_DIR,
@@ -3456,14 +3462,16 @@ def _skill_requirements_context(req: ChatRequest, specs: dict[str, dict]) -> str
 
 def _attachment_scope(session_id: str) -> str:
     """Map a browser session to a filesystem-safe, non-reversible inbox scope."""
-    value = session_id.strip()
-    if not value or len(value) > 256:
-        raise HTTPException(400, "无效的会话标识")
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:20]
+    from easel.attachment_refs import attachment_scope
+    try:
+        return attachment_scope(session_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 def _attachment_id(scope: str, path: str) -> str:
-    return hashlib.sha256(f"{scope}\0{path}".encode("utf-8")).hexdigest()[:24]
+    from easel.attachment_refs import attachment_id
+    return attachment_id(scope, path)
 
 
 def _attachment_context(req: ChatRequest) -> str:
@@ -3475,6 +3483,7 @@ def _attachment_context(req: ChatRequest) -> str:
 
     scope = _attachment_scope(req.sessionId)
     rows: list[str] = []
+    images: list[str] = []
     seen: set[str] = set()
     for attachment in req.attachments:
         rel = Path(attachment.path)
@@ -3492,6 +3501,8 @@ def _attachment_context(req: ChatRequest) -> str:
             continue
         seen.add(normalized)
         rows.append(f"- outputs/{normalized}")
+        if full.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}:
+            images.append(str(full))
 
     return (
         "〔系统附件清单，仅供本轮执行，不要向用户复述文件上传过程或内部路径〕\n"
@@ -3499,6 +3510,8 @@ def _attachment_context(req: ChatRequest) -> str:
         + "\n".join(rows)
         + "\n需要纳入内容项目时，将清单内文件复制到 outputs/<项目>/assets/ 后再使用；"
           "保留 inbox 原件，确保重试仍可复现。"
+        + ('\n图片附件须先用现有image/read工具实际读取，再分析视觉内容；不能凭文件名声称已看图。实际路径：\n'
+           + '\n'.join(images) if images else '')
     )
 
 
@@ -3511,6 +3524,9 @@ def _chat_message(req: ChatRequest) -> str:
     if not message:
         raise HTTPException(400, "消息不能为空")
     message = history_context(req.history) + message
+    if req.sessionId and _browser_service.has_pages(req.sessionId):
+        from easel.browser_bridge import instructions as browser_instructions
+        message += browser_instructions(req.sessionId)
     specs = _selected_skill_specs(req)
     message += (f'\n\n〔本轮文件交付规则〕持久产物目录是 {OUTPUTS_DIR}。'
                 '生成文件、从网站下载的文件或网页快照，都必须实际保存到该目录下的具体主题子目录，'
@@ -4859,6 +4875,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             settled=True, resource_settled=True)
         finally:
             try:
+                if _browser_service.has_pages(sk):
+                    await asyncio.to_thread(_browser_service.call, 'cancel_agents', sk)
+            except (ValueError, TimeoutError, RuntimeError):
+                to_client('activity', '浏览器操作结算未确认，请在浏览器面板重新观察。')
+            try:
                 execution_store.finish()
                 to_client('execution', execution_store.snapshot())
             except OSError:
@@ -5023,6 +5044,11 @@ async def api_chat_stop(req: StopRequest):
         from chat_recovery import stop_orphan
         return await asyncio.to_thread(stop_orphan, sys.modules[__name__], sk, req.turnId)
     if proc is not None and proc.poll() is None:
+        try:
+            if _browser_service.has_pages(sk):
+                await asyncio.to_thread(_browser_service.call, 'cancel_agents', sk)
+        except (ValueError, TimeoutError, RuntimeError):
+            pass  # Supervisor cleanup retries settlement before releasing the chat.
         _STOPPED_CHAT.add(sk)          # 标记为用户停止，供 supervisor 正常收尾（不报「被中断」）
         try:
             await asyncio.to_thread(proc.terminate)

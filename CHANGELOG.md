@@ -1,3 +1,10 @@
+## 2026-10-19 · Shared Chromium browser and Agent observations / 共享浏览器运行时
+
+- Real per-chat Chromium tabs, navigation, screenshot/DOM/text/log observations and verified actions; retain the page reader mode. / 每对话独立Chromium标签，导航及版本化截图/DOM/正文/日志、操作后观察，保留正文读取模式。
+- Shared Codex dynamic tool and local CLI bridge for resumed threads/OpenClaw; current-session image evidence follows existing attachment paths. / 新Codex线程注册浏览器工具，旧线程与OpenClaw通过CLI共享同页；截图接入现有会话附件与视觉输入。
+- Fix redirect-hop guarding, early cancellation, empty-session slot usage and coordinate-click navigation races. / 修复重定向逐跳校验、早期取消、空面板占用会话及坐标点击导航竞态。
+- 40 backend / 58 targeted frontend tests, build/lint and real isolated browser UI pass; real model quality and deployment remain unverified. / 40项后端、58项前端定向、构建/lint和真实隔离浏览器界面通过；真实模型质量与部署另验。[Details / 详情](docs/browser-runtime-2026-10-19.md)。
+
 ## 2026-10-19 · Panel launcher and browser page evidence / 新增面板与网页证据
 
 - Replace the sidebar-wide auxiliary-chat entry with a full panel launcher; files, browser, terminal, changes and auxiliary chat have independent tabs. / 右栏统一“新增面板”，文件、浏览器、终端、变更与辅助对话作为工具标签，保留关闭重开及更多工具中的目标。

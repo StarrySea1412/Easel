@@ -15,7 +15,7 @@ interface Props {
 }
 const tools = [
   { id: 'files', title: '文件', hint: '浏览对话文件与产物', Icon: IconFolder },
-  { id: 'browser', title: '浏览器', hint: '读取网页，带入分析', Icon: IconCompass },
+  { id: 'browser', title: '浏览器', hint: '浏览、操作与页面分析', Icon: IconCompass },
   { id: 'terminal', title: '终端', hint: '查看命令与执行输出', Icon: IconTerminal },
   { id: 'changes', title: '变更', hint: '查看文件变更回执', Icon: IconEdit },
   { id: 'side', title: '辅助对话', hint: '独立讨论旁支问题', Icon: IconChat },
