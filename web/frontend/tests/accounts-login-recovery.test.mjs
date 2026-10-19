@@ -30,16 +30,20 @@ async function fixture(t) {
   let timerId = 0;
   t.mock.method(globalThis, 'setTimeout', (callback, delay) => { assert.equal(delay, 2000); const id = ++timerId; timers.set(id, callback); return id; });
   t.mock.method(globalThis, 'clearTimeout', id => timers.delete(id));
+  const refreshTimers = new Map();
+  t.mock.method(window, 'setInterval', (callback, delay) => { assert.equal(delay, 60000); const id = ++timerId; refreshTimers.set(id, callback); return id; });
+  t.mock.method(window, 'clearInterval', id => refreshTimers.delete(id));
   const state = {
     requests: [], start: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
     read: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
     sms: async () => ({ ok: true }), cancel: async () => ({ cancelled: true, state: 'cancelled' }), analyzed: 0, whoamiCalls: 0,
+    accountRows: accounts, whoami: () => ({ loggedIn: true, name: 'Synthetic account', avatar: '' }),
   };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     state.requests.push({ url, method: options?.method || 'GET' });
     assert.equal(options.cache, 'no-store');
-    if (url === '/api/accounts') return response(accounts);
-    if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response({ loggedIn: true, name: 'Synthetic account', avatar: '' }); }
+    if (url === '/api/accounts') return response(state.accountRows);
+    if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response(await state.whoami()); }
     if (url.endsWith('/sms')) return response(await state.sms());
     if (url.includes('/cancel?')) return response(await state.cancel(url));
     if (url.endsWith('/status')) return response(await state.read(url));
@@ -69,7 +73,7 @@ async function fixture(t) {
     const [id, callback] = timers.entries().next().value; timers.delete(id);
     await act(async () => { void callback(); });
   };
-  return { state, container, modal, start, click, tick, timers, unmount: () => act(async () => root.unmount()) };
+  return { state, container, modal, start, click, tick, timers, refreshTimers, unmount: () => act(async () => root.unmount()) };
 }
 
 test('initial terminal failure is shown once and never schedules a status retry', async t => {
@@ -396,4 +400,46 @@ test('Xiaohongshu page previews offer an explicit browser login before terminal 
   assert.equal(view.modal().querySelector('img'), null);
   assert.match(view.modal().textContent, /工作台所在电脑的小红书窗口/);
   assert.equal(view.timers.size, 1);
+});
+
+test('visible account page periodically detects expiry and does not count an unverified snapshot as connected', async t => {
+  const view = await fixture(t);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  view.state.accountRows = [{platform:'zhihu',name:'知乎',backend:'web',supported:true,loggedIn:true,hasLocalSession:true}];
+  localStorage.setItem('easel_whoami', JSON.stringify({zhihu:{loggedIn:true,verified:true,checkedAt:now,name:'old identity',avatar:''}}));
+  view.state.whoami = () => ({loggedIn:false,verified:true,checkedAt:now,name:'',avatar:''});
+  now += 121000;
+  await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
+  assert.equal(view.state.whoamiCalls, 1);
+  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已连接/);
+  assert.match(view.container.querySelector('article').textContent, /登录已失效/);
+  // A stale quick endpoint cannot erase the fresh confirmed offline result.
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  assert.equal(view.state.whoamiCalls, 1);
+  assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.loggedIn, false);
+  await view.unmount();
+  assert.equal(view.refreshTimers.size, 0);
+});
+
+test('account checking remains unknown on transport failure and periodic checks pause while hidden or logging in', async t => {
+  const view = await fixture(t);
+  let now = Date.now(); t.mock.method(Date,'now',()=>now);
+  view.state.accountRows = [{platform:'zhihu',name:'知乎',backend:'web',supported:true,loggedIn:true,hasLocalSession:true}];
+  localStorage.setItem('easel_whoami', JSON.stringify({zhihu:{loggedIn:true,verified:true,checkedAt:now,name:'retained',avatar:''}}));
+  view.state.whoami = () => {throw new Error('synthetic offline');};
+  now += 121000;
+  Object.defineProperty(document, 'visibilityState', {configurable:true,value:'hidden'});
+  const before = view.state.requests.length;
+  await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
+  assert.equal(view.state.requests.length, before);
+  Object.defineProperty(document, 'visibilityState', {configurable:true,value:'visible'});
+  await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
+  assert.match(view.container.querySelector('article .badge').textContent, /状态待确认/);
+  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已连接/);
+  assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
+  await view.start('知乎');
+  const calls = view.state.requests.length;
+  await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
+  assert.equal(view.state.requests.length, calls);
 });

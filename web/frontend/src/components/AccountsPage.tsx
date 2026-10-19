@@ -5,7 +5,7 @@ import {
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
 import type { AccountItem, AccountWhoami, LoginStart, LoginStatus } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified, watchAccountFreshness } from '../lib/whoami';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
@@ -145,6 +145,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const ownedLoginRef = useRef<OwnedLogin | null>(null);
   const settlingRef = useRef(false);
   const aliveRef = useRef(true);
+  const loadingAccounts = useRef(false);
   const qrPlatformRef = useRef('');   // 当前登录中的平台，供 submitSms 稳定引用
 
   useEffect(() => {
@@ -202,46 +203,45 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
 
   // 打开页面：拉「快」状态（读 status.json，不起浏览器），随后后台自愈——对缓存缺失/过期的
   // 浏览器平台逐个真校验（whoami），结果到了刷新 UI，并令陈旧的假阴性缓存被真值覆盖。
-  const load = useCallback(() => {
+  const load = useCallback(async (force = false) => {
+    if (loadingAccounts.current || qrPlatformRef.current) return;
+    loadingAccounts.current = true;
     setErr('');
-    fetchAccounts()
-      .then((list) => {
-        if (!aliveRef.current) return;
-        setAccounts(list);
-        const cached = getWhoamiCache();
-        list.forEach(account => {
-          if (account.loggedIn && cached[account.platform]?.loggedIn === false) setWhoamiCache(account.platform, null);
-        });
-        setLoaded(true);
-        const targets = list
-          .filter((a) => a.supported && (a.loggedIn || a.hasLocalSession || cached[a.platform]))
-          .map((a) => a.platform);
-        verifyStale(targets, {
-          alive: () => aliveRef.current && !qrPlatformRef.current,
-          onChecking: platform => setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态…' } })),
-          onUpdate: (platform, r) => {
-            setWhoami((w) => ({ ...w, [platform]: r }));
-            setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
-            setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
-          },
-          onError: (platform, message) => setVerification(value => ({ ...value, [platform]: { state: 'error', message } })),
-        });
-      })
-      .catch(() => setErr('加载账号状态失败'));
+    try {
+      const list = await fetchAccounts();
+      if (!aliveRef.current) return;
+      setAccounts(list);
+      const cached = getWhoamiCache();
+      setLoaded(true);
+      const targets = list
+        .filter((a) => a.supported && (a.loggedIn || a.hasLocalSession || cached[a.platform]))
+        .map((a) => a.platform);
+      await verifyStale(targets, {
+        force,
+        alive: () => aliveRef.current && !qrPlatformRef.current && document.visibilityState === 'visible',
+        onChecking: platform => setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态…' } })),
+        onUpdate: (platform, r) => {
+          setWhoami((w) => ({ ...w, [platform]: r }));
+          setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
+          setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
+        },
+        onError: (platform, message) => setVerification(value => ({ ...value, [platform]: { state: 'error', message } })),
+      });
+    } catch {
+      if (aliveRef.current) {
+        setErr('加载账号状态失败，登录状态待确认');
+        const cache = getWhoamiCache();
+        Object.keys(cache).forEach(platform => markWhoamiUnverified(platform, '账号状态加载失败，请重试。'));
+      }
+    } finally { loadingAccounts.current = false; }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   // 切回本标签页 / 窗口重新获得焦点时自动重拉账号态——登录/退出后即使漏了一次刷新，切回来也是最新的，
   // 用户无需手动刷新页面。（登录中弹着二维码时不打扰，避免打断轮询。）
   useEffect(() => {
-    const refresh = () => { if (document.visibilityState === 'visible' && !qrPlatformRef.current) load(); };
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-    };
+    return watchAccountFreshness(() => { if (!qrPlatformRef.current) void load(); });
   }, [load]);
 
   const stopPoll = useCallback(() => {
@@ -465,7 +465,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const effLoggedIn = (a: AccountItem): boolean => {
     const w = whoami[a.platform];
     if (w && w !== 'loading' && isWhoamiFresh(w)) return w.loggedIn;
-    return a.loggedIn;
+    return false;
   };
 
   const badge = (a: AccountItem) => {
@@ -473,7 +473,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     if (whoami[a.platform] === 'loading' || verification[a.platform]?.state === 'checking') return <span className="badge">校验中…</span>;
     const w = whoami[a.platform];
     if (verification[a.platform]?.state === 'error' || (w && w !== 'loading' && w.verified === false)) return <span className="badge">状态待确认</span>;
-    if (effLoggedIn(a)) return w && w !== 'loading' && isWhoamiFresh(w) ? <span className="badge badge-ok">已连接</span> : <span className="badge">待在线校验</span>;
+    if (effLoggedIn(a)) return <span className="badge badge-ok">已连接</span>;
+    if (a.loggedIn && !(w && w !== 'loading' && isWhoamiFresh(w))) return <span className="badge">待在线校验</span>;
     return <span className="badge">未连接</span>;
   };
 
@@ -491,7 +492,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       <div className="accounts-heading">
         <div><p className="accounts-eyebrow">创作渠道</p><h1><IconAccounts size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />账号中心</h1>
           <p className="accounts-intro">连接发布平台，管理登录状态，了解自己的内容表现。</p></div>
-        <div className="account-heading-actions"><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? <IconEye size={15} /> : <IconEyeOff size={15} />}{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button><button className="btn btn-sm" onClick={load}><IconRefresh size={15} />刷新状态</button></div>
+        <div className="account-heading-actions"><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? <IconEye size={15} /> : <IconEyeOff size={15} />}{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button><button className="btn btn-sm" onClick={() => void load(true)}><IconRefresh size={15} />刷新状态</button></div>
       </div>
       <div className="accounts-summary" aria-live="polite">
         <span className="accounts-summary-dot" aria-hidden={true} />
@@ -543,7 +544,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                 </button>}
                 <div className="account-secondary-actions">
                   {logged && (a.platform === 'xiaohongshu' || OTHER_ANALYSIS_PLATFORMS.has(a.platform)) && <button type="button" onClick={() => openAnalysis(a.platform)}>查看内容分析 <span aria-hidden={true}>→</span></button>}
-                  {a.supported && logged && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>管理账号</button>}
+                  {a.supported && (logged || a.hasLocalSession) && <button type="button" disabled={logoutBusy === a.platform} onClick={() => { setManagedPlatform(a.platform); setConfirmLogout(false); }}>管理账号</button>}
                 </div>
               </div>
             </article>;

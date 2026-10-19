@@ -1,3 +1,6 @@
+> **登录态刷新与失败追踪 · 0.3.6（2026-10-19，源码未部署）**：账号页、发布页可见时每分钟检查，在线结论缓存缩短至2分钟；切回窗口/恢复网络触发刷新，过期或检查失败不计为确认在线。发布前继续强制检查身份；账号/媒体拦截、提交错误和新失败回执补报错误编号。ClawHub同名多作者下载已固定作者，API失败保留阶段、状态和运行版本，不采正文/凭据。按用户要求暂停部署，138仍0.3.5 / `193278acf42f`，真实多平台发布未验收，安装器未更新。[根因、验证与后续部署说明](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/clawhub-failure-events-2026-10-19.md)。
+
+
 > **账号连接取消 · 0.3.5（2026-10-19，138已更新）**：关闭扫码窗口会结束所属登录流程并等待资源结算；启动中关闭、重连、迟到响应和HTTP断开均有流程归属保护，取消失败可见且可重试。后端155项、前端50项、build/lint及隔离真实浏览器界面检查通过。用户已暂停真实平台登录与发布验收；138隔离和正式均运行 **0.3.5 / 193278acf42f**，app/browser Healthy、零重启。[实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/account-login-cancellation-2026-10-19.md)。
 
 > **0.3.4已部署138（2026-10-19）**：隔离和正式运行 **00f61ea06c3a**，验收时app/browser Healthy且新容器零重启。登录名额在新进程内申请，复用/重连保持容量1，成功等待profile保存；HTTPS登录/版本/网关和浏览器导航/DOM/截图通过。正式基线227项中225项摘要不变，2项浏览器临时状态变化单独记录；全部备份保留。真实账号身份与发布未验。[平台矩阵](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/platform-login-testing-2026-10-19.md)。

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification } from '../lib/api';
+import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification, reportPublishFailure } from '../lib/api';
 import type { PublishReceipt, PublishRequest } from '../lib/api';
 import { isFinalPublishReceipt, isPublishReceipt, mergePublishReceipts, publishPlatformLabel } from '../lib/publishReceipts';
+import { markWhoamiUnverified } from '../lib/whoami';
 
 export interface PublishSubmissionIssue {
   platform: string;
@@ -39,11 +40,17 @@ export function usePublishReceipts() {
     for (const item of incoming) {
       const latest = mergedById.get(item.receiptId);
       if (!latest || !isFinalPublishReceipt(latest)) continue;
-      const key = `${latest.receiptId}:${latest.outcome}`;
+      const loginRequired = latest.platformStatus === 'login_required' || latest.verification?.state === 'login_required';
+      const key = `${latest.receiptId}:${latest.outcome}:${loginRequired ? 'login_required' : ''}`;
       if (seenOutcomes.current.has(key)) continue;
       seenOutcomes.current.add(key);
       const old = previous.get(latest.receiptId);
-      if (!quiet || (old && !isFinalPublishReceipt(old))) nextNotices.push(latest.receiptId);
+      if (!quiet || (old && !isFinalPublishReceipt(old))) {
+        nextNotices.push(latest.receiptId);
+        if (loginRequired) markWhoamiUnverified(latest.platform, '平台回执提示登录失效，请重新检查账号；先核对作品结果，避免重复发布。');
+        if (latest.outcome === 'failed' || loginRequired) void reportPublishFailure(latest.platform, 'receipt', loginRequired ? 'login_required' : 'publish_failed',
+          undefined, performance.now(), latest.receiptId);
+      }
     }
     current.current = merged;
     setReceipts(merged);
@@ -155,10 +162,12 @@ export function usePublishReceipts() {
             if (!isPublishReceipt(receipt)) throw new Error('服务返回的回执不完整。');
             accept([receipt]);
           } else {
-            issue(request, '服务未返回可恢复的发布回执，请先到平台核对结果，避免重复发布。');
+            throw new Error('服务未返回可恢复的发布回执，请先到平台核对结果，避免重复发布。');
           }
         } catch (cause) {
-          issue(request, `${cause instanceof Error ? cause.message : '发布请求中断'} 请先查看回执或到平台核对，避免重复发布。`);
+          const id = await reportPublishFailure(request.platform, 'submit', 'receipt_missing', cause);
+          const message = cause instanceof Error ? cause.message : '发布请求中断';
+          issue(request, `${message}${id && !message.includes(id) ? `（错误编号：${id}）` : ''} 请先查看回执或到平台核对，避免重复发布。`);
         } finally {
           if (mounted.current) {
             setSubmittingPlatforms(items => items.filter(platform => platform !== request.platform));

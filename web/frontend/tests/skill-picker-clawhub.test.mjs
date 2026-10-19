@@ -16,9 +16,15 @@ const external = { id: 'alice/card-quote', slug: 'card-quote', displayName: 'Ext
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
 async function fixture(t) {
-  const calls = [], picked = [];
+  const calls = [], picked = [], reports = [];
+  let callbackUnavailable = false;
   let installed = [{ name: 'card-quote', description: 'Local Quote' }];
   t.mock.method(globalThis, 'fetch', (url, options = {}) => {
+    if (String(url) === '/api/diagnostics/failures') {
+      reports.push(JSON.parse(options.body));
+      if (callbackUnavailable) return Promise.reject(new TypeError('do-not-report-this-callback-failure'));
+      return Promise.resolve(json({ eventId: 'b'.repeat(32) }));
+    }
     if (String(url) === '/api/skills') return Promise.resolve(json(installed));
     return new Promise((resolve, reject) => calls.push({ url: String(url), options, resolve, reject }));
   });
@@ -37,7 +43,8 @@ async function fixture(t) {
   await click(button('ClawHub'));
   t.after(async () => { await act(async () => root.unmount()); node.remove(); });
   return {
-    node, calls, picked, click, button,
+    node, calls, picked, reports, click, button,
+    failCallback() { callbackUnavailable = true; },
     setInstalled(value) { installed = value; },
     async search(term) {
       const input = document.querySelector('.brush-search');
@@ -106,8 +113,54 @@ test('failed import preserves the result and selection count with an explicit re
   await act(async () => v.calls[2].reject(new Error('磁盘不可写，未导入')));
   assert.deepEqual(v.picked, []);
   assert.match(document.querySelector('.brush-import-error').textContent, /磁盘不可写/);
+  assert.match(document.querySelector('.brush-import-error').textContent, /错误编号：bbbb/);
+  assert.equal(v.reports[0].stage, 'import');
+  assert.equal(v.reports[0].slug, external.slug);
+  assert.equal(v.reports[0].owner, 'alice');
+  assert.ok(!JSON.stringify(v.reports).includes('磁盘不可写'), 'never send raw error text');
   assert.equal(document.querySelector('.clawhub-pick').disabled, false);
   assert.match(document.querySelector('.skill-picker-footer').textContent, /已选 1 个/);
+});
+
+test('server event ID stays visible and the browser callback correlates without duplicate text', async t => {
+  const v = await fixture(t); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.clawhub-pick'));
+  await v.reply(1, { skill: external, latestVersion: { version: '1.2.3' } });
+  const eventId = 'c'.repeat(32);
+  await act(async () => v.calls[2].resolve(new Response(JSON.stringify({ detail: '下载失败' }), {
+    status: 502, headers: { 'Content-Type': 'application/json', 'X-Easel-Failure-Id': eventId },
+  })));
+  assert.deepEqual(v.picked, []);
+  assert.equal(v.reports[0].relatedEventId, eventId);
+  assert.equal(v.reports[0].status, 502);
+  assert.equal(v.reports[0].code, 'http_error');
+  assert.equal(document.querySelector('.brush-import-error').textContent.split(eventId).length, 2);
+});
+
+test('post-import catalog mismatch is reported separately and leaves selection unchanged', async t => {
+  const v = await fixture(t); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.clawhub-pick'));
+  await v.reply(1, { skill: external, latestVersion: { version: '1.2.3' } });
+  await v.reply(2, { name: 'missing', displayName: 'External Quote', version: '1.2.3' });
+  assert.deepEqual(v.picked, []);
+  assert.equal(v.reports[0].stage, 'catalog_verify');
+  assert.equal(v.reports[0].code, 'catalog_missing');
+  assert.match(document.querySelector('.brush-import-error').textContent, /导入完成，但本机技能目录尚未读取到/);
+});
+
+test('unavailable callback preserves original network failure and does not report recursively', async t => {
+  const v = await fixture(t); v.failCallback(); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.clawhub-pick'));
+  await v.reply(1, { skill: external, latestVersion: { version: '1.2.3' } });
+  await act(async () => v.calls[2].reject(new TypeError('original network failure')));
+  assert.deepEqual(v.picked, []);
+  assert.equal(v.reports.length, 1);
+  assert.equal(v.reports[0].code, 'network');
+  assert.equal(document.querySelector('.brush-import-error').textContent, 'original network failure');
+  assert.equal(document.querySelector('.clawhub-pick').disabled, false);
 });
 
 test('author frontmatter becomes a readable summary and sanitized Markdown body', async t => {

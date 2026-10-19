@@ -18,10 +18,24 @@ from pydantic import BaseModel, Field
 
 from web.clawhub import ClawHubClient, ORIGIN
 from easel.imported_skills import installed, local_name
+from web.failure_events import annotate
 
 MAX_ZIP = 8 * 1024 * 1024
 MAX_EXPANDED = 32 * 1024 * 1024
 MAX_FILES = 256
+_INVALID_CODES = {
+    '技能压缩包超过8MiB，未导入': 'archive_too_large',
+    '技能文件过多，未导入': 'archive_too_many_files',
+    '技能压缩包包含不安全路径或特殊文件，未导入': 'archive_unsafe_path',
+    '技能解压体积过大，未导入': 'archive_expanded_too_large',
+    '技能压缩包无法读取，未导入': 'archive_unreadable',
+    '技能压缩包缺少根目录SKILL.md，未导入': 'archive_missing_skill',
+    '技能说明过大，未导入': 'skill_too_large',
+    '技能说明为空，未导入': 'skill_empty',
+    '技能说明不是UTF-8，未导入': 'skill_encoding',
+    '技能目录不可用，未导入': 'directory_unavailable',
+    '技能目录已存在，保留原文件，未覆盖': 'directory_exists',
+}
 
 
 class ImportRequest(BaseModel):
@@ -76,53 +90,78 @@ class SkillImporter:
         self.client = client or ClawHubClient()
         self.lock = asyncio.Lock()
 
-    async def download(self, slug: str, version: str):
+    async def download(self, slug: str, version: str, owner: str):
         try:
             async with httpx.AsyncClient(transport=self.client._transport, trust_env=False,
                     follow_redirects=False, timeout=httpx.Timeout(30, connect=5)) as client:
-                async with client.stream('GET', ORIGIN + '/api/v1/download', params={'slug': slug, 'version': version}) as r:
+                async with client.stream('GET', ORIGIN + '/api/v1/download',
+                        params={'slug': slug, 'version': version, 'ownerHandle': owner}) as r:
+                    annotate(upstreamStatus=r.status_code,
+                             upstreamType=r.headers.get('content-type', '').split(';')[0].strip())
                     if r.status_code == 429:
+                        annotate(code='download_rate_limited')
                         raise HTTPException(429, 'ClawHub下载限流，请稍后重试')
+                    if r.status_code == 409:
+                        annotate(code='download_identity_conflict')
+                        raise HTTPException(409, 'ClawHub无法确认该作者的下载版本，请刷新详情后重试')
                     if r.status_code != 200:
+                        annotate(code='download_http_error')
                         raise HTTPException(502, 'ClawHub技能下载失败，请重试')
                     if r.headers.get('content-type', '').split(';')[0].strip() not in ('application/zip', 'application/octet-stream'):
+                        annotate(code='download_content_type')
                         raise HTTPException(502, 'ClawHub没有返回技能压缩包')
                     chunks, size = [], 0
                     async for chunk in r.aiter_bytes():
                         size += len(chunk)
                         if size > MAX_ZIP:
+                            annotate(code='archive_too_large')
                             raise HTTPException(413, '技能压缩包超过8MiB，未导入')
                         chunks.append(chunk)
                     return b''.join(chunks)
         except httpx.TimeoutException:
+            annotate(code='download_timeout')
             raise HTTPException(504, 'ClawHub下载超时，请重试') from None
         except httpx.RequestError:
+            annotate(code='download_network')
             raise HTTPException(502, '无法连接ClawHub下载服务，请重试') from None
 
     async def import_skill(self, slug: str, owner: str, version: str):
+        annotate(operation='clawhub_import', stage='detail', owner=owner, slug=slug, skillVersion=version)
         detail = await self.client.detail(slug, owner)
         actual = detail['skill']
+        annotate(stage='version_check')
         if actual['version'] != version:
+            annotate(code='version_changed')
             raise HTTPException(409, '技能版本已更新，请刷新详情后重新选择')
         moderation = detail.get('moderation') or {}
+        annotate(stage='risk_check')
         if moderation.get('isMalwareBlocked') or moderation.get('isSuspicious'):
+            annotate(code='moderation_blocked')
             raise HTTPException(409, 'ClawHub已标记该技能存在风险，无法直接导入选择')
         name = local_name(owner, slug)
+        annotate(stage='installed_check')
         async with self.lock:
             current = installed(self.data).get(name)
             if current:
                 if current.get('version') != version:
+                    annotate(code='installed_version_conflict')
                     raise HTTPException(409, '已安装其他版本，保留原文件；请先在技能库核对版本')
                 return {'name': name, 'displayName': current.get('displayName', slug), 'version': version, 'alreadyInstalled': True}
             if (self.bundled / name).exists():
+                annotate(code='bundled_name_conflict')
                 raise HTTPException(409, '技能名称与内置技能冲突，未导入')
-            archive = await asyncio.wait_for(self.download(slug, version), timeout=40)
+            annotate(stage='download', upstreamStatus=None, upstreamType=None)
+            archive = await asyncio.wait_for(self.download(slug, version, owner), timeout=40)
             try:
+                annotate(stage='archive_validation')
                 files = await asyncio.to_thread(unpack, archive)
+                annotate(stage='save')
                 return await asyncio.to_thread(self.store, name, actual, files, archive)
             except ValueError as exc:
+                annotate(code=_INVALID_CODES.get(str(exc), 'archive_or_directory_invalid'), exceptionType=type(exc).__name__)
                 raise HTTPException(400, str(exc)) from None
             except OSError:
+                annotate(code='storage_unavailable', exceptionType='OSError')
                 raise HTTPException(503, '技能文件无法保存，未选中；请检查磁盘或目录权限后重试') from None
 
     def store(self, name, skill, files, archive):
@@ -162,6 +201,7 @@ def create_router(data, bundled):
         try:
             return await service.import_skill(slug, body.owner, body.version)
         except asyncio.TimeoutError:
+            annotate(code='import_timeout')
             raise HTTPException(504, '技能导入超时，请重试') from None
 
     return router

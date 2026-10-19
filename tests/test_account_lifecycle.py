@@ -363,3 +363,15 @@ def test_wechat_browser_session_is_distinct_from_app_credentials_and_recovers(is
         assert web._account_logged_in('wechat-oa', cfg) is logged
         assert (web._mp_login_status()['state'] == 'success') is logged
     assert all('weixin_mp_stats.py' in command[1] and command[2] == 'whoami' for command in commands)
+
+
+def test_cached_identity_is_rechecked_after_short_freshness_window(isolated, monkeypatch):
+    replies = iter([True, False])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
+        stdout=json.dumps({'loggedIn': next(replies)}), returncode=0))
+    now = [time.time()]
+    monkeypatch.setattr(web.time, 'time', lambda: now[0])
+    assert asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
+    now[0] += 121
+    assert not asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
+    assert not web._account_logged_in('douyin', web.LOGIN_RUNNERS['douyin'])

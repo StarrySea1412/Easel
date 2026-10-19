@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
+from web.failure_events import annotate
 
 
 ORIGIN = 'https://clawhub.ai'
@@ -220,6 +221,8 @@ class ClawHubClient:
             ) as client:
                 async with client.stream('GET', ORIGIN + path, params=params) as response:
                     status = response.status_code
+                    annotate(upstreamStatus=status,
+                             upstreamType=response.headers.get('content-type', '').split(';')[0].strip())
                     if status == 429:
                         delay = _retry_delay(response.headers)
                         self._cooldown_until = max(self._cooldown_until, time.monotonic() + delay)
@@ -252,8 +255,10 @@ class ClawHubClient:
             try:
                 payload = await asyncio.wait_for(self._read(path, params), REQUEST_SECONDS)
             except (asyncio.TimeoutError, httpx.TimeoutException):
+                annotate(code='catalog_timeout')
                 raise HTTPException(504, 'ClawHub 请求超时，请稍后重试') from None
             except httpx.RequestError:
+                annotate(code='catalog_network')
                 raise HTTPException(502, '暂时无法连接 ClawHub，请检查网络后重试') from None
             result = normalize(payload)
             result['fetchedAt'] = datetime.now(timezone.utc).isoformat()
@@ -313,11 +318,13 @@ def create_router(client=None):
 
     @router.get('/api/clawhub/search')
     async def search(response: Response, q: str = '', limit: int = 12):
+        annotate(operation='clawhub_search', stage='search')
         response.headers['Cache-Control'] = 'no-store'
         return await service.search(q, limit)
 
     @router.get('/api/clawhub/skills/{slug}')
     async def detail(slug: str, response: Response, owner: str | None = None):
+        annotate(operation='clawhub_detail', stage='detail', slug=slug, owner=owner)
         response.headers['Cache-Control'] = 'no-store'
         return await service.detail(slug, owner)
 

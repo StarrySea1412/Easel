@@ -6,7 +6,7 @@ import { loadTsModule } from './load-ts.mjs';
 
 // Real hook, publish editor and receipt components; all HTTP, mail and platform
 // operations below are controlled substitutes. This is not live publication QA.
-globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/' }).window;
+globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/', pretendToBeVisual: true }).window;
 globalThis.document = window.document;
 globalThis.HTMLElement = window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,11 +37,14 @@ const deferred = () => {
 
 async function fixture(t, initial = [], page = 'other') {
   localStorage.clear();
+  localStorage.setItem('easel_whoami', JSON.stringify({ zhihu: {
+    loggedIn: true, verified: true, checkedAt: Date.now(), name: '', avatar: '',
+  } }));
   savePublishDraft({ title: '本次要发布的标题', body: '本次内容正文。', platforms: ['zhihu'], overrides: {}, tags: '' });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = {
     model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0,
-    list: null, detail: null, publish: null, sms: null, verify: null, precheck: null,
+    list: null, detail: null, publish: null, sms: null, verify: null, precheck: null, reports: [], report: null,
     whoami: null, accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
   t.mock.method(window, 'confirm', text => { h.confirmations.push(text); return h.confirm; });
@@ -50,7 +53,10 @@ async function fixture(t, initial = [], page = 'other') {
     const request = { path, options, body: options.body ? JSON.parse(options.body) : undefined };
     h.requests.push(request);
     let result;
-    if (path === '/api/publish/receipts') result = h.list ? await h.list(request) : h.items;
+    if (path === '/api/diagnostics/failures') {
+      h.reports.push(request.body);
+      result = h.report ? await h.report(request) : { eventId: 'f'.repeat(32) };
+    } else if (path === '/api/publish/receipts') result = h.list ? await h.list(request) : h.items;
     else if (/^\/api\/publish\/receipts\/[^/]+\/(?:verify|verification)$/.test(path)) {
       if (!h.verify) throw new Error('No simulated verification handler configured');
       result = await h.verify(path.split('/')[4], request);
@@ -70,7 +76,7 @@ async function fixture(t, initial = [], page = 'other') {
     else if (path.startsWith('/api/schedule/context?')) result = {};
     else if (path === '/api/chat') result = h.precheck ? await h.precheck(request) : { response: '模拟预检结果' };
     else throw new Error(`Unexpected request: ${path}`);
-    return { ok: true, json: async () => structuredClone(result) };
+    return result instanceof Response ? result : { ok: true, json: async () => structuredClone(result) };
   });
   function Shell({ page }) {
     const model = usePublishReceipts();
@@ -500,5 +506,83 @@ test('slow login check has a spinner and repeated clicks cannot start another ch
   await view.click(send);
   assert.equal(view.h.requests.filter(r => r.path.includes('/whoami')).length, 1);
   await act(async () => gate.resolve({ loggedIn: false, verified: true, checkedAt: Date.now(), name: '', avatar: '' }));
+  assert.equal(view.posts().length, 0);
+});
+
+test('all disconnected targets report preflight failures without sending content or losing the draft', async t => {
+  const view = await fixture(t, [], 'publish');
+  localStorage.clear();
+  view.h.accounts = ['xiaohongshu','douyin','kuaishou','weixin-channels','zhihu','bilibili','wechat-oa']
+    .map(platform => ({platform, supported: true, loggedIn: false}));
+  await view.render('other'); await view.render('publish');
+  for (const button of view.container.querySelectorAll('.publish-platform-list button')) {
+    if (button.getAttribute('aria-pressed') !== 'true') await view.click(button);
+  }
+  await view.click(view.button('发布到 7 个平台'));
+  assert.equal(view.posts().length, 0);
+  assert.equal(view.h.confirmations.length, 0);
+  assert.equal(view.h.requests.filter(r => r.path.includes('/whoami') || r.path === '/api/chat').length, 0);
+  assert.equal(view.h.reports.length, 7);
+  assert.ok(view.h.reports.every(r => r.operation === 'publish' && r.stage === 'preflight' && r.code === 'login_required'));
+  assert.ok(view.h.reports.every(r => !('title' in r) && !('media' in r) && !('message' in r)));
+  assert.match(view.container.textContent, /尚未提交到平台/);
+  assert.match(view.container.textContent, /错误编号：f{32}/);
+  assert.equal(view.container.querySelector('#publish-body').value, '本次内容正文。');
+});
+
+test('a new failed receipt is reported once and initial failed history stays quiet', async t => {
+  const old = completed({outcome:'failed',url:''});
+  const view = await fixture(t, [old]);
+  assert.equal(view.h.reports.length, 0);
+  view.h.publish = () => completed({receiptId:'b'.repeat(32),outcome:'failed',url:''});
+  await act(async () => view.model().submit([{platform:'zhihu',payload:{title:'private',body:'private',media:[],tags:''}}]));
+  await view.refresh(); await view.refresh();
+  assert.equal(view.posts().length, 1);
+  assert.equal(view.h.reports.length, 1);
+  assert.equal(view.h.reports[0].receiptId, 'b'.repeat(32));
+  assert.equal(view.h.reports[0].code, 'publish_failed');
+  assert.ok(!JSON.stringify(view.h.reports).includes('private'));
+});
+
+for (const callbackFails of [false, true]) test(`submission error keeps the original result and never retries with callback unavailable=${callbackFails}`, async t => {
+  const view = await fixture(t);
+  view.h.publish = () => new Response(JSON.stringify({detail:'模拟服务忙'}), {
+    status:429, headers:{'X-Easel-Failure-Id':'a'.repeat(32),'Content-Type':'application/json'},
+  });
+  if (callbackFails) view.h.report = () => {throw new Error('callback offline');};
+  await act(async () => view.model().submit([{platform:'zhihu',payload:{title:'private',body:'private',media:[],tags:''}}]));
+  assert.equal(view.posts().length, 1);
+  assert.match(view.model().submissionIssues[0].message, /模拟服务忙/);
+  assert.equal(view.model().submissionIssues[0].message.split('a'.repeat(32)).length, 2);
+  assert.equal(view.h.reports[0].code, 'server_busy');
+  assert.equal(view.h.reports[0].relatedEventId, 'a'.repeat(32));
+  assert.equal(view.model().submitting, false);
+});
+
+test('returning to the publish page expires an online snapshot and broadcasts the offline result', async t => {
+  const view = await fixture(t, [], 'publish');
+  const initialTime = Date.now(); let now = initialTime;
+  t.mock.method(Date, 'now', () => now);
+  view.h.accounts = [{platform:'zhihu',supported:true,loggedIn:true}];
+  view.h.whoami = () => ({loggedIn:false,verified:true,checkedAt:now,name:'',avatar:''});
+  now += 121000;
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.loggedIn, false);
+  assert.match(view.container.querySelector('.publish-readiness').textContent, /需登录/);
+  await view.click(view.button('发布到 1 个平台'));
+  assert.equal(view.posts().length, 0);
+  assert.equal(view.h.confirmations.length, 0);
+  assert.match(view.container.textContent, /未登录/);
+});
+
+test('a later login-required readback invalidates cached status without changing the known publication outcome', async t => {
+  const pending = completed({outcome:'submitted',url:''});
+  const view = await fixture(t, [pending]);
+  view.h.items = [{...pending,verification:{state:'login_required',automatic:false,attempts:1},updatedAt:'2026-10-08T01:02:00Z'}];
+  await view.refresh(); await view.refresh();
+  assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.verified, false);
+  assert.equal(view.model().receipts[0].outcome, 'submitted');
+  assert.equal(view.h.reports.length, 1);
+  assert.equal(view.h.reports[0].code, 'login_required');
   assert.equal(view.posts().length, 0);
 });

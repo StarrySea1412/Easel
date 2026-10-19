@@ -283,7 +283,7 @@ LOGIN_PROCESSES: dict[str, subprocess.Popen] = {}
 _LOGIN_CANCEL_TASKS: set[asyncio.Task] = set()
 
 # whoami 真校验（起 headless 浏览器，数秒）的进程内缓存：避免账号页 + 工作台重复起浏览器。
-WHOAMI_TTL = 600  # 秒
+WHOAMI_TTL = 120  # 秒；与前端 whoami.ts 对齐，可见页面每分钟触发过期检查
 _WHOAMI_CACHE: dict[str, tuple[float, dict, str | None]] = {}
 _WHOAMI_LOCK = threading.Lock()
 _ACCOUNT_GENERATIONS: dict[str, str] = {}
@@ -691,6 +691,10 @@ if _proxy_origin:
 app.add_middleware(CORSMiddleware, allow_origins=_LOCAL_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1'] + _EXTRA_HOSTS)
 
+from web.failure_events import FailureEvents, FailureEventMiddleware, create_router as _failure_router
+_failure_events = FailureEvents(DATA_DIR, PROJECT_ROOT)
+app.include_router(_failure_router(_failure_events))
+
 
 @app.middleware('http')
 async def local_write_guard(request: Request, call_next):
@@ -708,6 +712,9 @@ async def local_write_guard(request: Request, call_next):
         if not allowed:
             return JSONResponse({'detail': '仅允许从本机工作台操作。'}, status_code=403)
     return await call_next(request)
+
+
+app.add_middleware(FailureEventMiddleware, events=_failure_events)
 
 
 def list_personas() -> list[dict]:
@@ -5798,7 +5805,7 @@ async def api_login_status(platform: str):
     s = _login_status(platform)
     if s.get('state') == 'success':
         # 登录刚成功 → 清掉登录前缓存的「未登录」whoami 结果，令下次 whoami 重新真校验；
-        # 否则卡片会因 WHOAMI_TTL(600s) 内的旧 false 持续显示「未登录」（本次视频号问题的根因）。
+        # 否则卡片会因 WHOAMI_TTL 内的旧 false 持续显示「未登录」。
         # 只清缓存、不改任何登录/检测逻辑。
         with _WHOAMI_LOCK:
             _WHOAMI_CACHE.pop(platform, None)

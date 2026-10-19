@@ -41,8 +41,12 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     } catch {
       /* 响应体不是 JSON，忽略 */
     }
-    const error = new Error(detail || `请求失败（${res.status} ${res.statusText}）`) as Error & { status: number };
+    const returnedId = res.headers?.get('X-Easel-Failure-Id');
+    const failureId = returnedId && /^[0-9a-f]{32}$/.test(returnedId) ? returnedId : undefined;
+    const error = new Error((detail || `请求失败（${res.status} ${res.statusText}）`) +
+      (failureId ? `（错误编号：${failureId}）` : '')) as Error & { status: number; failureId?: string };
     error.status = res.status;
+    error.failureId = failureId;
     throw error;
   }
   return res.json() as Promise<T>;
@@ -326,6 +330,49 @@ export function importClawHubSkill(skill: ClawHubSkill, version: string): Promis
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ owner: skill.ownerHandle, version }),
   });
+}
+
+export type ClawHubImportStage = 'detail' | 'import' | 'catalog_refresh' | 'catalog_verify';
+
+export async function reportClawHubFailure(skill: ClawHubSkill, stage: ClawHubImportStage,
+  version: string | undefined, reason: unknown, started: number): Promise<string | undefined> {
+  const error = reason as { status?: number; name?: string } | null;
+  const code = error?.status ? 'http_error' : stage === 'catalog_verify' ? 'catalog_missing'
+    : error?.name === 'TypeError' || error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'network' : 'unknown';
+  return reportClientFailure({ operation: 'clawhub_import', stage, code,
+    owner: skill.ownerHandle || undefined, slug: skill.slug, skillVersion: version }, reason, started);
+}
+
+export type PublishFailureStage = 'preflight' | 'identity' | 'submit' | 'receipt';
+export type PublishFailureCode = 'login_required' | 'media_required' | 'video_required' | 'identity_unverified'
+  | 'identity_changed' | 'server_busy' | 'network' | 'http_error' | 'receipt_missing' | 'publish_failed' | 'already_active';
+
+export function reportPublishFailure(platform: string, stage: PublishFailureStage, code: PublishFailureCode,
+  reason?: unknown, started = performance.now(), receiptId?: string): Promise<string | undefined> {
+  const error = reason as { status?: number; name?: string } | null;
+  const classification = error?.status === 429 ? 'server_busy' : error?.status ? 'http_error'
+    : error?.name === 'TypeError' || error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'network' : code;
+  return reportClientFailure({ operation: 'publish', platform, stage, code: classification, receiptId }, reason, started);
+}
+
+async function reportClientFailure(context: Record<string, unknown>, reason: unknown, started: number): Promise<string | undefined> {
+  const error = reason as { status?: number; failureId?: string; name?: string } | null;
+  const relatedEventId = typeof error?.failureId === 'string' && /^[0-9a-f]{32}$/.test(error.failureId) ? error.failureId : undefined;
+  const status = Number.isInteger(error?.status) && error!.status! >= 400 && error!.status! <= 599 ? error!.status : undefined;
+  // Deliberately omit message/stack, URLs, search terms and browser storage.
+  try {
+    const response = await fetch(`${BASE}/api/diagnostics/failures`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', keepalive: true,
+      signal: AbortSignal.timeout(1500),
+      body: JSON.stringify({ ...context, status, relatedEventId,
+        durationMs: Math.max(0, Math.min(86400000, Math.round(performance.now() - started))) }),
+    });
+    if (response.ok) {
+      const result = await response.json();
+      if (typeof result.eventId === 'string' && /^[0-9a-f]{32}$/.test(result.eventId)) return relatedEventId || result.eventId;
+    }
+  } catch { /* An unavailable callback must never replace the original failure. */ }
+  return relatedEventId;
 }
 
 export interface ClawHubSearch {
@@ -660,6 +707,7 @@ export interface PublishReceipt {
   updatedAt: string;
   state: string;
   outcome: PublishOutcome | null;
+  platformStatus?: string;
   contentId?: string;
   evidence?: { previewContentId?: string; [key: string]: unknown };
   url?: string;

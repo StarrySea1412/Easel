@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
   fetchAccounts, fetchOutputs, mediaUrl, accountWhoami,
+  reportPublishFailure,
 } from '../lib/api';
-import type { AccountItem, OutputFile, PublishRequest } from '../lib/api';
+import type { AccountItem, OutputFile, PublishRequest, PublishFailureCode, PublishFailureStage } from '../lib/api';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { loadPublishDraft, savePublishDraft } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
@@ -13,7 +14,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
   persona: string;
@@ -62,6 +63,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const [checking, setChecking] = useState(false);
   const [checkStage, setCheckStage] = useState('');
   const checkLock = useRef(false);
+  const publishAttempt = useRef(0);
   const [checkResult, setCheckResult] = useState('');
   const adaptCtl = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -72,6 +74,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountsError, setAccountsError] = useState('');
+  const refreshingAccounts = useRef(false);
   const [mediaFiles, setMediaFiles] = useState<OutputFile[]>([]);
   const [mediaLoading, setMediaLoading] = useState(true);
   const [mediaError, setMediaError] = useState('');
@@ -95,10 +98,29 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     };
   }, []);
 
+  const loadAccounts = useCallback(async (verify = false) => {
+    if (refreshingAccounts.current) return;
+    refreshingAccounts.current = true;
+    try {
+      const rows = await fetchAccounts();
+      if (!mounted.current) return;
+      setAccounts(rows); setAccountsError(''); setAccountsLoading(false);
+      if (verify) await verifyStale(rows.filter(row => row.supported &&
+        (row.loggedIn || row.hasLocalSession || getWhoamiCache()[row.platform])).map(row => row.platform), {
+        alive: () => mounted.current && !checkLock.current && document.visibilityState === 'visible',
+      });
+    } catch {
+      if (mounted.current) setAccountsError('账号状态加载失败，请重试。');
+    } finally {
+      refreshingAccounts.current = false;
+      if (mounted.current) setAccountsLoading(false);
+    }
+  }, []);
+
   // 登录态 + 可选媒体列表
   const loadAssets = useCallback(() => {
     setAccountsLoading(true); setAccountsError(''); setMediaLoading(true); setMediaError('');
-    fetchAccounts().then(setAccounts).catch(() => setAccountsError('账号状态加载失败，请重试。')).finally(() => setAccountsLoading(false));
+    void loadAccounts(true);
     fetchOutputs().then((roots) => {
       const files: OutputFile[] = [];
       const walk = (n: OutputFile) => {
@@ -109,18 +131,22 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
       setMediaFiles(files);
     }).catch(() => setMediaError('媒体列表加载失败，请重试。')).finally(() => setMediaLoading(false));
-  }, []);
+  }, [loadAccounts]);
   useEffect(() => { loadAssets(); }, [loadAssets]);
 
   useEffect(() => {
-    const sync = () => { void fetchAccounts().then(rows => { if (mounted.current) setAccounts(rows); }).catch(() => { if (mounted.current) setAccountsError('账号状态加载失败，请重试。'); }); };
+    const sync = () => { setAccounts(rows => [...rows]); void loadAccounts(); };
     const storage = (event: StorageEvent) => { if (event.key === 'easel_whoami') sync(); };
     window.addEventListener(ACCOUNT_STATE_EVENT, sync);
     window.addEventListener('storage', storage);
     return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
-  }, []);
+  }, [loadAccounts]);
+  useEffect(() => watchAccountFreshness(() => { if (!checkLock.current) void loadAccounts(true); }), [loadAccounts]);
 
-  const loginOf = (key: string) => accounts.find((a) => a.platform === key)?.loggedIn ?? false;
+  const loginOf = (key: string) => {
+    const entry = getWhoamiCache()[key];
+    return isWhoamiFresh(entry) ? entry.loggedIn : accounts.find(a => a.platform === key)?.loggedIn ?? false;
+  };
 
   const toggle = (k: string) => {
     if (!platforms.includes(k)) setPreviewPlatform(k);
@@ -162,6 +188,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     if (!loginOf(key)) return '未登录，请先到账号页登录。';
     if (MEDIA_REQUIRED.has(key) && selectedMedia.length === 0) return '需附带图片或视频。';
     if (VIDEO_ONLY.has(key) && !selectedMedia.some(path => VIDEO_RE.test(path))) return `${PLATFORMS.find(p => p.key === key)?.label}需要视频，请从内容库选择。`;
+    if (!isWhoamiFresh(getWhoamiCache()[key])) return '登录状态待在线确认，提交前将重新检查。';
     return '';
   };
   const readyCount = selectedPlatforms.filter(p => !preparationIssue(p.key)).length;
@@ -242,15 +269,37 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       return;
     }
     const errors: Record<string, string> = {};
+    const failureKinds: Record<string, { stage: PublishFailureStage; code: PublishFailureCode; cause?: unknown }> = {};
+    const attempt = ++publishAttempt.current;
+    const started = performance.now();
+    const reportBlocked = () => {
+      for (const [platform, message] of Object.entries(errors)) {
+        const kind = failureKinds[platform];
+        if (!kind) continue;
+        void reportPublishFailure(platform, kind.stage, kind.code, kind.cause, started).then(id => {
+          if (id && mounted.current && publishAttempt.current === attempt) {
+            setBlocked(previous => previous[platform] === message
+              ? { ...previous, [platform]: message + `（错误编号：${id}）` } : previous);
+          }
+        });
+      }
+    };
     const requests: PublishRequest[] = [];
     for (const target of targets) {
-      if (!loginOf(target.key)) errors[target.key] = '未登录，请先到账号页登录。';
-      else if (MEDIA_REQUIRED.has(target.key) && selectedMedia.length === 0) errors[target.key] = '需附带图片或视频。';
-      else if (VIDEO_ONLY.has(target.key) && !selectedMedia.some(path => VIDEO_RE.test(path))) errors[target.key] = `${target.label}需要视频，请从内容库选择。`;
+      if (!loginOf(target.key)) {
+        errors[target.key] = '未登录，请先到账号页登录。';
+        failureKinds[target.key] = { stage: 'preflight', code: 'login_required' };
+      } else if (MEDIA_REQUIRED.has(target.key) && selectedMedia.length === 0) {
+        errors[target.key] = '需附带图片或视频。';
+        failureKinds[target.key] = { stage: 'preflight', code: 'media_required' };
+      } else if (VIDEO_ONLY.has(target.key) && !selectedMedia.some(path => VIDEO_RE.test(path))) {
+        errors[target.key] = `${target.label}需要视频，请从内容库选择。`;
+        failureKinds[target.key] = { stage: 'preflight', code: 'video_required' };
+      }
       else requests.push({ platform: target.key, payload: { title, body: effective(target.key), media: [...selectedMedia], tags } });
     }
     setBlocked(errors);
-    if (!requests.length) { showToast('请先处理平台卡片中的账号或媒体提示。'); return; }
+    if (!requests.length) { reportBlocked(); showToast('尚未提交到平台，请先处理账号或媒体提示。'); return; }
     checkLock.current = true;
     setChecking(true);
     const confirmed: PublishRequest[] = [];
@@ -261,20 +310,28 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       const before = JSON.stringify(getWhoamiCache()[platform]);
       try {
         const result = await accountWhoami(platform, true);
-        if (before !== JSON.stringify(getWhoamiCache()[platform])) throw new Error('账号状态已变化，请重新检查。');
+        if (before !== JSON.stringify(getWhoamiCache()[platform])) {
+          failureKinds[platform] = { stage: 'identity', code: 'identity_changed' };
+          throw new Error('账号状态已变化，请重新检查。');
+        }
         if (result.verified === false) throw new Error(result.verificationMessage || '本次在线检查未确认登录状态。');
         setWhoamiCache(platform, result);
         identities[platform] = JSON.stringify(getWhoamiCache()[platform]);
         if (result.loggedIn) confirmed.push(request);
-        else errors[platform] = '在线检查确认登录已失效，请重新连接。';
+        else {
+          errors[platform] = '在线检查确认登录已失效，请重新连接。';
+          failureKinds[platform] = { stage: 'identity', code: 'login_required' };
+        }
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : '登录检查失败，请重试。';
         if (before === JSON.stringify(getWhoamiCache()[platform])) markWhoamiUnverified(platform, message);
         errors[platform] = message;
+        failureKinds[platform] ??= { stage: 'identity', code: 'identity_unverified', cause };
       }
       if (!mounted.current) { checkLock.current = false; return; }
     }
     setBlocked({ ...errors });
+    reportBlocked();
     if (!confirmed.length) {
       checkLock.current = false; setChecking(false); setCheckStage('');
       showToast('登录状态未确认，内容已保留，请检查平台提示后重试。');
@@ -302,7 +359,14 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       const entry = getWhoamiCache()[request.platform];
       return isWhoamiFresh(entry) && entry.loggedIn && identities[request.platform] === JSON.stringify(entry);
     });
-    if (unchanged.length !== confirmed.length) { showToast('账号状态已变化，内容已保留，请重新检查后发布。'); return; }
+    if (unchanged.length !== confirmed.length) {
+      for (const request of confirmed) {
+        errors[request.platform] = '账号状态已变化，内容已保留，请重新检查后发布。';
+        failureKinds[request.platform] = { stage: 'identity', code: 'identity_changed' };
+      }
+      setBlocked({ ...errors }); reportBlocked();
+      showToast('账号状态已变化，内容已保留，请重新检查后发布。'); return;
+    }
     void publishReceipts.submit(confirmed);
   };
 
@@ -468,7 +532,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                       <button className="pv-copy" onClick={() => copyFor(p.key)}>{copied === p.key ? <IconCheck size={13} /> : <IconCopy size={13} />}{copied === p.key ? '已复制' : '复制'}</button>
                     </div>
                   </div>
-                  {(issue || blocked[p.key]) && <p className="publish-platform-issue" role={blocked[p.key] ? 'alert' : undefined}>{issue || blocked[p.key]}</p>}
+                  {(issue || blocked[p.key]) && <p className="publish-platform-issue" role={blocked[p.key] ? 'alert' : undefined}>{blocked[p.key] || issue}</p>}
                   {receipt && <details className="publish-preview-receipt" open={platformBusy(p.key) || receipt.verification?.state === 'checking'}>
                     <summary><span>最近一次结果</span><span>{publishReceiptStatus(receipt).label}</span></summary>
                     <PublishReceiptCard receipt={receipt} onVerify={publishReceipts.open} onCheck={automatic => publishReceipts.verify(receipt.receiptId, automatic)}
@@ -487,7 +551,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                 return <button key={p.key} className="publish-readiness-row" onClick={() => setPreviewPlatform(p.key)}>
                   <span><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span>
                   <span className={busy ? 'is-busy' : preparationIssue(p.key) ? 'needs-attention' : 'is-ready'}>
-                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : preparationIssue(p.key) ? accountsLoading ? '读取账号中…' : !loginOf(p.key) ? '需登录' : '需补充素材' : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
+                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : preparationIssue(p.key) ? accountsLoading ? '读取账号中…' : accountsError ? '状态待确认' : !loginOf(p.key) ? '需登录' : !isWhoamiFresh(getWhoamiCache()[p.key]) ? '待在线确认' : '需补充素材' : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
                   </span>
                 </button>;
               })}

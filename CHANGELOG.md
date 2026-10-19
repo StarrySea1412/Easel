@@ -1,3 +1,10 @@
+## 0.3.6 · 2026-10-19 · Session freshness, ClawHub downloads and failure receipts
+
+- Pin `ownerHandle` when downloading a ClawHub archive; duplicate slugs otherwise return HTTP409. / 修复同名多作者技能下载漏传作者，保留官方409分类。
+- Visible Accounts/Publish pages refresh every minute, recheck online conclusions after two minutes and wake on focus/network recovery. Manual refresh and publication bypass the online cache; background checks pause while hidden or during the page's QR flow, remain serial and preserve newer account changes. / 失效结果跨组件与标签页同步；过期/未知不计为已连接，本地标记不能覆盖新失效结论，检查失败保留身份但提示待确认。
+- Bounded API journals and browser callbacks correlate failure IDs and retain stage/platform/build metadata. Publication reports account/media preflight blocks, identity and submission errors, and new failed/login-required receipts without retrying content. / 字段白名单排除标题、正文、素材路径、凭据与错误原文；沿用认证、轮转与限流。
+- Backend 218 and frontend 124 focused checks pass; production build/lint pass (20 existing warnings). Isolated real-browser checks cover expired-cache -> periodic offline detection -> publication blocked -> persisted error ID; official PPT download/import was separately verified in a temporary directory on 138. Host 138 remains 0.3.5 / `193278acf42f`; deployment is explicitly paused and live publication remains unverified. [Details / 详情](docs/clawhub-failure-events-2026-10-19.md).
+
 ## 0.3.5 · 2026-10-19 · Cancel owned login flows / 结束所属扫码流程
 
 - 关闭扫码窗口等待启动响应并取消对应attempt；结束前拦住新登录，失败可重试。Closing a QR dialog waits for startup and cancels only its owned attempt before allowing another login.

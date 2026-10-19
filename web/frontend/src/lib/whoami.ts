@@ -4,7 +4,8 @@ import { accountWhoami, type AccountWhoami } from './api';
 
 const KEY = 'easel_whoami';
 const requestVersions = new Map<string, number>();
-export const WHOAMI_TTL_MS = 600_000; // 10 分钟，与后端 WHOAMI_TTL 对齐
+export const WHOAMI_TTL_MS = 120_000; // 2 分钟，与后端 WHOAMI_TTL 对齐
+export const ACCOUNT_REFRESH_MS = 60_000;
 export const ACCOUNT_STATE_EVENT = 'easel:account-state';
 
 export type WhoamiEntry = AccountWhoami & { ts: number };
@@ -53,7 +54,7 @@ interface VerifyOpts {
  */
 const WHOAMI_CONCURRENCY = 1;
 
-export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
+export async function verifyStale(platforms: string[], opts: VerifyOpts = {}): Promise<void> {
   const ttlMs = opts.ttlMs ?? WHOAMI_TTL_MS;
   const cache = getWhoamiCache();
   const todo = opts.force ? platforms : platforms.filter((p) => !isWhoamiFresh(cache[p], ttlMs));
@@ -68,7 +69,7 @@ export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
       const before = JSON.stringify(getWhoamiCache()[p]);
       opts.onChecking?.(p);
       try {
-        const r = await accountWhoami(p);
+        const r = await accountWhoami(p, opts.force);
         if (version !== (requestVersions.get(p) || 0) || before !== JSON.stringify(getWhoamiCache()[p])) continue;
         if (r.verified === false) {
           const message = r.verificationMessage || '本次检查未确认登录状态，请重试。';
@@ -89,7 +90,22 @@ export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
       }
     }
   };
-  void Promise.all(
+  await Promise.all(
     Array.from({ length: Math.min(WHOAMI_CONCURRENCY, todo.length) }, () => worker()),
   );
+}
+
+/** Refresh only the visible page. Each consumer owns its in-flight guard. */
+export function watchAccountFreshness(refresh: () => void): () => void {
+  const wake = () => { if (document.visibilityState === 'visible') refresh(); };
+  const timer = window.setInterval(wake, ACCOUNT_REFRESH_MS);
+  window.addEventListener('focus', wake);
+  window.addEventListener('online', wake);
+  document.addEventListener('visibilitychange', wake);
+  return () => {
+    window.clearInterval(timer);
+    window.removeEventListener('focus', wake);
+    window.removeEventListener('online', wake);
+    document.removeEventListener('visibilitychange', wake);
+  };
 }

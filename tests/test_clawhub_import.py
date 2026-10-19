@@ -53,6 +53,7 @@ def test_pinned_import_registers_owner_identity_and_never_executes_scripts(tmp_p
         assert not request.headers.get('authorization') and not request.headers.get('cookie')
         if request.url.path.endswith('/download'):
             assert request.url.params['version'] == '1.2.3'
+            assert request.url.params['ownerHandle'] == 'alice', 'download must disambiguate same-name publishers'
             return httpx.Response(200, content=zip_bytes, headers={'Content-Type': 'application/zip'})
         return httpx.Response(200, json={'skill': {'slug': 'research', 'displayName': 'Research'},
             'owner': {'handle': 'alice'}, 'latestVersion': {'version': '1.2.3'}})

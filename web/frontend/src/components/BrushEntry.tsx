@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CAPABILITY_MENU } from '../lib/capabilityMenu';
-import { fetchClawHubSkill, fetchSkills, importClawHubSkill, searchClawHub } from '../lib/api';
+import { fetchClawHubSkill, fetchSkills, importClawHubSkill, searchClawHub, reportClawHubFailure, type ClawHubImportStage } from '../lib/api';
 import type { ClawHubDetail, ClawHubSearch, ClawHubSkill, SkillItem } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillGuidePreview from './SkillGuidePreview';
@@ -142,19 +142,27 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
     setImporting(skill.id);
     setImportError('');
     setClawError('');
+    let stage: ClawHubImportStage = 'detail';
+    let version: string | undefined;
+    const started = performance.now();
     try {
       const detail = clawDetail?.skill.id === skill.id ? clawDetail : await fetchClawHubSkill(skill);
-      const version = detail.latestVersion?.version || detail.skill.version;
+      version = detail.latestVersion?.version || detail.skill.version || undefined;
       if (!version) throw new Error('作者未提供可导入版本，请刷新详情后重试。');
+      stage = 'import';
       const result = await importClawHubSkill(skill, version);
+      stage = 'catalog_refresh';
       const updated = await fetchSkills();
       const imported = updated.find(item => item.name === result.name);
+      stage = 'catalog_verify';
       if (!imported || imported.provenance?.owner !== skill.ownerHandle || imported.provenance?.slug !== skill.slug) throw new Error('导入完成，但本机技能目录尚未读取到，请重新打开后选择。');
       setSkills(updated);
       if (epoch === selectionEpoch.current) onPick(`帮我做「${result.displayName}」`, result.name);
       showToast(epoch === selectionEpoch.current ? `已导入并选择 ${result.displayName}` : `已导入 ${result.displayName}，可在本机技能中选择`, 'success');
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : '技能导入失败，未选中，请重试。';
+      const failureId = await reportClawHubFailure(skill, stage, version, reason, started);
+      const original = reason instanceof Error ? reason.message : '技能导入失败，未选中，请重试。';
+      const message = original + (failureId && !original.includes(failureId) ? `（错误编号：${failureId}）` : '');
       setImportError(message);
       showToast(message, 'error');
     } finally { setImporting(null); }
