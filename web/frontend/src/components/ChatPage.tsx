@@ -19,8 +19,10 @@ import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
 import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
-import { createPortal } from 'react-dom';
-import { useAnchoredPanel } from '../hooks/useAnchoredPanel';
+import ChatPanelHome from './ChatPanelHome';
+import ChatBrowserPanel from './ChatBrowserPanel';
+import { ChatPanelFiles, ChatPanelExecution } from './ChatPanelTools';
+import { loadPanelTools, savePanelTools, PANEL_LABELS, type PanelTool } from '../lib/chatPanels';
 import '../styles/chat-side-panel.css';
 import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -77,7 +79,7 @@ interface ChatPageProps {
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）；线性图标与全局 icon 库同风格
-import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus, IconChat, IconTarget } from './icons';
+import { IconFire, IconEdit, IconLayout, IconVideo, IconPlus } from './icons';
 import type { ComponentType } from 'react';
 type Suggestion = { Icon: ComponentType<{ size?: number }>; title: string; prompt: string };
 const SUGGESTIONS: Suggestion[] = [
@@ -102,10 +104,16 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const goalActive=goal?.status==='active';
   const [panelOpen,setPanelOpen]=useState(true);
   const [goalEditor,setGoalEditor]=useState<{seed?:string;modelRef?:string;onConfigured?:()=>void;goal?:TaskGoal;welcome?:boolean}|null>(null);
-  const [panelTab,setPanelTab]=useState<'goal'|'side'>('goal');
+  const [panelTab,setPanelTab]=useState<'goal'|'side'|'new'|PanelTool>('goal');
+  const [toolTabs,setToolTabs]=useState<Record<string,PanelTool[]>>({});
+  const openedTools=useMemo(()=>toolTabs[session.id]||loadPanelTools(session.id),[toolTabs,session.id]);
+  const [selectedFileId,setSelectedFileId]=useState<string|undefined>();
+  const updateTools=(tools:PanelTool[])=>{setToolTabs(previous=>({...previous,[session.id]:tools}));savePanelTools(session.id,tools);};
+  const openTool=(tool:PanelTool)=>{if(!openedTools.includes(tool))updateTools([...openedTools,tool]);setPanelTab(tool);setPanelOpen(true);};
+  const closeTool=(tool:PanelTool)=>{updateTools(openedTools.filter(item=>item!==tool));if(panelTab===tool)setPanelTab('new');};
+  const openNewPanel=()=>{setPanelTab('new');setPanelOpen(true);};
   // 辅助对话多实例：activeSideId=当前标签；未指定时回退到最近创建的一个。
   const [activeSideId,setActiveSideId]=useState<string|null>(null);
-  const [tabPickerOpen,setTabPickerOpen]=useState(false);
   const [sideRenameId,setSideRenameId]=useState<string|null>(null);
   const [dragSideId,setDragSideId]=useState<string|null>(null);
   const [sideDrop,setSideDrop]=useState<{id:string;after:boolean}|null>(null);
@@ -121,24 +129,20 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     if(to<0||to>=ids.length)return;
     applySideOrder(sideId,ids[to],offset>0);
   };
-  const addTabRef=useRef<HTMLButtonElement>(null);
-  const tabPickerRef=useRef<HTMLDivElement>(null);
-  const closeTabPicker=useCallback(()=>setTabPickerOpen(false),[]);
-  const tabPickerPosition=useAnchoredPanel(tabPickerOpen, closeTabPicker, addTabRef, tabPickerRef, 'above', 260);
   const activeSide=sideSessions.find(item=>item.id===activeSideId)||sideSessions.at(-1);
+  useEffect(()=>{setPanelOpen(true);setPanelTab('goal');setActiveSideId(null);setSelectedFileId(undefined);setGoalEditor(null);},[session.id]);
   // 无目标时面板默认落在辅助对话标签上（有目标时保持“目标”优先的既有行为）。
   useEffect(()=>{
-    if(panelTab==='goal'&&!goal&&sideSessions.length)setPanelTab('side');
-  },[panelTab,goal,sideSessions.length]);
+    if(panelTab==='goal'&&!goal){if(sideSessions.length)setPanelTab('side');else if(openedTools.length)setPanelTab('new');}
+  },[panelTab,goal,sideSessions.length,openedTools.length]);
   const PANEL_WIDTH_KEY='easel:chat-panel-width';
-  const [panelWidth,setPanelWidth]=useState(()=>{const {ok,value}=readLocalValue(PANEL_WIDTH_KEY);const n=value?Number(value):NaN;return ok&&Number.isFinite(n)&&n>=280&&n<=560?n:340;});
+  const [panelWidth,setPanelWidth]=useState(()=>{const {ok,value}=readLocalValue(PANEL_WIDTH_KEY);const n=value?Number(value):NaN;return ok&&Number.isFinite(n)&&n>=280&&n<=720?n:480;});
   const panelWidthRef=useRef(panelWidth);panelWidthRef.current=panelWidth;
   const startPanelResize=(event:React.PointerEvent)=>{event.preventDefault();const startX=event.clientX,startW=panelWidthRef.current;
-    const move=(moveEvent:PointerEvent)=>setPanelWidth(Math.max(280,Math.min(560,startW-(moveEvent.clientX-startX))));
+    const move=(moveEvent:PointerEvent)=>setPanelWidth(Math.max(280,Math.min(720,startW-(moveEvent.clientX-startX))));
     const finish=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);writeLocalValue(PANEL_WIDTH_KEY,String(Math.round(panelWidthRef.current)));};
     window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish);};
   const openSidePanel=()=>{setPanelTab('side');setPanelOpen(true);const id=onSideChat?.();if(id)setActiveSideId(id);};
-  useEffect(()=>{setPanelOpen(true);setGoalEditor(null);},[session.id]);
   // 正在查看＝已读：会话终态角标（失败/已停止/已完成）在看过后不再保留（见 lib/seenStatus）；
   // deps 含最后一条消息的 turnId，同长度的重试替换也能被计为已读。
   useEffect(()=>{
@@ -169,12 +173,14 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     }catch(e){showToast(e instanceof Error?e.message:'目标操作失败，请重试。','error');}
   };
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
-  const panelVisible=panelOpen&&!goalEditor&&!session.importedFromBackup;
-  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&panelTab==='side'&&activeSide?' has-side-panel':''}`}>
+  const panelVisible=panelOpen&&!goalEditor&&!session.importedFromBackup&&Boolean(goal||sideSessions.length||openedTools.length||panelTab==='new'||panelTab==='side');
+  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&(panelTab==='new'||openedTools.includes(panelTab as PanelTool)||panelTab==='side'&&activeSide)?' has-side-panel':''}`}>
     {content}
-    {panelVisible&&(goal||sideSessions.length>0||panelTab==='side')&&<aside className="chat-side-panel" style={{width:panelWidth}} aria-label="对话侧边面板">
+    {panelVisible&&<aside className="chat-side-panel" style={{width:panelWidth}} aria-label="对话侧边面板">
       <header className="chat-side-panel-head">
-        <div className="chat-side-panel-tabs" role="tablist" aria-label="侧边面板">
+        <div className="chat-side-panel-tabs" role="tablist" aria-label="侧边面板" onKeyDown={event=>{if(event.altKey||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const tabs=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];const index=tabs.indexOf(event.target as HTMLButtonElement);if(index<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[next].focus();tabs[next].click();}}>
+          {panelTab==='new'&&<button type="button" role="tab" aria-selected className="chat-panel-launcher-tab" onClick={openNewPanel}>新增面板</button>}
+          {openedTools.map(tool=><span key={tool} className="chat-side-tab-wrap"><button type="button" role="tab" aria-selected={panelTab===tool} className={'chat-side-tab'+(panelTab===tool?' is-on':'')} onClick={()=>setPanelTab(tool)}>{PANEL_LABELS[tool]}</button><button type="button" className="chat-side-tab-close" aria-label={`关闭：${PANEL_LABELS[tool]}`} onClick={()=>closeTool(tool)}>×</button></span>)}
           {sideSessions.map(side=>{
             const on=panelTab==='side'&&activeSide?.id===side.id;
             const drop=sideDrop?.id===side.id?(sideDrop.after?' is-drop-after':' is-drop-before'):'';
@@ -204,35 +210,21 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             </span>;
           })}
           {goal&&<button type="button" role="tab" aria-selected={panelTab==='goal'} className={'chat-side-tab'+(panelTab==='goal'?' is-on':'')} onClick={()=>setPanelTab('goal')}>目标</button>}
-          <button ref={addTabRef} type="button" className="chat-side-tab-add" aria-label="打开标签页" aria-haspopup="menu" aria-expanded={tabPickerOpen} title="打开标签页" onClick={()=>setTabPickerOpen(v=>!v)}>＋</button>
+          <button type="button" className="chat-side-tab-add" aria-label="新增面板" title="新增面板" onClick={openNewPanel}>＋</button>
         </div>
         <button type="button" className="chat-side-panel-close" aria-label="收起侧边面板" title="收起" onClick={()=>setPanelOpen(false)}>×</button>
       </header>
-      {panelTab==='goal'&&goal
+      {panelTab==='new'?<ChatPanelHome onTool={openTool} onSideChat={()=>{const id=onSideChat?.('create');if(id){setPanelTab('side');setActiveSideId(id);}}} onGoal={viewGoal} hasGoal={Boolean(goal)} artifacts={deliveries.items} onFile={id=>{setSelectedFileId(id);openTool('files');}} closedSessions={closedSideSessions} onReopen={id=>{if(onSideReopen?.(id)){setPanelTab('side');setActiveSideId(id);}}}/>:panelTab==='goal'&&goal
         ? <ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>
-        : activeSide?<SideChatThread key={activeSide.id} session={activeSide} stream={sideStreams[activeSide.id]} stopping={Boolean(sideStoppingSessions[activeSide.id])} stopError={sideStopErrors[activeSide.id]}
+        : panelTab==='side'&&activeSide?<SideChatThread key={activeSide.id} session={activeSide} stream={sideStreams[activeSide.id]} stopping={Boolean(sideStoppingSessions[activeSide.id])} stopError={sideStopErrors[activeSide.id]}
             onQuestionAnswered={qid=>onSideQuestionAnswered?.(activeSide.id,qid)} onSteer={onSideSteer?id=>onSideSteer(activeSide.id,id):undefined}
             onSend={(text,attachments,skills,requirements,thinking,model)=>onSideSend?.(activeSide.id,text,attachments,skills,requirements,thinking,model) ?? false}
             onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
-        :<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button></div>}
+        :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
+      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
-    {tabPickerOpen&&createPortal(<div ref={tabPickerRef} className="chat-side-tab-picker" role="menu" aria-label="打开标签页" tabIndex={-1} style={tabPickerPosition}>
-      <h4>打开标签页</h4>
-      <p>选择要在侧边面板中打开的标签。</p>
-      <button type="button" role="menuitem" className="chat-side-tab-picker-row" onClick={()=>{setTabPickerOpen(false);const id=onSideChat?.('create');if(id){setPanelTab('side');setActiveSideId(id);}}}>
-        <span className="chat-side-tab-picker-icon" aria-hidden="true"><IconChat size={16}/></span>
-        <span className="chat-side-tab-picker-label">辅助对话<small>新建一个不打断主对话的子对话</small></span>
-      </button>
-      <button type="button" role="menuitem" className="chat-side-tab-picker-row" disabled={!goal} onClick={()=>{setTabPickerOpen(false);setPanelTab('goal');setPanelOpen(true);}}>
-        <span className="chat-side-tab-picker-icon" aria-hidden="true"><IconTarget size={16}/></span>
-        <span className="chat-side-tab-picker-label">目标<small>{goal?'查看或继续当前目标':'当前没有目标'}</small></span>
-      </button>
-      {closedSideSessions.length>0&&<><h4>重新打开</h4>{closedSideSessions.map(side=><button type="button" role="menuitem" className="chat-side-tab-picker-row" key={side.id} onClick={()=>{if(onSideReopen?.(side.id)){setTabPickerOpen(false);setPanelTab('side');setPanelOpen(true);setActiveSideId(side.id);}}}>
-        <span className="chat-side-tab-picker-icon" aria-hidden="true"><IconChat size={16}/></span><span className="chat-side-tab-picker-label">{side.title}<small>{side.pendingTurnId?'后台任务尚未结束':'记录和草稿已保留'}</small></span>
-      </button>)}</>}
-    </div>, document.body)}
   </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
   const [suggestionError, setSuggestionError] = useState('');
@@ -295,8 +287,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     <div className="chat-header-actions">
       {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
       {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}
-      {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openSidePanel} aria-expanded={panelVisible&&panelTab==='side'}><span aria-hidden="true">◫</span> 辅助对话</button>}
-      {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelOpen} onClick={()=>setPanelOpen(v=>!v)}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
+      {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openNewPanel} aria-expanded={panelVisible} aria-label="新增面板"><IconLayout size={16}/> 新增面板</button>}
+      {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelVisible&&panelTab==='goal'} onClick={()=>{setPanelTab('goal');setPanelOpen(panelTab!=='goal'||!panelOpen);}}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>

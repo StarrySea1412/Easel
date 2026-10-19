@@ -156,7 +156,61 @@ def extract_html(html: str) -> dict[str, str]:
     except Exception:
         pass
     title, text = parser.result()
+    # Prefer semantic article content to whole-page navigation. Keep the old
+    # extractor as the fallback for sites without a useful semantic region.
+    regions = _ContentRegions()
+    try:
+        regions.feed(html)
+        text = regions.result() or text
+    except Exception:
+        pass
     return {'title': title[:200], 'text': text}
+
+
+class _ContentRegions(HTMLParser):
+    VOID = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    CHROME = _TextExtractor.SKIP | {'nav', 'aside', 'footer'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+        self.active: list[tuple[int, list[str]]] = []
+        self.candidates: list[list[str]] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in self.VOID:
+            self.stack.append(tag)
+        if tag in {'main', 'article'} or dict(attrs).get('role') == 'main':
+            parts: list[str] = []
+            self.active.append((len(self.stack), parts))
+            self.candidates.append(parts)
+        if tag in _TextExtractor.BLOCKS and not any(item in self.CHROME for item in self.stack):
+            for _, parts in self.active:
+                parts.append('\n')
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in self.VOID:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        if tag not in self.stack:
+            return
+        index = len(self.stack) - 1 - self.stack[::-1].index(tag)
+        self.stack = self.stack[:index]
+        self.active = [(depth, parts) for depth, parts in self.active if depth <= index]
+
+    def handle_data(self, data):
+        if not data.strip() or any(tag in self.CHROME for tag in self.stack):
+            return
+        for _, parts in self.active:
+            if len(parts) < 20_000:
+                parts.append(data.strip() + ' ')
+
+    def result(self) -> str:
+        texts = [_normalize_text(''.join(parts)) for parts in self.candidates]
+        # Empty/short semantic shells must not discard the useful body fallback.
+        return max((text for text in texts if len(text) >= MIN_HTTP_TEXT), key=len, default='')
 
 
 def _decode(raw: bytes, content_type: str) -> str:

@@ -26,6 +26,32 @@ def test_extract_html_keeps_title_and_blocks_without_scripts():
     assert '\n' in out['text'], '块级标签产生换行'
 
 
+def test_extract_html_prefers_semantic_content_over_navigation():
+    body = '页面事实与证据。' * 60
+    html = (f'<title>页面</title><nav>{"站点导航" * 500}</nav><main><h1>正文标题</h1>'
+            f'<aside>推荐广告</aside><article><p>{body}</p></article>'
+            '<nav>章节导航</nav><script>hidden()</script><footer>页尾链接</footer></main>')
+    out = link_reader.extract_html(html)
+    assert out['title'] == '页面'
+    assert '正文标题' in out['text'] and body in out['text']
+    for chrome in ('站点导航', '推荐广告', '章节导航', 'hidden()', '页尾链接'):
+        assert chrome not in out['text']
+
+
+def test_extract_html_short_semantic_shell_keeps_body_fallback():
+    body = '没有语义容器的有效正文。' * 50
+    out = link_reader.extract_html(f'<main>加载中</main><section>{body}</section>')
+    assert body in out['text']
+
+
+def test_extract_html_role_main_and_void_elements_preserve_content():
+    body = '分析材料。' * 100
+    out = link_reader.extract_html(f'<div role="main"><h1>标题</h1><img src="x"><br/>'
+                                   f'<p>{body}</p><input value="x"></div><p>正文外的链接</p>')
+    assert '标题' in out['text'] and body in out['text']
+    assert '正文外的链接' not in out['text']
+
+
 def test_reader_falls_back_to_browser_when_http_is_blocked():
     calls = []
 

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { fetchChatExecution, type ChatExecution } from '../lib/api';
 import { decodeExecution, mergeOperations, mergeTimeline } from '../lib/execution';
 import ExecutionOperation from './ExecutionOperation';
+import type { Operation } from '../lib/execution';
 import '../styles/chat-execution.css';
 
-export default function ChatExecutionPanel({ sessionId, turnId, streaming, onProgressOwnership }: { sessionId: string; turnId: string; streaming: boolean; onOpen?: () => void; onProgressOwnership?: (owned:boolean)=>void }) {
+export default function ChatExecutionPanel({ sessionId, turnId, streaming, onProgressOwnership, kinds, emptyMessage }: { sessionId: string; turnId: string; streaming: boolean; onOpen?: () => void; onProgressOwnership?: (owned:boolean)=>void; kinds?: Operation['kind'][]; emptyMessage?: string }) {
   const [snapshot,setSnapshot]=useState<ChatExecution|null>(null);
   const [readError,setReadError]=useState<{sessionId:string;turnId:string;message:string}|null>(null);
   const [revision,setRevision]=useState(0),[loading,setLoading]=useState(false);
@@ -24,6 +25,7 @@ export default function ChatExecutionPanel({ sessionId, turnId, streaming, onPro
   const note=[error,...(current?.warnings??[])].filter(Boolean).join(' ');
   const notice=note?<div className="chat-execution-note" role="status"><span>{note}</span> <button type="button" onClick={()=>setRevision(x=>x+1)}>重新读取</button></div>:null;
   const loadEarlier=async()=>{if(current?.nextBefore==null||loading)return;setLoading(true);try{const value=await fetchChatExecution(sessionId,turnId,undefined,current.nextBefore);setSnapshot(old=>old?.sessionId===sessionId&&old.turnId===turnId?{...old,nextBefore:value.nextBefore,operations:mergeOperations(value.operations,old.operations),timeline:mergeTimeline(old.timeline,value.timeline)}:old);}catch{setReadError({sessionId,turnId,message:'较早记录暂不可读，已有回执保留。'});}finally{setLoading(false);}};
+  if(kinds){const filtered=rows.filter(row=>kinds.includes(row.kind));return <section className="chat-execution" aria-label="筛选后的本轮执行回执">{filtered.map(row=><ExecutionOperation key={row.id} row={row} running={streaming}/>)}{!filtered.length&&<p className="execution-note">{current?emptyMessage||'本轮暂无对应回执。':error?'尚未取得可核验的执行记录。':'正在读取执行记录…'}</p>}{current?.nextBefore!=null&&<button type="button" className="chat-execution-more" disabled={loading} onClick={()=>void loadEarlier()}>{loading?'正在读取…':'加载较早记录'}</button>}{notice}</section>;}
   if(!rows.length&&!current?.plan?.length&&!ownsProgress)return notice?<section className="chat-execution" aria-label="本轮执行记录提示">{notice}</section>:null;
   const byId=new Map(rows.map(row=>[row.id,row]));
   const linked=new Set(current?.timeline?.filter(entry=>entry.type==='operation').map(entry=>entry.operationId));

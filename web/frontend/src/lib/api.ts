@@ -1647,9 +1647,9 @@ export interface LinkReadResult {
   reason: string | null;
 }
 /** 受控读取一条链接的标题与正文（服务端普通 HTTP 优先、反爬站点回退本机有头浏览器）；读取不调用任何模型。 */
-export function readBreakdownLink(url: string): Promise<LinkReadResult> {
+export function readBreakdownLink(url: string, signal?: AbortSignal): Promise<LinkReadResult> {
   return request('/api/breakdown/link', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }), signal,
   });
 }
 export function previewComfyPrompt(prompt: string, cinematic: Record<string, string> = {}, negativePrompt = ''): Promise<{ prompt: string; cinematic: Record<string, string> }> {

@@ -51,24 +51,38 @@ test('the tab bar lists every side chat and switches between them', async t => {
   assert.equal(tabs[1].getAttribute('aria-selected'), 'false');
 });
 
-test('the + button opens the tab picker and creates a new side chat', async t => {
-  const view = fixture(t);
-  const calls = [];
-  await view.render(createElement(ChatPage, {
-    session: parent, sideSessions: [sideA],
-    onSideChat: mode => { calls.push(mode); return 's3'; },
-  }));
+test('the + button opens the full panel home without creating a chat, then lets the user choose', async t => {
+  const view = fixture(t), calls=[];
+  await view.render(createElement(ChatPage,{session:parent,sideSessions:[sideA],onSideChat:mode=>{calls.push(mode);return 's3';}}));
   await view.click(view.container.querySelector('.chat-side-tab-add'));
-  const picker = document.body.querySelector('.chat-side-tab-picker');
-  assert.ok(picker, 'the picker appears');
-  assert.match(picker.textContent, /打开标签页/);
-  assert.match(picker.textContent, /选择要在侧边面板中打开的标签/);
-  const rows = [...picker.querySelectorAll('.chat-side-tab-picker-row')];
-  assert.deepEqual(rows.map(row => row.querySelector('.chat-side-tab-picker-label').firstChild.textContent), ['辅助对话', '目标']);
-  assert.equal(rows[1].disabled, true, 'without a goal the goal row is disabled');
-  await view.click(rows[0]);
-  assert.deepEqual(calls, ['create'], 'the picker always creates a new side chat');
-  assert.equal(document.body.querySelector('.chat-side-tab-picker'), null, 'the picker closes after choosing');
+  const home=view.container.querySelector('.chat-panel-home');
+  assert.ok(home);assert.match(home.textContent,/新增面板/);assert.match(home.textContent,/推荐/);
+  assert.deepEqual(calls,[],'opening the launcher must not create a child');
+  const rows=[...home.querySelectorAll('.chat-panel-tool-grid button')];
+  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','终端','变更','辅助对话']);
+  await view.click(rows.find(row=>row.querySelector('strong').textContent==='辅助对话'));
+  assert.deepEqual(calls,['create']);assert.equal(view.container.querySelector('.chat-panel-home'),null);
+});
+
+test('tool tabs keep browser evidence across navigation, persist types per parent and close independently',async t=>{
+  const view=fixture(t);
+  await view.render(createElement(ChatPage,{session:{...parent,id:'panel-parent'},sideSessions:[]}));
+  const openHome=()=>view.click(view.container.querySelector('.chat-side-trigger'));
+  const choose=title=>view.click([...view.container.querySelectorAll('.chat-panel-tool-grid button')].find(button=>button.querySelector('strong').textContent===title));
+  await openHome();await choose('浏览器');
+  const browser=view.container.querySelector('.chat-browser-panel');
+  assert.ok(browser);assert.match(browser.textContent,/读取页面标题/);
+  await openHome();await choose('文件');
+  assert.equal(view.container.querySelector('.chat-browser-panel'),browser,'browser stays mounted while switching tabs');
+  assert.equal(browser.closest('.chat-panel-content').hidden,true);
+  assert.ok(view.container.querySelector('.chat-panel-files'));
+  assert.deepEqual(JSON.parse(localStorage.getItem('easel:chat-panel-tools:panel-parent')),['browser','files']);
+  await view.click(view.container.querySelector('[aria-label="关闭：文件"]'));
+  assert.ok(view.container.querySelector('.chat-panel-home'));
+  await view.click([...view.container.querySelectorAll('[role=tab]')].find(tab=>tab.textContent==='浏览器'));
+  assert.equal(browser.closest('.chat-panel-content').hidden,false);
+  await view.render(createElement(ChatPage,{session:{...parent,id:'another-parent'},sideSessions:[]}));
+  assert.equal(view.container.querySelector('.chat-browser-panel'),null,'another parent cannot see this page');
 });
 
 test('side chat uses shared tools, preserves a rejected draft and sends only its own scope',async t=>{
@@ -106,10 +120,10 @@ test('closed side tabs can be reopened from the picker without creating a replac
   await view.render(createElement(ChatPage,{session:parent,sideSessions:[sideA],closedSideSessions:[{...sideB,sideClosed:true}],
     onSideReopen:id=>{reopened.push(id);return true;},onSideChat:()=>created.push('new')}));
   await view.click(view.container.querySelector('.chat-side-tab-add'));
-  const picker=document.querySelector('.chat-side-tab-picker');
-  await view.click([...picker.querySelectorAll('[role=menuitem]')].find(item=>item.textContent.includes(sideB.title)));
+  const picker=view.container.querySelector('.chat-panel-home');
+  await view.click([...picker.querySelectorAll('.chat-panel-reopen-list button')].find(item=>item.textContent.includes(sideB.title)));
   assert.deepEqual(reopened,[sideB.id]);assert.deepEqual(created,[]);
-  assert.equal(document.querySelector('.chat-side-tab-picker'),null);
+  assert.equal(view.container.querySelector('.chat-panel-home'),null);
 });
 
 test('side questions and failed stops remain actionable in their own session',async t=>{
@@ -156,17 +170,17 @@ test('each side chat tab closes from its own button and the panel keeps an empty
   assert.deepEqual(closed, ['s2'], 'the active tab closes with its own id');
   await view.render(createElement(ChatPage, { ...props, sideSessions: [] }));
   await view.click(view.container.querySelector('.chat-side-trigger'));
-  assert.match(view.container.querySelector('.chat-side-panel-empty').textContent, /没有打开的辅助对话/);
+  assert.ok(view.container.querySelector('.chat-panel-home'));
   const created = [];
   await view.render(createElement(ChatPage, {
     ...props, sideSessions: [],
     onSideChat: mode => { created.push(mode ?? 'open'); return 's4'; },
   }));
   await view.click(view.container.querySelector('.chat-side-trigger'));
-  const button = [...view.container.querySelectorAll('.chat-side-panel-empty button')].find(b => b.textContent === '新建辅助对话');
+  const button = [...view.container.querySelectorAll('.chat-panel-tool-grid button')].find(b => b.querySelector('strong').textContent === '辅助对话');
   assert.ok(button);
   await view.click(button);
-  assert.deepEqual(created, ['open', 'create']);
+  assert.deepEqual(created, ['create']);
 });
 
 test('a side chat tab renames by double-click; Enter saves, Escape and blank titles keep the old name', async t => {

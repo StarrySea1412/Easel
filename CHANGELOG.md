@@ -1,3 +1,10 @@
+## 2026-10-19 · Panel launcher and browser page evidence / 新增面板与网页证据
+
+- Replace the sidebar-wide auxiliary-chat entry with a full panel launcher; files, browser, terminal, changes and auxiliary chat have independent tabs. / 右栏统一“新增面板”，文件、浏览器、终端、变更与辅助对话作为工具标签，保留关闭重开及更多工具中的目标。
+- Reuse current artifacts and read-only execution receipts. Browser reads page text, keeps source/time, preserves failed-read snapshots and explicitly adds analysis evidence to the main draft without auto-sending. / 接入现有产物与只读回执；浏览器读取正文、展示来源时间、失败保留快照，“分析此页”显式加入主草稿且不自动发送。
+- Prefer useful semantic HTML regions over navigation, keeping the body fallback. / 优先语义正文区域，避免导航占满引用，保留普通网页回退。
+- 29 targeted frontend / 13 backend reader tests, build and lint pass (18 existing warnings); desktop/390px UI verified with explicit fixtures, plus separate live HTTP reading. No live model call, service restart, 138 deployment or installer update. / 前端定向29项、读取后端13项、构建/lint通过；桌面及390px用显式fixture验UI，另验真实HTTP读取。未调用真实模型、重启服务、部署138或更新安装包。[Details / 详情](docs/panel-home-browser-research-2026-10-19.md)。
+
 ## 2026-10-19 · Auxiliary chat and Subagent observability / 辅助对话与子任务观测
 
 - Reuse the main composer in auxiliary chats, with child-scoped attachments/skills/model/effort, streaming, questions, Codex approvals, stop retry and artifacts. Only accepted sends clear the child draft. / 辅助对话复用主输入区，接入素材、技能、模型、思考强度、流式状态、问答、Codex审批、停止重试及产物；仅接收成功清理子草稿。

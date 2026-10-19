@@ -14,7 +14,7 @@ async function setup(t) {
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })));
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
-  const render = async (sessionId = 'a') => act(async () => root.render(createElement(Panel, { sessionId, turnId: 't1', streaming: false, onOpen: () => opened++ })));
+  const render = async (sessionId = 'a', extra = {}) => act(async () => root.render(createElement(Panel, { sessionId, turnId: 't1', streaming: false, onOpen: () => opened++, ...extra })));
   await render();
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   return { requests, container, render, opened: () => opened,
@@ -29,6 +29,16 @@ test('empty execution results retain backend warnings and retry without an aggre
   assert.equal(view.opened(), 0);
   await view.click('重新读取'); assert.equal(view.requests.length, 2);
   await view.respond(1, payload()); assert.equal(view.container.textContent, '');
+});
+
+test('terminal and changes panels filter the same dated turn without mixing receipt kinds',async t=>{
+  const view=await setup(t);await view.render('a',{kinds:['command'],emptyMessage:'没有命令'});
+  const row={id:'cmd',name:'exec',kind:'command',status:'completed',command:'tool-command',path:'',output:'command output',diff:''};
+  const diff={...row,id:'edit',name:'edit',kind:'file_change',command:'',path:'notes.md',diff:'+change'};
+  await view.respond(0,payload('a',[row,diff]));
+  assert.match(view.container.textContent,/tool-command/);assert.doesNotMatch(view.container.textContent,/notes.md/);
+  await view.render('a',{kinds:['file_change'],emptyMessage:'没有变更'});
+  assert.match(view.container.textContent,/notes.md/);assert.doesNotMatch(view.container.textContent,/tool-command/);
 });
 test('switching sessions hides old errors immediately and aborts pending old requests', async t => {
   const view = await setup(t);
