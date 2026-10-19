@@ -249,11 +249,12 @@ def test_endpoint_does_not_send_saved_key_to_changed_address(monkeypatch):
 
 
 @pytest.mark.parametrize('slot,protocol', [('relay', 'openai'), ('anthropic', 'openai'), ('openai', 'anthropic')])
-def test_discovery_rejects_slot_protocol_mismatch(monkeypatch, slot, protocol):
-    monkeypatch.setattr(web, '_discover_models', lambda *args: pytest.fail('must not send request'))
-    with pytest.raises(web.HTTPException):
-        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
-            channel='chat', slot=slot, protocol=protocol, apiKey='sk-typed', baseUrl='https://api.example/v1')))
+def test_discovery_uses_explicit_protocol_instead_of_slot_name(monkeypatch, slot, protocol):
+    seen = []
+    monkeypatch.setattr(web, '_discover_models', lambda base, key, proto: seen.append(proto) or {'ok': True, 'models': []})
+    result = asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+        channel='chat', slot=slot, protocol=protocol, apiKey='sk-typed', baseUrl='https://api.example/v1')))
+    assert seen == [protocol] and result['protocol'] == protocol
 
 
 def test_anthropic_base_with_v1_does_not_duplicate_path(monkeypatch):

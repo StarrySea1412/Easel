@@ -1817,9 +1817,33 @@ def _mask_key(v: str) -> str:
 
 
 _CHAT_PROTOCOLS = {'openai': 'openai', 'anthropic': 'anthropic', 'relay': 'anthropic'}
+_CHAT_APIS = {'openai': 'openai-completions', 'anthropic': 'anthropic-messages'}
 _CHAT_MODEL_KEYS = {'openai': 'OPENAI_MODEL', 'anthropic': 'ANTHROPIC_MODEL', 'relay': 'EASEL_LLM_MODEL'}
 _MODEL_CONFIG_LOCK = threading.RLock()
 AGENT_SAFETY_PLUGIN = PROJECT_ROOT / 'openclaw' / 'easel-agent-safety'
+
+
+def _chat_protocol(slot: str, providers: dict | None = None, model: str = '') -> str:
+    """Read the selected model/provider API; slot defaults are only for legacy configs."""
+    if providers is None:
+        try:
+            path = openclaw_state_dir() / 'openclaw.json'
+            providers = json.loads(path.read_text(encoding='utf-8')).get('models', {}).get('providers', {})
+        except (OSError, ValueError, AttributeError):
+            providers = {}
+    provider = providers.get(slot) if isinstance(providers, dict) else None
+    provider = provider if isinstance(provider, dict) else {}
+    # The adapter owns its wire API; the built-in upstream keeps its existing protocol.
+    if slot in _CHAT_PROTOCOLS and _is_local_gateway_base(provider.get('baseUrl')):
+        return _CHAT_PROTOCOLS[slot]
+    models = provider.get('models') if isinstance(provider.get('models'), list) else []
+    if not model:
+        model = _chat_model(slot, _read_env(), providers) if slot in _CHAT_MODEL_KEYS else (
+            str(models[0].get('id') or '') if models and isinstance(models[0], dict) else '')
+    selected = next((item for item in models if isinstance(item, dict) and item.get('id') == model), {})
+    api = str(selected.get('api') or provider.get('api') or '')
+    return {**{value: key for key, value in _CHAT_APIS.items()}, 'openai': 'openai',
+            'anthropic': 'anthropic'}.get(api, str(api) if api else _CHAT_PROTOCOLS.get(slot, 'openai'))
 
 
 def _chat_model(slot: str, env: dict, providers: dict | None = None) -> str:
@@ -1899,8 +1923,8 @@ def _model_channels() -> dict:
                 mid = models[0].get("id", "") if models and isinstance(models[0], dict) else ""
                 custom_rows.append({
                     "slot": "custom", "order": 0, "name": pkey, "sub": "自定义",
-                    "type": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
-                    "protocol": 'anthropic' if pv.get('api') == 'anthropic-messages' else 'openai',
+                    "type": _chat_protocol(pkey, providers, mid),
+                    "protocol": _chat_protocol(pkey, providers, mid),
                     "model": mid or "", "baseUrl": pv.get("baseUrl") or "",
                     "keyMasked": _mask_key(str(pv.get("apiKey") or "")),
                     "role": "主" if primary == f"{pkey}/{mid}" else "备",
@@ -1913,6 +1937,10 @@ def _model_channels() -> dict:
     for row in chat_rows:
         pkey = row['name'] if row.get('slot') == 'custom' else row.get('slot')
         provider = providers.get(pkey)
+        row['protocol'] = row['type'] = _chat_protocol(pkey, providers, row['model'])
+        row['protocolEditable'] = not (isinstance(provider, dict) and _is_local_gateway_base(provider.get('baseUrl')))
+        if not row['protocolEditable']:
+            row['protocolNote'] = '此渠道由本地模型网关管理，请在网关配置中修改上游协议。'
         models = provider.get('models') if isinstance(provider, dict) else []
         models = models if isinstance(models, list) else []
         selected = next((item for item in models if isinstance(item, dict) and item.get('id') == row['model']), {})
@@ -2251,7 +2279,7 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                     key = env.get(_SLOT_ENV_KEYS[pkey][1], '')
                 if not model and not prov.get('models'):
                     model = _chat_model(pkey, env)
-            api = 'anthropic-messages' if vals.get('protocol', _CHAT_PROTOCOLS.get(pkey)) == 'anthropic' else 'openai-completions'
+            api = _CHAT_APIS[vals.get('protocol') or _chat_protocol(pkey, providers, model)]
             if not local_gateway and prov.get('api') != api:
                 prov['api'] = api
                 changed = True
@@ -2272,6 +2300,8 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
             if model:
                 previous_models = prov.get('models') if isinstance(prov.get('models'), list) else []
                 target = next((dict(item) for item in previous_models if isinstance(item, dict) and item.get('id') == model), {'id': model, 'name': model})
+                if vals.get('protocol') and not local_gateway:
+                    target.pop('api', None)  # The selected model must inherit the protocol just saved.
                 if not target.get('name'):
                     target['name'] = model
                 if 'contextWindow' in vals:
@@ -2461,10 +2491,15 @@ async def api_settings_models_save(req: ModelSaveRequest):
         base = (row.baseUrl or '').strip().rstrip('/')
         key = (row.key or '').strip()
         protocol = (row.protocol or '').strip().lower()
-        if is_chat and slot in _CHAT_PROTOCOLS and protocol and protocol != _CHAT_PROTOCOLS[slot]:
-            raise HTTPException(400, '服务商协议与目标槽位不匹配，请选择同协议的服务商')
-        if is_chat and slot == 'custom' and protocol and protocol not in ('openai', 'anthropic'):
-            raise HTTPException(400, '自定义服务商仅支持 OpenAI Chat Completions 或 Anthropic 协议')
+        if is_chat:
+            pkey_for_protocol = name if slot == 'custom' else slot
+            saved_protocol = _chat_protocol(pkey_for_protocol, model=model)
+            protocol = protocol or saved_protocol
+            if protocol not in _CHAT_APIS:
+                raise HTTPException(400, '请选择支持的请求协议：OpenAI Chat Completions 或 Anthropic Messages')
+            saved_provider_base = _cur_prov.get(pkey_for_protocol, ('', ''))[0]
+            if _is_local_gateway_base(saved_provider_base) and protocol != saved_protocol:
+                raise HTTPException(400, '此渠道由本地模型网关管理，请在网关配置中修改上游协议')
         if base and not _valid_base_url(base):
             raise HTTPException(400, 'Base URL 需是合法的 http(s):// 地址')
         if key and any(ch.isspace() for ch in key):
@@ -2530,6 +2565,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             provider_updates[name] = {'model': model, 'base': base, 'key': key, 'protocol': protocol or 'openai'}
             keep_custom.add(name)
             pkey = name
+        if is_chat and pkey:
+            provider_updates[pkey]['protocol'] = protocol
         # 同一条规矩也得覆盖 openclaw.json 这一侧：_sync_openclaw_chat 只在 key 非空时改
         # apiKey，却无条件改 baseUrl —— 只换地址、Key 留空，下一轮对话就会拿着原 Key 去打新地址。
         # 自定义供应商压根不写 .env，前面那道 _SLOT_ENV_KEYS 闸拦不到它。
@@ -2574,19 +2611,18 @@ class SelftestRequest(BaseModel):
 
 @app.post("/api/settings/models/selftest")
 async def api_models_selftest(req: SelftestRequest):
-    """真自测：对已配置的 OpenAI 兼容通道发 GET {base}/models 并计耗时。"""
+    """Read saved model lists using each channel's configured protocol, without inference."""
     channel = (req.channel or "all").strip()
     env = _read_env()
-    targets: list[tuple[str, str]] = []
+    targets: list[tuple[str, str, str]] = []
     if channel in ("chat", "all"):
-        for base, key in ((env.get("ANTHROPIC_BASE_URL", ""), env.get("ANTHROPIC_API_KEY", "")),
-                          (env.get("OPENAI_BASE_URL", ""), env.get("OPENAI_API_KEY", "")),
-                          (env.get("EASEL_LLM_BASE_URL", ""), env.get("EASEL_LLM_API_KEY", ""))):
+        for slot in _CHAT_PROTOCOLS:
+            base, key = _saved_base_for('chat', slot), _saved_key_for('chat', slot)
             if base.strip() and key.strip():
-                targets.append((base.strip().rstrip("/"), key.strip()))
+                targets.append((base.strip().rstrip("/"), key.strip(), _chat_protocol(slot)))
     if channel in ("transcribe", "all") and (env.get("SILICONFLOW_API_KEY") or "").strip():
         targets.append(((env.get("SILICONFLOW_BASE_URL") or "https://api.siliconflow.cn/v1").strip().rstrip("/"),
-                        env["SILICONFLOW_API_KEY"].strip()))
+                        env["SILICONFLOW_API_KEY"].strip(), 'openai'))
 
     # 这里会把真实 API Key 当 Bearer 发出去，所以目标地址必须先过闸：
     # 合法 http(s)、且不指向本机/内网/云元数据；跳转也不跟（跟了等于绕过前面的判断）。
@@ -2596,8 +2632,10 @@ async def api_models_selftest(req: SelftestRequest):
 
     _opener = urllib.request.build_opener(_NoRedirect)
 
-    def _probe(base: str, key: str) -> dict:
+    def _probe(base: str, key: str, protocol: str) -> dict:
         t0 = time.time()
+        if protocol not in _CHAT_APIS:
+            return {'baseUrl': base, 'ok': False, 'ms': 0, 'detail': '已保存请求协议不支持模型列表查询'}
         if not _valid_base_url(base):
             return {"baseUrl": base, "ok": False, "ms": 0, "detail": "Base URL 不合法，未发起请求"}
         if not _ssrf_safe(base):
@@ -2605,7 +2643,10 @@ async def api_models_selftest(req: SelftestRequest):
                     "detail": "目标指向本机/内网地址，已拒绝（避免把 API Key 发给内网服务）"}
         try:
             _model_health_service().reserve_legacy()
-            rq = urllib.request.Request(base + "/models", headers={"Authorization": f"Bearer {key}"})
+            headers = ({'x-api-key': key, 'anthropic-version': '2023-06-01'}
+                       if protocol == 'anthropic' else {'Authorization': f'Bearer {key}'})
+            suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
+            rq = urllib.request.Request(base + suffix, headers=headers)
             with _opener.open(rq, timeout=15) as resp:
                 return {"baseUrl": base, "ok": resp.status == 200, "ms": int((time.time() - t0) * 1000)}
         except HTTPException as exc:
@@ -2616,7 +2657,7 @@ async def api_models_selftest(req: SelftestRequest):
             return {"baseUrl": base, "ok": False, "ms": int((time.time() - t0) * 1000),
                     "detail": _redact(f"{type(e).__name__}: {e}", key)[:140]}
 
-    results = await asyncio.to_thread(lambda: [_probe(b, k) for b, k in targets])
+    results = await asyncio.to_thread(lambda: [_probe(b, k, p) for b, k, p in targets])
     return {"channel": channel, "results": results, "testedAt": int(time.time())}
 
 
@@ -2898,7 +2939,7 @@ class ModelDiscoverRequest(BaseModel):
     slot: str = ""
     baseUrl: str = ""
     apiKey: str = ""
-    protocol: str = ""   # openai | anthropic；留空按 slot 推断
+    protocol: str = ""   # openai | anthropic；留空沿用已保存协议
 
 
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -2917,6 +2958,10 @@ def _saved_key_for(channel: str, slot: str) -> str:
     """该通道/槽位已保存的 Key（供「不重填也能获取模型」）；没有给空串。"""
     env = _read_env()
     if channel == "chat":
+        if slot not in _CHAT_PROTOCOLS:
+            key = _openclaw_provider_creds().get(slot, ('', ''))[1]
+            match = re.fullmatch(r'\$\{([A-Z][A-Z0-9_]*)\}', key)
+            return (env.get(match[1], '') or os.environ.get(match[1], '')) if match else key
         return {"openai": env.get("OPENAI_API_KEY", ""),
                 "relay": env.get("EASEL_LLM_API_KEY", ""),
                 "anthropic": env.get("ANTHROPIC_API_KEY", "")}.get(slot, "") or ""
@@ -2932,6 +2977,8 @@ def _saved_key_for(channel: str, slot: str) -> str:
 def _saved_base_for(channel: str, slot: str) -> str:
     env = _read_env()
     if channel == 'chat':
+        if slot not in _SLOT_ENV_KEYS:
+            return _openclaw_provider_creds().get(slot, ('', ''))[0]
         field = _SLOT_ENV_KEYS.get(slot, ('', ''))[0]
         return env.get(field, '') or ('https://api.anthropic.com' if slot == 'anthropic' else '')
     if channel == 'transcribe' and slot == 'siliconflow':
@@ -3063,12 +3110,14 @@ async def api_models_discover(req: ModelDiscoverRequest):
         raise HTTPException(400, 'API Key 不能包含空白字符')
     key = typed or _saved_key_for(channel, slot)
     proto = (req.protocol or "").strip().lower()
-    expected = _CHAT_PROTOCOLS.get(slot) if channel == 'chat' else 'openai'
+    expected = _chat_protocol(slot) if channel == 'chat' else 'openai'
     if proto and proto not in ('openai', 'anthropic'):
         raise HTTPException(400, '不支持的模型协议')
-    if expected and proto and expected != proto:
+    if channel != 'chat' and proto and expected != proto:
         raise HTTPException(400, '协议与目标槽位不匹配')
     proto = proto or expected or 'openai'
+    if proto not in _CHAT_APIS:
+        raise HTTPException(400, '已保存协议不支持模型列表查询，请明确选择支持的请求协议')
     if key and not typed and base != _saved_base_for(channel, slot).strip().rstrip('/'):
         raise HTTPException(400, '更换 Base URL 时必须重新填写 API Key，未向新地址发送已保存的密钥')
     result = await asyncio.to_thread(_discover_models, base, key, proto)
@@ -3109,8 +3158,9 @@ def _import_target_digest() -> str:
 def _import_compatible(slot: str, candidate: dict) -> str:
     if not candidate['compatible']:
         return candidate['skipReason']
-    if candidate['protocol'] != _CHAT_PROTOCOLS[slot]:
-        return f'协议不匹配：{slot} 槽位需要 {_CHAT_PROTOCOLS[slot]}'
+    expected = _chat_protocol(slot)
+    if candidate['protocol'] != expected:
+        return f'协议不匹配：{slot} 槽位当前使用 {expected}'
     base, _ = _openclaw_provider_creds().get(slot, ('', ''))
     if _is_local_gateway_base(base):
         return '此槽位由本地模型网关管理，请在网关配置中修改上游'
@@ -3122,7 +3172,7 @@ def _import_target_slot(requested: str, candidate: dict, env: dict, providers: d
     if requested != 'auto':
         return requested
     preferred = {'openai': ('openai',), 'anthropic': ('relay', 'anthropic')}.get(candidate['protocol'], ())
-    usable = [slot for slot in preferred if not _import_compatible(slot, candidate)]
+    usable = [slot for slot in dict.fromkeys((*preferred, *_CHAT_PROTOCOLS)) if not _import_compatible(slot, candidate)]
     if not usable:
         return preferred[0] if preferred else 'openai'
     for slot in usable:

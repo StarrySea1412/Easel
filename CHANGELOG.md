@@ -1,3 +1,9 @@
+## 0.3.1 · 2026-10-19 · Explicit chat request protocols / 对话请求协议设置
+
+- Expose the shared protocol selector for built-in and custom chat channels; persist the selected API and use it for discovery, saved probes and OpenClaw requests. No provider-name inference or fallback between protocols. / 所有对话渠道明确选协议，保存、发现、检测与后续请求一致，不按名称猜测或跨协议重试。
+- Preserve legacy and unknown configurations, protect gateway-owned protocols, resolve custom discovery credentials by exact identity, and keep import compatibility aligned with saved APIs. / 保留旧配置与未知值、说明网关管理边界，修复自定义渠道列表身份，导入按当前协议匹配。
+- Fix narrow provider header geometry; 225 backend and 72 frontend focused checks, build/lint and isolated browser checks pass. No live supplier call or deployment. / 修复窄卡标题排版；定向后端225项/前端72项、构建/lint与隔离浏览器检查通过，未真实推理或部署。[Details / 详情](docs/model-protocol-settings-2026-10-19.md)。
+
 ## 0.3.0 · 2026-10-19 · Browser panel and auxiliary-chat expansion
 
 - Major feature release from 0.2.8. Adds the redesigned browser panel, default icons for panel and web tabs, and explicit source-versus-running-version identification. Version source: `pyproject.toml`; the Vite UI embeds the same version.

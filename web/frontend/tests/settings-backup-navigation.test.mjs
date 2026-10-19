@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { Window } from 'happy-dom';
 import { act, createElement } from 'react';
 import { tsModuleUrl } from './load-ts.mjs';
+import { selectOption, optionValues } from './select-helpers.mjs';
 
 // Actual SettingsPanel, model picker, shared Select and provider fields; other
 // cards and APIs are stubs. This verifies React behavior, not browser/backend.
@@ -287,6 +288,67 @@ const configuredRows = () => [
 ];
 const modelChannels = rows => ({ channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: key === 'chat' ? rows : [] }])) });
 const findButton = (view, text) => [...view.container.querySelectorAll('button')].find(button => button.textContent === text);
+
+test('every chat channel exposes its protocol and saves an explicit keyboard selection as a draft', async t => {
+  const rows = [...configuredRows(),
+    { ...configuredRows()[1], slot: 'relay', name: 'DeepSeek' },
+    { ...configuredRows()[0], slot: 'custom', name: 'my-channel' }];
+  let savedRows = rows;
+  const view = await fixture(t, {
+    fetchModelChannels: () => modelChannels(savedRows),
+    saveModelConfig: async (_channel, saved) => {
+      savedRows = saved.map((row, i) => ({ ...rows[i], ...row }));
+      return { ...modelChannels(savedRows), ok: true };
+    },
+  });
+  await view.render(1, view.props, 'model');
+  const selectors = view.container.querySelectorAll('[aria-label="请求协议"]');
+  assert.equal(selectors.length, 4);
+  assert.deepEqual(await optionValues(selectors[2]), ['openai', 'anthropic']);
+  for (const key of ['ArrowDown', 'Home', 'Enter']) await act(async () => selectors[2].dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+  assert.equal(selectors[2].textContent, 'OpenAI Chat Completions');
+  assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'discoverModels', 'runChannelSelftest'].includes(call.name)), false);
+  await view.click(findButton(view, '保存并使用'));
+  const payload = view.harness.calls.find(call => call.name === 'saveModelConfig').args;
+  assert.equal(payload[0], 'chat');
+  assert.equal(payload[1][2].protocol, 'openai');
+  assert.equal(payload[1][1].protocol, 'anthropic');
+  assert.equal(view.container.querySelectorAll('[aria-label="请求协议"]')[2].textContent, 'OpenAI Chat Completions');
+  assert.equal(findButton(view, '保存并使用').disabled, true);
+});
+
+test('protocol changes invalidate old discovery and query the exact custom channel with the draft protocol', async t => {
+  const rows = [{ ...configuredRows()[0], slot: 'custom', name: 'deepseek' }];
+  const view = await fixture(t, {
+    fetchModelChannels: modelChannels(rows),
+    discoverModels: { ok: true, kind: 'models', models: ['old-catalog-model'], source: rows[0].baseUrl, fetchedAt: 123, keySource: 'saved', message: 'Synthetic list' },
+  });
+  await view.render(1, view.props, 'model');
+  await view.click(findButton(view, '获取模型列表'));
+  assert.ok(view.container.querySelector('[aria-label="获取的可用模型"]'));
+  await selectOption(view.container.querySelector('[aria-label="请求协议"]'), 'anthropic');
+  assert.equal(view.container.querySelector('[aria-label="获取的可用模型"]'), null);
+  await view.click(findButton(view, '获取模型列表'));
+  assert.deepEqual(view.harness.calls.filter(call => call.name === 'discoverModels').at(-1).args[0], {
+    channel: 'chat', slot: 'deepseek', baseUrl: rows[0].baseUrl, apiKey: '', protocol: 'anthropic',
+  });
+  assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'runChannelSelftest'].includes(call.name)), false);
+});
+
+test('gateway-owned and unknown protocols show truthful state without a silent OpenAI fallback', async t => {
+  const rows = [
+    { ...configuredRows()[0], protocol: 'openai', protocolEditable: false, protocolNote: '请在网关配置中修改上游协议。' },
+    { ...configuredRows()[1], protocol: 'openai-responses', type: 'openai-responses' },
+  ];
+  const view = await fixture(t, { fetchModelChannels: modelChannels(rows) });
+  await view.render(1, view.props, 'model');
+  const selectors = view.container.querySelectorAll('[aria-label="请求协议"]');
+  assert.equal(selectors[0].disabled, true);
+  assert.match(view.container.textContent, /请在网关配置中修改上游协议/);
+  assert.equal(selectors[1].textContent, 'openai-responses（当前配置）');
+  await selectOption(selectors[1], 'anthropic');
+  assert.equal(selectors[1].textContent, 'Anthropic Messages');
+});
 async function chooseLastModel(view) {
   const picker = view.container.querySelector('button[aria-label="主模型"]');
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));

@@ -51,6 +51,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
           const [quickHealth, setQuickHealth] = useState(false);
           const panelId = useId();
           const reference = r.contextReference?.modelId === r.model ? r.contextReference : null;
+          const protocol = r.protocol || r.type || 'openai';
           const cloud = ops?.channel === 'transcribe' && !subtitle && !local;
           const title = subtitle ? '自带字幕' : local ? '本地兜底' : cloud ? '云端转写' : r.name || '未命名供应商';
           const role = subtitle ? '优先读取 · 免配置' : local ? '云端不可用时接替' : cloud ? '需要 API Key'
@@ -98,10 +99,13 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                     onChange={(e) => ops?.onRow?.(i, { name: e.target.value.toLowerCase() })}
                   />
               </SettingsField>}
-              {isCustom && ops?.channel === 'chat' && <SettingsField label="请求协议">
-                <Select aria-label="请求协议" value={r.protocol || r.type || 'openai'}
-                  options={[{ value: 'openai', label: 'OpenAI 兼容', description: 'Chat Completions' }, { value: 'anthropic', label: 'Anthropic 兼容', description: 'Messages' }]}
+              {ops?.channel === 'chat' && <SettingsField label="请求协议">
+                <Select aria-label="请求协议" value={protocol} disabled={r.protocolEditable === false}
+                  options={[...(!['openai', 'anthropic'].includes(protocol) ? [{ value: protocol, label: `${protocol}（当前配置）`, disabled: true }] : []),
+                    { value: 'openai', label: 'OpenAI Chat Completions', description: '/chat/completions' },
+                    { value: 'anthropic', label: 'Anthropic Messages', description: '/v1/messages' }]}
                   onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
+                <span className="hint">{r.protocolNote || '按服务商接口选择；保存后用于后续请求，不会自动切换协议。'}</span>
               </SettingsField>}
               <SettingsField label="模型">
               {ed.model ? (
@@ -116,8 +120,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                     }}
                     options={(ops?.presets || []).map((preset) => ({ value: preset.id,
                       label: preset.name, description: preset.note,
-                      disabled: ops?.channel === 'chat' && r.slot !== 'custom'
-                        && preset.protocol !== (r.slot === 'openai' ? 'openai' : 'anthropic'),
+                      disabled: ops?.channel === 'chat' && r.protocolEditable === false && preset.protocol !== protocol,
                     }))}
                   />}
                   <span className="model-fetch">

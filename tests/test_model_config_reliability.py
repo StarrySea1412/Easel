@@ -291,15 +291,118 @@ def test_malformed_provider_collection_does_not_break_model_settings(sandbox):
     assert next(row for row in rows if row['slot'] == 'anthropic')['model'] == 'claude-sonnet-4-6'
 
 
-def test_save_failure_rolls_back_and_protocol_mismatch_rejected(sandbox, monkeypatch):
+def test_save_failure_rolls_back_and_unknown_protocol_rejected(sandbox, monkeypatch):
     before = web._model_file_snapshot()
     monkeypatch.setattr(web, '_sync_openclaw_chat', lambda *args: '同步失败：secret-data')
     with pytest.raises(web.HTTPException) as caught:
         asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(slot='openai', model='new')])) )
     assert 'secret-data' not in caught.value.detail and web._model_file_snapshot() == before
     with pytest.raises(web.HTTPException) as caught:
-        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(slot='openai', protocol='anthropic')])) )
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(slot='openai', protocol='unknown')])) )
     assert caught.value.status_code == 400
+
+
+@pytest.mark.parametrize('slot', ['openai', 'anthropic', 'relay', 'custom'])
+@pytest.mark.parametrize('protocol', ['openai', 'anthropic'])
+def test_channel_protocol_survives_save_reload_and_controls_probe_wire_format(sandbox, slot, protocol):
+    config = json.loads(sandbox[1].read_text())
+    provider = config['models']['providers'][slot]
+    provider.pop('headers', None)  # This test exercises standard key authentication.
+    model = provider['models'][0]['id']
+    provider['models'][0]['api'] = 'anthropic-messages' if protocol == 'openai' else 'openai-completions'
+    sandbox[1].write_text(json.dumps(config), encoding='utf-8')
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+        slot=slot, name=slot, model=model, baseUrl=provider['baseUrl'],
+        key='synthetic-protocol-key', protocol=protocol, primary=True)])))
+    assert result['ok']
+    saved = json.loads(sandbox[1].read_text())
+    assert saved['models']['providers'][slot]['api'] == web._CHAT_APIS[protocol]
+    assert 'api' not in saved['models']['providers'][slot]['models'][0]
+    for name in set(config['models']['providers']) - {slot}:
+        assert saved['models']['providers'][name] == config['models']['providers'][name]
+    reopened = web._model_channels()['channels']['chat']['rows']
+    row = next(row for row in reopened if row['slot'] == slot and (slot != 'custom' or row['name'] == slot))
+    assert row['protocol'] == row['type'] == protocol and row['protocolEditable']
+    target = web._model_health_target(f'{slot}/{model}')
+    assert target.protocol == protocol
+    request = web.model_health.request_body(target, 'offline protocol verification')
+    if protocol == 'anthropic':
+        assert request.full_url.endswith('/messages') and request.get_header('X-api-key') == 'synthetic-protocol-key'
+        assert request.get_header('Authorization') is None
+    else:
+        assert request.full_url.endswith('/chat/completions')
+        assert request.get_header('Authorization') == 'Bearer synthetic-protocol-key'
+
+
+def test_omitted_protocol_keeps_saved_choice_for_save_and_discovery(sandbox, monkeypatch):
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+        slot='openai', model='old-model', protocol='anthropic')])))
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+        slot='openai', model='old-model')])) )
+    assert web._chat_protocol('openai') == 'anthropic'
+    seen = []
+    monkeypatch.setattr(web, '_discover_models', lambda base, key, protocol: seen.append(protocol) or {'ok': True})
+    result = asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+        slot='openai', baseUrl='https://old.example/v1')))
+    assert seen == ['anthropic'] and result['protocol'] == 'anthropic'
+
+
+def test_unknown_saved_api_is_not_silently_rewritten_as_openai(sandbox):
+    config = json.loads(sandbox[1].read_text())
+    config['models']['providers']['openai']['api'] = 'openai-responses'
+    sandbox[1].write_text(json.dumps(config), encoding='utf-8')
+    assert web._model_channels()['channels']['chat']['rows'][0]['protocol'] == 'openai-responses'
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+            slot='openai', model='old-model')])))
+    assert caught.value.status_code == 400 and web._model_file_snapshot() == before
+
+
+def test_gateway_managed_protocol_change_is_explicitly_blocked(sandbox):
+    config = json.loads(sandbox[1].read_text())
+    config['models']['providers']['openai']['baseUrl'] = 'http://127.0.0.1:8890/v1'
+    sandbox[1].write_text(json.dumps(config), encoding='utf-8')
+    row = web._model_channels()['channels']['chat']['rows'][0]
+    assert not row['protocolEditable'] and '网关' in row['protocolNote']
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(
+            slot='openai', model='old-model', protocol='anthropic')])))
+    assert caught.value.status_code == 400 and '网关' in caught.value.detail
+    assert web._model_file_snapshot() == before
+
+
+def test_custom_channel_discovery_uses_its_exact_saved_identity_and_protocol(sandbox, monkeypatch):
+    seen = []
+    monkeypatch.setattr(web, '_discover_models', lambda base, key, protocol: seen.append((base, key, protocol)) or {'ok': True})
+    result = asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+        slot='custom', baseUrl='https://custom.example/v1')))
+    assert result['keySource'] == 'saved'
+    assert seen == [('https://custom.example/v1', 'custom-keep-key', 'openai')]
+
+
+def test_legacy_bulk_list_check_uses_saved_protocol_headers_and_paths(sandbox, monkeypatch):
+    from types import SimpleNamespace
+    config = json.loads(sandbox[1].read_text())
+    config['models']['providers']['openai']['api'] = 'anthropic-messages'
+    sandbox[1].write_text(json.dumps(config), encoding='utf-8')
+    web.ENV_FILE.write_text('OPENAI_BASE_URL=https://old.example/v1\nOPENAI_API_KEY=synthetic-key\n', encoding='utf-8')
+    monkeypatch.setattr(web, '_read_env', lambda: {'OPENAI_BASE_URL': 'https://old.example/v1', 'OPENAI_API_KEY': 'synthetic-key'})
+    monkeypatch.setattr(web, '_ssrf_safe', lambda base: True)
+    monkeypatch.setattr(web, '_model_health_service', lambda: SimpleNamespace(reserve_legacy=lambda: None))
+    requests = []
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+    monkeypatch.setattr(web.urllib.request, 'build_opener', lambda *args: SimpleNamespace(
+        open=lambda request, **kwargs: requests.append(request) or Response()))
+    result = asyncio.run(web.api_models_selftest(web.SelftestRequest(channel='chat')))
+    assert result['results'][0]['ok']
+    assert len(requests) == 1 and requests[0].full_url == 'https://old.example/v1/models'
+    assert requests[0].get_header('X-api-key') == 'synthetic-key'
+    assert requests[0].get_header('Authorization') is None
 
 
 def test_local_gateway_candidate_is_explicitly_unavailable(sandbox):

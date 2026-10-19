@@ -189,7 +189,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     try {
       const r = await discoverModels({
         channel: ch,
-        slot: row.slot || '',
+        slot: row.slot === 'custom' ? row.name : row.slot || '',
         baseUrl: row.baseUrl || '',
         apiKey: row.keyNew || '',
         protocol: row.protocol || '',

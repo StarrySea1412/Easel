@@ -1281,8 +1281,10 @@ export interface ModelRow {
   baseOptional?: boolean;
   adv?: boolean;
   deletable?: boolean;
-  /** 预设带出的协议（仅本地态；缺省按 slot 推断）。 */
+  /** 已保存或正在编辑的请求协议；旧配置缺省沿用原渠道协议。 */
   protocol?: string;
+  protocolEditable?: boolean;
+  protocolNote?: string;
 }
 
 // ── 服务商预设与模型发现（对应方案功能 C 第一步） ──
