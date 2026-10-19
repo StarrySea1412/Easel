@@ -1,3 +1,6 @@
+import { ChatRunProvider } from './ChatRunContext';
+import ChatProgressCapsule from './ChatProgressCapsule';
+import ChatAgentActivity from './ChatAgentActivity';
 import {historicalGatewayAuthError} from '../lib/chatErrors';
 import ChatTurnNavigation from './ChatTurnNavigation';
 import { chatTurnNodes,activeTurnFromOffsets,isChatAtBottom,shouldFollowChatScroll } from '../lib/chatNavigation';
@@ -96,7 +99,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
+function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -291,7 +294,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
       {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
       {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}
       {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openNewPanel} aria-expanded={panelVisible} aria-label="新增面板"><IconLayout size={16}/> 新增面板</button>}
-      {!isImported&&goal&&!goalEditor&&<button type="button" className="chat-new-button chat-goal-trigger" aria-label="查看当前目标" aria-expanded={panelVisible&&panelTab==='goal'} onClick={()=>{setPanelTab('goal');setPanelOpen(panelTab!=='goal'||!panelOpen);}}><span aria-hidden="true">◎</span> 目标{goal?.steps?.length?` ${goal.steps.filter(s=>s.status==='completed').length}/${goal.steps.length}`:''}</button>}
+      {!isImported&&!goalEditor&&<ChatProgressCapsule goal={goal} activity={stream?.activity||session.messages.at(-1)?.activity} startedAt={stream?.startedAt||session.messages.at(-1)?.startedAt} elapsedMs={!isStreaming?session.messages.at(-1)?.elapsedMs:undefined} failed={Boolean(session.messages.at(-1)?.error)&&!isStreaming} stopped={session.messages.at(-1)?.stopped&&!isStreaming} onGoal={viewGoal}/>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
       {!isEmpty && onNewChat && <button type="button" className="chat-new-button" onClick={onNewChat} title="新建对话" aria-label="新建对话"><IconPlus size={16} /><span>新对话</span></button>}
     </div>
@@ -418,7 +421,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
                 executionScope={`${session.id}:${auditTurn||''}`}
-                execution={!msg.externalSource && !isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} /> : undefined}
+                execution={!msg.externalSource && !isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => <><ChatAgentActivity sessionId={session.id} turnId={auditTurn}/>{session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} />}</> : undefined}
                 status={!msg.externalSource && session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
               /></Fragment>
             );
@@ -481,4 +484,10 @@ function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswer
         usageRefreshKey={session.messages.length} compaction={stream?.compaction} onSend={onSend} onStop={()=>onStop?.()} onSteer={onSteer} onOpenModels={onOpenModels}/>
     </div>
   </div>;
+}
+
+export default function ChatPage(props:ChatPageProps) {
+  const {session,stream}=props;
+  const turnId=session.pendingTurnId||[...session.messages].reverse().find(message=>message.role==='assistant'&&!message.externalSource&&message.turnId)?.turnId||'';
+  return <ChatRunProvider sessionId={session.id} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent {...props}/></ChatRunProvider>;
 }

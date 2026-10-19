@@ -138,7 +138,10 @@ class BrowserService:
             ready = threading.Event()
 
             def run():
-                self.loop = asyncio.new_event_loop()
+                # Uvicorn reload/workers can install Windows' Selector policy,
+                # which cannot launch Playwright's driver subprocess. Isolate
+                # the subprocess-capable loop to this worker, not global policy.
+                self.loop = asyncio.ProactorEventLoop() if os.name == 'nt' else asyncio.new_event_loop()
                 asyncio.set_event_loop(self.loop)
                 ready.set()
                 self.loop.run_forever()

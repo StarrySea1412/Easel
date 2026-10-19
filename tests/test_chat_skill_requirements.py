@@ -113,13 +113,29 @@ def test_requests_from_other_sessions_and_cleared_snapshots_do_not_reuse_prior_n
     {'skillRequirements': {'card-xiaohongshu': '这个技能未被本消息选中'}},
     {'skillRequirements': {'../escape': '路径不允许'}},
     {'selectedSkills': ['not-installed'], 'skillRequirements': {'not-installed': '技能没有安装'}},
-    {'sessionId': None}, {'sessionId': '   '}, {'sessionId': 's' * 257},
+    {'sessionId': None},
     {'skillRequirements': {'card-quote': '   '}},
 ])
 def test_invalid_association_or_session_is_rejected_before_execution(skills, patch):
     with pytest.raises(HTTPException) as exc:
         web._chat_message(request(**patch))
     assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize('session_id', ['   ', 's' * 257])
+def test_invalid_session_is_rejected_by_request_schema(session_id):
+    # ChatRequest validates its identifier before the message builder is called.
+    with pytest.raises(ValidationError):
+        request(sessionId=session_id)
+
+
+def test_long_task_guidance_exposes_structured_plan_updates(skills):
+    message = web._chat_message(request())
+    assert '复杂、多步骤或长任务' in message
+    assert 'update_plan/TodoWrite' in message
+    assert 'update_plan.py' in message
+    assert '简短问答不必建计划' in message
+    assert '只有实际核验后才标completed' in message
 
 
 @pytest.mark.parametrize('requirements', [

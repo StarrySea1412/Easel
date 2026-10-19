@@ -224,7 +224,7 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
 
   const livePanel = (effThinking || liveActivity || liveHint || progressSteps.length || isStreaming) ? (
     <div className="live-panel">
-      <WorkProgress steps={progressSteps} streaming={Boolean(isStreaming)} heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />
+      {!ownsProgress && <WorkProgress steps={progressSteps} streaming={Boolean(isStreaming)} heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />}
       {effThinking && (
         <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} backupSnapshot={backupSnapshot} />
       )}

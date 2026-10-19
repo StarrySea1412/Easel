@@ -285,6 +285,8 @@ class CodexService:
                 '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
                 'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'
                 'HTML使用自包含CSS/脚本或本地资源；预览隔离运行，不依赖外部CDN、联网接口或嵌套网页。')
+            params['developerInstructions'] += ('复杂或长任务先使用原生update_plan提交可验收的步骤，执行中持续更新；'
+                '短问答不强制建计划。工具回执不代表步骤完成，实际核验后才能标completed；失败或中断不得自动勾选剩余步骤。')
             if self.browser_service:
                 from .browser_bridge import instructions
                 params['developerInstructions'] += instructions(state['sessionId'])

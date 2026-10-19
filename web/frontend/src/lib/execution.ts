@@ -17,7 +17,7 @@ export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   const data=value as ExecutionSnapshot;
   if(typeof data.sessionId!=='string'||typeof data.turnId!=='string'||!Array.isArray(data.operations)||data.operations.length>100)return null;
   if(data.operations.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||!statuses.has(row.status)||['command','path','output','diff'].some(key=>typeof row[key as keyof Operation]!=='string')))return null;
-  const plan=Array.isArray(data.plan)?data.plan.filter(x=>x&&typeof x.step==='string'&&['pending','inProgress','completed'].includes(x.status)).slice(0,100):[];
+  const plan=Array.isArray(data.plan)?data.plan.filter(x=>x&&typeof x.step==='string'&&['pending','inProgress','completed','blocked','failed'].includes(x.status)).slice(0,100):[];
   const progress=Array.isArray(data.progress)?data.progress.filter(x=>typeof x==='string').slice(-50):[];
   const timeline=Array.isArray(data.timeline)?data.timeline.filter(entry=>entry&&typeof entry.id==='string'&&Number.isSafeInteger(entry.order)&&entry.order>=0&&(entry.type==='progress'?typeof entry.text==='string':entry.type==='operation'&&typeof entry.operationId==='string')).slice(-500):undefined;
   return {...data,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};

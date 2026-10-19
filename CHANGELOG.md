@@ -1,3 +1,11 @@
+## 0.4.0 · 2026-10-20 · Inline actions and structured progress / 对话行为与进度胶囊
+
+- Move current-turn progress into a collapsible header capsule with step states, count, elapsed time and goal acceptance access. Inline tools and OpenClaw root/observed child actions retain exact turn ownership and recorded model/channel identities. / 采用用户龙虾SVG，与办公室共用行为及厂商图标；未知身份不按配置猜测。
+- Give long tasks native update_plan/TodoWrite guidance and a bounded local CLI receipt fallback. Persist successful full-plan receipts; failure, stop and tool completion never check off unfinished steps. / 普通对话可独立拥有checklist，短问答不强制规划。
+- Add task-source summaries and bounded failure-ID inspection/copying to Activity, including direct links from import/publication failures. / 任务可返回原对话、定时或发布入口，失败刷新保留快照。
+- Fix Playwright startup under Windows Selector policy with a worker-owned Proactor loop; keep action errors through refresh and automatic resize, with serial visible-page polling. / 不改变全局事件循环或既有CDP/网络隔离。
+- Validation: 102 focused backend checks, full frontend 1,180 tests plus final focused regressions, build/lint and real isolated browser acceptance. Browser navigation/input/screenshot evidence is real; agent, task and publication observations use fixtures. Actual 390 CSS px layout and dark/light checked. 138 deployment remains paused; no paid inference, live platform publication or new installer. [Evidence and limitations / 证据边界](docs/chat-progress-capsule-2026-10-20.md).
+
 ## 0.3.6 · 2026-10-19 · Session freshness, ClawHub downloads and failure receipts
 
 - Pin `ownerHandle` when downloading a ClawHub archive; duplicate slugs otherwise return HTTP409. / 修复同名多作者技能下载漏传作者，保留官方409分类。

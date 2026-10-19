@@ -3,6 +3,7 @@ import type { OfficeAgent, OfficeEvent } from '../../lib/agentOffice';
 import { OFFICE_STATE_LABELS } from '../../lib/agentOffice';
 import { NativeSelect as Select } from '../ui/Select';
 import OfficeModelIdentity from './OfficeModelIdentity';
+import { AgentActionIcon } from '../AgentIdentity';
 import { officeTaskFocusData } from './officeTaskFocusData';
 import { officeWorkSurface } from './officeWorkSurface';
 import './office-task-focus.css';
@@ -47,7 +48,7 @@ export default function OfficeTaskFocus({ agents, events, selectedId, mode, stal
           </div>}
           {unreported && <div className="office-task-focus-idle"><strong>暂无任务记录</strong><p>收到该成员的任务与操作后显示。</p></div>}
           {(!memberSummary || latestReturn) && <dl className="office-task-focus-records">
-            {!memberSummary && <div><dt>{stale ? '上次记录的步骤' : '当前步骤'}</dt><dd>{agent.action?.evidence === 'observed' || agent.action?.evidence === 'demo' ? agent.action.label : '具体操作尚未上报'}<small>{mode === 'demo' ? '来自模拟脚本' : '依据当前成员的可见操作记录'}</small></dd></div>}
+            {!memberSummary && <div><dt>{stale ? '上次记录的步骤' : '当前步骤'}</dt><dd><AgentActionIcon kind={agent.action?.kind||'unreported'}/>{agent.action?.evidence === 'observed' || agent.action?.evidence === 'demo' ? agent.action.label : '具体操作尚未上报'}<small>{mode === 'demo' ? '来自模拟脚本' : '依据当前成员的可见操作记录'}</small></dd></div>}
             {latestReturn && <div><dt>最近回执</dt><dd><span className={latestReturn.status === 'failed' ? 'office-task-focus-failed' : undefined}>{latestReturn.status === 'failed' ? '报告错误' : '已返回'}{mode === 'demo' ? ' · 模拟' : ''}</span><p>{latestReturn.title}</p></dd></div>}
           </dl>}
           <div className="office-task-focus-actions"><button type="button" className="office-button" onClick={() => onOpenProcess(agent.id)}>查看工作过程 ↗</button><button type="button" className="office-button" onClick={onOpenOutputs}>查看产出与位置 ↓</button></div>

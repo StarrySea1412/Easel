@@ -24,7 +24,8 @@ function readableAddress(value: string) {
 }
 
 export default function ChatLiveBrowser({sessionId, active = true, onReadMode, onSiteIcon}: {sessionId:string;active?:boolean;onReadMode?:()=>void;onSiteIcon?:(source:string)=>void}) {
-  const [state,setState] = useState<BrowserState|null>(null), [error,setError] = useState('');
+  const [state,setState] = useState<BrowserState|null>(null), [actionError,setError] = useState(''), [connectionError,setConnectionError]=useState('');
+  const error=[connectionError,actionError].filter(Boolean).join(' ');
   const [url,setUrl] = useState(''), [tabId,setTabId] = useState(''), [view,setView] = useState<View>('image');
   const [requestId,setRequestId] = useState(''), [selected,setSelected] = useState(''), [fill,setFill] = useState('');
   const [adding,setAdding] = useState(false), [imageFailed,setImageFailed] = useState(false);
@@ -62,21 +63,33 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   const refresh = useCallback(async(signal?:AbortSignal)=>{
     const seq=++revision.current;
     const result=await fetchBrowserState(sessionId,signal);
-    if(currentSession.current===sessionId&&seq===revision.current&&!signal?.aborted)setState(result);
+    if(currentSession.current===sessionId&&seq===revision.current&&!signal?.aborted){setState(result);setConnectionError('');}
     return result;
   },[sessionId]);
   useEffect(()=>{
     const controller=new AbortController();
-    generation.current++;commandPending.current=false;resizeFailed.current='';setState(null);setView('image');setError('');setUrl('');setSelected('');setRequestId('');
+    generation.current++;commandPending.current=false;resizeFailed.current='';setState(null);setView('image');setError('');setConnectionError('');setUrl('');setSelected('');setRequestId('');
     setTabId(readLocalValue(tabKey(sessionId)).value||'');
-    void refresh(controller.signal).catch(cause=>{if(!controller.signal.aborted)setError(message(cause));});
+    void refresh(controller.signal).catch(cause=>{if(!controller.signal.aborted)setConnectionError(message(cause));});
     return()=>{controller.abort();invalidate();};
   },[sessionId,refresh,invalidate]);
   useEffect(()=>{
     if(!active)return;
-    const controller=new AbortController();
-    const timer=setInterval(()=>{void refresh(controller.signal).catch(cause=>{if(!controller.signal.aborted)setError(message(cause));});},2000);
-    return()=>{clearInterval(timer);controller.abort();};
+    let disposed=false,reading=false;
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    let request:AbortController|undefined;
+    const read=async()=>{
+      if(disposed||document.hidden||reading)return;
+      reading=true;request=new AbortController();const currentRequest=request;
+      const deadline=setTimeout(()=>currentRequest.abort(),12000);
+      try{await refresh(currentRequest.signal);if(currentRequest.signal.aborted&&!disposed)setConnectionError('浏览器连接超时，请重新连接。');}
+      catch(cause){if(!disposed)setConnectionError(currentRequest.signal.aborted?'浏览器连接超时，请重新连接。':message(cause));}
+      finally{clearTimeout(deadline);reading=false;if(!disposed&&!document.hidden)timer=setTimeout(()=>void read(),2000);}
+    };
+    const visibility=()=>{clearTimeout(timer);if(!document.hidden)void read();};
+    document.addEventListener('visibilitychange',visibility);
+    timer=setTimeout(()=>void read(),2000);
+    return()=>{disposed=true;clearTimeout(timer);request?.abort();document.removeEventListener('visibilitychange',visibility);};
   },[active,refresh]);
   const openTabs=state?.tabs.filter(tab=>!tab.closed)||[];
   const current=openTabs.find(tab=>tab.id===tabId)||openTabs.at(-1);
@@ -95,7 +108,7 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
     if(busy||commandPending.current)return;
     commandPending.current=true;
     const id=crypto.randomUUID(), epoch=generation.current;
-    setRequestId(id);setError('');
+    setRequestId(id);if(action!=='resize')setError('');
     try{
       const job=await runBrowserCommand(sessionId,{requestId:id,action,...(action==='create'&&viewport?viewport:{}),...(current?{tabId:current.id,snapshotId:snapshot?.id}:{}),...extra});
       if(generation.current!==epoch)return;
@@ -191,7 +204,7 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
         </div>
       </details>
     </div>
-    {error&&<div role="alert" className="browser-error"><span>{error}</span>{current&&<button type="button" disabled={busy} onClick={()=>void run('observe')}>重新观察</button>}<button type="button" onClick={reconnect}>重新连接</button><button type="button" aria-label="收起浏览器提示" onClick={()=>setError('')}>×</button></div>}
+    {error&&<div role="alert" className="browser-error"><span>{error}</span>{current&&<button type="button" disabled={busy} onClick={()=>void run('observe')}>重新观察</button>}<button type="button" onClick={reconnect}>重新连接</button><button type="button" aria-label="收起浏览器提示" onClick={()=>{setError('');setConnectionError('');}}>×</button></div>}
     <div className="browser-stage" ref={stage} aria-busy={busy}>
       {busy&&<div className="browser-loading-line" role="status"><span className="browser-sr-only">页面操作中</span></div>}
       {snapshot&&snapshot.url!=='about:blank'?<button type="button" className="browser-screenshot" aria-label="网页截图，鼠标点击页面操作，键盘激活查看元素" disabled={!usable||imageFailed}

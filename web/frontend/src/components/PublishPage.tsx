@@ -1,3 +1,4 @@
+import { FailureMessage } from './FailureRecords';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
@@ -532,7 +533,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                       <button className="pv-copy" onClick={() => copyFor(p.key)}>{copied === p.key ? <IconCheck size={13} /> : <IconCopy size={13} />}{copied === p.key ? '已复制' : '复制'}</button>
                     </div>
                   </div>
-                  {(issue || blocked[p.key]) && <p className="publish-platform-issue" role={blocked[p.key] ? 'alert' : undefined}>{blocked[p.key] || issue}</p>}
+                  {(issue || blocked[p.key]) && <p className="publish-platform-issue" role={blocked[p.key] ? 'alert' : undefined}><FailureMessage text={blocked[p.key] || issue || ''}/></p>}
                   {receipt && <details className="publish-preview-receipt" open={platformBusy(p.key) || receipt.verification?.state === 'checking'}>
                     <summary><span>最近一次结果</span><span>{publishReceiptStatus(receipt).label}</span></summary>
                     <PublishReceiptCard receipt={receipt} onVerify={publishReceipts.open} onCheck={automatic => publishReceipts.verify(receipt.receiptId, automatic)}

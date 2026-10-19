@@ -1,3 +1,4 @@
+import FailureRecordDialog from './components/FailureRecordDialog';
 import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
 import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib/sideChat';
@@ -1424,7 +1425,7 @@ export default function App() {
       case 'analysis':
         return <ContentAnalysisPage demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
-        return <ActivityPage key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
+        return <ActivityPage onOpenChat={handleSessionSelect} onOpenSchedules={()=>setCurrentPage('automation')} onOpenPublish={()=>setCurrentPage('publish')} key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
       case 'agent-office':
         return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
@@ -1515,6 +1516,7 @@ export default function App() {
         </div>
       </main>
 
+      <FailureRecordDialog/>
       {/* 首次使用：推荐配置画像 */}
       {showRecommend && (
         <div className="overlay">

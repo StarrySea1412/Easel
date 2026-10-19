@@ -3603,6 +3603,8 @@ def _chat_message(req: ChatRequest) -> str:
     if not message:
         raise HTTPException(400, "消息不能为空")
     message = history_context(req.history) + message
+    from easel.plan_progress import instructions as planning_instructions
+    message += planning_instructions()
     if req.sessionId and _browser_service.has_pages(req.sessionId):
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
@@ -7733,9 +7735,11 @@ async def api_chat_execution(session_id: str, turn_id: str, before: int | None =
         OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR, live=live, credentials=gateway_credentials(),
         before=before, limit=limit, journal=journal.get('operations', []), outputs=OUTPUTS_DIR)
     result['timeline'] = journal.get('timeline', [])[-500:]
+    result['plan'] = journal.get('plan', [])
     if live and (_RUNNING_CHAT.get(session_id) is not process or _ACTIVE_SKILL_TURNS.get(session_id) != turn_id):
         result['operations'] = []
         result['timeline'] = []
+        result['plan'] = []
         result['warnings'] = ['执行轮次正在更新，请稍后查看。']
     return result
 

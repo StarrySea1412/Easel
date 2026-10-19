@@ -20,6 +20,12 @@ import wenxin from '../assets/providers/wenxin-color.svg';
 
 const ICONS: Record<string, string> = { deepseek, openai, claude, gemini, qwen, moonshot, zhipu, minimax, doubao, siliconcloud, grok, mistral, fishaudio, hunyuan, spark, wenxin };
 
+/** Callers must supply an observed provider, never a guessed current config. */
+export function ObservedProviderIcon({provider,size=16}:{provider?:string;size?:number}) {
+  const key=provider==='kimi'?'moonshot':provider==='glm'?'zhipu':provider||'';
+  return ICONS[key]?<img src={ICONS[key]} alt="" width={size} height={size} draggable={false} data-provider-brand={key}/>:<span aria-hidden="true">?</span>;
+}
+
 export default function ProviderIcon({ row, fallback: Fallback }: { row: Pick<ModelRow, 'name' | 'slot' | 'model' | 'baseUrl'>; fallback: ComponentType<{ size?: number }> }) {
   const brand = providerBrand(row);
   return brand && ICONS[brand] ? <img src={ICONS[brand]} alt="" width={22} height={22} draggable={false} data-provider-brand={brand} /> : <Fallback size={19} />;

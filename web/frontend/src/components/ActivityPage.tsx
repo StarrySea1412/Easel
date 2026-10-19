@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import FailureRecords from './FailureRecords';
+import TaskOverview from './TaskOverview';
+import { useEffect, useState } from 'react';
 import Select from './ui/Select';
 import type { ChatSession, StreamState } from '../lib/store';
 import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from '../lib/activitySelection';
@@ -17,6 +19,9 @@ interface ActivityPageProps {
   streams: Record<string, StreamState>;
   target?: ActivityTarget;
   onOpenOffice?: (sessionId: string) => void;
+  onOpenChat?: (sessionId:string)=>void;
+  onOpenSchedules?: ()=>void;
+  onOpenPublish?: ()=>void;
 }
 
 const FILTER_LABELS: Record<ActivityFilter, string> = {
@@ -26,12 +31,14 @@ const FILTER_LABELS: Record<ActivityFilter, string> = {
 };
 
 export default function ActivityPage(props: ActivityPageProps) {
+  const [view,setView]=useState<'sessions'|'tasks'|'failures'>('sessions');
   // A new external turn target starts a fresh view even when the parent keeps
   // this page mounted; old filters must not hide the requested session.
   const targetKey = props.target
     ? JSON.stringify([props.target.sessionId, props.target.turnId])
     : 'default';
-  return <ActivityWorkspace key={targetKey} {...props} />;
+  useEffect(()=>{if(targetKey!=='default')setView('sessions');},[targetKey]);
+  return <div className="activity-hub"><nav className="activity-hub-nav" aria-label="记录入口">{([['sessions','会话记录'],['tasks','任务'],['failures','问题记录']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={view===id} onClick={()=>setView(id)}>{label}</button>)}</nav>{view==='sessions'?<ActivityWorkspace key={targetKey} {...props}/>:view==='tasks'?<TaskOverview onChat={props.onOpenChat} onSchedules={props.onOpenSchedules} onPublish={props.onOpenPublish}/>:<FailureRecords/>}</div>;
 }
 
 function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenOffice }: ActivityPageProps) {

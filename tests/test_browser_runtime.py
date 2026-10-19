@@ -6,6 +6,7 @@ import time
 import json
 import asyncio
 import base64
+import os
 from urllib.request import urlopen
 
 import pytest
@@ -23,6 +24,20 @@ PAGE = '''<!doctype html><html><head><title>真实浏览器验收</title></head>
 <a href="/next">下一页</a><label for="password">密码</label><input id="password" type="password">
 <div style="height:1400px">长页内容</div><p>页面末尾</p></main>
 <script>console.log('fixture ready');</script></body></html>'''
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows event loop compatibility')
+def test_playwright_starts_under_uvicorn_selector_policy(tmp_path):
+    policy = asyncio.get_event_loop_policy()
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    service = BrowserService(tmp_path / 'selector')
+    try:
+        service.call('ensure_browser')
+        assert service.browser.is_connected()
+        assert isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsSelectorEventLoopPolicy)
+    finally:
+        service.close()
+        asyncio.set_event_loop_policy(policy)
 
 
 @pytest.fixture(scope='module')

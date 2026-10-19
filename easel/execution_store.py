@@ -33,6 +33,8 @@ class ExecutionStore:
         saved = read_snapshot(root, session, turn)
         self.rows = {row['id']: row for row in saved.get('operations', [])}
         self.timeline = saved.get('timeline', [])
+        self.plan = saved.get('plan', [])
+        self.plan_inputs = {}
         self.order = max((entry['order'] for entry in self.timeline), default=0)
         self.seen = set()
         self.lock = threading.RLock()
@@ -41,6 +43,7 @@ class ExecutionStore:
         with self.lock:
             return {'sessionId': self.session, 'turnId': self.turn, 'source': 'gateway',
                     'operations': [dict(row) for row in list(self.rows.values())[-100:]],
+                    'plan': [dict(step) for step in self.plan],
                     'timeline': [dict(entry) for entry in self.timeline[-500:]]}
 
     def progress(self, text):
@@ -81,6 +84,9 @@ class ExecutionStore:
                 if row['name'] == 'process' and isinstance(data.get('args'), dict):
                     row['processSessionId'] = data['args'].get('sessionId', '')
                 self.rows[row_id] = row
+                from .plan_progress import NATIVE
+                if row['name'].split('.')[-1].lower() in NATIVE:
+                    self.plan_inputs[row_id] = data.get('args')
                 self.order += 1
                 row['order'] = self.order
                 self.timeline.append({'id': row_id, 'type': 'operation',
@@ -98,6 +104,11 @@ class ExecutionStore:
                         result['content'] = data['output']
                 result = {**result, **({'isError': data['isError']} if 'isError' in data else {})}
                 returned(row, result, time.time(), self.credentials, partial=phase == 'update')
+                if phase != 'update':
+                    from .plan_progress import receipt_plan
+                    plan = receipt_plan(row['name'], self.plan_inputs.pop(row_id, None), result, self.credentials)
+                    if plan is not None and row['status'] in {'returned', 'completed'}:
+                        self.plan = plan
                 process = row.get('processSessionId')
                 if process and row['name'] == 'process':
                     for original in self.rows.values():
@@ -119,5 +130,6 @@ class ExecutionStore:
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps({'sessionId': self.session, 'turnId': self.turn,
                                   'operations': list(self.rows.values()),
+                                  'plan': self.plan,
                                   'timeline': self.timeline}, ensure_ascii=False), encoding='utf-8')
         tmp.replace(path)

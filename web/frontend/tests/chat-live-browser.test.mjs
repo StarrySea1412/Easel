@@ -55,6 +55,25 @@ test('element actions use current ref and snapshot, failures remain visible afte
   assert.equal(v.container.querySelector('[role=alert]'),null);
 });
 
+test('automatic viewport adaptation preserves actionable address errors',async t=>{
+  const previous=globalThis.ResizeObserver;let resized;
+  globalThis.ResizeObserver=class{constructor(callback){resized=callback;}observe(){}disconnect(){}};
+  t.after(()=>{globalThis.ResizeObserver=previous;});
+  const v=await setup(t,'resize-error');
+  t.mock.method(v.container.querySelector('.browser-stage'),'getBoundingClientRect',()=>({width:640,height:480}));
+  const input=v.container.querySelector('[aria-label="交互网页地址"]');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'ftp://invalid.example');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await act(async()=>input.form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.match(v.container.querySelector('[role=alert]').textContent,/HTTP或HTTPS/);
+  await act(async()=>{resized();await new Promise(resolve=>setTimeout(resolve,400));});
+  await act(async()=>v.root.render(createElement(Panel,{sessionId:'resize-error',active:true})));
+  assert.equal(JSON.parse(v.requests[1].options.body).action,'resize');
+  assert.match(v.container.querySelector('[role=alert]').textContent,/HTTP或HTTPS/);
+  await v.respond(1,{id:'resize',state:'completed',tabId:'tab1'});
+  const updated=state('resize-error');updated.snapshots.tab1.viewport={width:640,height:480};await v.respond(2,updated);
+  assert.match(v.container.querySelector('[role=alert]').textContent,/HTTP或HTTPS/);
+});
+
 test('stop cancels exact operation and exposes stale observation',async t=>{
   const v=await setup(t,'cancel-owner');await v.click('重新观察');
   const id=JSON.parse(v.requests[1].options.body).requestId;
