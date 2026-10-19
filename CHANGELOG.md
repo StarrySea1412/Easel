@@ -1,3 +1,11 @@
+## 0.3.3 · 2026-10-19 · ClawHub import and selection / ClawHub导入选择
+
+- ClawHub说明拆分YAML元信息和正文，渲染经过清理的Markdown，不自动加载外部图片。Author metadata and sanitized Markdown are displayed separately.
+- 创作框支持按明确作者和固定版本“导入并选择”；文件存放在持久数据目录，保存失败或风险拦截不计入选择；已导入项可选择/移除并保持真实显示名。Imports persist with owner/version provenance and resolve to actual source paths in both Web and CLI.
+- 导入仅保存文件，不执行脚本或安装钩子；限制归档体积/数量并拒绝越界路径和链接，不覆盖内置或其他作者技能。Import never executes hooks or shadows bundled skills.
+- 模型列表和推理检测带明确Easel User-Agent，兼容拒绝默认Python标识的上游。Model probes explicitly identify the Easel client.
+- 验证：后端定向144项、前端ClawHub8项通过；生产build/lint通过（0错误，20条warning）；真实浏览器与138发布结果见部署记录。These checks do not establish external skill execution or all application workflows.
+
 ## 0.3.2 · 2026-10-19 · Linux deployment compatibility / Linux部署兼容
 
 - Include the product version source in the Docker frontend stage; lock PPTX runtime dependencies with wheel hashes. / Docker前端补版本源，Linux锁补PPTX依赖及校验值。

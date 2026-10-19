@@ -1,3 +1,4 @@
+import { registerImportedSkillNames } from './skillDisplayNames';
 import { decodeChatCompaction } from './chatCompaction';
 import { decodeChatTiming } from './chatTiming';
 import { publishExecution, decodeExecution } from './execution';
@@ -54,6 +55,9 @@ export interface PersonaDetail {
 
 export interface SkillItem {
   name: string;
+  displayName?: string;
+  source?: 'clawhub';
+  provenance?: { owner: string; slug: string; version: string };
   description: string;
   layer: string;
   needsApi: boolean;
@@ -106,6 +110,9 @@ export interface SkillGuide {
 
 export interface SkillDetail {
   name: string;
+  source?: 'clawhub';
+  displayName?: string;
+  provenance?: { owner: string; slug: string; version: string };
   layer: string;
   description: string;
   body: string;
@@ -177,7 +184,7 @@ export interface ProfileBuildStatus {
 }
 
 export function fetchStatus(): Promise<StatusResponse> {
-  return request<StatusResponse>('/api/status');
+  return request<StatusResponse>('/api/status').then(status => { registerImportedSkillNames(status.skills); return status; });
 }
 
 export function fetchPersonas(): Promise<PersonaItem[]> {
@@ -278,7 +285,7 @@ export function deleteIdea(id: string): Promise<{ ok: boolean }> {
 }
 
 export function fetchSkills(): Promise<SkillItem[]> {
-  return request<SkillItem[]>('/api/skills');
+  return request<SkillItem[]>('/api/skills').then(skills => { registerImportedSkillNames(skills); return skills; });
 }
 
 export interface ClawHubStats {
@@ -301,6 +308,13 @@ export interface ClawHubSkill {
   canonicalUrl: string;
   stats?: ClawHubStats | null;
   installationState: 'not_checked';
+}
+
+export function importClawHubSkill(skill: ClawHubSkill, version: string): Promise<{ name: string; displayName: string; version: string; alreadyInstalled: boolean }> {
+  return request(`/api/clawhub/skills/${encodeURIComponent(skill.slug)}/import`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner: skill.ownerHandle, version }),
+  });
 }
 
 export interface ClawHubSearch {

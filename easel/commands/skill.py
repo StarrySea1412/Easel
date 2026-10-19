@@ -33,18 +33,21 @@ OPENCLAW_PROFILE = "easel"
 
 def _list_all_skills() -> list[str]:
     """列出所有可用 SKILL 名。"""
-    if not SKILLS_DIR.is_dir():
-        return []
-    return [d.name for d in sorted(SKILLS_DIR.iterdir())
-            if d.is_dir() and (d / "SKILL.md").is_file()]
+    from easel.imported_skills import installed
+    return sorted(set([d.name for d in (SKILLS_DIR.iterdir() if SKILLS_DIR.is_dir() else [])
+            if d.is_dir() and (d / "SKILL.md").is_file()] + list(installed(data_root(PROJECT_ROOT)))))
 
 
 def _find_skill(name: str) -> str | None:
     """查找 SKILL 是否存在，返回完整名或 None。"""
     candidates = [name, f"skill-{name}"] if not name.startswith("skill-") else [name]
+    from easel.imported_skills import skill_path
     for candidate in candidates:
-        if (SKILLS_DIR / candidate / "SKILL.md").is_file():
+        try:
+            skill_path(SKILLS_DIR, data_root(PROJECT_ROOT), candidate)
             return candidate
+        except (FileNotFoundError, ValueError):
+            continue
     return None
 
 
@@ -159,7 +162,9 @@ def cmd_skill(args) -> int:
     # 构造消息——发给 OpenClaw，让它按 AGENTS.md 规则处理
     content = _resolve_input(args.input)
 
-    message = f"{persona_prefix(args.profile)}请执行 /{skill_full}，内容如下：\n\n{content}"
+    from easel.imported_skills import skill_path
+    path = skill_path(SKILLS_DIR, data_root(PROJECT_ROOT), skill_full)
+    message = f"{persona_prefix(args.profile)}请读取技能 {path} 并执行 /{skill_full}，内容如下：\n\n{content}"
 
     # 统一给足超时：制作类 SKILL（生视频/多镜合成）可能跑很久，取安全上界
     timeout = TIMEOUT_PRODUCE

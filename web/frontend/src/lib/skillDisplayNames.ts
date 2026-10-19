@@ -117,6 +117,15 @@ export const SKILL_DISPLAY_NAMES: Record<string, string> = {
   'xhs-note-creator': '小红书图文总入口',
 };
 
+const importedNames = new Map<string, string>();
+export function registerImportedSkillNames(skills: { name: string; displayName?: string; source?: string }[]) {
+  if (!Array.isArray(skills)) return;
+  importedNames.clear();
+  skills.forEach(skill => {
+    if (skill.source === 'clawhub' && skill.displayName) importedNames.set(skill.name, skill.displayName.slice(0, 200));
+  });
+}
+
 export function displayName(raw: string): string {
-  return Object.hasOwn(SKILL_DISPLAY_NAMES, raw) ? SKILL_DISPLAY_NAMES[raw] : raw;
+  return Object.hasOwn(SKILL_DISPLAY_NAMES, raw) ? SKILL_DISPLAY_NAMES[raw] : importedNames.get(raw) || raw;
 }

@@ -72,7 +72,8 @@ def image_score(text, expected):
 
 
 def request_body(target, prompt, image=None):
-    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+    from easel import __version__
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Easel/' + __version__}
     if target.protocol == 'anthropic':
         headers.update({'x-api-key': target.key, 'anthropic-version': '2023-06-01'})
         content = [{'type': 'text', 'text': prompt}]

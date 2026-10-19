@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 
 // Actual picker with controlled HTTP; external catalog replies are never executed.
@@ -17,13 +17,20 @@ const json = value => new Response(JSON.stringify(value), { headers: { 'Content-
 
 async function fixture(t) {
   const calls = [], picked = [];
+  let installed = [{ name: 'card-quote', description: 'Local Quote' }];
   t.mock.method(globalThis, 'fetch', (url, options = {}) => {
-    if (String(url) === '/api/skills') return Promise.resolve(json([{ name: 'card-quote', description: 'Local Quote' }]));
+    if (String(url) === '/api/skills') return Promise.resolve(json(installed));
     return new Promise((resolve, reject) => calls.push({ url: String(url), options, resolve, reject }));
   });
   const node = document.createElement('div'); document.body.append(node);
   const root = createRoot(node);
-  await act(async () => root.render(createElement(Picker, { selectedSkills: ['card-quote'], onPick: (...args) => picked.push(args), onRemove() {} })));
+  function ControlledPicker() {
+    const [selected, setSelected] = useState(['card-quote']);
+    return createElement(Picker, { selectedSkills: selected,
+      onPick: (...args) => { picked.push(args); setSelected(old => [...new Set([...old, args[1]])]); },
+      onRemove: name => setSelected(old => old.filter(item => item !== name)) });
+  }
+  await act(async () => root.render(createElement(ControlledPicker)));
   const click = async element => { assert.ok(element); await act(async () => { element.focus(); element.click(); }); };
   const button = text => [...document.querySelectorAll('button')].find(row => row.textContent.trim() === text);
   await click(node.querySelector('button'));
@@ -31,6 +38,7 @@ async function fixture(t) {
   t.after(async () => { await act(async () => root.unmount()); node.remove(); });
   return {
     node, calls, picked, click, button,
+    setInstalled(value) { installed = value; },
     async search(term) {
       const input = document.querySelector('.brush-search');
       await act(async () => {
@@ -67,6 +75,52 @@ test('picker searches ClawHub, keeps external identity separate, retries details
   assert.equal(document.activeElement, opener);
   assert.deepEqual(v.picked, []);
   assert.match(document.querySelector('.skill-picker-footer').textContent, /已选 1 个/);
+});
+
+test('ClawHub import uses pinned owner/version, then selects the registered local skill and can remove it', async t => {
+  const v = await fixture(t); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.brush-clawhub-item .clawhub-pick'));
+  assert.match(v.calls[1].url, /card-quote\?owner=alice/);
+  assert.match(document.querySelector('.clawhub-pick').textContent, /正在导入/);
+  await v.reply(1, { skill: external, latestVersion: { version: '1.2.3' } });
+  assert.equal(v.calls[2].options.method, 'POST');
+  assert.deepEqual(JSON.parse(v.calls[2].options.body), { owner: 'alice', version: '1.2.3' });
+  assert.deepEqual(v.picked, [], 'never select before files are registered');
+  const name = 'clawhub-card-quote-registered';
+  v.setInstalled([{ name: 'card-quote' }, { name, displayName: 'External Quote', source: 'clawhub', provenance: { owner: 'alice', slug: external.slug, version: '1.2.3' } }]);
+  await v.reply(2, { name, displayName: 'External Quote', version: '1.2.3' });
+  assert.equal(v.picked[0][1], name);
+  assert.equal(document.querySelector('.clawhub-pick').getAttribute('aria-pressed'), 'true');
+  assert.match(document.querySelector('.skill-picker-footer').textContent, /已选 2 个/);
+  await v.click(document.querySelector('.clawhub-pick'));
+  assert.match(document.querySelector('.skill-picker-footer').textContent, /已选 1 个/);
+  assert.equal(v.calls.length, 3, 'existing provenance selects without downloading again');
+});
+
+test('failed import preserves the result and selection count with an explicit retryable error', async t => {
+  const v = await fixture(t); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.clawhub-pick'));
+  await v.reply(1, { skill: external, latestVersion: { version: '1.2.3' } });
+  await act(async () => v.calls[2].reject(new Error('磁盘不可写，未导入')));
+  assert.deepEqual(v.picked, []);
+  assert.match(document.querySelector('.brush-import-error').textContent, /磁盘不可写/);
+  assert.equal(document.querySelector('.clawhub-pick').disabled, false);
+  assert.match(document.querySelector('.skill-picker-footer').textContent, /已选 1 个/);
+});
+
+test('author frontmatter becomes a readable summary and sanitized Markdown body', async t => {
+  const v = await fixture(t); await v.search('quote');
+  await v.reply(0, { query: 'quote', results: [external], limit: 12 });
+  await v.click(document.querySelector('.brush-clawhub-open'));
+  await v.reply(1, { skill: { ...external, description: '---\nname: card-quote\ndescription: >-\n  一段简介\n  第二行\n---\n# 使用方式\n\n- 准备材料\n- 输出文稿\n\n<script>bad()</script><img src="https://example.com/private">' }, owner: { handle: 'alice' } });
+  const content = document.querySelector('.clawhub-readable-description');
+  assert.match(content.textContent, /一段简介 第二行/);
+  assert.doesNotMatch(content.textContent, /name:|description:|---/);
+  assert.equal(content.querySelectorAll('li').length, 2);
+  assert.equal(content.querySelector('h1').textContent, '使用方式');
+  assert.equal(content.querySelector('script,img'), null, 'external documents cannot execute or fetch media');
 });
 
 test('switching sources aborts stale searches and closing a pending search does not leave the picker stuck', async t => {

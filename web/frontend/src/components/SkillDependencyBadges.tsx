@@ -17,6 +17,7 @@ export default function SkillDependencyBadges({ skill, detail }: { skill: SkillI
     return () => { active = false; };
   }, [detail, needsChannels]);
   const dependencies = skillDependencies(skill, detail, channels);
+  if (skill.source === 'clawhub') return <div className="skill-dependencies" aria-label="外部技能依赖"><span>依赖按作者说明配置</span></div>;
   if (!dependencies.length) return null;
   return <div className={`skill-dependencies${detail ? ' is-detailed' : ''}`} aria-label="技能外部能力与配置">
     {dependencies.map(dependency => {

@@ -1,11 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CAPABILITY_MENU } from '../lib/capabilityMenu';
-import { fetchClawHubSkill, fetchSkills, searchClawHub } from '../lib/api';
+import { fetchClawHubSkill, fetchSkills, importClawHubSkill, searchClawHub } from '../lib/api';
 import type { ClawHubDetail, ClawHubSearch, ClawHubSkill, SkillItem } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillGuidePreview from './SkillGuidePreview';
 import SkillDependencyBadges from './SkillDependencyBadges';
+import ClawHubDescription from './ClawHubDescription';
 import { Sk } from './Skeleton';
 import { IconSpark, IconStar } from './icons';
 import { isSkillFavorite, toggleSkillFavorite, useSkillFavorites } from '../lib/skillFavorites';
@@ -38,6 +39,9 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
   const [clawDetail, setClawDetail] = useState<ClawHubDetail | null>(null);
   const [clawDetailPending, setClawDetailPending] = useState(false);
   const [clawDetailError, setClawDetailError] = useState('');
+  const [importing, setImporting] = useState<string | null>(null);
+  const [importError, setImportError] = useState('');
+  const selectionEpoch = useRef(0);
   const [reload, setReload] = useState(0);
   const [position, setPosition] = useState({ left: 12, top: 12, width: 860, height: 560 });
   const popupRef = useRef<HTMLDivElement>(null);
@@ -56,7 +60,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
     clawDetailRequest.current?.abort();
   }
 
-  function close() { abortClawRequests(); setClawPending(false); setClawDetailPending(false); setOpen(false); triggerRef.current?.focus(); }
+  function close() { selectionEpoch.current++; abortClawRequests(); setClawPending(false); setClawDetailPending(false); setOpen(false); triggerRef.current?.focus(); }
   useEffect(() => { if (openRequest) setOpen(true); }, [openRequest]);
 
   useEffect(() => {
@@ -69,7 +73,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
     searchRef.current?.focus();
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!popupRef.current?.contains(target) && !triggerRef.current?.contains(target)) { abortClawRequests(); setClawPending(false); setClawDetailPending(false); setOpen(false); }
+      if (!popupRef.current?.contains(target) && !triggerRef.current?.contains(target)) { selectionEpoch.current++; abortClawRequests(); setClawPending(false); setClawDetailPending(false); setOpen(false); }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -79,6 +83,7 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
     document.addEventListener('keydown', onKeyDown);
     return () => {
       stale = true;
+      selectionEpoch.current++;
       abortClawRequests();
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
@@ -110,18 +115,60 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
     id: 'installed-extra', label: '更多已安装', groups: [{ label: '本机其他技能', skills: (skills || []).filter((skill) => !knownNames.has(skill.name)) }],
   }], [installed, skills, knownNames]);
   const query = q.trim().toLowerCase();
-  const groups = (query ? tabs.flatMap((entry) => entry.groups) : tabs[tab]?.groups || []).map((group) => ({ ...group, skills: group.skills.filter((skill) => !query || `${skill.name} ${displayName(skill.name)} ${skill.description}`.toLowerCase().includes(query)) })).filter((group) => group.skills.length);
+  const groups = (query ? tabs.flatMap((entry) => entry.groups) : tabs[tab]?.groups || []).map((group) => ({ ...group, skills: group.skills.filter((skill) => !query || `${skill.name} ${skill.displayName || displayName(skill.name)} ${skill.description}`.toLowerCase().includes(query)) })).filter((group) => group.skills.length);
 
   function pick(skill: SkillItem) {
     if (selectedSkills.includes(skill.name)) onRemove(skill.name);
-    else onPick(`帮我做「${displayName(skill.name)}」`, skill.name);
+    else onPick(`帮我做「${skill.displayName || displayName(skill.name)}」`, skill.name);
     setPreview(skill.name);
   }
 
   function resetClawHub() {
+    selectionEpoch.current++;
     abortClawRequests();
     setClawQuery(''); setClawResult(null); setClawPending(false); setClawError('');
     setClawSelected(null); setClawDetail(null); setClawDetailPending(false); setClawDetailError('');
+  }
+
+  function importedSkill(skill: ClawHubSkill) {
+    return skills?.find(item => item.provenance?.owner === skill.ownerHandle && item.provenance?.slug === skill.slug);
+  }
+
+  async function selectClawHub(skill: ClawHubSkill) {
+    const local = importedSkill(skill);
+    if (local) { pick(local); return; }
+    if (importing) return;
+    const epoch = selectionEpoch.current;
+    setImporting(skill.id);
+    setImportError('');
+    setClawError('');
+    try {
+      const detail = clawDetail?.skill.id === skill.id ? clawDetail : await fetchClawHubSkill(skill);
+      const version = detail.latestVersion?.version || detail.skill.version;
+      if (!version) throw new Error('作者未提供可导入版本，请刷新详情后重试。');
+      const result = await importClawHubSkill(skill, version);
+      const updated = await fetchSkills();
+      const imported = updated.find(item => item.name === result.name);
+      if (!imported || imported.provenance?.owner !== skill.ownerHandle || imported.provenance?.slug !== skill.slug) throw new Error('导入完成，但本机技能目录尚未读取到，请重新打开后选择。');
+      setSkills(updated);
+      if (epoch === selectionEpoch.current) onPick(`帮我做「${result.displayName}」`, result.name);
+      showToast(epoch === selectionEpoch.current ? `已导入并选择 ${result.displayName}` : `已导入 ${result.displayName}，可在本机技能中选择`, 'success');
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '技能导入失败，未选中，请重试。';
+      setImportError(message);
+      showToast(message, 'error');
+    } finally { setImporting(null); }
+  }
+
+  function selectClawHubButton(skill: ClawHubSkill) {
+    const local = importedSkill(skill);
+    const selected = Boolean(local && selectedSkills.includes(local.name));
+    const pending = importing === skill.id;
+    return <button type="button" className={`btn btn-sm clawhub-pick${selected ? ' is-selected' : ''}`} aria-pressed={selected}
+      disabled={Boolean(importing)} onClick={() => void selectClawHub(skill)}>
+      {pending ? '正在导入…' : selected ? '已选择 · 移除' : local ? '选择技能' : '导入并选择'}
+      {local && <small> · 本机 {local.provenance?.version}</small>}
+    </button>;
   }
 
   async function searchClawHubSkills() {
@@ -219,9 +266,10 @@ export default function BrushEntry({ selectedSkills, onPick, onRemove, compact =
         {source === 'installed' ? (loadError ? <div className="skill-picker-empty" role="alert">{loadError}<button className="link-btn" type="button" onClick={() => setReload((value) => value + 1)}>重新加载</button></div> : !skills ? <p className="skill-picker-empty" role="status">正在确认已安装的技能…</p> : !groups.length ? <p className="skill-picker-empty">{query ? `没有匹配「${q}」的已安装技能` : '当前分类暂无已安装技能'}</p> : groups.map((group) => <div key={group.label} className="brush-grp"><div className="brush-grp-name">{group.label} · {group.skills.length}</div>{group.skills.map((skill) => {
           const selected = selectedSkills.includes(skill.name);
           const needsSetup = skill.needsApi && !skill.apiConfigured;
-          return <button key={skill.name} type="button" className={`brush-item${selected ? ' is-selected' : ''}${preview === skill.name ? ' is-previewed' : ''}`} aria-pressed={selected} onMouseEnter={() => setPreview(skill.name)} onFocus={() => setPreview(skill.name)} onClick={() => pick(skill)}><span className={`brush-dot ${needsSetup ? 's-need' : 's-ready'}`} aria-hidden="true" /><div className="brush-item-copy"><span className="brush-il">{displayName(skill.name)}</span><span className="brush-idesc">{skill.description || skill.name}</span><div className="brush-item-meta">{needsSetup && <span className="brush-needs">需要配置 API</span>}<SkillDependencyBadges skill={skill} /></div></div><span className="brush-iadd" aria-hidden="true">{selected ? '✓' : '＋'}</span></button>;
-        })}</div>)) : (clawError ? <div className="skill-picker-empty" role="alert">{clawError}<button className="link-btn" type="button" onClick={() => void searchClawHubSkills()}>重新搜索</button></div> : clawPending ? <div className="brush-clawhub-skeleton-list" role="status"><span className="sr-only">正在检索 ClawHub…</span>{[0,1,2].map(i=><div key={i} className="brush-clawhub-item is-skeleton"><Sk w="34%" h={12} style={{ marginBottom: 8 }} /><Sk w="46%" h={10} style={{ marginBottom: 10 }} /><Sk w="92%" h={10} style={{ marginBottom: 6 }} /><Sk w="70%" h={10} /></div>)}</div> : !clawResult ? <p className="skill-picker-empty">输入技能名称或用途后，点击搜索 ClawHub。</p> : !clawResult.results.length ? <p className="skill-picker-empty">没有找到匹配「{clawResult.query}」的 ClawHub 技能，试试更短的关键词。</p> : clawResult.results.map((skill) => <article key={skill.id} className="brush-clawhub-item"><div className="brush-clawhub-source">ClawHub · 外部技能</div><button type="button" className="brush-clawhub-open" aria-label={`查看 ${skill.displayName} 详情`} onClick={() => void openClawHubDetail(skill)}><strong>{skill.displayName}</strong><span>{skill.ownerHandle ? `${skill.ownerHandle}/${skill.slug}` : skill.slug}</span><p>{skill.summary || '暂无摘要，查看详情了解用途。'}</p><small>{formatClawHubStatLine(skill.stats, ['downloads', 'comments']) ? formatClawHubStatLine(skill.stats, ['downloads', 'comments']) + ' · ' : ''}版本 {skill.version || '未提供'} · 更新 {clawHubDate(skill.updatedAt)}</small></button><div className="brush-clawhub-actions">{favoriteToggle(skill)}{clawHubUrl(skill.canonicalUrl) && <a href={clawHubUrl(skill.canonicalUrl)} target="_blank" rel="noopener noreferrer">官方页面 ↗</a>}<span>仅查看，不会安装</span></div></article>))}
-      </div>{source === 'installed' ? <SkillGuidePreview skillName={preview && installed.has(preview) ? preview : null} onPick={(text, skill) => { if (installed.has(skill)) { onPick(text, skill, true); close(); } }} /> : <section className="brush-guide brush-clawhub-detail" aria-label="ClawHub 技能详情" aria-busy={clawDetailPending} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeClawHubDetail(); } }}>{clawSelected ? <><header><div className="brush-clawhub-detail-head"><h3 ref={clawDetailHeading} tabIndex={-1}>{clawSelected.displayName}</h3>{favoriteToggle(clawSelected)}<button type="button" className="brush-close" onClick={closeClawHubDetail} aria-label="关闭 ClawHub 详情">×</button></div><code>{clawSelected.ownerHandle ? `${clawSelected.ownerHandle}/${clawSelected.slug}` : clawSelected.slug}</code></header>{clawDetailPending && <div className="clawhub-detail-skeleton" role="status"><span className="sr-only">正在读取作者说明…</span><Sk w="46%" h={15} style={{ marginBottom: 10 }} /><Sk w="30%" h={11} style={{ marginBottom: 16 }} /><div className="clawhub-skeleton-row"><Sk w={84} h={12} /><Sk w={84} h={12} /><Sk w={84} h={12} /></div><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="88%" h={11} style={{ marginBottom: 8 }} /><Sk w="62%" h={11} /></div>}{clawDetailError && <div className="brush-guide-error" role="alert">{clawDetailError}<button type="button" className="link-btn" onClick={() => void openClawHubDetail(clawSelected, true)}>重试详情</button></div>}{clawDetail && <><dl className="brush-clawhub-meta"><div><dt>作者</dt><dd>{clawDetail.owner.displayName || clawDetail.owner.handle || '未提供'}</dd></div><div><dt>版本</dt><dd>{clawDetail.latestVersion?.version || clawSelected.version || '未提供'}</dd></div><div><dt>更新</dt><dd>{clawHubDate(clawDetail.latestVersion?.createdAt || clawSelected.updatedAt)}</dd></div></dl>{clawDetailStatLine && <p className="brush-clawhub-stats">{clawDetailStatLine}</p>}<h4>作者说明</h4><p>{clawDetail.skill.description || clawDetail.skill.summary || '作者未提供说明。'}</p>{clawDetail.latestVersion?.changelog && <details><summary>版本更新说明</summary><p>{clawDetail.latestVersion.changelog}</p></details>}{clawDetail.skill.topics?.length > 0 && <p className="brush-guide-muted">标签：{clawDetail.skill.topics.join(' · ')}</p>} {(clawDetail.moderation?.isMalwareBlocked || clawDetail.moderation?.isSuspicious) && <div className="brush-guide-error">ClawHub 标记：{clawDetail.moderation.isMalwareBlocked ? '已阻止的技能。' : '该技能存在可疑内容。'} {clawDetail.moderation.summary}</div>}<p className="brush-guide-muted">外部技能尚未在 Easel 中验证，同名本地技能不代表同一作者或版本。</p>{clawHubUrl(clawDetail.skill.canonicalUrl) && <a className="btn btn-sm" href={clawHubUrl(clawDetail.skill.canonicalUrl)} target="_blank" rel="noopener noreferrer">在 ClawHub 查看 ↗</a>}</>}</> : <p className="brush-guide-empty"><strong>选择一个 ClawHub 技能</strong><span>这里只读取公开信息，不会安装或运行外部技能。</span></p>}</section>} </div>
+          return <button key={skill.name} type="button" className={`brush-item${selected ? ' is-selected' : ''}${preview === skill.name ? ' is-previewed' : ''}`} aria-pressed={selected} onMouseEnter={() => setPreview(skill.name)} onFocus={() => setPreview(skill.name)} onClick={() => pick(skill)}><span className={`brush-dot ${needsSetup ? 's-need' : 's-ready'}`} aria-hidden="true" /><div className="brush-item-copy"><span className="brush-il">{skill.displayName || displayName(skill.name)}</span><span className="brush-idesc">{skill.description || skill.name}</span><div className="brush-item-meta">{needsSetup && <span className="brush-needs">需要配置 API</span>}<SkillDependencyBadges skill={skill} /></div></div><span className="brush-iadd" aria-hidden="true">{selected ? '✓' : '＋'}</span></button>;
+        })}</div>)) : (clawError ? <div className="skill-picker-empty" role="alert">{clawError}<button className="link-btn" type="button" onClick={() => void searchClawHubSkills()}>重新搜索</button></div> : clawPending ? <div className="brush-clawhub-skeleton-list" role="status"><span className="sr-only">正在检索 ClawHub…</span>{[0,1,2].map(i=><div key={i} className="brush-clawhub-item is-skeleton"><Sk w="34%" h={12} style={{ marginBottom: 8 }} /><Sk w="46%" h={10} style={{ marginBottom: 10 }} /><Sk w="92%" h={10} style={{ marginBottom: 6 }} /><Sk w="70%" h={10} /></div>)}</div> : !clawResult ? <p className="skill-picker-empty">输入技能名称或用途后，点击搜索 ClawHub。</p> : !clawResult.results.length ? <p className="skill-picker-empty">没有找到匹配「{clawResult.query}」的 ClawHub 技能，试试更短的关键词。</p> : clawResult.results.map((skill) => <article key={skill.id} className="brush-clawhub-item"><div className="brush-clawhub-source">ClawHub · 外部技能</div><button type="button" className="brush-clawhub-open" aria-label={`查看 ${skill.displayName} 详情`} onClick={() => void openClawHubDetail(skill)}><strong>{skill.displayName}</strong><span>{skill.ownerHandle ? `${skill.ownerHandle}/${skill.slug}` : skill.slug}</span><p>{skill.summary || '暂无摘要，查看详情了解用途。'}</p><small>{formatClawHubStatLine(skill.stats, ['downloads', 'comments']) ? formatClawHubStatLine(skill.stats, ['downloads', 'comments']) + ' · ' : ''}版本 {skill.version || '未提供'} · 更新 {clawHubDate(skill.updatedAt)}</small></button><div className="brush-clawhub-actions">{favoriteToggle(skill)}{clawHubUrl(skill.canonicalUrl) && <a href={clawHubUrl(skill.canonicalUrl)} target="_blank" rel="noopener noreferrer">官方页面 ↗</a>}{selectClawHubButton(skill)}</div></article>))}
+      </div>{source === 'installed' ? <SkillGuidePreview skillName={preview && installed.has(preview) ? preview : null} onPick={(text, skill) => { if (installed.has(skill)) { onPick(text, skill, true); close(); } }} /> : <section className="brush-guide brush-clawhub-detail" aria-label="ClawHub 技能详情" aria-busy={clawDetailPending} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeClawHubDetail(); } }}>{clawSelected ? <><header><div className="brush-clawhub-detail-head"><h3 ref={clawDetailHeading} tabIndex={-1}>{clawSelected.displayName}</h3>{favoriteToggle(clawSelected)}<button type="button" className="brush-close" onClick={closeClawHubDetail} aria-label="关闭 ClawHub 详情">×</button></div><code>{clawSelected.ownerHandle ? `${clawSelected.ownerHandle}/${clawSelected.slug}` : clawSelected.slug}</code></header>{selectClawHubButton(clawSelected)}{clawDetailPending && <div className="clawhub-detail-skeleton" role="status"><span className="sr-only">正在读取作者说明…</span><Sk w="46%" h={15} style={{ marginBottom: 10 }} /><Sk w="30%" h={11} style={{ marginBottom: 16 }} /><div className="clawhub-skeleton-row"><Sk w={84} h={12} /><Sk w={84} h={12} /><Sk w={84} h={12} /></div><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="100%" h={11} style={{ marginBottom: 8 }} /><Sk w="88%" h={11} style={{ marginBottom: 8 }} /><Sk w="62%" h={11} /></div>}{clawDetailError && <div className="brush-guide-error" role="alert">{clawDetailError}<button type="button" className="link-btn" onClick={() => void openClawHubDetail(clawSelected, true)}>重试详情</button></div>}{clawDetail && <><dl className="brush-clawhub-meta"><div><dt>作者</dt><dd>{clawDetail.owner.displayName || clawDetail.owner.handle || '未提供'}</dd></div><div><dt>版本</dt><dd>{clawDetail.latestVersion?.version || clawSelected.version || '未提供'}</dd></div><div><dt>更新</dt><dd>{clawHubDate(clawDetail.latestVersion?.createdAt || clawSelected.updatedAt)}</dd></div></dl>{clawDetailStatLine && <p className="brush-clawhub-stats">{clawDetailStatLine}</p>}<h4>作者说明</h4><ClawHubDescription text={clawDetail.skill.description} fallback={clawDetail.skill.summary} />{clawDetail.latestVersion?.changelog && <details><summary>版本更新说明</summary><p>{clawDetail.latestVersion.changelog}</p></details>}{clawDetail.skill.topics?.length > 0 && <p className="brush-guide-muted">标签：{clawDetail.skill.topics.join(' · ')}</p>} {(clawDetail.moderation?.isMalwareBlocked || clawDetail.moderation?.isSuspicious) && <div className="brush-guide-error">ClawHub 标记：{clawDetail.moderation.isMalwareBlocked ? '已阻止的技能。' : '该技能存在可疑内容。'} {clawDetail.moderation.summary}</div>}<p className="brush-guide-muted">外部技能尚未在 Easel 中验证，同名本地技能不代表同一作者或版本。</p>{clawHubUrl(clawDetail.skill.canonicalUrl) && <a className="btn btn-sm" href={clawHubUrl(clawDetail.skill.canonicalUrl)} target="_blank" rel="noopener noreferrer">在 ClawHub 查看 ↗</a>}</>}</> : <p className="brush-guide-empty"><strong>选择一个 ClawHub 技能</strong><span>可查看说明或直接导入并选择；导入不会执行技能。</span></p>}</section>} </div>
+      {source === 'clawhub' && importError && <p className="brush-import-error" role="alert">{importError}</p>}
       <footer className="skill-picker-footer"><span>已选 {selectedSkills.length} 个 · {selectedSkills.length ? '点击已选项可移除' : '点击技能添加，预览不算选中'}</span><button type="button" className="btn btn-primary btn-sm" disabled={!selectedSkills.length} onClick={() => { if (selectedSkills.length) close(); }}>完成选择</button></footer>
     </div>, document.body)}
   </div>;

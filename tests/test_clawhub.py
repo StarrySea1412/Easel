@@ -114,9 +114,10 @@ def test_detail_checks_author_and_slug_and_never_uses_external_canonical_url():
     asyncio.run(run())
 
 
-def test_main_app_mounts_read_only_catalog_routes():
+def test_main_app_mounts_catalog_and_explicit_import_routes():
     routes = {path: set(operations) for path, operations in web.app.openapi()['paths'].items() if path.startswith('/api/clawhub')}
-    assert routes == {'/api/clawhub/search': {'get'}, '/api/clawhub/skills/{slug}': {'get'}}
+    assert routes == {'/api/clawhub/search': {'get'}, '/api/clawhub/skills/{slug}': {'get'},
+                      '/api/clawhub/skills/{slug}/import': {'post'}}
 
 
 def test_public_counters_flow_through_search_and_detail_without_inventing_issues():

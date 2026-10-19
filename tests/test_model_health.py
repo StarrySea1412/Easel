@@ -141,6 +141,7 @@ def test_protocol_image_payload_and_response_redaction(protocol):
     target = health.Target("provider/model", "provider", "model", protocol, "https://fixture.invalid/v1", "synthetic-secret")
     image, _, prompt = health.challenge(random.Random(1))
     request = health.request_body(target, prompt, image)
+    assert request.get_header('User-agent').startswith('Easel/')
     payload = json.loads(request.data)
     content = payload["messages"][0]["content"]
     if protocol == "anthropic":

@@ -93,6 +93,7 @@ def test_discover_success_openai(monkeypatch):
     def fake(req, timeout):
         seen["url"] = req.full_url
         seen["auth"] = req.get_header("Authorization")
+        assert req.get_header('User-agent').startswith('Easel/')
         body = {"data": [{"id": "deepseek-chat"}, {"id": "deepseek-reasoner"}, {"id": "deepseek-chat"}]}
         return _FakeResp(json.dumps(body).encode())
 

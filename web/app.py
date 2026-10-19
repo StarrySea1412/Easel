@@ -47,7 +47,7 @@ from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import state_dir as openclaw_state_dir
 from easel.paths import child_env, data_root
-from easel.version import runtime_version
+from easel.version import runtime_version, application_version
 from easel.collection_errors import collection_failure
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
@@ -102,6 +102,11 @@ DATA_DIR = data_root(PROJECT_ROOT)
 PROFILES_DIR = DATA_DIR / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
 OUTPUTS_DIR = DATA_DIR / "outputs"
+
+
+def _skill_md_path(name: str) -> Path:
+    from easel.imported_skills import skill_path
+    return skill_path(SKILLS_DIR / 'openclaw', DATA_DIR, name)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 REACT_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -729,15 +734,18 @@ def find_skill(name: str) -> str | None:
         return None
     cands = [name, f'skill-{name}'] if not name.startswith('skill-') else [name]
     for cand in cands:
-        if (SKILLS_DIR / 'openclaw' / cand / 'SKILL.md').is_file():
+        try:
+            _skill_md_path(cand)
             return cand
+        except (FileNotFoundError, ValueError):
+            continue
     return None
 
 
 def _parse_skill_md(path: Path) -> tuple[str, str, str]:
     """解析 SKILL.md → (description, layer, body)。body 为去掉 frontmatter 的正文。
     正确处理 YAML 块标量 description（`>-` / `>` / `|` 后跟缩进多行）。"""
-    text = path.read_text(encoding='utf-8')
+    text = path.read_text(encoding='utf-8-sig')
     desc, layer, body = '', '', text
     lines = text.splitlines()
     if not (lines and lines[0].strip() == '---'):
@@ -1076,6 +1084,14 @@ def get_skills() -> list[dict]:
                     if isinstance(extra.get('categoryId'), str) and extra['categoryId']:
                         entry['categoryId'] = extra['categoryId']
                 result.append(entry)
+    from easel.imported_skills import installed
+    for name, source in installed(DATA_DIR).items():
+        if any(item['name'] == name for item in result):
+            continue
+        desc, _, _ = _parse_skill_md(_skill_md_path(name))
+        result.append({'name': name, 'displayName': source.get('displayName', source['slug']),
+            'description': desc, 'layer': 'clawhub', 'needsApi': False, 'apiConfigured': True,
+            'source': 'clawhub', 'provenance': {key: source[key] for key in ('owner', 'slug', 'version')}})
     return result
 
 
@@ -1627,12 +1643,16 @@ async def api_skill_detail(name: str):
     full = find_skill(name)
     if full is None:
         raise HTTPException(404, f"SKILL '{name}' 不存在")
-    md_path = SKILLS_DIR / "openclaw" / full / "SKILL.md"
+    md_path = _skill_md_path(full)
     desc, layer, body = _parse_skill_md(md_path)
     needs_api = full in SKILL_API_REQUIREMENTS
     env = _read_env()
+    from easel.imported_skills import installed
+    source = installed(DATA_DIR).get(full)
     return {
         "name": full,
+        **({'source': 'clawhub', 'displayName': source.get('displayName', source['slug']),
+            'provenance': {key: source[key] for key in ('owner', 'slug', 'version')}} if source else {}),
         "layer": layer,
         "description": desc,
         "body": body,
@@ -2645,6 +2665,7 @@ async def api_models_selftest(req: SelftestRequest):
             _model_health_service().reserve_legacy()
             headers = ({'x-api-key': key, 'anthropic-version': '2023-06-01'}
                        if protocol == 'anthropic' else {'Authorization': f'Bearer {key}'})
+            headers['User-Agent'] = 'Easel/' + application_version()
             suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
             rq = urllib.request.Request(base + suffix, headers=headers)
             with _opener.open(rq, timeout=15) as resp:
@@ -3023,7 +3044,7 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
                 "message": "目标指向本机/内网地址，已拒绝（避免服务端被当作内网跳板）"}
     suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
     url = base + suffix
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": "Easel/" + application_version()}
     if key:
         if protocol == "anthropic":
             headers["x-api-key"] = key
@@ -3474,7 +3495,7 @@ def _selected_skill_specs(req: ChatRequest) -> dict[str, dict]:
         full = find_skill(name)
         if full is None:
             raise HTTPException(400, f'技能不存在或名称无效：{name[:120]}')
-        path = SKILLS_DIR / 'openclaw' / full / 'SKILL.md'
+        path = _skill_md_path(full)
         description, _layer, body = _parse_skill_md(path)
         guide = _skill_guide(full, description, body, path, {})
         scripts = sorted(set(re.findall(r'scripts/[A-Za-z0-9_./-]+\.(?:py|js|ts|sh|ps1)', body)))
@@ -3598,7 +3619,7 @@ def _chat_message(req: ChatRequest) -> str:
     if specs:
         message += '\n\n〔本轮指定技能〕\n' + '\n'.join(specs)
         message += '\n技能实际路径（以下为本轮已安装源码位置）：\n' + '\n'.join(
-            f'- {name}: {SKILLS_DIR / "openclaw" / name / "SKILL.md"}' for name in specs)
+            f'- {name}: {_skill_md_path(name)}' for name in specs)
         message += (f'\n本项目根目录：{PROJECT_ROOT}；共享参考目录：{SKILLS_DIR / "shared/references"}。'
             'references/相对所读SKILL.md所在目录解析，../相对同一目录解析；skills/shared/相对项目根解析。'
             '不要省略skills/openclaw中间层，不把共享参考文件拼到技能references目录。'
@@ -7335,6 +7356,8 @@ app.include_router(_comfyui_router(_COMFYUI_VIDEO_SERVICE))
 
 from clawhub import create_router as _clawhub_router
 app.include_router(_clawhub_router())
+from clawhub_import import create_router as _clawhub_import_router
+app.include_router(_clawhub_import_router(DATA_DIR, SKILLS_DIR / 'openclaw'))
 
 from conversation_share import ConversationShareStore as _ConversationShareStore, create_router as _conversation_share_router
 app.include_router(_conversation_share_router(_ConversationShareStore(DATA_DIR / 'conversation-shares')))

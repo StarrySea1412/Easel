@@ -1,3 +1,4 @@
+import ClawHubDescription from './ClawHubDescription';
 import { useEffect, useRef, useState } from 'react';
 import { fetchClawHubSkill, searchClawHub } from '../lib/api';
 import type { ClawHubDetail, ClawHubSearch, ClawHubSkill } from '../lib/api';
@@ -163,7 +164,7 @@ export default function ClawHubPanel() {
           {detail.moderation.isMalwareBlocked ? 'ClawHub 标记：已阻止的技能。' : 'ClawHub 标记：该技能存在可疑内容。'} {detail.moderation.summary}
         </div>}
         <h3>作者说明</h3>
-        <div className="clawhub-description">{detail.skill.description || detail.skill.summary || '作者未提供说明。'}</div>
+        <ClawHubDescription text={detail.skill.description} fallback={detail.skill.summary} />
         {detail.skill.descriptionTruncated && <p className="clawhub-note">说明较长，完整内容请查看官方页面。</p>}
         {detail.latestVersion?.changelog && <details><summary>版本更新说明</summary><div className="clawhub-description">{detail.latestVersion.changelog}</div></details>}
         {detail.skill.topics?.length > 0 && <p className="clawhub-note">标签：{detail.skill.topics.join(' · ')}</p>}

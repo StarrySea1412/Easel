@@ -142,3 +142,16 @@
 .brush-clawhub-item.is-skeleton { pointer-events: none; }
 
 .brush-clawhub-stats { margin: 6px 0 0; color: var(--text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.clawhub-pick { margin-left: auto; flex-shrink: 0; }
+.clawhub-pick.is-selected { background: var(--text); color: var(--surface); }
+.brush-clawhub-detail > .clawhub-pick { margin: 10px 0; }
+.brush-import-error { margin: 0; padding: 9px 16px; color: var(--red); font-size: 12px; }
+.clawhub-readable-description { min-width: 0; font-family: inherit; font-size: 12px; line-height: 1.75; overflow-wrap: anywhere; }
+.clawhub-description-summary { margin: 0 0 14px; color: var(--text-secondary); }
+.clawhub-readable-description .skill-body-md { font: inherit; }
+.clawhub-readable-description :is(h1,h2,h3,h4) { font-family: inherit; font-size: 14px; line-height: 1.5; margin: 18px 0 8px; }
+.clawhub-readable-description :is(ul,ol) { padding-left: 20px; }
+.clawhub-readable-description pre { max-width: 100%; overflow: auto; }
+.clawhub-readable-description table { display: block; max-width: 100%; overflow: auto; }
+.brush-clawhub-open p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
