@@ -1,3 +1,10 @@
+## 0.3.4 · 2026-10-19 · Platform login admission / 平台登录资源冲突
+
+- 自动账号核验串行并在扫码期间停止后续检查，收到429不再连打全部平台；本标签页的手动核验与登录启动共用队列。Account checks and login startup share a serial queue.
+- 浏览器名额在新登录进程启动前申请，已有二维码复用、凭据表单不额外占位；手动重连确认旧进程退出后立即释放，异常启动归还名额，HTTP断开不提前释放活任务。Reconnects reuse the active runner; restart retains the single-task limit.
+- 登录成功等待profile写入进程退出，再显示成功/触发身份核验，避免保存与读取争用。Wait for profile persistence before reporting login completion.
+- 验证：后端140项、前端46项及build/lint通过；138正式激活与用户扫码验收分别记录于[平台测试矩阵](docs/platform-login-testing-2026-10-19.md)。未公开发布内容，安装器未更新。
+
 ## 0.3.3 · 2026-10-19 · ClawHub import and selection / ClawHub导入选择
 
 - ClawHub说明拆分YAML元信息和正文，渲染经过清理的Markdown，不自动加载外部图片。Author metadata and sanitized Markdown are displayed separately.

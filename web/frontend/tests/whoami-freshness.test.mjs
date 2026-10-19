@@ -5,6 +5,7 @@ import { loadTsModule } from './load-ts.mjs';
 globalThis.window = new Window({url:'https://easel.test/'});
 globalThis.localStorage = window.localStorage;
 const { isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
+const { accountWhoami, startLogin } = await loadTsModule('../src/lib/api.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('rewriting a cache entry cannot extend the original online verification time', () => {
   localStorage.clear();
@@ -28,4 +29,41 @@ test('a late automatic result cannot overwrite another tab changing the account 
   localStorage.setItem('easel_whoami',JSON.stringify({zhihu:current}));
   finish({ok:true,json:async()=>({loggedIn:false,name:'stale',avatar:'',verified:true})});
   await tick(); await tick(); assert.equal(getWhoamiCache().zhihu.name,'new identity');
+});
+
+test('separate account callers and login startup share one serial admission queue', async t => {
+  const calls = []; const pending = [];
+  t.mock.method(globalThis, 'fetch', url => { calls.push(url); return new Promise(resolve => pending.push(resolve)); });
+  const first = accountWhoami('zhihu');
+  const second = accountWhoami('kuaishou', true);
+  const login = startLogin('douyin');
+  assert.deepEqual(calls, ['/api/accounts/zhihu/whoami']);
+  pending.shift()({ok: true, json: async () => ({loggedIn: false})});
+  await first; await tick();
+  assert.deepEqual(calls, ['/api/accounts/zhihu/whoami', '/api/accounts/kuaishou/whoami?force=true']);
+  pending.shift()({ok: false, status: 429, json: async () => ({detail: {message: 'busy'}})});
+  await assert.rejects(second, /busy/); await tick();
+  assert.equal(calls.at(-1), '/api/login/douyin');
+  pending.shift()({ok: true, json: async () => ({mode: 'qr', state: 'qr_ready'})});
+  assert.equal((await login).state, 'qr_ready');
+});
+
+test('busy admission stops the automatic batch and preserves identity as unverified', async t => {
+  localStorage.clear(); setWhoamiCache('zhihu', {loggedIn:true, name:'retained', avatar:'', checkedAt:0});
+  const calls = [];
+  t.mock.method(globalThis,'fetch',async url => { calls.push(url); return {ok:false,status:429,json:async()=>({detail:{message:'browser busy'}})}; });
+  verifyStale(['zhihu','douyin','kuaishou']); await tick(); await tick();
+  assert.deepEqual(calls, ['/api/accounts/zhihu/whoami']);
+  assert.equal(getWhoamiCache().zhihu.name,'retained');
+  assert.equal(getWhoamiCache().zhihu.verified,false);
+});
+
+test('opening a login modal stops remaining background checks after the active request', async t => {
+  localStorage.clear(); let finish; let alive = true; const calls = [];
+  t.mock.method(globalThis,'fetch',url => { calls.push(url); return new Promise(resolve=>{finish=resolve;}); });
+  verifyStale(['zhihu','douyin'], {alive:()=>alive});
+  alive = false;
+  finish({ok:true,json:async()=>({loggedIn:false,verified:true})});
+  await tick(); await tick();
+  assert.deepEqual(calls,['/api/accounts/zhihu/whoami']);
 });

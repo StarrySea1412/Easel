@@ -295,3 +295,46 @@ def test_reconnect_is_rejected_before_stopping_login_during_active_publish(monke
     assert login_api.client.post('/api/login/xiaohongshu', params={'restart': 'true'}).status_code == 409
     stop.assert_not_called()
     assert login_api.env['LOGIN_PROCESSES']['xiaohongshu'] is old
+
+
+@pytest.mark.parametrize('platform,endpoint', [('douyin', '/api/login/douyin'), ('wechat-oa-mp', '/api/accounts/wechat-oa/mp-login')])
+def test_server_single_slot_allows_reuse_and_restart_but_rejects_other_runner(login_api, monkeypatch, platform, endpoint):
+    from easel.runtime_limits import install_limits
+    env = login_api.env
+    workspace = SimpleNamespace(app=env['app'], _BG_TASKS=set(), LOGIN_PROCESSES=env['LOGIN_PROCESSES'], check_gateway=lambda: True)
+    install_limits(workspace)
+    pool = env['app'].state.server_pools['browser']
+    first = login_api.client.post(endpoint)
+    assert first.status_code == 200, first.text
+    assert pool.active == 1
+    proc = env['LOGIN_PROCESSES'][platform]
+    repeated = login_api.client.post(endpoint)
+    assert repeated.status_code == 200 and repeated.json()['state'] == 'qr_ready'
+    assert login_api.popen.call_count == 1 and pool.active == 1
+    rejected = login_api.client.post('/api/login/zhihu')
+    assert rejected.status_code == 429 and 'zhihu' not in env['LOGIN_PROCESSES']
+    assert not (env['LOGIN_DIR'] / 'zhihu.json').exists()
+    # A credential form does not consume another browser slot.
+    assert login_api.client.post('/api/login/wechat-oa').status_code == 200
+    def stop(child):
+        child.returncode = 0
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', stop)
+    restarted = login_api.client.post(endpoint + '?restart=true')
+    assert restarted.status_code == 200, restarted.text
+    assert login_api.popen.call_count == 2 and pool.active == 1
+    assert env['LOGIN_PROCESSES'][platform] is not proc
+    from easel.runtime_limits import release_login_admission
+    child = env['LOGIN_PROCESSES'][platform]
+    child.returncode = 0
+    release_login_admission(child)
+    assert pool.active == 0
+
+
+def test_failed_login_spawn_releases_server_slot(login_api):
+    from easel.runtime_limits import install_limits
+    env = login_api.env
+    install_limits(SimpleNamespace(app=env['app'], _BG_TASKS=set(), LOGIN_PROCESSES=env['LOGIN_PROCESSES'], check_gateway=lambda: True))
+    login_api.popen.side_effect = OSError('synthetic spawn failure')
+    with pytest.raises(OSError, match='synthetic spawn failure'):
+        login_api.client.post('/api/login/douyin')
+    assert env['app'].state.server_pools['browser'].active == 0

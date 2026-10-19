@@ -69,6 +69,18 @@ def test_live_runner_still_delivers_current_qr(status_reader, platform):
     assert result['qrTs'] > 0
 
 
+@pytest.mark.parametrize('platform', ['douyin', 'wechat-oa-mp'])
+def test_success_waits_for_profile_writer_to_exit(status_reader, platform):
+    env = status_reader
+    (env['LOGIN_DIR'] / f'{platform}.json').write_text(json.dumps({'state': 'success'}), encoding='utf-8')
+    (env['LOGIN_DIR'] / f'{platform}.png').write_bytes(b'stale QR')
+    env['LOGIN_PROCESSES'][platform] = SimpleNamespace(poll=lambda: None)
+    result = read(env, platform)
+    assert result['state'] == 'verifying' and result['qr'] == ''
+    env['LOGIN_PROCESSES'][platform] = SimpleNamespace(poll=lambda: 0)
+    assert read(env, platform)['state'] == 'success'
+
+
 @pytest.mark.parametrize('state', ['starting', 'verifying'])
 def test_empty_image_marker_never_resurrects_previous_code(status_reader, state):
     env = status_reader

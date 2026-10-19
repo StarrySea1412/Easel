@@ -210,7 +210,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
           .filter((a) => a.supported && (a.loggedIn || a.hasLocalSession || cached[a.platform]))
           .map((a) => a.platform);
         verifyStale(targets, {
-          alive: () => aliveRef.current,
+          alive: () => aliveRef.current && !qrPlatformRef.current,
           onChecking: platform => setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在在线检查登录状态…' } })),
           onUpdate: (platform, r) => {
             setWhoami((w) => ({ ...w, [platform]: r }));

@@ -5504,6 +5504,15 @@ def _login_status(platform: str) -> dict:
     # A runner can exit at any point (including QR/SMS verification). A stale
     # nonterminal marker must not keep the UI polling a dead child indefinitely.
     proc = LOGIN_PROCESSES.get(platform)
+    if data['state'] == 'success' and proc is not None:
+        if proc.poll() is None:
+            # Runners write success before closing/flushing the profile. Do
+            # not race the next identity check against that still-live writer.
+            data = {'state': 'verifying', 'message': '扫码已确认，正在保存登录状态…'}
+            marker = {}
+        else:
+            from easel.runtime_limits import release_login_admission
+            release_login_admission(proc)
     if data['state'] not in ('success', 'expired', 'error') and proc is not None:
         code = proc.poll()
         if code is not None:
@@ -5676,6 +5685,8 @@ async def _restart_owned_login(platform: str, key: str) -> None:
         try:
             terminate_phase_tree(existing)
             existing.wait(timeout=5)
+            from easel.runtime_limits import release_login_admission
+            release_login_admission(existing)
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             raise HTTPException(500, '旧登录流程未能停止，请关闭该平台登录窗口后重试') from exc
         if existing.poll() is None:
@@ -5718,52 +5729,55 @@ async def api_login_start(platform: str, visibleBrowser: bool = False, restart: 
             return {'mode': 'qr', **_login_status(platform)}
         if _account_browser_busy(platform):
             raise HTTPException(409, '该平台正在核验账号，请等待结束后再登录')
-        _invalidate_account_check(platform)
-        login_generation = _account_check_generation(platform)
-        if platform == 'xiaohongshu':
-            invalidate_account_context(platform)
+        from easel.runtime_limits import LoginAdmission
+        with LoginAdmission(app) as admission:
+            _invalidate_account_check(platform)
             login_generation = _account_check_generation(platform)
-        LOGIN_DIR.mkdir(parents=True, exist_ok=True)
-        qr = LOGIN_DIR / f'{platform}.png'
-        status = LOGIN_DIR / f'{platform}.json'
-        for f in (qr, status):
-            try:
-                f.unlink()
-            except OSError:
-                pass
-        if backend == 'xhs':
-            cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'login', '--no-proxy',
-                   '--qr-out', str(qr), '--status-file', str(status), '--timeout', str(LOGIN_TIMEOUT)]
-            if visibleBrowser:
-                cmd.append('--headed')
-        elif backend == 'biliup':
-            # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
-            cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
-                   '--qr-out', str(qr), '--status-file', str(status),
-                   '--cookie', str(DATA_DIR / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
-        elif backend == 'douyin':
-            code_file = LOGIN_DIR / f'{platform}.code'
-            try:
-                code_file.unlink()
-            except OSError:
-                pass
-            cmd = [sys.executable, str(SHARED_SCRIPTS / 'douyin_publish.py'), 'login',
-                   '--qr-out', str(qr), '--status-file', str(status),
-                   '--sms-code-file', str(code_file), '--timeout', str(LOGIN_TIMEOUT)]
-        else:
-            cmd = [sys.executable, str(SHARED_SCRIPTS / 'web_publisher.py'), 'login-qr',
-                   '--platform', cfg['wp'], '--qr-out', str(qr), '--status-file', str(status),
-                   '--timeout', str(LOGIN_TIMEOUT)]
-        # 新登录开始 → 清掉旧的 whoami 缓存（登录前可能缓存了「未登录」），避免登录成功后仍读到旧结果
-        with _WHOAMI_LOCK:
-            _WHOAMI_CACHE.pop(platform, None)
-        log_path = LOGIN_DIR / f'{platform}.log'
-        with log_path.open('a', encoding='utf-8') as log_file:
-            proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                                    stdout=log_file, stderr=subprocess.STDOUT,
-                                    start_new_session=os.name != 'nt',
-                                    creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        LOGIN_PROCESSES[platform] = proc
+            if platform == 'xiaohongshu':
+                invalidate_account_context(platform)
+                login_generation = _account_check_generation(platform)
+            LOGIN_DIR.mkdir(parents=True, exist_ok=True)
+            qr = LOGIN_DIR / f'{platform}.png'
+            status = LOGIN_DIR / f'{platform}.json'
+            for f in (qr, status):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            if backend == 'xhs':
+                cmd = [sys.executable, str(SHARED_SCRIPTS / 'xhs_publish.py'), 'login', '--no-proxy',
+                       '--qr-out', str(qr), '--status-file', str(status), '--timeout', str(LOGIN_TIMEOUT)]
+                if visibleBrowser:
+                    cmd.append('--headed')
+            elif backend == 'biliup':
+                # B站：TV 端扫码登录 API 生成二维码 + 写 biliup cookie（biliup login 需真终端，前端用不了）
+                cmd = [sys.executable, str(SHARED_SCRIPTS / 'bili_login.py'), 'login',
+                       '--qr-out', str(qr), '--status-file', str(status),
+                       '--cookie', str(DATA_DIR / 'cookies.json'), '--timeout', str(LOGIN_TIMEOUT)]
+            elif backend == 'douyin':
+                code_file = LOGIN_DIR / f'{platform}.code'
+                try:
+                    code_file.unlink()
+                except OSError:
+                    pass
+                cmd = [sys.executable, str(SHARED_SCRIPTS / 'douyin_publish.py'), 'login',
+                       '--qr-out', str(qr), '--status-file', str(status),
+                       '--sms-code-file', str(code_file), '--timeout', str(LOGIN_TIMEOUT)]
+            else:
+                cmd = [sys.executable, str(SHARED_SCRIPTS / 'web_publisher.py'), 'login-qr',
+                       '--platform', cfg['wp'], '--qr-out', str(qr), '--status-file', str(status),
+                       '--timeout', str(LOGIN_TIMEOUT)]
+            # 新登录开始 → 清掉旧的 whoami 缓存（登录前可能缓存了「未登录」），避免登录成功后仍读到旧结果
+            with _WHOAMI_LOCK:
+                _WHOAMI_CACHE.pop(platform, None)
+            log_path = LOGIN_DIR / f'{platform}.log'
+            with log_path.open('a', encoding='utf-8') as log_file:
+                proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                        stdout=log_file, stderr=subprocess.STDOUT,
+                                        start_new_session=os.name != 'nt',
+                                        creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            LOGIN_PROCESSES[platform] = proc
+            admission.track(proc)
     for _ in range(50):
         await asyncio.sleep(0.5)
         if _account_check_generation(platform) != login_generation:
@@ -5891,24 +5905,27 @@ async def api_mp_login_start(platform: str, restart: bool = False):
             return {"mode": "qr", **_mp_login_status()}
         if _account_browser_busy(platform):
             raise HTTPException(409, '该平台正在核验账号，请等待结束后再登录')
-        _invalidate_account_check(platform)
-        login_generation = _account_check_generation(platform)
-        LOGIN_DIR.mkdir(parents=True, exist_ok=True)
-        for f in (LOGIN_DIR / "wechat-oa-mp.png", LOGIN_DIR / "wechat-oa-mp.json"):
-            try:
-                f.unlink()
-            except OSError:
-                pass
-        wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "login",
-               "--proxy", wx_proxy, "--qr-out", str(LOGIN_DIR / "wechat-oa-mp.png"),
-               "--status-file", str(LOGIN_DIR / "wechat-oa-mp.json"), "--timeout", "240"]
-        with (LOGIN_DIR / "wechat-oa-mp.log").open("a", encoding="utf-8") as log_file:
-            proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
-                                    stdout=log_file, stderr=subprocess.STDOUT,
-                                    start_new_session=os.name != 'nt',
-                                    creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        LOGIN_PROCESSES["wechat-oa-mp"] = proc
+        from easel.runtime_limits import LoginAdmission
+        with LoginAdmission(app) as admission:
+            _invalidate_account_check(platform)
+            login_generation = _account_check_generation(platform)
+            LOGIN_DIR.mkdir(parents=True, exist_ok=True)
+            for f in (LOGIN_DIR / "wechat-oa-mp.png", LOGIN_DIR / "wechat-oa-mp.json"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
+            cmd = [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "login",
+                   "--proxy", wx_proxy, "--qr-out", str(LOGIN_DIR / "wechat-oa-mp.png"),
+                   "--status-file", str(LOGIN_DIR / "wechat-oa-mp.json"), "--timeout", "240"]
+            with (LOGIN_DIR / "wechat-oa-mp.log").open("a", encoding="utf-8") as log_file:
+                proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env(),
+                                        stdout=log_file, stderr=subprocess.STDOUT,
+                                        start_new_session=os.name != 'nt',
+                                        creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            LOGIN_PROCESSES["wechat-oa-mp"] = proc
+            admission.track(proc)
     for _ in range(60):
         await asyncio.sleep(0.5)
         if _account_check_generation(platform) != login_generation:

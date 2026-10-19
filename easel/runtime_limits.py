@@ -48,6 +48,38 @@ class Lease:
         threading.Thread(target=monitor, daemon=True, name='easel-admission-' + self.pool.name).start()
 
 
+class LoginAdmission:
+    """Reserve only a newly started runner; reconnects need no second slot."""
+
+    def __init__(self, app):
+        self.pool = getattr(app.state, 'server_pools', {}).get('browser')
+        self.lease = None
+        self.process = None
+
+    def __enter__(self):
+        self.lease = self.pool.acquire() if self.pool else None
+        return self
+
+    def track(self, process):
+        self.process = process
+        if self.lease:
+            process._easel_login_lease = self.lease
+
+    def __exit__(self, *_):
+        if self.lease:
+            if self.process is None:
+                self.lease.release()
+            else:
+                self.lease.watch(lambda: self.process.poll() is not None)
+
+
+def release_login_admission(process):
+    """A confirmed exit can release immediately before an explicit restart."""
+    lease = getattr(process, '_easel_login_lease', None)
+    if lease is not None and process.poll() is not None:
+        lease.release()
+
+
 def install_limits(workspace):
     pools = {name: Pool(name, max(1, int(os.environ.get('EASEL_' + name.upper() + '_LIMIT', '1'))))
              for name in ('agent', 'browser', 'media')}
@@ -61,8 +93,9 @@ def install_limits(workspace):
             return 'agent'
         if path in {'/api/imagegen', '/api/videogen', '/api/image-reverse'} and 'POST' in methods:
             return 'media'
-        if (path in {'/api/login/{platform}', '/api/accounts/{platform}/mp-login'} and 'POST' in methods
-                or path in {'/api/analytics/{platform}', '/api/accounts/{platform}/whoami'} and 'GET' in methods):
+        # Login endpoints acquire inside their account lock, after the reuse
+        # and credential-only branches, and retain the slot until child exit.
+        if path in {'/api/analytics/{platform}', '/api/accounts/{platform}/whoami'} and 'GET' in methods:
             return 'browser'
         return None
 

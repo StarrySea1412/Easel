@@ -13,6 +13,17 @@ function getBasePath(): string {
 
 const BASE = getBasePath();
 
+// Account checks and login startup share the server's browser admission pool.
+// Keep calls from this tab ordered, including checks triggered by other pages.
+let accountBrowserTail: Promise<unknown> | null = null;
+function accountBrowserRequest<T>(run: () => Promise<T>): Promise<T> {
+  const result = accountBrowserTail ? accountBrowserTail.then(run, run) : run();
+  accountBrowserTail = result;
+  const clear = () => { if (accountBrowserTail === result) accountBrowserTail = null; };
+  void result.then(clear, clear);
+  return result;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // 全部是动态应用接口（登录态/数据等），禁止浏览器 HTTP 缓存——否则 /api/accounts 等可能被启发式
   // 缓存住旧响应（曾表现为“扫码登录后卡片仍显示未登录”）。调用方可用 options.cache 覆盖。
@@ -576,7 +587,7 @@ export function saveCredentials(
 
 /** 启动「公众号后台」扫码登录（数据中心取数用，独立于 AppID 凭证）。返回二维码状态。 */
 export function startMpLogin(platform: string, options: { restart?: boolean } = {}): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login${options.restart ? '?restart=true' : ''}`, { method: 'POST' });
+  return accountBrowserRequest(() => request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login${options.restart ? '?restart=true' : ''}`, { method: 'POST' }));
 }
 
 /** 轮询公众号后台扫码登录状态。 */
@@ -611,9 +622,11 @@ export interface AccountWhoami {
 
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
 export async function accountWhoami(platform: string, force = false): Promise<AccountWhoami> {
-  const signal = AbortSignal.timeout(60000);
-  try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, { signal }); }
-  catch (cause) { if (signal.aborted) throw new Error('登录状态检查超时，请稍后重试'); throw cause; }
+  return accountBrowserRequest(async () => {
+    const signal = AbortSignal.timeout(60000);
+    try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, { signal }); }
+    catch (cause) { if (signal.aborted) throw new Error('登录状态检查超时，请稍后重试'); throw cause; }
+  });
 }
 
 /** 退出登录：删该平台持久化登录态。 */
@@ -724,7 +737,7 @@ export function startLogin(platform: string, visibleBrowser = false, options: { 
   if (visibleBrowser) params.set('visibleBrowser', 'true');
   if (options.restart) params.set('restart', 'true');
   const query = params.toString();
-  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}${query ? `?${query}` : ''}`, { method: 'POST' });
+  return accountBrowserRequest(() => request<LoginStart>(`/api/login/${encodeURIComponent(platform)}${query ? `?${query}` : ''}`, { method: 'POST' }));
 }
 
 export function loginStatus(platform: string): Promise<LoginStatus> {

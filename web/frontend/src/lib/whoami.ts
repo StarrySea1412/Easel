@@ -48,11 +48,10 @@ interface VerifyOpts {
 
 /**
  * 对缓存缺失/过期的平台在后台真校验（后端起 headless 浏览器，数秒/个），
- * 每得到一个结果就写缓存 + 回调 onUpdate。**并发 2 个**（比逐个串行快近一倍，又不至同时起太多
- * 浏览器打满资源）；每个平台仍独立、失败只跳过该平台，不影响其它，也不改任何登录/检测逻辑。
+ * 每得到一个结果就写缓存 + 回调 onUpdate。逐个串行，避免占满服务器浏览器资源。
  * Cookie 文件和登录成功标记都只是本地快照，不能替代在线检查。
  */
-const WHOAMI_CONCURRENCY = 2;
+const WHOAMI_CONCURRENCY = 1;
 
 export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
   const ttlMs = opts.ttlMs ?? WHOAMI_TTL_MS;
@@ -64,6 +63,7 @@ export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
     while (next < todo.length) {
       if (opts.alive && !opts.alive()) return;
       const p = todo[next++];
+      if (!opts.force && isWhoamiFresh(getWhoamiCache()[p], ttlMs)) continue;
       const version = requestVersions.get(p) || 0;
       const before = JSON.stringify(getWhoamiCache()[p]);
       opts.onChecking?.(p);
@@ -83,6 +83,9 @@ export function verifyStale(platforms: string[], opts: VerifyOpts = {}): void {
         const message = cause instanceof Error ? cause.message : '登录检查失败，请重试。';
         markWhoamiUnverified(p, message);
         if (!opts.alive || opts.alive()) opts.onError?.(p, message);
+        // A different tab or a still-running QR flow may own the only slot.
+        // Stop this batch rather than flooding every remaining account with 429.
+        if ((cause as { status?: number })?.status === 429) return;
       }
     }
   };
