@@ -17,14 +17,14 @@ async function setup(t,Component,props={}){
  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
  await act(async()=>root.render(createElement(Component,props)));
  t.after(async()=>{await act(async()=>root.unmount());container.remove();});
- return {container,requests,respond:async(i,body,status=200)=>act(async()=>requests[i].resolve(new Response(JSON.stringify(body),{status}))),click:async label=>{const b=[...container.querySelectorAll('button')].find(b=>b.textContent===label);assert.ok(b,label);await act(async()=>b.click());}};
+ return {container,requests,respond:async(i,body,status=200)=>act(async()=>requests[i].resolve(new Response(JSON.stringify(body),{status}))),click:async label=>{const b=[...container.querySelectorAll('button')].find(b=>b.textContent.trim()===label);assert.ok(b,label);await act(async()=>b.click());}};
 }
 test('failure copy includes only diagnostic fields and related timeline uses saved IDs',async t=>{
  let copied='';t.mock.method(navigator.clipboard,'writeText',async value=>{copied=value;});
  const v=await setup(t,Failures,{eventId:id});await v.respond(0,{events:[failure,{id:related,at:'2026-10-20T00:59:59Z',relatedEventId:id,stage:'submit'},{id:'c'.repeat(32),at:failure.at,stage:'unrelated'}]});
  await v.click('复制诊断摘要');const summary=JSON.parse(copied);assert.equal(summary.version,'0.4.0');assert.equal(summary.revision,'test-sha');
  assert.equal(summary.token,undefined);assert.equal(summary.body,undefined);assert.doesNotMatch(v.container.textContent,/PRIVATE_/);
- assert.match(v.container.querySelector('.failure-detail ol').textContent,/submit.*download/);assert.doesNotMatch(v.container.querySelector('.failure-detail ol').textContent,/unrelated/);
+ assert.match(v.container.querySelector('.failure-detail ol').textContent,/提交内容.*下载技能/);assert.doesNotMatch(v.container.querySelector('.failure-detail ol').textContent,/unrelated/);
  await v.click('刷新');await v.respond(1,{},503);assert.match(v.container.textContent,/读取失败，已有记录保留/);assert.match(v.container.textContent,/test-sha/);
 });
 test('a rotated error ID is retrieved exactly instead of silently selecting a different failure',async t=>{
@@ -41,7 +41,7 @@ test('task sources keep their receipt meaning and route back to their owning pag
  const calls=[];const v=await setup(t,Tasks,{onChat:id=>calls.push(id),onSchedules:()=>calls.push('schedule'),onPublish:()=>calls.push('publish')});
  await v.respond(0,{goals:[{id:'g',title:'目标一',status:'paused',reason:'待确认',sessionId:'original'}],plans:[{id:'p',title:'每日计划',enabled:true,history:[{status:'failed'}]}],runs:[]});
  await v.respond(1,[{receiptId:'r',platform:'bilibili',title:'提交回执',outcome:'submitted'}]);
- assert.match(v.container.textContent,/已启用/);assert.match(v.container.textContent,/最近触发：failed/);assert.match(v.container.textContent,/不代表上次执行成功/);
- await v.click('打开原对话 →');await v.click('打开定时任务 →');await v.click('打开发布页 →');assert.deepEqual(calls,['original','schedule','publish']);
+ assert.match(v.container.textContent,/已启用/);assert.match(v.container.textContent,/最近触发：失败/);assert.match(v.container.textContent,/不代表上次执行成功/);
+ await v.click('打开原对话');await v.click('打开定时任务');await v.click('打开发布页');assert.deepEqual(calls,['original','schedule','publish']);
  await v.click('刷新');await v.respond(2,{},503);await v.respond(3,[]);assert.match(v.container.textContent,/保留上次快照/);assert.match(v.container.textContent,/目标一/);
 });

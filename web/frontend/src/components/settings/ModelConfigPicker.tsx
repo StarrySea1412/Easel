@@ -1,6 +1,8 @@
 import type { ModelRow } from '../../lib/api';
 import Select from '../ui/Select';
 import { SettingsField } from './SettingsField';
+import { IconChat, IconCheck } from '../icons';
+import { IconUpload } from '../settingsIcons';
 
 export function ModelConfigPicker({ rows, savedPrimary, disabled, saving, dirty, saveNote, labelFor, onPrimary, onSave, onOpenImport }: {
   rows: ModelRow[];
@@ -19,7 +21,8 @@ export function ModelConfigPicker({ rows, savedPrimary, disabled, saving, dirty,
   return (
     <section className="model-config-picker" aria-label="默认对话模型">
       <div className="provider-head">
-        <div className="provider-heading"><h3>默认对话模型</h3></div>
+        <span className="provider-glyph" aria-hidden="true"><IconChat size={20} /></span>
+        <div className="provider-heading"><h3>默认对话模型</h3><small>新对话会优先使用这个 AI；已有对话以当前选择为准。</small></div>
       </div>
       <div className="model-default-current">
         <span>已保存默认</span><strong>{labelFor(savedPrimary)}</strong>
@@ -40,8 +43,8 @@ export function ModelConfigPicker({ rows, savedPrimary, disabled, saving, dirty,
       </p>}
       <div className="model-picker-actions">
         <button type="button" className="btn btn-sm btn-primary" disabled={disabled || !dirty}
-          onClick={onSave}>{saving ? '保存中…' : '保存并使用'}</button>
-        <button type="button" className="btn btn-sm" disabled={disabled} onClick={onOpenImport}>从 CC Switch / OpenClaw 导入</button>
+          onClick={onSave}><IconCheck size={15} />{saving ? '保存中…' : '保存并使用'}</button>
+        <button type="button" className="btn btn-sm" disabled={disabled} onClick={onOpenImport}><IconUpload size={15} />导入已有配置</button>
       </div>
       {saveNote && <p role={saveNote.startsWith('保存失败') ? 'alert' : 'status'}
         className={`model-picker-message${saveNote.startsWith('保存失败') ? ' err' : ''}`}>{saveNote}</p>}

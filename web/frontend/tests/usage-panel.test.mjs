@@ -50,6 +50,7 @@ async function fixture(t, props = {}, payload = usagePayload('s1')) {
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   return {
     container, requests,
+    render: async patch => act(async () => root.render(createElement(UsagePanel, { sessionId: 's1', ...props, ...patch }))),
     text: () => container.textContent || '',
     click: async element => act(async () => element.click()),
     find: text => [...container.querySelectorAll('button')].find(b => (b.textContent || '').includes(text)),
@@ -166,4 +167,43 @@ test('channel endpoint and grouping distinguish the same model across two routes
   assert.match(view.text(),/1 \/ 2 次/);
   assert.match(view.container.querySelector('.usage-request-list').textContent,/b.example/);
   assert.doesNotMatch(view.container.querySelector('.usage-request-list').textContent,/a.example/);
+});
+
+
+test('activity navigation switches scope without nested tabs or another read, preserving request filters', async t => {
+  const view = await fixture(t, { embedded: true, activityView: 'overview' });
+  await view.respondFirst();
+  assert.equal(view.container.querySelector('.usage-metrics.is-simple').children.length, 3);
+  assert.equal(view.container.querySelector('.usage-breakdown').open, false);
+  assert.equal(view.container.querySelector('.usage-tabs').hidden, true);
+  assert.equal(view.container.querySelector('.usage-view-tabs'), null);
+  await view.render({ activityView: 'requests' });
+  const provider = view.container.querySelector('.usage-request-filters select');
+  await act(async () => { provider.value = 'deepseek'; provider.dispatchEvent(new window.Event('change', { bubbles: true })); });
+  assert.match(view.text(), /1 \/ 2 次/);
+  await view.render({ activityView: 'project' });
+  assert.match(view.container.querySelector('.usage-metrics.is-full').textContent, /1,200/);
+  assert.match(view.text(), /项目会话汇总/);
+  await view.render({ activityView: 'requests' });
+  assert.equal(view.container.querySelector('.usage-request-filters select').value, 'deepseek');
+  assert.equal(view.requests.length, 1, 'navigation reuses the recorded response without extra model/network activity');
+});
+
+
+test('activity opens full project usage without a selected local session and keeps session drill-down explicit', async t => {
+  const { default: ActivityPage } = await loadTsModule('../src/components/ActivityPage.tsx', import.meta.url);
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    urls.push(String(url));
+    const id = new URL(String(url), window.location.href).searchParams.get('sessionId') || '';
+    return new Response(JSON.stringify(usagePayload(id)), { headers: { 'Content-Type': 'application/json' } });
+  });
+  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
+  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  await act(async () => root.render(createElement(ActivityPage, {sessions:[],activeSessionId:null,streams:{}})));
+  assert.equal(new URL(urls[0], window.location.href).searchParams.get('sessionId'), '');
+  assert.match(container.querySelector('.activity-project-usage').textContent, /1,200/);
+  assert.equal(container.querySelector('.usage-metrics.is-full').children.length, 8);
+  assert.equal(container.querySelector('.usage-breakdown'), null, 'full project metrics do not require expansion');
+  assert.equal(container.querySelector('.activity-session-picker'), null, 'no local conversation is required for project totals');
 });

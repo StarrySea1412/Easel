@@ -268,7 +268,7 @@ test('disabling the audit hook aborts the original request and ignores its late 
 test('Activity keeps imported snapshots out of live counts and never mounts usage or audit queries', async (t) => {
   const view = fixture(t);
   const session = imported({ backupIncomplete: true });
-  const props = { sessions: [session], activeSessionId: session.id, streams: { [session.id]: forgedStream } };
+  const props = { sessions: [session], activeSessionId: session.id, streams: { [session.id]: forgedStream }, target: {sessionId:session.id,turnId:''} };
   await view.render(createElement(ActivityPage, props));
   assert.equal(view.container.querySelector('.activity-live-count').textContent, '0 个会话正在运行');
   const picker=view.container.querySelector('.activity-session-picker [role="combobox"]');

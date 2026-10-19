@@ -1504,7 +1504,7 @@ export default function App() {
         }} />}
       />
       <main className="main-content">
-        <StorageNotice onOpenBackup={() => { setSettingsSection('more'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
+        <StorageNotice onOpenBackup={() => { setSettingsSection('backup'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
         <PublishReceiptCenter model={publishReceipts} showEntry={false}
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
           onOpenPublish={() => setCurrentPage('publish')} />

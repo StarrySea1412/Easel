@@ -605,10 +605,10 @@ test('repeated backup navigation emits a new settings request even while already
   const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]) });
   await act(async () => view.harness.storageNotice.onOpenBackup());
   const first = view.harness.pages['设置'];
-  assert.equal(first.initialSection, 'more');
+  assert.equal(first.initialSection, 'backup');
   await act(async () => view.harness.storageNotice.onOpenBackup());
   const second = view.harness.pages['设置'];
-  assert.equal(second.initialSection, 'more');
+  assert.equal(second.initialSection, 'backup');
   assert.equal(second.navigationKey, first.navigationKey + 1);
   assert.deepEqual(view.harness.calls, []);
 });

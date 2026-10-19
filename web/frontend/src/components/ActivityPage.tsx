@@ -6,12 +6,13 @@ import type { ChatSession, StreamState } from '../lib/store';
 import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from '../lib/activitySelection';
 import UsagePanel from './UsagePanel';
 import SkillAuditPanel from './SkillAuditPanel';
-import { IconHistory } from './icons';
+import { IconHistory, IconChat, IconTarget, IconWarn, IconCoins, IconFile, IconSkills, IconChart, IconAgentOffice } from './icons';
 import { formatChatElapsed } from '../lib/chatTiming';
 import { chatErrorTitle } from '../lib/chatErrors';
 import '../styles/activity.css';
 
-type Tab = 'usage' | 'audit';
+const RECORD_TABS = [{ id: 'usage', label: '用量概览', icon: IconCoins }, { id: 'requests', label: '调用明细', icon: IconFile }, { id: 'audit', label: '技能核验', icon: IconSkills }] as const;
+type Tab = typeof RECORD_TABS[number]['id'];
 
 interface ActivityPageProps {
   sessions: ChatSession[];
@@ -31,17 +32,31 @@ const FILTER_LABELS: Record<ActivityFilter, string> = {
 };
 
 export default function ActivityPage(props: ActivityPageProps) {
-  const [view,setView]=useState<'sessions'|'tasks'|'failures'>('sessions');
+  const [view,setView]=useState<'usage'|'sessions'|'tasks'|'failures'>(props.target ? 'sessions' : 'usage');
+  const [localTarget, setLocalTarget] = useState<ActivityTarget>();
+  const effectiveTarget = localTarget || props.target;
+  const titles = Object.fromEntries(props.sessions.map(s => [s.id, s.title]));
   // A new external turn target starts a fresh view even when the parent keeps
   // this page mounted; old filters must not hide the requested session.
   const targetKey = props.target
     ? JSON.stringify([props.target.sessionId, props.target.turnId])
     : 'default';
-  useEffect(()=>{if(targetKey!=='default')setView('sessions');},[targetKey]);
-  return <div className="activity-hub"><nav className="activity-hub-nav" aria-label="记录入口">{([['sessions','会话记录'],['tasks','任务'],['failures','问题记录']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={view===id} onClick={()=>setView(id)}>{label}</button>)}</nav>{view==='sessions'?<ActivityWorkspace key={targetKey} {...props}/>:view==='tasks'?<TaskOverview onChat={props.onOpenChat} onSchedules={props.onOpenSchedules} onPublish={props.onOpenPublish}/>:<FailureRecords/>}</div>;
+  useEffect(()=>{setLocalTarget(undefined);if(targetKey!=='default')setView('sessions');},[targetKey]);
+  return <div className="activity-hub">
+    <header className="activity-hub-heading"><span className="activity-heading-icon" aria-hidden="true"><IconHistory size={23} /></span><div><h1>运行记录</h1><p>查看 AI 用量、任务进展，或查找失败原因。</p></div><span className="activity-live-count">{Object.keys(props.streams).filter(id => !props.sessions.find(s => s.id === id)?.importedFromBackup).length} 个会话正在运行</span></header>
+    <nav className="activity-hub-nav" aria-label="记录入口">{([
+      { id: 'usage', label: '全部用量', hint: '项目累计与渠道统计', icon: IconChart },
+      { id: 'sessions', label: '会话记录', hint: '按对话查看调用细节', icon: IconChat },
+      { id: 'tasks', label: '任务', hint: '目标、定时任务与发布', icon: IconTarget },
+      { id: 'failures', label: '问题记录', hint: '失败原因与诊断信息', icon: IconWarn },
+    ] as const).map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => setView(item.id)}>
+      <span className="activity-nav-icon" aria-hidden="true"><item.icon size={20} /></span><span>{item.label}<small>{item.hint}</small></span>
+    </button>)}</nav>
+    {view === 'usage' ? <section className="activity-project-usage" aria-label="全项目用量"><div className="activity-project-heading"><h2>全部已记录用量</h2><p>汇总当前项目的模型调用；未上报的数据保留未知。</p></div><UsagePanel sessionId="" embedded activityView="project" sessionTitles={titles} isStreaming={Object.keys(props.streams).some(id => !props.sessions.find(s => s.id === id)?.importedFromBackup)} onInspectSession={id => {setLocalTarget({sessionId:id,turnId:''});setView('sessions');}} /></section> : view === 'sessions' ? <ActivityWorkspace key={JSON.stringify(effectiveTarget || 'default')} {...props} target={effectiveTarget} /> : view === 'tasks' ? <TaskOverview onChat={props.onOpenChat} onSchedules={props.onOpenSchedules} onPublish={props.onOpenPublish} /> : <FailureRecords />}
+  </div>;
 }
 
-function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenOffice }: ActivityPageProps) {
+function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenOffice, onOpenChat }: ActivityPageProps) {
   const [tab, setTab] = useState<Tab>(target?.turnId ? 'audit' : 'usage');
   const [selectedId, setSelectedId] = useState(target?.sessionId || activeSessionId || '');
   const [search, setSearch] = useState('');
@@ -67,12 +82,6 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
   return (
     <div className="activity-page">
       <div className="activity-workspace">
-        <header className="activity-heading">
-          <div>
-            <h1><IconHistory size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />运行记录</h1>
-          </div>
-          <span className="activity-live-count">{Object.keys(liveStreams).length} 个会话正在运行</span>
-        </header>
 
         <div className="activity-layout">
           <section className="activity-session-list" aria-label="运行会话筛选">
@@ -115,13 +124,14 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
           <main className="activity-detail">
             <div className="activity-detail-heading">
               <div>
-                <h2>{session?.title || emptyTitle}</h2>
+                {!session && <h2>{emptyTitle}</h2>}
                 {session?.importedFromBackup && <p>备份内容仅供阅读，不作为执行证据。</p>}
               </div>
               <div className="activity-detail-actions">
-              {session && !session.importedFromBackup && onOpenOffice && <button type="button" className="btn btn-sm" onClick={() => onOpenOffice(session.id)}>查看会话工作室 ↗</button>}
+              {session && onOpenChat && <button type="button" className="btn btn-sm" onClick={() => onOpenChat(session.id)}><IconChat size={15} />打开原对话</button>}
+              {session && !session.importedFromBackup && onOpenOffice && <button type="button" className="btn btn-sm" onClick={() => onOpenOffice(session.id)}><IconAgentOffice size={15} />查看办公室</button>}
               {session && (
-                  <span className={`activity-session-state${latestError ? ' is-error' : ''}`}>{session.importedFromBackup ? '备份副本' : receiving ? '运行中' : latestError ? chatErrorTitle(latestError) : '历史记录'}</span>
+                  <span className={`activity-session-state${latestError ? ' is-error' : ''}`}><span aria-hidden="true">{latestError ? <IconWarn size={14} /> : <IconHistory size={14} />}</span>{session.importedFromBackup ? '备份副本' : receiving ? '运行中' : latestError ? chatErrorTitle(latestError) : '历史记录'}</span>
               )}
               </div>
             </div>
@@ -130,8 +140,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
               {!receiving && latestReply?.elapsedMs !== undefined && <> · 最近一轮 {formatChatElapsed(latestReply.elapsedMs)}</>}
             </p>}
             {latestError && <div className="activity-error-summary" role="status">
-              <strong>{chatErrorTitle(latestError)}</strong><p>{latestError.message}</p>
-              {(latestError.detail || latestError.stage || latestError.channel || latestError.modelRef) && <details><summary>失败详情</summary>
+              <strong><IconWarn size={16} />最近一轮：{chatErrorTitle(latestError)}</strong><p>{latestError.message}</p>
+              {(latestError.detail || latestError.stage || latestError.channel || latestError.modelRef) && <details><summary>查看失败详情</summary>
                 {latestError.stage && <p>失败阶段：{latestError.stage}</p>}
                 {latestError.channel && <p>渠道：{latestError.channel}</p>}
                 {latestError.modelRef && <p>模型：{latestError.modelRef}</p>}
@@ -154,34 +164,29 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
                   onKeyDown={(event) => {
                     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                     event.preventDefault();
-                    const next = event.key === 'Home' ? 'usage' : event.key === 'End' ? 'audit' : tab === 'usage' ? 'audit' : 'usage';
+                    const index = RECORD_TABS.findIndex(item => item.id === tab);
+                    const next = RECORD_TABS[event.key === 'Home' ? 0 : event.key === 'End' ? RECORD_TABS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + RECORD_TABS.length) % RECORD_TABS.length].id;
                     setTab(next);
                     document.getElementById(`activity-tab-${next}`)?.focus();
                   }}
                 >
-                  {(['usage', 'audit'] as const).map((value) => (
-                    <button
-                      type="button"
-                      role="tab"
-                      key={value}
-                      id={`activity-tab-${value}`}
-                      aria-selected={tab === value}
-                      tabIndex={tab === value ? 0 : -1}
-                      aria-controls={`activity-panel-${value}`}
-                      onClick={() => setTab(value)}
-                    >
-                      {value === 'usage' ? '用量' : '技能记录'}
+                  {RECORD_TABS.map(({ id, label, icon: Icon }) => (
+                    <button type="button" role="tab" key={id} id={`activity-tab-${id}`}
+                      aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
+                      aria-controls={`activity-panel-${id === 'audit' ? 'audit' : 'usage'}`} onClick={() => setTab(id)}>
+                      <span aria-hidden="true"><Icon size={15} /></span>{label}
                     </button>
                   ))}
                 </div>
-                <div id={`activity-panel-${tab}`} role="tabpanel" aria-labelledby={`activity-tab-${tab}`}>
-                  {tab === 'usage' ? (
+                <div id={`activity-panel-${tab === 'audit' ? 'audit' : 'usage'}`}  role="tabpanel" aria-labelledby={`activity-tab-${tab}`}>
+                  {tab !== 'audit' ? (
                     <UsagePanel
                       key={session.id}
                       sessionId={session.id}
                       refreshKey={session.messages.length}
                       isStreaming={Boolean(liveStreams[session.id])}
                       embedded
+                      activityView={tab === 'usage' ? 'overview' : tab}
                       sessionTitles={titles}
                     />
                   ) : (

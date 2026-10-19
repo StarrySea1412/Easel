@@ -31,19 +31,19 @@ import type {
   ImportSource, ImportPreview, ImportCandidate,
 } from '../lib/api';
 import { MODEL_IMPORT_SLOT_OPTIONS, modelImportSlotLabel } from '../lib/modelImports';
-import { IconSlidersHorizontal, IconPackage, IconEllipsis, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform } from './settingsIcons';
-import { IconText, IconMic, IconMusic } from './icons';
+import { IconSlidersHorizontal, IconPackage, IconUpload, IconImage, IconBell, IconSend, IconFilm, IconAudioWaveform, IconMonitor, IconDatabase, IconGear } from './settingsIcons';
+import { IconText, IconMic, IconMusic, IconAgentOffice, IconFolder, IconArchive, IconPlus, IconTerminal, IconChevron } from './icons';
 
-export type SettingsSection = 'appearance' | 'agent-runtime' | 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | `channel:${Chan}`;
+export type SettingsSection = 'appearance' | 'agent-runtime' | 'general' | 'import' | 'model' | 'env' | 'image' | 'video' | 'notify' | 'employees' | 'more' | 'system' | 'backup' | `channel:${Chan}`;
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
 
-const CHANNELS: { id: Chan; label: string; icon: ComponentType<{ size?: number }> }[] = [
-  { id: 'chat', label: '对话与脚本', icon: IconText },
-  { id: 'transcribe', label: '语音转写', icon: IconMic },
-  { id: 'speech', label: '配音', icon: IconAudioWaveform },
-  { id: 'image', label: '生图', icon: IconImage },
-  { id: 'video', label: '视频', icon: IconFilm },
-  { id: 'music', label: '音乐', icon: IconMusic },
+const CHANNELS: { id: Chan; label: string; hint: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'chat', label: '聊天与写作', hint: '对话、脚本与任务', icon: IconText },
+  { id: 'transcribe', label: '语音转文字', hint: '提取字幕与录音', icon: IconMic },
+  { id: 'speech', label: '文字配音', hint: '把文字读出来', icon: IconAudioWaveform },
+  { id: 'image', label: '图片生成', hint: '生成与理解图片', icon: IconImage },
+  { id: 'video', label: '视频生成', hint: '生成视频片段', icon: IconFilm },
+  { id: 'music', label: '音乐生成', hint: '生成配乐', icon: IconMusic },
 ];
 
 /** 后台繁忙（整机高负载）时的抗抖动取数：单次超时即重试，撑过多秒级接口延迟。 */
@@ -88,8 +88,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   onAssessUpdate?: (prompt: string) => boolean;
 }) {
   // 'video' is a direct link into the existing model channel, not a second settings page.
-  // Legacy 'appearance' now lives in 更多设置 and 'agent-runtime' in 模型与渠道.
-  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' || section === 'appearance' ? 'more' : section === 'agent-runtime' ? 'model' : section;
+  // Keep legacy deep links, while grouping settings by the user's task.
+  const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' || section === 'appearance' ? 'more' : section === 'backup' ? 'system' : section;
   const [sec, setSec] = useState<SettingsSection>(normalizeSection(initialSection));
   const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'image' ? 'image' : initialSection === 'video' ? 'video' : 'chat');
   const [importOpen, setImportOpen] = useState(initialSection === 'import');
@@ -652,7 +652,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     <fieldset className="reverse-provider-editor" disabled={saving || modelLoading || Boolean(impBusy)}>
       <div className="reverse-provider-toolbar">
         <Select aria-label="编辑视觉供应商" value={chatRows.length ? String(visionIndex) : ''} options={chatRows.map((row, index) => ({ value: String(index), label: row.name || '新供应商' }))} placeholder="选择供应商" onChange={value => setVisionEditorIndex(Number(value))} />
-        <button type="button" className="btn btn-sm" disabled={modelLoading || saving} onClick={() => { setVisionEditorIndex(chatRows.length); addProvider(); }}>＋ 添加供应商</button>
+        <button type="button" className="btn btn-sm" disabled={modelLoading || saving} onClick={() => { setVisionEditorIndex(chatRows.length); addProvider(); }}><IconPlus size={15} /> 添加供应商</button>
       </div>
       {chatRows[visionIndex] && <div key={visionIndex}>{renderBoard([chatRows[visionIndex]], {
         channel: 'chat', onRow: (_, patch) => updateRow('chat', setChatRows, visionIndex, patch),
@@ -670,7 +670,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       <div className="settings-panel page">
         <div className="settings-head">
           <div>
-            <h2 className="settings-title">设置</h2>
+            <h1 className="settings-title"><span aria-hidden="true"><IconGear size={23} /></span>设置</h1>
+            <p className="settings-sub">选好 AI，调整适合你的工作台。</p>
           </div>
           <div className="settings-actions">
             {sec === 'model' && chan !== 'chat' && chan !== 'image' && (
@@ -695,52 +696,60 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-body">
-          <nav className="settings-nav">
-            <button aria-current={sec === 'model' ? 'page' : undefined} className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
-              <IconSlidersHorizontal size={16} />模型与渠道
-            </button>
-            <button aria-current={sec === 'more' ? 'page' : undefined} className={`snav${sec === 'more' ? ' active' : ''}`} onClick={() => setSec('more')}>
-              <IconEllipsis size={16} />更多设置
-            </button>
-            <details className="settings-secondary-nav" open={['env', 'notify', 'employees'].includes(sec) || undefined}>
-              <summary>其他设置</summary>
-              <button aria-current={sec === 'env' ? 'page' : undefined} className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
-                <IconPackage size={16} />环境安装<small>{total ? (okCount === total ? '全就绪' : `${okCount}/${total}`) : '…'}</small>
-              </button>
-              <button aria-current={sec === 'notify' ? 'page' : undefined} className={`snav${sec === 'notify' ? ' active' : ''}`} onClick={() => setSec('notify')}>
-                <IconBell size={16} />通知中心<small>{ntf.email && ntf.host ? '已配置' : ntfLoading ? '检测中…' : '邮箱推送'}</small>
-              </button>
-              <button aria-current={sec === 'employees' ? 'page' : undefined} className={`snav${sec === 'employees' ? ' active' : ''}`} onClick={() => setSec('employees')}>
-                <IconSlidersHorizontal size={16} />员工角色卡<small>办公室展示形象</small>
-              </button>
-            </details>
+          <nav className="settings-nav" aria-label="设置分类">
+            {([
+              { id: 'model', label: '模型与渠道', hint: '选择 AI，连接服务', icon: IconSlidersHorizontal, active: sec === 'model' },
+              { id: 'agent-runtime', label: 'Agent 与办公室', hint: '协作方式与角色形象', icon: IconAgentOffice, active: sec === 'agent-runtime' || sec === 'employees' },
+              { id: 'more', label: '通用偏好', hint: '界面外观与邮件通知', icon: IconMonitor, active: sec === 'more' || sec === 'notify' },
+              { id: 'system', label: '系统与数据', hint: '环境、保存位置与备份', icon: IconDatabase, active: sec === 'system' || sec === 'env' },
+            ] as const).map(item => <button key={item.id} type="button" aria-current={item.active ? 'page' : undefined}
+              className={`snav${item.active ? ' active' : ''}`} onClick={() => setSec(item.id)}>
+              <span className="settings-nav-icon" aria-hidden="true"><item.icon size={19} /></span>
+              <span>{item.label}<small>{item.hint}</small></span>
+            </button>)}
           </nav>
 
           <div className="settings-main">
+          {(sec === 'agent-runtime' || sec === 'employees') && <>
+            <div className="settings-section-heading"><h2>Agent 与办公室</h2><p>让多个 AI 分工协作，也可以调整它们在办公室中的形象。</p></div>
+            <div className="settings-local-nav" aria-label="Agent 设置内容">
+              <button type="button" aria-pressed={sec === 'agent-runtime'} onClick={() => setSec('agent-runtime')}><IconAgentOffice size={16} />协作方式</button>
+              <button type="button" aria-pressed={sec === 'employees'} onClick={() => setSec('employees')}><IconMonitor size={16} />角色形象</button>
+            </div>
+          </>}
+          <div hidden={sec !== 'agent-runtime'} className="agent-runtime-panel"><AgentRuntimeSettings onOpenModels={() => { setSec('model'); setChan('chat'); }} /></div>
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
             {sec === 'model' && (
               <section className="st-sec active">
-                  <div className="tabbar" role="tablist" aria-label="模型能力通道">
+                  <div className="settings-section-heading"><h2>模型与渠道</h2><p>先选用途，再选择要使用的 AI。渠道就是提供 AI 服务的供应商。</p></div>
+                  <div className="tabbar" role="tablist" aria-label="模型能力通道" onKeyDown={event => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    const index = CHANNELS.findIndex(c => c.id === chan);
+                    const next = CHANNELS[event.key === 'Home' ? 0 : event.key === 'End' ? CHANNELS.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + CHANNELS.length) % CHANNELS.length].id;
+                    setChan(next); document.getElementById(`settings-channel-tab-${next}`)?.focus();
+                  }}>
                   {CHANNELS.map((c) => (
-                    <button key={c.id} role="tab" aria-selected={chan === c.id} className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
-                      <span className="channel-icon" aria-hidden="true"><c.icon size={15} /></span>{c.label}
+                    <button key={c.id} role="tab" aria-selected={chan === c.id} aria-controls={`settings-channel-${c.id}`} id={`settings-channel-tab-${c.id}`} tabIndex={chan === c.id ? 0 : -1}
+                      className={`tab${chan === c.id ? ' active' : ''}`} onClick={() => setChan(c.id)}>
+                      <span className="channel-icon" aria-hidden="true"><c.icon size={19} /></span><span>{c.label}<small>{c.hint}</small></span>
                     </button>
                   ))}
                 </div>
                 {savedNote && chan !== 'chat' ? <div role="status" aria-live="polite" className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
 
                 {chan === 'chat' && (
-                  <section className="st-panel active">
+                  <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
                     <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
                       savedPrimary={savedChatRows.find((row) => row.role === '主')} saving={saving} dirty={chatDirty}
                       saveNote={savedNote} labelFor={modelConfigLabel} onPrimary={setPrimaryRow} onSave={() => void saveCurrent()}
                       onOpenImport={() => setImportOpen(true)} />
-                    <details className="model-settings-details"><summary>本机 Codex</summary><CodexSettings /></details>
-                    <details className="model-settings-details model-inline-import" open={importOpen}
+                    <details className="model-settings-details"><summary><span aria-hidden="true"><IconTerminal size={16} /></span>本机 Codex <small>使用本机已登录的编程助手</small></summary><CodexSettings /></details>
+                    <details className="model-settings-details model-inline-import" hidden={!importOpen} open={importOpen}
                       onToggle={(event) => setImportOpen(event.currentTarget.open)}>
-                      <summary><IconUpload size={14} /> 从 CC Switch / OpenClaw 导入模型</summary>
+                      <summary><span aria-hidden="true"><IconUpload size={16} /></span>导入已有模型配置 <small>从 CC Switch / OpenClaw 读取</small></summary>
             <section className="st-sec active">
               <ol className="model-import-steps" aria-label="配置导入步骤">
                 <li aria-current={!impPreview ? 'step' : undefined}><strong>1</strong> 选择来源</li>
@@ -903,13 +912,13 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                 onClick={() => setImportOpen(false)}>收起导入</button></div>
             </section>
                     </details>
-                    <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}>＋ 添加供应商</button>
                     {targetModelRef && <div ref={modelTestTarget} className="model-settings-details"><ModelHealthPanel key={targetModelRef} targetModelRef={targetModelRef} /></div>}
                     <details className="model-settings-details" open={providerDetailsOpen}
                       onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
-                      <summary>编辑供应商、协议、地址与密钥</summary>
+                      <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>查看模型、修改连接配置</small></summary>
                     <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
                     <div className="panel-top">
+                      <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
                       <span className="desc">密钥留空会保留原值；编辑后需保存。</span>
                       <span className="spacer" />
@@ -936,7 +945,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                     </fieldset>
                     </details>
                     <details className="model-settings-details">
-                      <summary>批量检查已保存通道的模型列表</summary>
+                      <summary><span aria-hidden="true"><IconPackage size={16} /></span>批量检查连接 <small>读取模型列表，不发起对话</small></summary>
                       <p className="hint">状态读取不调用模型；文字 / 图片验证会发起真实请求，供应商可能计费。自动检查默认关闭。</p>
                       <button type="button" className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing || saving}>
                         {testing ? '检查中…' : '检查已保存通道的模型列表'}</button>
@@ -945,14 +954,12 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                   </section>
                 )}
 
-                {chan === 'chat' && (
-                  <section className="st-panel active agent-runtime-panel">
-                    <AgentRuntimeSettings />
-                  </section>
-                )}
+                {chan === 'chat' && <button type="button" className="settings-link-row" onClick={() => setSec('agent-runtime')}>
+                  <span aria-hidden="true"><IconAgentOffice size={18} /></span><span>想让多个 AI 分工协作？<small>前往 Agent 与办公室设置</small></span><IconChevron size={16} />
+                </button>}
 
                 {chan === 'transcribe' && (
-                  <section className="st-panel active">
+                  <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
                     <div className="panel-top">
                       <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '云端已配置 · 未验证' : (localReady ? '本地组件已就绪' : '需配置或安装')}</span>
                       <span className="desc">优先读取自带字幕，其次云端转写，最后本地兜底</span>
@@ -974,7 +981,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                 )}
 
                 {chan === 'speech' && (
-                  <section className="st-panel active">
+                  <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('speech') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('speech') ? '有可用提供商' : '未配置'}</span>
                       <span className="desc">展开提供商可编辑配置；预置项会说明原因</span>
@@ -986,7 +993,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                 )}
 
                 {chan === 'video' && (
-                  <section className="st-panel active">
+                  <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('video') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('video') ? '有可用提供商' : '未配置'}</span>
                       <span className="desc">展开后直接编辑可配置字段；设置默认提供商后请保存</span>
@@ -998,7 +1005,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                 )}
 
                 {chan === 'music' && (
-                  <section className="st-panel active">
+                  <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('music') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('music') ? '有可用提供商' : '未配置'}</span>
                       <span className="desc">展开查看可配置字段；设置默认提供商后请保存</span>
@@ -1016,9 +1023,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
             {/* ── 生图通道：工作台「生图工坊」直出图的专用 OpenAI 协议通道 ── */}
             {sec === 'model' && chan === 'image' && (
-              <section className="st-sec active">
+              <section className="st-sec active" role="tabpanel" id="settings-channel-image" aria-labelledby="settings-channel-tab-image">
                 <div className="panel-top">
-                  <h3 className="settings-section-title">生图渠道</h3>
+                  <h3 className="settings-section-title">图片生成服务</h3>
                   <span className={`pill ${!imgBaseChanged && imgBaseSaved && imgKeyMasked ? 'ok' : 'off'}`}><span className="dot" />{imgLoading ? '读取中…' : imgLoadError ? '读取失败' : imgBaseChanged || imgKey ? '尚未保存' : imgBaseSaved && imgKeyMasked ? '已配置 · 未验证' : '未配置'}</span>
                   <span className="spacer" />
                 </div>
@@ -1063,8 +1070,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             {/* ── 通知中心：生成/发布完成后邮箱推送（可视化配置 + 测试发送） ── */}
             {sec === 'notify' && (
               <section className="st-sec active">
+                <button type="button" className="settings-back" onClick={() => setSec('more')}>← 返回通用偏好</button>
+                <div className="settings-section-heading"><h2><IconBell size={20} />邮件通知</h2><p>任务完成后发到邮箱。先填写邮箱服务配置，再保存。</p></div>
                 <div className="panel-top">
-                  <span className={`pill ${ntf.email && ntf.host ? 'ok' : 'off'}`}><span className="dot" />{ntf.email && ntf.host ? '已配置' : '未配置'}</span>
+                  <span className={`pill ${ntfSaved.startsWith('读取通知配置失败') ? 'fail' : ntf.email && ntf.host ? 'ok' : 'off'}`}><span className="dot" />{ntfSaved.startsWith('读取通知配置失败') ? '配置读取失败' : ntf.email && ntf.host ? '已配置' : '未配置'}</span>
                   <span className="desc">开启后自动发送任务结果；平台发布结果与邮件发送状态会分别显示在发布回执中</span>
                   <span className="spacer" />
                 </div>
@@ -1100,7 +1109,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                         任务完成自动发邮件（关闭则只在 Agent 主动通知时发）
                       </label>
                     </SettingsField>
-                    {ntfSaved && <div className={`save-note${ntfSaved.startsWith('保存失败') ? ' err' : ''}`}>{ntfSaved}</div>}
+                    {ntfSaved && <div className={`save-note${ntfSaved.includes('失败') ? ' err' : ''}`} role={ntfSaved.includes('失败') ? 'alert' : 'status'}>{ntfSaved}</div>}
                     <div className="img-chan-foot">
                       <button className="btn btn-sm btn-primary" onClick={() => void saveNotify()}
                         disabled={!ntf.email.trim() || !ntf.host.trim()}>保存通知配置</button>
@@ -1118,6 +1127,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
             {sec === 'env' && (
               <section className="st-sec active">
+                <button type="button" className="settings-back" onClick={() => setSec('system')}>← 返回系统与数据</button>
+                <div className="settings-section-heading"><h2><IconPackage size={20} />运行环境</h2><p>某个功能无法使用时，在这里检查需要的组件。</p></div>
                 <EnvBoard
                   tools={tools}
                   python={python}
@@ -1130,16 +1141,26 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             )}
 
           {sec === 'more' && <section className="st-sec active settings-more-cards">
+            <div className="settings-section-heading"><h2>通用偏好</h2><p>调整外观，选择接收任务结果的方式。</p></div>
             <AppearanceSettings />
-            <DemoDataSettingsCard {...demoDataPreference} />
-            <details><summary>保存位置</summary><StorageSettingsCard /></details>
-            <details><summary>会话备份</summary><ConversationBackupCard {...conversationBackup} /></details>
+            <button type="button" className="settings-link-row" onClick={() => setSec('notify')}>
+              <span className="settings-entry-icon" aria-hidden="true"><IconBell size={20} /></span><span>邮件通知<small>{ntfLoading ? '正在读取配置…' : ntfSaved.startsWith('读取通知配置失败') ? '配置读取失败，点击查看' : ntf.email && ntf.host ? '已配置 · 可修改或发送测试邮件' : '配置完成后，可接收任务结果'}</small></span><IconChevron size={16} />
+            </button>
+          </section>}
+          {sec === 'system' && <section className="st-sec active settings-more-cards">
+            <div className="settings-section-heading"><h2>系统与数据</h2><p>检查运行环境，管理文件保存与会话备份。</p></div>
+            <button type="button" className="settings-link-row" onClick={() => setSec('env')}>
+              <span className="settings-entry-icon" aria-hidden="true"><IconPackage size={20} /></span><span>运行环境<small>{envError ? '检查失败，请重试' : envLoading ? '正在检查…' : total ? `${okCount} / ${total} 个组件就绪` : '暂无检查结果'}</small></span><IconChevron size={16} />
+            </button>
+            <details><summary><span aria-hidden="true"><IconFolder size={19} /></span>保存位置 <small>查看文件存在哪里</small></summary><StorageSettingsCard /></details>
+            <details open={initialSection === 'backup' || undefined}><summary><span aria-hidden="true"><IconArchive size={19} /></span>会话备份 <small>导出记录或恢复备份</small></summary><ConversationBackupCard {...conversationBackup} /></details>
+            <details><summary><span aria-hidden="true"><IconMonitor size={19} /></span>演示数据 <small>管理页面中的示例内容</small></summary><DemoDataSettingsCard {...demoDataPreference} /></details>
           </section>}
           </div>
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? `修改后请点击「${chan === 'chat' ? '保存并使用' : chan === 'image' ? '保存生图通道' : '保存配置'}」。Agent 协作保存后同步到 OpenClaw，网关重载后对新任务生效。` : sec === 'more' ? '通用偏好即时应用，保存在当前浏览器。' : '修改后请保存。'}
+          {sec === 'model' ? '选择模型后请保存；已有配置不代表已通过连接验证。' : sec === 'more' ? '外观偏好即时应用，保存在当前浏览器。' : sec === 'agent-runtime' ? '协作设置需要保存并同步；以保存回执说明的生效时机为准。' : sec === 'notify' ? '修改后先保存。测试邮件将发送到已保存的收件人。' : '展开需要的项目，查看详情或进行修改。'}
         </div>
       </div>
     </div>

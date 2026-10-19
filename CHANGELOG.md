@@ -1,3 +1,10 @@
+## 0.5.0 · 2026-10-20 · Clearer Settings and Activity / 设置与运行记录整理
+
+- Group Settings into four labeled categories with consistent icons and plain-language descriptions; move collaboration limits into advanced settings while retaining drafts and legacy deep links. / 六种AI用途提供图标、说明及方向键切换，导入与供应商管理按需展开。
+- Open Activity on all recorded project usage, including eight expanded metrics, channel totals and the existing recent-session summary. Session details, tasks and failures remain accessible; exact turn links bypass the project view. / 无本地会话也能读取项目用量，未上报与部分数据继续明确。
+- Use compact task rows and readable failure stages; keep HTTP, build and correlation details in an expandable technical section. / 定时启用状态不代替最近执行结果，白名单复制及认证查询保留。
+- All 1,183 frontend tests, production build and lint pass (20 existing warnings). Real-browser checks use controlled responses and cover navigation, keyboard access, light/dark and an actual 390 CSS px iframe. No live model, SMTP, platform login or publication was exercised. Product version comes from `pyproject.toml`; 138 deployment and installer publication remain paused. [Evidence / 验证范围](docs/settings-activity-clarity-2026-10-20.md).
+
 ## 0.4.0 · 2026-10-20 · Inline actions and structured progress / 对话行为与进度胶囊
 
 - Move current-turn progress into a collapsible header capsule with step states, count, elapsed time and goal acceptance access. Inline tools and OpenClaw root/observed child actions retain exact turn ownership and recorded model/channel identities. / 采用用户龙虾SVG，与办公室共用行为及厂商图标；未知身份不按配置猜测。

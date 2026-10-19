@@ -92,7 +92,7 @@ async function fixture(t, responseOverrides = {}) {
     delete globalThis.__settingsBackupNavigation;
   });
   const demoDataPreference = { enabled: false, saved: true, error: '', onChange() {} };
-  const render = async (navigationKey, conversationBackup = props, initialSection = 'more') => act(async () => root.render(createElement(SettingsPanel, { initialSection: initialSection === 'default' ? undefined : initialSection, navigationKey, conversationBackup, demoDataPreference, onOpenOffice: () => { harness.officeOpens++; } })));
+  const render = async (navigationKey, conversationBackup = props, initialSection = 'backup') => act(async () => root.render(createElement(SettingsPanel, { initialSection: initialSection === 'default' ? undefined : initialSection, navigationKey, conversationBackup, demoDataPreference, onOpenOffice: () => { harness.officeOpens++; } })));
   await render(0);
   return {
     container, harness, props, render, demoDataPreference,
@@ -105,114 +105,85 @@ test('the studio video configuration link opens the existing model video channel
   const view = await fixture(t);
   await view.render(1, view.props, 'video');
   const selected = view.container.querySelector('[role="tab"][aria-selected="true"]');
-  assert.equal(selected?.textContent, '视频');
+  assert.match(selected?.textContent, /^视频生成/);
   assert.ok(view.container.querySelector('.snav[aria-current="page"]')?.textContent.includes('模型'));
   assert.ok(view.harness.calls.some(call => call.name === 'fetchModelChannels'));
 });
 
-test('more settings initially exposes both cards and its menu returns to the backup entry', async t => {
+test('system group exposes backup and storage, and returning preserves callbacks', async t => {
   const view = await fixture(t);
-  const more = view.nav('更多设置');
-  assert.ok(more);
-  assert.equal(more.textContent, '更多设置');
-  assert.equal(more.getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('系统与数据').getAttribute('aria-current'), 'page');
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
-  assert.ok(view.container.querySelector('[data-testid="storage-card"]'));
+  assert.ok(view.container.querySelector('[data-testid="backup-card"]').closest('details').open, 'backup deep link opens the destination');
   assert.deepEqual(view.harness.backupProps, view.props);
   await view.click(view.nav('模型与渠道'));
   assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
-  await view.click(more);
+  await view.click(view.nav('系统与数据'));
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
-  assert.equal(more.getAttribute('aria-current'), 'page');
-  assert.equal(view.harness.calls.length, 5);
 });
 
-test('appearance lives under 更多设置 and legacy appearance links map there without additional HTTP', async t => {
+test('legacy appearance opens preferences while backups live in system settings', async t => {
   const view = await fixture(t);
   const before = view.harness.calls.length;
-  assert.equal(view.nav('外观'), undefined, 'the standalone appearance entry is gone');
-  await view.click(view.nav('更多设置'));
-  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
-  assert.ok(view.container.querySelector('.appearance-card [role=combobox]'));
-  assert.ok(view.container.querySelector('[data-testid=backup-card]'));
-  await view.click(view.nav('模型与渠道'));
   await view.render(1, view.props, 'appearance');
-  assert.ok(view.container.querySelector('.appearance-card'));
-  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('通用偏好').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('.appearance-card [role=combobox]'));
+  assert.equal(view.container.querySelector('[data-testid=backup-card]'), null);
   assert.equal(view.harness.calls.length, before);
 });
 
-test('multiagent controls live in the model channel page and legacy agent links map there', async t => {
+test('agent deep links open collaboration without replacing model configuration state', async t => {
   const view = await fixture(t);
   const before = view.harness.calls.length;
   await view.click(view.nav('模型与渠道'));
-  assert.ok(view.container.querySelector('.agent-runtime-panel'), 'agent collaboration card sits under the chat channel');
+  assert.equal(view.container.querySelector('.agent-runtime-panel').hidden, true);
   await view.render(1, view.props, 'agent-runtime');
-  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
-  assert.ok(view.container.querySelector('.agent-runtime-panel'));
-  assert.equal(view.nav('Agent 协作'), undefined, 'the standalone agent entry is gone');
+  assert.equal(view.nav('Agent 与办公室').getAttribute('aria-current'), 'page');
+  assert.equal(view.container.querySelector('.agent-runtime-panel').hidden, false);
   assert.equal(view.harness.calls.length, before);
 });
 
-test('a fresh navigation key restores the same more section with latest props without remounting settings state', async t => {
+test('fresh backup navigation restores destination and latest callbacks without losing channel state', async t => {
   const view = await fixture(t);
   await view.click(view.nav('模型与渠道'));
-  const speech = [...view.container.querySelectorAll('.tab')].find(button => button.textContent === '配音');
-  assert.ok(speech);
+  const speech = [...view.container.querySelectorAll('.tab')].find(button => button.textContent.startsWith('文字配音'));
   await view.click(speech);
-  assert.equal(view.container.querySelector('.tab.active')?.textContent, '配音');
-  const callsBeforeNavigation = view.harness.calls.length;
-  const latest = { ...view.props, onExport: () => 'latest callback', onOpenSession: () => 'latest open' };
-
+  const latest = { ...view.props, onExport: () => 'latest callback' };
+  const before = view.harness.calls.length;
   await view.render(0, latest);
-  assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null, 'unchanged navigation request preserves internal selection');
+  assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
   await view.render(1, latest);
   assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
-  assert.equal(view.nav('更多设置').getAttribute('aria-current'), 'page');
   assert.equal(view.harness.backupProps.onExport, latest.onExport);
-  assert.equal(view.harness.backupProps.onOpenSession, latest.onOpenSession);
-
   await view.click(view.nav('模型与渠道'));
-  assert.equal(view.container.querySelector('.tab.active')?.textContent, '配音', 'channel state survives the external navigation');
-  assert.equal(view.harness.calls.length, callsBeforeNavigation, 'settings initialization effects did not remount');
-  await view.render(2, latest);
-  assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
+  assert.match(view.container.querySelector('.tab.active').textContent, /^文字配音/);
+  assert.equal(view.harness.calls.length, before);
 });
 
-test('employee appearance is a reachable independent settings section without additional server requests', async t => {
+test('office appearance is reachable from the Agent group and legacy employee links still work', async t => {
   const view = await fixture(t);
   const before = view.harness.calls.length;
-  const entry = view.nav('员工角色卡');
-  assert.ok(entry);
-  await view.click(entry);
-  assert.equal(entry.getAttribute('aria-current'), 'page');
+  await view.click(view.nav('Agent 与办公室'));
+  await view.click([...view.container.querySelectorAll('.settings-local-nav button')].find(b => b.textContent === '角色形象'));
   assert.ok(view.container.querySelector('[data-testid="employee-settings"]'));
   assert.equal(view.harness.employeeProps.defaultModelLabel, '尚未设置');
   await act(async () => view.harness.employeeProps.onOpenOffice());
   assert.equal(view.harness.officeOpens, 1);
-  assert.equal(view.container.querySelector('[data-testid="backup-card"]'), null);
-  assert.equal(view.harness.calls.length, before);
   await act(async () => view.harness.employeeProps.onOpenModels());
   assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
-  assert.equal(view.container.querySelector('.tab.active').textContent, '对话与脚本');
-  await view.click(view.nav('更多设置'));
-  assert.equal(view.container.querySelector('[data-testid="employee-settings"]'), null);
-  assert.ok(view.container.querySelector('[data-testid="backup-card"]'));
+  assert.match(view.container.querySelector('.tab.active').textContent, /^聊天与写作/);
+  await view.render(1, view.props, 'employees');
+  assert.ok(view.container.querySelector('[data-testid="employee-settings"]'));
+  assert.equal(view.harness.calls.length, before);
 });
 
-test('settings opens models by default and the demo preference stays in more settings', async t => {
+test('settings defaults to models and demo management is grouped with system data', async t => {
   const view = await fixture(t);
   await view.render(1, view.props, 'default');
   assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
-  await view.click(view.nav('更多设置'));
+  await view.click(view.nav('系统与数据'));
   assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
   assert.deepEqual(view.harness.demoProps, view.demoDataPreference);
-  const before = view.harness.calls.length;
-  await view.click(view.nav('模型与渠道'));
-  assert.equal(view.container.querySelector('[data-testid="demo-settings"]'), null);
-  await view.click(view.nav('更多设置'));
-  assert.ok(view.container.querySelector('[data-testid="demo-settings"]'));
-  assert.equal(view.harness.calls.length, before);
 });
 
 function notificationConfig(onDone = false) {
@@ -226,10 +197,10 @@ test('legacy image links and image tab open a single channel form', async t => {
   assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('生图通道'), undefined);
   assert.equal(view.nav('通用设置'), undefined);
-  assert.equal(view.container.querySelector('.tab.active').textContent, '生图');
+  assert.match(view.container.querySelector('.tab.active').textContent, /^图片生成/);
   assert.equal(view.container.querySelectorAll('[aria-label="生图模型名称"]').length, 1);
   assert.equal(view.container.querySelector('.settings-actions').textContent.trim(), '');
-  await view.click(view.nav('更多设置'));
+  await view.click(view.nav('通用偏好'));
   await view.click(view.nav('模型与渠道'));
   assert.ok(view.container.querySelector('[aria-label="生图模型名称"]'));
 });
@@ -287,7 +258,7 @@ const configuredRows = () => [
   { slot: 'anthropic', order: 2, name: 'Anthropic', sub: '', type: 'anthropic', model: 'model-b', baseUrl: 'https://b.example.test', keyMasked: 'sk***b', role: '备', result: '已配置' },
 ];
 const modelChannels = rows => ({ channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: key === 'chat' ? rows : [] }])) });
-const findButton = (view, text) => [...view.container.querySelectorAll('button')].find(button => button.textContent === text);
+const findButton = (view, text) => [...view.container.querySelectorAll('button')].find(button => button.textContent.trim() === text || (button.classList.contains('tab') && button.textContent.startsWith(text)));
 
 test('every chat channel exposes its protocol and saves an explicit keyboard selection as a draft', async t => {
   const rows = [...configuredRows(),
@@ -418,14 +389,14 @@ test('default model selection is a draft until saved and survives the single imp
   assert.match(view.container.querySelector('.model-default-pending').textContent, /保存前仍使用 OpenAI · model-a/);
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'applyImport', 'runChannelSelftest'].includes(call.name)), false);
   assert.equal(view.container.querySelectorAll('button').length > 0, true);
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '导入已有配置'));
   assert.equal(view.container.querySelectorAll('.model-import-steps li').length, 3);
   await view.click(findButton(view, '收起导入'));
   assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('配置导入'), undefined);
   assert.match(view.container.querySelector('button[aria-label="主模型"]').textContent, /model-b/);
   assert.equal(findButton(view, '保存并使用').disabled, false);
-  await view.click(findButton(view, '＋ 添加供应商'));
+  await view.click(findButton(view, '添加供应商'));
   assert.equal(view.container.querySelector('.model-provider-editors').closest('details').open, true);
   assert.ok(view.container.querySelector('input[aria-label="供应商名称"]'));
 });
@@ -472,7 +443,7 @@ test('import preview needs explicit confirmation, reports the actual default and
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(secondModel, 'unsaved-model-b');
     secondModel.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '导入已有配置'));
   await view.click(findButton(view, '2. 预览可导入模型'));
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
   await view.click(view.container.querySelector('input[type="radio"]'));
@@ -563,7 +534,7 @@ test('source cards read their own models immediately and reject a late response 
     previewImport: async source => source === 'cc-switch' ? first : current,
   });
   await view.render(1, view.props, 'model');
-  await view.click(findButton(view, '从 CC Switch / OpenClaw 导入'));
+  await view.click(findButton(view, '导入已有配置'));
   const cards = () => [...view.container.querySelectorAll('.imp-card')];
   assert.match(cards()[0].textContent, /点击读取模型/);
   assert.match(cards()[0].textContent, /已检测到/);
@@ -678,7 +649,7 @@ test('transcription cards use natural roles and missing key guidance rather than
   ];
   const view = await fixture(t, { fetchModelChannels: response });
   await view.render(1, view.props, 'model');
-  await view.click(findButton(view, '语音转写'));
+  await view.click(findButton(view, '语音转文字'));
   const cards = [...view.container.querySelectorAll('.provider-card')];
   assert.deepEqual(cards.map(card => card.querySelector('.provider-heading strong').textContent), ['自带字幕', '云端转写', '本地兜底']);
   assert.deepEqual(cards.map(card => card.querySelector('.provider-body').hidden), [true, true, true]);
@@ -692,10 +663,10 @@ test('transcription cards use natural roles and missing key guidance rather than
   await view.click(cards[2].querySelector('.provider-toggle'));
   assert.match(cards[2].textContent, /无需 API Key/);
   await view.click(findButton(view, '打开环境安装'));
-  assert.equal(view.nav('环境安装').getAttribute('aria-current'), 'page');
+  assert.equal(view.nav('系统与数据').getAttribute('aria-current'), 'page');
 });
 
-for (const [channel, label] of [['speech', '配音'], ['video', '视频'], ['music', '音乐']]) test(`editable ${channel} models and addresses are available directly after expanding the provider`, async t => {
+for (const [channel, label] of [['speech', '文字配音'], ['video', '视频生成'], ['music', '音乐生成']]) test(`editable ${channel} models and addresses are available directly after expanding the provider`, async t => {
   const response = modelChannels(configuredRows());
   response.channels[channel].rows = [{ slot: 'editable-provider', order: 0, name: 'Editable provider', sub: channel,
     type: 'openai', model: 'configured-model', baseUrl: 'https://media.example.test/v1', keyMasked: 'sk***',
@@ -778,7 +749,7 @@ test('transcription saving protects editable fields until the server responds', 
     fetchModelChannels: initial, saveModelConfig: () => new Promise(resolve => { finish = resolve; }),
   });
   await view.render(1, view.props, 'model');
-  await view.click(findButton(view, '语音转写'));
+  await view.click(findButton(view, '语音转文字'));
   const model = view.container.querySelector('input[aria-label="模型名称"]');
   await act(async () => {
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(model, 'first-edit');

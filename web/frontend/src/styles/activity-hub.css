@@ -1,3 +1,76 @@
-.activity-hub{height:100%;min-height:0;display:flex;flex-direction:column;overflow:auto}.activity-hub-nav{display:flex;gap:8px;padding:16px 24px 0;flex:none}.activity-hub-nav button{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font:inherit;font-size:12px;background:var(--surface);color:var(--text-secondary);cursor:pointer}.activity-hub-nav button[aria-pressed=true]{background:var(--accent-soft);color:var(--text)}.activity-hub>.activity-page{flex:1;min-height:0}
+.activity-hub{height:100%;min-height:0;display:flex;flex-direction:column;overflow:auto}.activity-hub-nav{display:flex;gap:8px;padding:16px 24px 0;flex:none}.activity-hub-nav button{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font:inherit;font-size:12px;background:var(--surface);color:var(--text-secondary);cursor:pointer}.activity-hub-nav button[aria-pressed=true]{background:var(--accent-soft);color:var(--text)}.activity-hub>.activity-page{flex:1;min-height:0;overflow:visible}
 .failure-records,.task-overview{padding:24px;min-width:0}.failure-records>header,.task-overview>header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.failure-records h2,.task-overview h2{font-size:20px;margin-right:auto}.hub-note{font-size:12px;color:var(--text-tertiary);line-height:1.7}.failure-record-layout{display:grid;grid-template-columns:minmax(200px,1fr) minmax(0,2fr);gap:20px}.failure-list{display:flex;flex-direction:column;gap:6px;max-height:65dvh;overflow:auto}.failure-list button{text-align:left;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-secondary);font:inherit;cursor:pointer;overflow-wrap:anywhere}.failure-list button[aria-pressed=true]{background:var(--accent-soft)}.failure-list small{display:block;color:var(--text-tertiary)}.failure-detail{min-width:0;overflow-wrap:anywhere}.failure-detail dl>div{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px;margin:7px 0;font-size:12px}.failure-detail dd{margin:0}.failure-detail dt{color:var(--text-tertiary)}.failure-detail li{font-size:12px;margin:7px 0}.failure-event-link{font:inherit;font-size:12px;cursor:pointer;background:transparent;color:var(--text-secondary);border:0;text-decoration:underline;text-underline-offset:3px}.failure-overlay{position:fixed;inset:0;z-index:900;background:#0005;display:grid;place-items:center;padding:16px}.failure-overlay>[role=dialog]{background:var(--surface);border:1px solid var(--border);border-radius:16px;max-height:90dvh;overflow:auto;width:min(950px,100%);padding:12px}.failure-overlay>[role=dialog]>button{display:block;margin-left:auto}.task-overview-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.task-overview article{padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--surface);min-width:0;overflow-wrap:anywhere}.task-overview h3{font-size:15px}.task-overview p,.task-overview small{font-size:12px;color:var(--text-secondary)}.task-overview button,.failure-records button{cursor:pointer}.task-overview>header>.ui-select{max-width:200px}
 @media(max-width:640px){.failure-records,.task-overview{padding:16px}.failure-record-layout{grid-template-columns:1fr}.failure-list{max-height:180px}.activity-hub-nav{padding-left:16px}}
+
+.activity-hub-heading { display:flex; align-items:center; gap:13px; padding:24px 24px 18px; flex:none; }
+.activity-heading-icon { display:grid; place-items:center; width:44px; height:44px; flex:none; border:1px solid var(--border); border-radius:13px; color:var(--accent-end); background:var(--surface); }
+.activity-hub-heading h1 { margin:0; font-size:24px; font-weight:650; }
+.activity-hub-heading p { margin:5px 0 0; color:var(--text-secondary); font-size:13px; line-height:1.7; }
+.activity-hub-nav { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; padding-top:0; }
+.activity-hub-nav button { display:flex; align-items:center; gap:11px; min-width:0; text-align:left; border-radius:var(--radius-md); padding:13px; font-size:14px; line-height:1.5; }
+.activity-hub-nav button[aria-pressed=true] { border-color:var(--accent-end); background:var(--accent-soft); color:var(--accent-end); }
+.activity-nav-icon { display:flex; flex:none; }
+.activity-hub-nav button small { display:block; color:var(--text-secondary); font-size:11px; font-weight:400; margin-top:3px; }
+.activity-hub button:focus-visible,.activity-hub summary:focus-visible { outline:2px solid var(--accent-start); outline-offset:3px; }
+.task-overview > header,.failure-records > header { margin-bottom:12px; }
+.task-overview > header > div:first-child,.failure-records > header > div:first-child { flex:1; }
+.task-overview h2,.failure-records h2 { margin:0; font-size:18px; }
+.task-overview header .hub-note,.failure-records header .hub-note { margin:5px 0 0; }
+.task-overview-list { display:flex; flex-direction:column; gap:0; border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; }
+.task-overview article { display:flex; align-items:center; gap:14px; padding:16px; border:0; border-bottom:1px solid var(--border); border-radius:0; }
+.task-overview article:last-child { border-bottom:0; }
+.record-source-icon { display:grid; place-items:center; flex:none; width:36px; height:36px; border-radius:10px; color:var(--text-secondary); background:var(--surface-2); }
+.task-row-content { flex:1; min-width:0; }
+.task-row-content h3 { margin:0 0 4px; font-size:14px; }
+.task-row-content p { margin:5px 0 0; line-height:1.7; }
+.record-state { display:inline-flex; align-items:center; gap:6px; padding:4px 9px; font-size:11px; border-radius:6px; color:var(--text-secondary); background:var(--surface-2); flex:none; }
+.record-state.is-active { color:var(--accent-end); background:var(--accent-soft); }
+.record-state.is-attention { color:var(--amber); background:var(--amber-soft); }
+.task-overview article > .btn { flex:none; }
+.record-empty { padding:28px 18px; color:var(--text-secondary); font-size:13px; line-height:1.8; text-align:center; }
+.record-empty > svg { color:var(--text-tertiary); }
+.record-empty h3 { font-size:15px; margin:10px 0 6px; color:var(--text); }
+.failure-list button { display:flex; align-items:flex-start; gap:10px; padding:13px; line-height:1.7; }
+.failure-list button > span:last-child { min-width:0; }
+.failure-list button strong { display:block; color:var(--text); font-size:13px; font-weight:550; }
+.failure-list button small { font-size:11px; margin-top:5px; }
+.failure-row-icon { flex:none; color:var(--amber); display:flex; padding-top:3px; }
+.failure-detail { border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); padding:20px; }
+.failure-detail h3 { font-size:18px; margin:14px 0 0; }
+.failure-detail h4 { font-size:13px; margin-top:22px; }
+.failure-technical { margin-top:18px; padding:14px 0; border-block:1px solid var(--border); }
+.failure-technical summary { cursor:pointer; font-size:13px; }
+.failure-technical summary small { font-size:11px; color:var(--text-secondary); }
+.hub-error { font-size:13px; line-height:1.7; color:var(--red); padding:12px; background:var(--red-soft); border-radius:var(--radius-sm); }
+@media(max-width:640px) {
+  .activity-hub-heading { padding:18px 16px; gap:10px; }
+  .activity-hub-heading h1 { font-size:21px; }
+  .activity-hub-heading p { font-size:12px; }
+  .activity-hub-nav { gap:6px; padding:0 16px; }
+  .activity-hub-nav button { align-items:flex-start; flex-direction:column; gap:6px; padding:10px; font-size:12px; }
+  .activity-hub-nav button small { font-size:10px; }
+  .task-overview article { flex-wrap:wrap; gap:9px; padding:13px; }
+  .task-overview article .record-state { margin-left:45px; }
+  .task-overview article > .btn { margin-left:auto; }
+  .task-row-content { flex-basis:calc(100% - 50px); }
+  .failure-detail { padding:15px; }
+}
+
+.activity-project-usage { padding:24px; min-width:0; }
+.activity-project-usage .usage-body { padding:0; }
+.activity-project-usage .usage-panel { margin:0; border:0; background:transparent; }
+.activity-project-usage .usage-metrics.is-full { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.activity-project-usage .usage-metric { padding:16px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); }
+.activity-project-usage .usage-metric > span { display:flex; gap:7px; align-items:center; }
+.activity-project-usage .usage-metric strong { font-size:22px; }
+.activity-project-usage .usage-metric.secondary strong { font-size:20px; }
+.activity-project-usage .usage-toolbar { justify-content:flex-end; }
+.activity-project-usage [hidden] { display:none!important; }
+.usage-session-link { padding:0; border:0; background:transparent; color:var(--text); font:inherit; text-align:left; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+@media(max-width:640px) {
+  .activity-hub-nav { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .activity-hub-nav button { flex-direction:row; align-items:center; }
+  .activity-project-usage { padding:18px 16px; }
+  .activity-project-usage .usage-metrics.is-full { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .activity-project-usage .usage-metric { padding:12px; }
+}

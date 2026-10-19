@@ -287,8 +287,8 @@ export const IconCoins = ({ size, className, strokeWidth }: P) => (
 );
 export const IconSettings2 = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
-    <path d="M12 3a9 9 0 0 1 9 9 9 9 0 0 1-9 9 9 9 0 0 1-9-9 9 9 0 0 1 9-9Z" />
-    <path d="M15.4 8.6 8.6 15.4" /><path d="M8.6 8.6l6.8 6.8" />
+    <path d="M3 7h4m4 0h10M3 17h10m4 0h4" />
+    <circle cx="9" cy="7" r="2" /><circle cx="15" cy="17" r="2" />
   </svg>
 );
 export const IconDownload = ({ size, className, strokeWidth }: P) => (

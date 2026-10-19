@@ -45,10 +45,10 @@ test('activity uses one compact custom session selector with state and turn coun
  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
  t.after(async()=>{await act(async()=>root.unmount());container.remove();});
  const sessions=['first','second'].map((id,index)=>({id,title:`会话${index+1}`,importedFromBackup:true,messages:Array.from({length:index+1},()=>({role:'user',content:'fixture'}))}));
- await act(async()=>root.render(createElement(Activity,{sessions,activeSessionId:'first',streams:{}})));
+ await act(async()=>root.render(createElement(Activity,{sessions,activeSessionId:'first',streams:{},target:{sessionId:'first',turnId:''}})));
  assert.equal(container.querySelector('.activity-session-rows'),null);
  const trigger=container.querySelector('[aria-label="运行会话"]');
  await act(async()=>trigger.click());assert.match(document.querySelector('[role="listbox"]').textContent,/2 轮对话/);
  await act(async()=>trigger.click());await selectOption(trigger,'second');
- assert.equal(container.querySelector('.activity-detail h2').textContent,'会话2');
+ assert.match(container.querySelector('[aria-label="运行会话"]').textContent,/会话2/);
 });
