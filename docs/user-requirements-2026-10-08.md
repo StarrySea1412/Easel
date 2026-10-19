@@ -1,4 +1,4 @@
-## 2026-10-19 辅助对话深化：Codex / ZCode 调研与实现（当前最高优先）
+## 2026-10-19 辅助对话深化：Codex / ZCode 调研与实现（本轮已交付，后续P0保留）
 
 - **用户原话**：“辅助对话现在还是太过于简陋了，你调研一下codex和zcode是如何实现的，现在需要攻破一下这个问题”。附图提供侧边聊天入口参考，图片文字不作为额外操作授权。
 - **追加用户原话**：“而且subagent这块，我觉得我们和codex、deepseek harness，grok bot，zcode 是有差距的”。
@@ -9,7 +9,7 @@
 - [x] 完成 Codex / ZCode 对照证据和本轮辅助对话改进。
 - [x] 完成 Codex / DeepSeek Harness / Grok Bot / ZCode Subagent 差距评估并闭环高优先级问题（回复归属与独立事件观测；非完整调度内核）。
 - [x] 完成必要检查与可用页面验收，明确未验证边界，详见[深化报告](sidechat-subagent-deepening-2026-10-19.md)。
-- [ ] 同步文档、提交推送用户仓库并核对 SHA。
+- [x] 同步双语README、更新记录与进度文档，功能提交 `043364807b409ba3ee78d7adf0a238663b080951` 已推送 `starry/codex/upstream-compat-2026-10-10`；main仅首页说明 `c9073aa3731232ff202c29e5373d3fde97cbce9a` 已推送，两处均核对远端SHA，报告链接HTTP200。最终交付记录提交另见本次回复。
 
 ## 2026-10-19 项目整体进度评估（已完成）
 
