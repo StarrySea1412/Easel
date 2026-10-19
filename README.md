@@ -1,6 +1,8 @@
-> **真实浏览器与页面分析（2026-10-19）**：新增面板 → 浏览器现有真实隔离Chromium、多网页标签、导航/前后退/刷新、截图点击、DOM填写及操作后观察，正文/元素/日志按页面版本展示；页面、选区、元素和截图可显式加入原主草稿。新Codex线程用动态工具，旧线程/OpenClaw通过本机CLI桥接访问同一网页，站点控制由用户开启。40项后端、58项前端定向、构建/lint及桌面浅深色/390px界面通过；CLI同页操作已验，真实模型分析质量待验。后端正常重启后生效，本轮未重启用户服务、部署138或更新安装器。Subagent持久目录/追问/取消结算P0仍保留。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-runtime-2026-10-19.md)。
+> **浏览器外壳与Jev评估（2026-10-19）**：浏览器改为单行紧凑工具栏与贴边网页，正文/元素/日志按需展开；面板标签和网页标签具有默认图标，站点图标加载中或失败时也保留回退。前端全量1148项、最后定向23项、后端定向29项及构建/lint通过；桌面浅深色与图标已验，本次390px视口覆盖未生效，窄屏视觉验收仍待补。[实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-redesign-version-2026-10-19.md)。Jev适合以后试验中文内容质检，当前不作为核心依赖，未安装或调用模型。[选型判断](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/jev-evaluation-2026-10-19.md)。
 
-> 功能代码位于 `codex/upstream-compat-2026-10-10` 开发分支；`main` 本次仅同步项目首页说明，未合并本轮功能代码。
+> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.0**，相对 138 最近核验的 0.2.8 属于大模块更新；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。是否已安装到 138 以运行 API 的版本、build/revision 为准；**本轮没有部署 138 或更新安装包**。详细信息见[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)。
+
+> **真实浏览器与页面分析（2026-10-19）**：新增面板 → 浏览器现有真实隔离Chromium、多网页标签、导航/前后退/刷新、截图点击、DOM填写及操作后观察，正文/元素/日志按页面版本展示；页面、选区、元素和截图可显式加入原主草稿。新Codex线程用动态工具，旧线程/OpenClaw通过本机CLI桥接访问同一网页，站点控制由用户开启。40项后端、58项前端定向、构建/lint及桌面浅深色/390px界面通过；CLI同页操作已验，真实模型分析质量待验。后端正常重启后生效，本轮未重启用户服务、部署138或更新安装器。Subagent持久目录/追问/取消结算P0仍保留。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-runtime-2026-10-19.md)。
 
 > **辅助对话与 Subagent 深化（2026-10-19）**：辅助对话复用主聊天输入区，支持素材/技能、模型与思考强度、队列、独立流式状态及子会话问答/审批；关闭标签保留历史、草稿和后台运行，可从“＋”重新打开。Agent 办公室新增按已确认子身份核验的最新回复摘要和独立生命周期事件，拒绝外来身份与越界时间的回复。完成隔离浏览器草稿/刷新/重开、菜单、键盘及390px布局检查；真实模型、上传与供应商审批未验。**持久子任务目录、打开原线程追问及取消资源结算仍是P0差距**，不宣称已追平参考产品。未重启本机后端/网关、未部署138或更新安装包；前端可刷新加载，后端改动待正常重启生效。[调研、实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/sidechat-subagent-deepening-2026-10-19.md)。 前端全量1136项、后端定向159项、构建及lint通过。
 
@@ -120,11 +122,11 @@
 
 # 对话、技能与文件交付修正（2026-10-12）
 
-最新界面修正：工具操作默认显示小图标和一行摘要，点击展开命令、回执和文件差异；进度按实际记录顺序穿插，旧操作缺共同顺序时明确说明，避免重复进度。未选技能时“完成选择”禁用，预览不算选中；内容库统一“图片”分类，生成图片用“AI 生图”标签区分，工坊历史进入同一分类。42项前端、62项后端定向检查通过，构建/lint完成；真实隔离Chromium验证桌面/390px、键盘/复制/分页、文件跳转、图片预览/下载和Codex审批入口。工具及模型事件为模拟，实际本地文件/媒体与持久记录HTTP已检查；未发模型或付费请求。源码服务7880已加载新版，详见[验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)。
+最新界面修正：工具操作默认显示小图标和一行摘要，点击展开命令、回执和文件差异；进度按实际记录顺序穿插，旧操作缺共同顺序时明确说明，避免重复进度。未选技能时“完成选择”禁用，预览不算选中；内容库统一“图片”分类，生成图片用“AI 生图”标签区分，工坊历史进入同一分类。42项前端、62项后端定向检查通过，构建/lint完成；真实隔离Chromium验证桌面/390px、键盘/复制/分页、文件跳转、图片预览/下载和Codex审批入口。工具及模型事件为模拟，实际本地文件/媒体与持久记录HTTP已检查；未发模型或付费请求。源码服务7880已加载新版，详见[验收记录](docs/execution-experience-implementation-2026-10-12.md)。
 
-**当前打包暂停，等待用户新指令。** 已完成[桌面选型、包体/启动和竞品差距评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/desktop-harness-assessment-2026-10-12.md)：先补齐执行与产物机制、拆分重型能力和优化启动，Windows 桌面优先验证 WebView2；未迁移到 Electron/Tauri，也未修改既有 Codex 接入计划。
+**当前打包暂停，等待用户新指令。** 已完成[桌面选型、包体/启动和竞品差距评估](docs/desktop-harness-assessment-2026-10-12.md)：先补齐执行与产物机制、拆分重型能力和优化启动，Windows 桌面优先验证 WebView2；未迁移到 Electron/Tauri，也未修改既有 Codex 接入计划。
 
-已按 [Codex 执行体验规划](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/codex-execution-experience-assessment-2026-10-12.md) 实现首版共享执行视图：OpenClaw/Codex 操作卡展示完整命令、目录、输出、退出码和后台进程；文件 diff 与回执同时可查、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，服务中断的未结束记录标为未确认。后端112项、前端102项定向回归及构建通过；真实 Chromium 验证键盘/复制/分页/实时终态、真实本地文件跳转及390px。模型端到端、Codex重启远端对账和完整浏览器操作闭环仍待验证，未调用真实模型或付费服务；见 [实现与验收记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/execution-experience-implementation-2026-10-12.md)。源码已整合原Codex接入、计时与自适应最高实现，既有接入计划保留，便携包继续暂停。
+已按 [Codex 执行体验规划](docs/codex-execution-experience-assessment-2026-10-12.md) 实现首版共享执行视图：OpenClaw/Codex 操作卡展示完整命令、目录、输出、退出码和后台进程；文件 diff 与回执同时可查、分别复制，支持筛选、历史分页和实际产物跳转。思考摘要、工作进度、计划与最终文本分开，实时事件和持久快照按会话/轮次隔离，服务中断的未结束记录标为未确认。后端112项、前端102项定向回归及构建通过；真实 Chromium 验证键盘/复制/分页/实时终态、真实本地文件跳转及390px。模型端到端、Codex重启远端对账和完整浏览器操作闭环仍待验证，未调用真实模型或付费服务；见 [实现与验收记录](docs/execution-experience-implementation-2026-10-12.md)。源码已整合原Codex接入、计时与自适应最高实现，既有接入计划保留，便携包继续暂停。
 
 点击工具栏“对话”会同时进入聊天并展开当前会话列表；再次点击不会丢失当前会话。其它工作区仍按原规则收起会话列。
 
@@ -134,7 +136,7 @@
 
 # Easel 创作工作台
 
-> **ComfyUI 视频工作流（2026-10-17）**：视频工坊已支持配置本地/局域网 ComfyUI API-format workflow，按电影镜头字段组织提示词，提交后读取队列历史并在校验 MP4 后登记到原对话产物；对话内视频可直接播放、刷新和下载。未配置 ComfyUI 时不会自动调用付费视频服务。配置字段、节点要求和验证边界见 [ComfyUI 视频工作流记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/comfyui-video-workflow-2026-10-17.md)。
+> **ComfyUI 视频工作流（2026-10-17）**：视频工坊已支持配置本地/局域网 ComfyUI API-format workflow，按电影镜头字段组织提示词，提交后读取队列历史并在校验 MP4 后登记到原对话产物；对话内视频可直接播放、刷新和下载。未配置 ComfyUI 时不会自动调用付费视频服务。配置字段、节点要求和验证边界见 [ComfyUI 视频工作流记录](docs/comfyui-video-workflow-2026-10-17.md)。
 
 面向本地使用的专业创作工具。将对话、素材、内容项目与小动物 Agent 办公室放在一个工作空间，能看见任务、操作记录和工作区产出。
 
@@ -150,7 +152,7 @@
 
 **10 月 9 日源码迭代**：账号分析新增七平台诊断能力、数据质量与指标口径、同条件比较组、真实标签/评论题材及七天实验；平台切换自动刷新并隔离迟到响应。输入框支持模型/思考强度选择和实测状态；设置提供自定义文本与随机四色图片测试、默认关闭的定时测活（滚动 60 秒最多 2 次、同渠道最多 2 个自动模型）。侧边刻度支持预览定位，会话重命名可请求 Agent 标题建议并由用户保存。CC Switch 导入和小红书人工浏览器登录也已修复。操作及完成度见 [运营交接指南](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/operator-handoff-2026-10-09.md)。这些新功能尚未进入旧便携 ZIP 或公开 0.2.6 安装器；真实扫码身份、发布/SMTP 和最终新包仍待验收；三种模型短回复、Kimi长回复及排队续写已取得。
 
-**追加整改**：模型选择、保存和导入集中同页，厂商图标自动适配，模型项默认折叠。思考浮层保留九档，仅Ultra使用紫色与粒子动画。默认折叠导航、技能依赖图标与hover说明、视觉反推配置、账号状态显隐已接入。最新源码7880已取得三种模型真实短回复、Kimi长回复与排队续写、真实工具写改回执；成本与速度的计算和缺失数据提示已验。平台人工身份、非空采集、发布/SMTP及新运营包仍待验，详见[checklist](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/user-feedback-checklist-2026-10-09.md)。
+**追加整改**：模型选择、保存和导入集中同页，厂商图标自动适配，模型项默认折叠。思考浮层保留九档，仅Ultra使用紫色与粒子动画。默认折叠导航、技能依赖图标与hover说明、视觉反推配置、账号状态显隐已接入。最新源码7880已取得三种模型真实短回复、Kimi长回复与排队续写、真实工具写改回执；成本与速度的计算和缺失数据提示已验。平台人工身份、非空采集、发布/SMTP及新运营包仍待验，详见[checklist](docs/user-feedback-checklist-2026-10-09.md)。
 
 ## 这一版有什么
 
@@ -297,7 +299,7 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 
 当前本地验证不等于真实模型推理、多 Agent 联动、所有平台发布或新安装包升级已经验收。本轮没有自有管理员账号系统。
 
-> **目标入口纠正（2026-10-17）**：目标设置回到当前聊天 composer 内，以同一个输入框和底部工具栏完成 `/goal`、目标编辑与启动；普通草稿、素材、技能、模型和停止入口保留，执行选项默认折叠，Escape 可返回普通对话。仅本机与隔离模拟验收，未启动付费目标、未更新 138 或安装包。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/goal-composer-correction-2026-10-17.md)
+> **目标入口纠正（2026-10-17）**：目标设置回到当前聊天 composer 内，以同一个输入框和底部工具栏完成 `/goal`、目标编辑与启动；普通草稿、素材、技能、模型和停止入口保留，执行选项默认折叠，Escape 可返回普通对话。仅本机与隔离模拟验收，未启动付费目标、未更新 138 或安装包。[实现与验收边界](docs/goal-composer-correction-2026-10-17.md)
 
 > **对话状态点（2026-10-17）**：侧栏现在把紧凑圆点直接放在每条会话标题最左侧：完成为绿点、失败为红点、运行中为蓝点；悬浮提示和无障碍名称仍保留完整状态与失败原因。
 
@@ -306,7 +308,7 @@ CI 覆盖 `main` 与 `codex/**` 开发分支。Windows 安装器构建仍为手�
 本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)，感谢原作者及贡献者。原有功能、历史提交和必要资源保留；本仓库维护独立的创作工作台、办公室交互和可靠性改进，不代表上游官方发行。
 
 采用 [Apache License 2.0](LICENSE)，保留[原有致谢](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/ACKNOWLEDGMENTS.md)。OpenClaw、前端库及技能中的第三方组件继续遵循各自许可证；发布包保留所需许可证信息。
-> **138 已完成 0.2.8 发布（2026-10-14）**：正式入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 运行 `0ba9fe201ca384f40894545db068a093b0e21235` / image `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`，app/browser healthy、重启0。真实管理员 `gaojitest` / `gaoji` 登录、版本API、网关、旧产物摘要、附件下载和持久配置/设备身份均核对通过。Agent真实工具 read/ls/search/fetch/browser/write/exec 通过；138不可达DuckDuckGo已改为Easel自带Bing RSS provider。环境安装页显示OpenClaw当前 `2026.9.6`、官方最新 `2026.10.3`，可让Agent基于官方更新记录评估是否值得升级；不会自动升级。隔离评估建议以兼容验收和安全影响评估为门槛，当前保持2026.9.6。详情见[运行修复记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/runtime-repair-2026-10-14.md)。
+> **138 已完成 0.2.8 发布（2026-10-14）**：正式入口 [https://192.168.0.138:8444/](https://192.168.0.138:8444/) 运行 `0ba9fe201ca384f40894545db068a093b0e21235` / image `sha256:14393be39cc117bed4e6296e022905f0d560109fcc592bbbc7c6b48a2b470000`，app/browser healthy、重启0。真实管理员 `gaojitest` / `gaoji` 登录、版本API、网关、旧产物摘要、附件下载和持久配置/设备身份均核对通过。Agent真实工具 read/ls/search/fetch/browser/write/exec 通过；138不可达DuckDuckGo已改为Easel自带Bing RSS provider。环境安装页显示OpenClaw当前 `2026.9.6`、官方最新 `2026.10.3`，可让Agent基于官方更新记录评估是否值得升级；不会自动升级。隔离评估建议以兼容验收和安全影响评估为门槛，当前保持2026.9.6。详情见[运行修复记录](docs/runtime-repair-2026-10-14.md)。
 > **Agent并行与费用保护（2026-10-16）**：设置 → Agent 协作现在要求先选择已配置的启动模型，才能启用子 Agent；并发数、子任务数、嵌套层级和单任务上限均受约束。未配置时会在调用前阻断 `sessions_spawn`，不会静默继承当前对话的高价模型。仅本机7880已更新，未发起付费任务，138与安装包未更新。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/agent-runtime-safety-2026-10-16.md)。
 
 > **工作进度时间线（2026-10-16）**：聊天进度现在只展示服务实际上报的有序事件；“请求已接收”“已进入运行器”“等待模型事件”等状态不再宣称 Agent 已被唤醒或模型正在思考。心跳单独标记，思考摘要与工作步骤分开，失败、停止、断线续接和备份记录有明确终态。前端1025项测试、构建、lint和Python语法检查通过；仅本机7880更新，未调用付费模型。[实现与验证记录](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/work-progress-redesign-2026-10-16.md)。
