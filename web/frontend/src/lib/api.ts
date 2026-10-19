@@ -548,6 +548,7 @@ export interface AccountItem {
 }
 
 export interface LoginStart {
+  attemptId?: string;
   mode: 'qr' | 'terminal' | 'credentials';   // credentials = 凭证式（公众号 AppID/AppSecret）
   state?: string;       // starting | qr_ready | success | expired | error | unknown
   message?: string;
@@ -596,6 +597,7 @@ export function mpLoginStatus(platform: string): Promise<LoginStatus> {
 }
 
 export interface LoginStatus {
+  attemptId?: string;
   mode: 'qr';
   state: string;
   message: string;
@@ -742,6 +744,11 @@ export function startLogin(platform: string, visibleBrowser = false, options: { 
 
 export function loginStatus(platform: string): Promise<LoginStatus> {
   return request<LoginStatus>(`/api/login/${encodeURIComponent(platform)}/status`);
+}
+
+/** Cancel one QR flow; saved credentials remain untouched. */
+export function cancelLogin(platform: string, attemptId: string): Promise<{ cancelled: boolean; state: string }> {
+  return request(`/api/login/${encodeURIComponent(platform)}/cancel?attemptId=${encodeURIComponent(attemptId)}`, { method: 'POST' });
 }
 
 // ---- 归因层：账号创作数据 ----

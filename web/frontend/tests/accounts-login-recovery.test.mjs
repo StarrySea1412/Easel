@@ -33,7 +33,7 @@ async function fixture(t) {
   const state = {
     requests: [], start: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
     read: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
-    sms: async () => ({ ok: true }), analyzed: 0, whoamiCalls: 0,
+    sms: async () => ({ ok: true }), cancel: async () => ({ cancelled: true, state: 'cancelled' }), analyzed: 0, whoamiCalls: 0,
   };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     state.requests.push({ url, method: options?.method || 'GET' });
@@ -41,6 +41,7 @@ async function fixture(t) {
     if (url === '/api/accounts') return response(accounts);
     if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response({ loggedIn: true, name: 'Synthetic account', avatar: '' }); }
     if (url.endsWith('/sms')) return response(await state.sms());
+    if (url.includes('/cancel?')) return response(await state.cancel(url));
     if (url.endsWith('/status')) return response(await state.read(url));
     if (url.startsWith('/api/login/') || url.startsWith('/api/accounts/wechat-oa/mp-login')) return response(await state.start(url));
     assert.fail(`Unexpected request ${url}`);
@@ -68,7 +69,7 @@ async function fixture(t) {
     const [id, callback] = timers.entries().next().value; timers.delete(id);
     await act(async () => { void callback(); });
   };
-  return { state, container, modal, start, click, tick, timers };
+  return { state, container, modal, start, click, tick, timers, unmount: () => act(async () => root.unmount()) };
 }
 
 test('initial terminal failure is shown once and never schedules a status retry', async t => {
@@ -100,21 +101,87 @@ test('closing during startup ignores the late error and cannot reopen the window
   assert.doesNotMatch(view.container.textContent, /STALE_START_ERROR/);
 });
 
-test('an old startup response cannot replace a new attempt or clear its pending state', async t => {
+test('closing pending startup waits for its ID and cancellation before another platform can start', async t => {
   const view = await fixture(t);
-  const first = deferred(), second = deferred();
+  const first = deferred(), cancelled = deferred();
   let starts = 0;
-  view.state.start = () => (++starts === 1 ? first : second).promise;
+  view.state.start = () => { starts++; return first.promise; };
+  view.state.cancel = () => cancelled.promise;
   await view.start();
   await view.click('关闭');
-  await view.start();
-  await act(async () => first.resolve(snapshot('error', 'STALE_START_ERROR')));
-  assert.match(view.modal().textContent, /启动中/);
-  assert.doesNotMatch(view.modal().textContent, /STALE_START_ERROR/);
-  assert.match(view.container.querySelector('.account-actions > button').textContent, /正在启动/);
-  await act(async () => second.resolve(snapshot('qr_ready', '', '_login/new-attempt.png')));
+  await view.start('知乎');
+  assert.equal(starts, 1);
+  assert.equal(view.modal(), null);
+  assert.match(view.container.textContent, /正在结束登录流程/);
+  await act(async () => first.resolve({ ...snapshot('qr_ready', '', '_login/old-attempt.png'), attemptId: 'a'.repeat(32) }));
+  assert.equal(view.modal(), null);
+  assert.equal(view.state.requests.filter(item => item.url.includes('/cancel?')).length, 1);
+  assert.equal(view.state.requests.at(-1).url, '/api/login/xiaohongshu/cancel?attemptId=' + 'a'.repeat(32));
+  await view.start('知乎');
+  assert.equal(starts, 1);
+  await act(async () => cancelled.resolve({ cancelled: true, state: 'cancelled' }));
+  view.state.start = async () => snapshot('qr_ready', '', '_login/new-attempt.png');
+  await view.start('知乎');
   assert.match(view.modal().querySelector('img').src, /new-attempt.png/);
   assert.equal(view.timers.size, 1);
+});
+
+test('failed cancellation is retryable and never claims resources have been released', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/current.png'), attemptId: 'b'.repeat(32) });
+  view.state.cancel = async () => { throw new Error('offline stop failure'); };
+  await view.start('知乎');
+  await view.click('关闭');
+  assert.equal(view.modal(), null);
+  assert.match(view.container.querySelector('[role="alert"]').textContent, /尚未确认登录流程已结束/);
+  const started = view.state.requests.filter(item => item.url === '/api/login/zhihu').length;
+  await view.start('知乎');
+  assert.equal(view.state.requests.filter(item => item.url === '/api/login/zhihu').length, started);
+  view.state.cancel = async () => ({ cancelled: true, state: 'cancelled' });
+  const retry = [...view.container.querySelectorAll('button')].find(button => button.textContent === '重试结束登录');
+  await act(async () => retry.click());
+  assert.equal(view.container.querySelector('[role="alert"]'), null);
+  await view.start('知乎');
+  assert.ok(view.modal());
+});
+
+test('success closes without cancellation and cancelled status stops polling', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('success'), attemptId: 'c'.repeat(32) });
+  await view.start('知乎');
+  await view.click('完成');
+  assert.equal(view.state.requests.filter(item => item.url.includes('/cancel?')).length, 0);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/current.png'), attemptId: 'd'.repeat(32) });
+  await view.start();
+  view.state.read = async () => ({ ...snapshot('cancelled', '已取消本次登录'), attemptId: 'd'.repeat(32) });
+  await view.tick();
+  assert.equal(view.timers.size, 0);
+  assert.equal(view.modal().querySelector('img'), null);
+  assert.match(view.modal().textContent, /已取消登录/);
+});
+
+test('another window replacing the runner never transfers cancellation ownership', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/owned.png'), attemptId: 'e'.repeat(32) });
+  await view.start('知乎');
+  view.state.read = async () => ({ ...snapshot('qr_ready', '', '_login/other.png'), attemptId: 'f'.repeat(32) });
+  await view.tick();
+  assert.equal(view.timers.size, 0);
+  assert.equal(view.modal().querySelector('img'), null);
+  assert.match(view.modal().textContent, /已由其他窗口更新/);
+  await view.click('关闭');
+  assert.match(view.state.requests.find(item => item.url.includes('/cancel?')).url, /attemptId=e{32}$/);
+});
+
+test('leaving the account page cancels its owned runner and stops polling', async t => {
+  const view = await fixture(t);
+  view.state.start = async () => ({ ...snapshot('qr_ready', '', '_login/owned.png'), attemptId: 'a'.repeat(32) });
+  await view.start('知乎');
+  await view.unmount();
+  assert.equal(view.timers.size, 0);
+  const cancellations = view.state.requests.filter(item => item.url.includes('/cancel?'));
+  assert.equal(cancellations.length, 1);
+  assert.equal(cancellations[0].url, '/api/login/zhihu/cancel?attemptId=' + 'a'.repeat(32));
 });
 
 test('status requests are serial and a late old result cannot overwrite a retried QR', async t => {

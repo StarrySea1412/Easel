@@ -1,3 +1,10 @@
+## 0.3.5 · 2026-10-19 · Cancel owned login flows / 结束所属扫码流程
+
+- 关闭扫码窗口等待启动响应并取消对应attempt；结束前拦住新登录，失败可重试。Closing a QR dialog waits for startup and cancels only its owned attempt before allowing another login.
+- 后端等待子进程实际退出才释放名额；HTTP断开后继续结算，旧请求不能结束新重连，已确认登录等待保存且保留success。Disconnected clients cannot release reservations early; stale cancellation cannot stop a newer runner; confirmed logins finish persistence.
+- 保留Cookie/profile和既有作品；取消状态停止轮询、隐藏旧二维码。Profiles remain intact and cancelled flows no longer poll or expose stale QR images.
+- 验证：后端155项、前端50项、build/lint（20个既有warning），隔离真实浏览器键盘关闭、结算状态和切平台通过。真实平台登录/身份/上传/发布按用户要求暂停，138本版激活待完成。[实现与验收](docs/account-login-cancellation-2026-10-19.md)。
+
 ## 0.3.4 · 2026-10-19 · Platform login admission / 平台登录资源冲突
 
 - 自动账号核验串行并在扫码期间停止后续检查，收到429不再连打全部平台；本标签页的手动核验与登录启动共用队列。Account checks and login startup share a serial queue.

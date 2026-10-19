@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   fetchAccounts, startLogin, loginStatus, mediaUrl,
-  accountWhoami, logoutAccount, submitLoginSms,
+  accountWhoami, logoutAccount, submitLoginSms, cancelLogin,
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
-import type { AccountItem, AccountWhoami, LoginStatus } from '../lib/api';
+import type { AccountItem, AccountWhoami, LoginStart, LoginStatus } from '../lib/api';
 import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified } from '../lib/whoami';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
@@ -35,9 +35,12 @@ const STATE_LABEL: Record<string, string> = {
   success: '登录成功 ✅',
   expired: '二维码已过期',
   error: '登录出错',
+  cancelled: '已取消登录',
   unknown: '等待中…',
 };
-const isLoginTerminal = (state: string) => ['success', 'expired', 'error'].includes(state);
+const isLoginTerminal = (state: string) => ['success', 'expired', 'error', 'cancelled'].includes(state);
+
+type OwnedLogin = { platform: string; start: Promise<LoginStart>; attemptId?: string; state?: string };
 
 type AccountVerification = { state: 'checking' | 'success' | 'expired' | 'error'; message: string };
 
@@ -114,6 +117,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [qrNonce, setQrNonce] = useState(0);   // 每次登录 +1，稳定缓存 key，避免每次轮询 img 闪烁
   const [terminalMsg, setTerminalMsg] = useState('');
   const [busy, setBusy] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState('');
   const [logoutBusy, setLogoutBusy] = useState('');
   const [managedPlatform, setManagedPlatform] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -137,6 +142,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   const [credErr, setCredErr] = useState('');
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loginAttemptRef = useRef(0);
+  const ownedLoginRef = useRef<OwnedLogin | null>(null);
+  const settlingRef = useRef(false);
   const aliveRef = useRef(true);
   const qrPlatformRef = useRef('');   // 当前登录中的平台，供 submitSms 稳定引用
 
@@ -242,16 +249,36 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }, []);
 
-  useEffect(() => () => stopPoll(), [stopPoll]);
-
-  const closeQr = useCallback(() => {
+  const closeQr = useCallback(async () => {
+    if (settlingRef.current) return;
     stopPoll();
-    qrPlatformRef.current = '';
-    setQr(null);
-    setBusy('');
-    setSmsCode(''); setSmsErr(''); setSmsBusy(false);
-    load();
+    const owned = ownedLoginRef.current;
+    settlingRef.current = true;
+    if (aliveRef.current) {
+      setQr(null); setBusy(''); setCancelError('');
+      setSmsCode(''); setSmsErr(''); setSmsBusy(false);
+      setCancelling(!!owned);
+    }
+    try {
+      // Closing while startup is pending still owns its eventual process ID.
+      // No new flow may reuse that process until this cancellation settles.
+      if (owned) {
+        await owned.start;
+        if (owned.attemptId && owned.state !== 'success') await cancelLogin(owned.platform, owned.attemptId);
+      }
+      if (ownedLoginRef.current === owned) ownedLoginRef.current = null;
+      qrPlatformRef.current = '';
+      if (aliveRef.current) { setCancelling(false); load(); }
+    } catch (cause) {
+      if (aliveRef.current) {
+        setCancelling(false);
+        setCancelError(`尚未确认登录流程已结束：${cause instanceof Error ? cause.message : '请重试'}。`);
+      }
+    } finally {
+      settlingRef.current = false;
+    }
   }, [stopPoll, load]);
+  useEffect(() => () => { void closeQr(); }, [closeQr]);
   const qrModalRef = useModalFocus(qr !== null, closeQr);
 
   const submitSms = useCallback(async () => {
@@ -310,7 +337,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   // One attempt owns its initial response, serial polling, and success callback.
   // Closing or retrying invalidates every in-flight response from the old attempt.
   const handleLogin = useCallback(async (a: AccountItem, mp = false, visibleBrowser = false, restart = false) => {
-    if (!a.supported) return;
+    if (!a.supported || settlingRef.current || cancelError) return;
     if (!mp && a.backend === 'wechat-oa') { openCred(a); return; }
     stopPoll();
     const attempt = loginAttemptRef.current;
@@ -326,8 +353,14 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     setQr({ platform: a.platform, name: a.name + (mp ? ' · 后台取数' : ''),
       flow: mp ? 'mp' : 'account', visibleBrowser, state: 'starting', message: '', qr: '' });
 
-    const applyStatus = async (s: Pick<LoginStatus, 'state' | 'message' | 'qr' | 'qrTs' | 'qrKind' | 'qrWidth' | 'qrHeight' | 'visibleBrowser'>) => {
+    const owned: OwnedLogin = { platform: a.platform,
+      start: mp ? startMpLogin(a.platform, { restart }) : startLogin(a.platform, visibleBrowser, { restart }) };
+    ownedLoginRef.current = owned;
+
+    const applyStatus = async (s: LoginStatus) => {
       if (!current()) return;
+      owned.state = s.state;
+      owned.attemptId = s.attemptId || owned.attemptId;
       setQr((prev) => prev && ({ ...prev, state: s.state, message: s.message, qr: s.qr, qrTs: s.qrTs,
         qrKind: s.qrKind, qrWidth: s.qrWidth, qrHeight: s.qrHeight,
         visibleBrowser: s.visibleBrowser ?? prev.visibleBrowser }));
@@ -347,6 +380,11 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       try {
         const s = await (mp ? mpLoginStatus(a.platform) : loginStatus(a.platform));
         if (!current()) return;
+        if (owned.attemptId && s.attemptId && owned.attemptId !== s.attemptId) {
+          owned.state = 'cancelled';
+          setQr(prev => prev && ({ ...prev, state: 'cancelled', qr: '', message: '登录流程已由其他窗口更新，请重新连接。' }));
+          return;
+        }
         failures = 0;
         await applyStatus(s);
         if (isLoginTerminal(s.state)) return;
@@ -361,27 +399,32 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       if (current()) pollRef.current = setTimeout(poll, 2000);
     };
     try {
-      const res = await (mp ? startMpLogin(a.platform, { restart }) : startLogin(a.platform, visibleBrowser, { restart }));
+      const res = await owned.start;
+      owned.state = res.state;
+      owned.attemptId = res.attemptId;
       if (!current()) return;
       if (res.mode === 'terminal' || res.mode === 'credentials') {
         qrPlatformRef.current = '';
+        ownedLoginRef.current = null;
         setQr(null);
         if (res.mode === 'terminal') setTerminalMsg(res.message || '请在终端登录');
         else openCred(a);
         return;
       }
-      await applyStatus({ state: res.state || 'starting', message: res.message || '', qr: res.qr || '',
-        visibleBrowser: res.visibleBrowser,
+      await applyStatus({ mode: 'qr', state: res.state || 'starting', message: res.message || '', qr: res.qr || '',
+        visibleBrowser: res.visibleBrowser, attemptId: res.attemptId,
         qrKind: res.qrKind, qrWidth: res.qrWidth, qrHeight: res.qrHeight,
         qrTs: 'qrTs' in res ? res.qrTs : undefined });
       if (current() && !isLoginTerminal(res.state || 'starting')) pollRef.current = setTimeout(poll, 2000);
     } catch (e) {
+      // A rejected startup has no identifiable runner to cancel safely.
+      if (ownedLoginRef.current === owned) ownedLoginRef.current = null;
       if (current()) setQr((prev) => prev && ({ ...prev, state: 'error', qr: '',
         message: e instanceof Error ? e.message : '启动登录失败，请稍后重试。' }));
     } finally {
       if (current()) setBusy('');
     }
-  }, [stopPoll, runWhoami, openCred, onAnalysisLogin, load]);
+  }, [stopPoll, runWhoami, openCred, onAnalysisLogin, load, cancelError]);
 
   const handleLogout = useCallback(async (a: AccountItem) => {
     identityEpoch.current[a.platform] = (identityEpoch.current[a.platform] || 0) + 1;
@@ -458,6 +501,8 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       {err && <div className="notice-error" role="alert">{err}</div>}
       {logoutMessage && <div className="accounts-message" role="status">{logoutMessage}</div>}
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
+      {cancelling && <div className="accounts-message" role="status">正在结束登录流程…完成后可连接其他平台。</div>}
+      {cancelError && <div className="accounts-message" role="alert">{cancelError} <button className="btn btn-sm" onClick={() => void closeQr()}>重试结束登录</button></div>}
       <div className="accounts-protection"><div><strong>登录凭据留在本机</strong><p>连接状态用于创作与发布；Cookie 和授权码不会在账号卡片中显示。共享屏幕时可隐藏昵称与头像。</p></div><span>可单独管理与退出</span></div>
 
       <section id="accounts-connections" aria-label="账号连接">
@@ -483,14 +528,17 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
               </div>
               <p className="account-login-method">{a.backend === 'wechat-oa' ? '使用微信扫码连接公众号' : a.backend === 'biliup' ? '按登录引导完成账号连接' : '使用手机 App 扫码连接'}</p>
               <div className="account-actions">
-                <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} disabled={!a.supported || pending || w === 'loading'}
-                  onClick={() => logged ? void runWhoami(a.platform) : void handleLogin(a, a.backend === 'wechat-oa')}>
+                <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} aria-disabled={cancelling || !!cancelError || undefined} disabled={!a.supported || pending || w === 'loading'}
+                  onClick={() => {
+                    if (settlingRef.current || cancelError) return;
+                    if (logged) void runWhoami(a.platform); else void handleLogin(a, a.backend === 'wechat-oa');
+                  }}>
                   {pending ? '正在启动…' : w === 'loading' ? '正在检查…' : logged ? '检查登录状态' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>
                 <AccountCheckResult result={verification[a.platform]} />
                 {info?.checkedAt && <p className="account-login-method">上次在线确认：{new Date(info.checkedAt).toLocaleString()}</p>}
                 {a.platform === 'xiaohongshu' && !logged && <button type="button" className="btn btn-block account-browser-login"
-                  disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
+                  aria-disabled={cancelling || !!cancelError || undefined} disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
                   在浏览器中登录
                 </button>}
                 <div className="account-secondary-actions">
@@ -525,7 +573,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
           {err && <p className="notice-error" role="alert">{err}</p>}
           <div className="account-management-buttons">
             <button className="btn" disabled={!!logoutBusy} onClick={() => { setManagedPlatform(null); setConfirmLogout(false); }}>关闭</button>
-            {!confirmLogout && (managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn" disabled={!!logoutBusy || managedInfo === 'loading'} onClick={() => void runWhoami(managedAccount.platform)}>{managedInfo === 'loading' ? '正在检查…' : '检查登录状态'}</button>}
+            {!confirmLogout && (managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn" disabled={cancelling || !!cancelError || !!logoutBusy || managedInfo === 'loading'} onClick={() => void runWhoami(managedAccount.platform)}>{managedInfo === 'loading' ? '正在检查…' : '检查登录状态'}</button>}
             {(managedAccount.hasLocalSession || effLoggedIn(managedAccount)) && <button className="btn account-logout-button" disabled={!!logoutBusy} onClick={() => confirmLogout ? void handleLogout(managedAccount) : setConfirmLogout(true)}>{logoutBusy ? '正在清理…' : effLoggedIn(managedAccount) ? confirmLogout ? '确认退出并清理登录态' : '退出此账号' : confirmLogout ? '确认清除连接记录' : '清除连接记录'}</button>}
           </div>
         </>}
@@ -578,7 +626,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   </p>
                 )}
               </div>
-            ) : ['error', 'expired'].includes(qr.state) ? (
+            ) : ['error', 'expired', 'cancelled'].includes(qr.state) ? (
               <div className="account-login-error" role="alert">
                 <p>{qr.message || (qr.state === 'expired' ? '二维码已过期，请重新获取。' : '登录未完成，请稍后重试。')}</p>
                 <p>已停止检查登录进度，不会自动重试。</p>
@@ -588,7 +636,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             )}
             <div className="account-login-actions">
               <button className="btn" onClick={closeQr}>{qr.state === 'success' ? '完成' : '关闭'}</button>
-              {qrAccount && (['error', 'expired', 'qr_ready'].includes(qr.state) || (qr.state === 'verifying' && qr.qrKind === 'page')) && <button className="btn btn-primary"
+              {qrAccount && (['error', 'expired', 'cancelled', 'qr_ready'].includes(qr.state) || (qr.state === 'verifying' && qr.qrKind === 'page')) && <button className="btn btn-primary"
                 disabled={!!busy} onClick={() => void handleLogin(qrAccount, qr.flow === 'mp', qr.visibleBrowser, true)}>重新连接</button>}
               {qrAccount?.platform === 'xiaohongshu' && !qr.visibleBrowser
                 && (['error', 'expired', 'qr_ready'].includes(qr.state) || (qr.state === 'verifying' && qr.qrKind === 'page')) &&

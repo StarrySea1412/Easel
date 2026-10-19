@@ -3,6 +3,8 @@ import ast
 import asyncio
 import json
 import os
+import re
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -40,7 +42,7 @@ def login_api(tmp_path):
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     names = {'api_login_start', 'api_login_status', '_login_status',
              '_require_account_available', '_account_browser_busy', '_restart_owned_login',
-             'api_mp_login_start', '_mp_login_status'}
+             'api_mp_login_start', '_mp_login_status', 'api_login_cancel', '_write_login_marker'}
     nodes = [node for node in source.body
              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names]
     assert {node.name for node in nodes} == names
@@ -49,7 +51,7 @@ def login_api(tmp_path):
                    and node.target.id == 'LOGIN_RUNNERS')
     app = FastAPI()
     env = {
-        'app': app, 'HTTPException': HTTPException, 'json': json, 'os': os, 'sys': sys,
+        'app': app, 'HTTPException': HTTPException, 'json': json, 'os': os, 'sys': sys, 're': re, 'time': time,
         'LOGIN_RUNNERS': ast.literal_eval(runners), 'LOGIN_TIMEOUT': 240,
         'LOGIN_DIR': tmp_path / 'login', 'LOGIN_PROCESSES': {},
         'SHARED_SCRIPTS': tmp_path / 'scripts', 'DATA_DIR': tmp_path / 'data', 'PROJECT_ROOT': tmp_path,
@@ -57,7 +59,9 @@ def login_api(tmp_path):
         '_WHOAMI_LOCK': threading.Lock(), '_WHOAMI_CACHE': {}, '_WHOAMI_PROCESSES': {},
         '_invalidate_account_check': Mock(), '_account_check_generation': Mock(return_value='isolated-generation'),
         'invalidate_account_context': Mock(), '_proxy_env': lambda: {}, '_wechat_has_credentials': lambda: False,
-        'asyncio': SimpleNamespace(sleep=AsyncMock(), to_thread=asyncio.to_thread),
+        'asyncio': SimpleNamespace(sleep=AsyncMock(), to_thread=asyncio.to_thread,
+                                  create_task=asyncio.create_task, shield=asyncio.shield),
+        '_LOGIN_CANCEL_TASKS': set(),
     }
 
     def spawn(args, **_kwargs):
@@ -338,3 +342,121 @@ def test_failed_login_spawn_releases_server_slot(login_api):
     with pytest.raises(OSError, match='synthetic spawn failure'):
         login_api.client.post('/api/login/douyin')
     assert env['app'].state.server_pools['browser'].active == 0
+
+
+@pytest.mark.parametrize('platform,key,endpoint', [
+    ('douyin', 'douyin', '/api/login/douyin'),
+    ('bilibili', 'bilibili', '/api/login/bilibili'),
+    ('kuaishou', 'kuaishou', '/api/login/kuaishou'),
+    ('weixin-channels', 'weixin-channels', '/api/login/weixin-channels'),
+    ('zhihu', 'zhihu', '/api/login/zhihu'),
+    ('xiaohongshu', 'xiaohongshu', '/api/login/xiaohongshu'),
+    ('wechat-oa', 'wechat-oa-mp', '/api/accounts/wechat-oa/mp-login'),
+])
+def test_cancel_owned_runner_releases_slot_and_preserves_credentials(login_api, monkeypatch, platform, key, endpoint):
+    from easel.runtime_limits import install_limits, release_login_admission
+    env = login_api.env
+    install_limits(SimpleNamespace(app=env['app'], _BG_TASKS=set(), LOGIN_PROCESSES=env['LOGIN_PROCESSES'], check_gateway=lambda: True))
+    cookie = env['DATA_DIR'] / 'cookies.json'
+    cookie.parent.mkdir(parents=True)
+    cookie.write_bytes(b'synthetic saved credentials')
+    first = login_api.client.post(endpoint).json()
+    proc = env['LOGIN_PROCESSES'][key]
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', lambda child: setattr(child, 'returncode', -9))
+    result = login_api.client.post(f'/api/login/{platform}/cancel', params={'attemptId': first['attemptId']})
+    assert result.status_code == 200, result.text
+    assert result.json() == {'cancelled': True, 'state': 'cancelled'}
+    assert env['app'].state.server_pools['browser'].active == 0
+    status = env['_login_status'](key)
+    assert status['state'] == 'cancelled' and status['qr'] == ''
+    assert cookie.read_bytes() == b'synthetic saved credentials'
+    other = 'zhihu' if platform != 'zhihu' else 'douyin'
+    assert login_api.client.post(f'/api/login/{other}').status_code == 200
+    env['LOGIN_PROCESSES'][other].returncode = 0
+    release_login_admission(env['LOGIN_PROCESSES'][other])
+    assert proc.poll() is not None and not env['_ACCOUNT_CLEARING']
+
+
+def test_old_cancel_does_not_stop_restarted_runner(login_api, monkeypatch):
+    first = login_api.client.post('/api/login/douyin').json()
+    stop = Mock(side_effect=lambda child: setattr(child, 'returncode', 0))
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', stop)
+    second = login_api.client.post('/api/login/douyin?restart=true').json()
+    assert first['attemptId'] != second['attemptId']
+    stopped = stop.call_count
+    result = login_api.client.post('/api/login/douyin/cancel', params={'attemptId': first['attemptId']})
+    assert result.json() == {'cancelled': False, 'state': 'superseded'}
+    assert stop.call_count == stopped
+    assert login_api.env['LOGIN_PROCESSES']['douyin'].poll() is None
+    result = login_api.client.post('/api/login/zhihu/cancel', params={'attemptId': second['attemptId']})
+    assert result.json()['state'] == 'superseded'
+    assert stop.call_count == stopped
+
+
+def test_cancel_failure_retains_slot_and_does_not_claim_cancelled(login_api, monkeypatch):
+    from easel.runtime_limits import Pool, release_login_admission
+    env = login_api.env
+    pool = Pool('browser', 1)
+    env['app'].state.server_pools = {'browser': pool}
+    first = login_api.client.post('/api/login/douyin').json()
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', Mock(side_effect=RuntimeError('offline stop failure')))
+    result = login_api.client.post('/api/login/douyin/cancel', params={'attemptId': first['attemptId']})
+    assert result.status_code == 409
+    assert pool.active == 1 and env['_login_status']('douyin')['state'] == 'qr_ready'
+    assert not env['_ACCOUNT_CLEARING']
+    proc = env['LOGIN_PROCESSES']['douyin']
+    proc.returncode = 0
+    release_login_admission(proc)
+
+
+def test_cancel_confirmed_login_waits_for_save_without_killing(login_api, monkeypatch):
+    env = login_api.env
+    first = login_api.client.post('/api/login/douyin').json()
+    env['_write_login_marker']('douyin', 'success', 'saved')
+    proc = env['LOGIN_PROCESSES']['douyin']
+    monkeypatch.setattr(proc, 'wait', lambda timeout: setattr(proc, 'returncode', 0))
+    stop = Mock()
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', stop)
+    result = login_api.client.post('/api/login/douyin/cancel', params={'attemptId': first['attemptId']})
+    assert result.json() == {'cancelled': False, 'state': 'success'}
+    assert env['_login_status']('douyin')['state'] == 'success'
+    stop.assert_not_called()
+
+
+def test_disconnected_cancel_keeps_reservation_until_stop_and_marker_settle(login_api, monkeypatch):
+    from easel.runtime_limits import Pool
+    env = login_api.env
+    pool = Pool('browser', 1)
+    env['app'].state.server_pools = {'browser': pool}
+    entered, finish = threading.Event(), threading.Event()
+    def stop(proc):
+        entered.set()
+        assert finish.wait(5)
+        proc.returncode = 0
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', stop)
+
+    async def scenario():
+        first = await env['api_login_start']('douyin', visibleBrowser=False, restart=False)
+        request = asyncio.create_task(env['api_login_cancel']('douyin', first['attemptId']))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            assert env['_ACCOUNT_CLEARING'] == {'douyin'} and pool.active == 1
+            with pytest.raises(HTTPException) as busy:
+                await env['api_login_start']('douyin', visibleBrowser=False, restart=False)
+            assert busy.value.status_code == 409
+        finally:
+            finish.set()
+            await asyncio.gather(*env['_LOGIN_CANCEL_TASKS'])
+        assert not env['_ACCOUNT_CLEARING'] and pool.active == 0
+        assert env['_login_status']('douyin')['state'] == 'cancelled'
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('attempt', ['', 'invalid', '../other', 'a' * 31])
+def test_cancel_rejects_invalid_attempt_without_launching(login_api, attempt):
+    result = login_api.client.post('/api/login/douyin/cancel', params={'attemptId': attempt})
+    assert result.status_code == 400
+    login_api.popen.assert_not_called()

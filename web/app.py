@@ -280,6 +280,7 @@ def _run_ledger_root() -> Path:
 SYSTEM_TOPLEVEL_DIRS = {"analytics"}
 LOGIN_TIMEOUT = 240
 LOGIN_PROCESSES: dict[str, subprocess.Popen] = {}
+_LOGIN_CANCEL_TASKS: set[asyncio.Task] = set()
 
 # whoami 真校验（起 headless 浏览器，数秒）的进程内缓存：避免账号页 + 工作台重复起浏览器。
 WHOAMI_TTL = 600  # 秒
@@ -5513,7 +5514,7 @@ def _login_status(platform: str) -> dict:
         else:
             from easel.runtime_limits import release_login_admission
             release_login_admission(proc)
-    if data['state'] not in ('success', 'expired', 'error') and proc is not None:
+    if data['state'] not in ('success', 'expired', 'error', 'cancelled') and proc is not None:
         code = proc.poll()
         if code is not None:
             data = {'state': 'error', 'message': f'登录流程已结束，但未返回成功结果。请重新连接（退出码 {code}）。'}
@@ -5538,6 +5539,7 @@ def _login_status(platform: str) -> dict:
         data['qr'] = ''
         data['qrTs'] = 0
     data['visibleBrowser'] = bool(proc is not None and '--headed' in (getattr(proc, 'args', ()) or ()))
+    data['attemptId'] = getattr(proc, '_easel_login_attempt', '') if proc is not None else ''
     return data
 
 
@@ -5801,6 +5803,70 @@ async def api_login_status(platform: str):
         with _WHOAMI_LOCK:
             _WHOAMI_CACHE.pop(platform, None)
     return {'mode': 'qr', **s}
+
+
+@app.post('/api/login/{platform}/cancel')
+async def api_login_cancel(platform: str, attemptId: str):
+    """Stop only the identified QR runner; keep saved credentials and profiles."""
+    cfg = LOGIN_RUNNERS.get(platform)
+    if not cfg:
+        raise HTTPException(404, '未知平台')
+    if not re.fullmatch(r'[a-f0-9]{32}', attemptId):
+        raise HTTPException(400, '无效的登录流程标识')
+    key = 'wechat-oa-mp' if cfg['backend'] == 'wechat-oa' else platform
+    with _PUBLISH_LOCK:
+        proc = LOGIN_PROCESSES.get(key)
+        if proc is None or getattr(proc, '_easel_login_attempt', '') != attemptId:
+            return {'cancelled': False, 'state': 'superseded'}
+        _require_account_available(platform)
+        _ACCOUNT_CLEARING.add(platform)
+
+    def stop():
+        from easel.install_runner import terminate_phase_tree
+        from easel.runtime_limits import release_login_admission
+        try:
+            marker = json.loads((LOGIN_DIR / f'{key}.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            marker = {}
+        if not isinstance(marker, dict):
+            marker = {}
+        try:
+            if proc.poll() is None:
+                # Let an already-confirmed login finish persisting its profile.
+                if marker.get('state') != 'success':
+                    terminate_phase_tree(proc)
+                proc.wait(timeout=5)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise HTTPException(409, '登录流程尚未停止，请稍后重新连接；浏览器资源仍被保留') from exc
+        if proc.poll() is None:
+            raise HTTPException(409, '登录流程仍在结束中，请稍后重试')
+        release_login_admission(proc)
+
+    async def settle():
+        try:
+            await asyncio.to_thread(stop)
+            with _PUBLISH_LOCK:
+                if LOGIN_PROCESSES.get(key) is not proc:
+                    return {'cancelled': False, 'state': 'superseded'}
+                state = _login_status(key)['state']
+                if state != 'success':
+                    _write_login_marker(key, 'cancelled', '已取消本次登录，已保存的登录资料保留')
+                _invalidate_account_check(platform)
+                return {'cancelled': state != 'success', 'state': 'success' if state == 'success' else 'cancelled'}
+        finally:
+            with _PUBLISH_LOCK:
+                _ACCOUNT_CLEARING.discard(platform)
+
+    # A disconnected HTTP client must not release the account reservation while
+    # its executor thread is still stopping the runner or persisting its result.
+    task = asyncio.create_task(settle())
+    _LOGIN_CANCEL_TASKS.add(task)
+    def ended(completed):
+        _LOGIN_CANCEL_TASKS.discard(completed)
+        if not completed.cancelled():
+            completed.exception()
+    task.add_done_callback(ended)
+    return await asyncio.shield(task)
 
 
 class SmsCodeRequest(BaseModel):

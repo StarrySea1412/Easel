@@ -1,4 +1,6 @@
-> **平台登录修复 · 0.3.4（2026-10-19，待138切换）**：后台身份核验串行，扫码期间暂停后续自动检查；服务器只对新登录进程占用名额，已有二维码复用和手动重连不再被自己的名额阻塞，登录身份核验等待会话写入完成。后端140项、前端46项、build/lint通过；138真实B站/抖音/快手二维码入口已验证，扫码后身份与发布仍待验证。[平台测试矩阵](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/platform-login-testing-2026-10-19.md)。
+> **账号连接取消 · 0.3.5（2026-10-19，源码已完成）**：关闭扫码窗口会结束所属登录流程并等待资源结算；启动中关闭、重连、迟到响应和HTTP断开均有流程归属保护，取消失败可见且可重试。后端155项、前端50项、build/lint及隔离真实浏览器界面检查通过。用户已暂停真实平台登录与发布验收；138当前运行 **0.3.4 / 00f61ea06c3a**，0.3.5待激活。[实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/account-login-cancellation-2026-10-19.md)。
+
+> **0.3.4已部署138（2026-10-19）**：隔离和正式运行 **00f61ea06c3a**，验收时app/browser Healthy且新容器零重启。登录名额在新进程内申请，复用/重连保持容量1，成功等待profile保存；HTTPS登录/版本/网关和浏览器导航/DOM/截图通过。正式基线227项中225项摘要不变，2项浏览器临时状态变化单独记录；全部备份保留。真实账号身份与发布未验。[平台矩阵](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/platform-login-testing-2026-10-19.md)。
 
 > **0.3.3已部署138（2026-10-19）**：正式运行 **0.3.3 / dd33c38f02e4**。ClawHub作者说明排版、固定作者/版本导入并选择、刷新留存已在正式页面核对；隔离/正式HTTPS登录、网关、浏览器通过，原30/199个文件摘要保持。指定模型渠道已切换，完整最小对话完成；旧Key从正式配置停用，服务商撤销未操作。首次导入的首页目录提示需刷新消除，外部技能执行及安装器不在本次验收范围。[正式发布回执](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/release-138-0.3.3-2026-10-19.md)。
 
@@ -6,7 +8,7 @@
 
 > **浏览器外壳与Jev评估（2026-10-19）**：浏览器改为单行紧凑工具栏与贴边网页，正文/元素/日志按需展开；面板标签和网页标签具有默认图标，站点图标加载中或失败时也保留回退。前端全量1148项、最后定向23项、后端定向29项及构建/lint通过；桌面浅深色与图标已验。原390px覆盖未生效的问题已在本次138验收补查：真实390px面板布局、网页截图和元素入口通过，完整窄屏流程仍未全验。[此前实现与验收](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-redesign-version-2026-10-19.md)。Jev适合以后试验中文内容质检，当前不作为核心依赖，未安装或调用模型。[选型判断](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/jev-evaluation-2026-10-19.md)。
 
-> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.3**，138已从0.2.8升级至 **0.3.3 / dd33c38f02e4**；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。部署以运行 API 的版本、build/revision 为准，最终文档提交与运行源码提交分别识别；**安装包未更新**。下面各条“未部署138”描述对应其历史开发阶段，当前部署状态以上述发布回执为准；[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)保留评估时快照。
+> **版本与更新判断（2026-10-19）**：开发分支 `codex/upstream-compat-2026-10-10` 当前源码版本为 **0.3.5**，138当前运行 **0.3.4 / 00f61ea06c3a**，0.3.5待激活；源码版本由 `pyproject.toml` 统一提供给后端和前端，版本详情显示两者及界面构建时间，版本不一致时提示。后续新增/重构大模块递增 minor，兼容修复递增 patch。部署以运行 API 的版本、build/revision 为准，最终文档提交与运行源码提交分别识别；**安装包未更新**。下面各条“未部署138”描述对应其历史开发阶段，当前部署状态以上述发布回执为准；[版本评估](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/project-assessment-2026-10-19.md)保留评估时快照。
 
 > **真实浏览器与页面分析（2026-10-19）**：新增面板 → 浏览器现有真实隔离Chromium、多网页标签、导航/前后退/刷新、截图点击、DOM填写及操作后观察，正文/元素/日志按页面版本展示；页面、选区、元素和截图可显式加入原主草稿。新Codex线程用动态工具，旧线程/OpenClaw通过本机CLI桥接访问同一网页，站点控制由用户开启。40项后端、58项前端定向、构建/lint及桌面浅深色/390px界面通过；CLI同页操作已验，真实模型分析质量待验。后端正常重启后生效，本轮未重启用户服务、部署138或更新安装器。Subagent持久目录/追问/取消结算P0仍保留。[实现与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/docs/browser-runtime-2026-10-19.md)。
 

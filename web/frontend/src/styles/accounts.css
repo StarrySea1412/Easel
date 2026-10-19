@@ -115,3 +115,7 @@
 @keyframes account-check-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .account-check-result.is-checking .account-check-icon svg { animation: none; } }
 @media (max-width: 600px) { .accounts-protection { align-items: flex-start; flex-direction: column; gap: 8px; } .account-management-dialog { padding: 20px; } }
+.account-actions button[aria-disabled="true"] {
+  opacity: .5;
+  cursor: not-allowed;
+}

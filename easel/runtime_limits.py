@@ -7,6 +7,7 @@ import inspect
 import os
 import threading
 import time
+import uuid
 
 from fastapi import HTTPException
 
@@ -62,6 +63,7 @@ class LoginAdmission:
 
     def track(self, process):
         self.process = process
+        process._easel_login_attempt = uuid.uuid4().hex
         if self.lease:
             process._easel_login_lease = self.lease
 
