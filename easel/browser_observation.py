@@ -29,7 +29,11 @@ OBSERVE = r"""() => {
   const text = (clone.textContent || '').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim().slice(0, 24000);
   const headings = Array.from(document.querySelectorAll('h1,h2,h3,[role=heading]')).filter(visible).slice(0,80)
     .map(el => ({level:el.getAttribute('aria-level') || el.tagName.slice(1),text:clean(el.innerText)}));
-  return {data:{title:document.title,url:location.href,text,selection:String(getSelection() || '').slice(0,8000),
+  const icon = Array.from(document.querySelectorAll('link[rel~="icon"]')).find(el => {
+    try { const url = new URL(el.href); return /^https?:$/.test(url.protocol) && url.origin === location.origin; } catch { return false; }
+  });
+  const faviconUrl = /^https?:$/.test(location.protocol) ? (icon?.href || new URL('/favicon.ico', location.href).href) : '';
+  return {data:{title:document.title,url:location.href,text,faviconUrl,selection:String(getSelection() || '').slice(0,8000),
     viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},headings,elements,
     frames:Array.from(document.querySelectorAll('iframe')).map(el=>({title:el.title || '',src:el.getAttribute('src') || ''})).slice(0,20)},nodes,document};
 }"""
@@ -38,3 +42,22 @@ ELEMENT_NAME = r"""el => ({connected:el.isConnected,name:(el.getAttribute('aria-
   (el.getAttribute('aria-labelledby') || '').split(' ').map(id=>document.getElementById(id)?.textContent || '').join(' ') ||
   Array.from(el.labels || []).map(label=>label.textContent).join(' ') || el.innerText || el.getAttribute('placeholder') || el.title || el.alt || '')
   .replace(/\s+/g,' ').trim().slice(0,240)})"""
+
+# Fetch only same-origin raster icons through Chromium's guarded network.
+READ_FAVICON = r"""async url => {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 1000);
+  try {
+    const response = await fetch(url, {signal:controller.signal, credentials:'omit', mode:'same-origin'});
+    const type = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!response.ok || !['image/png','image/jpeg','image/webp','image/gif','image/x-icon','image/vnd.microsoft.icon'].includes(type)) return '';
+    const reader = response.body.getReader(); let bytes = [], size = 0;
+    for (;;) {
+      const {done,value} = await reader.read(); if (done) break;
+      size += value.length; if (size > 65536) { await reader.cancel(); return ''; }
+      bytes.push(value);
+    }
+    const data = new Uint8Array(size); let offset = 0;
+    for (const part of bytes) { data.set(part,offset); offset += part.length; }
+    return 'data:'+type+';base64,'+btoa(String.fromCharCode(...data));
+  } catch { return ''; } finally { clearTimeout(timer); }
+}"""

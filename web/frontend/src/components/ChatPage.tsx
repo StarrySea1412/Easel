@@ -21,6 +21,7 @@ import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import ChatPanelHome from './ChatPanelHome';
 import ChatBrowserPanel from './ChatBrowserPanel';
+import ChatPanelIcon from './ChatPanelIcon';
 import { ChatPanelFiles, ChatPanelExecution } from './ChatPanelTools';
 import { loadPanelTools, savePanelTools, PANEL_LABELS, type PanelTool } from '../lib/chatPanels';
 import '../styles/chat-side-panel.css';
@@ -108,6 +109,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
   const [toolTabs,setToolTabs]=useState<Record<string,PanelTool[]>>({});
   const openedTools=useMemo(()=>toolTabs[session.id]||loadPanelTools(session.id),[toolTabs,session.id]);
   const [selectedFileId,setSelectedFileId]=useState<string|undefined>();
+  const [browserIcon,setBrowserIcon]=useState<{sessionId:string;source:string}|null>(null);
+  const onBrowserIcon=useCallback((source:string)=>setBrowserIcon(previous=>previous?.sessionId===session.id&&previous.source===source?previous:{sessionId:session.id,source}),[session.id]);
   const updateTools=(tools:PanelTool[])=>{setToolTabs(previous=>({...previous,[session.id]:tools}));savePanelTools(session.id,tools);};
   const openTool=(tool:PanelTool)=>{if(!openedTools.includes(tool))updateTools([...openedTools,tool]);setPanelTab(tool);setPanelOpen(true);};
   const closeTool=(tool:PanelTool)=>{updateTools(openedTools.filter(item=>item!==tool));if(panelTab===tool)setPanelTab('new');};
@@ -179,8 +182,8 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
     {panelVisible&&<aside className="chat-side-panel" style={{width:panelWidth}} aria-label="对话侧边面板">
       <header className="chat-side-panel-head">
         <div className="chat-side-panel-tabs" role="tablist" aria-label="侧边面板" onKeyDown={event=>{if(event.altKey||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const tabs=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];const index=tabs.indexOf(event.target as HTMLButtonElement);if(index<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[next].focus();tabs[next].click();}}>
-          {panelTab==='new'&&<button type="button" role="tab" aria-selected className="chat-panel-launcher-tab" onClick={openNewPanel}>新增面板</button>}
-          {openedTools.map(tool=><span key={tool} className="chat-side-tab-wrap"><button type="button" role="tab" aria-selected={panelTab===tool} className={'chat-side-tab'+(panelTab===tool?' is-on':'')} onClick={()=>setPanelTab(tool)}>{PANEL_LABELS[tool]}</button><button type="button" className="chat-side-tab-close" aria-label={`关闭：${PANEL_LABELS[tool]}`} onClick={()=>closeTool(tool)}>×</button></span>)}
+          {panelTab==='new'&&<button type="button" role="tab" aria-selected className="chat-panel-launcher-tab" onClick={openNewPanel}><ChatPanelIcon kind="new"/>新增面板</button>}
+          {openedTools.map(tool=><span key={tool} className="chat-side-tab-wrap"><button type="button" role="tab" aria-selected={panelTab===tool} className={'chat-side-tab'+(panelTab===tool?' is-on':'')} onClick={()=>setPanelTab(tool)}><ChatPanelIcon kind={tool} source={tool==='browser'&&browserIcon?.sessionId===session.id?browserIcon.source:undefined}/>{PANEL_LABELS[tool]}</button><button type="button" className="chat-side-tab-close" aria-label={`关闭：${PANEL_LABELS[tool]}`} onClick={()=>closeTool(tool)}>×</button></span>)}
           {sideSessions.map(side=>{
             const on=panelTab==='side'&&activeSide?.id===side.id;
             const drop=sideDrop?.id===side.id?(sideDrop.after?' is-drop-after':' is-drop-before'):'';
@@ -205,11 +208,11 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
                       if(event.key==='F2'){event.preventDefault();setSideRenameId(side.id);}
                       if(event.altKey&&event.key==='ArrowLeft'){event.preventDefault();moveSideChat(side.id,-1);}
                       if(event.altKey&&event.key==='ArrowRight'){event.preventDefault();moveSideChat(side.id,1);}
-                    }}>{side.title}</button>}
+                    }}><ChatPanelIcon kind="side"/>{side.title}</button>}
               {onSideClose&&<button type="button" className="chat-side-tab-close" aria-label={'关闭：'+side.title} title="关闭标签并保留记录（后台任务继续）" onClick={()=>onSideClose(side.id)}>×</button>}
             </span>;
           })}
-          {goal&&<button type="button" role="tab" aria-selected={panelTab==='goal'} className={'chat-side-tab'+(panelTab==='goal'?' is-on':'')} onClick={()=>setPanelTab('goal')}>目标</button>}
+          {goal&&<button type="button" role="tab" aria-selected={panelTab==='goal'} className={'chat-side-tab'+(panelTab==='goal'?' is-on':'')} onClick={()=>setPanelTab('goal')}><ChatPanelIcon kind="goal"/>目标</button>}
           <button type="button" className="chat-side-tab-add" aria-label="新增面板" title="新增面板" onClick={openNewPanel}>＋</button>
         </div>
         <button type="button" className="chat-side-panel-close" aria-label="收起侧边面板" title="收起" onClick={()=>setPanelOpen(false)}>×</button>
@@ -222,7 +225,7 @@ export default function ChatPage({ session, stream, stopping = false, stopError,
             onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
-      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
+      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
   </div>;

@@ -6,9 +6,9 @@ import { IconCompass } from './icons';
 import { showToast } from '../lib/toast';
 import ChatLiveBrowser from './ChatLiveBrowser';
 
-export default function ChatBrowserPanel({sessionId, active = true}: {sessionId:string;active?:boolean}) {
+export default function ChatBrowserPanel({sessionId, active = true, onSiteIcon}: {sessionId:string;active?:boolean;onSiteIcon?:(source:string)=>void}) {
   const [mode,setMode]=useState<'browser'|'reader'>('browser');
-  return <div className="chat-browser-workspace"><div className="browser-mode-tabs"><button type="button" aria-pressed={mode==='browser'} onClick={()=>setMode('browser')}>交互浏览</button><button type="button" aria-pressed={mode==='reader'} onClick={()=>setMode('reader')}>正文读取</button></div><div hidden={mode!=='browser'}><ChatLiveBrowser sessionId={sessionId} active={active&&mode==='browser'}/></div><div hidden={mode!=='reader'}><ChatPageReader sessionId={sessionId}/></div></div>;
+  return <div className="chat-browser-workspace"><div className="chat-browser-live-host" hidden={mode!=='browser'}><ChatLiveBrowser sessionId={sessionId} active={active&&mode==='browser'} onSiteIcon={onSiteIcon} onReadMode={()=>setMode('reader')}/></div><div className="chat-browser-reader-host" hidden={mode!=='reader'}><div className="browser-reader-toolbar"><button type="button" onClick={()=>setMode('browser')}>← 返回浏览器</button><span>正文读取</span></div><ChatPageReader sessionId={sessionId}/></div></div>;
 }
 
 export function ChatPageReader({ sessionId }: { sessionId: string }) {

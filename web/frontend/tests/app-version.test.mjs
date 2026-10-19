@@ -106,3 +106,18 @@ test('SHA-256 repositories retain their full revision in build details', async t
   await act(async () => view.trigger.click());
   assert.equal(document.querySelector('[role=dialog] code').title, value.revision);
 });
+
+
+test('a stale UI and a newer backend show both versions instead of pretending deployment is consistent',async t=>{
+  globalThis.__EASEL_UI_VERSION__='0.2.8';
+  globalThis.__EASEL_UI_BUILT_AT__='2026-10-19T04:00:00Z';
+  t.after(()=>{delete globalThis.__EASEL_UI_VERSION__;delete globalThis.__EASEL_UI_BUILT_AT__;});
+  const view=await fixture(t,()=>({...released,version:'0.3.0'}));
+  assert.match(view.trigger.textContent,/v0\.3\.0/);
+  assert.match(view.trigger.textContent,/版本不一致/);
+  await act(async()=>view.trigger.click());
+  const dialog=document.querySelector('[role=dialog]');
+  assert.match(dialog.textContent,/界面版本v0\.2\.8/);
+  assert.match(dialog.textContent,/后端版本v0\.3\.0/);
+  assert.match(dialog.querySelector('[role=status]').textContent,/确认部署版本并刷新/);
+});

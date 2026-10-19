@@ -4,7 +4,7 @@ export interface BrowserElement {
 }
 export interface BrowserSnapshot {
   id: string; tabId: string; sessionId: string; version: number; capturedAt: string; source: 'browser'; stale: boolean;
-  title: string; url: string; text: string; selection: string;
+  title: string; url: string; text: string; selection: string; favicon?: string;
   viewport: { width: number; height: number; scrollX: number; scrollY: number };
   headings: { level: string; text: string }[]; elements: BrowserElement[];
   frames: { title: string; src: string }[];
@@ -17,10 +17,10 @@ export interface BrowserState {
   sessionId: string; workspaceId: string; tabs: BrowserTab[]; snapshots: Record<string,BrowserSnapshot>;
   jobs: BrowserJob[]; events: BrowserEvent[]; controlOrigins: string[]; profile: 'isolated'; capabilities: string[];
 }
-export type BrowserAction = 'create'|'navigate'|'back'|'forward'|'reload'|'observe'|'click'|'fill'|'press'|'scroll'|'close';
+export type BrowserAction = 'create'|'navigate'|'back'|'forward'|'reload'|'observe'|'click'|'fill'|'press'|'scroll'|'close'|'resize';
 export interface BrowserCommand {
   requestId: string; action: BrowserAction; tabId?: string; snapshotId?: string; ref?: string;
-  url?: string; text?: string; key?: string; x?: number; y?: number; deltaY?: number;
+  url?: string; text?: string; key?: string; x?: number; y?: number; deltaY?: number; width?: number; height?: number;
 }
 export function decodeBrowserState(value: unknown, sessionId: string): BrowserState {
   const object = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object' && !Array.isArray(v));

@@ -1,3 +1,13 @@
+## 0.3.0 · 2026-10-19 · Browser panel and auxiliary-chat expansion
+
+- Major feature release from 0.2.8. Adds the redesigned browser panel, default icons for panel and web tabs, and explicit source-versus-running-version identification. Version source: `pyproject.toml`; the Vite UI embeds the same version.
+- Source release only. The verified 138 deployment remains 0.2.8 / `12f144c8848fc8a2fbc49a1acbfbbde1e63bb681`; 138 was not changed in this work.
+- Validation: 1,148 frontend tests, 23 final focused checks, 29 backend browser/version checks, lint (0 errors; 18 existing warnings) and production build pass. Desktop light/dark screenshots, default/site icons and menu keyboard actions verified in isolation. The 390px viewport override did not take effect, so this revision's narrow-screen visual check remains pending. See [verification and limits](docs/browser-redesign-version-2026-10-19.md).
+- Evaluated TypeSafe Jev for optional content checks; no SDK, credentials or model calls added. It does not replace the chat model or Subagent lifecycle implementation. / 完成Jev选型评估，建议先评中文内容质检，当前不作为核心依赖。[评估](docs/jev-evaluation-2026-10-19.md)。
+
+
+Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.
+
 ## 2026-10-19 · Shared Chromium browser and Agent observations / 共享浏览器运行时
 
 - Real per-chat Chromium tabs, navigation, screenshot/DOM/text/log observations and verified actions; retain the page reader mode. / 每对话独立Chromium标签，导航及版本化截图/DOM/正文/日志、操作后观察，保留正文读取模式。
@@ -468,9 +478,6 @@ October 10 density and alignment: skill setup status and capability badges share
 > **2026-10-10 输入与队列补充**：引导成功后自动接续剩余消息，空闲引导直接发送，运行中先等停止确认；手动停止、发送失败或缺素材仍暂停并保留消息。空闲回到底部显示箭头，运行中显示三点并在hover/focus时切换箭头。已选技能增加类型icon，附件提供图片缩略图/大预览与文件名/格式；“＋”可添加媒体、文件、文件夹素材或打开技能选择。生图/视频比例增加真实宽高示意，提示词输入与思考强度灰色区段增强辨识。引用info改为临时hover/focus提示，与展开引用互斥，Escape关闭。旧标签页切页失败定位为重建删除旧模块，预览构建已保留旧哈希资源；不刷新旧页面实际打开工坊成功。109项定向检查、生产构建和lint通过（既有warning）；真实队列自动取得“引导后继续正常”“剩余队列自动继续正常”。桌面/390px附件与菜单、图标、比例、输入已检查；引用hover属组件检查，尚无真实浏览器选择引用复核。旧未完成项继续保留，便携包仍未生成。
 
 # Changelog
-
-Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.
-
 ## [Unreleased]
 
 ### 2026-10-12 Codex execution experience assessment / 执行过程对标规划

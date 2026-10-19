@@ -42,6 +42,7 @@ test('the tab bar lists every side chat and switches between them', async t => {
   await view.render(createElement(ChatPage, { session: parent, sideSessions: [sideA, sideB] }));
   let tabs = [...view.container.querySelectorAll('.chat-side-tab')];
   assert.deepEqual(tabs.map(b => b.textContent), ['辅助对话', '辅助对话 2']);
+  assert.ok(tabs.every(tab=>tab.querySelector('.chat-panel-tab-icon svg')), 'panel type icons do not wait for remote data');
   assert.equal(tabs[0].getAttribute('aria-selected'), 'false');
   assert.equal(tabs[1].getAttribute('aria-selected'), 'true', 'the newest side chat is active by default');
   assert.equal(view.container.querySelector('.side-chat-composer textarea').getAttribute('aria-label'), '创作消息');
@@ -70,6 +71,7 @@ test('tool tabs keep browser evidence across navigation, persist types per paren
   const openHome=()=>view.click(view.container.querySelector('.chat-side-trigger'));
   const choose=title=>view.click([...view.container.querySelectorAll('.chat-panel-tool-grid button')].find(button=>button.querySelector('strong').textContent===title));
   await openHome();await choose('浏览器');
+  assert.ok([...view.container.querySelectorAll('[role=tab]')].find(tab=>tab.textContent==='浏览器').querySelector('.chat-panel-tab-icon svg'));
   const browser=view.container.querySelector('.chat-browser-panel');
   assert.ok(browser);assert.match(browser.textContent,/读取页面标题/);
   await openHome();await choose('文件');

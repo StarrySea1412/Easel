@@ -17,3 +17,4 @@
 .app-version-details dd{margin:0;min-width:0;overflow-wrap:anywhere;text-align:right}
 .app-version-details code{font-size:11px}
 .app-version-details p{margin:0;color:var(--text-secondary)}
+.app-version-details .app-version-mismatch{margin-top:10px;padding-top:9px;border-top:1px solid var(--border);font-size:11px;line-height:1.7}

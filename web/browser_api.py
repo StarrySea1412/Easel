@@ -24,6 +24,8 @@ class BrowserCommand(BaseModel):
     x: float | None = None
     y: float | None = None
     deltaY: int = Field(default=600, ge=-1600, le=1600)
+    width: int | None = Field(default=None, ge=280, le=1920)
+    height: int | None = Field(default=None, ge=240, le=1600)
 
 
 class BrowserControl(BaseModel):

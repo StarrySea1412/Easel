@@ -22,7 +22,7 @@ import time
 from urllib.parse import urlsplit
 import uuid
 
-from .browser_observation import OBSERVE, ELEMENT_NAME
+from .browser_observation import OBSERVE, ELEMENT_NAME, READ_FAVICON
 from .execution import public_text
 
 
@@ -91,6 +91,8 @@ class Tab:
     closed: bool = False
     error: str = ''
     cdp: object = None
+    favicon_key: str = ''
+    favicon: str = ''
 
 
 @dataclass
@@ -107,7 +109,7 @@ class Session:
 class BrowserService:
     MAX_SESSIONS = 8
     MAX_TABS = 6
-    ACTIONS = {'create', 'navigate', 'back', 'forward', 'reload', 'observe', 'click', 'fill', 'press', 'scroll', 'close'}
+    ACTIONS = {'create', 'navigate', 'back', 'forward', 'reload', 'observe', 'click', 'fill', 'press', 'scroll', 'close', 'resize'}
     MUTATING = {'click', 'fill', 'press'}
 
     def __init__(self, outputs: Path, *, allowed_origins=None, launch=None, idle_seconds=1800):
@@ -371,6 +373,15 @@ class BrowserService:
             data_handle = await handle.get_property('data')
             data = await data_handle.json_value()
             await data_handle.dispose()
+            icon_url = data.pop('faviconUrl', '')
+            if icon_url != tab.favicon_key:
+                tab.favicon_key, tab.favicon = icon_url, ''
+                if icon_url:
+                    try:
+                        tab.favicon = await tab.page.evaluate(READ_FAVICON, icon_url)
+                    except Exception:
+                        pass  # A site's icon must never fail a page observation.
+            data['favicon'] = tab.favicon
             node_list = await handle.get_property('nodes')
             properties = await node_list.get_properties()
             tab.refs = {'e' + index: item.as_element() for index, item in properties.items() if item.as_element()}
@@ -466,6 +477,12 @@ class BrowserService:
                 tab = self._tab(session, job['tabId'])
             async with tab.lock:
                 async with deadline(30):
+                    if action == 'resize' or action == 'create' and ('width' in payload or 'height' in payload):
+                        width, height = payload.get('width'), payload.get('height')
+                        if type(width) is not int or type(height) is not int or not (280 <= width <= 1920 and 240 <= height <= 1600):
+                            raise BrowserError('网页尺寸须在280–1920 × 240–1600范围内。')
+                        tab.dirty = True
+                        await tab.page.set_viewport_size({'width': width, 'height': height})
                     if action in {'create', 'navigate'}:
                         url = payload.get('url') or ('about:blank' if action == 'create' else '')
                         if url != 'about:blank':
@@ -479,7 +496,7 @@ class BrowserService:
                         tab.dirty = True
                         method = getattr(tab.page, {'back':'go_back','forward':'go_forward','reload':'reload'}[action])
                         await method(wait_until='domcontentloaded')
-                    elif action != 'observe':
+                    elif action not in {'observe', 'resize'}:
                         if tab.dirty or not tab.snapshot or payload.get('snapshotId') != tab.snapshot['id'] or tab.page.url != tab.snapshot['url']:
                             raise BrowserError('页面证据已过期，请重新观察后操作。', 409)
                         if action == 'scroll':

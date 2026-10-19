@@ -26,7 +26,7 @@ async function setup(t,sid,initial=state(sid)){
   if(initial)await respond(0,initial);
   t.after(async()=>{await act(async()=>root.unmount());container.remove();});
   return {container,root,requests,respond,
-    click:text=>act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent===text).click())};
+    click:text=>act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent===text||b.getAttribute('aria-label')===text).click())};
 }
 
 test('analysis keeps existing drafts and screenshot attaches only to current chat',async t=>{
@@ -42,7 +42,7 @@ test('analysis keeps existing drafts and screenshot attaches only to current cha
 });
 
 test('element actions use current ref and snapshot, failures remain visible after refresh',async t=>{
-  const v=await setup(t,'element-owner');await v.click('元素');
+  const v=await setup(t,'element-owner');await v.click('查看页面元素');
   await act(async()=>v.container.querySelector('.browser-element-list button').click());
   await v.click('点击元素');
   const body=JSON.parse(v.requests[1].options.body);
@@ -50,7 +50,7 @@ test('element actions use current ref and snapshot, failures remain visible afte
   await v.respond(1,{id:body.requestId,state:'failed',error:'元素已变化',tabId:'tab1'});
   await v.respond(2,state('element-owner',true));
   assert.match(v.container.querySelector('[role=alert]').textContent,/元素已变化/);
-  assert.equal([...v.container.querySelectorAll('button')].find(b=>b.textContent==='分析此页').disabled,true);
+  assert.equal([...v.container.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='分析此页').disabled,true);
   await v.click('重新连接');await v.respond(3,state('element-owner',true));
   assert.equal(v.container.querySelector('[role=alert]'),null);
 });
@@ -87,4 +87,31 @@ test('incompatible responses show reconnect and keyboard screenshot activation o
   await act(async()=>v.container.querySelector('.browser-screenshot').click());
   assert.ok(v.container.querySelector('.browser-element-list'));
   assert.equal(v.requests.length,2,'keyboard activation must not click coordinates 0,0');
+});
+
+
+test('page icons keep a default until loaded, reject remote URLs and recover from broken images',async t=>{
+  // happy-dom loads data URLs synchronously. Hold that event to exercise pending state.
+  let pending=true;
+  const dispatch=window.HTMLImageElement.prototype.dispatchEvent;
+  t.mock.method(window.HTMLImageElement.prototype,'dispatchEvent',function(event){
+    if(pending&&event.type==='load')return true;
+    return dispatch.call(this,event);
+  });
+  const data=state('icon-owner');data.tabs.push({...data.tabs[0],id:'tab2',title:'第二页'});
+  data.snapshots.tab1.favicon='https://untrusted.test/icon.png';
+  data.snapshots.tab2={...data.snapshots.tab1,tabId:'tab2',id:'shot2',favicon:'data:image/png;base64,aGVsbG8='};
+  const v=await setup(t,'icon-owner',data);
+  const icons=v.container.querySelectorAll('.browser-page-tabs .browser-site-icon');
+  assert.ok(icons[0].querySelector('svg'),'external URL must retain the default without making a UI-origin request');
+  assert.ok(icons[1].querySelector('img'));
+  assert.ok(icons[1].querySelector('svg'),'pending image keeps the default icon visible');
+  assert.equal(icons[1].querySelector('img').hidden,true);
+  pending=false;
+  await act(async()=>icons[1].querySelector('img').dispatchEvent(new window.Event('load')));
+  assert.equal(icons[1].querySelector('svg'),null,'loaded site icon replaces the default');
+  assert.equal(icons[1].querySelector('img').hidden,false);
+  await act(async()=>icons[1].querySelector('img').dispatchEvent(new window.Event('error')));
+  assert.ok(icons[1].querySelector('svg'),'broken site icon restores the default at the same size');
+  assert.equal(icons[1].querySelector('img'),null);
 });

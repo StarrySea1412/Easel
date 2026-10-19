@@ -5,6 +5,7 @@ import threading
 import time
 import json
 import asyncio
+import base64
 from urllib.request import urlopen
 
 import pytest
@@ -31,7 +32,16 @@ def site():
             pass
 
         def do_GET(self):
-            if self.path == '/probe-count':
+            if self.path == '/favicon.png':
+                body = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if self.path == '/icon-page':
+                body = b'<title>Page icon</title><link rel="icon" href="/favicon.png"><main>Icon fixture</main>'
+            elif self.path == '/probe-count':
                 body = str(getattr(self.server, 'denied_hits', 0)).encode()
             elif self.path == '/denied':
                 self.server.denied_hits = getattr(self.server, 'denied_hits', 0) + 1
@@ -277,3 +287,31 @@ def test_http_routes_and_screenshot_attachment_use_chat_ownership(browser, site)
         assert (browser.outputs/file['path']).read_bytes().startswith(b'\x89PNG')
         assert client.get(path.replace('/owner/','/other/')+'/image').status_code == 404
         assert client.delete('/api/browser/sessions/owner').json()['tabs'][0]['closed']
+
+
+def test_viewport_reflows_real_page_and_invalidates_old_element_refs(browser, site):
+    opened = command(browser, 'create', url=site, width=590, height=760)
+    tab = opened['tabId']
+    before = current(browser, tab)
+    assert before['viewport']['width'] == 590 and before['viewport']['height'] == 760
+    resized = command(browser, 'resize', tab, width=337, height=650)
+    assert resized['state'] == 'completed'
+    after = current(browser, tab)
+    assert after['viewport']['width'] == 337 and after['viewport']['height'] == 650
+    assert after['id'] != before['id']
+    stale = command(browser, 'click', tab, before['id'], ref=ref(before, '应用姓名'))
+    assert stale['state'] == 'failed' and '过期' in stale['error']
+    invalid = command(browser, 'resize', tab, width=100, height=650)
+    assert invalid['state'] == 'failed'
+    assert current(browser, tab)['viewport']['width'] == 337
+
+
+def test_site_icon_is_a_bounded_raster_from_the_guarded_browser_not_a_remote_ui_url(browser, site):
+    opened = command(browser, 'create', url=site+'/icon-page')
+    assert opened['state'] == 'completed'
+    icon = current(browser, opened['tabId'])['favicon']
+    assert icon.startswith('data:image/png;base64,')
+    assert base64.b64decode(icon.split(',',1)[1]).startswith(b'\x89PNG')
+    missing = command(browser, 'navigate', opened['tabId'], url=site+'/')
+    assert missing['state'] == 'completed'
+    assert current(browser, opened['tabId'])['favicon'] == ''
