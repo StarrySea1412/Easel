@@ -1,4 +1,6 @@
 import { registerImportedSkillNames } from './skillDisplayNames';
+import { collectAnalytics, analyticsScope, restoreAnalyticsSnapshot } from './analyticsCache';
+import { publishWorkbenchChange } from './workbenchEvents';
 import { decodeChatCompaction } from './chatCompaction';
 import { decodeChatTiming } from './chatTiming';
 import { publishExecution, decodeExecution } from './execution';
@@ -634,6 +636,9 @@ export interface AccountItem {
   hasLocalSession?: boolean;
   lastStateAt?: number | null;
   credentialStorage?: 'browser_profile' | 'cookie_file' | 'app_credentials';
+  identityKey?: string;
+  identity?: AccountWhoami | null; // 显示资料快照，不是在线结论
+  connection?: AccountWhoami | null; // 同源最新在线核验，不从本地资料推断
 }
 
 export interface LoginStart {
@@ -707,6 +712,8 @@ export interface AccountWhoami {
   loggedIn: boolean;
   name: string;
   avatar: string;   // 头像 URL（http）或空
+  identityKey?: string;
+  accountId?: string;
   verified?: boolean;
   checkedAt?: number; // 在线检查时间，毫秒；本地快照没有此字段
   verificationMessage?: string;
@@ -718,13 +725,15 @@ export function decodeAccountWhoami(value: unknown): AccountWhoami {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('账号状态格式异常，请重新检查登录状态。');
   const row = value as Record<string, unknown>;
   if (typeof row.loggedIn !== 'boolean'
-    || ['name', 'avatar', 'verificationMessage'].some(key => row[key] !== undefined && typeof row[key] !== 'string')
+    || ['name', 'avatar', 'verificationMessage', 'identityKey', 'accountId'].some(key => row[key] !== undefined && typeof row[key] !== 'string')
     || (row.verified !== undefined && typeof row.verified !== 'boolean')
     || (row.authState !== undefined && !['online', 'login_required', 'not_connected', 'unknown'].includes(row.authState as string))
     || (row.checkedAt !== undefined && (typeof row.checkedAt !== 'number' || !Number.isFinite(row.checkedAt) || row.checkedAt < 0))) {
     throw new Error('账号状态格式异常，请重新检查登录状态。');
   }
   return { loggedIn: row.loggedIn, name: row.name as string || '', avatar: row.avatar as string || '',
+    ...(typeof row.identityKey === 'string' ? { identityKey: row.identityKey } : {}),
+    ...(typeof row.accountId === 'string' ? { accountId: row.accountId } : {}),
     ...(!row.loggedIn && !['login_required', 'not_connected'].includes(row.authState as string)
       ? { verified: false } : row.verified !== undefined ? { verified: row.verified as boolean } : {}),
     ...(row.authState !== undefined ? { authState: row.authState as AccountWhoami['authState'] } : {}),
@@ -902,6 +911,9 @@ export interface AccountAnalytics {
   following: number | null;
   posts: number | null;
   metrics: { label: string; value: string | number; vs: string }[];
+  metrics_source?: { schema: string; section: string; url: string; period: string; from?: string; to?: string } | null;
+  metrics_title?: string;
+  metricsNeedsRefresh?: boolean;
   notes: { title: string; url: string; cover?: string; stat?: string }[];
   growth: Record<'last' | 'day' | 'week' | 'month' | 'year',
     { followers: number | null; likes: number | null; posts: number | null; since_days: number | null } | null>;
@@ -915,9 +927,17 @@ export function fetchAnalyticsPlatforms(): Promise<AnalyticsPlatform[]> {
 }
 
 /** 抓某平台已登录账号的创作数据，客户端等待时限略长于后端。 */
-export function fetchAccountAnalytics(platform: string): Promise<AccountAnalytics> {
-  return request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}`,
-    { signal: AbortSignal.timeout(platform === 'wechat-oa' ? 195000 : 105000) });
+export function fetchAccountAnalytics(platform: string, force = false): Promise<AccountAnalytics> {
+  return collectAnalytics(platform, () => request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}${force ? '?refresh=true' : ''}`,
+    { signal: AbortSignal.timeout(195000) }), force);
+}
+
+export async function restoreAccountAnalytics(platform: string): Promise<void> {
+  const scope = analyticsScope(platform);
+  const result = await request<{data:AccountAnalytics|null;running:boolean}>(`/api/analytics/${encodeURIComponent(platform)}/snapshot`);
+  if (scope !== analyticsScope(platform)) return;
+  if (result.data) restoreAnalyticsSnapshot(platform, result.data, scope);
+  if (result.running) await fetchAccountAnalytics(platform, true);
 }
 
 export interface XhsAnalysisAccount {
@@ -1597,11 +1617,11 @@ export function selectImportModel(payload: ImportCandidateRequest & { model: str
 export function applyImport(source: string, id: string, slot: string, path = '', previewToken = '', model = ''): Promise<ModelChannelsResponse & {
   ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
 }> {
-  return request('/api/models/import/apply', {
+  return request<ModelChannelsResponse & {ok:boolean;note?:string;applied:{name:string;slot:string;source:string;fields:string[]}}>('/api/models/import/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, id, slot, path, previewToken, model }),
-  });
+  }).then(value => { publishWorkbenchChange({domain:'models'}); return value; });
 }
 
 export interface ModelSaveRow {
@@ -1626,11 +1646,11 @@ export interface ModelSaveResponse extends ModelChannelsResponse {
 }
 
 export function saveModelConfig(channel: string, rows: ModelSaveRow[], deletedProviders: string[] = [], providerOrder?: string[]): Promise<ModelSaveResponse> {
-  return request('/api/settings/models/save', {
+  return request<ModelSaveResponse>('/api/settings/models/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ channel, rows, deletedProviders, providerOrder }),
-  });
+  }).then(value => { publishWorkbenchChange({domain:'models'}); return value; });
 }
 
 export interface ModelChannelRows { rows: ModelRow[] }

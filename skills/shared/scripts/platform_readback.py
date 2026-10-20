@@ -227,8 +227,9 @@ def read_douyin_works(page, *, limit: int = 20, evaluate_retries: int = 3) -> li
         raise RuntimeError(f"读回接口报错：status_code={status_code} {msg}")
 
     data = body.get("data") if isinstance(body.get("data"), dict) else {}
-    raw_items = (data.get("work_list") or body.get("aweme_list")
-                 or data.get("aweme_list") or body.get("items") or [])
+    raw_items = next((container[key] for container, key in
+                      ((data, "work_list"), (body, "aweme_list"), (data, "aweme_list"), (body, "items"))
+                      if key in container), None)
     if not isinstance(raw_items, list):
         raise RuntimeError("读回响应缺少 work_list（页面结构可能改版）")
 
@@ -246,6 +247,8 @@ def read_douyin_works(page, *, limit: int = 20, evaluate_retries: int = 3) -> li
                 "play_count": statistics.get("play_count"),
                 "digg_count": statistics.get("digg_count"),
                 "comment_count": statistics.get("comment_count"),
+                "collect_count": statistics.get("collect_count"),
+                "share_count": statistics.get("share_count"),
             },
         ))
     return works

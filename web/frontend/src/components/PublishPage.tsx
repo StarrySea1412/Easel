@@ -16,7 +16,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
-import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, hydrateAccountIdentities, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
   persona: string;
@@ -106,6 +106,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     try {
       const rows = await fetchAccounts();
       if (!mounted.current) return;
+      hydrateAccountIdentities(rows);
       setAccounts(rows); setAccountsError(''); setAccountsLoading(false);
       if (verify) await verifyStale(rows.filter(row => row.supported &&
         (row.loggedIn || row.hasLocalSession || getWhoamiCache()[row.platform])).map(row => row.platform), {
@@ -150,6 +151,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const loginOf = (key: string) => connectionOf(key) === 'online';
 
   const toggle = (k: string) => {
+    if (accountsLoading || accountsError || !loginOf(k) || platformBusy(k)) return;
     if (!platforms.includes(k)) setPreviewPlatform(k);
     setPlatforms((prev) => prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]);
     setBlocked({});
@@ -477,11 +479,17 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
           <section className="publish-section publish-platform-section">
             <div className="publish-section-heading"><h2>发布到</h2><span>可多选 · 已选 {platforms.length} 个</span></div>
             <div className="publish-platform-list" aria-label="发布平台">
-              {PLATFORMS.map(p => <button key={p.key} className={`publish-platform ${platforms.includes(p.key) ? 'active' : ''}${platformBusy(p.key) ? ' is-publishing' : ''}`}
-                aria-pressed={platforms.includes(p.key)} onClick={() => toggle(p.key)}>
+              {PLATFORMS.map(p => {
+                const connection = connectionOf(p.key);
+                const online = !accountsLoading && !accountsError && connection === 'online';
+                const pending = accountsLoading || !!accountsError || connection === 'unknown';
+                const status = pending ? '登录状态待确认' : online ? '已登录，可选择' : '未登录';
+                return <button key={p.key} className={`publish-platform ${platforms.includes(p.key) ? 'active' : ''}${online ? ' is-connected' : ''}${platformBusy(p.key) ? ' is-publishing' : ''}`}
+                data-connection={pending ? 'unknown' : connection} disabled={!online || platformBusy(p.key)} title={`${p.label} · ${status}`}
+                aria-label={`${p.label} · ${status}`} aria-pressed={platforms.includes(p.key)} onClick={() => toggle(p.key)}>
                 <span className="publish-platform-name"><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span>
-                <span className="publish-platform-check">{platformBusy(p.key) ? <PublishSpinner /> : platforms.includes(p.key) ? <IconCheck size={13} /> : '+'}</span>
-              </button>)}
+                <span className="publish-platform-check" aria-hidden="true">{platformBusy(p.key) || pending ? <PublishSpinner /> : platforms.includes(p.key) ? <IconCheck size={13} /> : online ? '+' : <span className="publish-platform-offline" />}</span>
+              </button>; })}
             </div>
           </section>
 

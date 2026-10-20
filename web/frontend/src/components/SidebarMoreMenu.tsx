@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Page } from './Sidebar';
+import { openSidebarPanel, SIDEBAR_PANEL_EVENT } from '../lib/sidebarPanels';
 import { IconSkills, IconOutputs, IconChart, IconHistory, IconProfile } from './icons';
 import '../styles/sidebar-more-menu.css';
 
@@ -18,6 +19,12 @@ export default function SidebarMoreMenu({currentPage,onNavigate}:{currentPage:Pa
   const trigger=useRef<HTMLButtonElement>(null);
   const panel=useRef<HTMLDivElement>(null);
   const id=useId();
+  useEffect(()=>{
+    const changed=(event:Event)=>{if((event as CustomEvent<string>).detail!==id)setOpen(false);};
+    window.addEventListener(SIDEBAR_PANEL_EVENT,changed);
+    return()=>window.removeEventListener(SIDEBAR_PANEL_EVENT,changed);
+  },[id]);
+  useEffect(()=>{if(open)openSidebarPanel(id);},[open,id]);
   const close=(restore=false)=>{setOpen(false);if(restore)trigger.current?.focus({preventScroll:true});};
   useLayoutEffect(()=>{
     if(!open)return;

@@ -228,3 +228,15 @@
 .browser-selection { margin:10px 0; padding:10px; border:1px solid var(--border); border-radius:6px; }
 .browser-selection blockquote { margin:0 0 8px; font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
 @container (max-width:360px) { .browser-toolbar { gap:3px; padding:7px 6px; } .chat-live-browser .browser-icon-button { width:28px; height:28px; } .chat-live-browser .browser-history-group button { width:21px; } .browser-location { margin:0 1px; } .browser-location input { padding:0 6px; font-size:11px; } .browser-start { padding:18px; } }
+.ca-material-quote { margin:14px 0; padding:12px; border:1px solid var(--border); border-radius:8px; }
+.ca-material-quote label { display:grid; gap:8px; font-size:12px; }
+.ca-material-quote textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:120px; background:var(--surface); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:10px; font:inherit; line-height:1.6; }
+.chat-analysis-panel { overflow:auto; min-width:0; }
+.chat-analysis-panel :is(p,pre,blockquote) { overflow-wrap:anywhere; }
+.chat-analysis-panel pre { white-space:pre-wrap; }
+.chat-analysis-panel .ca-paper { margin:12px 0; padding:12px; }
+
+.chat-panel-quote-actions { display: flex; justify-content: flex-end; padding: 8px 14px 0; }
+.chat-panel-content > .ca-material-quote { margin: 10px 14px; }
+
+.chat-panel-material-body { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }

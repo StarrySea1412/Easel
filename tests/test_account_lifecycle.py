@@ -382,3 +382,66 @@ def test_cached_identity_is_rechecked_after_ten_minutes(isolated, monkeypatch):
     now[0] += 480
     assert not asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
     assert not web._account_logged_in('douyin', web.LOGIN_RUNNERS['douyin'])
+
+def test_display_identity_survives_restart_and_unknown_checks_without_claiming_online(isolated, monkeypatch):
+    replies = iter([{'loggedIn': True, 'name': 'Own account', 'avatar': 'https://self.test/me.png'},
+                    {'loggedIn': False, 'error': 'synthetic offline'}])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
+        stdout=json.dumps(next(replies)), returncode=0))
+    first = asyncio.run(web.api_account_whoami('douyin'))
+    web._WHOAMI_CACHE.clear()
+    account = next(row for row in asyncio.run(web.api_accounts()) if row['platform'] == 'douyin')
+    saved = account['identity']
+    assert saved['name'] == 'Own account' and saved['avatar'] == first['avatar']
+    assert saved['verified'] is False and saved['authState'] == 'unknown'
+    unknown = asyncio.run(web.api_account_whoami('douyin', force=True))
+    assert unknown['name'] == saved['name'] and unknown['avatar'] == saved['avatar']
+    assert unknown['checkedAt'] == first['checkedAt'] and unknown['verified'] is False
+    assert 'douyin' not in web._WHOAMI_CACHE
+    stored = json.loads((isolated / '.account-identities/douyin.json').read_text(encoding='utf-8'))
+    assert set(stored) == {'name', 'avatar', 'identityKey', 'checkedAt'}
+
+def test_partial_identity_refresh_preserves_details_but_changed_account_does_not(isolated, monkeypatch):
+    replies = iter([{'loggedIn': True, 'name': 'Old', 'accountId': 'one', 'avatar': 'https://self.test/old.png'},
+                    {'loggedIn': True, 'name': '', 'avatar': ''},
+                    {'loggedIn': True, 'name': 'New', 'accountId': 'two', 'avatar': ''}])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(stdout=json.dumps(next(replies)), returncode=0))
+    first = asyncio.run(web.api_account_whoami('douyin'))
+    partial = asyncio.run(web.api_account_whoami('douyin', force=True))
+    assert partial['name'] == 'Old' and partial['avatar'] == first['avatar']
+    changed = asyncio.run(web.api_account_whoami('douyin', force=True))
+    assert changed['name'] == 'New' and changed['avatar'] == '' and changed['accountId'] == 'two'
+
+@pytest.mark.parametrize('action', ['logout', 'reconnect', 'confirmed_expiry'])
+def test_identity_snapshot_cannot_leak_across_disconnect_or_new_login(isolated, monkeypatch, action):
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(stdout=json.dumps(
+        {'loggedIn': True, 'name': 'Old account', 'avatar': 'https://self.test/old.png'}), returncode=0))
+    first = asyncio.run(web.api_account_whoami('douyin'))
+    if action == 'logout':
+        asyncio.run(web.api_logout('douyin'))
+    elif action == 'reconnect':
+        web._invalidate_account_check('douyin')
+    else:
+        monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
+            stdout=json.dumps({'loggedIn': False, 'reason': 'login_required'}), returncode=0))
+        asyncio.run(web.api_account_whoami('douyin', force=True))
+    row = next(row for row in asyncio.run(web.api_accounts()) if row['platform'] == 'douyin')
+    assert row['identity'] is None
+    if action != 'confirmed_expiry':
+        assert row['identityKey'] != first['identityKey']
+    assert not (isolated / '.account-identities/douyin.json').exists()
+
+def test_account_list_shares_explicit_expiry_but_never_promotes_saved_identity(isolated, monkeypatch):
+    replies = iter([{'loggedIn': True, 'name': 'Own account'}, {'loggedIn': False, 'reason': 'login_required'}])
+    monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(stdout=json.dumps(next(replies)), returncode=0))
+    online = asyncio.run(web.api_account_whoami('xiaohongshu', force=True))
+    account = next(x for x in asyncio.run(web.api_accounts()) if x['platform'] == 'xiaohongshu')
+    assert account['connection']['loggedIn'] and account['connection']['checkedAt'] == online['checkedAt']
+    expired = asyncio.run(web.api_account_whoami('xiaohongshu', force=True))
+    account = next(x for x in asyncio.run(web.api_accounts()) if x['platform'] == 'xiaohongshu')
+    assert account['connection']['authState'] == 'login_required'
+    assert account['connection']['identityKey'] == account['identityKey'] == expired['identityKey']
+    assert not account['loggedIn']
+    web._WHOAMI_CACHE.clear()
+    account = next(x for x in asyncio.run(web.api_accounts()) if x['platform'] == 'xiaohongshu')
+    assert account['connection'] is None

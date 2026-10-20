@@ -1,6 +1,6 @@
 .toast-host{position:fixed;z-index:2200;bottom:24px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);pointer-events:none}
 .toast-notice{display:flex;align-items:center;gap:10px;box-sizing:border-box;padding:11px 12px 11px 15px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--text);box-shadow:var(--shadow-md);font-size:12px;line-height:1.6;pointer-events:auto;overflow-wrap:anywhere}
-.toast-notice-icon{display:flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border-radius:50%;color:var(--text-secondary);border:1px solid currentColor}
+.toast-notice-icon{display:flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;color:var(--text-secondary)}
 .toast-notice-icon svg{display:block}
 .toast-notice.success .toast-notice-icon{color:var(--green)}
 .toast-notice.error .toast-notice-icon{color:var(--red)}

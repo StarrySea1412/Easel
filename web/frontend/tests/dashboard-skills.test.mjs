@@ -125,7 +125,11 @@ async function fixture(t, initial = {}) {
     else if (path.startsWith('/api/agent-office/models')) data = { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
     else if (path === '/api/settings/models/health') data = { results:[], schedules:[] };
     else if (path.startsWith('/api/settings/models/connection?')) data = { modelRef:'fixture/model',state:'unverified',channelName:'测试渠道',detail:'仅模拟配置，不发起推理' };
-    else if (['/api/schedule', '/api/outputs', '/api/accounts', '/api/ideas', '/api/analytics/platforms'].includes(path)) data = [];
+    else if (initial.analytics && path.startsWith('/api/analytics/') && !path.endsWith('/platforms')) data = path.endsWith('/snapshot') ? {data:null,running:false} : await initial.analytics(path);
+    else if (path === '/api/accounts') data = initial.accounts || [];
+    else if (path === '/api/analytics/platforms') data = initial.analyticsPlatforms || [];
+    else if (path.startsWith('/api/accounts/') && path.includes('/whoami')) data = {loggedIn:false,name:'',avatar:'',verified:false};
+    else if (['/api/schedule', '/api/outputs', '/api/ideas'].includes(path)) data = [];
     else throw new Error(`Unexpected request: ${path}`);
     return { ok: true, json: async () => data };
   });
@@ -137,7 +141,7 @@ async function fixture(t, initial = {}) {
   const render = async (status = gatewayStatus) => {
     gatewayStatus = status;
     await act(async () => root.render(createElement(modules.Dashboard, {
-      persona: '', gatewayStatus, onNavigate: page => h.navigations.push(page), onUseTopic: title => h.topics.push(title),
+      persona: '', gatewayStatus, onNavigate: page => h.navigations.push(page), onNavigateAnalysis: initial.onNavigateAnalysis, onUseTopic: title => h.topics.push(title),
       onQuickPrompt: (...args) => {
         h.sent.push(args.slice(0,3));
         h.sentRoute = args.slice(3);
@@ -661,4 +665,98 @@ test('Dashboard exposes the shared thinking control and hands the selected level
   await view.send();
   assert.equal(view.h.sentRoute[0], 'off');
   assert.equal(view.h.sentRoute[1], undefined);
+});
+
+test('account analysis keeps platform icons during reverification and restores the same identity snapshot', async t => {
+  const identity={loggedIn:true,name:'Saved account',avatar:'',identityKey:'scope-keep',accountId:'own',verified:false,ts:Date.now()};
+  const data={platform:'douyin',name:'抖音',nickname:'Saved account',loggedIn:true,followers:17,likes:3,posts:2,following:null,notes:[],metrics:[],growth:{},fetched_at:Date.now()/1000};
+  const savedScope=JSON.stringify(['scope-keep','own']);
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({douyin:{scope:savedScope,at:Date.now(),data}}));
+  const view=await fixture(t,{accounts:[{platform:'douyin',name:'抖音',supported:true,loggedIn:false,hasLocalSession:true,identityKey:'scope-keep'}],analyticsPlatforms:[{platform:'douyin',name:'抖音',loggedIn:false}],extra:{easel_whoami:JSON.stringify({douyin:identity})}});
+  await view.render();
+  const chip=()=>view.container.querySelector('.ana-plats .chip');
+  assert.ok(chip()); assert.ok(chip().querySelector('img.ana-platform-icon'));
+  assert.ok(chip().querySelector('.ana-platform-state.is-unknown'));
+  assert.doesNotMatch(view.container.querySelector('.dash-grid').textContent,/让每一次发布都有反馈/);
+  await act(async()=>chip().click());
+  assert.match(view.container.textContent,/@Saved account/);
+  assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/douyin')),'viewing saved data does not re-scrape');
+  await view.remount();
+  await act(async()=>chip().click());
+  assert.match(view.container.textContent,/@Saved account/);
+  sessionStorage.clear();
+});
+
+test('explicit logged-out platforms remain visible with red state and cannot start account collection', async t => {
+  const identity={loggedIn:false,name:'',avatar:'',identityKey:'scope-out',verified:true,authState:'login_required',checkedAt:Date.now(),ts:Date.now()};
+  const view=await fixture(t,{accounts:[{platform:'xiaohongshu',name:'小红书',supported:true,loggedIn:false,hasLocalSession:true,identityKey:'scope-out'}],analyticsPlatforms:[{platform:'xiaohongshu',name:'小红书',loggedIn:false}],extra:{easel_whoami:JSON.stringify({xiaohongshu:identity})}});
+  await view.render();
+  const chip=view.container.querySelector('.ana-plats .chip');
+  assert.ok(chip.querySelector('.ana-platform-state.is-login_required'));
+  await act(async()=>chip.click());
+  assert.match(view.container.textContent,/小红书账号未登录/);
+  const connect=view.container.querySelector('.ana-account-empty-action');
+  assert.equal(connect.textContent,'连接账号');
+  await view.focus(connect); assert.equal(document.activeElement,connect);
+  await view.click(connect); assert.deepEqual(view.h.navigations,['accounts']);
+  assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/xiaohongshu') && !path.endsWith('/snapshot')));
+});
+
+
+test('account metrics use an aligned data table and distinguish zero from missing comparison', async t => {
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});
+  sessionStorage.clear();
+  const identity={loggedIn:true,name:'表格账号',avatar:'',identityKey:'scope-metrics-table',accountId:'table-owner',verified:true,authState:'online',checkedAt:Date.now(),ts:Date.now()};
+  const metrics=[{label:'播放量',value:'1294',vs:'+65'},{label:'主页访问量',value:'30',vs:'+15'},{label:'作品点赞',value:'58',vs:'+11'},{label:'作品分享',value:'62',vs:'+13'},{label:'作品评论',value:'3',vs:null},{label:'净增粉丝',value:'0',vs:'0'}];
+  const data={platform:'douyin',name:'抖音',nickname:identity.name,loggedIn:true,followers:17,likes:3,posts:2,following:null,notes:[],metrics,metrics_title:'近7日表现',metrics_source:{schema:'douyin-account-overview-v2',section:'账号总览',url:'https://creator.douyin.com/creator-micro/home',period:'last_7_days',from:'2026-10-14',to:'2026-10-20'},growth:{},fetched_at:Date.now()/1000};
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({douyin:{scope:JSON.stringify([identity.identityKey,identity.accountId]),at:Date.now(),data}}));
+  sessionStorage.setItem('easel:analytics-platform','douyin');
+  const view=await fixture(t,{accounts:[{platform:'douyin',name:'抖音',supported:true,loggedIn:true,hasLocalSession:true,identityKey:identity.identityKey}],analyticsPlatforms:[{platform:'douyin',name:'抖音',loggedIn:true}],extra:{easel_whoami:JSON.stringify({douyin:identity})}});
+  await view.render();
+  const table=view.container.querySelector('table.ana-metrics-table');
+  assert.ok(table);
+  assert.deepEqual([...table.querySelectorAll('thead th')].map(c=>c.textContent),['指标','数值','较前7日']);
+  assert.ok([...table.querySelectorAll('thead th')].every(c=>c.scope==='col'));
+  const rows=[...table.querySelectorAll('tbody tr')];
+  assert.equal(rows.length,6);
+  assert.deepEqual(rows.map(r=>[...r.children].map(c=>c.textContent)),metrics.map(m=>[m.label,m.value,m.vs??'—']));
+  assert.ok(rows.every(r=>r.querySelector('th').scope==='row'));
+  assert.equal(rows[4].lastElementChild.title,'平台未提供对比数据');
+  assert.match(table.closest('section').title,/2026-10-14 至 2026-10-20/);
+  await view.remount();
+  assert.equal(view.container.querySelectorAll('table.ana-metrics-table tbody tr').length,6);
+  assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/douyin?')));
+  sessionStorage.clear();
+});
+
+test('account analysis retains previous data and loading across page unmount then shows the shared final result', async t => {
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});
+  sessionStorage.clear();
+  const identity={loggedIn:true,name:'旧结果账号',avatar:'',identityKey:'scope-navigation-new',accountId:'owner',verified:true,authState:'online',checkedAt:Date.now(),ts:Date.now()};
+  const data={platform:'douyin',name:'抖音',nickname:'旧结果账号',loggedIn:true,followers:17,likes:3,posts:2,following:null,notes:[],metrics:[],growth:{},fetched_at:1};
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({douyin:{scope:JSON.stringify([identity.identityKey,identity.accountId]),at:Date.now(),data}}));
+  sessionStorage.setItem('easel:analytics-platform','douyin');
+  let finish; const navigations=[];
+  const view=await fixture(t,{accounts:[{platform:'douyin',name:'抖音',supported:true,loggedIn:true,hasLocalSession:true,identityKey:identity.identityKey}],analyticsPlatforms:[{platform:'douyin',name:'抖音',loggedIn:true}],extra:{easel_whoami:JSON.stringify({douyin:identity})},analytics:()=>new Promise(resolve=>{finish=resolve;}),onNavigateAnalysis:p=>navigations.push(p)});
+  await view.render();
+  const card=()=>view.container.querySelector('[aria-label=账号分析]');
+  assert.match(card().textContent,/@旧结果账号/);
+  assert.equal(card().querySelectorAll('.ana-stat').length,3);
+  assert.ok(card().querySelector('.ana-identity .account-connection-dot'));
+  assert.equal(card().querySelector('.ana-col-metrics'),null);
+  assert.doesNotMatch(card().textContent,/上次采集结果/);
+  await view.click([...card().querySelectorAll('button')].find(b=>b.textContent==='主动分析'));
+  assert.ok(card().querySelector('.ana-refresh-status .publish-spinner'));
+  assert.match(card().textContent,/@旧结果账号/);
+  await view.click([...card().querySelectorAll('button')].find(b=>b.textContent==='内容分析 →'));
+  assert.deepEqual(navigations,['douyin']);
+  await view.remount();
+  assert.match(card().textContent,/@旧结果账号/);
+  assert.ok(card().querySelector('.ana-refresh-status .publish-spinner'));
+  assert.equal(view.h.requests.filter(([path])=>path==='/api/analytics/douyin?refresh=true').length,1);
+  await act(async()=>finish({...data,nickname:'新的分析结果',followers:28,fetched_at:2}));
+  assert.match(card().textContent,/@新的分析结果/);
+  assert.equal(card().querySelector('.ana-refresh-status .publish-spinner'),null);
+  sessionStorage.clear();
 });

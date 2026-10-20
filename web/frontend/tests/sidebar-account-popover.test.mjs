@@ -123,6 +123,15 @@ test('open preview shares online and unknown transitions without treating the lo
   assert.match(view.panel().querySelector('.account-connection-dot button').title, /上次核验/);
   assert.doesNotMatch(view.panel().textContent, /登录状态有效|上次核验/);
   await act(async () => markWhoamiUnverified('xiaohongshu','检查超时'));
+  assert.equal(view.panel().querySelector('.sidebar-account-name').textContent, 'shared');
   assert.ok(view.panel().querySelector('.account-connection-dot.is-checking'));
   assert.doesNotMatch(view.panel().textContent,/已退出|均未登录/);
+});
+
+test('opening another sidebar panel closes account hover preview without refocusing it', async t => {
+  const view = await fixture(t);
+  await view.open(); assert.ok(view.panel());
+  await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:sidebar-panel',{detail:'notification-center'})));
+  assert.equal(view.panel(),null);
+  assert.equal(view.trigger.getAttribute('aria-expanded'),'false');
 });

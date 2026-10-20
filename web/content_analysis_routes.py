@@ -65,6 +65,21 @@ def create_router(root_getter, capture, providers_getter=lambda: [], *, session_
     async def report(platform: str, accountId: str):
         return run(store().report, platform, accountId)
 
+    @router.post('/conversations')
+    async def prepare_conversation(request: Request):
+        from analysis_conversations import AnalysisConversations
+        return run(AnalysisConversations(store()).prepare, await payload(request))
+
+    @router.get('/conversations')
+    async def list_conversations(platform: str, accountId: str):
+        from analysis_conversations import AnalysisConversations
+        return {'conversations': run(AnalysisConversations(store()).list, platform, accountId)}
+
+    @router.post('/conversations/{context_id}/result')
+    async def save_conversation_result(context_id: str, request: Request):
+        from analysis_conversations import AnalysisConversations
+        return run(AnalysisConversations(store()).save_result, context_id, await payload(request))
+
     @router.post('/import')
     async def import_content(request: Request):
         return run(store().ingest, await payload(request))

@@ -1,0 +1,7 @@
+.analysis-progress { margin:16px 0; min-width:0; }
+.analysis-progress-label { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-secondary); margin-bottom:9px; }
+.analysis-progress-label small { margin-left:auto; font-size:11px; }
+.analysis-progress-track { height:5px; overflow:hidden; border-radius:5px; background:var(--surface-2); }
+.analysis-progress-track >span { display:block; width:35%; height:100%; border-radius:inherit; background:var(--accent-start); animation:analysis-progress-slide 1.6s ease-in-out infinite; }
+@keyframes analysis-progress-slide { from { transform:translateX(-110%); } to { transform:translateX(390%); } }
+@media(prefers-reduced-motion:reduce) { .analysis-progress-track >span { animation:none; width:100%; opacity:.6; } }

@@ -6,8 +6,6 @@
 .account-connection-dot-mark { width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 2px color-mix(in srgb,currentColor 14%,transparent); }
 .account-connection-dot.is-online { color:var(--green); }
 .account-connection-dot.is-login_required,.account-connection-dot.is-not_connected { color:var(--red); }
-.account-connection-dot.is-checking { color:var(--amber,#ad7a25); }
-.account-connection-dot.is-checking .account-connection-dot-mark { animation:account-dot-pulse 1.4s ease-in-out infinite; }
+.account-connection-dot.is-checking { color:var(--text-secondary); }
 .account-connection-dot > button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
-@keyframes account-dot-pulse { 50% { opacity:.4;transform:scale(.82); } }
 @media (prefers-reduced-motion:reduce) { .account-connection-dot.is-checking .account-connection-dot-mark { animation:none; } }

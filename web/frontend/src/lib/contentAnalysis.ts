@@ -1,3 +1,4 @@
+import { publishWorkbenchChange } from './workbenchEvents';
 export type MetricKey = 'views' | 'likes' | 'comments' | 'collects' | 'shares';
 export type Metrics = Partial<Record<MetricKey, number | null>>;
 export type AdvancedMetricKey = 'impressions' | 'completions' | 'averageWatchSeconds' | 'durationSeconds' | 'followersAttributed' | 'coins' | 'danmaku';
@@ -40,8 +41,25 @@ export function topicIdeaNote(evidence:TopicEvidence):string {
 }
 const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
 export const analysisUrl = (path:string) => `${base}/api/content-analysis${path}`;
+const pendingReads = new Map<string, Promise<unknown>>();
+let mutationVersion = 0;
 export async function analysisRequest<T>(path:string, method='GET', body?:unknown):Promise<T> {
-  const response = await fetch(analysisUrl(path), {method, cache:'no-store', headers: body ? {'Content-Type':'application/json'} : undefined, body:body ? JSON.stringify(body) : undefined});
-  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(typeof data.detail === 'string' ? data.detail : `请求失败 (${response.status})`); }
-  return response.json();
+  const read = method === 'GET';
+  const synchronizing = path === '/sync' && method === 'POST';
+  const key = mutationVersion + ':' + method + ':' + path + ':' + JSON.stringify(body);
+  const shared = (read || synchronizing) && pendingReads.get(key);
+  if (shared) return shared as Promise<T>;
+  const task = (async () => {
+    const response = await fetch(analysisUrl(path), {method, cache:'no-store', headers: body ? {'Content-Type':'application/json'} : undefined, body:body ? JSON.stringify(body) : undefined});
+    if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(typeof data.detail === 'string' ? data.detail : `请求失败 (${response.status})`); }
+    const result = await response.json();
+    if (!read && (!synchronizing || result.report)) {
+      mutationVersion++;
+      const scope = body as {platform?:string;accountId?:string}|undefined;
+      publishWorkbenchChange({domain:'analysis', platform:scope?.platform, accountId:result.scope?.accountId || scope?.accountId});
+    }
+    return result as T;
+  })();
+  if (read || synchronizing) pendingReads.set(key, task);
+  try { return await task; } finally { if (pendingReads.get(key) === task) pendingReads.delete(key); }
 }

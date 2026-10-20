@@ -239,6 +239,47 @@ def metrics_with_vs(lines: list[str], labels: list[str], anchor: str | None = No
     return out
 
 
+DOUYIN_METRICS_SCHEMA = 'douyin-account-overview-v2'
+
+
+def douyin_account_metrics(lines: list[str]) -> tuple[list[dict], dict | None]:
+    """Read only the dated account overview, never latest works or courses."""
+    compact = [re.sub(r'\s+', '', line) for line in lines]
+    for start, text in enumerate(compact):
+        if text != '账号总览':
+            continue
+        end = next((i for i in range(start + 1, len(lines)) if compact[i] in
+                    {'互动管理', '收入变现', '创作服务', '热门课程', '精选专题', '通知', '最新作品'}), len(lines))
+        if end == len(lines):
+            continue
+        anchors = [i for i in range(start + 1, end) if compact[i] == '近7日']
+        if len(anchors) != 1:
+            continue
+        center = max((i for i in range(start) if compact[i] == '数据中心'), default=-1)
+        if center < 0:
+            continue
+        period = next((re.search(r'统计周期[：:](\d{4})[./-](\d{1,2})[./-](\d{1,2})[-~至](\d{4})[./-](\d{1,2})[./-](\d{1,2})', value)
+                       for value in compact[center + 1:start] if value.startswith('统计周期')), None)
+        if not period:
+            continue
+        from datetime import date
+        try:
+            values = [int(value) for value in period.groups()]
+            begin, finish = date(*values[:3]), date(*values[3:])
+        except ValueError:
+            continue
+        if (finish - begin).days != 6:
+            continue
+        labels = ['播放量', '主页访问量', '作品点赞', '作品分享', '作品评论', '净增粉丝']
+        metrics = metrics_with_vs(lines[anchors[0] + 1:end], labels)
+        if not metrics:
+            continue
+        return metrics, {'schema': DOUYIN_METRICS_SCHEMA, 'section': '账号总览',
+                         'url': PLATFORMS['douyin']['url'], 'period': 'last_7_days',
+                         'from': begin.isoformat(), 'to': finish.isoformat()}
+    return [], None
+
+
 def _delta(cur, base):
     return (cur - base) if (type(cur) is int and type(base) is int) else None
 
@@ -767,7 +808,7 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                 def _sig(L):
                     lk = num_by_label(L, ov.get("likes", []), d)
                     fo = num_by_label(L, ov.get("followers", []), d)
-                    m = metrics_with_vs(L, mets, manchor)
+                    m = douyin_account_metrics(L)[0] if platform == 'douyin' else metrics_with_vs(L, mets, manchor)
                     mv = m[0]["value"] if m else None
                     # 配了 metrics_anchor（如抖音「近7日」）说明该页必有指标块；块异步晚于概览渲染，
                     # 若还没解析到指标就别急着「稳定」返回，继续轮询等它出来（避免 metrics 偶发为空）。
@@ -794,7 +835,10 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                 r["likes"] = num_by_label(lines, ov["likes"], d)
                 r["following"] = num_by_label(lines, ov.get("following", []), d)
                 r["posts"] = num_by_label(lines, cfg.get("posts_labels", ["笔记数", "作品数", "内容数", "视频数"]), d)
-                r["metrics"] = metrics_with_vs(lines, cfg.get("metrics", []), manchor)[:8]
+                if platform == 'douyin':
+                    r['metrics'], r['metrics_source'] = douyin_account_metrics(lines)
+                else:
+                    r["metrics"] = metrics_with_vs(lines, cfg.get("metrics", []), manchor)[:8]
                 r["nickname"] = extract_nickname(lines, ov, cfg.get("uid_anchor", ""))
                 # 昵称优先用专用选择器（视频号文本锚点不稳：概览是「关注者1」同行，锚不到昵称）
                 nsel = cfg.get("nickname_selector")
@@ -827,7 +871,13 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                     except Exception:
                         pass
                 # 最新笔记放最后抓——小红书会跳转到笔记管理页，之后不再读首页
-                r["notes"] = _scrape_notes(platform, page, cfg)
+                if platform == "douyin":
+                    identity, notes = _douyin_content(page)
+                    r["account_id"] = identity["platform_account_id"]
+                    r["nickname"] = identity["display_name"]
+                    r["notes"] = notes
+                else:
+                    r["notes"] = _scrape_notes(platform, page, cfg)
             finally:
                 ctx.close()
     finally:
@@ -1043,6 +1093,36 @@ _DOUYIN_NOTES_JS = r"""() => {
   });
   return out.slice(0, 6);
 }"""
+
+
+def _douyin_content(page):
+    """Reuse authenticated publish readback; missing work-list data is an error, not zero works."""
+    from datetime import datetime, timezone
+    from platform_readback import read_douyin_account, read_douyin_works
+    identity = read_douyin_account(page)
+    works = read_douyin_works(page, limit=20)
+    notes = []
+    for work in works:
+        if work.status != "published":
+            continue
+        ident = work.platform_content_id
+        if not re.fullmatch(r"[0-9]+", ident):
+            continue
+        notes.append({
+            "id": ident, "accountId": identity["platform_account_id"],
+            "title": work.title, "tags": re.findall(r"#([^#\s]+)", work.title)[:40],
+            "format": "视频", "url": f"https://www.douyin.com/video/{ident}",
+            "publishedAt": datetime.fromtimestamp(work.published_at_ms / 1000, timezone.utc).isoformat()
+                           if work.published_at_ms else None,
+            "metrics": {target: work.stats.get(source) for target, source in
+                        [("views", "play_count"), ("likes", "digg_count"), ("comments", "comment_count"),
+                         ("collects", "collect_count"), ("shares", "share_count")]},
+            "stat": "", "cover": "",
+        })
+    confirmed = read_douyin_account(page)
+    if confirmed["platform_account_id"] != identity["platform_account_id"]:
+        raise RuntimeError("采集期间账号发生变化，请重新读取作品")
+    return identity, notes
 
 
 def _extract_note_tokens(data) -> dict:
@@ -1279,7 +1359,9 @@ def cmd_fetch(a) -> int:
         "followers": s["followers"], "likes": s["likes"],
         "following": s["following"], "posts": s["posts"],
         "metrics": s["metrics"], "notes": s["notes"],
-        "metrics_title": "平台近 7 日（创作中心只给这档）",
+        "metrics_title": {'xiaohongshu': '近 7 日表现', 'douyin': '近 7 日表现',
+                          'weixin-channels': '昨日表现', 'zhihu': '累计表现'}.get(a.platform, '平台指标'),
+        "metrics_source": s.get('metrics_source'),
         "overview": [
             {"key": "followers", "label": "粉丝", "value": s["followers"]},
             {"key": "likes", "label": "获赞与收藏" if a.platform == "xiaohongshu" else "获赞", "value": s["likes"]},

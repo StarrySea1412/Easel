@@ -5,8 +5,8 @@ import { clearEvents, markEventsRead, readEvents, readEventSync, removeEvents, s
 import { isLegacyTransientNotice } from '../lib/noticeFormat';
 import { showToast } from '../lib/toast';
 import InlineInfo from './InlineInfo';
-import { IconBell } from './settingsIcons';
-import { IconCheck, IconChevron, IconInfo, IconTrash } from './icons';
+import NotificationIcon from './NotificationIcon';
+import { IconChevron } from './icons';
 import '../styles/event-notifications.css';
 
 const toneLabels = { error: '需要留意', success: '已完成', info: '动态' };
@@ -54,25 +54,25 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
     panel.current?.focus();
   };
   return <div className="global-events">
-    <button ref={button} type="button" className={'nav-item global-events-entry' + (open ? ' is-open' : '')} title={'事件通知，' + unread + ' 条未读'} aria-label={'事件通知，' + unread + ' 条未读'}
+    <button ref={button} id={panelId + '-trigger'} type="button" className={'nav-item global-events-entry' + (open ? ' is-open' : '')} title={'事件通知，' + unread + ' 条未读'} aria-label={'事件通知，' + unread + ' 条未读'}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? dismiss() : setOpen(true)}>
-      <span className="nav-icon" aria-hidden="true"><IconBell size={19} /></span><span className="nav-item-label">事件通知</span>{unread > 0 && <b className="event-unread-badge">{unread > 99 ? '99+' : unread}</b>}
+      <span className="nav-icon" aria-hidden="true"><NotificationIcon name='bell' size={19} /></span><span className="nav-item-label">事件通知</span>{unread > 0 && <b className="event-unread-badge">{unread > 99 ? '99+' : unread}</b>}
     </button>
     {open && createPortal(<section ref={panel} id={panelId} className="global-events-panel" style={position} role="dialog" aria-labelledby={panelId + '-title'} tabIndex={-1}>
-      <header className="event-panel-header"><div className="event-heading"><span className="event-heading-icon" aria-hidden="true"><IconBell size={18} /></span>
+      <header className="event-panel-header"><div className="event-heading"><span className="event-heading-icon" aria-hidden="true"><NotificationIcon name='bell' size={18} /></span>
         <div><h2 id={panelId + '-title'}>事件通知</h2><p>对话、生成与发布的最新动态</p></div></div>
-        <button className="event-icon-button" type="button" aria-label="关闭事件通知" title="关闭" onClick={close}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+        <button className="event-icon-button" type="button" aria-label="关闭事件通知" title="关闭" onClick={close}><NotificationIcon name='x' size={17} /></button>
       </header>
       <div className="event-panel-toolbar"><div className="event-filters" role="group" aria-label="筛选事件" aria-live="polite">
         <button ref={filter === 'all' ? filterButton : undefined} type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部<span>{notices.length}</span></button>
         <button ref={filter === 'unread' ? filterButton : undefined} type="button" aria-pressed={filter === 'unread'} onClick={() => setFilter('unread')}>未读<span>{unread}</span></button></div>
-        <button type="button" className="event-mark-all" disabled={!unread} onClick={() => markRead()}><IconCheck size={14} />全部已读</button>
+        <button type="button" className="event-mark-all" disabled={!unread} onClick={() => markRead()}><NotificationIcon name='check' size={14} />全部已读</button>
       </div>
       <div className="event-panel-scroll">
         {visible.length ? <ol className="event-list">{visible.map((notice, index) => <li key={notice.id}>
           {(index === 0 || day(visible[index - 1].at) !== day(notice.at)) && <h3 className="event-date-heading">{dateLabel(notice.at)}</h3>}
           <article className={'event-card ' + notice.tone + (notice.read ? ' is-read' : ' is-unread')}>
-            <span className="event-notice-tone" role="img" aria-label={toneLabels[notice.tone]} title={toneLabels[notice.tone]}>{notice.tone === 'success' ? <IconCheck size={16} /> : notice.tone === 'error' ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10.3 4-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4m0 3v1" /></svg> : <IconInfo size={16} />}</span>
+            <span className="event-notice-tone" role="img" aria-label={toneLabels[notice.tone]} title={toneLabels[notice.tone]}>{notice.tone === 'success' ? <NotificationIcon name='check' size={16} /> : notice.tone === 'error' ? <NotificationIcon name='triangle-alert' size={16} /> : <NotificationIcon name='info' size={16} />}</span>
             <div className="event-card-content"><div className="event-card-meta"><span>{sourceLabel(notice)}</span>
               <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time></div>
               {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} onClick={() => {
@@ -84,10 +84,10 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
             <div className="event-row-state">
                 {/* 读态点与勾共用同一槽位：未读实心点、已读弱化点恒可见；未读行 hover/聚焦时点让位给勾，无布局跳动。 */}
                 <span className={'event-read-state ' + (notice.read ? 'is-read' : 'is-unread')} role="img" aria-label={notice.read ? '已读' : '未读'} title={notice.read ? '已读' : '未读'} />
-                {!notice.read && <button type="button" className="event-icon-button event-mark-one" aria-label={'标为已读：' + notice.message} title="标为已读" onClick={() => markRead(notice.id)}><IconCheck size={14} /></button>}
+                {!notice.read && <button type="button" className="event-icon-button event-mark-one" aria-label={'标为已读：' + notice.message} title="标为已读" onClick={() => markRead(notice.id)}><NotificationIcon name='check' size={14} /></button>}
             </div>
           </article>
-        </li>)}</ol> : <div className="event-empty" role="status"><span aria-hidden="true">{filter === 'unread' && notices.length ? <IconCheck size={27} /> : <IconBell size={27} />}</span>
+        </li>)}</ol> : <div className="event-empty" role="status"><span aria-hidden="true">{filter === 'unread' && notices.length ? <NotificationIcon name='check' size={27} /> : <NotificationIcon name='bell' size={27} />}</span>
           <h3>{filter === 'unread' && notices.length ? '都看过了' : '暂时没有新动态'}</h3><p>{filter === 'unread' && notices.length ? '所有通知已读，稍后再来看看。' : '对话、生成与发布的完成或失败，都会汇集在这里。'}</p>
           {filter === 'unread' && notices.length > 0 && <button type="button" className="event-view" onClick={() => setFilter('all')}>查看全部事件<IconChevron size={13} /></button>}</div>}
       </div>
@@ -97,7 +97,7 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
           <div className="event-history-note"><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已保存到本机' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本机记录'}</span><InlineInfo label="通知存储说明" hover>最近1000条保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。瞬时确认提示不再进入通知，旧版本留下的这类记录可用“清理提示记录”移除。</InlineInfo>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</div>
           <div className="event-footer-actions">
             {noise.length > 0 && <button type="button" className="event-clean-noise" title="瞬时确认提示不再进入通知；这些是旧版本留下的记录" onClick={cleanNoise}>清理 {noise.length} 条提示记录</button>}
-            <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><IconTrash size={13} />清空</button>
+            <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><NotificationIcon name='trash' size={13} />清空</button>
           </div></>}
       </footer>
     </section>, document.body)}

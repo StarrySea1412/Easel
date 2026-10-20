@@ -1,3 +1,18 @@
+## 0.9.0 · 2026-10-21 · Account analysis workflow / 账号分析工作流
+
+- Keep successful account snapshots and in-flight collection across page navigation; isolate identities and preserve prior results during refresh. / 同账号快照与采集跨页保留，刷新时旧数据叠加加载图标。
+- Add typed analysis conversations, Markdown materials, editable panel quotes and scoped completed-answer writeback. Preparing materials does not send a model request. / 新增分析对话、Markdown材料、辅助面板引用与答复回填；准备材料不自动推理。
+- Rework dashboard result cards, connection empty states and content-shaped skeletons. / 重排账号分析完整结果、连接空态与骨架。
+- Fix Douyin account counters falling through into recommended courses: require account-overview boundaries and a dated seven-day range; invalidate only unverified metrics in old snapshots, preserving identity and works. / 修复推荐课程211.88万误作账号播放量，保留账号与作品并隔离错误旧指标。
+- Present platform metrics in a three-column data table, preserving real zeros and showing missing comparisons without inventing values. / 平台指标改为指标、数值、比较三列表格，保留真实0，不编造缺失比较。
+- Local verification and source branch delivery; host 138 and installers unchanged. / 本机及隔离分支交付；138与安装器未更新。
+
+## 0.8.5 · 2026-10-21 · Account identity refresh / 账号身份刷新
+
+- Preserve the last confirmed nickname and avatar on incomplete same-account checks; persist display identity separately from live authentication so it can recover after Web restart or browser-cache loss without claiming online status. / 同账号资料读取不完整时保留昵称头像；本机单独保存显示身份，Web重启或浏览器缓存缺失后可恢复，不把快照当在线结论。
+- Isolate old identity on reconnect, logout, explicit expiry or account change; retry failed avatars after new verification and keep sidebar nicknames while pending. Keep the ten-minute check cooldown. / 重新登录、退出、明确失效或换号时隔离旧资料；新核验后重试失败头像，侧栏待确认时保留昵称；保留十分钟冷却。
+- Local/source update; automatic publishing acceptance continues. Host 138 and installers unchanged. / 本机及源码更新，自动发布闭环继续验收；138和安装器未更新。
+
 ## 0.8.4 · 2026-10-21 · Message editor layout / 消息编辑布局
 
 - Make edited messages grow with their content and available width, within a bounded scroll area. Use a bordered card with a separate action footer and one short branch notice. / 消息编辑框随内容和宽度伸展，超长文本限高滚动；统一卡片样式，底部操作独立对齐，分支说明精简为一句。

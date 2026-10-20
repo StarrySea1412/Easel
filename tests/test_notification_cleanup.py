@@ -47,3 +47,29 @@ def test_notification_remove_route_keeps_clear_all_separate(tmp_path, monkeypatc
             assert (await client.get('/api/notifications')).json()['notices'] == []
 
     asyncio.run(exercise())
+
+def test_deleted_session_rejects_late_notifications_and_preserves_other_targets(tmp_path):
+    store = NotificationStore(tmp_path)
+    def chat(ident, sid):
+        return {**value(ident), 'target': {'page': 'chat', 'sessionId': sid}}
+    store.add([chat('deleted-1', 'removed'), chat('keep-chat', 'kept'), value('keep-global')])
+    assert store.remove_session('removed') == 1
+    store.add([chat('deleted-1', 'removed'), chat('late-new-id', 'removed')])
+    assert {x['id'] for x in store.list()['notices']} == {'keep-chat', 'keep-global'}
+    assert store.remove_session('removed') == 0
+    assert 'late-new-id' in store.list()['seen']
+
+
+def test_session_cleanup_route_and_stale_client_cannot_revive(tmp_path, monkeypatch):
+    import app
+    monkeypatch.setattr(app, 'OUTPUTS_DIR', tmp_path)
+    row = {**value('session-note'), 'target': {'page': 'chat', 'sessionId': 'gone'}}
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app), base_url='http://127.0.0.1:7880') as client:
+            await client.post('/api/notifications', json={'notices': [row, value('keep')]})
+            assert (await client.post('/api/notifications/remove', json={'sessionId': 'gone'})).status_code == 200
+            await client.post('/api/notifications', json={'notices': [{**row, 'id': 'late'}]})
+            assert [x['id'] for x in (await client.get('/api/notifications')).json()['notices']] == ['keep']
+            assert (await client.post('/api/notifications/remove', json={'sessionId': 'gone', 'ids': ['keep']})).status_code == 400
+            assert (await client.post('/api/notifications/remove', json={'sessionId': '../bad'})).status_code == 422
+    asyncio.run(exercise())

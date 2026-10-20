@@ -18,6 +18,7 @@ const { default: PublishReceiptCenter, PublishReceiptCard } = await loadTsModule
 const { default: PublishPage } = await loadTsModule('../src/components/PublishPage.tsx');
 const { default: CalendarPage } = await loadTsModule('../src/components/CalendarPage.tsx');
 const { savePublishDraft } = await loadTsModule('../src/lib/store.ts');
+const { setWhoamiCache, markWhoamiUnverified } = await loadTsModule('../src/lib/whoami.ts');
 
 const makeReceipt = (changes = {}) => ({
   receiptId: 'a'.repeat(32), platform: 'zhihu', title: '隔离验收样例',
@@ -387,6 +388,7 @@ test('editor confirmation is required, cancellation and leaving during precheck 
 
 test('multiple previews switch by keyboard and preserve independent versions across pages', async t => {
   const view = await fixture(t, [], 'publish');
+  await act(async () => setWhoamiCache('xiaohongshu', { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟作者', avatar: '' }));
   await view.click(view.container.querySelector('.publish-platform-list button:nth-child(1)'));
   assert.equal(view.container.querySelectorAll('[role="tab"]').length, 2);
   const xhs = view.container.querySelector('#publish-tab-xiaohongshu');
@@ -416,6 +418,9 @@ test('mixed platform readiness explicitly excludes video targets and restores im
   view.h.accounts = ['zhihu', 'xiaohongshu', 'douyin'].map(platform => ({ platform, loggedIn: true }));
   view.h.outputs = ['01.png', '02.png'].map(name => ({ type: 'file', kind: 'image', name, path: `outputs/${name}` }));
   await view.render('other'); await view.render('publish');
+  await act(async () => {
+    for (const platform of ['xiaohongshu', 'douyin']) setWhoamiCache(platform, { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟作者', avatar: '' });
+  });
   await view.click(view.container.querySelector('.publish-platform-list button:nth-child(1)'));
   await view.click(view.container.querySelector('.publish-platform-list button:nth-child(2)'));
   await view.click(view.button('选择媒体'));
@@ -523,10 +528,10 @@ test('all disconnected targets report preflight failures without sending content
   localStorage.clear();
   view.h.accounts = ['xiaohongshu','douyin','kuaishou','weixin-channels','zhihu','bilibili','wechat-oa']
     .map(platform => ({platform, supported: true, loggedIn: false, hasLocalSession: false}));
-  await view.render('other'); await view.render('publish');
-  for (const button of view.container.querySelectorAll('.publish-platform-list button')) {
-    if (button.getAttribute('aria-pressed') !== 'true') await view.click(button);
-  }
+  await view.render('other');
+  savePublishDraft({ title: '本次要发布的标题', body: '本次内容正文。', platforms: view.h.accounts.map(row => row.platform), overrides: {}, tags: '' });
+  await view.render('publish');
+  assert.ok([...view.container.querySelectorAll('.publish-platform-list button')].every(button => button.disabled));
   await view.click(view.button('发布到 7 个平台'));
   assert.equal(view.posts().length, 0);
   assert.equal(view.h.confirmations.length, 0);
@@ -593,5 +598,28 @@ test('a later login-required readback invalidates cached status without changing
   assert.equal(view.model().receipts[0].outcome, 'submitted');
   assert.equal(view.h.reports.length, 1);
   assert.equal(view.h.reports[0].code, 'login_required');
+  assert.equal(view.posts().length, 0);
+});
+
+test('publish targets follow shared login events and disable offline platforms without losing drafts', async t => {
+  const view = await fixture(t, [], 'publish');
+  const target = label => [...view.container.querySelectorAll('.publish-platform-list button')].find(button => button.textContent.includes(label));
+  assert.equal(target('知乎').disabled, false);
+  assert.ok(target('知乎').classList.contains('is-connected'));
+  assert.equal(target('抖音').disabled, true);
+  await act(async () => setWhoamiCache('douyin', { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟作者', avatar: '' }));
+  assert.equal(target('抖音').disabled, false);
+  assert.ok(target('抖音').classList.contains('is-connected'));
+  await view.click(target('抖音'));
+  assert.equal(target('抖音').getAttribute('aria-pressed'), 'true');
+  await act(async () => markWhoamiUnverified('douyin', '暂未确认'));
+  assert.equal(target('抖音').disabled, true);
+  assert.ok(target('抖音').querySelector('.publish-spinner'));
+  await act(async () => setWhoamiCache('douyin', { loggedIn: false, verified: true, authState: 'login_required', checkedAt: Date.now(), name: '', avatar: '' }));
+  assert.equal(target('抖音').disabled, true);
+  assert.equal(target('抖音').classList.contains('is-connected'), false);
+  assert.match(target('抖音').getAttribute('aria-label'), /未登录/);
+  assert.equal(target('抖音').querySelector('.publish-spinner'), null);
+  assert.equal(view.container.querySelector('#publish-body').value, '本次内容正文。');
   assert.equal(view.posts().length, 0);
 });

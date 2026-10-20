@@ -76,6 +76,7 @@ from image_reverse import (
 )
 import model_health
 import channel_profiles
+from account_identity import AccountIdentityStore, display_identity, merge_identity
 import run_ledger
 from output_metadata import creation_time, text_cover
 from easel.manual_publish import build_package, publishing_mode
@@ -620,6 +621,7 @@ class NotificationRead(BaseModel):
 class NotificationCleanup(BaseModel):
     """Targeted removal of confirmed-noise records; absent ids keep the clear-all behavior."""
     ids: list[str] | None = Field(default=None, max_length=2000)
+    sessionId: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_.-]{1,120}$')
 
 
 @app.get('/api/notifications')
@@ -650,9 +652,12 @@ async def api_notifications_remove(req: NotificationCleanup):
     """Targeted removal on its own route: a backend without it must fail closed
     instead of letting an ids body fall through to the clear-all DELETE."""
     from easel.notifications import NotificationStore
-    if req.ids is None:
-        raise HTTPException(400, '缺少要清理的通知 id')
-    await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).remove, req.ids)
+    if (req.ids is None) == (req.sessionId is None):
+        raise HTTPException(400, '请提供通知 id 或已删除的会话标识')
+    if req.sessionId is not None:
+        await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).remove_session, req.sessionId)
+    else:
+        await asyncio.to_thread(NotificationStore(OUTPUTS_DIR).remove, req.ids)
     return {'ok': True}
 
 
@@ -6745,9 +6750,23 @@ async def api_accounts():
         {'platform': pf, 'name': cfg['name'], 'backend': cfg['backend'],
          'supported': cfg['backend'] != 'unsupported',
          'loggedIn': _account_logged_in(pf, cfg),
-         'note': cfg.get('note', ''), **_account_local_metadata(pf, cfg)}
+         'note': cfg.get('note', ''), **_account_local_metadata(pf, cfg),
+         'identityKey': _account_identity_key(pf),
+         'connection': _account_verified_connection(pf),
+         'identity': _account_identity_store().read(pf, _account_identity_key(pf)) or None}
         for pf, cfg in LOGIN_RUNNERS.items()
     ]
+
+
+def _account_verified_connection(platform: str) -> dict | None:
+    """Expose only a current online check, including explicit login expiry."""
+    with _WHOAMI_LOCK:
+        hit = _WHOAMI_CACHE.get(platform)
+    if (hit and hit[2] == _account_check_generation(platform)
+            and hit[1].get('identityKey') == _account_identity_key(platform)
+            and hit[1].get('verified') is True and time.time() - hit[0] < WHOAMI_TTL):
+        return dict(hit[1])
+    return None
 
 
 def _account_local_metadata(platform: str, cfg: dict) -> dict:
@@ -6780,6 +6799,18 @@ def _account_local_metadata(platform: str, cfg: dict) -> dict:
             'credentialStorage': storage}
 
 
+def _account_identity_store() -> AccountIdentityStore:
+    return AccountIdentityStore(DATA_DIR / '.account-identities')
+
+
+def _account_identity_key(platform: str) -> str:
+    cfg = LOGIN_RUNNERS[platform]
+    cookie = cfg['backend'] == 'biliup'
+    profile = 'WeixinMpProfile' if cfg['backend'] == 'wechat-oa' else cfg.get('profile')
+    credential = DATA_DIR / 'cookies.json' if cookie else BROWSER_PROFILES / profile if profile else None
+    return _account_identity_store().key(platform, credential, cookie=cookie)
+
+
 def _account_check_generation(platform: str) -> str:
     with _WHOAMI_LOCK:
         generation = _ACCOUNT_GENERATIONS.get(platform, '')
@@ -6788,6 +6819,7 @@ def _account_check_generation(platform: str) -> str:
 
 def _invalidate_account_check(platform: str) -> None:
     with _WHOAMI_LOCK:
+        _account_identity_store().clear(platform, rotate=True)
         _ACCOUNT_GENERATIONS[platform] = uuid.uuid4().hex
         _WHOAMI_CACHE.pop(platform, None)
 
@@ -7222,8 +7254,11 @@ async def api_account_whoami(platform: str, force: bool = False):
         return {'loggedIn': False, 'name': '', 'avatar': ''}
     # 小红书账号数据切换后，旧缓存的昵称和登录结论不再属于当前上下文。
     account_generation = _account_check_generation(platform)
+    identity_key = _account_identity_key(platform)
     with _WHOAMI_LOCK:
         hit = _WHOAMI_CACHE.get(platform)
+    if hit and hit[1].get('identityKey') not in (None, identity_key):
+        hit = None
     if not force and hit and hit[2] == account_generation and (time.time() - hit[0]) < WHOAMI_TTL:
         return hit[1]
     if backend == 'wechat-oa':
@@ -7255,7 +7290,7 @@ async def api_account_whoami(platform: str, force: bool = False):
         if line.startswith('{'):
             try:
                 d = json.loads(line)
-                data = {'loggedIn': bool(d.get('loggedIn')), 'name': d.get('name') or '', 'avatar': d.get('avatar') or ''}
+                data = {'loggedIn': bool(d.get('loggedIn')), **display_identity(d)}
                 # 有 error 字段 = 校验本身失败（浏览器起不来/网络抖动/崩溃），不是可信的「未登录」结论
                 confident = (isinstance(d.get('loggedIn'), bool) and not d.get('error')
                              and not getattr(proc, 'returncode', 0) and d.get('verified') is not False
@@ -7273,11 +7308,21 @@ async def api_account_whoami(platform: str, force: bool = False):
         # 避免一次校验抖动就把已登录卡片翻成「未登录」并缓存 10 分钟；下次校验(缓存未写)会自动重试恢复。
         with _WHOAMI_LOCK:
             _WHOAMI_CACHE.pop(platform, None)
-        previous = hit[1] if hit and hit[2] == account_generation else {}
+        previous = hit[1] if hit and hit[2] == account_generation else _account_identity_store().read(platform, _account_identity_key(platform))
         return {**previous, 'loggedIn': previous.get('loggedIn', _account_logged_in(platform, cfg)),
                 'name': previous.get('name', ''), 'avatar': previous.get('avatar', ''),
+                'identityKey': _account_identity_key(platform),
                 'authState': 'unknown', 'verified': False,
                 'verificationMessage': '本次检查未取得明确账号证据，不能判断已退出；保留上次账号并稍后重试。'}
+    identity_key = _account_identity_key(platform)
+    if data['loggedIn']:
+        previous = _account_identity_store().read(platform, identity_key)
+        if hit and hit[2] == account_generation and hit[1].get('loggedIn'):
+            previous = {**previous, **hit[1]}
+        data.update(merge_identity(previous, data))
+    else:
+        _account_identity_store().clear(platform, rotate=True)
+        identity_key = _account_identity_key(platform)
     if platform == 'xiaohongshu' and not data['loggedIn']:
         invalidate_account_context(platform, live_only=True)
     # 回写标记：确认已登录 → 快速路径（/api/accounts、/api/analytics/platforms）此后也正确；
@@ -7294,7 +7339,9 @@ async def api_account_whoami(platform: str, force: bool = False):
         _write_login_marker('wechat-oa-mp', 'success' if data['loggedIn'] else 'expired',
                             '在线检查确认公众号后台会话有效' if data['loggedIn'] else '在线检查确认公众号后台会话已失效')
     current_generation = _account_check_generation(platform)
-    data.update(verified=True, checkedAt=int(time.time() * 1000))
+    data.update(verified=True, checkedAt=int(time.time() * 1000), identityKey=identity_key)
+    if data['loggedIn']:
+        _account_identity_store().save(platform, identity_key, data)
     with _WHOAMI_LOCK:
         _WHOAMI_CACHE[platform] = (time.time(), data, current_generation)
     return {**data, 'verified': True}
@@ -7679,8 +7726,63 @@ async def api_insights_idea(req: InsightIdeaRequest):
     return {"ok": True, "idea": item}
 
 
+_ANALYTICS_TASKS = {}
+
+
+@app.get("/api/analytics/{platform}/snapshot")
+async def api_analytics_snapshot(platform: str):
+    if platform not in ANALYTICS_PLATFORMS:
+        raise HTTPException(404, '该平台暂不支持数据抓取')
+    from account_analytics_snapshots import AnalyticsSnapshots
+    key = _account_identity_key(platform)
+    task_key = (str(OUTPUTS_DIR.resolve()), platform, key)
+    active = _ANALYTICS_TASKS.get(task_key)
+    return {'data': AnalyticsSnapshots(OUTPUTS_DIR / '_analytics').get(platform, key),
+            'running': bool(active and not active.done())}
+
+
 @app.get("/api/analytics/{platform}")
 async def api_analytics(platform: str):
+    if platform not in ANALYTICS_PLATFORMS:
+        raise HTTPException(404, '该平台暂不支持数据抓取')
+    from account_analytics_snapshots import AnalyticsSnapshots
+    from content_analysis import Store as AnalysisStore
+    from content_analysis_sync import SUPPORTED, live_account_id, live_contents
+    root = OUTPUTS_DIR.resolve()
+    identity = _account_identity_key(platform)
+    generation = _content_analysis_session_generation(platform)
+    key = (str(root), platform, identity)
+    active = _ANALYTICS_TASKS.get(key)
+    if active and not active.done():
+        return await asyncio.shield(active)
+
+    async def collect():
+        data = await _capture_account_analytics(platform)
+        if root != OUTPUTS_DIR.resolve() or identity != _account_identity_key(platform) or generation != _content_analysis_session_generation(platform):
+            raise HTTPException(409, '账号状态已变化，请重新读取；原有结果保留')
+        if data.get('loggedIn') is True:
+            account_id = live_account_id(data)
+            if platform in SUPPORTED and account_id:
+                contents, _ = live_contents(data, account_id)
+                if contents:
+                    AnalysisStore(root / '_analytics' / 'workbench').ingest({
+                        'platform': platform, 'accountId': account_id, 'name': data.get('nickname') or account_id,
+                        'contents': contents}, identity='live_verified')
+            AnalyticsSnapshots(root / '_analytics').save(platform, identity, data)
+        return data
+
+    task = asyncio.create_task(collect())
+    _ANALYTICS_TASKS[key] = task
+    def completed(done):
+        if _ANALYTICS_TASKS.get(key) is done:
+            _ANALYTICS_TASKS.pop(key, None)
+        if not done.cancelled():
+            done.exception()
+    task.add_done_callback(completed)
+    return await asyncio.shield(task)
+
+
+async def _capture_account_analytics(platform: str):
     """抓取某平台已登录账号的创作数据，同平台并发刷新共享一次有时限的任务。"""
     if platform not in ANALYTICS_PLATFORMS:
         raise HTTPException(404, "该平台暂不支持数据抓取")
@@ -7789,6 +7891,8 @@ async def api_analytics(platform: str):
             n.setdefault("tags", [])
             n.setdefault("publish", "")
         if platform != 'xiaohongshu':
+            from account_metric_evidence import sanitize_metrics
+            data = sanitize_metrics(platform, data)
             from account_analysis import build_analysis
             data['analysis'] = build_analysis(platform, data)
             # 这些旧快照仅按平台存储，无法核验是否同一账号；不能输出本人增长结论。

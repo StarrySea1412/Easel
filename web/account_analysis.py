@@ -67,7 +67,13 @@ def _article_evidence(items):
 
 
 def build_analysis(platform: str, data: dict) -> dict:
+    from account_metric_evidence import sanitize_metrics
+    data = sanitize_metrics(platform, data)
     label, source_url, period, hosts = PLATFORMS[platform]
+    if platform == 'douyin':
+        source = data.get('metrics_source') or {}
+        period = (f"账号总览：{source['from']} 至 {source['to']}（近7日）" if not data.get('metricsNeedsRefresh') and source.get('from') and source.get('to')
+                  else '账号总览统计周期尚未核实')
     logged_in = data.get('loggedIn') is True
     overview = [{'key': key, 'label': label, 'value': _number(data.get(key)) if logged_in else None}
                 for key, label in OVERVIEW]

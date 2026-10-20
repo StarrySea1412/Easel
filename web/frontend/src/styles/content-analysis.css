@@ -43,6 +43,14 @@
 .ca-platform .platform-icon { width: 24px; height: 24px; object-fit: contain; border-radius: var(--radius-xs); }
 .ca-platform:hover { background: var(--surface-2); color: var(--text); }
 .ca-platform.is-selected { background: var(--surface); border-color: var(--border); color: var(--text); box-shadow: 0 2px 5px #29282306; font-weight: 600; }
+.ca-platform.is-connected { color: var(--green); }
+.ca-platform.is-connected.is-selected { border-color: var(--green); background: color-mix(in srgb, var(--green) 7%, var(--surface)); }
+.ca-platform-status { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none; color: var(--text-tertiary); }
+.ca-platform-status.is-online { color: var(--green); }
+.ca-platform-status.is-offline { color: var(--red); }
+.ca-platform-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ca-manual-workbench { margin: 16px 0; }
+.ca-manual-workbench > summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; margin-bottom: 14px; }
 .content-analysis-page button:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
 .ca-context { padding: 18px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ca-context-main { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }

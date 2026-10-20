@@ -1420,7 +1420,8 @@ def _account_identity(response) -> dict | None:
                     pass
         if avatar:
             break
-    return {"name": name.strip()[:40] if isinstance(name, str) else "", "avatar": avatar}
+    return {"name": name.strip()[:40] if isinstance(name, str) else "", "avatar": avatar,
+            "accountId": str(user.get("uid") or user.get("sec_uid") or user.get("open_id"))}
 
 
 def cmd_selftest(_a) -> int:

@@ -31,6 +31,13 @@
 .publish-studio .publish-platform:hover { background: var(--surface-hover); border-color: var(--border-strong); }
 .publish-studio .publish-platform.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent-start) 40%, var(--border)); color: var(--text); }
 .publish-studio .publish-platform-check { display: flex; align-items: center; color: var(--accent-start); }
+.publish-studio .publish-platform.is-connected { color: var(--green); border-color: color-mix(in srgb, var(--green) 38%, var(--border)); background: color-mix(in srgb, var(--green) 5%, var(--surface)); }
+.publish-studio .publish-platform.is-connected.active { border-color: var(--green); background: color-mix(in srgb, var(--green) 13%, var(--surface)); box-shadow: inset 0 0 0 1px var(--green); }
+.publish-studio .publish-platform.is-connected .publish-platform-check { color: var(--green); }
+.publish-studio .publish-platform:disabled { cursor: not-allowed; color: var(--text-tertiary); background: var(--surface-2); border-color: var(--border); box-shadow: none; }
+.publish-studio .publish-platform:disabled .publish-platform-icon { opacity: .45; }
+.publish-studio .publish-platform:disabled .publish-platform-check { color: var(--text-tertiary); }
+.publish-studio .publish-platform-offline { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .publish-studio .publish-platform-name { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .publish-studio .publish-platform-icon { width: 18px; height: 18px; object-fit: contain; flex-shrink: 0; border-radius: var(--radius-xs); }
 .publish-studio .publish-media-selection { display: flex; flex-wrap: wrap; gap: 12px; align-items: start; }

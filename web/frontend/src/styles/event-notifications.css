@@ -31,6 +31,7 @@
 .event-list li:last-child .event-card { border-bottom: 0; }
 .event-card:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 .event-notice-tone { display: grid; place-items: center; flex: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 50%; background: var(--surface-2); color: var(--text-secondary); }
+.event-notice-tone svg, .toast-notice-icon svg { display: block; flex: none; }
 .event-card.error .event-notice-tone { background: var(--red-soft); color: var(--red); }
 .event-card.success .event-notice-tone { background: var(--green-soft); color: var(--green); }
 .event-card-content { flex: 1; min-width: 0; }

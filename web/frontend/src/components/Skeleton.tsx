@@ -26,3 +26,16 @@ export function SkeletonImage({ ratio = '1 / 1', label }: { ratio?: string; labe
     </div>
   );
 }
+
+/** Mirrors the account overview and recent works, without inventing data. */
+export function AccountAnalysisSkeleton() {
+  return <div className="ana-skeleton" role="status" aria-label="正在读取账号分析" aria-busy="true">
+    <div className="ana-body" aria-hidden="true">
+      <div className="ana-col">
+        <Sk w="38%" h={14} /><Sk w="65%" h={10} style={{ marginTop: 10, marginBottom: 16 }} />
+        <div className="ana-skeleton-metrics">{[0, 1, 2].map(i => <div key={i}><Sk w="54%" h={22} /><Sk w="36%" h={10} style={{ marginTop: 8 }} /></div>)}</div>
+      </div>
+      <div className="ana-col ana-skeleton-works"><Sk w="32%" h={14} />{[0, 1, 2].map(i => <div key={i}><Sk w={i === 1 ? '70%' : '88%'} h={12} /><Sk w="46%" h={9} style={{ marginTop: 8 }} /></div>)}</div>
+    </div>
+  </div>;
+}

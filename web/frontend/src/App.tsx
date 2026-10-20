@@ -1,3 +1,7 @@
+import { saveAnalysisChatResult, type AnalysisBinding, type AnalysisChatRequest } from './lib/analysisConversations';
+import { analysisRequest } from './lib/contentAnalysis';
+import { analyticsScope } from './lib/analyticsCache';
+import { savePanelTools } from './lib/chatPanels';
 import { confirmModal } from './components/ui/ConfirmModal';
 import FailureRecordDialog from './components/FailureRecordDialog';
 import { chatErrorDetail } from './lib/chatErrors';
@@ -21,7 +25,7 @@ import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from '
 import Sidebar from './components/Sidebar';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
-import { notificationOutputPath, startEventSync } from './lib/eventNotifications';
+import { notificationOutputPath, removeSessionEvents, startEventSync } from './lib/eventNotifications';
 import { noticeSubject } from './lib/noticeFormat';
 import { markSessionSeenById } from './lib/seenStatus';
 import SkillDrawer from './components/SkillDrawer';
@@ -393,7 +397,10 @@ export default function App() {
     const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg), ...msg };
     const session = sessionsRef.current.find(item => item.id === sessionId);
     const stopped = msg.stopped === true;
-    if (!msg.error && !stopped) rememberBreakdownReport(session, msg.content, msg.turnId);
+    if (!msg.error && !stopped) {
+      rememberBreakdownReport(session, msg.content, msg.turnId);
+      void saveAnalysisChatResult(session, msg).catch(reason => showToast('分析回填未完成：' + (reason instanceof Error ? reason.message : '请重试'), 'error'));
+    }
     const outcome = msg.error ? '失败' : stopped ? '已停止' : '已完成';
     showToast(`${noticeSubject(session?.title, '对话')} · ${outcome}`, msg.error ? 'error' : stopped ? 'info' : 'success', undefined,
       `chat:${sessionId}:${msg.turnId || session?.pendingTurnId || msg.startedAt || 'legacy'}:${outcome}`, { page: 'chat', sessionId });
@@ -776,6 +783,33 @@ export default function App() {
     }
     return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel);
   }, [sendUserAndStream]);
+
+  const analysisPreparing = useRef(new Set<string>());
+  const handleAnalysisChat = useCallback(async (request: AnalysisChatRequest) => {
+    if (request.sessionId) {
+      const existing = sessionsRef.current.find(s => s.id === request.sessionId && s.analysisContext?.platform === request.platform && s.analysisContext.accountId === request.accountId);
+      if (!existing) { showToast('原分析对话不在本机，可重新提取材料创建对话', 'info'); return; }
+      setActiveSessionId(existing.id); setCurrentPage('chat'); return;
+    }
+    const key = JSON.stringify(request);
+    if (analysisPreparing.current.has(key)) return;
+    analysisPreparing.current.add(key);
+    const identity = analyticsScope(request.platform);
+    try {
+      const session = createSession(selectedPersona);
+      const binding = await analysisRequest<AnalysisBinding>('/conversations', 'POST', { ...request, sessionId: session.id });
+      if (identity !== analyticsScope(request.platform)) throw new Error('账号已切换，请在当前账号重新提取材料');
+      session.conversationType = binding.kind; session.analysisContext = binding;
+      session.title = `${binding.kind === 'content-analysis' ? '作品分析' : '账号分析'} · ${binding.accountName}`;
+      const next = [session, ...sessionsRef.current];
+      if (!saveSessions(next)) throw new Error('分析对话未能保存，未发送模型请求');
+      savePanelTools(session.id, ['analysis']);
+      setChatDraftText(session.id, binding.markdown);
+      sessionsRef.current = next; setSessions(next);
+      setActiveSessionId(session.id); setCurrentPage('chat');
+    } catch (reason) { showToast(reason instanceof Error ? reason.message : '准备分析对话失败', 'error'); }
+    finally { analysisPreparing.current.delete(key); }
+  }, [selectedPersona]);
 
   const editRequests = useRef(new Set<string>());
   const handleEditMessage = useCallback(async (sessionId: string, userIndex: number, text: string, signal: AbortSignal) => {
@@ -1259,6 +1293,7 @@ export default function App() {
     }
 
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
+    removeSessionEvents(id);
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
       ? stopChat(id).catch(() => ({ stopped: false }))
@@ -1358,6 +1393,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             onNavigate={setCurrentPage}
+            onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }}
             onOpenModels={(modelRef) => { setSettingsModelRef(modelRef); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onUseTopic={handleUseTopic}
             onQuickPrompt={handleQuickPrompt}
@@ -1371,6 +1407,7 @@ export default function App() {
             key={activeSession.id}
             session={activeSession}
             taskState={tasks}
+            onOpenAnalysis={() => { if (activeSession.analysisContext) setAnalysisPlatform(activeSession.analysisContext.platform); setCurrentPage('analysis'); }}
             sideSessions={sideChatsOf(activeSession, sessions)}
             closedSideSessions={sideChatsOf(activeSession, sessions, true).filter(item=>item.sideClosed)}
             onSideReopen={handleSideReopen}
@@ -1434,7 +1471,7 @@ export default function App() {
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':
-        return <ContentAnalysisPage demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
+        return <ContentAnalysisPage onAnalysisChat={handleAnalysisChat} demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
         return <ActivityPage onOpenChat={handleSessionSelect} onOpenSchedules={()=>setCurrentPage('automation')} onOpenPublish={()=>setCurrentPage('publish')} key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
       case 'agent-office':
@@ -1503,7 +1540,7 @@ export default function App() {
           onNoticeAcknowledged={sessionId => markSessionSeenById(sessionId, sessionsRef.current)}
           onOpen={target => {
           if (target.page === 'chat' && target.sessionId) {
-            if (!sessionsRef.current.some(session => session.id === target.sessionId)) { showToast('该会话已删除。', 'info'); return; }
+            if (!sessionsRef.current.some(session => session.id === target.sessionId)) { removeSessionEvents(target.sessionId); return; }
             setActiveSessionId(target.sessionId);
           }
           if (target.page === 'image' && target.medium) videoStudio.setViewMode(target.medium);

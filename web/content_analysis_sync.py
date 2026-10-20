@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from content_analysis import Store, now, scope, timestamp
 
-SUPPORTED = {'xiaohongshu', 'bilibili'}
+SUPPORTED = {'xiaohongshu', 'bilibili', 'douyin'}
 CACHE_SECONDS = 15 * 60
 UNSUPPORTED = '当前平台采集器尚未同时返回稳定账号 ID 和作品 ID，不能安全自动载入；可先导出平台数据再导入。'
 SUCCESS = {'ready', 'partial', 'empty'}
@@ -50,7 +50,7 @@ def live_contents(live, account_id):
         item = {'id': ident, 'title': note.get('title') or '未提供标题',
                 'metrics': note.get('metrics') or {}, 'snapshotAt': fetched_at, 'period': 'unknown'}
         # A metric refresh does not erase materials previously supplied by the operator.
-        for key in ('tags', 'body'):
+        for key in ('tags', 'body', 'url', 'publishedAt', 'format', 'transcript', 'comments', 'coverText'):
             if note.get(key):
                 item[key] = note[key]
         result.append(item)

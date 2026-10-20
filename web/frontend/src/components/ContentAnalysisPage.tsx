@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchAccounts, type AccountItem } from '../lib/api';
-import { accountConnection, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
+import { fetchAccounts, restoreAccountAnalytics, type AccountItem } from '../lib/api';
+import { accountConnection, hydrateAccountIdentities, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
-import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
+import AccountAnalyticsDetails from './AccountAnalyticsDetails';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
-import XhsInsightsPanel from './XhsInsightsPanel';
-import BiliInsightsPanel from './BiliInsightsPanel';
+import { selectedAnalyticsPlatform, selectAnalyticsPlatform, readAnalyticsCache, analyticsPending, analyticsRevision, subscribeAnalytics } from '../lib/analyticsCache';
+import { useSyncExternalStore } from 'react';
+import type { AnalysisChatRequest } from '../lib/analysisConversations';
+import PublishSpinner from './PublishSpinner';
+import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
 import ContentAnalysisDemo from './ContentAnalysisDemo';
 import { IconChart } from './icons';
 import '../styles/content-analysis.css';
@@ -22,12 +25,13 @@ const PLATFORMS = [
 
 const validPlatform = (value?: string) => PLATFORMS.some((item) => item.id === value) ? value! : 'xiaohongshu';
 
-export default function ContentAnalysisPage({ initialPlatform, onNavigateAccounts, onNavigateIdeas, autoCollectSignal = 0, onAutoCollectHandled, demoEnabled = true }: {
+export default function ContentAnalysisPage({ initialPlatform, onNavigateAccounts, onNavigateIdeas, autoCollectSignal = 0, onAutoCollectHandled, demoEnabled = true, onAnalysisChat }: {
   initialPlatform?: string; onNavigateAccounts: () => void; onNavigateIdeas: () => void;
   autoCollectSignal?: number; onAutoCollectHandled?: () => void;
-  demoEnabled?: boolean;
+  demoEnabled?: boolean; onAnalysisChat?: (request: AnalysisChatRequest) => Promise<void>;
 }) {
-  const [platform, setPlatform] = useState(() => validPlatform(initialPlatform));
+  const [platform, setPlatform] = useState(() => validPlatform(initialPlatform || selectedAnalyticsPlatform()));
+  useSyncExternalStore(subscribeAnalytics, analyticsRevision);
   const [requestedSource, setDataSource] = useState<'demo' | 'mine'>('mine');
   const dataSource = demoEnabled ? requestedSource : 'mine';
   const [section, setSection] = useState<AnalysisSection>('review');
@@ -35,8 +39,6 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   const identities = useAccountIdentities();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [revision, setRevision] = useState(0);
-  const [legacyOpen,setLegacyOpen]=useState(false);
   const request = useRef(0);
   const refresh = useCallback(async () => {
     const sequence = ++request.current;
@@ -44,7 +46,8 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
     try {
       const result = await fetchAccounts();
       if (sequence !== request.current) return;
-      setAccounts(result); setRevision((value) => value + 1);
+      hydrateAccountIdentities(result);
+      setAccounts(result);
       void verifyStale(result.filter(row => row.supported && (row.loggedIn || row.hasLocalSession)).map(row => row.platform), { alive: () => sequence === request.current });
     } catch (reason) {
       if (sequence === request.current) setError(reason instanceof Error ? reason.message : '暂时无法读取账号状态');
@@ -55,16 +58,15 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   useEffect(() => watchAccountFreshness(() => { if (dataSource === 'mine') void refresh(); }), [refresh, dataSource]);
   useEffect(() => { if (!demoEnabled) setDataSource('mine'); }, [demoEnabled]);
   useEffect(() => { if (autoCollectSignal > 0) { setDataSource('mine'); setSection('review'); } }, [autoCollectSignal]);
-  useEffect(() => { setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
-  useEffect(()=>setLegacyOpen(false),[platform]);
+  useEffect(() => { if (initialPlatform) setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
+  useEffect(() => { selectAnalyticsPlatform(platform); }, [platform]);
   const selected = PLATFORMS.find((item) => item.id === platform)!;
   const account = accounts.find((item) => item.platform === platform);
   const connection = accountConnection(account, identities[platform]);
   const available = Boolean(account?.supported && connection === 'online');
-  const mappedAccounts = PLATFORMS.filter((item) => item.id !== 'xiaohongshu').map((item) => {
-    const value = accounts.find((entry) => entry.platform === item.id);
-    return { platform: item.id, name: item.name, loggedIn: Boolean(value?.supported && accountConnection(value, identities[item.id]) === 'online'), identity: `${item.id}:${revision}:${identities[item.id]?.checkedAt || 0}` };
-  });
+  const liveIdentity = identities[platform];
+  const identityScope = (account?.identityKey || liveIdentity?.identityKey || '') + ':' + (liveIdentity?.accountId || '');
+  useEffect(() => { if (!readAnalyticsCache(platform) && !analyticsPending(platform)) void restoreAccountAnalytics(platform).catch(() => {}); }, [platform, identityScope]);
 
   return <div className="content-analysis-page">
     <div className="ca-workspace">
@@ -76,9 +78,13 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       {demoEnabled && <div className="ca-data-source"><div role="group" aria-label="分析数据来源"><button type="button" aria-pressed={dataSource === 'mine'} onClick={() => { setDataSource('mine'); setSection('review'); }}>我的数据</button><button type="button" aria-pressed={dataSource === 'demo'} onClick={() => { setDataSource('demo'); setSection('review'); }}>演示</button></div></div>}
 
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
-        {PLATFORMS.map((item) => <button type="button" key={item.id} className={platform === item.id ? 'ca-platform is-selected' : 'ca-platform'} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
+        {PLATFORMS.map((item) => {
+          const state = accountConnection(accounts.find(row => row.platform === item.id), identities[item.id]);
+          const status = loading || error || state === 'unknown' ? '确认中' : state === 'online' ? '可分析' : '未登录';
+          return <button type="button" key={item.id} className={`ca-platform${platform === item.id ? ' is-selected' : ''}${state === 'online' ? ' is-connected' : ''}`} title={`${item.name} · ${status}`} aria-label={`${item.name} · ${status}`} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
           <PlatformIcon platform={item.id} name={item.name} /><span>{item.name}</span>
-        </button>)}
+          <span className={`ca-platform-status${status === '确认中' ? ' is-pending' : state === 'online' ? ' is-online' : ' is-offline'}`} aria-hidden="true">{status === '确认中' ? <PublishSpinner /> : <span className="ca-platform-dot" />}</span>
+        </button>; })}
       </section>
 
       <div className="ca-context">
@@ -97,28 +103,11 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       </nav>
 
       {dataSource === 'demo' ? <ContentAnalysisDemo section={section} onSection={setSection} onUseMyData={() => { setDataSource('mine'); setSection('review'); }} /> : <>
-      <ContentAnalysisWorkbench key={platform} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas}
-        connected={available} sessionReady={!loading&&!error} onNavigateAccounts={onNavigateAccounts} onSyncHandled={autoCollectSignal>0?onAutoCollectHandled:undefined} />
-
-      <div hidden={section !== 'review'}>
-        <details className="ca-collection-tools" open={legacyOpen} onToggle={event=>setLegacyOpen(event.currentTarget.open)}><summary>可选：查看平台原始概览 <span>与归档作品分开核对，展开后才读取</span></summary>
-        {legacyOpen&&<>
-        <div className="ca-review-layout">
-          <section className="ca-review-main" aria-label="内容复盘">
-            <div className="ca-section-intro"><p className="ca-kicker">01 / REVIEW</p><h2>平台采集与实时概览</h2><p>{selected.scope}</p></div>
-            {loading ? <div className="ca-loading" role="status">正在读取账号连接状态…</div> : error ? <div className="ca-loading">账号状态暂不可用，重试成功后即可查看分析。</div> : <>
-              {!available && <div className="ca-connect-callout"><div><strong>连接{selected.name}，开始自己的内容复盘</strong><p>{platform === 'xiaohongshu' ? '连接后采集本人笔记；已有导出文件也可在下方查看导入方式。' : '登录并校验身份后，采集当前账号真实返回的指标与作品。'}</p></div><button type="button" className="btn btn-primary btn-sm" onClick={onNavigateAccounts}>前往账号中心</button></div>}
-              {platform === 'xiaohongshu' ? <XhsInsightsPanel key={`xhs-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /> : platform === 'bilibili' ? <><BiliInsightsPanel key={`bili-${revision}`} loggedIn={available} onNavigateIdeas={onNavigateIdeas} /><PlatformAnalysisPanel showPlatformPicker={false} key={`bili-platform-${revision}`} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} /></> : <PlatformAnalysisPanel showPlatformPicker={false} key={platform} accounts={mappedAccounts} platform={platform} onPlatformChange={setPlatform} revision={revision} />}
-            </>}
-          </section>
-          <aside className="ca-guide" aria-label="复盘指引">
-            <div className="ca-guide-card"><p className="ca-kicker">REVIEW NOTES</p><h2>把数据变成下一步</h2><ol><li><span>01</span><div><strong>确认范围</strong><p>先看来源、时间和作品覆盖，确认正在分析谁的数据。</p></div></li><li><span>02</span><div><strong>回到作品</strong><p>打开作品和原始依据，寻找可复用的主题与值得改进的细节。</p></div></li><li><span>03</span><div><strong>带着问题创作</strong><p>把发现记录成选题，下一篇聚焦一项可验证的改动。</p></div></li></ol></div>
-            <div className="ca-scope-card"><h3>本平台的分析边界</h3><p>{selected.limit}</p><button type="button" className="ca-text-button" onClick={() => setSection('method')}>查看完整数据口径 <span aria-hidden={true}>→</span></button></div>
-          </aside>
-        </div>
-        </>}
-        </details>
-      </div>
+      <AccountAnalyticsDetails platform={platform}/>
+      {!['xiaohongshu','bilibili','douyin'].includes(platform) && !readAnalyticsCache(platform) && !analyticsPending(platform) && <PlatformAnalysisPanel accounts={accounts.map(a => ({platform:a.platform,name:a.name,loggedIn:accountConnection(a,identities[a.platform])==='online',identity:a.identityKey||''}))} platform={platform} onPlatformChange={setPlatform} revision={0} showPlatformPicker={false} primaryAction/>}
+      <ContentAnalysisWorkbench onAnalysisChat={onAnalysisChat} analyticsRunning={analyticsPending(platform)} analyticsAvailable={Boolean(readAnalyticsCache(platform))} key={platform+':'+identityScope} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas}
+        connected={available} sessionReady={!loading&&!error} liveAccountId={liveIdentity?.accountId} identityScope={identityScope}
+        onNavigateAccounts={onNavigateAccounts} onSyncHandled={autoCollectSignal>0?onAutoCollectHandled:undefined} />
 
       {section === 'method' && <section className="ca-method" aria-labelledby="ca-method-title">
         <div className="ca-section-intro"><p className="ca-kicker">02 / DATA NOTES</p><h2 id="ca-method-title">看懂数据，也看懂它的边界</h2><p>数值、来源和观察时间一起，才构成可靠的复盘依据。</p></div>

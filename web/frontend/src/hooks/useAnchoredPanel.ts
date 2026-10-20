@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
+import { openSidebarPanel, SIDEBAR_PANEL_EVENT } from '../lib/sidebarPanels';
 
 /** Keep global/composer popovers inside the viewport, including a collapsed rail. */
 export function useAnchoredPanel(open: boolean, close: () => void,
@@ -24,6 +25,11 @@ export function useAnchoredPanel(open: boolean, close: () => void,
   }, [open, placement, preferredWidth, anchor, panel]);
   useEffect(() => {
     if (!open) return;
+    const owner = anchor.current?.id || 'anchored-panel';
+    openSidebarPanel(owner);
+    const otherPanel = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== owner) close();
+    };
     panel.current?.focus();
     const outside = (event: Event) => {
       if (!panel.current?.contains(event.target as Node) && !anchor.current?.contains(event.target as Node)) close();
@@ -33,9 +39,11 @@ export function useAnchoredPanel(open: boolean, close: () => void,
     };
     document.addEventListener('pointerdown', outside); document.addEventListener('focusin', outside);
     document.addEventListener('keydown', escape); window.addEventListener('easel:page-navigation', close);
+    window.addEventListener(SIDEBAR_PANEL_EVENT, otherPanel);
     return () => {
       document.removeEventListener('pointerdown', outside); document.removeEventListener('focusin', outside);
       document.removeEventListener('keydown', escape); window.removeEventListener('easel:page-navigation', close);
+      window.removeEventListener(SIDEBAR_PANEL_EVENT, otherPanel);
     };
   }, [open, close, anchor, panel]);
   return position;

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { type AccountConnection } from '../lib/whoami';
+import PublishSpinner from './PublishSpinner';
 import '../styles/account-connection-dot.css';
 
 type Props = { connection: AccountConnection; checking?: boolean; checkedAt?: number; message?: string };
@@ -31,7 +32,7 @@ export default function AccountConnectionDot({ connection, checking, checkedAt, 
     <button type="button" aria-label={detail} title={detail} aria-expanded={visible} aria-describedby={visible ? detailId : undefined}
       onFocus={() => { setFocused(true); setDismissed(false); }} onBlur={() => setFocused(false)}
       onClick={() => { setOpen(!open); setDismissed(open); }} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); setDismissed(true); } }}>
-      <span className="account-connection-dot-mark" aria-hidden="true" />
+      {pending ? <PublishSpinner /> : <span className="account-connection-dot-mark" aria-hidden="true" />}
     </button>
     {visible && <span id={detailId} role="tooltip" className="account-connection-dot-detail">{detail}</span>}
   </span>;

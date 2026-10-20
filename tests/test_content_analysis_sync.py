@@ -60,7 +60,7 @@ def test_http_discovery_cache_refresh_status_and_missing_total(tmp_path):
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize('platform', ['douyin', 'kuaishou', 'zhihu', 'weixin-channels', 'wechat-oa'])
+@pytest.mark.parametrize('platform', ['kuaishou', 'zhihu', 'weixin-channels', 'wechat-oa'])
 def test_unsupported_collectors_never_run(tmp_path, platform):
     async def capture(_):
         pytest.fail('unsupported collector must not run')
@@ -338,3 +338,13 @@ def test_old_logged_out_response_does_not_describe_a_newly_connected_session(tmp
         assert result['status'] == 'error' and '账号状态已变化' in result['message']
         assert service.status('xiaohongshu')['status'] == 'idle'
     asyncio.run(exercise())
+
+
+def test_douyin_structured_collector_is_supported_and_persists_materials(tmp_path):
+    async def capture(_):
+        return {'loggedIn': True, 'accountId': 'douyin-owner', 'nickname': '本人', 'notes': [
+            {'id': '123456789012345', 'title': '篮球作品', 'transcript': '真实转写', 'metrics': {'likes': 4}}]}
+    result = asyncio.run(SyncService(lambda: tmp_path, capture).sync('douyin', 'douyin-owner'))
+    assert result['supported'] and result['status'] == 'partial'
+    assert result['report']['contents'][0]['transcript'] == '真实转写'
+    assert result['report']['contents'][0]['metrics']['likes'] == 4

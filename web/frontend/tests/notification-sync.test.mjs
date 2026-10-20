@@ -41,3 +41,27 @@ test('durable notification sync retries offline operations, preserves actions, r
   assert.ok(requests.every(request=>request.url.endsWith('/api/notifications')||request.url.endsWith('/api/notifications/read')));
   assert.equal(events.recordEvent('duplicate','success',undefined,'new'),false);
 });
+
+test('deleting a chat removes all its notices immediately, retries persistence and blocks late arrivals', async t => {
+  let offline = true; const server = new Map(); const tombstones = new Set();
+  t.mock.method(globalThis, 'fetch', async (_url, init={}) => {
+    if (offline) throw Error('offline');
+    const body=init.body?JSON.parse(init.body):{};
+    if (String(_url).endsWith('/remove')) {
+      tombstones.add(body.sessionId);
+      for (const [id,row] of server) if(row.target?.sessionId===body.sessionId) server.delete(id);
+    } else if(init.method==='POST') {
+      for(const row of body.notices||[]) if(!tombstones.has(row.target?.sessionId)) server.set(row.id,row);
+    }
+    return new Response(JSON.stringify({notices:[...server.values()],seen:[...server.keys()]}));
+  });
+  events.recordEvent('gone','success',undefined,'gone-1',{page:'chat',sessionId:'gone-chat'});
+  events.recordEvent('keep','success',undefined,'keep-1',{page:'chat',sessionId:'keep-chat'});
+  events.removeSessionEvents('gone-chat');
+  assert.deepEqual(events.readEvents().map(x=>x.id),['keep-1']);
+  assert.equal(events.recordEvent('late','error',undefined,'gone-late',{page:'chat',sessionId:'gone-chat'}),false);
+  await events.syncEvents(); assert.equal(events.readEventSync(),'error');
+  offline=false; await events.syncEvents();
+  assert.ok(tombstones.has('gone-chat'));
+  assert.deepEqual([...server.keys()],['keep-1']);
+});

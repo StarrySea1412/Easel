@@ -55,6 +55,7 @@ class NotificationStore:
                 db.execute('CREATE TABLE IF NOT EXISTS notices (id TEXT PRIMARY KEY, at REAL, payload TEXT)')
                 # Tombstones prevent cleared events from reappearing on reconnect.
                 db.execute('CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, at REAL)')
+                db.execute('CREATE TABLE IF NOT EXISTS deleted_sessions (id TEXT PRIMARY KEY, at REAL)')
                 yield db
         finally:
             db.close()
@@ -68,6 +69,11 @@ class NotificationStore:
         rows = [notice(value) for value in values]
         with self.database() as db, db:
             for row in rows:
+                target = row.get('target', {})
+                if target.get('page') == 'chat' and db.execute(
+                        'SELECT 1 FROM deleted_sessions WHERE id=?', (target.get('sessionId'),)).fetchone():
+                    db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (row['id'], row['at']))
+                    continue
                 if db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (row['id'], row['at'])).rowcount:
                     db.execute('INSERT INTO notices VALUES (?,?,?)', (row['id'], row['at'], json.dumps(row, ensure_ascii=False)))
             db.execute('DELETE FROM notices WHERE id NOT IN (SELECT id FROM notices ORDER BY at DESC,id DESC LIMIT ?)', (LIMIT,))
@@ -96,6 +102,22 @@ class NotificationStore:
     def clear(self):
         with self.database() as db, db:
             db.execute('DELETE FROM notices')
+
+    def remove_session(self, session_id):
+        """A deleted conversation cannot receive late or replayed notifications."""
+        if not isinstance(session_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', session_id):
+            raise ValueError('会话标识无效')
+        with self.database() as db, db:
+            db.execute('INSERT OR IGNORE INTO deleted_sessions VALUES (?,?)', (session_id, time.time() * 1000))
+            ids = []
+            for ident, payload in db.execute('SELECT id,payload FROM notices'):
+                target = json.loads(payload).get('target', {})
+                if target.get('page') == 'chat' and target.get('sessionId') == session_id:
+                    ids.append(ident)
+            for ident in ids:
+                db.execute('DELETE FROM notices WHERE id=?', (ident,))
+                db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (ident, time.time() * 1000))
+            return len(ids)
 
 
 def chat_finished(outputs: Path, sid: str, tid: str, *, failed=False, stopped=False):

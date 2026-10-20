@@ -142,8 +142,9 @@ async function loadPage() {
   for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
     const specifier = statement.moduleSpecifier.text;
     if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
-    const target = specifier === '../lib/api' ? moduleUrl('export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);return [];}')
-      : specifier === '../lib/whoami' ? moduleUrl('export const useAccountIdentities=()=>({});export const accountConnection=()=>"unknown";export const verifyStale=async()=>{};export const watchAccountFreshness=()=>()=>{};')
+    const target = specifier === '../lib/api' ? moduleUrl('export const restoreAccountAnalytics=async()=>{};export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);return [];}')
+      : specifier === '../lib/whoami' ? moduleUrl('export const hydrateAccountIdentities=()=>{};export const useAccountIdentities=()=>({});export const accountConnection=()=>"unknown";export const verifyStale=async()=>{};export const watchAccountFreshness=()=>()=>{};')
+      : specifier === '../lib/analyticsCache' ? moduleUrl('export const selectedAnalyticsPlatform=()=>"";export const selectAnalyticsPlatform=()=>{};export const readAnalyticsCache=()=>null;export const analyticsPending=()=>false;export const analyticsRevision=()=>0;export const subscribeAnalytics=()=>()=>{};')
       : specifier === './ContentAnalysisDemo' ? await tsModuleUrl(new URL('../src/components/ContentAnalysisDemo.tsx', import.meta.url))
       : specifier === './icons' ? await tsModuleUrl(new URL('../src/components/icons.tsx', import.meta.url))
       : specifier.startsWith('.') ? moduleUrl(`export default function Panel(){return ${JSON.stringify(specifier === './ContentAnalysisWorkbench' ? '真实作品工作台替身' : '')};}`)
@@ -161,7 +162,7 @@ test('page defaults to actual works and the user can explicitly switch to isolat
   assert.equal(globalThis.__demoAccountReads, 1);
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.match(view.container.textContent, /真实作品工作台替身/);
-  assert.equal(view.container.querySelector('.ca-collection-tools').open, false);
+  assert.equal(view.container.querySelector('.ca-collection-tools'), null);
   assert.equal(view.button('我的数据').getAttribute('aria-pressed'), 'true');
   await view.click(view.button('演示'));
   assert.equal(globalThis.__demoAccountReads, 1);
@@ -187,7 +188,7 @@ test('disabled demo mounts actual-data tools immediately and never substitutes s
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.equal(view.button('演示'), undefined);
   await view.render({ autoCollectSignal: 1 });
-  assert.equal(view.container.querySelector('.ca-collection-tools').open, false, 'the optional legacy collector is not auto-mounted beside work synchronization');
+  assert.equal(view.container.querySelector('.ca-collection-tools'), null, 'the optional legacy collector is not auto-mounted beside work synchronization');
   assert.equal(view.container.querySelector('[aria-label="分析数据来源"]'), null);
   assert.match(view.container.textContent, /真实作品工作台替身/);
 });

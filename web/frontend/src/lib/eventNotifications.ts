@@ -14,6 +14,7 @@ const key = 'easel:event-notifications';
 const limit = 1000;
 const seenLimit = 10000;
 let notices: EventNotice[] = [];
+const deletedSessions = new Set<string>();
 // Keep deduplication separate from the visible history. Clearing the panel must
 // not replay a still-pending question or an already-announced publish receipt.
 let seen = new Set<string>();
@@ -65,11 +66,16 @@ try {
   const stored: unknown = JSON.parse(sessionStorage.getItem(key) || 'null');
   const rows = Array.isArray(stored) ? stored : record(stored) && Array.isArray(stored.notices) ? stored.notices : [];
   const ids = new Set<string>();
+  if (record(stored) && Array.isArray(stored.deletedSessions)) {
+    for (const id of stored.deletedSessions) if (validId(id)) deletedSessions.add(id);
+  }
   for (const row of rows) {
     if (!record(row) || !validId(row.id) || ids.has(row.id) || typeof row.message !== 'string'
       || !['info', 'success', 'error'].includes(String(row.tone)) || typeof row.at !== 'number'
       || !Number.isFinite(row.at) || row.at <= 0 || Number.isNaN(new Date(row.at).getTime())) continue;
     ids.add(row.id);
+    const target = targetFrom(row.target);
+    if (target?.page === 'chat' && deletedSessions.has(target.sessionId)) continue;
     notices.push({ id: row.id, message: row.message.slice(0, 600), tone: row.tone as ToastTone,
       at: row.at, read: row.read === true, target: targetFrom(row.target) });
     if (notices.length === limit) break;
@@ -77,14 +83,14 @@ try {
   const storedSeen = record(stored) && Array.isArray(stored.seen) ? stored.seen.filter(validId) : [];
   seen = new Set([...notices.map(notice => notice.id), ...storedSeen].slice(0, seenLimit));
   if (record(stored) && stored.version === 2 && Array.isArray(stored.pending)) {
-    pending = stored.pending.filter((op): op is Operation => record(op) && (op.method === 'POST' || op.method === 'DELETE') && (!op.suffix || op.suffix === '/read')).slice(0, 2000);
+    pending = stored.pending.filter((op): op is Operation => record(op) && (op.method === 'POST' || op.method === 'DELETE') && (!op.suffix || op.suffix === '/read' || op.suffix === '/remove')).slice(0, 2000);
   } else if (notices.length) pending.push({ method: 'POST', body: { notices } });
 } catch { /* Storage restrictions or corrupt history must not interrupt tasks. */ }
 
 function changed() {
   try {
     sessionStorage.setItem(key, JSON.stringify({ version: 2,
-      notices: notices.map(({ action: _action, ...notice }) => notice), seen: [...seen], pending }));
+      notices: notices.map(({ action: _action, ...notice }) => notice), seen: [...seen], deletedSessions: [...deletedSessions], pending }));
   } catch { /* Keep events in memory when this browser cannot persist them. */ }
   listeners.forEach(listener => listener());
 }
@@ -120,7 +126,8 @@ export function syncEvents(): Promise<void> {
         if (pending.length) continue;
         const actions = new Map(notices.map(notice => [notice.id, notice.action]));
         notices = data.notices.filter((row): row is EventNotice => record(row) && validId(row.id) && typeof row.message === 'string' && ['info', 'success', 'error'].includes(String(row.tone)) && typeof row.at === 'number' && Number.isFinite(row.at) && row.at > 0)
-          .slice(0, limit).map(row => ({ ...row, target: targetFrom(row.target), action: actions.get(row.id) }));
+          .slice(0, limit).map(row => ({ ...row, target: targetFrom(row.target), action: actions.get(row.id) }))
+          .filter(row => row.target?.page !== 'chat' || !deletedSessions.has(row.target.sessionId));
         seen = new Set(data.seen.filter(validId).slice(0, seenLimit));
       } while (pending.length);
       syncState = 'saved';
@@ -146,6 +153,7 @@ export const subscribeEvents = (listener: () => void) => {
 export const readEvents = () => notices;
 
 export function recordEvent(message: string, tone: ToastTone, action?: ToastNotice['action'], id?: string, target?: NoticeTarget): boolean {
+  if (target?.page === 'chat' && deletedSessions.has(target.sessionId)) return false;
   const identifier = validId(id) ? id : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   if (seen.has(identifier)) return false;
   seen = new Set([identifier, ...seen].slice(0, seenLimit));
@@ -183,4 +191,12 @@ export async function removeEvents(ids: string[]): Promise<boolean> {
 export function clearEvents(): void {
   notices = [];
   queue({ method: 'DELETE' });
+}
+
+/** Called only after a conversation was deleted, never from a partial list. */
+export function removeSessionEvents(sessionId: string): void {
+  if (!/^[A-Za-z0-9_.-]{1,120}$/.test(sessionId)) return;
+  deletedSessions.add(sessionId);
+  notices = notices.filter(row => row.target?.page !== 'chat' || row.target.sessionId !== sessionId);
+  queue({ method: 'POST', suffix: '/remove', body: { sessionId } });
 }

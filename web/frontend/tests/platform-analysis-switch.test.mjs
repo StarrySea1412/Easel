@@ -23,11 +23,19 @@ const response = (platform, title = `${platform} 作品`) => ({
   } }),
 });
 async function fixture(t, fetcher) {
+  const values=new Map();
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:key=>values.get(key)||null}});
+  const identities=accounts=>values.set('easel_whoami',JSON.stringify(Object.fromEntries(accounts.map(a=>[a.platform,{identityKey:`fixture-${Math.random()}-${a.identity}`,accountId:a.identity}]))));
+  let lastIdentity='';
   t.mock.method(globalThis, 'fetch', fetcher);
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
   const state = { platform: 'douyin', accounts: platforms, revision: 0 };
-  const render = () => root.render(createElement(Panel, { ...state, showPlatformPicker: false, onPlatformChange: platform => { state.platform = platform; render(); } }));
+  const render = () => {
+    const signature=JSON.stringify(state.accounts.map(a=>[a.platform,a.identity]));
+    if(signature!==lastIdentity){identities(state.accounts);lastIdentity=signature;}
+    root.render(createElement(Panel, { ...state, showPlatformPicker: false, onPlatformChange: platform => { state.platform = platform; render(); } }));
+  };
   await act(async () => render());
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   return { container, state, render };

@@ -246,7 +246,7 @@ def test_douyin_identity_uses_current_account_api_not_page_authors(response, val
     identity = douyin_publish._account_identity(response)
     assert (identity is not None) is valid
     if valid:
-        assert identity == {"name": "Me", "avatar": "https://self.test/own.png"}
+        assert identity == {"name": "Me", "avatar": "https://self.test/own.png", "accountId": "own"}
 
 
 def test_douyin_identity_skips_invalid_avatar_urls():

@@ -312,7 +312,7 @@ def test_douyin_does_not_reject_session_before_spa_login_anchor_renders(tmp_path
     polled = []
     monkeypatch.setattr(account_stats, "_poll_stable", lambda *args: polled.append(True) or ["粉丝", "12"])
     monkeypatch.setattr(account_stats, "_platform_logged_in", lambda *args: bool(polled))
-    monkeypatch.setattr(account_stats, "_scrape_notes", lambda *args: [])
+    monkeypatch.setattr(account_stats, "_douyin_content", lambda *args: ({'platform_account_id':'owner', 'display_name':'Owner'}, []))
     stats = account_stats._scrape("douyin", False, None, None)
     assert stats["logged_in"] is True
     assert stats["followers"] == 12
@@ -359,7 +359,8 @@ def test_hidden_login_button_does_not_invalidate_session(visible):
 def test_note_listener_is_removed_when_manager_navigation_fails():
     page = SimpleNamespace(on=Mock(), remove_listener=Mock(),
                            goto=Mock(side_effect=TimeoutError()))
-    assert account_stats._scrape_notes("xiaohongshu", page, account_stats.PLATFORMS["xiaohongshu"]) == []
+    with pytest.raises(RuntimeError, match='未保存本次快照'):
+        account_stats._scrape_notes("xiaohongshu", page, account_stats.PLATFORMS["xiaohongshu"])
     page.remove_listener.assert_called_once_with("response", page.on.call_args.args[1])
 
 

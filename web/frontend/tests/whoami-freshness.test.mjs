@@ -4,7 +4,7 @@ import { Window } from 'happy-dom';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window = new Window({url:'https://easel.test/'});
 globalThis.localStorage = window.localStorage;
-const { accountConnection, isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
+const { accountConnection, hydrateAccountIdentities, isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
 const { accountWhoami, startLogin } = await loadTsModule('../src/lib/api.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -120,4 +120,45 @@ test('unconfirmed checks cool down for ten minutes and duplicate consumers share
   await first;
   await verifyStale(['bilibili']);
   assert.equal(calls.length, 1, 'switching pages must not repeat an inconclusive check');
+});
+
+test('partial refreshes preserve display details, while account switches and explicit disconnect replace them', () => {
+  localStorage.clear();
+  setWhoamiCache('douyin',{loggedIn:true,name:'Own',avatar:'https://self.test/me.png',identityKey:'same',accountId:'one',checkedAt:Date.now()-700000});
+  setWhoamiCache('douyin',{loggedIn:true,name:'',avatar:'',identityKey:'same',verified:true,checkedAt:Date.now()});
+  assert.equal(getWhoamiCache().douyin.name,'Own');
+  assert.equal(getWhoamiCache().douyin.avatar,'https://self.test/me.png');
+  setWhoamiCache('douyin',{loggedIn:false,name:'',avatar:'',identityKey:'same',verified:false});
+  assert.equal(getWhoamiCache().douyin.name,'Own');
+  assert.equal(accountConnection(undefined,getWhoamiCache().douyin),'unknown');
+  setWhoamiCache('douyin',{loggedIn:true,name:'Other',avatar:'',identityKey:'same',accountId:'two',verified:true,checkedAt:Date.now()});
+  assert.equal(getWhoamiCache().douyin.avatar,'');
+  setWhoamiCache('douyin',{loggedIn:false,name:'',avatar:'',authState:'not_connected',verified:true,checkedAt:Date.now()});
+  assert.equal(getWhoamiCache().douyin.name,'');
+});
+
+test('saved server identity restores after cache loss, stays unknown and permits the first real check', async t => {
+  localStorage.clear();
+  const account={platform:'douyin',identityKey:'new',identity:{loggedIn:true,name:'Saved',avatar:'https://self.test/me.png',identityKey:'new',checkedAt:Date.now()-700000}};
+  hydrateAccountIdentities([account]);
+  assert.equal(getWhoamiCache().douyin.name,'Saved');
+  assert.equal(getWhoamiCache().douyin.ts,0);
+  assert.equal(isWhoamiFresh(getWhoamiCache().douyin),false);
+  const calls=[];
+  t.mock.method(globalThis,'fetch',async url=>{calls.push(url);return {ok:true,json:async()=>({loggedIn:true,name:'',avatar:'',identityKey:'new',verified:true,checkedAt:Date.now()})};});
+  await verifyStale(['douyin']);
+  assert.equal(calls.length,1); assert.equal(getWhoamiCache().douyin.name,'Saved');
+  assert.equal(accountConnection(undefined,getWhoamiCache().douyin),'online');
+  hydrateAccountIdentities([{...account,identityKey:'next',identity:null}]);
+  assert.equal(getWhoamiCache().douyin,undefined);
+});
+
+test('account list applies newer backend expiry across pages and rejects stale proof', () => {
+  localStorage.clear();
+  const old = Date.now() - 2000, now = Date.now();
+  setWhoamiCache('xiaohongshu', {loggedIn:true,name:'old',avatar:'',identityKey:'before',verified:true,checkedAt:old});
+  hydrateAccountIdentities([{platform:'xiaohongshu',identityKey:'after',connection:{loggedIn:false,name:'',avatar:'',identityKey:'after',authState:'login_required',verified:true,checkedAt:now}}]);
+  assert.equal(accountConnection({loggedIn:true}, getWhoamiCache().xiaohongshu),'login_required');
+  hydrateAccountIdentities([{platform:'xiaohongshu',identityKey:'after',connection:{loggedIn:true,name:'old',avatar:'',identityKey:'after',authState:'online',verified:true,checkedAt:old}}]);
+  assert.equal(accountConnection({loggedIn:true}, getWhoamiCache().xiaohongshu),'login_required');
 });

@@ -1,9 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchAccounts } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, accountConnection, useAccountIdentities, useAccountChecks, type AccountConnection } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, hydrateAccountIdentities, useAccountIdentities, useAccountChecks, type AccountConnection } from '../lib/whoami';
 import AccountConnectionDot from './AccountConnectionDot';
 import PlatformIcon from './PlatformIcon';
+import { openSidebarPanel, SIDEBAR_PANEL_EVENT } from '../lib/sidebarPanels';
 import { IconAccounts } from './icons';
 import '../styles/sidebar-account-popover.css';
 
@@ -30,6 +31,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
   const reveal = () => {
     clearHide();
     if (!suppressFocus.current) {
+      openSidebarPanel(panelId);
       if (!open) { setSnapshot(undefined); setError(false); }
       setOpen(true);
     }
@@ -52,6 +54,15 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
 
   useEffect(() => () => clearTimeout(hideTimer.current), []);
   useEffect(() => {
+    const otherPanel = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== panelId) { clearTimeout(hideTimer.current); setOpen(false); }
+    };
+    const navigating = () => { clearTimeout(hideTimer.current); setOpen(false); };
+    window.addEventListener(SIDEBAR_PANEL_EVENT, otherPanel);
+    window.addEventListener('easel:page-navigation', navigating);
+    return () => { window.removeEventListener(SIDEBAR_PANEL_EVENT, otherPanel); window.removeEventListener('easel:page-navigation', navigating); };
+  }, [panelId]);
+  useEffect(() => {
     const update = () => setRevision(value => value + 1);
     window.addEventListener(ACCOUNT_STATE_EVENT, update); window.addEventListener('storage', update);
     return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, update); window.removeEventListener('storage', update); };
@@ -65,6 +76,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
     // side effect of hovering a navigation item, and never render credentials.
     fetchAccounts().then(accounts => {
       if (stale) return;
+      hydrateAccountIdentities(accounts);
       setSnapshot(PLATFORMS.map(([platform, name]) => {
         const account = accounts.find(item => item.platform === platform);
         return { platform, name, loggedIn: account?.loggedIn ?? null, hasLocalSession: account?.hasLocalSession };
@@ -137,7 +149,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
         <p className="sidebar-account-summary">{connected?.length ? `${connected.length} 个平台已确认在线` : '尚无可确认的已登录平台'}</p>
         <ul>{snapshot.map(account => <li key={account.platform}>
           <PlatformIcon platform={account.platform} name={account.name} className="sidebar-account-brand" />
-          <span className="sidebar-account-name" title={account.name}>{connectionOf(account.platform) === 'online' && identities[account.platform]?.name && localStorage.getItem('easel_account_privacy') !== '1' ? identities[account.platform].name : account.name}</span>
+          <span className="sidebar-account-name" title={account.name}>{identities[account.platform]?.loggedIn && identities[account.platform]?.name && localStorage.getItem('easel_account_privacy') !== '1' ? identities[account.platform].name : account.name}</span>
           <AccountConnectionDot connection={connectionOf(account.platform)} checking={checks.has(account.platform)} checkedAt={identities[account.platform]?.checkedAt} message={identities[account.platform]?.verificationMessage} />
         </li>)}</ul>
       </>}

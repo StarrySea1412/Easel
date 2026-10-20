@@ -5,7 +5,7 @@ import {
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
 import type { AccountItem, AccountWhoami, LoginStart, LoginStatus } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified, setAccountChecking, useAccountChecks, useAccountIdentities, watchAccountFreshness } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, setWhoamiCache, hydrateAccountIdentities, verifyStale, isWhoamiFresh, markWhoamiUnverified, setAccountChecking, useAccountChecks, useAccountIdentities, watchAccountFreshness } from '../lib/whoami';
 import AccountConnectionDot from './AccountConnectionDot';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
@@ -186,12 +186,12 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       const r = await accountWhoami(platform, true);
       if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0) || before !== JSON.stringify(getWhoamiCache()[platform])) return null;
       if (r.verified === false) {
-        markWhoamiUnverified(platform, r.verificationMessage || '登录状态尚未确认，请重试。');
+        setWhoamiCache(platform, { ...r, verified: false });
         setWhoami((w) => ({ ...w, [platform]: getWhoamiCache()[platform] || r }));
         setVerification(value => ({ ...value, [platform]: { state: 'error', message: r.verificationMessage || '本次检查未能确认登录状态，保留上次状态，请稍后重试。' } }));
         return null;
       }
-      setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
+      setWhoamiCache(platform, r); setWhoami((w) => ({ ...w, [platform]: getWhoamiCache()[platform] || r }));
       setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
       setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? r.verificationMessage || '登录状态有效' : '未登录' } }));
       return r;
@@ -214,6 +214,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     try {
       const list = await fetchAccounts();
       if (!aliveRef.current) return;
+      hydrateAccountIdentities(list);
       setAccounts(list);
       const cached = getWhoamiCache();
       setLoaded(true);
@@ -370,6 +371,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         visibleBrowser: s.visibleBrowser ?? prev.visibleBrowser }));
       if (s.state !== 'success') return;
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true, hasLocalSession: true } : x));
+      setWhoamiCache(a.platform, null); // A new login may select a different account.
       setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '', checkedAt: Date.now(), verified: true });
       setVerification(value => ({ ...value, [a.platform]: { state: 'checking', message: '登录成功，正在读取账号身份…' } }));
       const identity = await runWhoami(a.platform);
@@ -530,7 +532,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             return <article key={a.platform} className={`card account-card${!a.supported ? ' account-unavailable' : ''}`}>
               <div className="account-card-head"><div className="account-platform"><span className="account-platform-mark"><PlatformIcon platform={a.platform} name={a.name} /></span><h3>{a.name}</h3></div>{badge(a)}</div>
               <div className="account-identity">
-                {knownIdentity ? <><Avatar url={hideIdentity ? undefined : info?.avatar} name={hideIdentity ? a.name : info?.name || a.name} /><div><strong className="account-nick">{hideIdentity ? '账号身份已隐藏' : info?.name || '已保存的账号'}</strong></div></>
+                {knownIdentity ? <><Avatar key={`${a.platform}:${info?.checkedAt || 0}:${info?.identityKey || ''}`} url={hideIdentity ? undefined : info?.avatar} name={hideIdentity ? a.name : info?.name || a.name} /><div><strong className="account-nick">{hideIdentity ? '账号身份已隐藏' : info?.name || '已保存的账号'}</strong></div></>
                   : checking ? <div className="account-skeleton account-skeleton-identity" role="status" aria-label="正在自动检测登录状态" />
                   : <p className="account-connection-copy">{a.supported ? '连接后，在这里查看当前账号与登录状态。' : '此平台暂不可用，请先使用其他平台。'}</p>}
               </div>

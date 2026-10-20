@@ -501,3 +501,34 @@ test('account checking remains unknown on transport failure and periodic checks 
   await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
   assert.equal(view.state.requests.length, calls);
 });
+
+test('blank identity refresh keeps the nickname and retries the same failed avatar on a new verification', async t => {
+  const view = await fixture(t);
+  const oldAt=Date.now()-700000;
+  view.state.accountRows=[{platform:'zhihu',name:'知乎',backend:'web',supported:true,loggedIn:true,hasLocalSession:true}];
+  localStorage.setItem('easel_whoami',JSON.stringify({zhihu:{loggedIn:true,name:'Saved nick',avatar:'https://self.test/face.png',checkedAt:oldAt,ts:oldAt}}));
+  await act(async()=>window.dispatchEvent(new window.StorageEvent('storage',{key:'easel_whoami'})));
+  const oldImage=view.container.querySelector('img.account-avatar');
+  assert.ok(oldImage);
+  await act(async()=>oldImage.dispatchEvent(new window.Event('error')));
+  assert.ok(view.container.querySelector('.account-avatar-fallback'));
+  view.state.whoami=()=>({loggedIn:true,verified:true,name:'',avatar:'',checkedAt:Date.now()});
+  await act(async()=>window.dispatchEvent(new window.Event('focus')));
+  assert.equal(view.container.querySelector('.account-nick').textContent,'Saved nick');
+  const retried=view.container.querySelector('img.account-avatar');
+  assert.ok(retried); assert.equal(retried.src,'https://self.test/face.png');
+  assert.notEqual(retried,oldImage);
+});
+
+test('newly successful login never borrows the previous account avatar while identity lookup fails', async t => {
+  const view=await fixture(t);
+  const {setWhoamiCache}=await loadTsModule('../src/lib/whoami.ts');
+  await act(async()=>setWhoamiCache('xiaohongshu',{loggedIn:true,verified:true,checkedAt:Date.now(),name:'Previous owner',avatar:'https://self.test/previous.png'}));
+  view.state.start=async()=>snapshot('success');
+  const {markWhoamiUnverified}=await loadTsModule('../src/lib/whoami.ts');
+  await act(async()=>markWhoamiUnverified('xiaohongshu','需要重新连接'));
+  view.state.whoami=()=>({loggedIn:true,verified:false,name:'',avatar:''});
+  await view.start();
+  assert.doesNotMatch(view.container.textContent,/Previous owner/);
+  assert.equal(view.container.querySelector('img.account-avatar'),null);
+});

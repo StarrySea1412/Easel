@@ -1,7 +1,8 @@
 import type { AccountInsight, AnalysisContent, AnalysisReport } from '../lib/contentAnalysis';
 import '../styles/account-analysis-insights.css';
 
-export default function AccountAnalysisInsights({ report, busy, error, onRequest, onChoose, onPlan }: {
+export default function AccountAnalysisInsights({ report, busy, error, onRequest, onChoose, onPlan, inConversation = false }: {
+ inConversation?: boolean;
  report: AnalysisReport;
  busy: boolean;
  error?: string;
@@ -19,8 +20,8 @@ export default function AccountAnalysisInsights({ report, busy, error, onRequest
    <details><summary>需要补充的材料与分析边界</summary><h4>建议准备</h4><ul>{profile.materialNeeds.map(item => <li key={item}>{item}</li>)}</ul><h4>当前不能判断</h4><ul>{profile.limitations.map(item => <li key={item}>{item}</li>)}</ul></details>
   </section>}
   <section className="ca-paper" aria-label="跨作品 AI 解读" aria-busy={busy}>
-   <div className="ca-card-heading"><h3>跨作品 AI 解读</h3><button className="btn btn-sm" disabled={busy || materialCount < 2} onClick={onRequest}>{busy ? '正在分析当前账号…' : saved ? '重新生成账号解读' : '生成账号解读'}</button></div>
-   <p className="ca-caption">点击会将当前账号已保存作品的文字材料与事实发送至已配置的模型服务。事实由程序整理，模型建议仍是待验证假设。</p>
+   <div className="ca-card-heading"><h3>跨作品 AI 解读</h3><button className="btn btn-sm" disabled={busy || materialCount < 2} onClick={onRequest}>{inConversation ? busy ? '正在准备材料…' : '在辅助面板分析账号' : busy ? '正在分析当前账号…' : saved ? '重新生成账号解读' : '生成账号解读'}</button></div>
+   <p className="ca-caption">{inConversation ? '打开专用分析对话，在辅助面板查看、提取和编辑 Markdown 材料；发送消息后才调用模型，结果回填当前账号。' : '点击会将当前账号已保存作品的文字材料与事实发送至已配置的模型服务。事实由程序整理，模型建议仍是待验证假设。'}</p>
    {error && <div className="ca-error" role="alert"><p>{error}</p><button className="ca-text-button" disabled={busy} onClick={onRequest}>重新生成解读</button><p className="ca-caption">重新生成会再次请求模型服务；本地材料诊断仍可使用。</p></div>}
    {materialCount < 2 && <p className="ca-caption">至少保存两篇含文字材料的作品后才能生成跨作品解读。</p>}
    {saved ? <>

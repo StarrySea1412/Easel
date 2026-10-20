@@ -25,10 +25,12 @@ import type { MessageSettingsActions } from './ChatMessageSettings';
 import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import ChatPanelHome from './ChatPanelHome';
+import ChatAnalysisPanel from './ChatAnalysisPanel';
 import ChatBrowserPanel from './ChatBrowserPanel';
 import ChatSourcesPanel from './ChatSourcesPanel';
 import ChatPanelIcon from './ChatPanelIcon';
 import { ChatPanelFiles, ChatPanelExecution } from './ChatPanelTools';
+import PanelMaterialQuote from './PanelMaterialQuote';
 import { loadPanelTools, savePanelTools, PANEL_LABELS, type PanelTool } from '../lib/chatPanels';
 import '../styles/chat-side-panel.css';
 import { readSelectedSkills, readSkillRequirements } from '../lib/selectedSkills';
@@ -53,6 +55,7 @@ interface ChatPageProps {
   onStop: () => void;
   onEdit?: (userIndex: number, text: string, signal: AbortSignal) => Promise<boolean>;
   onOpenSource?: (sessionId: string) => void;
+  onOpenAnalysis?: () => void;
   onSteer?: (id: string) => Promise<boolean>;
   onResend: (
     userIndex: number,
@@ -102,7 +105,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
+function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onOpenAnalysis, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -111,9 +114,9 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   const goalActive=goal?.status==='active';
   const [panelOpen,setPanelOpen]=useState(true);
   const [goalEditor,setGoalEditor]=useState<{seed?:string;modelRef?:string;onConfigured?:()=>void;goal?:TaskGoal;welcome?:boolean}|null>(null);
-  const [panelTab,setPanelTab]=useState<'goal'|'side'|'new'|PanelTool>('goal');
+  const [panelTab,setPanelTab]=useState<'goal'|'side'|'new'|PanelTool>(session.analysisContext?'analysis':'goal');
   const [toolTabs,setToolTabs]=useState<Record<string,PanelTool[]>>({});
-  const openedTools=useMemo(()=>toolTabs[session.id]||loadPanelTools(session.id),[toolTabs,session.id]);
+  const openedTools=useMemo(()=>toolTabs[session.id]||[...new Set([...loadPanelTools(session.id),...(session.analysisContext?['analysis' as const]:[])])],[toolTabs,session.id,session.analysisContext]);
   const [selectedFileId,setSelectedFileId]=useState<string|undefined>();
   const [browserIcon,setBrowserIcon]=useState<{sessionId:string;source:string}|null>(null);
   const onBrowserIcon=useCallback((source:string)=>setBrowserIcon(previous=>previous?.sessionId===session.id&&previous.source===source?previous:{sessionId:session.id,source}),[session.id]);
@@ -139,11 +142,11 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     applySideOrder(sideId,ids[to],offset>0);
   };
   const activeSide=sideSessions.find(item=>item.id===activeSideId)||sideSessions.at(-1);
-  useEffect(()=>{setPanelOpen(true);setPanelTab('goal');setActiveSideId(null);setSelectedFileId(undefined);setGoalEditor(null);},[session.id]);
+  useEffect(()=>{setPanelOpen(true);setPanelTab(session.analysisContext?'analysis':'goal');setActiveSideId(null);setSelectedFileId(undefined);setGoalEditor(null);},[session.id,session.analysisContext]);
   // 无目标时面板默认落在辅助对话标签上（有目标时保持“目标”优先的既有行为）。
   useEffect(()=>{
-    if(panelTab==='goal'&&!goal){if(sideSessions.length)setPanelTab('side');else if(openedTools.length)setPanelTab('new');}
-  },[panelTab,goal,sideSessions.length,openedTools.length]);
+    if(panelTab==='goal'&&!goal){if(session.analysisContext)setPanelTab('analysis');else if(sideSessions.length)setPanelTab('side');else if(openedTools.length)setPanelTab('new');}
+  },[panelTab,goal,sideSessions.length,openedTools.length,session.analysisContext]);
   const PANEL_WIDTH_KEY='easel:chat-panel-width';
   const [panelWidth,setPanelWidth]=useState(()=>{const {ok,value}=readLocalValue(PANEL_WIDTH_KEY);const n=value?Number(value):NaN;return ok&&Number.isFinite(n)&&n>=280&&n<=720?n:480;});
   const panelWidthRef=useRef(panelWidth);panelWidthRef.current=panelWidth;
@@ -249,13 +252,13 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             messageSettings={{...messageSettings, targets:[{value:session.id,label:'主对话'}, ...messageSettings.targets.filter(target=>target.value!==activeSide.id)], quote:(text,target)=>{if(target==='current')addChatDraftQuote(activeSide.id, `来自「${activeSide.title}」：\n${text}`);else messageSettings.quote(`来自「${activeSide.title}」：\n${text}`,target===session.id?'current':target);}}}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
-      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
+      {openedTools.map(tool=><PanelMaterialQuote key={`${session.id}:${tool}`} sessionId={session.id} tool={tool} hidden={panelTab!==tool}>{tool==='analysis'?<ChatAnalysisPanel session={session} onOpenAnalysis={onOpenAnalysis}/>:tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
         const messageIndex=session.messages.findIndex(message=>message.turnId===turnId);
         const index=messageIndex>=0?nodes.findLastIndex(node=>node.messageIndex<=messageIndex):turnId===session.pendingTurnId?nodes.length-1:-1;
         if(index<0){showToast('这条来源对应的对话暂不在本地记录中。','info');return;}
         if(window.innerWidth<=900)setPanelOpen(false);
         requestAnimationFrame(()=>jumpTo(index));
-      }}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
+      }}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</PanelMaterialQuote>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
   </div>;
@@ -316,7 +319,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   // start can retry its saved ID rather than creating the goal a second time.
   const isEmpty = goalEditor?.welcome ?? (session.messages.length === 0 && !isStreaming && !deliveries.items.length && !deliveries.jobs.length && !deliveries.messages.length);
   const header = <header className="chat-header">
-    <div className="chat-header-context"><span>对话</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty ? '新对话' : session.title}</h2></div>
+    <div className="chat-header-context"><span>{session.conversationType==='account-analysis'?'账号分析':session.conversationType==='content-analysis'?'作品分析':'对话'}</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty&&!session.analysisContext ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
       {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
       {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}

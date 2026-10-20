@@ -8,6 +8,7 @@ import { requirementsForSelection } from './selectedSkills';
 import type { SkillRequirements } from './selectedSkills';
 import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
+import { isAnalysisBinding, type AnalysisBinding } from './analysisBinding';
 
 export interface ChatMessage extends ChatTiming {
   shareAppend?: { token: string; appendId: string; at: number; source: { model: string; harness: string } }; // 来自分享接管的回传标记
@@ -31,6 +32,8 @@ export interface ChatMessage extends ChatTiming {
 }
 
 export interface ChatSession {
+  conversationType?: 'general' | 'account-analysis' | 'content-analysis';
+  analysisContext?: AnalysisBinding;
   editBranch?: { sourceSessionId: string; prefixLength: number };
   engine?: 'openclaw' | 'codex';
   id: string;
@@ -202,6 +205,8 @@ function decodeSessions(raw: string): ChatSession[] {
       created: typeof value.created === 'number' && Number.isFinite(value.created) ? value.created : 0,
     };
     session.engine = value.engine === 'codex' ? 'codex' : 'openclaw';
+    if (['general','account-analysis','content-analysis'].includes(String(value.conversationType))) session.conversationType = value.conversationType as ChatSession['conversationType'];
+    if (isAnalysisBinding(value.analysisContext) && value.analysisContext.sessionId === id && value.importedFromBackup !== true) session.analysisContext = value.analysisContext;
     if (record(value.editBranch) && typeof value.editBranch.sourceSessionId === 'string'
       && Number.isInteger(value.editBranch.prefixLength) && Number(value.editBranch.prefixLength) >= 0
       && Number(value.editBranch.prefixLength) <= messages.length) {
@@ -257,7 +262,7 @@ function prune(sessions: ChatSession[]): ChatSession[] {
   const pruned = sessions.filter((s) => {
     // 辅助对话（子会话）是用户显式开的旁支：即使还没有消息也逐个保留（有独立的关闭入口），
     // 否则多开两个空辅助对话会在保存时被静默丢掉。
-    if (s.parentSessionId || parents.has(s.id)) return true;
+    if (s.parentSessionId || parents.has(s.id) || s.analysisContext) return true;
     if (s.archived || s.pinnedAt || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;

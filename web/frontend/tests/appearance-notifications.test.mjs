@@ -169,3 +169,12 @@ test('marking notices read acknowledges their chat sessions', async t => {
   assert.deepEqual(acked, ['s7', 's8'], '全部已读联动每个未读对话会话一次');
   assert.equal(events.readEvents().find(item => item.id === 'ack-image').read, true, '非对话通知只标读不联动');
 });
+
+test('account hover claims sidebar ownership and dismisses notification panel', async t => {
+  const v=await view(t,Center,{onOpen:()=>{}});
+  await v.click(v.node.querySelector('.global-events-entry'));
+  assert.ok(document.querySelector('.global-events-panel'));
+  await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:sidebar-panel',{detail:'account-preview'})));
+  assert.equal(document.querySelector('.global-events-panel'),null);
+  assert.equal(v.node.querySelector('.global-events-entry').getAttribute('aria-expanded'),'false');
+});

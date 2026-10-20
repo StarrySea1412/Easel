@@ -37,6 +37,17 @@ const parent = { id: 'p', title: '主对话', created: 1, messages: [{ role: 'us
 const sideA = { id: 's1', title: '辅助对话', created: 2, parentSessionId: 'p', messages: [] };
 const sideB = { id: 's2', title: '辅助对话 2', created: 3, parentSessionId: 'p', messages: [] };
 
+test('empty analysis conversations open their material panel immediately and show their typed title', async t => {
+  const view = fixture(t);
+  const analysisContext={id:'ctx-panel',platform:'douyin',accountId:'owner',accountName:'Owner',sessionId:'analysis-panel-owner',kind:'account-analysis',contentIds:['work'],sourceHash:'hash',markdown:'# 真实材料',createdAt:'2026-10-21T00:00:00Z',status:'prepared',result:null};
+  await view.render(createElement(ChatPage,{session:{id:'analysis-panel-owner',title:'账号分析 · Owner',created:1,messages:[],conversationType:'account-analysis',analysisContext}}));
+  const tab=[...view.container.querySelectorAll('[role=tab]')].find(b=>b.textContent==='分析材料');
+  assert.equal(tab.getAttribute('aria-selected'),'true');
+  assert.equal(view.container.querySelector('.chat-analysis-panel').closest('.chat-panel-content').hidden,false);
+  assert.equal(view.container.querySelector('.chat-header-context h2').textContent,'账号分析 · Owner');
+  assert.equal(view.container.querySelector('.chat-panel-launcher-tab'),null);
+});
+
 test('the tab bar lists every side chat and switches between them', async t => {
   const view = fixture(t);
   await view.render(createElement(ChatPage, { session: parent, sideSessions: [sideA, sideB] }));
@@ -60,7 +71,7 @@ test('the + button opens the full panel home without creating a chat, then lets 
   assert.ok(home);assert.match(home.textContent,/新增面板/);assert.match(home.textContent,/推荐/);
   assert.deepEqual(calls,[],'opening the launcher must not create a child');
   const rows=[...home.querySelectorAll('.chat-panel-tool-grid button')];
-  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','来源','终端','变更','辅助对话']);
+  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','来源','终端','变更','分析材料','辅助对话']);
   await view.click(rows.find(row=>row.querySelector('strong').textContent==='辅助对话'));
   assert.deepEqual(calls,['create']);assert.equal(view.container.querySelector('.chat-panel-home'),null);
 });

@@ -42,9 +42,19 @@ export function getWhoamiCache(): Record<string, WhoamiEntry> {
 }
 
 /** 写缓存；r 为 null 则删除该平台条目。附带 ts 供 TTL 判定（旧格式无 ts→视为过期）。 */
-export function setWhoamiCache(platform: string, r: AccountWhoami | null): void {
+export function setWhoamiCache(platform: string, r: AccountWhoami | null, options?: { hydrated?: boolean }): void {
   requestVersions.set(platform, (requestVersions.get(platform) || 0) + 1);
-  const entry = r ? { ...r, ts: Date.now() } : null;
+  const previous = getWhoamiCache()[platform];
+  const compatible = previous?.loggedIn && (!r?.identityKey || r.identityKey === previous.identityKey)
+    && (!r?.accountId || !previous.accountId || r.accountId === previous.accountId)
+    && (!r?.name || !previous.name || r.name === previous.name);
+  const retain = r && compatible && (r.loggedIn || r.verified === false);
+  const entry = r ? { ...r, ...(retain ? {
+    name: r.name || previous.name, avatar: r.avatar || previous.avatar,
+    identityKey: r.identityKey || previous.identityKey, accountId: r.accountId || previous.accountId,
+    loggedIn: r.verified === false ? previous.loggedIn : r.loggedIn,
+    checkedAt: r.checkedAt ?? previous.checkedAt,
+  } : {}), ts: options?.hydrated ? 0 : Date.now() } : null;
   try {
     const c = getWhoamiCache();
     if (entry) c[platform] = entry;
@@ -58,6 +68,36 @@ export function isWhoamiFresh(e: AccountWhoami & { ts?: number } | undefined, tt
   const at = e?.checkedAt ?? e?.ts;
   return !!e && e.verified !== false && (e.loggedIn || e.authState === 'login_required' || e.authState === 'not_connected') && typeof at === 'number' && Number.isFinite(at)
     && at <= Date.now() && Date.now() - at < ttlMs;
+}
+
+/** Restore display identity without promoting a saved snapshot to an online check. */
+export function hydrateAccountIdentities(accounts: AccountItem[]): void {
+  for (const account of accounts) {
+    if (!account.identityKey) continue;
+    let previous: WhoamiEntry | undefined = getWhoamiCache()[account.platform];
+    if (account.connection) {
+      try {
+        const proof = decodeAccountWhoami(account.connection);
+        if (proof.identityKey === account.identityKey && isWhoamiFresh(proof)
+            && (!previous || (proof.checkedAt || 0) > (previous.checkedAt || 0))) {
+          setWhoamiCache(account.platform, proof);
+          continue;
+        }
+      } catch { /* A display snapshot or malformed response is never online proof. */ }
+    }
+    if (previous && previous.identityKey !== account.identityKey) {
+      setWhoamiCache(account.platform, null);
+      previous = undefined;
+    }
+    if (!previous && account.identity) {
+      try {
+        const identity = decodeAccountWhoami(account.identity);
+        if (identity.identityKey === account.identityKey) {
+          setWhoamiCache(account.platform, { ...identity, verified: false, authState: 'unknown' }, { hydrated: true });
+        }
+      } catch { /* Ignore malformed snapshots without replacing a live result. */ }
+    }
+  }
 }
 
 export type AccountConnection = 'online' | 'login_required' | 'not_connected' | 'unknown';
@@ -133,12 +173,12 @@ export async function verifyStale(platforms: string[], opts: VerifyOpts = {}): P
         if (version !== (requestVersions.get(p) || 0) || before !== JSON.stringify(getWhoamiCache()[p])) continue;
         if (r.verified === false) {
           const message = r.verificationMessage || '本次检查未确认登录状态，请重试。';
-          markWhoamiUnverified(p, message);
+          setWhoamiCache(p, { ...r, verified: false, verificationMessage: message });
           if (!opts.alive || opts.alive()) opts.onError?.(p, message);
           continue;
         }
         setWhoamiCache(p, r);
-        if (!opts.alive || opts.alive()) opts.onUpdate?.(p, r);
+        if (!opts.alive || opts.alive()) opts.onUpdate?.(p, getWhoamiCache()[p] || r);
       } catch (cause) {
         if (version !== (requestVersions.get(p) || 0) || before !== JSON.stringify(getWhoamiCache()[p])) continue;
         const message = cause instanceof Error ? cause.message : '登录检查失败，请重试。';
