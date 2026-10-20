@@ -936,6 +936,8 @@ def cmd_whoami(a):
                     qr = page.query_selector("img[src*='qrcode'], .login__type__container__scan")
                     if host != 'mp.weixin.qq.com' or not qr or not qr.is_visible():
                         out['error'] = '未识别到公众号账号或可见登录入口，暂时无法确认状态。'
+                    else:
+                        out['reason'] = 'login_required'
             finally:
                 ctx.close()
     except Exception as e:

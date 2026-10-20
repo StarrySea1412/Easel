@@ -350,9 +350,9 @@ def test_omitted_protocol_keeps_saved_choice_for_save_and_discovery(sandbox, mon
 
 def test_unknown_saved_api_is_not_silently_rewritten_as_openai(sandbox):
     config = json.loads(sandbox[1].read_text())
-    config['models']['providers']['openai']['api'] = 'openai-responses'
+    config['models']['providers']['openai']['api'] = 'unsupported-wire-api'
     sandbox[1].write_text(json.dumps(config), encoding='utf-8')
-    assert web._model_channels()['channels']['chat']['rows'][0]['protocol'] == 'openai-responses'
+    assert web._model_channels()['channels']['chat']['rows'][0]['protocol'] == 'unsupported-wire-api'
     before = web._model_file_snapshot()
     with pytest.raises(web.HTTPException) as caught:
         asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(

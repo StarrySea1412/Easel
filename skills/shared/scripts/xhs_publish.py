@@ -1567,6 +1567,8 @@ def cmd_whoami(a) -> int:
                             result['error'] = _LOGIN_PAGE_MESSAGES[kind]
                         elif not (first_party and login is not None and login.is_visible()):
                             result['error'] = '未识别到可见账号或登录入口，暂时无法确认会话状态，请稍后重试。'
+                        else:
+                            result['reason'] = 'login_required'
                     if logged:
                         img = page.query_selector('.main-container .user img.reds-img')
                         if img:

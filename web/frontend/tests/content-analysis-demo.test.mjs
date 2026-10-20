@@ -143,6 +143,7 @@ async function loadPage() {
     const specifier = statement.moduleSpecifier.text;
     if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
     const target = specifier === '../lib/api' ? moduleUrl('export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);return [];}')
+      : specifier === '../lib/whoami' ? moduleUrl('export const useAccountIdentities=()=>({});export const accountConnection=()=>"unknown";export const verifyStale=async()=>{};export const watchAccountFreshness=()=>()=>{};')
       : specifier === './ContentAnalysisDemo' ? await tsModuleUrl(new URL('../src/components/ContentAnalysisDemo.tsx', import.meta.url))
       : specifier === './icons' ? await tsModuleUrl(new URL('../src/components/icons.tsx', import.meta.url))
       : specifier.startsWith('.') ? moduleUrl(`export default function Panel(){return ${JSON.stringify(specifier === './ContentAnalysisWorkbench' ? '真实作品工作台替身' : '')};}`)
@@ -182,7 +183,7 @@ test('disabled demo mounts actual-data tools immediately and never substitutes s
   globalThis.__demoAccountError = '';
   await view.click(view.button('重试'));
   assert.equal(view.container.querySelector('[role="alert"]'), null);
-  assert.match(view.container.textContent, /需要连接账号/);
+  assert.match(view.container.textContent, /登录状态待确认/);
   assert.equal(view.container.querySelector('[aria-label="内容分析演示"]'), null);
   assert.equal(view.button('演示'), undefined);
   await view.render({ autoCollectSignal: 1 });

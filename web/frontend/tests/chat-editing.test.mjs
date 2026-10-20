@@ -59,7 +59,8 @@ test('failures keep edited text and controls usable; switching sessions aborts o
  const v=fixture(t);await v.render({onEdit:async()=>{throw new Error('附件不存在');}});await v.edit();await v.type('保留修改');await v.click(v.button('发送'));
  assert.match(v.container.textContent,/附件不存在/);assert.equal(v.container.querySelector('.chat-message-editor textarea').value,'保留修改');assert.equal(v.button('发送').disabled,false);
  let signal;await v.render({onEdit:async(i,text,abort)=>{signal=abort;return new Promise(()=>{});}});await v.click(v.button('发送'));
- await v.render({session:{...source(),id:'other'}});assert.equal(signal.aborted,true);assert.equal(v.container.querySelector('.chat-message-editor textarea').value,'旧问题');
+ await v.render({session:{...source(),id:'other'}});assert.equal(signal.aborted,true);assert.equal(v.container.querySelector('.chat-message-editor'),null);
+ await v.edit();assert.equal(v.container.querySelector('.chat-message-editor textarea').value,'旧问题');
 });
 test('generation, pending recovery and stopping disable editing; imported backups have no edit action',async t=>{
  const v=fixture(t);for(const patch of [{stream:{content:'生成中',thinking:'',activity:'',questions:[]}},{stream:undefined,stopping:true},{stopping:false,session:{...source(),pendingTurnId:'recover'}}]){

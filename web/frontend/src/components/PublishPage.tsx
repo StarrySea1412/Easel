@@ -1,3 +1,4 @@
+import { confirmModal } from './ui/ConfirmModal';
 import { FailureMessage } from './FailureRecords';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
@@ -15,7 +16,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, verifyStale, watchAccountFreshness } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
   persona: string;
@@ -144,10 +145,9 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   }, [loadAccounts]);
   useEffect(() => watchAccountFreshness(() => { if (!checkLock.current) void loadAccounts(true); }), [loadAccounts]);
 
-  const loginOf = (key: string) => {
-    const entry = getWhoamiCache()[key];
-    return isWhoamiFresh(entry) ? entry.loggedIn : accounts.find(a => a.platform === key)?.loggedIn ?? false;
-  };
+  const identities = useAccountIdentities();
+  const connectionOf = (key: string) => accountConnection(accounts.find(a => a.platform === key), identities[key]);
+  const loginOf = (key: string) => connectionOf(key) === 'online';
 
   const toggle = (k: string) => {
     if (!platforms.includes(k)) setPreviewPlatform(k);
@@ -186,7 +186,8 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const preparationIssue = (key: string) => {
     if (accountsLoading) return '正在读取账号';
     if (accountsError) return '账号状态未知';
-    if (!loginOf(key)) return '未登录，请先到账号页登录。';
+    if (connectionOf(key) === 'unknown') return '登录状态待在线确认，提交前将重新检查。';
+    if (!loginOf(key)) return '未登录，请先连接账号。';
     if (MEDIA_REQUIRED.has(key) && selectedMedia.length === 0) return '需附带图片或视频。';
     if (VIDEO_ONLY.has(key) && !selectedMedia.some(path => VIDEO_RE.test(path))) return `${PLATFORMS.find(p => p.key === key)?.label}需要视频，请从内容库选择。`;
     if (!isWhoamiFresh(getWhoamiCache()[key])) return '登录状态待在线确认，提交前将重新检查。';
@@ -287,8 +288,8 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
     };
     const requests: PublishRequest[] = [];
     for (const target of targets) {
-      if (!loginOf(target.key)) {
-        errors[target.key] = '未登录，请先到账号页登录。';
+      if (['login_required', 'not_connected'].includes(connectionOf(target.key))) {
+        errors[target.key] = '未登录，请先连接账号。';
         failureKinds[target.key] = { stage: 'preflight', code: 'login_required' };
       } else if (MEDIA_REQUIRED.has(target.key) && selectedMedia.length === 0) {
         errors[target.key] = '需附带图片或视频。';
@@ -320,7 +321,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
         identities[platform] = JSON.stringify(getWhoamiCache()[platform]);
         if (result.loggedIn) confirmed.push(request);
         else {
-          errors[platform] = '在线检查确认登录已失效，请重新连接。';
+          errors[platform] = '未登录，请先连接账号。';
           failureKinds[platform] = { stage: 'identity', code: 'login_required' };
         }
       } catch (cause) {
@@ -346,16 +347,17 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       if (mounted.current) setCheckResult(`预检失败：${e instanceof Error ? e.message : '未知错误'}\n\n预检仅用于提醒，不会阻止你继续发布。`);
     } finally {
       if (mounted.current) setChecking(false);
-      checkLock.current = false;
       if (mounted.current) setCheckStage('');
     }
-    if (!mounted.current) return;
-    const okToSend = window.confirm(
+    if (!mounted.current) { checkLock.current = false; return; }
+    let okToSend = false;
+    try { okToSend = await confirmModal(
       `发布前预检已执行，结果已显示在页面中。人设评分只做提醒，不会阻止发布。\n\n` +
       `即将向这些账号【真实提交内容】：${targets.filter(target => confirmed.some(request => request.platform === target.key)).map(target => target.label).join('、')}。\n` +
       `${Object.keys(errors).length ? '\n本次不会提交：' + targets.filter(target => errors[target.key]).map(target => target.label + '（' + errors[target.key] + '）').join('、') + '。\n' : ''}` +
       `平台可能进入审核，公众号保存到草稿箱。结果与可用作品地址会保存在发布回执中。确定继续？`);
-    if (!okToSend) return;
+    } finally { checkLock.current = false; }
+    if (!okToSend || !mounted.current) return;
     const unchanged = confirmed.filter(request => {
       const entry = getWhoamiCache()[request.platform];
       return isWhoamiFresh(entry) && entry.loggedIn && identities[request.platform] === JSON.stringify(entry);
@@ -554,7 +556,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                 return <button key={p.key} className="publish-readiness-row" onClick={() => setPreviewPlatform(p.key)}>
                   <span><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span>
                   <span className={busy ? 'is-busy' : preparationIssue(p.key) ? 'needs-attention' : 'is-ready'}>
-                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : preparationIssue(p.key) ? accountsLoading ? '读取账号中…' : accountsError ? '状态待确认' : !loginOf(p.key) ? '需登录' : !isWhoamiFresh(getWhoamiCache()[p.key]) ? '待在线确认' : '需补充素材' : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
+                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : preparationIssue(p.key) ? accountsLoading ? '读取账号中…' : accountsError || connectionOf(p.key) === 'unknown' ? '状态待确认' : !loginOf(p.key) ? '需登录' : '需补充素材' : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
                   </span>
                 </button>;
               })}

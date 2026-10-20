@@ -66,3 +66,4 @@
 
 .easel-select-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; color:var(--text-secondary); }
 .easel-select-icon:empty { display:none; }
+.easel-select-group-label { padding:9px 12px 4px; font-size:11px; font-weight:600; color:var(--text-secondary); border-top:1px solid var(--border); }

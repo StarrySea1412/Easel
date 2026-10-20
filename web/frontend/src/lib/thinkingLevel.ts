@@ -8,6 +8,7 @@ export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
 export type ThinkingPreference = ThinkingLevel | 'auto';
 export const DEFAULT_THINKING_PREFERENCE: ThinkingPreference = 'auto';
 export function resolveThinkingPreference(value: ThinkingPreference, supported?: readonly string[]): ThinkingLevel | undefined {
+  if (!supported?.some(level => (THINKING_LEVELS as readonly string[]).includes(level))) return undefined;
   if (value !== 'auto') return compatibleThinkingLevel(value, supported);
   // Auto is a UI preference, never an upstream effort parameter.
   const strongest = [...THINKING_LEVELS].reverse().find(level => level !== 'adaptive' && level !== 'off' && supported?.includes(level));

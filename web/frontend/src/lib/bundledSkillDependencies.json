@@ -45,9 +45,6 @@
     "speech",
     "music"
   ],
-  "skill-email-notify": [
-    "notify"
-  ],
   "skill-wechat-publisher": [
     "image"
   ],
@@ -69,5 +66,8 @@
   "voice-clone": [
     "speech",
     "music"
+  ],
+  "skill-email-notify": [
+    "notify"
   ]
 }

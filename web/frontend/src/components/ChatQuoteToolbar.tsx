@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom';
 import { CHAT_QUOTE_EVENT } from '../lib/chatQuote';
 import '../styles/chat-quote.css';
+import ChatMessageSettings, { type MessageSettingsActions } from './ChatMessageSettings';
 
-export default function ChatQuoteToolbar({ sessionId, root }: { sessionId: string; root: RefObject<HTMLDivElement | null> }) {
+export default function ChatQuoteToolbar({ sessionId, root, actions }: { sessionId: string; root: RefObject<HTMLDivElement | null>; actions?: MessageSettingsActions }) {
   const [selection, setSelection] = useState<{ text: string; left: number; top: number } | null>(null);
   const selectionRef = useRef(selection); selectionRef.current = selection;
   const interacting = useRef(false);
@@ -15,7 +16,7 @@ export default function ChatQuoteToolbar({ sessionId, root }: { sessionId: strin
   useEffect(() => {
     const update = (event: Event) => {
       if (interacting.current) return;
-      if ((event.target as Element | null)?.closest?.('.chat-quote-button')) return;
+      if ((event.target as Element | null)?.closest?.('.chat-quote-toolbar, [role="dialog"]')) return;
       const selected = document.getSelection();
       if (!selected || selected.isCollapsed || !selected.rangeCount || !root.current?.contains(selected.anchorNode) || !root.current?.contains(selected.focusNode)) { setSelection(null); return; }
       const text = selected.toString().trim();
@@ -34,6 +35,8 @@ export default function ChatQuoteToolbar({ sessionId, root }: { sessionId: strin
     const area = root.current;
     return () => { document.removeEventListener('selectionchange', update); document.removeEventListener('pointerup', update); document.removeEventListener('keyup', update); document.removeEventListener('keydown', key); area?.removeEventListener('scroll', clear); };
   }, [quote, root]);
-  return selection && createPortal(<button type="button" className="chat-quote-button" aria-label="引用选中文字" title="引用到输入框（Ctrl+Shift+Q）"
-    style={{ left: selection.left, top: selection.top }} onPointerDown={event => { interacting.current = true; event.preventDefault(); }} onPointerCancel={() => { interacting.current = false; }} onMouseDown={event => event.preventDefault()} onClick={() => quote(selection.text)}>引用 <span>↗</span></button>, document.body);
+  return selection && createPortal(<div className="chat-quote-toolbar" style={{ left: Math.min(selection.left, Math.max(12, window.innerWidth - 230)), top: selection.top }}
+    onPointerDown={() => { interacting.current = true; }}><button type="button" className="chat-quote-button" aria-label="引用选中文字" title="引用到输入框（Ctrl+Shift+Q）"
+      onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()} onClick={() => quote(selection.text)}>引用 <span>↗</span></button>
+      {actions && <ChatMessageSettings text={selection.text} actions={actions} onDismiss={() => { interacting.current = false; setSelection(null); }} />}</div>, document.body);
 }

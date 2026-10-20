@@ -129,7 +129,7 @@ test('unknown context does not draw a fake zero and Codex requests its own sessi
   await act(async () => v.root.render(createElement(Context, { sessionId: 'c1', engine: 'codex' })));
   await v.click(v.node.querySelector('button'));
   assert.match(document.querySelector('.context-usage-panel').textContent, /Codex 尚未提供/);
-  assert.equal(requests.length, before + 1);
+  assert.equal(requests.length, before + 2);
   assert.ok(requests.at(-1).includes('sessionId=c1'));
 });
 

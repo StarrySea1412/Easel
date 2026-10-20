@@ -163,6 +163,7 @@ test('only Ultra enables the highlighted theme and particles, and leaving Ultra 
 
 async function fixture(t, preference, { strict = false, selectedModel, otherModel } = {}) {
   const values = new Map(preference === undefined ? [] : [[KEY, preference]]);
+  const capabilityModel = selectedModel === null ? null : selectedModel || {id:'fixture/all',provider:'fixture',model:'all',configured:true,thinkingLevels:[...THINKING_LEVELS]};
   if (selectedModel) values.set('easel_chat_model_ref', selectedModel.id);
   const storage = { values, writes: [], blocked: false, failWrite: false,
     getItem(key) { if (this.blocked) throw new Error('denied'); return values.get(key) ?? null; },
@@ -171,7 +172,7 @@ async function fixture(t, preference, { strict = false, selectedModel, otherMode
   };
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
   t.mock.method(globalThis, 'fetch', async url => ({ ok: true, json: async () => url === '/api/upload/limits' ? { max_mb: 50 }
-    : String(url).includes('/agent-office/models') ? { available: true, scope: 'next_turn', options: selectedModel ? [selectedModel, ...(otherModel ? [otherModel] : [])] : [] } : [] }));
+    : String(url).includes('/agent-office/models') ? { available: true, scope: 'next_turn', options: capabilityModel ? [capabilityModel, ...(otherModel ? [otherModel] : [])] : [], defaultModelRef: capabilityModel?.id } : [] }));
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container), sent = [];
   let sessionId = `thinking-composer-${++sequence}`, busy = {};
@@ -190,10 +191,11 @@ async function fixture(t, preference, { strict = false, selectedModel, otherMode
     trigger: () => document.querySelector('.thinking-level-trigger'),
     menu: () => document.querySelector('.thinking-level-menu[role=dialog]'),
     slider: () => document.querySelector('input[type=range][aria-label="思考强度"]'),
-    async choose(level, element = this.slider()) { assert.ok(element); await act(async () => {
+    async choose(level, element = this.slider()) { await act(async () => {
       if (level === 'auto') { document.querySelector('.thinking-level-auto').click(); return; }
       if (level === 'adaptive') { document.querySelector('.thinking-level-adaptive').click(); return; }
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, String(THINKING_LEVELS.filter(value => value !== 'adaptive').indexOf(level)));
+      if (!element) return;
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, String([...document.querySelectorAll('[data-thinking-level]')].findIndex(tick => tick.dataset.thinkingLevel === level)));
       element.dispatchEvent(new window.Event('input', { bubbles: true }));
     }); },
     async reload() { await act(async () => root.render(null)); await render(); },
@@ -213,7 +215,8 @@ test('unsupported saved strength automatically matches the runtime without losin
   assert.equal(view.container.querySelector('.composer-thinking-warning'), null);
   await view.click(view.trigger());
   assert.equal(document.querySelector('.thinking-level-adaptive'), null);
-  assert.equal(document.querySelector('[aria-label="选择Ultra思考强度"]').disabled, true);
+  assert.equal(document.querySelector('[aria-label="选择Ultra思考强度"]'), null);
+  assert.equal(view.slider(), null, 'one supported level has no invented slider stops');
   assert.equal(document.querySelector('.thinking-level-reset').disabled, false);
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.sent.length, 1); assert.equal(view.sent[0][4], 'off');
@@ -229,12 +232,12 @@ test('StrictMode mount and remount read a saved preference without saving or rep
 });
 
 test('invalid saved strength falls back to auto without rewriting until an explicit selection', async t => {
-  const view = await fixture(t, 'old-invalid-level', { strict: true }); await view.render();
+  const view = await fixture(t, 'old-invalid-level', { strict: true, selectedModel:null }); await view.render();
   assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：自动');
   assert.equal(view.storage.values.get(KEY), 'old-invalid-level');
-  await view.click(view.trigger()); await view.choose('ultra');
-  assert.equal(view.storage.values.get(KEY), 'ultra');
-  assert.deepEqual(view.storage.writes.filter(([key]) => key === KEY), [[KEY, 'ultra']]);
+  await view.click(view.trigger());
+  assert.equal(view.slider(),null);
+  assert.deepEqual(view.storage.writes.filter(([key]) => key === KEY), []);
 });
 
 test('strength selection survives navigation/reload and sends the exact level as the fifth argument', async t => {
@@ -304,7 +307,7 @@ test('manual strength stops and model adaptive remain available, and reset resto
     await view.choose(level);
     assert.equal(view.storage.values.get(KEY), level);
     if (level === 'adaptive') assert.equal(document.querySelector('.thinking-level-adaptive').getAttribute('aria-pressed'), 'true');
-    else assert.equal(view.slider().value, String(THINKING_LEVELS.filter(value => value !== 'adaptive').indexOf(level)));
+    else assert.equal(view.slider().value, String([...document.querySelectorAll('[data-thinking-level]')].findIndex(tick => tick.dataset.thinkingLevel === level)));
     assert.match(view.trigger().getAttribute('aria-label'), /^思考强度：/);
   }
   await view.click(document.querySelector('.thinking-level-reset'));
@@ -326,7 +329,7 @@ test('popup omits the duplicate model row and displays one auto option with the 
 });
 
 test('unknown capability uses a single auto option and does not claim a measured strength', async t => {
-  const view = await fixture(t); await view.render(); await view.click(view.trigger());
+  const view = await fixture(t, undefined, {selectedModel:null}); await view.render(); await view.click(view.trigger());
   assert.equal(view.trigger().textContent, '自动');
   assert.equal(view.menu().querySelector('.thinking-level-heading'), null);
   assert.equal(view.menu().querySelectorAll('.thinking-level-auto').length, 1);

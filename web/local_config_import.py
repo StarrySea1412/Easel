@@ -171,14 +171,12 @@ def _model_hints(app_type: str, cfg: dict) -> list[str]:
     return list(dict.fromkeys(m for m in models if m))
 
 
-def _expand_models(candidate: dict, models: list[str]) -> list[dict]:
-    """每个模型拥有可重复读取的候选 ID，导入时仍校验完整候选指纹。"""
+def _with_models(candidate: dict, models: list[str]) -> dict:
+    """One candidate per channel; its models stay selectable at import time."""
     unique = list(dict.fromkeys(m.strip() for m in models if isinstance(m, str) and m.strip()))
-    if not unique:
-        return [candidate]
-    return [{**candidate, "model": model,
-             "id": hashlib.sha1(f'{candidate["id"]}|{model}'.encode('utf-8')).hexdigest()[:12]
-             if len(unique) > 1 else candidate["id"]} for model in unique]
+    if unique and not candidate.get("model"):
+        candidate["model"] = unique[0]
+    return {**candidate, "models": unique or ([candidate["model"]] if candidate.get("model") else [])}
 
 
 def _candidate(source: str, name: str, base: str, key: str, protocol: str,
@@ -199,9 +197,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         skip = "Base URL 不是合法的 http(s) 地址"
     elif not key:
         skip = "没有可用的密钥（可能只存了 OAuth 登录态）"
-    elif protocol == "openai-responses":
-        skip = "此配置使用 Responses；当前对话通道仅支持 Chat Completions / Anthropic Messages，不能直接导入"
-    elif protocol not in ("openai", "anthropic"):
+    elif protocol not in ("openai", "openai-responses", "anthropic"):
         skip = "协议未明确或当前通道不支持，不能直接导入"
     elif any(c.isspace() for c in key):
         skip = "密钥包含空白字符"
@@ -211,6 +207,7 @@ def _candidate(source: str, name: str, base: str, key: str, protocol: str,
         "name": (name or (base if _valid_base(base) else "") or "未命名").strip()[:80],
         "baseUrl": base,
         "model": next(iter(_model_hints(app_type, cfg)), "") if cfg else "",
+        "models": [],
         "protocol": protocol,
         "appType": app_type,
         "note": note,
@@ -256,7 +253,7 @@ def read_openclaw(path: Path) -> tuple[list[dict], list[str]]:
             protocol = {"openai": "openai", "anthropic": "anthropic", "relay": "anthropic"}.get(pkey, "unknown")
         cand = _candidate("openclaw", str(pkey), base, key, protocol,
                           app_type="openclaw", cfg=pv, note="来自本机 OpenClaw 配置")
-        out.extend(_expand_models(cand, model_ids))
+        out.append(_with_models(cand, model_ids))
     return out, []
 
 
@@ -326,7 +323,7 @@ def _read_ccswitch_sqlite(path: Path) -> tuple[list[dict], list[str]]:
         base, key = _cc_credentials(app_type, cfg)
         cand = _candidate("cc-switch", str(r["name"]), base, key,
                           protocol, app_type=app_type, cfg=cfg, source_id=str(r["source_id"]))
-        out.extend(_expand_models(cand, _model_hints(str(r["app_type"]), cfg)))
+        out.append(_with_models(cand, _model_hints(str(r["app_type"]), cfg)))
     con.close()
     return out, errors
 
@@ -357,7 +354,7 @@ def _read_ccswitch_json(path: Path) -> tuple[list[dict], list[str]]:
                 base, key = _cc_credentials(str(app_type), cfg)
                 cand = _candidate("cc-switch", name, base, key,
                                   protocol, app_type=str(app_type), cfg=cfg, source_id=str(pid))
-                out.extend(_expand_models(cand, _model_hints(str(app_type), cfg)))
+                out.append(_with_models(cand, _model_hints(str(app_type), cfg)))
             except Exception as e:  # noqa: BLE001  单条坏了不影响整体
                 errors.append(f"条目解析失败：{type(e).__name__}")
     return out, errors

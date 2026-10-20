@@ -7,12 +7,14 @@ import OutputMessageContent from './OutputMessageContent';
 import BreakdownReport from './BreakdownReport';
 import { IconCopy, IconCheck, IconRetry, IconEdit } from './icons';
 import ChatMessageEditor from './ChatMessageEditor';
+import ChatMessageSettings, { type MessageSettingsActions } from './ChatMessageSettings';
 import '../styles/chat-editing.css';
 import './message-model-selection.css';
 import { formatChatElapsed } from '../lib/chatTiming';
 import './message-timing.css';
 
 export interface BubbleActions {
+  messageSettings?: { text: string; actions: MessageSettingsActions };
   onEdit?: (text: string, signal: AbortSignal) => Promise<boolean>;
   onCopy: () => void | Promise<void>;
   onRetry?: () => void;    // 仅最后一轮可用（append-only：不改写历史）
@@ -168,6 +170,7 @@ function ActionBar({ actions, status, onEdit }: { actions?: BubbleActions; statu
         <button type="button" className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}
       {status}
+      {actions?.messageSettings && <ChatMessageSettings {...actions.messageSettings} />}
     </div>
   );
 }

@@ -1,0 +1,13 @@
+.account-connection-dot { position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:20px;height:24px;color:var(--text-tertiary);cursor:help;border-radius:4px; }
+.account-connection-dot > button { display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;cursor:help; }
+.account-connection-dot-detail { display:none;position:absolute;z-index:100;right:0;bottom:calc(100% + 6px);width:max-content;max-width:min(270px,calc(100vw - 48px));padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);box-shadow:var(--shadow-lg);font-size:11px;font-weight:400;line-height:1.6;white-space:normal;pointer-events:none; }
+.account-connection-dot.is-open .account-connection-dot-detail { display:block; }
+.account-management-facts .account-connection-dot-detail { left:0;right:auto;bottom:auto;top:calc(100% + 6px);max-width:min(270px,calc(100vw - 210px)); }
+.account-connection-dot-mark { width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 2px color-mix(in srgb,currentColor 14%,transparent); }
+.account-connection-dot.is-online { color:var(--green); }
+.account-connection-dot.is-login_required,.account-connection-dot.is-not_connected { color:var(--red); }
+.account-connection-dot.is-checking { color:var(--amber,#ad7a25); }
+.account-connection-dot.is-checking .account-connection-dot-mark { animation:account-dot-pulse 1.4s ease-in-out infinite; }
+.account-connection-dot > button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
+@keyframes account-dot-pulse { 50% { opacity:.4;transform:scale(.82); } }
+@media (prefers-reduced-motion:reduce) { .account-connection-dot.is-checking .account-connection-dot-mark { animation:none; } }

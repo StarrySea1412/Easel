@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import ActivitySkeleton from './ActivitySkeleton';
 import '../styles/activity-hub.css';
 import { IconWarn, IconCopy, IconRefresh, IconInfo } from './icons';
 
@@ -31,7 +32,7 @@ export default function FailureRecords({eventId}:{eventId?:string}) {
     <p className="hub-note">最近 100 条记录 · 更早记录可能已轮转；这里不保存完整正文或凭据。</p>
     {error&&<p role="alert" className="hub-error">{error}</p>}
     <div className="failure-record-layout"><div className="failure-list" aria-label="最近失败事件">
-      {loading&&!rows.length&&<p role="status">正在读取问题记录…</p>}
+      {loading&&!rows.length&&<ActivitySkeleton label="正在读取问题记录" />}
       {!rows.length&&!loading&&!error&&<div className="record-empty"><IconInfo size={25}/><p>{eventId?'未找到该编号，可能已轮转。':'当前没有记录到问题。'}</p></div>}
       {rows.map(row=><button type="button" key={row.id} aria-pressed={row.id===selected} onClick={()=>{setSelected(row.id);setCopy('');}}>
         <span className="failure-row-icon" aria-hidden="true"><IconWarn size={17}/></span><span><strong>{operationLabel(row)}</strong><span>{stageLabel(row)}</span><small>{timeLabel(row.at)} · {row.id.slice(0,8)}</small></span>

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { fetchPublishingPolicy } from '../lib/api';
 import type { PublishingPolicy } from '../lib/api';
+import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import AutomatedPublishPage from './PublishPage';
 import ManualPublishPage from './ManualPublishPage';
 
-export default function PublishingPage({ persona }: { persona: string }) {
+export default function PublishingPage({ persona, publishReceipts }: { persona: string; publishReceipts?: PublishReceiptsModel }) {
   const [policy, setPolicy] = useState<PublishingPolicy | null>(null);
   const [mode, setMode] = useState<PublishingPolicy['mode']>('automated');
   const [error, setError] = useState('');
@@ -45,7 +46,9 @@ export default function PublishingPage({ persona }: { persona: string }) {
           : '保留原有账号检查、预检、确认及自动提交流程。'}</span>
     </div>
     <div className="publishing-mode-content">
-      {manual ? <ManualPublishPage persona={persona} /> : <AutomatedPublishPage persona={persona} />}
+      {manual ? <ManualPublishPage persona={persona} />
+        : publishReceipts ? <AutomatedPublishPage persona={persona} publishReceipts={publishReceipts} />
+          : <div className="panel">自动发布需要在工作台的发布页打开，以便显示发布回执。</div>}
     </div>
   </div>;
 }

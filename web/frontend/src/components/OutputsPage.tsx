@@ -1,3 +1,5 @@
+import { showToast } from '../lib/toast';
+import { confirmModal } from './ui/ConfirmModal';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { fetchOutputs, fetchOutputContent, mediaUrl, deleteOutput, renameOutput } from '../lib/api';
@@ -217,13 +219,13 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     e.stopPropagation();
     const isDir = node.type === 'dir';
     const label = isDir ? `项目/文件夹「${node.meta?.title || node.name}」及其全部内容` : `文件「${node.name}」`;
-    if (!window.confirm(`确定删除${label}？\n此操作不可恢复。`)) return;
+    if (!(await confirmModal(`确定删除${label}？\n此操作不可恢复。`))) return;
     try {
       await deleteOutput(node.path);
       setSelected((cur) => (cur?.path === node.path ? null : cur));
       load();
     } catch (err) {
-      alert((err as Error).message || '删除失败');
+      showToast((err as Error).message || '删除失败', 'error');
     }
   }, [load]);
 
@@ -243,7 +245,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
       await renameOutput(node.path, name);
       load();
     } catch (err) {
-      alert((err as Error).message || '重命名失败');
+      showToast((err as Error).message || '重命名失败', 'error');
     }
   }, [renameValue, load]);
   const renameEditor = (node: OutputNode) => (

@@ -9,6 +9,7 @@ import { loadTsModule } from './load-ts.mjs';
 // Clipboard/network/scroll are substitutes, not real browser or layout tests.
 globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/' }).window;
 globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true });
 Object.defineProperty(navigator, 'clipboard', { value: { async writeText() {} }, configurable: true });
@@ -334,4 +335,45 @@ test('inline goal setup survives goal-created polling, retries the saved ID and 
   assert.equal(createCount,1);assert.equal(getChatDraft(session.id).text,'');
   await submit();assert.equal(createCount,1);assert.equal(attempts,2);
   assert.equal(view.container.querySelector('[aria-label="创作消息"]').value,'');
+});
+
+test('message settings seed append or replacement and preserve the saved goal until confirmation', async t => {
+  const observer=globalThis.ResizeObserver;globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+  const raf=globalThis.requestAnimationFrame;globalThis.requestAnimationFrame=callback=>{callback();return 1;};
+  globalThis.localStorage=window.localStorage;
+  t.after(()=>{globalThis.ResizeObserver=observer;globalThis.requestAnimationFrame=raf;});
+  const view=fixture(t),writes=[];
+  const session={id:'message-goal-edit',title:'消息设置',created:1,messages:[{role:'user',content:'新增的要求'}]};
+  const goal={id:'current-goal',sessionId:session.id,title:'原目标',objective:'完成原任务',modelRef:'fixture/model',status:'paused',phase:'idle',iterations:0,maxIterations:5,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,criteria:[{type:'review',label:'质量',value:''}],checks:[],reason:''};
+  t.mock.method(globalThis,'fetch',async (url,options={})=>{
+    if(options.method==='PUT'||options.method==='POST')writes.push({url,options});
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/model',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));
+    return new Response(JSON.stringify({records:[],items:[],jobs:[],messages:[],skills:[]}));
+  });
+  await view.render(createElement(ChatPage,{session,...callbacks().props,taskState:{goals:[goal],runs:[],plans:[],serverTime:1}}));
+  for(const [label,expected] of [['追加到当前目标','完成原任务\n\n新增的要求'],['替换当前目标','新增的要求']]){
+    await view.click(view.container.querySelector('.message-row.user [aria-label=对话操作]'));
+    await view.click([...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent===label));
+    assert.equal(view.container.querySelector('[aria-label=要持续追求的目标]').value,expected);
+    assert.deepEqual(writes,[]);
+    await view.click(view.container.querySelector('[aria-label=退出目标设置]'));
+  }
+});
+
+test('message settings quote exact messages into a side draft without sending or replacing the existing draft',async t=>{
+  const observer=globalThis.ResizeObserver;globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+  globalThis.localStorage=window.localStorage;t.after(()=>{globalThis.ResizeObserver=observer;});
+  const {getChatDraft,setChatDraftText}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
+  const view=fixture(t),actions=callbacks();
+  const session={id:'message-quote-main',title:'来源主对话',created:1,messages:[{role:'user',content:'只引用这一条'}]};
+  const side={id:'message-quote-side',parentSessionId:session.id,title:'素材侧聊',created:2,messages:[]};
+  setChatDraftText(side.id,'保留原草稿');
+  await view.render(createElement(ChatPage,{session,sideSessions:[side],...actions.props}));
+  await view.click(view.container.querySelector('.message-row.user [aria-label=对话操作]'));
+  await view.click(document.querySelector('[aria-label=引用到哪个对话]'));
+  await view.click(document.querySelector('[role=option][data-value=message-quote-side]'));
+  await view.click([...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent==='引用到输入框'));
+  assert.equal(getChatDraft(side.id).text,'保留原草稿');
+  assert.deepEqual(getChatDraft(side.id).quotes,['来自「来源主对话」：\n只引用这一条']);
+  assert.equal(actions.calls.send,0);assert.ok(view.container.querySelector('[aria-label=辅助对话消息]'));
 });

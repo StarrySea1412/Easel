@@ -12,7 +12,7 @@ globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 const { createRoot } = await import('react-dom/client');
 const { default: Composer } = await loadTsModule('../src/components/ChatComposer.tsx', import.meta.url);
 const KEY = 'easel_chat_model_ref'; const REF = 'relay/vendor/model:v2'; let sequence = 0;
-const option = { id: REF, provider: 'relay', model: 'vendor/model:v2', label: '实际模型', configured: true };
+const option = { id: REF, provider: 'relay', model: 'vendor/model:v2', label: '实际模型', configured: true, channelName: 'happy' };
 
 async function fixture(t, saved) {
   const values = new Map(saved ? [[KEY, saved]] : []), writes = [], calls = [], sent = [];
@@ -106,7 +106,7 @@ test('status belongs to the model selector and its settings action targets that 
   await view.render({ onOpenModels: ref => opened.push(ref) });
   assert.ok(view.trigger().querySelector('.composer-model-health'));
   assert.equal(view.container.querySelector('button.composer-model-health'), null);
-  assert.match(document.getElementById(view.trigger().getAttribute('aria-describedby')).textContent, /测试渠道/);
+  assert.match(document.getElementById(view.trigger().getAttribute('aria-describedby')).textContent, /happy · 渠道已连通/);
   await act(async () => view.trigger().click());
   assert.doesNotMatch(document.querySelector('.easel-select-popup').textContent, /渠道状态与详情/);
   await act(async () => [...document.querySelectorAll('.easel-select-option')].find(item => item.textContent.includes('模型设置')).click());

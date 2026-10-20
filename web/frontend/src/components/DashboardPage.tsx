@@ -6,10 +6,10 @@ import {
 } from '../lib/api';
 import type {
   TrendGroup, ScheduleItem, OutputNode, AccountItem, Idea,
-  AnalyticsPlatform, AccountAnalytics, AccountWhoami,
+  AnalyticsPlatform, AccountAnalytics,
 } from '../lib/api';
 import type { Page } from './Sidebar';
-import { verifyStale } from '../lib/whoami';
+import { accountConnection, useAccountIdentities, verifyStale } from '../lib/whoami';
 import { SkeletonCard } from './Skeleton';
 import { IconText } from './icons';
 import DashboardCard from './ui/DashboardCard';
@@ -90,7 +90,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
   const anaPending = useRef(new Set<string>());
   const [anaWin, setAnaWin] = useState<'last' | 'day' | 'week' | 'month' | 'year'>('week');
   // whoami 自愈：登录态以真实 profile 为准（与账号页共享 localStorage 缓存）
-  const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>({});
+  const whoamiMap = useAccountIdentities();
 
   // ── 直达创作 ──
   const quickDraft = useSyncExternalStore(
@@ -124,7 +124,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
     setIdeas([]);
     setAnaData({});
     setAnaErrors({});
-    setWhoamiMap({});
     anaPending.current.clear();
     const load = <T,>(key: string, request: Promise<T>, apply: (data: T) => void) => {
       request.then((data) => { if (alive) apply(data); })
@@ -147,7 +146,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
       verifyStale(ps.filter((p) => !API_BASED.has(p.platform)).map((p) => p.platform), {
         alive: () => alive,
         onUpdate: (platform, r) => {
-          setWhoamiMap((m) => ({ ...m, [platform]: r }));
           if (r.loggedIn) setAnaSel((s) => s || platform);
         },
       });
@@ -216,7 +214,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const recent = (outputs || []).slice(0, 5);
   const pendingIdeas = ideas.filter((i) => i.status === 'pending');
-  const loggedIn = accounts.filter((a) => a.loggedIn).length;
+  const loggedIn = accounts.filter((a) => accountConnection(a, whoamiMap[a.platform]) === 'online').length;
 
   const quick: { label: string; page: Page; Icon: typeof IconChat }[] = [
     { label: '开始对话', page: 'chat', Icon: IconChat },
@@ -231,7 +229,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
     { label: '待做选题', value: loadErrors['选题'] ? '—' : !loaded['选题'] ? '…' : String(pendingIdeas.length), page: 'ideas', Icon: IconIdea },
     { label: '待发排期', value: loadErrors['排期'] ? '—' : !loaded['排期'] ? '…' : String(upcoming.length), page: 'calendar', Icon: IconCalendar },
     { label: '内容项目', value: loadErrors['内容'] ? '—' : !loaded['内容'] ? '…' : String(outputs?.length ?? 0), page: 'outputs', Icon: IconOutputs },
-    { label: '已登录账号', value: loadErrors['账号'] ? '—' : !loaded['账号'] ? '…' : `${loggedIn}/${accounts.length}`, page: 'accounts', Icon: IconAccounts },
+    { label: '已确认在线', value: loadErrors['账号'] ? '—' : !loaded['账号'] ? '…' : `${loggedIn}/${accounts.length}`, page: 'accounts', Icon: IconAccounts },
   ];
 
 
@@ -327,7 +325,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
             )}
             </div>}>
           {(() => {
-            const logged = anaPlats.filter((p) => whoamiMap[p.platform]?.loggedIn ?? p.loggedIn);
+            const logged = anaPlats.filter((p) => accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]) === 'online');
             if (!loaded['分析']) return <SkeletonCard rows={3} title={false} />;
             if (loadErrors['分析']) return <div className="dash-empty">分析服务暂不可用，请点击上方「重新加载」。</div>;
             if (logged.length === 0) {
@@ -360,7 +358,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
                     <button className="link-btn" onClick={() => onNavigate('analysis')}>查看内容分析 →</button>
                   </div>
                 ) : !d.loggedIn ? (
-                  <DashboardEmpty Icon={IconAccounts} title="账号需要重新登录" description="登录状态已失效，请前往账号页重新连接。" action="前往账号页" onAction={() => onNavigate('accounts')} />
+                  <DashboardEmpty Icon={IconAccounts} title="账号状态待确认" description="本次采集未确认登录状态，请到账号中心检测。已有登录资料保留。" action="前往账号页" onAction={() => onNavigate('accounts')} />
                 ) : (
                   <div className="ana-body">
                     {d.warning && <div className="dash-empty" role="status" style={{ gridColumn: '1 / -1' }}>{d.warning}</div>}

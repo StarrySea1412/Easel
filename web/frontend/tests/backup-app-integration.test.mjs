@@ -10,6 +10,7 @@ import { tsModuleUrl } from './load-ts.mjs';
 // This checks state/controller integration, not browser layout or downloads.
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const prefix = 'data:text/javascript;base64,';
@@ -87,6 +88,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './components/PublishReceiptCenter') target = receiptCenter;
     else if (specifier === './components/DashboardPage') target = dashboard;
     else if (specifier === './hooks/useImageStudio') target = image;
+    else if (specifier === './components/ui/ConfirmModal') target = await tsModuleUrl(new URL('components/ui/ConfirmModal.tsx', base));
     else if (specifier.startsWith('./components/')) target = empty;
     else target = await tsModuleUrl(new URL(specifier + '.ts', base));
     replacements.push({ start: statement.moduleSpecifier.getStart(), end: statement.moduleSpecifier.end, text: JSON.stringify(target) });
@@ -262,9 +264,6 @@ function deferredStop() {
 test('send callbacks queue a busy draft and reject read-only or deleted sessions', async t => {
   const imported = { id: 'readonly', title: '备份', created: 1, importedFromBackup: true, messages: [] };
   const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, imported]), easel_active_session: 'original' });
-  const previousConfirm = window.confirm;
-  window.confirm = () => true;
-  t.after(() => { window.confirm = previousConfirm; });
   await act(async () => harness.sidebar.onSessionSelect('original'));
   const originalSend = harness.pages['对话'].onSend;
   let accepted, busy, readonly, deleted;
@@ -274,7 +273,8 @@ test('send callbacks queue a busy draft and reject read-only or deleted sessions
   await act(async () => harness.sidebar.onSessionSelect('readonly'));
   await act(async () => { readonly = harness.pages['对话'].onSend('只读草稿不可发送', [], ['card-quote'], { 'card-quote': '不得被只读备份触发' }); });
   assert.equal(readonly, false);
-  await act(async () => harness.sidebar.onSessionDelete('original'));
+  await act(async () => { void harness.sidebar.onSessionDelete('original'); });
+  await act(async () => [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === '确定').click());
   await act(async () => { deleted = originalSend('已删除会话的晚到发送'); });
   assert.equal(deleted, false);
   assert.equal(harness.streams.length, 1);
@@ -820,10 +820,8 @@ test('actual App pins through the Sidebar, persists across reload and preserves 
   await act(async () => reloaded.harness.sidebar.onSessionPin(second.id, false));
   assert.equal(JSON.parse(reloaded.values.get('easel_sessions')).find(item => item.id === second.id).pinnedAt, undefined);
   await act(async () => reloaded.harness.sidebar.onSessionPin(second.id, true));
-  const originalConfirm = window.confirm;
-  window.confirm = () => true;
-  t.after(() => { window.confirm = originalConfirm; });
-  await act(async () => reloaded.harness.sidebar.onSessionDelete(second.id));
+  await act(async () => { void reloaded.harness.sidebar.onSessionDelete(second.id); });
+  await act(async () => [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === '确定').click());
   assert.equal(reloaded.harness.sidebar.sessions.some(item => item.id === second.id), false);
   assert.equal(JSON.parse(reloaded.values.get('easel_sessions')).some(item => item.id === second.id), false);
   assert.equal(reloaded.harness.streams.length, 0);

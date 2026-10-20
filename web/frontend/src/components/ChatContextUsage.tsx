@@ -40,6 +40,12 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const error = failure?.key === requestKey ? failure.message : '';
   useEffect(() => { setOpen(false); setDetails(false); }, [sessionId, engine]);
   useEffect(() => {
+    const refresh = () => setRevision(value => value + 1);
+    window.addEventListener('easel:channel-names-changed', refresh);
+    window.addEventListener('focus', refresh);
+    return () => { window.removeEventListener('easel:channel-names-changed', refresh); window.removeEventListener('focus', refresh); };
+  }, []);
+  useEffect(() => {
     const controller = new AbortController();
     setPending(true); setFailure(null);
     const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
@@ -55,8 +61,8 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
     return () => controller.abort();
   }, [sessionId, modelRef, engine, requestKey, refreshKey, streaming, revision]);
   useEffect(() => {
-    if (!open || !streaming) return;
-    const timer = setInterval(() => setRevision(value => value + 1), 15000);
+    if (!open) return;
+    const timer = setInterval(() => setRevision(value => value + 1), streaming ? 15000 : 60000);
     return () => clearInterval(timer);
   }, [open, streaming, engine]);
   const used = data?.usedTokens;
@@ -65,12 +71,14 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const known = percent != null && Number.isFinite(percent);
   const capacitySource = data?.capacitySource;
   const referenceOnly = capacitySource === 'official_reference';
+  const catalogOnly = capacitySource === 'model_catalog';
   const runtimeLimited = capacitySource === 'runtime_config';
   const recordedOnly = capacitySource === 'session_snapshot';
-  const basis = referenceOnly ? '原厂标称窗口' : recordedOnly ? '会话记录额度' : runtimeLimited ? '配置的会话额度' : '配置的模型窗口';
+  const basis = catalogOnly ? '自动匹配的目录窗口' : referenceOnly ? '原厂标称窗口' : recordedOnly ? '会话记录额度' : runtimeLimited ? '配置的会话额度' : '配置的模型窗口';
   const capacityNote = capacity == null ? null
     : runtimeLimited ? '容量为运行器会话额度（达到即触发压缩），不是模型上限；可在渠道设置中补齐模型窗口'
     : recordedOnly ? '容量仅取自旧会话记录，不是模型上限'
+    : catalogOnly ? '窗口已自动匹配公共目录；渠道额度尚未核验，手动配置优先'
     : referenceOnly ? '容量为原厂标称窗口，尚未对本渠道核验' : null;
   const label = known ? `上下文容量，${percent.toFixed(1)}% 已用，按${basis}计算` : used != null ? '上下文容量，容量尚未提供' : '上下文容量，占用尚未提供';
   const tone = known && percent >= 90 ? 'danger' : known && percent >= 75 ? 'warn' : '';
@@ -78,7 +86,7 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
   const skills = data?.skills;
   return <>
     <button ref={button} type="button" className={`context-usage-trigger ${tone}${known ? '' : ' is-unknown'}`} aria-label={label} title={label}
-      aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>
+      aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => { if (!open) setRevision(value => value + 1); setOpen(value => !value); }}>
       <svg width="21" height="21" viewBox="0 0 24 24" aria-hidden="true"><circle className="context-ring-track" cx="12" cy="12" r="8" />
         {known && <circle className="context-ring-value" cx="12" cy="12" r="8" pathLength="100" strokeDasharray={`${Math.min(100, Math.max(0, percent))} 100`} transform="rotate(-90 12 12)" />}
       </svg><span className="context-trigger-percent">{known ? `${Math.round(percent)}%` : '—'}</span>
@@ -89,10 +97,10 @@ export default function ChatContextUsage({ sessionId, modelRef = '', engine = 'o
         <p>{data?.breakdownStatus === 'estimated' || data?.breakdownStatus === 'partial' ? data.breakdownNote : data?.breakdownStatus === 'inconsistent' ? '已知字符数保留；分类报告与总量不一致，暂不计算占比。' : '当前运行时未提供可对应的分类报告，不能精确拆分上下文。'}</p>
         <p>字符数是本地记录值，Token按字符数÷4粗估；不同模型、中文和代码的分词会有差异。缺少分类只影响该项，已知项仍单独显示；未读的技能全文不计入。{data?.runtimeStore === 'sqlite' ? '当前会话读取 SQLite 存储。' : ''}</p>
         {skills && <p>{skills.note}</p>}
-        <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p>
+        <p>容量{data?.capacitySource === 'model_config' ? '取自所选模型配置' : catalogOnly ? '取自自动更新的公共模型目录，未经渠道验证' : referenceOnly ? '取自有出处的原厂参考资料，未经渠道验证' : data?.capacitySource === 'runtime_config' ? '取自显式运行器会话限制' : recordedOnly ? '仅取自旧会话记录，不等同模型上限' : '未提供'}。未提交的草稿不计入；上次快照不等于下一次请求。</p>
       </InlineInfo></h2><button type="button" className="context-close" aria-label="关闭上下文容量" onClick={() => { dismiss(); button.current?.focus(); }}>×</button></header>
       <div className="context-usage-total" title={used == null ? '占用未提供' : `${used.toLocaleString()} / ${capacity?.toLocaleString() || '容量未知'} Token`}>
-        <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><span className="context-total-right"><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>{engine !== 'codex' && data && <InlineInfo label="容量依据说明" hover wide><p>{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{referenceOnly && ' · 渠道支持尚未核验'}</p>{data.contextReference && <p>原厂标称 <strong>{data.contextReference.label}</strong> · 来源 {data.contextReference.url}{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}{data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}{data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}{(referenceOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p>{referenceOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}</InlineInfo>}</span>
+        <strong>{compact(used)} <span>/ {compact(capacity)}</span></strong><span className="context-total-right"><b>{known ? `${percent.toFixed(1)}%` : used != null ? '容量未知' : '占用未知'}</b>{engine !== 'codex' && data && <InlineInfo label="容量依据说明" hover wide><p>{capacity ? `占比按${basis}计算` : '模型窗口尚未配置'}{(referenceOnly || catalogOnly) && ' · 渠道支持尚未核验'}</p>{data.contextReference && <p>{catalogOnly ? '目录标称' : '原厂标称'} <strong>{data.contextReference.label}</strong> · 来源 {data.contextReference.url}{data.configuredWindow ? `；本渠道配置 ${compact(data.configuredWindow)} Token` : '；尚未写入运行器模型配置'}</p>}{data.configuredLimit != null && <p>运行器会话限制：{compact(data.configuredLimit)} Token（显式配置）</p>}{data.recordedLimit != null && <p>最近会话记录额度：{compact(data.recordedLimit)} Token{data.recordedLimit === 200000 && !data.configuredWindow && !data.configuredLimit ? '，与运行器通用默认值一致' : ''}。</p>}{(referenceOnly || catalogOnly || recordedOnly || (data.recordedLimit != null && data.configuredWindow != null && data.recordedLimit !== data.configuredWindow)) && <p>{referenceOnly || catalogOnly ? '标称窗口不代表当前渠道已开放；未补齐模型配置时，运行器仍可能按较小额度提前压缩。' : recordedOnly ? '会话记录可能来自默认值，不作为模型真实上限。' : '配置与旧会话记录不同；旧记录不会被改写，等待后续请求更新。'}</p>}</InlineInfo>}</span>
       </div>
       {capacityNote && <p className="context-capacity-source warn">{capacityNote}</p>}
       <div className="context-capacity-track" role={known ? 'progressbar' : undefined} aria-label="上下文已用比例" aria-valuenow={known ? Math.min(100, percent) : undefined} aria-valuemin={known ? 0 : undefined} aria-valuemax={known ? 100 : undefined}>

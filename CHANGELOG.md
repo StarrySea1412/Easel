@@ -1,3 +1,19 @@
+## 0.8.1 · 2026-10-20 · Provider import and channel labels / 供应商导入与渠道标识
+
+- Show each model's channel nickname in the composer model list (`渠道 · 模型`), so identical model ids served by different channels stay distinguishable. / 模型菜单在模型前显示渠道昵称，同渠道多模型可区分。
+- Import lists one row per channel with a model picker instead of repeating a channel for every model; remove the overwrite-preview lines and confirmation checkbox; each row imports directly and is edited afterwards in the provider editor. / 导入按渠道去重，可直接选择模型并一键导入；移除替换提示与二次确认，导入后在模型编辑区修改。
+- Support the `openai-responses` (Responses) protocol for chat channels: import, save, protocol picker, model discovery and availability probing (request/response parsing) no longer reject it. / 对话通道支持 Responses 协议：可导入、保存、选择协议、枚举模型和测活。
+- Source-only change; local build verified, host 138 and installers unchanged. / 仅源码与本地构建，138与安装器未更新。
+- Account evidence is shared across pages; unknown/checking states use an animated loading dot, confirmed online is green and confirmed signed out is red. Click, hover or focus reveals the reason/time; automatic verification uses a ten-minute cooldown. / 账号按证据统一状态；未确认/检测中动态loading、在线绿点、明确未登录红点；可交互查看时间和原因，自动检测降频至10分钟。
+- Add message settings to quote into main/side chats and seed new/appended/replacement goals without sending. Replace native alerts and confirmations with application UI; switching conversations closes old editors. / 新增消息设置，可引用主/侧边对话，新增/追加/替换目标先进入编辑框；原生弹窗改共享应用弹窗，切会话关闭旧编辑器。
+- Show loading skeletons when activity data changes; preserve Windows system proxy settings and bound Bilibili QR generation failures. / 运行记录切换补骨架屏；B站二维码生成保留系统代理、增加超时与失败收口。
+
+## 0.8.0 · 2026-10-20 · Upstream main merge / 上游合并
+
+- Merge upstream `origin/main` 8d08b216 (v0.3.0, 201 commits) into the fork while keeping our product behavior: design system, chat progress/subagent/browser panels, account state machine, provider flow, Windows launcher and publish receipts. / 合并上游 v0.3.0，保留本分支设计与功能。
+- Absorb upstream defect fixes: gateway chat lock/snapshot state machine, login-wall detection, publish draft de-duplication, doctor loop protection, artifact/harness/local-agent modules (added but not wired), and document-path validation. / 吸收上游聊天锁、登录墙、发布去重、诊断等修复；新子系统仅接入代码，未接线。
+- Merge conflicts: 57 files resolved hunk by hunk; `web/app.py`, `SettingsPanel.tsx`, `ChatPage.tsx` and `styles/index.css` were never taken wholesale. / 57 个冲突逐块合并，关键文件未整文件取一侧。
+
 ## 0.7.6 · 2026-10-20 · Model status clarity / 模型状态说明
 
 - A channel test or inference probe that passed now shows a connected state even when the gateway cannot verify a per-turn model override; the two capabilities are no longer collapsed into one grey dot. / 渠道检测或推理测活通过即显示已连通，不再因网关无法核验“本轮指定模型”而显示未验证。

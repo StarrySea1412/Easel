@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -80,7 +81,7 @@ def _sign(params: dict) -> bytes:
     return (q + "&sign=" + sig).encode()
 
 
-def _post(url: str, params: dict, timeout: int = 20) -> dict:
+def _post(url: str, params: dict, timeout: int = 10) -> dict:
     req = urllib.request.Request(
         url, data=_sign(params), method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA})
@@ -92,21 +93,24 @@ def _gen_qr() -> tuple[str, str]:
     """申请二维码：返回 (url, auth_code)。"""
     r = _post(GEN_URL, {"appkey": APPKEY, "local_id": "0", "ts": str(int(time.time()))})
     if r.get("code") != 0:
-        _die(f"申请二维码失败：{r.get('code')} {r.get('message')}")
+        raise ValueError(f"B站二维码申请失败（错误码 {r.get('code')}），请稍后重试。")
     d = r.get("data") or {}
     if not d.get("url") or not d.get("auth_code"):
-        _die("二维码响应缺 url/auth_code")
+        raise ValueError('B站二维码响应不完整，请重新连接。')
     return d["url"], d["auth_code"]
 
 
-def _render_qr(url: str, out: Path) -> None:
+def _render_qr(url: str, out: Path) -> dict:
     """把登录 url 编码成二维码 PNG（segno 纯 Python，自带 PNG writer，无需 PIL）。"""
     try:
         import segno
     except Exception as e:
-        _die(f"需要 segno 生成二维码（pip install segno）：{e}", 3)
+        raise RuntimeError('二维码生成组件不可用，请修复本机 segno 依赖。') from e
     out.parent.mkdir(parents=True, exist_ok=True)
-    segno.make(url, error="m").save(str(out), scale=8, border=2)
+    qr = segno.make(url, error="m")
+    qr.save(str(out), scale=8, border=4)
+    width, height = qr.symbol_size(scale=8, border=4)
+    return {'qrKind': 'qr', 'qrWidth': width, 'qrHeight': height}
 
 
 def _poll(auth_code: str) -> tuple[int, dict]:
@@ -129,6 +133,21 @@ def _write_cookie(data: dict, cookie_file: Path) -> None:
 
 
 def cmd_login(a) -> int:
+    login_state.configure_stdio()
+    try:
+        return _login(a)
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        message = '连接B站登录服务失败，请检查网络或代理后重新连接。'
+    except (ValueError, RuntimeError) as exc:
+        message = str(exc)
+    except Exception:
+        message = 'B站登录未完成，请重新连接。'
+    login_state.write_status(getattr(a, 'status_file', None), 'error', message)
+    print(message, file=sys.stderr, flush=True)
+    return 1
+
+
+def _login(a) -> int:
     qr_out = Path(a.qr_out).expanduser() if a.qr_out else DEFAULT_QR_OUT
     cookie_file = Path(a.cookie).expanduser() if a.cookie else DEFAULT_COOKIE
     sf = getattr(a, "status_file", None)
@@ -136,8 +155,8 @@ def cmd_login(a) -> int:
     login_state.write_status(sf, "starting")
 
     url, auth_code = _gen_qr()
-    _render_qr(url, qr_out)
-    login_state.write_status(sf, "qr_ready", "用 B站 App 扫码登录", qr=str(qr_out))
+    meta = _render_qr(url, qr_out)
+    login_state.write_status(sf, "qr_ready", "用 B站 App 扫码登录", qr=str(qr_out), qr_meta=meta)
     print(f"📱 B站二维码已保存：{qr_out}（B站 App 扫码）", file=sys.stderr)
 
     deadline = time.time() + timeout_s
@@ -203,8 +222,12 @@ def cmd_whoami(a) -> int:
             if nav.get("isLogin"):
                 result = {"loggedIn": True, "name": (nav.get("uname") or "")[:40],
                           "avatar": nav.get("face") or ""}
+            else:
+                result['reason'] = 'auth_expired'
         except Exception as e:  # noqa: BLE001 — whoami 永远输出 JSON
             result["error"] = str(e)
+    else:
+        result['reason'] = 'credentials_missing'
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

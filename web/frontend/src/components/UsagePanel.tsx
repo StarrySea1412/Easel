@@ -4,6 +4,7 @@ import { IconChat, IconChart, IconCoins } from './icons';
 import InlineInfo from './InlineInfo';
 import '../styles/usage.css';
 import UsagePriceEditor from './UsagePriceEditor';
+import ActivitySkeleton from './ActivitySkeleton';
 import ProjectUsageDashboard, {type UsageDashboardData} from './ProjectUsageDashboard';
 
 const METRICS = [
@@ -161,7 +162,7 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
         </div>
         {error && <p className="usage-error" role="alert">{error}</p>}
         {isStreaming && <p className="usage-note">对话进行中，定时读取已落盘用量；当前数字不包含服务尚未上报的使用量。</p>}
-        {summary && current ? <>
+        {!current && !error ? <ActivitySkeleton label="正在读取用量记录" /> : summary && current ? <>
           {!summary.calls ? <div className="usage-empty-state" role="status"><span className="usage-empty-icon" aria-hidden="true"><IconCoins size={26} /></span><h3>{scope === 'session' ? '本次会话暂无用量记录' : '项目暂无用量记录'}</h3><p>模型调用完成、用量写入后，就能在这里查看。<br />尚未上报的 Token 和费用不会记为 0。</p>{scope === 'session' && !activityView && current.project.calls > 0 && <button type="button" className="btn" onClick={() => setScope('project')}>查看整个项目 · {current.project.calls} 次调用 <span aria-hidden="true">→</span></button>}</div> : <>
           {activityView ? <p className="usage-coverage-note">已收到 {summary.reportedCalls} 次调用的 Token 记录{summary.missingCalls ? ` · ${summary.missingCalls} 次未上报，合计可能不完整` : ' · Token 记录已覆盖'}</p> : <div className="usage-coverage"><div><strong>{summary.calls} 次调用</strong><span>{summary.reportedCalls} 次有 Token 记录{scope === 'project' ? ` · ${current.sessionCount} 个会话` : ''}</span></div><span className={`usage-coverage-badge${summary.missingCalls ? ' is-partial' : ''}`}>{summary.missingCalls ? `${summary.missingCalls} 次未上报` : 'Token 记录已覆盖'}</span><span className="usage-coverage-track" role="img" aria-label={`${summary.calls} 次模型调用 · ${summary.reportedCalls} 次有 Token 记录 · ${summary.missingCalls} 次未上报`}><span style={{ width: `${Math.min(100, summary.reportedCalls / summary.calls * 100)}%` }} /></span></div>}
           {scope === 'session' && !activityView && <div className="usage-view-tabs" role="tablist" aria-label="用量内容" onKeyDown={switchTab}><button type="button" role="tab" tabIndex={view === 'overview' ? 0 : -1} aria-selected={view === 'overview'} onClick={() => setView('overview')}>消耗总览</button><button type="button" role="tab" tabIndex={view === 'requests' ? 0 : -1} aria-selected={view === 'requests'} onClick={() => setView('requests')}>请求明细 <span>{summary.calls}</span></button></div>}

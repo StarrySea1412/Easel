@@ -402,7 +402,7 @@ test('every chat channel exposes its protocol and saves an explicit keyboard sel
   await view.render(1, view.props, 'model');
   const selectors = view.container.querySelectorAll('[aria-label="请求协议"]');
   assert.equal(selectors.length, 4);
-  assert.deepEqual(await optionValues(selectors[2]), ['openai', 'anthropic']);
+  assert.deepEqual(await optionValues(selectors[2]), ['openai', 'openai-responses', 'anthropic']);
   for (const key of ['ArrowDown', 'Home', 'Enter']) await act(async () => selectors[2].dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   assert.equal(selectors[2].textContent, 'OpenAI Chat Completions');
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'discoverModels', 'runChannelSelftest'].includes(call.name)), false);
@@ -436,16 +436,18 @@ test('protocol changes invalidate old discovery and query the exact custom chann
 test('gateway-owned and unknown protocols show truthful state without a silent OpenAI fallback', async t => {
   const rows = [
     { ...configuredRows()[0], protocol: 'openai', protocolEditable: false, protocolNote: '请在网关配置中修改上游协议。' },
-    { ...configuredRows()[1], protocol: 'openai-responses', type: 'openai-responses' },
+    { ...configuredRows()[1], protocol: 'google-generative-ai', type: 'google-generative-ai' },
+    { ...configuredRows()[1], slot: 'relay', protocol: 'openai-responses', type: 'openai-responses' },
   ];
   const view = await fixture(t, { fetchModelChannels: modelChannels(rows) });
   await view.render(1, view.props, 'model');
   const selectors = view.container.querySelectorAll('[aria-label="请求协议"]');
   assert.equal(selectors[0].disabled, true);
   assert.match(view.container.textContent, /请在网关配置中修改上游协议/);
-  assert.equal(selectors[1].textContent, 'openai-responses（当前配置）');
-  await selectOption(selectors[1], 'anthropic');
-  assert.equal(selectors[1].textContent, 'Anthropic Messages');
+  assert.equal(selectors[1].textContent, 'google-generative-ai（当前配置）');
+  assert.equal(selectors[2].textContent, 'OpenAI Responses');
+  await selectOption(selectors[2], 'anthropic');
+  assert.equal(selectors[2].textContent, 'Anthropic Messages');
 });
 async function chooseLastModel(view) {
   await view.click([...view.container.querySelectorAll('.provider-default-action')].at(-1));
@@ -535,7 +537,7 @@ test('default save failure preserves the draft and retry shows the actual server
   assert.equal(view.harness.calls.filter(call=>call.name==='saveModelConfig').length,2);
 });
 
-test('import preview needs explicit confirmation, reports the actual default and preserves other provider drafts', async t => {
+test('import writes a channel directly, reports the actual default and preserves other provider drafts', async t => {
   const rows = configuredRows();
   const importedRows = rows.map((row, index) => index === 0 ? { ...row, model: 'imported-model-a' } : row);
   const candidate = { id: 'source-entry', name: 'Imported source', model: 'imported-model-a', baseUrl: rows[0].baseUrl, protocol: 'openai',
@@ -552,14 +554,13 @@ test('import preview needs explicit confirmation, reports the actual default and
     secondModel.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
   await view.click(findButton(view, '导入已有配置'));
-  await view.click(findButton(view, '2. 预览可导入模型'));
+  await view.click(findButton(view, '2. 读取可导入渠道'));
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
-  await view.click(view.container.querySelector('input[type="radio"]'));
-  assert.equal(findButton(view, '3. 确认导入并保存').disabled, true);
-  await view.click(view.container.querySelector('input[type="checkbox"]'));
-  await view.click(findButton(view, '3. 确认导入并保存'));
+  assert.equal(view.container.querySelector('.ii-ov'), null, 'replacement preview lines are gone');
+  assert.equal(view.container.querySelector('input[type="checkbox"]'), null);
+  await view.click(findButton(view, '导入'));
   const apply = view.harness.calls.find(call => call.name === 'applyImport');
-  assert.deepEqual(apply.args, ['cc-switch', 'source-entry', 'openai', 'synthetic-source.db', 'synthetic-preview-token']);
+  assert.deepEqual(apply.args, ['cc-switch', 'source-entry', 'openai', 'synthetic-source.db', 'synthetic-preview-token', 'imported-model-a']);
   assert.match(view.container.querySelector('.import-msg').textContent, /已保存默认现为：OpenAI · imported-model-a/);
   assert.match(view.container.querySelector('.import-msg').textContent, /尚未进行真实调用测活/);
   await view.click(findButton(view, '收起导入'));
@@ -796,28 +797,20 @@ test('import discovery keeps source credentials on the server and requires fresh
     applyImport: { ...modelChannels(configuredRows()), ok: true, applied: { name: 'Catalog source', slot: 'openai' } },
   });
   await view.render(1, view.props, 'import');
-  await view.click(findButton(view, '2. 预览可导入模型'));
-  await view.click(view.container.querySelector('input[type="radio"]'));
-  await view.click(view.container.querySelector('input[type="checkbox"]'));
+  await view.click(findButton(view, '2. 读取可导入渠道'));
   await view.click(findButton(view, '获取该渠道模型'));
   assert.deepEqual(view.harness.calls.find(call => call.name === 'discoverImportModels').args, [{
     source: 'cc-switch', path: 'synthetic-source.db', id: candidate.id, slot: 'openai', previewToken: 'original-token',
   }]);
-  const picker = view.container.querySelector('button[aria-label="Catalog source渠道可用模型"]');
+  const picker = view.container.querySelector('button[aria-label="Catalog source导入模型"]');
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
-  assert.equal(view.container.querySelector('input[type="checkbox"]').checked, false);
-  assert.equal(findButton(view, '3. 确认导入并保存').disabled, true);
-  await act(async () => finishSelection({ ...candidate, model: 'fetched-model', previewToken: 'selected-token',
-    overwrites: [{ field: 'OPENAI_MODEL', current: 'model-a', incoming: 'fetched-model' }] }));
-  assert.match(view.container.querySelector('.ii-ov').textContent, /model-a → fetched-model/);
-  assert.match(view.container.querySelector('.import-msg').textContent, /尚未保存/);
+  assert.match(picker.textContent, /fetched-model/);
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
-  await view.click(view.container.querySelector('input[type="checkbox"]'));
-  await view.click(findButton(view, '3. 确认导入并保存'));
+  await view.click(findButton(view, '导入'));
   assert.deepEqual(view.harness.calls.find(call => call.name === 'applyImport').args, [
-    'cc-switch', candidate.id, 'openai', 'synthetic-source.db', 'selected-token',
+    'cc-switch', candidate.id, 'openai', 'synthetic-source.db', 'original-token', 'fetched-model',
   ]);
-  assert.equal(view.harness.calls.some(call => ['runChannelSelftest', 'discoverModels', 'saveModelConfig'].includes(call.name)), false);
+  assert.equal(view.harness.calls.some(call => ['runChannelSelftest', 'discoverModels', 'saveModelConfig', 'selectImportModel'].includes(call.name)), false);
 });
 
 test('late source discovery is ignored when the user switches import sources', async t => {
@@ -833,7 +826,7 @@ test('late source discovery is ignored when the user switches import sources', a
     discoverImportModels: () => pending,
   });
   await view.render(1, view.props, 'import');
-  await view.click(findButton(view, '2. 预览可导入模型'));
+  await view.click(findButton(view, '2. 读取可导入渠道'));
   await view.click(findButton(view, '获取该渠道模型'));
   await view.click([...view.container.querySelectorAll('.imp-card')][1]);
   await act(async () => finishDiscovery({ ok: true, models: ['STALE_MODEL'], message: 'STALE_CATALOG' }));

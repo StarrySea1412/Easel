@@ -47,7 +47,7 @@ async function fixture(t, initial = [], page = 'other') {
     list: null, detail: null, publish: null, sms: null, verify: null, precheck: null, reports: [], report: null,
     whoami: null, accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
-  t.mock.method(window, 'confirm', text => { h.confirmations.push(text); return h.confirm; });
+
   t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
     const path = String(url);
     const request = { path, options, body: options.body ? JSON.parse(options.body) : undefined };
@@ -94,7 +94,16 @@ async function fixture(t, initial = [], page = 'other') {
   const dispose = async () => { if (!unmounted) { unmounted = true; await act(async () => root.unmount()); container.remove(); } };
   t.after(dispose);
   await render(page);
-  const click = async element => { assert.ok(element, 'interaction target exists'); await act(async () => element.click()); };
+  const click = async element => {
+    assert.ok(element, 'interaction target exists');
+    await act(async () => element.click());
+    const modal = document.querySelector('[role=dialog][aria-describedby]');
+    if (modal) {
+      h.confirmations.push(modal.querySelector('p').textContent);
+      const label = h.confirm ? '确定' : '取消';
+      await act(async () => [...modal.querySelectorAll('button')].find(button => button.textContent === label).click());
+    }
+  };
   const refresh = async () => { await act(async () => { await h.model.refresh(); }); };
   const tick = async ms => { await act(async () => { t.mock.timers.tick(ms); }); };
   return {
@@ -486,14 +495,14 @@ for (const scenario of ['expired', 'unknown', 'error']) test(`publication checks
   const view = await fixture(t, [], 'publish');
   view.h.whoami = async () => {
     if (scenario === 'error') throw new Error('模拟检查超时');
-    return { loggedIn: scenario !== 'expired', verified: scenario !== 'unknown', checkedAt: Date.now(), name: '', avatar: '', verificationMessage: '模拟无法确认' };
+    return { loggedIn: scenario !== 'expired', authState: scenario === 'expired' ? 'login_required' : 'unknown', verified: scenario !== 'unknown', checkedAt: Date.now(), name: '', avatar: '', verificationMessage: scenario === 'expired' ? '平台要求登录' : '模拟无法确认' };
   };
   const send = [...view.container.querySelectorAll('button')].find(button => button.textContent.includes('发布到 1 个平台'));
   await view.click(send);
   assert.equal(view.posts().length, 0);
   assert.equal(view.h.confirmations.length, 0);
   assert.equal(view.container.querySelector('#publish-title').value, '本次要发布的标题');
-  assert.match(view.container.textContent, scenario === 'expired' ? /登录已失效/ : scenario === 'unknown' ? /模拟无法确认/ : /模拟检查超时/);
+  assert.match(view.container.textContent, scenario === 'expired' ? /未登录，请先连接账号/ : scenario === 'unknown' ? /模拟无法确认/ : /模拟检查超时/);
 });
 
 test('slow login check has a spinner and repeated clicks cannot start another check', async t => {
@@ -513,7 +522,7 @@ test('all disconnected targets report preflight failures without sending content
   const view = await fixture(t, [], 'publish');
   localStorage.clear();
   view.h.accounts = ['xiaohongshu','douyin','kuaishou','weixin-channels','zhihu','bilibili','wechat-oa']
-    .map(platform => ({platform, supported: true, loggedIn: false}));
+    .map(platform => ({platform, supported: true, loggedIn: false, hasLocalSession: false}));
   await view.render('other'); await view.render('publish');
   for (const button of view.container.querySelectorAll('.publish-platform-list button')) {
     if (button.getAttribute('aria-pressed') !== 'true') await view.click(button);
@@ -564,15 +573,15 @@ test('returning to the publish page expires an online snapshot and broadcasts th
   const initialTime = Date.now(); let now = initialTime;
   t.mock.method(Date, 'now', () => now);
   view.h.accounts = [{platform:'zhihu',supported:true,loggedIn:true}];
-  view.h.whoami = () => ({loggedIn:false,verified:true,checkedAt:now,name:'',avatar:''});
-  now += 121000;
+  view.h.whoami = () => ({loggedIn:false,authState:'login_required',verified:true,checkedAt:now,name:'',avatar:''});
+  now += 601000;
   await act(async () => window.dispatchEvent(new window.Event('focus')));
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.loggedIn, false);
   assert.match(view.container.querySelector('.publish-readiness').textContent, /需登录/);
   await view.click(view.button('发布到 1 个平台'));
   assert.equal(view.posts().length, 0);
   assert.equal(view.h.confirmations.length, 0);
-  assert.match(view.container.textContent, /未登录/);
+  assert.match(view.container.textContent, /未登录，请先连接账号/);
 });
 
 test('a later login-required readback invalidates cached status without changing the known publication outcome', async t => {

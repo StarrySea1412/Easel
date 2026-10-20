@@ -410,13 +410,13 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
 export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels }: { value: ThinkingPreference; onChange: (value: ThinkingPreference) => void; disabled: boolean; supportedLevels?: string[] }) {
   const [open, setOpen] = useState(false);
   const menuOpen = open && !disabled;
-  const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive');
+  const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive' && supportedLevels?.includes(level));
   const resolved = resolveThinkingPreference(value, supportedLevels);
-  const displayLevel = resolved ? THINKING_LABELS[resolved] : value === 'auto' ? '自动' : THINKING_LABELS[value];
-  const index = Math.max(0, strengthLevels.indexOf(resolved === 'adaptive' ? 'medium' : resolved || 'medium'));
-  const availableIndexes = strengthLevels.flatMap((level, i) => !supportedLevels?.length || supportedLevels.includes(level) ? [i] : []);
-  const minIndex = availableIndexes[0] ?? 0, maxIndex = availableIndexes.at(-1) ?? 0;
-  const sliderIndex = Math.min(maxIndex, Math.max(minIndex, index));
+  const displayLevel = resolved ? THINKING_LABELS[resolved] : '自动';
+  const index = Math.max(0, strengthLevels.indexOf(resolved || 'medium'));
+  const minIndex = 0, maxIndex = Math.max(0, strengthLevels.length - 1);
+  const sliderIndex = Math.min(maxIndex, index);
+  const progress = maxIndex ? sliderIndex / maxIndex * 100 : 0;
   const rootRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -469,18 +469,18 @@ export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels
   const handleSliderKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      event.preventDefault(); const next = availableIndexes.find(i => i > index); if (next !== undefined) choose(next);
+      event.preventDefault(); choose(Math.min(maxIndex, index + 1));
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      event.preventDefault(); for (let i = index - 1; i >= 0; i--) { if (!supportedLevels?.length || supportedLevels.includes(strengthLevels[i])) { choose(i); break; } }
+      event.preventDefault(); choose(Math.max(minIndex, index - 1));
     } else if (event.key === 'Home') {
       event.preventDefault(); choose(minIndex);
     } else if (event.key === 'End') {
-      event.preventDefault(); for (let i = strengthLevels.length - 1; i >= 0; i--) { if (!supportedLevels?.length || supportedLevels.includes(strengthLevels[i])) { choose(i); break; } }
+      event.preventDefault(); choose(maxIndex);
     } else if (event.key === 'Enter') {
       event.preventDefault(); closeAndFocus();
     }
   };
-  return <div className={`thinking-level-picker${value === 'ultra' ? ' is-ultra' : ''}${value === 'adaptive' ? ' is-adaptive' : ''}`} ref={rootRef} style={{ '--thinking-progress': `${sliderIndex / (strengthLevels.length - 1) * 100}%`, '--thinking-available': `${maxIndex / (strengthLevels.length - 1) * 100}%` } as React.CSSProperties}>
+  return <div className={`thinking-level-picker${resolved === 'ultra' ? ' is-ultra' : ''}${resolved === 'adaptive' ? ' is-adaptive' : ''}`} ref={rootRef} style={{ '--thinking-progress': `${progress}%`, '--thinking-available': '100%' } as React.CSSProperties}>
     <button ref={triggerRef} type="button" className="thinking-level-trigger" disabled={disabled}
       aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls={menuOpen ? `${pickerId}-menu` : undefined} aria-label={`思考强度：${displayLevel}`} title={`思考强度：${displayLevel}${value === 'auto' ? '（自动选择最高支持档位）' : ''}`}
       onClick={() => open ? setOpen(false) : openMenu()}
@@ -491,11 +491,11 @@ export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels
       }}>
       <strong>{displayLevel}</strong><IconChevron size={13} />
     </button>
-    {menuOpen && createPortal(<div ref={menuRef} id={`${pickerId}-menu`} className={`thinking-level-menu${value === 'ultra' ? ' is-ultra' : ''}${value === 'adaptive' ? ' is-adaptive' : ''}`} role="dialog" aria-label="思考强度"
-      style={{ ...menuPosition, '--thinking-progress': `${sliderIndex / (strengthLevels.length - 1) * 100}%`, '--thinking-available': `${maxIndex / (strengthLevels.length - 1) * 100}%` } as React.CSSProperties}
+    {menuOpen && createPortal(<div ref={menuRef} id={`${pickerId}-menu`} className={`thinking-level-menu${resolved === 'ultra' ? ' is-ultra' : ''}${resolved === 'adaptive' ? ' is-adaptive' : ''}`} role="dialog" aria-label="思考强度"
+      style={{ ...menuPosition, '--thinking-progress': `${progress}%`, '--thinking-available': '100%' } as React.CSSProperties}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); } }}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      {(value !== 'auto' || resolved) && <div className="thinking-level-heading"><strong>{displayLevel}</strong>
+      {resolved && <div className="thinking-level-heading"><strong>{displayLevel}</strong>
         <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title="恢复自适应最高" disabled={disabled || value === 'auto'}
           onClick={() => { onChange('auto'); sliderRef.current?.focus(); }}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 7a5 5 0 1 1 .9 4M3 2v5h5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -505,15 +505,14 @@ export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels
         <button type="button" className="thinking-level-auto" aria-pressed={value === 'auto'} disabled={disabled} onClick={() => onChange('auto')}>自适应最高</button>
         {supportedLevels?.includes('adaptive') && <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title="由模型自动决定强度" disabled={disabled} onClick={() => onChange('adaptive')}>模型自适应</button>}
       </div>
-      <div className="thinking-level-slider-wrap">
-        {maxIndex < strengthLevels.length - 1 && <span className="thinking-level-unavailable" aria-hidden="true"/>}
-        {value === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
-        <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={maxIndex || 1} step={1} value={sliderIndex}
-          style={{width:maxIndex ? `calc(${maxIndex / (strengthLevels.length - 1) * 100}% + ${27 * (1 - maxIndex / (strengthLevels.length - 1))}px)` : '27px'}}
-          aria-label="思考强度" aria-valuetext={displayLevel} aria-describedby={`${pickerId}-hint`} disabled={disabled || availableIndexes.length < 2}
+      {strengthLevels.length > 1 && <div className="thinking-level-slider-wrap">
+        {resolved === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
+        <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={maxIndex} step={1} value={sliderIndex}
+          aria-label="思考强度" aria-valuetext={displayLevel} aria-describedby={`${pickerId}-hint`} disabled={disabled}
           onChange={event => choose(Number(event.target.value))} onKeyDown={handleSliderKeyDown} />
-        <div className="thinking-level-ticks">{strengthLevels.map((level, tick) => <button type="button" key={level} disabled={disabled || !availableIndexes.includes(tick)} aria-label={`选择${THINKING_LABELS[level]}思考强度`} aria-pressed={level===value} title={!availableIndexes.includes(tick) ? `${THINKING_LABELS[level]}：网关声明不支持` : THINKING_LABELS[level]} className={`${level === value ? 'is-current' : tick < sliderIndex ? 'is-filled' : ''}`} onClick={()=>choose(tick)}><span/></button>)}</div>
-      </div>
+        <div className="thinking-level-ticks">{strengthLevels.map((level, tick) => <button type="button" key={level} data-thinking-level={level} disabled={disabled} aria-label={`选择${THINKING_LABELS[level]}思考强度`} aria-pressed={level===resolved} title={THINKING_LABELS[level]} className={`${level === resolved ? 'is-current' : tick < sliderIndex ? 'is-filled' : ''}`} onClick={()=>choose(tick)}><span/></button>)}</div>
+      </div>}
+      {strengthLevels.length > 0 ? <p className="thinking-level-supported">当前可选：{strengthLevels.map(level => THINKING_LABELS[level]).join(' · ')}</p> : <p className="thinking-level-supported">{supportedLevels?.includes('adaptive') ? '由模型自动决定思考强度。' : '尚未确认模型档位，沿用模型默认。'}</p>}
       <span id={`${pickerId}-hint`} className="thinking-level-note">支持程度取决于模型，调整立即保存，对下一轮生效。</span>
     </div>, document.body)}
   </div>;

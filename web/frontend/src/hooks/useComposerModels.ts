@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { fetchOfficeTaskModels, type OfficeModelCapability } from '../lib/officeControls';
-import { isCompleteModelRef, loadComposerModel, saveComposerModel } from '../lib/composerModel';
+import { isCompleteModelRef, loadComposerModel, saveComposerModel, subscribeComposerModel } from '../lib/composerModel';
 import { fetchModelHealth, type ModelHealthSnapshot } from '../lib/modelHealth';
 import { fetchChannelConnection, type ChannelConnection } from '../lib/channelStatus';
 import { useCodexModels } from './useCodexModels';
@@ -11,7 +11,7 @@ export function useComposerModels(sessionId: string | null, engine: 'openclaw'|'
   return engine === 'codex' ? codex : openclaw;
 }
 function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
-  const [modelRef, setModelRef] = useState(loadComposerModel);
+  const modelRef = useSyncExternalStore(subscribeComposerModel, loadComposerModel);
   const [capability, setCapability] = useState<OfficeModelCapability | null>(null);
   const [health, setHealth] = useState<ModelHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   const ready = modelRef ? (!loading && capability?.available === true && Boolean(selected)) : !automaticDisabled;
   const choose = (value: string) => {
     if (value && (!capability?.available || !options.some(option => option.id === value && option.enabled !== false))) return;
-    setModelRef(value); setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
+    setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
   };
   return { modelRef, options, selected, ready, loading, capability, health, connection: connection?.modelRef === effectiveRef ? connection : null, error, notice, choose, refresh: () => setRevision(value => value + 1),
     getSnapshot: () => ready ? { modelRef: modelRef || undefined } : null };

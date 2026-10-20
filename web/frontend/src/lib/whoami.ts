@@ -1,12 +1,29 @@
 // whoami 登录态：缓存 + 开页后台自愈校验。账号页与工作台「创作数据」卡片共用，
 // 避免对同一平台在 TTL 内重复起 headless 浏览器。缓存落 localStorage，条目带 ts。
-import { accountWhoami, decodeAccountWhoami, type AccountWhoami } from './api';
+import { useSyncExternalStore } from 'react';
+import { accountWhoami, decodeAccountWhoami, type AccountWhoami, type AccountItem } from './api';
 
 const KEY = 'easel_whoami';
 const requestVersions = new Map<string, number>();
-export const WHOAMI_TTL_MS = 120_000; // 2 分钟，与后端 WHOAMI_TTL 对齐
-export const ACCOUNT_REFRESH_MS = 60_000;
+export const WHOAMI_TTL_MS = 600_000; // 10 分钟；发布前仍强制核验
+export const ACCOUNT_REFRESH_MS = 600_000;
 export const ACCOUNT_STATE_EVENT = 'easel:account-state';
+const ACCOUNT_CHECK_EVENT = 'easel:account-check';
+const checking = new Set<string>();
+
+export function setAccountChecking(platform: string, active: boolean): void {
+  if (active) checking.add(platform); else checking.delete(platform);
+  window.dispatchEvent(new window.Event(ACCOUNT_CHECK_EVENT));
+}
+const checkSnapshot = () => [...checking].sort().join(',');
+const subscribeChecks = (listener: () => void) => {
+  window.addEventListener(ACCOUNT_CHECK_EVENT, listener);
+  return () => window.removeEventListener(ACCOUNT_CHECK_EVENT, listener);
+};
+export function useAccountChecks(): Set<string> {
+  const value = useSyncExternalStore(subscribeChecks, checkSnapshot);
+  return new Set(value ? value.split(',') : []);
+}
 
 export type WhoamiEntry = AccountWhoami & { ts: number };
 
@@ -39,8 +56,37 @@ export function setWhoamiCache(platform: string, r: AccountWhoami | null): void 
 
 export function isWhoamiFresh(e: AccountWhoami & { ts?: number } | undefined, ttlMs = WHOAMI_TTL_MS): boolean {
   const at = e?.checkedAt ?? e?.ts;
-  return !!e && e.verified !== false && typeof at === 'number' && Number.isFinite(at)
+  return !!e && e.verified !== false && (e.loggedIn || e.authState === 'login_required' || e.authState === 'not_connected') && typeof at === 'number' && Number.isFinite(at)
     && at <= Date.now() && Date.now() - at < ttlMs;
+}
+
+export type AccountConnection = 'online' | 'login_required' | 'not_connected' | 'unknown';
+
+/** All pages use the same evidence rule. A local marker is only a snapshot. */
+export function accountConnection(account?: Pick<AccountItem, 'loggedIn' | 'hasLocalSession'>, entry?: WhoamiEntry): AccountConnection {
+  if (isWhoamiFresh(entry)) return entry!.loggedIn ? 'online' : entry!.authState === 'not_connected' ? 'not_connected' : 'login_required';
+  if (entry || account?.loggedIn || account?.hasLocalSession || !account) return 'unknown';
+  return account.hasLocalSession === false ? 'not_connected' : 'unknown';
+}
+
+function accountSnapshot(): string {
+  try { return localStorage.getItem(KEY) || ''; } catch { return ''; }
+}
+function subscribeAccountState(listener: () => void): () => void {
+  const storage = (event: StorageEvent) => { if (event.key === KEY || event.key === null) listener(); };
+  const timer = window.setInterval(listener, 60_000);
+  window.addEventListener(ACCOUNT_STATE_EVENT, listener);
+  window.addEventListener('storage', storage);
+  window.addEventListener('focus', listener);
+  return () => { window.clearInterval(timer); window.removeEventListener(ACCOUNT_STATE_EVENT, listener);
+    window.removeEventListener('storage', storage); window.removeEventListener('focus', listener); };
+}
+
+/** Shared identity snapshot, including local events, cross-tab changes and TTL expiry. */
+export function useAccountIdentities(): Record<string, WhoamiEntry> {
+  // The time bucket lets all mounted consumers expire a confirmed state together.
+  useSyncExternalStore(subscribeAccountState, () => accountSnapshot() + ':' + Math.floor(Date.now() / 60_000));
+  return getWhoamiCache();
 }
 
 export function markWhoamiUnverified(platform: string, message: string): void {
@@ -66,18 +112,22 @@ const WHOAMI_CONCURRENCY = 1;
 
 export async function verifyStale(platforms: string[], opts: VerifyOpts = {}): Promise<void> {
   const ttlMs = opts.ttlMs ?? WHOAMI_TTL_MS;
-  const cache = getWhoamiCache();
-  const todo = opts.force ? platforms : platforms.filter((p) => !isWhoamiFresh(cache[p], ttlMs));
+  const due = (p: string) => {
+    const entry = getWhoamiCache()[p];
+    return !isWhoamiFresh(entry, ttlMs) && !(entry?.verified === false && Date.now() - entry.ts < ACCOUNT_REFRESH_MS);
+  };
+  const todo = opts.force ? platforms : platforms.filter(due);
   if (!todo.length) return;
   let next = 0;
   const worker = async (): Promise<void> => {
     while (next < todo.length) {
       if (opts.alive && !opts.alive()) return;
       const p = todo[next++];
-      if (!opts.force && isWhoamiFresh(getWhoamiCache()[p], ttlMs)) continue;
+      if (checking.has(p) || (!opts.force && !due(p))) continue;
       const version = requestVersions.get(p) || 0;
       const before = JSON.stringify(getWhoamiCache()[p]);
       opts.onChecking?.(p);
+      setAccountChecking(p, true);
       try {
         const r = await accountWhoami(p, opts.force);
         if (version !== (requestVersions.get(p) || 0) || before !== JSON.stringify(getWhoamiCache()[p])) continue;
@@ -97,7 +147,7 @@ export async function verifyStale(platforms: string[], opts: VerifyOpts = {}): P
         // A different tab or a still-running QR flow may own the only slot.
         // Stop this batch rather than flooding every remaining account with 429.
         if ((cause as { status?: number })?.status === 429) return;
-      }
+      } finally { setAccountChecking(p, false); }
     }
   };
   await Promise.all(

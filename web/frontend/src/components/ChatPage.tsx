@@ -8,7 +8,7 @@ import '../styles/chat-navigation.css';
 import { Fragment, useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
 import ChatSkillEvidence from './ChatSkillEvidence';
 import { useChatSkillAudits } from '../hooks/useChatSkillAudits';
-import MessageBubble from './MessageBubble';
+import MessageBubble, { type BubbleActions } from './MessageBubble';
 import ChatArtifacts from './ChatArtifacts';
 import ChatGoalPanel from './ChatGoalPanel';
 import { type TaskSnapshot, type TaskGoal } from '../lib/tasks';
@@ -20,6 +20,8 @@ import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
+import { addChatDraftQuote } from '../lib/chatDrafts';
+import type { MessageSettingsActions } from './ChatMessageSettings';
 import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import ChatPanelHome from './ChatPanelHome';
@@ -180,6 +182,23 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     }catch(e){showToast(e instanceof Error?e.message:'目标操作失败，请重试。','error');}
   };
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
+  const editableGoal = goal && !['completed','cancelled'].includes(goal.status) ? goal : undefined;
+  const messageSettings: MessageSettingsActions = {
+    targets: [...sideSessions.map(side => ({ value: side.id, label: `侧边对话 · ${side.title}` })), ...(onSideChat ? [{ value: 'new-side', label: '新建侧边对话' }] : [])],
+    hasGoal: Boolean(editableGoal),
+    goalBlocked: taskBusy || Boolean(stream || stopping || session.pendingTurnId) || session.engine === 'codex',
+    quote: (text, target) => {
+      const id = target === 'current' ? session.id : target === 'new-side' ? onSideChat?.('create') : sideSessions.find(side => side.id === target)?.id;
+      if (!id) { showToast('目标对话不可用，请重新选择。', 'error'); return; }
+      addChatDraftQuote(id, `来自「${session.title}」：\n${text}`);
+      if (id !== session.id) { setPanelTab('side'); setPanelOpen(true); setActiveSideId(id); }
+    },
+    goal: (text, mode) => {
+      if (taskBusy || stream || stopping || session.pendingTurnId) { showToast('请先暂停并等待当前执行结束。', 'info'); return; }
+      const seed = mode === 'append' && editableGoal ? `${editableGoal.objective}\n\n${text}` : text;
+      openGoal(seed);
+    },
+  };
   const panelVisible=panelOpen&&!goalEditor&&!session.importedFromBackup&&Boolean(goal||sideSessions.length||openedTools.length||panelTab==='new'||panelTab==='side');
   const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&(panelTab==='new'||openedTools.includes(panelTab as PanelTool)||panelTab==='side'&&activeSide)?' has-side-panel':''}`}>
     {content}
@@ -227,6 +246,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             onQuestionAnswered={qid=>onSideQuestionAnswered?.(activeSide.id,qid)} onSteer={onSideSteer?id=>onSideSteer(activeSide.id,id):undefined}
             onSend={(text,attachments,skills,requirements,thinking,model)=>onSideSend?.(activeSide.id,text,attachments,skills,requirements,thinking,model) ?? false}
             onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
+            messageSettings={{...messageSettings, targets:[{value:session.id,label:'主对话'}, ...messageSettings.targets.filter(target=>target.value!==activeSide.id)], quote:(text,target)=>{if(target==='current')addChatDraftQuote(activeSide.id, `来自「${activeSide.title}」：\n${text}`);else messageSettings.quote(`来自「${activeSide.title}」：\n${text}`,target===session.id?'current':target);}}}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
       {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
@@ -371,7 +391,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
         </div>
         {onNewChat && <button type="button" className="btn" onClick={onNewChat}>新建对话继续</button>}
       </section>}
-      {!isImported && <ChatQuoteToolbar key={session.id} sessionId={session.id} root={scrollRef}/>}<div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
+      {!isImported && <ChatQuoteToolbar key={session.id} sessionId={session.id} root={scrollRef} actions={messageSettings}/>}<div className="chat-conversation-body"><div className="chat-messages" ref={scrollRef} onScroll={syncPosition}
         onWheel={event=>{if(event.deltaY)navigationTarget.current=null;if(event.deltaY<0){followLatest.current=false;setFollowing(false);}}}
         onTouchMove={()=>{navigationTarget.current=null;}}
         onPointerDown={event=>{if(event.target===event.currentTarget)navigationTarget.current=null;}}
@@ -383,7 +403,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             const isLast = i === displayMessages.length - 1;
             const live = isStreaming && isLast && msg.role === 'assistant';
             const isFinal = !live && i < session.messages.length;
-            let actions;
+            let actions: BubbleActions | undefined;
             if (isFinal) {
               const copy = () => {if(!navigator.clipboard?.writeText)throw new Error('剪贴板不可用');const historical=msg.role==='assistant'&&!msg.error?historicalGatewayAuthError(msg.content):undefined;return navigator.clipboard.writeText(historical?['历史失败记录',historical.message,historical.code].join('\n\n'):msg.error?[msg.content,msg.error.message,msg.error.code].filter(Boolean).join('\n\n'):msg.content);};
               // Retry appends to the same runtime; editing creates a fresh branch.
@@ -410,6 +430,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
               }
             }
             const auditTurn=live?session.pendingTurnId:msg.turnId;
+            if (actions && !isImported && !live && msg.content.trim()) actions.messageSettings = { text: msg.content, actions: messageSettings };
             const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
             const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
             return (
@@ -455,11 +476,12 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
 }
 
 /** 辅助对话线程：父会话的子会话，独立记录，不打断主对话。 */
-function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswered, onSteer, onSend, onStop, onOpenModels, onQuoteFromMain, onQuoteToMain }: {
+function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswered, onSteer, onSend, onStop, onOpenModels, onQuoteFromMain, onQuoteToMain, messageSettings }: {
   session: ChatSession; stream?: StreamState; stopping: boolean; stopError?: string;
   onQuestionAnswered?: ChatPageProps['onQuestionAnswered']; onSteer?: ChatPageProps['onSteer'];
   onSend: ChatPageProps['onSend']; onStop?: () => void; onOpenModels?: ChatPageProps['onOpenModels'];
   onQuoteFromMain?: () => void; onQuoteToMain?: () => void;
+  messageSettings: MessageSettingsActions;
 }) {
   const busy = Boolean(stream || session.pendingTurnId);
   const lastAssistant = [...session.messages].reverse().find(message => message.role === 'assistant' && (message.content || '').trim());
@@ -472,6 +494,7 @@ function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswer
     <div className="side-chat-thread" ref={thread} onScroll={()=>{const el=thread.current;if(el)follow.current=isChatAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);}} role="log" aria-label="辅助对话消息">
       {!session.messages.length && !busy && <p className="side-chat-empty">还没有消息。可以问一个旁支问题，或先把主对话的上一轮引用进来。</p>}
       {session.messages.map((message, index) => <MessageBubble key={`${index}-${message.role}`} message={message} sessionId={session.id}
+        actions={message.content.trim()?{onCopy:()=>navigator.clipboard.writeText(message.content),canModify:!busy,messageSettings:{text:message.content,actions:messageSettings}}:undefined}
         artifacts={message.role==='assistant'&&message.turnId?<ChatArtifacts artifacts={deliveries.items.filter(item=>item.turnId===message.turnId)} jobs={deliveries.jobs.filter(item=>item.turnId===message.turnId)} onUpdated={deliveries.updated} onJobsChanged={deliveries.retry}/>:undefined}/>)}
       {stream && <MessageBubble message={{role:'assistant',content:stream.content}} sessionId={session.id} isStreaming thinking={stream.thinking} activity={stream.activity} activitySteps={stream.activitySteps} stillWorking={stream.stillWorking}
         artifacts={<ChatArtifacts artifacts={deliveries.items.filter(item=>item.turnId===session.pendingTurnId)} jobs={deliveries.jobs.filter(item=>item.turnId===session.pendingTurnId)} onUpdated={deliveries.updated} onJobsChanged={deliveries.retry}/>}
@@ -496,5 +519,5 @@ function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswer
 export default function ChatPage(props:ChatPageProps) {
   const {session,stream}=props;
   const turnId=session.pendingTurnId||[...session.messages].reverse().find(message=>message.role==='assistant'&&!message.externalSource&&message.turnId)?.turnId||'';
-  return <ChatRunProvider sessionId={session.id} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent {...props}/></ChatRunProvider>;
+  return <ChatRunProvider sessionId={session.id} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent key={session.id} {...props}/></ChatRunProvider>;
 }

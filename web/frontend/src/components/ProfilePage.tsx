@@ -1,3 +1,4 @@
+import { confirmModal } from './ui/ConfirmModal';
 import { useState, useEffect } from 'react';
 import { fetchPersonaFiles, savePersonaFile, deletePersona, fetchAccountAnalytics } from '../lib/api';
 import type { PersonaFile, AccountAnalytics } from '../lib/api';
@@ -136,7 +137,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`确定删除画像「${persona}」吗？\n此操作不可恢复，将删除该画像的全部六维文件。`)) return;
+    if (!(await confirmModal(`确定删除画像「${persona}」吗？\n此操作不可恢复，将删除该画像的全部六维文件。`))) return;
     setDeleting(true);
     try {
       await deletePersona(persona);

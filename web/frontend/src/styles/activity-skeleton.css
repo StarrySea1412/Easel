@@ -1,0 +1,10 @@
+.activity-skeleton { min-height:240px;padding:16px 0; }
+.activity-skeleton-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:24px; }
+.activity-skeleton-metrics > span,.activity-skeleton-lines > span { display:block;border-radius:var(--radius-sm);background:linear-gradient(100deg,var(--surface-2) 25%,var(--surface-hover) 45%,var(--surface-2) 65%);background-size:200% 100%;animation:activity-skeleton-shimmer 1.5s ease-in-out infinite; }
+.activity-skeleton-metrics > span { height:84px; }
+.activity-skeleton-lines { display:grid;gap:12px; }
+.activity-skeleton-lines > span { height:34px; }
+.activity-skeleton-lines > span:last-child { width:72%; }
+@keyframes activity-skeleton-shimmer { from { background-position:100% 0; } to { background-position:-100% 0; } }
+@media(max-width:640px) { .activity-skeleton-metrics { gap:8px; } .activity-skeleton-metrics > span { height:68px; } }
+@media(prefers-reduced-motion:reduce) { .activity-skeleton span { animation:none; } }

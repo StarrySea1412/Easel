@@ -76,7 +76,8 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
           const reference = r.contextReference?.modelId === r.model ? r.contextReference : null;
           const protocol = r.protocol || r.type || 'openai';
           const cloud = ops?.channel === 'transcribe' && !subtitle && !local;
-          const title = subtitle ? '自带字幕' : local ? '本地兜底' : cloud ? '云端转写' : r.name || '未命名供应商';
+          const title = subtitle ? '自带字幕' : local ? '本地兜底' : cloud ? '云端转写'
+            : (r.channelName && r.channelName !== '未命名渠道' ? r.channelName : r.name) || '未命名供应商';
           const role = subtitle ? '优先读取 · 免配置' : local ? '云端不可用时接替' : cloud ? '需要 API Key'
             : r.role === '主' ? '默认通道' : r.role === '备' ? '备用通道' : r.role;
           const address = subtitle || local ? role : r.baseUrl?.trim() && r.baseUrl !== '—' ? r.baseUrl
@@ -139,8 +140,9 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
               </SettingsField>}
               {ops?.channel === 'chat' && <SettingsField label="请求协议">
                 <Select aria-label="请求协议" value={protocol} disabled={r.protocolEditable === false}
-                  options={[...(!['openai', 'anthropic'].includes(protocol) ? [{ value: protocol, label: `${protocol}（当前配置）`, disabled: true }] : []),
+                  options={[...(!['openai', 'openai-responses', 'anthropic'].includes(protocol) ? [{ value: protocol, label: `${protocol}（当前配置）`, disabled: true }] : []),
                     { value: 'openai', label: 'OpenAI Chat Completions', description: '/chat/completions' },
+                    { value: 'openai-responses', label: 'OpenAI Responses', description: '/v1/responses' },
                     { value: 'anthropic', label: 'Anthropic Messages', description: '/v1/messages' }]}
                   onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
                 <span className="hint">{r.protocolNote || '按服务商接口选择；保存后用于后续请求，不会自动切换协议。'}</span>
@@ -200,9 +202,9 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
               </SettingsField>
               {ops?.channel === 'chat' && <SettingsField label="上下文窗口（Token）">
                 <input className="mock" type="number" aria-label="上下文窗口（Token）" min="1024" max="10000000" step="1"
-                  value={r.contextWindow ?? ''} placeholder={reference ? `原厂参考 ${reference.label}，尚未写入配置` : '未配置；运行器可能使用通用默认值'}
+                  value={r.contextWindow ?? ''} placeholder={reference ? `自动匹配；原厂参考 ${reference.label}` : '自动匹配模型目录（留空）'}
                   onChange={event => ops?.onRow?.(i, { contextWindow: event.target.value === '' ? null : Number(event.target.value) })} />
-                <span className="hint">按此渠道模型的实际能力填写；保存后用于后续请求的上下文预算。这里不会增加模型本身的容量。</span>
+                <span className="hint">留空时容量面板自动匹配模型目录，每6小时刷新；手填并保存后固定使用此值。目录标称不等同渠道额度；这里不会增加模型本身的容量。</span>
                 {reference && <span className="hint">原厂参考：{reference.label}（{reference.tokens.toLocaleString('zh-CN')} Token） · <a href={reference.url} target="_blank" rel="noopener noreferrer">{reference.source} ↗</a>。{reference.note}
                   {r.contextWindow == null && <button type="button" className="adv-btn" onClick={() => ops?.onRow?.(i, { contextWindow: reference.tokens })}>填入参考值，保存后生效</button>}
                 </span>}

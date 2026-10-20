@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { AriaAttributes, KeyboardEvent, ReactNode, SelectHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import './select.css';
@@ -7,6 +7,9 @@ export interface SelectOption {
   value: string;
   label: string;
   description?: string;
+  group?: string;
+  groupKey?: string;
+  menuLabel?: string;
   icon?: ReactNode;
   disabled?: boolean;
 }
@@ -207,14 +210,16 @@ export default function Select({ id, name, value, options, onChange, placeholder
       aria-label={aria['aria-label']} aria-labelledby={aria['aria-labelledby'] || (!aria['aria-label'] ? triggerId : undefined)}
       className="easel-select-popup" style={position}>
       <div ref={scrollRef} className="easel-select-options" role="presentation">
-        {options.map((option, index) => <div key={option.value} ref={(node) => { optionRefs.current[index] = node; }}
-          id={`${listId}-${index}`} role="option" data-value={option.value} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
+        {options.map((option, index) => <Fragment key={option.value}>
+          {option.group && (index === 0 || (option.groupKey || option.group) !== (options[index - 1].groupKey || options[index - 1].group)) && <div className="easel-select-group-label" role="presentation">{option.group}</div>}
+          <div ref={(node) => { optionRefs.current[index] = node; }}
+          id={`${listId}-${index}`} role="option" data-value={option.value} aria-label={option.menuLabel ? option.label : undefined} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
           className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
           onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
           onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-          {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
+          {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.menuLabel || option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
           {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
-        </div>)}
+        </div></Fragment>)}
       </div>
       {footer && <div ref={footerWrapRef} className="easel-select-footer" role="presentation">
         <div id={`${listId}-${footerIndex}`} role="option" data-value="__select_footer__" aria-disabled={footer.disabled || undefined}

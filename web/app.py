@@ -299,7 +299,7 @@ LOGIN_PROCESSES: dict[str, subprocess.Popen] = {}
 _LOGIN_CANCEL_TASKS: set[asyncio.Task] = set()
 
 # whoami 真校验（起 headless 浏览器，数秒）的进程内缓存：避免账号页 + 工作台重复起浏览器。
-WHOAMI_TTL = 120  # 秒；与前端 whoami.ts 对齐，可见页面每分钟触发过期检查
+WHOAMI_TTL = 600  # 秒；与前端 whoami.ts 对齐，发布前 force 核验
 _WHOAMI_CACHE: dict[str, tuple[float, dict, str | None]] = {}
 _WHOAMI_LOCK = threading.Lock()
 _ACCOUNT_GENERATIONS: dict[str, str] = {}
@@ -1138,9 +1138,17 @@ def clean_agent_output(raw: str) -> str:
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
     env = child_env(PROJECT_ROOT)
-    env.setdefault('http_proxy', os.environ.get('EASEL_PROXY', ''))
-    env.setdefault('https_proxy', os.environ.get('EASEL_PROXY', ''))
-    env.setdefault('no_proxy', 'localhost,127.0.0.1,10.*,*.xiaohongshu.com,*.devops.xiaohongshu.com,*.douyin.com,*.kuaishou.com,*.zhihu.com,*.bilibili.com,*.weixin.qq.com,*.qq.com')
+    # On Windows urllib falls back to the system proxy only when the proxy
+    # environment is empty. Adding no_proxy alone would disable that fallback.
+    system_proxies = urllib.request.getproxies()
+    for scheme in ('http', 'https'):
+        if system_proxies.get(scheme):
+            env.setdefault(f'{scheme}_proxy', system_proxies[scheme])
+    if os.environ.get('EASEL_PROXY', '').strip():
+        for scheme in ('http', 'https'):
+            if not os.environ.get(f'{scheme}_proxy') and not os.environ.get(f'{scheme.upper()}_PROXY'):
+                env[f'{scheme}_proxy'] = os.environ['EASEL_PROXY']
+    env.setdefault('no_proxy', 'localhost,127.0.0.1,10.*,*.xiaohongshu.com,*.devops.xiaohongshu.com,*.douyin.com,*.kuaishou.com,*.zhihu.com,*.weixin.qq.com,*.qq.com')
     return env
 
 
@@ -1331,7 +1339,11 @@ def _direct_api_enabled() -> bool:
 
 def _harness_settings() -> dict:
     try:
-        return harness_store.settings(OUTPUTS_DIR, read_settings(ENV_FILE))
+        env = read_settings(ENV_FILE)
+        # Keep this fork's OpenClaw default. Imported harnesses require an
+        # explicit selection; a fresh checkout must not silently switch to API.
+        env.setdefault('EASEL_CHAT_TRANSPORT', CHAT_TRANSPORT)
+        return harness_store.settings(OUTPUTS_DIR, env)
     except HarnessError as error:
         raise HTTPException(409, str(error)) from error
 
@@ -2044,7 +2056,13 @@ def _mask_key(v: str) -> str:
 
 
 _CHAT_PROTOCOLS = {'openai': 'openai', 'anthropic': 'anthropic', 'relay': 'anthropic'}
-_CHAT_APIS = {'openai': 'openai-completions', 'anthropic': 'anthropic-messages'}
+_CHAT_APIS = {'openai': 'openai-completions', 'openai-responses': 'openai-responses',
+              'anthropic': 'anthropic-messages'}
+# Responses and Chat Completions share the OpenAI auth/transport family; the
+# request contract differs, so the protocol itself is still stored verbatim.
+def _same_transport(left: str, right: str) -> bool:
+    families = {'openai': 'openai', 'openai-responses': 'openai', 'anthropic': 'anthropic'}
+    return left in families and right in families and families[left] == families[right]
 _CHAT_MODEL_KEYS = {'openai': 'OPENAI_MODEL', 'anthropic': 'ANTHROPIC_MODEL', 'relay': 'EASEL_LLM_MODEL'}
 _MODEL_CONFIG_LOCK = threading.RLock()
 AGENT_SAFETY_PLUGIN = PROJECT_ROOT / 'openclaw' / 'easel-agent-safety'
@@ -2100,6 +2118,7 @@ def _model_channels() -> dict:
     catalog = office_controls.configured_models(config_path, include_disabled=True)
     env = _read_env()
     primary = ""
+    direct = _direct_api_enabled()
     providers = {}
     try:
         oc = openclaw_state_dir() / "openclaw.json"
@@ -2180,9 +2199,11 @@ def _model_channels() -> dict:
     except Exception:  # noqa: BLE001
         pass
     chat_rows.extend(custom_rows)
+    channel_names = _channel_labels()
     for row in chat_rows:
         pkey = row['name'] if row.get('slot') == 'custom' else row.get('slot')
         row['providerId'] = pkey
+        row['channelName'] = channel_names.get(pkey, {}).get('name') or pkey
         row['enabled'] = pkey not in disabled
         row['chatModels'] = [item['model'] for item in catalog if item['provider'] == pkey]
         row['deletable'] = True
@@ -2654,6 +2675,8 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 changed = True
             if model:
                 previous_models = prov.get('models') if isinstance(prov.get('models'), list) else []
+                old_model = (previous_models[0].get('id')
+                             if previous_models and isinstance(previous_models[0], dict) else None)
                 target = next((dict(item) for item in previous_models if isinstance(item, dict) and item.get('id') == model), {'id': model, 'name': model})
                 if vals.get('protocol') and not local_gateway:
                     target.pop('api', None)  # The selected model must inherit the protocol just saved.
@@ -2985,7 +3008,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
             saved_protocol = _chat_protocol(pkey_for_protocol, model=model)
             protocol = protocol or saved_protocol
             if protocol not in _CHAT_APIS:
-                raise HTTPException(400, '请选择支持的请求协议：OpenAI Chat Completions 或 Anthropic Messages')
+                raise HTTPException(400, '请选择支持的请求协议：OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages')
             saved_provider_base = _cur_prov.get(pkey_for_protocol, ('', ''))[0]
             if _is_local_gateway_base(saved_provider_base) and protocol != saved_protocol:
                 raise HTTPException(400, '此渠道由本地模型网关管理，请在网关配置中修改上游协议')
@@ -3395,7 +3418,8 @@ def _model_health_target(ref: str):
             saved = config["models"]["providers"][provider]
             entry = next(row for row in saved["models"] if row.get("id") == model)
             api = entry.get("api") or saved.get("api") or _CHAT_PROTOCOLS.get(provider, "")
-            protocol = {"openai-completions": "openai", "anthropic-messages": "anthropic",
+            protocol = {"openai-completions": "openai", "openai-responses": "openai-responses",
+                        "anthropic-messages": "anthropic",
                         "openai": "openai", "anthropic": "anthropic"}.get(api, "")
             base = str(saved.get("baseUrl") or _saved_base_for("chat", provider)).strip().rstrip("/")
             key = saved.get("apiKey") or _saved_key_for("chat", provider)
@@ -3836,9 +3860,9 @@ async def api_models_discover(req: ModelDiscoverRequest):
     key = typed or _saved_key_for(channel, slot)
     proto = (req.protocol or "").strip().lower()
     expected = _chat_protocol(slot) if channel == 'chat' else 'openai'
-    if proto and proto not in ('openai', 'anthropic'):
+    if proto and proto not in _CHAT_APIS:
         raise HTTPException(400, '不支持的模型协议')
-    if channel != 'chat' and proto and expected != proto:
+    if channel != 'chat' and proto and proto != expected:
         raise HTTPException(400, '协议与目标槽位不匹配')
     proto = proto or expected or 'openai'
     if proto not in _CHAT_APIS:
@@ -3884,7 +3908,7 @@ def _import_compatible(slot: str, candidate: dict) -> str:
     if not candidate['compatible']:
         return candidate['skipReason']
     expected = _chat_protocol(slot)
-    if candidate['protocol'] != expected:
+    if not _same_transport(candidate['protocol'], expected):
         return f'协议不匹配：{slot} 槽位当前使用 {expected}'
     base, _ = _openclaw_provider_creds().get(slot, ('', ''))
     if _is_local_gateway_base(base):
@@ -3896,7 +3920,8 @@ def _import_target_slot(requested: str, candidate: dict, env: dict, providers: d
     """Auto matches transport and prefers an empty slot; preview still confirms writes."""
     if requested != 'auto':
         return requested
-    preferred = {'openai': ('openai',), 'anthropic': ('relay', 'anthropic')}.get(candidate['protocol'], ())
+    preferred = {'openai': ('openai',), 'openai-responses': ('openai',),
+                 'anthropic': ('relay', 'anthropic')}.get(candidate['protocol'], ())
     usable = [slot for slot in dict.fromkeys((*preferred, *_CHAT_PROTOCOLS)) if not _import_compatible(slot, candidate)]
     if not usable:
         return preferred[0] if preferred else 'openai'
@@ -4018,6 +4043,7 @@ class ImportApplyRequest(BaseModel):
     id: str = ""
     slot: str = "openai"
     previewToken: str = ""
+    model: str = ""
 
 
 def _validated_import_preview(req: ImportApplyRequest):
@@ -4042,6 +4068,13 @@ def _validated_import_preview(req: ImportApplyRequest):
     reason = _import_compatible(slot, hit)
     if reason:
         raise HTTPException(400, f'该来源配置不可用：{reason}')
+    requested_model = (getattr(req, 'model', '') or '').strip()
+    if requested_model:
+        allowed = {*(hit.get('models') or []), *(preview.get('discoveredModels') or [])}
+        if hit.get('model'):
+            allowed.add(hit['model'])
+        if requested_model not in allowed:
+            raise HTTPException(400, '所选模型不在此渠道的模型列表中，请重新预览')
     try:
         if _import_target_digest() != preview['target']:
             raise HTTPException(409, '当前配置已变化，请重新预览覆盖内容')
@@ -4080,7 +4113,7 @@ async def api_import_discover(req: ImportApplyRequest):
             raise HTTPException(400, '来源缺少 Base URL；仅有 Key 无法确定模型列表地址')
         if not key:
             raise HTTPException(400, '来源没有可用 API Key，请先补全来源配置并重新预览')
-        if protocol not in ('openai', 'anthropic'):
+        if protocol not in _CHAT_APIS:
             raise HTTPException(400, '来源协议不支持模型列表枚举')
     # Reuse the existing SSRF, no-redirect, authentication and protocol restrictions.
     discovered = await asyncio.to_thread(_discover_models, base, key, protocol)
@@ -4144,10 +4177,12 @@ async def api_import_apply(req: ImportApplyRequest):
         selected_model = preview.get('selectedModel')
         if selected_model and selected_model not in preview.get('discoveredModels', []):
             raise HTTPException(409, '选择的模型已不在最新来源列表中，请重新选择')
-        if selected_model or hit.get('model'):
-            updates[model_env] = selected_model or hit['model']
+        chosen_model = ((req.model or '').strip() or selected_model or hit.get('model')
+                        or preview['model'])
+        if chosen_model:
+            updates[model_env] = chosen_model
         note = _commit_model_configuration(updates, {slot: {
-            'model': preview['model'], 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name']))
+            'model': chosen_model, 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name']))
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
     resp = {"ok": True, "note": note,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,
@@ -7176,7 +7211,14 @@ async def api_account_whoami(platform: str, force: bool = False):
                 d = json.loads(line)
                 data = {'loggedIn': bool(d.get('loggedIn')), 'name': d.get('name') or '', 'avatar': d.get('avatar') or ''}
                 # 有 error 字段 = 校验本身失败（浏览器起不来/网络抖动/崩溃），不是可信的「未登录」结论
-                confident = isinstance(d.get('loggedIn'), bool) and not d.get('error') and not getattr(proc, 'returncode', 0)
+                confident = (isinstance(d.get('loggedIn'), bool) and not d.get('error')
+                             and not getattr(proc, 'returncode', 0) and d.get('verified') is not False
+                             and (d['loggedIn'] or d.get('reason') in
+                                  ('login_required', 'publish_auth_expired', 'auth_expired', 'credentials_missing')))
+                if confident:
+                    data['authState'] = ('online' if d['loggedIn'] else 'not_connected'
+                                         if d.get('reason') == 'credentials_missing' else 'login_required')
+                    data['verificationMessage'] = '登录状态有效' if d['loggedIn'] else '未登录'
                 break
             except Exception:
                 continue
@@ -7185,32 +7227,30 @@ async def api_account_whoami(platform: str, force: bool = False):
         # 避免一次校验抖动就把已登录卡片翻成「未登录」并缓存 10 分钟；下次校验(缓存未写)会自动重试恢复。
         with _WHOAMI_LOCK:
             _WHOAMI_CACHE.pop(platform, None)
-        return {'loggedIn': _account_logged_in(platform, cfg), 'name': '', 'avatar': '',
-                'verified': False, 'verificationMessage': '本次在线检查未取得可信结果，保留上次登录状态；请稍后重试。'}
+        previous = hit[1] if hit and hit[2] == account_generation else {}
+        return {**previous, 'loggedIn': previous.get('loggedIn', _account_logged_in(platform, cfg)),
+                'name': previous.get('name', ''), 'avatar': previous.get('avatar', ''),
+                'authState': 'unknown', 'verified': False,
+                'verificationMessage': '本次检查未取得明确账号证据，不能判断已退出；保留上次账号并稍后重试。'}
     if platform == 'xiaohongshu' and not data['loggedIn']:
         invalidate_account_context(platform, live_only=True)
-    current_generation = _account_check_generation(platform)
-    data.update(verified=True, checkedAt=int(time.time() * 1000))
-    with _WHOAMI_LOCK:
-        _WHOAMI_CACHE[platform] = (time.time(), data, current_generation)
     # 回写标记：确认已登录 → 快速路径（/api/accounts、/api/analytics/platforms）此后也正确；
     # biliup 走 cookies.json 判定，不用标记文件。
     if backend != 'biliup':
         if data['loggedIn']:
             _write_login_marker(platform, 'success', data.get('name') or '')
-        elif backend == 'wechat-oa':
-            _write_login_marker(platform, 'expired', '在线检查确认公众号后台会话已失效')
-        else:
-            try:
-                marker_path.unlink()
-            except OSError:
-                pass
+        elif backend != 'wechat-oa':
+            _write_login_marker(platform, 'expired', data['verificationMessage'])
     else:
         _write_login_marker(platform, 'success' if data['loggedIn'] else 'expired',
                             '在线检查确认登录有效' if data['loggedIn'] else '在线检查确认登录已失效，请重新连接')
     if backend == 'wechat-oa':
         _write_login_marker('wechat-oa-mp', 'success' if data['loggedIn'] else 'expired',
                             '在线检查确认公众号后台会话有效' if data['loggedIn'] else '在线检查确认公众号后台会话已失效')
+    current_generation = _account_check_generation(platform)
+    data.update(verified=True, checkedAt=int(time.time() * 1000))
+    with _WHOAMI_LOCK:
+        _WHOAMI_CACHE[platform] = (time.time(), data, current_generation)
     return {**data, 'verified': True}
 
 
@@ -8266,7 +8306,7 @@ async def api_publish(platform: str, req: PublishRequest):
             cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec']
         elif platform == 'bilibili':
             bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
-            cmd = [py, '-X', 'utf8', str(PROJECT_ROOT / 'skills' / 'openclaw' / 'skill-bilibili-upload'
+            cmd = [py, '-X', 'utf8', str(_skill_md_path('skill-bilibili-upload').parent
                            / 'scripts' / 'bili_upload.py'), 'upload', '--video', vids[0],
                    '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag,
                    '--cookie', str(DATA_DIR / 'cookies.json'), '--exec']
@@ -9078,6 +9118,7 @@ async def api_skill_critique(req: SkillCritiqueRequest):
 @app.get('/api/usage/context')
 async def api_context_usage(sessionId: str, modelRef: str = ''):
     from context_usage import collect_context
+    from model_catalog import catalog_reference
     from usage_stats import collect_usage
     import sqlite3
     try:
@@ -9088,7 +9129,8 @@ async def api_context_usage(sessionId: str, modelRef: str = ''):
         result = await asyncio.to_thread(collect_context, openclaw_state_dir(), SESSIONS_DIR,
                                          sessionId, modelRef,
                                          lambda: collect_usage(PROJECT_ROOT, openclaw_state_dir(), SESSIONS_DIR, sessionId, 1, 0),
-                                         SKILLS_DIR / 'builtin')
+                                         SKILLS_DIR / 'builtin',
+                                         lambda model: catalog_reference(model, DATA_DIR))
         return JSONResponse(result, headers={'Cache-Control': 'no-store'})
     except ValueError:
         raise HTTPException(400, '上下文会话或模型标识无效') from None

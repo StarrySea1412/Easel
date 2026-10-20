@@ -710,6 +710,7 @@ export interface AccountWhoami {
   verified?: boolean;
   checkedAt?: number; // 在线检查时间，毫秒；本地快照没有此字段
   verificationMessage?: string;
+  authState?: 'online' | 'login_required' | 'not_connected' | 'unknown';
 }
 
 /** Browser storage and HTTP payloads are untrusted even when TypeScript callers are typed. */
@@ -719,11 +720,14 @@ export function decodeAccountWhoami(value: unknown): AccountWhoami {
   if (typeof row.loggedIn !== 'boolean'
     || ['name', 'avatar', 'verificationMessage'].some(key => row[key] !== undefined && typeof row[key] !== 'string')
     || (row.verified !== undefined && typeof row.verified !== 'boolean')
+    || (row.authState !== undefined && !['online', 'login_required', 'not_connected', 'unknown'].includes(row.authState as string))
     || (row.checkedAt !== undefined && (typeof row.checkedAt !== 'number' || !Number.isFinite(row.checkedAt) || row.checkedAt < 0))) {
     throw new Error('账号状态格式异常，请重新检查登录状态。');
   }
   return { loggedIn: row.loggedIn, name: row.name as string || '', avatar: row.avatar as string || '',
-    ...(row.verified !== undefined ? { verified: row.verified as boolean } : {}),
+    ...(!row.loggedIn && !['login_required', 'not_connected'].includes(row.authState as string)
+      ? { verified: false } : row.verified !== undefined ? { verified: row.verified as boolean } : {}),
+    ...(row.authState !== undefined ? { authState: row.authState as AccountWhoami['authState'] } : {}),
     ...(row.checkedAt !== undefined ? { checkedAt: row.checkedAt as number } : {}),
     ...(row.verificationMessage !== undefined ? { verificationMessage: row.verificationMessage as string } : {}) };
 }
@@ -1430,6 +1434,7 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
 
 export interface ModelRow {
+  channelName?: string;
   draftId?: string;
   /** Saved runtime model IDs; discovery alone never adds chat choices. */
   chatModels?: string[];
@@ -1527,6 +1532,7 @@ export interface ImportCandidate {
   name: string;
   baseUrl: string;
   model: string;
+  models?: string[];   // 同一渠道内的全部模型；导入时可直接选择
   protocol: string;
   appType: string;
   note: string;
@@ -1583,13 +1589,13 @@ export function selectImportModel(payload: ImportCandidateRequest & { model: str
   });
 }
 
-export function applyImport(source: string, id: string, slot: string, path = '', previewToken = ''): Promise<ModelChannelsResponse & {
+export function applyImport(source: string, id: string, slot: string, path = '', previewToken = '', model = ''): Promise<ModelChannelsResponse & {
   ok: boolean; note?: string; applied: { name: string; slot: string; source: string; fields: string[] };
 }> {
   return request('/api/models/import/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, id, slot, path, previewToken }),
+    body: JSON.stringify({ source, id, slot, path, previewToken, model }),
   });
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAccounts, type AccountItem } from '../lib/api';
+import { accountConnection, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
 import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
@@ -31,6 +32,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   const dataSource = demoEnabled ? requestedSource : 'mine';
   const [section, setSection] = useState<AnalysisSection>('review');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const identities = useAccountIdentities();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -43,22 +45,25 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       const result = await fetchAccounts();
       if (sequence !== request.current) return;
       setAccounts(result); setRevision((value) => value + 1);
+      void verifyStale(result.filter(row => row.supported && (row.loggedIn || row.hasLocalSession)).map(row => row.platform), { alive: () => sequence === request.current });
     } catch (reason) {
       if (sequence === request.current) setError(reason instanceof Error ? reason.message : '暂时无法读取账号状态');
     } finally { if (sequence === request.current) setLoading(false); }
   }, []);
 
   useEffect(() => { if (dataSource === 'mine') void refresh(); return () => { request.current += 1; }; }, [refresh, dataSource]);
+  useEffect(() => watchAccountFreshness(() => { if (dataSource === 'mine') void refresh(); }), [refresh, dataSource]);
   useEffect(() => { if (!demoEnabled) setDataSource('mine'); }, [demoEnabled]);
   useEffect(() => { if (autoCollectSignal > 0) { setDataSource('mine'); setSection('review'); } }, [autoCollectSignal]);
   useEffect(() => { setPlatform(validPlatform(initialPlatform)); }, [initialPlatform]);
   useEffect(()=>setLegacyOpen(false),[platform]);
   const selected = PLATFORMS.find((item) => item.id === platform)!;
   const account = accounts.find((item) => item.platform === platform);
-  const available = Boolean(account?.supported && account.loggedIn);
+  const connection = accountConnection(account, identities[platform]);
+  const available = Boolean(account?.supported && connection === 'online');
   const mappedAccounts = PLATFORMS.filter((item) => item.id !== 'xiaohongshu').map((item) => {
     const value = accounts.find((entry) => entry.platform === item.id);
-    return { platform: item.id, name: item.name, loggedIn: Boolean(value?.supported && value.loggedIn), identity: `${item.id}:${revision}` };
+    return { platform: item.id, name: item.name, loggedIn: Boolean(value?.supported && accountConnection(value, identities[item.id]) === 'online'), identity: `${item.id}:${revision}:${identities[item.id]?.checkedAt || 0}` };
   });
 
   return <div className="content-analysis-page">
@@ -77,7 +82,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       </section>
 
       <div className="ca-context">
-        <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已保存登录状态' : '需要连接账号'}</span></div>
+        <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已连接' : connection === 'unknown' ? '登录状态待确认' : connection === 'login_required' ? '未登录' : '需要连接账号'}</span></div>
         <button type="button" className="ca-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '刷新状态'}</button>
       </div>
       {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}</>}

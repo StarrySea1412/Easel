@@ -98,7 +98,7 @@ def breakdown(report, used, skill_snapshot=None):
 
 
 def collect_context(state_dir: Path, web_sessions_dir: Path, session_id: str,
-                    model_ref: str = '', usage_reader=None, skills_dir: Path | None = None):
+                    model_ref: str = '', usage_reader=None, skills_dir: Path | None = None, catalog_reader=None):
     if not SAFE_ID.fullmatch(session_id) or len(model_ref) > 300 or any(ord(c) < 32 for c in model_ref):
         raise ValueError('Invalid session/model identity')
     config = read_json(state_dir / 'openclaw.json')
@@ -140,10 +140,14 @@ def collect_context(state_dir: Path, web_sessions_dir: Path, session_id: str,
     mismatch = bool(entry and selected_ref and selected_ref != observed_ref)
     reference = context_reference(model_id)
     configured_window = number(selected.get('contextWindow')) or None
+    catalog = catalog_reader(model_id) if not configured_window and catalog_reader else None
+    catalog_tokens = number(mapping(catalog).get('tokens')) or None
+    if catalog_tokens:
+        reference = catalog
     configured_limit = number(defaults.get('contextTokens')) or None
     recorded_limit = (number(entry.get('contextTokens')) or None) if not mismatch else None
     capacity = configured_window or (reference['tokens'] if reference else None)
-    capacity_source = 'model_config' if configured_window else 'official_reference' if reference else 'unavailable'
+    capacity_source = 'model_config' if configured_window else 'model_catalog' if catalog_tokens else 'official_reference' if reference else 'unavailable'
     if configured_limit and (capacity is None or configured_limit < capacity):
         capacity, capacity_source = configured_limit, 'runtime_config'
     if capacity is None and recorded_limit:

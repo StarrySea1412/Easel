@@ -71,6 +71,18 @@ test('embedded panel renders honest placeholders and call counts', async t => {
   assert.match(view.text(), /未上报/, 'null metrics stay 未上报 instead of 0');
 });
 
+test('switching sessions shows skeleton immediately and ignores the old pending response', async t => {
+  const view = await fixture(t, { embedded: true });
+  assert.ok(view.container.querySelector('.activity-skeleton[aria-busy="true"]'));
+  await view.render({sessionId: 's2'});
+  assert.ok(view.requests[0].options.signal.aborted);
+  await view.respondFirst();
+  assert.ok(view.container.querySelector('.activity-skeleton'));
+  await act(async () => view.requests[1].resolve(new Response(JSON.stringify(usagePayload('s2')))));
+  assert.equal(view.container.querySelector('.activity-skeleton'), null);
+  assert.match(view.text(), /240/);
+});
+
 test('project scope switches to the session summary table', async t => {
   const view = await fixture(t, { embedded: true });
   await view.respondFirst();

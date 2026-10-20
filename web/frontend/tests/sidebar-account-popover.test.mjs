@@ -8,6 +8,7 @@ import { loadTsModule } from './load-ts.mjs';
 // checks do not claim an online platform session or real-browser validation.
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.localStorage = window.localStorage;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const { default: SidebarAccountPopover } = await loadTsModule('../src/components/SidebarAccountPopover.tsx', import.meta.url);
@@ -16,6 +17,7 @@ const accounts = connected => platforms.map(platform => ({ platform, loggedIn: p
 const response = value => ({ ok: true, json: async () => value });
 
 async function fixture(t) {
+  localStorage.clear();
   const requests = [];
   const state = { read: async () => response(accounts()), visits: 0 };
   t.mock.method(globalThis, 'fetch', async (url, options) => { requests.push({ url, options }); return state.read(); });
@@ -31,14 +33,15 @@ async function fixture(t) {
   };
 }
 
-test('account preview only reads an uncached local snapshot and identifies all seven logged-out brands', async t => {
+test('local account snapshots never claim logout without online evidence', async t => {
   const view = await fixture(t);
   assert.deepEqual(view.requests, []);
   await view.open();
   assert.deepEqual(view.requests.map(item => item.url), ['/api/accounts']);
   assert.equal(view.requests[0].options.cache, 'no-store');
-  assert.match(view.panel().textContent, /7 个平台均未登录/);
-  assert.match(view.panel().textContent, /本地登录快照 · 待在线校验/);
+  assert.match(view.panel().textContent, /尚无可确认的已登录平台/);
+  assert.doesNotMatch(view.panel().textContent, /均未登录|已退出/);
+  assert.doesNotMatch(view.panel().textContent, /本地登录快照|在线结论与账号中心共用/);
   assert.equal(view.panel().querySelectorAll('img.sidebar-account-brand').length, 7);
   assert.doesNotMatch(view.panel().textContent, /PRIVATE_SESSION_SHOULD_NOT_RENDER/);
   await act(async () => view.panel().querySelector('.sidebar-account-open').click());
@@ -50,7 +53,7 @@ test('reopening clears old success while a fresh snapshot is pending, and failur
   const view = await fixture(t);
   view.state.read = async () => response(accounts('xiaohongshu'));
   await view.open();
-  assert.match(view.panel().textContent, /1 个平台记录为已登录/);
+  assert.match(view.panel().querySelector('.account-connection-dot button').title, /正在确认连接/);
   await view.escape();
   assert.equal(document.activeElement, view.trigger);
   let fail;
@@ -73,7 +76,7 @@ test('a late response from a closed preview cannot overwrite the new opening', a
   view.state.read = async () => response(accounts());
   await view.open();
   await act(async () => finishOld(response(accounts('douyin'))));
-  assert.match(view.panel().textContent, /7 个平台均未登录/);
+  assert.match(view.panel().textContent, /尚无可确认的已登录平台/);
   assert.doesNotMatch(view.panel().textContent, /1 个平台记录为已登录/);
 });
 
@@ -106,5 +109,20 @@ test('missing platform statuses stay unknown instead of claiming all platforms a
   await view.open();
   assert.match(view.panel().textContent, /尚无可确认的已登录平台/);
   assert.doesNotMatch(view.panel().textContent, /7 个平台均未登录/);
-  assert.equal([...view.panel().querySelectorAll('li small')].filter(item => item.textContent === '待读取').length, 7);
+  assert.equal(view.panel().querySelectorAll('.account-connection-dot.is-checking').length, 7);
+});
+
+test('open preview shares online and unknown transitions without treating the local snapshot as proof', async t => {
+  const { setWhoamiCache, markWhoamiUnverified } = await loadTsModule('../src/lib/whoami.ts');
+  const view = await fixture(t);
+  await view.open();
+  await act(async () => setWhoamiCache('xiaohongshu', {loggedIn:true,verified:true,checkedAt:Date.now(),name:'shared',avatar:''}));
+  assert.match(view.panel().textContent, /1 个平台已确认在线/);
+  assert.ok(view.panel().querySelector('.account-connection-dot.is-online'));
+  assert.equal(view.panel().querySelector('.sidebar-account-name').textContent, 'shared');
+  assert.match(view.panel().querySelector('.account-connection-dot button').title, /上次核验/);
+  assert.doesNotMatch(view.panel().textContent, /登录状态有效|上次核验/);
+  await act(async () => markWhoamiUnverified('xiaohongshu','检查超时'));
+  assert.ok(view.panel().querySelector('.account-connection-dot.is-checking'));
+  assert.doesNotMatch(view.panel().textContent,/已退出|均未登录/);
 });

@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchAccounts } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, useAccountIdentities, useAccountChecks, type AccountConnection } from '../lib/whoami';
+import AccountConnectionDot from './AccountConnectionDot';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts } from './icons';
 import '../styles/sidebar-account-popover.css';
@@ -10,13 +11,15 @@ const PLATFORMS = [
   ['xiaohongshu', '小红书'], ['kuaishou', '快手'], ['weixin-channels', '视频号'],
   ['zhihu', '知乎'], ['bilibili', '哔哩哔哩'], ['douyin', '抖音'], ['wechat-oa', '微信公众号'],
 ] as const;
-type Snapshot = { platform: string; name: string; loggedIn: boolean | null }[];
+type Snapshot = { platform: string; name: string; loggedIn: boolean | null; hasLocalSession?: boolean }[];
 
 export default function SidebarAccountPopover({ active, onNavigate }: { active: boolean; onNavigate: () => void }) {
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const identities = useAccountIdentities();
+  const checks = useAccountChecks();
   const [position, setPosition] = useState({ left: 64, top: 12, width: 290 });
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -64,9 +67,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
       if (stale) return;
       setSnapshot(PLATFORMS.map(([platform, name]) => {
         const account = accounts.find(item => item.platform === platform);
-        const cached = getWhoamiCache()[platform];
-        const fresh = isWhoamiFresh(cached);
-        return { platform, name, loggedIn: cached?.verified === false ? null : fresh ? cached.loggedIn : typeof account?.loggedIn === 'boolean' ? account.loggedIn : null };
+        return { platform, name, loggedIn: account?.loggedIn ?? null, hasLocalSession: account?.hasLocalSession };
       }));
     }).catch(() => { if (!stale) setError(true); });
     return () => { stale = true; };
@@ -103,7 +104,11 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
   }, [open]);
 
-  const connected = snapshot?.filter(account => account.loggedIn);
+  const connectionOf = (platform: string): AccountConnection => {
+    const account = snapshot?.find(row => row.platform === platform);
+    return accountConnection(account ? { loggedIn: account.loggedIn === true, hasLocalSession: account.hasLocalSession } : undefined, identities[platform]);
+  };
+  const connected = snapshot?.filter(account => connectionOf(account.platform) === 'online');
   return <>
     <button ref={trigger} type="button" className={`nav-item sidebar-accounts-trigger${active ? ' active' : ''}`}
       aria-label="账号" title="账号" aria-current={active ? 'page' : undefined} aria-expanded={open} aria-controls={panelId}
@@ -126,16 +131,15 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
         if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node) && event.relatedTarget !== trigger.current) close();
       }}>
       <div className="sidebar-account-heading"><strong>平台账号</strong><button type="button" aria-label="关闭账号预览" onClick={() => close(true)}>×</button></div>
-      <p className="sidebar-account-note">本地登录快照 · 待在线校验</p>
       {!snapshot && !error && <p className="sidebar-account-state" role="status">正在读取本次账号快照…</p>}
       {error && <p className="sidebar-account-state" role="alert">本次快照读取失败，暂不能确认登录状态。</p>}
       {snapshot && <>
-        <p className="sidebar-account-summary">{connected?.length ? `${connected.length} 个平台记录为已登录` : snapshot.every(account => account.loggedIn === false) ? '7 个平台均未登录' : '尚无可确认的已登录平台'}</p>
+        <p className="sidebar-account-summary">{connected?.length ? `${connected.length} 个平台已确认在线` : '尚无可确认的已登录平台'}</p>
         <ul>{snapshot.map(account => <li key={account.platform}>
           <PlatformIcon platform={account.platform} name={account.name} className="sidebar-account-brand" />
-          <span>{account.name}</span><small className={account.loggedIn ? 'is-connected' : ''}>{account.loggedIn === null ? '待读取' : account.loggedIn ? '已登录 · 待校验' : '未登录'}</small>
+          <span className="sidebar-account-name" title={account.name}>{connectionOf(account.platform) === 'online' && identities[account.platform]?.name && localStorage.getItem('easel_account_privacy') !== '1' ? identities[account.platform].name : account.name}</span>
+          <AccountConnectionDot connection={connectionOf(account.platform)} checking={checks.has(account.platform)} checkedAt={identities[account.platform]?.checkedAt} message={identities[account.platform]?.verificationMessage} />
         </li>)}</ul>
-        <p className="sidebar-account-note">快照不代表会话当前有效。可前往账号中心查看和主动校验。</p>
       </>}
       <button type="button" className="sidebar-account-open" onClick={() => { close(); onNavigate(); }}>查看账号 <span aria-hidden="true">→</span></button>
     </div>, document.body)}

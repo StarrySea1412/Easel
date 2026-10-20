@@ -11,6 +11,7 @@ export function useCompatibleThinking(value: ThinkingPreference, supported: stri
   const restricted = Boolean(supported?.length && THINKING_LEVELS.some(level => !supported.includes(level)));
   return { level: resolved, notice: value === 'auto'
     ? resolved ? `自适应最高：当前模型使用${THINKING_LABELS[resolved]}，切换模型后自动匹配。可在此手动调整；能力声明不代表调用成功。` : '正在读取模型支持的档位；尚未确认时沿用模型默认，不发送猜测的强度。'
+    : !resolved ? '尚未确认模型档位，暂时沿用模型默认；保留手动偏好，读取能力后再匹配。'
     : restricted || resolved !== value
-    ? `已按网关能力声明使用${THINKING_LABELS[resolved!]}。可选：${supported?.map(level => THINKING_LABELS[level as ThinkingPreference] || level).join('、')}；不支持的档位已禁用。能力声明不代表本轮执行已验证。` : '' };
+    ? `已按网关能力声明使用${THINKING_LABELS[resolved]}。可选：${supported?.map(level => THINKING_LABELS[level as ThinkingPreference] || level).join('、')}。能力声明不代表本轮执行已验证。` : '' };
 }

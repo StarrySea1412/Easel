@@ -136,18 +136,25 @@ def test_random_image_contains_pixels_without_answer_metadata():
     assert not health.image_score(json.dumps(expected[::-1]), expected)["passed"]
 
 
-@pytest.mark.parametrize("protocol", ["openai", "anthropic"])
+@pytest.mark.parametrize("protocol", ["openai", "openai-responses", "anthropic"])
 def test_protocol_image_payload_and_response_redaction(protocol):
     target = health.Target("provider/model", "provider", "model", protocol, "https://fixture.invalid/v1", "synthetic-secret")
     image, _, prompt = health.challenge(random.Random(1))
     request = health.request_body(target, prompt, image)
     assert request.get_header('User-agent').startswith('Easel/')
     payload = json.loads(request.data)
-    content = payload["messages"][0]["content"]
+    content = (payload.get("messages") or payload["input"])[0]["content"]
     if protocol == "anthropic":
         assert request.full_url.endswith("/v1/messages")
         assert base64.b64decode(content[0]["source"]["data"]) == image
         raw = {"content": [{"type": "text", "text": "synthetic-secret received"}]}
+    elif protocol == "openai-responses":
+        assert request.full_url.endswith("/v1/responses")
+        input_content = payload["input"][0]["content"]
+        assert input_content[0]["type"] == "input_image"
+        assert input_content[0]["image_url"].startswith("data:image/png;base64,")
+        raw = {"output": [{"type": "message", "content": [
+            {"type": "output_text", "text": "synthetic-secret received"}]}]}
     else:
         assert request.full_url.endswith("/v1/chat/completions")
         assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
@@ -160,6 +167,13 @@ def test_protocol_image_payload_and_response_redaction(protocol):
     assert result["ok"] and "synthetic-secret" not in json.dumps(result)
 
 
+def test_responses_target_is_accepted_for_availability_checks(service):
+    target = health.Target("provider/model", "provider", "model", "openai-responses",
+                           "https://fixture.invalid/v1", "synthetic-secret")
+    service.targets["provider/model"] = target
+    assert service.api.target("provider/model").protocol == "openai-responses"
+
+
 def test_saved_resolver_and_readonly_routes(service, tmp_path, monkeypatch):
     state = tmp_path / "state"
     state.mkdir()
@@ -169,6 +183,9 @@ def test_saved_resolver_and_readonly_routes(service, tmp_path, monkeypatch):
     monkeypatch.setattr(web, "openclaw_state_dir", lambda: state)
     assert web._model_health_target("relay/model-0").key == "synthetic-secret"
     assert web._model_health_target("foreign/model") is None
+    config.write_text(json.dumps({"models": {"providers": {"relay": {"api": "openai-responses",
+        "baseUrl": "https://fixture.invalid/v1", "apiKey": "synthetic-secret", "models": [{"id": "model-0"}]}}}}))
+    assert web._model_health_target("relay/model-0").protocol == "openai-responses"
     monkeypatch.setattr(web, "_model_health_service", lambda: service.api)
     assert asyncio.run(web.api_model_health())["results"] == [] and not service.calls
     result = asyncio.run(web.api_model_probe(web.ModelProbeRequest(modelRef="relay/model-0", prompt="custom")))

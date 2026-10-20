@@ -13,7 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills" / "shared" / "scripts"))
-sys.path.insert(0, str(ROOT / "skills" / "openclaw" / "skill-bilibili-upload" / "scripts"))
+sys.path.insert(0, str(ROOT / "skills" / "builtin" / "skill-bilibili-upload" / "scripts"))
 
 import bili_upload as bili
 import calendar_ops

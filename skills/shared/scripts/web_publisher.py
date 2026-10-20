@@ -1700,6 +1700,8 @@ def cmd_whoami(a) -> int:
                     elif pa == 'unknown':
                         result['error'] = '发布权限检查未取得可信结果，请稍后重试。'
                 result["loggedIn"] = logged
+                if not logged and not result.get('error'):
+                    result.setdefault('reason', 'login_required')
                 if logged:
                     result.update(_account_identity(account) if account else _visible_account_identity(page, cfg))
                 elif cfg.get("profile") == "ChannelsProfile":

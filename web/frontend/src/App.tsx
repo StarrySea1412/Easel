@@ -1,3 +1,4 @@
+import { confirmModal } from './components/ui/ConfirmModal';
 import FailureRecordDialog from './components/FailureRecordDialog';
 import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
@@ -1244,13 +1245,18 @@ export default function App() {
     setCurrentPage('chat', true);
   }, [sessions]);
 
-  const handleSessionDelete = useCallback((id: string) => {
+  const handleSessionDelete = useCallback(async (id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
     if (!target?.importedFromBackup && target?.messages.some(m => m.taskGoalId || m.taskRunId)) {
       showToast('这条对话包含服务端目标记录，请使用归档保留结果；归档不会停止计划或目标。', 'info');
       return;
     }
-    if (!window.confirm('确定删除这条对话？')) return;
+    if (!(await confirmModal('确定删除这条对话？'))) return;
+    const latest = sessionsRef.current.find(session => session.id === id);
+    if (!latest) return;
+    if (!latest.importedFromBackup && latest.messages.some(message => message.taskGoalId || message.taskRunId)) {
+      showToast('这条对话已有目标执行记录，请归档保留。', 'info'); return;
+    }
 
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
     const wasRunning = Boolean(streamCtl.current[id]);

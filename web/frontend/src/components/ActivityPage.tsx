@@ -181,7 +181,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
                 <div id={`activity-panel-${tab === 'audit' ? 'audit' : 'usage'}`}  role="tabpanel" aria-labelledby={`activity-tab-${tab}`}>
                   {tab !== 'audit' ? (
                     <UsagePanel
-                      key={session.id}
+                      key={`${session.id}:${tab}`}
                       sessionId={session.id}
                       refreshKey={session.messages.length}
                       isStreaming={Boolean(liveStreams[session.id])}

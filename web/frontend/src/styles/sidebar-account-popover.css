@@ -9,6 +9,8 @@
 .sidebar-account-popover ul { list-style:none;margin:10px 0;padding:0; }
 .sidebar-account-popover li { display:flex;align-items:center;gap:9px;min-height:35px;padding:4px 0;font-size:12px; }
 .sidebar-account-brand { width:22px;height:22px;object-fit:contain;flex:none; }
+.sidebar-account-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.sidebar-account-popover li .account-connection-dot { margin-left:auto; }
 .sidebar-account-popover li small { margin-left:auto;color:var(--text-secondary);font-size:10px;white-space:nowrap; }
 .sidebar-account-popover li small.is-connected { color:color-mix(in srgb,var(--green) 70%,var(--text)); }
 .sidebar-account-open { display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:13px;padding:10px 11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font:inherit;font-size:12px;cursor:pointer; }

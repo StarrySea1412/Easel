@@ -5,7 +5,8 @@ import {
   saveCredentials, getCredentials, startMpLogin, mpLoginStatus,
 } from '../lib/api';
 import type { AccountItem, AccountWhoami, LoginStart, LoginStatus } from '../lib/api';
-import { ACCOUNT_STATE_EVENT, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified, watchAccountFreshness } from '../lib/whoami';
+import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, setWhoamiCache, verifyStale, isWhoamiFresh, markWhoamiUnverified, setAccountChecking, useAccountChecks, useAccountIdentities, watchAccountFreshness } from '../lib/whoami';
+import AccountConnectionDot from './AccountConnectionDot';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
@@ -46,8 +47,8 @@ type OwnedLogin = { platform: string; start: Promise<LoginStart>; attemptId?: st
 type AccountVerification = { state: 'checking' | 'success' | 'expired' | 'error'; message: string };
 
 function AccountCheckResult({ result }: { result?: AccountVerification }) {
-  if (!result) return null;
-  const Icon = result.state === 'success' ? IconCheck : result.state === 'checking' ? IconRefresh : IconInfo;
+  if (!result || result.state !== 'error') return null;
+  const Icon = IconInfo;
   return <p className={`account-check-result is-${result.state}`} role={result.state === 'error' ? 'alert' : 'status'}>
     <span className="account-check-icon" aria-hidden="true"><Icon size={13} strokeWidth={2} /></span>
     <span>{result.message}</span>
@@ -180,6 +181,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     const before = JSON.stringify(getWhoamiCache()[platform]);
     // Keep the last identity while checking; cache age is not logout evidence.
     setVerification(value => ({ ...value, [platform]: { state: 'checking', message: '正在检查登录状态…' } }));
+    setAccountChecking(platform, true);
     try {
       const r = await accountWhoami(platform, true);
       if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0) || before !== JSON.stringify(getWhoamiCache()[platform])) return null;
@@ -191,7 +193,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       }
       setWhoami((w) => ({ ...w, [platform]: r })); setWhoamiCache(platform, r);
       setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
-      setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
+      setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? r.verificationMessage || '登录状态有效' : '未登录' } }));
       return r;
     } catch (cause) {
       if (aliveRef.current && epoch === (identityEpoch.current[platform] || 0) && before === JSON.stringify(getWhoamiCache()[platform])) {
@@ -200,7 +202,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         setVerification(value => ({ ...value, [platform]: { state: 'error', message: `检查失败：${cause instanceof Error ? cause.message : '请稍后重试'}。尚未确认登录是否有效。` } }));
       }
       return null;
-    }
+    } finally { setAccountChecking(platform, false); }
   }, []);
 
   // 打开页面：拉「快」状态（读 status.json，不起浏览器），随后后台自愈——对缓存缺失/过期的
@@ -225,7 +227,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         onUpdate: (platform, r) => {
           setWhoami((w) => ({ ...w, [platform]: r }));
           setAccounts(rows => rows.map(row => row.platform === platform ? { ...row, loggedIn: r.loggedIn } : row));
-          setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? '登录状态有效' : '登录已失效，请重新连接' } }));
+          setVerification(value => ({ ...value, [platform]: { state: r.loggedIn ? 'success' : 'expired', message: r.loggedIn ? r.verificationMessage || '登录状态有效' : '未登录' } }));
         },
         onError: (platform, message) => setVerification(value => ({ ...value, [platform]: { state: 'error', message } })),
       });
@@ -439,8 +441,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       await logoutAccount(a.platform);
       // 内存态立即翻未登录（同登录路径），不等 load() 回来
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false, hasLocalSession: false, lastStateAt: null } : x));
-      setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
-      setWhoamiCache(a.platform, null);
+      const disconnected: AccountWhoami = { loggedIn: false, name: '', avatar: '', authState: 'not_connected', verified: true, checkedAt: Date.now() };
+      setWhoami((w) => ({ ...w, [a.platform]: disconnected }));
+      setWhoamiCache(a.platform, disconnected);
       setLogoutMessage(`已退出 ${a.name}，此平台的本地登录态已清理。已保存的作品和分析记录仍保留。`);
       setManagedPlatform(null); setConfirmLogout(false);
       load();
@@ -465,23 +468,16 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     });
   };
 
+  const identities = useAccountIdentities();
+  const checks = useAccountChecks();
   // Only fresh results count as confirmed online. Stale results retain identity
   // and show an unknown/checking state, never an invented logged-out state.
   const effLoggedIn = (a: AccountItem): boolean => {
-    const w = whoami[a.platform];
-    if (w && w !== 'loading' && isWhoamiFresh(w)) return w.loggedIn;
-    return false;
+    return accountConnection(a, identities[a.platform]) === 'online';
   };
 
   const badge = (a: AccountItem) => {
-    if (!a.supported) return <span className="badge">暂不可连接</span>;
-    if (whoami[a.platform] === 'loading' || verification[a.platform]?.state === 'checking') return <span className="badge">校验中…</span>;
-    const w = whoami[a.platform];
-    if (verification[a.platform]?.state === 'error' || (w && w !== 'loading' && w.verified === false)) return <span className="badge">状态待确认</span>;
-    if (effLoggedIn(a)) return <span className="badge badge-ok">已连接</span>;
-    if (w && w !== 'loading' && isWhoamiFresh(w) && !w.loggedIn) return <span className="badge">登录已失效</span>;
-    if ((w && w !== 'loading' && (w.loggedIn || !isWhoamiFresh(w))) || a.loggedIn || a.hasLocalSession) return <span className="badge">等待自动检测</span>;
-    return <span className="badge">未连接</span>;
+    return <AccountConnectionDot connection={a.supported ? accountConnection(a, identities[a.platform]) : 'unknown'} checking={checks.has(a.platform)} checkedAt={identities[a.platform]?.checkedAt} message={identities[a.platform]?.verificationMessage} />;
   };
 
   const connectedCount = accounts.filter((account) => account.supported && effLoggedIn(account)).length;
@@ -534,13 +530,13 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             return <article key={a.platform} className={`card account-card${!a.supported ? ' account-unavailable' : ''}`}>
               <div className="account-card-head"><div className="account-platform"><span className="account-platform-mark"><PlatformIcon platform={a.platform} name={a.name} /></span><h3>{a.name}</h3></div>{badge(a)}</div>
               <div className="account-identity">
-                {knownIdentity ? <><Avatar url={hideIdentity ? undefined : info?.avatar} name={hideIdentity ? a.name : info?.name || a.name} /><div><strong className="account-nick">{hideIdentity ? '账号身份已隐藏' : info?.name || '已保存的账号'}</strong><p>{checking ? '正在自动检测，保留上次账号' : logged ? '当前登录账号' : '上次确认的账号，当前状态待检测'}</p></div></>
+                {knownIdentity ? <><Avatar url={hideIdentity ? undefined : info?.avatar} name={hideIdentity ? a.name : info?.name || a.name} /><div><strong className="account-nick">{hideIdentity ? '账号身份已隐藏' : info?.name || '已保存的账号'}</strong></div></>
                   : checking ? <div className="account-skeleton account-skeleton-identity" role="status" aria-label="正在自动检测登录状态" />
                   : <p className="account-connection-copy">{a.supported ? '连接后，在这里查看当前账号与登录状态。' : '此平台暂不可用，请先使用其他平台。'}</p>}
               </div>
               <p className="account-login-method">{a.backend === 'wechat-oa' ? '使用微信扫码连接公众号' : a.backend === 'biliup' ? '按登录引导完成账号连接' : '使用手机 App 扫码连接'}</p>
               <div className="account-actions">
-                {needsCheck ? <div className={`account-auto-status${checking ? ' is-checking' : ''}`} role="status"><IconRefresh size={15} />{checking ? '正在自动检测…' : logged ? '自动检测已开启' : '登录状态待确认，将自动重试'}</div> : <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} aria-disabled={cancelling || !!cancelError || undefined} disabled={!a.supported || pending || w === 'loading'}
+                {needsCheck ? null : <button className={`btn btn-block ${a.supported && !logged ? 'btn-primary' : ''}`} aria-disabled={cancelling || !!cancelError || undefined} disabled={!a.supported || pending || w === 'loading'}
                   onClick={() => {
                     if (settlingRef.current || cancelError) return;
                     if (logged) void runWhoami(a.platform); else void handleLogin(a, a.backend === 'wechat-oa');
@@ -548,7 +544,6 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   {pending ? '正在启动…' : a.supported ? '连接账号' : '暂不可连接'}
                 </button>}
                 <AccountCheckResult result={verification[a.platform]} />
-                {info?.checkedAt && <p className="account-login-method">上次在线确认：{new Date(info.checkedAt).toLocaleString()}</p>}
                 {a.platform === 'xiaohongshu' && !needsCheck && <button type="button" className="btn btn-block account-browser-login"
                   aria-disabled={cancelling || !!cancelError || undefined} disabled={!a.supported || pending || w === 'loading'} onClick={() => void handleLogin(a, false, true, true)}>
                   在浏览器中登录
@@ -565,7 +560,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         <details className="accounts-help"><summary>连接遇到问题？</summary>
           <p>二维码未出现或已过期时，请关闭登录窗口后重试。平台可能要求短信验证，请按登录窗口中的提示完成。</p>
           <p>更换网络、代理或服务器环境可能触发平台验证。优先在稳定的正常网络中重新连接；具体失败原因以平台返回结果为准。</p>
-          <p>进入页面、切回窗口和每分钟会自动检测，在线结果缓存两分钟。缓存过期或网络异常只代表状态待确认；仅平台明确确认失效后才提示重新登录。检测不会重新登录或发布内容。</p>
+          <p>在线检测结果保留10分钟；检测未确认也会等待10分钟后再自动重试。切页、聚焦和刷新不会重复检测。发布前会重新核验；悬停状态点可查看上次核验时间。</p>
           {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
         </details>
       </section>

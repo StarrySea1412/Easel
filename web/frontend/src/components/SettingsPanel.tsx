@@ -23,7 +23,7 @@ import {
   fetchEnvTools,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchModelPresets, discoverModels,
-  fetchImportSources, previewImport, applyImport, discoverImportModels, selectImportModel,
+  fetchImportSources, previewImport, applyImport, discoverImportModels,
   saveImagegenChannel, fetchImagegenGallery, fetchSkillDetail, saveEnv, testNotifyEmail,
 } from '../lib/api';
 import type {
@@ -72,7 +72,8 @@ const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内
 function modelConfigLabel(row?: ModelRow) {
   if (!row) return '尚未设置';
   const model = !row.model || PLACEHOLDERS.has(row.model) ? '模型未指定' : row.model;
-  return row.name.trim().toLowerCase() === model.toLowerCase() ? model : `${row.name || '未命名供应商'} · ${model}`;
+  const channel = row.channelName && row.channelName !== '未命名渠道' ? row.channelName : row.name || '未命名供应商';
+  return channel.trim().toLowerCase() === model.toLowerCase() ? model : `${channel} · ${model}`;
 }
 
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -230,11 +231,11 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const [impPath, setImpPath] = useState('');
   const [impSlot, setImpSlot] = useState('auto');
   const [impPreview, setImpPreview] = useState<ImportPreview | null>(null);
-  const [impPick, setImpPick] = useState('');
-  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply' | 'discover' | 'model'>('');
+  const [impModels, setImpModels] = useState<Record<string, string>>({});
+  const [impApplyingId, setImpApplyingId] = useState('');
+  const [impBusy, setImpBusy] = useState<'' | 'preview' | 'apply' | 'discover'>('');
   const [impDiscovery, setImpDiscovery] = useState<Record<string, DiscoverResult | 'loading'>>({});
   const [impMsg, setImpMsg] = useState('');
-  const [impConfirmed, setImpConfirmed] = useState(false);
   const [impAdvancedOpen, setImpAdvancedOpen] = useState(false);
   const [impSourcesLoading, setImpSourcesLoading] = useState(false);
   const impSourceRequest = useRef(0);
@@ -244,8 +245,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const clearImportPreview = useCallback(() => {
     impPreviewRequest.current += 1;
     setImpPreview(null);
-    setImpPick('');
-    setImpConfirmed(false);
+    setImpModels({});
+    setImpApplyingId('');
     setImpMsg('');
     setImpDiscovery({});
     setImpBusy((busy) => busy === 'apply' ? busy : '');
@@ -279,13 +280,14 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     setImpBusy('preview');
     setImpMsg('');
     setImpPreview(null);
-    setImpPick('');
-    setImpConfirmed(false);
+    setImpModels({});
     setImpDiscovery({});
     try {
       const d = await previewImport(source, impSlot, path);
       if (!mounted.current || requestId !== impPreviewRequest.current) return;
       setImpPreview(d);
+      setImpModels(Object.fromEntries(d.candidates.map((candidate) => [candidate.id,
+        candidate.model || candidate.models?.[0] || ''])));
       if (!d.candidates.length) setImpMsg('这个来源里没有读到可导入的配置');
     } catch (e) {
       if (mounted.current && requestId === impPreviewRequest.current) setImpMsg(e instanceof Error ? e.message : '预览失败');
@@ -317,59 +319,51 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     }
   }, [impPreview, impBusy, impSource, saving]);
 
-  const pickImportModel = useCallback(async (candidate: ImportCandidate, model: string) => {
-    if (!candidate.previewToken || !impPreview || impBusy || saving || !model) return;
-    const requestId = ++impPreviewRequest.current;
-    setImpBusy('model');
-    setImpConfirmed(false);
-    setImpMsg('');
-    try {
-      const updated = await selectImportModel({ source: impSource, path: impPreview.path, id: candidate.id,
-        slot: candidate.targetSlot, previewToken: candidate.previewToken, model });
-      if (!mounted.current || requestId !== impPreviewRequest.current) return;
-      setImpPreview((current) => current ? { ...current, candidates: current.candidates.map((item) => item.id === candidate.id ? updated : item) } : current);
-      setImpPick(candidate.id);
-      setImpMsg(`已预览模型 ${updated.model}，请核对下方替换内容并重新确认。尚未保存。`);
-    } catch (error) {
-      if (mounted.current && requestId === impPreviewRequest.current) setImpMsg(error instanceof Error ? error.message : '更新预览失败，请重试');
-    } finally {
-      if (mounted.current && requestId === impPreviewRequest.current) setImpBusy('');
-    }
-  }, [impPreview, impBusy, impSource, saving]);
-
-  const applyImportPick = useCallback(async () => {
-    const selected = impPreview?.candidates.find((c) => c.id === impPick && c.compatible);
-    if (!selected?.previewToken || !impConfirmed || impBusy || impApplying.current || modelSavePending.current) return;
+  const applyImportCandidate = useCallback(async (candidate: ImportCandidate) => {
+    if (!candidate.compatible || !candidate.previewToken || impBusy || impApplying.current || modelSavePending.current) return;
     impApplying.current = true;
     setImpBusy('apply');
+    setImpApplyingId(candidate.id);
     setImpMsg('');
     try {
-      const targetSlot = selected.targetSlot || impSlot;
-      const r = await applyImport(impSource, impPick, targetSlot, impPreview?.path || impPath.trim(), selected.previewToken);
+      const targetSlot = candidate.targetSlot || impSlot;
+      const model = (impModels[candidate.id] || candidate.model || '').trim();
+      const r = await applyImport(impSource, candidate.id, targetSlot, impPreview?.path || impPath.trim(),
+        candidate.previewToken, model);
       if (!mounted.current) return;
       clearModelDiscovery('chat');
       const previousDefault = savedChatRows.find((row) => row.role === '主');
       const actualDefault = r.channels.chat.rows.find((row) => row.role === '主');
       const identity = (row?: ModelRow) => row ? `${row.slot}:${row.name}:${row.model}:${row.baseUrl}` : '';
       setSavedChatRows(r.channels.chat.rows);
-      setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}。${identity(previousDefault) === identity(actualDefault)
+      setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}${model ? ` · ${model}` : ''}。${identity(previousDefault) === identity(actualDefault)
         ? `默认模型未改变：${modelConfigLabel(actualDefault)}` : `已保存默认现为：${modelConfigLabel(actualDefault)}`}。尚未进行真实调用测活。${r.note ? ` ${r.note}` : ''}`);
       setImpPreview(null);
-      setImpPick('');
-      setImpConfirmed(false);
       const imported = r.channels.chat.rows.find((row) => row.slot === targetSlot);
       if (imported) setChatRows((rows) => rows.some((row) => row.slot === targetSlot)
         ? rows.map((row) => row.slot === targetSlot ? { ...imported, role: row.role } : row) : [...rows, imported]);
-    } catch (e) {
-      if (mounted.current) {
-        setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
-        setImpConfirmed(false);
+      // Each successful import changes the target fingerprint. Refresh all
+      // remaining tokens so the next channel can also be imported directly.
+      try {
+        const remaining = new Set(impPreview?.candidates.filter((item) => item.id !== candidate.id).map((item) => item.id));
+        const fresh = await previewImport(impSource, impSlot, impPreview?.path || impPath.trim());
+        if (mounted.current) {
+          const candidates = fresh.candidates.filter((item) => remaining.has(item.id));
+          setImpPreview({ ...fresh, candidates });
+          setImpDiscovery({});
+          setImpModels(Object.fromEntries(candidates.map((item) => [item.id,
+            item.models?.includes(impModels[item.id]) ? impModels[item.id] : item.model || item.models?.[0] || ''])));
+        }
+      } catch {
+        if (mounted.current) setImpMsg((message) => `${message} 其余渠道请重新读取后导入。`);
       }
+    } catch (e) {
+      if (mounted.current) setImpMsg(e instanceof Error ? `导入失败：${e.message}` : '导入失败');
     } finally {
       impApplying.current = false;
-      if (mounted.current) setImpBusy('');
+      if (mounted.current) { setImpBusy(''); setImpApplyingId(''); }
     }
-  }, [impSource, impPick, impSlot, impPath, impPreview, impConfirmed, impBusy, savedChatRows, clearModelDiscovery]);
+  }, [impSource, impSlot, impPath, impPreview, impModels, impBusy, savedChatRows, clearModelDiscovery]);
 
   useEffect(() => {
     let alive = true;
@@ -872,8 +866,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             <section className="st-sec active">
               <ol className="model-import-steps" aria-label="配置导入步骤">
                 <li aria-current={!impPreview ? 'step' : undefined}><strong>1</strong> 选择来源</li>
-                <li aria-current={impPreview && !impPick ? 'step' : undefined}><strong>2</strong> 预览模型与覆盖</li>
-                <li aria-current={impPick ? 'step' : undefined}><strong>3</strong> 确认写入</li>
+                <li aria-current={impPreview ? 'step' : undefined}><strong>2</strong> 选择渠道并直接导入</li>
               </ol>
               <div className="panel-top">
                 <span className="desc">
@@ -934,33 +927,28 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                     />
                     </details>
                     <button className="btn btn-sm btn-primary" onClick={() => void loadImportPreview()} disabled={Boolean(impBusy) || saving}>
-                      {impBusy === 'preview' ? '读取中…' : '2. 预览可导入模型'}
+                      {impBusy === 'preview' ? '读取中…' : '2. 读取可导入渠道'}
                     </button>
                   </div>
                   {impBusy === 'preview' && <SkeletonCard rows={3} />}
                   {impPreview && impPreview.candidates.length > 0 && !impPreview.candidates.some((candidate) => candidate.compatible) && (
-                    <p className="hint">没有匹配当前通道的配置。可选择自动匹配协议；Responses 配置当前不支持直接导入，具体原因见各条目。</p>
+                    <p className="hint">没有匹配当前通道的配置。可改用自动匹配协议；每条渠道的具体原因见下方说明。</p>
                   )}
                   {impPreview && impPreview.candidates.length > 0 && (
                     <>
                       <div className="import-list">
                         {impPreview.candidates.map((c) => {
                           const fetched = impDiscovery[c.id];
+                          const discovered = fetched && fetched !== 'loading' && fetched.ok ? fetched.models : [];
+                          const choices = [...new Set([...(c.models || []), ...discovered])];
+                          const chosen = impModels[c.id] || c.model || choices[0] || '';
                           const discoveryReason = !c.compatible ? c.skipReason : !c.baseUrl ? '此来源缺少服务地址，不能仅凭 Key 确定渠道。'
                             : !c.keyPresent ? '此来源未提供 API Key，请先在来源工具补齐，再重新读取。' : '';
                           return <article
                             key={c.id}
-                            className={`import-item${c.compatible ? '' : ' off'}${impPick === c.id ? ' on' : ''}`}
+                            className={`import-item${c.compatible ? '' : ' off'}${impApplyingId === c.id ? ' on' : ''}`}
                           >
-                            <label className="import-choice">
-                            <input
-                              type="radio"
-                              name="imp-pick"
-                              disabled={!c.compatible || Boolean(impBusy)}
-                              checked={impPick === c.id}
-                              onChange={() => { setImpPick(c.id); setImpConfirmed(false); }}
-                            />
-                            <span className="ii-main">
+                            <div className="ii-main">
                               <span className="ii-name">
                                 {c.name}
                                 <span className="badge">{c.protocol}</span>
@@ -969,62 +957,45 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                               <span className="ii-base">{c.baseUrl || '（无地址）'}</span>
                               <span className="ii-meta">
                                 {c.compatible && `写入 ${modelImportSlotLabel(c.targetSlot || impSlot)} · `}
-                                {c.model ? `模型 ${c.model} · ` : ''}密钥 {c.keyMasked || '无'}
+                                {chosen ? `模型 ${chosen} · ` : ''}密钥 {c.keyMasked || '无'}
                                 {!c.compatible && ` · ${c.skipReason}`}
                                 {c.note && ` · ${c.note}`}
                               </span>
-                              {c.compatible && c.overwrites.length > 0 && (
-                                <span className="ii-ov">
-                                  将替换：{c.overwrites.map((o) => `${o.field.endsWith('_API_KEY') ? 'API 密钥' : o.field.endsWith('_BASE_URL') ? '服务地址' : o.field.endsWith('_MODEL') ? '模型名称' : '现有配置'}（${o.current} → ${o.incoming}）`).join('；')}
-                                </span>
-                              )}
-                            </span>
-                            </label>
+                            </div>
                             <div className="import-candidate-actions">
+                              {choices.length > 1 && <Select aria-label={`${c.name}导入模型`} value={chosen}
+                                disabled={!c.compatible || Boolean(impBusy) || saving}
+                                options={choices.map((model) => ({ value: model, label: model }))}
+                                onChange={(model) => setImpModels((current) => ({ ...current, [c.id]: model }))} />}
                               <button type="button" className="adv-btn" disabled={Boolean(discoveryReason) || !c.previewToken || Boolean(impBusy) || saving}
                                 title="服务端使用此来源的地址、协议和 Key 仅读取模型列表，密钥不发送到前端"
                                 onClick={() => void discoverImportCandidate(c)}>
                                 {fetched === 'loading' ? '正在获取…' : '获取该渠道模型'}
                               </button>
-                              <span className="hint">{discoveryReason || '使用该来源的地址、协议和 Key，只枚举模型，不发起推理。'}</span>
+                              <button type="button" className="btn btn-sm btn-primary"
+                                disabled={!c.compatible || !c.previewToken || Boolean(impBusy) || saving}
+                                onClick={() => void applyImportCandidate(c)}>
+                                {impApplyingId === c.id ? '导入中…' : '导入'}
+                              </button>
+                              <span className="hint">{discoveryReason || '直接写入所选通道；导入后可在模型编辑区修改模型、地址和协议。'}</span>
                             </div>
                             {fetched && <div className={`discover-row${fetched !== 'loading' ? fetched.ok ? ' ok' : ' bad' : ''}`} role="status">
                               {fetched === 'loading' ? <><span className="spin" /> 正在读取此来源的模型列表…</> : <>
                                 <span>{fetched.message}</span>
-                                {fetched.ok && fetched.models.length > 0 ? <span className="dr-pick">
-                                  <Select aria-label={`${c.name}渠道可用模型`} value={fetched.models.includes(c.model) ? c.model : ''}
-                                    disabled={Boolean(impBusy) || saving} placeholder={`选择获取的模型（${fetched.models.length} 个）`}
-                                    options={fetched.models.map((model) => ({ value: model, label: model }))}
-                                    onChange={(model) => void pickImportModel(c, model)} />
-                                  <span className="dr-src">选择后更新模型与替换预览；确认导入后才保存。</span>
-                                </span> : <span className="dr-src">核对来源的地址、协议和 Key 后重新读取；渠道不支持枚举时，仍可导入来源中已填的模型名。</span>}
+                                {fetched.ok && discovered.length > 0 ? <span className="dr-src">已并入上方模型选择；点击导入后保存。</span>
+                                  : <span className="dr-src">核对来源的地址、协议和 Key 后重新读取；渠道不支持枚举时，仍可导入来源中已填的模型名。</span>}
                               </>}
                             </div>}
                           </article>;
                         })}
                       </div>
-                      <label className="import-msg">
-                        <input type="checkbox" checked={impConfirmed}
-                          disabled={!impPick || Boolean(impBusy)}
-                          onChange={(e) => setImpConfirmed(e.target.checked)} />
-                        我已核对替换内容，确认保存到所选通道（替换此通道尚未保存的编辑）
-                      </label>
-                      <div className="import-foot">
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => void applyImportPick()}
-                          disabled={!impPick || !impConfirmed || Boolean(impBusy) || saving}
-                        >
-                          {impBusy === 'apply' ? '导入中…' : '3. 确认导入并保存'}
-                        </button>
-                        <span className="hint">{impPreview.note}</span>
-                      </div>
+                      <div className="import-foot"><span className="hint">{impPreview.note}</span></div>
                     </>
                   )}
                   {impPreview && impPreview.errors.length > 0 && (
                     <div className="import-msg">部分条目已跳过：{impPreview.errors.join('；')}</div>
                   )}
-                  <div className="foot-note">预览不会写入或调用模型；确认后才保存。导入不等于连接验证，默认模型是否改变以保存回执为准。</div>
+                  <div className="foot-note">读取不会写入或调用模型；点击导入即保存，后续可在供应商编辑区修改。</div>
                 </>
               )}
               <div className="import-foot"><button type="button" className="btn btn-sm" disabled={Boolean(impBusy)}

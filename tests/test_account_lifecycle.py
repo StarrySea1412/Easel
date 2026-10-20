@@ -51,10 +51,10 @@ def seed(source):
 def test_whoami_confirmed_logout_only_invalidates_live_identity(isolated, monkeypatch, source):
     root = seed(source)
     monkeypatch.setattr(web, "_run_owned_whoami", lambda *args, **kwargs: SimpleNamespace(
-        stdout=json.dumps({"loggedIn": False}), stderr=""))
+        stdout=json.dumps({"loggedIn": False, "reason": "login_required"}), stderr=""))
     result = asyncio.run(web.api_account_whoami("xiaohongshu"))
     assert result["loggedIn"] is False
-    assert not (web.LOGIN_DIR / "xiaohongshu.json").exists()
+    assert json.loads((web.LOGIN_DIR / "xiaohongshu.json").read_text(encoding='utf-8'))["state"] == "expired"
     assert ae.load(root, f"{source}:test-account")  # Retained evidence survives logout.
     data = asyncio.run(web.api_analytics_insights("xiaohongshu"))
     assert data["sampleSize"] == (1 if source == "import" else 0)
@@ -90,14 +90,19 @@ def test_whoami_browser_failure_keeps_last_known_identity(isolated, monkeypatch)
     assert (web.LOGIN_DIR / "xiaohongshu.json").exists()
 
 
-@pytest.mark.parametrize("payload,returncode", [({}, 0), ({"loggedIn": "false"}, 0), ({"loggedIn": False}, 1)])
+@pytest.mark.parametrize("payload,returncode", [({}, 0), ({"loggedIn": "false"}, 0), ({"loggedIn": False}, 1),
+    ({"loggedIn": False}, 0), ({"loggedIn": False, "verified": True}, 0),
+    ({"loggedIn": False, "reason": "timeout"}, 0),
+    ({"loggedIn": False, "reason": "login_required", "verified": False}, 0),
+    ({"loggedIn": False, "reason": "login_required", "error": "network"}, 0)])
 def test_unreliable_whoami_reply_does_not_invalidate_identity(isolated, monkeypatch, payload, returncode):
     root = seed("live")
     before = ae.generation(root)
     monkeypatch.setattr(web, "_run_owned_whoami", lambda *args, **kwargs: SimpleNamespace(
         stdout=json.dumps(payload), stderr="", returncode=returncode))
     result = asyncio.run(web.api_account_whoami("xiaohongshu"))
-    assert result["loggedIn"] is True and ae.generation(root) == before
+    assert result["loggedIn"] is True and result['verified'] is False and result['authState'] == 'unknown'
+    assert ae.generation(root) == before
     assert "xiaohongshu" not in web._WHOAMI_CACHE
     assert (web.LOGIN_DIR / "xiaohongshu.json").exists()
 
@@ -127,7 +132,7 @@ def test_manual_whoami_bypasses_fresh_positive_cache(isolated, monkeypatch):
 
     def reply(*args, **kwargs):
         calls.append(True)
-        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies)}), stderr='', returncode=0)
+        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies), 'reason': 'login_required'}), stderr='', returncode=0)
 
     monkeypatch.setattr(web, '_run_owned_whoami', reply)
     assert asyncio.run(web.api_account_whoami('xiaohongshu'))['loggedIn'] is True
@@ -135,7 +140,7 @@ def test_manual_whoami_bypasses_fresh_positive_cache(isolated, monkeypatch):
     assert len(calls) == 1
     assert asyncio.run(web.api_account_whoami('xiaohongshu', force=True))['loggedIn'] is False
     assert len(calls) == 2
-    assert not (web.LOGIN_DIR / 'xiaohongshu.json').exists()
+    assert json.loads((web.LOGIN_DIR / 'xiaohongshu.json').read_text(encoding='utf-8'))['state'] == 'expired'
 
 
 def test_confirmed_logout_cache_uses_invalidated_generation(isolated, monkeypatch):
@@ -144,7 +149,7 @@ def test_confirmed_logout_cache_uses_invalidated_generation(isolated, monkeypatc
 
     def reply(*args, **kwargs):
         calls.append(True)
-        return SimpleNamespace(stdout=json.dumps({"loggedIn": False}), stderr="", returncode=0)
+        return SimpleNamespace(stdout=json.dumps({"loggedIn": False, "reason": "login_required"}), stderr="", returncode=0)
 
     monkeypatch.setattr(web, "_run_owned_whoami", reply)
     assert asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"] is False
@@ -326,7 +331,7 @@ def test_bili_expiry_is_honoured_without_deleting_cookie_and_recovers(isolated, 
     cookie.write_text('synthetic retained cookie')
     replies = iter([False, True])
     monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
-        stdout=json.dumps({'loggedIn': next(replies)}), returncode=0))
+        stdout=json.dumps({'loggedIn': next(replies), 'reason': 'auth_expired'}), returncode=0))
     expired = asyncio.run(web.api_account_whoami('bilibili', force=True))
     assert expired['verified'] and expired['checkedAt'] > 0
     assert cookie.exists() and not web._account_logged_in('bilibili', web.LOGIN_RUNNERS['bilibili'])
@@ -355,7 +360,7 @@ def test_wechat_browser_session_is_distinct_from_app_credentials_and_recovers(is
     replies = iter([True, False, True])
     def reply(platform, cmd, generation):
         commands.append(cmd)
-        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies)}), returncode=0)
+        return SimpleNamespace(stdout=json.dumps({'loggedIn': next(replies), 'reason': 'login_required'}), returncode=0)
     monkeypatch.setattr(web, '_run_owned_whoami', reply)
     for logged in (True, False, True):
         result = asyncio.run(web.api_account_whoami('wechat-oa', force=True))
@@ -365,13 +370,15 @@ def test_wechat_browser_session_is_distinct_from_app_credentials_and_recovers(is
     assert all('weixin_mp_stats.py' in command[1] and command[2] == 'whoami' for command in commands)
 
 
-def test_cached_identity_is_rechecked_after_short_freshness_window(isolated, monkeypatch):
+def test_cached_identity_is_rechecked_after_ten_minutes(isolated, monkeypatch):
     replies = iter([True, False])
     monkeypatch.setattr(web, '_run_owned_whoami', lambda *args: SimpleNamespace(
-        stdout=json.dumps({'loggedIn': next(replies)}), returncode=0))
+        stdout=json.dumps({'loggedIn': next(replies), 'reason': 'login_required'}), returncode=0))
     now = [time.time()]
     monkeypatch.setattr(web.time, 'time', lambda: now[0])
     assert asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
     now[0] += 121
+    assert asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
+    now[0] += 480
     assert not asyncio.run(web.api_account_whoami('douyin'))['loggedIn']
     assert not web._account_logged_in('douyin', web.LOGIN_RUNNERS['douyin'])

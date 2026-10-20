@@ -122,6 +122,9 @@ async function fixture(t, initial = {}) {
     else if (path.startsWith('/api/skill/')) data = skillDetail(decodeURIComponent(path.split('/').at(-1)));
     else if (path.startsWith('/api/trends?')) data = { trends: h.trends, updated: 0 };
     else if (path === '/api/upload/limits') data = { max_mb: 50 };
+    else if (path.startsWith('/api/agent-office/models')) data = { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
+    else if (path === '/api/settings/models/health') data = { results:[], schedules:[] };
+    else if (path.startsWith('/api/settings/models/connection?')) data = { modelRef:'fixture/model',state:'unverified',channelName:'测试渠道',detail:'仅模拟配置，不发起推理' };
     else if (['/api/schedule', '/api/outputs', '/api/accounts', '/api/ideas', '/api/analytics/platforms'].includes(path)) data = [];
     else throw new Error(`Unexpected request: ${path}`);
     return { ok: true, json: async () => data };
@@ -647,7 +650,7 @@ test('Dashboard trends keep each source error visible when every source is empty
 test.after(() => window.close());
 
 test('Dashboard exposes the shared thinking control and hands the selected level to creation', async t => {
-  const view = await fixture(t, { text: '第一轮强度验收' });
+  const view = await fixture(t, { text: '第一轮强度验收', thinkingLevels: ['off','low','medium','high'] });
   await view.render();
   const trigger = view.container.querySelector('.thinking-level-trigger');
   assert.ok(trigger);

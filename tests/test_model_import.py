@@ -167,12 +167,14 @@ def test_openclaw_all_models_are_selectable_and_apply_exact_choice(cc_home, fake
     path.write_text(json.dumps(data), encoding='utf-8')
     preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='openclaw')))
     candidates = [c for c in preview['candidates'] if c['name'] == 'openai']
-    assert [c['model'] for c in candidates] == ['deepseek-chat', 'deepseek-reasoner']
-    assert len({c['id'] for c in candidates}) == 2
-    assert all(c['compatible'] and 'key' not in c for c in candidates)
-    selected = candidates[1]
+    # One row per channel, with every model available at import time.
+    assert len(candidates) == 1
+    assert candidates[0]['models'] == ['deepseek-chat', 'deepseek-reasoner']
+    assert candidates[0]['compatible'] and 'key' not in candidates[0]
+    selected = candidates[0]
     result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(
-        source='openclaw', id=selected['id'], previewToken=selected['previewToken'])))
+        source='openclaw', id=selected['id'], previewToken=selected['previewToken'],
+        model='deepseek-reasoner')))
     assert result['ok']
     assert 'OPENAI_MODEL=deepseek-reasoner' in fake_env[0].read_text(encoding='utf-8')
     assert fake_env[1][-1][0]['openai']['model'] == 'deepseek-reasoner'
@@ -188,11 +190,10 @@ def test_ccswitch_claude_all_model_aliases_are_selectable(cc_home):
     })
     path.write_text(json.dumps(data), encoding='utf-8')
     candidates, errors = lci.read_ccswitch(path)
-    models = [candidate for candidate in candidates if candidate['name'] == 'Relay A']
+    rows = [candidate for candidate in candidates if candidate['name'] == 'Relay A']
     assert not errors
-    assert [candidate['model'] for candidate in models] == [
-        'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5']
-    assert len({candidate['id'] for candidate in models}) == 3
+    assert len(rows) == 1
+    assert rows[0]['models'] == ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5']
     assert lci.read_ccswitch(path)[0] == candidates
 
 
@@ -357,8 +358,9 @@ def test_ccswitch_display_names_are_not_model_ids_and_short_explicit_keys_are_re
     candidates, errors = lci.read_ccswitch(path)
     claude = [item for item in candidates if item['appType'] == 'claude']
     assert not errors
-    assert [item['model'] for item in claude] == ['claude-sonnet-4-6', 'claude-opus-4-6']
-    assert all(item['key'] == 'local-key' and item['compatible'] for item in claude)
+    assert len(claude) == 1
+    assert claude[0]['models'] == ['claude-sonnet-4-6', 'claude-opus-4-6']
+    assert claude[0]['key'] == 'local-key' and claude[0]['compatible']
 
 
 def test_auto_preview_matches_protocol_and_apply_uses_the_confirmed_target(cc_home, fake_env):
@@ -445,18 +447,46 @@ def test_preview_hides_credentials_embedded_in_rejected_urls(cc_home, fake_env, 
     assert selected['baseUrl'] == '（地址格式不兼容，已隐藏）'
 
 
-def test_responses_remains_explicitly_incompatible_and_does_not_change_target(cc_home, fake_env):
+def test_responses_configuration_imports_into_the_openai_slot(cc_home, fake_env):
     path = _write_ccswitch_json(cc_home[1])
     data = json.loads(path.read_text(encoding='utf-8'))
     cfg = data['codex']['providers']['p2']['settingsConfig']
     cfg['config'] = cfg['config'].replace('wire_api = "chat"', 'wire_api = "responses"')
     path.write_text(json.dumps(data), encoding='utf-8')
-    before = fake_env[0].read_bytes()
     preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='cc-switch', slot='auto')))
     selected = next(item for item in preview['candidates'] if item['appType'] == 'codex')
-    assert selected['protocol'] == 'openai-responses' and not selected['compatible']
-    assert 'Responses' in selected['skipReason'] and 'previewToken' not in selected
-    assert fake_env[0].read_bytes() == before
+    assert selected['protocol'] == 'openai-responses' and selected['compatible']
+    assert selected['targetSlot'] == 'openai' and selected['previewToken']
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='cc-switch', id=selected['id'],
+        slot='openai', path=preview['path'], previewToken=selected['previewToken'])))
+    assert result['ok']
+    assert fake_env[1][-1][0]['openai']['protocol'] == 'openai-responses'
+    saved = json.loads((cc_home[0] / 'openclaw.json').read_text(encoding='utf-8'))
+    assert saved['models']['providers']['openai']['api'] == 'openai-responses'
+
+
+def test_direct_import_chooses_any_configured_channel_model(cc_home, fake_env):
+    path = _write_openclaw(cc_home[0])
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['models']['providers']['openai']['models'] = [{'id': 'model-a'}, {'id': 'model-b'}, {'id': 'model-a'}]
+    path.write_text(json.dumps(data), encoding='utf-8')
+    preview = asyncio.run(web.api_import_preview(web.ImportPreviewRequest(source='openclaw', slot='openai')))
+    rows = [row for row in preview['candidates'] if row['name'] == 'openai']
+    assert len(rows) == 1 and rows[0]['models'] == ['model-a', 'model-b']
+    selected = rows[0]
+    result = asyncio.run(web.api_import_apply(web.ImportApplyRequest(source='openclaw', path=str(path),
+        id=selected['id'], slot='openai', previewToken=selected['previewToken'], model='model-b')))
+    assert result['ok']
+    assert fake_env[1][-1][0]['openai']['model'] == 'model-b'
+
+
+def test_direct_import_rejects_model_from_another_channel(cc_home, fake_env):
+    path, candidate, args = discovery_args(cc_home)
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_import_apply(web.ImportApplyRequest(**args, model='unrelated-model')))
+    assert caught.value.status_code == 400
+    assert web._model_file_snapshot() == before and fake_env[1] == []
 
 
 def discovery_args(cc_home, app_type='codex'):

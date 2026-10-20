@@ -58,6 +58,35 @@ def test_model_switch_uses_new_capacity_without_reusing_old_occupancy(state):
     assert all(p['tokens'] is None for p in value['breakdown'])
 
 
+def test_catalog_auto_refresh_replaces_legacy_budget_without_writing_config(state):
+    native, web, entry, save = state
+    save({**entry, 'model': 'mimo-v2.6-flash', 'contextTokens': 200000})
+    path = native / 'openclaw.json'
+    before = path.read_bytes()
+    current = [1_050_000]
+    def read(model):
+        assert model == 'mimo-v2.6-flash'
+        return {'tokens': current[0], 'source': 'public catalog'}
+    value = collect_context(native, web, 'chat1', 'p/mimo-v2.6-flash', catalog_reader=read)
+    assert value['capacity'] == 1_050_000 and value['capacitySource'] == 'model_catalog'
+    assert value['recordedLimit'] == 200000 and value['usedTokens'] == 1000
+    current[0] = 1_100_000
+    assert collect_context(native, web, 'chat1', 'p/mimo-v2.6-flash', catalog_reader=read)['capacity'] == 1_100_000
+    assert path.read_bytes() == before
+
+
+def test_manual_window_skips_catalog_and_keeps_runtime_limit(state):
+    native, web, _, _ = state
+    def read(model):
+        raise AssertionError('manual window must not be overwritten or queried')
+    assert collect_context(native, web, 'chat1', catalog_reader=read)['capacity'] == 100000
+    path = native / 'openclaw.json'
+    config = json.loads(path.read_text())
+    config['agents']['defaults']['contextTokens'] = 50000
+    path.write_text(json.dumps(config))
+    assert collect_context(native, web, 'chat1', catalog_reader=read)['capacity'] == 50000
+
+
 @pytest.mark.parametrize('patch', [
     {'systemPromptReport': {}},
     {'systemPromptReport': {'source': 'estimate'}},

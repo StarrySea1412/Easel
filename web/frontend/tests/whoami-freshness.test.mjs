@@ -4,7 +4,7 @@ import { Window } from 'happy-dom';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window = new Window({url:'https://easel.test/'});
 globalThis.localStorage = window.localStorage;
-const { isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
+const { accountConnection, isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
 const { accountWhoami, startLogin } = await loadTsModule('../src/lib/api.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -34,6 +34,26 @@ test('rewriting a cache entry cannot extend the original online verification tim
   setWhoamiCache('zhihu', {loggedIn:true,name:'old',avatar:'',checkedAt:Date.now()-700000,verified:true});
   assert.equal(isWhoamiFresh(getWhoamiCache().zhihu), false);
   assert.equal(isWhoamiFresh({loggedIn:true,name:'',avatar:'',checkedAt:Date.now()+60000}), false);
+});
+
+test('every page uses evidence rather than local booleans to decide account state', () => {
+  const now = Date.now();
+  assert.equal(accountConnection({loggedIn: false, hasLocalSession: true}), 'unknown');
+  assert.equal(accountConnection({loggedIn: true, hasLocalSession: true}), 'unknown');
+  assert.equal(accountConnection({loggedIn: false, hasLocalSession: false}), 'not_connected');
+  assert.equal(accountConnection({loggedIn: true}, {loggedIn:false,verified:true,checkedAt:now,ts:now,name:'',avatar:''}), 'unknown');
+  assert.equal(accountConnection({loggedIn: false}, {loggedIn:true,verified:true,checkedAt:now,ts:now,name:'saved',avatar:''}), 'online');
+  assert.equal(accountConnection({loggedIn: true}, {loggedIn:false,authState:'login_required',verified:true,checkedAt:now,ts:now,name:'',avatar:''}), 'login_required');
+  assert.equal(accountConnection({loggedIn: true}, {loggedIn:false,authState:'login_required',verified:true,checkedAt:now-601000,ts:now,name:'',avatar:''}), 'unknown');
+});
+
+test('bare false from an online check preserves identity and never broadcasts a verified logout', async t => {
+  localStorage.clear(); setWhoamiCache('zhihu',{loggedIn:true,name:'retained',avatar:'',checkedAt:0});
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({loggedIn:false,verified:true,name:'',avatar:''})}));
+  await verifyStale(['zhihu']);
+  assert.equal(getWhoamiCache().zhihu.loggedIn,true);
+  assert.equal(getWhoamiCache().zhihu.name,'retained');
+  assert.equal(accountConnection({loggedIn:true},getWhoamiCache().zhihu),'unknown');
 });
 test('failed automatic check retains identity but marks its status unknown and broadcasts the result', async t => {
   localStorage.clear(); setWhoamiCache('zhihu',{loggedIn:true,name:'retained identity',avatar:'',checkedAt:Date.now()-700000});
@@ -88,4 +108,16 @@ test('opening a login modal stops remaining background checks after the active r
   finish({ok:true,json:async()=>({loggedIn:false,verified:true})});
   await tick(); await tick();
   assert.deepEqual(calls,['/api/accounts/zhihu/whoami']);
+});
+
+test('unconfirmed checks cool down for ten minutes and duplicate consumers share the active check', async t => {
+  localStorage.clear(); let finish; const calls = [];
+  t.mock.method(globalThis,'fetch',url => { calls.push(url); return new Promise(resolve => {finish=resolve;}); });
+  const first = verifyStale(['bilibili']);
+  await verifyStale(['bilibili']);
+  assert.equal(calls.length, 1);
+  finish({ok:true,json:async()=>({loggedIn:false,verified:false,name:'',avatar:''})});
+  await first;
+  await verifyStale(['bilibili']);
+  assert.equal(calls.length, 1, 'switching pages must not repeat an inconclusive check');
 });

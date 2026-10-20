@@ -1360,6 +1360,8 @@ def cmd_whoami(a) -> int:
                     result['error'] = ('账号页面或身份接口尚未就绪，请稍后重试'
                                        if status not in (8, 1002, 2154)
                                        else '未识别到账号或可见登录入口，暂时无法确认状态。')
+                elif not logged:
+                    result['reason'] = 'login_required'
                 if logged and not logged_from_api:
                     # 昵称/头像用**稳定锚点**取，不靠随机 class（真机校准 2026-08）：
                     # 头像 src 路径含 aweme-avatar 稳定；昵称是「抖音号：」上一行的非数字文本。

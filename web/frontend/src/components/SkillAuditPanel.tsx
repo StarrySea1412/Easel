@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import ActivitySkeleton from './ActivitySkeleton';
 import '../styles/skill-audit.css';
 
 type Critique = { text: string; model: string; at: string | number };
@@ -40,7 +41,7 @@ export default function SkillAuditPanel({ sessionId, refreshKey, isStreaming = f
   sessionId: string; refreshKey?: number; isStreaming?: boolean; embedded?: boolean; targetTurnId?:string;
 }) {
   // Keying the inner panel also isolates in-flight reviews and expanded rows on session changes.
-  return <SessionAuditPanel key={sessionId} sessionId={sessionId} refreshKey={refreshKey} isStreaming={isStreaming} embedded={embedded} targetTurnId={targetTurnId} />;
+  return <SessionAuditPanel key={`${sessionId}:${targetTurnId || ''}`} sessionId={sessionId} refreshKey={refreshKey} isStreaming={isStreaming} embedded={embedded} targetTurnId={targetTurnId} />;
 }
 
 function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded, targetTurnId }: {
@@ -111,7 +112,7 @@ function SessionAuditPanel({ sessionId, refreshKey, isStreaming, embedded, targe
       </div>
       {error && <p className="skill-audit-error" role="alert">{error}{records ? '；下方保留上次读取结果。' : ''}</p>}
       {isStreaming && <p className="skill-audit-note">对话进行中，证据尚可能不完整；本轮结束后自动刷新。</p>}
-      {loading && !records && <p className="skill-audit-note" role="status">正在读取核验记录…</p>}
+      {!records && !error && <ActivitySkeleton label="正在读取核验记录" />}
       {records?.length === 0 && <p className="skill-audit-empty">{targetTurnId ? '未找到指定轮次的持久核验记录，无法确认其执行情况。' : '本会话暂无核验记录。没有记录不代表 Skill 未执行，也不能据此判断效果通过。'}</p>}
       {records?.map((record) => {
         const critique = critiques[record.turnId] || record.critique;
