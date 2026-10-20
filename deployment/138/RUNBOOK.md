@@ -1,3 +1,5 @@
+> **Current deployment, 2026-10-20:** Production and isolated instances run 0.7.2 / `e63a08eac773`, fixed image `sha256:fd631a6ab44a62837e781b3e50d87ce81783a4483bfc05ed08ef24aa5d80e25c`. Production has HappyCoding configured with five models, keeping its existing default. HTTP/source hashes passed; final browser and business acceptance is delegated to the user. Earlier release notes below are historical. [Receipt, capacity limits and rollback](../../docs/release-138-0.7.2-2026-10-20.md).
+
 # Easel 138 Linux deployment
 
 Latest verified 0.2.8 release: `12f144c8`, image `82cd8cbddf1a`. The Windows quick entry completed isolated/live activation, source/authentication/gateway/official-update checks and real Agent tool acceptance. Frontend interaction acceptance belongs to the user. [Actual receipt](../../docs/quick-deploy-138-acceptance-2026-10-14.md).

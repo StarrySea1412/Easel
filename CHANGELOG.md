@@ -1,3 +1,8 @@
+## 0.7.2 deployment receipt · 2026-10-20 · 138部署补记
+
+- Activate committed `e63a08eac773` in isolated and production stacks, preserve snapshots and previous fixed images, and verify HTTPS login, Gateway, assets and runtime hashes. / 已按用户新授权更新138，运行源码与后续文档提交分别记录。
+- Add an enabled HappyCoding channel in production with five discovered Chat models, keeping the existing default. Credentials are runtime-only; no inference requests or installer publication. Final browser/business acceptance remains with the user. / 正式新增happycoding，未调用推理。[Receipt / 回执](docs/release-138-0.7.2-2026-10-20.md)。
+
 ## 0.7.2 · 2026-10-20 · Sources search styling / 来源搜索框样式
 
 - Give the Sources search field a soft theme surface, aligned icon and one focus boundary; suppress the native search inset and the global input focus outline inside it. / 来源搜索框统一底色、图标与间距，聚焦仅由外框承载，消除原生输入框及全局焦点规则叠加描边。检索行为不变。
