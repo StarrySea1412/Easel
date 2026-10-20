@@ -212,7 +212,7 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
       <div className={`message-row user${editing ? ' is-editing' : ''}`} ref={userRow}>
         <div className="msg-col user">
           {editing && actions?.onEdit ? <ChatMessageEditor key={`${sessionId}:${message.content}`} text={message.content} disabled={!actions.canModify} onCancel={cancelEdit} onSend={actions.onEdit} /> : <div className="message-bubble user">{message.content}</div>}
-          {!backupSnapshot && message.requestedModelRef && <p className="message-model-selection">本轮指定：{message.requestedModelRef}</p>}
+          {!editing && !backupSnapshot && message.requestedModelRef && <p className="message-model-selection">本轮指定：{message.requestedModelRef}</p>}
           {actions && !editing && <ActionBar actions={actions} onEdit={() => setEditing(true)} />}
         </div>
       </div>

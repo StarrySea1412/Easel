@@ -44,6 +44,23 @@ test('editing an earlier user turn focuses original text, cancels without changi
  assert.equal(document.activeElement.getAttribute('aria-label'),'重新编辑消息');assert.match(v.container.textContent,/后续回答/);
  await v.edit();assert.equal(v.container.querySelector('.chat-message-editor textarea').value,'旧问题');
 });
+
+test('editing has one compact footer, keeps context metadata out of the draft and restores it on cancel',async t=>{
+ const v=fixture(t);await v.render();await v.edit();
+ const editor=v.container.querySelector('.chat-message-editor');
+ assert.equal(editor.getAttribute('role'),'group');
+ assert.equal(editor.getAttribute('aria-label'),'编辑消息');
+ const field=editor.querySelector('textarea');
+ assert.equal(field.rows,3);assert.equal(field.value,'旧问题');
+ assert.equal(document.getElementById(field.getAttribute('aria-describedby')).textContent,'发送后创建分支，原对话保留。');
+ assert.match(field.title,/Shift \+ Enter 换行/);
+ assert.equal(editor.querySelectorAll('.chat-message-edit-footer').length,1);
+ assert.equal(editor.querySelectorAll('.chat-message-edit-footer button').length,2);
+ assert.equal(editor.closest('.msg-col').querySelector('.message-model-selection'),null);
+ await v.click(v.button('取消'));
+ assert.match(v.container.textContent,/本轮指定：provider\/model/);
+ assert.equal(v.calls.length,0);
+});
 test('empty edits stay local; Shift+Enter and IME do not send, Enter sends exact message index',async t=>{
  const v=fixture(t);await v.render();await v.edit();await v.type('  ');assert.equal(v.button('发送').disabled,true);await v.key('Enter');assert.equal(v.calls.length,0);
  await v.type('修改一\n修改二');await v.key('Enter',{shiftKey:true});await v.key('Enter',{isComposing:true});assert.equal(v.calls.length,0);

@@ -1,3 +1,9 @@
+## 0.8.4 · 2026-10-21 · Message editor layout / 消息编辑布局
+
+- Make edited messages grow with their content and available width, within a bounded scroll area. Use a bordered card with a separate action footer and one short branch notice. / 消息编辑框随内容和宽度伸展，超长文本限高滚动；统一卡片样式，底部操作独立对齐，分支说明精简为一句。
+- Hide the old turn's model caption while editing, restore it on cancel, and keep Enter/Shift+Enter/IME, cancellation and branch behavior. / 编辑时收起旧轮次模型注脚，取消后恢复；保留快捷键、中文输入法、取消和分支行为。
+- Local frontend/source change only; host 138 and installers unchanged. / 仅本机前端及源码更新，138与安装器未更新。
+
 ## 0.8.3 · 2026-10-21 · Chat progress clarity / 工作进度精简
 
 - Replace repeated runner handshakes and long silence diagnostics with a short current status; silence is not treated as failure or completion. / 去掉握手消息堆叠，长等待提示精简为当前状态，不凭无事件判定失败或完成。
