@@ -1,3 +1,9 @@
+## 0.8.3 · 2026-10-21 · Chat progress clarity / 工作进度精简
+
+- Replace repeated runner handshakes and long silence diagnostics with a short current status; silence is not treated as failure or completion. / 去掉握手消息堆叠，长等待提示精简为当前状态，不凭无事件判定失败或完成。
+- Deduplicate progress, omit entries already shown in the plan/current status, and collapse earlier progress by default. Keep actual steps, errors and required user actions; execution records remain unchanged. / 进度去重，当前步骤不重复列历史，较早进度默认折叠；保留步骤、错误及用户操作提示，底层记录不变。
+- Local source/frontend update only; host 138 and installers unchanged. / 仅本机源码与前端更新，138和安装器未更新。
+
 ## 0.8.2 · 2026-10-21 · LLM failure receipts / LLM问题记录
 
 - Persist structured LLM failures from SSE and terminal snapshots to the shared diagnostic journal, including HTTP-200 streams; keep one receipt per logical turn and exclude explicit user stops. / SSE流内错误与终态失败统一写入问题记录，同轮去重，主动停止不误记。

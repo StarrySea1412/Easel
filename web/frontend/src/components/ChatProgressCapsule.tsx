@@ -3,6 +3,7 @@ import { useChatRun } from '../hooks/useChatRun';
 import type { TaskGoal } from '../lib/tasks';
 import { taskStatus } from '../lib/tasks';
 import { formatChatElapsed } from '../lib/chatTiming';
+import { progressEntries, progressText } from '../lib/chatProgress';
 import { IconCheck, IconChevron, IconClock, IconInfo, IconLoader, IconStop } from './icons';
 import '../styles/chat-run-progress.css';
 
@@ -20,14 +21,17 @@ export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,f
   const plan=snapshot?.plan?.length?snapshot.plan:(!run.turnId||goal?.currentTurnId===run.turnId?goal?.steps?.map(step=>({step:step.title,status:step.status==='in_progress'?'inProgress':step.status})):undefined)||[];
   const completed=plan.filter(step=>step.status==='completed').length;
   const current=plan.find(step=>step.status==='inProgress')||plan.find(step=>step.status==='blocked'||step.status==='failed')||plan.find(step=>step.status==='pending');
-  const progress=snapshot?.timeline?.filter(entry=>entry.type==='progress').map(entry=>entry.text||'')||snapshot?.progress||[];
+  const timelineProgress=snapshot?.timeline?.filter(entry=>entry.type==='progress').map(entry=>entry.text||'');
+  const rawProgress=timelineProgress?.length?timelineProgress:snapshot?.progress||[];
+  const progress=progressEntries(rawProgress);
   const activityLabel=typeof activity==='string'?activity.split('\n').at(-1):Array.isArray(activity)?activity.filter(item=>typeof item==='string').at(-1):'';
-  const label=run.execution.error?'进度更新中断':failed?'本轮失败':stopped?'本轮已停止':current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':progress.at(-1)||activityLabel||goal?.title||(run.streaming?'等待工作进度回执':'本轮记录'));
-  if(!plan.length&&!goal&&!run.streaming&&!progress.length&&!activity&&!failed&&!stopped&&!run.execution.error)return null;
+  const latest=progressText(rawProgress.at(-1)||activityLabel||'');
+  const label=run.execution.error?'进度更新中断':failed?'本轮失败':stopped?'本轮已停止':latest==='等待你回答'?latest:current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':latest||progress.at(-1)||goal?.title||(run.streaming?'正在执行':'本轮记录'));
+  if(!plan.length&&!goal&&!run.streaming&&!progress.length&&!latest&&!failed&&!stopped&&!run.execution.error)return null;
   const elapsed=elapsedMs??(run.streaming&&startedAt!==undefined?Math.max(0,now-startedAt):undefined);
   const state=failed||run.execution.error?'error':stopped?'stopped':run.streaming?'running':plan.length&&completed===plan.length?'done':'idle';
   const StatusIcon=state==='error'?IconInfo:state==='stopped'?IconStop:state==='running'?IconLoader:state==='done'?IconCheck:IconClock;
-  const visibleProgress=showAll?progress:progress.slice(-3);
+  const history=progress.filter(text=>text!==label&&text!==goal?.title&&!plan.some(step=>step.step===text));
   const finishedSteps=plan.filter(step=>step.status==='completed');
   const openSteps=plan.filter(step=>step.status!=='completed');
   const renderStep=(step:typeof plan[number],index:number)=><li key={index} data-state={step.status}><span className="chat-progress-step-icon" aria-hidden="true">{step.status==='completed'?<IconCheck size={14}/>:step.status==='inProgress'?<IconLoader size={14}/>:step.status==='blocked'||step.status==='failed'?<IconInfo size={14}/>:<i/>}</span><div>{step.step}<small>{labels[step.status]||'状态未上报'}</small></div></li>;
@@ -43,7 +47,7 @@ export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,f
         {openSteps.length>3&&<><button type="button" className="chat-progress-group" aria-expanded={showPending} aria-controls={`${id}-pending`} onClick={()=>setShowPending(value=>!value)}><IconChevron size={12}/>其余待处理 {openSteps.length-3} 项</button><ol id={`${id}-pending`} hidden={!showPending}>{openSteps.slice(3).map(renderStep)}</ol></>}
       </>}
       {!plan.length&&<div className="chat-progress-summary" data-state={state}><StatusIcon size={16}/><span>{label}</span></div>}
-      {progress.length>0&&<div className="chat-progress-history">{visibleProgress.map((text,index)=><p key={index}>{text}</p>)}{progress.length>3&&<button type="button" className="chat-progress-history-toggle" aria-expanded={showAll} onClick={()=>setShowAll(value=>!value)}>{showAll?'收起记录':`查看全部 ${progress.length} 条记录`}<IconChevron size={12}/></button>}</div>}
+      {history.length>0&&<div className="chat-progress-history"><button type="button" className="chat-progress-history-toggle" aria-expanded={showAll} aria-controls={`${id}-history`} onClick={()=>setShowAll(value=>!value)}>{showAll?'收起较早进度':`较早进度 · ${history.length}`}<IconChevron size={12}/></button><div id={`${id}-history`} hidden={!showAll}>{history.map((text,index)=><p key={index}>{text}</p>)}</div></div>}
       {(failed||stopped)&&plan.some(step=>step.status!=='completed')&&<p role="status">{failed?'本轮失败':'本轮已停止'}，未完成步骤保留。</p>}
       {!run.streaming&&!failed&&!stopped&&plan.some(step=>step.status!=='completed')&&<p className="chat-progress-note">本轮已结束，清单仍有未完成项；保留 Agent 最后上报状态。</p>}
       {run.execution.error&&<p role="status">{run.execution.error}<button type="button" onClick={run.execution.refresh}>重新读取</button></p>}
