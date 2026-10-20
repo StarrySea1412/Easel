@@ -1,3 +1,8 @@
+## 0.7.4 · 2026-10-20 · Linux chat request fix / Linux 对话请求修复
+
+- Stringify `Path` arguments before POSIX shell quoting; this fixes a `TypeError` that returned HTTP 500 before every OpenClaw chat model call. Add a regression test for path arguments with spaces. / 修复Linux将`Path`对象传给`shlex.quote`的问题，避免所有对话请求在调用模型前500；增加含空格路径的回归测试。
+- Host 138 deployment and post-deploy chat acceptance are in progress. / 138部署与对话实际验收进行中。
+
 ## 0.7.3 · 2026-10-20 · Login and stream recovery / 登录与对话恢复
 
 - Retain stale account identity while checking; distinguish unknown from platform-confirmed expiry. Automatically check on entry, focus, network recovery and every minute, with skeleton placeholders. / 自动检测、骨架屏，缓存过期和网络失败不再冒充退出。

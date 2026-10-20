@@ -4,10 +4,18 @@ import sys
 from pathlib import Path
 
 from easel.execution_store import ExecutionStore, read_snapshot
-from easel.plan_progress import normalize, receipt_plan
+from easel.plan_progress import _quote_argument, instructions, normalize, receipt_plan
 
 
 PLAN = {'plan': [{'step': '读取资料', 'status': 'completed'}, {'step': '核验交付', 'status': 'in_progress'}]}
+
+
+def test_planning_instructions_quote_script_path_on_posix():
+    value = instructions()
+    script = Path('sample scripts') / 'update_plan.py'
+    assert 'update_plan.py' in value
+    assert '--plan-file' in value
+    assert _quote_argument(script, windows=False) == f"'{script}'"
 
 
 def test_plan_validation_and_secret_redaction():

@@ -12,6 +12,12 @@ COMMANDS = {'exec', 'exec_command', 'bash', 'shell', 'commandExecution'}
 MARKER = 'EASEL_PLAN '
 
 
+def _quote_argument(value, windows):
+    if windows:
+        return "'" + str(value).replace("'", "''") + "'"
+    return shlex.quote(str(value))
+
+
 def normalize(value, credentials=None):
     if not isinstance(value, dict):
         return None
@@ -64,8 +70,8 @@ def receipt_plan(name, args, result, credentials=None):
 
 def instructions():
     script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/update_plan.py'
-    quote = (lambda v: "'" + str(v).replace("'", "''") + "'") if os.name == 'nt' else shlex.quote
-    command = ('& ' if os.name == 'nt' else '') + quote(sys.executable) + ' ' + quote(script)
+    windows = os.name == 'nt'
+    command = ('& ' if windows else '') + _quote_argument(sys.executable, windows) + ' ' + _quote_argument(script, windows)
     return ('\n\n〔任务规划与进度〕复杂、多步骤或长任务在开始执行前主动制定3至8项可验收checklist；'
             '简短问答不必建计划。优先调用已有update_plan/TodoWrite工具，状态仅pending/in_progress/completed，'
             '同时至多一项in_progress。没有规划工具时，用exec运行 '
