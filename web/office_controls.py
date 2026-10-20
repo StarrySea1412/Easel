@@ -232,6 +232,8 @@ def _probe_http_override(web, session: str | None, credentials, model_ref: str |
 
 def turn_model_capability(web, session: str | None = None, model_ref: str | None = None,
                           *, transport: str | None = None, credentials=None) -> dict:
+    if isinstance(session, str) and session.startswith('root:'):
+        session = session[5:]   # An office agent id addresses the same session record.
     if session and (not isinstance(session, str) or not office.SAFE_ID.fullmatch(session)):
         _error('无效的会话标识。', 400)
     options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
@@ -305,6 +307,9 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
         result.update(available=True, scope='next_turn', reason=None)
     except HTTPException as exc:
         result['reason'] = str(exc.detail)
+    except OSError:
+        # A closed gateway socket says nothing about the user's channel test.
+        result['reason'] = '运行网关当前未连接，暂时无法核验本轮指定模型；改用「自动沿用」仍可发送。'
     except Exception:
         # Transport/schema/auth errors can contain credentials or private URLs.
         result['reason'] = '无法只读核验当前网关的指定模型能力，任务不会改用默认模型。'

@@ -278,7 +278,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
-      if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。请刷新模型选项或改用会话配置。'); return; }
+      if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。改用「自动沿用」可继续发送。'); return; }
       const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
         : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
       if (accepted === true) clearChatDraft(sessionId, submitted);

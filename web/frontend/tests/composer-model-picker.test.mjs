@@ -17,9 +17,9 @@ const option = { id: REF, provider: 'relay', model: 'vendor/model:v2', label: '�
 async function fixture(t, saved) {
   const values = new Map(saved ? [[KEY, saved]] : []), writes = [], calls = [], sent = [];
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); }, removeItem: key => values.delete(key) } });
-  const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success' };
+  const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success', reason: '' };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options }
+    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options, ...(h.reason ? { reason: h.reason } : {}) }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
         : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
         : url === '/api/upload/limits' ? { max_mb: 50 } : [];
@@ -136,6 +136,21 @@ test('model menu renames the default to 自动沿用 and pins 模型设置 as a 
   assert.deepEqual(opened, [REF]);
   assert.equal(document.querySelector('.easel-select-popup'), null);
   assert.ok(view.calls.every(([, init]) => !init?.body));
+});
+
+test('a passed channel test stays green and the menu names the real blocker instead of asking to check the connection', async t => {
+  const view = await fixture(t, REF);
+  view.h.capability = false; view.h.healthState = 'success';
+  view.h.reason = '运行网关当前未连接，暂时无法核验本轮指定模型；改用「自动沿用」仍可发送。';
+  await view.render();
+  assert.ok(view.trigger().querySelector('.composer-model-health.success'), 'a passed inference is success, not unverified');
+  const info = view.container.querySelector('[aria-label="模型状态详情"]');
+  assert.ok(info); assert.match(info.getAttribute('title'), /运行网关当前未连接/);
+  await act(async () => view.trigger().click());
+  const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
+  assert.doesNotMatch(popup.textContent, /请在模型设置中检查连接/);
+  assert.match(popup.textContent, /改用「自动沿用」仍可发送/);
+  assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance never probes a model');
 });
 
 test('running composer keeps stop beside queue-send when a draft is present', async t => {

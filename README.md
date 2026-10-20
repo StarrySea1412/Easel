@@ -1,3 +1,5 @@
+> **模型状态说明 · 0.7.6（2026-10-20，源码）**：渠道检测或推理测活通过即显示已连通，不再因网关无法核验“本轮指定模型”而显示未验证。下拉改为真实原因（网关未连接、网关版本未核验、覆盖权限未确认），完整原因可通过 ⓘ 查看；默认“自动沿用”始终可选。源码推送至[修复分支](https://github.com/StarrySea1412/Easel/tree/codex/model-status-clarity-0.7.6)，138与安装器未更新。
+
 > **渠道并发与对话失败说明 · 0.7.5（2026-10-20，源码）**：同一渠道跨会话串行执行，排队任务可以停止，超时明确标记为未发送；不同渠道保持并行。已保存的明确429并发错误显示为“服务商限流”，不自动重发。源码已推送至[修复分支](https://github.com/StarrySea1412/Easel/tree/codex/chat-provider-queue-0.7.5)，138仍运行0.7.4，本次未部署，安装器未更新。[诊断与验证](https://github.com/StarrySea1412/Easel/blob/codex/chat-provider-queue-0.7.5/docs/chat-provider-queue-2026-10-20.md)。
 
 > **对话请求修复 · 0.7.4（2026-10-20，已运行于138）**：修复Linux对话请求组装时将`Path`对象传给shell引用导致新对话请求500的问题；增加Linux路径回归测试。138登录、Gateway与资源核验通过；合成请求在上下文预算保护处返回413，没有调用服务商，真实模型对话未验。[诊断与验证](https://github.com/StarrySea1412/Easel/blob/codex/chat-request-fix-0.7.4/docs/chat-request-typeerror-2026-10-20.md)。

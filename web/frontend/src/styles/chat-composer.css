@@ -30,6 +30,8 @@
 .composer-model-health.running .composer-model-status-dot { animation:composer-status-pulse 1.4s ease-in-out infinite; }
 @keyframes composer-status-pulse { 50% { opacity:.4; transform:scale(.82); } }
 .composer-model-health-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.composer-model-info { display:inline-flex; align-items:center; justify-content:center; flex:none; width:22px; height:22px; border-radius:var(--radius-sm); color:var(--text-tertiary); cursor:help; }
+.composer-model-info:hover { color:var(--text); background:var(--surface-2); }
 .chat-composer .composer-attach-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:6px 9px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
 .chat-composer .composer-attach-btn:hover:not(:disabled) { color:var(--text); background:var(--surface-2); }
 .chat-composer .composer-attach-btn:disabled { cursor:default; opacity:.5; }

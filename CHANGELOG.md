@@ -1,3 +1,10 @@
+## 0.7.6 · 2026-10-20 · Model status clarity / 模型状态说明
+
+- A channel test or inference probe that passed now shows a connected state even when the gateway cannot verify a per-turn model override; the two capabilities are no longer collapsed into one grey dot. / 渠道检测或推理测活通过即显示已连通，不再因网关无法核验“本轮指定模型”而显示未验证。
+- Replace the blanket menu hint “请在模型设置中检查连接” with the actual blocker (gateway offline, unverified gateway version, or override permission), and expose the full reason through a visible ⓘ tooltip instead of a clipped screen-reader-only label. The default “自动沿用” stays selectable and sending stays available. / 下拉改为真实原因（网关未连接、网关版本未核验、覆盖权限未确认），完整原因改用可悬停 ⓘ；默认“自动沿用”始终可选，发送不被阻断。
+- Accept an office agent identity (`root:<session>`) when reading per-turn model capability instead of rejecting it as an invalid session id. / 办公室 Agent 标识 `root:<会话>` 读取模型能力时按同一会话处理，不再返回无效会话。
+- Source-only change: local build rebuilt and verified against a temporary server; host 138 and the installer are not updated. / 仅源码与本地构建，138与安装器未更新。
+
 ## 0.7.5 · 2026-10-20 · Provider concurrency and chat failure clarity / 渠道并发与对话失败说明
 
 - Queue chat runs by provider across sessions and processes; queued work can be stopped and fails clearly after five minutes without being sent. Other providers remain parallel. / 按渠道跨会话、跨进程排队；等待中可停止，超过5分钟明确提示未发送，其他渠道仍可并行。
