@@ -1,3 +1,9 @@
+## 0.6.1 · 2026-10-20 · Web sources panel / 网页来源面板
+
+- Add Chat → Add panel → Sources: observed web results, safe original links, keyword filtering, turn navigation, attachments and actual tool counts. / 同网址合并保留轮次与操作证据，普通回答链接不冒充检索来源。
+- Extract bounded metadata from tool receipts, including native Codex/MCP/browser results; recover known legacy web-tool outputs. Load recent 10 turns in bounded batches, isolate sessions and preserve partial results on failure. / 本机手动浏览与正文读取只保留元数据，最多200次观察。
+- Backend36/frontend44 targeted checks, final build and lint (0 errors/20 existing warnings), real browser fixture checks and actual local7880 entry/empty state verified. Local7880 restarted; development revision remains null. No138 deployment/restart or installer. [Evidence / 验证范围](docs/chat-sources-2026-10-20.md).
+
 ## 0.6.0 · 2026-10-20 · Usage dashboard / 用量图表仪表盘
 
 - Keep all recorded project totals as the default; add a 7/30-day area chart, date inspection, metric controls, reporting ring, recent usage and model ranking. / 支持方向键/Home/End及会话下钻，累计统计不随趋势范围变化。

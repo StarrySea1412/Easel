@@ -5,6 +5,7 @@ export interface Operation {
   startedAt?: string; finishedAt?: string; elapsedSeconds?: number; exitCode?: number; exitSignal?: string;
   processSessionId?: string; added?: number; removed?: number; changeKind?: string; artifactPath?: string;
   contentHidden?: boolean; source?: string; truncated?: Record<string, boolean>; order?: number;
+  webSources?: {url:string;title:string}[];
 }
 export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {

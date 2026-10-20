@@ -60,7 +60,7 @@ test('the + button opens the full panel home without creating a chat, then lets 
   assert.ok(home);assert.match(home.textContent,/新增面板/);assert.match(home.textContent,/推荐/);
   assert.deepEqual(calls,[],'opening the launcher must not create a child');
   const rows=[...home.querySelectorAll('.chat-panel-tool-grid button')];
-  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','终端','变更','辅助对话']);
+  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','来源','终端','变更','辅助对话']);
   await view.click(rows.find(row=>row.querySelector('strong').textContent==='辅助对话'));
   assert.deepEqual(calls,['create']);assert.equal(view.container.querySelector('.chat-panel-home'),null);
 });

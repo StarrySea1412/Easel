@@ -6,6 +6,7 @@ import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import { showToast } from '../lib/toast';
 import { IconChat, IconChevron, IconCompass, IconImage, IconPlus, IconRefresh, IconStop } from './icons';
 import SiteIcon from './BrowserSiteIcon';
+import { recordPageSource } from '../lib/chatSources';
 
 type View = 'image'|'text'|'elements'|'logs';
 const tabKey = (sid: string) => `easel:browser-tab:${sid}`;
@@ -94,6 +95,9 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   const openTabs=state?.tabs.filter(tab=>!tab.closed)||[];
   const current=openTabs.find(tab=>tab.id===tabId)||openTabs.at(-1);
   const snapshot=current&&state?.snapshots[current.id];
+  useEffect(()=>{
+    if(snapshot&&!snapshot.stale&&snapshot.sessionId===sessionId)recordPageSource(sessionId,{id:`browser:${snapshot.id}`,url:snapshot.url,title:snapshot.title,at:snapshot.capturedAt,kind:'browser'});
+  },[snapshot,sessionId]);
   useEffect(()=>{onSiteIcon?.(snapshot?.favicon||'');},[snapshot?.favicon,onSiteIcon]);
   const liveJob=state&&[...state.jobs].reverse().find(job=>['queued','running'].includes(job.state)&&(!current||job.tabId===current.id));
   const busy=Boolean(requestId||liveJob);

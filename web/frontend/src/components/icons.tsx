@@ -160,6 +160,11 @@ export const IconSearch = ({ size, className, strokeWidth }: P) => (
     <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
   </svg>
 );
+export const IconSources = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="m10 13 4-4M8 16l-1 1a4.24 4.24 0 0 1-6-6l4-4a4.24 4.24 0 0 1 6 0m2 1 1-1a4.24 4.24 0 0 1 6 6l-4 4a4.24 4.24 0 0 1-6 0" transform="translate(1 0)"/>
+  </svg>
+);
 export const IconCompass = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <circle cx="12" cy="12" r="10" /><path d="m16.2 7.8-2.1 6.4-6.4 2.1 2.1-6.4z" />

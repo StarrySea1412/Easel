@@ -52,7 +52,7 @@ def kind(name, args):
         return 'read'
     if name in ('write', 'write_file', 'edit', 'apply_patch', 'fileChange'):
         return 'file_change'
-    if name in ('browser', 'browser_navigate', 'browser_click', 'browser_snapshot', 'browser_screenshot'):
+    if name in ('browser', 'easel_browser', 'browser_navigate', 'browser_click', 'browser_snapshot', 'browser_screenshot'):
         return 'browser'
     if name in ('web_search', 'webSearch', 'search', 'grep', 'glob', 'web_fetch'):
         return 'search'
@@ -149,6 +149,11 @@ def returned(row, result, at=None, credentials=None, partial=False):
         text = details['tail']
     if text or 'content' in result or 'aggregated' in details or 'tail' in details:
         set_text(row, 'output', text, credentials)
+    if row['status'] in ('returned', 'completed'):
+        from .web_sources import references
+        links = references(row['name'], result, lambda value: public_text(value, credentials))
+        if links:
+            row['webSources'] = links
     diff = details.get('diff')
     if isinstance(diff, str) and result.get('isError') is False and not partial:
         set_text(row, 'diff', diff, credentials)
@@ -219,8 +224,10 @@ def codex_rows(state):
             action = item.get('action') or {}
             row['action'] = action.get('type', 'search')
             set_text(row, 'url', action.get('url'))
+            set_text(row, 'query', action.get('query') or ' · '.join(q for q in action.get('queries', []) if isinstance(q, str)))
         if name in ('mcpToolCall', 'dynamicToolCall'):
             row['name'] = public_text(item.get('tool', name), limit=100)
+            row['kind'] = kind(row['name'], {})
             result = item.get('result')
             if isinstance(result, dict):
                 observed = row['status']

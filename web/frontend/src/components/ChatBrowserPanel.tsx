@@ -5,6 +5,7 @@ import { browserPageQuote } from '../lib/chatPanels';
 import { IconCompass } from './icons';
 import { showToast } from '../lib/toast';
 import ChatLiveBrowser from './ChatLiveBrowser';
+import { recordPageSource } from '../lib/chatSources';
 
 export default function ChatBrowserPanel({sessionId, active = true, onSiteIcon}: {sessionId:string;active?:boolean;onSiteIcon?:(source:string)=>void}) {
   const [mode,setMode]=useState<'browser'|'reader'>('browser');
@@ -29,7 +30,9 @@ export function ChatPageReader({ sessionId }: { sessionId: string }) {
       let finalUrl: URL;
       try {finalUrl=new URL(page.url);if(!['http:','https:'].includes(finalUrl.protocol)||finalUrl.username||finalUrl.password)throw new Error();}
       catch {throw new Error('页面来源地址无效，请重新读取。');}
-      setSnapshot({page:{...page,url:finalUrl.href},at:new Date().toISOString()});
+      const at=new Date().toISOString();
+      setSnapshot({page:{...page,url:finalUrl.href},at});
+      recordPageSource(sessionId,{id:`reader:${at}:${finalUrl.href}`,url:finalUrl.href,title:page.title||'',at,kind:'reader'});
     } catch(cause) {if(!request.signal.aborted)setError(cause instanceof Error?cause.message:'网页读取失败，请重试。');}
     finally {if(!request.signal.aborted)setBusy(false);}
   };

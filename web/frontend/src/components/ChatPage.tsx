@@ -24,6 +24,7 @@ import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import ChatPanelHome from './ChatPanelHome';
 import ChatBrowserPanel from './ChatBrowserPanel';
+import ChatSourcesPanel from './ChatSourcesPanel';
 import ChatPanelIcon from './ChatPanelIcon';
 import { ChatPanelFiles, ChatPanelExecution } from './ChatPanelTools';
 import { loadPanelTools, savePanelTools, PANEL_LABELS, type PanelTool } from '../lib/chatPanels';
@@ -228,7 +229,13 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             onStop={()=>onSideStop?.(activeSide.id)} onOpenModels={onOpenModels}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
-      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
+      {openedTools.map(tool=><div className="chat-panel-content" key={`${session.id}:${tool}`} hidden={panelTab!==tool}>{tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
+        const messageIndex=session.messages.findIndex(message=>message.turnId===turnId);
+        const index=messageIndex>=0?nodes.findLastIndex(node=>node.messageIndex<=messageIndex):turnId===session.pendingTurnId?nodes.length-1:-1;
+        if(index<0){showToast('这条来源对应的对话暂不在本地记录中。','info');return;}
+        if(window.innerWidth<=900)setPanelOpen(false);
+        requestAnimationFrame(()=>jumpTo(index));
+      }}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</div>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
   </div>;
