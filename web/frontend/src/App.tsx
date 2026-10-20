@@ -424,6 +424,32 @@ export default function App() {
     });
   }, []);
 
+  // Both fresh and restored streams can lose their event log. Read only the
+  // exact turn snapshot; never replay the prompt or adopt another turn's reply.
+  const recoverMissingTurn = useCallback(async (sessionId: string, turnId: string, runAcc: typeof streamAcc.current[string]) => {
+    const current = () => streamAcc.current[sessionId] === runAcc;
+    let snapshot: Awaited<ReturnType<typeof fetchLastTurn>> | undefined;
+    try { snapshot = await fetchLastTurn(sessionId, turnId); } catch { /* preserve partial output below */ }
+    if (!current()) return;
+    flushTyping(sessionId);
+    const recovered = snapshot?.status === 'done' && snapshot.turn_id === turnId ? snapshot : undefined;
+    if (!recovered) pauseChatQueue(sessionId, '本轮结果尚未确认，队列已暂停。请先核对运行记录。');
+    appendAssistant(sessionId, recovered ? {
+      ...decodeChatTiming(recovered), role: 'assistant', content: recovered.text || (recovered.error ? '' : '（无输出）'),
+      error: recovered.error, thinking: recovered.thinking || runAcc.thinking || undefined,
+      turnId, requestedModelRef: runAcc.requestedModelRef || recovered.requestedModelRef || undefined,
+      activity: runAcc.steps.join('\n') || undefined,
+    } : {
+      role: 'assistant', content: runAcc.content, thinking: runAcc.thinking || undefined,
+      turnId, requestedModelRef: runAcc.requestedModelRef, activity: runAcc.steps.join('\n') || undefined,
+      error: { code: 'chat_recovery_unavailable', category: 'connection', retryable: false,
+        message: '无法接回本轮任务，最终结果尚未确认。已保留收到的内容；请先查看运行记录，确认后再手动发送。' },
+    });
+    if (recovered?.error) pauseChatQueue(sessionId, '本轮失败，队列已暂停。修复后可继续发送。');
+    clearStream(sessionId);
+    try { if (sessionStorage.getItem(`easel_pending_turn:${sessionId}`) === turnId) sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* optional storage */ }
+  }, [appendAssistant, clearStream]);
+
   // 启动一次流式（fetch + 累积 + 回调）——只管流，不动消息列表
   const startStream = useCallback((
     sessionId: string,
@@ -513,7 +539,7 @@ export default function App() {
       },
       turnId,
       false,
-      undefined,
+      () => { void recoverMissingTurn(sessionId, turnId, runAcc); },
       attachments,
       (q) => {
         // ask_user 问答题：追加进流式状态（去重），ChatPage 渲染为选项卡片
@@ -561,7 +587,7 @@ export default function App() {
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
       history,
     );
-  }, [appendAssistant, clearStream]);
+  }, [appendAssistant, clearStream, recoverMissingTurn]);
 
   // 刷新/重开页面后按 eventId=0 重放当前 job，再继续实时 tail；旧任务无事件日志时退回最终快照。
   const resumePendingTurn = useCallback((sessionId: string) => {
@@ -611,6 +637,7 @@ export default function App() {
           const a = streamAcc.current[sessionId];
           appendAssistant(sessionId, { role: 'assistant', content: a?.content || '', error:chatErrorDetail(err), turnId, requestedModelRef: a?.requestedModelRef, thinking: a?.thinking || undefined, activity: a?.steps.join('\n') || undefined });
           clearStream(sessionId);
+          try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* optional storage */ }
         });
       },
       (chunk) => {
@@ -634,29 +661,7 @@ export default function App() {
       },
       turnId,
       true,
-      () => {
-        // The event log may disappear after a backend restart. Prefer the
-        // completed per-session snapshot; otherwise terminate stale recovery.
-        void fetchLastTurn(sessionId, turnId).then((r) => {
-          if(streamAcc.current[sessionId]!==runAcc)return;
-          if (r.status === 'done') {
-            appendAssistant(sessionId, { ...decodeChatTiming(r), role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
-          } else {
-            appendAssistant(sessionId, {
-              role: 'assistant',
-              content: '上一轮任务记录已失效，无法继续恢复。请重新发送上一条消息。',
-            });
-          }
-          clearStream(sessionId);
-          try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
-        }).catch(() => {
-          if(streamAcc.current[sessionId]!==runAcc)return;
-          appendAssistant(sessionId, {
-            role: 'assistant', content: '上一轮任务记录已失效，请重新发送上一条消息。',
-          });
-          clearStream(sessionId);
-        });
-      },
+      () => { void recoverMissingTurn(sessionId, turnId, runAcc); },
       undefined,   // attachments: 恢复轮次无新附件
       (q) => {
         const a = streamAcc.current[sessionId]; if (a !== runAcc) return;
@@ -703,7 +708,7 @@ export default function App() {
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
     );
-  }, [appendAssistant, clearStream]);
+  }, [appendAssistant, clearStream, recoverMissingTurn]);
 
   // 活跃会话确定后（含挂载首刷）尝试恢复它悬空的一轮
   useEffect(() => {

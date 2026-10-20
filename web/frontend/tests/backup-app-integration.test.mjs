@@ -107,6 +107,40 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
+for (const resume of [false, true]) {
+  for (const outcome of ['done', 'missing', 'wrong-turn', 'offline']) {
+    test(`missing job recovery (${resume ? 'restored' : 'fresh'}, ${outcome}) preserves identity, content and queue safety`, async t => {
+      const session = resume ? { ...sourceSession, pendingTurnId: 'restored-turn', messages: [{ role: 'user', content: '悬空任务' }] } : sourceSession;
+      const { harness, values, queue } = await fixture(t, { easel_sessions: JSON.stringify([session]), easel_active_session: session.id });
+      await act(async () => harness.sidebar.onSessionSelect(session.id));
+      if (!resume) await act(async () => harness.pages['对话'].onSend('新任务'));
+      const run = harness.streams.at(-1), turnId = run.args[9];
+      assert.equal(typeof run.args[11], 'function');
+      await act(async () => { run.args[3]('保留正文'); run.args[6]('保留思考'); });
+      harness.lastResponse = async (_session, requested) => {
+        assert.equal(requested, turnId);
+        if (outcome === 'offline') throw new Error('synthetic snapshot unavailable');
+        return { status: outcome === 'missing' ? 'none' : 'done', turn_id: outcome === 'wrong-turn' ? 'other-turn' : turnId,
+          text: '完整结果', thinking: '完整思考' };
+      };
+      await act(async () => run.args[11]());
+      const saved = JSON.parse(values.get('easel_sessions')).find(row => row.id === session.id);
+      const answer = saved.messages.at(-1);
+      assert.equal(answer.turnId, turnId);
+      assert.equal(saved.pendingTurnId, undefined);
+      assert.equal(sessionStorage.getItem(`easel_pending_turn:${session.id}`), null);
+      assert.equal(harness.streams.length, 1, 'recovery never submits a second model task');
+      if (outcome === 'done') {
+        assert.equal(answer.content, '完整结果'); assert.equal(answer.error, undefined);
+      } else {
+        assert.equal(answer.content, '保留正文'); assert.equal(answer.thinking, '保留思考');
+        assert.equal(answer.error.code, 'chat_recovery_unavailable'); assert.equal(answer.error.retryable, false);
+        assert.equal(queue.getChatQueue(session.id).paused, true);
+      }
+    });
+  }
+}
+
 test('breakdown merges into the selected chat, persists its recovery identity, runs once and retains normal follow-up', async t => {
   const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
   await act(async () => harness.sidebar.onPageChange('breakdown'));

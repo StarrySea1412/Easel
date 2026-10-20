@@ -12,11 +12,30 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 
 STATES = ("starting", "qr_ready", "scanned", "sms_required", "verifying",
           "success", "expired", "error")
+
+
+def report_scan(path: str | None, page) -> bool:
+    """Report only visible platform acknowledgement, never infer scan from a
+    missing QR or a timer. Include child frames used by WeChat login widgets.
+    """
+    acknowledgement = re.compile(
+        r"^\s*(?:扫码成功|扫描成功|已扫码|扫描完成|请在手机上确认登录|"
+        r"请在微信上确认登录|请在手机端确认|请在手机上确认)(?:[，,。！!\s]|$)", re.MULTILINE)
+    for frame in list(getattr(page, 'frames', None) or [page])[:4]:
+        try:
+            if frame.get_by_text(acknowledgement).first.is_visible(timeout=500):
+                write_status(path, 'scanned', '平台已收到扫码，请在手机上确认登录。')
+                return True
+        except Exception:
+            # A navigating frame or unsupported widget supplies no evidence.
+            continue
+    return False
 
 
 def read_sms_code(path: str | None) -> str:

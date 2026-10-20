@@ -119,3 +119,22 @@
   opacity: .5;
   cursor: not-allowed;
 }
+.account-auto-status { display: flex; align-items: center; gap: 8px; min-height: 36px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.account-auto-status svg { flex: none; }
+.account-auto-status.is-checking svg { animation: account-check-spin 1s linear infinite; }
+.account-skeleton { display: block; border-radius: var(--radius-sm); background: linear-gradient(100deg, var(--surface-hover) 30%, var(--bg-secondary) 50%, var(--surface-hover) 70%); background-size: 200% 100%; animation: account-skeleton-shimmer 1.8s ease-in-out infinite; }
+.account-skeleton-heading { height: 44px; width: 65%; }
+.account-skeleton-identity { height: 48px; width: 100%; }
+.account-skeleton-action { height: 36px; width: 100%; margin-top: 12px; }
+.account-login-progress { display: flex; justify-content: center; gap: 20px; list-style: none; padding: 0; margin: 20px 0; color: var(--text-tertiary); font-size: 12px; }
+.account-login-progress li { display: flex; align-items: center; gap: 6px; }
+.account-login-progress li > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-hover); }
+.account-login-progress li[aria-current] { color: var(--text); }
+.account-login-progress li[aria-current] > span { background: var(--text); color: var(--bg); }
+.account-login-success { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 8px; }
+.account-login-success-icon { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 50%; color: var(--green); background: color-mix(in srgb, var(--green) 10%, var(--bg)); }
+.account-login-success > strong { font-size: 18px; font-weight: 600; }
+.account-login-success > p { margin: 0; font-size: 13px; color: var(--text-secondary); }
+@keyframes account-skeleton-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .account-skeleton, .account-auto-status.is-checking svg { animation: none; } }
+@media (max-width: 440px) { .account-login-progress { gap: 10px; font-size: 11px; } }

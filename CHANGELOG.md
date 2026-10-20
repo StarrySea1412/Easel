@@ -1,3 +1,10 @@
+## 0.7.3 · 2026-10-20 · Login and stream recovery / 登录与对话恢复
+
+- Retain stale account identity while checking; distinguish unknown from platform-confirmed expiry. Automatically check on entry, focus, network recovery and every minute, with skeleton placeholders. / 自动检测、骨架屏，缓存过期和网络失败不再冒充退出。
+- Report visible scan acknowledgements for XHS, web platforms and WeChat; unify progress, retry messaging and success SVG. / 补齐真实已扫码回调与手机确认提示，统一成功弹窗。
+- Recover missing Chat streams only from the same completed turn; retain partial output, clear stale markers and pause queues when unknown. Never automatically replay inference. / 两条续接路径共用同轮恢复，缺失结果暂停队列。
+- Deployment evidence and real-platform limits: [修复回执 / Scope](docs/account-login-recovery-2026-10-20.md).
+
 ## 0.7.2 deployment receipt · 2026-10-20 · 138部署补记
 
 - Activate committed `e63a08eac773` in isolated and production stacks, preserve snapshots and previous fixed images, and verify HTTPS login, Gateway, assets and runtime hashes. / 已按用户新授权更新138，运行源码与后续文档提交分别记录。

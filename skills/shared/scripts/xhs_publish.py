@@ -700,6 +700,9 @@ def cmd_login(a) -> int:
                 if logged_in:
                     completed_message = "登录成功"
                     return 0
+                if login_state.report_scan(sf, page):
+                    page.wait_for_timeout(2000)
+                    continue
                 current_qr = _query_safe(page, SELECTORS["qrcode"])
                 current_meta = login_qr.capture_element(current_qr, qr_out) if current_qr is not None else None
                 login_state.write_status(sf, "qr_ready" if current_meta else "verifying",

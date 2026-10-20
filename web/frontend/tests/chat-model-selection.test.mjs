@@ -133,6 +133,21 @@ test('resume-only and missing recovery paths never POST even when a model snapsh
   assert.ok(calls.every(call => call.body === undefined));
 });
 
+test('POST stream EOF followed by a missing job uses recovery instead of a raw 404 or another POST', { timeout: 5000 }, async t => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, ...init });
+    return calls.length === 1 ? new Response(event('token', '已有正文', 1))
+      : new Response(JSON.stringify({ detail: '对话任务记录不存在或已失效' }), { status: 404 });
+  });
+  const result = run(t);
+  assert.equal((await result.terminal).kind, 'unavailable');
+  assert.deepEqual(calls.map(call => call.method || 'GET'), ['POST', 'GET']);
+  assert.equal(calls[1].url, '/workbench/api/chat/jobs/turn-a/stream?after=1');
+  assert.equal(result.state.tokens.join(''), '已有正文');
+  assert.equal(result.state.errors.length, 0);
+});
+
 for (const [status, code] of [[400, 'chat_model_not_configured'], [503, 'chat_model_override_unavailable']]) {
   test(`${code} is terminal and never retries with the model field omitted`, async t => {
     const calls = [];

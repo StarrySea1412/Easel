@@ -1211,7 +1211,8 @@ def cmd_login_qr(a) -> int:
                 if _is_logged_in(page, cfg):
                     confirmed = True
                     break
-                if tick % 3 == 0:
+                scanned = login_state.report_scan(sf, page)
+                if tick % 3 == 0 and not scanned:
                     # Keep code rotations and late render/verification changes
                     # in sync with the UI; unchanged bytes retain their cache key.
                     try:

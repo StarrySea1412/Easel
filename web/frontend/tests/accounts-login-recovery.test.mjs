@@ -60,7 +60,7 @@ async function fixture(t, { rawCache } = {}) {
   const modal = () => container.querySelector('.account-login-modal');
   const start = async (name = '小红书') => {
     const card = [...container.querySelectorAll('article')].find(item => item.querySelector('h3')?.textContent === name);
-    const button = card.querySelector('.account-actions > button');
+    const button = card.querySelector('.account-actions > button') || [...card.querySelectorAll('.account-secondary-actions button')].find(item => item.textContent === '重新连接');
     await act(async () => { button.focus(); button.click(); });
     return button;
   };
@@ -257,8 +257,46 @@ test('success in the initial response verifies identity once without polling', a
   assert.equal(view.state.analyzed, 1);
   assert.equal(view.timers.size, 0);
   assert.match(view.modal().textContent, /登录成功/);
+  assert.ok(view.modal().querySelector('.account-login-success-icon svg'));
+  assert.doesNotMatch(view.modal().textContent, /✅|正在为你自动抓取/);
   await view.click('完成');
   assert.equal(view.modal(), null);
+});
+
+test('scan acknowledgement is announced before phone confirmation and success', async t => {
+  const view = await fixture(t);
+  await view.start();
+  assert.match(view.modal().textContent, /等待手机扫码，每2秒/);
+  view.state.read = async () => snapshot('scanned', '请在手机确认');
+  await view.tick();
+  assert.match(view.modal().querySelector('.account-login-status').textContent, /已扫码，等待手机确认/);
+  assert.equal(view.modal().querySelector('[aria-current="step"]').textContent, '3确认并保存');
+  assert.equal(view.modal().querySelector('img'), null);
+  assert.equal(view.timers.size, 1);
+  view.state.read = async () => snapshot('success');
+  await view.tick();
+  assert.ok(view.modal().querySelector('.account-login-success-icon svg'));
+  assert.equal(view.timers.size, 0);
+});
+
+test('expired positive cache keeps identity during automatic checks and transient failures', async t => {
+  const cache = { xiaohongshu: { loggedIn: true, name: '上次确认账号', avatar: '', checkedAt: Date.now() - 180000, ts: Date.now() - 180000 } };
+  const view = await fixture(t, { rawCache: JSON.stringify(cache) });
+  // Initial automatic check completed. Age it, then observe the next refresh.
+  localStorage.setItem('easel_whoami', JSON.stringify(cache));
+  await act(async () => window.dispatchEvent(new window.StorageEvent('storage', { key: 'easel_whoami' })));
+  const pending = deferred(); view.state.whoami = () => pending.promise;
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  const card = view.container.querySelector('article');
+  assert.match(card.querySelector('.account-nick').textContent, /上次确认账号/);
+  assert.match(card.textContent, /正在自动检测/);
+  assert.doesNotMatch(card.textContent, /连接后，在这里/);
+  assert.ok(![...card.querySelectorAll('button')].some(button => button.textContent === '检查登录状态'));
+  await act(async () => pending.reject(new Error('synthetic offline')));
+  assert.match(card.querySelector('.account-nick').textContent, /上次确认账号/);
+  assert.match(card.querySelector('.badge').textContent, /状态待确认/);
+  assert.doesNotMatch(card.querySelector('.badge').textContent, /未连接|失效/);
+  assert.ok(card.textContent.includes('上次在线确认'));
 });
 
 test('a terminal polling result stops further checks and manual retry starts a fresh attempt', async t => {
@@ -428,8 +466,9 @@ test('visible account page periodically detects expiry and does not count an unv
   now += 121000;
   await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
   assert.equal(view.state.whoamiCalls, 1);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已连接/);
+  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
   assert.match(view.container.querySelector('article').textContent, /登录已失效/);
+  assert.ok([...view.container.querySelectorAll('article button')].some(button => button.textContent === '连接账号'));
   // A stale quick endpoint cannot erase the fresh confirmed offline result.
   await act(async () => window.dispatchEvent(new window.Event('focus')));
   assert.equal(view.state.whoamiCalls, 1);
@@ -452,7 +491,7 @@ test('account checking remains unknown on transport failure and periodic checks 
   Object.defineProperty(document, 'visibilityState', {configurable:true,value:'visible'});
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
   assert.match(view.container.querySelector('article .badge').textContent, /状态待确认/);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已连接/);
+  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
   await view.start('知乎');
   const calls = view.state.requests.length;

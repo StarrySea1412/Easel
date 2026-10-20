@@ -261,7 +261,7 @@ def _run_login(a):
                     return 0
                 # 二维码可能刷新，定期重截
                 try:
-                    if not _extract_token(page.url):
+                    if not login_state.report_scan(status, page) and not _extract_token(page.url):
                         _capture_qr(page, qr_out)
                 except Exception:
                     pass
