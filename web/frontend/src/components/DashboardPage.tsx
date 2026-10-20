@@ -363,6 +363,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onUs
                   <DashboardEmpty Icon={IconAccounts} title="账号需要重新登录" description="登录状态已失效，请前往账号页重新连接。" action="前往账号页" onAction={() => onNavigate('accounts')} />
                 ) : (
                   <div className="ana-body">
+                    {d.warning && <div className="dash-empty" role="status" style={{ gridColumn: '1 / -1' }}>{d.warning}</div>}
                     {/* 概览 + 增长对比 */}
                     <div className="ana-col ana-col-main">
                       <div className="ana-id">{d.nickname ? `@${d.nickname}` : d.name}</div>

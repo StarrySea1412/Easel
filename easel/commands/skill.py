@@ -24,9 +24,13 @@ from easel.paths import child_env, data_root
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import persona_prefix, profile_exists
 from easel.timeouts import TIMEOUT_PRODUCE
+from easel.direct_api import read_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SKILLS_DIR = PROJECT_ROOT / "skills" / "openclaw"
+# 2026.9 合并把技能源目录从 skills/openclaw 迁到 skills/builtin；两套布局都支持。
+SKILLS_DIR = PROJECT_ROOT / "skills" / "builtin"
+if not SKILLS_DIR.is_dir():
+    SKILLS_DIR = PROJECT_ROOT / "skills" / "openclaw"
 PROFILES_DIR = data_root(PROJECT_ROOT) / "profiles"
 OPENCLAW_PROFILE = "easel"
 
@@ -145,6 +149,14 @@ def _run_via_openclaw(message: str, timeout: int = 300) -> int:
 
 
 def cmd_skill(args) -> int:
+    from easel import harnesses
+    from easel.harnesses.base import HarnessError
+    import asyncio
+    settings = read_settings(data_root(PROJECT_ROOT) / ".env")
+    runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
+    if runtime == "api":
+        print("[easel] API 直连支持聊天；SKILL 执行需要具备本机工具的 Agent 运行时")
+        return 1
     skill_name = args.name
     skill_full = _find_skill(skill_name)
 
@@ -174,4 +186,12 @@ def cmd_skill(args) -> int:
         print(f"[easel] 画像: {args.profile}")
     print("─" * 50)
 
+    if runtime != "openclaw":
+        try:
+            asyncio.run(harnesses.console_turn(message, PROJECT_ROOT, settings, timeout=timeout))
+            print()
+            return 0
+        except (HarnessError, asyncio.TimeoutError) as error:
+            print(f"\nAgent 执行失败：{error or '请求超时'}")
+            return 1
     return _run_via_openclaw(message, timeout=timeout)

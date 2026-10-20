@@ -15,6 +15,7 @@ from pathlib import Path
 from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.paths import data_root
+from easel.direct_api import DirectAPIError, api_config, read_settings
 
 # 项目根目录（Easel/）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -118,10 +119,17 @@ def _chromium_available() -> bool:
 
 
 def _gateway_healthy() -> bool:
-    """Allow a brief gateway cold-start hiccup, but require an actual HTTP 200."""
+    """Allow a brief gateway cold-start hiccup, but require an actual HTTP 200.
+
+    端口走 easel/gateway_endpoint.py：非默认 profile（Easel 的 ``--profile easel``）
+    不是 18789，写死就会「gateway 活着、doctor 报 FAIL」。
+    """
+    # 127.0.0.1 探针绝不能继承系统 http_proxy（direct_api 同款 doctrine）：
+    # 默认 opener 会把回环请求发给代理，代理不可达时健康的网关被误报为 FAIL。
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(healthz_url(), timeout=5) as response:
+            with opener.open(healthz_url(), timeout=5) as response:
                 if response.status == 200:
                     return True
         except (OSError, urllib.error.URLError):
@@ -176,6 +184,7 @@ def _env_key_valid() -> bool:
                 "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                 "OPENAI_API_KEY", "OPENAI_BASE_URL",
                 "OPENAI_MAAS_API_KEY", "OPENAI_MAAS_ENDPOINT",
+                "EASEL_DIRECT_API_BASE_URL", "EASEL_DIRECT_API_MODEL", "EASEL_DIRECT_API_KEY",
             ):
                 auth_vars[key] = value
     except OSError:
@@ -197,11 +206,59 @@ def _env_key_valid() -> bool:
         return True
     if _set("OPENAI_MAAS_API_KEY") and _set("OPENAI_MAAS_ENDPOINT"):
         return True
+    # 独立 OpenAI-compatible 网关（Web 设置里的“直连”）也是一条可用通道。
+    # 只在 .env 里出现过这些键时才判定，避免部分填写反过来掩盖上面已验证的通道。
+    direct_names = ("EASEL_DIRECT_API_BASE_URL", "EASEL_DIRECT_API_MODEL", "EASEL_DIRECT_API_KEY")
+    if any(auth_vars.get(name, "").strip() for name in direct_names):
+        try:
+            api_config({name: auth_vars.get(name, "") for name in direct_names})
+            return True
+        except DirectAPIError:
+            return False
     return False
 
 
+def _cli_backend(primary: str) -> dict[str, object] | None:
+    if "/" not in primary:
+        return None
+    provider = primary.split("/", 1)[0]
+    try:
+        from easel.local_agents import KNOWN_AGENT_CLIS
+    except Exception:  # noqa: BLE001
+        return None
+    for item in KNOWN_AGENT_CLIS:
+        if item.get("openclaw_provider") == provider:
+            return item
+    return None
+
+
+def _primary_model_cli_available() -> tuple[bool, str]:
+    cfg_path = _openclaw_config_path()
+    if not cfg_path.is_file():
+        return False, ""
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, ""
+    primary = (((cfg.get("agents") or {}).get("defaults") or {})
+               .get("model") or {}).get("primary") or ""
+    backend = _cli_backend(primary)
+    if not backend:
+        return False, ""
+    commands = tuple(backend.get("commands") or ())
+    if any(shutil.which(str(cmd)) for cmd in commands):
+        return True, ""
+    label = backend.get("label") or backend.get("id") or primary.split("/", 1)[0]
+    return False, f"primary 是 {primary}，但未在 PATH 找到 {label} CLI（{', '.join(map(str, commands))}）"
+
+
 def _openclaw_config_path() -> Path:
-    """easel 用独立 profile，不碰用户本机的 OpenClaw 配置（与 gateway_questions 同一约定）。"""
+    """easel 用独立 profile，不碰用户本机的 OpenClaw 配置。
+
+    与 web/app.py、local_agents 同一真相源：委托 easel.openclaw_workspace.config_path()。
+    之前这里自己解析 EASEL_OPENCLAW_STATE_DIR，与 config_path() 有细微差别——
+    环境变量是空串时这里会返回 Path('')（相对路径），config_path() 会正确回落默认目录。
+    """
     from easel.openclaw_workspace import config_path
     return config_path()
 
@@ -234,6 +291,12 @@ def _primary_model_routable() -> tuple[bool, str]:
         return True, ""
 
     provider = primary.split("/", 1)[0]
+    backend = _cli_backend(primary)
+    if backend:
+        if any(shutil.which(str(cmd)) for cmd in (backend.get("commands") or ())):
+            return True, ""
+        return False, (f"primary 是 {primary}，但未在 PATH 找到 "
+                       f"{backend.get('label') or provider} CLI —— 请先安装并登录后再试")
     providers = (cfg.get("models") or {}).get("providers") or {}
     entry = providers.get(provider)
     if not isinstance(entry, dict):
@@ -248,43 +311,111 @@ def _primary_model_routable() -> tuple[bool, str]:
     return True, ""
 
 
+def _tool_loop_policy() -> list[str]:
+    """Describe saved switches only; do not infer runtime support or defaults."""
+    try:
+        cfg = json.loads(_openclaw_config_path().read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return ["无法读取 JSON 配置；循环保护状态未知"]
+    if not isinstance(cfg, dict):
+        return ["配置根节点不是对象；循环保护状态未知"]
+
+    def switch(scope):
+        if not isinstance(scope, dict):
+            return "格式异常"
+        for key in ("tools", "loopDetection"):
+            if key not in scope:
+                return "未设置"
+            scope = scope[key]
+            if not isinstance(scope, dict):
+                return "格式异常"
+        if "enabled" not in scope:
+            return "未设置"
+        value = scope["enabled"]
+        if type(value) is not bool:
+            return "格式异常"
+        return "显式开启" if value else "显式关闭"
+
+    lines = [f"tools.loopDetection.enabled：{switch(cfg)}"]
+    agents = cfg.get("agents", {})
+    if not isinstance(agents, dict):
+        return lines + ["agents 格式异常；无法检查 Agent 覆盖"]
+    # Both saved layouts exist in supported-era OpenClaw releases. Inspect
+    # separately; do not guess which one a running gateway actually consumes.
+    for layout, expected in (("list", list), ("entries", dict)):
+        if layout not in agents:
+            continue
+        entries = agents[layout]
+        if not isinstance(entries, expected):
+            lines.append(f"agents.{layout} 格式异常；无法检查 Agent 覆盖")
+            continue
+        states = [switch(entry) for entry in (entries.values() if layout == "entries" else entries)]
+        counts = "，".join(f"{state} {states.count(state)}" for state in
+                           ("显式开启", "显式关闭", "未设置", "格式异常"))
+        lines.append(f"agents.{layout} 的 Agent 开关：{counts}")
+    if "list" in agents and "entries" in agents:
+        lines.append("同时存在 list / entries；请用所装 OpenClaw 版本核对配置布局")
+    return lines
+
+
 def cmd_doctor(_args) -> int:
     print("Easel — 环境检查\n")
     all_ok = True
     install_mode = bool(getattr(_args, "install_mode", False))
     defer_browser = install_mode and bool(getattr(_args, "defer_browser", False))
+    if install_mode:
+        # 安装器验证只检查环境本身，不探测用户运行时/凭证；保持既有安装流程。
+        runtime = "openclaw"
+        settings: dict[str, str] = {}
+        alternate = False
+        direct = False
+    else:
+        settings = read_settings(data_root(PROJECT_ROOT) / ".env")
+        from easel import harnesses
+        runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
+        alternate = runtime not in ("api", "openclaw")
+        direct = runtime == "api"
+        print("  对话模式：" + (runtime if alternate else (
+            "API 直连（无需 OpenClaw）" if direct else "OpenClaw")))
+        if alternate:
+            descriptor = harnesses.describe(runtime)
+            all_ok &= _check(f"{runtime} CLI", descriptor["installed"], descriptor["install_hint"])
+            print("  原生认证和模型可用性请运行 easel ping 验证；不读取或迁移凭证")
+            direct = True
 
     # 1. Runtime prerequisites
     all_ok &= _check("Python >= 3.10", _python_version_ok(),
                       "请安装 Python 3.10 或更高版本")
     all_ok &= _check("Python venv module", _venv_available(),
                       "Debian/Ubuntu 请安装 python3-venv")
-    # openclaw 版本决定 Node 引擎要求：2026.9.x 需要 Node 24.16+，2026.6.x 需要 22.19+（实测其
-    # engines，见 _node_version_ok 的说明）。未装 openclaw 时按 setup 的默认安装目标
-    # （openclaw@latest）从严要求 24.16+。
-    oc_ver = _openclaw_version()
-    node_strict = oc_ver is None or oc_ver >= (2026, 9, 0)
-    node_floor = "24.16" if node_strict else "22.19"
-    has_node = shutil.which("node") is not None
-    node_ok = _node_version_ok(node_strict)
-    node_detail = (f"请安装 Node.js >= {node_floor}: https://nodejs.org/" if not has_node
-                   else f"Node.js 版本不满足当前 OpenClaw 要求，请升级到 >= {node_floor}: https://nodejs.org/")
-    all_ok &= _check(f"Node.js >= {node_floor}", node_ok, node_detail)
+    if not direct:
+        # openclaw 版本决定 Node 引擎要求：2026.9.x 需要 Node 24.16+，2026.6.x 需要 22.19+（实测其
+        # engines，见 _node_version_ok 的说明）。未装 openclaw 时按 setup 的默认安装目标
+        # （openclaw@latest）从严要求 24.16+。
+        oc_ver = _openclaw_version()
+        node_strict = oc_ver is None or oc_ver >= (2026, 9, 0)
+        node_floor = "24.16" if node_strict else "22.19"
+        has_node = shutil.which("node") is not None
+        node_ok = _node_version_ok(node_strict)
+        node_detail = (f"请安装 Node.js >= {node_floor}: https://nodejs.org/" if not has_node
+                       else f"Node.js 版本不满足当前 OpenClaw 要求，请升级到 >= {node_floor}: https://nodejs.org/")
+        all_ok &= _check(f"Node.js >= {node_floor}", node_ok, node_detail)
     all_ok &= _check("FFmpeg", shutil.which("ffmpeg") is not None,
                       "媒体处理需要 FFmpeg；请安装后重试")
 
-    # 2. openclaw command + 版本
-    has_openclaw = shutil.which("openclaw") is not None
-    all_ok &= _check("openclaw command", has_openclaw,
-                      "请安装 openclaw: npm i -g openclaw")
-    if has_openclaw:
-        min_str = ".".join(map(str, MIN_OPENCLAW))
-        ver_str = ".".join(map(str, oc_ver)) if oc_ver else "未知"
-        oc_ver_ok = oc_ver is not None and oc_ver >= MIN_OPENCLAW
-        all_ok &= _check(
-            f"OpenClaw >= {min_str}", oc_ver_ok,
-            f"当前 {ver_str}，过旧会有 provider/schema 兼容问题；请升级：npm i -g openclaw@latest",
-        )
+    if not direct:
+        # 2. openclaw command + 版本
+        has_openclaw = shutil.which("openclaw") is not None
+        all_ok &= _check("openclaw command", has_openclaw,
+                          "请安装 openclaw: npm i -g openclaw")
+        if has_openclaw:
+            min_str = ".".join(map(str, MIN_OPENCLAW))
+            ver_str = ".".join(map(str, oc_ver)) if oc_ver else "未知"
+            oc_ver_ok = oc_ver is not None and oc_ver >= MIN_OPENCLAW
+            all_ok &= _check(
+                f"OpenClaw >= {min_str}", oc_ver_ok,
+                f"当前 {ver_str}，过旧会有 provider/schema 兼容问题；请升级：npm i -g openclaw@latest",
+            )
 
     for module in ("fastapi", "uvicorn", "sse_starlette", "multipart"):
         all_ok &= _check(f"Python package: {module}", _module_available(module),
@@ -302,6 +433,12 @@ def cmd_doctor(_args) -> int:
     # 3. .env file with valid key
     if install_mode:
         print(f"  {YELLOW}待配置{NC} 模型 API Key / 路由：安装后请在 Web 设置中填写，并运行 easel ping 验证。")
+    elif direct and not alternate:
+        try:
+            base, model, _key = api_config(settings)
+            all_ok &= _check(f"API 配置 ({model})", True)
+        except DirectAPIError as error:
+            all_ok &= _check("API 配置", False, str(error))
     else:
         env_ok = _env_key_valid()
         all_ok &= _check(".env (API Key)", env_ok,
@@ -310,22 +447,53 @@ def cmd_doctor(_args) -> int:
         route_ok, route_detail = _primary_model_routable()
         all_ok &= _check("OpenClaw model routing", route_ok, route_detail)
 
-    # 4. OpenClaw gateway running
-    gw_ok = _gateway_healthy()
-    all_ok &= _check(f"OpenClaw gateway ({describe()})", gw_ok,
-                      "运行 python -m easel gateway start")
+    # 3.5 本机 agent CLI：有免 key 通道时提示用户（.env 没配也可能是绿灯路径）。
+    # 不计入 all_ok —— 装不装 Claude Code 是用户的选择，不是环境故障。
+    if not install_mode:
+        try:
+            from easel.local_agents import summarize_local_agents
+            la = summarize_local_agents()
+            if la["installedCount"]:
+                usable = ", ".join(str(a["label"]) for a in la["agents"] if a["usableWithoutKey"])
+                detail = (f"检测到 {la['installedCount']} 个本机 agent CLI；"
+                          + (f"可免 API key 使用：{usable}" if usable
+                             else "暂无可直接接入底座的登录态"))
+                _check("本机 agent CLI", True, detail)
+        except Exception:  # noqa: BLE001  探测失败不阻塞 doctor
+            pass
 
-    # 5. Skills synced
-    synced, synced_detail = _skills_synced()
-    all_ok &= _check("Skills synced", synced,
-                      f"{synced_detail}；重新运行 setup.ps1（Windows）或 bash openclaw/sync.sh（Linux/macOS）")
+    if not direct:
+        if not install_mode:
+            print("  OpenClaw 循环保护（只读配置诊断，不计入环境就绪结果）")
+            for line in _tool_loop_policy():
+                print(f"    └─ {line}")
+            print("    未设置不等于关闭；继承、默认值和运行时支持由 OpenClaw 版本决定。")
+            print("    已保存配置不证明网关已加载，也不代表每任务工具调用预算。")
+
+        # 4. OpenClaw gateway running
+        gw_ok = _gateway_healthy()
+        all_ok &= _check(f"OpenClaw gateway ({describe()})", gw_ok,
+                          "运行 python -m easel gateway start")
+
+        # 5. Skills synced
+        synced, synced_detail = _skills_synced()
+        all_ok &= _check("Skills synced", synced,
+                          f"{synced_detail}；重新运行 setup.ps1（Windows）或 bash agents/sync.sh（Linux/macOS）")
 
     # 6. Key project files
     gateway_label = "scripts/gateway.ps1" if os.name == "nt" else "scripts/gateway.sh"
     gateway_path = PROJECT_ROOT / "scripts" / ("gateway.ps1" if os.name == "nt" else "gateway.sh")
+    # 布局在 2026.9 合并时从 openclaw/ + skills/openclaw 迁到 agents/ + skills/builtin；
+    # 两种布局都认，源码树与旧数据目录都能通过。
+    openclaw_config = PROJECT_ROOT / "agents" / "openclaw.json5"
+    if not openclaw_config.exists():
+        openclaw_config = PROJECT_ROOT / "openclaw" / "openclaw.json5"
+    skills_root = PROJECT_ROOT / "skills" / "builtin"
+    if not skills_root.is_dir():
+        skills_root = PROJECT_ROOT / "skills" / "openclaw"
     key_files = [
-        ("openclaw/openclaw.json5", PROJECT_ROOT / "openclaw" / "openclaw.json5"),
-        ("skills/openclaw/", PROJECT_ROOT / "skills" / "openclaw"),
+        ("OpenClaw config", openclaw_config),
+        ("Skills source", skills_root),
         (gateway_label, gateway_path),
     ]
     for label, path in key_files:

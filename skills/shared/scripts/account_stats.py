@@ -2,7 +2,7 @@
 """account_stats.py — 归因层：抓取已登录账号的创作数据（Playwright，headless 可用）。
 
 复用各平台**持久化登录态**（同 xhs_publish/web_publisher 的 <Platform>Profile）；登录一次两处通用。
-抓取按「正文分行 + 标签就近取数」——不同平台概览区数字在标签前/后不一，故按平台配 direction，避免
+小红书优先读取本人创作中心接口，其它平台按「正文分行 + 标签就近取数」——不同平台概览区数字在标签前/后不一，故按平台配 direction，避免
 把邻近的账号ID/曝光数等误当指标（曾把小红书账号号当获赞数）。数字解析/多窗口增长为纯函数，selftest 覆盖。
 
 返回：概览(粉丝/获赞/关注) + 平台近7日各指标含环比 + 最新笔记链接 + 我方快照多窗口增长(较上次/日/周/月/年)。
@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Isolated/embedded Python does not add the script directory to sys.path.
 # This is a bundled sibling module, not an external package to install.
@@ -40,7 +41,7 @@ PLATFORMS: dict[str, dict] = {
         "overview_dir": "before",
         "overview": {"followers": ["粉丝数"], "likes": ["获赞与收藏"], "following": ["关注数"]},
         "metrics": ["曝光数", "观看数", "点赞数", "评论数", "收藏数", "分享数", "净涨粉", "主页访客"],
-        "note_url_re": r"xiaohongshu\.com/(explore|discovery/item)/|/publish/publish",
+        "note_url_re": r"xiaohongshu\.com/(explore|discovery/item)/",
     },
     "douyin": {
         "name": "抖音", "profile": "DouyinProfile",
@@ -51,6 +52,8 @@ PLATFORMS: dict[str, dict] = {
         # 首页「近7日」块真实标签（旧列表与页面不符导致 metrics 恒空）；环比是「较前7日±X」。
         "metrics": ["播放量", "主页访问量", "作品分享", "作品评论"],
         "metrics_anchor": "近7日",   # 只从「近7日」之后解析，避开「最新作品」卡片里的同名「播放量」
+        # 登录墙检测：抖音会话过期时 creator-micro 不跳 passport，而是原地弹扫码 iframe（URL 不变），
+        # 通用 URL 检测兜不住 → 补二维码选择器 + 「高清发布」按钮（登录者必有）双检（同 douyin_publish._logged_in）。
         "login_qr_selector": 'img[class*="qr"], [class*="qrcode"] img, [class*="qrcode"] canvas, img[aria-label="二维码"]',
         "login_ok_selector": 'button[class*="douyin-creator-master-button"], #douyin-creator-master-side-upload-wrap button',
         "note_url_re": r"douyin\.com/(video|note)/|creator-micro/content",
@@ -324,10 +327,13 @@ def compact(history: list[dict], now: int) -> list[dict]:
 
 
 def should_record(history: list[dict], snap: dict) -> bool:
-    """数据变了才记：与上一条快照的 followers/likes/posts 有任一不同就记，全同则跳过（不重复攒行）。"""
+    """当天第一条必记；之后只在粉丝/获赞/作品有变化时再记。
+    以前「全同就跳过」导致跨天没有基线，较昨日/较上周看起来永远一样。"""
     if not history:
         return True
     last = history[-1]
+    if _local_day(last.get("ts", 0)) != _local_day(snap.get("ts", 0)):
+        return True
     return any(last.get(k) != snap.get(k) for k in ("followers", "likes", "posts"))
 
 
@@ -484,98 +490,349 @@ def _platform_logged_in(page, cfg: dict) -> bool:
     return False
 
 
+def _login_wall(page) -> bool:
+    if re.search(r"(passport|/login)", page.url or ""):
+        return True
+    try:
+        return any(element.is_visible() for element in page.query_selector_all(
+            'button:has-text("扫码登录"), [class*="login-btn"]'))
+    except Exception:
+        return False
+
+
+def _xhs_session(context) -> tuple[dict | None, bool]:
+    from xhs_publish import CREATOR_ACCOUNT_URL, CREATOR_HOME_URL, EXPLORE_URL, _initial_state, _state_account
+
+    creator_expired = False
+    try:
+        response = context.request.get(
+            CREATOR_ACCOUNT_URL, headers={"Referer": CREATOR_HOME_URL}, timeout=5000)
+        payload = response.json()
+        account = payload.get("data") if isinstance(payload, dict) else None
+        creator_expired = response.status == 401 and isinstance(payload, dict) and payload.get("success") is False
+        if (response.status == 200 and isinstance(payload, dict) and payload.get("success") is True
+                and isinstance(account, dict) and isinstance(account.get("userId"), str)
+                and re.fullmatch(r"[A-Za-z0-9_-]+", account["userId"])):
+            return account, True
+    except Exception:
+        pass
+    try:
+        response = context.request.get(EXPLORE_URL, timeout=4000)
+        if response.status == 200:
+            state = _initial_state(response.text())
+            account = _state_account(state)
+            if account is not None:
+                return account, False
+            current = urlparse(response.url)
+            user = state.get("user")
+            if creator_expired and (
+                    current.hostname == "www.xiaohongshu.com" and current.path.startswith("/login")
+                    or isinstance(user, dict) and user.get("loggedIn") is False):
+                return None, False
+    except Exception:
+        pass
+    if creator_expired:
+        return None, False
+    raise RuntimeError("小红书登录态暂时无法确认，请检查网络或平台维护状态后重试")
+
+
+def _xhs_profile_stats(state: dict, user_id: str) -> dict:
+    from xhs_publish import _account_identity, _state_account, _unwrap_state
+
+    account = _state_account(state)
+    if account is not None and account["userId"] != user_id:
+        return {}
+    user = state.get("user")
+    profile = _unwrap_state(user.get("userPageData")) if isinstance(user, dict) else None
+    if not isinstance(profile, dict) or profile.get("userId", user_id) != user_id:
+        return {}
+    result = {}
+    basic = profile.get("basicInfo")
+    if isinstance(basic, dict):
+        result["nickname"] = _account_identity(basic)["name"]
+    interactions = profile.get("interactions")
+    if not isinstance(interactions, list):
+        return result
+    keys = {"fans": "followers", "follows": "following", "interaction": "likes"}
+    labels = {"粉丝": "followers", "关注": "following", "获赞与收藏": "likes"}
+    for item in interactions:
+        if not isinstance(item, dict):
+            continue
+        kind, label = item.get("type"), item.get("name")
+        key = (keys.get(kind) if isinstance(kind, str) else None) or (
+            labels.get(label) if isinstance(label, str) else None)
+        count = item.get("count")
+        if key and not isinstance(count, bool) and re.fullmatch(
+                r"\d+(?:\.\d+)?(?:[万亿wWkK千])?", str(count).replace(",", "").strip()):
+            result[key] = parse_num(count)
+    return result
+
+
+def _xhs_own_stats(context, account: dict) -> dict:
+    from xhs_publish import EXPLORE_URL, _initial_state
+
+    user_id = account["userId"]
+    destination = f"https://www.xiaohongshu.com/user/profile/{user_id}"
+    try:
+        response = context.request.get(
+            destination, headers={"Referer": EXPLORE_URL}, timeout=4000)
+        current = urlparse(response.url)
+        if (response.status == 200 and current.hostname == "www.xiaohongshu.com"
+                and current.path.rstrip("/") == urlparse(destination).path):
+            return _xhs_profile_stats(_initial_state(response.text()), user_id)
+    except Exception:
+        pass
+    return {}
+
+
+def _xhs_stats_signature(lines: list[str]):
+    cfg = PLATFORMS["xiaohongshu"]
+    overview = tuple(num_by_label(lines, labels, "before") for labels in cfg["overview"].values())
+    metrics = metrics_with_vs(lines, cfg["metrics"])
+    if all(value is None for value in overview) and not metrics:
+        return None
+    return overview, tuple((metric["label"], metric["value"], metric["vs"]) for metric in metrics)
+
+
+def _xhs_creator_overview(data) -> dict:
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    if isinstance(data.get("name"), str) and data["name"].strip():
+        result["nickname"] = data["name"].strip()[:80]
+    for source, target in (("fans_count", "followers"), ("faved_count", "likes"),
+                           ("follow_count", "following")):
+        value = data.get(source)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            result[target] = value
+    return result
+
+
+def _xhs_creator_metrics(data) -> list[dict]:
+    if not isinstance(data, dict) or not isinstance(data.get("seven"), dict):
+        return []
+    seven = data["seven"]
+    metrics = []
+    for label, key in (
+        ("曝光数", "impl_count"), ("观看数", "view_count"), ("点赞数", "like_count"),
+        ("评论数", "comment_count"), ("收藏数", "collect_count"), ("分享数", "share_count"),
+        ("净涨粉", "net_rise_fans_count"), ("主页访客", "home_view_count"),
+    ):
+        value = seven.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0 and key != "net_rise_fans_count":
+            continue
+        rate = seven.get(key + "_rate")
+        vs = ""
+        if (seven.get(key + "_rate_display") is True and isinstance(rate, (int, float))
+                and not isinstance(rate, bool) and float("-inf") < rate < float("inf")):
+            vs = f"{rate:+g}%"
+        metrics.append({"label": label, "value": value, "vs": vs})
+    return metrics
+
+
+def _xhs_creator_stats(context) -> dict:
+    from xhs_publish import CREATOR_HOME_URL
+
+    try:
+        response = context.request.get(
+            "https://creator.xiaohongshu.com/api/galaxy/creator/home/personal_info",
+            headers={"Referer": CREATOR_HOME_URL}, timeout=4000)
+        payload = response.json()
+        if response.status == 200 and isinstance(payload, dict) and payload.get("success") is True:
+            return _xhs_creator_overview(payload.get("data"))
+    except Exception:
+        pass
+    return {}
+
+
+def _scrape_xhs(context, page, result: dict) -> dict:
+    from xhs_publish import _account_identity
+
+    account, creator_logged_in = _xhs_session(context)
+    if account is None:
+        result["logged_in"] = False
+        return result
+    user_id = account.get("userId")
+    if isinstance(user_id, str) and re.fullmatch(r"[A-Za-z0-9_-]+", user_id):
+        result["account_id"] = user_id
+    result["nickname"] = _account_identity(account)["name"]
+    own_stats = _xhs_creator_stats(context) if creator_logged_in else {}
+    if not any(key in own_stats for key in ("followers", "likes", "following")):
+        own_stats = _xhs_own_stats(context, account)
+    result.update({key: value for key, value in own_stats.items() if value is not None and value != ""})
+    cfg = PLATFORMS["xiaohongshu"]
+    if creator_logged_in:
+        listener = None
+        try:
+            from analytics_transport import prepare
+
+            prepare(context, cfg["url"], ANALYTICS_DIR / "_xhs_assets")
+
+            def received(response):
+                current = urlparse(response.url)
+                if (current.hostname != "creator.xiaohongshu.com" or response.status != 200
+                        or current.path not in (
+                            "/api/galaxy/creator/home/personal_info",
+                            "/api/galaxy/v2/creator/datacenter/account/base")):
+                    return
+                try:
+                    payload = response.json()
+                    if not isinstance(payload, dict) or payload.get("success") is not True:
+                        return
+                    if current.path.endswith("/personal_info"):
+                        result.update(_xhs_creator_overview(payload.get("data")))
+                    else:
+                        result["metrics"] = _xhs_creator_metrics(payload.get("data"))
+                except Exception:
+                    pass
+
+            try:
+                page.on("response", received)
+                listener = received
+            except Exception:
+                pass
+            page.goto(cfg["url"], wait_until="commit", timeout=8000)
+            lines = _poll_stable(
+                page, lambda lines: tuple((metric["label"], metric["value"], metric["vs"])
+                                          for metric in result["metrics"])
+                if result["metrics"] else None, 14000)
+            if not _login_wall(page):
+                for key, labels in cfg["overview"].items():
+                    if result[key] is None:
+                        result[key] = num_by_label(lines, labels, "before")
+                result["posts"] = num_by_label(lines, ["笔记数", "作品数", "内容数"], "before")
+                if any(result[key] is not None for key in ("followers", "likes", "posts")) or result["metrics"]:
+                    result["notes"] = _scrape_notes("xiaohongshu", page, cfg)
+        except Exception:
+            pass
+        finally:
+            if listener is not None:
+                try:
+                    page.remove_listener("response", listener)
+                except Exception:
+                    pass
+    has_overview = any(result[key] is not None for key in ("followers", "likes", "following", "posts"))
+    if not has_overview and not result["metrics"]:
+        raise RuntimeError("小红书账号已登录，但未取得创作数据；创作中心可能维护、需要重新登录或页面结构已变化，请稍后重试")
+    if not result["metrics"]:
+        result["warning"] = ("已读取本人账号概览；创作中心近 7 日数据暂不可用，请稍后重试"
+                             if creator_logged_in else
+                             "已读取本人账号概览；创作中心登录态已失效，请重新登录小红书以获取近 7 日数据")
+    return result
+
+
 def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) -> dict:
     from playwright.sync_api import sync_playwright
     cfg = PLATFORMS[platform]
     r = {"nickname": "", "followers": None, "likes": None, "following": None,
          "posts": None, "metrics": [], "notes": [], "logged_in": True}
-    with sync_playwright() as p:
-        profile = _profile_dir(platform, base)
-        profile.mkdir(parents=True, exist_ok=True)
-        kwargs = dict(headless=not headed, locale="zh-CN", args=LAUNCH_ARGS)
-        if proxy:
-            kwargs["proxy"] = {"server": proxy}
-        ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        try:
-            page.goto(cfg["url"], wait_until="domcontentloaded", timeout=30000)
-            ov, d = cfg["overview"], cfg.get("overview_dir", "after")
-            mets = cfg.get("metrics", [])
-            manchor = cfg.get("metrics_anchor")
-            # 稳定性轮询：概览/指标数值连续两次一致才走，避开占位0→真实值的异步坑
-            def _sig(L):
-                lk = num_by_label(L, ov.get("likes", []), d)
-                fo = num_by_label(L, ov.get("followers", []), d)
-                m = metrics_with_vs(L, mets, manchor)
-                mv = m[0]["value"] if m else None
-                # 配了 metrics_anchor（如抖音「近7日」）说明该页必有指标块；块异步晚于概览渲染，
-                # 若还没解析到指标就别急着「稳定」返回，继续轮询等它出来（避免 metrics 偶发为空）。
-                if manchor and mets and not m:
-                    return None
-                return None if (lk is None and fo is None and mv is None) else (lk, fo, mv)
-            lines = _poll_stable(page, _sig, 10000)
-            clicked = False
-            for txt in cfg.get("pre_click", []):   # 前置点击（如知乎点「累计」tab 拿总量）
-                try:
-                    page.click(f"text={txt}", timeout=3000)
-                    clicked = True
-                except Exception:
-                    pass
-            if clicked:
-                lines = _poll_stable(page, _sig, 6000)   # 点「累计」后重新等稳定
-            if re.search(r"(passport|/login)", page.url or "") or \
-               page.query_selector('button:has-text("扫码登录"), [class*="login-btn"]'):
-                r["logged_in"] = False
-            if r["logged_in"]:
-                r["logged_in"] = _platform_logged_in(page, cfg)
-            if cfg.get("login_ok_selector") and not r["logged_in"]:
-                return r
-            r["followers"] = num_by_label(lines, ov["followers"], d)
-            r["likes"] = num_by_label(lines, ov["likes"], d)
-            r["following"] = num_by_label(lines, ov.get("following", []), d)
-            r["posts"] = num_by_label(lines, cfg.get("posts_labels", ["笔记数", "作品数", "内容数", "视频数"]), d)
-            r["metrics"] = metrics_with_vs(lines, cfg.get("metrics", []), manchor)[:8]
-            r["nickname"] = extract_nickname(lines, ov, cfg.get("uid_anchor", ""))
+    profile = _profile_dir(platform, base)
+    profile.mkdir(parents=True, exist_ok=True)
+    xhs_lock = None
+    if platform == "xiaohongshu":
+        # 同一个 XiaohongshuProfile 目录，xhs_publish.py 的登录/发布/whoami 都用 _ProfileLock
+        # 互斥（见其模块注释：并发打开会把内核打成 exit 21）；看数据这条路径也走同一个目录，
+        # 必须一起遵守，否则就是那个锁没堵住的后门。锁在起 playwright 之前拿，确保启动失败
+        # 也不会漏放（finally 包住整段，不只是 ctx 的生命周期）。
+        from xhs_publish import _launch as _xhs_launch, _clear_stale_chrome_locks, _ProfileLock
+        xhs_lock = _ProfileLock(profile)
+        xhs_lock.acquire(20)
+    try:
+        with sync_playwright() as p:
             if platform == "xiaohongshu":
-                r["account_id"] = extract_xhs_account_id(lines)
-            # 昵称优先用专用选择器（视频号文本锚点不稳：概览是「关注者1」同行，锚不到昵称）
-            nsel = cfg.get("nickname_selector")
-            if nsel:
+                # 与发布/登录共用 Cloak + 同一套启动参数；禁图版 Chromium 会把创作中心打回登录页。
+                _clear_stale_chrome_locks(profile)
+                ctx = _xhs_launch(p, headed, base, proxy, login_assets=False)
+            else:
+                kwargs = dict(headless=not headed, locale="zh-CN", args=LAUNCH_ARGS)
+                if proxy:
+                    kwargs["proxy"] = {"server": proxy}
+                ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            try:
+                if platform == "xiaohongshu":
+                    return _scrape_xhs(ctx, page, r)
                 try:
-                    el = page.query_selector(nsel)
-                    if el:
-                        t = (el.inner_text() or "").strip().splitlines()
-                        if t and t[0]:
-                            r["nickname"] = t[0][:40]
+                    page.goto(cfg["url"], wait_until="commit", timeout=12000)
                 except Exception:
-                    pass
-            if os.environ.get("EASEL_STATS_DEBUG") and (platform != "xiaohongshu" or r.get("account_id")) \
-                    and not (platform == "xiaohongshu" and os.environ.get("EASEL_ANALYTICS_MANAGED") == "1"):
-                debug_dir = (evidence.account_dir(ANALYTICS_DIR, evidence.account_key(r["account_id"], "live"))
-                             if platform == "xiaohongshu" else ANALYTICS_DIR)
-                debug_name = "page" if platform == "xiaohongshu" else f"{platform}-page"
-                debug_dir.mkdir(parents=True, exist_ok=True)
-                (debug_dir / f"{debug_name}.txt").write_text("\n".join(lines)[:20000], encoding="utf-8")
-                try:
-                    page.screenshot(path=str(debug_dir / f"{debug_name}.png"))
-                except Exception:
-                    pass
-            # 粉丝数在单独子页时（如知乎「关注者分析」），主页抓完再来这里取
-            fu = cfg.get("followers_url")
-            if fu and r["followers"] is None:
-                try:
-                    page.goto(fu, wait_until="domcontentloaded", timeout=30000)
-                    flabels = cfg.get("followers_labels", ov["followers"])
-                    flines = _poll_stable(
-                        page, lambda L: (num_by_label(L, flabels, "after"),)
-                        if num_by_label(L, flabels, "after") is not None else None, 8000)
-                    r["followers"] = num_by_label(flines, flabels, "after")
-                except Exception:
-                    pass
-            # 最新笔记放最后抓——小红书会跳转到笔记管理页，之后不再读首页
-            r["notes"] = _scrape_notes(platform, page, cfg) if r["logged_in"] else []
-        finally:
-            ctx.close()
+                    if not _has_body(page):
+                        raise
+                if _login_wall(page):
+                    r["logged_in"] = False
+                    return r
+                ov, d = cfg["overview"], cfg.get("overview_dir", "after")
+                mets = cfg.get("metrics", [])
+                manchor = cfg.get("metrics_anchor")
+                # 稳定性轮询：概览/指标数值连续两次一致才走，避开占位0→真实值的异步坑
+                def _sig(L):
+                    lk = num_by_label(L, ov.get("likes", []), d)
+                    fo = num_by_label(L, ov.get("followers", []), d)
+                    m = metrics_with_vs(L, mets, manchor)
+                    mv = m[0]["value"] if m else None
+                    # 配了 metrics_anchor（如抖音「近7日」）说明该页必有指标块；块异步晚于概览渲染，
+                    # 若还没解析到指标就别急着「稳定」返回，继续轮询等它出来（避免 metrics 偶发为空）。
+                    if manchor and mets and not m:
+                        return None
+                    return None if (lk is None and fo is None and mv is None) else (lk, fo, mv)
+                lines = _poll_stable(page, _sig, 10000)
+                clicked = False
+                for txt in cfg.get("pre_click", []):   # 前置点击（如知乎点「累计」tab 拿总量）
+                    try:
+                        page.click(f"text={txt}", timeout=3000)
+                        clicked = True
+                    except Exception:
+                        pass
+                if clicked:
+                    lines = _poll_stable(page, _sig, 6000)   # 点「累计」后重新等稳定
+                if _login_wall(page):
+                    r["logged_in"] = False
+                if r["logged_in"]:
+                    r["logged_in"] = _platform_logged_in(page, cfg)
+                if not r["logged_in"]:
+                    return r
+                r["followers"] = num_by_label(lines, ov["followers"], d)
+                r["likes"] = num_by_label(lines, ov["likes"], d)
+                r["following"] = num_by_label(lines, ov.get("following", []), d)
+                r["posts"] = num_by_label(lines, cfg.get("posts_labels", ["笔记数", "作品数", "内容数", "视频数"]), d)
+                r["metrics"] = metrics_with_vs(lines, cfg.get("metrics", []), manchor)[:8]
+                r["nickname"] = extract_nickname(lines, ov, cfg.get("uid_anchor", ""))
+                # 昵称优先用专用选择器（视频号文本锚点不稳：概览是「关注者1」同行，锚不到昵称）
+                nsel = cfg.get("nickname_selector")
+                if nsel:
+                    try:
+                        el = page.query_selector(nsel)
+                        if el:
+                            t = (el.inner_text() or "").strip().splitlines()
+                            if t and t[0]:
+                                r["nickname"] = t[0][:40]
+                    except Exception:
+                        pass
+                if os.environ.get("EASEL_STATS_DEBUG"):
+                    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+                    (ANALYTICS_DIR / f"{platform}-page.txt").write_text("\n".join(lines)[:20000], encoding="utf-8")
+                    try:
+                        page.screenshot(path=str(ANALYTICS_DIR / f"{platform}-page.png"))
+                    except Exception:
+                        pass
+                # 粉丝数在单独子页时（如知乎「关注者分析」），主页抓完再来这里取
+                fu = cfg.get("followers_url")
+                if fu and r["followers"] is None:
+                    try:
+                        page.goto(fu, wait_until="commit", timeout=10000)
+                        flabels = cfg.get("followers_labels", ov["followers"])
+                        flines = _poll_stable(
+                            page, lambda L: (num_by_label(L, flabels, "after"),)
+                            if num_by_label(L, flabels, "after") is not None else None, 8000)
+                        r["followers"] = num_by_label(flines, flabels, "after")
+                    except Exception:
+                        pass
+                # 最新笔记放最后抓——小红书会跳转到笔记管理页，之后不再读首页
+                r["notes"] = _scrape_notes(platform, page, cfg)
+            finally:
+                ctx.close()
+    finally:
+        if xhs_lock is not None:
+            xhs_lock.release()
     return r
 
 
@@ -598,32 +855,74 @@ def _poll_stable(page, sig, max_ms: int = 10000, step: int = 400) -> list[str]:
     避开「占位 0 → 真实值」的异步渲染坑；真·0 账号也会很快稳定。超时返回最后一次。"""
     prev = object()
     lines: list[str] = []
-    waited = 0
-    while waited < max_ms:
+    deadline = time.monotonic() + max_ms / 1000
+    while time.monotonic() < deadline:
         try:
-            lines = lines_of(page.inner_text("body"))
+            remaining = max(1, int((deadline - time.monotonic()) * 1000))
+            lines = lines_of(page.inner_text("body", timeout=min(1000, remaining)))
         except Exception:
             lines = []
         cur = sig(lines)
         if cur is not None and cur == prev:
             return lines
         prev = cur
-        page.wait_for_timeout(step)
-        waited += step
+        remaining = int((deadline - time.monotonic()) * 1000)
+        if remaining <= 0:
+            break
+        page.wait_for_timeout(min(step, remaining))
     return lines
 
 
+_XHS_UNPUBLISHED_TITLES = {"", "无笔记标题", "无标题", "(无标题)"}
+
+
+def is_public_xhs_note(note: dict) -> bool:
+    """创作中心「全部」会混进草稿。只保留已发出去的笔记。"""
+    title = (note.get("title") or "").strip()
+    if title in _XHS_UNPUBLISHED_TITLES:
+        return False
+    text = note.get("text") or ""
+    if re.search(r"(草稿|未发布|待发布)", text) and "已发布" not in text:
+        return False
+    href = note.get("href") or note.get("url") or ""
+    if "/publish/publish" in href:
+        return False
+    return True
+
+
+def _xhs_open_published_notes(page) -> None:
+    """笔记管理默认「全部」。点顶部「已发布」后再抓，避免草稿箱条目。"""
+    page.evaluate(
+        """() => {
+          const label = (e) => (e.innerText || e.textContent || '').replace(/\\s+/g, ' ').trim();
+          const visible = (e) => e.getClientRects && e.getClientRects().length;
+          const notCard = (e) => !e.closest('.note-card');
+          const prefer = [...document.querySelectorAll('[role="tab"], .ant-tabs-tab, button')];
+          const hit = prefer.find(e => label(e) === '已发布' && visible(e) && notCard(e))
+            || [...document.querySelectorAll('div, span, a')].find(
+                 e => label(e) === '已发布' && visible(e) && notCard(e));
+          if (hit) hit.click();
+        }"""
+    )
+    page.wait_for_timeout(1000)
+
+
 _XHS_NOTES_JS = """() => {
+  const skipTitle = new Set(['', '无笔记标题', '无标题', '(无标题)']);
   const out = [];
   document.querySelectorAll('.note-card').forEach(c => {
     const titleEl = c.querySelector('.note-card__title');
+    const title = (titleEl ? titleEl.textContent : '').trim().slice(0, 60);
+    const text = (c.innerText || '').replace(/\\s+/g, ' ');
+    if (skipTitle.has(title)) return;
+    if (/(草稿|未发布|待发布)/.test(text) && !/已发布/.test(text)) return;
     let noteId = '';
     try { noteId = (JSON.parse(c.getAttribute('data-impression') || '{}')
                     .noteTarget || {}).value?.noteId || ''; } catch (e) {}
-    // 尽力从卡片内链接拿 xsec_token（列表页不一定带）——供直接抓评论用
     let href = '';
     const a = c.querySelector("a[href*='xsec_token'], a[href*='/explore/'], a[href*='/item/']");
     if (a) href = a.href || '';
+    if ((href || '').includes('/publish/publish')) return;
     const img = c.querySelector('.note-card__cover img, img');
     // 逐篇指标：note-manager 卡片把「点赞/收藏/评论」写在 data-* 属性里（改版风险区，
     // 取不到就留空串，绝不猜）；发布日期在 .publish-time 或 title/aria 里。
@@ -652,6 +951,7 @@ _XHS_NOTES_JS = """() => {
       title: (titleEl ? titleEl.textContent : '').trim().slice(0, 100),
       noteId, href, tags,
       like, fav, cmt, publish,
+      text: (c.textContent || '').trim().slice(0, 200),
       cover: img ? (img.src || '') : '',
     });
   });
@@ -769,6 +1069,7 @@ def _extract_note_tokens(data) -> dict:
 def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
     """抓最新已发布内容（标题 + 可点链接 + 每条数据）。各平台内容页与结构不同，分平台解析。"""
     if platform == "xiaohongshu":
+        listener = None
         try:
             import re as _re
             from urllib.parse import urlparse as _up, parse_qs as _pq
@@ -781,13 +1082,21 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                 except Exception:
                     pass
             page.on("response", _on_resp)
+            listener = _on_resp
             page.goto("https://creator.xiaohongshu.com/new/note-manager",
-                      wait_until="domcontentloaded", timeout=30000)
+                      wait_until="commit", timeout=8000)
+            if _login_wall(page):
+                return []
             try:
-                page.wait_for_selector(".note-card", timeout=6000)
+                page.wait_for_selector(".note-card, [role='tab']", timeout=6000)
             except Exception:
-                page.wait_for_timeout(1500)
-            page.wait_for_timeout(800)  # 等列表接口回来
+                return []
+            _xhs_open_published_notes(page)
+            try:
+                page.wait_for_selector(".note-card", timeout=4000)
+            except Exception:
+                return []
+            page.wait_for_timeout(800)  # 等已发布列表接口回来
             out = []
             cards = page.evaluate(_XHS_NOTES_JS) or []
             if not cards:
@@ -795,6 +1104,8 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                 if re.search(r"(passport|/login)", page.url or "") or not re.search(r"暂无笔记|还没有发布|暂无内容|暂无作品", body):
                     raise RuntimeError("笔记列表未加载或登录已失效，未确认空列表")
             for n in cards:
+                if not is_public_xhs_note(n):
+                    continue
                 href = n.get("href") or ""
                 h_tok = h_nid = ""
                 if href:
@@ -832,21 +1143,25 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
                     "metrics_raw": {"likes": n.get("like"), "collects": n.get("fav"), "comments": n.get("cmt")},
                     "stat": " · ".join(parts),
                 })
-            try:
-                page.remove_listener("response", _on_resp)
-            except Exception:
-                pass
             return out
         except Exception as exc:
             raise RuntimeError("小红书笔记列表采集失败，未保存本次快照") from exc
+        finally:
+            if listener is not None:
+                try:
+                    page.remove_listener("response", listener)
+                except Exception:
+                    pass
     if platform == "zhihu":
         try:
             page.goto("https://www.zhihu.com/creator/manage/creation/all",
-                      wait_until="domcontentloaded", timeout=30000)
+                      wait_until="commit", timeout=10000)
+            if _login_wall(page):
+                return []
             try:
                 page.wait_for_selector("a[href*='zhuanlan.zhihu.com/p/'], a[href*='/answer/']", timeout=6000)
             except Exception:
-                page.wait_for_timeout(1500)
+                return []
             return [{"title": n.get("title") or "(无标题)", "url": n.get("href") or "",
                      "cover": "", "stat": n.get("stat") or ""}
                     for n in (page.evaluate(_ZHIHU_NOTES_JS) or [])]
@@ -855,11 +1170,13 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
     if platform == "douyin":
         try:
             page.goto("https://creator.douyin.com/creator-micro/content/manage",
-                      wait_until="domcontentloaded", timeout=30000)
+                      wait_until="commit", timeout=10000)
+            if _login_wall(page):
+                return []
             try:
                 page.wait_for_selector("a[href*='/video/'], img", timeout=6000)
             except Exception:
-                page.wait_for_timeout(1500)
+                return []
             page.wait_for_timeout(800)   # 等作品列表异步渲染
             return [{"title": n.get("title") or "(无标题)", "url": n.get("url") or "",
                      "cover": n.get("cover") or "", "stat": n.get("stat") or ""}
@@ -869,11 +1186,13 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
     if platform == "kuaishou":
         try:
             page.goto("https://cp.kuaishou.com/article/manage/video",
-                      wait_until="domcontentloaded", timeout=30000)
+                      wait_until="commit", timeout=10000)
+            if _login_wall(page):
+                return []
             try:
                 page.wait_for_selector("[class*='video-item']", timeout=6000)
             except Exception:
-                page.wait_for_timeout(1500)
+                return []
             # 快手作品无独立公开链接，点击回到作品管理页；完播率在每条「数据」详情、列表不含
             return [{"title": n.get("title") or "(无标题)",
                      "url": "https://cp.kuaishou.com/article/manage/video",
@@ -928,7 +1247,10 @@ def cmd_fetch(a) -> int:
     except Exception as e:
         _die(f"需要 playwright：{e}", 3)
     disable = True if a.no_proxy else (False if a.proxy else None)
-    s = _scrape(a.platform, a.headed, a.profile_base, _proxy(a.platform, a.proxy, disable))
+    try:
+        s = _scrape(a.platform, a.headed, a.profile_base, _proxy(a.platform, a.proxy, disable))
+    except Exception as error:
+        _die(str(error))
 
     now = int(time.time())
     snap = {"ts": now, "followers": s["followers"], "likes": s["likes"], "posts": s["posts"]}
@@ -957,9 +1279,16 @@ def cmd_fetch(a) -> int:
         "followers": s["followers"], "likes": s["likes"],
         "following": s["following"], "posts": s["posts"],
         "metrics": s["metrics"], "notes": s["notes"],
+        "metrics_title": "平台近 7 日（创作中心只给这档）",
+        "overview": [
+            {"key": "followers", "label": "粉丝", "value": s["followers"]},
+            {"key": "likes", "label": "获赞与收藏" if a.platform == "xiaohongshu" else "获赞", "value": s["likes"]},
+            {"key": "following", "label": "关注", "value": s["following"]},
+        ],
         "growth": growth, "fetched_at": now,
         "noteSnapshotCount": len(note_recs),
         "lastSnapshotAt": (note_recs[0]["fetched_at"] if note_recs else None),
+        "warning": s.get("warning", ""),
     }
     print(json.dumps(out, ensure_ascii=False))
     return 0
@@ -1020,10 +1349,14 @@ def cmd_selftest(_a) -> int:
     assert growth_windows([], cur)["last"] is None
     # 快照「变了才记」：空→记，全同→不记，任一变→记
     assert should_record([], {"followers": 4, "likes": 11, "posts": None}) is True
-    assert should_record([{"followers": 4, "likes": 11, "posts": None}],
-                         {"followers": 4, "likes": 11, "posts": None}) is False
-    assert should_record([{"followers": 4, "likes": 11, "posts": None}],
-                         {"followers": 5, "likes": 11, "posts": None}) is True
+    same_day = 100 * 86400
+    assert should_record([{"ts": same_day, "followers": 4, "likes": 11, "posts": None}],
+                         {"ts": same_day + 3600, "followers": 4, "likes": 11, "posts": None}) is False
+    assert should_record([{"ts": same_day, "followers": 4, "likes": 11, "posts": None}],
+                         {"ts": same_day + 3600, "followers": 5, "likes": 11, "posts": None}) is True
+    next_day = same_day + 86400
+    assert should_record([{"ts": same_day, "followers": 4, "likes": 11, "posts": None}],
+                         {"ts": next_day, "followers": 4, "likes": 11, "posts": None}) is True
     # 分层保留 compact：近90天全留、90~400天每天1条、>400天每周1条
     NOW = 500 * 86400
     hist = []
@@ -1049,7 +1382,12 @@ def cmd_selftest(_a) -> int:
                                                  {"id": "n2", "xsecToken": "t2"}, {"noteId": "n3"}]}}) \
         == {"n1": "t1", "n2": "t2"}
     assert _extract_note_tokens([]) == {}
-    print("✅ selftest 通过（解析 + 概览分方向取数(修获赞bug) + 近7日环比 + 多窗口增长 + 配置/代理 + 接口token提取）")
+    assert is_public_xhs_note({"title": "GPT6 两小时速通课题答辩PPT", "text": "展示 12"})
+    assert is_public_xhs_note({"title": "无笔记标题"}) is False
+    assert is_public_xhs_note({"title": "(无标题)"}) is False
+    assert is_public_xhs_note({"title": "还没写完", "text": "草稿 编辑"}) is False
+    assert is_public_xhs_note({"title": "有标题草稿", "href": "https://creator.xiaohongshu.com/publish/publish?id=1"}) is False
+    print("✅ selftest 通过（解析 + 概览分方向取数(修获赞bug) + 近7日环比 + 多窗口增长 + 配置/代理 + 接口token提取 + 排除草稿）")
     return 0
 
 

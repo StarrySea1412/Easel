@@ -297,7 +297,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
         errors[target.key] = `${target.label}需要视频，请从内容库选择。`;
         failureKinds[target.key] = { stage: 'preflight', code: 'video_required' };
       }
-      else requests.push({ platform: target.key, payload: { title, body: effective(target.key), media: [...selectedMedia], tags } });
+      else requests.push({ platform: target.key, payload: { title, body: effective(target.key), media: [...selectedMedia], tags, persona: persona || undefined } });
     }
     setBlocked(errors);
     if (!requests.length) { reportBlocked(); showToast('尚未提交到平台，请先处理账号或媒体提示。'); return; }
@@ -378,9 +378,11 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   };
   const addToCalendar = async (key: string) => {
     if (empty) return;
+    // 用本地日期（日历页按本地渲染）：toISOString 是 UTC，东八区 0-8 点会落到「昨天」
     const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     await createSchedule({
-      title: title.trim() || effective(key).slice(0, 20), date: d.toISOString().slice(0, 10),
+      title: title.trim() || effective(key).slice(0, 20), date,
       platform: PLATFORMS.find((p) => p.key === key)?.label || '', time: '', status: 'draft', note: effective(key),
     });
     showToast('已存为草稿并加入今天的日历');

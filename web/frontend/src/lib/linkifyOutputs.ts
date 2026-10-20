@@ -103,9 +103,11 @@ function transformLink(seg: string): string {
   if (!target.startsWith('outputs/')) return seg;
   const rel = target.slice('outputs/'.length);
   if (!rel || rel.split('/').some(part => part === '..' || part === '.')) return seg;
-  // 文件进入内容库预览；图片保留媒体目标，以便已有 ![图片] 正常内联。
+  // 文件进入内容库预览；可直接预览的媒体/文档保留 /api/media 目标（图片仍正常内联），
+  // 其余文件跳到内容库对应位置。
   try {
-    const url = IMG_RE.test(target) ? toMediaUrl(target) : toJumpUrl(target);
+    const previewable = /\.(?:png|jpe?g|gif|webp|svg|avif|bmp|ico|html?|mp4|webm|mov|m4v|mp3|wav|ogg|m4a|flac|pdf)$/i.test(target);
+    const url = previewable ? toMediaUrl(target) : toJumpUrl(target);
     return `${match[1]}(${url})`;
   } catch {
     return seg;

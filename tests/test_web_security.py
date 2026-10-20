@@ -8,6 +8,7 @@ Key 外泄。下面全是负向用例，配一条正向用例保证闸没修成�
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -38,11 +39,32 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "ENV_FILE", env_file)
     monkeypatch.setattr(web, "_openclaw_provider_creds",
                         lambda: {"myproxy": ("https://good.example.com/v1", "sk-fake-custom")})
-    monkeypatch.setattr(web, "_sync_openclaw_chat", lambda *a, **k: "")
+    # openclaw.json 也必须隔离：_sync_openclaw_chat 直连 state dir 下的 openclaw.json，
+    # 不隔离就会把夹具值写进用户真配置。重定向 home 根一次覆盖所有运行时路径。
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    oc_dir = tmp_path / ".openclaw-easel"
+    oc_dir.mkdir()
+    (oc_dir / "openclaw.json").write_text(json.dumps({
+        "models": {"providers": {"openai": {
+            "api": "openai-completions",
+            "apiKey": "sk-fake-existing",
+            "baseUrl": "https://api.openai.com/v1",
+            "models": [{"id": "gpt-4o"}],
+        }}},
+        "agents": {"defaults": {"model": {"primary": "openai/gpt-4o"}}},
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    if hasattr(web, "_oc_config_path"):
+        monkeypatch.setattr(web, "_oc_config_path", lambda: oc_dir / "openclaw.json")
+    if hasattr(web, "openclaw_state_dir"):
+        monkeypatch.setattr(web, "openclaw_state_dir", lambda: oc_dir)
+    monkeypatch.setattr(web, "DATA_DIR", tmp_path / "data")
     # Exercise route validation after the same trusted-host/loopback checks as
     # local callers; TestClient's default peer is the non-IP string 'testclient'.
-    with TestClient(web.app, base_url="http://127.0.0.1:7860", client=("127.0.0.1", 51234)) as c:
+    local = "http://127.0.0.1:7860"
+    with TestClient(web.app, base_url=local, client=("127.0.0.1", 51234),
+                    headers={"Origin": local}) as c:
         c.env_file = env_file          # 用例里用来断言「.env 一个字节都没变」
+        c.openclaw_cfg = oc_dir / "openclaw.json"   # 同理：真 openclaw.json 也不许被写
         yield c
 
 
@@ -208,7 +230,8 @@ def test_ssrf_guard_rejects_internal(url):
 def test_selftest_probe_has_guards():
     import inspect
     src = inspect.getsource(web.api_models_selftest)
-    assert "_valid_base_url" in src and "_ssrf_safe" in src, "探针前必须先过两道闸"
+    assert "_valid_base_url" in src and "_model_target_allowed" in src, "探针前必须先过两道闸"
+    assert "_ssrf_safe" in inspect.getsource(web._model_target_allowed)
     assert "redirect_request" in src, "不能跟跳转——跟了等于绕过前面的判断"
 
 
@@ -256,6 +279,22 @@ def test_model_only_change_not_blocked(client):
     assert web._read_env()["OPENAI_MODEL"] == "gpt-4o-mini"
 
 
+def test_save_never_writes_real_openclaw_config(client):
+    """回归（#62）：保存模型只能落在沙箱 openclaw.json 上。
+
+    _sync_openclaw_chat 会改写 provider 目录与 primary。一旦 home 没被隔离，pytest 就会把夹具值
+    写进用户真配置，跑完测试对话报 Unknown model。这里既断言 home 确实被重定向，又读回沙箱文件
+    断言写入结果——若哪天隔离失效（例如路径改成 import 期常量），两条断言都会响亮失败。
+    """
+    assert Path.home() != Path("~").expanduser(), "fixture 必须把 home 重定向到沙箱"
+    resp = _save(client, {"channel": "chat", "rows": [
+        {"slot": "openai", "model": "deepseek-flash",
+         "baseUrl": "https://api.deepseek.com", "key": "sk-fake-new"}]})
+    assert resp.status_code == 200, resp.text[:300]
+    data = json.loads(client.openclaw_cfg.read_text(encoding="utf-8"))
+    assert data["models"]["providers"]["openai"]["models"][0]["id"] == "deepseek-flash"
+
+
 # ---- #48 传输层：直连常驻网关提速，但绝不能把会话历史搞丢 ----
 
 def test_http_path_falls_back_without_httpx(monkeypatch):
@@ -282,6 +321,9 @@ def test_ready_probe_hits_chat_completions_not_models(monkeypatch):
     monkeypatch.setattr(web.urllib.request, 'urlopen', capture)
     assert web._gateway_http_ready(force=True)
     assert urls == ['http://127.0.0.1:19019/v1/chat/completions']
+
+    from easel.gateway_endpoint import chat_completions_url
+    assert chat_completions_url().endswith("/v1/chat/completions")
 
 
 @pytest.mark.parametrize("code,expected", [(400, True), (404, False), (500, False)])

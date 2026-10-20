@@ -48,6 +48,14 @@ def _done(out: Path, extra: str = "") -> None:
     print(f"✅ {out} ({kb:.0f} KB){(' ' + extra) if extra else ''}")
 
 
+
+def _require_pillow():
+    try:
+        from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        _die(f"未安装或无法加载 Pillow：{e}\n  pip install Pillow", 3)
+    return Image, ImageFilter, ImageEnhance, ImageOps
+
 def _denoise(im):
     """用 OpenCV fastNlMeans 去噪；无 cv2 则原样返回。"""
     try:
@@ -64,7 +72,7 @@ def _denoise(im):
 
 
 def cmd_enhance(a) -> int:
-    from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+    Image, ImageFilter, ImageEnhance, ImageOps = _require_pillow()
     src = _require(a.input)
     out = _prep_out(a.output)
     im = Image.open(src).convert("RGB")
@@ -112,7 +120,7 @@ def cmd_enhance(a) -> int:
 
 def cmd_selftest(_a) -> int:
     print("img_enhance 自检 ...", file=sys.stderr)
-    from PIL import Image, ImageFilter
+    Image, ImageFilter, _ImageEnhance, _ImageOps = _require_pillow()
     import tempfile
     with tempfile.TemporaryDirectory() as td_:
         d = Path(td_)

@@ -56,11 +56,12 @@ function AccountCheckResult({ result }: { result?: AccountVerification }) {
 
 /** 头像：有 URL 就显示图（加载失败退回首字），否则显示昵称/平台名首字。 */
 function Avatar({ url, name }: { url?: string; name: string }) {
-  const [broken, setBroken] = useState(false);
+  // A transient failure for one URL must not hide a later, refreshed avatar.
+  const [broken, setBroken] = useState('');
   const initial = (name || '?').trim().charAt(0);
-  if (url && !broken) {
+  if (url && broken !== url) {
     return <img className="account-avatar" src={url} alt={name}
-      referrerPolicy="no-referrer" onError={() => setBroken(true)} />;
+      referrerPolicy="no-referrer" onError={() => setBroken(url)} />;
   }
   return <div className="account-avatar account-avatar-fallback">{initial}</div>;
 }

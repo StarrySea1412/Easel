@@ -2,7 +2,7 @@
 
 历史上三处各写一份画像逻辑，且 CLI 还残留全局 USER.md（并发竞态）。
 统一到这里后：画像一律**作为消息内联**注入（`我当前使用的画像是「X」。`），
-由 OpenClaw 按 AGENTS.md 自行读取 `profiles/<X>/` 并凝练，每个请求自包含，无全局文件污染。
+由当前 Agent 执行引擎按 AGENTS.md 自行读取 `profiles/<X>/` 并凝练，每个请求自包含，无全局文件污染。
 参见 docs/prompt-stack.md。
 """
 
@@ -33,14 +33,15 @@ def list_personas() -> list[str]:
 
 
 def profile_exists(name: str) -> bool:
-    """检查画像目录是否存在。"""
+    """检查画像目录是否存在，拒绝把路径片段当作画像名。"""
     return valid_persona_name(name) and (PROFILES_DIR / name).is_dir()
 
 
 def valid_persona_name(name: str) -> bool:
-    """Accept a single user-facing profile directory, never a path."""
+    """Return whether ``name`` is a single, user-facing profile directory name."""
     return (
-        isinstance(name, str) and bool(name)
+        isinstance(name, str)
+        and bool(name)
         and not name.startswith((".", "_"))
         and not any(character in name for character in ("/", "\\", ":"))
         and not any(ord(character) < 32 for character in name)

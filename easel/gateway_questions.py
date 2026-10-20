@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import sqlite3
 import subprocess
@@ -28,19 +27,15 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-# --- path resolution -------------------------------------------------------
-
-HOME = Path.home()
-# Easel runs OpenClaw under an isolated `easel` profile at ~/.openclaw-easel/;
-# allow an override for non-default setups.
+from easel.gateway_endpoint import websocket_url
 from easel.openclaw_workspace import state_dir
+
+# --- path resolution -------------------------------------------------------
 
 PROFILE_DIR = state_dir()
 PROFILE_STATE_DIR = PROFILE_DIR / "state"
 PROFILE_DB = PROFILE_STATE_DIR / "openclaw.sqlite"
 
-# Resolve on each connection so configuration changes use the same endpoint as Web/doctor.
-from easel.gateway_endpoint import websocket_url
 
 # Gateway WS handshake constants. Kept here as a single source of truth rather
 # than buried in the connect payload — bump these to track OpenClaw's gateway
@@ -317,30 +312,34 @@ class GatewayClient:
             },
         }
         ws.send(json.dumps(conn))
-        ok = False
-        deadline = time.time() + self.timeout
-        while time.time() < deadline:
-            msg = json.loads(ws.recv())
-            if msg.get("id") == "1":
-                ok = msg.get("ok", False)
-                if not ok:
-                    ws.close()
-                    raise GatewayQuestionError(
-                        f"gateway connect failed: {json.dumps(msg.get('error'))[:200]}")
-                hello = msg.get("payload") or {}
-                features = hello.get("features") or {}
-                auth = hello.get("auth") or {}
-                self.methods = {m for m in features.get("methods", []) if isinstance(m, str)}
-                self.granted_scopes = {s for s in auth.get("scopes", []) if isinstance(s, str)}
-                server = hello.get("server")
-                version = server.get("version") if isinstance(server, dict) else None
-                self.server_version = (version if isinstance(version, str)
-                                       and re.fullmatch(r'[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,3}(?:[-+][A-Za-z0-9.-]{1,32})?', version)
-                                       else None)
-                break
-        if not ok:
+        try:
+            ok = False
+            deadline = time.time() + self.timeout
+            while time.time() < deadline:
+                msg = json.loads(ws.recv())
+                if msg.get("id") == "1":
+                    ok = msg.get("ok", False)
+                    if not ok:
+                        raise GatewayQuestionError(
+                            f"gateway connect failed: {json.dumps(msg.get('error'))[:200]}")
+                    hello = msg.get("payload") or {}
+                    features = hello.get("features") or {}
+                    auth = hello.get("auth") or {}
+                    self.methods = {m for m in features.get("methods", []) if isinstance(m, str)}
+                    self.granted_scopes = {s for s in auth.get("scopes", []) if isinstance(s, str)}
+                    server = hello.get("server")
+                    version = server.get("version") if isinstance(server, dict) else None
+                    self.server_version = (version if isinstance(version, str)
+                                           and re.fullmatch(r'[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,3}(?:[-+][A-Za-z0-9.-]{1,32})?', version)
+                                           else None)
+                    break
+            if not ok:
+                raise GatewayQuestionError("gateway connect timed out")
+        except Exception:
+            # 被网关拒绝（NOT_PAIRED/scope-upgrade）或收到非 JSON 帧时同样要关连接：
+            # 否则每轮 connect 都在网关侧留下一个悬挂 socket/配对申请，直到 GC。
             ws.close()
-            raise GatewayQuestionError("gateway connect timed out")
+            raise
         self.ws = ws
 
     def _rpc(self, method: str, params: dict, timeout: float | None = None,

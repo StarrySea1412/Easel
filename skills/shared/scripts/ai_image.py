@@ -3,6 +3,9 @@
 
 复用 Easel 已验证的 ecom-details-image/scripts/generate_image.py 约定：
   - OpenAI 兼容同步 API（/images/generations、/images/edits、/images/variations）
+  - Agnes AI（base_url 主机名含 agnes）：无 /images/edits、/images/variations，
+    文生图 / 图生图 / 变体统一打 /images/generations，输入图放 extra_body.image，
+    size 用 1K/2K/3K/4K 档位 + 独立 ratio，n>1 客户端逐张循环
   - apimart.ai 异步轮询 API（提交任务 → 轮询 /tasks/<id> → 下载）
   - 自动检测模式：base_url 含 "apimart" → async，其他 → sync；也可 --mode 强制指定
 

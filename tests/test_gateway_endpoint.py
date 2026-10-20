@@ -331,6 +331,14 @@ def test_gateway_ps1_resolution_order():
         "$Port = ConvertTo-GatewayPort $env:OPENCLAW_GATEWAY_PORT",
         "$Port = ConvertTo-GatewayPort $env:EASEL_GATEWAY_PORT",
         "$Port = Get-ConfiguredPort $ConfigDir",
-        "$Port = Get-ProfilePort $Profile",
+        "$Port = Get-ProfilePort $ProfileName",
     )]
     assert positions == sorted(positions)
+
+
+# 上游把 gateway.ps1 改成「向 Python 解析器询问端口」，因此删掉了上面这组镜像对拍，
+# 换成 test_gateway_ps1_delegates_to_python_resolver /
+# test_gateway_ps1_fails_loudly_when_unresolvable。本 fork 的 Windows 启动器保留
+# 自包含的 PowerShell 实现（不能依赖 venv 里存在 easel），所以这里继续用镜像对拍，
+# 不采用那两条断言：它们会要求删除 scripts/gateway.ps1 里的镜像实现，与本 fork 的
+# 启动/部署流程冲突。

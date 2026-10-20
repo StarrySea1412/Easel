@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easel"
-version = "0.7.6"
+version = "0.8.0"
 description = "社媒内容工作流整合层 — Easel CLI"
 requires-python = ">=3.10"
 # 运行依赖统一安装，确保 Web、媒体处理和浏览器发布开箱可用。
@@ -23,6 +23,7 @@ dependencies = [
     "rembg>=2.0,<3", "biliup==1.2.9", "jieba>=0.42,<1", "snownlp>=0.12,<1",
     "markdown>=3.5,<4",
     "python-pptx>=1.0,<2",      # PPT 生成（pptx-slides 技能：大纲→pptx+HTML/PNG/PDF）
+    "requests>=2.32,<3", "beautifulsoup4>=4.12,<5",  # 上游合并：技能抓取与解析
     # ask_user 问答题桥接（easel/gateway_questions.py）：连本地 gateway WS RPC + Ed25519 设备签名
     # 只用到 load_pem_private_key + Ed25519.sign（长期稳定 API），上界放宽避免与新版冲突
     "websocket-client>=1.7,<2",

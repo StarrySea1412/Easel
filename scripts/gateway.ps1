@@ -1,5 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
-$Profile = 'easel'
+# 不要用 $Profile：它是 PowerShell 的自动变量（当前用户的配置脚本路径），
+# 覆写它会遮蔽自动变量，PSScriptAnalyzer 也会直接报警。
+$ProfileName = 'easel'
 $Root = Split-Path -Parent $PSScriptRoot
 $env:EASEL_ROOT = $Root
 if (-not $env:EASEL_DATA_DIR) { $env:EASEL_DATA_DIR = $Root }
@@ -14,7 +16,7 @@ if (-not $env:EASEL_PYTHON -and (Test-Path -LiteralPath $VenvPython -PathType Le
 if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR }
 $LogFile = Join-Path $env:EASEL_DATA_DIR 'gateway.log'
 $ErrorLogFile = Join-Path $env:EASEL_DATA_DIR 'gateway.error.log'
-$ConfigDir = Join-Path $HOME ".openclaw-$Profile"
+$ConfigDir = Join-Path $HOME ".openclaw-$ProfileName"
 if ($env:EASEL_OPENCLAW_STATE_DIR) { $ConfigDir = $env:EASEL_OPENCLAW_STATE_DIR }
 function ConvertTo-GatewayPort([string]$Raw) {
     $value = $Raw.Trim()
@@ -42,8 +44,8 @@ function Get-ConfiguredPort([string]$Directory) {
 $Port = ConvertTo-GatewayPort $env:OPENCLAW_GATEWAY_PORT
 if (-not $Port) { $Port = ConvertTo-GatewayPort $env:EASEL_GATEWAY_PORT }
 if (-not $Port) { $Port = Get-ConfiguredPort $ConfigDir }
-if (-not $Port) { $Port = Get-ProfilePort $Profile }
-$env:OPENCLAW_GATEWAY_PORT = [string]$Port
+if (-not $Port) { $Port = Get-ProfilePort $ProfileName }
+$env:OPENCLAW_GATEWAY_PORT = "$Port"
 $StartupTimeout = 300
 if ($env:EASEL_GATEWAY_STARTUP_TIMEOUT) {
     $requestedTimeout = 0
@@ -62,7 +64,7 @@ function Test-Gateway {
 function Get-GatewayProcess {
     # Match the complete profile argument; easel-other belongs to another user
     # profile and must never be stopped by Easel's restart command.
-    $commandPattern = 'openclaw.*(?:^|\s)--profile\s+(?:"{0}"|''{0}''|{0})\s+gateway(?:\s|$)' -f [regex]::Escape($Profile)
+    $commandPattern = 'openclaw.*(?:^|\s)--profile\s+(?:"{0}"|''{0}''|{0})\s+gateway(?:\s|$)' -f [regex]::Escape($ProfileName)
     Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
         Where-Object { $_.CommandLine -match $commandPattern -and $_.CommandLine -match ('--port\s+' + $Port + '(?:\s|$)') }
 }
@@ -92,8 +94,8 @@ switch ($args[0]) {
             break
         }
         New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
-        Write-Host "[easel] Starting Easel gateway (profile: $Profile)..."
-        $command = "openclaw --profile $Profile gateway run --allow-unconfigured --bind loopback --port $Port"
+        Write-Host "[easel] Starting Easel gateway (profile: $ProfileName)..."
+        $command = "openclaw --profile $ProfileName gateway run --allow-unconfigured --bind loopback --port $Port"
         Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $command `
             -WorkingDirectory $Root -RedirectStandardOutput $LogFile -RedirectStandardError $ErrorLogFile -WindowStyle Hidden | Out-Null
         $ready = $false
@@ -108,8 +110,8 @@ switch ($args[0]) {
     'stop' { Stop-Gateway }
     'restart' { Stop-Gateway; Start-Sleep -Seconds 2; & $PSCommandPath start }
     'status' {
-        if (Test-Gateway) { Write-Host "[easel] Gateway running (profile: $Profile)" }
-        else { Write-Host '[easel] Gateway not running' }
+        if (Test-Gateway) { Write-Host "[easel] Gateway running (profile: $ProfileName, port: $Port)" }
+        else { Write-Host "[easel] Gateway not running (profile: $ProfileName, port: $Port)" }
     }
     'logs' { Get-Content $LogFile -Wait }
     default { Write-Host 'Usage: gateway.ps1 {start|stop|restart|status|logs}'; exit 1 }

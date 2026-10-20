@@ -1,7 +1,7 @@
 # Easel Skill 能力地图
 
-> 本文档按 Easel 的内容工作流分层介绍当前技能库。每个条目对应 `skills/openclaw/` 中一个可用的 `SKILL.md`。
-> 当前共 **115 个 Skill**；这里只说明各 Skill 负责什么，具体输入、输出和执行流程请查看对应目录。
+> 本文档按 Easel 的内容工作流分层介绍当前技能库。每个条目对应 `skills/builtin/`（内置）或 `skills/openclaw/`（扩展） 中一个可用的 `SKILL.md`。
+> 当前共 **116 个 Skill**；这里只说明各 Skill 负责什么，具体输入、输出和执行流程请查看对应目录。
 
 ## 🗺️ 分层总览
 

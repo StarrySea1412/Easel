@@ -435,6 +435,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         key2: r.keyNew2 || '',
         primary: r.role === '主',
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
+        // 自定义供应商的推理开关只在该行有意义；其余行后端不读。
+        thinking: channel === 'chat' && r.slot === 'custom' ? r.thinking : undefined,
+        thinkingFormat: channel === 'chat' && r.slot === 'custom' && r.thinking && r.protocol !== 'anthropic'
+          ? (r.thinkingFormat || undefined) : undefined,
         contextWindow: channel === 'chat' ? r.contextWindow : undefined,
         enabled: channel === 'chat' ? r.enabled !== false : undefined,
       }));

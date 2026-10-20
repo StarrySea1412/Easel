@@ -66,15 +66,28 @@ def _done(out: Path, extra: str = "") -> None:
     print(f"✅ {out} ({kb:.0f} KB){(' ' + extra) if extra else ''}")
 
 
+def _require_rembg():
+    try:
+        import rembg
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        _die(f"未安装或无法加载 rembg/onnxruntime：{e}\n  pip install rembg onnxruntime", 3)
+    return rembg
+
+
+def _require_pillow():
+    try:
+        from PIL import Image
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        _die(f"未安装或无法加载 Pillow：{e}\n  pip install Pillow", 3)
+    return Image
+
+
 def _load_session(model: str):
     _ensure_proxy()
+    rembg = _require_rembg()
     try:
-        from rembg import new_session
-    except Exception as e:
-        _die(f"未安装 rembg：{e}\n  pip install rembg onnxruntime", 3)
-    try:
-        return new_session(model)
-    except Exception as e:
+        return rembg.new_session(model)
+    except (Exception, SystemExit) as e:  # noqa: BLE001
         _die(f"加载模型 {model} 失败（可能是下载失败/网络问题）：{e}", 3)
 
 
@@ -83,15 +96,15 @@ def cmd_remove(a) -> int:
         _die("--bg-color 与 --bg-image 二选一。", 2)
     src = _require(a.input)
     out = _prep_out(a.output)
-    from rembg import remove
-    from PIL import Image
+    rembg = _require_rembg()
+    Image = _require_pillow()
 
     session = _load_session(a.model)
     with Image.open(src) as im:
         im = im.convert("RGBA")
-        cut = remove(im, session=session,
-                     alpha_matting=a.alpha_matting,
-                     post_process_mask=True)  # RGBA
+        cut = rembg.remove(im, session=session,
+                           alpha_matting=a.alpha_matting,
+                           post_process_mask=True)  # RGBA
 
     if a.bg_color:
         bg = Image.new("RGBA", cut.size, a.bg_color)
@@ -127,20 +140,20 @@ def cmd_remove(a) -> int:
 def cmd_check(a) -> int:
     ok = True
     try:
-        import rembg  # noqa
+        rembg = _require_rembg()
         print(f"✅ rembg {getattr(rembg, '__version__', '?')}")
-    except Exception as e:
-        print(f"❌ rembg 未安装：{e}（pip install rembg onnxruntime）"); ok = False
+    except SystemExit:
+        print("❌ rembg/onnxruntime 未安装或无法加载（pip install rembg onnxruntime）"); ok = False
     try:
         import onnxruntime  # noqa
         print(f"✅ onnxruntime {onnxruntime.__version__}")
-    except Exception as e:
-        print(f"❌ onnxruntime 未安装：{e}"); ok = False
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        print(f"❌ onnxruntime 未安装或无法加载：{e}"); ok = False
     try:
-        from PIL import Image  # noqa
+        _require_pillow()
         print("✅ Pillow")
-    except Exception as e:
-        print(f"❌ Pillow 未安装：{e}"); ok = False
+    except SystemExit:
+        print("❌ Pillow 未安装或无法加载（pip install Pillow）"); ok = False
     print(f"可用模型：{', '.join(_MODELS)}（默认 u2net）")
     print("模型缓存目录：~/.u2net/（首次运行自动下载，需外网代理）")
     return 0 if ok else 3
@@ -148,14 +161,17 @@ def cmd_check(a) -> int:
 
 def cmd_selftest(_a) -> int:
     print("remove_bg 自检 ...", file=sys.stderr)
-    from PIL import Image
+    Image = _require_pillow()
     import tempfile
     with tempfile.TemporaryDirectory() as td_:
         d = Path(td_)
         # 造一张：白底中心一个红圆（主体）
         src = d / "src.png"
         im = Image.new("RGB", (256, 256), "white")
-        from PIL import ImageDraw
+        try:
+            from PIL import ImageDraw
+        except (Exception, SystemExit) as e:  # noqa: BLE001
+            _die(f"未安装或无法加载 Pillow：{e}\n  pip install Pillow", 3)
         ImageDraw.Draw(im).ellipse((64, 64, 192, 192), fill=(220, 30, 30))
         im.save(src)
 

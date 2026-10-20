@@ -13,10 +13,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 
-STATES = ("starting", "qr_ready", "scanned", "sms_required", "verifying",
+STATES = ("starting", "qr_ready", "window_login", "scanned", "sms_required", "verifying",
           "success", "expired", "error")
 
 
@@ -36,6 +37,17 @@ def report_scan(path: str | None, page) -> bool:
             # A navigating frame or unsupported widget supplies no evidence.
             continue
     return False
+
+
+def configure_stdio() -> None:
+    """让登录日志在 Windows GBK 终端和重定向文件中都能输出中文、emoji。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
 
 
 def read_sms_code(path: str | None) -> str:

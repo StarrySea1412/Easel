@@ -9,12 +9,16 @@ import web.app as web
 
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("EASEL_AGENT_RUNTIME", "openclaw")
     env_path = tmp_path / ".env"
     env_path.write_text("", encoding="utf-8")
     config_path = tmp_path / "openclaw.json"
     config_path.write_text(json.dumps({"models": {"providers": {}}}), encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_path)
     monkeypatch.setattr(web, "openclaw_state_dir", lambda: tmp_path)
+    # 合并后的 app 两种读配置入口都在用；两个都指向临时目录，测试不碰用户配置。
+    if hasattr(web, "_oc_config_path"):
+        monkeypatch.setattr(web, "_oc_config_path", lambda: config_path)
     monkeypatch.setattr(web, "DATA_DIR", tmp_path / "data")
     local = "http://127.0.0.1:7860"
     client = TestClient(web.app, base_url=local, client=("127.0.0.1", 51234),
@@ -152,3 +156,9 @@ def test_mirror_only_credentials_keep_their_url_on_model_only_save(sandbox, slot
     mirror = json.loads(config_path.read_text())["models"]["providers"][provider]
     assert mirror["baseUrl"] == "https://old.example/v1"
     assert mirror["apiKey"] == "sk-mirror-test"
+
+
+# 上游新增的 panel 测试（full panel relay pair / 旧 relay 迁移）断言 relay 槽位写入
+# models.providers.anthropic 并删除 relay。本 fork 保留 relay 与官方 Anthropic 为两个
+# 独立 provider（见 seed() 里的 provider = slot），不采用 relay→anthropic 迁移，
+# 因此这些用例不在此文件中保留。

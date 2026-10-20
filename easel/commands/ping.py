@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from easel.gateway_endpoint import healthz_url, chat_completions_url, describe
+from easel.gateway_endpoint import (healthz_url, chat_completions_url, describe,
+                                    port_source)
 from easel.openclaw_cmd import openclaw_base_cmd
-from easel.paths import child_env
+from easel.paths import child_env, data_root
+from easel.direct_api import DirectAPIError, read_settings, stream_chat
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -52,16 +55,50 @@ def _step(label: str, cmd: list[str], timeout: int = 30,
 
 def cmd_ping(_args) -> int:
     print("[easel] 连通性测试\n")
+    from pathlib import Path
+    from easel import harnesses
+    from easel.harnesses.base import HarnessError
+    root = Path(__file__).resolve().parents[2]
+    # 与 doctor/web 一致：配置读持久数据目录，而不是源码/安装目录。
+    settings = read_settings(data_root(root) / ".env")
+    runtime = harnesses.settings(root / "outputs", settings)["runtime"]
+    if runtime not in ("api", "openclaw"):
+        try:
+            asyncio.run(asyncio.wait_for(
+                harnesses.console_turn("请只回复 PONG，不执行任何工具", root, settings,
+                                       timeout=60, interactive=False), 60))
+            print(f"\n{runtime} 连通性测试通过")
+            return 0
+        except (HarnessError, asyncio.TimeoutError) as error:
+            print(f"\n{runtime} 连通性失败：{error or '请求超时'}")
+            return 1
+    if runtime == "api":
+        async def probe():
+            async for kind, text in stream_chat(settings, "请只回复 PONG", timeout=30):
+                if kind == "token":
+                    print(text, end="", flush=True)
+        try:
+            asyncio.run(asyncio.wait_for(probe(), timeout=35))
+        except (DirectAPIError, asyncio.TimeoutError) as error:
+            print(f"\n{RED}API 直连 FAIL{NC}：{error or '请求超时'}")
+            return 1
+        print(f"\n{GREEN}✓ API 直连通过（未使用 OpenClaw）{NC}")
+        return 0
     all_ok = True
 
-    # Step 1: Gateway healthz
+    # Step 1: Gateway healthz（端口不写死：非默认 profile 走哈希，easel → 37289）
     try:
-        with urllib.request.urlopen(healthz_url(), timeout=10) as response:
+        # 回环探针不走继承的 http_proxy（doctor 同款）：否则代理环境下健康的
+        # 网关会被误报 FAIL，诱导用户去重启一个其实活着的 gateway。
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(healthz_url(), timeout=10) as response:
             gateway_ok = response.status == 200
     except (OSError, urllib.error.URLError):
         gateway_ok = False
     print(f"  {('Step 1: Gateway healthz ' + describe()):<50s} "
           f"{GREEN if gateway_ok else RED}{'OK' if gateway_ok else 'FAIL'}{NC}")
+    if not gateway_ok:
+        print(f"    └─ 端口来自 {port_source()}；改了 profile/端口后请 python -m easel gateway restart")
     all_ok &= gateway_ok
 
     # Step 2: OpenClaw agent

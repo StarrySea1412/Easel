@@ -13,7 +13,7 @@
 创意（谁说什么、什么情绪）由上层 LLM 产出到 lines.json；音色映射在 cast.json。
 本脚本只做确定性编排：逐行合成 + 情绪→韵律 + ffmpeg 拼接 + SRT 时序。**路径无关**：
 输入/输出都用显式文件路径，不绑定任何目录约定（短剧的 --series/--episode 便利层见
-skills/openclaw/short-drama/scripts/dubbing.py，它委派本引擎）。
+skills/builtin/short-drama/scripts/dubbing.py，它委派本引擎）。
 
 子命令：
     cast init   --cast FILE            生成 cast.json 模板（含旁白）
@@ -965,7 +965,16 @@ def _selftest() -> int:
     return 0 if ok else 1
 
 
+def _load_default_env() -> None:
+    try:
+        import ai_video
+        ai_video.load_env_file(ai_video.find_default_env_file())
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> int:
+    _load_default_env()
     ap = argparse.ArgumentParser(
         description="多角色/对话配音引擎（cast + lines → 多声线 voice.mp3 + srt）",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)

@@ -132,6 +132,14 @@ def _summary(path: Path) -> dict:
     }
 
 
+def _input_sample_rate(path: Path) -> str | None:
+    rate = _summary(path).get("sample_rate")
+    if rate is None:
+        return None
+    rate = str(rate).strip()
+    return rate if rate.isdigit() else None
+
+
 def _report(out: Path) -> None:
     s = _summary(out)
     kb = s["size_bytes"] / 1024
@@ -188,6 +196,9 @@ def cmd_normalize(args) -> int:
     inp = _check_input(args.input)
     out = _prep_output(args.output)
     ln = f"loudnorm=I={args.i}:TP={args.tp}:LRA={args.lra}"
+    sample_rate = _input_sample_rate(inp)
+    if sample_rate:
+        ln += f",aresample={sample_rate}"
     cmd = ["-i", str(inp), "-af", ln]
     if args.bitrate:
         cmd += ["-b:a", args.bitrate]
@@ -317,6 +328,9 @@ def cmd_denoise(args) -> int:
     out = _prep_output(args.output)
     model = _ensure_rnnoise_model(args.model) if args.tier == 3 else None
     filt, used = _denoise_filter(args.tier, model, args.mix)
+    sample_rate = _input_sample_rate(inp)
+    if used == 3 and sample_rate:
+        filt += f",aresample={sample_rate}"
     print(f"  降噪 Tier{used}: {filt}", file=sys.stderr)
     cmd = ["-i", str(inp), "-af", filt]
     # 视频输入只处理音轨，视频轨原样保留。

@@ -165,18 +165,53 @@ function Ensure-Command($Name, $PackageId, $Hint) {
     Info "未找到 $Name，使用 winget 安装 $PackageId..."
     & winget install --id $PackageId --exact --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { Fail "$Name 自动安装失败。$Hint" }
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    # 追加注册表 PATH，而不是替换：进程内已有的 PATH（隔离 npm 前缀、Node 目录）不能丢。
+    $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
     Require-Command $Name $Hint
 }
 function Read-EnvFile($Path) {
     $values = @{}
-    if (Test-Path $Path) { Get-Content $Path | ForEach-Object { if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') { $values[$matches[1]] = $matches[2].Trim().Trim('"').Trim("'") } } }
+    # 显式 -Encoding UTF8：PS 5.1 的 Get-Content 默认按系统 ANSI 代码页解码，
+    # 而 .env 由 UTF-8 的 .env.example 复制而来，中文系统上会解出乱码。
+    if (Test-Path $Path) { Get-Content $Path -Encoding UTF8 | ForEach-Object { if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') { $values[$matches[1]] = $matches[2].Trim().Trim('"').Trim("'") } } }
     return $values
 }
 function Read-Secret($Prompt) {
     $secure = Read-Host $Prompt -AsSecureString
     return [System.Net.NetworkCredential]::new('', $secure).Password
 }
+# 任何对原生命令做 stderr 重定向的地方都必须走这里：
+# 文件顶部是 $ErrorActionPreference = 'Stop'，而 Windows PowerShell 5.1 在 Stop 下会把
+# 原生命令 stderr 的每一行包成 ErrorRecord 抛出 NativeCommandError —— 脚本级终止，
+# 轮不到读 $LASTEXITCODE。局部降到 Continue 再捕获输出与退出码。
+function Invoke-NativeCapture([string]$Exe, [string[]]$Arguments) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = (& $Exe @Arguments 2>&1 | Out-String)
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return [pscustomobject]@{ Ok = ($code -eq 0); Output = $out; Code = $code }
+}
+
+function Invoke-OpenClawRaw([string[]]$Arguments) {
+    return (Invoke-NativeCapture 'openclaw' $Arguments)
+}
+
+# 能力探测（带记忆）：读 --help 判断某个子命令/标志在当前版本上存在不存在。
+# 比「先调用、失败再回退」可靠 —— 后者分不清「不支持该功能」与「这次配置真的写错了」。
+$script:OcCaps = @{}
+function Test-OpenClawSupport([string[]]$SubCommand, [string]$Needle) {
+    $cacheKey = ($SubCommand -join ' ') + '|' + $Needle
+    if (-not $script:OcCaps.ContainsKey($cacheKey)) {
+        $r = Invoke-OpenClawRaw (@('--profile','easel') + $SubCommand + @('--help'))
+        $script:OcCaps[$cacheKey] = ($r.Output -match [regex]::Escape($Needle))
+    }
+    return $script:OcCaps[$cacheKey]
+}
+
 function OpenClaw-Config($Key, $Value, [switch]$Json) {
     $ErrorActionPreference = 'Continue'
     $arguments = @('--profile','easel','config','set',$Key,$Value)
@@ -196,17 +231,32 @@ function Try-OpenClawConfig($Key, $Value, [switch]$Json) {
 # 双引号：任何含 JSON 的 config set 都会变成裸键值、--strict-json 解析失败（见 issue #41）。
 # 这里改走 --batch-file：argv 里只出现临时文件路径（无引号字符），JSON 从文件读，5.1/7 行为一致。
 function OpenClaw-ConfigBatch($Operations) {
-    $ErrorActionPreference = 'Continue'
     $batchPath = Join-Path ([System.IO.Path]::GetTempPath()) "easel-config-set-$(Get-Random).json"
     try {
         [System.IO.File]::WriteAllText($batchPath, (ConvertTo-Json -InputObject $Operations -Depth 40 -Compress))
-        & openclaw --profile easel config set --batch-file $batchPath 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return }
-        # 老版本 openclaw 不认 --batch-file：退回逐条写入（PS7 可用；Windows PS5.1 下请升级 openclaw）
-        Write-Warning '当前 OpenClaw 不支持 --batch-file，退回逐条写入；建议 npm i -g openclaw@latest 升级。'
-        foreach ($op in $Operations) {
-            OpenClaw-Config $op.path (ConvertTo-Json -InputObject $op.value -Depth 40 -Compress) -Json
+        # 「支持不支持 --batch-file」必须由能力探测回答，不能拿退出码去推断：非零退出
+        # 同样可能是「这次配置真的被拒了」（2026.9.x 会拒绝删掉 provider 既有子键的整块
+        # 写入），按退出码回退会把真实配置错误误报成「不支持 --batch-file」。
+        if (-not (Test-OpenClawSupport @('config','set') '--batch-file')) {
+            # 老版本 openclaw 不认 --batch-file：退回逐条写入（PS7 可用；Windows PS5.1 下请升级 openclaw）
+            Write-Warning '当前 OpenClaw 不支持 --batch-file，退回逐条写入；建议 npm i -g openclaw@latest 升级。'
+            foreach ($op in $Operations) {
+                OpenClaw-Config $op.path (ConvertTo-Json -InputObject $op.value -Depth 40 -Compress) -Json
+            }
+            return
         }
+        $arguments = @('--profile','easel','config','set','--batch-file',$batchPath)
+        # --replace 明确声明「有意整块替换」：不声明时 2026.9.x 会拒绝任何会删掉既有
+        # 子键（例如 timeoutSeconds）的写入，让第二次安装失败、安装器不可重入。
+        if (Test-OpenClawSupport @('config','set') '--replace') { $arguments += '--replace' }
+        $r = Invoke-OpenClawRaw $arguments
+        if ($r.Ok) {
+            ($r.Output -split "`n") | Where-Object { $_ -and $_ -notmatch '^No change$' } |
+                ForEach-Object { Write-Host $_ }
+            return
+        }
+        $first = (($r.Output -split "`n") | Where-Object { $_ } | Select-Object -First 1)
+        Fail "OpenClaw 拒绝了这批配置（$first）"
     } finally { Remove-Item $batchPath -Force -ErrorAction SilentlyContinue }
 }
 # 原子写入 anthropic provider。部分 OpenClaw 版本（如 2026.3.x）的 schema 要求 provider 一次性带齐
@@ -300,8 +350,11 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
 
 foreach ($candidate in $candidates) {
     $candidateArgs = $candidate.arguments
-    & $candidate.command @candidateArgs -c $versionCheck
-    if ($LASTEXITCODE -eq 0) { $pythonCommand = $candidate.command; $pythonArgs = $candidateArgs; break }
+    # 这是一次可用性探测：python 存在但跑不起来（典型是 Windows 应用商店的占位
+    # python.exe）时要安静地换下一个候选，不能让它抛 NativeCommandError 打断安装。
+    if ((Invoke-NativeCapture $candidate.command ($candidateArgs + @('-c', $versionCheck))).Ok) {
+        $pythonCommand = $candidate.command; $pythonArgs = $candidateArgs; break
+    }
 }
 if (-not $pythonCommand) {
     if (-not $AllowWinget) { Fail '没有符合要求的 Python（发行版需要 3.12，源码需要 3.10+）；手动安装或用 -AllowWinget 重试。' }
@@ -408,8 +461,14 @@ function Invoke-profile {
         if (Test-Path -LiteralPath $configPath) {
             $env:OPENCLAW_CONFIG_PATH = $configPath
             Info '保留已有 OpenClaw profile；模型配置请在 Web 设置中修改。'
-            & openclaw --profile easel config validate
-            if ($LASTEXITCODE -ne 0) { Fail '已有 OpenClaw 配置无效，请修复后继续；安装器不会覆盖它。' }
+            # config validate 直到 2026.3 才有；老版本直接调会报「too many arguments」
+            # 并让安装在准备 Python 前就中止。先探测，无此子命令则跳过整体校验。
+            if (Test-OpenClawSupport @('config') 'validate') {
+                & openclaw --profile easel config validate
+                if ($LASTEXITCODE -ne 0) { Fail '已有 OpenClaw 配置无效，请修复后继续；安装器不会覆盖它。' }
+            } else {
+                Write-Warning '当前 OpenClaw 不支持 config validate，跳过整体校验（各配置项写入时已自行校验）。'
+            }
             return
         }
         # Publish a new config only once all writes/validation have succeeded.
@@ -515,9 +574,11 @@ if ($embeddingKey -and $embeddingUrl -and $embeddingModel) {
         Ok "独立向量模型已配置（memorySearch）：$($envValues[$embeddingModel])"
     }
 } else {
-    # 新 schema 用 memory.search.enabled=false 关闭向量检索；老 schema 用 provider=none。
+    # 关闭向量检索的键也随版本变过：「关闭」不能用 provider 枚举表达（2026.2.x 只认
+    # local/openai，写 none 会报 Invalid input 并中断安装）。两种 enabled=false 静默尝试，
+    # 关不掉也不该让安装失败；不配向量 API 时默认走关键词检索。
     if (-not (Try-OpenClawConfig 'memory.search.enabled' 'false' -Json)) {
-        OpenClaw-Config 'agents.defaults.memorySearch.provider' 'none'
+        $null = Try-OpenClawConfig 'agents.defaults.memorySearch.enabled' 'false' -Json
     }
     if (($embeddingKeyNames + $embeddingUrlNames + $embeddingModelNames | Where-Object { $envValues.ContainsKey($_) }).Count -gt 0) { Write-Warning '向量 API 配置不完整，已关闭向量检索；需要同时设置向量 API key、Base URL 和模型名' } else { Info '未配置独立向量 API，使用关键词记忆检索' }
 }
@@ -535,8 +596,12 @@ if (-not (Try-OpenClawConfig 'gateway.http.endpoints.chatCompletions.enabled' 't
 if ($anthropicSynced) {
     $null = Try-OpenClawConfig "models.providers.$syncedProvider.timeoutSeconds" '600'
 }
-& openclaw --profile easel config validate
-if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置校验失败。' }
+if (Test-OpenClawSupport @('config') 'validate') {
+    & openclaw --profile easel config validate
+    if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置校验失败。' }
+} else {
+    Write-Warning '当前 OpenClaw 不支持 config validate，跳过整体校验（各配置项写入时已自行校验）。'
+}
 
 }
 
@@ -588,11 +653,20 @@ if ([string]::IsNullOrWhiteSpace($workspace)) { Fail '无法确定 OpenClaw work
 $workspace = [System.IO.Path]::GetFullPath($workspace.Trim())
 $skillsPath = Join-Path $workspace 'skills'
 New-Item -ItemType Directory -Force -Path $skillsPath | Out-Null
-Copy-Item (Join-Path $Root 'skills\openclaw\*') -Destination $skillsPath -Recurse -Force
+# 2026.9 合并把源目录迁到 skills\builtin + agents\workspace；旧布局继续兼容源码树/旧发行包。
+$skillsSource = Join-Path $Root 'skills\builtin'
+if (-not (Test-Path -LiteralPath $skillsSource)) { $skillsSource = Join-Path $Root 'skills\openclaw' }
+if (Test-Path -LiteralPath $skillsSource) {
+    Copy-Item (Join-Path $skillsSource '*') -Destination $skillsPath -Recurse -Force
+}
 # Workspace personal instructions are never overwritten during upgrades.
-Get-ChildItem -LiteralPath (Join-Path $Root 'openclaw\workspace') -Filter '*.md' | ForEach-Object {
-    $destination = Join-Path $workspace $_.Name
-    if (-not (Test-Path -LiteralPath $destination)) { Copy-Item -LiteralPath $_.FullName -Destination $destination }
+$workspaceSource = Join-Path $Root 'agents\workspace'
+if (-not (Test-Path -LiteralPath $workspaceSource)) { $workspaceSource = Join-Path $Root 'openclaw\workspace' }
+if (Test-Path -LiteralPath $workspaceSource) {
+    Get-ChildItem -LiteralPath $workspaceSource -Filter '*.md' | ForEach-Object {
+        $destination = Join-Path $workspace $_.Name
+        if (-not (Test-Path -LiteralPath $destination)) { Copy-Item -LiteralPath $_.FullName -Destination $destination }
+    }
 }
 $context = Join-Path $workspace 'CONTEXT.md'
 @"
@@ -619,8 +693,12 @@ foreach ($mapping in @(@{ name='easel-profiles'; folder='profiles' }, @{ name='o
 function Invoke-gateway {
 
 Info '验证配置并启动 Gateway...'
-& openclaw --profile easel config validate
-if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置无效。' }
+if (Test-OpenClawSupport @('config') 'validate') {
+    & openclaw --profile easel config validate
+    if ($LASTEXITCODE -ne 0) { Fail 'OpenClaw 配置无效。' }
+} else {
+    Write-Warning '当前 OpenClaw 不支持 config validate，跳过整体校验。'
+}
 $identityFile = Join-Path $DataDir 'gateway-installation.json'
 $currentIdentity = @{ root=$Root.ToLowerInvariant(); version=$(if ($Manifest) { [string]$Manifest.version } else { (Get-Content -LiteralPath (Join-Path $Root 'pyproject.toml') -Raw) }) }
 $previousIdentity = $null

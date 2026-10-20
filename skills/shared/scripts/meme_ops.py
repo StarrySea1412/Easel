@@ -66,6 +66,14 @@ def _done(out: Path, extra: str = "") -> None:
     print(f"✅ {out} ({kb:.0f} KB){(' ' + extra) if extra else ''}")
 
 
+
+def _require_pillow():
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        _die(f"未安装或无法加载 Pillow：{e}\n  pip install Pillow", 3)
+    return Image, ImageDraw, ImageFont
+
 def _wrap(draw, text, font, max_w):
     """按最大宽度换行：含空格按词，其余按字符。返回行列表。"""
     text = text.strip()
@@ -103,7 +111,7 @@ def _wrap(draw, text, font, max_w):
 
 def _fit_font(draw, text, font_path, max_w, start_size, min_size=14, max_lines=4):
     """从 start_size 递减，直到文本换行后行数 ≤ max_lines。返回 (font, lines)。"""
-    from PIL import ImageFont
+    _Image, _ImageDraw, ImageFont = _require_pillow()
     size = start_size
     while size >= min_size:
         font = ImageFont.truetype(font_path, size)
@@ -129,7 +137,7 @@ def _draw_block(draw, lines, font, img_w, y, fill, stroke_fill, stroke_w, align_
 
 
 def cmd_make(a) -> int:
-    from PIL import Image, ImageDraw
+    Image, ImageDraw, _ImageFont = _require_pillow()
     src = _require(a.input)
     out = _prep_out(a.output)
     font_path = _find_font(a.font)
@@ -191,7 +199,7 @@ def cmd_make(a) -> int:
 
 def cmd_selftest(_a) -> int:
     print("meme_ops 自检 ...", file=sys.stderr)
-    from PIL import Image
+    Image, _ImageDraw, _ImageFont = _require_pillow()
     import tempfile
     with tempfile.TemporaryDirectory() as td_:
         d = Path(td_)

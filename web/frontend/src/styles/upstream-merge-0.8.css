@@ -1,0 +1,158 @@
+/* Upstream Easel v0.3.0 component styles, merged into the split design system.
+ *
+ * Only rules for classes introduced by upstream that our styles/*.css does not
+ * already define live here. Upstream's legacy `.settings-overlay` layout (and
+ * its profile-library rules for the old Profile page) are intentionally NOT
+ * copied: our fork replaced those screens with `.settings-page` / the current
+ * profile editor, which keep their own styles.
+ */
+
+/* ---- Agent 底座（HarnessSettings） -------------------------------------- */
+.settings-page .harness-settings { margin-bottom: 20px; }
+.settings-page .harness-settings .panel-top { flex-wrap: wrap; }
+.settings-page .harness-settings .settings-field {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.settings-page .harness-settings .settings-field:last-of-type { border-bottom: none; }
+.settings-page .harness-settings .settings-field-label { padding-top: 8px; font-size: 12.5px; font-weight: 500; color: var(--text-secondary); }
+.settings-page .harness-settings .settings-field-body { min-width: 0; max-width: 480px; }
+.settings-page .harness-settings .settings-field-body .desc { margin: 7px 0 0; line-height: 1.6; }
+
+.settings-permission-switch {
+  display: inline-flex; align-items: center; width: 40px; height: 24px; padding: 3px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-hover);
+  cursor: pointer; transition: background var(--t-fast);
+}
+.settings-permission-switch[aria-checked="true"] { background: var(--accent-start); border-color: var(--accent-start); }
+.settings-permission-switch__thumb {
+  width: 16px; height: 16px; border-radius: 50%; background: var(--bg);
+  box-shadow: var(--shadow-sm); transition: transform var(--t-fast);
+}
+.settings-permission-switch[aria-checked="true"] .settings-permission-switch__thumb { transform: translateX(16px); }
+.settings-permission-switch:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 3px; }
+.settings-permission-switch:disabled { opacity: .5; cursor: default; }
+
+.settings-page .settings-native-models { display: flex; gap: 9px; align-items: center; margin-bottom: 9px; }
+.settings-page .settings-native-models .settings-select-wrap { flex: 1; min-width: 0; }
+.settings-page .settings-native-models > .btn { flex-shrink: 0; }
+.settings-page .settings-select-wrap { display: block; width: 100%; }
+.settings-page .settings-select { min-height: 34px; font: inherit; font-size: 12.5px; text-align: left; }
+.settings-page .settings-select svg { flex-shrink: 0; color: var(--text-tertiary); }
+.settings-page .settings-select:focus-visible { outline: none; border-color: var(--accent-end); box-shadow: 0 0 0 3px var(--accent-soft); }
+.settings-page .settings-select:disabled { background: var(--surface-2); color: var(--text-tertiary); cursor: not-allowed; }
+.settings-page .settings-engine-control { display: flex; align-items: center; gap: 8px; }
+.settings-page .settings-engine-control .settings-select-wrap { flex: 1; min-width: 0; }
+.settings-page .settings-help { position: relative; flex: none; display: inline-flex; }
+.settings-page .settings-help-trigger {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
+  border: none; border-radius: 50%; background: transparent; color: var(--text-tertiary);
+  font: inherit; font-size: 16px; cursor: help;
+}
+.settings-page .settings-help-trigger:hover,
+.settings-page .settings-help-trigger:focus-visible { background: var(--surface-hover); color: var(--accent-end); }
+.settings-page .settings-help-trigger:focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }
+.settings-page .settings-help-tooltip {
+  position: absolute; z-index: 110; top: calc(100% + 8px); right: 0;
+  width: min(320px, calc(100vw - 48px)); padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-secondary); font-size: 12px; line-height: 1.7;
+  box-shadow: var(--shadow-md); visibility: hidden; opacity: 0; pointer-events: none;
+}
+.settings-page .settings-help:hover .settings-help-tooltip,
+.settings-page .settings-help:focus-within .settings-help-tooltip { visibility: visible; opacity: 1; pointer-events: auto; }
+
+@media (max-width: 640px) {
+  .settings-page .harness-settings .settings-field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .settings-page .harness-settings .settings-field-label { padding-top: 0; }
+  .settings-page .harness-settings .settings-field-body { max-width: none; }
+}
+
+/* ---- 本机 Agent 区块（设置 → 对话与脚本） ----------------------------- */
+.settings-page .local-agents {
+  margin: 12px 0 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.settings-page .la-head {
+  display: flex; align-items: baseline; gap: 10px; padding: 9px 16px;
+  font-size: 12.5px; font-weight: 600; background: var(--surface-2); border-bottom: 1px solid var(--border);
+}
+.settings-page .la-head .desc { font-weight: 400; color: var(--text-tertiary); }
+.settings-page .la-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--border); }
+.settings-page .la-row:last-of-type { border-bottom: none; }
+.settings-page .la-row:hover { background: var(--surface-hover); }
+.settings-page .la-name { display: flex; flex-direction: column; flex: 0 0 180px; min-width: 0; font-size: 12.5px; }
+.settings-page .la-name small { color: var(--text-tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-page .la-state {
+  flex: 0 0 auto; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  font-size: 11px; text-align: center;
+}
+.settings-page .la-state.ok { color: var(--green); border-color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
+.settings-page .la-act { display: flex; align-items: center; gap: 8px; flex: 0 0 300px; }
+.settings-page .la-hint { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-tertiary); }
+.settings-page .la-model {
+  width: 100%; max-width: 200px; padding: 4px 8px;
+  font: inherit; font-size: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: inherit; cursor: pointer; transition: border-color .12s ease;
+}
+.settings-page .la-model:hover { border-color: var(--text-tertiary); }
+.settings-page .la-model:focus { outline: none; border-color: var(--accent-end); }
+
+/* ---- 模型列：输入框 + 拉取按钮 + 自定义下拉 ---------------------------- */
+.settings-page .model-cell { display: flex; align-items: center; gap: 6px; min-width: 0; position: relative; }
+.settings-page .model-cell input.mock { min-width: 0; flex: 1 1 auto; }
+.settings-page .custom-model-cell { flex-wrap: wrap; }
+.settings-page .thinking-controls {
+  flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.settings-page .thinking-controls label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.settings-page .thinking-controls input { accent-color: var(--accent-end); margin: 0; }
+.settings-page .thinking-controls select {
+  min-width: 0; max-width: 100%; font-size: 11px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
+}
+.settings-page .fetch-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; font-size: 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; white-space: nowrap; transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.settings-page .fetch-btn:hover:not(:disabled) { color: var(--accent-end); border-color: var(--accent-end); background: color-mix(in srgb, var(--accent-end) 6%, var(--surface)); }
+.settings-page .fetch-btn:disabled { opacity: .55; cursor: default; }
+.settings-page .fetch-btn.ok { color: var(--green); border-color: var(--green); padding: 3px 7px; }
+.settings-page .fetch-btn .spin { width: 10px; height: 10px; border-width: 1.5px; }
+.settings-page .model-cell .fetch-err { color: var(--red); font-size: 12px; flex: 0 0 auto; cursor: help; }
+
+/* 下拉面板由 createPortal 挂到 body，选择器必须保持全局。 */
+.model-dd {
+  z-index: 100; min-width: 240px; max-width: 380px; max-height: 240px;
+  overflow: auto; padding: 4px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+.model-dd .dd-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 9px; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: var(--text);
+}
+.model-dd .dd-item:hover, .model-dd .dd-item.active { background: var(--accent-soft); }
+.model-dd .dd-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.model-dd .dd-item small { color: var(--text-tertiary); font-size: 11px; }
+.model-dd .dd-empty { padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 12px; }
+.model-dd .dd-pull {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px;
+  font-size: 12px; border: 1px solid var(--accent-end); border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent-end); cursor: pointer; font-weight: 500;
+}
+.model-dd .dd-pull:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-end) 16%, var(--surface)); }
+.model-dd .dd-pull:disabled { opacity: .6; cursor: default; }
+
+/* 自定义供应商行的协议选择触发器（浮层复用 .model-dd 视觉）。 */
+.proto-trigger {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+  min-width: 0; width: 100%; padding: 6px 9px; position: relative; user-select: none;
+  font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text);
+}
+.proto-trigger:hover { border-color: var(--border-strong); }
+.proto-trigger .proto-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

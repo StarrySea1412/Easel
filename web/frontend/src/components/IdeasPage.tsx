@@ -60,6 +60,7 @@ export default function IdeasPage({ onUseTopic }: IdeasPageProps) {
     catch { setError('删除选题失败，请重试。'); }
   };
   const schedule = async (it: Idea) => {
+    // 用本地日期（日历页按本地渲染）：toISOString 是 UTC，东八区 0-8 点会落到「昨天」
     const d = new Date();
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     try {

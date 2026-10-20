@@ -8,6 +8,9 @@
 - chat 入口可能中途触发制作层任务 → 按制作层预算，别被 turn 超时掐断。
 """
 
+TIMEOUT_HARNESS_CANCEL = 2      # 协议取消收尾预算，超时后仍清理本机进程树
+TIMEOUT_MODEL_TOOL_PROBE = 60
+
 TIMEOUT_PRODUCE = 7200   # 制作层：生视频 / 多镜合成给足时间
 TIMEOUT_DIRECT = 300     # 轻量直接执行层
 TIMEOUT_CHAT = TIMEOUT_PRODUCE   # chat 可能中途触发制作任务，按制作层预算

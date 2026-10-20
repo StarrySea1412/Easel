@@ -20,10 +20,15 @@ cd Easel
 ```bash
 python scripts/validate_skills.py            # SKILL frontmatter、目录结构、发布契约
 python scripts/validate_skill_commands.py    # 文档中的 python 命令与脚本真实 argparse 对齐
+python scripts/validate_document_paths.py    # 文档内路径与技能目录一致性
 python -m pytest -q                          # 根目录全量，包含 skills 内的测试
 ```
 
+路径校验覆盖根文档、`docs/`、`agents/` 和 `skills/` 下的 Markdown，以及画像模板和前端说明，包括深层参考文档和 Agent 提示材料。命令里的 `skills/...` 相对项目根，技能资源名相对技能目录，Markdown 链接与显式 `../` 相对当前文档；占位符和运行时生成的产物不要求预先存在。
+
 前端有改动时，在 `web/frontend` 运行 `npm test`、`npm run lint` 和 `npm run build`。交付时同步项目说明与进度，提交并推送本仓库后核对远端 SHA；首页介绍需与开发分支的实际功能和安装包边界一致。
+
+仅更新 OpenClaw 已同步的提示文档时可运行 `bash agents/sync.sh --docs-only`：更新内置技能与共享 Markdown、身份文档和运行时路径说明，不清空 `MEMORY.md`、不删除 `USER.md` 或自定义技能、不修改脚本和产物链接。其它原生执行引擎直接读取 `agents/workspace/`，不需要这一步。
 
 ## Skill 约定
 

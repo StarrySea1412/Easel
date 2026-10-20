@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import subprocess
 import sys
@@ -26,7 +27,13 @@ from easel.openclaw_cmd import openclaw_base_cmd
 from easel.paths import child_env, data_root
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
+from easel.persona import chat_turn_message
+from easel.persona import load_profile_text
+from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, history_path,
+                              read_settings, stream_chat)
 from easel.timeouts import TIMEOUT_CHAT
+from easel import harnesses
+from easel.harnesses.base import HarnessError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = data_root(PROJECT_ROOT) / "profiles"
@@ -124,6 +131,60 @@ def cmd_chat(_args) -> int:
 
     session_key = f"easel-{time.strftime('%m%d-%H%M%S')}"
 
+    settings = read_settings()
+    runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
+    if runtime not in ("api", "openclaw"):
+        print(f"  Agent 底座：{runtime}（/exit 退出）")
+        native_id = ""
+
+        def remember(value):
+            nonlocal native_id
+            native_id = value
+
+        while True:
+            try:
+                message = input("你：").strip()
+                if message in ("/exit", "/quit"):
+                    return 0
+                if message:
+                    # timeout 与同命令的 openclaw TUI / web 路径对齐（TIMEOUT_CHAT=7200）：
+                    # chat 可能中途触发制作层任务，console_turn 默认 1800s 会把它掐断。
+                    _, native_id = asyncio.run(harnesses.console_turn(
+                        chat_turn_message(message, selected_persona), PROJECT_ROOT,
+                        {**settings, **_proxy_env()}, native_id, on_bind=remember,
+                        timeout=TIMEOUT_CHAT))
+                    print()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            except (HarnessError, asyncio.TimeoutError) as error:
+                print(f"\nAgent 执行失败：{error or '请求超时'}")
+    if runtime == "api":
+        print("  API 直连模式（文字问答；/exit 退出）\n")
+        system = SYSTEM_PROMPT
+        if selected_persona:
+            system += "\n\n当前画像：\n" + load_profile_text(selected_persona)
+        async def reply(message):
+            async for kind, text in stream_chat(
+                    read_settings(), message, system=system,
+                    history_file=history_path(PROJECT_ROOT / "outputs" / "_sessions", session_key),
+                    timeout=TIMEOUT_CHAT):
+                if kind == "token":
+                    print(text, end="", flush=True)
+        while True:
+            try:
+                message = input("你：").strip()
+                if message in ("/exit", "/quit"):
+                    return 0
+                if message:
+                    asyncio.run(asyncio.wait_for(reply(message), TIMEOUT_CHAT))
+                    print()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            except (DirectAPIError, asyncio.TimeoutError) as error:
+                print(f"\n❌ {error or 'API 请求超时'}")
+
     print(f"  {DIM}会话: {session_key}{NC}")
     print(f"  {DIM}切换历史会话: 对话中输入 /session{NC}")
     print(f"  {CYAN}Ctrl+C{NC} 退出")
@@ -145,8 +206,10 @@ def cmd_chat(_args) -> int:
 
 def cmd_web(args) -> int:
     """启动 Web 工作台（FastAPI + React），默认 http://localhost:7860。"""
+    from easel.runtime_env import web_environment
+
     port = getattr(args, "port", 7860)
-    env = _proxy_env()
+    env = web_environment(_proxy_env())
     env["EASEL_PORT"] = str(port)
     script = PROJECT_ROOT / "web" / "app.py"
     if not script.is_file():
@@ -208,7 +271,11 @@ def main(argv: list[str] | None = None) -> int:
     register_install(sub)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except HarnessError as error:
+        print(f"Agent 设置错误：{error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
