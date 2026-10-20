@@ -1,3 +1,9 @@
+## 0.7.0 · 2026-10-20 · Live browser view / 面板实时操作
+
+- Add a 实时画面 toggle to the auxiliary browser panel: JPEG frames stream from the session's own Chromium (`Page.startScreencast`) and clicks, wheel, keys, typed text and paste go straight to the page over a new batched input route, without waiting for an observation. / 帧流与输入都走既有会话浏览器 API，按页面 CSS 视口换算坐标，退出即回退快照并重新观察。
+- New-window links are no longer silent: the popup address is captured, the window is closed and the click continues in the current tab, with a late-popup fallback and an explicit notice. Clicking a text field offers element filling; a refused stale action re-observes automatically (`recovered`) without replaying it. / 同时修正内网地址被误报为"网页域名无法解析"的消息。
+- Validation: browser backend 24 checks (5 new, real isolated Chromium), full frontend 1196 tests, production build and lint (0 errors / 20 existing warnings); isolated instance on 7899 verified frames and real clicks. Host 138, installers and paid model calls untouched. [Evidence / 验证范围](docs/browser-live-view-2026-10-20.md).
+
 ## 0.6.2 · 2026-10-20 · Reliability fixes / 可靠性修复
 
 - Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/agent-retry-button-2026-10-20.md)。

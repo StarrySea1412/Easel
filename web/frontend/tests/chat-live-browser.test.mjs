@@ -134,3 +134,38 @@ test('page icons keep a default until loaded, reject remote URLs and recover fro
   assert.ok(icons[1].querySelector('svg'),'broken site icon restores the default at the same size');
   assert.equal(icons[1].querySelector('img'),null);
 });
+
+test('click hints open the element list and keep new-window notices visible',async t=>{
+  const v=await setup(t,'hint-owner');
+  await v.click('查看页面元素');
+  await act(async()=>v.container.querySelector('.browser-element-list button').click());
+  await v.click('点击元素');
+  const body=JSON.parse(v.requests[1].options.body);
+  await v.respond(1,{id:body.requestId,state:'completed',tabId:'tab1',notice:'这是输入框：可在元素列表直接填写文字。',focusRef:'e0'});
+  await v.respond(2,state('hint-owner'));
+  assert.match(v.container.querySelector('[role=status]').textContent,/输入框/);
+  assert.equal(v.container.querySelector('.browser-element-actions strong').textContent,'姓名');
+});
+
+test('live view streams frames and forwards pointer and keyboard input',async t=>{
+  const v=await setup(t,'live-owner');
+  await v.click('实时画面');
+  const stage=v.container.querySelector('.browser-live-stage');
+  assert.ok(stage,'live mode renders a frame stage');
+  assert.match(stage.querySelector('img').src,/\/api\/browser\/sessions\/live-owner\/tabs\/tab1\/cast/);
+  const surface=stage.querySelector('.browser-live-surface');
+  t.mock.method(surface,'getBoundingClientRect',()=>({left:0,top:0,right:1280,bottom:800,width:1280,height:800,x:0,y:0,toJSON(){return {};}}));
+  await act(async()=>{surface.dispatchEvent(new window.MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:640,clientY:400,button:0}));});
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,120));});
+  const first=v.requests.filter(request=>/\/input$/.test(request.url))[0];
+  assert.ok(first,'live input posts to the session browser');
+  assert.deepEqual(JSON.parse(first.options.body).events[0],{type:'click',x:640,y:400});
+  await v.respond(v.requests.indexOf(first),{ok:true,tabId:'tab1',dirty:true});
+  await act(async()=>surface.dispatchEvent(new window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'a'})));
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,120));});
+  const second=v.requests.filter(request=>/\/input$/.test(request.url))[1];
+  assert.equal(JSON.parse(second.options.body).events[0].text,'a');
+  await v.respond(v.requests.indexOf(second),{ok:true,tabId:'tab1',dirty:true});
+  await act(async()=>{v.container.querySelector('[aria-label="退出实时画面"]').click();});
+  assert.equal(v.container.querySelector('.browser-live-stage'),null);
+});

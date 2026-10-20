@@ -21,7 +21,7 @@ from web.browser_api import router
 PAGE = '''<!doctype html><html><head><title>真实浏览器验收</title></head><body>
 <nav>站点导航</nav><main><h1>浏览器测试页</h1><p id="result">尚未操作</p>
 <label for="name">姓名</label><input id="name"><button id="apply" onclick="document.querySelector('#result').textContent='你好，'+document.querySelector('#name').value">应用姓名</button>
-<a href="/next">下一页</a><label for="password">密码</label><input id="password" type="password">
+<a href="/next">下一页</a><a href="/next" target="_blank">新窗口链接</a><label for="password">密码</label><input id="password" type="password">
 <div style="height:1400px">长页内容</div><p>页面末尾</p></main>
 <script>console.log('fixture ready');</script></body></html>'''
 
@@ -330,3 +330,75 @@ def test_site_icon_is_a_bounded_raster_from_the_guarded_browser_not_a_remote_ui_
     missing = command(browser, 'navigate', opened['tabId'], url=site+'/')
     assert missing['state'] == 'completed'
     assert current(browser, opened['tabId'])['favicon'] == ''
+
+
+def test_new_window_link_continues_in_current_tab(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    shot = current(browser, tab)
+    link = next(el for el in shot['elements'] if el['name'] == '新窗口链接')
+    clicked = command(browser, 'click', tab, shot['id'], x=link['x'] + link['width'] / 2, y=link['y'] + link['height'] / 2)
+    assert clicked['state'] == 'completed', clicked
+    assert '当前标签页' in clicked.get('notice', ''), clicked
+    assert current(browser, tab)['url'] == site + '/next'
+
+
+def test_click_on_text_field_offers_element_fill(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    shot = current(browser, tab)
+    field = next(el for el in shot['elements'] if el['name'] == '姓名')
+    clicked = command(browser, 'click', tab, shot['id'], x=field['x'] + 5, y=field['y'] + 5)
+    assert clicked['state'] == 'completed', clicked
+    assert clicked.get('focusRef') == field['ref']
+    assert '输入框' in clicked.get('notice', '')
+
+
+def test_refused_stale_action_observes_again_without_replaying(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    shot = current(browser, tab)
+    command(browser, 'fill', tab, shot['id'], ref=ref(shot, '姓名'), text='Easel')
+    stale = command(browser, 'click', tab, shot['id'], ref=ref(shot, '应用姓名'))
+    assert stale['state'] == 'failed' and '过期' in stale['error']
+    assert stale.get('recovered') is True and stale.get('snapshotId')
+    snap = current(browser, tab)
+    assert snap['id'] == stale['snapshotId'] and snap['stale'] is False
+    assert '你好' not in snap['text'], 'the refused click must not be replayed'
+
+
+def test_live_input_types_and_clicks_without_waiting_for_observation(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    shot = current(browser, tab)
+    field = next(el for el in shot['elements'] if el['name'] == '姓名')
+    apply = next(el for el in shot['elements'] if el['name'] == '应用姓名')
+    result = browser.call('input', 'owner', tab, [
+        {'type': 'click', 'x': field['x'] + 5, 'y': field['y'] + 5},
+        {'type': 'text', 'text': '实时输入'},
+        {'type': 'click', 'x': apply['x'] + 5, 'y': apply['y'] + 5},
+    ])
+    assert result['ok'] and result['tabId'] == tab
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if '你好，实时输入' in current(browser, tab)['text']:
+            break
+        time.sleep(.1)
+    assert '你好，实时输入' in current(browser, tab)['text']
+
+
+def test_live_cast_returns_jpeg_frames_and_stops_after_close(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    frame = None
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        frame = browser.call('cast_next', 'owner', tab, 0)
+        if frame:
+            break
+        time.sleep(.1)
+    assert frame and frame['jpeg']
+    raw = base64.b64decode(frame['jpeg'])
+    assert raw.startswith(b'\xff\xd8') and len(raw) > 500
+    assert browser.call('cast_next', 'owner', tab, frame['version']) is None
+    assert command(browser, 'close', tab)['state'] == 'completed'

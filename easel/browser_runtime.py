@@ -94,6 +94,9 @@ class Tab:
     cdp: object = None
     favicon_key: str = ''
     favicon: str = ''
+    cast: dict | None = None
+    cast_hook: bool = False
+    live_observe: object = None
 
 
 @dataclass
@@ -104,6 +107,9 @@ class Session:
     jobs: OrderedDict = field(default_factory=OrderedDict)
     events: deque = field(default_factory=lambda: deque(maxlen=160))
     control_origins: set = field(default_factory=set)
+    popups: deque = field(default_factory=lambda: deque(maxlen=8))
+    popup_pending: bool = False
+    popup_fallback: tuple | None = None
     touched: float = field(default_factory=time.monotonic)
 
 
@@ -188,7 +194,7 @@ class BrowserService:
             for session in self.sessions.values():
                 session.context = None
                 for tab in session.tabs.values():
-                    tab.closed, tab.dirty = True, True
+                    tab.closed, tab.dirty, tab.cast = True, True, None
             self.browser = None
         try:
             if not self.playwright:
@@ -233,10 +239,14 @@ class BrowserService:
             raise BrowserError('该来源未获准访问。内网或本地预览需先由运行环境配置允许的来源。', 403)
         try:
             addresses = await asyncio.to_thread(socket.getaddrinfo, host, None, type=socket.SOCK_STREAM)
-            if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-                raise BrowserError('该来源未获准访问。内网或本地预览需先配置允许的来源。', 403)
         except (socket.gaierror, ValueError):
             raise BrowserError('网页域名无法解析。') from None
+        try:
+            private = not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses)
+        except ValueError:
+            private = True
+        if private:
+            raise BrowserError('该来源未获准访问。内网或本地预览需先配置允许的来源。', 403)
         return url
 
     def _folder(self, sid):
@@ -303,7 +313,7 @@ class BrowserService:
                 'snapshots': {tab.id: {**tab.snapshot, 'stale': self._tab_info(tab)['stale']} for tab in session.tabs.values() if tab.snapshot and tab.snapshot.get('id')},
                 'jobs': [self._job_info(job) for job in list(session.jobs.values())[-16:]],
                 'events': list(session.events)[-80:], 'controlOrigins': sorted(session.control_origins),
-                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs']}
+                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs', 'live']}
 
     async def _control(self, sid, url, enabled):
         session = await self._session(sid)
@@ -338,9 +348,6 @@ class BrowserService:
         if not session.context:
             session.context = await self.browser.new_context(viewport={'width': 1280, 'height': 800},
                 accept_downloads=False, service_workers='block', permissions=[])
-
-            # Popup pages do not silently acquire a UI identity or agent control.
-            session.context.on('page', lambda page: page.on('popup', lambda popup: asyncio.create_task(popup.close())))
         page = await session.context.new_page()
         page.set_default_timeout(10000)
         page.set_default_navigation_timeout(20000)
@@ -375,8 +382,277 @@ class BrowserService:
                     'url': public_text(response.url, limit=500)}))
         page.on('dialog', lambda dialog: asyncio.create_task(dialog.dismiss()))
         page.on('download', lambda download: asyncio.create_task(download.cancel()))
+        # A separate window would bypass the panel's identity and the per-site
+        # agent permission, so capture its address and continue in this tab.
+        page.on('popup', lambda popup: self._popup_opened(session, popup))
         page.on('framenavigated', lambda frame: setattr(tab, 'dirty', True) if frame == page.main_frame else None)
         return tab
+
+    def _popup_opened(self, session, popup):
+        session.popup_pending = True
+        asyncio.create_task(self._capture_popup(session, popup))
+
+    async def _capture_popup(self, session, popup):
+        """Record a new-window address before the window is closed."""
+        url = ''
+        try:
+            deadline_at = time.monotonic() + 2
+            while time.monotonic() < deadline_at:
+                try:
+                    url = popup.url or ''
+                except Exception:
+                    url = ''
+                if url and url != 'about:blank':
+                    break
+                await asyncio.sleep(.08)
+        finally:
+            session.popups.append(url)
+            try:
+                await popup.close()
+            except Exception:
+                pass
+        # The popup may appear after the click already returned. Continue it in
+        # the tab that opened it, but only while that tab has not moved on.
+        fallback = session.popup_fallback
+        session.popup_fallback = None
+        if not fallback or not url or url == 'about:blank':
+            return
+        tab_id, base_url = fallback
+        tab = session.tabs.get(tab_id)
+        if not tab or tab.closed or not tab.page or tab.page.is_closed() or tab.page.url != base_url:
+            return
+        try:
+            await self._validate_url(url)
+        except BrowserError:
+            return
+        try:
+            async with tab.lock:
+                tab.dirty = True
+                await tab.page.goto(url, wait_until='domcontentloaded')
+                await self._observe(session, tab)
+        except Exception:
+            pass
+
+    async def _popup_notice(self, session, tab):
+        """Continue a new-window link in the current tab; never leave it silent."""
+        if not session.popup_pending:
+            return ''
+        deadline_at = time.monotonic() + 1
+        while not session.popups and time.monotonic() < deadline_at:
+            await asyncio.sleep(.05)
+        session.popup_pending = False
+        url = session.popups.popleft() if session.popups else ''
+        session.popups.clear()
+        if not url or url == 'about:blank':
+            return '这个链接会打开新窗口，面板已拦截，但没有取得可打开的地址。'
+        try:
+            await self._validate_url(url)
+        except BrowserError:
+            return '这个链接打开了未获准访问的新窗口，已被拦截。'
+        session.popup_fallback = None
+        tab.dirty = True
+        try:
+            await tab.page.goto(url, wait_until='domcontentloaded')
+        except Exception:
+            return '链接默认在新窗口打开，当前标签页打开失败；请用地址栏重试。'
+        return '链接默认在新窗口打开，已在当前标签页继续。'
+
+    def _text_ref(self, tab, x, y):
+        for item in (tab.snapshot or {}).get('elements', []):
+            if item.get('sensitive') or item.get('disabled'):
+                continue
+            if item['x'] <= x <= item['x'] + item['width'] and item['y'] <= y <= item['y'] + item['height']:
+                if item.get('role') in ('textbox', 'combobox') or item.get('tag') in ('input', 'textarea'):
+                    return item['ref']
+        return ''
+
+    async def _click_point(self, session, tab, x, y):
+        session.popups.clear()
+        session.popup_pending = False
+        hint = self._text_ref(tab, x, y)
+        before = tab.page.url
+        await self._position_click(tab, x, y)
+        # A popup is dispatched by the page's own handler, slightly after the
+        # mouse event. Wait only while neither a popup nor a navigation shows.
+        deadline_at = time.monotonic() + .35
+        while not session.popup_pending and tab.page.url == before and time.monotonic() < deadline_at:
+            await asyncio.sleep(.04)
+        session.popup_fallback = (tab.id, before)
+        notice = await self._popup_notice(session, tab)
+        if not notice:
+            # Keep a late popup able to continue this click for a short while.
+            asyncio.get_running_loop().call_later(3, self._clear_popup_fallback, session, tab.id)
+        return notice, hint
+
+    @staticmethod
+    def _clear_popup_fallback(session, tab_id):
+        fallback = session.popup_fallback
+        if fallback and fallback[0] == tab_id:
+            session.popup_fallback = None
+
+    @staticmethod
+    def _apply_click_hints(job, notice, hint):
+        if notice:
+            job['notice'] = notice
+        if hint:
+            job['focusRef'] = hint
+            hint_text = '这是输入框：可在元素列表直接填写文字。'
+            job['notice'] = f"{job['notice']} {hint_text}" if job.get('notice') else hint_text
+
+    LIVE_KEYS = {'Enter', 'Tab', 'Escape', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'}
+
+    async def _input(self, sid, tab_id, events):
+        """Low-latency input for the live view; never waits for a new observation."""
+        session = await self._session(sid)
+        tab = self._tab(session, tab_id)
+        if tab.lock.locked():
+            raise BrowserError('页面正在执行另一项操作，请稍后再输入。', 409)
+        viewport = tab.page.viewport_size or {'width': 1280, 'height': 800}
+        notices, hint = [], ''
+        async with tab.lock:
+            for event in events:
+                kind = event.get('type')
+                if kind in ('click', 'move', 'wheel'):
+                    x, y = event.get('x'), event.get('y')
+                    if kind != 'wheel' or x is not None:
+                        if not isinstance(x, (float, int)) or not isinstance(y, (float, int)) or not (0 <= x < viewport['width'] and 0 <= y < viewport['height']):
+                            raise BrowserError('输入位置无效，请重新观察页面。')
+                if kind == 'click':
+                    tab.dirty = True
+                    notice, text = await self._click_point(session, tab, x, y)
+                    if notice:
+                        notices.append(notice)
+                    hint = hint or text
+                elif kind == 'move':
+                    await tab.page.mouse.move(x, y)
+                elif kind == 'wheel':
+                    delta = max(-1600, min(1600, int(event.get('deltaY') or 0)))
+                    if not delta:
+                        continue
+                    tab.dirty = True
+                    await tab.page.mouse.wheel(0, delta)
+                elif kind == 'key':
+                    key = event.get('key')
+                    if key not in self.LIVE_KEYS:
+                        raise BrowserError('不支持的按键。')
+                    tab.dirty = True
+                    await tab.page.keyboard.press(key)
+                elif kind == 'text':
+                    value = event.get('text')
+                    if not isinstance(value, str) or not value or len(value) > 2000:
+                        raise BrowserError('输入文字须为2000字以内的非空文本。')
+                    tab.dirty = True
+                    await tab.page.keyboard.insert_text(value)
+                else:
+                    raise BrowserError('不支持的实时输入。')
+            self._wake_live_observe(session, tab)
+        result = {'ok': True, 'tabId': tab.id, 'dirty': tab.dirty}
+        if notices:
+            result['notice'] = ' '.join(dict.fromkeys(notices))
+        if hint:
+            result['focusRef'] = hint
+            result['notice'] = (result.get('notice', '') + ' 这是输入框：可在元素列表直接填写文字。').strip()
+        return result
+
+    def _wake_live_observe(self, session, tab):
+        old = tab.live_observe
+        if old and not old.done():
+            old.cancel()
+
+        async def later():
+            try:
+                await asyncio.sleep(.9)
+                if tab.closed or tab.lock.locked():
+                    return
+                async with tab.lock:
+                    if not tab.closed:
+                        await self._observe(session, tab)
+            except Exception:
+                pass  # A transient navigation must not fail the user's input.
+
+        tab.live_observe = asyncio.create_task(later())
+
+    async def _cast_next(self, sid, tab_id, since=0):
+        session = await self._session(sid)
+        tab = self._tab(session, tab_id)
+        cast = await self._ensure_cast(tab)
+        cast['touched'] = time.monotonic()
+        if not cast['frame'] or cast['version'] <= int(since or 0):
+            return None
+        return {'version': cast['version'], 'jpeg': base64.b64encode(cast['frame']).decode('ascii'),
+                'width': cast['width'], 'height': cast['height']}
+
+    async def _ensure_cast(self, tab):
+        if tab.cast is None:
+            tab.cast = {'version': 0, 'frame': b'', 'width': 0, 'height': 0,
+                        'touched': time.monotonic(), 'watch': None}
+            if not tab.cast_hook:
+                tab.cast_hook = True
+                tab.cdp.on('Page.screencastFrame', lambda event: self._cast_frame(tab, event))
+            viewport = (tab.snapshot or {}).get('viewport') or tab.page.viewport_size or {}
+            width, height = viewport.get('width', 1280), viewport.get('height', 800)
+            try:
+                await tab.cdp.send('Page.startScreencast', {'format': 'jpeg', 'quality': 70,
+                    'maxWidth': min(1920, int(width) or 1280), 'maxHeight': min(1600, int(height) or 800),
+                    'everyNthFrame': 1})
+            except Exception:
+                pass
+            try:
+                shot = await tab.page.screenshot(type='jpeg', quality=65, animations='disabled', timeout=8000)
+                tab.cast.update(frame=shot, version=1, width=width, height=height)
+            except Exception:
+                pass
+            tab.cast['watch'] = asyncio.create_task(self._cast_watch(tab))
+        return tab.cast
+
+    def _cast_frame(self, tab, event):
+        cast = tab.cast
+        try:
+            raw = base64.b64decode(event.get('data') or '')
+        except Exception:
+            raw = b''
+        if cast is not None and raw:
+            meta = event.get('metadata') or {}
+            cast['frame'] = raw
+            cast['version'] += 1
+            cast['width'] = int(meta.get('deviceWidth') or cast['width'] or 0)
+            cast['height'] = int(meta.get('deviceHeight') or cast['height'] or 0)
+            cast['touched'] = time.monotonic()
+        if event.get('sessionId') is not None:
+            asyncio.create_task(self._cast_ack(tab, event['sessionId']))
+
+    async def _cast_ack(self, tab, screencast_id):
+        try:
+            await tab.cdp.send('Page.screencastFrameAck', {'sessionId': screencast_id})
+        except Exception:
+            pass
+
+    async def _cast_watch(self, tab):
+        """Stop an abandoned stream so an idle page is not encoded forever."""
+        try:
+            while True:
+                await asyncio.sleep(5)
+                cast = tab.cast
+                if cast is None:
+                    return
+                if tab.closed or not tab.page or tab.page.is_closed():
+                    tab.cast = None
+                    return
+                if time.monotonic() - cast['touched'] > 15:
+                    await self._cast_stop(tab)
+                    return
+        except asyncio.CancelledError:
+            return
+
+    async def _cast_stop(self, tab):
+        cast, tab.cast = tab.cast, None
+        if cast and cast.get('watch'):
+            cast['watch'].cancel()
+        if tab.cdp:
+            try:
+                await tab.cdp.send('Page.stopScreencast')
+            except Exception:
+                pass
 
     async def _observe(self, session, tab):
         for handle in tab.refs.values():
@@ -504,6 +780,7 @@ class BrowserService:
                         tab.dirty = True
                         await tab.page.goto(url, wait_until='domcontentloaded')
                     elif action == 'close':
+                        await self._cast_stop(tab)
                         await tab.page.close()
                         tab.closed, tab.dirty = True, True
                     elif action in {'back', 'forward', 'reload'}:
@@ -524,7 +801,8 @@ class BrowserService:
                             if actor == 'agent' or not isinstance(x, (float, int)) or not isinstance(y, (float, int)) or not (0 <= x < viewport['width'] and 0 <= y < viewport['height']):
                                 raise BrowserError('点击位置无效；Agent需使用观察结果中的元素标识。')
                             tab.dirty = True
-                            await self._position_click(tab, x, y)
+                            notice, hint = await self._click_point(session, tab, x, y)
+                            self._apply_click_hints(job, notice, hint)
                         else:
                             ref = payload.get('ref')
                             element = tab.refs.get(ref)
@@ -538,7 +816,11 @@ class BrowserService:
                                 raise BrowserError('密码、验证码和支付信息请在受信浏览器中由你手动处理。', 403)
                             tab.dirty = True
                             if action == 'click':
+                                session.popups.clear()
+                                session.popup_pending = False
                                 await element.click()
+                                notice = await self._popup_notice(session, tab)
+                                self._apply_click_hints(job, notice, '')
                             elif action == 'fill':
                                 value = payload.get('text')
                                 if not isinstance(value, str) or len(value) > 8000:
@@ -566,6 +848,16 @@ class BrowserService:
             if tab:
                 tab.error = job['error']
                 tab.dirty = True
+                if isinstance(exc, BrowserError) and exc.status == 409 and not tab.closed:
+                    # The refused action never ran. A fresh observation makes
+                    # the panel usable again without replaying any site action.
+                    try:
+                        async with tab.lock:
+                            await self._observe(session, tab)
+                        job.update(recovered=True, snapshotId=(tab.snapshot or {}).get('id'),
+                                   notice='页面已变化，已重新观察；请重试刚才的操作。')
+                    except Exception:
+                        pass
         finally:
             job['finishedAt'] = now()
             self._event(session, action, job['state'], job.get('tabId'), job['id'], job.get('error', ''))
@@ -634,6 +926,9 @@ class BrowserService:
             await session.context.close()
         session.context = None
         for tab in session.tabs.values():
+            await self._cast_stop(tab)
+            if tab.live_observe and not tab.live_observe.done():
+                tab.live_observe.cancel()
             tab.closed, tab.dirty = True, True
             tab.refs.clear()
             tab.images.clear()
