@@ -15,9 +15,10 @@ export function ModelCheckFeedback({ check }: { check?: ModelCheckState }) {
   </div>;
 }
 
-export default function ModelAvailabilityPanel({ controller, models, targetModelRef }: {
+export default function ModelAvailabilityPanel({ controller, models, targetModelRef, saving }: {
   controller: ModelAvailabilityController;
-  models: { ref: string; identity?: string; label: string; reason?: string }[];
+  models: { ref: string; identity?: string; label: string; reason?: string; needsSave?: boolean; onCheck?: () => void }[];
+  saving?: boolean;
   targetModelRef?: string;
 }) {
   const [draft, setDraft] = useState<ModelCheckDefaults>(controller.defaults);
@@ -27,7 +28,7 @@ export default function ModelAvailabilityPanel({ controller, models, targetModel
     <div className="model-availability-list">{models.filter(model => !targetModelRef || model.ref === targetModelRef).map((model, index) => {
       const check = controller.checks[model.identity || model.ref];
       return <div className="model-availability-row" key={`${model.identity || model.ref}:${index}`}><div><strong>{model.label}</strong><small>{model.ref}</small>{model.reason && <small>{model.reason}</small>}<ModelCheckFeedback check={check}/></div>
-        <button type="button" className="btn btn-sm" disabled={Boolean(model.reason) || check?.busy} title={model.reason} onClick={() => void controller.run(model.ref, model.identity)}>{check?.busy ? '检测中…' : check ? '重新检测' : '检测'}</button></div>;
+        <button type="button" className="btn btn-sm" disabled={Boolean(model.reason) || check?.busy || saving} title={model.reason} onClick={() => model.onCheck ? model.onCheck() : void controller.run(model.ref, model.identity)}>{check?.busy ? '测试中…' : '测试'}</button></div>;
     })}</div>
     {!models.length && <p className="hint">先添加并保存供应商，即可使用内置参数检测。</p>}
     <details className="model-check-defaults"><summary>默认检测设置 <small>可选；不修改也能直接检测</small></summary>

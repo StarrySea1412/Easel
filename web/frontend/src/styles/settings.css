@@ -199,6 +199,22 @@
 .settings-page .provider-default-badge { flex:none; padding:0 5px; border:1px solid var(--border); border-radius:5px; color:var(--text-secondary); font-size:10px; font-weight:400; line-height:16px; }
 .settings-page .provider-quick-actions { display:flex; align-items:center; gap:4px; flex:none; }
 .settings-page .provider-quick-actions .adv-btn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:32px; min-width:30px; padding:5px; margin:0; border:0; background:transparent; color:var(--text-tertiary); }
+.settings-page .provider-quick-actions .provider-text-action { width:auto; gap:5px; padding:0 10px; border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-secondary); background:var(--surface); font-size:12px; font-weight:500; line-height:1; white-space:nowrap; }
+.settings-page .provider-quick-actions .provider-default-action:disabled { color:var(--text-tertiary); background:var(--surface-hover); opacity:1; }
+.settings-page .provider-quick-actions .provider-default-action { min-width:80px; }
+.settings-page .provider-quick-actions .provider-connection-action { min-width:104px; }
+.settings-page .provider-drag-handle { display:inline-flex; align-items:center; justify-content:center; flex:none; width:20px; min-height:32px; padding:0; border:0; border-radius:5px; background:transparent; color:var(--text-tertiary); cursor:grab; touch-action:none; user-select:none; }
+.settings-page .provider-drag-handle:active { cursor:grabbing; }
+.settings-page .provider-drag-handle:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+.settings-page .provider-card.is-disabled { background:var(--surface-hover); border-color:var(--border); }
+.settings-page .provider-card.is-disabled .provider-toggle { color:var(--text-tertiary); }
+.settings-page .provider-card.is-disabled .provider-name-row strong { color:var(--text-tertiary); }
+.settings-page .provider-card.is-disabled .provider-glyph { filter:grayscale(1); opacity:.55; }
+.settings-page .provider-list { position:relative; }
+.settings-page .provider-card { transition:border-color .18s, box-shadow .18s, background-color .18s; }
+.settings-page .provider-card.is-dragging { border-color:var(--text-tertiary); background:var(--surface-hover); box-shadow:var(--shadow-md); opacity:.6; }
+@media (prefers-reduced-motion:reduce) { .settings-page .provider-card { transition:none; } }
+.settings-page .provider-card .provider-quick-actions button:disabled { cursor:default; }
 .settings-page .provider-quick-actions .adv-btn:hover, .settings-page .provider-icon-action[aria-expanded=true] { background:var(--accent-soft); color:var(--text); }
 .settings-page .provider-connection-action svg { fill:none; stroke:currentColor; stroke-width:1.5; }
 .settings-page .provider-check-result { display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px 12px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); font-size:12px; line-height:1.6; }
@@ -214,17 +230,46 @@
 .settings-page .provider-compact-row .provider-heading small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .settings-page .provider-body { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
 .settings-page .provider-body[hidden] { display: none; }
+.settings-page .provider-chat-summary { color: var(--text-secondary); }
+.settings-page .provider-model-input { min-width: 0; }
+.settings-page .provider-model-input > * { width: 100%; }
+.settings-page .provider-model-input input[hidden] { display: none; }
+.settings-page .provider-model-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; color: var(--text-secondary); font-size: 11px; }
+.settings-page .provider-model-meta .adv-btn { font-size: 11px; padding: 3px 7px; }
+.settings-page .provider-discovery-note { display: grid; gap: 3px; color: var(--text-secondary); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-page .provider-discovery-note.bad { color: var(--red); }
+.settings-page .provider-discovery-note small { font-size: inherit; color: var(--text-tertiary); }
+.settings-page .provider-enable-control { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-right:auto; font-size:12px; }
+.settings-page .provider-enable-control small { color:var(--text-tertiary); font-size:11px; }
+.settings-page .provider-enable-control button { width:32px; height:19px; border:0; padding:2px; background:var(--border-strong); border-radius:999px; cursor:pointer; }
+.settings-page .provider-enable-control button[aria-checked=true] { background:var(--text); }
+.settings-page .provider-enable-control button span { display:block; width:15px; height:15px; border-radius:50%; background:var(--surface); transition:transform .15s; }
+.settings-page .provider-enable-control button[aria-checked=true] span { transform:translateX(13px); }
+.settings-page .provider-enable-control button:disabled { cursor:default; opacity:.5; }
+.settings-page .provider-enable-control button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:3px; }
+.settings-page .provider-chat-catalog { display: grid; gap: 8px; margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.settings-page .provider-chat-catalog strong { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+.settings-page .provider-chat-catalog > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-page .provider-chat-catalog small { color: var(--text-tertiary); font-size: 11px; overflow-wrap: anywhere; }
+.settings-page .provider-model-chip { border-radius: 5px; padding: 3px 7px; background: var(--surface-hover); color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.settings-page .provider-save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.settings-page .provider-save-actions small { font-size: 11px; color: var(--text-tertiary); }
+.settings-page .provider-save-message { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; color: var(--text-secondary); }
+.settings-page .provider-save-message[role=alert] { color: var(--red); }
+.settings-page .provider-save-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 0 0; font-size: 13px; }
+.settings-page .provider-save-bar small { display: block; margin-top: 4px; font-size: 11px; color: var(--text-tertiary); }
 .settings-page .channel-icon { display: inline-flex; flex: none; align-items: center; }
 .settings-page .provider-fixed p, .settings-page .provider-save-hint { color: var(--text-tertiary); font-size: 11px; line-height: 1.7; margin: 0 0 8px; }
 .settings-page .provider-save-hint { margin-top: 10px; }
 .settings-page .provider-heading { display: flex; flex: 1 1 160px; flex-direction: column; gap: 3px; min-width: 0; }
 .settings-page .provider-title, .settings-page .provider-heading h3, .settings-page .provider-heading strong { margin: 0; color: var(--text); font-size: 14px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
-.settings-page .provider-sub, .settings-page .provider-heading small { color: var(--text-tertiary); font-size: 11px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-page .provider-sub, .settings-page .provider-heading small { color: var(--text-tertiary); font-size: 12px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
 .settings-page .provider-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 100%; margin-left: auto; }
 .settings-page .provider-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; min-width: 0; }
 .settings-page .settings-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .settings-page .settings-field-label { color: var(--text-secondary); font-size: 12px; font-weight: 600; line-height: 1.5; }
 .settings-page .settings-field-control { min-width: 0; max-width: 100%; }
+.settings-page .provider-fields .mock, .settings-page .provider-fields .easel-select, .settings-page .img-chan .mock, .settings-page .img-chan .easel-select { min-height:36px; box-sizing:border-box; padding:7px 10px; font-size:13px; line-height:20px; }
 .settings-page .settings-field-hint { min-width: 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-page .settings-field-control > .cell-text { display: block; padding: 8px 0; }
 .settings-page input.mock, .settings-page select.mock {
@@ -392,6 +437,9 @@
 
 @container provider (max-width: 520px) {
   .settings-page .provider-compact-row { gap: 6px; }
+  .settings-page .provider-compact-row { flex-wrap:wrap; }
+  .settings-page .provider-compact-row .provider-toggle { flex-basis:calc(100% - 30px); }
+  .settings-page .provider-quick-actions { margin-left:26px; flex-wrap:wrap; }
   .settings-page .provider-head { gap: 9px; }
   .settings-page .provider-heading { min-width: 0; }
   .settings-page .provider-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; }

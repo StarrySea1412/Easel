@@ -1362,6 +1362,10 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
 
 export interface ModelRow {
+  draftId?: string;
+  /** Saved runtime model IDs; discovery alone never adds chat choices. */
+  chatModels?: string[];
+  enabled?: boolean;
   /** 保存时的供应商身份；编辑显示名后删除仍指向原配置。 */
   providerId?: string;
   contextWindow?: number | null;
@@ -1420,11 +1424,12 @@ export function fetchModelPresets(): Promise<{ presets: Record<string, ModelPres
 
 export function discoverModels(payload: {
   channel: string; slot?: string; baseUrl: string; apiKey?: string; protocol?: string;
-}): Promise<DiscoverResult> {
+}, signal?: AbortSignal): Promise<DiscoverResult> {
   return request('/api/models/discover', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
@@ -1518,6 +1523,7 @@ export function applyImport(source: string, id: string, slot: string, path = '',
 }
 
 export interface ModelSaveRow {
+  enabled?: boolean;
   contextWindow?: number | null;
   slot: string;
   name?: string;
@@ -1534,11 +1540,11 @@ export interface ModelSaveResponse extends ModelChannelsResponse {
   note?: string;
 }
 
-export function saveModelConfig(channel: string, rows: ModelSaveRow[], deletedProviders: string[] = []): Promise<ModelSaveResponse> {
+export function saveModelConfig(channel: string, rows: ModelSaveRow[], deletedProviders: string[] = [], providerOrder?: string[]): Promise<ModelSaveResponse> {
   return request('/api/settings/models/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel, rows, deletedProviders }),
+    body: JSON.stringify({ channel, rows, deletedProviders, providerOrder }),
   });
 }
 

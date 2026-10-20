@@ -23,9 +23,9 @@ export default class ErrorBoundary extends Component<Props, State> {
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           height: '100vh', gap: 12, color: 'var(--text)', background: 'var(--bg)', padding: 24, textAlign: 'center',
         }}>
-          <div style={{ fontSize: 40 }}>😵</div>
+          <div style={{ fontSize: 'calc(40px * var(--easel-font-scale, 1))' }}>😵</div>
           <h2 style={{ margin: 0 }}>页面出错了</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14, maxWidth: 420 }}>{this.state.message}</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 'calc(14px * var(--easel-font-scale, 1))', maxWidth: 420 }}>{this.state.message}</p>
           <button onClick={() => window.location.reload()}
             style={{ padding: '9px 18px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--text, #17191c)', color: 'var(--bg, #fff)', cursor: 'pointer' }}>
             刷新页面

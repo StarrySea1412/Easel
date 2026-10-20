@@ -90,6 +90,17 @@ test('unconfigured model entry opens settings directly without a separate warnin
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance does not save or probe models');
 });
 
+test('disabled configured models remain visible but cannot be selected or sent', async t => {
+  const view=await fixture(t, REF);view.h.options=[{...option,enabled:false}];
+  await view.render();await view.type('保留任务草稿');await view.send();
+  assert.deepEqual(view.sent,[]);
+  await act(async()=>view.trigger().click());
+  const item=[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('已停用'));
+  assert.ok(item);assert.equal(item.getAttribute('aria-disabled'),'true');
+  await act(async()=>item.click());assert.equal(view.values.get(KEY),REF);
+  assert.ok(view.calls.every(([,init])=>!init?.body));
+});
+
 test('status belongs to the model selector and its settings action targets that model', async t => {
   const view = await fixture(t, REF), opened=[];
   await view.render({ onOpenModels: ref => opened.push(ref) });

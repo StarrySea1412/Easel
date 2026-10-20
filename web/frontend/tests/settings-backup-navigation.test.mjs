@@ -238,6 +238,35 @@ test('image settings save model with the channel once and preserve an existing k
   assert.match(view.container.textContent, /已保存/);
 });
 
+test('image model discovery stays in the model field, uses the dedicated slot and preserves manual input', async t => {
+  let reads=0;
+  const view=await fixture(t,{fetchImagegenGallery:{channel:{baseUrl:'https://image.test/v1',model:'saved-image',keyMasked:'fixture***'}},discoverModels:()=>({ok:true,kind:'ok',models:++reads===1?[]:['image-a','image-b'],message:'Synthetic catalog',fetchedAt:123,keySource:'saved'})});
+  await view.render(1,view.props,'image');
+  const button=()=>view.container.querySelector('[aria-label="获取生图模型"]');
+  await view.click(button());assert.match(view.container.textContent,/可手动填写模型后保存/);
+  await view.click(button());
+  const select=view.container.querySelector('[aria-label="获取的生图模型"]');
+  assert.ok(select.closest('.model-fetch'));
+  await selectOption(select,'image-b');
+  await view.click(findButton(view,'手动输入'));
+  assert.equal(view.container.querySelector('[aria-label="生图模型名称"]').value,'image-b');
+  const payload=view.harness.calls.find(call=>call.name==='discoverModels').args[0];
+  assert.deepEqual(payload,{channel:'image',slot:'imagegen',baseUrl:'https://image.test/v1',apiKey:'',protocol:'openai'});
+  assert.equal(view.harness.calls.some(call=>['saveImagegenChannel','probeModel','saveModelConfig'].includes(call.name)),false);
+});
+
+test('changing image credentials invalidates a late model list and requires a new key for a new address', async t => {
+  let finish;
+  const view=await fixture(t,{fetchImagegenGallery:{channel:{baseUrl:'https://image.test/v1',model:'saved-image',keyMasked:'fixture***'}},discoverModels:()=>new Promise(resolve=>{finish=resolve;})});
+  await view.render(1,view.props,'image');await view.click(view.container.querySelector('[aria-label="获取生图模型"]'));
+  const input=view.container.querySelector('[aria-label="生图 Base URL"]');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'https://new.test/v1');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await act(async()=>finish({ok:true,models:['OLD-CATALOG'],message:'old',fetchedAt:123,keySource:'saved'}));
+  assert.equal(view.container.querySelector('[aria-label="获取的生图模型"]'),null);
+  assert.equal(view.container.querySelector('[aria-label="获取生图模型"]').disabled,true);
+  assert.doesNotMatch(view.container.textContent,/OLD-CATALOG/);
+});
+
 test('notification test clearly uses saved settings and does not save pending form edits', async t => {
   const view = await fixture(t, {
     fetchSkillDetail: notificationConfig(), testNotifyEmail: { ok: true, detail: '模拟发送结果', to: ['saved@example.test'] },
@@ -309,7 +338,7 @@ test('empty unsaved suppliers can be removed individually without deleting saved
   assert.equal(view.container.querySelectorAll('.provider-card').length, 2);
   assert.match(view.container.textContent, /已移除未保存的供应商/);
   assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
-  assert.equal(findButton(view, '保存并使用').disabled, true);
+  assert.equal(findButton(view, '保存全部修改').disabled, true);
 });
 
 test('deleting the default supplier is a draft and saving sends its slot with the surviving default', async t => {
@@ -324,13 +353,13 @@ test('deleting the default supplier is a draft and saving sends its slot with th
   await view.render(1, view.props, 'model');
   await removeProvider(view, 0);
   assert.equal(view.container.querySelectorAll('.provider-card').length, 1);
-  assert.match(view.container.textContent, /点击“保存并使用”后生效/);
+  assert.match(view.container.textContent, /点击“保存全部修改”后生效/);
   assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   const [channel, rows, deleted] = view.harness.calls.find(call => call.name === 'saveModelConfig').args;
   assert.equal(channel, 'chat'); assert.deepEqual(deleted, ['openai']);
   assert.equal(rows.length, 1); assert.equal(rows[0].slot, 'anthropic'); assert.equal(rows[0].primary, true);
-  assert.equal(findButton(view, '保存并使用').disabled, true);
+  assert.equal(findButton(view, '保存全部修改').disabled, true);
 });
 
 test('deleting an edited custom supplier uses its saved identity and leaves no resurrected provider on retry', async t => {
@@ -347,15 +376,15 @@ test('deleting an edited custom supplier uses its saved identity and leaves no r
     name.dispatchEvent(new window.Event('input', { bubbles:true }));
   });
   await removeProvider(view, 0);
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   assert.match(view.container.textContent, /保存失败/);
-  assert.equal(findButton(view, '保存并使用').disabled, false);
-  await view.click(findButton(view, '保存并使用'));
+  assert.equal(findButton(view, '保存全部修改').disabled, false);
+  await view.click(findButton(view, '保存全部修改'));
   const calls = view.harness.calls.filter(call => call.name === 'saveModelConfig');
   assert.equal(calls.length, 2);
-  for (const call of calls) assert.deepEqual(call.args, ['chat', [], ['saved-name']]);
+  for (const call of calls) assert.deepEqual(call.args, ['chat', [], ['saved-name'], []]);
   assert.match(view.container.textContent, /当前未配置对话渠道/);
-  assert.equal(findButton(view, '保存并使用').disabled, true);
+  assert.equal(findButton(view, '保存全部修改').disabled, true);
 });
 
 test('every chat channel exposes its protocol and saves an explicit keyboard selection as a draft', async t => {
@@ -377,13 +406,13 @@ test('every chat channel exposes its protocol and saves an explicit keyboard sel
   for (const key of ['ArrowDown', 'Home', 'Enter']) await act(async () => selectors[2].dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   assert.equal(selectors[2].textContent, 'OpenAI Chat Completions');
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'discoverModels', 'runChannelSelftest'].includes(call.name)), false);
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   const payload = view.harness.calls.find(call => call.name === 'saveModelConfig').args;
   assert.equal(payload[0], 'chat');
   assert.equal(payload[1][2].protocol, 'openai');
   assert.equal(payload[1][1].protocol, 'anthropic');
   assert.equal(view.container.querySelectorAll('[aria-label="请求协议"]')[2].textContent, 'OpenAI Chat Completions');
-  assert.equal(findButton(view, '保存并使用').disabled, true);
+  assert.equal(findButton(view, '保存全部修改').disabled, true);
 });
 
 test('protocol changes invalidate old discovery and query the exact custom channel with the draft protocol', async t => {
@@ -419,8 +448,7 @@ test('gateway-owned and unknown protocols show truthful state without a silent O
   assert.equal(selectors[1].textContent, 'Anthropic Messages');
 });
 async function chooseLastModel(view) {
-  const picker = view.container.querySelector('button[aria-label="主模型"]');
-  for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+  await view.click([...view.container.querySelectorAll('.provider-default-action')].at(-1));
 }
 
 test('known context reference fills only on request, keeps manual values and hides after a model change', async t => {
@@ -460,14 +488,14 @@ test('custom context budgets validate before saving, serialize clearing and rese
   });
   assert.equal(input().value, '32768');
   await change(input(), '1');
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   assert.match(view.container.textContent, /1024–10000000/);
   assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
   await change(input(), '131072');
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   assert.equal(view.harness.calls.find(call => call.name === 'saveModelConfig').args[1][0].contextWindow, 131072);
   await change(input(), '');
-  await view.click(findButton(view, '保存并使用'));
+  await view.click(findButton(view, '保存全部修改'));
   assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').at(-1).args[1][0].contextWindow, null);
   await change(input(), '65536');
   const model = view.container.querySelector('input[aria-label="模型名称"]');
@@ -475,54 +503,36 @@ test('custom context budgets validate before saving, serialize clearing and rese
   assert.equal(input().value, '');
 });
 
-test('default model selection is a draft until saved and survives the single import entry round trip', async t => {
-  const view = await fixture(t, { fetchModelChannels: modelChannels(configuredRows()), fetchImportSources: { sources: [] } });
-  await view.render(1, view.props, 'model');
-  assert.match(view.container.querySelector('.model-default-current').textContent, /OpenAI · model-a/);
-  assert.equal(view.container.querySelector('.model-provider-editors').closest('details').open, false);
-  assert.equal(findButton(view, '保存并使用').disabled, true);
+test('row default button saves only that supplier, retains other drafts and import stays reachable', async t => {
+  const original = configuredRows();
+  const saved = original.map((row, index) => ({...row, role:index === 1 ? '主' : '备'}));
+  const view = await fixture(t, {fetchModelChannels:modelChannels(original), fetchImportSources:{sources:[]}, saveModelConfig:{...modelChannels(saved),ok:true}});
+  await view.render(1,view.props,'model');
+  assert.equal(view.container.querySelector('.model-config-picker'),null);
+  assert.equal(view.container.querySelector('.model-provider-editors').closest('details').open,true);
+  const first=view.container.querySelector('[aria-label="模型名称"]');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(first,'other-draft');first.dispatchEvent(new window.Event('input',{bubbles:true}));});
   await chooseLastModel(view);
-  assert.match(view.container.querySelector('.model-default-current').textContent, /OpenAI · model-a/);
-  assert.match(view.container.querySelector('.model-default-pending').textContent, /待保存：Anthropic · model-b/);
-  assert.match(view.container.querySelector('.model-default-pending').textContent, /保存前仍使用 OpenAI · model-a/);
-  assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'applyImport', 'runChannelSelftest'].includes(call.name)), false);
-  assert.equal(view.container.querySelectorAll('button').length > 0, true);
-  await view.click(findButton(view, '导入已有配置'));
-  assert.equal(view.container.querySelectorAll('.model-import-steps li').length, 3);
-  await view.click(findButton(view, '收起导入'));
-  assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
-  assert.equal(view.nav('配置导入'), undefined);
-  assert.match(view.container.querySelector('button[aria-label="主模型"]').textContent, /model-b/);
-  assert.equal(findButton(view, '保存并使用').disabled, false);
-  await view.click(findButton(view, '添加供应商'));
-  assert.equal(view.container.querySelector('.model-provider-editors').closest('details').open, true);
-  assert.ok(view.container.querySelector('input[aria-label="供应商名称"]'));
+  const call=view.harness.calls.find(call=>call.name==='saveModelConfig');
+  assert.equal(call.args[1].length,1);assert.equal(call.args[1][0].slot,'anthropic');assert.equal(call.args[1][0].primary,true);
+  assert.equal(first.value,'other-draft');
+  assert.equal(view.container.querySelectorAll('.provider-default-action')[1].textContent,'默认模型');
+  await view.click(findButton(view,'导入已有配置'));await view.click(findButton(view,'收起导入'));
+  assert.equal(view.container.querySelector('[aria-label="模型名称"]').value,'other-draft');
 });
 
-test('failed save preserves the chosen draft; success displays the server model and routing note', async t => {
-  let attempts = 0;
-  const savedRows = configuredRows().map((row, index) => ({ ...row, role: index === 1 ? '主' : '备', ...(index === 1 ? { model: 'server-model-b' } : {}) }));
-  const view = await fixture(t, {
-    fetchModelChannels: modelChannels(configuredRows()),
-    saveModelConfig: async () => {
-      if (++attempts === 1) throw new Error('synthetic save failure');
-      return { ...modelChannels(savedRows), ok: true, note: '网关尚未确认重新加载，请核对执行回执' };
-    },
-  });
-  await view.render(1, view.props, 'model');
+test('default save failure preserves the draft and retry shows the actual server default and note', async t => {
+  let attempts=0;
+  const rows=configuredRows();
+  const saved=rows.map((row,i)=>({...row,role:i===1?'主':'备',...(i===1?{model:'server-model-b'}:{})}));
+  const view=await fixture(t,{fetchModelChannels:modelChannels(rows),saveModelConfig:()=>{if(++attempts===1)throw Error('synthetic save failure');return {...modelChannels(saved),ok:true,note:'网关尚未确认重新加载'};}});
+  await view.render(1,view.props,'model');await chooseLastModel(view);
+  assert.match(view.container.textContent,/保存失败：synthetic save failure/);
+  assert.equal(view.container.querySelectorAll('[aria-label="模型名称"]')[1].value,'model-b');
   await chooseLastModel(view);
-  await view.click(findButton(view, '保存并使用'));
-  assert.match(view.container.querySelector('[role="alert"]').textContent, /保存失败：synthetic save failure/);
-  assert.match(view.container.querySelector('button[aria-label="主模型"]').textContent, /model-b/);
-  assert.match(view.container.querySelector('.model-default-current').textContent, /model-a/);
-  await view.click(findButton(view, '保存并使用'));
-  assert.match(view.container.querySelector('.model-default-current').textContent, /server-model-b/);
-  assert.equal(view.container.querySelector('.model-default-pending'), null);
-  assert.match(view.container.querySelector('.model-picker-message').textContent, /已保存默认：Anthropic · server-model-b/);
-  assert.match(view.container.querySelector('.model-picker-message').textContent, /网关尚未确认重新加载/);
-  assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').length, 2);
-  assert.equal(view.harness.calls.find(call => call.name === 'saveModelConfig').args[1].find(row => row.slot === 'anthropic').primary, true);
-  assert.equal(view.harness.calls.some(call => call.name === 'runChannelSelftest'), false);
+  assert.equal(view.container.querySelectorAll('[aria-label="模型名称"]')[1].value,'server-model-b');
+  assert.match(view.container.textContent,/网关尚未确认重新加载/);
+  assert.equal(view.harness.calls.filter(call=>call.name==='saveModelConfig').length,2);
 });
 
 test('import preview needs explicit confirmation, reports the actual default and preserves other provider drafts', async t => {
@@ -553,9 +563,9 @@ test('import preview needs explicit confirmation, reports the actual default and
   assert.match(view.container.querySelector('.import-msg').textContent, /已保存默认现为：OpenAI · imported-model-a/);
   assert.match(view.container.querySelector('.import-msg').textContent, /尚未进行真实调用测活/);
   await view.click(findButton(view, '收起导入'));
-  assert.match(view.container.querySelector('.model-default-current').textContent, /imported-model-a/);
+  assert.match(view.container.querySelector('.provider-chat-catalog').textContent, /imported-model-a/);
   assert.equal(view.container.querySelectorAll('input[aria-label="模型名称"]')[1].value, 'unsaved-model-b');
-  assert.equal(findButton(view, '保存并使用').disabled, false);
+  assert.equal(findButton(view, '保存全部修改').disabled, false);
   assert.equal(view.harness.calls.some(call => call.name === 'runChannelSelftest'), false);
 });
 
@@ -586,9 +596,9 @@ test('model-list discovery reports failure and empty results, then fills a draft
   const list = card.querySelector('button[aria-label="获取的可用模型"]');
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => list.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   assert.equal(card.querySelector('input[aria-label="模型名称"]').value, 'catalog-second');
-  assert.match(card.textContent, /已填入“模型名称”：catalog-second/);
-  assert.match(view.container.querySelector('.model-default-current').textContent, /model-a/);
-  assert.equal(findButton(view, '保存并使用').disabled, false);
+  assert.match(card.textContent, /保存后加入：catalog-second/);
+  assert.match(view.container.querySelector('.provider-default-action').textContent, /默认模型|设为默认/);
+  assert.equal(findButton(view, '保存全部修改').disabled, false);
   assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'applyImport', 'runChannelSelftest'].includes(call.name)), false);
   assert.deepEqual(view.harness.calls.find(call => call.name === 'discoverModels').args[0], {
     channel: 'chat', slot: 'openai', baseUrl: rows[0].baseUrl, apiKey: '', protocol: '',
@@ -620,7 +630,7 @@ test('compact supplier availability check runs immediately with built-in default
   const card = view.container.querySelector('.provider-card');
   const check = card.querySelector('button[aria-label^="检测"]');
   assert.equal(reads, 0);
-  assert.match(check.title, /内置默认参数/);
+  assert.match(check.title, /内置参数/);
   await view.click(check);
   assert.equal(check.disabled, true);
   assert.equal(check.getAttribute('aria-busy'), 'true');
@@ -643,7 +653,7 @@ test('optional defaults remain separate from providers and change one-click chec
   const rows = configuredRows();
   const view = await fixture(t, { fetchModelChannels:modelChannels(rows), probeModel: payload => ({...payload,state:'success',detail:'Synthetic model response',testedAt:123}) });
   await view.render(1,view.props,'model');
-  const section = [...view.container.querySelectorAll('details.model-settings-details')].find(details => details.querySelector('summary')?.textContent.includes('模型可用性'));
+  const section = [...view.container.querySelectorAll('details.model-settings-details')].find(details => details.querySelector('summary')?.textContent.includes('测试设置'));
   assert.ok(section);
   assert.equal(section.closest('.provider-card'),null);
   await act(async () => { section.open = true; section.dispatchEvent(new window.Event('toggle')); });
@@ -678,8 +688,8 @@ test('unsaved changes and late or malformed availability receipts cannot appear 
     input.dispatchEvent(new window.Event('input',{bubbles:true}));
   });
   await act(async()=>finish({modelRef:'openai/model-a',mode:'text',state:'success',detail:'OLD MODEL PASSED',testedAt:123}));
-  assert.equal(check.disabled,true);
-  assert.match(check.title,/先保存/);
+  assert.equal(check.disabled,false);
+  assert.match(check.title,/测试/);
   assert.doesNotMatch(card.textContent,/OLD MODEL PASSED/);
 });
 
@@ -689,8 +699,50 @@ test('legacy import links open the single model page and expand its import workf
   assert.equal(view.nav('模型与渠道').getAttribute('aria-current'), 'page');
   assert.equal(view.nav('配置导入'), undefined);
   assert.equal(view.container.querySelector('.model-inline-import').open, true);
-  assert.ok(view.container.querySelector('.model-config-picker'));
+  assert.equal(view.container.querySelector('.model-config-picker'), null);
+  assert.ok(view.container.querySelector('.model-provider-editors'));
   assert.equal(view.container.querySelectorAll('.model-import-steps').length, 1);
+});
+
+test('testing saves only the selected row, preserves other drafts and does not probe after a failed save', async t => {
+  const rows = configuredRows(); let attempts=0;
+  const view = await fixture(t, {fetchModelChannels:modelChannels(rows), saveModelConfig:(_channel, submitted) => {
+    if (++attempts === 1) throw Error('blocked save');
+    return {...modelChannels(rows.map(row => row.slot === submitted[0].slot ? {...row,...submitted[0],chatModels:[submitted[0].model]} : row)),ok:true};
+  },probeModel:payload=>({...payload,state:'success',detail:'Synthetic response',testedAt:123})});
+  await view.render(1,view.props,'model');
+  const change=async(input,value)=>act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await change(view.container.querySelectorAll('[aria-label="模型名称"]')[0],'new-model');
+  await view.click(findButton(view,'添加供应商'));
+  const check=view.container.querySelector('.provider-connection-action');
+  assert.equal(check.textContent,'测试');await view.click(check);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,0);
+  await view.click(check);
+  const calls=view.harness.calls.filter(call=>['saveModelConfig','probeModel'].includes(call.name));
+  assert.deepEqual(calls.map(call=>call.name),['saveModelConfig','saveModelConfig','probeModel']);
+  assert.equal(calls[1].args[1].length,1);
+  assert.equal(calls[2].args[0].modelRef,'openai/new-model');
+  assert.equal(view.container.querySelectorAll('.provider-card').length,3);
+});
+
+test('provider keyboard sorting and enablement remain drafts until save and retain stable card state', async t => {
+  const rows=configuredRows().map(row=>({...row,providerId:row.slot,chatModels:[row.model],enabled:true}));
+  const view=await fixture(t,{fetchModelChannels:modelChannels(rows),saveModelConfig:(_channel,submitted,_gone,order)=>({...modelChannels(order.map(id=>{const row=submitted.find(row=>row.slot===id);return {...rows.find(row=>row.slot===id),...row,role:row.primary?'主':'备'};})),ok:true})});
+  await view.render(1,view.props,'model');
+  const cards=()=>[...view.container.querySelectorAll('.provider-card')];
+  await view.click(cards()[1].querySelector('.provider-toggle'));
+  const handle=cards()[1].querySelector('.provider-drag-handle');handle.focus();
+  await act(async()=>handle.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true})));
+  assert.equal(cards()[0].dataset.providerKey,'anthropic');
+  assert.equal(cards()[0].querySelector('.provider-body').hidden,false);
+  assert.equal(document.activeElement,handle);
+  await view.click(cards()[0].querySelector('[role=switch]'));
+  assert.equal(cards()[0].classList.contains('is-disabled'),true);
+  assert.equal(view.harness.calls.some(call=>call.name==='saveModelConfig'),false);
+  await view.click(findButton(view,'保存全部修改'));
+  const call=view.harness.calls.find(call=>call.name==='saveModelConfig');
+  assert.deepEqual(call.args[3],['anthropic','openai']);assert.equal(call.args[1][0].enabled,false);
+  assert.equal(cards()[0].classList.contains('is-disabled'),true);
 });
 
 test('source cards read their own models immediately and reject a late response from the previous source', async t => {
@@ -948,6 +1000,29 @@ test('transcription saving protects editable fields until the server responds', 
   assert.equal(view.container.querySelector('input[aria-label="模型名称"]').value, 'first-edit');
   assert.equal(findButton(view, '保存配置').disabled, false);
   assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').length, 1);
+});
+
+test('provider pointer sorting moves stable cards and stops on pointer release',async t=>{
+  const rows=configuredRows().map(row=>({...row,providerId:row.slot,enabled:true}));
+  const view=await fixture(t,{fetchModelChannels:modelChannels(rows)});
+  await view.render(1,view.props,'model');
+  const list=view.container.querySelector('.provider-list');
+  const cards=()=>[...list.querySelectorAll('.provider-card')];
+  for(const card of cards()) {
+    Object.defineProperty(card,'offsetTop',{configurable:true,get:()=>cards().indexOf(card)*100});
+    Object.defineProperty(card,'offsetHeight',{configurable:true,get:()=>90});
+  }
+  const handle=cards()[0].querySelector('.provider-drag-handle');
+  await act(async()=>handle.dispatchEvent(new window.PointerEvent('pointerdown',{pointerId:7,button:0,isPrimary:true,bubbles:true,cancelable:true})));
+  await act(async()=>window.dispatchEvent(new window.PointerEvent('pointermove',{pointerId:7,clientY:150,cancelable:true})));
+  assert.equal(cards()[1].dataset.providerKey,'openai');
+  assert.equal(cards()[1].querySelector('.provider-drag-handle'),handle);
+  assert.equal(cards()[1].classList.contains('is-dragging'),true);
+  await act(async()=>window.dispatchEvent(new window.PointerEvent('pointerup',{pointerId:7})));
+  await act(async()=>window.dispatchEvent(new window.PointerEvent('pointermove',{pointerId:7,clientY:0})));
+  assert.equal(cards()[1].dataset.providerKey,'openai');
+  assert.equal(list.querySelector('.is-dragging'),null);
+  assert.equal(view.harness.calls.some(call=>call.name==='saveModelConfig'),false);
 });
 
 test.after(async () => {

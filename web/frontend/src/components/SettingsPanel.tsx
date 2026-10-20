@@ -7,7 +7,6 @@ import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
 import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
 import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
-import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import CodexSettings from './CodexSettings';
 import ModelAvailabilityPanel, { ModelCheckFeedback } from './settings/ModelAvailabilityPanel';
 import { useModelAvailability } from '../hooks/useModelAvailability';
@@ -146,15 +145,15 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const availability = useModelAvailability();
   const [availabilityOpen, setAvailabilityOpen] = useState(Boolean(targetModelRef));
   const providerIdentity = (row: ModelRow) => row.providerId || (row.slot === 'custom' ? row.name : row.slot) || '';
-  const configIdentity = (row: ModelRow) => JSON.stringify([providerIdentity(row), row.model, row.baseUrl, row.protocol || row.type, row.keyMasked, row.keyNew || '']);
+  const configIdentity = (row: ModelRow) => JSON.stringify([providerIdentity(row), row.model, row.baseUrl, row.protocol || row.type, row.keyMasked, row.keyNew || '', row.contextWindow, row.enabled !== false]);
   const modelCheckTarget = (row: ModelRow) => {
     const saved = savedChatRows.find(item => providerIdentity(item) === providerIdentity(row));
     return { ref: `${providerIdentity(row)}/${row.model}`, identity: configIdentity(row), label: modelConfigLabel(row),
-      reason: !saved || configIdentity(saved) !== configIdentity(row) ? '请先保存供应商修改，再检测。'
-        : !row.model || PLACEHOLDERS.has(row.model) ? '请先选择并保存模型。'
-          : !row.keyMasked || row.keyMasked === '—' ? '请先保存供应商 API Key。' : undefined };
+      needsSave: !saved || configIdentity(saved) !== configIdentity(row) || (row.chatModels !== undefined && !row.chatModels.includes(row.model)),
+      reason: !row.model || PLACEHOLDERS.has(row.model) ? '请先选择或输入模型名称。'
+        : (!row.keyMasked || row.keyMasked === '—') && !row.keyNew?.trim() ? '请先填写 API Key。' : undefined };
   };
-  const [providerDetailsOpen, setProviderDetailsOpen] = useState(false);
+  const [providerDetailsOpen, setProviderDetailsOpen] = useState(true);
   const [modelLoading, setModelLoading] = useState(true);
   const modelTestTarget = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -175,6 +174,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const [saving, setSaving] = useState(false);
   const modelSavePending = useRef(false);
   const [savedNote, setSavedNote] = useState('');
+  const [savedRowIndex, setSavedRowIndex] = useState<number | undefined>();
   const [presets, setPresets] = useState<Record<string, ModelPreset[]>>({});
   const [discover, setDiscover] = useState<Record<string, DiscoverResult | 'loading'>>({});
   const discoveryRequests = useRef(new Map<string, symbol>());
@@ -378,7 +378,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         if (!alive) return;
         setChatRows(d.channels.chat.rows || []);
         setSavedChatRows(d.channels.chat.rows || []);
-        setProviderDetailsOpen(!(d.channels.chat.rows || []).some((row) => row.keyMasked && row.keyMasked !== '—'));
+
         setTransRows(d.channels.transcribe.rows || []);
         setMediaRows({
           image: d.channels.image?.rows || [],
@@ -414,9 +414,11 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   // ── 模型配置可编辑（v2）：保存到 .env / openclaw ──────────
   const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
 
-  const saveCurrent = useCallback(async (channel: Chan = chan) => {
+  const saveCurrent = useCallback(async (channel: Chan = chan, rowIndex?: number, makePrimary = false) => {
     if (modelSavePending.current || impApplying.current || modelLoading) return;
-    const rows = channel === 'chat' ? chatRows : channel === 'transcribe' ? transRows : (mediaRows[channel] || []);
+    setSavedRowIndex(rowIndex);
+    const allRows = channel === 'chat' ? chatRows : channel === 'transcribe' ? transRows : (mediaRows[channel] || []);
+    const rows = rowIndex === undefined ? allRows : allRows.filter((_, index) => index === rowIndex).map(row => makePrimary ? { ...row, role: '主', enabled: true } : row);
     if (channel === 'chat' && rows.some(row => row.contextWindow != null && (!Number.isInteger(row.contextWindow) || row.contextWindow < 1024 || row.contextWindow > 10000000))) {
       setSavedNote('上下文窗口须为1024–10000000之间的整数。'); return;
     }
@@ -434,6 +436,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         primary: r.role === '主',
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
         contextWindow: channel === 'chat' ? r.contextWindow : undefined,
+        enabled: channel === 'chat' ? r.enabled !== false : undefined,
       }));
     if (!payload.length && !(channel === 'chat' && deletedProviders.length)) {
       setSavedNote('当前通道没有可保存的配置');
@@ -443,21 +446,28 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     setSaving(true);
     setSavedNote('');
     try {
-      const d = await saveModelConfig(channel, payload, channel === 'chat' ? deletedProviders : []);
+      const d = await saveModelConfig(channel, payload, channel === 'chat' && rowIndex === undefined ? deletedProviders : [],
+        channel === 'chat' && rowIndex === undefined ? allRows.map(providerIdentity) : undefined);
       if (!mounted.current) return;
       clearModelDiscovery(channel);
       if (channel === 'chat') {
-        setChatRows(d.channels.chat.rows || []);
+        const fresh = d.channels.chat.rows || [];
+        setChatRows(current => rowIndex === undefined ? fresh : current.map((row, index) => {
+          const saved = fresh.find(item => providerIdentity(item) === providerIdentity(row));
+          return index === rowIndex ? saved || row : { ...row, role: saved?.role || row.role };
+        }));
         setSavedChatRows(d.channels.chat.rows || []);
-        setDeletedProviders([]);
+        if (rowIndex === undefined) setDeletedProviders([]);
       }
       else if (channel === 'transcribe') setTransRows(d.channels.transcribe.rows || []);
       else setMediaRows((rows) => ({ ...rows, [channel]: d.channels[channel]?.rows || [] }));
       clearImportPreview();
       setSavedNote(channel === 'chat' && !d.channels.chat.rows.length ? '✓ 已删除供应商；当前未配置对话渠道。' : channel === 'chat'
-        ? `✓ 已保存默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。请回到对话选择“自动沿用”；实际调用以执行回执为准。${d.note ? ` ${d.note}` : ''}`
+        ? `✓ 配置已保存。默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。已显示的模型可在对话中选择；保存不代表检测通过。${d.note ? ` ${d.note}` : ''}`
         : d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
+      window.dispatchEvent(new window.Event('easel:channel-names-changed'));
+      return d;
     } catch (e) {
       if (mounted.current) setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
     } finally {
@@ -467,6 +477,17 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       }
     }
   }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders, modelLoading, clearModelDiscovery]);
+
+  const checkModel = async (index: number) => {
+    const row = chatRows[index], target = modelCheckTarget(row);
+    if (target.reason) return;
+    if (target.needsSave) {
+      const result = await saveCurrent('chat', index);
+      if (!result || !mounted.current) return;
+      const saved = result.channels.chat.rows.find(item => providerIdentity(item) === providerIdentity(row));
+      if (saved) void availability.run(`${providerIdentity(saved)}/${saved.model}`, configIdentity(saved));
+    } else void availability.run(target.ref, target.identity);
+  };
 
   // ── 通知中心（邮箱通知可视化配置 + 测试发送） ──────────────
   const [ntf, setNtf] = useState({ email: '', host: '', port: '465', user: '', pass: '', onDone: false });
@@ -535,6 +556,28 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const [imgSaving, setImgSaving] = useState(false);
   const imgSavePending = useRef(false);
   const imgBaseChanged = imgBase.trim() !== imgBaseSaved.trim();
+  const [imgDiscovery, setImgDiscovery] = useState<DiscoverResult | 'loading'>();
+  const [imgManualModel, setImgManualModel] = useState(false);
+  const imgDiscoverRequest = useRef(0);
+  const imgDiscoverAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => { imgDiscoverAbort.current?.abort(); }, []);
+  const clearImgDiscovery = () => {
+    imgDiscoverRequest.current += 1; imgDiscoverAbort.current?.abort(); setImgDiscovery(undefined); setImgManualModel(false);
+  };
+  const imgChoices = imgDiscovery && imgDiscovery !== 'loading' && imgDiscovery.ok ? imgDiscovery.models : [];
+  const imgDiscoverReason = !imgBase.trim() ? '请先填写服务地址' : !imgKey.trim() && (imgBaseChanged || !imgKeyMasked || imgKeyMasked === '—') ? '请先填写此服务地址对应的 API Key' : '';
+  const discoverImageModels = async () => {
+    if (imgDiscoverReason || imgDiscovery === 'loading') return;
+    const id = ++imgDiscoverRequest.current, controller = new AbortController();
+    imgDiscoverAbort.current?.abort(); imgDiscoverAbort.current = controller;
+    setImgDiscovery('loading'); setImgManualModel(false);
+    try {
+      const result = await discoverModels({channel:'image',slot:'imagegen',baseUrl:imgBase.trim(),apiKey:imgKey.trim(),protocol:'openai'}, controller.signal);
+      if (mounted.current && id === imgDiscoverRequest.current) setImgDiscovery(result);
+    } catch (cause) {
+      if (mounted.current && id === imgDiscoverRequest.current) setImgDiscovery({ok:false,kind:'client_error',models:[],message:cause instanceof Error ? cause.message : '获取失败，请重试',channel:'image',slot:'imagegen',source:imgBase.trim(),fetchedAt:Date.now()/1000,keySource:'none'});
+    }
+  };
   useEffect(() => {
     let alive = true;
     fetchImagegenGallery().then(({ channel }) => {
@@ -603,14 +646,25 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     setProviderDetailsOpen(true);
     setSavedNote('');
     setChatRows((rs) => [...rs, {
+      draftId: crypto.randomUUID(),
       slot: 'custom', order: 0, name: '', sub: '自定义', type: 'openai',
       model: '', baseUrl: '', keyMasked: '', role: '备', result: '待保存',
     }]);
   };
 
   const setPrimaryRow = (i: number) => {
-    setChatRows((rs) => rs.map((r, j) => (r.slot ? { ...r, role: j === i ? '主' : '备' } : r)));
+    if (modelSavePending.current || impApplying.current || modelLoading) return;
+    setChatRows((rs) => rs.map((r, j) => (r.slot ? { ...r, role: j === i ? '主' : '备', ...(j === i ? { enabled: true } : {}) } : r)));
     setSavedNote('');
+    void saveCurrent('chat', i, true);
+  };
+
+  const moveProvider = (from: number, to: number) => {
+    if (modelSavePending.current || impApplying.current || from === to || to < 0 || to >= chatRows.length) return;
+    clearModelDiscovery('chat');
+    setChatRows(rows => { const next = [...rows]; next.splice(to, 0, next.splice(from, 1)[0]); return next; });
+    setSavedRowIndex(undefined);
+    setSavedNote('顺序已调整，点击“保存全部修改”后生效。');
   };
 
   const removeRow = (i: number) => {
@@ -621,13 +675,13 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     clearModelDiscovery('chat');
     const provider = removed.providerId || (removed.slot === 'custom' ? removed.deletable ? removed.name : '' : removed.slot);
     if (provider) setDeletedProviders((names) => [...new Set([...names, provider])]);
-    setSavedNote(provider ? `已从草稿移除“${removed.name || provider}”，点击“保存并使用”后生效。` : '已移除未保存的供应商。');
+    setSavedNote(provider ? `已从草稿移除“${removed.name || provider}”，点击“保存全部修改”后生效。` : '已移除未保存的供应商。');
     setVisionEditorIndex(index => index > i ? index - 1 : index);
     setChatRows((rs) => {
       const gone = rs[i];
       const left = rs.filter((_, j) => j !== i);
       if (gone && gone.role === '主') {
-        const first = left.findIndex((r) => r.slot && r.model && !PLACEHOLDERS.has(r.model));
+        const first = left.findIndex((r) => r.slot && r.enabled !== false && r.model && !PLACEHOLDERS.has(r.model));
         if (first >= 0) left[first] = { ...left[first], role: '主' };
       }
       return left;
@@ -760,10 +814,53 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
 
                 {chan === 'chat' && (
                   <section className="st-panel active" role="tabpanel" id={`settings-channel-${chan}`} aria-labelledby={`settings-channel-tab-${chan}`}>
-                    <ModelConfigPicker rows={chatRows} disabled={modelLoading || saving || Boolean(impBusy)}
-                      savedPrimary={savedChatRows.find((row) => row.role === '主')} saving={saving} dirty={chatDirty}
-                      saveNote={savedNote} labelFor={modelConfigLabel} onPrimary={setPrimaryRow} onSave={() => void saveCurrent()}
-                      onOpenImport={() => setImportOpen(true)} />
+                    <details className="model-settings-details" open={providerDetailsOpen}
+                      onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
+                      <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>连接配置与对话可选模型</small></summary>
+                    <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
+                    <div className="panel-top">
+                      <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
+                      <button type="button" className="adv-btn" onClick={() => setImportOpen(true)}><IconUpload size={15}/> 导入已有配置</button>
+                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
+                      <span className="desc">拖动调整顺序，保存后生效；测试无需额外设置。</span>
+                      <span className="spacer" />
+                    </div>
+                    {renderBoard(chatRows, {
+                      onRow: (i, p) => updateRow('chat', setChatRows, i, p),
+                      onPrimary: setPrimaryRow,
+                      primaryBusy: saving,
+                      primarySaved: i => savedChatRows.some(row => providerIdentity(row) === providerIdentity(chatRows[i]) && row.role === '主' && row.model === chatRows[i].model),
+                      onMove: moveProvider,
+                      onRemove: removeRow,
+                      channel: 'chat',
+                      onSaveRow: i => void saveCurrent('chat', i),
+                      saveMessage: i => i === savedRowIndex ? savedNote : '',
+                      onCheck: i => void checkModel(i),
+                      checkLabel: () => '测试',
+                      isDirty: i => { const saved = savedChatRows.find(row => providerIdentity(row) === providerIdentity(chatRows[i])); return !saved || configIdentity(saved) !== configIdentity(chatRows[i]) || saved.role !== chatRows[i].role; },
+                      checkBusy: i => availability.checks[modelCheckTarget(chatRows[i]).identity]?.busy === true,
+                      checkReason: i => modelCheckTarget(chatRows[i]).reason,
+                      checkFeedback: i => {
+                        const target = modelCheckTarget(chatRows[i]);
+                        return !target.reason && availability.checks[target.identity] ? <div className="provider-check-result"><ModelCheckFeedback check={availability.checks[target.identity]}/></div> : null;
+                      },
+                      health: (i) => {
+                        const row = chatRows[i];
+                        return row.model && row.slot ? <ChannelNameEditor key={providerIdentity(row)} provider={providerIdentity(row)}/> : null;
+                      },
+                      presets: presets.chat,
+                      discovery: (i) => discover[`chat:${i}`],
+                      onDiscover: (i) => void runDiscover('chat', i, chatRows[i]),
+                      onPickPreset: (i, p) => updateRow('chat', setChatRows, i, {
+                        baseUrl: p.baseUrl, protocol: p.protocol,
+                        name: p.id, sub: p.note || '预设', type: p.protocol,
+                      }),
+                    })}
+                    <div className="provider-save-bar"><span>{chatDirty ? '有尚未保存的修改' : '配置已保存'}<small>保存全部编辑、启停、排序和删除；设为默认会直接保存该供应商。</small></span><button type="button" className="btn btn-sm btn-primary" disabled={!chatDirty || saving || modelLoading} onClick={() => void saveCurrent('chat')}>{saving ? '保存中…' : '保存全部修改'}</button></div>
+                    {savedRowIndex === undefined && savedNote && <p className="provider-save-message" role={savedNote.startsWith('保存失败') ? 'alert' : 'status'}>{savedNote}</p>}
+                    <div className="foot-note">保存过的模型会自动出现在对话列表。停用后仍然列出并标注“已停用”，启用后可选择；不会删除配置或停止正在执行的任务。</div>
+                    </fieldset>
+                    </details>
                     <details className="model-settings-details"><summary><span aria-hidden="true"><IconTerminal size={16} /></span>本机 Codex <small>使用本机已登录的编程助手</small></summary><CodexSettings /></details>
                     <details className="model-settings-details model-inline-import" hidden={!importOpen} open={importOpen}
                       onToggle={(event) => setImportOpen(event.currentTarget.open)}>
@@ -931,46 +1028,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             </section>
                     </details>
                     <details ref={modelTestTarget} className="model-settings-details" open={availabilityOpen} onToggle={event => setAvailabilityOpen(event.currentTarget.open)}>
-                      <summary><span aria-hidden="true"><IconPackage size={16}/></span>模型可用性 <small>内置默认参数，点击即可检测</small></summary>
-                      {availabilityOpen && <ModelAvailabilityPanel controller={availability} models={chatRows.map(modelCheckTarget)} targetModelRef={targetModelRef}/>}
+                      <summary><span aria-hidden="true"><IconPackage size={16}/></span>测试设置 <small>内置默认参数，可直接测试</small></summary>
+                      {availabilityOpen && <ModelAvailabilityPanel controller={availability} models={chatRows.map((row, index) => ({ ...modelCheckTarget(row), onCheck: () => void checkModel(index) }))} saving={saving} targetModelRef={targetModelRef}/>}
                     </details>
-                    <details className="model-settings-details" open={providerDetailsOpen}
-                      onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
-                      <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>查看模型、修改连接配置</small></summary>
-                    <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
-                    <div className="panel-top">
-                      <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
-                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
-                      <span className="desc">密钥留空会保留原值；编辑后需保存。</span>
-                      <span className="spacer" />
-                    </div>
-                    {renderBoard(chatRows, {
-                      onRow: (i, p) => updateRow('chat', setChatRows, i, p),
-                      onPrimary: setPrimaryRow,
-                      onRemove: removeRow,
-                      channel: 'chat',
-                      onCheck: i => { const target = modelCheckTarget(chatRows[i]); if (!target.reason) void availability.run(target.ref, target.identity); },
-                      checkBusy: i => availability.checks[modelCheckTarget(chatRows[i]).identity]?.busy === true,
-                      checkReason: i => modelCheckTarget(chatRows[i]).reason,
-                      checkFeedback: i => {
-                        const target = modelCheckTarget(chatRows[i]);
-                        return !target.reason && availability.checks[target.identity] ? <div className="provider-check-result"><ModelCheckFeedback check={availability.checks[target.identity]}/></div> : null;
-                      },
-                      health: (i) => {
-                        const row = chatRows[i];
-                        return row.model && row.slot ? <ChannelNameEditor key={providerIdentity(row)} provider={providerIdentity(row)}/> : null;
-                      },
-                      presets: presets.chat,
-                      discovery: (i) => discover[`chat:${i}`],
-                      onDiscover: (i) => void runDiscover('chat', i, chatRows[i]),
-                      onPickPreset: (i, p) => updateRow('chat', setChatRows, i, {
-                        baseUrl: p.baseUrl, protocol: p.protocol,
-                        name: p.id, sub: p.note || '预设', type: p.protocol,
-                      }),
-                    })}
-                    <div className="foot-note">“获取模型列表”需要地址与 API Key，仅读取列表，不运行模型。选择结果会填入“模型名称”；列表为空或读取失败时可按服务商文档手动填写。编辑完成后点击上方“保存并使用”。</div>
-                    </fieldset>
-                    </details>
+
                     <details className="model-settings-details">
                       <summary><span aria-hidden="true"><IconPackage size={16} /></span>批量检查连接 <small>读取模型列表，不发起对话</small></summary>
                       <p className="hint">状态读取不调用模型；文字 / 图片验证会发起真实请求，供应商可能计费。自动检查默认关闭。</p>
@@ -1065,7 +1126,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                       aria-label="生图 Base URL"
                       disabled={imgLoading || imgSaving}
                       placeholder="https://api.example.com/v1"
-                      onChange={(e) => setImgBase(e.target.value)}
+                      onChange={(e) => { clearImgDiscovery(); setImgBase(e.target.value); }}
                     />
                   </SettingsField>
                   <SettingsField label="API Key" horizontal>
@@ -1076,11 +1137,18 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                       aria-label="生图 API Key"
                       disabled={imgLoading || imgSaving}
                       placeholder={imgBaseChanged ? '服务地址已更改，请填写对应 Key' : imgKeyMasked ? '已保存，留空保留' : '填写服务商提供的 Key'}
-                      onChange={(e) => setImgKey(e.target.value)}
+                      onChange={(e) => { clearImgDiscovery(); setImgKey(e.target.value); }}
                     />
                   </SettingsField>
                   <SettingsField label="模型名称" horizontal>
-                    <input className="mock" value={imgModel} aria-label="生图模型名称" placeholder="例如 gpt-image-1 或服务商模型 ID" disabled={imgLoading || imgSaving} onChange={(e) => setImgModel(e.target.value)} />
+                    <div className="model-fetch">
+                      {imgChoices.length > 0 && !imgManualModel ? <Select aria-label="获取的生图模型" value={imgModel} placeholder="选择生图模型" disabled={imgLoading || imgSaving}
+                        options={[...(!imgChoices.includes(imgModel) && imgModel ? [{value:imgModel,label:imgModel,description:'当前填写的模型'}] : []), ...imgChoices.map(model=>({value:model,label:model}))]} onChange={setImgModel}/>
+                        : <input className="mock" value={imgModel} aria-label="生图模型名称" placeholder="例如 gpt-image-1 或服务商模型 ID" disabled={imgLoading || imgSaving} onChange={(e) => setImgModel(e.target.value)} />}
+                      <button type="button" className="adv-btn" aria-label="获取生图模型" title={imgDiscoverReason || '只读取模型列表，不生成图片；列表可能同时包含其他用途模型'} disabled={imgLoading || imgSaving || Boolean(imgLoadError) || Boolean(imgDiscoverReason) || imgDiscovery === 'loading'} onClick={() => void discoverImageModels()}>{imgDiscovery === 'loading' ? '获取中…' : '获取模型'}</button>
+                    </div>
+                    {imgChoices.length > 0 && <span className="provider-model-meta"><span>已获取 {imgChoices.length} 个候选，请选择支持图片生成的模型</span><button type="button" className="adv-btn" onClick={() => setImgManualModel(value=>!value)}>{imgManualModel ? '从列表选择' : '手动输入'}</button></span>}
+                    {imgDiscovery && <div className={`provider-discovery-note${imgDiscovery !== 'loading' && !imgDiscovery.ok ? ' bad' : ''}`} role="status">{imgDiscovery === 'loading' ? '正在获取模型列表…' : <><span>{imgDiscovery.message}</span><small>{!imgDiscovery.ok || !imgChoices.length ? '可手动填写模型后保存。' : '仅获取候选列表；选择后请保存生图通道，未验证图片生成能力。'}</small></>}</div>}
                   </SettingsField>
                   {imgSaved && <div className={`save-note${imgSaved.startsWith('保存失败') ? ' err' : ''}`}>{imgSaved}</div>}
                   <div className="img-chan-foot">
@@ -1130,7 +1198,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                         onChange={(e) => setNtf((f) => ({ ...f, pass: e.target.value }))} />
                     </SettingsField>
                     <SettingsField label="自动通知" horizontal>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 'calc(13px * var(--easel-font-scale, 1))' }}>
                         <input type="checkbox" checked={ntf.onDone}
                           onChange={(e) => setNtf((f) => ({ ...f, onDone: e.target.checked }))} />
                         任务完成自动发邮件（关闭则只在 Agent 主动通知时发）

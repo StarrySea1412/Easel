@@ -1,2 +1,6 @@
 @import './styles/index.css';
 @import './styles/theme-surfaces.css';
+
+/* One 14px baseline; absolute font declarations also follow this preference via PostCSS. */
+:root { font-size: var(--easel-font-size, 14px); }
+body { font-size: var(--easel-font-size, 14px); }

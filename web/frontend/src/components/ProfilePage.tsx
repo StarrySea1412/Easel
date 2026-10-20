@@ -181,7 +181,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
         </div>
       </div>
 
-      {error && <div style={{ color: 'var(--red)', fontSize: 14, marginTop: 12 }}>{error}</div>}
+      {error && <div style={{ color: 'var(--red)', fontSize: 'calc(14px * var(--easel-font-scale, 1))', marginTop: 12 }}>{error}</div>}
 
       {loading ? (
         <div className="loading"><div className="spinner" />加载中…</div>
@@ -212,7 +212,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
               {editing ? (
                 <textarea
                   className="field"
-                  style={{ minHeight: 150, fontFamily: "'SF Mono','Consolas',monospace", fontSize: 13 }}
+                  style={{ minHeight: 150, fontFamily: "'SF Mono','Consolas',monospace", fontSize: 'calc(13px * var(--easel-font-scale, 1))' }}
                   value={drafts[f.filename] ?? ''}
                   onChange={(e) => setDrafts((p) => ({ ...p, [f.filename]: e.target.value }))}
                 />

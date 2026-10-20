@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import ProviderIcon from '../ProviderIcon';
 import type { ModelRow, ModelPreset, DiscoverResult } from '../../lib/api';
@@ -11,8 +11,14 @@ import { IconFilm, IconGlobe, IconHexagon, IconImage, IconMonitor } from '../set
 export type ProviderBoardOptions = {
       onRow?: (i: number, patch: Partial<ModelRow>) => void;
       onSave?: () => void;
+      onSaveRow?: (i: number) => void;
+      saveMessage?: (i: number) => string;
+      isDirty?: (i: number) => boolean;
       saving?: boolean;
       onPrimary?: (i: number) => void;
+      primarySaved?: (i: number) => boolean;
+      primaryBusy?: boolean;
+      onMove?: (from: number, to: number) => void;
       onRemove?: (i: number) => void;
       media?: boolean;
       channel?: string;                    // 用于「获取模型」的通道标识
@@ -25,6 +31,7 @@ export type ProviderBoardOptions = {
       onCheck?: (i: number) => void;
       checkBusy?: (i: number) => boolean;
       checkReason?: (i: number) => string | undefined;
+      checkLabel?: (i: number) => string;
       checkFeedback?: (i: number) => ReactNode;
     };
 
@@ -40,7 +47,12 @@ type BoardProps = {
   resultText: (row: ModelRow) => { text: string; cls: string };
 };
 
-function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: number }) {
+const rowKey = (row: ModelRow) => row.providerId || row.draftId || `${row.slot || row.type}:${row.name}`;
+
+function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardProps & {
+  r: ModelRow; i: number; count: number; dragging?: boolean;
+  onGrab?: (pointerId: number) => void;
+}) {
           const rt = resultText(r);
           const ed = SLOT_EDIT[r.slot || '']
             || (ops?.media && r.slot
@@ -55,6 +67,11 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
           const subtitle = !r.slot && r.role === '免配';
           const local = r.type === 'local';
           const [expanded, setExpanded] = useState(false);
+          const [manualModel, setManualModel] = useState(false);
+          const choices = discovery && discovery !== 'loading' && discovery.ok ? discovery.models : [];
+          const isChat = ops?.channel === 'chat';
+          const dirty = ops?.isDirty?.(i) || false;
+          const saveMessage = ops?.saveMessage?.(i);
           const panelId = useId();
           const reference = r.contextReference?.modelId === r.model ? r.contextReference : null;
           const protocol = r.protocol || r.type || 'openai';
@@ -69,18 +86,26 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
             : ops?.channel === 'image' ? IconImage : ops?.channel === 'video' ? IconFilm
               : ops?.channel === 'music' ? IconMusic : r.slot === 'relay' ? IconGlobe : IconHexagon;
           return (
-            <article className="provider-card">
+            <article data-provider-key={rowKey(r)} className={`provider-card${isChat && r.enabled === false ? ' is-disabled' : ''}${dragging ? ' is-dragging' : ''}`}>
               <div className="provider-compact-row">
+              {ops?.onMove && <button type="button" className="provider-drag-handle" disabled={ops.saving}
+                aria-label={`排序${title}，第${i + 1}项，共${count}项`} title="拖动排序；方向键上下移动，Home/End 移到首尾，保存后生效"
+                onPointerDown={event => { if (event.button !== 0 || event.isPrimary === false) return; event.preventDefault(); event.currentTarget.focus(); onGrab?.(event.pointerId); }}
+                onKeyDown={event => { const to = event.key === 'ArrowUp' ? i - 1 : event.key === 'ArrowDown' ? i + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null; if (to !== null) { event.preventDefault(); ops.onMove?.(i, to); } }}>
+                <svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor" aria-hidden="true">{[5,9].flatMap(x => [4,9,14].map(y => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.2"/>))}</svg>
+              </button>}
               <button type="button" className="provider-head provider-toggle" aria-expanded={expanded} aria-controls={panelId}
                 aria-label={`${expanded ? '收起' : '展开'}${title}配置`} onClick={() => setExpanded(!expanded)}>
                 <span className="provider-glyph" aria-hidden="true">{subtitle || local ? <Glyph size={19} /> : <ProviderIcon row={r} fallback={Glyph} />}</span>
                 <span className="provider-heading">
-                  <span className="provider-name-row"><strong>{title}</strong>{r.role === '主' && <span className="provider-default-badge">默认</span>}</span>
+                  <span className="provider-name-row"><strong>{title}</strong>{(ops?.primarySaved ? ops.primarySaved(i) : r.role === '主') && <span className="provider-default-badge">默认</span>}{dirty && <span className="provider-default-badge">待保存</span>}</span>
                   <small title={address}>{address}</small>
+                  {isChat && <small className="provider-chat-summary">{r.enabled === false ? '已停用' : '已启用'} · {r.chatModels?.length ? r.chatModels.join('、') : '保存后出现在对话模型列表'}</small>}
                 </span>
               </button>
               {ed && <div className="provider-quick-actions">
-                {(ops?.onCheck || ops?.onDiscover) && <button type="button" className="adv-btn provider-icon-action provider-connection-action" aria-label={`检测${title}${ops.onCheck ? '模型可用性' : '连接'}`} title={checkReason || (ops.onCheck ? '使用内置默认参数直接检测，供应商可能计费' : '检测连接：读取模型列表，不发起模型推理')} disabled={Boolean(checkReason) || checking || ops.saving} aria-busy={checking} onClick={() => ops.onCheck ? ops.onCheck(i) : ops.onDiscover?.(i)}>{checking ? <span className="spin"/> : <IconPlay size={16}/>}</button>}
+                {isChat && ops?.onPrimary && <button type="button" className="adv-btn provider-text-action provider-default-action" aria-label={`设${title}为默认模型`} disabled={!r.model || ops.saving || ops.primaryBusy || (ops.primarySaved?.(i) && !dirty)} title={`保存${title}当前模型并设为新对话默认`} onClick={() => ops.onPrimary?.(i)}>{ops.primarySaved?.(i) && !dirty ? '默认模型' : '设为默认'}</button>}
+                {(ops?.onCheck || ops?.onDiscover) && <button type="button" className="adv-btn provider-text-action provider-connection-action" aria-label={`检测${title}${ops.onCheck ? '模型可用性' : '连接'}`} title={checkReason || `${ops?.checkLabel?.(i) || '直接测试'}：使用内置参数，供应商可能计费`} disabled={Boolean(checkReason) || checking || ops.saving} aria-busy={checking} onClick={() => ops.onCheck ? ops.onCheck(i) : ops.onDiscover?.(i)}>{checking ? <span className="spin"/> : <IconPlay size={14}/>}<span>{checking ? '测试中' : ops?.checkLabel?.(i) || '测试'}</span></button>}
                 {ops?.onRow && <button type="button" className="adv-btn provider-icon-action" aria-label={`编辑${title}配置`} title="编辑配置" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(!expanded)}><IconEdit size={16}/></button>}
                 {ops?.onRemove && <ProviderActionsMenu title={title} disabled={ops.saving} onDelete={() => ops.onRemove?.(i)}/>}
               </div>}
@@ -94,6 +119,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                 </>}
               </div>}
               <div className="provider-body" id={panelId} hidden={!expanded}>
+              {isChat && ops?.health?.(i)}
               {!ed && <div className="provider-fixed">
                 <p>{subtitle ? '直接读取视频已有的字幕文件，无需填写模型、地址或密钥。没有自带字幕时会继续尝试云端转写。'
                   : local ? '在本机运行 faster-whisper，无需 API Key。请先安装本地组件；云端不可用时由它接替。'
@@ -101,12 +127,13 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                 {local && ops?.onOpenEnvironment && <button type="button" className="adv-btn" onClick={ops.onOpenEnvironment}>打开环境安装</button>}
               </div>}
               {ed && <div className="provider-fields">
-              {isCustom && <SettingsField label="供应商名称">
+              {isCustom && <SettingsField label="供应商标识">
                   <input
                     className="mock"
                     value={r.name}
                     placeholder="名称"
                     aria-label="供应商名称"
+                    disabled={Boolean(r.providerId)}
                     onChange={(e) => ops?.onRow?.(i, { name: e.target.value.toLowerCase() })}
                   />
               </SettingsField>}
@@ -118,10 +145,7 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                   onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
                 <span className="hint">{r.protocolNote || '按服务商接口选择；保存后用于后续请求，不会自动切换协议。'}</span>
               </SettingsField>}
-              <SettingsField label="模型">
-              {ed.model ? (
-                <span className="key-stack">
-                  {(ops?.presets || []).length > 0 && <Select
+              {(ops?.presets || []).length > 0 && <SettingsField label="服务商预设（可选）"><Select
                     value=""
                     aria-label="服务商预设"
                     placeholder="服务商预设…"
@@ -133,24 +157,40 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                       label: preset.name, description: preset.note,
                       disabled: ops?.channel === 'chat' && r.protocolEditable === false && preset.protocol !== protocol,
                     }))}
-                  />}
+                  /></SettingsField>}
+              <SettingsField label="模型">
+              {ed.model ? (
+                <span className="key-stack">
                   <span className="model-fetch">
+                    <span className="provider-model-input">
+                    {choices.length > 0 && !manualModel && <Select aria-label="获取的可用模型" value={r.model} placeholder="选择模型"
+                      options={[...(!choices.includes(r.model) && r.model ? [{ value: r.model, label: r.model, description: '当前填写的模型' }] : []), ...choices.map(model => ({ value: model, label: model }))]}
+                      onChange={model => ops?.onRow?.(i, { model })}/>}
                     <input
                       className="mock"
+                      hidden={choices.length > 0 && !manualModel}
                       aria-label="模型名称"
                       value={r.model}
                       placeholder={ops?.media ? '留空使用提供商预置模型' : isCustom ? '模型名' : ''}
                       onChange={(e) => ops?.onRow?.(i, { model: e.target.value })}
                     />
+                    </span>
                     {ops?.onDiscover && <button
                       className="adv-btn"
                       title={needsKey ? '先填写 API Key，或导入已有配置' : '用此地址和已保存 / 刚填的 Key 读取模型列表，不发起模型推理'}
                       disabled={needsKey || discovering}
-                      onClick={() => ops?.onDiscover?.(i)}
+                      onClick={() => { setManualModel(false); ops?.onDiscover?.(i); }}
                     >
                       {discovering ? '读取中…' : '获取模型列表'}
                     </button>}
                   </span>
+                  {choices.length > 0 && <span className="provider-model-meta"><span>已获取 {choices.length} 个候选模型</span><button type="button" className="adv-btn" onClick={() => setManualModel(value => !value)}>{manualModel ? '从列表选择' : '手动输入'}</button></span>}
+                  {discovery && <div className={`provider-discovery-note${discovery !== 'loading' && !discovery.ok ? ' bad' : ''}`} role="status">{discovery === 'loading' ? '正在获取模型列表…' : <>
+                    <span>{discovery.message}</span>
+                    {!discovery.ok && <small>请核对地址、协议和 Key；获取失败也可手动输入模型并保存。</small>}
+                    {discovery.ok && !choices.length && <small>接口没有返回模型列表，请手动填写模型后保存。</small>}
+                    {discovery.ok && <small>{hhmm(discovery.fetchedAt)} · {discovery.keySource === 'input' ? '使用刚填的 Key' : '使用已保存的 Key'} · 只读取候选列表，尚未进行模型推理</small>}
+                  </>}</div>}
                   {ops?.onDiscover && needsKey && <span className="hint">先填写 API Key，或从配置导入；填写后可读取模型列表。</span>}
                 </span>
               ) : (
@@ -209,7 +249,8 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
               </SettingsField>
               </div>}
               <div className="provider-status">
-              {r.slot && ops?.onPrimary ? (
+              {isChat && <div className="provider-enable-control"><button type="button" role="switch" aria-label={`启用${title}`} aria-checked={r.enabled !== false} disabled={r.role === '主'} title={r.role === '主' ? '停用前请先设其他默认渠道' : '保存后生效；停用不删除模型和密钥'} onClick={() => ops?.onRow?.(i, { enabled: r.enabled === false })}><span aria-hidden="true"/></button><span>{r.enabled === false ? '已停用' : '已启用'}</span>{r.role === '主' && <small>默认渠道</small>}</div>}
+              {!isChat && r.slot && ops?.onPrimary ? (
                 <button
                   className={`tag ${r.role === '主' ? 'main' : 'backup'}`}
                   onClick={() => ops.onPrimary?.(i)}
@@ -217,61 +258,78 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                 >
                   {r.role === '主' ? '默认通道' : '设为默认通道'}
                 </button>
-              ) : (
+              ) : !isChat ? (
                 <span className={`tag ${r.role === '主' ? 'main' : 'backup'}`}>{role}</span>
-              )}
+              ) : null}
               <span className={`stt ${rt.cls}`}>{rt.text}</span>
               </div>
-              {ed && <p className="provider-save-hint hint">修改保留为草稿；点击页面“保存”后生效。读取模型列表失败时，可手动填写可编辑的模型名称。</p>}
-              {ops?.health?.(i)}
-              {(() => {
-                if (!ops?.discovery) return null;
-                const d = ops.discovery(i);
-                if (!d) return null;
-                if (d === 'loading') {
-                  return <div className="discover-row"><span className="spin" /> 正在向 {r.baseUrl || '该地址'} 查询可用模型…</div>;
-                }
-                return (
-                  <div className={`discover-row${d.ok ? ' ok' : ' bad'}`}>
-                    <span className="dr-txt">
-                      {d.ok ? '✓' : '✗'} {d.message}
-                      {d.ok && <span className="dr-src">· 来源 {d.source} · {hhmm(d.fetchedAt)}
-                        {d.keySource === 'saved' ? ' · 用已保存的 Key' : d.keySource === 'input' ? ' · 用刚填的 Key' : ' · 未带 Key'}
-                      </span>}
-                    </span>
-                    {!d.ok && <span className="dr-src">请核对地址、协议和 Key 后重试；服务商不支持列表时，可按其文档手动填写“模型名称”。</span>}
-                    {d.ok && d.models.length === 0 && <span className="dr-src">接口没有返回模型列表。请按服务商文档手动填写“模型名称”，然后保存。</span>}
-                    {d.ok && d.models.length > 0 && (() => {
-                      const hit = d.models.includes(r.model);
-                      return (
-                        <span className="dr-pick">
-                          <Select
-                            aria-label="获取的可用模型" value={hit ? r.model : ''}
-                            placeholder={`选模型并填入名称（${d.models.length} 个）…`}
-                            onChange={(model) => { if (model) ops?.onRow?.(i, { model }); }}
-                            options={d.models.map((model) => ({ value: model, label: model }))}
-                          />
-                          <span className="dr-src">{hit ? `已填入“模型名称”：${r.model}；保存后写入配置。` : '选择后填入上方“模型名称”，仍需点击保存。'}</span>
-                        </span>
-                      );
-                    })()}
-                  </div>
-                );
-              })()}
+              {isChat && <div className="provider-chat-catalog" aria-label="对话模型"><strong>对话模型{r.enabled === false ? ' · 已停用，启用后可使用' : ''}</strong><div>{r.chatModels?.length ? r.chatModels.map(model => <span className="provider-model-chip" key={model}>{model}</span>) : <small>保存配置后自动出现在对话模型列表。</small>}</div>{r.model && !r.chatModels?.includes(r.model) && <small>保存后加入：{r.model}</small>}</div>}
+              {ed && <div className="provider-save-actions"><button type="button" className="btn btn-sm btn-primary" disabled={ops?.saving} onClick={() => ops?.onSaveRow ? ops.onSaveRow(i) : ops?.onSave?.()}>{ops?.saving ? '保存中…' : '保存配置'}</button>
+                {ops?.onCheck && <button type="button" className="btn btn-sm" disabled={Boolean(checkReason) || checking || ops.saving} title={checkReason || '实际模型请求可能计费'} onClick={() => ops.onCheck?.(i)}>{checking ? '测试中…' : ops.checkLabel?.(i) || '测试'}</button>}
+                <small>{checkReason || '保存无需检测通过；密钥留空保留原值。'}</small></div>}
+              {saveMessage && <p className="provider-save-message" role={saveMessage.startsWith('保存失败') ? 'alert' : 'status'}>{saveMessage}</p>}
+              {!isChat && ops?.health?.(i)}
               </div>
             </article>
           );
 }
 
 export function ProviderBoard({ rows, ops, modelLoading, resultText }: BoardProps & { rows: ModelRow[]; modelLoading: boolean }) {
+  const list = useRef<HTMLDivElement>(null);
+  const positions = useRef(new Map<string, number>());
+  const dragKey = useRef<string | null>(null);
+  const dragPointer = useRef<number | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const next = new Map<string, number>();
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    list.current?.querySelectorAll<HTMLElement>('[data-provider-key]').forEach(card => {
+      const key = card.dataset.providerKey!, top = card.offsetTop, previous = positions.current.get(key);
+      next.set(key, top);
+      if (!reduced && previous !== undefined && previous !== top && card.animate) {
+        card.getAnimations?.().forEach(animation => animation.cancel());
+        card.animate([{ transform: `translateY(${previous - top}px)` }, { transform: 'translateY(0)' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+    });
+    positions.current = next;
+  }, [rows]);
+  useEffect(() => {
+    if (!dragging) return;
+    const finish = () => { dragKey.current = null; dragPointer.current = null; setDragging(null); };
+    const move = (event: PointerEvent) => {
+      if (event.pointerId !== dragPointer.current || !list.current || ops?.saving) return;
+      event.preventDefault();
+      const from = rows.findIndex(row => rowKey(row) === dragKey.current);
+      if (from < 0) { finish(); return; }
+      const top = list.current.getBoundingClientRect().top;
+      // Layout offsets exclude the FLIP transform, so animated cards cannot bounce the target back.
+      const cards = Array.from(list.current.querySelectorAll<HTMLElement>('[data-provider-key]'));
+      let to = from;
+      cards.forEach((card, index) => {
+        const midpoint = top + card.offsetTop + card.offsetHeight / 2;
+        if (index > from && event.clientY >= midpoint) to = index;
+        if (index < from && event.clientY <= midpoint && to === from) to = index;
+      });
+      if (to !== from) ops?.onMove?.(from, to);
+    };
+    const up = (event: PointerEvent) => { if (event.pointerId === dragPointer.current) finish(); };
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') finish(); };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    window.addEventListener('blur', finish);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); window.removeEventListener('blur', finish); window.removeEventListener('keydown', key); };
+  }, [dragging, rows, ops]);
   return (
     modelLoading && rows.length === 0 ? (
       <div className="board"><div className="empty"><span className="spin" /> 正在读取配置…<span className="hint">（后台繁忙时可能稍慢，会自动重试）</span></div></div>
     ) : rows.length === 0 ? (
       <div className="board"><div className="empty">还没有配置。<span className="hint">可在「环境安装」先补齐本地能力。</span></div></div>
     ) : (
-      <div className="provider-list">
-        {rows.map((r, i) => <ProviderCard key={`${r.slot || r.type}:${i}`} r={r} i={i} ops={ops} resultText={resultText} />)}
+      <div className="provider-list" ref={list}>
+        {rows.map((r, i) => <ProviderCard key={rowKey(r)} r={r} i={i} count={rows.length} ops={ops} resultText={resultText}
+          dragging={dragging === rowKey(r)} onGrab={pointerId => { dragKey.current = rowKey(r); dragPointer.current = pointerId; setDragging(rowKey(r)); }}/>) }
       </div>
     )
   );

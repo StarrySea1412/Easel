@@ -157,8 +157,14 @@ class Service:
         if not isinstance(ref, str) or not ref or len(ref) > 500:
             raise HTTPException(400, '模型标识无效。')
         target = self.resolver(ref)
-        if not target or not target.key or not target.base or target.protocol not in ('openai', 'anthropic'):
-            raise HTTPException(400, '所选模型没有完整的已保存渠道配置，请先保存配置。')
+        if not target:
+            raise HTTPException(400, '该模型尚未同步到可检测目录，或使用当前检测器不支持的认证方式。请在供应商编辑区保存模型；若已保存，请检查网关与认证设置。保存配置不需要先通过检测。')
+        if not target.key:
+            raise HTTPException(400, '此渠道未找到可用的 API Key，请在供应商编辑区填写并保存。')
+        if not target.base:
+            raise HTTPException(400, '此渠道缺少接口地址，请在供应商编辑区填写并保存。')
+        if target.protocol not in ('openai', 'anthropic'):
+            raise HTTPException(400, '此渠道的请求协议暂不支持可用性检测；这不会阻止保存配置。')
         if not self.allowed(target.base):
             raise HTTPException(400, '已保存目标地址不可用于测试，请核对最终接口地址。')
         return target

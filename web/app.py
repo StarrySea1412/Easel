@@ -1894,6 +1894,11 @@ def _chat_model(slot: str, env: dict, providers: dict | None = None) -> str:
 
 
 def _model_channels() -> dict:
+    import office_controls
+    from model_preferences import disabled_providers
+    config_path = openclaw_state_dir() / 'openclaw.json'
+    disabled = disabled_providers(config_path)
+    catalog = office_controls.configured_models(config_path, include_disabled=True)
     env = _read_env()
     primary = ""
     providers = {}
@@ -1908,19 +1913,20 @@ def _model_channels() -> dict:
         pass
 
     chat_rows = []
-    ob = (env.get("OPENAI_BASE_URL") or "").strip()
-    ok_key = bool((env.get("OPENAI_API_KEY") or "").strip())
+    ob = (env.get("OPENAI_BASE_URL") or providers.get("openai", {}).get("baseUrl") or "").strip()
+    openai_key = str(env.get("OPENAI_API_KEY") or providers.get("openai", {}).get("apiKey") or "").strip()
+    ok_key = bool(openai_key)
     if ob or ok_key:
         chat_rows.append({
             "slot": "openai", "order": 1, "name": "deepseek",
             "sub": "官方直连",
             "type": "openai", "protocol": "openai", "model": _chat_model('openai', env, providers),
-            "baseUrl": ob, "keyMasked": _mask_key(env.get("OPENAI_API_KEY", "")),
+            "baseUrl": ob, "keyMasked": _mask_key(openai_key),
             "role": "主" if primary.startswith("openai/") else "备",
             "result": "已配置" if ok_key else "缺 key",
         })
-    ab = (env.get("ANTHROPIC_BASE_URL") or "").strip()
-    ak = (env.get("ANTHROPIC_API_KEY") or "").strip()
+    ab = (env.get("ANTHROPIC_BASE_URL") or providers.get("anthropic", {}).get("baseUrl") or "").strip()
+    ak = str(env.get("ANTHROPIC_API_KEY") or providers.get("anthropic", {}).get("apiKey") or "").strip()
     if ab or ak:
         chat_rows.append({
             "slot": "anthropic", "order": len(chat_rows) + 1, "name": "anthropic", "sub": "官方直连",
@@ -1928,8 +1934,8 @@ def _model_channels() -> dict:
             "baseUrl": ab or "https://api.anthropic.com", "keyMasked": _mask_key(ak),
             "role": "主" if primary.startswith('anthropic/') else "备", "result": "已配置" if ak else "缺 key",
         })
-    lb = (env.get("EASEL_LLM_BASE_URL") or "").strip()
-    lk = (env.get("EASEL_LLM_API_KEY") or "").strip()
+    lb = (env.get("EASEL_LLM_BASE_URL") or providers.get("relay", {}).get("baseUrl") or "").strip()
+    lk = str(env.get("EASEL_LLM_API_KEY") or providers.get("relay", {}).get("apiKey") or "").strip()
     if lb or lk:
         chat_rows.append({
             "slot": "relay", "order": len(chat_rows) + 1, "name": "relay", "sub": "中转站",
@@ -1965,6 +1971,8 @@ def _model_channels() -> dict:
     for row in chat_rows:
         pkey = row['name'] if row.get('slot') == 'custom' else row.get('slot')
         row['providerId'] = pkey
+        row['enabled'] = pkey not in disabled
+        row['chatModels'] = [item['model'] for item in catalog if item['provider'] == pkey]
         row['deletable'] = True
         provider = providers.get(pkey)
         row['protocol'] = row['type'] = _chat_protocol(pkey, providers, row['model'])
@@ -1989,6 +1997,9 @@ def _model_channels() -> dict:
          "keyMasked": _mask_key(env.get("SILICONFLOW_API_KEY", "")), "role": "主",
          "result": "已配置" if sf else "缺 key"},
     ]
+    from model_preferences import provider_order
+    order = provider_order(config_path)
+    chat_rows.sort(key=lambda row: order.index(row.get('providerId', row.get('slot'))) if row.get('providerId', row.get('slot')) in order else len(order))
     channels: dict = {"chat": {"rows": chat_rows}, "transcribe": {"rows": trans_rows}}
     try:
         import model_registry as _mr  # skills/shared/scripts 已在 sys.path 上
@@ -2404,13 +2415,15 @@ def _atomic_model_bytes(path: Path, content: bytes) -> None:
 
 
 def _model_file_snapshot() -> dict[Path, bytes | None]:
-    paths = (ENV_FILE, openclaw_state_dir() / 'openclaw.json', DATA_DIR / 'channel-names.json')
+    from model_preferences import path_for, order_path
+    paths = (ENV_FILE, openclaw_state_dir() / 'openclaw.json', DATA_DIR / 'channel-names.json',
+             path_for(openclaw_state_dir() / 'openclaw.json'), order_path(openclaw_state_dir() / 'openclaw.json'))
     return {p: p.read_bytes() if p.exists() else None for p in paths}
 
 
 def _commit_model_configuration(updates: dict[str, str], providers: dict[str, dict] | None = None,
                                 keep: set[str] | None = None, primary: str = '', channel_label: tuple[str, str] | None = None,
-                                deleted: set[str] | None = None) -> str:
+                                deleted: set[str] | None = None, provider_order: list[str] | None = None) -> str:
     """Rollback ordinary write/sync failures. Each file is atomic; hard process termination is not a transaction."""
     _guard_env_values(updates)
     with _MODEL_CONFIG_LOCK:
@@ -2435,6 +2448,17 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
             except (ValueError, TypeError, AttributeError):
                 raise HTTPException(500, '无法读取现有模型配置，未保存；请检查 OpenClaw 配置') from None
         try:
+            if providers is not None:
+                from model_preferences import disabled_providers, path_for, order_path
+                config_path = openclaw_state_dir() / 'openclaw.json'
+                disabled = disabled_providers(config_path) - (deleted or set())
+                for provider, values in providers.items():
+                    if 'enabled' in values:
+                        disabled.discard(provider) if values['enabled'] else disabled.add(provider)
+                existing = json.loads(before.get(config_path) or b'{}')
+                current_primary = existing.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
+                if (primary or current_primary).split('/', 1)[0] in disabled:
+                    raise HTTPException(400, '默认对话渠道不能停用，请先选择另一个默认模型并保存。')
             remove_keys = {key for name in (deleted or set()) & RESERVED_PROVIDER_KEYS
                            for key in (*_SLOT_ENV_KEYS[name], _CHAT_MODEL_KEYS[name])}
             legacy = _read_env().get('CLAUDE_MODEL', '')
@@ -2446,10 +2470,29 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
                     _sync_openclaw_chat(providers, keep or set(), primary)) if providers is not None else ''
             if '失败' in note:
                 raise RuntimeError('sync failed')
+            if providers is not None:
+                # Removing a default may choose a replacement; never select a disabled channel.
+                updated = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+                actual = updated.get('agents', {}).get('defaults', {}).get('model', {})
+                if actual.get('primary', '').split('/', 1)[0] in disabled:
+                    candidates = [f"{name}/{model['id']}" for name, value in updated.get('models', {}).get('providers', {}).items()
+                                  if name not in disabled and isinstance(value, dict) for model in value.get('models', [])
+                                  if isinstance(model, dict) and model.get('id')]
+                    if candidates:
+                        actual['primary'] = candidates[0]
+                    else:
+                        actual.pop('primary', None)
+                    _atomic_model_bytes(config_path, json.dumps(updated, ensure_ascii=False, indent=2).encode('utf-8'))
+                _atomic_model_bytes(path_for(config_path), json.dumps(sorted(disabled)).encode('utf-8'))
+                if provider_order is not None:
+                    known = set(updated.get('models', {}).get('providers', {}))
+                    if len(set(provider_order)) != len(provider_order) or any(name not in known for name in provider_order):
+                        raise HTTPException(400, '渠道排序包含重复或未保存的供应商，请刷新后重试。')
+                    _atomic_model_bytes(order_path(config_path), json.dumps(provider_order).encode('utf-8'))
             if channel_label:
                 channel_profiles.save(sys.modules[__name__], channel_label[0], channel_label[1], channel_label[1])
             return note
-        except Exception:
+        except Exception as error:
             restored = True
             for path, content in before.items():
                 try:
@@ -2463,6 +2506,8 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
                     restored = False
             if not restored:
                 raise HTTPException(500, '保存失败且未能完整恢复；请检查文件权限并核对配置后再重试') from None
+            if isinstance(error, HTTPException):
+                raise error
             raise HTTPException(500, '保存失败，原有配置已恢复；请检查文件权限或 OpenClaw 配置后重试') from None
 
 
@@ -2475,6 +2520,7 @@ class ModelSaveRow(BaseModel):
     key2: str = ""
     primary: bool = False
     protocol: str = ""
+    enabled: bool | None = None
     contextWindow: int | None = Field(default=None, ge=1024, le=10000000, strict=True)
 
 
@@ -2482,6 +2528,7 @@ class ModelSaveRequest(BaseModel):
     channel: str = "chat"
     rows: list[ModelSaveRow] = Field(default_factory=list)
     deletedProviders: list[str] = Field(default_factory=list)
+    providerOrder: list[str] | None = Field(default=None, max_length=256)
 
 
 @app.post("/api/settings/models/save")
@@ -2641,6 +2688,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             pkey = name
         if is_chat and pkey:
             provider_updates[pkey]['protocol'] = protocol
+            if row.enabled is not None:
+                provider_updates[pkey]['enabled'] = row.enabled
         # 同一条规矩也得覆盖 openclaw.json 这一侧：_sync_openclaw_chat 只在 key 非空时改
         # apiKey，却无条件改 baseUrl —— 只换地址、Key 留空，下一轮对话就会拿着原 Key 去打新地址。
         # 自定义供应商压根不写 .env，前面那道 _SLOT_ENV_KEYS 闸拦不到它。
@@ -2671,10 +2720,10 @@ async def api_settings_models_save(req: ModelSaveRequest):
             provider_updates[pkey]['contextWindow'] = row.contextWindow
         if is_chat and pkey and getattr(row, 'primary', False) and model:
             primary_ref = f'{pkey}/{model}'
-    if not updates and not provider_updates and not primary_ref and not req.deletedProviders:
+    if not updates and not provider_updates and not primary_ref and not req.deletedProviders and req.providerOrder is None:
         raise HTTPException(400, '没有可保存的改动（key 留空表示不改）')
     note = _commit_model_configuration(updates, provider_updates if is_chat else None, keep_custom, primary_ref,
-                                       deleted=deleted if is_chat else None)
+                                       deleted=deleted if is_chat else None, provider_order=req.providerOrder if is_chat else None)
     resp = {"ok": True, "note": note}
     resp.update(_model_channels())
     return resp
@@ -2742,7 +2791,7 @@ def _model_health_target(ref: str):
     import office_controls
     with _MODEL_CONFIG_LOCK:
         path = openclaw_state_dir() / "openclaw.json"
-        if ref not in {row["id"] for row in office_controls.configured_models(path)}:
+        if ref not in {row["id"] for row in office_controls.configured_models(path, include_disabled=True)}:
             return None
         try:
             config = json.loads(path.read_text(encoding="utf-8"))
@@ -3044,6 +3093,8 @@ def _saved_key_for(channel: str, slot: str) -> str:
     if channel == "transcribe":
         return env.get("SILICONFLOW_API_KEY", "") or ""
     if channel == "image":
+        if slot == 'imagegen':
+            return env.get('IMG_API_KEY', '') or ''
         for name in ("IMG_API_KEY", "OPENAI_API_KEY", "API_KEY"):
             if (env.get(name) or "").strip():
                 return env[name]
@@ -3060,6 +3111,8 @@ def _saved_base_for(channel: str, slot: str) -> str:
     if channel == 'transcribe' and slot == 'siliconflow':
         return env.get('SILICONFLOW_BASE_URL') or 'https://api.siliconflow.cn/v1'
     if channel == 'image':
+        if slot == 'imagegen':
+            return env.get('IMG_BASE_URL', '') or ''
         return env.get('IMG_BASE_URL') or env.get('OPENAI_BASE_URL') or ''
     return ''
 
@@ -4146,6 +4199,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     requested_model_ref = req.modelRef
     requested_thinking_level = req.thinkingLevel
     import office_controls
+    if requested_model_ref is None:
+        await asyncio.to_thread(office_controls.require_enabled_inherited_model, sys.modules[__name__], req.sessionId)
     if requested_model_ref is not None:
         await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                 req.sessionId, requested_model_ref,
@@ -5215,6 +5270,8 @@ async def api_chat(req: ChatRequest):
     loop = asyncio.get_event_loop()
     # chat 可能中途触发制作层长任务 → 用 TIMEOUT_CHAT，与流式 /api/chat/stream 一致（勿用 300s）
     from easel.task_store import TaskStore, TaskConflict
+    import office_controls
+    await asyncio.to_thread(office_controls.require_enabled_inherited_model, sys.modules[__name__], req.sessionId)
     store, turn = TaskStore(OUTPUTS_DIR), uuid.uuid4().hex
     if req.sessionId:
         try:

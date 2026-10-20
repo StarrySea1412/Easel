@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'web'))
 import app as web
 import local_config_import as lci
+import office_controls
 
 
 @pytest.fixture(autouse=True)
@@ -506,4 +507,133 @@ def test_delete_failure_restores_env_credentials_provider_and_primary(sandbox, m
 def test_chat_rows_expose_stable_provider_identity_for_delete_after_draft_rename(sandbox):
     rows = web._model_channels()['channels']['chat']['rows']
     assert all(row['deletable'] for row in rows)
-    assert {row['providerId'] for row in rows} == {'openai', 'custom'}
+    assert {row['providerId'] for row in rows} == {'openai', 'anthropic', 'relay', 'custom'}
+
+
+def test_chat_catalog_uses_saved_runtime_models_and_supports_disabled_channels(sandbox):
+    _, oc = sandbox
+    before = json.loads(oc.read_text())
+    before['models']['providers']['relay']['models'].append({'id': 'another-model'})
+    oc.write_text(json.dumps(before))
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+        web.ModelSaveRow(slot='relay', model='relay-model', enabled=False),
+    ])))
+    row = next(row for row in result['channels']['chat']['rows'] if row['slot'] == 'relay')
+    assert row['enabled'] is False and row['chatModels'] == ['relay-model', 'another-model']
+    assert not any(row['provider'] == 'relay' for row in office_controls.configured_models(oc))
+    listed = office_controls.configured_models(oc, include_disabled=True)
+    assert all(row.get('enabled') is False for row in listed if row['provider'] == 'relay')
+    with pytest.raises(web.HTTPException):
+        office_controls.validate_requested_model(web, 'relay/relay-model')
+    assert web._model_health_target('relay/relay-model') is not None, 'disabled channels remain explicitly testable'
+    assert json.loads(oc.read_text())['models']['providers']['relay']['apiKey'] == before['models']['providers']['relay']['apiKey']
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+        web.ModelSaveRow(slot='relay', model='relay-model', enabled=True),
+    ])))
+    assert {row['model'] for row in office_controls.configured_models(oc) if row['provider'] == 'relay'} == {'relay-model', 'another-model'}
+
+
+def test_default_cannot_be_disabled_without_a_replacement_and_no_files_change(sandbox):
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+            web.ModelSaveRow(slot='openai', model='old-model', enabled=False),
+        ])))
+    assert caught.value.status_code == 400 and '默认' in caught.value.detail
+    assert web._model_file_snapshot() == before
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+        web.ModelSaveRow(slot='openai', model='old-model', enabled=False),
+        web.ModelSaveRow(slot='relay', model='relay-model', primary=True),
+    ])))
+    assert result['primary'] == 'relay/relay-model'
+
+
+def test_visibility_write_failure_rolls_back_env_and_runtime_config(sandbox, monkeypatch):
+    before = web._model_file_snapshot()
+    write = web._atomic_model_bytes
+    def fail(path, data):
+        if path.name == 'easel-disabled-providers.json':
+            raise OSError('simulated visibility failure')
+        return write(path, data)
+    monkeypatch.setattr(web, '_atomic_model_bytes', fail)
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+            web.ModelSaveRow(slot='relay', model='new-model', enabled=False),
+        ])))
+    assert caught.value.status_code == 500
+    assert web._model_file_snapshot() == before
+
+
+def test_deleting_default_skips_disabled_replacement_and_preserves_disabled_credentials(sandbox):
+    _, oc = sandbox
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(slot='anthropic', enabled=False)])))
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[], deletedProviders=['openai'])))
+    assert result['primary'] == 'relay/relay-model'
+    assert json.loads(oc.read_text())['models']['providers']['anthropic']['apiKey'] == 'official-old-key'
+
+
+def test_saved_only_builtin_is_editable_when_no_env_alias_exists(sandbox):
+    web.ENV_FILE.write_text('', encoding='utf-8')
+    rows = web._model_channels()['channels']['chat']['rows']
+    assert {row['slot'] for row in rows} >= {'openai', 'anthropic', 'relay'}
+    assert all(row['chatModels'] for row in rows)
+
+
+def test_provider_order_is_persisted_for_settings_and_chat_without_changing_credentials(sandbox):
+    before = json.loads(sandbox[1].read_text())
+    order = ['relay', 'custom', 'openai', 'anthropic']
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(providerOrder=order)))
+    assert [row['providerId'] for row in result['channels']['chat']['rows']] == order
+    assert [row['providerId'] for row in web._model_channels()['channels']['chat']['rows']] == order
+    assert list(dict.fromkeys(row['provider'] for row in office_controls.configured_models(sandbox[1]))) == order
+    assert json.loads(sandbox[1].read_text()) == before
+
+
+@pytest.mark.parametrize('order', [['relay', 'relay'], ['missing'], ['../secret']])
+def test_invalid_order_rolls_back_all_configuration(sandbox, order):
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(providerOrder=order, rows=[web.ModelSaveRow(slot='relay', model='changed')])))
+    assert caught.value.status_code == 400
+    assert web._model_file_snapshot() == before
+
+
+def test_order_write_failure_rolls_back_model_and_disabled_preferences(sandbox, monkeypatch):
+    before = web._model_file_snapshot()
+    write = web._atomic_model_bytes
+    def fail(path, data):
+        if path.name == 'easel-provider-order.json':
+            raise OSError('simulated order write failure')
+        return write(path, data)
+    monkeypatch.setattr(web, '_atomic_model_bytes', fail)
+    with pytest.raises(web.HTTPException):
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(providerOrder=['relay'], rows=[web.ModelSaveRow(slot='relay', model='changed', enabled=False)])))
+    assert web._model_file_snapshot() == before
+
+
+def test_inherited_disabled_model_cannot_start_a_new_turn(sandbox, monkeypatch):
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[web.ModelSaveRow(slot='relay', enabled=False)])))
+    monkeypatch.setattr(office_controls, 'turn_model_capability', lambda *args: {'available': True, 'currentModelRef': 'relay/relay-model', 'defaultModelRef': 'openai/old-model'})
+    with pytest.raises(web.HTTPException):
+        office_controls.require_enabled_inherited_model(web, 'test-session')
+
+
+def test_imagegen_model_discovery_uses_only_its_dedicated_saved_key_without_writing(sandbox, monkeypatch):
+    web._write_env_direct({'IMG_BASE_URL':'https://image.example/v1','IMG_API_KEY':'image-synthetic-key','OPENAI_API_KEY':'chat-synthetic-key'})
+    before=web._model_file_snapshot(); calls=[]
+    def discover(base,key,protocol):
+        calls.append((base,key,protocol)); return {'ok':True,'models':['image-model'],'message':'fixture'}
+    monkeypatch.setattr(web,'_discover_models',discover)
+    result=asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(channel='image',slot='imagegen',baseUrl='https://image.example/v1')))
+    assert calls==[('https://image.example/v1','image-synthetic-key','openai')]
+    assert result['models']==['image-model'] and result['keySource']=='saved'
+    assert before==web._model_file_snapshot()
+    assert 'synthetic-key' not in json.dumps(result)
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(channel='image',slot='imagegen',baseUrl='https://other.example/v1')))
+    assert caught.value.status_code==400 and len(calls)==1
+
+
+def test_imagegen_discovery_does_not_borrow_chat_credentials(sandbox):
+    assert web._saved_key_for('image','imagegen')==''
+    assert web._saved_base_for('image','imagegen')==''

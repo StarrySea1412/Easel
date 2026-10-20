@@ -164,13 +164,13 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
             <div className="drawer-meta-actions"><button type="button" className="btn btn-primary btn-sm" disabled={metaSaving} onClick={() => void saveMeta()}>{metaSaving ? '保存中…' : '保存'}</button>{metaMsg && <span role="status">{metaMsg}</span>}</div>
           </section>
           {detail && <SkillDependencyBadges skill={detail} detail={detail} />}
-          {loadErr && <div style={{ color: 'var(--red)', fontSize: 14 }}>{loadErr}</div>}
+          {loadErr && <div style={{ color: 'var(--red)', fontSize: 'calc(14px * var(--easel-font-scale, 1))' }}>{loadErr}</div>}
 
           {/* 新手导读：按 SKILL.md 原文静态整理，不需要先配模型 */}
           {guide && (
             <div className="panel guide-panel">
               <div className="panel-title">🧭 新手导读
-                <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 12 }}>
+                <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 'calc(12px * var(--easel-font-scale, 1))' }}>
                   （按原文整理，原文没写的会标明）
                 </span>
               </div>
@@ -286,13 +286,13 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
           {detail?.needsApi && detail.apiSpec && (
             <div className="panel">
               <div className="panel-title">🔑 {detail.apiSpec.label} · API 配置
-                <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 12 }}>
+                <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 'calc(12px * var(--easel-font-scale, 1))' }}>
                   （任选一个服务商填齐即可用）
                 </span>
               </div>
               {detail.apiSpec.settings.length > 0 && (
                 <div className="provider-block">
-                  <div className="provider-head"><strong style={{ fontSize: 13 }}>默认选择与能力</strong></div>
+                  <div className="provider-head"><strong style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))' }}>默认选择与能力</strong></div>
                   {detail.apiSpec.settings.map((k) => (
                     <div key={k.env}>
                       <label className="field-label">
@@ -328,7 +328,7 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
                 return (
                   <div key={prov.id} className={`provider-block ${provOk ? 'configured' : ''}`}>
                     <div className="provider-head">
-                      <strong style={{ fontSize: 13 }}>{prov.name}</strong>
+                      <strong style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))' }}>{prov.name}</strong>
                       {provOk
                         ? <span className="badge badge-ok">✓ 就绪</span>
                         : <span className="badge">未配置</span>}
@@ -365,7 +365,7 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
                 <button className="btn btn-primary btn-sm" onClick={handleSaveEnv} disabled={saving}>
                   {saving ? '保存中…' : '保存到 .env'}
                 </button>
-                {savedMsg && <span style={{ fontSize: 13, color: savedMsg.includes('✓') ? 'var(--green)' : 'var(--text-secondary)' }}>{savedMsg}</span>}
+                {savedMsg && <span style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: savedMsg.includes('✓') ? 'var(--green)' : 'var(--text-secondary)' }}>{savedMsg}</span>}
               </div>
             </div>
           )}
@@ -373,9 +373,9 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
           {/* 进入对话 */}
           <div className="panel">
             <div className="panel-title">在对话中使用</div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>带上技能与需求进入新对话，确认后再发送。</p>
+            <p style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)' }}>带上技能与需求进入新对话，确认后再发送。</p>
             {blocked && (
-              <div style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>
+              <div style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--amber)', marginBottom: 10 }}>
                 当前配置不完整，可先进入对话；调用前请补齐对应渠道配置。
               </div>
             )}
@@ -393,7 +393,7 @@ export default function SkillDrawer({ skillName, onOpenChat, onClose, onConfigur
                 进入对话
               </button>
             </div>
-            {runErr && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 10 }}>{runErr}</div>}
+            {runErr && <div style={{ color: 'var(--red)', fontSize: 'calc(13px * var(--easel-font-scale, 1))', marginTop: 10 }}>{runErr}</div>}
           </div>
 
           {/* 原文入口：默认折叠，保留完整 SKILL.md 与运行命令 */}

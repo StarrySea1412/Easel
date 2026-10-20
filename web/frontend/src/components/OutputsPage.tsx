@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = { draft: '草稿', ready: '待发',
 const STATUS_COLOR: Record<string, string> = { draft: '#94a3b8', ready: '#d97706', published: '#16a34a' };
 
 const badge: CSSProperties = {
-  fontSize: 11, padding: '1px 7px', borderRadius: 'var(--radius-pill)',
+  fontSize: 'calc(11px * var(--easel-font-scale, 1))', padding: '1px 7px', borderRadius: 'var(--radius-pill)',
   background: 'rgba(0,0,0,0.05)', color: 'var(--text-secondary)', whiteSpace: 'nowrap',
 };
 const statusBadge = (s: string): CSSProperties => ({
@@ -291,7 +291,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             opaque origin，脚本跑得起来但访问不到本站，安全。(修复：内嵌预览里复制按钮点了没反应) */}
         <iframe src={`${url}?v=${selected.mtime ?? 0}`} title={selected.name} sandbox="allow-scripts" allow="clipboard-write"
           style={{ width: '100%', height: '68vh', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: '#fff' }} />
-        <div style={{ marginTop: 8 }}><a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-start)', fontSize: 13 }}>在新标签打开 ↗</a></div>
+        <div style={{ marginTop: 8 }}><a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-start)', fontSize: 'calc(13px * var(--easel-font-scale, 1))' }}>在新标签打开 ↗</a></div>
       </>
     );
     if (selected.kind === 'text') {
@@ -301,7 +301,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
       if (!content) return <div className="trend-empty">文件内容为空</div>;
       return <div className="outputs-viewer-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />;
     }
-    return <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>无法预览。<a href={downloadUrl(selected.path)} download style={{ color: 'var(--accent-start)' }}>下载 {selected.name}</a></div>;
+    return <div style={{ color: 'var(--text-secondary)', fontSize: 'calc(14px * var(--easel-font-scale, 1))' }}>无法预览。<a href={downloadUrl(selected.path)} download style={{ color: 'var(--accent-start)' }}>下载 {selected.name}</a></div>;
   };
 
   /** 项目/文件夹卡片：顶层项目用展示头（标题/平台/状态/封面），嵌套子文件夹回退朴素样式。 */
@@ -406,7 +406,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
           {/* 成品区 */}
           {deliverableFiles.length > 0 && (
             <>
-              <div className="section-label" style={{ margin: '6px 0 8px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <div className="section-label" style={{ margin: '6px 0 8px', fontSize: 'calc(13px * var(--easel-font-scale, 1))', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 成品 · {deliverableFiles.length}
               </div>
               <div className="gallery-grid">{deliverableFiles.map(renderFile)}</div>
@@ -415,7 +415,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
           {/* 素材 / 过程文件区 */}
           {(dirs.length > 0 || restFiles.length > 0) && (
             <>
-              <div className="section-label" style={{ margin: '18px 0 8px', fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>
+              <div className="section-label" style={{ margin: '18px 0 8px', fontSize: 'calc(13px * var(--easel-font-scale, 1))', fontWeight: 600, color: 'var(--text-tertiary)' }}>
                 素材 / 过程文件
               </div>
               <div className="gallery-grid">
@@ -444,14 +444,14 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
           <div ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-label={`预览 ${selected.name}`} tabIndex={-1} onClick={(e) => e.stopPropagation()} style={selected.kind === 'image' ? { width: 'min(1080px, 100vw)' } : undefined}>
             <div className="drawer-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ minWidth: 0 }}>
-                <div className="skill-detail-title" style={{ fontSize: 16 }}>{selected.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3, fontFamily: "'SF Mono','Consolas',monospace" }}>{selected.path}</div>
+                <div className="skill-detail-title" style={{ fontSize: 'calc(16px * var(--easel-font-scale, 1))' }}>{selected.name}</div>
+                <div style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--text-tertiary)', marginTop: 3, fontFamily: "'SF Mono','Consolas',monospace" }}>{selected.path}</div>
               </div>
               <button className="icon-btn" aria-label="关闭预览" onClick={() => setSelected(null)}>×</button>
             </div>
             <div className="drawer-body">
               {preview()}
-              {selected.kind === 'image' && <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 14, lineHeight: 1.7 }}>
+              {selected.kind === 'image' && <div style={{ color: 'var(--text-secondary)', fontSize: 'calc(13px * var(--easel-font-scale, 1))', marginTop: 14, lineHeight: 1.7 }}>
                 {onReferenceImage&&<button className="btn btn-sm" onClick={()=>onReferenceImage({name:selected.name,url:mediaUrl(selected.path),mtime:selected.mtime||0})}>用作参考图 · 图生图</button>}<div>{imageDimensions(selected)}{selected.mtime ? ` · 保存于 ${new Date(selected.mtime * 1000).toLocaleString('zh-CN')}` : ''}</div>
                 {selected.generation?.size && <div>请求尺寸：{selected.generation.size}{selected.generation.model ? ` · 模型：${selected.generation.model}` : ''}</div>}
                 {selected.generation?.prompt ? <>

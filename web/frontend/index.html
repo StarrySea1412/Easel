@@ -16,6 +16,19 @@
 })();
     </script>
     <style>html{background:#fff}html[data-theme="dark"]{background:#17181c}</style>
+    <script id="easel-font-size-init">
+// Restore typography before the first paint, including when React is still loading.
+(function () {
+  var size = 14;
+  try {
+    var stored = localStorage.getItem('easel:font-size');
+    var value = stored && stored.trim() ? Number(stored) : NaN;
+    if (Number.isFinite(value) && value >= 12 && value <= 20) size = Math.round(value * 10) / 10;
+  } catch { /* Default remains usable when browser storage is restricted. */ }
+  document.documentElement.style.setProperty('--easel-font-size', size + 'px');
+  document.documentElement.style.setProperty('--easel-font-scale', String(size / 14));
+})();
+    </script>
     <script>
       // 子路径代理下必须带结尾斜杠，否则相对资源路径(./assets)会解析到上一级 → 404 白屏。
       // 若当前路径无结尾斜杠且末段不像文件名(无扩展名)，自动补斜杠后重载。

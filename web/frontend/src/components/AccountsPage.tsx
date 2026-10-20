@@ -586,14 +586,14 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
             aria-labelledby="account-login-title" tabIndex={-1}
             onClick={(e) => e.stopPropagation()}>
             <h3 id="account-login-title" style={{ margin: '0 0 4px' }}>登录 {qr.name}</h3>
-            <div style={{ fontSize: 13, marginBottom: 14,
+            <div style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', marginBottom: 14,
               color: qr.state === 'success' ? 'var(--green)'
                 : ['error', 'expired'].includes(qr.state) ? 'var(--red)' : 'var(--text-secondary)' }}>
               {STATE_LABEL[qr.state] || qr.state}{qr.message && !['error', 'expired', 'sms_required'].includes(qr.state) ? ` — ${qr.message}` : ''}
             </div>
             {qr.state === 'sms_required' ? (
               <div style={{ padding: '6px 4px 2px' }}>
-                <div style={{ fontSize: 13, marginBottom: 10,
+                <div style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', marginBottom: 10,
                   color: /错误|过期|失败|重新|未找到|未完成|不正确|失效/.test(qr.message || '')
                     ? 'var(--red)' : 'var(--text-secondary)' }}>
                   {qr.message || '平台风控要求短信验证，验证码已发到你手机，请输入：'}
@@ -604,9 +604,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
                   onKeyDown={(e) => { if (e.key === 'Enter') submitSms(); }}
                   placeholder="短信验证码" inputMode="numeric" autoFocus
                   style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center',
-                    letterSpacing: 6, fontSize: 20, padding: '10px 12px',
+                    letterSpacing: 6, fontSize: 'calc(20px * var(--easel-font-scale, 1))', padding: '10px 12px',
                     border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }} />
-                {smsErr && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>{smsErr}</div>}
+                {smsErr && <div style={{ color: 'var(--red)', fontSize: 'calc(12px * var(--easel-font-scale, 1))', marginTop: 6 }}>{smsErr}</div>}
                 <button className="btn btn-primary btn-block" style={{ marginTop: 12 }}
                   disabled={smsBusy} onClick={submitSms}>
                   {smsBusy ? '提交中…' : '提交验证码'}
@@ -620,9 +620,9 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
               <div className="loading" style={{ padding: 40 }}><div className="spinner" />{qr.visibleBrowser ? '请在工作台所在电脑的小红书窗口完成登录或安全验证。' : '正在验证验证码，登录中…'}</div>
             ) : qr.state === 'success' ? (
               <div style={{ padding: '20px 8px' }}>
-                <div style={{ fontSize: 44 }}>✅</div>
+                <div style={{ fontSize: 'calc(44px * var(--easel-font-scale, 1))' }}>✅</div>
                 {qr.platform === 'xiaohongshu' && (
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  <p style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)', marginTop: 8 }}>
                     登录成功！正在为你自动抓取本人笔记数据…<br />关闭此窗后，进入「内容分析」查看进度。
                   </p>
                 )}
@@ -651,27 +651,27 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
         <div className="overlay" onClick={closeCred}>
           <div className="modal" style={{ width: 420, maxWidth: '100%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 4px' }}>配置 {cred.name}</h3>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
               公众号用官方接口发布，需填开发者凭证（公众平台 → 设置与开发 → 开发接口管理）。<br />
               需把本服务器出口 IP 加入公众号「IP 白名单」，否则报 40164。文章发到<b>草稿箱</b>，群发请到 mp 后台确认。
             </div>
-            {credMsg && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 10 }}>{credMsg}</div>}
-            <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>AppID</label>
+            {credMsg && <div style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--green)', marginBottom: 10 }}>{credMsg}</div>}
+            <label style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)' }}>AppID</label>
             <input value={credForm.appId} autoFocus
               onChange={(e) => setCredForm((f) => ({ ...f, appId: e.target.value.trim() }))}
               placeholder="wx..." style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
-            <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>AppSecret</label>
+                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 'calc(14px * var(--easel-font-scale, 1))' }} />
+            <label style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)' }}>AppSecret</label>
             <input value={credForm.appSecret} type="password"
               onChange={(e) => setCredForm((f) => ({ ...f, appSecret: e.target.value.trim() }))}
               placeholder="开发者密钥（不会回显）" style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
-            <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>默认作者（可选）</label>
+                margin: '4px 0 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 'calc(14px * var(--easel-font-scale, 1))' }} />
+            <label style={{ fontSize: 'calc(12px * var(--easel-font-scale, 1))', color: 'var(--text-secondary)' }}>默认作者（可选）</label>
             <input value={credForm.author}
               onChange={(e) => setCredForm((f) => ({ ...f, author: e.target.value }))}
               placeholder="文章署名" style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px',
-                margin: '4px 0 4px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 14 }} />
-            {credErr && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{credErr}</div>}
+                margin: '4px 0 4px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 'calc(14px * var(--easel-font-scale, 1))' }} />
+            {credErr && <div style={{ color: 'var(--red)', fontSize: 'calc(12px * var(--easel-font-scale, 1))', marginTop: 8 }}>{credErr}</div>}
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button className="btn btn-primary" style={{ flex: 1 }} disabled={credBusy} onClick={submitCred}>
                 {credBusy ? '验证中…' : '保存并验证'}

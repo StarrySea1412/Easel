@@ -1,18 +1,54 @@
-.chat-progress-anchor{position:relative;min-width:0;max-width:340px}
-.chat-progress-capsule{display:flex;align-items:center;gap:8px;max-width:100%;min-height:32px;padding:5px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text-secondary);font:inherit;font-size:12px;cursor:pointer;text-align:left}
-.chat-progress-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
-.chat-progress-symbol{flex:none;color:var(--text-tertiary)}
-.chat-progress-capsule small{flex:none;font-variant-numeric:tabular-nums}
-.chat-progress-capsule.is-running .chat-progress-symbol{color:var(--accent)}
-.chat-progress-popover{position:absolute;top:calc(100% + 10px);right:0;width:min(340px,calc(100vw - 32px));box-sizing:border-box;max-height:min(70dvh,640px);overflow-y:auto;overscroll-behavior:contain;padding:16px;border:1px solid var(--border);border-radius:16px;background:var(--surface);color:var(--text);box-shadow:0 14px 40px #0002;z-index:80;font-size:13px;line-height:1.6}
-.chat-progress-popover header{display:flex;align-items:center;gap:10px}.chat-progress-popover header small{margin-left:auto;color:var(--text-tertiary)}
-.chat-progress-popover button{font:inherit;cursor:pointer;color:var(--text-secondary);background:transparent;border:0;border-radius:6px;padding:4px 7px}
-.chat-progress-count{display:flex;justify-content:space-between;color:var(--text-tertiary);padding:12px 0 6px;border-top:1px solid var(--border);margin-top:12px}
-.chat-progress-popover ol{list-style:none;margin:0;padding:0}.chat-progress-popover li{display:flex;align-items:flex-start;gap:10px;padding:8px 0;overflow-wrap:anywhere}.chat-progress-popover li>span{width:16px;flex:none;color:var(--text-tertiary)}
-.chat-progress-popover li small{display:block;font-size:11px;color:var(--text-tertiary)}.chat-progress-popover li[data-state=completed]{color:var(--text-tertiary)}.chat-progress-popover li[data-state=completed]>span{color:#34875b}.chat-progress-popover li[data-state=inProgress]>span{color:var(--accent)}.chat-progress-popover li[data-state=failed]>span,.chat-progress-popover li[data-state=blocked]>span{color:#b65642}
-.chat-progress-note{font-size:11px;color:var(--text-tertiary);margin:10px 0 0}.chat-progress-popover details{border-top:1px solid var(--border);margin-top:12px;padding-top:10px}.chat-progress-popover details p{font-size:12px;overflow-wrap:anywhere}.chat-progress-objective{overflow-wrap:anywhere}.chat-progress-goal{margin-top:12px}
+/* Keep controls self-contained: shared button and disclosure rules must not change their layout. */
+.chat-progress-anchor { position:relative; min-width:0; max-width:320px; font-family:inherit; }
+.chat-progress-anchor .chat-progress-capsule { appearance:none; display:inline-flex; align-items:center; justify-content:flex-start; gap:7px; box-sizing:border-box; max-width:100%; min-height:30px; margin:0; padding:5px 9px; border:1px solid var(--border); border-radius:999px; background:var(--surface); color:var(--text-secondary); font:inherit; font-size:12px; line-height:18px; text-align:left; cursor:pointer; transition:background .15s,border-color .15s; }
+.chat-progress-anchor .chat-progress-capsule:hover,.chat-progress-anchor .chat-progress-capsule[aria-expanded=true] { background:var(--surface-hover); border-color:var(--text-tertiary); }
+.chat-progress-current { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.chat-progress-symbol,.chat-progress-chevron { display:inline-flex; align-items:center; justify-content:center; flex:none; }
+.chat-progress-anchor svg { display:block; flex:none; }
+.chat-progress-capsule small { flex:none; color:var(--text-tertiary); font-size:11px; font-variant-numeric:tabular-nums; }
+.chat-progress-chevron { color:var(--text-tertiary); transform:rotate(90deg); transition:transform .16s; }
+.chat-progress-capsule[aria-expanded=true] .chat-progress-chevron { transform:rotate(-90deg); }
+.chat-progress-capsule[data-state=running] .chat-progress-symbol { color:var(--accent); }
+.chat-progress-capsule[data-state=error] .chat-progress-symbol,.chat-progress-summary[data-state=error]>svg { color:var(--red); }
+.chat-progress-capsule[data-state=done] .chat-progress-symbol { color:var(--green); }
+.chat-progress-anchor .chat-progress-popover { position:absolute; top:calc(100% + 6px); right:0; width:min(320px,calc(100vw - 32px)); box-sizing:border-box; max-height:min(70dvh,560px); overflow-y:auto; overscroll-behavior:contain; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--text-secondary); box-shadow:0 6px 22px #00000014; z-index:80; font:inherit; font-size:12px; line-height:1.6; animation:chat-progress-reveal .14s ease-out; }
+.chat-progress-popover>header { display:flex; align-items:center; gap:8px; margin:0 0 8px; padding:0; min-height:24px; }
+.chat-progress-popover>header strong { flex:1; color:var(--text); font-size:12px; font-weight:550; }
+.chat-progress-popover>header small { color:var(--text-tertiary); font-size:11px; font-variant-numeric:tabular-nums; }
+.chat-progress-anchor .chat-progress-popover button { appearance:none; display:inline-flex; align-items:center; gap:6px; margin:0; padding:5px 7px; border:0; border-radius:6px; background:transparent; color:var(--text-secondary); font:inherit; line-height:1.6; text-align:left; cursor:pointer; }
+.chat-progress-anchor .chat-progress-popover button:hover { background:var(--surface-hover); color:var(--text); }
+.chat-progress-anchor button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+.chat-progress-collapse { flex:none; justify-content:center; width:26px; height:26px; }
+.chat-progress-collapse svg { transform:rotate(-90deg); }
+.chat-progress-count { display:flex; justify-content:space-between; color:var(--text-tertiary); margin:10px 0 6px; }
+.chat-progress-track { height:3px; margin-bottom:8px; border-radius:3px; overflow:hidden; background:var(--border); }
+.chat-progress-track>span { display:block; height:100%; background:var(--accent); border-radius:inherit; transition:width .2s; }
+.chat-progress-popover ol { list-style:none; margin:0; padding:0; }
+.chat-progress-popover li { display:flex; align-items:flex-start; gap:8px; padding:7px 4px; overflow-wrap:anywhere; }
+.chat-progress-popover li>div { min-width:0; }
+.chat-progress-step-icon { display:inline-flex; align-items:center; justify-content:center; width:16px; height:20px; flex:none; color:var(--text-tertiary); }
+.chat-progress-step-icon i { width:9px; height:9px; border:1px solid currentColor; border-radius:50%; }
+.chat-progress-popover li small { display:block; font-size:11px; color:var(--text-tertiary); }
+.chat-progress-popover li[data-state=completed] { color:var(--text-tertiary); }
+.chat-progress-popover li[data-state=inProgress] { color:var(--text); }
+.chat-progress-popover li[data-state=inProgress]>.chat-progress-step-icon { color:var(--accent); }
+.chat-progress-popover li[data-state=failed]>.chat-progress-step-icon,.chat-progress-popover li[data-state=blocked]>.chat-progress-step-icon { color:var(--red); }
+.chat-progress-anchor .chat-progress-group { width:100%; color:var(--text-tertiary); }
+.chat-progress-group[aria-expanded=true]>svg { transform:rotate(90deg); }
+.chat-progress-summary { display:flex; align-items:flex-start; gap:8px; margin:2px 0; padding:6px 2px; overflow-wrap:anywhere; }
+.chat-progress-summary>svg { margin-top:2px; }
+.chat-progress-history { margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+.chat-progress-history p { margin:0; padding:5px 2px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.chat-progress-history-toggle { color:var(--text-tertiary); }
+.chat-progress-history-toggle[aria-expanded=true]>svg { transform:rotate(-90deg); }
+.chat-progress-note,.chat-progress-popover>p[role=status] { margin:8px 0 0; font-size:11px; color:var(--text-tertiary); }
+.chat-progress-objective { margin:4px 0 8px; color:var(--text); overflow-wrap:anywhere; }
+.chat-progress-objective small { display:block; color:var(--text-tertiary); }
+.chat-progress-anchor .chat-progress-goal { width:100%; margin-top:8px; border-top:1px solid var(--border); border-radius:0; padding-top:10px; }
+@keyframes chat-progress-reveal { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:translateY(0); } }
+@media(prefers-reduced-motion:reduce) { .chat-progress-anchor * { animation:none!important; transition:none!important; } }
 .chat-agent-activity{font-size:12px;line-height:1.65;margin:0 0 14px;color:var(--text-secondary)}.chat-agent-engine{display:flex;align-items:center;gap:7px;margin:4px 0 7px}.chat-agent-engine>span{font-size:11px;color:var(--text-tertiary)}.chat-agent-refresh{margin-top:4px}
 .chat-agent-row{padding:6px 0 6px 12px;border-left:1px solid var(--border);margin:0 0 4px 10px}.chat-agent-action{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.chat-agent-action strong{font-weight:550}.chat-agent-action>span{overflow-wrap:anywhere}
 .agent-model-label{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--text-tertiary)}.agent-model-label>span:not(.agent-provider-mark){overflow-wrap:anywhere}.agent-provider-mark{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--border);border-radius:5px;font-size:10px;font-weight:600}.agent-model-label small{font-size:inherit}.chat-agent-coverage{display:block;color:var(--text-tertiary);overflow-wrap:anywhere}
 :root[data-theme="dark"] .agent-provider-mark img:is([data-provider-brand="openai"],[data-provider-brand="moonshot"],[data-provider-brand="grok"],[data-provider-brand="fishaudio"]){filter:invert(1)}
-@media(max-width:760px){.chat-header{flex-wrap:wrap}.chat-header-actions{flex-wrap:wrap;justify-content:flex-end;max-width:100%;gap:6px}.chat-progress-anchor{max-width:min(270px,calc(100vw - 50px))}.chat-progress-popover{position:fixed;right:16px;top:100px}.chat-agent-engine{flex-wrap:wrap}}
+@media(max-width:760px){.chat-header{flex-wrap:wrap}.chat-header-actions{flex-wrap:wrap;justify-content:flex-end;max-width:100%;gap:6px}.chat-progress-anchor{max-width:min(270px,calc(100vw - 50px))}.chat-agent-engine{flex-wrap:wrap}}

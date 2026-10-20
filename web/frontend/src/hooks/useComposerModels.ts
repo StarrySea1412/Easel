@@ -43,20 +43,22 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
     return () => { clearInterval(timer); controller.abort(); };
   }, [sessionId, revision, enabled]);
   const options = capability?.options.filter(option => option.configured && isCompleteModelRef(option.id)) || [];
-  const selected = options.find(option => option.id === modelRef);
+  const selected = options.find(option => option.id === modelRef && option.enabled !== false);
   const effectiveRef = selected?.id || capability?.currentModelRef || capability?.defaultModelRef || '';
+  const effectiveDisabled = options.find(option => option.id === effectiveRef)?.enabled === false;
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    setConnection(effectiveRef ? { modelRef: effectiveRef, state: 'running', channelName: '正在读取渠道', detail: '正在读取已保存渠道的模型列表…' } : null);
-    if (effectiveRef) fetchChannelConnection(effectiveRef, controller.signal)
+    setConnection(effectiveRef && !effectiveDisabled ? { modelRef: effectiveRef, state: 'running', channelName: '正在读取渠道', detail: '正在读取已保存渠道的模型列表…' } : null);
+    if (effectiveRef && !effectiveDisabled) fetchChannelConnection(effectiveRef, controller.signal)
       .then(value => { if (!controller.signal.aborted) setConnection(value); })
       .catch(cause => { if (!controller.signal.aborted) setConnection({ modelRef: effectiveRef, state: 'failed', channelName: '渠道状态未知', detail: cause instanceof Error ? cause.message : '模型列表读取失败。' }); });
     return () => controller.abort();
-  }, [effectiveRef, revision, enabled]);
-  const ready = !modelRef || (!loading && capability?.available === true && Boolean(selected));
+  }, [effectiveRef, effectiveDisabled, revision, enabled]);
+  const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
+  const ready = modelRef ? (!loading && capability?.available === true && Boolean(selected)) : !automaticDisabled;
   const choose = (value: string) => {
-    if (value && (!capability?.available || !options.some(option => option.id === value))) return;
+    if (value && (!capability?.available || !options.some(option => option.id === value && option.enabled !== false))) return;
     setModelRef(value); setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
   };
   return { modelRef, options, selected, ready, loading, capability, health, connection: connection?.modelRef === effectiveRef ? connection : null, error, notice, choose, refresh: () => setRevision(value => value + 1),

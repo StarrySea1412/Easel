@@ -21,10 +21,6 @@
 .composer-model-select .easel-select-value { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .composer-model-health { display:inline-flex; align-items:center; justify-content:center; flex:none; color:var(--text-tertiary); }
 .composer-model-health.running { color:var(--amber,#ad7a25); }
-.channel-name-editor { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:12px 0; }
-.channel-name-editor label { display:flex; align-items:center; gap:8px; font-size:12px; }
-.channel-name-editor input { width:160px; max-width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:var(--radius-xs); background:var(--surface); color:var(--text); font:inherit; }
-.channel-name-editor small,.channel-name-editor p { width:100%; margin:0; color:var(--text-tertiary); font-size:11px; }
 .composer-model-health.success { color:var(--green); }
 .composer-model-health.failed { color:var(--red); }
 .composer-model-health.unverified { color:var(--text-tertiary); }

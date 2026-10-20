@@ -1,3 +1,10 @@
+## 0.7.0 · 2026-10-20 · Model settings and typography / 模型设置与字号
+
+- Rebuild provider editing around separate saving, testing, default selection, enablement and persistent ordering. Saved models appear in Chat automatically; disabled choices remain visible and cannot start new runs. / 重整供应商流程，保存即进入对话列表，停用保留灰态并阻止新任务沿用。
+- Keep model discovery in the original field, support independent channel naming, and add read-only image-service model discovery with stale-response cancellation. / 获取模型原位选择、渠道独立命名、生图服务候选获取及过期响应隔离。
+- Default to 14px with a persistent 12–20px continuous slider. Scope progress control styles, group completed/remaining steps, and expand the recent-usage scroll area. / 默认14px连续字号，进度胶囊样式与分组修复，最近调用完整滚动。
+- Final browser acceptance is assigned to the user. No real model inference, host 138 deployment/restart or installer publication in this revision. / 浏览器最终验收交用户，本轮无真实推理、138部署/重启或安装器发布。[Evidence / 交付范围](docs/provider-flow-and-typography-2026-10-20.md)。
+
 ## 0.6.2 · 2026-10-20 · Reliability fixes / 可靠性修复
 
 - Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/agent-retry-button-2026-10-20.md)。

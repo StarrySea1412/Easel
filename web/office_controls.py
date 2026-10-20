@@ -50,18 +50,21 @@ def _error(message: str, status: int = 409):
     raise HTTPException(status, message)
 
 
-def configured_models(config_path: Path) -> list[dict]:
+def configured_models(config_path: Path, *, include_disabled: bool = False) -> list[dict]:
     """Project only explicitly configured identifiers; never return auth or URLs."""
     config = office._read_json(config_path, config_path.parent, set()) or {}
     models = config.get('models')
     providers = models.get('providers') if isinstance(models, dict) else None
     if not isinstance(providers, dict):
         return []
+    from model_preferences import disabled_providers, provider_order
+    disabled = disabled_providers(config_path)
+    order = provider_order(config_path)
     result = []
     seen = set()
-    for provider, value in providers.items():
+    for provider, value in sorted(providers.items(), key=lambda item: order.index(item[0]) if item[0] in order else len(order)):
         if (not isinstance(provider, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,79}', provider)
-                or not isinstance(value, dict)):
+                or not isinstance(value, dict) or (provider in disabled and not include_disabled)):
             continue
         for row in value.get('models', []) if isinstance(value.get('models'), list) else []:
             model = row.get('id') if isinstance(row, dict) else None
@@ -72,7 +75,8 @@ def configured_models(config_path: Path) -> list[dict]:
                 continue
             seen.add(ref)
             result.append({'id': ref, 'provider': provider, 'model': model,
-                           'label': f'{provider} · {model}', 'configured': True})
+                           'label': f'{provider} · {model}', 'configured': True,
+                           **({'enabled': False} if include_disabled and provider in disabled else {})})
             if len(result) >= 256:
                 return result
     return result
@@ -87,6 +91,20 @@ def validate_requested_model(web, model_ref: str) -> None:
     options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
     if model_ref not in {option['id'] for option in options}:
         _model_error('chat_model_not_configured', '只能选择已配置的完整渠道模型，请刷新模型设置。', 400)
+
+
+def require_enabled_inherited_model(web, session: str | None = None) -> None:
+    """A stored override must not bypass a channel disabled since the last turn."""
+    from model_preferences import disabled_providers
+    if not disabled_providers(web.openclaw_state_dir() / 'openclaw.json'):
+        return
+    capability = turn_model_capability(web, session)
+    if not capability.get('available'):
+        _model_error('chat_model_state_unavailable', '无法确认当前渠道启停状态，请选择已启用模型后重试。')
+    ref = capability.get('currentModelRef') or capability.get('defaultModelRef')
+    if not ref:
+        _model_error('chat_model_not_configured', '请先选择已启用的对话模型。', 400)
+    validate_requested_model(web, ref)
 
 
 def _model_probe_client(transport: str, credentials):
@@ -217,13 +235,14 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
     if session and (not isinstance(session, str) or not office.SAFE_ID.fullmatch(session)):
         _error('无效的会话标识。', 400)
     options = configured_models(web.openclaw_state_dir() / 'openclaw.json')
+    all_options = configured_models(web.openclaw_state_dir() / 'openclaw.json', include_disabled=True)
     labels = web._channel_labels() if hasattr(web, '_channel_labels') else {}
-    for option in options:
+    for option in all_options:
         channel = labels.get(option['provider'], {})
         option['channelName'] = channel.get('name', '未命名渠道')
         option['label'] = f"{option['channelName']} · {option['model']}"
     result = {'available': False, 'scope': 'unavailable', 'currentModelRef': None,
-              'options': options, 'reason': '尚未配置可选择的渠道模型。',
+              'options': all_options, 'reason': '尚未配置可选择的已启用渠道模型。',
               'gatewayVersion': None, 'transport': None}
     config = office._read_json(web.openclaw_state_dir() / 'openclaw.json', web.openclaw_state_dir(), set()) or {}
     agents = config.get('agents', {})
@@ -257,7 +276,7 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
             try:
                 catalog = client._rpc('models.list', {'agentId': 'main', 'view': 'configured'})
                 rows = catalog.get('models', []) if isinstance(catalog, dict) else []
-                for option in options:
+                for option in all_options:
                     matches = [row for row in rows if isinstance(row, dict)
                                and row.get('provider') == option['provider'] and row.get('id') == option['model']]
                     if len(matches) != 1:
@@ -281,7 +300,7 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
                 row = matches[0]
                 ref = (f"{row['providerOverride']}/{row['modelOverride']}"
                        if isinstance(row.get('providerOverride'), str) and isinstance(row.get('modelOverride'), str) else None)
-                if ref in {option['id'] for option in options}:
+                if ref in {option['id'] for option in all_options}:
                     result['currentModelRef'] = ref
         result.update(available=True, scope='next_turn', reason=None)
     except HTTPException as exc:

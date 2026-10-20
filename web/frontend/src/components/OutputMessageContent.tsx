@@ -60,5 +60,5 @@ export default function OutputMessageContent({ content, inert = false, streaming
     }
     return { html: template.innerHTML, warnings: [...warnings] };
   }, [source, links, checks, revision, inert, content, streaming]);
-  return <><div dangerouslySetInnerHTML={{ __html: rendered.html }} />{rendered.warnings.length > 0 && <p role="status" style={{ fontSize: 13, color: 'var(--amber)' }}>{rendered.warnings.join('；')}。请让 Agent 实际保存产物后再交付。 <button type="button" className="link-btn" onClick={() => setRevision(value => value + 1)}>重新检查文件</button></p>}</>;
+  return <><div dangerouslySetInnerHTML={{ __html: rendered.html }} />{rendered.warnings.length > 0 && <p role="status" style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--amber)' }}>{rendered.warnings.join('；')}。请让 Agent 实际保存产物后再交付。 <button type="button" className="link-btn" onClick={() => setRevision(value => value + 1)}>重新检查文件</button></p>}</>;
 }

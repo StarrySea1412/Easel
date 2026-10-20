@@ -1521,9 +1521,9 @@ export default function App() {
       {showRecommend && (
         <div className="overlay">
           <div className="modal" style={{ width: 420, maxWidth: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: 40 }}>👋</div>
-            <h2 style={{ margin: '12px 0 8px', fontSize: 20 }}>欢迎使用 Easel</h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 'calc(40px * var(--easel-font-scale, 1))' }}>👋</div>
+            <h2 style={{ margin: '12px 0 8px', fontSize: 'calc(20px * var(--easel-font-scale, 1))' }}>欢迎使用 Easel</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 'calc(14px * var(--easel-font-scale, 1))', lineHeight: 1.6 }}>
               配置你的账号画像，生成的内容会更贴合你的风格、受众和平台调性。<br />
               大约 2 分钟，也可以随时在侧栏「+ 新建画像」补配。
             </p>

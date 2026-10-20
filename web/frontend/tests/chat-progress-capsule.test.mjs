@@ -56,3 +56,21 @@ test('stopped and failed runs preserve unchecked steps and expose interrupted pr
   const v=await setup(t);await v.respond(0,snapshot());await v.render('a',{stopped:true});await v.click('.chat-progress-capsule');assert.match(v.container.textContent,/本轮已停止，未完成步骤保留/);
   await v.render('a',{failed:true});assert.match(v.container.textContent,/本轮失败，未完成步骤保留/);assert.match(v.container.querySelector('.chat-progress-capsule').textContent,/1\/3/);
 });
+
+test('progress groups keep completed and remaining tasks accessible without an empty checklist message',async t=>{
+  const v=await setup(t);
+  await v.respond(0,{...snapshot(),plan:[...plan,...Array.from({length:4},(_,i)=>({step:`后续任务${i+1}`,status:'pending'}))]});
+  await v.click('.chat-progress-capsule');
+  const groups=()=>[...v.container.querySelectorAll('.chat-progress-group')];
+  assert.deepEqual(groups().map(button=>button.getAttribute('aria-expanded')),['false','false']);
+  assert.equal(v.container.querySelector('li[data-state=completed]').closest('ol').hidden,true);
+  for(const button of groups()) await act(async()=>button.click());
+  assert.equal(v.container.querySelector('li[data-state=completed]').closest('ol').hidden,false);
+  assert.equal(v.container.querySelectorAll('ol[hidden]').length,0);
+  await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:execution',{detail:{...snapshot(),plan:[],progress:['接口请求未完成']}})));
+  await v.render('a',{failed:true});
+  assert.doesNotMatch(v.container.textContent,/没有结构化清单|尚未提交结构化清单/);
+  assert.equal(v.container.querySelectorAll('.chat-progress-summary').length,1);
+  assert.equal(v.container.querySelector('.chat-progress-summary').textContent,'本轮失败');
+  assert.equal(v.container.querySelector('.chat-progress-history').textContent,'接口请求未完成');
+});

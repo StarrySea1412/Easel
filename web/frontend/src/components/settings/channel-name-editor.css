@@ -1,0 +1,7 @@
+.channel-name-editor { display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px; margin:0 0 18px; padding:0 0 18px; border-bottom:1px solid var(--border); }
+.channel-name-editor label { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; font-size:12px; font-weight:600; line-height:18px; color:var(--text-secondary); }
+.settings-page .channel-name-editor input { width:240px; max-width:100%; min-height:36px; box-sizing:border-box; padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:inherit; font-size:13px; font-weight:400; }
+.channel-name-editor small,.channel-name-editor p { flex-basis:100%; margin:0; color:var(--text-tertiary); font-size:11px; line-height:1.6; overflow-wrap:anywhere; }
+.channel-name-editor p[role=alert] { color:var(--red); }
+.channel-name-editor input:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+.channel-name-editor > .btn { min-height:36px; margin:0; }
