@@ -474,7 +474,7 @@ class BrowserService:
         await self._position_click(tab, x, y)
         # A popup is dispatched by the page's own handler, slightly after the
         # mouse event. Wait only while neither a popup nor a navigation shows.
-        deadline_at = time.monotonic() + .35
+        deadline_at = time.monotonic() + .6
         while not session.popup_pending and tab.page.url == before and time.monotonic() < deadline_at:
             await asyncio.sleep(.04)
         session.popup_fallback = (tab.id, before)
@@ -483,7 +483,6 @@ class BrowserService:
             # Keep a late popup able to continue this click for a short while.
             asyncio.get_running_loop().call_later(3, self._clear_popup_fallback, session, tab.id)
         return notice, hint
-
     @staticmethod
     def _clear_popup_fallback(session, tab_id):
         fallback = session.popup_fallback
@@ -848,19 +847,35 @@ class BrowserService:
             if tab:
                 tab.error = job['error']
                 tab.dirty = True
-                if isinstance(exc, BrowserError) and exc.status == 409 and not tab.closed:
-                    # The refused action never ran. A fresh observation makes
-                    # the panel usable again without replaying any site action.
-                    try:
-                        async with tab.lock:
-                            await self._observe(session, tab)
-                        job.update(recovered=True, snapshotId=(tab.snapshot or {}).get('id'),
-                                   notice='页面已变化，已重新观察；请重试刚才的操作。')
-                    except Exception:
-                        pass
+                if not tab.closed and action != 'close':
+                    observed = await self._recover_observation(session, tab)
+                    if observed:
+                        # The panel is usable again immediately. Re-observation
+                        # is read-only, so nothing the site did is replayed.
+                        detail = ('页面已变化，已自动重新观察；请继续刚才的操作。'
+                                  if isinstance(exc, BrowserError) and exc.status == 409
+                                  else f'{job["error"]} 已自动重新观察，请确认页面后重试。')
+                        job.update(recovered=True, snapshotId=(tab.snapshot or {}).get('id'), notice=detail)
         finally:
             job['finishedAt'] = now()
             self._event(session, action, job['state'], job.get('tabId'), job['id'], job.get('error', ''))
+
+    async def _recover_observation(self, session, tab, attempts=3):
+        """Re-observe after a failure so the next click is not refused as stale."""
+        for attempt in range(attempts):
+            try:
+                async with tab.lock:
+                    if tab.closed or not tab.page or tab.page.is_closed():
+                        return False
+                    await self._observe(session, tab)
+                return True
+            except BrowserError:
+                pass
+            except Exception:
+                pass
+            # A navigation may still be settling; one short retry is enough.
+            await asyncio.sleep(.3 * (attempt + 1))
+        return False
 
     async def _position_click(self, tab, x, y):
         """Mouse input lacks ElementHandle.click's navigation auto-wait."""

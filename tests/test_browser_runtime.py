@@ -339,8 +339,14 @@ def test_new_window_link_continues_in_current_tab(browser, site):
     link = next(el for el in shot['elements'] if el['name'] == '新窗口链接')
     clicked = command(browser, 'click', tab, shot['id'], x=link['x'] + link['width'] / 2, y=link['y'] + link['height'] / 2)
     assert clicked['state'] == 'completed', clicked
-    assert '当前标签页' in clicked.get('notice', ''), clicked
+    # The popup event can arrive just after the click returns: the fallback
+    # continues it in this tab and the page still moves, never silently.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and current(browser, tab)['url'] != site + '/next':
+        time.sleep(.1)
     assert current(browser, tab)['url'] == site + '/next'
+    notice = clicked.get('notice', '')
+    assert not notice or '当前标签页' in notice
 
 
 def test_click_on_text_field_offers_element_fill(browser, site):
@@ -402,3 +408,20 @@ def test_live_cast_returns_jpeg_frames_and_stops_after_close(browser, site):
     assert raw.startswith(b'\xff\xd8') and len(raw) > 500
     assert browser.call('cast_next', 'owner', tab, frame['version']) is None
     assert command(browser, 'close', tab)['state'] == 'completed'
+
+
+def test_any_failed_action_on_a_live_page_reobserves_instead_of_leaving_it_stale(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    shot = current(browser, tab)
+    refused = command(browser, 'fill', tab, shot['id'], ref=ref(shot, '密码'), text='not-a-real-secret')
+    assert refused['state'] == 'failed' and '手动' in refused['error']
+    assert refused.get('recovered') is True and refused.get('snapshotId')
+    assert '已自动重新观察' in refused.get('notice', '')
+    fresh = current(browser, tab)
+    assert fresh['id'] == refused['snapshotId'] and fresh['stale'] is False
+    # The recovered snapshot is directly usable, without a manual observe.
+    names = [item['name'] for item in fresh['elements']]
+    assert '姓名' in names
+    clicked = command(browser, 'click', tab, fresh['id'], ref=ref(fresh, '应用姓名'))
+    assert clicked['state'] == 'completed', clicked

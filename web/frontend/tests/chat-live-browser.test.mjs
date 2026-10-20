@@ -169,3 +169,13 @@ test('live view streams frames and forwards pointer and keyboard input',async t=
   await act(async()=>{v.container.querySelector('[aria-label="退出实时画面"]').click();});
   assert.equal(v.container.querySelector('.browser-live-stage'),null);
 });
+
+test('a recovered failure shows the notice instead of a blocking alert',async t=>{
+  const v=await setup(t,'recover-owner');
+  await v.click('重新观察');
+  await v.respond(1,{id:'r1',state:'failed',tabId:'tab1',error:'元素已变化',recovered:true,snapshotId:'shot2',notice:'元素已变化 已自动重新观察，请确认页面后重试。'});
+  await v.respond(2,state('recover-owner'));
+  assert.equal(v.container.querySelector('[role=alert]'),null,'recovered failures must not block the panel');
+  assert.match(v.container.querySelector('[role=status]').textContent,/已自动重新观察/);
+  assert.equal([...v.container.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='分析此页').disabled,false);
+});
