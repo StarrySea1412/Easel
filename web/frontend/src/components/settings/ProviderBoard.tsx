@@ -4,7 +4,8 @@ import ProviderIcon from '../ProviderIcon';
 import type { ModelRow, ModelPreset, DiscoverResult } from '../../lib/api';
 import { SettingsField } from './SettingsField';
 import Select from '../ui/Select';
-import { IconChevron, IconMic, IconMusic, IconText } from '../icons';
+import { IconEdit, IconMic, IconMusic, IconPlay, IconText } from '../icons';
+import ProviderActionsMenu from './ProviderActionsMenu';
 import { IconFilm, IconGlobe, IconHexagon, IconImage, IconMonitor } from '../settingsIcons';
 
 export type ProviderBoardOptions = {
@@ -21,6 +22,10 @@ export type ProviderBoardOptions = {
       onPickPreset?: (i: number, p: ModelPreset) => void;
       onOpenEnvironment?: () => void;
       health?: (i: number, open?: boolean) => ReactNode;
+      onCheck?: (i: number) => void;
+      checkBusy?: (i: number) => boolean;
+      checkReason?: (i: number) => string | undefined;
+      checkFeedback?: (i: number) => ReactNode;
     };
 
 const SLOT_EDIT: Record<string, { model: boolean; base: boolean }> = {
@@ -42,13 +47,14 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
               ? { model: r.modelEditable !== false, base: r.baseEditable !== false }
               : undefined);
           const isCustom = r.slot === 'custom';
-          const discovering = ops?.discovery?.(i) === 'loading';
+          const discovery = ops?.discovery?.(i);
+          const discovering = discovery === 'loading';
+          const checking = ops?.onCheck ? ops.checkBusy?.(i) === true : discovering;
           const needsKey = !r.keyNew?.trim() && (!r.keyMasked || r.keyMasked === '—');
+          const checkReason = ops?.onCheck ? ops.checkReason?.(i) : needsKey ? '先填写 API Key，再检测连接' : undefined;
           const subtitle = !r.slot && r.role === '免配';
           const local = r.type === 'local';
           const [expanded, setExpanded] = useState(false);
-          const [quickEdit, setQuickEdit] = useState(false);
-          const [quickHealth, setQuickHealth] = useState(false);
           const panelId = useId();
           const reference = r.contextReference?.modelId === r.model ? r.contextReference : null;
           const protocol = r.protocol || r.type || 'openai';
@@ -56,6 +62,9 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
           const title = subtitle ? '自带字幕' : local ? '本地兜底' : cloud ? '云端转写' : r.name || '未命名供应商';
           const role = subtitle ? '优先读取 · 免配置' : local ? '云端不可用时接替' : cloud ? '需要 API Key'
             : r.role === '主' ? '默认通道' : r.role === '备' ? '备用通道' : r.role;
+          const address = subtitle || local ? role : r.baseUrl?.trim() && r.baseUrl !== '—' ? r.baseUrl
+            : ed ? ops?.media && r.baseOptional !== false ? '使用供应商预置地址' : '尚未填写地址'
+              : role || r.sub;
           const Glyph = subtitle ? IconText : local ? IconMonitor : cloud || ops?.channel === 'speech' ? IconMic
             : ops?.channel === 'image' ? IconImage : ops?.channel === 'video' ? IconFilm
               : ops?.channel === 'music' ? IconMusic : r.slot === 'relay' ? IconGlobe : IconHexagon;
@@ -65,23 +74,25 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
               <button type="button" className="provider-head provider-toggle" aria-expanded={expanded} aria-controls={panelId}
                 aria-label={`${expanded ? '收起' : '展开'}${title}配置`} onClick={() => setExpanded(!expanded)}>
                 <span className="provider-glyph" aria-hidden="true">{subtitle || local ? <Glyph size={19} /> : <ProviderIcon row={r} fallback={Glyph} />}</span>
-                <span className="provider-heading"><strong>{title}</strong>
-                  <small title={r.model}>{ed ? r.model && r.model !== '—' ? r.model : '尚未选择模型' : r.sub}</small>
+                <span className="provider-heading">
+                  <span className="provider-name-row"><strong>{title}</strong>{r.role === '主' && <span className="provider-default-badge">默认</span>}</span>
+                  <small title={address}>{address}</small>
                 </span>
-                <span className="provider-summary-status"><span className={`stt ${rt.cls}`}>{rt.text}</span><small>{role}</small></span>
-                <IconChevron size={15} className="provider-chevron" />
               </button>
               {ed && <div className="provider-quick-actions">
-                {ed.model && ops?.onRow && <button type="button" className="adv-btn" aria-expanded={quickEdit} onClick={() => setQuickEdit(!quickEdit)}>改模型</button>}
-                {ops?.health && <button type="button" className="adv-btn" aria-expanded={quickHealth} onClick={() => setQuickHealth(!quickHealth)}>检测</button>}
+                {(ops?.onCheck || ops?.onDiscover) && <button type="button" className="adv-btn provider-icon-action provider-connection-action" aria-label={`检测${title}${ops.onCheck ? '模型可用性' : '连接'}`} title={checkReason || (ops.onCheck ? '使用内置默认参数直接检测，供应商可能计费' : '检测连接：读取模型列表，不发起模型推理')} disabled={Boolean(checkReason) || checking || ops.saving} aria-busy={checking} onClick={() => ops.onCheck ? ops.onCheck(i) : ops.onDiscover?.(i)}>{checking ? <span className="spin"/> : <IconPlay size={16}/>}</button>}
+                {ops?.onRow && <button type="button" className="adv-btn provider-icon-action" aria-label={`编辑${title}配置`} title="编辑配置" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(!expanded)}><IconEdit size={16}/></button>}
+                {ops?.onRemove && <ProviderActionsMenu title={title} disabled={ops.saving} onDelete={() => ops.onRemove?.(i)}/>}
               </div>}
               </div>
-              {quickEdit && ed?.model && <div className="provider-quick-edit">
-                <label>模型<input className="mock" aria-label={`${title}快捷模型名称`} value={r.model === '—' ? '' : r.model} placeholder="模型名称" onChange={event => ops?.onRow?.(i, {model:event.target.value})} /></label>
-                {ops?.onSave && <button type="button" className="btn btn-sm" disabled={ops.saving} onClick={ops.onSave}>{ops.saving ? '保存中…' : '保存修改'}</button>}
-                <small>草稿；保存后生效</small>
+              {ops?.checkFeedback?.(i)}
+              {!expanded && discovery && <div className={`provider-check-result${discovery !== 'loading' && !discovery.ok ? ' bad' : ''}`} role="status" aria-live="polite">
+                {discovery === 'loading' ? <span>正在检测连接…</span> : <>
+                  <div><strong>{discovery.ok ? '连接检查通过' : '连接检查未通过'}</strong><span>{discovery.message}</span>
+                    <small>本次读取模型列表 · {hhmm(discovery.fetchedAt)}；文本与图片测试可在编辑配置内使用。</small></div>
+                  <button type="button" className="adv-btn" disabled={needsKey || ops?.saving} onClick={() => ops?.onDiscover?.(i)}>重新检测</button>
+                </>}
               </div>}
-              {quickHealth && ops?.health?.(i, true)}
               <div className="provider-body" id={panelId} hidden={!expanded}>
               {!ed && <div className="provider-fixed">
                 <p>{subtitle ? '直接读取视频已有的字幕文件，无需填写模型、地址或密钥。没有自带字幕时会继续尝试云端转写。'
@@ -210,14 +221,9 @@ function ProviderCard({ r, i, ops, resultText }: BoardProps & { r: ModelRow; i: 
                 <span className={`tag ${r.role === '主' ? 'main' : 'backup'}`}>{role}</span>
               )}
               <span className={`stt ${rt.cls}`}>{rt.text}</span>
-              {isCustom && ops?.onRemove ? (
-                <button className="row-del" onClick={() => ops.onRemove?.(i)} title="删除该供应商">✕</button>
-              ) : (
-                <span />
-              )}
               </div>
               {ed && <p className="provider-save-hint hint">修改保留为草稿；点击页面“保存”后生效。读取模型列表失败时，可手动填写可编辑的模型名称。</p>}
-              {!quickHealth && ops?.health?.(i)}
+              {ops?.health?.(i)}
               {(() => {
                 if (!ops?.discovery) return null;
                 const d = ops.discovery(i);

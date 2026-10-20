@@ -375,6 +375,10 @@ async function reportClientFailure(context: Record<string, unknown>, reason: unk
   return relatedEventId;
 }
 
+export function reportPageFailure(details: import('./pageFailure').PageFailureDetails) {
+  return reportClientFailure(details, undefined, performance.now());
+}
+
 export interface ClawHubSearch {
   source: 'clawhub';
   query: string;
@@ -669,11 +673,27 @@ export interface AccountWhoami {
   verificationMessage?: string;
 }
 
+/** Browser storage and HTTP payloads are untrusted even when TypeScript callers are typed. */
+export function decodeAccountWhoami(value: unknown): AccountWhoami {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('账号状态格式异常，请重新检查登录状态。');
+  const row = value as Record<string, unknown>;
+  if (typeof row.loggedIn !== 'boolean'
+    || ['name', 'avatar', 'verificationMessage'].some(key => row[key] !== undefined && typeof row[key] !== 'string')
+    || (row.verified !== undefined && typeof row.verified !== 'boolean')
+    || (row.checkedAt !== undefined && (typeof row.checkedAt !== 'number' || !Number.isFinite(row.checkedAt) || row.checkedAt < 0))) {
+    throw new Error('账号状态格式异常，请重新检查登录状态。');
+  }
+  return { loggedIn: row.loggedIn, name: row.name as string || '', avatar: row.avatar as string || '',
+    ...(row.verified !== undefined ? { verified: row.verified as boolean } : {}),
+    ...(row.checkedAt !== undefined ? { checkedAt: row.checkedAt as number } : {}),
+    ...(row.verificationMessage !== undefined ? { verificationMessage: row.verificationMessage as string } : {}) };
+}
+
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
 export async function accountWhoami(platform: string, force = false): Promise<AccountWhoami> {
   return accountBrowserRequest(async () => {
     const signal = AbortSignal.timeout(60000);
-    try { return await request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, { signal }); }
+    try { return decodeAccountWhoami(await request<unknown>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, { signal })); }
     catch (cause) { if (signal.aborted) throw new Error('登录状态检查超时，请稍后重试'); throw cause; }
   });
 }
@@ -1342,6 +1362,8 @@ export function fetchEnvJob(jobId: string): Promise<EnvJob> {
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
 
 export interface ModelRow {
+  /** 保存时的供应商身份；编辑显示名后删除仍指向原配置。 */
+  providerId?: string;
   contextWindow?: number | null;
   contextReference?: { modelId: string; tokens: number; label: string; source: string; url: string; checkedAt: string; note: string } | null;
   slot?: string;

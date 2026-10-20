@@ -11,6 +11,21 @@
 .model-health-actions, .model-health-schedule { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; }
 .model-health-schedule .easel-select { min-width:130px; }
 .model-health-error { color:var(--red); overflow-wrap:anywhere; }
+.model-availability-panel { margin-top:12px; min-width:0; }
+.model-availability-list { display:grid; gap:8px; margin:12px 0; }
+.model-availability-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); }
+.model-availability-row > div { flex:1 1 150px; min-width:0; }
+.model-availability-row strong, .model-availability-row small { display:block; overflow-wrap:anywhere; }
+.model-availability-row small { color:var(--text-tertiary); margin-top:4px; font-size:11px; }
+.model-check-feedback { display:grid; gap:4px; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.model-check-feedback strong { color:var(--green); }
+.model-check-feedback.bad strong { color:var(--red); }
+.model-check-feedback small { color:var(--text-tertiary); font-size:11px; }
+.model-availability-row .model-check-feedback { margin-top:8px; }
+.model-check-defaults, .model-check-advanced { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); font-size:12px; }
+.model-check-defaults > summary, .model-check-advanced > summary { cursor:pointer; margin-bottom:10px; }
+.model-check-defaults > summary small { color:var(--text-tertiary); }
+.model-check-defaults .model-health-fields > label { display:grid; gap:6px; }
 .model-health-controls { border:0; padding:0; margin:0; min-width:0; }
 .model-health-inline { border:0; border-radius:0; padding:12px 0 0; margin-top:0; }
 .provider-health { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); font-size:12px; }

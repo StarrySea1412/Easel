@@ -9,7 +9,8 @@ import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import { ModelConfigPicker } from './settings/ModelConfigPicker';
 import CodexSettings from './CodexSettings';
-import ModelHealthPanel from './settings/ModelHealthPanel';
+import ModelAvailabilityPanel, { ModelCheckFeedback } from './settings/ModelAvailabilityPanel';
+import { useModelAvailability } from '../hooks/useModelAvailability';
 import ChannelNameEditor from './settings/ChannelNameEditor';
 import ImageReverseSettings from './settings/ImageReverseSettings';
 import Select from './ui/Select';
@@ -142,11 +143,23 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   // ── 模型配置（真值只读 + 真自测） ────────────────────────
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
   const [savedChatRows, setSavedChatRows] = useState<ModelRow[]>([]);
+  const availability = useModelAvailability();
+  const [availabilityOpen, setAvailabilityOpen] = useState(Boolean(targetModelRef));
+  const providerIdentity = (row: ModelRow) => row.providerId || (row.slot === 'custom' ? row.name : row.slot) || '';
+  const configIdentity = (row: ModelRow) => JSON.stringify([providerIdentity(row), row.model, row.baseUrl, row.protocol || row.type, row.keyMasked, row.keyNew || '']);
+  const modelCheckTarget = (row: ModelRow) => {
+    const saved = savedChatRows.find(item => providerIdentity(item) === providerIdentity(row));
+    return { ref: `${providerIdentity(row)}/${row.model}`, identity: configIdentity(row), label: modelConfigLabel(row),
+      reason: !saved || configIdentity(saved) !== configIdentity(row) ? '请先保存供应商修改，再检测。'
+        : !row.model || PLACEHOLDERS.has(row.model) ? '请先选择并保存模型。'
+          : !row.keyMasked || row.keyMasked === '—' ? '请先保存供应商 API Key。' : undefined };
+  };
   const [providerDetailsOpen, setProviderDetailsOpen] = useState(false);
   const [modelLoading, setModelLoading] = useState(true);
-  const modelTestTarget = useRef<HTMLDivElement>(null);
+  const modelTestTarget = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     if (!targetModelRef || modelLoading) return;
+    setAvailabilityOpen(true);
     const timer = setTimeout(() => { modelTestTarget.current?.scrollIntoView?.({ block: 'center' }); modelTestTarget.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true }); }, 0);
     return () => clearTimeout(timer);
   }, [targetModelRef, navigationKey, modelLoading]);
@@ -422,7 +435,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
         contextWindow: channel === 'chat' ? r.contextWindow : undefined,
       }));
-    if (!payload.length) {
+    if (!payload.length && !(channel === 'chat' && deletedProviders.length)) {
       setSavedNote('当前通道没有可保存的配置');
       return;
     }
@@ -441,7 +454,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       else if (channel === 'transcribe') setTransRows(d.channels.transcribe.rows || []);
       else setMediaRows((rows) => ({ ...rows, [channel]: d.channels[channel]?.rows || [] }));
       clearImportPreview();
-      setSavedNote(channel === 'chat'
+      setSavedNote(channel === 'chat' && !d.channels.chat.rows.length ? '✓ 已删除供应商；当前未配置对话渠道。' : channel === 'chat'
         ? `✓ 已保存默认：${modelConfigLabel(d.channels.chat.rows.find((row) => row.role === '主'))}。请回到对话选择“自动沿用”；实际调用以执行回执为准。${d.note ? ` ${d.note}` : ''}`
         : d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
       void refreshEnv();
@@ -601,15 +614,20 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   };
 
   const removeRow = (i: number) => {
+    if (modelLoading || modelSavePending.current || impApplying.current) return;
+    const removed = chatRows[i];
+    if (!removed) return;
     // Removing a row changes the indexes of every later provider card.
     clearModelDiscovery('chat');
-    const removed = chatRows[i];
-    if (removed?.deletable && removed.name) setDeletedProviders((names) => [...new Set([...names, removed.name])]);
+    const provider = removed.providerId || (removed.slot === 'custom' ? removed.deletable ? removed.name : '' : removed.slot);
+    if (provider) setDeletedProviders((names) => [...new Set([...names, provider])]);
+    setSavedNote(provider ? `已从草稿移除“${removed.name || provider}”，点击“保存并使用”后生效。` : '已移除未保存的供应商。');
+    setVisionEditorIndex(index => index > i ? index - 1 : index);
     setChatRows((rs) => {
       const gone = rs[i];
       const left = rs.filter((_, j) => j !== i);
       if (gone && gone.role === '主') {
-        const first = left.findIndex((r) => r.slot);
+        const first = left.findIndex((r) => r.slot && r.model && !PLACEHOLDERS.has(r.model));
         if (first >= 0) left[first] = { ...left[first], role: '主' };
       }
       return left;
@@ -912,7 +930,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                 onClick={() => setImportOpen(false)}>收起导入</button></div>
             </section>
                     </details>
-                    {targetModelRef && <div ref={modelTestTarget} className="model-settings-details"><ModelHealthPanel key={targetModelRef} targetModelRef={targetModelRef} /></div>}
+                    <details ref={modelTestTarget} className="model-settings-details" open={availabilityOpen} onToggle={event => setAvailabilityOpen(event.currentTarget.open)}>
+                      <summary><span aria-hidden="true"><IconPackage size={16}/></span>模型可用性 <small>内置默认参数，点击即可检测</small></summary>
+                      {availabilityOpen && <ModelAvailabilityPanel controller={availability} models={chatRows.map(modelCheckTarget)} targetModelRef={targetModelRef}/>}
+                    </details>
                     <details className="model-settings-details" open={providerDetailsOpen}
                       onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
                       <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>查看模型、修改连接配置</small></summary>
@@ -928,10 +949,16 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                       onPrimary: setPrimaryRow,
                       onRemove: removeRow,
                       channel: 'chat',
-                      health: (i, open) => {
+                      onCheck: i => { const target = modelCheckTarget(chatRows[i]); if (!target.reason) void availability.run(target.ref, target.identity); },
+                      checkBusy: i => availability.checks[modelCheckTarget(chatRows[i]).identity]?.busy === true,
+                      checkReason: i => modelCheckTarget(chatRows[i]).reason,
+                      checkFeedback: i => {
+                        const target = modelCheckTarget(chatRows[i]);
+                        return !target.reason && availability.checks[target.identity] ? <div className="provider-check-result"><ModelCheckFeedback check={availability.checks[target.identity]}/></div> : null;
+                      },
+                      health: (i) => {
                         const row = chatRows[i];
-                        const ref = row.slot === 'custom' ? `${row.name}/${row.model}` : `${row.slot}/${row.model}`;
-                        return row.model && row.slot ? <><ChannelNameEditor key={row.slot === 'custom' ? row.name : row.slot} provider={row.slot === 'custom' ? row.name : row.slot}/><details className="provider-health" open={open}><summary>模型可用性</summary><ModelHealthPanel key={ref} targetModelRef={ref} dirty={JSON.stringify(row) !== JSON.stringify(savedChatRows[i])} /></details></> : null;
+                        return row.model && row.slot ? <ChannelNameEditor key={providerIdentity(row)} provider={providerIdentity(row)}/> : null;
                       },
                       presets: presets.chat,
                       discovery: (i) => discover[`chat:${i}`],

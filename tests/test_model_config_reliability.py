@@ -432,3 +432,78 @@ def test_malformed_source_is_reported_without_crashing(sandbox, payload):
     candidates, errors = lci.read_source('openclaw', p)
     assert not candidates
     assert errors or payload == {'models': {'providers': []}}
+
+
+@pytest.mark.parametrize('slot', ['openai', 'anthropic', 'relay'])
+def test_delete_builtin_clears_its_env_and_provider_without_touching_neighbors(sandbox, slot):
+    _, oc = sandbox
+    before = json.loads(oc.read_text())['models']['providers']
+    web._write_env_direct({key: f'test-{name}' if 'MODEL' in key else 'https://fixture.example' if 'BASE' in key else 'test-key'
+                           for name in web.RESERVED_PROVIDER_KEYS
+                           for key in (*web._SLOT_ENV_KEYS[name], web._CHAT_MODEL_KEYS[name])})
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(deletedProviders=[slot])))
+    after = json.loads(oc.read_text())
+    assert result['ok'] and slot not in after['models']['providers']
+    assert all(key not in web._read_env() for key in (*web._SLOT_ENV_KEYS[slot], web._CHAT_MODEL_KEYS[slot]))
+    for name, provider in before.items():
+        if name != slot:
+            assert after['models']['providers'][name] == provider
+    assert not any(row['slot'] == slot for row in result['channels']['chat']['rows'])
+    assert web._read_env()['OTHER_SECRET'] == 'untouched'
+    assert not after['agents']['defaults']['model']['primary'].startswith(slot + '/')
+
+
+def test_delete_default_prunes_only_its_fallbacks_and_allowlist(sandbox):
+    _, oc = sandbox
+    data = json.loads(oc.read_text())
+    defaults = data['agents']['defaults']
+    defaults['model']['fallbacks'] = ['openai/another', 'relay/relay-model']
+    defaults['models'] = {'openai/old-model': {'alias': 'old'}, 'relay/relay-model': {'alias': 'keep'}}
+    oc.write_text(json.dumps(data))
+    asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(deletedProviders=['openai'])))
+    defaults = json.loads(oc.read_text())['agents']['defaults']
+    assert defaults['model']['primary'] == 'anthropic/official-model'
+    assert defaults['model']['fallbacks'] == ['relay/relay-model']
+    assert defaults['models'] == {'relay/relay-model': {'alias': 'keep'}}
+
+
+def test_delete_all_providers_accepts_empty_rows_and_leaves_no_stale_default(sandbox):
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(
+        rows=[], deletedProviders=['openai', 'anthropic', 'relay', 'custom'])))
+    data = json.loads(sandbox[1].read_text())
+    assert result['channels']['chat']['rows'] == []
+    assert data['models']['providers'] == {}
+    assert 'primary' not in data['agents']['defaults']['model']
+    assert 'CLAUDE_MODEL' not in web._read_env()
+
+
+@pytest.mark.parametrize('payload', [
+    dict(rows=[dict(slot='openai', model='new-model')], deletedProviders=['openai']),
+    dict(deletedProviders=['../openai']),
+    dict(channel='speech', deletedProviders=['openai']),
+])
+def test_invalid_deletion_is_rejected_before_any_configuration_write(sandbox, payload):
+    before = web._model_file_snapshot()
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(**payload)))
+    assert caught.value.status_code == 400
+    assert before == web._model_file_snapshot()
+
+
+def test_delete_failure_restores_env_credentials_provider_and_primary(sandbox, monkeypatch):
+    before = web._model_file_snapshot()
+    sync = web._sync_openclaw_chat
+    def fail(*args):
+        sync(*args)
+        raise OSError('simulated failure after deletion')
+    monkeypatch.setattr(web, '_sync_openclaw_chat', fail)
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(deletedProviders=['openai'])))
+    assert caught.value.status_code == 500
+    assert before == web._model_file_snapshot()
+
+
+def test_chat_rows_expose_stable_provider_identity_for_delete_after_draft_rename(sandbox):
+    rows = web._model_channels()['channels']['chat']['rows']
+    assert all(row['deletable'] for row in rows)
+    assert {row['providerId'] for row in rows} == {'openai', 'custom'}

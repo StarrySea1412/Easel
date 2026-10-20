@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import '../styles/activity-hub.css';
 import { IconWarn, IconCopy, IconRefresh, IconInfo } from './icons';
 
-type Failure={id:string;at:string;source?:string;route?:string;status?:number;operation?:string;stage?:string;code?:string;relatedEventId?:string;platform?:string;owner?:string;slug?:string;version?:string;revision?:string;locations?:string[]};
+type Failure={id:string;at:string;source?:string;route?:string;status?:number;operation?:string;stage?:string;code?:string;relatedEventId?:string;platform?:string;owner?:string;slug?:string;version?:string;revision?:string;locations?:string[];page?:string;exceptionType?:string;asset?:string;uiVersion?:string};
 const base=()=>window.location.pathname.replace(/\/index\.html$/,'').replace(/\/$/,'');
 export function FailureEventLink({id}:{id:string}) {return <button type="button" className="failure-event-link" onClick={()=>window.dispatchEvent(new CustomEvent('easel:failure-detail',{detail:id}))}>查看问题 {id.slice(0,8)}</button>;}
 export function FailureMessage({text}:{text:string}) {const ids=[...text.matchAll(/错误编号[：:]\s*([0-9a-f]{32})/g)].map(match=>match[1]);return <>{text}{[...new Set(ids)].map(id=><FailureEventLink key={id} id={id}/>)}</>;}
@@ -20,9 +20,9 @@ export default function FailureRecords({eventId}:{eventId?:string}) {
     void read();return()=>{disposed=true;clearTimeout(deadline);controller.abort();};
   },[eventId,revision]);
   const current=rows.find(row=>row.id===selected), related=current?rows.filter(row=>row.id===current.id||row.relatedEventId===current.id||row.id===current.relatedEventId):[];
-  const safeSummary=current?{id:current.id,at:current.at,operation:current.operation,stage:current.stage,code:current.code,route:current.route,status:current.status,platform:current.platform,owner:current.owner,slug:current.slug,version:current.version,revision:current.revision,locations:current.locations,relatedEventId:current.relatedEventId}:null;
-  const operationLabel = (row: Failure) => ({clawhub:'技能导入',publish:'内容发布',accounts:'账号连接',browser:'辅助浏览器',chat:'AI 对话'} as Record<string,string>)[row.operation || ''] || row.operation || '请求失败';
-  const stageLabel = (row: Failure) => ({download:'下载技能',preflight:'提交前检查',submit:'提交内容',import:'导入技能',search:'搜索技能',catalog:'读取技能列表',request:'发送请求',response:'接收响应',login_required:'需要重新登录'} as Record<string,string>)[row.stage || row.code || ''] || row.stage || row.code || '阶段未记录';
+  const safeSummary=current?{id:current.id,at:current.at,operation:current.operation,stage:current.stage,code:current.code,route:current.route,status:current.status,platform:current.platform,owner:current.owner,slug:current.slug,version:current.version,revision:current.revision,locations:current.locations,relatedEventId:current.relatedEventId,page:current.page,exceptionType:current.exceptionType,asset:current.asset,uiVersion:current.uiVersion}:null;
+  const operationLabel = (row: Failure) => ({clawhub:'技能导入',publish:'内容发布',accounts:'账号连接',browser:'辅助浏览器',chat:'AI 对话',page_load:'页面打开'} as Record<string,string>)[row.operation || ''] || row.operation || '请求失败';
+  const stageLabel = (row: Failure) => ({download:'下载技能',preflight:'提交前检查',submit:'提交内容',import:'导入技能',search:'搜索技能',catalog:'读取技能列表',request:'发送请求',response:'接收响应',login_required:'需要重新登录',module_load:'加载页面资源',render:'显示页面'} as Record<string,string>)[row.stage || row.code || ''] || row.stage || row.code || '阶段未记录';
   const timeLabel = (value: string) => Number.isNaN(Date.parse(value)) ? value : new Date(value).toLocaleString('zh-CN', {hour12:false});
   return <section className="failure-records" aria-label="问题记录">
     <header><div><h2>问题排查</h2><p className="hub-note">遇到失败时，查看发生在哪一步，复制诊断信息以便排查。</p></div>

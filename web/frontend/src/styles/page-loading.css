@@ -15,6 +15,9 @@
 .page-loading-placeholder .sk:last-child { width: 80%; }
 .page-load-error h2 { margin: 0; color: var(--text); font-size: 18px; font-weight: 550; }
 .page-load-error .btn { flex: none; }
+.page-error-details { width: min(420px, 100%); text-align: left; font-size: 12px; }
+.page-error-details summary { cursor: pointer; }
+.page-error-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: 12px; background: var(--surface); border-radius: var(--radius-sm); }
 .local-storage-notice {
   display: flex;
   flex: none;

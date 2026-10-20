@@ -19,6 +19,12 @@ function deferred() {
 }
 
 function fixture(t) {
+  const reports = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/api/diagnostics/failures');
+    reports.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ eventId: 'a'.repeat(32) }) };
+  });
   const container = document.createElement('div');
   document.body.append(container);
   const caught = [];
@@ -30,6 +36,7 @@ function fixture(t) {
   return {
     container,
     caught,
+    reports,
     render: async (element) => act(async () => root.render(element)),
     click: async (button) => act(async () => button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))),
   };
@@ -90,6 +97,8 @@ test('retry reloads a rejected lazy module while preserving outer controller sta
     const errorPanel = view.container.querySelector('[role="alert"]');
     assert.match(errorPanel?.textContent || '', /运行记录暂时无法打开/);
     assert.equal(view.caught.at(-1), failure);
+    assert.equal(view.reports.at(-1).stage, 'module_load');
+    assert.equal(view.reports.at(-1).code, 'module_load_failed');
     assert.equal(view.container.querySelector('[aria-busy="true"]'), null);
 
     await view.render(createElement(PersistentController, { selectedSession: `session-retry-${attempt}` }));
@@ -115,6 +124,33 @@ test('retry reloads a rejected lazy module while preserving outer controller sta
   assert.equal(reloads, 0);
   assert.equal(loads, 3);
   assert.equal(view.container.querySelector('[role="alert"]'), null);
+});
+
+test('runtime rendering errors keep safe diagnostics and a recorded event distinct from module loading', async t => {
+  const view = fixture(t);
+  const failure = new TypeError('PRIVATE_IDENTITY access_token=PRIVATE_SECRET');
+  failure.stack = 'TypeError: PRIVATE_SECRET\n    at render (https://easel.test/assets/AccountsPage-abc123.js:123:45)';
+  const Page = createLazyPage('账号', async () => ({ default: () => { throw failure; } }));
+  await view.render(createElement(Page));
+  assert.match(view.container.textContent, /页面显示时出现异常/);
+  assert.equal(view.reports.length, 1);
+  assert.equal(view.reports[0].page, 'accounts');
+  assert.equal(view.reports[0].stage, 'render');
+  assert.equal(view.reports[0].asset, 'assets/AccountsPage-abc123.js:123:45');
+  assert.equal(view.reports[0].exceptionType, 'TypeError');
+  assert.match(view.container.textContent, /查看问题 aaaaaaaa/);
+  assert.doesNotMatch(JSON.stringify(view.reports) + view.container.textContent, /PRIVATE_/);
+});
+
+test('unavailable diagnostic callback never masks the page error or disables retry', async t => {
+  const view = fixture(t);
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('PRIVATE callback error'); });
+  const Page = createLazyPage('账号', () => Promise.reject(new Error('PRIVATE import error')));
+  await view.render(createElement(Page));
+  assert.match(view.container.textContent, /页面资源加载失败/);
+  assert.match(view.container.textContent, /诊断记录未能保存/);
+  assert.doesNotMatch(view.container.textContent, /PRIVATE/);
+  assert.equal([...view.container.querySelectorAll('button')].find(button => button.textContent === '重新尝试').disabled, false);
 });
 
 test.after(async () => {

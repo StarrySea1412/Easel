@@ -7,6 +7,28 @@ globalThis.localStorage = window.localStorage;
 const { isWhoamiFresh, getWhoamiCache, setWhoamiCache, verifyStale } = await loadTsModule('../src/lib/whoami.ts');
 const { accountWhoami, startLogin } = await loadTsModule('../src/lib/api.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('invalid account cache containers and identity shapes cannot reach account rendering', () => {
+  for (const raw of ['null', '[]', '1', '"legacy"', '{broken']) {
+    localStorage.setItem('easel_whoami', raw);
+    assert.deepEqual(getWhoamiCache(), {}, `invalid cache: ${raw}`);
+  }
+  const valid = { loggedIn: true, name: 'valid identity', avatar: '', ts: Date.now() };
+  localStorage.setItem('easel_whoami', JSON.stringify({ zhihu: valid, douyin: null,
+    kuaishou: { loggedIn: true, name: { text: 'bad identity' }, avatar: '', ts: Date.now() },
+    bilibili: { loggedIn: 'true', name: '', avatar: '' } }));
+  assert.deepEqual(getWhoamiCache(), { zhihu: valid });
+  assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).kuaishou.name.text, 'bad identity', 'reading must not erase stored data');
+});
+
+test('malformed online identity responses are rejected and never overwrite the last known identity as verified', async t => {
+  localStorage.clear(); setWhoamiCache('zhihu', { loggedIn: true, name: 'retained', avatar: '', checkedAt: 0 });
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ loggedIn: true, name: { nickname: 'wrong shape' }, avatar: '' }) }));
+  await verifyStale(['zhihu']);
+  assert.equal(getWhoamiCache().zhihu.name, 'retained');
+  assert.equal(getWhoamiCache().zhihu.verified, false);
+  assert.equal(isWhoamiFresh(getWhoamiCache().zhihu), false);
+});
 test('rewriting a cache entry cannot extend the original online verification time', () => {
   localStorage.clear();
   setWhoamiCache('zhihu', {loggedIn:true,name:'old',avatar:'',checkedAt:Date.now()-700000,verified:true});

@@ -32,6 +32,8 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   else if (specifier === './settings/SettingsField') target = await tsModuleUrl(new URL('../src/components/settings/SettingsField.tsx', import.meta.url));
   else if (specifier === './settings/ModelConfigPicker') target = await tsModuleUrl(new URL('../src/components/settings/ModelConfigPicker.tsx', import.meta.url));
   else if (specifier === './settings/ProviderBoard') target = await tsModuleUrl(new URL('../src/components/settings/ProviderBoard.tsx', import.meta.url));
+  else if (specifier === './settings/ModelAvailabilityPanel') target = await tsModuleUrl(new URL('../src/components/settings/ModelAvailabilityPanel.tsx', import.meta.url));
+  else if (specifier === '../hooks/useModelAvailability') target = await tsModuleUrl(new URL('../src/hooks/useModelAvailability.ts', import.meta.url));
   else if (specifier === './ui/Select') target = await tsModuleUrl(new URL('../src/components/ui/Select.tsx', import.meta.url));
   else if (specifier === './settings/AppearanceSettings') target = await tsModuleUrl(new URL('../src/components/settings/AppearanceSettings.tsx', import.meta.url));
   else if (specifier === './icons' || specifier === './settingsIcons') target = await tsModuleUrl(new URL(`../src/components/${specifier.slice(2)}.tsx`, import.meta.url));
@@ -80,7 +82,17 @@ async function fixture(t, responseOverrides = {}) {
   };
   globalThis.__settingsBackupNavigation = harness;
   let networkCalls = 0;
-  t.mock.method(globalThis, 'fetch', () => { networkCalls++; throw new Error('No network allowed'); });
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).endsWith('/api/settings/models/probe') && Object.hasOwn(harness.responses, 'probeModel')) {
+      const payload = JSON.parse(init.body);
+      harness.calls.push({name:'probeModel', args:[payload]});
+      const response = harness.responses.probeModel;
+      const result = typeof response === 'function' ? await response(payload) : response;
+      return {ok:result.httpOk !== false,status:result.httpOk === false?503:200,json:async()=>result};
+    }
+    networkCalls++; throw new Error('No network allowed');
+  });
+  window.localStorage.clear();
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -259,6 +271,92 @@ const configuredRows = () => [
 ];
 const modelChannels = rows => ({ channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: key === 'chat' ? rows : [] }])) });
 const findButton = (view, text) => [...view.container.querySelectorAll('button')].find(button => button.textContent.trim() === text || (button.classList.contains('tab') && button.textContent.startsWith(text)));
+
+async function removeProvider(view, index) {
+  await view.click(view.container.querySelectorAll('.provider-more-trigger')[index]);
+  const action = document.querySelector('.provider-actions-menu [role=menuitem]');
+  assert.match(action.textContent, /删除供应商/);
+  await view.click(action);
+}
+
+test('provider ellipsis opens a focused menu, Escape restores focus and outside click dismisses it', async t => {
+  const view = await fixture(t, { fetchModelChannels: modelChannels(configuredRows()) });
+  await view.render(1, view.props, 'model');
+  const trigger = view.container.querySelector('.provider-more-trigger');
+  assert.equal(trigger.getAttribute('aria-haspopup'), 'menu');
+  assert.equal(document.querySelector('[role=menuitem]'), null);
+  await act(async () => trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key:'ArrowDown', bubbles:true, cancelable:true })));
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.activeElement, document.querySelector('.provider-actions-menu [role=menuitem]'));
+  await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true })));
+  assert.equal(document.querySelector('.provider-actions-menu'), null);
+  assert.equal(document.activeElement, trigger);
+  await view.click(trigger);
+  await act(async () => document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles:true })));
+  assert.equal(document.querySelector('.provider-actions-menu'), null);
+  assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
+});
+
+test('empty unsaved suppliers can be removed individually without deleting saved providers', async t => {
+  const view = await fixture(t, { fetchModelChannels: modelChannels(configuredRows()) });
+  await view.render(1, view.props, 'model');
+  await view.click(findButton(view, '添加供应商'));
+  await view.click(findButton(view, '添加供应商'));
+  assert.equal(view.container.querySelectorAll('.provider-card').length, 4);
+  await removeProvider(view, 3);
+  assert.equal(view.container.querySelectorAll('.provider-card').length, 3);
+  await removeProvider(view, 2);
+  assert.equal(view.container.querySelectorAll('.provider-card').length, 2);
+  assert.match(view.container.textContent, /已移除未保存的供应商/);
+  assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
+  assert.equal(findButton(view, '保存并使用').disabled, true);
+});
+
+test('deleting the default supplier is a draft and saving sends its slot with the surviving default', async t => {
+  let saved = configuredRows();
+  const view = await fixture(t, {
+    fetchModelChannels: () => modelChannels(saved),
+    saveModelConfig: (_channel, rows) => {
+      saved = rows.map(row => ({ ...configuredRows().find(item => item.slot === row.slot), ...row, role:row.primary ? '主' : '备' }));
+      return { ...modelChannels(saved), ok:true };
+    },
+  });
+  await view.render(1, view.props, 'model');
+  await removeProvider(view, 0);
+  assert.equal(view.container.querySelectorAll('.provider-card').length, 1);
+  assert.match(view.container.textContent, /点击“保存并使用”后生效/);
+  assert.equal(view.harness.calls.some(call => call.name === 'saveModelConfig'), false);
+  await view.click(findButton(view, '保存并使用'));
+  const [channel, rows, deleted] = view.harness.calls.find(call => call.name === 'saveModelConfig').args;
+  assert.equal(channel, 'chat'); assert.deepEqual(deleted, ['openai']);
+  assert.equal(rows.length, 1); assert.equal(rows[0].slot, 'anthropic'); assert.equal(rows[0].primary, true);
+  assert.equal(findButton(view, '保存并使用').disabled, true);
+});
+
+test('deleting an edited custom supplier uses its saved identity and leaves no resurrected provider on retry', async t => {
+  const custom = { ...configuredRows()[0], slot:'custom', providerId:'saved-name', name:'saved-name', deletable:true };
+  let attempts = 0;
+  const view = await fixture(t, {
+    fetchModelChannels: modelChannels([custom]),
+    saveModelConfig: () => { if (++attempts === 1) throw new Error('保存失败：模拟离线'); return { ...modelChannels([]), ok:true }; },
+  });
+  await view.render(1, view.props, 'model');
+  const name = view.container.querySelector('input[aria-label="供应商名称"]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(name, 'draft-name');
+    name.dispatchEvent(new window.Event('input', { bubbles:true }));
+  });
+  await removeProvider(view, 0);
+  await view.click(findButton(view, '保存并使用'));
+  assert.match(view.container.textContent, /保存失败/);
+  assert.equal(findButton(view, '保存并使用').disabled, false);
+  await view.click(findButton(view, '保存并使用'));
+  const calls = view.harness.calls.filter(call => call.name === 'saveModelConfig');
+  assert.equal(calls.length, 2);
+  for (const call of calls) assert.deepEqual(call.args, ['chat', [], ['saved-name']]);
+  assert.match(view.container.textContent, /当前未配置对话渠道/);
+  assert.equal(findButton(view, '保存并使用').disabled, true);
+});
 
 test('every chat channel exposes its protocol and saves an explicit keyboard selection as a draft', async t => {
   const rows = [...configuredRows(),
@@ -505,8 +603,84 @@ test('unconfigured models show why discovery is unavailable and expand their edi
   const discover = [...view.container.querySelectorAll('button')].filter(button => button.textContent === '获取模型列表');
   assert.equal(discover.length, 2);
   assert.equal(discover.every(button => button.disabled), true);
+  assert.equal([...view.container.querySelectorAll('button[aria-label^="检测"]')].every(button => button.disabled), true);
   assert.match(view.container.textContent, /先填写 API Key，或从配置导入/);
   assert.equal(view.harness.calls.some(call => call.name === 'discoverModels'), false);
+});
+
+test('compact supplier availability check runs immediately with built-in defaults, reports failure and retries', async t => {
+  const rows = configuredRows();
+  let finish;
+  let reads = 0;
+  const view = await fixture(t, { fetchModelChannels: modelChannels(rows), probeModel: () => {
+    reads++;
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  await view.render(1, view.props, 'model');
+  const card = view.container.querySelector('.provider-card');
+  const check = card.querySelector('button[aria-label^="检测"]');
+  assert.equal(reads, 0);
+  assert.match(check.title, /内置默认参数/);
+  await view.click(check);
+  assert.equal(check.disabled, true);
+  assert.equal(check.getAttribute('aria-busy'), 'true');
+  assert.match(card.querySelector('[role=status]').textContent, /正在检测文本可用性/);
+  assert.equal(card.querySelector('.provider-body').hidden, true);
+  const result = { modelRef: `${rows[0].slot}/${rows[0].model}`, mode:'text', testedAt:123 };
+  assert.deepEqual(view.harness.calls.find(call => call.name === 'probeModel').args[0], {modelRef:result.modelRef,mode:'text',prompt:'请只回复：连接成功'});
+  await act(async () => finish({ ...result, state:'failed', detail: 'Synthetic HTTP 401' }));
+  assert.match(card.querySelector('[role=status]').textContent, /文本检测未通过.*HTTP 401/);
+  assert.equal(check.disabled, false);
+  await view.click(check);
+  await act(async () => finish({ ...result, state:'success', detail: '已收到非空文本响应。' }));
+  assert.match(card.querySelector('[role=status]').textContent, /文本检测通过.*非空文本响应/);
+  assert.equal(reads, 2);
+  assert.equal(card.querySelector('.provider-body').hidden, true);
+  assert.equal(view.harness.calls.some(call => ['saveModelConfig', 'runChannelSelftest', 'discoverModels'].includes(call.name)), false);
+});
+
+test('optional defaults remain separate from providers and change one-click checks only after saving', async t => {
+  const rows = configuredRows();
+  const view = await fixture(t, { fetchModelChannels:modelChannels(rows), probeModel: payload => ({...payload,state:'success',detail:'Synthetic model response',testedAt:123}) });
+  await view.render(1,view.props,'model');
+  const section = [...view.container.querySelectorAll('details.model-settings-details')].find(details => details.querySelector('summary')?.textContent.includes('模型可用性'));
+  assert.ok(section);
+  assert.equal(section.closest('.provider-card'),null);
+  await act(async () => { section.open = true; section.dispatchEvent(new window.Event('toggle')); });
+  assert.match(section.textContent,/无需配置检测参数/);
+  assert.equal(view.harness.calls.some(call=>call.name==='probeModel'),false);
+  const input = section.querySelector('textarea[aria-label="默认检测提示词"]');
+  assert.equal(input.value,'请只回复：连接成功');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(input,'只回复 OK');
+    input.dispatchEvent(new window.Event('input',{bubbles:true}));
+  });
+  const check = view.container.querySelector('.provider-card button[aria-label^="检测"]');
+  await view.click(check);
+  assert.equal(view.harness.calls.find(call=>call.name==='probeModel').args[0].prompt,'请只回复：连接成功');
+  await view.click([...section.querySelectorAll('button')].find(button=>button.textContent==='保存默认设置'));
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,1);
+  assert.match(window.localStorage.getItem('easel:model-check-defaults:v1'),/只回复 OK/);
+  await view.click(check);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel')[1].args[0].prompt,'只回复 OK');
+});
+
+test('unsaved changes and late or malformed availability receipts cannot appear as a passed current model', async t => {
+  let finish;
+  const view = await fixture(t, {fetchModelChannels:modelChannels(configuredRows()),probeModel:()=>new Promise(resolve=>{finish=resolve;})});
+  await view.render(1,view.props,'model');
+  const card=view.container.querySelector('.provider-card');
+  const check=card.querySelector('button[aria-label^="检测"]');
+  await view.click(check);
+  const input=card.querySelector('input[aria-label="模型名称"]');
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'unsaved-model');
+    input.dispatchEvent(new window.Event('input',{bubbles:true}));
+  });
+  await act(async()=>finish({modelRef:'openai/model-a',mode:'text',state:'success',detail:'OLD MODEL PASSED',testedAt:123}));
+  assert.equal(check.disabled,true);
+  assert.match(check.title,/先保存/);
+  assert.doesNotMatch(card.textContent,/OLD MODEL PASSED/);
 });
 
 test('legacy import links open the single model page and expand its import workflow', async t => {
@@ -624,10 +798,15 @@ test('provider cards hide internal order, collapse independently, and preserve e
   assert.equal(cards.every(card => card.querySelector('.provider-body').hidden), true);
   assert.equal(view.container.querySelector('.provider-card .step'), null);
   assert.equal(cards.every(card => card.querySelector('.provider-glyph svg, .provider-glyph img')), true);
+  assert.equal(cards[0].querySelector('.provider-heading small').textContent, rows[0].baseUrl);
+  assert.equal(cards[0].querySelector('.provider-default-badge').textContent, '默认');
+  assert.equal(cards[1].querySelector('.provider-default-badge'), null);
+  const edit = cards[0].querySelector('button[aria-label^="编辑"]');
+  assert.ok(edit.querySelector('svg'));
   const toggle = cards[0].querySelector('.provider-toggle');
   assert.equal(toggle.tagName, 'BUTTON');
   assert.equal(toggle.getAttribute('aria-controls'), cards[0].querySelector('.provider-body').id);
-  await view.click(toggle);
+  await view.click(edit);
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(cards[1].querySelector('.provider-body').hidden, true);
   const input = cards[0].querySelector('input[aria-label="模型名称"]');
@@ -655,7 +834,8 @@ test('transcription cards use natural roles and missing key guidance rather than
   assert.deepEqual(cards.map(card => card.querySelector('.provider-body').hidden), [true, true, true]);
   assert.equal(cards.every(card => card.querySelector('.provider-glyph svg, .provider-glyph img')), true);
   assert.match(cards[0].querySelector('.provider-head').textContent, /免配置/);
-  assert.match(cards[1].querySelector('.provider-head').textContent, /API Key/);
+  assert.equal(cards[1].querySelector('.provider-heading small').textContent, 'https://api.example.test/v1');
+  assert.match(cards[1].querySelector('.provider-body').textContent, /API Key/);
   assert.match(cards[2].querySelector('.provider-head').textContent, /云端不可用时接替/);
   assert.equal(view.container.querySelector('.step'), null);
   assert.ok(cards[1].querySelector('input[aria-label="模型名称"]'));

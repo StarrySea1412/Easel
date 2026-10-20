@@ -1,6 +1,6 @@
 // whoami 登录态：缓存 + 开页后台自愈校验。账号页与工作台「创作数据」卡片共用，
 // 避免对同一平台在 TTL 内重复起 headless 浏览器。缓存落 localStorage，条目带 ts。
-import { accountWhoami, type AccountWhoami } from './api';
+import { accountWhoami, decodeAccountWhoami, type AccountWhoami } from './api';
 
 const KEY = 'easel_whoami';
 const requestVersions = new Map<string, number>();
@@ -11,7 +11,17 @@ export const ACCOUNT_STATE_EVENT = 'easel:account-state';
 export type WhoamiEntry = AccountWhoami & { ts: number };
 
 export function getWhoamiCache(): Record<string, WhoamiEntry> {
-  try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; }
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(KEY) || '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).flatMap(([platform, entry]) => {
+      try {
+        const account = decodeAccountWhoami(entry);
+        const ts = (entry as Record<string, unknown>).ts;
+        return [[platform, { ...account, ts: typeof ts === 'number' && Number.isFinite(ts) && ts >= 0 ? ts : 0 }]];
+      } catch { return []; } // Ignore only the malformed entry; never erase browser or platform data.
+    }));
+  } catch { return {}; }
 }
 
 /** 写缓存；r 为 null 则删除该平台条目。附带 ts 供 TTL 判定（旧格式无 ts→视为过期）。 */

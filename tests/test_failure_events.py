@@ -166,3 +166,21 @@ def test_publish_callback_records_only_platform_stage_and_receipt(tmp_path, plat
                   {'slug': 'skill'}, {'stage': 'catalog_verify'}, {'platform': 'untrusted'}]:
         assert client.post('/api/diagnostics/failures', json={**body, **extra}).status_code == 422
     assert 'PRIVATE' not in events.path.read_text()
+
+
+@pytest.mark.parametrize('stage,code', [('module_load', 'module_load_failed'), ('render', 'render_failed')])
+def test_page_failure_callback_keeps_safe_stage_asset_and_ui_version(tmp_path, stage, code):
+    app, events = fixture_app(tmp_path)
+    client = TestClient(app)
+    body = {'operation': 'page_load', 'page': 'accounts', 'stage': stage, 'code': code,
+            'exceptionType': 'TypeError', 'asset': 'assets/AccountsPage-abc123.js:123:45', 'uiVersion': '0.6.2'}
+    result = client.post('/api/diagnostics/failures', json=body)
+    assert result.status_code == 201
+    event, = events.recent()
+    assert event['id'] == result.json()['eventId']
+    assert (event['route'], event['page'], event['stage'], event['uiVersion']) == ('page_load_ui', 'accounts', stage, '0.6.2')
+    assert event['asset'] == body['asset'] and event['exceptionType'] == 'TypeError'
+    for extra in [{'message': 'PRIVATE'}, {'stack': 'PRIVATE'}, {'page': 'PRIVATE'}, {'asset': 'https://private/path?token=PRIVATE'},
+                  {'platform': 'zhihu'}, {'stage': 'identity'}, {'code': 'network'}, {'uiVersion': 'PRIVATE'}, {'exceptionType': 'PRIVATE'}]:
+        assert client.post('/api/diagnostics/failures', json={**body, **extra}).status_code == 422
+    assert 'PRIVATE' not in events.path.read_text()

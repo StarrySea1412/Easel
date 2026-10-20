@@ -1,6 +1,11 @@
 ## 0.6.2 · 2026-10-20 · Reliability fixes / 可靠性修复
 
 - Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/agent-retry-button-2026-10-20.md)。
+- Match the reference compact supplier rows with check/edit/more icons; More → Delete handles built-in and custom suppliers, stable identities and persisted configuration cleanup with rollback. / 删除先修改草稿，保存后生效；支持全删、键盘、焦点和390px布局。
+- Run actual model checks immediately using built-in text parameters; optional browser defaults and an independent availability section share the same result. Model discovery stays separate. / 无需先配置检测参数；真实请求可能计费，本轮只用隔离响应验收。
+- Reject malformed account caches and online identity payloads. Add safe page failure receipts that distinguish module loading from rendering and retain manual retry and diagnostic copy. / 不清空用户Cookie/profile；不上传错误原文、昵称、缓存或凭据。
+- Provider frontend51/model-health backend28 checks passed. Account frontend42/failure backend16 checks and production build/lint passed (20 existing warnings). Extended configuration/security suite:191 passed,2 pre-existing source-marker assertions failed. Real browser fixture recovery and read-only host138 inspection are documented separately. / 138仍0.3.5，原截图根因尚未确认；未部署/重启或发布安装器。
+- [Provider scope / 供应商验证](docs/provider-management-2026-10-20.md) · [138 account investigation / 账号页排障](docs/accounts-page-recovery-2026-10-20.md).
 
 ## 0.6.1 · 2026-10-20 · Web sources panel / 网页来源面板
 

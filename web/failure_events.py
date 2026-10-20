@@ -26,7 +26,8 @@ BACKUPS = 3
 _context: ContextVar[dict | None] = ContextVar('easel_failure_context', default=None)
 _TOKEN = re.compile(r'[A-Za-z0-9_.+-]{1,128}\Z')
 _FIELDS = {'operation', 'stage', 'code', 'owner', 'slug', 'skillVersion',
-           'upstreamStatus', 'upstreamType', 'exceptionType', 'relatedEventId', 'locations', 'platform', 'receiptId'}
+           'upstreamStatus', 'upstreamType', 'exceptionType', 'relatedEventId', 'locations', 'platform', 'receiptId',
+           'page', 'asset', 'uiVersion'}
 
 
 def annotate(**values):
@@ -44,6 +45,9 @@ def _safe(values):
                            and re.fullmatch(r'(?:web|easel|deployment)/[A-Za-z0-9_./-]+:[0-9]{1,7}', entry)]
         elif key == 'upstreamStatus':
             if type(value) is int and 100 <= value <= 599:
+                result[key] = value
+        elif key == 'asset':
+            if isinstance(value, str) and re.fullmatch(r'assets/[A-Za-z0-9_-]+\.js:[0-9]{1,7}:[0-9]{1,7}', value):
                 result[key] = value
         elif key == 'upstreamType' and isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+', value):
             result[key] = value[:128]
@@ -170,11 +174,11 @@ class FailureEventMiddleware:
 
 class ClientFailure(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    operation: Literal['clawhub_import', 'publish']
-    stage: Literal['detail', 'import', 'catalog_refresh', 'catalog_verify', 'preflight', 'identity', 'submit', 'receipt']
+    operation: Literal['clawhub_import', 'publish', 'page_load']
+    stage: Literal['detail', 'import', 'catalog_refresh', 'catalog_verify', 'preflight', 'identity', 'submit', 'receipt', 'module_load', 'render']
     code: Literal['network', 'http_error', 'catalog_missing', 'unknown', 'login_required', 'media_required',
                   'video_required', 'identity_unverified', 'identity_changed', 'server_busy',
-                  'receipt_missing', 'publish_failed', 'already_active']
+                  'receipt_missing', 'publish_failed', 'already_active', 'module_load_failed', 'render_failed']
     status: int | None = Field(default=None, ge=400, le=599)
     durationMs: int = Field(default=0, ge=0, le=86_400_000)
     owner: str | None = Field(default=None, pattern=r'^[a-z0-9][a-z0-9_.-]{0,99}$')
@@ -183,10 +187,22 @@ class ClientFailure(BaseModel):
     relatedEventId: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     platform: Literal['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'zhihu', 'bilibili', 'wechat-oa'] | None = None
     receiptId: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    page: Literal['accounts', 'chat', 'settings', 'publish', 'images', 'automations', 'skills', 'outputs',
+                  'activity', 'office', 'analysis', 'profile', 'trends', 'calendar', 'ideas', 'breakdown', 'other'] | None = None
+    exceptionType: Literal['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError'] | None = None
+    asset: str | None = Field(default=None, max_length=180, pattern=r'^assets/[A-Za-z0-9_-]+\.js:[0-9]{1,7}:[0-9]{1,7}$')
+    uiVersion: str | None = Field(default=None, max_length=64, pattern=r'^(?:development|[0-9]+\.[0-9]+\.[0-9]+(?:[.+-][A-Za-z0-9.-]+)?)$')
 
     @model_validator(mode='after')
     def operation_fields(self):
-        if self.operation == 'clawhub_import':
+        if self.operation == 'page_load':
+            expected = {'module_load': 'module_load_failed', 'render': 'render_failed'}
+            if (not self.page or not self.exceptionType or not self.uiVersion or expected.get(self.stage) != self.code
+                    or any((self.owner, self.slug, self.skillVersion, self.platform, self.receiptId))):
+                raise ValueError('Page failure callback fields do not match the operation')
+        elif any((self.page, self.exceptionType, self.asset, self.uiVersion)):
+            raise ValueError('Page failure fields require a page operation')
+        elif self.operation == 'clawhub_import':
             if not self.slug or self.platform or self.receiptId or self.stage not in {'detail', 'import', 'catalog_refresh', 'catalog_verify'}:
                 raise ValueError('ClawHub callback fields do not match the operation')
         elif (not self.platform or self.slug or self.owner or self.skillVersion
@@ -213,7 +229,7 @@ def create_router(events: FailureEvents):
             raise HTTPException(429, '失败上报较多，请稍后重试', headers={'Retry-After': '60'})
         values = body.model_dump(exclude_none=True)
         event_id = await asyncio.to_thread(events.record, source='browser',
-            route='clawhub_import_selection' if body.operation == 'clawhub_import' else 'publish_ui',
+            route={'clawhub_import': 'clawhub_import_selection', 'publish': 'publish_ui', 'page_load': 'page_load_ui'}[body.operation],
             method='CLIENT', status=body.status,
             duration=body.durationMs, context=values)
         if not event_id:

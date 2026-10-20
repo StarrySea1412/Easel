@@ -21,11 +21,12 @@ const accounts = [
   { platform: 'zhihu', name: '知乎', backend: 'web', supported: true, loggedIn: false },
 ];
 
-async function fixture(t) {
+async function fixture(t, { rawCache } = {}) {
   localStorage.clear();
   localStorage.setItem('easel_whoami', JSON.stringify(Object.fromEntries(accounts.map(account => [account.platform, {
     loggedIn: false, name: '', avatar: '', ts: Date.now(),
   }]))));
+  if (rawCache !== undefined) localStorage.setItem('easel_whoami', rawCache);
   const timers = new Map();
   let timerId = 0;
   t.mock.method(globalThis, 'setTimeout', (callback, delay) => { assert.equal(delay, 2000); const id = ++timerId; timers.set(id, callback); return id; });
@@ -74,6 +75,21 @@ async function fixture(t) {
     await act(async () => { void callback(); });
   };
   return { state, container, modal, start, click, tick, timers, refreshTimers, unmount: () => act(async () => root.unmount()) };
+}
+
+for (const rawCache of ['null', JSON.stringify({ zhihu: { loggedIn: true, name: { nickname: 'invalid' }, avatar: '', ts: Date.now() } })]) {
+  test('account center opens with malformed stored identities and survives cross-tab cache changes: ' + rawCache.slice(0, 20), async t => {
+    const view = await fixture(t, { rawCache });
+    assert.match(view.container.textContent, /账号中心/);
+    assert.equal(view.container.querySelectorAll('article').length, accounts.length);
+    await act(async () => {
+      localStorage.setItem('easel_whoami', rawCache);
+      window.dispatchEvent(new window.StorageEvent('storage', { key: 'easel_whoami' }));
+    });
+    assert.match(view.container.textContent, /账号中心/);
+    assert.equal(view.container.querySelectorAll('article').length, accounts.length);
+    assert.equal(view.modal(), null);
+  });
 }
 
 test('initial terminal failure is shown once and never schedules a status retry', async t => {

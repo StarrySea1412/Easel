@@ -1964,6 +1964,8 @@ def _model_channels() -> dict:
     chat_rows.extend(custom_rows)
     for row in chat_rows:
         pkey = row['name'] if row.get('slot') == 'custom' else row.get('slot')
+        row['providerId'] = pkey
+        row['deletable'] = True
         provider = providers.get(pkey)
         row['protocol'] = row['type'] = _chat_protocol(pkey, providers, row['model'])
         row['protocolEditable'] = not (isinstance(provider, dict) and _is_local_gateway_base(provider.get('baseUrl')))
@@ -2226,10 +2228,11 @@ async def api_agent_runtime_settings_save(req: AgentRuntimeSettingsRequest):
     return result
 
 
-def _write_env_direct(updates: dict[str, str]) -> None:
+def _write_env_direct(updates: dict[str, str], remove_keys: set[str] | None = None) -> None:
     """后端受控键位专用：就地更新/追加 .env（不做 allowlist 过滤，仅服务端固定映射调用）。原子写。"""
     updates = {k: v for k, v in updates.items() if k and v.strip() != ''}
-    if not updates:
+    remove_keys = remove_keys or set()
+    if not updates and not remove_keys:
         return
     _guard_env_values(updates)
     lines = ENV_FILE.read_text(encoding='utf-8').splitlines() if ENV_FILE.is_file() else []
@@ -2240,6 +2243,8 @@ def _write_env_direct(updates: dict[str, str]) -> None:
         matched = None
         if s and not s.startswith('#') and '=' in s:
             k = s.split('=', 1)[0].strip()
+            if k in remove_keys:
+                continue
             if k in updates:
                 matched = k
         if matched is not None:
@@ -2271,7 +2276,8 @@ def _openclaw_provider_creds() -> dict[str, tuple[str, str]]:
         return {}
 
 
-def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str], primary_ref: str) -> str:
+def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str], primary_ref: str,
+                        deleted: set[str] | None = None) -> str:
     """同步 chat 供应商到 ~/.openclaw-easel/openclaw.json：更新/新增 + 删除多余自定义 + 主模型。
 
     provider_updates: {pkey: {"model","base","key"}}；keep_custom: 保留的自定义键；primary_ref: 目标主模型（空=不改）。
@@ -2282,9 +2288,11 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
         data = json.loads(oc.read_text(encoding='utf-8')) if oc.is_file() else {}
         providers = data.setdefault('models', {}).setdefault('providers', {})
         changed = False
+        removed = set(deleted or ())
         for pkey in [k for k in list(providers.keys())
-                     if k not in RESERVED_PROVIDER_KEYS and k not in keep_custom]:
+                     if k in removed or (k not in RESERVED_PROVIDER_KEYS and k not in keep_custom)]:
             providers.pop(pkey, None)
+            removed.add(pkey)
             changed = True
         for pkey, vals in provider_updates.items():
             prov = providers.setdefault(pkey, {})
@@ -2344,6 +2352,31 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 if models != previous_models:
                     changed = True
                 prov['models'] = models
+        if removed:
+            defaults = data.get('agents', {}).get('defaults', {})
+            model_config = defaults.get('model', {})
+            current_primary = str(model_config.get('primary') or '')
+            if not primary_ref and current_primary.split('/', 1)[0] in removed:
+                replacement = next((f"{name}/{model['id']}" for name, provider in providers.items()
+                                    if isinstance(provider, dict) for model in provider.get('models', [])
+                                    if isinstance(model, dict) and isinstance(model.get('id'), str) and model['id']), '')
+                if replacement:
+                    model_config['primary'] = replacement
+                else:
+                    model_config.pop('primary', None)
+                changed = True
+            fallbacks = model_config.get('fallbacks')
+            if isinstance(fallbacks, list):
+                kept = [ref for ref in fallbacks if not isinstance(ref, str) or ref.split('/', 1)[0] not in removed]
+                if kept != fallbacks:
+                    model_config['fallbacks'] = kept
+                    changed = True
+            allowed = defaults.get('models')
+            if isinstance(allowed, dict):
+                for ref in list(allowed):
+                    if ref.split('/', 1)[0] in removed:
+                        allowed.pop(ref)
+                        changed = True
         if primary_ref:
             ref = data.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})
             if ref.get('primary') != primary_ref:
@@ -2376,7 +2409,8 @@ def _model_file_snapshot() -> dict[Path, bytes | None]:
 
 
 def _commit_model_configuration(updates: dict[str, str], providers: dict[str, dict] | None = None,
-                                keep: set[str] | None = None, primary: str = '', channel_label: tuple[str, str] | None = None) -> str:
+                                keep: set[str] | None = None, primary: str = '', channel_label: tuple[str, str] | None = None,
+                                deleted: set[str] | None = None) -> str:
     """Rollback ordinary write/sync failures. Each file is atomic; hard process termination is not a transaction."""
     _guard_env_values(updates)
     with _MODEL_CONFIG_LOCK:
@@ -2401,9 +2435,15 @@ def _commit_model_configuration(updates: dict[str, str], providers: dict[str, di
             except (ValueError, TypeError, AttributeError):
                 raise HTTPException(500, '无法读取现有模型配置，未保存；请检查 OpenClaw 配置') from None
         try:
-            if updates:
-                _write_env_direct(updates)
-            note = _sync_openclaw_chat(providers, keep or set(), primary) if providers is not None else ''
+            remove_keys = {key for name in (deleted or set()) & RESERVED_PROVIDER_KEYS
+                           for key in (*_SLOT_ENV_KEYS[name], _CHAT_MODEL_KEYS[name])}
+            legacy = _read_env().get('CLAUDE_MODEL', '')
+            if '/' in legacy and legacy.split('/', 1)[0] in (deleted or set()):
+                remove_keys.add('CLAUDE_MODEL')
+            if updates or remove_keys:
+                _write_env_direct(updates, remove_keys) if remove_keys else _write_env_direct(updates)
+            note = (_sync_openclaw_chat(providers, keep or set(), primary, deleted) if deleted else
+                    _sync_openclaw_chat(providers, keep or set(), primary)) if providers is not None else ''
             if '失败' in note:
                 raise RuntimeError('sync failed')
             if channel_label:
@@ -2448,6 +2488,8 @@ class ModelSaveRequest(BaseModel):
 async def api_settings_models_save(req: ModelSaveRequest):
     """保存模型通道：.env 就地更新（key 留空=不改）；chat 同步 openclaw；媒体通道写 provider 配置。"""
     ch0 = (req.channel or "").strip()
+    if ch0 != 'chat' and req.deletedProviders:
+        raise HTTPException(400, '供应商删除仅适用于对话渠道')
     if ch0 not in ('chat', 'transcribe', 'speech', 'image', 'video', 'music'):
         raise HTTPException(400, '未知模型通道')
     if ch0 in ("speech", "image", "video", "music"):
@@ -2507,11 +2549,15 @@ async def api_settings_models_save(req: ModelSaveRequest):
     is_chat = (req.channel or '').strip() == 'chat'
     _cur_env = _read_env()
     _cur_prov = _openclaw_provider_creds() if is_chat else {}
+    deleted = set(req.deletedProviders)
     if is_chat:
-        if any(name in RESERVED_PROVIDER_KEYS or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,23}', name)
+        if any(not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,23}', name)
                for name in req.deletedProviders):
-            raise HTTPException(400, '只能显式删除自定义服务商')
-        keep_custom = set(_cur_prov) - set(req.deletedProviders)
+            raise HTTPException(400, '供应商标识无效，未删除')
+        submitted = {row.name.strip().lower() if row.slot == 'custom' else row.slot.strip() for row in req.rows}
+        if deleted & submitted:
+            raise HTTPException(400, '同一供应商不能同时保存和删除')
+        keep_custom = set(_cur_prov) - deleted
     for row in req.rows:
         slot = (row.slot or '').strip()
         name = (row.name or '').strip().lower()
@@ -2627,7 +2673,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             primary_ref = f'{pkey}/{model}'
     if not updates and not provider_updates and not primary_ref and not req.deletedProviders:
         raise HTTPException(400, '没有可保存的改动（key 留空表示不改）')
-    note = _commit_model_configuration(updates, provider_updates if is_chat else None, keep_custom, primary_ref)
+    note = _commit_model_configuration(updates, provider_updates if is_chat else None, keep_custom, primary_ref,
+                                       deleted=deleted if is_chat else None)
     resp = {"ok": True, "note": note}
     resp.update(_model_channels())
     return resp
