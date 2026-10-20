@@ -1,3 +1,8 @@
+## 0.7.1 · 2026-10-20 · Publishing shortcut / 内容发布快捷入口
+
+- Add a persistent sidebar publishing button with the existing icon, selected state and navigation behavior. / 侧边工具栏增加“内容发布”按钮，直接进入现有发布页；折叠时保留提示，切页收起会话列。
+- Update the local 7880 build; final visual and live-publication acceptance remains with the user. No host 138 or installer release. / 更新本机7880构建，最终视觉及真实发布仍交用户验收；138与安装器未更新。
+
 ## 0.7.0 · 2026-10-20 · Model settings and typography / 模型设置与字号
 
 - Rebuild provider editing around separate saving, testing, default selection, enablement and persistent ordering. Saved models appear in Chat automatically; disabled choices remain visible and cannot start new runs. / 重整供应商流程，保存即进入对话列表，停用保留灰态并阻止新任务沿用。

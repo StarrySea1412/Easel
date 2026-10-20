@@ -186,10 +186,10 @@ test('invalid legacy preferences still start with both columns compact', async t
   assert.equal(view.shell().classList.contains('is-toolbar-expanded'), false);
 });
 
-for (const expanded of [true, false]) test(`all eleven workspaces remain reachable with conversations ${expanded ? 'expanded' : 'collapsed'}`, async t => {
+for (const expanded of [true, false]) test(`all twelve workspaces remain reachable with conversations ${expanded ? 'expanded' : 'collapsed'}`, async t => {
   const view = await fixture(t, {}, { [CONVERSATIONS]: String(expanded) });
   if (expanded) await view.clickLabel('展开对话列表');
-  for (const [label, page] of [['工作台', 'dashboard'], ['对话', 'chat'], ['生图工坊', 'image'], ['Agent 办公室', 'agent-office'], ['设置', 'settings']]) {
+  for (const [label, page] of [['工作台', 'dashboard'], ['对话', 'chat'], ['生图工坊', 'image'], ['内容发布', 'publish'], ['Agent 办公室', 'agent-office'], ['设置', 'settings']]) {
     await view.clickLabel(label); assert.equal(view.visits.at(-1), page);
   }
   for (const [label, page] of [['技能库', 'skills'], ['内容库', 'outputs'], ['内容分析', 'analysis'], ['运行记录', 'activity'], ['画像', 'profile']]) {
@@ -206,7 +206,7 @@ for (const expanded of [true, false]) test(`all eleven workspaces remain reachab
   const accountLink = document.querySelector('.sidebar-account-open'); assert.ok(accountLink);
   await act(async () => accountLink.click());
   assert.equal(view.visits.at(-1), 'accounts');
-  assert.equal(new Set(view.visits).size, 11);
+  assert.equal(new Set(view.visits).size, 12);
   assert.equal(view.shell().classList.contains('is-expanded'), false, 'account navigation automatically collapses the conversation column');
   assert.equal(localStorage.getItem(CONVERSATIONS), String(expanded), 'navigation does not rewrite obsolete layout preferences');
 });
