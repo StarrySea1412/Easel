@@ -144,7 +144,8 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         code = 'model_stream_interrupted'
     elif re.fullmatch(r'\s*(?:aborted|cancelled|canceled)\s*', message):
         code = 'agent_request_aborted'
-    elif status == 429 or 'rate limit' in message or 'too many requests' in message:
+    elif status == 429 or any(s in message for s in (
+            'rate limit', 'too many requests', '并发请求数限制', '最多同时处理', '请求频率超限', '请求过于频繁')):
         code = 'model_rate_limited'
     elif (status in (500, 502, 503) and fallback != 'gateway_request_failed') or 'overloaded' in message:
         code = 'model_service_unavailable'

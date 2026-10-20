@@ -3799,6 +3799,7 @@ def _skill_configuration_context(specs: dict[str, dict]) -> str:
 # 表现为「答一半停在冒号」），以及会话串味（一个会话读到另一个的 session 文件内容）。
 # 不同会话 key 不同锁 → 不同对话仍可并行；只序列化「同一会话」的重叠请求。
 _session_locks: dict[str, asyncio.Lock] = {}
+_provider_locks: dict[str, asyncio.Lock] = {}
 
 
 def _session_lock(sk: str) -> asyncio.Lock:
@@ -3807,6 +3808,26 @@ def _session_lock(sk: str) -> asyncio.Lock:
         lk = asyncio.Lock()
         _session_locks[sk] = lk
     return lk
+
+
+def _provider_lock(provider: str) -> asyncio.Lock:
+    lk = _provider_locks.get(provider)
+    if lk is None:
+        lk = asyncio.Lock()
+        _provider_locks[provider] = lk
+    return lk
+
+
+def _chat_provider_key(model_ref: str | None) -> str:
+    provider = model_ref.split('/', 1)[0] if isinstance(model_ref, str) and '/' in model_ref else ''
+    if not provider:
+        try:
+            config = json.loads((openclaw_state_dir() / 'openclaw.json').read_text(encoding='utf-8'))
+            primary = config.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
+            provider = primary.split('/', 1)[0] if isinstance(primary, str) else ''
+        except (OSError, ValueError, AttributeError):
+            provider = ''
+    return provider if re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', provider) else 'default'
 
 
 # 会话续接：把 web 的 sessionId 确定性映射成一个稳定的 OpenClaw --session-id（transcript 文件名）。
@@ -4257,6 +4278,12 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
     async def supervisor():
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
+        provider_key = _chat_provider_key(requested_model_ref)
+        provider_lock = _provider_lock(provider_key)
+        provider_xlock = _CrossProcLock(
+            'provider-' + hashlib.sha256(provider_key.encode('utf-8')).hexdigest())
+        provider_xlock.cancel_event = cancel_job
+        provider_lock_acquired = False
         from easel.execution_store import ExecutionStore
         execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
         started_at_ms = int(time.time() * 1000)
@@ -4460,6 +4487,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             save_turn(pk, 'done', '', {'turn_id': turn_id, 'clean_end': False, 'stop_reason': 'user_stopped',
                                       'requestedModelRef': requested_model_ref,
                                       'requestedThinkingLevel': requested_thinking_level})
+            run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='stopped',
+                            stop_reason='user_stopped', settled=True, resource_settled=True)
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
         try:
@@ -4484,6 +4513,60 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     "requestedThinkingLevel": requested_thinking_level,
                 })
                 to_client("activity", "⏳ 这个会话正在另一个窗口运行，请稍候再试")
+                return
+
+            provider_wait_started = time.monotonic()
+            provider_wait_timeout = min(TIMEOUT_CHAT, 300)
+            if provider_lock.locked():
+                to_client('activity', f'⏳ 渠道 {provider_key} 正在处理其他会话，本轮已排队；上一轮结束后才会发送。')
+            while not provider_lock_acquired:
+                if cancel_job.is_set():
+                    user_stopped = True
+                    cancelled_before_start()
+                    return
+                remaining = provider_wait_timeout - (time.monotonic() - provider_wait_started)
+                if remaining <= 0:
+                    error = {
+                        'code': 'chat_channel_busy', 'category': 'execution', 'retryable': True,
+                        'message': f'渠道 {provider_key} 连续繁忙超过5分钟；本轮未发送到模型。请等待其他任务结束后再重试。',
+                        'channel': provider_key, 'stage': 'provider_queue',
+                    }
+                    save_turn(pk, 'done', '', {'turn_id': turn_id, 'requestedModelRef': requested_model_ref,
+                                               'requestedThinkingLevel': requested_thinking_level,
+                                               'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
+                    to_client('error', error)
+                    run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                                    error=error, stop_reason='provider_queue_timeout',
+                                    settled=True, resource_settled=True)
+                    return
+                try:
+                    await asyncio.wait_for(provider_lock.acquire(), timeout=min(0.2, remaining))
+                    provider_lock_acquired = True
+                except asyncio.TimeoutError:
+                    continue
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
+            remaining = max(0.0, provider_wait_timeout - (time.monotonic() - provider_wait_started))
+            got_provider = await loop.run_in_executor(None, provider_xlock.acquire, remaining)
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
+            if not got_provider:
+                error = {
+                    'code': 'chat_channel_busy', 'category': 'execution', 'retryable': True,
+                    'message': f'渠道 {provider_key} 连续繁忙超过5分钟；本轮未发送到模型。请等待其他任务结束后再重试。',
+                    'channel': provider_key, 'stage': 'provider_queue',
+                }
+                save_turn(pk, 'done', '', {'turn_id': turn_id, 'requestedModelRef': requested_model_ref,
+                                           'requestedThinkingLevel': requested_thinking_level,
+                                           'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
+                to_client('error', error)
+                run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                                error=error, stop_reason='provider_queue_timeout',
+                                settled=True, resource_settled=True)
                 return
 
             # Resolve credentials after queueing, so a rotation while the prior
@@ -5067,6 +5150,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 to_client('execution', execution_store.snapshot())
             except OSError:
                 to_client('activity', '执行记录保存失败；本轮结束回执仍保留。')
+            provider_xlock.release()
+            if provider_lock_acquired:
+                provider_lock.release()
             xlock.release()
             if lock_acquired:
                 lock.release()

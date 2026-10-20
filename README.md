@@ -1,4 +1,6 @@
-> **对话请求修复 · 0.7.4（2026-10-20，源码）**：修复Linux对话请求组装时将`Path`对象传给shell引用导致所有新对话请求500的问题；增加Linux路径回归测试。138已确认原0.7.3仍出现该TypeError，补丁版本正在构建部署，完成状态以部署回执为准。[诊断与验证](https://github.com/StarrySea1412/Easel/blob/codex/chat-request-fix-0.7.4/docs/chat-request-typeerror-2026-10-20.md)。
+> **渠道并发与对话失败说明 · 0.7.5（2026-10-20，源码）**：同一渠道跨会话串行执行，排队任务可以停止，超时明确标记为未发送；不同渠道保持并行。已保存的明确429并发错误显示为“服务商限流”，不自动重发。源码已推送至[修复分支](https://github.com/StarrySea1412/Easel/tree/codex/chat-provider-queue-0.7.5)，138仍运行0.7.4，本次未部署，安装器未更新。[诊断与验证](https://github.com/StarrySea1412/Easel/blob/codex/chat-provider-queue-0.7.5/docs/chat-provider-queue-2026-10-20.md)。
+
+> **对话请求修复 · 0.7.4（2026-10-20，已运行于138）**：修复Linux对话请求组装时将`Path`对象传给shell引用导致新对话请求500的问题；增加Linux路径回归测试。138登录、Gateway与资源核验通过；合成请求在上下文预算保护处返回413，没有调用服务商，真实模型对话未验。[诊断与验证](https://github.com/StarrySea1412/Easel/blob/codex/chat-request-fix-0.7.4/docs/chat-request-typeerror-2026-10-20.md)。
 
 > **账号与断流恢复 · 0.7.3（2026-10-20）**：正式与隔离运行`8e836509e4f1`。账号中心自动检测并保留待确认身份，新增骨架屏、真实扫码反馈与统一成功图标；对话续接记录缺失时查询同轮完成结果，未知时保留输出、暂停队列，不自动重发。HTTPS登录、Gateway、资源与运行文件哈希通过，原账号及渠道配置保留；手机扫码、原对话恢复与最终业务交用户复测，安装器未发布。[部署与验证范围](https://github.com/StarrySea1412/Easel/blob/codex/account-recovery-0.7.3/docs/release-138-0.7.3-2026-10-20.md)。
 

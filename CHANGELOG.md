@@ -1,7 +1,13 @@
+## 0.7.5 · 2026-10-20 · Provider concurrency and chat failure clarity / 渠道并发与对话失败说明
+
+- Queue chat runs by provider across sessions and processes; queued work can be stopped and fails clearly after five minutes without being sent. Other providers remain parallel. / 按渠道跨会话、跨进程排队；等待中可停止，超过5分钟明确提示未发送，其他渠道仍可并行。
+- Classify only stored failures with an explicit HTTP 429 concurrency-limit detail as provider rate limits. Never replay the failed turn automatically. / 仅将包含明确HTTP 429并发上限的历史失败归为服务商限流，不自动重发。
+- Source changes and focused checks are pushed to `codex/chat-provider-queue-0.7.5`; host 138 remains on 0.7.4 and is not deployed in this change. / 源码及定向检查已推送；138仍为0.7.4，本次未部署或更新安装器。[Diagnosis and verification / 诊断与验证](docs/chat-provider-queue-2026-10-20.md).
+
 ## 0.7.4 · 2026-10-20 · Linux chat request fix / Linux 对话请求修复
 
 - Stringify `Path` arguments before POSIX shell quoting; this fixes a `TypeError` that returned HTTP 500 before every OpenClaw chat model call. Add a regression test for path arguments with spaces. / 修复Linux将`Path`对象传给`shlex.quote`的问题，避免所有对话请求在调用模型前500；增加含空格路径的回归测试。
-- Host 138 deployment and post-deploy chat acceptance are in progress. / 138部署与对话实际验收进行中。
+- Host 138 runs this patch. HTTPS login, Gateway and static assets were checked; a synthetic request stopped at the context-budget guard without calling the provider. Real model acceptance remains unverified. / 138已运行此版本，登录、Gateway及资源核验通过；合成请求在上下文预算保护处拦截，没有调用服务商。真实模型对话未验证。
 
 ## 0.7.3 · 2026-10-20 · Login and stream recovery / 登录与对话恢复
 

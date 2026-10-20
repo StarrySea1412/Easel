@@ -106,3 +106,21 @@ test('generic historical aborted explains missing provenance and retains real up
  const actual=chatErrorDetail({message:'模型流中断',code:'model_stream_interrupted',category:'connection',detail:'Anthropic stream ended before a terminal event',channel:'anthropic',channelEndpoint:'fixture.example',modelRef:'anthropic/kimi-k3'});
  assert.equal(chatErrorTitle(actual),'模型响应中断');assert.equal(actual.channelEndpoint,'fixture.example');assert.equal(actual.detail,'Anthropic stream ended before a terminal event');
 });
+
+test('provider concurrency failures explain queue timeout and upstream rate limits',()=>{
+ assert.equal(chatErrorTitle({code:'chat_channel_busy',category:'execution',message:'未发送'}),'渠道排队超时');
+ assert.equal(chatErrorTitle({code:'model_rate_limited',category:'execution',message:'检查并发'}),'服务商限流');
+});
+
+test('stored generic failures with an explicit provider concurrency 429 show the cause',()=>{
+ const detail=chatErrorDetail({code:'agent_execution_failed',category:'execution',retryable:true,
+  message:'本轮执行失败。请查看运行记录中的具体失败步骤后重试。',
+  detail:'429: {"error":{"message":"您已达到并发请求数限制：最多同时处理1个请求"}}'});
+ assert.equal(detail.code,'model_rate_limited');
+ assert.equal(chatErrorTitle(detail),'服务商限流');
+ assert.match(detail.message,/当前渠道最多同时处理1个任务/);
+ assert.match(detail.detail,/最多同时处理1个请求/);
+ const unrelated=chatErrorDetail({code:'agent_execution_failed',category:'execution',
+  message:'本轮执行失败。',detail:'429: unrelated response'});
+ assert.equal(unrelated.code,'agent_execution_failed');
+});

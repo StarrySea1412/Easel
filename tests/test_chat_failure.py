@@ -38,5 +38,14 @@ def test_last_real_failure_has_priority_and_secrets_are_redacted():
 
 def test_rate_limits_and_unavailability_are_actionable():
     assert gateway_error('rate limit exceeded')['code']=='model_rate_limited'
+    assert gateway_error('429: {"error":{"message":"您已达到并发请求数限制：最多同时处理1个请求"}}')['code']=='model_rate_limited'
+    assert gateway_error('您已达到并发请求数限制')['code']=='model_rate_limited'
     assert gateway_error('overloaded')['code']=='model_service_unavailable'
     assert gateway_error('timeout')['code']=='gateway_timeout'
+
+
+def test_observed_provider_concurrency_limit_is_classified_for_the_chat_ui():
+    result=observed_failure([event('429: {"error":{"message":"您已达到并发请求数限制：最多同时处理1个请求"}}')])
+    assert result['code']=='model_rate_limited'
+    assert result['channel']=='anthropic' and result['modelRef']=='anthropic/kimi-k3'
+    assert '并发限制' in result['message']
