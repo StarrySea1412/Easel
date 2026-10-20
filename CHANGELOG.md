@@ -1,3 +1,7 @@
+## 0.6.2 · 2026-10-20 · Reliability fixes / 可靠性修复
+
+- Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/agent-retry-button-2026-10-20.md)。
+
 ## 0.6.1 · 2026-10-20 · Web sources panel / 网页来源面板
 
 - Add Chat → Add panel → Sources: observed web results, safe original links, keyword filtering, turn navigation, attachments and actual tool counts. / 同网址合并保留轮次与操作证据，普通回答链接不冒充检索来源。

@@ -1,6 +1,7 @@
 import { useChatRun } from '../hooks/useChatRun';
 import { describeOfficeAction } from '../lib/officeActions';
 import { OpenClawIcon, AgentActionIcon, ModelIdentityLabel } from './AgentIdentity';
+import { IconRefresh } from './icons';
 import '../styles/chat-run-progress.css';
 
 /** The office snapshot is only attached to its exact conversation turn. */
@@ -15,6 +16,8 @@ export default function ChatAgentActivity({sessionId,turnId}:{sessionId:string;t
       <ModelIdentityLabel identity={agent.observedModel}/>
       {agent.parentId&&<small className="chat-agent-coverage">任务：{agent.task} · 状态来自父会话回执</small>}
     </div>;})}
-    {office.error&&<button type="button" onClick={office.refresh}>重新读取行为</button>}
+    {office.error&&<button type="button" className="btn btn-sm btn-ghost chat-agent-refresh" disabled={office.loading} onClick={office.refresh}>
+      <IconRefresh size={14}/>{office.loading?'读取中…':'重新读取行为'}
+    </button>}
   </section>;
 }
