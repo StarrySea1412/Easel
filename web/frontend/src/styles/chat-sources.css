@@ -1,9 +1,15 @@
 .chat-sources-panel { min-width:0; padding:18px 16px; color:var(--text); }
 .chat-sources-panel h2 { display:flex; align-items:center; gap:7px; }
 .source-refresh { display:grid; place-items:center; border:0; background:transparent; color:var(--text-secondary); padding:5px; cursor:pointer; border-radius:var(--radius-sm); }
-.source-search { display:flex; align-items:center; gap:8px; padding:9px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-tertiary); }
-.source-search input { width:100%; min-width:0; border:0; outline:0; background:transparent; color:var(--text); font:inherit; font-size:12px; }
-.source-search:focus-within { outline:2px solid var(--focus-ring); outline-offset:2px; }
+.chat-sources-panel .source-search { display:flex; align-items:center; gap:9px; box-sizing:border-box; min-height:38px; padding:7px 11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--text-tertiary); cursor:text; transition:border-color .15s,background .15s; }
+.source-search>svg { display:block; flex:none; }
+.chat-sources-panel .source-search input { appearance:none; -webkit-appearance:none; display:block; flex:1; width:0; min-width:0; margin:0; padding:0; border:0; border-radius:0; outline:none; box-shadow:none; background:transparent; color:var(--text); font:inherit; font-size:13px; line-height:22px; }
+.chat-sources-panel .source-search input::placeholder { color:var(--text-tertiary); opacity:1; }
+/* The container owns focus; the shared input:focus-visible rule must not draw a second box. */
+.chat-sources-panel .source-search input:focus,.chat-sources-panel .source-search input:focus-visible { border:0; outline:none; box-shadow:none; }
+.chat-sources-panel .source-search:hover { border-color:var(--border-strong); }
+.chat-sources-panel .source-search:focus-within { border-color:var(--focus-ring); box-shadow:0 0 0 1px var(--focus-ring); background:var(--surface); }
+@media(prefers-reduced-motion:reduce) { .chat-sources-panel .source-search { transition:none; } }
 .source-window,.source-footnote { font-size:10px; color:var(--text-tertiary); line-height:1.8; margin:12px 0; }
 .source-section { margin-top:20px; }
 .source-section h3 { display:flex; gap:8px; align-items:center; margin:0; font-size:11px; font-weight:550; color:var(--text-secondary); }

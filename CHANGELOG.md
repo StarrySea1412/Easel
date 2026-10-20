@@ -1,3 +1,8 @@
+## 0.7.2 · 2026-10-20 · Sources search styling / 来源搜索框样式
+
+- Give the Sources search field a soft theme surface, aligned icon and one focus boundary; suppress the native search inset and the global input focus outline inside it. / 来源搜索框统一底色、图标与间距，聚焦仅由外框承载，消除原生输入框及全局焦点规则叠加描边。检索行为不变。
+- Update local 7880; final browser acceptance remains with the user. No host 138 deployment or installer release. / 更新本机7880，最终浏览器验收交用户，138与安装器未更新。
+
 ## 0.7.1 · 2026-10-20 · Publishing shortcut / 内容发布快捷入口
 
 - Add a persistent sidebar publishing button with the existing icon, selected state and navigation behavior. / 侧边工具栏增加“内容发布”按钮，直接进入现有发布页；折叠时保留提示，切页收起会话列。
