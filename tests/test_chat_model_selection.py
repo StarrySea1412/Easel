@@ -402,6 +402,7 @@ def test_same_provider_queues_other_sessions_and_queued_turn_can_be_cancelled(sa
         saved = await web.api_chat_last('session-two', 'queued-provider-turn')
         assert len(sandbox.requests) == 1
         assert saved['stop_reason'] == 'user_stopped'
+        assert not [row for row in web._chat_failure_events().recent() if row.get('turnId') == 'queued-provider-turn']
         assert second_events[-1]['event'] == first_events[-1]['event'] == 'done'
         assert not sandbox.provider_locks['relay'].locked()
 

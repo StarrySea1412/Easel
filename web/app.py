@@ -709,9 +709,18 @@ if _proxy_origin:
 app.add_middleware(CORSMiddleware, allow_origins=_LOCAL_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1'] + _EXTRA_HOSTS)
 
-from web.failure_events import FailureEvents, FailureEventMiddleware, create_router as _failure_router
+from web.failure_events import FailureEvents, FailureEventMiddleware, annotate as annotate_failure, create_router as _failure_router
 _failure_events = FailureEvents(DATA_DIR, PROJECT_ROOT)
-app.include_router(_failure_router(_failure_events))
+app.include_router(_failure_router(_failure_events, _run_ledger_root))
+_codex_service.failure_events = _failure_events
+
+
+def _chat_failure_events():
+    # Follow isolated session stores; tests must never write synthetic model
+    # failures into the user's real diagnostics directory.
+    if _run_ledger_root() != _DEFAULT_SESSIONS_DIR:
+        return FailureEvents(_run_ledger_root().parent, PROJECT_ROOT)
+    return _failure_events
 
 
 @app.middleware('http')
@@ -1446,9 +1455,20 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
     }
 
 
+def _publishing_message(message: str) -> str:
+    if publishing_mode(read_settings(ENV_FILE)) == 'automated':
+        return message
+    return message + '\n\n当前为人工提交模式：准备并交付发布素材，由用户人工提交；不要调用发布脚本或自动上传、提交平台。'
+
+
 def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None,
                    thinking_level: str | None = None) -> str:
     sk = session_id or f'web-{int(time.time() * 1000)}'
+    failure_turn_id = uuid.uuid4().hex
+
+    def failed(error):
+        _chat_failure_events().record_chat(turn_id=failure_turn_id, session_id=sk, error=error)
+        return error['message']
     msg = _publishing_message(msg)
     # 跨进程锁：同一会话同时刻只跑一个 openclaw，防并发 takeover 崩溃（rc=1）
     xlock = _CrossProcLock(sk)
@@ -1468,12 +1488,12 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
                            env=credentials.environment(_proxy_env()))
         if r.returncode != 0:
             error = gateway_error('\n'.join((r.stdout or '', r.stderr or '')))
-            return '❌ ' + error['message']
+            return '❌ ' + failed(error)
         return redact_gateway_text(clean_agent_output(r.stdout or ''), credentials) or '（无输出）'
     except subprocess.TimeoutExpired:
-        return '⏱️ ' + gateway_error('timeout')['message']
+        return '⏱️ ' + failed(gateway_error('timeout'))
     except Exception as e:
-        return '❌ ' + gateway_error(type(e).__name__ + ': ' + str(e))['message']
+        return '❌ ' + failed(gateway_error(type(e).__name__ + ': ' + str(e)))
     finally:
         xlock.release()
 
@@ -4682,6 +4702,13 @@ def _save_turn(sk: str, status: str, text: str, extra: dict | None = None) -> No
         payload = {"status": status, "text": text, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         if extra:
             payload.update(extra)
+        if status == 'done' and isinstance(payload.get('error'), dict) and payload.get('stop_reason') != 'user_stopped' and payload.get('stopped') is not True:
+            event_id = _chat_failure_events().record_chat(
+                turn_id=payload.get('turn_id'), session_id=sk.removeprefix('web:'),
+                error=payload['error'], model_ref=payload.get('requestedModelRef'),
+                duration=payload.get('elapsedMs', 0))
+            if event_id:
+                payload['error'] = {**payload['error'], 'failureEventId': event_id}
         tmp = _turn_file(sk).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, _turn_file(sk))
@@ -5032,6 +5059,7 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
 
 @app.post("/api/chat/stream")
 async def api_chat_stream(req: ChatRequest):
+    annotate_failure(operation='chat', stage='request', modelRef=req.modelRef, sessionId=req.sessionId, turnId=req.turnId)
     # Durable admission shared with automatic goals. Existing supervisor still
     # owns the lease after the HTTP stream has been returned/disconnected.
     from easel.task_store import TaskStore, TaskConflict
@@ -5207,6 +5235,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             if kind in ('error', 'done'):
                 to_client('timing', timing(True))
             if kind == 'error' and isinstance(text, dict):
+                if cancel_job.is_set() or sk in _STOPPED_CHAT:
+                    return
+                event_id = _chat_failure_events().record_chat(
+                    turn_id=turn_id, session_id=sk, error=text, model_ref=requested_model_ref,
+                    duration=(time.monotonic() - started_monotonic) * 1000)
+                if event_id:
+                    text['failureEventId'] = event_id
                 turn_error = text
             event_seq += 1
             if kind == "done":
@@ -5910,6 +5945,17 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                              and run_info.get('stop_reason') not in ('length', 'max_tokens', 'model_length', 'tool_use', 'content_filter', 'error')
                              and (bool(run_info.get('http_done')) if is_http
                                   else (getattr(proc, 'clean_end', False) or run_info.get('last_ev') == 'assistant_message_end')))
+                if not user_stopped and not clean_end:
+                    reason = run_info.get('stop_reason')
+                    error = turn_error or {
+                        'code': ('model_output_limit' if reason in ('length', 'max_tokens', 'model_length')
+                                 else 'model_content_filtered' if reason == 'content_filter'
+                                 else 'model_stream_interrupted'),
+                        'stage': 'model_response',
+                    }
+                    await asyncio.to_thread(_chat_failure_events().record_chat, turn_id=turn_id,
+                                            session_id=sk, error=error, model_ref=requested_model_ref,
+                                            duration=(time.monotonic() - started_monotonic) * 1000)
                 # Reaching finally while the child is alive means timeout, explicit
                 # stop, cancellation, or an internal stream failure. Never release
                 # the session locks while such a process can still write history.

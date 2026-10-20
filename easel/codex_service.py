@@ -64,6 +64,7 @@ class CodexService:
         self.active: dict[str, dict] = {}
         self.metadata_client = None
         self.browser_service = None
+        self.failure_events = None
         self._recover()
 
     def _recover(self):
@@ -128,6 +129,17 @@ class CodexService:
             return json.loads(path.read_text(encoding='utf-8'))
 
     def _persist(self, state):
+        if (self.failure_events is not None and state.get('status') == 'done'
+                and state.get('outcome') != 'interrupted' and isinstance(state.get('error'), dict)):
+            from .gateway_auth import gateway_error
+            error = state['error']
+            classified = gateway_error(error.get('message', ''))
+            event_id = self.failure_events.record_chat(
+                turn_id=state['turn_id'], session_id=state['sessionId'],
+                error={**classified, **error}, model_ref=state.get('requestedModelRef'),
+                duration=state.get('elapsedMs', 0))
+            if event_id:
+                error['failureEventId'] = event_id
         self._write(self._state_path(state['sessionId'], state['turn_id']), state)
 
     def execution(self, sid, tid, before=None, limit=40):

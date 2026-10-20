@@ -25,6 +25,51 @@ def fixture_app(tmp_path, upstream=None):
     return app, events
 
 
+def test_llm_failure_is_safe_durable_and_deduplicated(tmp_path):
+    events = FailureEvents(tmp_path)
+    error = {'code': 'model_rate_limited', 'stage': 'model_response',
+             'modelRef': 'relay/gpt-test', 'channel': 'relay',
+             'message': 'PRIVATE_PROMPT', 'detail': 'api_key=PRIVATE_KEY',
+             'channelEndpoint': 'https://PRIVATE_HOST'}
+    event_id = events.record_chat(turn_id='turn-1', session_id='chat-1', error=error)
+    assert events.record_chat(turn_id='turn-1', error=error) == event_id
+    row, = FailureEvents(tmp_path).recent()
+    assert row['id'] == event_id and row['operation'] == 'chat'
+    assert row['status'] == 200 and row['code'] == 'model_rate_limited'
+    assert row['modelRef'] == 'relay/gpt-test' and row['channel'] == 'relay'
+    assert row['sessionId'] == 'chat-1' and row['turnId'] == 'turn-1'
+    assert 'PRIVATE' not in events.path.read_text()
+
+
+def test_llm_history_backfill_uses_explicit_failures_and_original_time(tmp_path):
+    events = FailureEvents(tmp_path)
+    root = tmp_path / 'sessions'
+    (root / 'runs').mkdir(parents=True)
+    older = '2026-10-20T00:00:00+00:00'
+    (root / 'latest.json').write_text(json.dumps({'status': 'done', 'turn_id': 'failed-turn',
+        'at': older, 'error': {'code': 'model_stream_interrupted', 'stage': 'model_response'},
+        'requestedModelRef': 'relay/model', 'text': 'PRIVATE'}))
+    for turn, status, stop, error in [('failed-turn', 'failed', None, {'code': 'model_stream_interrupted'}),
+            ('stopped', 'stopped', 'user_stopped', {'code': 'agent_request_aborted'}),
+            ('still-running', 'running', None, {'code': 'gateway_timeout'}),
+            ('success', 'completed', None, None), ('uncertain', 'failed', None, None)]:
+        (root / 'runs' / (turn + '.json')).write_text(json.dumps({'turnId': turn, 'sessionId': 'session',
+            'status': status, 'stopReason': stop, 'error': error, 'terminalAt': older}))
+    (root / 'malformed.json').write_text('broken')
+    events.record(source='server', route='/api/new', method='GET', status=500, duration=1, context={})
+    app = FastAPI()
+    app.include_router(create_router(events, lambda: root))
+    client = TestClient(app)
+    rows = client.get('/api/diagnostics/failures').json()['events']
+    assert len(rows) == 2 and rows[0]['route'] == '/api/new'
+    row = rows[1]
+    assert row['at'] == older and row['turnId'] == 'failed-turn'
+    assert row['stage'] == 'model_response' and row['modelRef'] == 'relay/model'
+    assert row['sessionId'] == 'session'
+    assert client.get('/api/diagnostics/failures').json()['events'] == rows
+    assert 'PRIVATE' not in events.path.read_text()
+
+
 def test_failed_download_records_pinned_identity_stage_and_safe_upstream_status(tmp_path):
     def upstream(request):
         if request.url.path.endswith('/download'):
@@ -184,3 +229,44 @@ def test_page_failure_callback_keeps_safe_stage_asset_and_ui_version(tmp_path, s
                   {'platform': 'zhihu'}, {'stage': 'identity'}, {'code': 'network'}, {'uiVersion': 'PRIVATE'}, {'exceptionType': 'PRIVATE'}]:
         assert client.post('/api/diagnostics/failures', json={**body, **extra}).status_code == 422
     assert 'PRIVATE' not in events.path.read_text()
+
+def test_codex_terminal_failures_share_diagnostic_store_and_exclude_interrupt(tmp_path):
+    from easel.codex_service import CodexService
+    service = CodexService(tmp_path / 'outputs')
+    service.failure_events = FailureEvents(tmp_path)
+    state = {'sessionId': 'codex-session', 'turn_id': 'codex-turn', 'status': 'done',
+             'outcome': 'failed', 'error': {'message': 'timeout PRIVATE'}, 'requestedModelRef': 'codex/gpt-test'}
+    service._persist(state)
+    row, = service.failure_events.recent()
+    assert row['code'] == 'gateway_timeout' and row['id'] == state['error']['failureEventId']
+    assert row['modelRef'] == 'codex/gpt-test'
+    service._persist(state)
+    service._persist({**state, 'turn_id': 'stopped-turn', 'outcome': 'interrupted'})
+    assert len(service.failure_events.recent()) == 1
+    assert 'PRIVATE' not in service.failure_events.path.read_text()
+
+def test_llm_recording_failure_does_not_claim_a_saved_receipt(tmp_path, monkeypatch):
+    events = FailureEvents(tmp_path)
+    def denied(*args, **kwargs):
+        raise PermissionError('PRIVATE')
+    monkeypatch.setattr('web.failure_events.os.open', denied)
+    assert events.record_chat(turn_id='turn', error={'code': 'gateway_timeout'}) is None
+    assert events.recent() == []
+
+
+def test_historical_classification_does_not_store_provider_response(tmp_path):
+    events = FailureEvents(tmp_path)
+    events.record_chat(turn_id='old-turn', error={'code': 'agent_execution_failed',
+        'detail': '429 您已达到并发请求数限制 PRIVATE api_key=PRIVATE'})
+    row, = events.recent()
+    assert row['code'] == 'model_rate_limited'
+    assert 'PRIVATE' not in events.path.read_text()
+
+
+def test_restored_prompt_wrapper_preserves_existing_publish_policy(monkeypatch):
+    import web.app as web
+    monkeypatch.setattr(web, 'read_settings', lambda path: {})
+    assert web._publishing_message('draft') == 'draft'
+    monkeypatch.setattr(web, 'read_settings', lambda path: {'EASEL_PUBLISH_MODE': 'manual'})
+    assert '人工提交' in web._publishing_message('draft')
+    assert '不要调用发布脚本' in web._publishing_message('draft')

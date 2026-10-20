@@ -1170,6 +1170,11 @@ export function streamChat(
         } else if (currentEvent === 'error') {
           let detail:unknown;
           try { detail = JSON.parse(data); } catch { detail = data; }
+          if (detail && typeof detail==='object' && 'failureEventId' in detail
+              && typeof detail.failureEventId==='string' && /^[0-9a-f]{32}$/.test(detail.failureEventId)
+              && typeof window.dispatchEvent==='function' && typeof window.CustomEvent==='function') {
+            window.dispatchEvent(new window.CustomEvent('easel:failure-recorded', {detail:detail.failureEventId}));
+          }
           onError(makeChatError(detail));
           return true;
         } else if (currentEvent === 'done') {

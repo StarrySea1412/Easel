@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from typing import Literal
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,7 +27,7 @@ _context: ContextVar[dict | None] = ContextVar('easel_failure_context', default=
 _TOKEN = re.compile(r'[A-Za-z0-9_.+-]{1,128}\Z')
 _FIELDS = {'operation', 'stage', 'code', 'owner', 'slug', 'skillVersion',
            'upstreamStatus', 'upstreamType', 'exceptionType', 'relatedEventId', 'locations', 'platform', 'receiptId',
-           'page', 'asset', 'uiVersion'}
+           'page', 'asset', 'uiVersion', 'sessionId', 'turnId', 'channel', 'modelRef'}
 
 
 def annotate(**values):
@@ -46,6 +46,9 @@ def _safe(values):
         elif key == 'upstreamStatus':
             if type(value) is int and 100 <= value <= 599:
                 result[key] = value
+        elif key in {'channel', 'modelRef', 'sessionId', 'turnId'}:
+            if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.:/+-]{1,300}', value):
+                result[key] = value
         elif key == 'asset':
             if isinstance(value, str) and re.fullmatch(r'assets/[A-Za-z0-9_-]+\.js:[0-9]{1,7}:[0-9]{1,7}', value):
                 result[key] = value
@@ -62,18 +65,21 @@ class FailureEvents:
         self.path = self.directory / 'failure-events.jsonl'
         self.runtime = runtime_version(root)
         self.root = (root or Path(__file__).resolve().parents[1]).resolve()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.client_window = (0.0, 0)
 
-    def record(self, *, source, route, method, status, duration, context):
-        event_id = uuid4().hex
-        event = {'id': event_id, 'at': datetime.now(timezone.utc).isoformat(),
+    def record(self, *, source, route, method, status, duration, context, event_id=None, at=None):
+        deduplicate = event_id is not None
+        event_id = event_id or uuid4().hex
+        event = {'id': event_id, 'at': at or datetime.now(timezone.utc).isoformat(),
                  'source': source, 'route': route, 'method': method, 'status': status,
                  'durationMs': max(0, min(round(duration), 86_400_000)),
-                 **self.runtime, **_safe(context)}
+                 **(self.runtime if at is None else {}), **_safe(context)}
         line = json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
         try:
             with self.lock:
+                if deduplicate and self.recent(1, event_id):
+                    return event_id
                 self.directory.mkdir(parents=True, exist_ok=True)
                 if self.path.exists() and self.path.stat().st_size + len(line) > MAX_BYTES:
                     for index in range(BACKUPS, 0, -1):
@@ -104,9 +110,67 @@ class FailureEvents:
                         continue
                     if isinstance(item, dict) and (event_id is None or item.get('id') == event_id):
                         result.append(item)
-                        if len(result) >= limit:
-                            return result
-        return result
+        return sorted(result, key=lambda item: str(item.get('at', '')), reverse=True)[:limit]
+
+    def record_chat(self, *, turn_id, session_id=None, error, model_ref=None, duration=0, at=None):
+        """Record one logical LLM failure, including HTTP-200 SSE failures.
+
+        Only classified metadata is collected, never message/detail or endpoint.
+        The stable ID deduplicates stream delivery, final save and history replay.
+        """
+        if not isinstance(turn_id, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,160}', turn_id):
+            return None
+        if not isinstance(error, dict):
+            return None
+        if error.get('code') == 'agent_execution_failed' and isinstance(error.get('detail'), str):
+            from easel.gateway_auth import gateway_error
+            classified = gateway_error(error['detail'])
+            if classified['code'] != 'agent_execution_failed':
+                error = {**error, 'code': classified['code']}
+        model = error.get('modelRef') or model_ref
+        context = {'operation': 'chat', 'stage': error.get('stage') or ('model_response' if str(error.get('code', '')).startswith('model_') else 'agent_execution'),
+                   'code': error.get('code') or 'agent_execution_failed',
+                   'turnId': turn_id, 'sessionId': session_id, 'modelRef': model,
+                   'channel': error.get('channel') or (model.split('/', 1)[0] if isinstance(model, str) and '/' in model else None)}
+        return self.record(source='history' if at else 'server', route='/api/chat/stream', method='POST', status=200,
+                           duration=duration, context=context, at=at,
+                           event_id=uuid5(NAMESPACE_URL, 'easel:chat-failure:' + turn_id).hex)
+
+    def reconcile_chat_history(self, root):
+        """Recover bounded, explicitly failed durable runs; do not infer from text."""
+        root = Path(root)
+        candidates = {}
+        for directory in (root, root / 'runs'):
+            try:
+                paths = sorted(directory.glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)[:200]
+            except OSError:
+                continue
+            for path in paths:
+                try:
+                    if path.stat().st_size > 8 * 1024 * 1024:
+                        continue
+                    row = json.loads(path.read_text(encoding='utf-8'))
+                    if not isinstance(row, dict):
+                        continue
+                    if row.get('status') not in {'done', 'failed'} or row.get('stopped') is True or row.get('stop_reason', row.get('stopReason')) == 'user_stopped':
+                        continue
+                    error = row.get('error')
+                    if not isinstance(error, dict) or not error.get('code'):
+                        continue
+                    turn = row.get('turnId') or row.get('turn_id')
+                    timestamp = row.get('terminalAt') or row.get('at')
+                    observed = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).astimezone(timezone.utc).isoformat()
+                    if turn:
+                        previous = candidates.get(turn, {})
+                        candidates[turn] = {**previous, 'turn_id': turn,
+                            'session_id': row.get('sessionId') or previous.get('session_id'),
+                            'error': {**previous.get('error', {}), **error},
+                            'model_ref': row.get('modelRef') or row.get('requestedModelRef') or previous.get('model_ref'),
+                            'at': observed}
+                except (OSError, ValueError, TypeError, AttributeError):
+                    continue
+        for row in sorted(candidates.values(), key=lambda row: row['at']):
+            self.record_chat(**row)
 
     def admit_client(self):
         with self.lock:
@@ -211,7 +275,7 @@ class ClientFailure(BaseModel):
         return self
 
 
-def create_router(events: FailureEvents):
+def create_router(events: FailureEvents, chat_history=None):
     router = APIRouter()
 
     @router.get('/api/diagnostics/failures')
@@ -219,6 +283,8 @@ def create_router(events: FailureEvents):
                      eventId: str | None = Query(default=None, pattern=r'^[0-9a-f]{32}$')):
         response.headers['Cache-Control'] = 'no-store'
         try:
+            if chat_history is not None:
+                await asyncio.to_thread(events.reconcile_chat_history, chat_history())
             return {'events': await asyncio.to_thread(events.recent, limit, eventId)}
         except OSError:
             raise HTTPException(503, '失败记录暂时无法读取') from None

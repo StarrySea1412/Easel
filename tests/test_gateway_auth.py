@@ -156,7 +156,8 @@ def test_probe_cache_expires_on_auth_rotation_or_endpoint_change(monkeypatch):
     assert len(calls) == 3 and calls[-1] == (endpoint[0], 'Bearer rotated-test-token')
 
 
-def test_sync_auth_failure_passes_credentials_and_returns_only_safe_classified_message(monkeypatch):
+def test_sync_auth_failure_passes_credentials_and_returns_only_safe_classified_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     released = []
     class Lock:
         def __init__(self, key): assert key == 'synthetic-sync-session'
@@ -305,6 +306,10 @@ def test_http_failures_preserve_text_order_and_recovery_error(stream_sandbox, mo
         assert saved['clean_end'] is (case == 'complete')
         if code:
             assert len(errors) == 1 and errors[0]['code'] == code
+            failure, = web._chat_failure_events().recent()
+            assert failure['id'] == errors[0]['failureEventId']
+            assert failure['turnId'] == 'http-turn' and failure['sessionId'] == 'http-test'
+            assert failure['code'] == code and failure['operation'] == 'chat'
             assert saved['error'] == errors[0]
             assert [e['data'] for e in replay if e['event'] == 'error'] == errors
             if case == 'partial-eof':
@@ -312,6 +317,7 @@ def test_http_failures_preserve_text_order_and_recovery_error(stream_sandbox, mo
                 assert kinds.index('token') < kinds.index('error') < kinds.index('done')
         else:
             assert not errors and saved['error'] is None
+            assert ([row['code'] for row in web._chat_failure_events().recent()] == ['model_output_limit'] if case in ('length', 'max_tokens') else web._chat_failure_events().recent() == [])
         assert 'synthetic-http-token' not in json.dumps(events) + json.dumps(saved) + json.dumps(replay)
     asyncio.run(exercise())
 
@@ -329,6 +335,8 @@ def test_startup_failure_has_terminal_recoverable_error(stream_sandbox, monkeypa
         saved = await web.api_chat_last('startup-test', 'startup-turn')
         errors = [json.loads(e['data']) for e in events if e['event'] == 'error']
         assert events[-1]['event'] == 'done' and len(errors) == 1
+        failure, = web._chat_failure_events().recent()
+        assert failure['id'] == errors[0]['failureEventId']
         assert saved['status'] == 'done' and saved['error'] == errors[0] and not saved['clean_end']
         assert not saved['text']
         assert 'synthetic-http-token' not in json.dumps(events) + json.dumps(saved)
@@ -361,6 +369,8 @@ def test_client_disconnect_keeps_http_failure_recoverable(stream_sandbox, monkey
         await asyncio.wait_for(asyncio.gather(*list(web._BG_TASKS)), 5)
         saved = await web.api_chat_last('disconnect-test', 'disconnect-turn')
         assert saved['status'] == 'done' and saved['error']['code'] == 'gateway_auth_rejected'
+        failure, = web._chat_failure_events().recent()
+        assert failure['id'] == saved['error']['failureEventId']
         assert not saved['clean_end'] and not saved['text']
         replay = web._read_job_events('disconnect-turn')
         assert replay[-1]['event'] == 'done'

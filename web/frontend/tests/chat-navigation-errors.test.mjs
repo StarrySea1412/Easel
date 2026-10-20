@@ -124,3 +124,9 @@ test('stored generic failures with an explicit provider concurrency 429 show the
   message:'本轮执行失败。',detail:'429: unrelated response'});
  assert.equal(unrelated.code,'agent_execution_failed');
 });
+
+test('failure receipt survives normalization and rejects untrusted IDs',()=>{
+ const id='a'.repeat(32),detail={message:'failed',code:'model_rate_limited',failureEventId:id};
+ assert.equal(chatErrorDetail(makeChatError(detail)).failureEventId,id);
+ assert.equal(chatErrorDetail({...detail,failureEventId:'PRIVATE'}).failureEventId,undefined);
+});

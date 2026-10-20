@@ -187,3 +187,12 @@ test('opening an unloaded skill verdict loads the audit once and reports what wa
   await act(async () => new Promise(resolve => setTimeout(resolve, 260)));
   assert.equal(document.querySelector('.chat-skill-evidence'), null);
 });
+
+test('LLM failure opens its saved diagnostic receipt',async t=>{
+ const id='a'.repeat(32),seen=[];
+ const handler=event=>seen.push(event.detail);window.addEventListener('easel:failure-detail',handler);
+ t.after(()=>window.removeEventListener('easel:failure-detail',handler));
+ const container=await mount(t,{message:{role:'assistant',content:'',error:{message:'服务商限流',code:'model_rate_limited',failureEventId:id}}});
+ const link=container.querySelector('.failure-event-link');assert.ok(link);
+ await act(async()=>link.click());assert.deepEqual(seen,[id]);
+});

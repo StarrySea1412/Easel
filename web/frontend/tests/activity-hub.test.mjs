@@ -45,3 +45,18 @@ test('task sources keep their receipt meaning and route back to their owning pag
  await v.click('打开原对话');await v.click('打开定时任务');await v.click('打开发布页');assert.deepEqual(calls,['original','schedule','publish']);
  await v.click('刷新');await v.respond(2,{},503);await v.respond(3,[]);assert.match(v.container.textContent,/保留上次快照/);assert.match(v.container.textContent,/目标一/);
 });
+
+test('LLM failures show classified reasons, channel and durable turn identity',async t=>{
+ const v=await setup(t,Failures,{eventId:id});
+ await v.respond(0,{events:[{id,at:failure.at,operation:'chat',stage:'model_response',code:'model_rate_limited',channel:'relay',modelRef:'relay/gpt-test',sessionId:'session-1',turnId:'turn-1',status:200}]});
+ const detail=v.container.querySelector('.failure-detail').textContent;
+ assert.match(detail,/LLM 执行/);assert.match(detail,/服务商限流/);assert.match(detail,/模型响应/);assert.match(detail,/relay\/gpt-test/);assert.match(detail,/turn-1/);assert.match(detail,/session-1/);
+});
+
+test('a recorded background LLM failure refreshes the open problem list',async t=>{
+ const v=await setup(t,Failures);await v.respond(0,{events:[]});
+ await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:failure-recorded',{detail:id})));
+ assert.equal(v.requests.length,2);
+ await v.respond(1,{events:[{id,at:failure.at,operation:'chat',code:'gateway_timeout'}]});
+ assert.match(v.container.textContent,/LLM 执行/);
+});

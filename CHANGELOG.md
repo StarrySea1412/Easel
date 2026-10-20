@@ -1,3 +1,11 @@
+## 0.8.2 · 2026-10-21 · LLM failure receipts / LLM问题记录
+
+- Persist structured LLM failures from SSE and terminal snapshots to the shared diagnostic journal, including HTTP-200 streams; keep one receipt per logical turn and exclude explicit user stops. / SSE流内错误与终态失败统一写入问题记录，同轮去重，主动停止不误记。
+- Backfill up to 200 latest session snapshots and 200 run ledgers only when they contain explicit terminal failure metadata; retain observed timestamps and leave historical build identity unknown. / 有界补录明确落盘失败，保留原发生时间，不编造历史版本或凭输出文本推断失败。
+- Add classified reasons, channel/model and session/turn identity to problem details, link chat errors to saved receipts, and refresh an open problem list on stream failure events. / 问题详情补分类、渠道模型和会话轮次，对话可打开问题详情，已打开问题列表响应全局失败事件。
+- Restore the missing publishing-message helper used by both chat prompt paths after the upstream merge; respect the existing manual/automated publishing policy. / 恢复合并遗漏的聊天消息包装函数，保持现有发布模式约束。
+- Codex terminal errors use the same receipt store; interruption remains separate. Source/local changes only; host 138 and installers unchanged. / Codex终态错误接入相同记录，停止分开处理；仅源码/本地，138与安装器未更新。
+
 ## 0.8.1 · 2026-10-20 · Provider import and channel labels / 供应商导入与渠道标识
 
 - Show each model's channel nickname in the composer model list (`渠道 · 模型`), so identical model ids served by different channels stay distinguishable. / 模型菜单在模型前显示渠道昵称，同渠道多模型可区分。
