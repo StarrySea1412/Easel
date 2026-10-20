@@ -754,6 +754,7 @@ class BrowserService:
     async def _execute(self, session, job, payload, actor):
         tab = None
         action = job['action']
+        before_url = ''
         try:
             job.update(state='running', startedAt=now())
             self._event(session, action, 'running', job['tabId'], job['id'])
@@ -764,6 +765,10 @@ class BrowserService:
                 job['tabId'] = tab.id
             else:
                 tab = self._tab(session, job['tabId'])
+                try:
+                    before_url = tab.page.url
+                except Exception:
+                    before_url = ''
             async with tab.lock:
                 async with deadline(30):
                     if action == 'resize' or action == 'create' and ('width' in payload or 'height' in payload):
@@ -852,10 +857,14 @@ class BrowserService:
                     if observed:
                         # The panel is usable again immediately. Re-observation
                         # is read-only, so nothing the site did is replayed.
-                        detail = ('页面已变化，已自动重新观察；请继续刚才的操作。'
-                                  if isinstance(exc, BrowserError) and exc.status == 409
-                                  else f'{job["error"]} 已自动重新观察，请确认页面后重试。')
-                        job.update(recovered=True, snapshotId=(tab.snapshot or {}).get('id'), notice=detail)
+                        moved = bool(before_url) and (tab.snapshot or {}).get('url') not in ('', before_url)
+                        if moved:
+                            notice = '操作未确认完成，但页面已跳转；已自动重新观察，请确认页面后继续。'
+                        elif isinstance(exc, BrowserError) and exc.status == 409:
+                            notice = '页面已变化，已自动重新观察；请继续刚才的操作。'
+                        else:
+                            notice = f'{job["error"]} 已自动重新观察，请确认页面后重试。'
+                        job.update(recovered=True, moved=moved, snapshotId=(tab.snapshot or {}).get('id'), notice=notice)
         finally:
             job['finishedAt'] = now()
             self._event(session, action, job['state'], job.get('tabId'), job['id'], job.get('error', ''))

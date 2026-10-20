@@ -418,6 +418,7 @@ def test_any_failed_action_on_a_live_page_reobserves_instead_of_leaving_it_stale
     assert refused['state'] == 'failed' and '手动' in refused['error']
     assert refused.get('recovered') is True and refused.get('snapshotId')
     assert '已自动重新观察' in refused.get('notice', '')
+    assert refused.get('moved') is False
     fresh = current(browser, tab)
     assert fresh['id'] == refused['snapshotId'] and fresh['stale'] is False
     # The recovered snapshot is directly usable, without a manual observe.
