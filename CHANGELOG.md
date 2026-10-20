@@ -1,3 +1,9 @@
+## 0.6.0 · 2026-10-20 · Usage dashboard / 用量图表仪表盘
+
+- Keep all recorded project totals as the default; add a 7/30-day area chart, date inspection, metric controls, reporting ring, recent usage and model ranking. / 支持方向键/Home/End及会话下钻，累计统计不随趋势范围变化。
+- Aggregate 30 Beijing-calendar days from the existing ledger; preserve missing values, partial coverage and zero recorded fees. Separate identical models on distinct observed channels. / 最近20条安全字段、前8个渠道模型排行；未知/未来时间单列，不纳入趋势。
+- Real isolated Chromium checks cover light/dark, empty windows, keyboard, drill-down and actual 390px layout with fixtures. Normal backend restart is needed for the additional response fields; the existing service, host 138 and installers remain unchanged. [Evidence / 验证范围](docs/usage-dashboard-2026-10-20.md).
+
 ## 0.5.0 · 2026-10-20 · Clearer Settings and Activity / 设置与运行记录整理
 
 - Group Settings into four labeled categories with consistent icons and plain-language descriptions; move collaboration limits into advanced settings while retaining drafts and legacy deep links. / 六种AI用途提供图标、说明及方向键切换，导入与供应商管理按需展开。

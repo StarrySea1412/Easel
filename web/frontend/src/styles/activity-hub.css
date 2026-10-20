@@ -64,6 +64,8 @@
 .activity-project-usage .usage-metric > span { display:flex; gap:7px; align-items:center; }
 .activity-project-usage .usage-metric strong { font-size:22px; }
 .activity-project-usage .usage-metric.secondary strong { font-size:20px; }
+.activity-project-usage .usage-metrics.is-full .usage-metric:nth-child(2) { border-top:2px solid var(--green); }
+.activity-project-usage .usage-metrics.is-full .usage-metric:nth-child(2) strong { color:var(--green); }
 .activity-project-usage .usage-toolbar { justify-content:flex-end; }
 .activity-project-usage [hidden] { display:none!important; }
 .usage-session-link { padding:0; border:0; background:transparent; color:var(--text); font:inherit; text-align:left; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }

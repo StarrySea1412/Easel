@@ -4,6 +4,7 @@ import { IconChat, IconChart, IconCoins } from './icons';
 import InlineInfo from './InlineInfo';
 import '../styles/usage.css';
 import UsagePriceEditor from './UsagePriceEditor';
+import ProjectUsageDashboard, {type UsageDashboardData} from './ProjectUsageDashboard';
 
 const METRICS = [
   ['totalTokens', '总 Token'], ['inputTokens', '输入（含缓存）'], ['outputTokens', '输出'],
@@ -21,6 +22,7 @@ type Call = Counts & { id: string; timestamp: string; model: string; provider: s
   costBreakdown?: { pricing: { source: string; multiplier: string }; partsUsd: Record<string, string>; freshInputTokens: number } | null };
 type Turn = { id: string; number: number; timestamp: string; unattributed: boolean; summary: Summary; calls: Call[] };
 type Usage = {
+  dashboard?: UsageDashboardData;
   sessionId: string; session: Summary; project: Summary; turns: Turn[]; turnCount: number;
   offset: number; limit: number; sessionCount: number; sourceCount: number; updatedAt: number;
   sessions: { sessionId: string; summary: Summary; lastAt: string }[];
@@ -165,6 +167,7 @@ export default function UsagePanel({ sessionId, refreshKey, isStreaming = false,
           {scope === 'session' && !activityView && <div className="usage-view-tabs" role="tablist" aria-label="用量内容" onKeyDown={switchTab}><button type="button" role="tab" tabIndex={view === 'overview' ? 0 : -1} aria-selected={view === 'overview'} onClick={() => setView('overview')}>消耗总览</button><button type="button" role="tab" tabIndex={view === 'requests' ? 0 : -1} aria-selected={view === 'requests'} onClick={() => setView('requests')}>请求明细 <span>{summary.calls}</span></button></div>}
           <div hidden={scope === 'session' && view !== 'overview'}>
           {activityView && <><MetricCards summary={summary} simple={activityView !== 'project'} full={activityView === 'project'} /><p className="usage-note">Token 是 AI 处理文字的计量单位；费用以服务实际记录为准，未上报时不填 0。</p></>}
+          {activityView === 'project' && <ProjectUsageDashboard data={current.dashboard} summary={summary} sessionTitles={sessionTitles} onInspectSession={onInspectSession}/>}
           <Breakdown className={activityView === 'overview' ? 'usage-breakdown' : undefined}>
           {activityView === 'overview' && <summary><span aria-hidden="true"><IconChart size={16} /></span>详细用量 <small>输入输出、渠道、速度与轮次分布</small></summary>}
           {activityView !== 'project' && <MetricCards summary={summary} />}

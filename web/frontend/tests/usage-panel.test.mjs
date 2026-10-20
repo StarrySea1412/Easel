@@ -207,3 +207,37 @@ test('activity opens full project usage without a selected local session and kee
   assert.equal(container.querySelector('.usage-breakdown'), null, 'full project metrics do not require expansion');
   assert.equal(container.querySelector('.activity-session-picker'), null, 'no local conversation is required for project totals');
 });
+
+test('project charts change date and metric without changing cumulative scope or inventing missing costs', async t => {
+  const days = Array.from({length:30},(_,i)=>({date:`2026-09-${String(i+1).padStart(2,'0')}`,summary:summary(1,100+i)}));
+  const payload = usagePayload('', {dashboard:{days,timezone:'Asia/Shanghai',rangeDays:30,undatedCalls:1,futureCalls:0,recentLimit:20,recent:[{id:'recent',sessionId:'s1',timestamp:'2026-09-30T01:00:00Z',model:'gpt-fixture',provider:'openai',totalTokens:null}],models:[{channelId:'anthropic-1',provider:'anthropic',channelName:'写作渠道',model:'claude-fixture',summary:summary(2,240)}],modelCount:1}});
+  const opened=[];
+  const view = await fixture(t, {sessionId:'',embedded:true,activityView:'project',onInspectSession:id=>opened.push(id)}, payload);
+  await view.respondFirst();
+  assert.equal(view.container.querySelectorAll('.usage-day-strip button').length,7);
+  assert.equal(view.container.querySelector('[data-provider-brand="claude"]').getAttribute('alt'),'','observed Anthropic provider uses its brand icon');
+  assert.match(view.container.querySelector('.usage-chart-card').textContent,/882/);
+  await view.click(view.find('近30天'));
+  assert.equal(view.container.querySelectorAll('.usage-day-strip button').length,30);
+  await view.click(view.find('记录费用'));
+  assert.match(view.container.querySelector('.usage-chart-card h3').textContent,/未上报/);
+  assert.match(view.container.querySelector('.usage-chart-inspection').textContent,/未上报/);
+  assert.equal(view.container.querySelectorAll('.usage-area-chart path').length,0,'unknown fees must not create a zero cost curve');
+  const dates=view.container.querySelectorAll('.usage-day-strip button');
+  await act(async()=>{dates[29].focus();dates[29].dispatchEvent(new window.KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));});
+  assert.equal(document.activeElement,dates[0]);
+  assert.match(view.container.querySelector('.usage-chart-inspection').textContent,/2026-09-01/);
+  await view.click(view.container.querySelector('.usage-recent-list button'));
+  assert.deepEqual(opened,['s1']);
+  assert.match(view.container.querySelector('.usage-metrics.is-full').textContent,/1,200/,'trend range never filters the project cumulative cards');
+  assert.equal(view.requests.length,1,'chart exploration does not make model or extra HTTP calls');
+});
+
+test('small recorded USD fees use their actual scale instead of a one-dollar baseline', async t => {
+  const rows=[{date:'2026-10-19',summary:{...summary(1,100),recordedCostUsd:.003}},{date:'2026-10-20',summary:{...summary(1,200),recordedCostUsd:.006}}];
+  const payload=usagePayload('',{dashboard:{days:rows,timezone:'Asia/Shanghai',rangeDays:30,undatedCalls:0,futureCalls:0,recentLimit:20,recent:[],models:[],modelCount:0}});
+  const view=await fixture(t,{sessionId:'',embedded:true,activityView:'project'},payload);
+  await view.respondFirst();await view.click(view.find('记录费用'));
+  const axis=view.container.querySelector('.usage-area-chart').textContent;
+  assert.match(axis,/\$0\.006/);assert.match(axis,/\$0\.003/);assert.doesNotMatch(axis,/\$1\b/);
+});

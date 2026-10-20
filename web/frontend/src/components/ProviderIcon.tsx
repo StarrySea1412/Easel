@@ -22,7 +22,8 @@ const ICONS: Record<string, string> = { deepseek, openai, claude, gemini, qwen, 
 
 /** Callers must supply an observed provider, never a guessed current config. */
 export function ObservedProviderIcon({provider,size=16}:{provider?:string;size?:number}) {
-  const key=provider==='kimi'?'moonshot':provider==='glm'?'zhipu':provider||'';
+  const aliases:Record<string,string>={anthropic:'claude',google:'gemini',dashscope:'qwen',xai:'grok',kimi:'moonshot',glm:'zhipu'};
+  const key=aliases[provider||'']||provider||'';
   return ICONS[key]?<img src={ICONS[key]} alt="" width={size} height={size} draggable={false} data-provider-brand={key}/>:<span aria-hidden="true">?</span>;
 }
 

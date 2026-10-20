@@ -393,8 +393,10 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
                    'lastAt': max((call['timestamp'] for call in calls), default='')}
                   for key, calls in sessions.items()]
     by_session.sort(key=lambda item: item['lastAt'], reverse=True)
+    from usage_dashboard import dashboard
     return {
         'sessionId': session_id, 'session': summarize(current), 'project': summarize(all_calls),
+        **({'dashboard': dashboard(all_calls, summarize)} if not session_id else {}),
         'channels': {'session': channel_groups(current, summarize), 'project': channel_groups(all_calls, summarize)},
         'channelNote': '渠道标识取自实际调用记录；地址来自当轮配置快照，仅显示域名。旧记录缺少快照时标为地址未记录，不用当前配置猜填；同渠道模型价格与当时快照独立保存。',
         'turns': turns[offset:offset + limit], 'turnCount': len(turns), 'offset': offset, 'limit': limit,

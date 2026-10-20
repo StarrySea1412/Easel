@@ -219,3 +219,15 @@ def test_pricing_endpoint_validates_and_preserves_corrupt_saved_prices(sandbox, 
     path = usage.pricing_path(sandbox[2]); path.write_text('{broken')
     with pytest.raises(ValueError): usage.save_price(sandbox[2], 'fixture', 'fixture', price)
     assert path.read_text() == '{broken'
+
+
+def test_project_dashboard_aggregates_all_sessions_independently_of_turn_pagination(sandbox):
+    stamp = usage.datetime.now(usage.timezone.utc).isoformat()
+    transcript(sandbox, 'chat1', [record('a1', tokens={'input': 10, 'output': 5}, timestamp=stamp)])
+    transcript(sandbox, 'chat2', [record('a2', tokens={'input': 20, 'output': 5}, timestamp=stamp)])
+    data = collect(sandbox, '', limit=1)
+    assert data['turns'] == [] and data['project']['totalTokens'] == 40
+    assert sum(day['summary']['calls'] for day in data['dashboard']['days']) == 2
+    assert {row['sessionId'] for row in data['dashboard']['recent']} == {'chat1', 'chat2'}
+    assert data['dashboard']['models'][0]['summary']['totalTokens'] == 40
+    assert 'dashboard' not in collect(sandbox, 'chat1'), 'single-session reads retain their small response'
