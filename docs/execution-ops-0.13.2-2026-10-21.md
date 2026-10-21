@@ -81,4 +81,6 @@ OpenClaw 2026.9.x 把所有内核工具统一走一个调度器：外层 `name` 
 
 ## Git 交付回执
 
-待提交后补记（功能提交、远端分支 SHA、核对结果）。
+- 功能提交 `433fa96378918513c69e8fbdd2c8d69047c4223b` 已推送 `starry/codex/execution-ops-0.13.2`；本地 `rev-parse HEAD` 与 `git ls-remote` 一致。
+- 默认分支仅同步中英文首页，`starry/main` 为 `2a0736c3e019977491aea660e9e3f5d5f9726454`，已核对远端 SHA；功能代码未合并 `main`。
+- 本地构建入口 `assets/index-BtfjuKGk.js`，构建内版本常量 0.13.2；该构建来自隔离工作树 `exec-ops-0132`，未部署到用户 `7881` 实例、138 或安装器。
