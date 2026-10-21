@@ -1,6 +1,6 @@
 # 138最新验收版本0.11.2（2026-10-21）
 
-用户明确授权立即更新138。当前正在构建与验证，尚未切换；以最终部署回执为准。
+用户明确授权立即更新138。正式8444与隔离8445已切换至0.11.2，用户可开始验收。
 
 ## 内容
 - 生图工坊：剪贴板、提示词反推和灵感常显，提示词技能入口。
@@ -14,7 +14,25 @@
 - 构建、HTTP、登录、浏览器、搜索及最终用户业务验收分别记录。
 
 ## 自动验证
-- 本轮后端重点79通过；RSS解析4通过。生产构建与前端全量正在执行。
+- 本轮后端重点79通过；RSS解析4通过。TypeScript/Vite生产构建通过，前端全量1340通过，lint为0 error。
 - Linux锁补齐beautifulsoup4及soupsieve；迁移后的workspace和安全插件显式打包。
 
-- TypeScript及Vite生产构建已通过；搜索插件在本机实际OpenClaw SDK加载成功。前端全量仍在运行，不能报告通过。
+- TypeScript及Vite生产构建已通过；搜索插件在本机实际OpenClaw SDK加载成功。前端全量1340通过。
+
+## 真实部署回执
+
+- 源码提交：5b6e8177c5a292681cfbe13f12cad4e66ea939a4，已推送并核对starry分支SHA；后续交付文档提交不改变运行源码。
+- 正式入口：https://192.168.0.138:8444/ ，隔离入口只绑定138本机：https://127.0.0.1:8445/ 。
+- 镜像：sha256:602a05f775456bdc3d6db293ea9dce2818f82084cee4983601e9b601be259099。
+- 前端0.11.2；正式和隔离均通过实际HTTPS登录、API版本/修订、gateway=true、60个入口/静态资源哈希与1658个运行源码文件校验。
+- 两个实例通过Gateway工具接口直接真实搜索，provider=easel-search，返回3条真实来源，包含https://www.python.org/；没有调用付费模型。本机37289也已自动重载后直接搜索成功。
+- 实际浏览器：正式入口显示0.11.2/5b6e8177c5a2；已点击进入生图工坊，截图确认灵感、Skill入口、剪贴板与提示词反推常显。没有运行真实生图或平台发布；其他业务菜单不据此视为全部验收。
+- 隔离管理员gaojitest/gaoji实际HTTPS登录通过；正式沿用独立合规凭据且实际登录通过。登录文件与模型配置哈希前后一致，正式2个provider、隔离1个provider保持；没有清理用户会话。
+- 正式停写快照：/home/ubuntu/easel-backups/20261021T092641Z.tar.gz；隔离快照：/home/ubuntu/easel-backups-test/20261021T092335Z.tar.gz。
+- 回滚镜像：sha256:70a07dc3f10bbb87d1912798cf9494f39a2c684777e62600c92143e850652131，原0.7.4源码77036a15950a。当前代码/镜像回滚命令：python3 /home/ubuntu/Easel/deployment/138/manage.py rollback --base /home/ubuntu；数据恢复另按停写快照处理。
+- 低空间采用审计过的增量构建：原Node/OpenClaw锁与所有已有Python锁项相同，仅增加两个校验哈希的wheel，删除移位旧源码并替换整套前端。保留1280MiB构建终止门槛，构建期间最小剩余1662443520字节。没有删除业务数据、备份或其他项目镜像。
+- 服务器回执位于本版本目录：image-build-receipt.json、acceptance-production.json、acceptance-isolated-test.json、configuration-preservation.json；均不含密钥。
+
+## 保留未完成项
+
+合并全量后端的175失败/54错误仍须分类修复，不能把本次最新版供用户测试写成所有功能完善。真实模型、生成/发布、所有历史菜单与最终业务验收仍待后续完成。
