@@ -10,9 +10,11 @@ import ImageReversePanel from './ImageReversePanel';
 import VideoStudioPanel from './VideoStudioPanel';
 import StudioMediaSource from './StudioMediaSource';
 import StudioModelControl from './StudioModelControl';
+import ImagePromptSkills from './ImagePromptSkills';
+import { confirmModal } from './ui/ConfirmModal';
 import { useStudioMediaInput } from '../hooks/useStudioMediaInput';
 import { firstStudioMedia, STUDIO_MEDIA_ACCEPT } from '../lib/studioClipboard';
-import { IconOutputs } from './icons';
+import { IconOutputs, IconCopy, IconSpark, IconLoader } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 import '../styles/image-studio.css';
 import { returnImageToChat, canReturnToSession, addImageToPublish } from '../lib/creationWorkspace';
@@ -29,9 +31,10 @@ const EDIT_EXAMPLES = [
   ['转为插画', '保留主体和构图，改成细腻的手绘插画风格。'],
 ];
 
-export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings, sessionId, sourceSessionId = null, onOpenPublish }: {
+export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings, sessionId, sourceSessionId = null, onOpenPublish, active = true, onPromptSkill }: {
   studio: ImageStudioController; onOpenSettings: () => void; onOpenOutputs: () => void; onOpenModels: () => void;
   video?: VideoStudioController; onOpenVideoSettings?: () => void; sessionId?: string | null; sourceSessionId?: string | null; onOpenPublish?: () => void;
+  active?: boolean; onPromptSkill?: (skill: string, input: string) => boolean;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -63,6 +66,15 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
   const openVideoSettings = onOpenVideoSettings || onOpenModels;
   const maskScope=reference?`${reference.id}:${reference.url}:${reference.width}:${reference.height}`:null;
   useEffect(()=>setMaskEditorReference(null),[maskScope,videoMode]);
+  const draftState = useRef({ locked, prompt: studio.imgPrompt, mode: studio.mode });
+  draftState.current = { locked, prompt: studio.imgPrompt, mode: studio.mode };
+  const applyExample = async (prompt: string) => {
+    const before = draftState.current;
+    if (before.locked || before.prompt === prompt) return;
+    if (before.prompt.trim() && !await confirmModal('替换当前描述？', { confirmLabel: '替换' })) return;
+    const now = draftState.current;
+    if (!now.locked && now.prompt === before.prompt && now.mode === before.mode) studio.setImgPrompt(prompt);
+  };
 
   return <div className="page-scroll image-page">
     <header className="image-page-heading">
@@ -91,19 +103,20 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           <label className="image-prompt-label" htmlFor="image-prompt">{reference ? '这张图，你想怎么改？' : '你想生成什么？'}</label>
           <textarea id="image-prompt" rows={2} value={studio.imgPrompt} placeholder={reference ? '例如：保留这只猫，把背景换成阳光下的咖啡馆。' : '例如：窗边的一杯咖啡，清晨柔光，胶片摄影质感。'}
             onChange={event => studio.setImgPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); if (canGenerate) void studio.fireImagegen(); } }} />
-          {!studio.imgPrompt && <details className="image-prompt-examples"><summary>灵感示例</summary><div className="image-prompt-suggestions">{(reference ? EDIT_EXAMPLES : EXAMPLES).map(([label, prompt]) => <button type="button" key={label} disabled={locked} onClick={() => studio.setImgPrompt(prompt)}>{label}</button>)}</div></details>}
+          <section className="image-prompt-examples" aria-label="灵感示例">
+            <div className="image-example-ideas"><span className="image-inspiration-label"><IconSpark size={14} />灵感示例</span><div className="image-prompt-suggestions">{(reference ? EDIT_EXAMPLES : EXAMPLES).map(([label, prompt]) => <button type="button" key={label} disabled={locked} onClick={() => void applyExample(prompt)}>{label}</button>)}</div></div>
+            {onPromptSkill && <ImagePromptSkills active={active} disabled={locked} prompt={studio.imgPrompt} ratio={size.label} onOpen={onPromptSkill} />}
+          </section>
           <div className="image-composer-toolbar"><div className="image-composer-tools">
             <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => uploadInput.current?.click()}><IconImage size={16} />{studio.referenceBusy ? '上传中…' : reference ? '换图' : '添加图片'}</button>
+            <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => void media.pasteClipboard()}>{media.processing ? <IconLoader className="studio-tool-loading" size={16} /> : <IconCopy size={16} />}从剪贴板粘贴</button>
+            <button type="button" className="btn image-add-reference" disabled={locked} onClick={() => { returnMode.current = studio.mode === 'img2img' ? 'img2img' : 'generate'; studio.setMode('reverse'); }}><IconSpark size={16} />提示词反推</button>
             <input ref={uploadInput} aria-label="上传参考图" type="file" hidden accept={STUDIO_MEDIA_ACCEPT} disabled={locked} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveFile(file); }} />
             <label className="image-ratio-select"><span>比例</span><Select aria-label="画面比例" optionIcons={Object.fromEntries(IMAGE_SIZES.map(item => [item.id, <AspectRatioIcon key={item.id} ratio={item.ratio} automatic={item.id === 'auto'}/>]))} disabled={locked} value={studio.imgSize} onChange={event => studio.setImgSize(event.target.value)}>{IMAGE_SIZES.map(item => <option key={item.id} value={item.id}>{item.id === 'auto' ? '自动尺寸' : item.label.split(' ').at(-1)}</option>)}</Select></label>
           </div><button type="submit" className="btn btn-primary image-generate" disabled={!canGenerate}>{studio.imgSubmitting ? '正在提交…' : busy ? '正在生成…' : reference ? '生成修改图 →' : '生成图片 →'}</button></div>
           {studio.imgPrompt.length > 2000 && <p className="image-error" role="alert">描述最多 2000 字，当前 {studio.imgPrompt.length} 字，请稍作精简。</p>}
           <StudioMediaSource media={media} locked={locked} />
           <details className="image-advanced"><summary>更多选项</summary><div className="image-advanced-body">
-            <div className="image-secondary-actions">
-              <button type="button" className="btn btn-sm" disabled={locked} onClick={() => void media.pasteClipboard()}>{media.processing ? '读取素材中…' : '从剪贴板粘贴'}</button>
-              <button type="button" className="btn btn-sm" disabled={locked} onClick={() => { returnMode.current = studio.mode === 'img2img' ? 'img2img' : 'generate'; studio.setMode('reverse'); }}>提取提示词 ↗</button>
-            </div>
             <p>输出尺寸：{studio.imgSize === 'auto' ? '由模型决定；部分服务可能不支持。' : studio.imgSize.replace('x', ' × ')}。当前模型：{studio.imgChannel?.model || '服务默认模型'}。</p>
             {reference && <div className="image-mask"><label htmlFor="image-mask-upload">局部编辑蒙版</label><p>可上传与原图同尺寸的 PNG，用完全透明的区域指定修改位置；需生图服务支持。</p>
               {studio.mask && <div className="image-mask-file"><span>{studio.mask.name}</span><button type="button" className="link-btn" disabled={locked} onClick={studio.clearMask}>移除蒙版</button></div>}

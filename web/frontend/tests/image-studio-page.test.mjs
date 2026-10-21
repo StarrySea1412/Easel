@@ -19,7 +19,7 @@ const resultJob = (patch = {}) => ({ jobId: 'job-one', state: 'done', mode: 'img
   prompt: '保留小猫，换成阳光咖啡馆背景', size: '1536x1024', url: '/api/media/result.png',
   error: null, started: 1, width: 1536, height: 1024, ...patch });
 
-async function fixture(t, patch = {}) {
+async function fixture(t, patch = {}, extraProps = {}) {
   const calls = { uploads: [], sizes: [], modes: [], prompts: [], reused: [], savedModels: [], generated: 0, cleared: 0, settings: 0, models: 0, outputs: 0 };
   const studio = {
     mode: 'generate', reference: null, mask: null, referenceBusy: false,
@@ -43,14 +43,14 @@ async function fixture(t, patch = {}) {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const props = { studio, onOpenSettings: () => { calls.settings++; }, onOpenModels: () => { calls.models++; }, onOpenOutputs: () => { calls.outputs++; } };
+  const props = { studio, onOpenSettings: () => { calls.settings++; }, onOpenModels: () => { calls.models++; }, onOpenOutputs: () => { calls.outputs++; }, ...extraProps };
   const render = async (values = {}) => { Object.assign(studio, values); await act(async () => root.render(createElement(Page, props))); };
   t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('Page tests must not call a backend'); });
   await render();
   const button = label => [...container.querySelectorAll('button')].find(item => item.textContent.replace(/[←→↗]/g, '').trim() === label);
   const dispatch = async (element, event) => { assert.ok(element, 'event target exists'); await act(async () => element.dispatchEvent(event)); await render(); };
-  return { container, studio, calls, render, button,
+  return { container, studio, calls, render, button, props,
     click: async element => { assert.ok(element, 'button exists'); await act(async () => element.click()); await render(); },
     dispatch,
     async selectFile(file, selector = '[aria-label="上传参考图"]') {
@@ -100,7 +100,7 @@ test('upload, drop and clipboard image all reach the reference upload controller
   assert.equal(view.calls.uploads.length, 3);
 });
 
-test('editing shows the original immediately and contextual suggestions disappear after choosing a description', async t => {
+test('editing keeps contextual suggestions visible and confirms before replacing the current description', async t => {
   const view = await fixture(t, { mode: 'img2img', reference });
   assert.equal(view.container.querySelector('[aria-label="图片画布"] img').getAttribute('src'), reference.url);
   assert.equal(view.container.querySelector('[aria-label="图片画布"] img').alt, `原图：${reference.name}`);
@@ -109,11 +109,22 @@ test('editing shows the original immediately and contextual suggestions disappea
   assert.equal(view.button('产品摄影'), undefined);
   await view.click(view.button('换背景'));
   assert.match(view.container.querySelector('#image-prompt').value, /保留主体/);
-  assert.equal(view.button('换背景'), undefined, 'suggestions cannot overwrite an existing description');
+  assert.ok(view.button('换背景'), 'suggestions remain visible after entering a description');
+  const previous = view.container.querySelector('#image-prompt').value;
+  await view.click(view.button('调整光线'));
+  assert.equal(view.container.querySelector('#image-prompt').value, previous);
+  const dialogButton = label => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent === label);
+  assert.ok(dialogButton('替换'));
+  await view.click(dialogButton('取消'));
+  assert.equal(view.container.querySelector('#image-prompt').value, previous);
+  await view.click(view.button('调整光线'));
+  await view.click(dialogButton('替换'));
+  assert.match(view.container.querySelector('#image-prompt').value, /傍晚阳光/);
+  const current = view.container.querySelector('#image-prompt').value;
   await view.click(view.button('移除图片'));
   assert.equal(view.calls.cleared, 1);
   assert.equal(view.container.querySelector('[aria-label="图片画布"]'), null);
-  assert.equal(view.container.querySelector('#image-prompt').value, view.calls.prompts[0], 'removing image preserves the description');
+  assert.equal(view.container.querySelector('#image-prompt').value, current, 'removing image preserves the description');
 });
 
 test('results belong to their reference and original/result comparison resets for a newer result', async t => {
@@ -181,12 +192,12 @@ test('busy submission or reference upload locks edits and ignores dropped or pas
     assert.equal(view.container.querySelector('button[type="submit"]').disabled, true);
     assert.equal(view.container.querySelector('[aria-label="上传参考图"]').disabled, true);
     assert.equal(view.container.querySelector('[aria-label="画面比例"]').disabled, true);
-    for (const label of ['提取提示词', '移除图片', '继续修改', '原图', '结果']) assert.equal(view.button(label).disabled, true, label);
+    for (const label of ['提示词反推', '从剪贴板粘贴', '换背景', '移除图片', '继续修改', '原图', '结果']) assert.equal(view.button(label).disabled, true, label);
     assert.equal(view.container.querySelector(`[aria-label="用作参考图：${galleryItem.name}"]`).disabled, true);
     await view.transfer('drop', [file]);
     await view.transfer('paste', [file]);
     await view.click(view.button('继续修改'));
-    await view.click(view.button('提取提示词'));
+    await view.click(view.button('提示词反推'));
   }
   assert.deepEqual(view.calls.uploads, []);
   assert.deepEqual(view.calls.reused, []);
@@ -195,7 +206,7 @@ test('busy submission or reference upload locks edits and ignores dropped or pas
 
 test('prompt extraction preserves the editing draft and opens the image channel for vision settings', async t => {
   const view = await fixture(t, { mode: 'img2img', reference, imgPrompt: '保留已有修改要求' });
-  await view.click(view.button('提取提示词'));
+  await view.click(view.button('提示词反推'));
   assert.equal(view.studio.mode, 'reverse');
   assert.ok(view.container.querySelector('[aria-label="反推参数"]'));
   await view.click(view.button('配置理解模型'));
@@ -233,11 +244,51 @@ test('clipboard button requests media only on click and uploads the actual clipb
   t.after(() => { if (previous) Object.defineProperty(navigator, 'clipboard', previous); else delete navigator.clipboard; });
   const view = await fixture(t);
   assert.equal(reads, 0);
+  assert.equal(view.button('从剪贴板粘贴').closest('details'), null, 'clipboard action is directly visible');
+  assert.equal(view.button('提示词反推').closest('details'), null, 'reverse action is directly visible');
+  assert.equal(view.button('产品摄影').closest('details'), null, 'inspiration is directly visible');
   await view.click(view.button('从剪贴板粘贴'));
   assert.equal(reads, 1);
   assert.equal(view.calls.uploads.length, 1);
   assert.equal(view.calls.uploads[0][0].type, 'image/png');
   assert.equal(await view.calls.uploads[0][0].text(), 'clipboard-bytes');
+});
+
+test('Skill inspiration uses installed prompt skills, preserves suggestions on fetch failure and prepares a draft only', async t => {
+  const opened = [];
+  const view = await fixture(t, { imgPrompt: '银杏树下的咖啡', imgSize: '768x1024' }, {
+    active: false, onPromptSkill: (skill, input) => { opened.push({ skill, input }); return true; },
+  });
+  let reads = 0, fail = false;
+  const catalog = [
+    { name: 'ecom-details-image', description: '商品图片提示词', needsApi: false },
+    { name: 'copywriting', description: '营销文案', needsApi: false },
+    { name: 'custom-image-prompt', displayName: '摄影灵感', source: 'clawhub', description: 'image prompt suggestions' },
+  ];
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.match(String(url), /\/api\/skills$/); reads++;
+    if (fail) throw new Error('temporary outage');
+    return { ok: true, json: async () => catalog };
+  });
+  assert.equal(reads, 0);
+  view.props.active = true;
+  await view.render();
+  assert.equal(reads, 1);
+  const skills = () => view.container.querySelector('[aria-label="Skill 灵感"]');
+  assert.ok(skills()); assert.match(skills().textContent, /电商详情图/);
+  assert.doesNotMatch(skills().textContent, /营销文案|AI 生图/, 'uninstalled and unrelated skills stay absent');
+  const action = () => [...skills().querySelectorAll('button')].find(b => b.textContent.includes('摄影灵感'));
+  await view.click(action());
+  assert.equal(opened[0].skill, 'custom-image-prompt');
+  assert.match(opened[0].input, /银杏树下的咖啡/); assert.match(opened[0].input, /3:4/);
+  assert.match(opened[0].input, /暂不生成图片/);
+  assert.equal(view.studio.imgPrompt, '银杏树下的咖啡'); assert.equal(view.calls.generated, 0);
+  fail = true;
+  await act(async () => window.dispatchEvent(new window.Event('easel:skill-configured')));
+  assert.ok(action(), 'catalogue failure keeps previously loaded suggestions');
+  await view.render({ imgSubmitting: true }); assert.equal(action().disabled, true);
+  view.props.onPromptSkill = () => false; await view.render({ imgSubmitting: false });
+  await view.click(action()); assert.match(view.container.querySelector('[role="alert"]').textContent, /草稿未能保存/);
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });

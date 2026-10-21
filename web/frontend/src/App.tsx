@@ -57,6 +57,7 @@ import {
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { rememberOutputReferences, markOutputSessionDeleted, outputSessionDeleted } from './lib/outputReferences';
+import { displayName } from './lib/skillDisplayNames';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { addChatDraftQuote, clearChatDraft, getChatDraft, setChatDraftText } from './lib/chatDrafts';
@@ -985,6 +986,25 @@ export default function App() {
     return true;
   }, [selectedPersona, setCurrentPage, mergeTarget]);
 
+  const handleImagePromptSkill = useCallback((skill: string, input: string): boolean => {
+    if (!skill.trim() || !input.trim()) return false;
+    const created = createSession(selectedPersona || undefined);
+    created.title = `提示词灵感 · ${displayName(skill)}`;
+    if (!writeSelectedSkills(created.id, [skill])) return false;
+    setChatDraftText(created.id, input);
+    try {
+      if (JSON.parse(localStorage.getItem(`easel:chat-draft:${created.id}`) || 'null')?.text !== input) return false;
+    } catch { return false; }
+    const next = [created, ...sessionsRef.current];
+    if (!saveSessions(next)) return false;
+    sessionsRef.current = next;
+    setSessions(next);
+    setActiveSessionId(created.id);
+    requestCreationPanel('image', created.id);
+    setCurrentPage('chat', true);
+    return true;
+  }, [selectedPersona, setCurrentPage]);
+
   const handleStartBreakdown = useCallback((material: string, modelRef?: string, thinkingLevel?: ThinkingLevel): boolean => {
     if (!material.trim() || gatewayStatus !== 'connected') return false;
     const base = mergeTarget();
@@ -1557,6 +1577,7 @@ export default function App() {
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <ToastHost />
       <CreationWorkspaceHost studio={imageStudio} video={videoStudio} receipts={publishReceipts} sessions={sessions} persona={selectedPersona}
+        onPromptSkill={handleImagePromptSkill}
         onOpenChat={handleSessionSelect} onNewChat={()=>{const session=createSession(selectedPersona || undefined);setSessions(previous=>{const next=[session,...previous];saveSessions(next);return next;});return session.id;}}
         onOpenSettings={()=>{setSettingsSection('image');setCurrentPage('settings');}}
         onOpenVideoSettings={()=>{setSettingsSection('video');setCurrentPage('settings');}}

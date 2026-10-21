@@ -23,6 +23,7 @@ type Props = {
   studio: ImageStudioController; video: VideoStudioController; receipts: PublishReceiptsModel; sessions: ChatSession[]; persona: string;
   onOpenSettings: () => void; onOpenVideoSettings: () => void; onOpenOutputs: () => void;
   onExpand: (kind:'image'|'publish') => void; onOpenChat: (sessionId: string) => void; onNewChat: () => string;
+  onPromptSkill?: (skill: string, input: string) => boolean;
 };
 export default function CreationWorkspaceHost(props: Props) {
   useSyncExternalStore(subscribeCreation, creationRevision);
@@ -100,7 +101,7 @@ function WorkspaceInstance(props: Props & {workspace:CreationWorkspace}) {
     <div className="creation-agent-images">{deliveries.items.filter(item=>item.status==='ready'&&item.mimeType.startsWith('image/')).map(item=><article key={item.id}><a href={artifactUrl(item,'file')} target="_blank" rel="noreferrer"><img src={artifactUrl(item,'file')} alt={item.description || item.name}/></a>{targetId&&<button className="link-btn" onClick={async()=>{try{await returnImageToChat(targetId,mediaUrl(item.path));showToast('图片已加入目标对话','success');}catch(reason){showToast(reason instanceof Error?reason.message:'引用失败','error');}}}>添加到对话</button>}<button className="link-btn" onClick={()=>{try{addImageToPublish(workspace.sessionId,mediaUrl(item.path));onExpand('publish');}catch(reason){showToast(reason instanceof Error?reason.message:'添加失败','error');}}}>用于发布</button></article>)}</div>
     {deliveries.note && <p role="status">{deliveries.note}</p>}
   </section>}{workspace.kind === 'image'
-    ? <ImageStudioPage studio={studio} video={workspace.sessionId ? undefined : props.video} sessionId={targetId} sourceSessionId={workspace.sessionId} onOpenPublish={()=>{selectCreation('publish',workspace.sessionId);onExpand('publish');}} onOpenSettings={props.onOpenSettings} onOpenVideoSettings={props.onOpenVideoSettings} onOpenModels={props.onOpenSettings} onOpenOutputs={props.onOpenOutputs}/>
+    ? <ImageStudioPage active={active} onPromptSkill={props.onPromptSkill} studio={studio} video={workspace.sessionId ? undefined : props.video} sessionId={targetId} sourceSessionId={workspace.sessionId} onOpenPublish={()=>{selectCreation('publish',workspace.sessionId);onExpand('publish');}} onOpenSettings={props.onOpenSettings} onOpenVideoSettings={props.onOpenVideoSettings} onOpenModels={props.onOpenSettings} onOpenOutputs={props.onOpenOutputs}/>
     : <PublishPage workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={props.persona} publishReceipts={props.receipts}/>
   }</div>,container);
 }

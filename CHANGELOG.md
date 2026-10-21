@@ -1,3 +1,9 @@
+## 0.11.1 · 2026-10-21 · Visible image prompt tools / 生图常用入口常显
+
+- Keep clipboard paste, prompt reverse engineering and inspiration examples visible; use shared SVG icons and confirm before replacing an existing prompt. / 剪贴板、提示词反推与灵感示例常显，复用SVG图标，替换已有描述先用应用确认框。
+- Installed image prompt Skills open separate unsent chat drafts with the current description and ratio, linked to the image auxiliary panel. / 已安装的图片提示词技能可携带描述与比例创建独立对话草稿并打开生图辅助面板，不自动发送或生成。
+- Local activation and browser acceptance remain pending; host 138 and installers unchanged. / 本机生效及实机验收仍待完成，138及安装器未变。[设计与验证](docs/image-studio-prompt-tools-2026-10-21.md)。
+
 ## 0.11.0 · 2026-10-21 · Content library organization / 内容库来源与整理
 
 - Return to a delivery-backed source or a clearly labeled legacy reference conversation; preserve unsent drafts and add the file as a deduplicated quote. Handle deletion, archive restoration and read-only backups. / 按真实交付记录返回来源对话，旧文件明确标记引用对话；保留未发送草稿，去重加入文件引用，区分已删除、归档恢复和只读备份。

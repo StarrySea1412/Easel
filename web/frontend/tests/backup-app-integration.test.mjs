@@ -130,6 +130,32 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
+test('image prompt Skill starts a separate unsent conversation with a linked image panel and preserves old drafts', async t => {
+  const oldDraft = JSON.stringify({ version: 1, text: '旧对话不能覆盖', attachmentNames: [] });
+  const v = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: sourceSession.id,
+    'easel:chat-draft:original': oldDraft });
+  await act(async () => v.harness.sidebar.onPageChange('image'));
+  await act(async () => assert.equal(v.harness.creationHost.onPromptSkill('ecom-details-image', '完善咖啡主图提示词，3:4'), true));
+  const created = v.harness.pages['对话'].session;
+  assert.notEqual(created.id, sourceSession.id);
+  assert.match(created.title, /提示词灵感/); assert.equal(created.messages.length, 0);
+  assert.deepEqual(JSON.parse(v.values.get(`easel:selected-skills:${created.id}`)), ['ecom-details-image']);
+  assert.equal(JSON.parse(v.values.get(`easel:chat-draft:${created.id}`)).text, '完善咖啡主图提示词，3:4');
+  assert.equal(v.values.get('easel:chat-draft:original'), oldDraft);
+  assert.equal(JSON.parse(v.values.get('easel:creation-panel-request')).sessionId, created.id);
+  assert.equal(v.harness.streams.length, 0);
+});
+
+test('image prompt Skill does not navigate or send if its conversation cannot be saved', async t => {
+  const v = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: sourceSession.id });
+  await act(async () => v.harness.sidebar.onPageChange('image'));
+  v.storage.quota = true;
+  await act(async () => assert.equal(v.harness.creationHost.onPromptSkill('ai-image-gen', '仅策划提示词'), false));
+  assert.equal(v.harness.sidebar.currentPage, 'image');
+  assert.deepEqual(JSON.parse(v.values.get('easel_sessions')), [sourceSession]);
+  assert.equal(v.harness.streams.length, 0);
+});
+
 test('content library returns to the exact chat with a deduplicated file quote and preserves the unsent draft', async t => {
   const target={...sourceSession,id:'library-origin',messages:[{role:'assistant',content:'[成果](outputs/project/file.md)'}]};
   const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,target]),easel_active_session:sourceSession.id,
