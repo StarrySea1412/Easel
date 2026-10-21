@@ -163,6 +163,7 @@ export default function App() {
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState('');
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsWithBreakdown());
+  const [sessionsLoading, setSessionsLoading] = useState(() => loadSessions().length === 0);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [gatewayRecoveryNote, setGatewayRecoveryNote] = useState('');
@@ -322,7 +323,7 @@ export default function App() {
       const [state,remote]=await Promise.all([taskRequest<TaskSnapshot>('',undefined,'GET',controller.signal),taskRequest<{sessions:ChatSession[]}>('/sessions',undefined,'GET',controller.signal)]);
       if(controller.signal.aborted)return;
       setTasks(state);setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);if(next!==old)saveSessions(next);return next;});
-    }catch{/* Keep the last confirmed snapshot; never infer completion from a failed read. */}finally{if(!controller.signal.aborted)timer=setTimeout(()=>void poll(),3000);}}
+    }catch{/* Keep the last confirmed snapshot; never infer completion from a failed read. */}finally{if(!controller.signal.aborted){setSessionsLoading(false);timer=setTimeout(()=>void poll(),3000);}}}
     void poll();return()=>{controller.abort();clearTimeout(timer);};
   },[taskRevision]);
 
@@ -1548,6 +1549,7 @@ export default function App() {
         runningSessions={Object.keys(streams)}
         stoppingSessions={Object.keys(stoppingSessions).filter(id => stoppingSessions[id])}
         taskState={tasks}
+        sessionsLoading={sessionsLoading}
         activeSessionId={activeSessionId}
         activeSessionHasMessages={activeSession ? activeSession.messages.length > 0 : false}
         onSessionSelect={handleSessionSelect}

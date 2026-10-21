@@ -51,6 +51,37 @@ async function fixture(t, props = {}, preferences = {}) {
   };
 }
 
+test('recent conversations show shaped skeleton rows during the first remote read', async t => {
+  const view = await fixture(t, { sessions: [], activeSessionId: null, sessionsLoading: true });
+  await view.clickLabel('对话');
+  const skeleton = view.container.querySelector('[aria-label="正在读取最近对话"]');
+  assert.ok(skeleton);
+  assert.equal(skeleton.getAttribute('aria-busy'), 'true');
+  assert.equal(skeleton.querySelectorAll('.sidebar-session-skeleton-row').length, 5);
+  assert.equal(view.container.querySelector('.sidebar-empty'), null);
+  assert.equal(view.byLabel('最近对话').querySelector('.sidebar-session-count'), null);
+  await view.update({ sessions: [session('loaded', '已读取的对话')], activeSessionId: 'loaded', sessionsLoading: false });
+  assert.equal(view.container.querySelector('[aria-label="正在读取最近对话"]'), null);
+  assert.match(view.container.textContent, /已读取的对话/);
+});
+
+test('a background session refresh keeps existing rows instead of replacing them with skeletons', async t => {
+  const view = await fixture(t, { sessions: [session('existing', '已有对话')], activeSessionId: 'existing', sessionsLoading: true });
+  await view.clickLabel('对话');
+  assert.equal(view.container.querySelector('[aria-label="正在读取最近对话"]'), null);
+  assert.match(view.container.textContent, /已有对话/);
+});
+
+test('an initial empty chat stays behind the skeleton and an empty response ends loading', async t => {
+  const view = await fixture(t, { sessions: [session('blank', 'New Chat', {messages:[]})], activeSessionId:'blank', sessionsLoading:true });
+  await view.clickLabel('对话');
+  assert.ok(view.byLabel('正在读取最近对话'));
+  assert.equal(view.container.querySelector('.session-select'), null);
+  await view.update({sessions:[], activeSessionId:null, sessionsLoading:false});
+  assert.equal(view.byLabel('正在读取最近对话'), null);
+  assert.match(view.container.querySelector('.sidebar-empty').textContent, /还没有最近对话/);
+});
+
 test('new installations start with both columns collapsed and reveal real conversations on request', async t => {
   const view = await fixture(t);
   assert.equal(view.shell().classList.contains('is-expanded'), false);

@@ -74,6 +74,11 @@
 .session-menu-divider{height:1px;margin:4px 5px;background:var(--border)}
 @media(hover:none),(max-width:760px){.session-menu-trigger{opacity:1}.session-menu button{min-height:40px}}
 .sidebar-shell .sidebar-empty{display:block;font-size:11px;line-height:1.8;padding:10px 8px;color:var(--text-tertiary)}
+.sidebar-session-skeleton{display:flex;flex-direction:column;gap:4px;padding:2px 8px 8px}
+.sidebar-session-skeleton-row{display:flex;align-items:center;gap:8px;min-height:34px;padding:5px 8px;border-radius:var(--radius-sm)}
+.sidebar-session-skeleton-row .sk:first-child{flex:none}
+.sidebar-session-skeleton-row .sk:last-child{display:block;flex:none;max-width:calc(100% - 16px)}
+@media(prefers-reduced-motion:reduce){.sidebar-session-skeleton .sk::after{animation:none}}
 .sidebar-shell .sidebar-status{display:flex;align-items:center;flex:none;gap:7px;margin:0;padding:13px 16px;border-top:1px solid var(--border);font-size:10px;color:var(--text-secondary)}
 .sidebar-shell .status-dot{width:6px;height:6px;box-shadow:none}
 .sidebar-shell button:focus-visible,.sidebar-shell select:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}

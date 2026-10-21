@@ -16,6 +16,7 @@ import SidebarMoreMenu from './SidebarMoreMenu';
 import AppVersion from './AppVersion';
 import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
+import { Sk } from './Skeleton';
 import {sessionStatuses} from '../lib/sessionStatus';
 import type {SessionStatusKind} from '../lib/sessionStatus';
 import {readSeenStatuses, subscribeSeenStatuses} from '../lib/seenStatus';
@@ -48,6 +49,8 @@ interface SidebarProps {
   runningSessions?: string[];
   stoppingSessions?: string[];
   taskState?: TaskSnapshot;
+  /** First remote session snapshot is still being read; local rows remain visible when present. */
+  sessionsLoading?: boolean;
 }
 
 export default function Sidebar({
@@ -74,6 +77,7 @@ export default function Sidebar({
   runningSessions = [],
   stoppingSessions = [],
   taskState,
+  sessionsLoading = false,
 }: SidebarProps) {
   // 辅助对话（子会话）只在侧边面板里出现，不进主列表。
   const listedSessions = sessions.filter((s) => !s.parentSessionId);
@@ -239,6 +243,7 @@ export default function Sidebar({
   const pinned = active.filter(s => s.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!);
   const recent = active.filter(s => !s.pinnedAt);
   const archived = listedSessions.filter((s) => s.archived);
+  const showSessionSkeleton = sessionsLoading && !pinned.length && recent.every(s => s.id === activeSessionId && s.messages.length === 0);
 
   const renameForm = (s:ChatSession,floating=false) => (
         <div key={s.id} className={`session-rename-form ${floating?'session-hover-editor':'session-item'}`}>
@@ -345,9 +350,11 @@ export default function Sidebar({
           </header>
           <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section">
             {pinned.length > 0 && <section className="sidebar-pinned" aria-label="置顶对话"><div className="sidebar-section-header"><span className="sidebar-section-title">置顶</span><span className="sidebar-session-count">{pinned.length}</span></div>{pinned.map(s=>renderItem(s,false))}</section>}
-            <section className="sidebar-recent" aria-label="最近对话"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span><span className="sidebar-session-count">{recent.length}</span></div>
-            {recent.map(s=>renderItem(s,false))}
-            {!active.length&&<p className="sidebar-empty">还没有最近对话。<br/>新建对话，开始今天的创作。</p>}
+            <section className="sidebar-recent" aria-label="最近对话"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span>{!showSessionSkeleton && <span className="sidebar-session-count">{recent.length}</span>}</div>
+            {showSessionSkeleton ? <div className="sidebar-session-skeleton" role="status" aria-label="正在读取最近对话" aria-busy="true">
+              {Array.from({length: 5}, (_, index) => <div className="sidebar-session-skeleton-row" key={index} aria-hidden="true"><Sk w={7} h={7} r="50%" /><Sk w={index === 4 ? '54%' : index === 1 ? '78%' : '66%'} h={11} /></div>)}
+            </div> : <>{recent.map(s=>renderItem(s,false))}
+            {!active.length&&<p className="sidebar-empty">还没有最近对话。<br/>新建对话，开始今天的创作。</p>}</>}
             </section>
             {archived.length>0&&<><button className="archived-header" aria-expanded={showArchived} onClick={()=>setShowArchived(value=>!value)}><span className={`archived-chevron ${showArchived?'open':''}`}><IconChevron size={12}/></span>已归档 · {archived.length}</button>{showArchived&&archived.map(s=>renderItem(s,true))}</>}
           </div></div>

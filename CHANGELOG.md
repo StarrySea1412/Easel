@@ -1,3 +1,8 @@
+## 0.10.3 · 2026-10-21 · Recent conversation loading / 最近对话加载
+
+- Show five shared skeleton rows while the first remote conversation list is loading; preserve cached rows during background refresh and respect reduced motion. / 首次读取最近对话显示五行共享骨架，后台刷新保留原列表，减少动态效果时关闭微光。[验证与交付范围](docs/recent-conversations-skeleton-2026-10-21.md)。
+- Local/source only; host 138 and installers unchanged. / 仅本机及源码，138与安装器未更新。
+
 ## 0.10.2 · 2026-10-21 · Analysis switching and growth / 分析切换与账号增长
 
 - Analysis tabs gain icons, active states, headings and keyboard navigation while retaining workspaces. / 分析视图增加图标、选中态、标题与键盘切换，保留工作区。

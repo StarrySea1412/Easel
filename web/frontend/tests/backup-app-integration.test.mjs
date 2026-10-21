@@ -130,6 +130,26 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
+test('App keeps the initial conversation skeleton until the remote session list settles', async t => {
+  let finish;
+  const remote = new Promise(resolve => { finish = resolve; });
+  t.mock.method(globalThis, 'fetch', async request => ({ok:true,json:async()=>{
+    const path=String(request);
+    if(path.endsWith('/api/tasks/sessions')) return remote;
+    if(path.endsWith('/api/tasks')) return {goals:[],plans:[],runs:[],serverTime:1};
+    return [];
+  }}));
+  const {harness,container}=await fixture(t,{},true);
+  const chat=container.querySelector('[aria-label="对话"]');
+  await act(async()=>chat.click());
+  assert.equal(harness.sidebar.sessionsLoading,true);
+  assert.ok(container.querySelector('[aria-label="正在读取最近对话"]'));
+  await act(async()=>finish({sessions:[sourceSession]}));
+  assert.equal(harness.sidebar.sessionsLoading,false);
+  assert.equal(container.querySelector('[aria-label="正在读取最近对话"]'),null);
+  assert.match(container.textContent,/保留当前工作/);
+});
+
 for (const resume of [false, true]) {
   for (const outcome of ['done', 'missing', 'wrong-turn', 'offline']) {
     test(`missing job recovery (${resume ? 'restored' : 'fresh'}, ${outcome}) preserves identity, content and queue safety`, async t => {
