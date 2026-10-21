@@ -51,7 +51,7 @@
 .chat-page .model-thinking-text { line-height:1.85; }
 .chat-page .chat-skill-evidence { max-width:none; padding:10px 0 14px; border:0; border-top:1px solid var(--border); border-radius:0; background:transparent; }
 .chat-page .chat-skill-row { border-top:0; padding-top:0; }
-.chat-page .chat-return-latest { position:absolute; bottom:calc(100% + 3px); left:50%; transform:translateX(-50%); margin:0; white-space:nowrap; }
+.chat-page .chat-return-latest { position:absolute; z-index:11; bottom:12px; left:50%; transform:translateX(-50%); margin:0; white-space:nowrap; }
 @media(max-width:640px) {
  .work-progress { max-width:none; padding:11px 12px 9px; }
  .work-progress-heading { gap:10px; }

@@ -314,10 +314,11 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   };
   const isImported = session.importedFromBackup === true;
   const isStreaming = !isImported && !!stream;
+  const runInProgress = isStreaming || (!isImported && Boolean(session.pendingTurnId));
   const skillAudits=useChatSkillAudits(session.id,isStreaming,session.messages.length,isImported || session.engine === 'codex');
   // Keep the setup mounted when polling adds the goal-created message, so a failed
   // start can retry its saved ID rather than creating the goal a second time.
-  const isEmpty = goalEditor?.welcome ?? (session.messages.length === 0 && !isStreaming && !deliveries.items.length && !deliveries.jobs.length && !deliveries.messages.length);
+  const isEmpty = goalEditor?.welcome ?? (session.messages.length === 0 && !runInProgress && !deliveries.items.length && !deliveries.jobs.length && !deliveries.messages.length);
   const header = <header className="chat-header">
     <div className="chat-header-context"><span>{session.conversationType==='account-analysis'?'账号分析':session.conversationType==='content-analysis'?'作品分析':'对话'}</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty&&!session.analysisContext ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
@@ -462,9 +463,11 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
           )}
           <div ref={messagesEndRef} />
         </div>
-      </div>{nodes.length>3&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
+      </div>{nodes.length>3&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}
+        {(runInProgress || !following) && <button type="button" className={`chat-return-latest${runInProgress ? ' is-running' : ''}`} aria-label={runInProgress?'返回最新进度':'回到最新一轮'} title={runInProgress?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{runInProgress && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
+      </div>
 
-      {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className={`chat-return-latest${isStreaming ? ' is-running' : ''}`} aria-label={isStreaming?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{isStreaming && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
+      {!isImported && <div className="chat-input-area">
         {!isImported && <div className="chat-input-inner">
           {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
             <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>

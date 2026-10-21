@@ -1,3 +1,8 @@
+## 0.9.2 · 2026-10-21 · Chat progress and latest message / 对话加载与返回底部
+
+- Restore the circular three-dot progress control during execution and pending reconnects; hover or focus reveals the jump-to-latest arrow. / 执行中及等待重连时保留圆形三点加载提示，悬停或聚焦可直接返回最新消息。
+- Place the control inside the conversation viewport, outside the scrollable input that previously clipped it. / 按钮放回对话视口，避免被输入区滚动裁切；完成后上翻仍可一键回到底部。
+
 ## 0.9.1 · 2026-10-21 · Channel model menu / 渠道模型菜单
 
 - Show only the current/default channel and its models; switch enabled channels in the Manage Models submenu with hover, click or keyboard. / 只列当前/默认渠道模型；管理模型子菜单可悬停、点击或键盘切换启用渠道。

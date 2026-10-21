@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import { act, createElement } from 'react';
 import { tsModuleUrl } from './load-ts.mjs';
@@ -257,6 +258,31 @@ test('return to latest shows loading only while a run exists, then changes to an
  await v.render('latest',patch);
  latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),false);assert.equal(latest.querySelector('.chat-latest-dots'),null);assert.ok(latest.querySelector('.chat-latest-arrow'));
  await v.click(latest);assert.equal(v.container.querySelector('.chat-return-latest'),null);
+});
+
+test('running conversations retain the latest loading control at the bottom and outside the clipped input',async t=>{
+ const v=await fixture(t);const patch={messages:[{role:'user',content:'正在执行'}],pendingTurnId:'pending-latest'};
+ await v.render('running-latest',patch,{stream:{content:'逐步回复',thinking:'',activity:[]}});
+ let latest=v.container.querySelector('.chat-return-latest');
+ assert.ok(latest);assert.ok(latest.querySelector('.chat-latest-dots'));
+ assert.equal(latest.parentElement.className,'chat-conversation-body');
+ assert.equal(v.container.querySelector('.chat-input-area .chat-return-latest'),null);
+ await v.click(latest);assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'));
+ await v.render('running-latest',patch);
+ assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'),'pending reconnect must retain loading');
+ await v.render('other');assert.equal(v.container.querySelector('.chat-return-latest'),null);
+ await v.render('running-latest',patch);assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'));
+ await v.render('running-latest',{messages:[...patch.messages,{role:'assistant',content:'已完成'}]});
+ assert.equal(v.container.querySelector('.chat-return-latest'),null);
+});
+
+test('latest control stays in the scroll viewport with circular loading on touch screens',async()=>{
+ const css=await readFile(new URL('../src/styles/chat-workspace.css',import.meta.url),'utf8');
+ const navigation=await readFile(new URL('../src/styles/chat-navigation.css',import.meta.url),'utf8');
+ assert.match(css,/\.chat-page \.chat-return-latest\s*\{[^}]*bottom:12px/);
+ assert.doesNotMatch(css,/\.chat-page \.chat-return-latest\s*\{[^}]*bottom:calc\(100%/);
+ assert.match(navigation,/\.chat-return-latest\s*\{[^}]*border-radius:50%/);
+ assert.doesNotMatch(navigation,/@media\(hover:none\)\s*\{\s*\.chat-latest-dots\s*\{\s*display:none/);
 });
 
 
