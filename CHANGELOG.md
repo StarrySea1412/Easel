@@ -1,3 +1,9 @@
+## 0.9.1 · 2026-10-21 · Channel model menu / 渠道模型菜单
+
+- Show only the current/default channel and its models; switch enabled channels in the Manage Models submenu with hover, click or keyboard. / 只列当前/默认渠道模型；管理模型子菜单可悬停、点击或键盘切换启用渠道。
+- Remove per-message scope annotations and repeated option descriptions. Saving selections never calls a model; sending still validates the exact route. / 去掉“仅用于本轮”等重复注释；保存选择不调用模型，发送仍校验指定路由。
+- Local preview and isolated source branch only; host 138, main and installers unchanged. / 仅本机及隔离分支，138、main和安装器未改。
+
 ## 0.9.0 · 2026-10-21 · Account analysis workflow / 账号分析工作流
 
 - Keep successful account snapshots and in-flight collection across page navigation; isolate identities and preserve prior results during refresh. / 同账号快照与采集跨页保留，刷新时旧数据叠加加载图标。

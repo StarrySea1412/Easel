@@ -19,7 +19,7 @@ async function fixture(t, saved) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); }, removeItem: key => values.delete(key) } });
   const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success', reason: '' };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options, ...(h.reason ? { reason: h.reason } : {}) }
+    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', defaultModelRef: REF, options: h.options, ...(h.reason ? { reason: h.reason } : {}) }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
         : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
         : url === '/api/upload/limits' ? { max_mb: 50 } : [];
@@ -31,7 +31,7 @@ async function fixture(t, saved) {
   let mounted = true;
   const unmount = async () => { if (mounted) { mounted = false; await act(async () => root.unmount()); container.remove(); } };
   t.after(unmount);
-  return { h, container, calls, writes, values, sent, render, unmount, trigger: () => container.querySelector('[aria-label="本轮使用模型"]'),
+  return { h, container, calls, writes, values, sent, render, unmount, trigger: () => container.querySelector('[aria-label="选择模型"]'),
     async reload() { await act(async () => root.render(null)); await render(); },
     async navigate() { sessionId += '-new'; await render(); },
     async key(key) { const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); await act(async () => this.trigger().dispatchEvent(event)); return event; },
@@ -41,21 +41,21 @@ async function fixture(t, saved) {
 }
 
 test('configured complete models are keyboard selectable, stored explicitly and sent as sixth argument', async t => {
-  const view = await fixture(t); await view.render(); assert.deepEqual(view.writes.filter(([key]) => key === KEY), []);
+  const view = await fixture(t, REF); await view.render(); assert.deepEqual(view.writes.filter(([key]) => key === KEY), []);
   view.trigger().focus(); await view.key('ArrowDown');
-  assert.equal(document.querySelectorAll('.easel-select-option').length, 2, 'default and configured only');
-  await view.key('ArrowDown'); await view.key('Enter');
+  assert.equal(document.querySelectorAll('.easel-select-options [role=option]').length, 1, 'only current channel model');
+  await view.key('Enter');
   assert.equal(view.values.get(KEY), REF); assert.match(view.container.textContent, /渠道已连通/);
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
   assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
 });
 
-test('removed saved model preserves draft until user explicitly restores session configuration', async t => {
+test('removed saved model preserves draft until user chooses an available model', async t => {
   const view = await fixture(t, 'old/missing'); await view.render(); await view.type('不应被自动换模型'); await view.send();
   assert.deepEqual(view.sent, []); assert.match(view.container.querySelector('[role=alert]').textContent, /草稿已保留/); assert.equal(view.values.get(KEY), 'old/missing');
   await view.key('Home'); await view.key('Enter'); await view.send();
-  assert.equal(view.sent[0].length, 5); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), '');
+  assert.equal(view.sent[0][5], REF); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), REF);
 });
 
 test('streaming allows next-message model selection; stopping locks selector without changing preference', async t => {
@@ -109,33 +109,50 @@ test('status belongs to the model selector and its settings action targets that 
   assert.match(document.getElementById(view.trigger().getAttribute('aria-describedby')).textContent, /happy · 渠道已连通/);
   await act(async () => view.trigger().click());
   assert.doesNotMatch(document.querySelector('.easel-select-popup').textContent, /渠道状态与详情/);
-  await act(async () => [...document.querySelectorAll('.easel-select-option')].find(item => item.textContent.includes('模型设置')).click());
+  await act(async () => document.querySelector('.easel-select-footer [role=option]').click());
+  await act(async () => [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent.includes('模型设置')).click());
   assert.deepEqual(opened, [REF]);
   assert.equal(document.querySelector('[aria-label="渠道状态详情"]'), null);
   assert.ok(view.calls.every(([, init]) => !init?.body));
 });
 
-test('model menu renames the default to 自动沿用 and pins 模型设置 as a fixed footer outside the scrolling list', async t => {
-  const view = await fixture(t, REF), opened = [];
-  await view.render({ onOpenModels: ref => opened.push(ref) });
-  await act(async () => view.trigger().click());
-  const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
-  const scroller = popup.querySelector('.easel-select-options');
-  const footerWrap = popup.querySelector('.easel-select-footer');
-  assert.ok(scroller && footerWrap, 'candidates scroll inside .easel-select-options while .easel-select-footer stays pinned');
-  assert.deepEqual([...scroller.querySelectorAll('.easel-select-option-label')].map(el => el.textContent), ['自动沿用', 'vendor/model:v2']);
-  assert.equal(scroller.firstElementChild.querySelector('.easel-select-option-description'), null, '自动沿用 carries no hint line');
-  assert.equal(scroller.textContent.includes('未单独指定时使用设置中的默认模型'), false);
-  assert.equal(scroller.textContent.includes('模型设置'), false, 'the manage entry is not part of the scrolling list');
-  const footerItem = footerWrap.querySelector('[role=option]');
-  assert.match(footerItem.textContent, /模型设置/);
-  await view.key('End');
-  assert.equal(view.trigger().getAttribute('aria-activedescendant'), footerItem.id, 'End reaches the pinned footer');
-  assert.equal(footerItem.classList.contains('is-active'), true);
-  await view.key('Enter');
-  assert.deepEqual(opened, [REF]);
-  assert.equal(document.querySelector('.easel-select-popup'), null);
-  assert.ok(view.calls.every(([, init]) => !init?.body));
+test('model menu shows current channel only and opens enabled channels from the management footer', async t => {
+  const view=await fixture(t, REF),opened=[];
+  view.h.options=[option,{...option,id:'other/vendor/model:v2',provider:'other',channelName:'另一渠道'},{...option,id:'relay/second',model:'second'},{...option,id:'disabled/model',provider:'disabled',channelName:'关闭渠道',enabled:false}];
+  await view.render({onOpenModels:ref=>opened.push(ref)});
+  await act(async()=>view.trigger().click());
+  const popup=document.querySelector('.easel-select-popup');
+  assert.deepEqual([...popup.querySelectorAll('.easel-select-options .easel-select-option-label')].map(e=>e.textContent),['vendor/model:v2','second']);
+  assert.equal(popup.querySelectorAll('.easel-select-group-label').length,1);
+  assert.doesNotMatch(popup.textContent,/仅用于本轮|自动沿用|渠道 .* ·/);
+  const footer=popup.querySelector('.easel-select-footer [role=option]');
+  assert.equal(footer.textContent,'管理模型›');
+  await act(async()=>footer.dispatchEvent(new window.Event('pointermove',{bubbles:true})));
+  assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(e=>e.textContent),['happy✓','另一渠道','模型设置']);
+  await act(async()=>[...document.querySelectorAll('[role=menuitem]')].find(e=>e.textContent==='另一渠道').click());
+  assert.equal(view.values.get(KEY),'other/vendor/model:v2');
+  assert.equal(document.querySelector('[role=menu]'),null);
+  assert.equal(document.querySelectorAll('.easel-select-group-label').length,1);
+  assert.equal(document.querySelector('.easel-select-group-label').textContent,'另一渠道');
+  assert.deepEqual([...document.querySelectorAll('.easel-select-options .easel-select-option-label')].map(e=>e.textContent),['vendor/model:v2']);
+  await view.key('End'); await view.key('ArrowRight'); await view.key('End'); await view.key('Enter');
+  assert.deepEqual(opened,['other/vendor/model:v2']);
+  assert.equal(document.querySelector('.easel-select-popup'),null);
+  assert.ok(view.calls.every(([,init])=>!init?.body));
+});
+
+test('default channel models are shown without saving a forced override, and channel selection works by keyboard', async t => {
+  const view=await fixture(t);
+  view.h.options=[{...option,id:'other/model',provider:'other',model:'model',channelName:'另一渠道'},option];
+  await view.render();
+  assert.match(view.trigger().textContent,/happy/);
+  assert.equal(view.values.has(KEY),false);
+  await view.key('ArrowDown');
+  assert.equal(document.querySelector('.easel-select-group-label').textContent,'happy');
+  await view.key('End'); await view.key('ArrowRight'); await view.key('Home'); await view.key('Enter');
+  assert.equal(view.values.get(KEY),'other/model');
+  await view.key('Escape');
+  assert.equal(document.querySelector('.easel-select-popup'),null);
 });
 
 test('a passed channel test stays green and the menu names the real blocker instead of asking to check the connection', async t => {
@@ -149,8 +166,21 @@ test('a passed channel test stays green and the menu names the real blocker inst
   await act(async () => view.trigger().click());
   const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
   assert.doesNotMatch(popup.textContent, /请在模型设置中检查连接/);
-  assert.match(popup.textContent, /改用「自动沿用」仍可发送/);
+  assert.doesNotMatch(popup.textContent, /自动沿用|仅用于本轮|推理未测/);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance never probes a model');
+});
+
+test('unavailable runtime permits saving a channel choice but never silently sends with another model', async t => {
+  const view=await fixture(t, REF);
+  view.h.capability=false;
+  view.h.options=[option,{...option,id:'other/model',provider:'other',model:'model',channelName:'另一渠道'}];
+  await view.render();
+  await view.key('End'); await view.key('ArrowRight'); await view.key('ArrowDown'); await view.key('Enter');
+  assert.equal(view.values.get(KEY),'other/model');
+  await view.key('Escape'); await view.type('保留指定渠道'); await view.send();
+  assert.deepEqual(view.sent,[]);
+  assert.match(view.container.querySelector('[role=alert]').textContent,/草稿已保留/);
+  assert.ok(view.calls.every(([,init])=>!init?.body));
 });
 
 test('running composer keeps stop beside queue-send when a draft is present', async t => {

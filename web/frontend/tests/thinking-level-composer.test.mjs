@@ -92,7 +92,7 @@ test('embedded goal keeps the ordinary composer tools and toggles back to the sa
   assert.ok(view.container.querySelector('.chat-composer'));
   assert.ok(view.container.querySelector('[aria-label="对话引擎"]'));
   assert.ok(view.container.querySelector('[aria-label="添加素材或技能"]'));
-  assert.ok(view.container.querySelector('[aria-label="本轮使用模型"], [aria-label="模型设置"]'));
+  assert.ok(view.container.querySelector('[aria-label="选择模型"], [aria-label="模型设置"]'));
   assert.ok(view.container.querySelector('[aria-label="要持续追求的目标"]'));
   assert.equal(view.container.querySelector('textarea'),originalInput);
   assert.equal(view.container.querySelector('.chat-composer'),originalComposer);
@@ -361,7 +361,7 @@ test('default auto sends high for the current model, survives refresh, and manua
   await view.click(view.trigger()); await view.choose('auto'); await view.reload();
   assert.equal(view.trigger().getAttribute('aria-label'), '思考强度：高');
   assert.equal(view.storage.values.get(KEY), 'auto');
-  await view.click(view.container.querySelector('[aria-label="本轮使用模型"]'));
+  await view.click(view.container.querySelector('[aria-label="选择模型"]'));
   await view.click([...document.querySelectorAll('[role="option"]')].find(element => element.textContent.includes('stronger')));
   await view.type('切换后最高档'); await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.equal(view.sent[2][4], 'xhigh');

@@ -58,7 +58,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
   const ready = modelRef ? (!loading && capability?.available === true && Boolean(selected)) : !automaticDisabled;
   const choose = (value: string) => {
-    if (value && (!capability?.available || !options.some(option => option.id === value && option.enabled !== false))) return;
+    if (value && !options.some(option => option.id === value && option.enabled !== false)) return;
     setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
   };
   return { modelRef, options, selected, ready, loading, capability, health, connection: connection?.modelRef === effectiveRef ? connection : null, error, notice, choose, refresh: () => setRevision(value => value + 1),

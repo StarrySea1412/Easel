@@ -278,7 +278,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
-      if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。改用「自动沿用」可继续发送。'); return; }
+      if (!model) { setChatDraftError(sessionId, '所选模型暂不可用，草稿已保留。请检查模型连接后重试。'); return; }
       const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
         : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
       if (accepted === true) clearChatDraft(sessionId, submitted);
@@ -380,7 +380,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
           {onGoal && (goalEditor || Boolean(goalStatus)) && <button type="button" className={`composer-goal-btn${goalEditor?' is-active':''}`} aria-pressed={Boolean(goalEditor)} aria-label={goalEditor?'退出目标设置':'设置或查看目标'} title={goalEditor?'退出目标模式（Esc）':'设置或查看当前对话目标'} disabled={Boolean(goalEditor&&goalState.busy)||editingQueue} onClick={()=>goalEditor?closeGoal():openGoal()}><IconTarget size={16}/><span>目标</span>{goalEditor&&<span aria-hidden="true" className="composer-goal-exit">×</span>}</button>}
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
-          {goalEditor&&goalState.modelLocked?<Select className="composer-goal-locked-model" aria-label="目标执行模型" value={goalState.executionModel} disabled onChange={()=>{}} options={[{value:goalState.executionModel,label:goalState.executionModel}]}/>:engine === 'codex' ? <Select aria-label="本轮使用模型" value={models.modelRef} disabled={stopping || models.loading}
+          {goalEditor&&goalState.modelLocked?<Select className="composer-goal-locked-model" aria-label="目标执行模型" value={goalState.executionModel} disabled onChange={()=>{}} options={[{value:goalState.executionModel,label:goalState.executionModel}]}/>:engine === 'codex' ? <Select aria-label="选择模型" value={models.modelRef} disabled={stopping || models.loading}
             options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
             : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}
           <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}

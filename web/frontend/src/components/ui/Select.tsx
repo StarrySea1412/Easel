@@ -21,6 +21,7 @@ export interface SelectFooterOption {
   icon?: ReactNode;
   disabled?: boolean;
   onActivate: () => void;
+  items?: { key: string; label: string; selected?: boolean; disabled?: boolean; onActivate: () => void; closeOnActivate?: boolean }[];
 }
 
 export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-labelledby' | 'aria-describedby' | 'aria-invalid'> {
@@ -47,10 +48,14 @@ export default function Select({ id, name, value, options, onChange, placeholder
   const popupRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const footerWrapRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const searchRef = useRef({ text: '', time: 0 });
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [submenuOpen, setSubmenuOpen] = useState(false);
+  const [submenuIndex, setSubmenuIndex] = useState(0);
+  const [submenuPosition, setSubmenuPosition] = useState({ top: 0, left: 0, width: 220, maxHeight: 320 });
   const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 320 });
   // 键盘导航把固定底栏当作列表末尾的虚拟条目（与旧“模型设置在列表内”的手感一致）。
   const entries: (SelectOption & { onActivate?: () => void })[] = footer
@@ -67,11 +72,13 @@ export default function Select({ id, name, value, options, onChange, placeholder
     setActiveIndex(selected && !selected.disabled ? selectedIndex : (direction === 1 ? enabled[0] : enabled.at(-1)) ?? -1);
     searchRef.current = { text: '', time: 0 };
     setOpen(true);
+    setSubmenuOpen(false);
   }
 
   function choose(index: number) {
     const option = entries[index];
     if (!option || option.disabled) return;
+    if (index === footerIndex && footer?.items?.length) { setSubmenuOpen(true); setSubmenuIndex(0); return; }
     setOpen(false);
     triggerRef.current?.focus({ preventScroll: true });
     if (option.onActivate) { option.onActivate(); return; }
@@ -87,6 +94,18 @@ export default function Select({ id, name, value, options, onChange, placeholder
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (disabled) return;
+    if (expanded && submenuOpen && footer?.items?.length) {
+      if (event.key === 'ArrowLeft' || event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSubmenuOpen(false); return; }
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        const enabled = footer.items.map((item, index) => item.disabled ? -1 : index).filter(index => index >= 0);
+        const at = enabled.indexOf(submenuIndex);
+        setSubmenuIndex((event.key === 'Home' ? enabled[0] : event.key === 'End' ? enabled.at(-1) : enabled[(at + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length]) ?? 0);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateSubmenu(submenuIndex); return; }
+    }
+    if (expanded && event.key === 'ArrowRight' && activeIndex === footerIndex && footer?.items?.length) { event.preventDefault(); setSubmenuOpen(true); setSubmenuIndex(0); return; }
     if (event.key === 'Tab') { setOpen(false); return; }
     if (event.key === 'Escape') {
       if (expanded) { event.preventDefault(); event.stopPropagation(); setOpen(false); }
@@ -128,6 +147,35 @@ export default function Select({ id, name, value, options, onChange, placeholder
       }
     }
   }
+
+  function activateSubmenu(index: number) {
+    const item = footer?.items?.[index];
+    if (!item || item.disabled) return;
+    item.onActivate();
+    setSubmenuOpen(false);
+    setActiveIndex(-1);
+    if (item.closeOnActivate) setOpen(false);
+    triggerRef.current?.focus({ preventScroll: true });
+  }
+
+  useLayoutEffect(() => {
+    if (!expanded || !submenuOpen) return;
+    function positionSubmenu() {
+      const popup = popupRef.current?.getBoundingClientRect();
+      const footerRect = footerWrapRef.current?.getBoundingClientRect();
+      if (!popup || !footerRect) return;
+      const width = Math.min(220, window.innerWidth - 16);
+      const right = popup.right + 4;
+      const left = right + width <= window.innerWidth - 8 ? right : popup.left - width - 4 >= 8 ? popup.left - width - 4 : Math.max(8, Math.min(popup.left, window.innerWidth - width - 8));
+      const maxHeight = Math.max(80, Math.min(320, window.innerHeight - 16));
+      const height = Math.min(submenuRef.current?.scrollHeight || maxHeight, maxHeight);
+      setSubmenuPosition({ width, left, top: Math.max(8, Math.min(footerRect.top, window.innerHeight - height - 8)), maxHeight });
+    }
+    positionSubmenu();
+    window.addEventListener('resize', positionSubmenu);
+    window.addEventListener('scroll', positionSubmenu, true);
+    return () => { window.removeEventListener('resize', positionSubmenu); window.removeEventListener('scroll', positionSubmenu, true); };
+  }, [expanded, submenuOpen, footer?.items?.length]);
 
   useEffect(() => {
     if (disabled || !options.length) setOpen(false);
@@ -176,7 +224,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
     if (!expanded) return;
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !popupRef.current?.contains(target)) setOpen(false);
+      if (!triggerRef.current?.contains(target) && !popupRef.current?.contains(target) && !submenuRef.current?.contains(target)) setOpen(false);
     }
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -198,15 +246,16 @@ export default function Select({ id, name, value, options, onChange, placeholder
     <button ref={triggerRef} id={triggerId} type="button" role="combobox" value={value} title={title}
       className={`easel-select ${expanded ? 'is-open' : ''} ${className}`.trim()}
       aria-expanded={expanded} aria-haspopup="listbox" aria-controls={expanded ? listId : undefined}
-      aria-activedescendant={expanded && entries[activeIndex] ? `${listId}-${activeIndex}` : undefined}
+      aria-owns={expanded && submenuOpen ? `${listId}-submenu` : undefined}
+      aria-activedescendant={expanded && submenuOpen && footer?.items?.[submenuIndex] ? `${listId}-submenu-${submenuIndex}` : expanded && entries[activeIndex] ? `${listId}-${activeIndex}` : undefined}
       aria-required={required || undefined} disabled={disabled} {...aria}
       onClick={() => expanded ? setOpen(false) : show()} onKeyDown={onKeyDown}
-      onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
+      onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node) && !submenuRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
       <span className="easel-select-icon" aria-hidden="true">{triggerIcon ?? selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
       <svg className="easel-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
     </button>
     {name && <input type="hidden" name={name} value={value} disabled={disabled} />}
-    {expanded && createPortal(<div ref={popupRef} id={listId} role="listbox"
+    {expanded && createPortal(<><div ref={popupRef} id={listId} role="listbox"
       aria-label={aria['aria-label']} aria-labelledby={aria['aria-labelledby'] || (!aria['aria-label'] ? triggerId : undefined)}
       className="easel-select-popup" style={position}>
       <div ref={scrollRef} className="easel-select-options" role="presentation">
@@ -215,7 +264,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
           <div ref={(node) => { optionRefs.current[index] = node; }}
           id={`${listId}-${index}`} role="option" data-value={option.value} aria-label={option.menuLabel ? option.label : undefined} aria-selected={value === option.value} aria-disabled={option.disabled || undefined}
           className={`easel-select-option${index === activeIndex ? ' is-active' : ''}${value === option.value ? ' is-selected' : ''}${option.disabled ? ' is-disabled' : ''}`}
-          onPointerMove={() => { if (!option.disabled) setActiveIndex(index); }}
+          onPointerMove={() => { setSubmenuOpen(false); if (!option.disabled) setActiveIndex(index); }}
           onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
           {option.icon && <span className="easel-select-icon" aria-hidden="true">{option.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{option.menuLabel || option.label}</span>{option.description && <span className="easel-select-option-description">{option.description}</span>}</span>
           {value === option.value && <svg className="easel-select-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>}
@@ -223,13 +272,21 @@ export default function Select({ id, name, value, options, onChange, placeholder
       </div>
       {footer && <div ref={footerWrapRef} className="easel-select-footer" role="presentation">
         <div id={`${listId}-${footerIndex}`} role="option" data-value="__select_footer__" aria-disabled={footer.disabled || undefined}
+          aria-haspopup={footer.items?.length ? 'menu' : undefined} aria-expanded={footer.items?.length ? submenuOpen : undefined}
           className={`easel-select-option is-footer${activeIndex === footerIndex ? ' is-active' : ''}${footer.disabled ? ' is-disabled' : ''}`}
-          onPointerMove={() => { if (!footer.disabled) setActiveIndex(footerIndex); }}
+          onPointerMove={() => { if (!footer.disabled) { setActiveIndex(footerIndex); if (footer.items?.length) setSubmenuOpen(true); } }}
           onMouseDown={(event) => event.preventDefault()} onClick={() => choose(footerIndex)}>
           {footer.icon && <span className="easel-select-icon" aria-hidden="true">{footer.icon}</span>}<span className="easel-select-option-copy"><span className="easel-select-option-label">{footer.label}</span>{footer.description && <span className="easel-select-option-description">{footer.description}</span>}</span>
+          {!!footer.items?.length && <span aria-hidden="true">›</span>}
         </div>
       </div>}
-    </div>, document.body)}
+    </div>{submenuOpen && footer?.items?.length && <div ref={submenuRef} id={`${listId}-submenu`} className="easel-select-popup easel-select-submenu" role="menu" aria-label={footer.label} style={submenuPosition}>
+      {footer.items.map((item, index) => <div key={item.key} id={`${listId}-submenu-${index}`} role="menuitem" aria-disabled={item.disabled || undefined} aria-current={item.selected || undefined}
+        className={`easel-select-option${index === submenuIndex ? ' is-active' : ''}${item.selected ? ' is-selected' : ''}${item.disabled ? ' is-disabled' : ''}`}
+        onPointerMove={() => setSubmenuIndex(index)} onMouseDown={event => event.preventDefault()} onClick={() => activateSubmenu(index)}>
+        <span className="easel-select-option-copy">{item.label}</span>{item.selected && <span aria-hidden="true">✓</span>}
+      </div>)}
+    </div>}</>, document.body)}
   </>;
 }
 
