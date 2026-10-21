@@ -1,3 +1,10 @@
+## 0.13.1 · 2026-10-21 · Execution visibility / 执行可见性修复
+
+- Explain commands beyond leading `cd`; retain full command, output and exit status. / 修复命令标题只剩cd，按可观察动作解释读取、搜索、脚本与构建。
+- Keep reasoning availability through stream/recovery/storage/backup; label absent and partial summaries without inventing private reasoning. / 展示思考摘要等待、未收到、历史未知和中断状态，终态隐藏旧等待提示。
+- Register local `easel_plan_update`, accept successful goal progress receipts and expose turn-scoped collaboration configuration. Add proactive delegation rules for independent subtasks within saved limits; keep persistent-goal guards. / 提供真实计划工具，贯通目标步骤回执，区分协作配置、请求和子Agent身份。
+- [Verification and upgrade boundaries / 验证与升级边界](docs/execution-visibility-0.13.1-2026-10-21.md). No host 138 deployment, installer publication or paid-model acceptance.
+
 ## 0.13.0 · 2026-10-21 · Scoped profile memory / 画像记忆管理
 
 - Add weighted cache-read ratios, coverage and invalid/missing counters to existing usage groups. / 原用量分组内增加加权缓存占比及有效、缺失、异常样本数。

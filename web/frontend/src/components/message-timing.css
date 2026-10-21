@@ -1,2 +1,4 @@
 .message-turn-elapsed { display: block; margin: 7px 0 0; color: var(--text-muted, #878b96); font-size: 11px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .typing-indicator ~ .message-turn-elapsed { margin-top: 8px; }
+.reasoning-availability { display:flex; flex-direction:column; gap:4px; margin:10px 0 15px; padding:10px 13px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text-secondary); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.reasoning-availability strong { font-size:12px; font-weight:500; }

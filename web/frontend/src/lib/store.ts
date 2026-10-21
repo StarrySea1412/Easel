@@ -8,9 +8,10 @@ import { requirementsForSelection } from './selectedSkills';
 import type { SkillRequirements } from './selectedSkills';
 import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
+import { decodeChatReasoning, type ChatReasoning } from './chatReasoning';
 import { isAnalysisBinding, type AnalysisBinding } from './analysisBinding';
 
-export interface ChatMessage extends ChatTiming {
+export interface ChatMessage extends ChatTiming, ChatReasoning {
   shareAppend?: { token: string; appendId: string; at: number; source: { model: string; harness: string } }; // 来自分享接管的回传标记
   taskRunId?:string;
   taskGoalId?:string;
@@ -158,6 +159,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   if (value.role === 'user' && value.kind === 'breakdown') message.kind = 'breakdown';
   if (value.stopped === true) message.stopped = true;
   Object.assign(message, decodeChatTiming(value));
+  Object.assign(message, decodeChatReasoning(value));
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity', 'taskRunId', 'taskGoalId'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];
   }

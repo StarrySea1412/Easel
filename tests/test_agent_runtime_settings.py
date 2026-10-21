@@ -23,6 +23,23 @@ def test_agent_runtime_is_closed_when_no_startup_model(tmp_path, monkeypatch):
     assert value['guard'] == 'strict_model_and_spawn_deny'
 
 
+def test_goal_turn_keeps_its_delegation_guard_and_uses_goal_progress(tmp_path, monkeypatch):
+    from easel.task_store import TaskStore
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path)
+    monkeypatch.setattr(web, '_agent_runtime_config', lambda: {'ready':True,'maxSpawnDepth':1})
+    store = TaskStore(tmp_path)
+    goal = store.create_goal({'objective':'核验进度策略','criteria':[{'type':'review','label':'核验','value':''}],
+        'modelRef':'fixture/model','maxIterations':2,'maxSeconds':120,'maxTools':5,'maxImages':0},session='policy-session')
+    store.change_goal(goal['id'], 'start')
+    _, run = store.claim('worker')
+    request = web.ChatRequest(message='不需要调用模型', sessionId='policy-session', turnId=run['turnId'])
+    runtime = web._chat_agent_runtime(request)
+    assert runtime['ready'] is False and runtime['goalManaged'] is True
+    assert 'easel_goal_update' in runtime['reason']
+    assert 'goalManaged' not in web._chat_agent_runtime(request.model_copy(update={'turnId':'another'}))
+    assert 'goalManaged' not in web._chat_agent_runtime(request.model_copy(update={'sessionId':'foreign'}))
+
+
 def test_agent_runtime_save_requires_exact_model_and_denies_spawn_when_disabled(tmp_path, monkeypatch):
     state = tmp_path / 'state'
     state.mkdir()

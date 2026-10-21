@@ -77,6 +77,15 @@ test('progress groups keep completed and remaining tasks accessible without an e
 });
 
 const silence='已180秒未收到新事件；当前阶段尚未确认，可能正在等待输入、工具或模型响应。请查看本轮状态与操作记录；任务未自动重发或终止。';
+test('backend provider-wait wording never remains in failed history',async t=>{
+  const v=await setup(t);
+  await v.respond(0,{...snapshot(),plan:[],progress:['已读取材料','运行已 180 秒没有新事件，仍在等待 provider；未自动重发或终止。']});
+  await v.render('a',{failed:true});await v.click('.chat-progress-capsule');
+  assert.match(v.container.querySelector('.chat-progress-summary').textContent,/本轮失败/);
+  assert.doesNotMatch(v.container.textContent,/180 秒|仍在等待 provider/);
+  assert.match(v.container.textContent,/已读取材料/);
+  assert.match(v.container.querySelector('.chat-agent-capabilities').textContent,/未收到更新|历史记录未保存协作配置/);
+});
 const handshake=['请求已收到，等待运行器确认','已进入运行器，等待模型事件'];
 const question='等待你回答问题，请查看输入框上方的选项卡。';
 test('screenshot noise becomes one short status without a duplicate history',async t=>{

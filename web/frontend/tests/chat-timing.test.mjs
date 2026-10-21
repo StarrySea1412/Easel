@@ -45,6 +45,19 @@ test('completed elapsed duration survives export/import while live start identif
     messages: [{ role: 'assistant', content: '', elapsedMs: -3 }] }] })), /耗时/);
 });
 
+test('reasoning status replay is validated and delivered before the terminal event',async t=>{
+  const statuses=[],encoder=new TextEncoder();
+  t.mock.method(globalThis,'fetch',async()=>new Response(new ReadableStream({start(controller){
+    controller.enqueue(encoder.encode('id: 1\nevent: reasoning_status\ndata: {"thinkingStatus":"fake"}\n\n'
+      +'id: 2\nevent: reasoning_status\ndata: {"thinkingStatus":"partial"}\n\n'
+      +'id: 3\nevent: error\ndata: {"message":"fixture"}\n\n'));controller.close();
+  }})));
+  await new Promise(resolve=>streamChat('',undefined,'reasoning-meta',()=>{},()=>{},()=>{statuses.push('error');resolve();},
+    undefined,undefined,undefined,'meta-turn',true,undefined,[],undefined,undefined,[],{},undefined,undefined,undefined,
+    undefined,undefined,undefined,'openclaw',undefined,status=>statuses.push(status)));
+  assert.deepEqual(statuses,[{thinkingStatus:'partial'},'error']);
+});
+
 test('orphaned replay ends reconnecting with actionable recovery while retaining the controller', async t => {
   let requests = 0, controller; const encoder = new TextEncoder();
   t.mock.method(globalThis, 'fetch', async () => {

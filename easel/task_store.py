@@ -298,6 +298,10 @@ class TaskStore:
         with self.db() as db:
             return [json.loads(r[0]) for r in db.execute("SELECT data FROM runs WHERE state IN ('running','unconfirmed')")]
 
+    def is_goal_turn(self, session, turn):
+        with self.db() as db:
+            return db.execute("SELECT 1 FROM runs WHERE session=? AND turn=? AND state='running'", (session, turn)).fetchone() is not None
+
     def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True):
         with self.db() as db:
             r = self._get(db, 'runs', run)
@@ -516,7 +520,7 @@ class TaskStore:
                 self._conclude_budget(db, g, '工具调用已达到目标上限，正在停止。')
                 return {'allowed': False, 'reason': '目标工具调用已达上限。'}
             db.execute('INSERT INTO tool_reservations VALUES(?,?)', (g['id'], reservation))
-            if tool not in ('easel_goal_update', 'easel_task_guard'):
+            if tool not in ('easel_goal_update', 'easel_task_guard', 'easel_plan_update'):
                 r['workTools'] = r.get('workTools', 0) + 1
                 db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r), r['id']))
             g['toolsUsed'] += 1; self._goal(db, g)

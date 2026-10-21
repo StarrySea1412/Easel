@@ -78,7 +78,8 @@ def test_shared_stream_cannot_latch_foreign_session_or_missing_identity():
     assert web._raw_event_for_run(json.dumps({'sessionId': 'ours'}), 'a', 'ours') is None
 
 
-def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeypatch):
+@pytest.mark.parametrize('failed', [False, True])
+def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeypatch, failed):
     session = 'reasoning-test'
     runtime_session = web._openclaw_session_id(session)
     raw_path = tmp_path / 'raw.jsonl'
@@ -97,7 +98,7 @@ def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeyp
             with raw_path.open('a', encoding='utf-8') as f:
                 for record in records:
                     f.write(json.dumps(record, ensure_ascii=False) + '\n')
-        def poll(self): return 0
+        def poll(self): return 1 if failed else 0
 
     class CrossLock:
         def __init__(self, key): pass
@@ -132,7 +133,8 @@ def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeyp
         result = await web.api_chat_last(session, 'reasoning-turn')
         assert result['status'] == 'done'
         assert result['thinking'] == thinking
-        assert result['thinkingStatus'] == 'available'
+        assert result['thinkingStatus'] == ('partial' if failed else 'available')
+        assert {'thinkingStatus': result['thinkingStatus']} in [json.loads(e['data']) for e in events if e['event'] == 'reasoning_status']
         assert result['text'] == '最后的回答。'
         replay = web._read_job_events('reasoning-turn')
         assert ''.join(e['data'] for e in replay if e['event'] == 'thinking') == thinking
@@ -199,6 +201,7 @@ def test_http_supervisor_waits_for_raw_tail_and_retains_provider_summary(tmp_pat
         result = await web.api_chat_last('http-reasoning', 'http-turn')
         assert result['thinking'] == thinking
         assert result['thinkingStatus'] == ('unavailable' if mode == 'unavailable' else 'available')
+        assert json.loads(next(e['data'] for e in events if e['event'] == 'reasoning_status'))['thinkingStatus'] == result['thinkingStatus']
         assert result['text'] == '回答'
         assert events[-1]['event'] == 'done'
     asyncio.run(scenario())

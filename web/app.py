@@ -2512,7 +2512,9 @@ def _agent_runtime_config() -> dict:
         'maxSpawnDepth': _bounded_int(subagents.get('maxSpawnDepth'), 1, 0, 2),
         'runTimeoutSeconds': _bounded_int(subagents.get('runTimeoutSeconds'), 900, 60, 3600),
         'guard': 'strict_model_and_spawn_deny' if not enabled else 'strict_model',
-        'reason': None if enabled else ('已默认启用：启动模型跟随当前主模型，保存本卡后生效。'
+        'reason': None if enabled else ('当前设置禁止sessions_spawn，未开放子Agent启动。请在设置中核对协作开关与启动模型。'
+                                       if 'sessions_spawn' in denied and model in option_ids
+                                       else '尚未启用：已预选当前主模型，保存本卡后生效。'
                                        if suggested
                                        else '请先选择启动模型并保存；未配置前不会启动 Agent，也不会继承当前对话模型。'),
     }
@@ -4411,6 +4413,15 @@ def _attachment_context(req: ChatRequest) -> str:
     )
 
 
+def _chat_agent_runtime(req: ChatRequest) -> dict:
+    runtime = _agent_runtime_config()
+    if req.sessionId and req.turnId:
+        from easel.task_store import TaskStore
+        if TaskStore(OUTPUTS_DIR).is_goal_turn(req.sessionId, req.turnId):
+            runtime = {**runtime, 'ready': False, 'reason': '持续目标的当前预算保护不开放子Agent；使用easel_goal_update更新目标步骤。', 'goalManaged': True}
+    return runtime
+
+
 def _chat_message(req: ChatRequest) -> str:
     from chat_branch import history_context
     context = _attachment_context(req)
@@ -4424,8 +4435,11 @@ def _chat_message(req: ChatRequest) -> str:
     if memory:
         references.append({'source': 'profile-experience', **memory})
     message = ''
-    from easel.plan_progress import instructions as planning_instructions
-    message += planning_instructions()
+    from easel.plan_progress import instructions as planning_instructions, collaboration_instructions
+    runtime = _chat_agent_runtime(req)
+    message += ('\n\n〔目标进度〕当前为受保护的持续目标，优先调用easel_goal_update更新完整steps（id/title/status/detail）；'
+                '不要另建普通计划或派生Agent。完成需实际核验，失败保留未完成项。' if runtime.get('goalManaged') else planning_instructions())
+    message += collaboration_instructions(runtime)
     if req.sessionId and _browser_service.has_pages(req.sessionId):
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
@@ -5284,6 +5298,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         provider_lock_acquired = False
         from easel.execution_store import ExecutionStore
         execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        execution_store.configure_runtime(_chat_agent_runtime(req))
         started_at_ms = int(time.time() * 1000)
         started_monotonic = time.monotonic()
         terminal_timing = None
@@ -5323,7 +5338,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
         def to_client(kind, text=None, **extra):
             nonlocal event_seq, turn_error, last_progress_at
-            if kind not in ('timing', 'execution'):
+            if kind not in ('timing', 'execution', 'reasoning_status'):
                 last_progress_at = time.monotonic()
             if kind == 'activity' and isinstance(text, str):
                 try:
@@ -5342,6 +5357,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 if event_id:
                     text['failureEventId'] = event_id
                 turn_error = text
+            if kind in ('error', 'done'):
+                to_client('reasoning_status', {'thinkingStatus':
+                    ('partial' if kind == 'error' or turn_error or extra.get('stopped') else 'available') if full_thinking else 'unavailable'})
             event_seq += 1
             if kind == "done":
                 data = {"sessionKey": extra.get("sessionKey")}
@@ -6107,7 +6125,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     "requestedThinkingLevel": requested_thinking_level,
                     "gateway_run_id": run_info.get('run_id'),
                     "thinking": ''.join(full_thinking),
-                    "thinkingStatus": 'available' if full_thinking else 'unavailable',
+                    "thinkingStatus": ('partial' if turn_error or user_stopped or not clean_end else 'available') if full_thinking else 'unavailable',
                     "thinkingSource": reasoning_stream.source,
                     "error": turn_error,
                     "clean_end": clean_end,
@@ -6148,6 +6166,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             to_client('error', error)
             save_turn(pk, 'done', ''.join(full_text), {
                 'turn_id': turn_id, 'thinking': ''.join(full_thinking),
+                'thinkingStatus': 'partial' if full_thinking else 'unavailable',
                 'requestedModelRef': requested_model_ref,
                 'requestedThinkingLevel': requested_thinking_level,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
@@ -6237,7 +6256,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 yield {"id": str(item["id"]), "event": "question", "data": item["text"]}
             elif t == "error":
                 yield {"id": str(item["id"]), "event": "error", "data": json.dumps(item["text"], ensure_ascii=False)}
-            elif t in ('model_selection', 'timing', 'execution'):
+            elif t in ('model_selection', 'timing', 'execution', 'reasoning_status'):
                 yield {"id": str(item["id"]), "event": t, "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "done":
                 done = {"sessionKey": item.get("sessionKey")}
@@ -9246,6 +9265,8 @@ async def api_chat_execution(session_id: str, turn_id: str, before: int | None =
         before=before, limit=limit, journal=journal.get('operations', []), outputs=OUTPUTS_DIR)
     result['timeline'] = journal.get('timeline', [])[-500:]
     result['plan'] = journal.get('plan', [])
+    if journal.get('runtime'):
+        result['runtime'] = journal['runtime']
     if live and (_RUNNING_CHAT.get(session_id) is not process or _ACTIVE_SKILL_TURNS.get(session_id) != turn_id):
         result['operations'] = []
         result['timeline'] = []

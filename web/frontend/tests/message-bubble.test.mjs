@@ -105,6 +105,27 @@ test('persisted thinking panel labels estimated tokens and expands on click', as
   assert.match(container.querySelector('.model-thinking-text').textContent, /推理过程/);
 });
 
+test('missing reasoning has honest live, final, legacy and backup states', async t => {
+  const live=await mount(t,{message:{role:'assistant',content:''},isStreaming:true});
+  assert.match(live.textContent,/尚未收到可见思考摘要/);
+  const final=await mount(t,{message:{role:'assistant',content:'回答',turnId:'t',thinkingStatus:'unavailable'}});
+  assert.match(final.textContent,/本轮未收到可见思考摘要/);
+  assert.equal(final.querySelector('.model-thinking-toggle'),null);
+  const legacy=await mount(t,{message:{role:'assistant',content:'旧回答',turnId:'old'}});
+  assert.match(legacy.textContent,/历史记录未保存思考摘要状态/);
+  const backup=await mount(t,{message:{role:'assistant',content:'备份',thinkingStatus:'unavailable'},backupSnapshot:true});
+  assert.match(backup.textContent,/备份未保存思考摘要/);
+  const partial=await mount(t,{message:{role:'assistant',content:'',thinking:'已返回摘要',thinkingStatus:'partial'}});
+  assert.match(partial.textContent,/已保留 · 本轮中断/);
+  assert.equal(partial.querySelector('.reasoning-availability'),null);
+});
+
+test('failed fallback progress removes old provider-wait notices',async t=>{
+  const container=await mount(t,{message:{role:'assistant',content:'',turnId:'t',error:{message:'失败'},activity:'已读取资料\n运行已 180 秒没有新事件，仍在等待 provider；未自动重发或终止。'}});
+  assert.match(container.textContent,/已读取资料/);
+  assert.doesNotMatch(container.textContent,/180 秒|仍在等待 provider/);
+});
+
 test('copy action reflects copied state and retry only appears when allowed', async t => {
   const attempts = []; const copied = [];
   const container = await mount(t, {

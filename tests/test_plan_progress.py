@@ -1,10 +1,13 @@
 import json
 import subprocess
 import sys
+import shutil
+import pytest
 from pathlib import Path
 
 from easel.execution_store import ExecutionStore, read_snapshot
 from easel.plan_progress import _quote_argument, instructions, normalize, receipt_plan
+from easel.plan_progress import collaboration_instructions
 
 
 PLAN = {'plan': [{'step': '读取资料', 'status': 'completed'}, {'step': '核验交付', 'status': 'in_progress'}]}
@@ -76,3 +79,41 @@ def test_cli_produces_real_receipt_consumed_and_persisted(tmp_path):
     store.consume(event(1, 'start', name='exec', args={'command': 'update_plan.py'}))
     store.consume(event(2, 'end', result={'content': result.stdout, 'details': {'exitCode': 0}}))
     assert read_snapshot(tmp_path, 'real-script', 'turn')['plan'] == normalize(PLAN)
+
+
+def test_native_plugin_validates_and_receipts_drive_persisted_plan(tmp_path):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node unavailable')
+    plugin = Path(__file__).resolve().parents[1] / 'openclaw/easel-agent-safety/plan.mjs'
+    source = f'''import {{registerPlan}} from {json.dumps(plugin.as_uri())};
+      let tool; registerPlan({{registerTool:t=>tool=t}});
+      const good=await tool.execute('plan', {json.dumps(PLAN)});
+      const bad=await tool.execute('bad', {{plan:[{{step:'a',status:'in_progress'}},{{step:'b',status:'in_progress'}}]}});
+      console.log(JSON.stringify({{good,bad}}));'''
+    result = subprocess.run([node, '--input-type=module', '-e', source], capture_output=True, text=True, encoding='utf-8', check=True, timeout=15)
+    receipts = json.loads(result.stdout)
+    assert receipts['bad']['isError'] is True
+    store = ExecutionStore(tmp_path, 'native', 'turn')
+    store.configure_runtime({'ready': True, 'maxSpawnDepth': 1})
+    store.consume(event(1, 'start', name='easel_plan_update', args=PLAN))
+    assert store.snapshot()['plan'] == []
+    store.consume(event(2, 'end', result=receipts['good']))
+    assert store.snapshot()['plan'] == normalize(PLAN)
+    assert read_snapshot(tmp_path, 'native', 'turn')['runtime']['subagentsConfigured'] is True
+    assert ExecutionStore(tmp_path, 'native', 'turn').snapshot()['runtime'] == store.runtime
+    store.consume({**event(3, 'start', name='easel_plan_update', args=PLAN), 'data': {**event(3, 'start', name='easel_plan_update', args=PLAN)['data'], 'toolCallId': 'bad-call'}})
+    store.consume({'seq': 4, 'stream': 'tool', 'data': {'phase': 'end', 'toolCallId': 'bad-call', 'result': receipts['bad']}})
+    assert store.snapshot()['plan'] == normalize(PLAN)
+
+
+def test_goal_progress_is_visible_only_on_success_and_collaboration_respects_limits():
+    args = {'steps': [{'id': 'a', 'title': '核验材料', 'status': 'completed'}, {'id': 'b', 'title': '交付', 'status': 'blocked'}]}
+    assert receipt_plan('easel_goal_update', args, {}) == [{'step': '核验材料', 'status': 'completed'}, {'step': '交付', 'status': 'blocked'}]
+    assert receipt_plan('easel_goal_update', args, {'isError': True}) is None
+    assert receipt_plan('easel_goal_update', {'steps': [None]}, {}) is None
+    assert 'sessions_spawn' in collaboration_instructions({'ready': True, 'maxSpawnDepth': 1})
+    for config in ({'ready':False}, {'ready':True, 'maxSpawnDepth':0}):
+        assert '当前配置未开放' in collaboration_instructions(config)
+        assert '主动用sessions_spawn' not in collaboration_instructions(config)
+    assert 'easel_plan_update' in instructions()

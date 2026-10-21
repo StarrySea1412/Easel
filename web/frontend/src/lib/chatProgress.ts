@@ -1,6 +1,6 @@
 // Presentation only: keep the full event stream in execution records.
 const transportNotice = /^(?:请求已(?:收到|接收)，等待运行器确认|已进入运行器，等待模型事件)[。！!]?$/;
-const silenceNotice = /^(?:已\s*)?\d+\s*秒未收到新事件[；;，,]/;
+const silenceNotice = /^(?:(?:已\s*)?\d+\s*秒未收到新事件|运行已\s*\d+\s*秒没有新事件)[；;，,]/;
 const questionNotice = /^等待你回答问题[，,]请查看输入框上方的选项卡[。.]?$/;
 
 export function progressText(value: string): string {

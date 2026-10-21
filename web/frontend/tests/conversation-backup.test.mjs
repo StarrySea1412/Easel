@@ -23,6 +23,14 @@ function backup(overrides = {}) {
   };
 }
 
+test('reasoning availability survives backup round trips without runtime identities',()=>{
+  const exported=createConversationBackup([session({messages:[{role:'assistant',content:'partial',thinking:'可见摘要',thinkingStatus:'partial',turnId:'local-turn'}]})]);
+  const imported=createImportedSessions(parseConversationBackup(JSON.stringify(exported)),[]);
+  assert.equal(imported[0].messages[0].thinkingStatus,'partial');
+  assert.equal(imported[0].messages[0].thinking,'可见摘要');
+  assert.equal(imported[0].messages[0].turnId,undefined);
+});
+
 function freeze(value) {
   if (value && typeof value === 'object') {
     Object.values(value).forEach(freeze);

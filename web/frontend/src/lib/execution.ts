@@ -1,3 +1,4 @@
+import { explainCommand } from './commandExplanation';
 export type OperationStatus = 'running'|'returned'|'completed'|'failed'|'unconfirmed'|'stopped'|'denied';
 export interface Operation {
   id: string; name: string; kind?: 'command'|'read'|'file_change'|'search'|'browser'|'tool'; status: OperationStatus;
@@ -9,6 +10,7 @@ export interface Operation {
 }
 export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {
+  runtime?: {subagentsConfigured:boolean; subagentReason?:string};
   sessionId: string; turnId: string; operations: Operation[]; warnings: string[];
   total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[]; timeline?:ExecutionEntry[];
 }
@@ -21,7 +23,9 @@ export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   const plan=Array.isArray(data.plan)?data.plan.filter(x=>x&&typeof x.step==='string'&&['pending','inProgress','completed','blocked','failed'].includes(x.status)).slice(0,100):[];
   const progress=Array.isArray(data.progress)?data.progress.filter(x=>typeof x==='string').slice(-50):[];
   const timeline=Array.isArray(data.timeline)?data.timeline.filter(entry=>entry&&typeof entry.id==='string'&&Number.isSafeInteger(entry.order)&&entry.order>=0&&(entry.type==='progress'?typeof entry.text==='string':entry.type==='operation'&&typeof entry.operationId==='string')).slice(-500):undefined;
-  return {...data,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
+  const rawRuntime=data.runtime;
+  const runtime=rawRuntime&&typeof rawRuntime.subagentsConfigured==='boolean'?{subagentsConfigured:rawRuntime.subagentsConfigured,subagentReason:typeof rawRuntime.subagentReason==='string'?rawRuntime.subagentReason.slice(0,500):undefined}:undefined;
+  return {...data,runtime,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
 }
 export function publishExecution(value: unknown) {
   const data=decodeExecution(value);
@@ -53,8 +57,10 @@ export function operationTitle(row:Operation){
     const action=({navigate:'打开网页',open:'打开网页',browser_navigate:'打开网页',click:'点击页面元素',browser_click:'点击页面元素',snapshot:'读取页面',browser_snapshot:'读取页面',screenshot:'截取页面',browser_screenshot:'截取页面',type:'填写页面',fill:'填写页面',scroll:'滚动页面'} as Record<string,string>)[row.action||row.name]||'浏览网页';
     return `${action}${row.url?' · '+row.url:''}`;
   }
-  if(row.kind==='command')return `${row.name==='process'?'读取进程状态':'执行命令'}${row.command.trim()?' · '+row.command.trim().split(/\s+/)[0]:''}`;
+  if(row.kind==='command')return row.name==='process'?'读取进程状态':explainCommand(row.command);
   if(row.path)return `访问文件 · ${filename}`;
-  if(row.command)return `执行命令 · ${row.command.trim().split(/\s+/)[0]}`;
+  if(row.command)return explainCommand(row.command);
+  if(['easel_plan_update','update_plan','todowrite','todo_write','easel_goal_update'].includes(row.name.toLowerCase()))return row.name==='easel_goal_update'?'更新目标进度':'更新任务计划';
+  if(['sessions_spawn','spawn_agent'].includes(row.name))return '委派子 Agent';
   return ['tool_call','tool','mcpToolCall','dynamicToolCall'].includes(row.name)?'调用工具 · 操作详情未记录':`调用工具 · ${row.name}`;
 }

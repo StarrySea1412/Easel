@@ -136,7 +136,7 @@ def test_only_progress_tools_do_not_keep_continuation_running(tmp_path):
 def test_work_tool_admission_is_durable_idempotent_and_per_round(tmp_path):
     store = TaskStore(tmp_path)
     g = store.create_goal(spec(), session='chat'); _, r = claim(store, g)
-    for call, tool in [('read', 'read'), ('read', 'read'), ('status', 'easel_task_guard'), ('plan', 'easel_goal_update')]:
+    for call, tool in [('read', 'read'), ('read', 'read'), ('status', 'easel_task_guard'), ('plan', 'easel_goal_update'), ('checklist', 'easel_plan_update')]:
         assert store.guard('chat', 'provider', call, tool)['allowed']
     assert not store.guard('chat', 'wrong-provider', 'wrong', 'read')['allowed']
     assert TaskStore(tmp_path).get('runs', r['id'])['workTools'] == 1

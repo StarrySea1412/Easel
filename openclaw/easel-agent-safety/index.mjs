@@ -1,6 +1,7 @@
 import { registerPresent } from './present.mjs';
 import { registerImage } from './image.mjs';
 import { registerTasks } from './tasks.mjs';
+import { registerPlan } from './plan.mjs';
 
 function readModel(config) {
   const value = config?.agents?.defaults?.subagents?.model;
@@ -22,6 +23,7 @@ export default {
     registerPresent(api);
     registerImage(api);
     registerTasks(api);
+    registerPlan(api);
     api.on('before_tool_call', (event) => {
       if (event.toolName !== 'sessions_spawn' && event.toolName !== 'spawn_agent') return;
       const startupModel = readModel(api.config);

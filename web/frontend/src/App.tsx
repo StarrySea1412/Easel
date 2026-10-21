@@ -12,6 +12,7 @@ import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
+import { decodeChatReasoning, type ChatReasoning } from './lib/chatReasoning';
 import type { ChatTiming } from './lib/chatTiming';
 import { drainStreamRun } from './lib/streamLifecycle';
 import { createLazyPage } from './lib/lazyPage';
@@ -390,7 +391,7 @@ export default function App() {
   const streamCtl = useRef<Record<string, AbortController>>({});
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
   const [officeTarget, setOfficeTarget] = useState<{ sessionId: string; key: number } | null>(null);
-  const streamAcc = useRef<Record<string, ChatTiming & { turnId?:string; requestedModelRef?: string; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
+  const streamAcc = useRef<Record<string, ChatTiming & ChatReasoning & { turnId?:string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
   const answeredRef = useRef<Set<string>>(new Set());   // 已提交答案的 question id：重放/恢复不再重现
   // ---- 打字机：分批到达的 token 按节奏吐给界面 ----
   const typingBuf = useRef<Record<string, string>>({});
@@ -432,7 +433,11 @@ export default function App() {
 
   const appendAssistant = useCallback((sessionId: string, msg: ChatMessage, sessionKey?: string) => {
     const accumulated = streamAcc.current[sessionId];
-    const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg), ...msg };
+    const observedReasoning = accumulated?.turnId === msg.turnId && msg.turnId && msg.error?.code !== 'chat_recovery_unavailable'
+      ? { thinkingStatus: msg.thinking ? msg.error || msg.stopped ? 'partial' as const : 'available' as const : 'unavailable' as const, ...decodeChatReasoning(accumulated) }
+      : {};
+    const completed = { ...finishChatTiming(decodeChatTiming(accumulated)), ...decodeChatTiming(msg),
+      requestedThinkingLevel: accumulated?.requestedThinkingLevel, ...observedReasoning, ...msg };
     const session = sessionsRef.current.find(item => item.id === sessionId);
     const stopped = msg.stopped === true;
     if (!msg.error && !stopped) {
@@ -481,7 +486,7 @@ export default function App() {
     const recovered = snapshot?.status === 'done' && snapshot.turn_id === turnId ? snapshot : undefined;
     if (!recovered) pauseChatQueue(sessionId, '本轮结果尚未确认，队列已暂停。请先核对运行记录。');
     appendAssistant(sessionId, recovered ? {
-      ...decodeChatTiming(recovered), role: 'assistant', content: recovered.text || (recovered.error ? '' : '（无输出）'),
+      ...decodeChatTiming(recovered), ...decodeChatReasoning(recovered), role: 'assistant', content: recovered.text || (recovered.error ? '' : '（无输出）'),
       error: recovered.error, thinking: recovered.thinking || runAcc.thinking || undefined,
       turnId, requestedModelRef: runAcc.requestedModelRef || recovered.requestedModelRef || undefined,
       activity: runAcc.steps.join('\n') || undefined,
@@ -632,6 +637,7 @@ export default function App() {
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
       history,
+      (status) => { if (streamAcc.current[sessionId] === runAcc) Object.assign(runAcc, status); },
     );
   }, [appendAssistant, clearStream, recoverMissingTurn]);
 
@@ -652,7 +658,7 @@ export default function App() {
     if (!turnId) {
       void fetchLastTurn(sessionId).then((r) => {
         if (streamAcc.current[sessionId] !== runAcc) return;
-        if (r.status === 'done') appendAssistant(sessionId, { ...decodeChatTiming(r), role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
+        if (r.status === 'done') appendAssistant(sessionId, { ...decodeChatTiming(r), ...decodeChatReasoning(r), role: 'assistant', content: r.text || (r.error?'':'（无输出）'), error:r.error, thinking: r.thinking || undefined, turnId:r.turn_id, requestedModelRef: last.requestedModelRef || r.requestedModelRef || undefined });
         clearStream(sessionId);
       }).catch(() => {if(streamAcc.current[sessionId]===runAcc)clearStream(sessionId);});
       return;
@@ -753,6 +759,8 @@ export default function App() {
         setStreams(p => p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], ...timing } } : p);
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
+      undefined,
+      (status) => { if (streamAcc.current[sessionId] === runAcc) Object.assign(runAcc, status); },
     );
   }, [appendAssistant, clearStream, recoverMissingTurn]);
 
@@ -1106,7 +1114,7 @@ export default function App() {
         if (saved.status !== 'done' || saved.turn_id !== run.turnId) throw new Error('结束记录尚不可读，请重试核实');
         streamCtl.current[sessionId]?.abort();
         clearTyping(sessionId); typingBuf.current[sessionId] = '';
-        appendAssistant(sessionId, { ...decodeChatTiming(saved), role: 'assistant', content: saved.text || '', error: saved.error,
+        appendAssistant(sessionId, { ...decodeChatTiming(saved), ...decodeChatReasoning(saved), role: 'assistant', content: saved.text || '', error: saved.error,
           thinking: saved.thinking || undefined, turnId: run.turnId, requestedModelRef: run.requestedModelRef });
         clearStream(sessionId);
         try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }

@@ -13,6 +13,7 @@ import '../styles/chat-editing.css';
 import './message-model-selection.css';
 import { formatChatElapsed } from '../lib/chatTiming';
 import './message-timing.css';
+import { progressEntries } from '../lib/chatProgress';
 
 export interface BubbleActions {
   messageSettings?: { text: string; actions: MessageSettingsActions };
@@ -58,7 +59,7 @@ function TurnElapsed({ startedAt, elapsedMs, running }: { startedAt?: number; el
     title="从本轮开始到返回结果、失败或停止，包含等待与执行时间。">{running ? '已用时' : '耗时'} {formatChatElapsed(elapsed)}</span>;
 }
 
-function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; streaming: boolean; backupSnapshot?: boolean }) {
+function ThinkingPanel({ text, streaming, backupSnapshot, partial }: { text: string; streaming: boolean; backupSnapshot?: boolean; partial?: boolean }) {
   // Preserve the user's expanded/collapsed choice as new chunks and the final
   // answer arrive; binding `open` to answer emptiness used to override it.
   const [expanded, setExpanded] = useState(streaming);
@@ -69,11 +70,15 @@ function ThinkingPanel({ text, streaming, backupSnapshot }: { text: string; stre
   return <section className="model-thinking" aria-label="模型返回的思考内容">
     <button type="button" className="model-thinking-toggle message-disclosure-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
       <DisclosureChevron expanded={expanded} />
-      <span>思考摘要</span><span className="model-thinking-state">{backupSnapshot ? '来自备份' : streaming ? '接收中' : '已保留'}</span>
+      <span>思考摘要</span><span className="model-thinking-state">{backupSnapshot ? '来自备份' : streaming ? '接收中' : partial ? '已保留 · 本轮中断' : '已保留'}</span>
       <span className="model-thinking-count" title="按可见思考文字估算，非服务商返回或计费用量。">≈ {estimatedTokens.toLocaleString()} tokens</span>
     </button>
     {expanded && <div className="model-thinking-body"><p className="model-thinking-note">{backupSnapshot ? '备份保留的思考文字，未经本机后台核验' : '模型服务实际返回的思考内容或摘要'}</p><div className="model-thinking-text">{text}</div></div>}
   </section>;
+}
+
+function ReasoningAvailability({note,label}:{note:string;label:string}) {
+  return <div className="reasoning-availability" role="status"><strong>思考摘要 · {label}</strong><span>{note}</span></div>;
 }
 
 type WorkProgressProps = {
@@ -222,16 +227,23 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
   // ---- 助手消息 ----
   // 思考 / 活动：流式时用实时值；结束后用消息里持久化的值 —— 一直保留，不隐藏
   const effThinking = isStreaming ? (thinking || '') : (message.thinking || '');
+  const reasoningNote = !effThinking && (isStreaming || message.turnId || message.thinkingStatus) ?
+    (backupSnapshot ? '备份未保存思考摘要，无法核验原服务是否返回。' : isStreaming ?
+      message.requestedThinkingLevel === 'off' ? '本轮请求关闭思考；行为记录仍会展示。' : '尚未收到可见思考摘要；操作记录会随执行更新。' :
+      message.thinkingStatus === 'unavailable' ? '本轮未收到可见思考摘要。渠道或网关可能未传递摘要，提高思考档位也不保证返回。' : '历史记录未保存思考摘要状态，无法判断原服务是否返回。') : '';
+  const reasoningLabel=backupSnapshot?'备份未核验':isStreaming?message.requestedThinkingLevel==='off'?'本轮关闭':'等待摘要':message.thinkingStatus==='unavailable'?'未收到':'历史未知';
   const liveActivity = isStreaming && !ownsProgress ? (activity || '') : '';
   const liveHint = isStreaming ? (stillWorking || '') : '';   // 防呆「未卡住」提示，附着显示、不顶掉真实状态
-  const progressSteps = normalizeProgressSteps(isStreaming ? activity : message.activity, isStreaming ? activitySteps : undefined);
+  const rawProgressSteps = normalizeProgressSteps(isStreaming ? activity : message.activity, isStreaming ? activitySteps : undefined);
+  const progressSteps = isStreaming ? rawProgressSteps : progressEntries(rawProgressSteps);
 
-  const livePanel = (effThinking || liveActivity || liveHint || progressSteps.length || isStreaming) ? (
+  const livePanel = (effThinking || reasoningNote || liveActivity || liveHint || progressSteps.length || isStreaming) ? (
     <div className="live-panel">
       {!ownsProgress && <WorkProgress steps={progressSteps} streaming={Boolean(isStreaming)} heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />}
       {effThinking && (
-        <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} backupSnapshot={backupSnapshot} />
+        <ThinkingPanel text={effThinking} streaming={Boolean(isStreaming)} backupSnapshot={backupSnapshot} partial={message.thinkingStatus==='partial'} />
       )}
+      {reasoningNote && <ReasoningAvailability note={reasoningNote} label={reasoningLabel}/>}
     </div>
   ) : null;
 
@@ -241,6 +253,7 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
       <div className="message-row assistant">
         <div className="message-bubble assistant">
           <WorkProgress steps={progressSteps} streaming heartbeat={liveHint} error={Boolean(message.error)} stopped={message.stopped} backupSnapshot={backupSnapshot} />
+          <ReasoningAvailability note={reasoningNote} label={reasoningLabel}/>
           <TurnElapsed startedAt={message.startedAt} elapsedMs={message.elapsedMs} running />
         </div>
       </div>

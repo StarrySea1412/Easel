@@ -1140,6 +1140,7 @@ export function streamChat(
   onTiming?: (timing: import('./chatTiming').ChatTiming) => void,
   engine: 'openclaw'|'codex' = 'openclaw',
   history?: { role: 'user' | 'assistant'; content: string }[],
+  onReasoningStatus?: (status: import('./chatReasoning').ChatReasoning) => void,
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -1178,6 +1179,11 @@ export function streamChat(
           try { onToken(JSON.parse(data) as string); } catch { onToken(data); }
         } else if (currentEvent === 'text_snapshot' && onTextSnapshot) {
           try { const text: unknown = JSON.parse(data); if (typeof text === 'string') onTextSnapshot(text); } catch { /* malformed snapshot */ }
+        } else if (currentEvent === 'reasoning_status' && onReasoningStatus) {
+          try {
+            const value = (JSON.parse(data) as {thinkingStatus?:unknown}).thinkingStatus;
+            if (value === 'available' || value === 'unavailable' || value === 'partial') onReasoningStatus({thinkingStatus:value});
+          } catch { /* Unknown reasoning metadata cannot establish availability. */ }
         } else if (currentEvent === 'thinking' && onThinking) {
           let thinkingChunk: unknown;
           try { thinkingChunk = JSON.parse(data); } catch { thinkingChunk = data; }
@@ -1313,7 +1319,7 @@ export function streamChat(
 }
 
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<import('./chatTiming').ChatTiming & { status: string; text: string; thinking?: string; thinkingStatus?: 'available' | 'unavailable'; error?:ChatErrorDetail; turn_id?: string; requestedModelRef?: string | null }> {
+export function fetchLastTurn(sessionId: string, turnId?: string): Promise<import('./chatTiming').ChatTiming & import('./chatReasoning').ChatReasoning & { status: string; text: string; thinking?: string; error?:ChatErrorDetail; turn_id?: string; requestedModelRef?: string | null }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }

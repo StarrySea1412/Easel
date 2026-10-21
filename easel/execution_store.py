@@ -34,6 +34,7 @@ class ExecutionStore:
         self.rows = {row['id']: row for row in saved.get('operations', [])}
         self.timeline = saved.get('timeline', [])
         self.plan = saved.get('plan', [])
+        self.runtime = saved.get('runtime', {})
         self.plan_inputs = {}
         self.order = max((entry['order'] for entry in self.timeline), default=0)
         self.seen = set()
@@ -43,7 +44,7 @@ class ExecutionStore:
         with self.lock:
             return {'sessionId': self.session, 'turnId': self.turn, 'source': 'gateway',
                     'operations': [dict(row) for row in list(self.rows.values())[-100:]],
-                    'plan': [dict(step) for step in self.plan],
+                    'plan': [dict(step) for step in self.plan], 'runtime': dict(self.runtime),
                     'timeline': [dict(entry) for entry in self.timeline[-500:]]}
 
     def progress(self, text):
@@ -57,6 +58,13 @@ class ExecutionStore:
             self.timeline.append({'id': f'progress-{self.order}', 'type': 'progress',
                                   'order': self.order, 'text': text})
             self.timeline = self.timeline[-500:]
+            self.persist()
+
+    def configure_runtime(self, value):
+        """Turn-start configuration evidence, not proof of an available gateway tool."""
+        with self.lock:
+            self.runtime = {'subagentsConfigured': value.get('ready') is True and value.get('maxSpawnDepth', 0) > 0,
+                            'subagentReason': public_text(value.get('reason') or ('启动深度设为0，当前不允许委派。' if value.get('maxSpawnDepth') == 0 else ''), self.credentials, 500)}
             self.persist()
 
     def consume(self, payload):
@@ -131,5 +139,6 @@ class ExecutionStore:
         tmp.write_text(json.dumps({'sessionId': self.session, 'turnId': self.turn,
                                   'operations': list(self.rows.values()),
                                   'plan': self.plan,
+                                  'runtime': self.runtime,
                                   'timeline': self.timeline}, ensure_ascii=False), encoding='utf-8')
         tmp.replace(path)

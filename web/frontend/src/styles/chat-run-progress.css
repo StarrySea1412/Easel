@@ -52,3 +52,9 @@
 .agent-model-label{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--text-tertiary)}.agent-model-label>span:not(.agent-provider-mark){overflow-wrap:anywhere}.agent-provider-mark{display:inline-grid;place-items:center;width:16px;height:16px;border:1px solid var(--border);border-radius:5px;font-size:10px;font-weight:600}.agent-model-label small{font-size:inherit}.chat-agent-coverage{display:block;color:var(--text-tertiary);overflow-wrap:anywhere}
 :root[data-theme="dark"] .agent-provider-mark img:is([data-provider-brand="openai"],[data-provider-brand="moonshot"],[data-provider-brand="grok"],[data-provider-brand="fishaudio"]){filter:invert(1)}
 @media(max-width:760px){.chat-header{flex-wrap:wrap}.chat-header-actions{flex-wrap:wrap;justify-content:flex-end;max-width:100%;gap:6px}.chat-progress-anchor{max-width:min(270px,calc(100vw - 50px))}.chat-agent-engine{flex-wrap:wrap}}
+.chat-agent-capabilities { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.chat-agent-capabilities summary { cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.chat-agent-capabilities summary svg { flex:none; transition:transform .15s; }
+.chat-agent-capabilities[open] summary svg { transform:rotate(90deg); }
+.chat-agent-capabilities summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.chat-agent-capabilities p { margin: 8px 0 0; line-height: 1.6; overflow-wrap: anywhere; }

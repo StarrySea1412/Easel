@@ -2,12 +2,13 @@ import type { ChatMessage, ChatSession } from './store';
 import type { ThinkingLevel } from './api';
 import { historicalGatewayAuthError } from './chatErrors';
 import { decodeChatTiming } from './chatTiming';
+import { decodeChatReasoning, type ChatReasoning } from './chatReasoning';
 
 export const MAX_BACKUP_BYTES = 20 * 1024 * 1024;
 export const MAX_BACKUP_SESSIONS = 5000;
 export const MAX_BACKUP_MESSAGES = 100000;
 
-export interface BackupMessage {
+export interface BackupMessage extends ChatReasoning {
   kind?: 'breakdown';
   stopped?: boolean;
   role: 'user' | 'assistant';
@@ -123,6 +124,7 @@ function validateBackup(value: unknown): ConversationBackup {
         content: textField(message.content, `${messagePath}.content`, budget),
       };
       if (message.role === 'user' && message.kind === 'breakdown') result.kind = 'breakdown';
+      Object.assign(result, decodeChatReasoning(message));
       if (message.stopped !== undefined) result.stopped = booleanField(message.stopped, `${messagePath}.stopped`);
       if (message.elapsedMs !== undefined) {
         const timing = decodeChatTiming(message);
@@ -165,6 +167,7 @@ function visibleMessage(message: ChatMessage): BackupMessage {
     ...(message.stopped === true ? { stopped: true } : {}),
     content: historical ? '' : message.content,
     ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
+    ...decodeChatReasoning(message),
     ...(message.activity !== undefined ? { activity: message.activity } : {}),
     ...('elapsedMs' in decodeChatTiming(message) ? { elapsedMs: message.elapsedMs } : {}),
     ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),
@@ -250,6 +253,7 @@ export function createImportedSessions(backup: ConversationBackup, existingIds: 
         ...(message.stopped === true ? { stopped: true } : {}),
         content: message.content,
         ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
+        ...decodeChatReasoning(message),
         ...(message.activity !== undefined ? { activity: message.activity } : {}),
         ...(message.elapsedMs !== undefined ? { elapsedMs: message.elapsedMs } : {}),
         ...(message.requestedThinkingLevel !== undefined ? { requestedThinkingLevel: message.requestedThinkingLevel } : {}),

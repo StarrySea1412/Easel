@@ -20,7 +20,7 @@ export function editBranchPlan(source: ChatSession, userIndex: number, text: str
 
 export function remapEditedMessage(message: ChatMessage, files: Record<string, UploadedFile>): ChatMessage {
   // Native turn/audit IDs and enhanced prompts belong to the source runtime.
-  const { turnId: _turn, agentContent: _agent, thinking: _thinking, activity: _activity, ...snapshot } = message;
+  const { turnId: _turn, agentContent: _agent, thinking: _thinking, thinkingStatus: _reasoningStatus, activity: _activity, ...snapshot } = message;
   return { ...snapshot, ...(message.attachments ? { attachments: message.attachments.map(file => {
     if (!files[file.path]) throw new Error('分支附件复制不完整，请重试。');
     return files[file.path];
