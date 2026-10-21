@@ -45,6 +45,18 @@ def ident(session, turn, call):
     return hashlib.sha256(f'{session}\0{turn}\0{call}'.encode()).hexdigest()[:24]
 
 
+def tool_name(name):
+    """Last segment of a dotted or gateway-namespaced tool id.
+
+    OpenClaw reports ``openclaw:core:web_search`` in some receipts and plain
+    ``web_search`` in others; both must select the same kind and title.
+    """
+    name = str(name).split('.')[-1]
+    if name.startswith('openclaw:'):
+        name = name.split(':')[-1]
+    return name[:100]
+
+
 def kind(name, args):
     if name in ('exec', 'exec_command', 'bash', 'shell', 'process', 'commandExecution'):
         return 'command'
@@ -77,7 +89,13 @@ def begin(session, turn, call, name, args, at=None, credentials=None, source='tr
         nested_args = function.get('arguments', function.get('input'))
         if isinstance(nested_name, str) and nested_name.strip() and isinstance(nested_args, dict):
             name, args = nested_name, nested_args
-    name = name.split('.')[-1][:100]
+        elif isinstance(args.get('id'), str) and args['id'].strip() and isinstance(args.get('args'), dict):
+            # OpenClaw 2026.9.x forwards every core tool through one dispatcher:
+            # {"id":"web_search","args":{...}}. The transcript keeps only the
+            # dispatcher name, so an unread envelope hides the tool, query and
+            # URL behind a generic "调用工具" row.
+            name, args = args['id'], args['args']
+    name = tool_name(name)
     row = {'id': ident(session, turn, call), 'name': name, 'kind': kind(name, args),
            'status': 'running', 'command': '', 'path': '', 'cwd': '', 'output': '', 'diff': '',
            'truncated': {}, 'source': source}

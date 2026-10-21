@@ -154,6 +154,15 @@ try:
 except ValueError:
     _STALL_WARNING_SECONDS = 180
 STALL_WARNING_SECONDS = max(30, min(_STALL_WARNING_SECONDS, TIMEOUT_CHAT + 30))
+# 没有逐工具事件流的传输（HTTP 直连、纯 CLI）按这个间隔读本轮 transcript。
+# 读的是与事后面板同一份、按轮次边界裁剪的记录，代价有上限；间隔再短只是重复解析。
+try:
+    _EXECUTION_TAIL_SECONDS = float(os.environ.get("EASEL_EXECUTION_TAIL_SECONDS", "1.5"))
+except ValueError:
+    _EXECUTION_TAIL_SECONDS = 1.5
+if not _EXECUTION_TAIL_SECONDS > 0:      # 同时挡住 0、负数和 nan
+    _EXECUTION_TAIL_SECONDS = 1.5
+EXECUTION_TAIL_SECONDS = max(0.5, min(_EXECUTION_TAIL_SECONDS, 30.0))
 
 # gateway 进程把原始事件流（token/thinking/收尾）写到的**单个共享文件**。
 # 关键：`openclaw agent` 只是瘦客户端，没有 --raw-stream 标志——只有常驻 gateway 按它自己
@@ -5299,6 +5308,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         from easel.execution_store import ExecutionStore
         execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
         execution_store.configure_runtime(_chat_agent_runtime(req))
+        execution_tail = None            # 只对没有逐工具事件流的传输启动
         started_at_ms = int(time.time() * 1000)
         started_monotonic = time.monotonic()
         terminal_timing = None
@@ -5389,6 +5399,35 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 return
             if value:
                 loop.call_soon_threadsafe(to_client, 'execution', value)
+
+        def _transcript_receipt():
+            """Rows this turn's own transcript can prove, read without side effects."""
+            import chat_execution
+            return chat_execution.snapshot(
+                sk, turn_id, OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR,
+                live=True, credentials=execution_store.credentials,
+                outputs=OUTPUTS_DIR, limit=100).get('operations') or []
+
+        async def _tail_transcript_operations(active_proc):
+            """Record operations a transport cannot stream itself.
+
+            HTTP chat completions and the plain CLI run the agent without any
+            per-tool lifecycle frame, so the journal would hold progress only and
+            the panel would fall back to unordered receipts. Reading the same
+            bounded, turn-scoped transcript the post-turn view already trusts
+            keeps live and historical receipts in one shape.
+            """
+            while active_proc.poll() is None:
+                await asyncio.sleep(EXECUTION_TAIL_SECONDS)
+                try:
+                    rows = await asyncio.to_thread(_transcript_receipt)
+                    if execution_store.ingest(rows):
+                        to_client('execution', execution_store.snapshot())
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — a receipt read never fails the turn
+                    continue
+
         if requested_model_ref is not None:
             to_client('model_selection', {'requestedModelRef': requested_model_ref})
 
@@ -5710,6 +5749,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 await asyncio.to_thread(proc.terminate)
             # 这里仅记录已进入运行器；模型是否开始思考要以实际事件流为准。
             to_client("activity", "已进入运行器，等待模型事件")
+            # 原生 WS 路径自带 tool 流（on_tool）；HTTP 与纯 CLI 没有逐工具帧，
+            # 改为按轮次读 transcript，把操作与顺序补进同一份执行日志。
+            if getattr(proc, 'on_tool', None) is None:
+                execution_tail = loop.create_task(_tail_transcript_operations(proc))
 
             q = asyncio.Queue()
             SENTINEL = object()
@@ -6180,6 +6223,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     await asyncio.to_thread(_browser_service.call, 'cancel_agents', sk)
             except (ValueError, TimeoutError, RuntimeError):
                 to_client('activity', '浏览器操作结算未确认，请在浏览器面板重新观察。')
+            if execution_tail is not None:
+                # 停止轮询后补读一次：最后一个工具回执通常落在上一拍之后。
+                execution_tail.cancel()
+                try:
+                    await asyncio.gather(execution_tail, return_exceptions=True)
+                    execution_store.ingest(await asyncio.to_thread(_transcript_receipt))
+                except asyncio.CancelledError:
+                    pass
+                except Exception:  # noqa: BLE001 — 本轮已有自身回执
+                    pass
             try:
                 execution_store.finish()
                 to_client('execution', execution_store.snapshot())

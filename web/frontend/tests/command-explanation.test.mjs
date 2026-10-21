@@ -23,3 +23,16 @@ test('summary never replaces full command and process tools keep their meaning',
   assert.equal(operationTitle({...row,name:'process'}),'读取进程状态');
   assert.equal(operationTitle({...row,kind:'tool',command:'',name:'easel_goal_update'}),'更新目标进度');
 });
+
+test('dispatcher-decoded tools keep a specific title instead of a generic one',()=>{
+  const base={kind:'search',command:'',path:'',name:'web_search',url:'',query:''};
+  assert.equal(operationTitle({...base,query:'林雄'}),'搜索内容 · 林雄');
+  assert.equal(operationTitle({...base,name:'web_fetch',url:'https://example.test/a'}),'读取网页 · https://example.test/a');
+  assert.equal(operationTitle({...base,kind:'browser',name:'browser',action:'open',url:'https://example.test'}),
+    '打开网页 · https://example.test');
+  assert.equal(operationTitle({...base,kind:'tool',name:'ask_user'}),'向用户提问');
+  assert.equal(operationTitle({...base,kind:'tool',name:'tool_search'}),'查找工具');
+  assert.equal(operationTitle({...base,kind:'tool',name:'tool_describe'}),'读取工具说明');
+  // Only a genuinely unreadable dispatcher row may claim its details were lost.
+  assert.equal(operationTitle({...base,kind:'tool',name:'tool_call'}),'调用工具 · 操作详情未记录');
+});

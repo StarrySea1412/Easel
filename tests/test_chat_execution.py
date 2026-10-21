@@ -53,3 +53,35 @@ def test_inactive_journal_preserves_receipts_and_does_not_claim_process_still_ru
     assert value['operations'][1]['status'] == 'returned'
     assert value['operations'][1]['artifactPath'] == 'topic/actual.txt'
     assert unknown['status'] == 'running'
+
+
+def test_dispatcher_envelope_names_the_tool_and_keeps_its_query(tmp_path):
+    """OpenClaw 2026.9.x records {"id": ..., "args": {...}} under one tool_call row."""
+    audits, transcripts = tmp_path / 'audits', tmp_path / 'transcripts'
+    transcripts.mkdir()
+    stamp = time.time() - 20
+    events = [
+        {'timestamp': stamp, 'message': {'role': 'assistant', 'content': [
+            {'type': 'toolCall', 'id': 'call1', 'name': 'tool_call',
+             'arguments': {'id': 'web_search', 'args': {'query': '林雄'}}}]}},
+        {'timestamp': stamp + 1, 'message': {'role': 'toolResult', 'toolCallId': 'call1', 'isError': True,
+            'details': {'status': 'error', 'error': 'web_search is disabled'},
+            'content': [{'type': 'text', 'text': 'web_search is disabled'}]}},
+        {'timestamp': stamp + 2, 'message': {'role': 'assistant', 'content': [
+            {'type': 'toolCall', 'id': 'call2', 'name': 'tool_call',
+             'arguments': {'id': 'openclaw:core:web_fetch', 'args': {'url': 'https://example.test/a'}}}]}},
+        {'timestamp': stamp + 3, 'message': {'role': 'toolResult', 'toolCallId': 'call2', 'isError': False,
+            'content': [{'type': 'text', 'text': 'page body'}]}},
+    ]
+    trace = transcripts / 'own.jsonl'
+    trace.write_text(''.join(json.dumps(event) + '\n' for event in events))
+    (transcripts / 'sessions.json').write_text(json.dumps({'agent:main:chat': {'sessionId': 'own'}}))
+    audit = audits / hashlib.sha256(b'chat').hexdigest()[:24] / 'turn.json'
+    audit.parent.mkdir(parents=True)
+    audit.write_text(json.dumps({'sessionId': 'chat', 'turnId': 'turn', 'status': 'completed',
+        'started': stamp - 1, 'finished': stamp + 4,
+        '_sources': {str(trace): {'offset': 0, 'digest': hashlib.sha256(b'').hexdigest()}}}))
+    rows = execution.snapshot('chat', 'turn', audits, transcripts)['operations']
+    assert [(row['name'], row['kind'], row['status']) for row in rows] == [
+        ('web_search', 'search', 'failed'), ('web_fetch', 'search', 'returned')]
+    assert rows[0]['query'] == '林雄' and rows[1]['url'] == 'https://example.test/a'

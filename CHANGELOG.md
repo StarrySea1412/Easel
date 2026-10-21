@@ -1,3 +1,9 @@
+## 0.13.2 · 2026-10-21 · Operation receipts / 操作详情记录
+
+- Decode OpenClaw's `{"id": ..., "args": {...}}` dispatcher envelope and namespaced `openclaw:*` ids, so `web_search`, `web_fetch`, `browser` and `ask_user` receipts keep their real tool, query, URL and failure reason instead of a generic "调用工具 · 操作详情未记录" row. / 修复工具回执只剩通用标题：解包调度信封与命名空间工具名，恢复真实工具、参数与失败原因。
+- Record operations for turns without per-tool event frames (HTTP chat completions and the plain CLI) by reading the turn's own bounded transcript into the same journal; adopted calls join the timeline so progress and tool calls keep one order. / HTTP/纯 CLI 传输按轮读取 transcript 写入同一份执行日志，操作与进度共享顺序，不再提示“旧操作未记录共同顺序”。
+- [Verification and upgrade boundaries / 验证与升级边界](docs/execution-ops-0.13.2-2026-10-21.md). No host 138 deployment, installer publication or paid-model acceptance.
+
 ## 0.13.1 · 2026-10-21 · Execution visibility / 执行可见性修复
 
 - Explain commands beyond leading `cd`; retain full command, output and exit status. / 修复命令标题只剩cd，按可观察动作解释读取、搜索、脚本与构建。

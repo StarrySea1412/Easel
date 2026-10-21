@@ -58,6 +58,9 @@ export function operationTitle(row:Operation){
     return `${action}${row.url?' · '+row.url:''}`;
   }
   if(row.kind==='command')return row.name==='process'?'读取进程状态':explainCommand(row.command);
+  if(row.name==='ask_user')return '向用户提问';
+  if(row.name==='tool_search')return '查找工具';
+  if(row.name==='tool_describe')return '读取工具说明';
   if(row.path)return `访问文件 · ${filename}`;
   if(row.command)return explainCommand(row.command);
   if(['easel_plan_update','update_plan','todowrite','todo_write','easel_goal_update'].includes(row.name.toLowerCase()))return row.name==='easel_goal_update'?'更新目标进度':'更新任务计划';

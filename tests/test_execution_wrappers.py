@@ -62,3 +62,42 @@ def test_invalid_wrappers_preserve_outer_name_fields_and_do_not_guess(envelope):
     assert row['name'] == 'tool_call' and row['kind'] == 'tool'
     assert row['command'] == 'outer-command' and row['path'] == 'outer-file'
     assert envelope['command'] == 'outer-command'
+
+
+@pytest.mark.parametrize('wrapper', ['tool_call', 'tool'])
+@pytest.mark.parametrize('tool_id, expected', [
+    ('web_search', ('web_search', 'search', 'query')),
+    ('web_fetch', ('web_fetch', 'search', 'url')),
+    ('openclaw:core:web_search', ('web_search', 'search', 'query')),
+    ('openclaw:browser:browser', ('browser', 'browser', 'url')),
+])
+def test_openclaw_dispatcher_envelope_restores_the_real_tool(wrapper, tool_id, expected):
+    """2026.9.x forwards every core tool as {"id": ..., "args": {...}} under tool_call."""
+    name, kind, field = expected
+    payload = {'query': 'topic', 'url': 'https://example.test/page', 'targetUrl': 'https://example.test/page'}
+    row = begin('s', 't', 'c', wrapper, {'id': tool_id, 'args': payload})
+    assert row['name'] == name and row['kind'] == kind
+    assert row[field] == payload[field]
+    assert 'args' not in row
+
+
+def test_openclaw_dispatcher_matches_the_nested_receipt_shape():
+    """The transcript keeps the dispatcher name; kind must come from the envelope."""
+    row = begin('s', 't', 'c', 'tool_call', {'args': {'query': '林雄'}, 'id': 'web_search'})
+    assert row['name'] == 'web_search' and row['kind'] == 'search' and row['query'] == '林雄'
+    returned(row, {'isError': True, 'details': {'status': 'error', 'error': 'web_search is disabled'}})
+    assert row['status'] == 'failed'
+
+
+@pytest.mark.parametrize('envelope', [
+    {'id': 'web_search', 'args': '{"query":"do not parse"}'},
+    {'id': 'web_search', 'args': ['not', 'a', 'dict']},
+    {'id': ' ', 'args': {'query': 'ignored'}},
+    {'id': 17, 'args': {'query': 'ignored'}},
+    {'args': {'query': 'ignored'}},
+])
+def test_invalid_openclaw_envelopes_keep_the_dispatcher_row(envelope):
+    envelope = {**envelope, 'command': 'outer-command'}
+    row = begin('s', 't', 'c', 'tool_call', envelope)
+    assert row['name'] == 'tool_call' and row['kind'] == 'tool'
+    assert row['command'] == 'outer-command'

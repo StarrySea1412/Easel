@@ -27,6 +27,39 @@ def read(root, session, turn):
     return read_snapshot(root, session, turn).get('operations', [])
 
 
+TERMINAL = frozenset({'returned', 'completed', 'failed', 'stopped', 'denied'})
+
+
+def _adds_detail(value):
+    """A later receipt may add detail but must not erase what was already proven."""
+    if isinstance(value, bool):
+        return value is True
+    if value is None:
+        return False
+    if isinstance(value, (str, list, dict)):
+        return bool(value)
+    return True
+
+
+def adopt(existing, incoming):
+    """Merge one transcript receipt into a journal row without regressing it."""
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if key in ('id', 'order', 'source', 'status', 'truncated') or not _adds_detail(value):
+            continue
+        merged[key] = value
+    status = incoming.get('status')
+    if isinstance(status, str) and status not in ('running', 'unconfirmed'):
+        if existing.get('status') not in TERMINAL:
+            merged['status'] = status
+    truncated = dict(existing['truncated']) if isinstance(existing.get('truncated'), dict) else {}
+    if isinstance(incoming.get('truncated'), dict):
+        truncated.update(incoming['truncated'])
+    if truncated:
+        merged['truncated'] = truncated
+    return merged
+
+
 class ExecutionStore:
     def __init__(self, root, session, turn, credentials=None):
         self.root, self.session, self.turn, self.credentials = root, session, turn, credentials
@@ -124,6 +157,40 @@ class ExecutionStore:
                             returned(original, result, time.time(), self.credentials, partial=phase == 'update')
             self.persist()
             return self.snapshot()
+
+    def ingest(self, rows):
+        """Adopt transcript receipts this transport cannot stream itself.
+
+        The OpenAI-compatible stream and the plain CLI report no per-tool
+        lifecycle, so without this the journal holds progress only. The journal
+        is the only place that keeps a whole-turn order, so an adopted call gets
+        the same timeline entry a streamed one would have produced.
+        Returns True when callers should publish a new snapshot.
+        """
+        changed = False
+        with self.lock:
+            for row in rows if isinstance(rows, list) else []:
+                row_id = row.get('id') if isinstance(row, dict) else None
+                if not isinstance(row_id, str) or not row_id:
+                    continue
+                existing = self.rows.get(row_id)
+                if existing is None:
+                    adopted = dict(row)
+                    self.order += 1
+                    adopted['order'] = self.order
+                    self.rows[row_id] = adopted
+                    self.timeline.append({'id': row_id, 'type': 'operation',
+                                          'operationId': row_id, 'order': self.order})
+                    self.timeline = self.timeline[-500:]
+                    changed = True
+                    continue
+                merged = adopt(existing, row)
+                if merged != existing:
+                    self.rows[row_id] = merged
+                    changed = True
+            if changed:
+                self.persist()
+        return changed
 
     def finish(self):
         with self.lock:
