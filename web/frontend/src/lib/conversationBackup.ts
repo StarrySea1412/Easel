@@ -20,6 +20,7 @@ export interface BackupMessage {
 }
 
 export interface BackupSession {
+  conversationType?: ChatSession['conversationType'];
   title: string;
   created: number;
   archived?: boolean;
@@ -142,6 +143,7 @@ function validateBackup(value: unknown): ConversationBackup {
     });
     return {
       title,
+      ...(['general', 'account-analysis', 'content-analysis', 'content-generation'].includes(String(session.conversationType)) ? { conversationType: session.conversationType as ChatSession['conversationType'] } : {}),
       created: session.created,
       ...(session.archived !== undefined ? { archived: booleanField(session.archived, `${path}.archived`) } : {}),
       ...(session.incomplete !== undefined ? { incomplete: booleanField(session.incomplete, `${path}.incomplete`) } : {}),
@@ -198,6 +200,7 @@ export function createConversationBackup(
     const importedIncomplete = 'backupIncomplete' in session && session.backupIncomplete === true;
     exported.push({
       title: session.title,
+      ...(session.conversationType || session.analysisContext ? { conversationType: session.analysisContext?.kind || session.conversationType } : {}),
       created: session.created,
       ...(session.archived !== undefined ? { archived: session.archived } : {}),
       ...(session.pendingTurnId || snapshot !== undefined || importedIncomplete ? { incomplete: true } : {}),
@@ -235,6 +238,7 @@ export function createImportedSessions(backup: ConversationBackup, existingIds: 
     usedIds.add(id);
     return {
       id,
+      ...(session.conversationType ? { conversationType: session.conversationType } : {}),
       title: session.title,
       created: session.created,
       ...(session.archived !== undefined ? { archived: session.archived } : {}),

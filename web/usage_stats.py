@@ -78,8 +78,38 @@ def normalize_usage(usage: object) -> dict:
     # Preserve that provenance instead of claiming it is a provider invoice.
     cost = data.get('cost')
     cost_usd = _number(cost.get('total'), integer=False) if isinstance(cost, dict) else None
-    return dict(zip(FIELDS, (input_tokens, output_tokens, cache_read, cache_write,
-                            reasoning, total, cost_usd)))
+    result = dict(zip(FIELDS, (input_tokens, output_tokens, cache_read, cache_write,
+                              reasoning, total, cost_usd)))
+    separate = 'input' in data or 'cache_read_input_tokens' in data or 'cache_creation_input_tokens' in data
+    # Preserve compatibility totals, but do not use a lower-bound Pi/Anthropic
+    # input as a cache-ratio denominator when a cache component is unknown.
+    result['cacheInputComplete'] = not separate or (cache_read is not None and cache_write is not None)
+    raw_counts = [data[k] for k in ('input', 'input_tokens', 'prompt_tokens', 'cacheRead', 'cacheWrite',
+                  'cache_read_input_tokens', 'cache_creation_input_tokens') if k in data]
+    raw_counts += [input_details['cached_tokens']] if 'cached_tokens' in input_details else []
+    result['cacheCountsInvalid'] = any(value is not None and _number(value) is None for value in raw_counts)
+    return result
+
+
+def cache_reuse(calls):
+    eligible, missing, invalid, zero, inputs, reads = 0, 0, 0, 0, 0, 0
+    for call in calls:
+        input_tokens, read, write = (call.get(key) for key in ('inputTokens', 'cacheReadTokens', 'cacheWriteTokens'))
+        if call.get('cacheCountsInvalid') or any(value is not None and _number(value) is None for value in (input_tokens, read, write)):
+            invalid += 1
+        elif input_tokens is None or read is None or call.get('cacheInputComplete') is False:
+            missing += 1
+        elif read > input_tokens or (write is not None and read + write > input_tokens):
+            invalid += 1
+        elif input_tokens == 0:
+            zero += 1
+        else:
+            eligible += 1
+            inputs += input_tokens
+            reads += read
+    return {'ratio': reads / inputs if inputs else None, 'eligibleRecords': eligible, 'totalRecords': len(calls),
+            'inputTokens': inputs, 'readTokens': reads, 'missingRecords': missing, 'invalidRecords': invalid,
+            'zeroInputRecords': zero, 'unit': 'usage_events' if any(row.get('engine') == 'codex' for row in calls) else 'requests'}
 
 
 def summarize(calls: list[dict]) -> dict:
@@ -97,6 +127,7 @@ def summarize(calls: list[dict]) -> dict:
         performance[source] = {'calls': len(eligible), 'outputTokensPerSecond':
                                round(sum(call['outputTokens'] for call in eligible) * 1000 / window, 3) if window > 0 else None}
     result['performance'] = performance
+    result['cacheReuse'] = cache_reuse(calls)
     return result
 
 
@@ -309,7 +340,7 @@ def collect_usage(project_root: Path, state_dir: Path, web_sessions_dir: Path,
         for path, web_id in sources.items():
             try:
                 stat = path.stat()
-                signature = f'{stat.st_mtime_ns}:{stat.st_size}'
+                signature = f'cache-v2:{stat.st_mtime_ns}:{stat.st_size}'
                 previous = db.execute('SELECT signature, malformed FROM sources WHERE path=?', (str(path),)).fetchone()
                 if previous and previous[0] == signature:
                     if previous[1]:

@@ -21,7 +21,7 @@ from content_analysis_professional import ADVANCED_METRICS, build_professional, 
 
 PLATFORMS = ('xiaohongshu', 'douyin', 'kuaishou', 'zhihu', 'weixin-channels', 'bilibili', 'wechat-oa')
 METRICS = ('views', 'likes', 'comments', 'collects', 'shares')
-REVIEW_RULE_VERSION = 2
+from easel.analysis_evidence import REVIEW_RULE_VERSION, account_material_hash, material_hash
 METHOD = '仅分析所选账号已导入的作品样本；指标不跨平台比较，不把缺失补零，不把相关性当因果。材料分析覆盖正文、真实评论、封面文字与逐字稿；只引用实际提供的文字，不推断图像、视频画面或算法偏好。'
 
 
@@ -402,19 +402,6 @@ class Store:
                 raise ValueError('账号材料已更改，请重新请求跨作品解读')
             db.execute('INSERT OR REPLACE INTO account_insights VALUES(?,?,?,?)',
                        (platform, account_id, expected, json.dumps(result, ensure_ascii=False)))
-
-
-def account_material_hash(contents):
-    values = [(c['id'], material_hash(c)) for c in sorted(contents, key=lambda c: c['id'])]
-    return hashlib.sha256(json.dumps([VERSION, values], ensure_ascii=False).encode()).hexdigest()
-
-
-def material_hash(content):
-    selected = {k: content.get(k) for k in ('id', 'title', 'body', 'coverText', 'transcript', 'comments', 'metrics', 'period', 'tags', 'format', 'paid', 'snapshotAt', 'publishedAt', 'identity')}
-    selected['advancedMetrics'] = {key: (content.get('advancedMetrics') or {}).get(key) for key in ADVANCED_METRICS}
-    # Older stored interpretations did not pass the current material/quantity
-    # checks. Preserve them in SQLite, but never expose them as current reviews.
-    return hashlib.sha256(json.dumps([REVIEW_RULE_VERSION, selected], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
 def summarize(contents):

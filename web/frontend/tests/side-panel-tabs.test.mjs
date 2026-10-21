@@ -60,6 +60,18 @@ test('analysis composer presents the snapshot as a material card and preserves t
   assert.match(textarea.value,/改进建议/);
   assert.equal(getChatDraft('analysis-card').text,markdown,'presentation does not discard the original persisted draft');
   const card=view.container.querySelector('[aria-label="作品分析材料"]');
+  const toggle=card.querySelector('[aria-controls]');
+  const details=document.getElementById(toggle.getAttribute('aria-controls'));
+  assert.equal(toggle.getAttribute('aria-expanded'),'false');
+  assert.equal(details.hidden,true,'material details start collapsed');
+  assert.ok(card.querySelector('[aria-label="查看分析材料"]'),'full material stays available while collapsed');
+  await view.click(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'),'true');
+  assert.equal(details.hidden,false);
+  assert.equal(textarea.value.includes('改进建议'),true);
+  await view.click(toggle);
+  assert.equal(details.hidden,true);
+  assert.equal(getChatDraft('analysis-card').text,markdown,'folding does not rewrite the draft or snapshot');
   assert.match(card.textContent,/Creator/);assert.match(card.textContent,/抖音/);assert.match(card.textContent,/1 篇作品/);
   assert.match(card.textContent,/关于镜头语言的作品/);assert.equal(card.querySelector('pre'),null);
   assert.equal(view.container.querySelector('.suggestions'),null,'analysis offers relevant actions instead of general chat suggestions');

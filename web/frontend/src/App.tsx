@@ -776,6 +776,7 @@ export default function App() {
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
     kind?: 'breakdown',
+    purpose?: 'content-generation',
   ) => {
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
     if (cur?.importedFromBackup) return false;
@@ -792,6 +793,7 @@ export default function App() {
         const base = truncateAt != null ? s.messages.slice(0, truncateAt) : s.messages;
         const updated = {
           ...s,
+          ...(purpose && !s.analysisContext && !['account-analysis', 'content-analysis'].includes(s.conversationType || '') ? { conversationType: purpose } : {}),
           messages: [...base, {
             role: 'user',
             content: visible,
@@ -867,7 +869,7 @@ export default function App() {
         || streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]
         || getChatQueue(sessionId).items.length) throw new Error('原对话状态已变化，请重新打开编辑。');
       const original = remapEditedMessage(plan.original, result.attachments);
-      const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine,
+      const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine, conversationType: source.analysisContext?.kind || source.conversationType,
         title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
           { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
             ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) }
@@ -958,8 +960,9 @@ export default function App() {
   const handleUseTopic = useCallback((title: string) => {
     const prompt = `围绕当前热点「${title}」：先判断它适不适合我的账号赛道；若合适，给 2-3 个差异化的二创角度，并把你最推荐的那条写成可直接发布的文案初稿。`;
     const target = mergeTarget();
-    if (target) { setCurrentPage('chat'); sendUserAndStream(target.id, prompt); return; }
+    if (target) { setCurrentPage('chat'); sendUserAndStream(target.id, prompt, [], undefined, undefined, [], {}, undefined, undefined, undefined, 'content-generation'); return; }
     const ns = createSession(selectedPersona || undefined);
+    ns.conversationType = 'content-generation';
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
@@ -971,6 +974,7 @@ export default function App() {
     const t = text.trim();
     if (!t || gatewayStatus !== 'connected') return false;
     const ns = createSession(selectedPersona || undefined);
+    ns.conversationType = 'content-generation';
     const skills = [...selectedSkills];
     const requirements = requirementsForSelection(skillRequirements, skills);
     // The new composer must be able to display the same selection that is sent.
@@ -1010,6 +1014,7 @@ export default function App() {
   const handleImagePromptSkill = useCallback((skill: string, input: string): boolean => {
     if (!skill.trim() || !input.trim()) return false;
     const created = createSession(selectedPersona || undefined);
+    created.conversationType = 'content-generation';
     created.title = `提示词灵感 · ${displayName(skill)}`;
     if (!writeSelectedSkills(created.id, [skill])) return false;
     setChatDraftText(created.id, input);
@@ -1564,7 +1569,7 @@ export default function App() {
       case 'agent-office':
         return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
-        return <ProfilePage persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
+        return <ProfilePage key={selectedPersona} persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} onSource={id=>{const source=sessionsRef.current.find(item=>item.id===id);if(!source||source.importedFromBackup||outputSessionDeleted(id)){showToast('原对话已删除或不在当前记录中','info');return;}handleSessionSelect(id);}} />;
       case 'settings':
         return <SettingsPanel onAssessUpdate={handleQuickPrompt} demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
           onExport: handleExportConversations,
@@ -1603,7 +1608,7 @@ export default function App() {
       <ToastHost />
       <CreationWorkspaceHost studio={imageStudio} video={videoStudio} receipts={publishReceipts} sessions={sessions} persona={selectedPersona}
         onPromptSkill={handleImagePromptSkill}
-        onOpenChat={handleSessionSelect} onNewChat={()=>{const session=createSession(selectedPersona || undefined);setSessions(previous=>{const next=[session,...previous];saveSessions(next);return next;});return session.id;}}
+        onOpenChat={handleSessionSelect} onNewChat={()=>{const session=createSession(selectedPersona || undefined);session.conversationType='content-generation';setSessions(previous=>{const next=[session,...previous];saveSessions(next);return next;});return session.id;}}
         onOpenSettings={()=>{setSettingsSection('image');setCurrentPage('settings');}}
         onOpenVideoSettings={()=>{setSettingsSection('video');setCurrentPage('settings');}}
         onOpenOutputs={()=>{setOutputFilter('image');setCurrentPage('outputs');}}

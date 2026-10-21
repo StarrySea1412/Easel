@@ -31,6 +31,8 @@ import { requestCreationPanel, takeCreationPanel } from '../lib/creationWorkspac
 import ChatBrowserPanel from './ChatBrowserPanel';
 import ChatSourcesPanel from './ChatSourcesPanel';
 import ChatPanelIcon from './ChatPanelIcon';
+import SessionPurposeIcon from './SessionPurposeIcon';
+import { sessionPurpose } from '../lib/sessionPurpose';
 import { ChatPanelFiles, ChatPanelExecution } from './ChatPanelTools';
 import PanelMaterialQuote from './PanelMaterialQuote';
 import { loadPanelTools, savePanelTools, PANEL_LABELS, type PanelTool } from '../lib/chatPanels';
@@ -354,7 +356,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   // start can retry its saved ID rather than creating the goal a second time.
   const isEmpty = goalEditor?.welcome ?? (session.messages.length === 0 && !runInProgress && !deliveries.items.length && !deliveries.jobs.length && !deliveries.messages.length);
   const header = <header className="chat-header">
-    <div className="chat-header-context"><span>{session.conversationType==='account-analysis'?'账号分析':session.conversationType==='content-analysis'?'作品分析':'对话'}</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty&&!session.analysisContext ? '新对话' : session.title}</h2></div>
+    <div className="chat-header-context"><SessionPurposeIcon session={session}/><span>{session.analysisContext?.kind==='account-analysis'||session.conversationType==='account-analysis'?'账号分析':session.analysisContext?.kind==='content-analysis'||session.conversationType==='content-analysis'?'作品分析':sessionPurpose(session).label}</span><span aria-hidden="true">/</span><h2 title={session.title}>{isEmpty&&!session.analysisContext ? '新对话' : session.title}</h2></div>
     <div className="chat-header-actions">
       {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
       {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}

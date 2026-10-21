@@ -1864,6 +1864,20 @@ def _valid_persona_name(name: str) -> bool:
     return valid_persona_name(name)
 
 
+def _memory_analysis_source(binding_id):
+    from easel.memory_sources import analysis_source
+    return analysis_source(OUTPUTS_DIR, binding_id, _run_ledger_root())
+
+
+def _memory_store():
+    from easel.profile_memory import MemoryStore
+    return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR, _memory_analysis_source)
+
+
+from profile_memory_routes import create_router as _memory_router
+app.include_router(_memory_router(_memory_store))
+
+
 def _persona_file_path(name: str, filename: str) -> Path:
     """校验画像名/文件名，返回 profiles/<name>/<filename> 的安全路径。"""
     if not _valid_persona_name(name):
@@ -1902,6 +1916,8 @@ async def api_persona_file_save(name: str, req: PersonaFileRequest):
     if not profile_exists(name):
         raise HTTPException(404, "画像不存在")
     fp = _persona_file_path(name, req.filename)
+    if req.filename == 'memory.md':
+        raise HTTPException(409, '请在经验沉淀中预览导入或修改条目；整文件保存不能绕过确认和版本校验。')
     tmp = fp.with_suffix(".md.tmp")
     tmp.write_text(req.content, encoding="utf-8")
     tmp.replace(fp)
@@ -1917,6 +1933,7 @@ async def api_persona_delete(name: str):
     if PROFILES_DIR.resolve() not in pd.parents or not pd.is_dir():
         raise HTTPException(404, "画像不存在")
     import shutil
+    _memory_store().purge_profile(name)
     shutil.rmtree(pd)
     return {"ok": True, "deleted": name}
 
@@ -4397,12 +4414,16 @@ def _attachment_context(req: ChatRequest) -> str:
 def _chat_message(req: ChatRequest) -> str:
     from chat_branch import history_context
     context = _attachment_context(req)
-    message = req.message.strip()
-    if context:
-        message = f"{message}\n\n{context}" if message else context
-    if not message:
+    if not req.message.strip() and not context:
         raise HTTPException(400, "消息不能为空")
-    message = history_context(req.history) + message
+    history_context(req.history)  # Keep the existing size limit; serialize as data below.
+    references = ([{'source': 'attachments', 'text': context}] if context else [])
+    if req.history:
+        references.append({'source': 'history-snapshot', 'messages': [{'role': item.role, 'content': item.content} for item in req.history]})
+    memory = _chat_memory_context(req)
+    if memory:
+        references.append({'source': 'profile-experience', **memory})
+    message = ''
     from easel.plan_progress import instructions as planning_instructions
     message += planning_instructions()
     if req.sessionId and _browser_service.has_pages(req.sessionId):
@@ -4458,7 +4479,31 @@ def _chat_message(req: ChatRequest) -> str:
     # through one provider response. This is guidance, not a claim about the
     # provider's native output limit.
     message += '\n\n' + LONG_TASK_OUTPUT_RULE
-    return _publishing_message(chat_turn_message(message, req.persona))
+    from easel.prompt_envelope import assemble
+    from easel.persona import turn_reminder
+    return assemble(req.message, policy=_publishing_message(turn_reminder()),
+                    runtime=persona_prefix(req.persona) + '\n' + message, references=references)
+
+
+def _chat_memory_context(req):
+    if not req.persona or not profile_exists(req.persona) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').is_file():
+        return None
+    platform = account = None
+    from content_analysis import Store
+    analysis_path = OUTPUTS_DIR / '_analytics' / 'workbench'
+    if req.sessionId and analysis_path.exists():
+        store = Store(analysis_path)
+        with store.connect() as db:
+            table = db.execute("SELECT 1 FROM sqlite_master WHERE name='analysis_conversations'").fetchone()
+            row = db.execute('SELECT data FROM analysis_conversations WHERE session_id=? ORDER BY rowid DESC LIMIT 1', (req.sessionId,)).fetchone() if table else None
+        if row:
+            binding = json.loads(row[0])
+            platform, account = binding['platform'], binding['accountId']
+    result = _memory_store().context(req.persona, req.message, platform, account)
+    if req.sessionId and req.turnId:
+        if not _memory_store().record_use(req.persona, req.sessionId, req.turnId, result):
+            raise HTTPException(409, '该轮已绑定其他经验版本；资料已更改，请新建一轮再发送。')
+    return result
 
 
 def _skill_configuration_context(specs: dict[str, dict]) -> str:
@@ -8703,9 +8748,10 @@ def _write_baseline_profile(name: str, form: dict) -> None:
     (pd / 'preferences.md').write_text(
         f"# 偏好与红线\n\n## 要做的\n\n{direction}\n\n## 不做的\n\n{avoid or '[待补充]'}\n\n## 合规底线\n\n{avoid or '[待补充]'}\n",
         encoding='utf-8')
-    (pd / 'memory.md').write_text(
-        f"# 经验沉淀\n\n## 内容洞察\n\n{'喜欢的内容/对标：' + likes if likes else '[待 AI 分析已收藏/点赞]'}\n\n## 踩过的坑\n\n[待积累]\n",
-        encoding='utf-8')
+    if not (pd / 'memory.md').exists():
+        (pd / 'memory.md').write_text(
+            f"# 经验沉淀\n\n## 内容洞察\n\n{'喜欢的内容/对标：' + likes if likes else '[待 AI 分析已收藏/点赞]'}\n\n## 踩过的坑\n\n[待积累]\n",
+            encoding='utf-8')
 
 
 @app.delete("/api/session/{session_key}")

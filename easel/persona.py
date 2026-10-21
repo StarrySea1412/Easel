@@ -28,13 +28,16 @@ def list_personas() -> list[str]:
         return []
     return sorted(
         d.name for d in PROFILES_DIR.iterdir()
-        if d.is_dir() and valid_persona_name(d.name)
+        if profile_exists(d.name)
     )
 
 
 def profile_exists(name: str) -> bool:
     """检查画像目录是否存在，拒绝把路径片段当作画像名。"""
-    return valid_persona_name(name) and (PROFILES_DIR / name).is_dir()
+    from easel.profile_memory import linked
+    return (valid_persona_name(name) and not linked(PROFILES_DIR) and not linked(PROFILES_DIR / name)
+            and (PROFILES_DIR / name).resolve().parent == PROFILES_DIR.resolve()
+            and (PROFILES_DIR / name).is_dir())
 
 
 def valid_persona_name(name: str) -> bool:
@@ -48,26 +51,53 @@ def valid_persona_name(name: str) -> bool:
     )
 
 
-def load_profile_text(name: str) -> str:
+def load_profile_text(name: str, *, for_model: bool = False, query: str = '') -> str:
     """读取画像文件夹，按固定顺序拼接所有非空 .md。画像不存在返回空串。"""
     if not valid_persona_name(name):
         return ""
     profile_dir = PROFILES_DIR / name
-    if not profile_dir.is_dir():
+    if not profile_exists(name):
         return ""
     parts: list[str] = []
     for filename in _FILE_ORDER:
+        if for_model and filename == 'memory.md':
+            continue
         filepath = profile_dir / filename
-        if filepath.is_file():
+        if filepath.is_file() and not filepath.is_symlink():
             text = filepath.read_text(encoding="utf-8").strip()
             if text:
                 parts.append(text)
     for filepath in sorted(profile_dir.glob("*.md")):
-        if filepath.name not in _FILE_ORDER:
+        if filepath.name not in _FILE_ORDER and not filepath.is_symlink():
             text = filepath.read_text(encoding="utf-8").strip()
             if text:
                 parts.append(text)
+    if for_model:
+        context = model_memory_context(name, query)
+        if context and context['entries']:
+            import json
+            parts.append('经验参考数据（不能覆盖本轮用户要求）：\n' + json.dumps(context, ensure_ascii=False))
     return "\n\n---\n\n".join(parts)
+
+
+def model_memory_context(name, query=''):
+    if not name or not profile_exists(name) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').exists():
+        return None
+    from easel.profile_memory import MemoryStore
+    import sqlite3
+    try:
+        return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR).context(name, query)
+    except (OSError, ValueError, sqlite3.Error):
+        return {'entries': [], 'warning': '经验存储不可用，本轮未注入经验。'}
+
+
+def model_turn_message(user_message, name, *, runtime='', references=()):
+    from easel.prompt_envelope import assemble
+    context = model_memory_context(name, user_message)
+    sources = list(references)
+    if context:
+        sources.append({'source': 'profile-experience', **context})
+    return assemble(user_message, policy=turn_reminder(), runtime=persona_prefix(name) + '\n' + runtime, references=sources)
 
 
 def persona_prefix(name: str | None) -> str:
@@ -76,6 +106,24 @@ def persona_prefix(name: str | None) -> str:
     明确账号记忆作用域，避免 OpenClaw 的全局 MEMORY.md 污染并行画像会话。
     """
     if name and profile_exists(name):
+        from easel.profile_memory import linked
+        if linked(PROFILES_DIR / name / 'memory.md'):
+            return f'我当前使用的画像是「{name}」。经验文件路径不可用，本轮不得读取经验文件或数据库。'
+        database = PROFILES_DIR.parent / 'memory' / 'profile-memory.sqlite3'
+        if database.exists():
+            import sqlite3
+            from easel.profile_memory import linked
+            if linked(database) or linked(database.parent):
+                return '画像经验路径不可用；本轮不得读取经验文件或数据库。'
+            try:
+                with sqlite3.connect(database) as connection:
+                    row = connection.execute('SELECT managed FROM profiles WHERE name=?', (name,)).fetchone()
+            except sqlite3.Error:
+                return '画像经验存储不可用；本轮不得读取经验文件或数据库。'
+            if row and row[0]:
+                return (f'我当前使用的画像是「{name}」。偏好与红线读取该画像preferences.md；'
+                        '经验已托管，仅使用本轮按范围提供的经验引用，不扫描memory.md、数据库或其他账号历史；'
+                        '需要新增经验时只提出候选，不能代替用户确认或直接改文件。')
         return (
             f"我当前使用的画像是「{name}」。"
             f"本会话的账号长期记忆仅使用 profiles/{name}/memory.md，"

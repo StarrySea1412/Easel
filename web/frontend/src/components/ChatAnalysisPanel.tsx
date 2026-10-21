@@ -8,6 +8,7 @@ import { watchWorkbenchChange } from '../lib/workbenchEvents';
 import OutputMessageContent from './OutputMessageContent';
 import AnalysisResultReport from './AnalysisResultReport';
 import PublishSpinner from './PublishSpinner';
+import { proposeMemory } from '../lib/profileMemory';
 import AnalysisEvidenceOverview from './AnalysisEvidenceOverview';
 import PlatformIcon from './PlatformIcon';
 import { IconChart, IconCopy, IconChevron, IconChat, IconImport } from './icons';
@@ -20,6 +21,8 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
   const [writing, setWriting] = useState(false);
   const [writeError, setWriteError] = useState('');
   const material = useRef<HTMLDivElement>(null);
+  const resultMaterial=useRef<HTMLDivElement>(null);
+  const [candidate,setCandidate]=useState(''),[savingMemory,setSavingMemory]=useState(false),[memoryError,setMemoryError]=useState('');
   useEffect(() => {
     if (!context) return;
     let alive = true;
@@ -42,6 +45,19 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
     catch (reason) { setWriteError(reason instanceof Error ? reason.message : '回填失败，请重试'); }
     finally { setWriting(false); }
   };
+  const extractMemory=()=>{
+    const selection=window.getSelection();
+    const selected=selection&&resultMaterial.current?.contains(selection.anchorNode)&&resultMaterial.current.contains(selection.focusNode)?selection.toString().trim():'';
+    if(!selected){setMemoryError('先在已保存的分析结果中选取一段结论，或在下方填写其中的原文片段。');setCandidate('');return;}
+    setMemoryError('');setCandidate(selected);
+  };
+  const saveMemory=async()=>{
+    if(!session.persona||!saved?.result||savingMemory)return;
+    setSavingMemory(true);setMemoryError('');
+    try{await proposeMemory(session.persona,candidate,{kind:'account',platform:context.platform,accountId:context.accountId},{type:'analysis',bindingId:context.id});setCandidate('');showToast('候选已保存，在画像「经验沉淀」确认后生效','success');}
+    catch(reason){setMemoryError(reason instanceof Error?reason.message:'保存候选失败');}
+    finally{setSavingMemory(false);}
+  };
   return <section className="chat-panel-home chat-analysis-panel" aria-label="分析辅助面板">
     <header className="analysis-panel-heading"><span className="analysis-panel-heading-icon"><IconChart size={18}/></span><div><h2>{context.kind === 'content-analysis' ? '作品分析' : '账号分析'} · {context.accountName}</h2><div className="analysis-panel-source"><PlatformIcon platform={context.platform} name={context.platform}/><span>{context.contentIds.length} 篇</span><time dateTime={context.createdAt}>{new Date(context.createdAt).toLocaleString('zh-CN')}</time></div></div></header>
     <div className="analysis-panel-actions"><button className="btn btn-sm" title="提取选中内容；未选中时提取全部材料" onMouseDown={event=>event.preventDefault()} onClick={extract}><IconCopy size={14}/>提取材料</button>{onOpenAnalysis && <button className="btn btn-sm" onClick={onOpenAnalysis}><IconChart size={14}/>查看分析结果<IconChevron size={12}/></button>}{latest && <button className="btn btn-sm" disabled={writing || Boolean(session.pendingTurnId) || saved?.stale} onClick={() => void writeback()}>{writing ? <PublishSpinner/> : <IconImport size={14}/>}<span>回填最新答复</span></button>}</div>
@@ -49,7 +65,7 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
     {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}><IconChat size={14}/>引用到分析对话</button></div>}
     {session.pendingTurnId && <span role="status" aria-label="分析执行中"><PublishSpinner /></span>}
     {saved?.stale && <p className="ca-caption">来源材料已更新，本对话保留历史快照；重新提取后可生成新分析。</p>}
-    {saved?.result && <AnalysisResultReport result={saved.result}/>}
+    {saved?.result && <><div ref={resultMaterial}><AnalysisResultReport result={saved.result}/></div><div className="ca-material-quote"><button className="btn btn-sm" disabled={saved.stale||!session.persona||savingMemory} onMouseDown={event=>event.preventDefault()} onClick={extractMemory}>选取结论加入画像</button><p>{session.persona?`保存到「${session.persona}」的待确认经验，仅适用于原平台账号。`:'先为当前对话选择画像，再保存经验。'}</p><label>候选结论（已保存结果的原文片段）<textarea rows={3} value={candidate} onChange={event=>setCandidate(event.target.value)}/></label><button className="btn btn-sm" disabled={!candidate.trim()||!session.persona||saved.stale||savingMemory} onClick={()=>void saveMemory()}>{savingMemory&&<PublishSpinner/>}保存候选</button>{memoryError&&<p role="alert" className="ca-error">{memoryError}</p>}</div></>}
     <div ref={material}><AnalysisEvidenceOverview context={context}/>
     <details><summary>原始 Markdown / JSON 材料</summary><OutputMessageContent inert content={context.markdown}/></details></div>
   </section>;

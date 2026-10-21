@@ -1,3 +1,11 @@
+## 0.13.0 · 2026-10-21 · Scoped profile memory / 画像记忆管理
+
+- Add weighted cache-read ratios, coverage and invalid/missing counters to existing usage groups. / 原用量分组内增加加权缓存占比及有效、缺失、异常样本数。
+- Add one SQLite experience service for Web and CLI/Skill; explicit legacy import, pending proposals, revision-bound confirmation, editing, invalidation, restore, deletion and history. / 统一经验服务，支持旧文确认导入与完整条目生命周期，账号经验按稳定ID隔离。
+- Saved analysis creates evidence-bound candidates; references are serialized separately from exact user text in the compatible OpenClaw message. / 分析提案绑定原账号及材料哈希，消息分离用户原文和引用资料。
+- Limits and deployment gates: [implementation record](docs/inference-memory-0.13.0-2026-10-21.md). No host 138 upgrade, installer publication or paid-model evaluation. / 138、安装器及真实模型效果评估未执行。
+- Distinguish analysis, generation and general chats with accessible icons; collapse composer material summaries with full material access. / 会话类型图标、默认收起的材料摘要与完整材料入口。
+
 ## 0.12.0 · 2026-10-21 · Publishing receipts page / 独立发布回执页
 
 - Add sidebar/creation/notification navigation, refreshable deep links, search and shared platform/state selectors; retain verification, SMS and notification controls. / 新增侧栏、创作导航及通知入口，支持刷新后回到指定回执、搜索与共享筛选控件，保留核实/短信/通知设置。

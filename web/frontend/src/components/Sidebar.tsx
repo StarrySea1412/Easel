@@ -16,6 +16,7 @@ import SidebarMoreMenu from './SidebarMoreMenu';
 import AppVersion from './AppVersion';
 import SessionActionsMenu, { SessionPinIcon } from './SessionActionsMenu';
 import SessionHoverCard from './SessionHoverCard';
+import SessionPurposeIcon from './SessionPurposeIcon';
 import { Sk } from './Skeleton';
 import {sessionStatuses} from '../lib/sessionStatus';
 import type {SessionStatusKind} from '../lib/sessionStatus';
@@ -289,7 +290,7 @@ export default function Sidebar({
         <div className="session-row-content">{state&&<span className={`session-status-badge is-${state.kind}`} title={`${state.label}：${state.detail}`} aria-label={state.kind==='running'?'正在对话':state.kind==='stopping'?'正在停止':state.label}>
           {state.kind==='running'||state.kind==='stopping'?<IconLoader size={10} strokeWidth={2.2} className="session-running-indicator"/>:<span className="session-status-dot" aria-hidden="true" />}
           <span className="session-status-label">{state.label}</span>
-        </span>}<button className="session-item-title session-select" title="单击打开 · 双击重命名（F2）" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }} onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); startRename(s); }}>{s.title}</button></div>
+        </span>}<button className="session-item-title session-select" title="单击打开 · 双击重命名（F2）" aria-current={currentPage === 'chat' && s.id === activeSessionId ? 'page' : undefined} onPointerEnter={event=>{if(event.pointerType!=='touch')openHover(s,event.currentTarget);}} onFocus={event=>openHover(s,event.currentTarget)} onBlur={event=>{if(!(event.relatedTarget as HTMLElement)?.closest('.session-hover-card'))setHoveredSession(null);}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setHoveredSession(null);}if(event.key==='F2'){event.preventDefault();startRename(s);}}} onClick={(e) => { e.stopPropagation(); selectSession(s.id); }} onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); startRename(s); }}><SessionPurposeIcon session={s}/><span className="session-title-text">{s.title}</span></button></div>
         {!isArchived && <button type="button" className={`session-quick-pin${s.pinnedAt?' is-pinned':''}`} aria-label={`${s.pinnedAt?'取消置顶':'置顶'}对话：${s.title}`} title={s.pinnedAt?'取消置顶':'置顶'} onPointerEnter={()=>setHoveredSession(null)} onClick={event=>{event.stopPropagation();pinFocusId.current=s.id;onSessionPin(s.id,!s.pinnedAt);}}><SessionPinIcon unpin={Boolean(s.pinnedAt)}/></button>}
         <SessionActionsMenu session={s} onPin={() => { setHoveredSession(null);pinFocusId.current = s.id; onSessionPin(s.id, !s.pinnedAt); }}
           onRename={() => startRename(s)} onArchive={() => onSessionArchive(s.id, !isArchived)} onDelete={() => onSessionDelete(s.id)} />

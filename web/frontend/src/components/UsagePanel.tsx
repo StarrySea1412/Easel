@@ -6,6 +6,7 @@ import '../styles/usage.css';
 import UsagePriceEditor from './UsagePriceEditor';
 import ActivitySkeleton from './ActivitySkeleton';
 import ProjectUsageDashboard, {type UsageDashboardData} from './ProjectUsageDashboard';
+import CacheReuseMetric, {type CacheReuse} from './CacheReuseMetric';
 
 const METRICS = [
   ['totalTokens', '总 Token'], ['inputTokens', '输入（含缓存）'], ['outputTokens', '输出'],
@@ -15,7 +16,7 @@ const METRICS = [
 type Metric = typeof METRICS[number][0];
 type Counts = Record<Metric, number | null>;
 type Summary = Counts & { calls: number; reportedCalls: number; missingCalls: number; coverage: Record<Metric, number> & { estimatedCostUsd?: number };
-  estimatedCostUsd?: number | null; performance?: Record<string, { calls: number; outputTokensPerSecond: number | null }> };
+  cacheReuse?:CacheReuse; estimatedCostUsd?: number | null; performance?: Record<string, { calls: number; outputTokensPerSecond: number | null }> };
 type Call = Counts & { id: string; timestamp: string; model: string; provider: string;
   channelId?: string; channelName?: string; channelEndpoint?: string | null; channelSource?: string;
   durationMs?: number | null; firstTokenMs?: number | null; outputTokensPerSecond?: number | null;
@@ -79,11 +80,12 @@ function MetricCards({ summary, compact=false, simple=false, full=false }: { sum
   if (simple || full) return <div className={`usage-metrics${full ? ' is-full' : ' is-simple'}`}>
     <div className="usage-metric primary"><span><IconChat size={16} />调用次数</span><strong>{summary.calls.toLocaleString('zh-CN')}</strong><small>服务记录的调用或用量事件</small></div>
     {cards(full ? [...METRICS] : METRICS.filter(([field]) => ['totalTokens', 'recordedCostUsd'].includes(field)))}
+    {full&&<CacheReuseMetric value={summary.cacheReuse}/>}
   </div>;
-  if (compact) return <div className="usage-metrics is-compact">{cards([...METRICS])}</div>;
+  if (compact) return <div className="usage-metrics is-compact">{cards([...METRICS])}<CacheReuseMetric value={summary.cacheReuse}/></div>;
   return <>
     <div className="usage-metrics">{cards(METRICS.filter(([field])=>['totalTokens','inputTokens','outputTokens','recordedCostUsd'].includes(field)))}</div>
-    <details className="usage-extra-metrics"><summary>缓存与推理用量</summary><div className="usage-metrics is-compact">{cards(METRICS.filter(([field])=>['cacheReadTokens','cacheWriteTokens','reasoningTokens'].includes(field)))}</div></details>
+    <details className="usage-extra-metrics"><summary>缓存与推理用量</summary><div className="usage-metrics is-compact">{cards(METRICS.filter(([field])=>['cacheReadTokens','cacheWriteTokens','reasoningTokens'].includes(field)))}<CacheReuseMetric value={summary.cacheReuse}/></div></details>
   </>;
 }
 

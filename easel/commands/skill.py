@@ -22,7 +22,7 @@ from pathlib import Path
 from easel.paths import child_env, data_root
 
 from easel.openclaw_cmd import openclaw_base_cmd
-from easel.persona import persona_prefix, profile_exists
+from easel.persona import model_turn_message, profile_exists
 from easel.timeouts import TIMEOUT_PRODUCE
 from easel.direct_api import read_settings
 
@@ -176,7 +176,8 @@ def cmd_skill(args) -> int:
 
     from easel.imported_skills import skill_path
     path = skill_path(SKILLS_DIR, data_root(PROJECT_ROOT), skill_full)
-    message = f"{persona_prefix(args.profile)}请读取技能 {path} 并执行 /{skill_full}，内容如下：\n\n{content}"
+    message = model_turn_message(f'请读取技能 {path} 并执行 /{skill_full}', args.profile,
+                                 references=[{'source': 'skill-input', 'text': content}])
 
     # 统一给足超时：制作类 SKILL（生视频/多镜合成）可能跑很久，取安全上界
     timeout = TIMEOUT_PRODUCE

@@ -3,6 +3,7 @@ import { useChatSources } from '../hooks/useChatSources';
 import type { ChatSession } from '../lib/store';
 import { IconCompass, IconFile, IconSearch, IconSources, IconRefresh } from './icons';
 import '../styles/chat-sources.css';
+import MemoryUsage from './MemoryUsage';
 
 export default function ChatSourcesPanel({ session, active, onLocate }: { session: ChatSession; active: boolean; onLocate: (turnId: string) => void }) {
   const [query, setQuery] = useState('');
@@ -31,6 +32,7 @@ export default function ChatSourcesPanel({ session, active, onLocate }: { sessio
         <div className="source-evidence">{page.evidence.map(item => <span key={item.id} title={item.query}>{item.label}{['failed', 'denied', 'stopped'].includes(item.status) ? ' · 未成功' : item.status === 'running' ? ' · 执行中' : item.status === 'unconfirmed' ? ' · 结果待确认' : ''}{item.turnId && <button type="button" onClick={() => onLocate(item.turnId!)}>第 {turnNumbers.get(item.turnId) || '—'} 轮对话</button>}</span>)}</div>
       </div></article>)}</div>}
     {attachments.length > 0 && <div className="source-section"><h3>对话附件 <span>{attachments.length}</span></h3>{attachments.map(file => <article className="source-page" key={file.id}><span className="source-item-icon" aria-hidden="true"><IconFile size={18}/></span><div className="source-item-body"><strong>{file.name}</strong><small>已附加到对话{file.turnId && <button type="button" onClick={() => onLocate(file.turnId!)}>查看对话</button>}</small></div></article>)}</div>}
+    {session.persona&&!session.importedFromBackup&&<MemoryUsage key={`${session.id}/${session.persona}`} name={session.persona} sessionId={session.id} refreshKey={session.pendingTurnId||String(session.messages.length)}/>}
     {!pages.length && !attachments.length && !sources.loading && <div className="source-empty"><IconSources size={26}/><h3>{term ? '没有匹配的网页或附件' : '还没有记录网页来源'}</h3><p>{term ? '试试其他标题、域名或检索词。' : 'Agent 检索或读取网页后会显示在这里。回答中普通提到的链接不会标成已检索来源。'}</p></div>}
     {sources.more && <button type="button" className="source-load-more" onClick={sources.loadMore} disabled={sources.loading}>查看更早 10 轮来源</button>}
     {tools.length > 0 && <details className="source-tools"><summary>使用过的工具 · {sources.tools.reduce((count, tool) => count + tool.calls, 0)} 次调用</summary>{tools.map(tool => <div key={tool.name}><IconSources size={15}/><span>{tool.name}</span><small>{tool.calls} 次{tool.failed ? ` · ${tool.failed} 次未成功` : ''}</small></div>)}</details>}

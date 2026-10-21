@@ -5,6 +5,8 @@ import type { PersonaFile, AccountAnalytics } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconProfile, IconUserPlus, IconUserRound, IconEdit, IconTrash } from './icons';
 import { showToast as notifyFailure } from '../lib/toast';
+import ProfileMemoryManager from './ProfileMemoryManager';
+import { publishWorkbenchChange } from '../lib/workbenchEvents';
 
 // 粉丝量级：把粉丝数映射成人话档位（画像里“粉丝量级”一栏要的是量级而非精确值）
 function fanTier(n: number): string {
@@ -56,6 +58,7 @@ interface ProfilePageProps {
   persona: string;
   onNewProfile: () => void;
   onDeleted: (name: string) => void;
+  onSource?: (id: string) => void;
 }
 
 const DIM_META: Record<string, { label: string; icon: string }> = {
@@ -67,7 +70,7 @@ const DIM_META: Record<string, { label: string; icon: string }> = {
   'memory.md': { label: '经验沉淀', icon: 'ME' },
 };
 
-export default function ProfilePage({ persona, onNewProfile, onDeleted }: ProfilePageProps) {
+export default function ProfilePage({ persona, onNewProfile, onDeleted, onSource }: ProfilePageProps) {
   const [files, setFiles] = useState<PersonaFile[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
@@ -101,6 +104,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
     setSavingFile(filename);
     try {
       await savePersonaFile(persona, filename, drafts[filename] ?? '');
+      publishWorkbenchChange({domain:'profile-memory',name:persona,reason:'profile-field'});
       setFiles((prev) => prev.map((f) => f.filename === filename ? { ...f, content: drafts[filename] ?? '' } : f));
       showToast(`已保存 ${DIM_META[filename]?.label || filename} ✓`);
     } catch (e) {
@@ -123,6 +127,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
       const base = files.find((f) => f.filename === filename)?.content ?? '';
       const merged = mergeWechatBlock(base, buildWechatBlock(a));
       await savePersonaFile(persona, filename, merged);
+      publishWorkbenchChange({domain:'profile-memory',name:persona,reason:'profile-field'});
       // 同步更新 files（视图）与 drafts（若正在编辑也一致），无需手动保存
       setFiles((prev) => prev.map((f) => f.filename === filename ? { ...f, content: merged } : f));
       setDrafts((p) => ({ ...p, [filename]: merged }));
@@ -187,7 +192,7 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
       {loading ? (
         <div className="loading"><div className="spinner" />加载中…</div>
       ) : (
-        files.map((f) => {
+        files.filter(f => f.filename !== 'memory.md').map((f) => {
           const meta = DIM_META[f.filename] || { label: f.filename, icon: 'MD' };
           const dirty = editing && (drafts[f.filename] ?? '') !== f.content;
           return (
@@ -227,6 +232,8 @@ export default function ProfilePage({ persona, onNewProfile, onDeleted }: Profil
           );
         })
       )}
+
+      <ProfileMemoryManager key={persona} name={persona} onSource={onSource}/>
 
       {toast && <div className="toast ok"><span className="toast-icon">✓</span>{toast}</div>}
     </div>

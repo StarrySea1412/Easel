@@ -27,7 +27,7 @@ from easel.openclaw_cmd import openclaw_base_cmd
 from easel.paths import child_env, data_root
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
-from easel.persona import chat_turn_message
+from easel.persona import model_turn_message as chat_turn_message
 from easel.persona import load_profile_text
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, history_path,
                               read_settings, stream_chat)
@@ -163,7 +163,7 @@ def cmd_chat(_args) -> int:
         print("  API 直连模式（文字问答；/exit 退出）\n")
         system = SYSTEM_PROMPT
         if selected_persona:
-            system += "\n\n当前画像：\n" + load_profile_text(selected_persona)
+            system += "\n\n当前画像参考资料：\n" + load_profile_text(selected_persona, for_model=True)
         async def reply(message):
             async for kind, text in stream_chat(
                     read_settings(), message, system=system,
@@ -269,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # install（安装状态查看/管理；阶段执行走 setup 向导与发行版引导器）
     register_install(sub)
+    from easel.commands.memory import register as register_memory
+    register_memory(sub)
 
     args = parser.parse_args(argv)
     try:

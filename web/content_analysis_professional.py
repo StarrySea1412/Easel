@@ -8,8 +8,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-ADVANCED_METRICS = ('impressions', 'completions', 'averageWatchSeconds', 'durationSeconds',
-                    'followersAttributed', 'coins', 'danmaku')
+from easel.analysis_evidence import ADVANCED_METRICS
 PRIMARY_METRICS = {'xiaohongshu': 'collects', 'bilibili': 'collects', 'douyin': 'shares',
                    'kuaishou': 'comments', 'weixin-channels': 'shares', 'zhihu': 'collects', 'wechat-oa': 'shares'}
 LABELS = {'views': '播放/阅读', 'likes': '点赞/赞同', 'comments': '评论', 'collects': '收藏', 'shares': '分享',

@@ -1,7 +1,7 @@
 """Transparent platform editorial lenses, never claims about recommendation algorithms."""
 from copy import deepcopy
 
-VERSION = '2026-10-08'
+from easel.analysis_evidence import VERSION
 # Each rule requires actual supplied text before it can create a diagnostic.
 _RULES = {
     'xiaohongshu': ('小红书', [('body', '搜索问题与收藏用途', '检查正文是否给出可检索的具体问题、适用条件和方便保存后照做的步骤。'), ('comments', '笔记评论中的使用需求', '把真实评论里的使用情境整理成补充说明，保留条件与例外，不外推搜索需求规模。')]),

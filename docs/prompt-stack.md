@@ -16,7 +16,9 @@ Layer 4: SKILL           被触发时加载 SKILL.md + 按需读取 references/ 
 > - **CLI `easel chat`**（多轮交互）：选画像后通过所选底座的原有消息通道注入同一前缀，画像随原生 session 历史留存供后续 turn 沿用（超长会话被压缩后可能丢，属已知取舍）。
 > - 三入口的画像逻辑统一收敛到 `easel/persona.py`（`list_personas` / `load_profile_text` / `persona_prefix`）。
 
-> **记忆作用域**：Easel 不使用任何引擎工作区的全局 `MEMORY.md` 承载账号知识；OpenClaw 的该文件由同步脚本保持为空。账号长期记忆只存放在 `profiles/<当前画像>/memory.md`，每个会话按自身绑定的画像直接读取。通用模式不读取任何画像记忆，也不通过动态改写全局文件切换画像。
+> **记忆作用域（0.13.0）**：Easel 不使用任何引擎工作区的全局 `MEMORY.md` 承载账号知识；OpenClaw 的该文件由同步脚本保持为空。确认导入后的经验存于数据根 `memory/profile-memory.sqlite3`，先按画像、平台账号、状态和来源过滤，再匹配当前任务。托管 `memory.md` 只作画像级兼容投影，Agent不直接扫描；Web、CLI与Skill复用服务。未托管旧文可查看，通用模式不借用画像经验。详情见[记忆接入记录](inference-memory-0.13.0-2026-10-21.md)。
+
+> **每轮消息（easel-turn/2）**：内部组装分为版本化策略、运行差异、JSON引用资料和不改写的用户原文，末尾保留原提醒。附件、历史、分析与经验均是引用数据，历史角色标签不提升权限。当前OpenClaw仍接收单字符串，这不是独立developer/system通道，也不是防提示注入或防exec绕写的证明；尚未启用减少稳定规则/尾提醒的优化。
 
 共享源文件位于 `agents/workspace/`。OpenClaw 沿用 `bash agents/sync.sh` 同步到它的隔离工作区；
 Codex 沿用 `developerInstructions`，OpenCode / 通用 ACP 沿用消息前缀注入方式，加载同一组 Markdown。

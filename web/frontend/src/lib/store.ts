@@ -32,7 +32,7 @@ export interface ChatMessage extends ChatTiming {
 }
 
 export interface ChatSession {
-  conversationType?: 'general' | 'account-analysis' | 'content-analysis';
+  conversationType?: 'general' | 'account-analysis' | 'content-analysis' | 'content-generation';
   analysisContext?: AnalysisBinding;
   editBranch?: { sourceSessionId: string; prefixLength: number };
   engine?: 'openclaw' | 'codex';
@@ -205,7 +205,7 @@ function decodeSessions(raw: string): ChatSession[] {
       created: typeof value.created === 'number' && Number.isFinite(value.created) ? value.created : 0,
     };
     session.engine = value.engine === 'codex' ? 'codex' : 'openclaw';
-    if (['general','account-analysis','content-analysis'].includes(String(value.conversationType))) session.conversationType = value.conversationType as ChatSession['conversationType'];
+    if (['general','account-analysis','content-analysis','content-generation'].includes(String(value.conversationType))) session.conversationType = value.conversationType as ChatSession['conversationType'];
     if (isAnalysisBinding(value.analysisContext) && value.analysisContext.sessionId === id && value.importedFromBackup !== true) session.analysisContext = value.analysisContext;
     if (record(value.editBranch) && typeof value.editBranch.sourceSessionId === 'string'
       && Number.isInteger(value.editBranch.prefixLength) && Number(value.editBranch.prefixLength) >= 0

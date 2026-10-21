@@ -73,7 +73,7 @@
 
 制作流程：凝练 Profile → 明确主题/规格/风格/受众/红线/输出 → 按 SKILL 产出 → 自检 → 仅失败时返工一次。
 
-- Profile 读取 `identity.md`、`style.md`、`audience.md`、`preferences.md`、`memory.md`；制作层不读 `platforms.md`，并原样遵守 preferences 红线。
+- Profile 读取 `identity.md`、`style.md`、`audience.md`、`preferences.md`；经验使用本轮按范围提供的引用，制作层不读 `platforms.md`，并原样遵守 preferences 红线。
 - 一个项目使用 `outputs/<主题>/`；成品放项目目录根，中间素材放其 `assets/`，测试放 `outputs/_scratch/`。
 - 主题必须是人类可读的具体项目名，禁止 `xhs/test/tmp/output`等泛名，禁止在 `outputs/` 根目录散落内容文件。写入前先用 `python skills/shared/scripts/output_paths.py outputs/<主题>/<文件>` 校验；脚本自带该门禁时不重复调用。
 - 制作前明确 SKILL、主题、规格、风格、受众、结构、红线、特殊要求和输出路径；不要只复述用户原话就开工。
@@ -110,16 +110,16 @@ python skills/builtin/skill-publish-log/scripts/log.py record --platform <平台
 - 对话附件由后端按会话隔离，并在本轮消息中提供唯一的“系统附件清单”。只能使用清单明确列出的路径，禁止扫描、枚举或猜测 `outputs/_inbox/` 中的其他文件。需要纳入项目时把清单文件复制到 `outputs/<项目>/assets/` 后使用，保留 inbox 原件以支持安全重试；不要向用户复述上传过程、附件清单或内部路径。
 - 每个画像是项目根 `profiles/<画像>/` 下的一组 `identity/style/audience/platforms/preferences/memory.md`，代表一个跨平台人设。
 - 发现、策划、发布、归因读取六维；制作只凝练制作相关维度。未指定画像时走通用模式，可提示指定画像效果更好。
-- 项目根 `profiles/<当前画像>/memory.md` 是该会话唯一的账号长期记忆；每轮以消息中声明的当前画像为准，不从其他画像推断或借用经验。
+- 托管经验由 Easel 记忆服务统一保存；只使用本轮提供的经验条目与版本，不扫描数据库、其他画像或账号历史。账号经验必须匹配平台和稳定账号ID，跨平台经验由用户明确选择范围。未托管的旧文件可查看，不能直接改成新服务的有效经验。
 - 工作区根目录的全局 `MEMORY.md` 在 Easel 中不承载用户画像、账号经验或创作红线：不要读取、写入或调用 memory 工具检索它。通用模式不使用任何画像的 `memory.md`。
-- 不得为了切换画像而改写、复制或软链接全局 `MEMORY.md`；并行会话必须各自直接读取所绑定画像目录，避免互相覆盖。
+- 不得为了切换画像而改写、复制或软链接全局 `MEMORY.md`；并行会话分别使用所绑定画像与本轮经验引用。
 
 任务结束时，只有出现真正可复用的偏好、红线、制作技巧或效果归因，才凝练 1–3 条并询问是否写入画像：
 
 值得沉淀的内容包括：用户明确偏好/禁区、反复认可的封面/开场/配音/字幕方法，以及发布后验证有效或失效的选题和结构。一次性规格、临时参数和流水账不沉淀。
 
 1. 给出拟写内容和目标文件（preferences/style/memory）。
-2. 用户同意后调用 `skill-profile-manager` 增量更新，去重合并，不覆盖无关内容。
+2. 经验由 `skill-profile-manager` 调用 Easel 记忆服务提出候选；在画像“经验沉淀”确认后才生效。不得通过 exec、文件工具、整文件PUT或伪造请求直接激活经验。偏好与红线仍按用户明确要求增量更新对应维度。
 3. 用户拒绝、忽略或未指定画像则不写；不记录 Key、token、路径和一次性参数。
 
 ## 行为边界

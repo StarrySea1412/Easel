@@ -215,7 +215,8 @@ test('activity opens full project usage without a selected local session and kee
   await act(async () => root.render(createElement(ActivityPage, {sessions:[],activeSessionId:null,streams:{}})));
   assert.equal(new URL(urls[0], window.location.href).searchParams.get('sessionId'), '');
   assert.match(container.querySelector('.activity-project-usage').textContent, /1,200/);
-  assert.equal(container.querySelector('.usage-metrics.is-full').children.length, 8);
+  assert.equal(container.querySelector('.usage-metrics.is-full').children.length, 9);
+  assert.match(container.querySelector('.usage-metrics.is-full').textContent, /缓存读取占比/);
   assert.equal(container.querySelector('.usage-breakdown'), null, 'full project metrics do not require expansion');
   assert.equal(container.querySelector('.activity-session-picker'), null, 'no local conversation is required for project totals');
 });

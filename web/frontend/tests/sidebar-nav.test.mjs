@@ -65,6 +65,26 @@ test('recent conversations show shaped skeleton rows during the first remote rea
   assert.match(view.container.textContent, /已读取的对话/);
 });
 
+test('conversation purpose icons distinguish analysis, generation and ordinary chat independently of titles and status', async t => {
+  const view = await fixture(t, { sessions: [
+    session('analysis', '同一个标题', { conversationType: 'account-analysis' }),
+    session('generation', '同一个标题', { conversationType: 'content-generation', archived: true }),
+    session('general', '分析报告生成', {}),
+  ], activeSessionId: 'analysis', runningSessions: ['analysis'] });
+  await view.clickLabel('对话');
+  const analysis = view.container.querySelector('[data-purpose="analysis"]');
+  assert.equal(analysis.getAttribute('aria-label'), '分析资料 · 账号分析');
+  assert.ok(analysis.closest('.session-row-content').querySelector('.session-status-badge.is-running'));
+  assert.ok(analysis.closest('.session-row-content').querySelector('.session-select'));
+  assert.equal(view.container.querySelector('[data-purpose="general"]').getAttribute('title'), '普通对话');
+  const archived = [...view.container.querySelectorAll('button')].find(button => button.textContent.includes('已归档'));
+  await act(async () => archived.click());
+  assert.equal(view.container.querySelector('[data-purpose="generation"]').getAttribute('aria-label'), '生成内容');
+  await view.remount();
+  await view.clickLabel('对话');
+  assert.ok(view.container.querySelector('[data-purpose="analysis"]'), 'remount keeps metadata based icons');
+});
+
 test('a background session refresh keeps existing rows instead of replacing them with skeletons', async t => {
   const view = await fixture(t, { sessions: [session('existing', '已有对话')], activeSessionId: 'existing', sessionsLoading: true });
   await view.clickLabel('对话');

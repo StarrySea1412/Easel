@@ -139,6 +139,7 @@ test('image prompt Skill starts a separate unsent conversation with a linked ima
   const created = v.harness.pages['对话'].session;
   assert.notEqual(created.id, sourceSession.id);
   assert.match(created.title, /提示词灵感/); assert.equal(created.messages.length, 0);
+  assert.equal(created.conversationType, 'content-generation');
   assert.deepEqual(JSON.parse(v.values.get(`easel:selected-skills:${created.id}`)), ['ecom-details-image']);
   assert.equal(JSON.parse(v.values.get(`easel:chat-draft:${created.id}`)).text, '完善咖啡主图提示词，3:4');
   assert.equal(v.values.get('easel:chat-draft:original'), oldDraft);
@@ -439,6 +440,8 @@ test('dashboard transfers selected skills and creation requirements before sendi
   assert.equal(accepted, true);
   const run = harness.streams[0]; const id = run.args[2];
   assert.notEqual(id, sourceSession.id);
+  assert.equal(harness.sidebar.sessions.find(s => s.id === id).conversationType, 'content-generation');
+  assert.equal(JSON.parse(values.get('easel_sessions')).find(s => s.id === id).conversationType, 'content-generation');
   assert.deepEqual(run.args[15], ['card-quote']);
   assert.deepEqual(run.args[16], { 'card-quote': '本次创作保留引用' });
   assert.deepEqual(JSON.parse(values.get(`easel:selected-skills:${id}`)), ['card-quote']);
@@ -447,6 +450,22 @@ test('dashboard transfers selected skills and creation requirements before sendi
   assert.deepEqual(harness.sidebar.sessions.find(s => s.id === id).messages[0].selectedSkills, ['card-quote']);
   assert.deepEqual(harness.sidebar.sessions.find(s => s.id === id).messages[0].skillRequirements, run.args[16]);
   assert.equal(harness.pages['对话'].session.id, id);
+});
+
+for (const previousType of [undefined, 'content-generation', 'account-analysis']) test(`topic creation persists its purpose while retaining analysis identity (${previousType || 'ordinary'})`, async t => {
+  const source = { ...sourceSession, conversationType: previousType };
+  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([source]), easel_active_session: source.id });
+  await act(async () => harness.pages['工作台'].onUseTopic('隔离创作选题'));
+  assert.equal(harness.streams.length, 1);
+  assert.equal(harness.streams[0].args[2], source.id, 'topic merges into the selected session');
+  const expected = previousType === 'account-analysis' ? previousType : 'content-generation';
+  assert.equal(harness.pages['对话'].session.conversationType, expected);
+  await act(async () => { harness.streams[0].args[20]('隔离测试已完成'); harness.streams[0].args[4](); });
+  const persisted = JSON.parse(values.get('easel_sessions'));
+  assert.equal(persisted.find(item => item.id === source.id).conversationType, expected);
+  const reopened = await fixture(t, { easel_sessions: JSON.stringify(persisted), easel_active_session: source.id });
+  assert.equal(reopened.harness.sidebar.sessions.find(item => item.id === source.id).conversationType, expected, 'local decoder retains purpose after reopening');
+  assert.equal(reopened.harness.streams.length, 0, 'reopening never sends a request');
 });
 
 for (const refused of ['easel:selected-skills:', 'easel:skill-requirements:']) test(`dashboard does not create or send a task when ${refused} cannot persist`, async t => {
