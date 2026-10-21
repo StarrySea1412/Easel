@@ -917,8 +917,9 @@ export interface AccountAnalytics {
   metrics_title?: string;
   metricsNeedsRefresh?: boolean;
   notes: { title: string; url: string; cover?: string; stat?: string }[];
+  growthSchema?: string;
   growth: Record<'last' | 'day' | 'week' | 'month' | 'year',
-    { followers: number | null; likes: number | null; posts: number | null; since_days: number | null } | null>;
+    { followers: number | null; likes: number | null; posts: number | null; since_days: number | null; baseline_at?: number; current_at?: number } | null>;
   fetched_at: number;
   warning?: string;
 }

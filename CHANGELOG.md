@@ -1,3 +1,9 @@
+## 0.10.2 · 2026-10-21 · Analysis switching and growth / 分析切换与账号增长
+
+- Analysis tabs gain icons, active states, headings and keyboard navigation while retaining workspaces. / 分析视图增加图标、选中态、标题与键盘切换，保留工作区。
+- Persist identity-scoped overview history; switch five real growth windows with baseline dates, missing comparisons and zero changes. Upgrade caches through read-only snapshots without collecting again. / 按账号身份保存历史，五时段切换真实增量与基准时间，区分缺失和持平，只读升级旧缓存不重新采集。
+- Local/source only; host 138 and installers unchanged. Browser acceptance pending due to denied access. / 仅本机和源码，138与安装器未改，浏览器访问受限待验收。[验证记录](docs/account-growth-windows-2026-10-21.md)。
+
 ## 0.10.1 · 2026-10-21 · Analysis report reading and latest control / 分析报告阅读与返回底部
 
 - Hide the return control when the conversation is already at the bottom, including active runs and pending reconnects; show it only while scrolled away. / 对话已到底部时隐藏返回按钮，包括执行中与等待重连；仅离开底部时显示。

@@ -51,7 +51,8 @@ export function restoreAnalyticsSnapshot(platform: string, data: AccountAnalytic
   data = sanitizeAccountMetrics(data);
   if (expectedScope !== analyticsScope(platform) || expectedScope === '["",""]' || data.platform !== platform || !data.loggedIn) return;
   const previous = readAnalyticsCache(platform);
-  if (previous && previous.fetched_at >= data.fetched_at) return;
+  if (previous && (previous.fetched_at > data.fetched_at ||
+      (previous.fetched_at === data.fetched_at && previous.growthSchema === data.growthSchema))) return;
   entries.set(platform, {scope:expectedScope, at:Date.now(), data});
   try { sessionStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(entries))); } catch { /* In-memory fallback. */ }
   changed(platform);

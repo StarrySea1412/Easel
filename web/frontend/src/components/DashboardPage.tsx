@@ -103,7 +103,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
   const whoamiMap = useAccountIdentities();
   const accountChecks = useAccountChecks();
   const identitySignature = JSON.stringify(Object.entries(whoamiMap).map(([p, e]) => [p, e.identityKey, e.accountId]));
-  useEffect(() => { if (anaSel && !readAnalyticsCache(anaSel) && !analyticsPending(anaSel)) void restoreAccountAnalytics(anaSel).catch(() => {}); }, [anaSel, identitySignature]);
+  useEffect(() => { if (anaSel && readAnalyticsCache(anaSel)?.growthSchema !== 'account-history-v1' && !analyticsPending(anaSel)) void restoreAccountAnalytics(anaSel).catch(() => {}); }, [anaSel, identitySignature]);
   useEffect(() => {
     const restore = () => {
       const restored: Record<string, AccountAnalytics> = {};
@@ -383,6 +383,8 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
             const WIN: [typeof anaWin, string][] = [
               ['last', '较上次'], ['day', '较昨日'], ['week', '较上周'], ['month', '较上月'], ['year', '较去年'],
             ];
+            const windowLabel = WIN.find(([key]) => key === anaWin)![1];
+            const windowData = d && typeof d === 'object' ? d.growth?.[anaWin] : null;
             return (
               <>
                 <div className="ana-plats">
@@ -424,13 +426,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
                       <div className="ana-col ana-col-main">
                         <div className="ana-overview">
                           {([['粉丝', 'followers'], ['获赞', 'likes'], ['作品', 'posts']] as const).map(([label, key]) => {
-                            const w = d.growth?.[anaWin] ?? null;
-                            const g = w ? growthInfo(w[key]) : null;
-                            return <div key={key} className="ana-stat"><div className="ana-stat-label">{label}</div><div className="ana-stat-val" title={d[key] == null ? '平台未提供' : d[key]!.toLocaleString('zh-CN')}>{fmtNum(d[key])}</div>{g && <div className="ana-stat-delta" style={{ color: g.color }}>{g.text}</div>}</div>;
+                            const g = windowData ? growthInfo(windowData[key]) : null;
+                            return <div key={key} className="ana-stat"><div className="ana-stat-label">{label}</div><div className="ana-stat-val" title={d[key] == null ? '平台未提供' : `累计${label}：${d[key]!.toLocaleString('zh-CN')}`}>{fmtNum(d[key])}</div><div className="ana-stat-delta" style={{ color: g?.color || 'var(--text-tertiary)' }}><span className="ana-stat-window">{windowLabel}</span> {g?.text || (windowData ? '未提供' : '暂无对比')}</div></div>;
                           })}
                         </div>
                         <div className="ana-wins" role="group" aria-label="增长对比时段">{WIN.map(([k, lab]) => <button key={k} type="button" aria-pressed={anaWin === k} className={`ana-win ${anaWin === k ? 'on' : ''}`} onClick={() => setAnaWin(k)}>{lab}</button>)}</div>
-                        <p className="ana-wins-note" title="增长依赖跨对应时间段采集的历史快照；短时间重复刷新不会生成历史增长。">{d.growth?.[anaWin]?.since_days != null ? `对比 ${d.growth[anaWin]!.since_days} 天前` : '暂无该时段对比'}</p>
+                        <p className="ana-wins-note" role="status" aria-live="polite" aria-atomic="true">{windowLabel} · {windowData?.baseline_at ? `对比 ${new Date(windowData.baseline_at * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : windowData?.since_days != null ? `对比 ${windowData.since_days} 天前` : '暂无该时段对比'}</p>
                         {d.metricsNeedsRefresh && <section className="ana-refresh-metrics"><h3 className="ana-sub">平台指标</h3><button type="button" className="link-btn" disabled={analyticsPending(anaSel)} onClick={() => runAna(anaSel, true)} title="旧指标来源无法确认，保留账号资料与作品，重新读取平台账号总览">重新采集指标</button></section>}
                         {!!d.metrics?.length && <div className="ana-statistics">
                         <AnalysisMetricChart title={d.metrics_title || '平台指标'} caption={d.metrics_source?.from && d.metrics_source.to ? d.metrics_source.from + ' — ' + d.metrics_source.to : '平台返回的汇总指标'} data={metricData(d.metrics)} />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchAccounts, restoreAccountAnalytics, type AccountItem } from '../lib/api';
 import { accountConnection, hydrateAccountIdentities, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
@@ -10,8 +10,17 @@ import type { AnalysisChatRequest } from '../lib/analysisConversations';
 import PublishSpinner from './PublishSpinner';
 import ContentAnalysisWorkbench, { type AnalysisSection } from './ContentAnalysisWorkbench';
 import ContentAnalysisDemo from './ContentAnalysisDemo';
-import { IconChart } from './icons';
+import { IconChart, IconFile, IconCompass, IconTarget, IconInfo } from './icons';
 import '../styles/content-analysis.css';
+import '../styles/analysis-view-tabs.css';
+
+const ANALYSIS_VIEWS = [
+  { id:'review', label:'先看结论', Icon:IconChart },
+  { id:'works', label:'逐篇看作品', Icon:IconFile },
+  { id:'themes', label:'找内容方向', Icon:IconCompass },
+  { id:'experiments', label:'下一步怎么做', Icon:IconTarget },
+  { id:'method', label:'数据说明', Icon:IconInfo },
+] as const;
 
 const PLATFORMS = [
   { id: 'xiaohongshu', name: '小红书', format: '图文 · 短视频', source: '本人笔记管理页 / 用户导出记录', scope: '逐篇赞、藏、评与标题标签；可导入本人记录，查看建议依据并加入选题。', limit: '关键词结果来自已有标题与标签，不代表完整正文诊断；采集时间不等于发布时间。' },
@@ -35,6 +44,19 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   const [requestedSource, setDataSource] = useState<'demo' | 'mine'>('mine');
   const dataSource = demoEnabled ? requestedSource : 'mine';
   const [section, setSection] = useState<AnalysisSection>('review');
+  const viewId = useId();
+  const viewPanel = useRef<HTMLDivElement>(null);
+  const viewTabs = useRef(new Map<AnalysisSection, HTMLButtonElement>());
+  const previousView = useRef(section);
+  const activeView = ANALYSIS_VIEWS.find(view => view.id === section)!;
+  useEffect(() => {
+    if (previousView.current === section) return;
+    previousView.current = section;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = viewPanel.current?.animate?.([{ opacity:.55 }, { opacity:1 }], { duration:160, easing:'ease-out' });
+    void animation?.finished?.catch(() => {});
+    return () => animation?.cancel();
+  }, [section]);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const identities = useAccountIdentities();
   const [loading, setLoading] = useState(true);
@@ -93,17 +115,22 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       </div>
       {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}</>}
 
-      <nav className="ca-view-nav" aria-label="分析视图">
-        <button type="button" aria-current={section === 'review' ? 'page' : undefined} onClick={() => setSection('review')}>先看结论</button>
-        <button type="button" aria-current={section === 'works' ? 'page' : undefined} onClick={() => setSection('works')}>逐篇看作品</button>
-        <button type="button" aria-current={section === 'themes' ? 'page' : undefined} onClick={() => setSection('themes')}>找内容方向</button>
-        <button type="button" aria-current={section === 'experiments' ? 'page' : undefined} onClick={() => setSection('experiments')}>下一步怎么做</button>
-        <button type="button" aria-current={section === 'method' ? 'page' : undefined} onClick={() => setSection('method')}>数据说明</button>
-        <span>{dataSource === 'demo' ? '虚构样例 · 不写入我的数据' : '仅分析实际返回的数据'}</span>
-      </nav>
+      <div className="ca-view-nav" role="tablist" aria-label="分析视图" onKeyDown={event => {
+        const index = ANALYSIS_VIEWS.findIndex(view => viewTabs.current.get(view.id) === event.target);
+        if (index < 0) return;
+        const next = event.key === 'ArrowRight' ? (index+1)%ANALYSIS_VIEWS.length : event.key === 'ArrowLeft' ? (index+ANALYSIS_VIEWS.length-1)%ANALYSIS_VIEWS.length : event.key === 'Home' ? 0 : event.key === 'End' ? ANALYSIS_VIEWS.length-1 : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        const view = ANALYSIS_VIEWS[next]; setSection(view.id);
+        const tab = viewTabs.current.get(view.id); tab?.focus(); tab?.scrollIntoView?.({ block:'nearest', inline:'nearest' });
+      }}>
+        {ANALYSIS_VIEWS.map(({id,label,Icon}) => <button type="button" role="tab" key={id} id={`${viewId}-tab-${id}`} ref={element => { if(element)viewTabs.current.set(id,element);else viewTabs.current.delete(id); }} aria-selected={section===id} aria-controls={`${viewId}-panel-${id}`} tabIndex={section===id?0:-1} onClick={() => setSection(id)}><span>{label}</span><Icon size={16}/></button>)}
+      </div>
 
+      <div ref={viewPanel} className="ca-view-panel" role="tabpanel" id={`${viewId}-panel-${section}`} aria-labelledby={`${viewId}-tab-${section}`} tabIndex={0}>
+      <header className="ca-view-heading"><activeView.Icon size={20}/><h2>{activeView.label}</h2></header>
       {dataSource === 'demo' ? <ContentAnalysisDemo section={section} onSection={setSection} onUseMyData={() => { setDataSource('mine'); setSection('review'); }} /> : <>
-      <AccountAnalyticsDetails platform={platform}/>
+      <div className="ca-review-overview" hidden={section!=='review'}><AccountAnalyticsDetails platform={platform}/></div>
       {!['xiaohongshu','bilibili','douyin'].includes(platform) && !readAnalyticsCache(platform) && !analyticsPending(platform) && <PlatformAnalysisPanel accounts={accounts.map(a => ({platform:a.platform,name:a.name,loggedIn:accountConnection(a,identities[a.platform])==='online',identity:a.identityKey||''}))} platform={platform} onPlatformChange={setPlatform} revision={0} showPlatformPicker={false} primaryAction/>}
       <ContentAnalysisWorkbench onAnalysisChat={onAnalysisChat} analyticsRunning={analyticsPending(platform)} analyticsAvailable={Boolean(readAnalyticsCache(platform))} key={platform+':'+identityScope} platform={platform} section={section} onSection={setSection} onNavigateIdeas={onNavigateIdeas}
         connected={available} sessionReady={!loading&&!error} liveAccountId={liveIdentity?.accountId} identityScope={identityScope}
@@ -133,6 +160,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         <div className="ca-method-footer"><p>上方工作台保存作品材料与观测记录，支持主题复盘、实验基线和手动回收。跨平台排名、因果归因和没有材料的视觉判断不作为结论。</p><button type="button" className="btn btn-sm" onClick={() => setSection('review')}>回到内容复盘</button></div>
       </section>}
       </>}
+      </div>
     </div>
   </div>;
 }

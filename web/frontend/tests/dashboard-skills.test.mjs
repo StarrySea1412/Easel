@@ -125,7 +125,8 @@ async function fixture(t, initial = {}) {
     else if (path.startsWith('/api/agent-office/models')) data = { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
     else if (path === '/api/settings/models/health') data = { results:[], schedules:[] };
     else if (path.startsWith('/api/settings/models/connection?')) data = { modelRef:'fixture/model',state:'unverified',channelName:'测试渠道',detail:'仅模拟配置，不发起推理' };
-    else if (initial.analytics && path.startsWith('/api/analytics/') && !path.endsWith('/platforms')) data = path.endsWith('/snapshot') ? {data:null,running:false} : await initial.analytics(path);
+    else if (path.startsWith('/api/analytics/') && path.endsWith('/snapshot')) data = {data:initial.snapshot || null,running:false};
+    else if (initial.analytics && path.startsWith('/api/analytics/') && !path.endsWith('/platforms')) data = await initial.analytics(path);
     else if (path === '/api/accounts') data = initial.accounts || [];
     else if (path === '/api/analytics/platforms') data = initial.analyticsPlatforms || [];
     else if (path.startsWith('/api/accounts/') && path.includes('/whoami')) data = {loggedIn:false,name:'',avatar:'',verified:false};
@@ -681,7 +682,7 @@ test('account analysis keeps platform icons during reverification and restores t
   assert.doesNotMatch(view.container.querySelector('.dash-grid').textContent,/让每一次发布都有反馈/);
   await act(async()=>chip().click());
   assert.match(view.container.textContent,/@Saved account/);
-  assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/douyin')),'viewing saved data does not re-scrape');
+  assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/douyin') && !path.endsWith('/snapshot')),'viewing saved data does not re-scrape');
   await view.remount();
   await act(async()=>chip().click());
   assert.match(view.container.textContent,/@Saved account/);
@@ -727,6 +728,61 @@ test('account metrics use an aligned data table and distinguish zero from missin
   await view.remount();
   assert.equal(view.container.querySelectorAll('table.ana-metrics-table tbody tr').length,6);
   assert.ok(!view.h.requests.some(([path])=>path.startsWith('/api/analytics/douyin?')));
+  sessionStorage.clear();
+});
+
+test('account growth windows change the visible deltas and comparison baseline', async t => {
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});
+  sessionStorage.clear();
+  const identity={loggedIn:true,name:'窗口账号',avatar:'',identityKey:'scope-growth',accountId:'growth-owner',verified:true,authState:'online',checkedAt:Date.now(),ts:Date.now()};
+  const growth={
+    last:{followers:1,likes:2,posts:3,since_days:.1,baseline_at:1799990000,current_at:1800000000},
+    day:{followers:11,likes:12,posts:13,since_days:1,baseline_at:1799913600,current_at:1800000000},
+    week:{followers:21,likes:22,posts:23,since_days:7,baseline_at:1799395200,current_at:1800000000},
+    month:{followers:null,likes:null,posts:null,since_days:null},
+    year:null,
+  };
+  const data={platform:'douyin',name:'抖音',nickname:identity.name,loggedIn:true,followers:100,likes:200,posts:10,following:null,notes:[],metrics:[],growth,growthSchema:'account-history-v1',fetched_at:1800000000};
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({douyin:{scope:JSON.stringify([identity.identityKey,identity.accountId]),at:Date.now(),data}}));
+  sessionStorage.setItem('easel:analytics-platform','douyin');
+  const view=await fixture(t,{accounts:[{platform:'douyin',name:'抖音',supported:true,loggedIn:true,hasLocalSession:true,identityKey:identity.identityKey}],analyticsPlatforms:[{platform:'douyin',name:'抖音',loggedIn:true}],extra:{easel_whoami:JSON.stringify({douyin:identity})}});
+  await view.render();
+  const card=()=>view.container.querySelector('[aria-label=账号分析]');
+  const buttons=()=>[...card().querySelectorAll('.ana-win')];
+  const deltaText=()=>[...card().querySelectorAll('.ana-stat-delta')].map(node=>node.textContent);
+  assert.deepEqual(deltaText(),['较上周 ▲+21','较上周 ▲+22','较上周 ▲+23']);
+  await view.click(buttons()[0]);
+  assert.deepEqual(deltaText(),['较上次 ▲+1','较上次 ▲+2','较上次 ▲+3']);
+  assert.match(card().querySelector('.ana-wins-note').textContent,/较上次 · 对比/);
+  await view.click(buttons()[1]);
+  assert.deepEqual(deltaText(),['较昨日 ▲+11','较昨日 ▲+12','较昨日 ▲+13']);
+  assert.match(card().querySelector('.ana-wins-note').textContent,/较昨日 · 对比/);
+  await view.click(buttons()[2]);
+  assert.deepEqual(deltaText(),['较上周 ▲+21','较上周 ▲+22','较上周 ▲+23']);
+  await view.click(buttons()[3]);
+  assert.deepEqual(deltaText(),['较上月 未提供','较上月 未提供','较上月 未提供']);
+  assert.match(card().querySelector('.ana-wins-note').textContent,/较上月 · 暂无该时段对比/);
+  await view.click(buttons()[4]);
+  assert.deepEqual(deltaText(),['较去年 暂无对比','较去年 暂无对比','较去年 暂无对比']);
+  assert.match(card().querySelector('.ana-wins-note').textContent,/较去年 · 暂无该时段对比/);
+  assert.equal(buttons().filter(b=>b.getAttribute('aria-pressed')==='true').length,1);
+  assert.deepEqual([...card().querySelectorAll('.ana-stat-val')].map(n=>n.textContent),['100','200','10']);
+  assert.equal(view.h.requests.filter(([path])=>path.startsWith('/api/analytics/douyin') && !path.endsWith('/snapshot')).length,0);
+  sessionStorage.clear();
+});
+
+test('a restored snapshot upgrades same-timestamp growth without collecting again', async t => {
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});
+  sessionStorage.clear();
+  const identity={loggedIn:true,name:'缓存账号',avatar:'',identityKey:'scope-growth-upgrade',accountId:'upgrade-owner',verified:true,authState:'online',checkedAt:Date.now(),ts:Date.now()};
+  const data={platform:'douyin',name:'抖音',nickname:identity.name,loggedIn:true,followers:100,likes:200,posts:10,following:null,notes:[],metrics:[],growth:{week:null},fetched_at:1800000000};
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({douyin:{scope:JSON.stringify([identity.identityKey,identity.accountId]),at:Date.now(),data}}));
+  sessionStorage.setItem('easel:analytics-platform','douyin');
+  const snapshot={...data,growthSchema:'account-history-v1',growth:{week:{followers:42,likes:0,posts:-1,since_days:7}}};
+  const view=await fixture(t,{snapshot,accounts:[{platform:'douyin',name:'抖音',supported:true,loggedIn:true,identityKey:identity.identityKey}],analyticsPlatforms:[{platform:'douyin',name:'抖音',loggedIn:true}],extra:{easel_whoami:JSON.stringify({douyin:identity})}});
+  await view.render();
+  assert.deepEqual([...view.container.querySelectorAll('.ana-stat-delta')].map(n=>n.textContent),['较上周 ▲+42','较上周 持平','较上周 ▼1']);
+  assert.deepEqual(view.h.requests.filter(([path])=>path.startsWith('/api/analytics/douyin')).map(([path])=>path),['/api/analytics/douyin/snapshot']);
   sessionStorage.clear();
 });
 

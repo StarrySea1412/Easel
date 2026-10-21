@@ -7818,7 +7818,7 @@ async def api_analytics(platform: str):
                     AnalysisStore(root / '_analytics' / 'workbench').ingest({
                         'platform': platform, 'accountId': account_id, 'name': data.get('nickname') or account_id,
                         'contents': contents}, identity='live_verified')
-            AnalyticsSnapshots(root / '_analytics').save(platform, identity, data)
+            data = AnalyticsSnapshots(root / '_analytics').save(platform, identity, data)
         return data
 
     task = asyncio.create_task(collect())
@@ -7945,7 +7945,8 @@ async def _capture_account_analytics(platform: str):
             data = sanitize_metrics(platform, data)
             from account_analysis import build_analysis
             data['analysis'] = build_analysis(platform, data)
-            # 这些旧快照仅按平台存储，无法核验是否同一账号；不能输出本人增长结论。
+            # Legacy platform JSONL cannot prove account ownership. The successful
+            # collection wrapper adds growth from identity-scoped overview history.
             data['growth'] = {window: None for window in ('last', 'day', 'week', 'month', 'year')}
         return data
     code, message = collection_failure(proc.stderr or '')

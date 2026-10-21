@@ -212,4 +212,50 @@ test('a mounted demo exits immediately when disabled and does not interrupt actu
   assert.ok(view.container.querySelector('[aria-label="内容分析演示"]'));
 });
 
+test('analysis tabs expose immediate view changes and retain the mounted workbench',async t=>{
+ globalThis.__demoAccountReads=0;
+ const Page=await loadPage();const v=await fixture(t,'review',Page,{demoEnabled:false});
+ const panel=v.container.querySelector('[role=tabpanel]');const source=v.container.querySelector('.ca-review-overview');
+ const labels=['先看结论','逐篇看作品','找内容方向','下一步怎么做','数据说明'];
+ assert.equal(v.container.querySelectorAll('[role=tab]').length,5);
+ for(const label of labels){
+  await v.click(v.button(label));
+  const current=v.container.querySelector('[role=tab][aria-selected=true]');
+  assert.equal(current.textContent,label);assert.ok(current.querySelector('svg'));
+  assert.equal(current.getAttribute('aria-controls'),panel.id);
+  assert.equal(panel.getAttribute('aria-labelledby'),current.id);
+  assert.equal(panel.querySelector('.ca-view-heading h2').textContent,label);
+  assert.equal(v.container.querySelector('[role=tabpanel]'),panel,'switching does not remount the workbench');
+  assert.equal(source.hidden,label!=='先看结论');
+ }
+ assert.equal(globalThis.__demoAccountReads,1,'local tabs must not recheck accounts or reload analysis');
+});
+
+test('analysis tabs support arrow wrap, Home/End and one keyboard entry point',async t=>{
+ globalThis.__demoAccountReads=0;
+ const Page=await loadPage();const v=await fixture(t,'review',Page,{demoEnabled:false});
+ const tabs=[...v.container.querySelectorAll('[role=tab]')];
+ const press=async key=>act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true})));
+ tabs[0].focus();await press('ArrowRight');assert.equal(document.activeElement,tabs[1]);
+ assert.equal(tabs[1].getAttribute('aria-selected'),'true');
+ await press('End');assert.equal(document.activeElement,tabs[4]);
+ await press('ArrowRight');assert.equal(document.activeElement,tabs[0]);
+ await press('ArrowLeft');assert.equal(document.activeElement,tabs[4]);
+ await press('Home');assert.equal(document.activeElement,tabs[0]);
+ assert.deepEqual(tabs.map(tab=>tab.tabIndex),[0,-1,-1,-1,-1]);
+});
+
+test('view transitions respect reduced motion and repeated clicks do not restart a transition',async t=>{
+ globalThis.__demoAccountReads=0;
+ const Page=await loadPage();const v=await fixture(t,'review',Page,{demoEnabled:false});
+ let calls=0,cancels=0;
+ const panel=v.container.querySelector('[role=tabpanel]');
+ panel.animate=()=>{calls++;return{cancel(){cancels++;}};};
+ t.mock.method(window,'matchMedia',()=>({matches:false}));
+ await v.click(v.button('逐篇看作品'));assert.equal(calls,1);
+ await v.click(v.button('逐篇看作品'));assert.equal(calls,1);
+ window.matchMedia=()=>({matches:true});
+ await v.click(v.button('数据说明'));assert.equal(calls,1);assert.equal(cancels,1);
+});
+
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
