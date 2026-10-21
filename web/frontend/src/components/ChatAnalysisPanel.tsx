@@ -6,6 +6,7 @@ import { addChatDraftQuote } from '../lib/chatDrafts';
 import { showToast } from '../lib/toast';
 import { watchWorkbenchChange } from '../lib/workbenchEvents';
 import OutputMessageContent from './OutputMessageContent';
+import AnalysisResultReport from './AnalysisResultReport';
 import PublishSpinner from './PublishSpinner';
 import AnalysisEvidenceOverview from './AnalysisEvidenceOverview';
 import PlatformIcon from './PlatformIcon';
@@ -48,7 +49,7 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
     {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}><IconChat size={14}/>引用到分析对话</button></div>}
     {session.pendingTurnId && <span role="status" aria-label="分析执行中"><PublishSpinner /></span>}
     {saved?.stale && <p className="ca-caption">来源材料已更新，本对话保留历史快照；重新提取后可生成新分析。</p>}
-    {saved?.result && <details open><summary>已回填的分析结果</summary><OutputMessageContent inert content={saved.result.markdown}/></details>}
+    {saved?.result && <AnalysisResultReport result={saved.result}/>}
     <div ref={material}><AnalysisEvidenceOverview context={context}/>
     <details><summary>原始 Markdown / JSON 材料</summary><OutputMessageContent inert content={context.markdown}/></details></div>
   </section>;

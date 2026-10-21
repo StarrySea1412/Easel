@@ -253,6 +253,9 @@ test('return to latest shows loading only while a run exists, then changes to an
   {role:'assistant',content:'回复',turnId:`latest-${number}`},
  ])};
  await v.render('latest',patch,{stream:{content:'生成中',thinking:'',activity:[]}});
+ const thread=v.container.querySelector('.chat-messages');
+ Object.defineProperties(thread,{scrollHeight:{configurable:true,value:1200},clientHeight:{configurable:true,value:400}});
+ thread.scrollTop=100;
  await v.click(v.container.querySelector('.chat-turn-navigation button'));
  let latest=v.container.querySelector('.chat-return-latest');assert.ok(latest);assert.equal(latest.classList.contains('is-running'),true);assert.ok(latest.querySelector('.chat-latest-dots'));
  await v.render('latest',patch);
@@ -260,18 +263,28 @@ test('return to latest shows loading only while a run exists, then changes to an
  await v.click(latest);assert.equal(v.container.querySelector('.chat-return-latest'),null);
 });
 
-test('running conversations retain the latest loading control at the bottom and outside the clipped input',async t=>{
+test('latest control hides at the bottom during streaming and reconnects, and returns only when scrolled away',async t=>{
  const v=await fixture(t);const patch={messages:[{role:'user',content:'正在执行'}],pendingTurnId:'pending-latest'};
  await v.render('running-latest',patch,{stream:{content:'逐步回复',thinking:'',activity:[]}});
+ assert.equal(v.container.querySelector('.chat-return-latest'),null,'short running conversations need no return button');
+ await v.type('保留草稿');
+ const thread=v.container.querySelector('.chat-messages');
+ Object.defineProperties(thread,{scrollHeight:{configurable:true,value:1200},clientHeight:{configurable:true,value:400}});
+ const scroll=async top=>act(async()=>{thread.scrollTop=top;thread.dispatchEvent(new window.Event('scroll'));});
+ await scroll(800);assert.equal(v.container.querySelector('.chat-return-latest'),null);
+ await scroll(100);
  let latest=v.container.querySelector('.chat-return-latest');
  assert.ok(latest);assert.ok(latest.querySelector('.chat-latest-dots'));
  assert.equal(latest.parentElement.className,'chat-conversation-body');
  assert.equal(v.container.querySelector('.chat-input-area .chat-return-latest'),null);
- await v.click(latest);assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'));
+ await v.click(latest);assert.equal(v.container.querySelector('.chat-return-latest'),null);
+ assert.equal(v.container.querySelector('textarea').value,'保留草稿');assert.deepEqual(v.h.sent,[]);
  await v.render('running-latest',patch);
- assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'),'pending reconnect must retain loading');
+ assert.equal(v.container.querySelector('.chat-return-latest'),null,'pending reconnect at the bottom stays hidden');
+ await scroll(100);assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'));
+ await scroll(800);assert.equal(v.container.querySelector('.chat-return-latest'),null,'manual scroll to bottom also hides it');
  await v.render('other');assert.equal(v.container.querySelector('.chat-return-latest'),null);
- await v.render('running-latest',patch);assert.ok(v.container.querySelector('.chat-return-latest .chat-latest-dots'));
+ await v.render('running-latest',patch);assert.equal(v.container.querySelector('.chat-return-latest'),null);
  await v.render('running-latest',{messages:[...patch.messages,{role:'assistant',content:'已完成'}]});
  assert.equal(v.container.querySelector('.chat-return-latest'),null);
 });

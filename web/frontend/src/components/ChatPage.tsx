@@ -322,12 +322,14 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   const navigationTarget=useRef<number|null>(null);
   const lastScrollTop=useRef(0);
   const [following,setFollowing]=useState(true);
+  const [atBottom,setAtBottom]=useState(true);
   const [currentTurn,setCurrentTurn]=useState(0);
   const nodes=useMemo(()=>chatTurnNodes(session.messages, session.importedFromBackup ? '' : stream?.content),[session.messages,session.importedFromBackup,stream?.content]);
   const previousCount=useRef(nodes.length);
   const syncPosition=useCallback(()=>{
     const element=scrollRef.current;if(!element)return;
     const atBottom=isChatAtBottom(element.scrollTop,element.scrollHeight,element.clientHeight);
+    setAtBottom(atBottom);
     followLatest.current=shouldFollowChatScroll(followLatest.current,lastScrollTop.current,element.scrollTop,element.scrollHeight,element.clientHeight,navigationTarget.current!==null);
     lastScrollTop.current=element.scrollTop;setFollowing(followLatest.current);
     if(navigationTarget.current!==null){setCurrentTurn(navigationTarget.current);return;}
@@ -335,12 +337,13 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     const offsets=nodes.map(node=>(turnRefs.current.get(node.messageIndex)?.getBoundingClientRect().top??origin)-origin+element.scrollTop);
     setCurrentTurn(Math.max(0,activeTurnFromOffsets(offsets,element.scrollTop,atBottom)));
   },[nodes]);
-  const goLatest=()=>{navigationTarget.current=null;followLatest.current=true;setFollowing(true);const element=scrollRef.current;if(element){element.scrollTo({top:element.scrollHeight,behavior:'instant'});lastScrollTop.current=element.scrollTop;}setCurrentTurn(Math.max(0,nodes.length-1));};
+  const goLatest=()=>{navigationTarget.current=null;followLatest.current=true;setFollowing(true);setAtBottom(true);const element=scrollRef.current;if(element){element.scrollTo({top:element.scrollHeight,behavior:'instant'});lastScrollTop.current=element.scrollTop;}setCurrentTurn(Math.max(0,nodes.length-1));};
   const jumpTo=(index:number)=>{
     if(index<0||index>=nodes.length)return;
     const element=scrollRef.current,anchor=turnRefs.current.get(nodes[index].messageIndex);if(!element||!anchor)return;
     navigationTarget.current=index;followLatest.current=false;setFollowing(false);setCurrentTurn(index);
     element.scrollTo({top:anchor.getBoundingClientRect().top-element.getBoundingClientRect().top+element.scrollTop-22,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+    setAtBottom(isChatAtBottom(element.scrollTop,element.scrollHeight,element.clientHeight));
     anchor.focus({preventScroll:true});
   };
   const isImported = session.importedFromBackup === true;
@@ -365,13 +368,15 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   useLayoutEffect(()=>{
     if(nodes.length>previousCount.current){navigationTarget.current=null;followLatest.current=true;}
     previousCount.current=nodes.length;
-    if(!isEmpty&&followLatest.current){const element=scrollRef.current;if(element){element.scrollTop=element.scrollHeight;lastScrollTop.current=element.scrollTop;}setFollowing(true);setCurrentTurn(Math.max(0,nodes.length-1));}
+    const element=scrollRef.current;
+    if(!isEmpty&&followLatest.current){if(element){element.scrollTop=element.scrollHeight;lastScrollTop.current=element.scrollTop;}setFollowing(true);setCurrentTurn(Math.max(0,nodes.length-1));}
+    if(element)setAtBottom(isChatAtBottom(element.scrollTop,element.scrollHeight,element.clientHeight));
   },[session.messages,stream?.content,stream?.thinking,stream?.activity,stream?.stillWorking,isEmpty,nodes.length]);
   useEffect(()=>{
     const thread=messagesEndRef.current?.parentElement,element=scrollRef.current;if(!thread||!element||typeof ResizeObserver==='undefined')return;
     const observer=new ResizeObserver(()=>{
       if(followLatest.current){element.scrollTop=element.scrollHeight;lastScrollTop.current=element.scrollTop;}
-      else syncPosition();
+      syncPosition();
     });
     observer.observe(thread);observer.observe(element);return()=>observer.disconnect();
   },[isEmpty,syncPosition]);
@@ -498,7 +503,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
           <div ref={messagesEndRef} />
         </div>
       </div>{nodes.length>3&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}
-        {(runInProgress || !following) && <button type="button" className={`chat-return-latest${runInProgress ? ' is-running' : ''}`} aria-label={runInProgress?'返回最新进度':'回到最新一轮'} title={runInProgress?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{runInProgress && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
+        {!atBottom && <button type="button" className={`chat-return-latest${runInProgress ? ' is-running' : ''}`} aria-label={runInProgress?'返回最新进度':'回到最新一轮'} title={runInProgress?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{runInProgress && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
       </div>
 
       {!isImported && <div className="chat-input-area">

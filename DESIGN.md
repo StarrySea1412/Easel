@@ -39,6 +39,10 @@
 
 ## 维护
 
+### 报告与界面改动的设计流程（用户于2026-10-21追加）
+
+先读取现有设计规范与共享组件，再调研相关成熟产品/官方设计系统；在对应任务文档中记录实际看过的来源、当前问题、信息层级与布局决策，之后再写界面代码。报告应先区分结论、证据、行动与局限，再选择文字、表格或图表，不把完整Markdown直接塞进面板，也不添加没有真实数据依据的装饰图。实现后在真实页面检查完整页与窄面板、长内容、空态和交互；未实际生效的视口不能标记为通过。此流程不要求用户再批准一遍已经授权的修改。
+
 全局颜色 token 位于 `web/frontend/src/styles/index.css` 开头；工作台适配位于同文件末尾 `Easel Studio` 区域。发布、账号与设置页面优先引用同一组 token，避免硬编码旧米黄或棕色。侧栏布局位于 `sidebar-shell.css`，侧栏弹层位于 `sidebar-more-menu.css` 与 `sidebar-account-popover.css`，对话工作区位于 `chat-workspace.css`；这些文件仅消费全局颜色，不各自定义调色板。新增首页类为 `dash-heading`、`dash-eyebrow`、`dash-date`、`dash-composer`、`dash-launch-label`，其余沿用既有类。后续如拆分样式，应统一处理加载顺序，防止旧页面规则反向覆盖这些适配。
 
 生图蒙版交互的功能对照与许可依据见 [AI Image Studio 比较](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/image-studio-comparison-2026-10-08.md)。真实浏览器已检查桌面侧栏四种组合、刷新恢复、焦点及五个“更多”入口，也检查了 390×844 窄屏的侧栏、技能弹层、九个热榜来源图标、蒙版工具与共享选择控件；“标准”笔刷尺寸的窄屏换行已修正并核对截图。技能导读已验证键盘入口，独立鼠标悬停仅有模拟 DOM 覆盖。这里记录设计与实现原则；逐项浏览器、演示数据和真实本地后端证据以 [2026-10-08 验收记录](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md) 为准，需求对应关系见 [用户要求清单](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/user-requirements-2026-10-08.md)。

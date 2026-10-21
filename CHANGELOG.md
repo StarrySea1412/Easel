@@ -1,3 +1,9 @@
+## 0.10.1 · 2026-10-21 · Analysis report reading and latest control / 分析报告阅读与返回底部
+
+- Hide the return control when the conversation is already at the bottom, including active runs and pending reconnects; show it only while scrolled away. / 对话已到底部时隐藏返回按钮，包括执行中与等待重连；仅离开底部时显示。
+- Share a research-informed report reader between the analysis panel and full page: separate existing conclusions and evidence, fold technical receipts, retain the original text and contain wide tables. / 辅助面板与完整分析页共用经过设计调研的报告阅读组件：结论与证据分节，技术回执折叠，保留完整原文，表格独立滚动。设计依据与验收见 [报告设计记录](docs/analysis-report-design-2026-10-21.md)。
+- Local frontend fix only; host 138 and installers unchanged. / 仅本机前端修复，138与安装器未更新。
+
 ## 0.10.0 · 2026-10-21 · Creation collaboration and analysis / 创作协作与分析
 
 - Recover offline local OpenClaw, refresh model capability and clear stale send guards without extra buttons. / 本机OpenClaw离线自动恢复，恢复后刷新模型能力并清理旧报错，删除发送提示区多余按钮。
