@@ -6,6 +6,6 @@
 - 51项定向回归通过，覆盖底部执行、等待重连、切换会话、执行完成、上翻后回底、只读备份与键盘轮次导航；DOM测试并不等同真实模型执行。
 - TypeScript/Vite构建通过；lint退出0，保留既有warning；git diff --check通过。
 - 真实7880已加载0.9.2：打开已有长对话、上翻后可见圆形向下按钮；DOM命中检查确认未被遮挡，点击后scrollHeight-clientHeight-scrollTop小于2且按钮隐藏。截图outputs/qa-085/chat-latest-092-browser.png。运行中三点及pending重连状态由组件测试验证，本轮未发起真实推理；未另验窄屏和触摸浏览器，不将静态样式检查视为设备验收。
-- Git回执待提交推送后记录；平台资料、profile锁及QA输出不提交。
+- 功能提交43cca2ba9636abddbc49292179a3cc6f270292ff已推送starry/codex/upstream-merge-0.8.0，ls-remote核对SHA一致，保留dd086377祖先关系；平台资料、profile锁及QA输出未提交。
 
 版本单一来源pyproject.toml=0.9.2，前端从该来源构建；仅本机7880与starry隔离分支交付。138、main及安装器不变，无真实模型推理或发布。历史任务清单保留，后端历史全量归类尚未完成。当前无管理员认证，无需新增管理员账号。
