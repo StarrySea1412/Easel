@@ -56,9 +56,10 @@ import {
   saveActiveId,
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
+import { rememberOutputReferences, markOutputSessionDeleted, outputSessionDeleted } from './lib/outputReferences';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
-import { addChatDraftQuote, clearChatDraft, setChatDraftText } from './lib/chatDrafts';
+import { addChatDraftQuote, clearChatDraft, getChatDraft, setChatDraftText } from './lib/chatDrafts';
 import { analysisChatMessage, defaultAnalysisRequest } from './lib/analysisComposer';
 import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispatchQueuedMessage, dispatchSelectedQueuedMessage, pauseChatQueue, clearChatQueue } from './lib/chatQueue';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
@@ -163,6 +164,7 @@ export default function App() {
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState('');
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsWithBreakdown());
+  useEffect(() => { rememberOutputReferences(sessions); }, [sessions]);
   const [sessionsLoading, setSessionsLoading] = useState(() => loadSessions().length === 0);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
@@ -1296,6 +1298,26 @@ export default function App() {
     setCurrentPage('chat', true);
   }, [sessions]);
 
+  const handleOutputConversation = useCallback(async (id: string, file: {path:string;name:string}) => {
+    let target=sessionsRef.current.find(session=>session.id===id);
+    if (!target) { showToast(outputSessionDeleted(id) ? '原对话已删除' : '未找到原对话，可能已删除或不在当前记录中', 'info'); return false; }
+    if (target.importedFromBackup) { showToast('这是一份只读对话备份，无法继续操作', 'info'); return false; }
+    if (target.archived && !await confirmModal('原对话已归档，恢复后继续？', {confirmLabel:'恢复并打开'})) return false;
+    target=sessionsRef.current.find(session=>session.id===id);
+    if (!target || outputSessionDeleted(id)) { showToast('原对话已删除', 'info'); return false; }
+    if (target.importedFromBackup) return false;
+    if (target.archived) {
+      const next=sessionsRef.current.map(session=>session.id===id ? {...session,archived:false} : session);
+      if (!saveSessions(next)) { showToast('恢复对话未能保存，请重试', 'error'); return false; }
+      sessionsRef.current=next; setSessions(next);
+    }
+    const name=file.name.replace(/[[\]\\]/g, '\\$&');
+    const quote=`内容库文件：[${name}](/api/media/${file.path.split('/').map(encodeURIComponent).join('/')})`;
+    if (!getChatDraft(id).quotes?.includes(quote)) addChatDraftQuote(id, quote);
+    setActiveSessionId(id); setSelectedPersona(target.persona || ''); setCurrentPage('chat', true);
+    return true;
+  }, [setCurrentPage]);
+
   const handleSessionDelete = useCallback(async (id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
     if (!target?.importedFromBackup && target?.messages.some(m => m.taskGoalId || m.taskRunId)) {
@@ -1311,6 +1333,8 @@ export default function App() {
 
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
     creationSessionDeleted(id);
+    rememberOutputReferences(sessionsRef.current);
+    markOutputSessionDeleted(id);
     removeSessionEvents(id);
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
@@ -1485,7 +1509,7 @@ export default function App() {
       case 'skills':
         return <SkillPage onOpenChat={handleSkillChat} />;
       case 'outputs':
-        return <OutputsPage initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { selectCreation('image',null); videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { selectCreation('image',null); videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
+        return <OutputsPage sessions={sessions} sessionsLoading={sessionsLoading} onOpenConversation={handleOutputConversation} initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { selectCreation('image',null); videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { selectCreation('image',null); videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':

@@ -1,3 +1,9 @@
+## 0.11.0 · 2026-10-21 · Content library organization / 内容库来源与整理
+
+- Return to a delivery-backed source or a clearly labeled legacy reference conversation; preserve unsent drafts and add the file as a deduplicated quote. Handle deletion, archive restoration and read-only backups. / 按真实交付记录返回来源对话，旧文件明确标记引用对话；保留未发送草稿，去重加入文件引用，区分已删除、归档恢复和只读备份。
+- Persist nested classification folders with create, rename, delete, file assignment and unfiled views. Keep physical file URLs intact and retain files when classifications are deleted. / 持久化嵌套分类文件夹，支持创建/改名/删除/文件归类及未归类视图，不移动文件，删除分类保留原文件。
+- Source implementation delivered; local activation and browser visual acceptance pending, host 138 and installers unchanged. / 隔离源码已实现，本机生效及浏览器视觉待验，138及安装器未更新。[调研与验收](docs/output-library-organization-2026-10-21.md)。
+
 ## 0.10.4 · 2026-10-21 · Analysis material layout / 分析材料卡适配
 
 - Separate account title, metadata and material action; use container width for narrow columns, retain full title on hover and remove repeated labels. / 账号标题、平台信息与查看材料操作分行；按容器宽度适配窄分栏，标题省略且悬停保留全称，移除重复标签。

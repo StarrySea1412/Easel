@@ -1,0 +1,46 @@
+.library-layout { display:grid; grid-template-columns:200px minmax(0,1fr); gap:24px; max-width:1160px; margin:20px auto 0; }
+.library-main { min-width:0; }
+.library-main .gallery-toolbar { margin-top:0; }
+.library-sidebar { align-self:start; min-width:0; padding-right:12px; border-right:1px solid var(--border); }
+.library-folder-select { display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:36px; padding:7px 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+.library-folder-select>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.library-folder-select>svg { flex:none; width:1.3em; height:1.3em; }
+.library-folder-select small { margin-left:auto; font-size:10px; color:var(--text-tertiary); font-variant-numeric:tabular-nums; }
+.library-folder-select:hover,.library-folder-row:hover { background:var(--surface-2); }
+.library-folder-select.active,.library-folder-row.active { background:var(--accent-soft); color:var(--text); }
+.library-folder-row.active .library-folder-select { color:var(--text); }
+.library-sidebar-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:18px 8px 6px; color:var(--text-tertiary); font-size:11px; }
+.library-folder-row { position:relative; border-radius:var(--radius-sm); }
+.library-folder-actions { display:none; position:absolute; right:2px; top:3px; align-items:center; gap:0; padding-left:6px; background:var(--surface-2); border-radius:var(--radius-sm); }
+.library-folder-actions .icon-btn { width:26px; height:30px; padding:4px; }
+.library-folder-row:hover .library-folder-actions,.library-folder-row:focus-within .library-folder-actions { display:flex; }
+.library-folder-row:hover .library-folder-select,.library-folder-row:focus-within .library-folder-select { padding-right:90px; }
+.library-file-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; margin-top:8px; padding-top:7px; border-top:1px solid var(--border); }
+.library-file-actions>.btn { border:0; padding:2px 0; background:transparent; color:var(--text-secondary); font-size:11px; gap:4px; }
+.library-file-actions>.btn:hover { color:var(--text); }
+.library-file-actions svg { width:1.3em; height:1.3em; }
+.library-current-folder { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.library-dialog { width:min(440px,calc(100vw - 32px)); max-height:80dvh; overflow-y:auto; box-sizing:border-box; }
+.library-dialog h2 { display:flex; gap:8px; align-items:center; font-size:17px; margin:0 0 16px; }
+.library-dialog label { display:grid; gap:8px; font-size:12px; color:var(--text-secondary); }
+.library-dialog input { width:100%; box-sizing:border-box; font:inherit; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:9px 10px; }
+.library-dialog footer { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-top:20px; }
+.library-file-name { font-size:12px; color:var(--text-secondary); overflow-wrap:anywhere; margin:0 0 16px; }
+.library-dialog-hint { color:var(--text-tertiary); font-size:11px; margin-top:8px; }
+.library-dialog .spinner { width:14px; height:14px; }
+.library-origin-list { display:grid; gap:8px; }
+.library-origin { display:flex; align-items:center; gap:10px; width:100%; min-width:0; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+.library-origin>span { flex:1; min-width:0; display:grid; gap:4px; }
+.library-origin strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:550; }
+.library-origin small { color:var(--text-secondary); font-size:11px; line-height:1.6; }
+.library-origin:disabled { cursor:default; background:var(--surface-2); }
+.library-sidebar button:focus-visible,.library-dialog button:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+@media(max-width:760px) {
+  .library-layout { grid-template-columns:minmax(0,1fr); gap:16px; }
+  .library-sidebar { border-right:0; border-bottom:1px solid var(--border); padding:0 0 12px; max-height:220px; overflow-y:auto; }
+  .library-sidebar-heading { padding-top:10px; }
+}
+@media(hover:none) {
+  .library-folder-actions { display:flex; }
+  .library-folder-row .library-folder-select { padding-right:90px; }
+}

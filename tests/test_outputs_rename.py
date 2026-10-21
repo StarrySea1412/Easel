@@ -91,3 +91,29 @@ def test_directory_rename_moves_children_and_imagegen_sidecar(rename_env):
     assert res.status_code == 200 and res.json()['renamed'] == 'AI生图/落日.png'
     assert web._imagegen_metadata_path(images / '落日.png').read_text(encoding='utf-8') == '{"prompt": "落日"}'
     assert not sidecar.exists()
+
+
+def test_library_classification_and_source_follow_directory_rename(rename_env):
+    from easel.artifacts import ArtifactStore
+    client, root = rename_env
+    (root / 'project').mkdir()
+    (root / 'project' / 'draft.md').write_text('original')
+    ArtifactStore(root).present('original-chat', 'turn-1', [{'path': 'project/draft.md'}], source='test')
+    folder = client.post('/api/output-library/folders', json={'name': '分类'}).json()
+    assert client.put('/api/output-library/file', json={'path': 'project/draft.md', 'folder': folder['id']}).status_code == 200
+    assert client.post('/api/output/project/rename', json={'name': 'renamed'}).status_code == 200
+    assert client.get('/api/output-library').json()['files'] == {'renamed/draft.md': folder['id']}
+    assert client.get('/api/output-library/origins', params={'path': 'renamed/draft.md'}).json()['origins'][0]['sessionId'] == 'original-chat'
+    assert all(not n['name'].startswith('_') for n in client.get('/api/outputs').json())
+
+
+def test_failed_classification_save_rolls_back_file_rename(rename_env, monkeypatch):
+    client, root = rename_env
+    (root / 'note.md').write_text('keep original')
+    def unavailable(*args):
+        raise PermissionError('test storage unavailable')
+    monkeypatch.setattr(web.OutputLibrary, 'renamed', unavailable)
+    response = client.post('/api/output/note.md/rename', json={'name': 'new'})
+    assert response.status_code == 503
+    assert (root / 'note.md').read_text() == 'keep original'
+    assert not (root / 'new.md').exists()

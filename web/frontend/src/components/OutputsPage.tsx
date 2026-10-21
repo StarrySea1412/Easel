@@ -4,10 +4,17 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { fetchOutputs, fetchOutputContent, mediaUrl, deleteOutput, renameOutput } from '../lib/api';
 import type { OutputNode, OutputMeta } from '../lib/api';
+import type { ChatSession } from '../lib/store';
+import { renameOutputReferences } from '../lib/outputReferences';
+import useOutputLibrary from '../hooks/useOutputLibrary';
+import OutputLibrarySidebar from './OutputLibrarySidebar';
+import OutputLibraryDialog, { type LibraryEdit } from './OutputLibraryDialog';
+import OutputConversationDialog from './OutputConversationDialog';
 import { renderMarkdown } from '../lib/sanitize';
 import { Sk } from './Skeleton';
-import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash, IconEdit } from './icons';
+import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash, IconEdit, IconChat } from './icons';
 import '../styles/output-covers.css';
+import '../styles/output-library.css';
 
 const FILTERS: { key: string; label: string; Icon: typeof IconOutputs }[] = [
   { key: 'all', label: '全部', Icon: IconOutputs },
@@ -115,6 +122,9 @@ function imageDimensions(node: OutputNode): string {
 }
 
 interface OutputsPageProps {
+  sessions?: ChatSession[];
+  sessionsLoading?: boolean;
+  onOpenConversation?: (id:string,file:OutputNode)=>Promise<boolean>;
   jumpPath?: string;
   onJumpHandled?: () => void;
   initialFilter?: string;
@@ -122,7 +132,13 @@ interface OutputsPageProps {
   onReuseImage?: (prompt: string, size?: string) => void;
 }
 
-export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHandled, onReuseImage, onReferenceImage }: OutputsPageProps) {
+export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHandled, onReuseImage, onReferenceImage, sessions = [], sessionsLoading = false, onOpenConversation }: OutputsPageProps) {
+  const library=useOutputLibrary();
+  const [folderView,setFolderView]=useState('all');
+  const [libraryEdit,setLibraryEdit]=useState<LibraryEdit|null>(null);
+  const [conversationFile,setConversationFile]=useState<OutputNode|null>(null);
+  const closeLibraryEdit=useCallback(()=>setLibraryEdit(null),[]);
+  const closeConversation=useCallback(()=>setConversationFile(null),[]);
   const [roots, setRoots] = useState<OutputNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState('');
@@ -176,7 +192,26 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     return () => { document.removeEventListener('keydown', onKeyDown); previous?.focus(); };
   }, [selected]);
 
-  const currentNodes = useMemo(() => resolvePath(roots, stack), [roots, stack]);
+  const flattened=useMemo(()=>allFiles(roots),[roots]);
+  const folderScope=useCallback((id:string)=>{
+    const result=new Set([id]);
+    for(let i=0;i<8;i++)for(const folder of library.state.folders)if(result.has(folder.parent))result.add(folder.id);
+    return result;
+  },[library.state.folders]);
+  const folderCounts=useMemo(()=>{
+    const counts:Record<string,number>={all:flattened.length,unfiled:flattened.filter(f=>!library.state.files[f.path]).length};
+    for(const folder of library.state.folders){const ids=folderScope(folder.id);counts[folder.id]=flattened.filter(f=>ids.has(library.state.files[f.path])).length;}
+    return counts;
+  },[flattened,library.state,folderScope]);
+  const currentNodes = useMemo(() => {
+    if(folderView==='all')return resolvePath(roots,stack);
+    const ids=folderScope(folderView);
+    return flattened.filter(f=>folderView==='unfiled'?!library.state.files[f.path]:ids.has(library.state.files[f.path]));
+  }, [roots, stack,folderView,flattened,folderScope,library.state.files]);
+  const selectFolder=useCallback((id:string)=>{setFolderView(id);setStack([]);setQuery('');},[]);
+  useEffect(()=>{
+    if(!library.loading&&!library.error&&folderView!=='all'&&folderView!=='unfiled'&&!library.state.folders.some(f=>f.id===folderView))setFolderView('all');
+  },[folderView,library.loading,library.error,library.state.folders]);
   const searching = filter !== 'all' || Boolean(query.trim());
   const dirs = useMemo(
     () => searching ? [] : currentNodes.filter((n) => n.type === 'dir').sort((a, b) => (b.mtime || 0) - (a.mtime || 0)),
@@ -196,11 +231,11 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
   }, [currentNodes, query]);
 
   const atTop = stack.length === 0;
-  const atProjectRoot = stack.length === 1;
+  const atProjectRoot = folderView==='all' && stack.length === 1;
   // 当前项目的展示头（进入项目后才有），用于「成品/素材」分区
   const projectMeta = useMemo(
-    () => (stack.length >= 1 ? roots.find((r) => r.name === stack[0])?.meta : undefined),
-    [roots, stack]);
+    () => (folderView==='all' && stack.length >= 1 ? roots.find((r) => r.name === stack[0])?.meta : undefined),
+    [roots, stack,folderView]);
   const deliverableSet = useMemo(
     () => new Set(atProjectRoot ? (projectMeta?.deliverablePaths || []) : []),
     [projectMeta, atProjectRoot]);
@@ -242,7 +277,9 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     setRenamingPath(null);
     if (!name || name === node.name) return;
     try {
-      await renameOutput(node.path, name);
+      const renamed=await renameOutput(node.path, name);
+      renameOutputReferences(node.path,renamed.renamed);
+      window.dispatchEvent(new window.Event('easel:library-updated'));
       load();
     } catch (err) {
       showToast((err as Error).message || '重命名失败', 'error');
@@ -276,6 +313,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
     const parent = parts.slice(0, -1);
     const node = resolvePath(roots, parent).find(n => n.name === parts.at(-1));
     setStack(node?.type === 'file' ? parent : parts);
+    setFolderView('all');
     setFilter('all'); setQuery('');
     if (node?.type === 'file') void open(node);
     else setSelected(null);
@@ -348,6 +386,10 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         {f.kind === 'image' && <div className="gcard-sub" style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>{generatedImage(f) && <span style={badge}>AI 生图</span>}<span>{imageDimensions(f) || '查看完整图片'}</span></div>}
         {f.generation?.prompt && <div className="gcard-sub" title={f.generation.prompt} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 4 }}>{f.generation.prompt}</div>}
         <CreatedTime node={f} />
+        <div className="library-file-actions" onClick={event=>event.stopPropagation()}>
+          {onOpenConversation&&<button type="button" className="btn btn-sm" title="返回对话" aria-label={`返回${f.name}的对话`} onClick={()=>setConversationFile(f)}><IconChat size={14}/><span>返回对话</span></button>}
+          <button type="button" className="btn btn-sm" title="整理到文件夹" aria-label={`整理${f.name}`} disabled={library.loading||Boolean(library.error)} onClick={()=>setLibraryEdit({kind:'assign',file:f,folder:library.state.files[f.path]||''})}><IconFolder size={14}/><span>整理</span></button>
+        </div>
       </div>
     </div>
   );
@@ -360,7 +402,8 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
         <div>
           <h1 className="page-title">
             <IconOutputs size={21} />
-            <button className="crumb" style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }} onClick={() => goTo(0)}>内容库</button>
+            <button className="crumb" style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }} onClick={() => {selectFolder('all');goTo(0);}}>内容库</button>
+            {folderView!=='all'&&<><span className="crumb-sep">/</span><span className="library-current-folder" title={library.state.folders.find(f=>f.id===folderView)?.name}>{folderView==='unfiled'?'未归类':library.state.folders.find(f=>f.id===folderView)?.name}</span></>}
             {stack.map((name, i) => (
               <span key={i}>
                 <span className="crumb-sep">/</span>
@@ -371,14 +414,21 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
             ))}
           </h1>
           <p className="page-subtitle">
-            {searching ? `共 ${files.length} 个结果，按最新保存排序${stack.length ? ' · 当前文件夹及子目录' : ''}` : atTop
+            {folderView!=='all'?`${files.length} 个文件${folderView==='unfiled'?'':' · 包含子文件夹'}`:searching ? `共 ${files.length} 个结果，按最新保存排序${stack.length ? ' · 当前文件夹及子目录' : ''}` : atTop
               ? `${dirs.length} 个文件夹 · ${files.length} 个文件 · ${generatedCount} 张 AI 生图。生成的图片和历史记录统一保存在这里。`
               : `${dirs.length} 个文件夹 · ${files.length} 个文件（可继续点开子文件夹）`}
           </p>
         </div>
-        <button className="btn btn-sm" onClick={load} disabled={treeLoading}><IconRefresh size={14} /> {treeLoading ? '刷新中…' : '刷新'}</button>
+        <button className="btn btn-sm" onClick={()=>{load();void library.reload();}} disabled={treeLoading||library.loading}><IconRefresh size={14} /> {treeLoading ? '刷新中…' : '刷新'}</button>
       </div>
 
+      <div className="library-layout">
+      <OutputLibrarySidebar folders={library.state.folders} counts={folderCounts} active={folderView} loading={treeLoading||library.loading||Boolean(library.error)} onSelect={selectFolder} onCreate={parent=>setLibraryEdit({kind:'create',parent})} onRename={folder=>setLibraryEdit({kind:'rename',folder})} onDelete={async folder=>{
+        if(!await confirmModal(`删除文件夹「${folder.name}」及其子文件夹？文件会保留在内容库中。`, {confirmLabel:'删除文件夹'}))return;
+        try{await library.remove(folder.id);}catch(error){showToast(error instanceof Error?error.message:'删除文件夹失败','error');}
+      }}/>
+      <div className="library-main">
+      {library.error&&<div className="notice-error" role="alert">{library.error}</div>}
       {treeError && <div className="notice-error">{treeError}</div>}
 
       {/* 项目主题标签（进入项目根时展示） */}
@@ -403,7 +453,7 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
       {empty && !treeError && !treeLoading ? (
         <div className="empty-state" style={{ height: 300 }}>
           <div className="empty-icon"><IconOutputs size={44} /></div>
-          <p>{searching ? '没有找到匹配的内容，试试清空搜索或切换为「全部」' : atTop ? '还没有产物——去对话或生图工坊生成第一条内容吧' : '这个文件夹是空的'}</p>
+          <p>{searching ? '没有找到匹配的内容，试试清空搜索或切换为「全部」' : folderView!=='all' ? folderView==='unfiled'?'没有未归类的文件':'这个文件夹还没有内容' : atTop ? '还没有产物——去对话或生图工坊生成第一条内容吧' : '这个文件夹是空的'}</p>
         </div>
       ) : hasSplit ? (
         <>
@@ -442,6 +492,15 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
           {!treeLoading && files.map(renderFile)}
         </div>
       )}
+      </div>
+      </div>
+
+      {libraryEdit&&<OutputLibraryDialog edit={libraryEdit} folders={library.state.folders} onClose={closeLibraryEdit} onSave={async value=>{
+        if(libraryEdit.kind==='assign')await library.assign(libraryEdit.file.path,value);
+        else if(libraryEdit.kind==='create'){const created=await library.save(value,libraryEdit.parent);selectFolder(created.id);}
+        else await library.save(value,libraryEdit.folder.parent,libraryEdit.folder.id);
+      }}/>}
+      {conversationFile&&onOpenConversation&&<OutputConversationDialog file={conversationFile} sessions={sessions} sessionsLoading={sessionsLoading} onClose={closeConversation} onOpen={async(id,file)=>{closeConversation();return onOpenConversation(id,file);}}/>}
 
       {selected && (
         <div className="drawer-overlay" onClick={() => setSelected(null)}>
@@ -473,6 +532,8 @@ export default function OutputsPage({ initialFilter = 'all', jumpPath, onJumpHan
               </div>}
             </div>
             <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {onOpenConversation&&<button className="btn btn-sm" onClick={()=>{setConversationFile(selected);setSelected(null);}}><IconChat size={14}/>返回对话</button>}
+              <button className="btn btn-sm" disabled={library.loading||Boolean(library.error)} onClick={()=>{setLibraryEdit({kind:'assign',file:selected,folder:library.state.files[selected.path]||''});setSelected(null);}}><IconFolder size={14}/>整理</button>
               <a className="btn btn-sm" href={mediaUrl(selected.path)} target="_blank" rel="noreferrer">打开原文件 ↗</a>
               <a className="btn btn-sm" href={downloadUrl(selected.path)} download={selected.name}>下载文件</a>
               <button className="btn btn-sm btn-danger" onClick={(e) => remove(selected, e)}><IconTrash size={13} /> 删除此文件</button>

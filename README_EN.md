@@ -1,3 +1,5 @@
+> **Content library organization · 0.11.0 (2026-10-21, source; local activation pending restart)**: Return files to their source conversations with a deduplicated draft reference; handle deleted, archived and read-only chats explicitly. Create nested classification folders, rename them and organize files without changing file URLs. Removing a classification keeps its files. Host 138 and installers unchanged. [Research and verification](docs/output-library-organization-2026-10-21.md).
+
 > **Analysis material layout · 0.10.4 (2026-10-21, local/source)**: Separate the account title, platform metadata and material action; adapt to the composer width while retaining materials and drafts. Browser visual acceptance pending; host 138 and installers unchanged. [Design and verification](docs/analysis-composer-layout-2026-10-21.md).
 
 > **Recent conversation skeleton · 0.10.3 (2026-10-21, local/source)**: Five shared skeleton rows during the initial remote list read; cached conversations stay visible during background refresh. Reduced motion disables shimmer. Host 138 and installers unchanged. [Verification](docs/recent-conversations-skeleton-2026-10-21.md).

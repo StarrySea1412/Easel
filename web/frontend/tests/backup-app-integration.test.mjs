@@ -130,6 +130,44 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
+test('content library returns to the exact chat with a deduplicated file quote and preserves the unsent draft', async t => {
+  const target={...sourceSession,id:'library-origin',messages:[{role:'assistant',content:'[成果](outputs/project/file.md)'}]};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,target]),easel_active_session:sourceSession.id,
+    'easel:chat-draft:library-origin':JSON.stringify({version:1,text:'未发送的修改要求',attachmentNames:[]})});
+  await act(async()=>v.harness.sidebar.onPageChange('outputs'));
+  const open=v.harness.pages['内容库'].onOpenConversation,file={name:'file.md',path:'project/file.md',type:'file',kind:'text'};
+  await act(async()=>assert.equal(await open(target.id,file),true));
+  assert.equal(v.container.querySelector('.page-host').textContent,'对话');
+  assert.equal(v.harness.pages['对话'].session.id,target.id);
+  const draft=JSON.parse(v.values.get('easel:chat-draft:library-origin'));
+  assert.equal(draft.text,'未发送的修改要求');assert.equal(draft.quotes.length,1);assert.match(draft.quotes[0],/project\/file.md/);
+  await act(async()=>assert.equal(await open(target.id,file),true));
+  assert.equal(JSON.parse(v.values.get('easel:chat-draft:library-origin')).quotes.length,1);
+  assert.equal(v.harness.streams.length,0);
+  await act(async()=>v.harness.sidebar.onPageChange('outputs'));
+  await act(async()=>assert.equal(await v.harness.pages['内容库'].onOpenConversation('deleted-chat',file),false));
+  assert.equal(v.container.querySelector('.page-host').textContent,'内容库');
+});
+
+test('library restores archived chats only after application confirmation and rejects readonly backups',async t=>{
+  const archived={...sourceSession,id:'library-archived',archived:true},backup={...sourceSession,id:'library-backup',importedFromBackup:true};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,archived,backup]),easel_active_session:sourceSession.id});
+  await act(async()=>v.harness.sidebar.onPageChange('outputs'));
+  const open=v.harness.pages['内容库'].onOpenConversation,file={name:'file.md',path:'project/file.md',type:'file',kind:'text'};
+  let result;
+  await act(async()=>{void open(archived.id,file).then(value=>{result=value;});});
+  assert.match(document.querySelector('[role=dialog]').textContent,/已归档/);
+  await act(async()=>[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent==='取消').click());
+  assert.equal(result,false);assert.equal(v.container.querySelector('.page-host').textContent,'内容库');
+  await act(async()=>{void open(archived.id,file).then(value=>{result=value;});});
+  await act(async()=>[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent==='恢复并打开').click());
+  assert.equal(result,true);assert.equal(v.harness.pages['对话'].session.id,archived.id);
+  assert.equal(JSON.parse(v.values.get('easel_sessions')).find(s=>s.id===archived.id).archived,false);
+  await act(async()=>v.harness.sidebar.onPageChange('outputs'));
+  await act(async()=>assert.equal(await v.harness.pages['内容库'].onOpenConversation(backup.id,file),false));
+  assert.equal(v.container.querySelector('.page-host').textContent,'内容库');assert.equal(v.harness.streams.length,0);
+});
+
 test('App keeps the initial conversation skeleton until the remote session list settles', async t => {
   let finish;
   const remote = new Promise(resolve => { finish = resolve; });

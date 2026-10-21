@@ -554,6 +554,24 @@ export function renameOutput(path: string, name: string): Promise<{ ok: boolean;
   });
 }
 
+export interface LibraryFolder { id: string; parent: string; name: string }
+export interface OutputLibraryState { folders: LibraryFolder[]; files: Record<string,string> }
+export function fetchOutputLibrary(): Promise<OutputLibraryState> { return request('/api/output-library'); }
+export function saveLibraryFolder(name: string, parent = '', id?: string): Promise<LibraryFolder> {
+  return request('/api/output-library/folders'+(id ? '/'+encodeURIComponent(id) : ''), {
+    method:id ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,parent}),
+  });
+}
+export function deleteLibraryFolder(id: string): Promise<{ok:boolean}> {
+  return request('/api/output-library/folders/'+encodeURIComponent(id), {method:'DELETE'});
+}
+export function assignLibraryFile(path: string, folder: string): Promise<{ok:boolean}> {
+  return request('/api/output-library/file', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,folder})});
+}
+export function fetchOutputOrigins(path: string): Promise<{origins:import('./outputReferences').OutputOrigin[]}> {
+  return request('/api/output-library/origins?path='+encodeURIComponent(path));
+}
+
 export interface UploadedFile { id: string; name: string; path: string; }
 
 /** OpenClaw's canonical per-turn reasoning levels. */

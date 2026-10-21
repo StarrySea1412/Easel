@@ -6389,6 +6389,10 @@ async def api_skill(req: SkillRequest):
     return {"response": result}
 
 
+from easel.output_library import OutputLibrary, router as output_library_router
+app.include_router(output_library_router(lambda: OUTPUTS_DIR))
+
+
 @app.get("/api/outputs")
 def api_outputs():
     # 产物树是全量递归扫描（文件量大时单次可达数十秒）。必须是同步 handler：
@@ -6577,6 +6581,7 @@ class OutputRenameRequest(BaseModel):
 @app.post("/api/output/{path:path}/rename")
 async def api_output_rename(path: str, req: OutputRenameRequest):
     """重命名内容库里的文件或目录：保留扩展名、仅限内容库内、系统数据受保护、同名冲突如实报错。"""
+    import sqlite3
     full = _safe_output_target(path)
     if _is_protected(full):
         raise HTTPException(403, '系统数据受保护，不可从内容库重命名')
@@ -6610,6 +6615,18 @@ async def api_output_rename(path: str, req: OutputRenameRequest):
     except OSError as e:
         raise HTTPException(500, f'重命名失败：{e}')
     rel = target.relative_to(OUTPUTS_DIR).as_posix()
+    try:
+        await asyncio.to_thread(OutputLibrary(OUTPUTS_DIR).renamed, path, rel)
+    except (OSError, sqlite3.Error) as exc:
+        try:
+            target.rename(full)
+            if is_file and full.parent.name in {IMAGEGEN_DIR.name, 'images'}:
+                sidecar = _imagegen_metadata_path(target)
+                if sidecar.exists():
+                    sidecar.rename(_imagegen_metadata_path(full))
+        except OSError:
+            raise HTTPException(500, '文件已改名，但分类同步失败，请刷新核对文件位置') from exc
+        raise HTTPException(503, '分类未能保存，本次改名已撤销，请稍后重试') from exc
     return {"ok": True, "renamed": rel, "old": path, "kind": "dir" if not is_file else "file"}
 
 
