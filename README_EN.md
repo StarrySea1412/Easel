@@ -1,3 +1,5 @@
+> **Analysis material layout · 0.10.4 (2026-10-21, local/source)**: Separate the account title, platform metadata and material action; adapt to the composer width while retaining materials and drafts. Browser visual acceptance pending; host 138 and installers unchanged. [Design and verification](docs/analysis-composer-layout-2026-10-21.md).
+
 > **Recent conversation skeleton · 0.10.3 (2026-10-21, local/source)**: Five shared skeleton rows during the initial remote list read; cached conversations stay visible during background refresh. Reduced motion disables shimmer. Host 138 and installers unchanged. [Verification](docs/recent-conversations-skeleton-2026-10-21.md).
 
 > **Analysis switching and account growth · 0.10.2 (2026-10-21, local/source)**: Clear analysis tabs, headings and keyboard navigation; five growth windows switch real deltas and baseline dates using identity-scoped history. Missing history stays unavailable. Read-only snapshots upgrade old caches without collecting again. Latest browser acceptance is blocked by browser access policy; host 138 and installers unchanged. [Verification](docs/account-growth-windows-2026-10-21.md).

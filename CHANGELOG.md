@@ -1,3 +1,8 @@
+## 0.10.4 · 2026-10-21 · Analysis material layout / 分析材料卡适配
+
+- Separate account title, metadata and material action; use container width for narrow columns, retain full title on hover and remove repeated labels. / 账号标题、平台信息与查看材料操作分行；按容器宽度适配窄分栏，标题省略且悬停保留全称，移除重复标签。
+- Materials, drafts and the existing dialog remain intact. Browser visual acceptance pending; host 138 and installers unchanged. / 保留材料、草稿与原弹窗。浏览器视觉待验，138与安装器未更新。[设计与验证](docs/analysis-composer-layout-2026-10-21.md)。
+
 ## 0.10.3 · 2026-10-21 · Recent conversation loading / 最近对话加载
 
 - Show five shared skeleton rows while the first remote conversation list is loading; preserve cached rows during background refresh and respect reduced motion. / 首次读取最近对话显示五行共享骨架，后台刷新保留原列表，减少动态效果时关闭微光。[验证与交付范围](docs/recent-conversations-skeleton-2026-10-21.md)。
