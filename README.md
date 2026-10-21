@@ -1,3 +1,5 @@
+> **推理观测、画像记忆与会话识别 · 0.13.0（2026-10-21，源码交付）**：画像经验支持旧文导入、候选确认、版本、失效与来源追溯；用量新增加权缓存读取占比。会话图标区分分析资料、生成内容、普通对话，材料摘要默认收起。功能提交 `8e961438` 位于 `codex/inference-memory-0.13.0`；main仅同步说明，功能代码未合并。138与安装器未升级，生产迁移及真实模型效果另行验收。[使用、验证与升级边界](https://github.com/StarrySea1412/Easel/blob/codex/inference-memory-0.13.0/docs/inference-memory-0.13.0-2026-10-21.md)。
+
 > **发布回执与发布指引 · 0.12.0（2026-10-21，源码已交付）**：独立回执页支持搜索、平台/状态筛选和失败处理入口；素材缺失显示具体要求并定位补充区。知乎发布复用账号身份校验，修复旧选择器误报未登录。功能位于 `codex/publish-receipts-0.12.0`，未合并功能代码到main；138仍为0.11.2，安装器未更新。[实现与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/publish-receipts-0.12.0/docs/publish-receipts-page-0.12.0-2026-10-21.md)。
 
 > **138已更新 · 0.11.2（2026-10-21）**：正式与隔离运行5b6e8177c5a2。生图工坊常显剪贴板、提示词反推、灵感与Skill入口；正式浏览器已核对。HTTPS登录、Gateway、前端资源和真实搜索通过。全量后端仍有已知红灯，当前供用户测试，安装器未发布。[部署回执与回滚](https://github.com/StarrySea1412/Easel/blob/codex/upstream-merge-0.8.0/docs/release-138-0.11.2-2026-10-21.md)。
