@@ -44,3 +44,9 @@
 Version 0.12.0 adds a dedicated receipts page with safe deep links, search, shared platform/status selectors and recovery navigation. It keeps existing submission, moderation, SMS and notification controls without replaying historical publish requests. Preparation explains the precise media requirement and focuses the picker, with a library link when empty. Zhihu preflight now shares the account identity proof and recognizes the current column-editor header, while still blocking explicit login prompts and reporting uncertain authentication separately.
 
 Validation includes 216 backend tests, 128 focused frontend tests and a final 57-test navigation/receipt group (overlapping), build/lint and an actual local browser using synthetic receipts. The production diagnosis was read-only. Host138 remains on0.11.2; no production deployment, installer release or real article submission was performed in this delivery.
+
+## Git交付回执
+
+- 功能提交：`7312535c3242465ff4d2d661acf38297ec05ce71`，已推送 `starry/codex/publish-receipts-0.12.0`，本地与远端SHA一致。
+- 默认分支双语首页：`230388e95a865da1552c69a60b67d0ce94fc5610`，仅修改README.md / README_EN.md，已推送并核对远端SHA，保留main其余源码树。
+- 本节和清单为后续文档提交；产品版本仍为0.12.0。本机构建为development，138运行版本仍是0.11.2，不能以Git推送代表服务生效。
