@@ -65,3 +65,13 @@ test('deleting a chat removes all its notices immediately, retries persistence a
   assert.ok(tombstones.has('gone-chat'));
   assert.deepEqual([...server.keys()],['keep-1']);
 });
+
+test('deleting a chat also removes legacy completion events without targets and blocks their replay', async t => {
+  const events = await loadTsModule('../src/lib/eventNotifications.ts', import.meta.url);
+  events.recordEvent('legacy completion','success',undefined,'chat:legacy-gone:turn-1:已完成');
+  events.recordEvent('other completion','success',undefined,'chat:legacy-keep:turn-1:已完成');
+  events.removeSessionEvents('legacy-gone');
+  assert.ok(!events.readEvents().some(row=>row.id==='chat:legacy-gone:turn-1:已完成'));
+  assert.ok(events.readEvents().some(row=>row.id==='chat:legacy-keep:turn-1:已完成'));
+  assert.equal(events.recordEvent('late legacy completion','success',undefined,'chat:legacy-gone:turn-2:已完成'),false);
+});

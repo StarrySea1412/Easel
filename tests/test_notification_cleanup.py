@@ -60,6 +60,14 @@ def test_deleted_session_rejects_late_notifications_and_preserves_other_targets(
     assert 'late-new-id' in store.list()['seen']
 
 
+def test_deleted_session_removes_legacy_notices_without_targets_and_rejects_late_replays(tmp_path):
+    store = NotificationStore(tmp_path)
+    store.add([value('chat:removed:old-turn:已完成'), value('chat:kept:old-turn:已完成'), value('global')])
+    assert store.remove_session('removed') == 1
+    store.add([value('chat:removed:late-turn:已完成'), value('chat:kept:second-turn:已完成')])
+    assert {row['id'] for row in store.list()['notices']} == {'chat:kept:old-turn:已完成', 'chat:kept:second-turn:已完成', 'global'}
+
+
 def test_session_cleanup_route_and_stale_client_cannot_revive(tmp_path, monkeypatch):
     import app
     monkeypatch.setattr(app, 'OUTPUTS_DIR', tmp_path)

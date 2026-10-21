@@ -13,7 +13,7 @@ from manage import RELEASE, verify
 DEPENDENCIES = ('deployment/138/Dockerfile', 'deployment/138/runtime-package.json',
                 'deployment/138/runtime-package-lock.json', 'requirements/linux-py312.lock', 'pyproject.toml')
 RUNTIME_PREFIXES = ('easel/', 'web/', 'scripts/', 'skills/', 'profiles/_template/',
-                    'openclaw/workspace/', 'deployment/138/')
+                    'openclaw/workspace/', 'agents/workspace/', 'openclaw/easel-agent-safety/', 'deployment/138/')
 
 
 def compatible(candidate, baseline):
@@ -71,7 +71,8 @@ COPY web/ ./web/
 COPY scripts/ ./scripts/
 COPY skills/ ./skills/
 COPY profiles/_template/ ./profiles/_template/
-COPY openclaw/workspace/ ./openclaw/workspace/
+COPY agents/workspace/ ./agents/workspace/
+COPY openclaw/easel-agent-safety/ ./openclaw/easel-agent-safety/
 COPY LICENSE ./
 COPY release-manifest.json ./
 COPY deployment/138/ ./deployment/138/

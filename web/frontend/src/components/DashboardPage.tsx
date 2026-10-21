@@ -309,7 +309,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
           <div className="dash-composer-bar">
             <div className="dash-composer-tools">
             <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
-            <ComposerModelPicker models={quickModels} disabled={gatewayStatus !== 'connected'} onOpenModels={onOpenModels} />
+            <ComposerModelPicker models={quickModels} onOpenModels={onOpenModels} />
             <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} />
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>

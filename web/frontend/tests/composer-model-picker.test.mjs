@@ -55,7 +55,7 @@ test('removed saved model preserves draft until user chooses an available model'
   const view = await fixture(t, 'old/missing'); await view.render(); await view.type('不应被自动换模型'); await view.send();
   assert.deepEqual(view.sent, []); assert.equal(view.container.querySelector('textarea').value, '不应被自动换模型'); assert.equal(view.values.get(KEY), 'old/missing');
   assert.match(view.container.querySelector('[role=alert]').textContent,/old\/missing.*已移除或尚未配置/);
-  await view.key('Home'); await view.key('Enter'); await view.send();
+  await view.key('Home'); await view.key('ArrowDown'); await view.key('Enter'); await view.send();
   assert.equal(view.sent[0][5], REF); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), REF);
 });
 
@@ -107,37 +107,40 @@ test('status belongs to the model selector and its settings action targets that 
   await view.render({ onOpenModels: ref => opened.push(ref) });
   assert.ok(view.trigger().querySelector('.composer-model-health'));
   assert.equal(view.container.querySelector('button.composer-model-health'), null);
-  assert.match(document.getElementById(view.trigger().getAttribute('aria-describedby')).textContent, /happy · 渠道已连通/);
+  assert.match(view.container.querySelector('.composer-model-health-label').textContent, /渠道已连通/);
   await act(async () => view.trigger().click());
   assert.doesNotMatch(document.querySelector('.easel-select-popup').textContent, /渠道状态与详情/);
   await act(async () => document.querySelector('.easel-select-footer [role=option]').click());
-  await act(async () => [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent.includes('模型设置')).click());
   assert.deepEqual(opened, [REF]);
-  assert.equal(document.querySelector('[aria-label="渠道状态详情"]'), null);
+  assert.equal(document.querySelector('[aria-label="模型状态详情"]'), null);
   assert.ok(view.calls.every(([, init]) => !init?.body));
 });
 
-test('model menu shows current channel only and opens enabled channels from the management footer', async t => {
+test('model menu shows current channel models, channel switcher at top, and only settings at the bottom', async t => {
   const view=await fixture(t, REF),opened=[];
   view.h.options=[option,{...option,id:'other/vendor/model:v2',provider:'other',channelName:'另一渠道'},{...option,id:'relay/second',model:'second'},{...option,id:'disabled/model',provider:'disabled',channelName:'关闭渠道',enabled:false}];
   await view.render({onOpenModels:ref=>opened.push(ref)});
   await act(async()=>view.trigger().click());
   const popup=document.querySelector('.easel-select-popup');
+  assert.equal(popup.querySelector('.easel-select-header .easel-select-option-label').textContent,'happy');
+  assert.equal(popup.querySelector('.easel-select-header .easel-select-option-description').textContent,'API');
   assert.deepEqual([...popup.querySelectorAll('.easel-select-options .easel-select-option-label')].map(e=>e.textContent),['vendor/model:v2','second']);
-  assert.equal(popup.querySelectorAll('.easel-select-group-label').length,1);
+  assert.equal(popup.querySelectorAll('.easel-select-group-label').length,0);
   assert.doesNotMatch(popup.textContent,/仅用于本轮|自动沿用|渠道 .* ·/);
   const footer=popup.querySelector('.easel-select-footer [role=option]');
-  assert.equal(footer.textContent,'管理模型›');
-  await act(async()=>footer.dispatchEvent(new window.Event('pointermove',{bubbles:true})));
-  assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(e=>e.textContent),['happy✓','另一渠道','模型设置']);
+  assert.equal(footer.textContent,'管理模型');
+  await act(async()=>footer.click());
+  assert.deepEqual(opened,[REF]);
+  await act(async()=>view.trigger().click());
+  await act(async()=>document.querySelector('.easel-select-header [role=option]').dispatchEvent(new window.Event('pointermove',{bubbles:true})));
+  assert.deepEqual([...document.querySelectorAll('[role=menuitem]')].map(e=>e.textContent),['happy✓','另一渠道']);
   await act(async()=>[...document.querySelectorAll('[role=menuitem]')].find(e=>e.textContent==='另一渠道').click());
   assert.equal(view.values.get(KEY),'other/vendor/model:v2');
   assert.equal(document.querySelector('[role=menu]'),null);
-  assert.equal(document.querySelectorAll('.easel-select-group-label').length,1);
-  assert.equal(document.querySelector('.easel-select-group-label').textContent,'另一渠道');
+  assert.equal(document.querySelector('.easel-select-header .easel-select-option-label').textContent,'另一渠道');
   assert.deepEqual([...document.querySelectorAll('.easel-select-options .easel-select-option-label')].map(e=>e.textContent),['vendor/model:v2']);
-  await view.key('End'); await view.key('ArrowRight'); await view.key('End'); await view.key('Enter');
-  assert.deepEqual(opened,['other/vendor/model:v2']);
+  await view.key('End'); await view.key('Enter');
+  assert.deepEqual(opened,[REF,'other/vendor/model:v2']);
   assert.equal(document.querySelector('.easel-select-popup'),null);
   assert.ok(view.calls.every(([,init])=>!init?.body));
 });
@@ -149,8 +152,8 @@ test('default channel models are shown without saving a forced override, and cha
   assert.match(view.trigger().textContent,/happy/);
   assert.equal(view.values.has(KEY),false);
   await view.key('ArrowDown');
-  assert.equal(document.querySelector('.easel-select-group-label').textContent,'happy');
-  await view.key('End'); await view.key('ArrowRight'); await view.key('Home'); await view.key('Enter');
+  assert.equal(document.querySelector('.easel-select-header .easel-select-option-label').textContent,'happy');
+  await view.key('Home'); await view.key('ArrowRight'); await view.key('Home'); await view.key('Enter');
   assert.equal(view.values.get(KEY),'other/model');
   await view.key('Escape');
   assert.equal(document.querySelector('.easel-select-popup'),null);
@@ -162,17 +165,17 @@ test('a passed channel test stays green and the menu names the real blocker inst
   view.h.reason = '运行网关当前未连接，暂时无法核验本轮指定模型；改用「自动沿用」仍可发送。';
   await view.render();
   assert.ok(view.trigger().querySelector('.composer-model-health.success'), 'a passed inference is success, not unverified');
-  const info = view.container.querySelector('[aria-label="模型状态详情"]');
-  assert.ok(info); assert.match(info.getAttribute('title'), /运行网关当前未连接/);
+  const info = view.container.querySelector('.composer-model-health');
+  assert.ok(info); assert.match(info.getAttribute('title'), /渠道已连通/);
   await act(async () => view.trigger().click());
   const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
   assert.doesNotMatch(popup.textContent, /请在模型设置中检查连接/);
   assert.doesNotMatch(popup.textContent, /自动沿用|仅用于本轮|推理未测/);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance never probes a model');
   await view.key('Escape');await view.type('保留这份材料');await view.send();
-  assert.deepEqual(view.sent,[]);assert.match(view.container.querySelector('[role=alert]').textContent,/OpenClaw 未连接/);
-  assert.equal(view.container.querySelector('textarea').value,'保留这份材料');
-  assert.equal(view.container.querySelector('[role=alert] button'),null);
+  assert.equal(view.sent.length,1);
+  assert.equal(view.sent[0][5],REF);
+  assert.equal(view.container.querySelector('[role=alert]'),null);
 });
 
 test('unavailable runtime permits saving a channel choice but never silently sends with another model', async t => {
@@ -180,11 +183,12 @@ test('unavailable runtime permits saving a channel choice but never silently sen
   view.h.capability=false;
   view.h.options=[option,{...option,id:'other/model',provider:'other',model:'model',channelName:'另一渠道'}];
   await view.render();
-  await view.key('End'); await view.key('ArrowRight'); await view.key('ArrowDown'); await view.key('Enter');
+  await view.key('Home'); await view.key('ArrowRight'); await view.key('End'); await view.key('Enter');
   assert.equal(view.values.get(KEY),'other/model');
   await view.key('Escape'); await view.type('保留指定渠道'); await view.send();
-  assert.deepEqual(view.sent,[]);
-  assert.equal(view.container.querySelector('textarea').value,'保留指定渠道');
+  assert.equal(view.sent.length,1);
+  assert.equal(view.sent[0][5],'other/model');
+  assert.equal(view.container.querySelector('[role=alert]'),null);
   assert.ok(view.calls.every(([,init])=>!init?.body));
 });
 
@@ -201,19 +205,16 @@ test('running composer keeps stop beside queue-send when a draft is present', as
   assert.equal(actions().length, 2); assert.ok(actions().every(button => button.disabled));
 });
 
-test('automatic status refresh shows a spinner and clears a stale guard without sending the draft or adding buttons', async t => {
+test('automatic status refresh preserves selection and draft without blocking or adding buttons', async t => {
   const view=await fixture(t,REF);view.h.capability=false;
   view.h.reason='无法只读核验当前网关的指定模型能力，任务不会改用默认模型。';
-  await view.render();await view.type('恢复后由我发送');await view.send();
-  const alert=view.container.querySelector('[role=alert]');
-  assert.match(alert.textContent,/OpenClaw 连接检查未通过/);
-  assert.doesNotMatch(alert.textContent,/只读核验|草稿已保留|不会改用/);
+  await view.render();await view.type('恢复后由我发送');
+  assert.equal(view.container.querySelector('[role=alert]'),null);
   let resolveProbe;const previous=globalThis.fetch;
   t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('/agent-office/models')?new Promise(resolve=>{resolveProbe=resolve;}):previous(url,init));
-  assert.equal(alert.querySelector('button'),null);
   await act(async()=>window.dispatchEvent(new window.Event('easel:channel-names-changed')));
-  assert.ok(view.container.querySelector('.composer-connection-spinner'));
-  assert.equal(view.container.querySelector('.composer-connection-notice').getAttribute('aria-busy'),'true');
+  assert.equal(view.trigger().disabled,false);
+  assert.equal(view.container.querySelector('.composer-connection-notice'),null);
   await act(async()=>resolveProbe({ok:true,json:async()=>({available:true,scope:'next_turn',defaultModelRef:REF,options:[option]})}));
   assert.equal(view.container.querySelector('.composer-connection-notice'),null);
   assert.equal(view.container.querySelector('textarea').value,'恢复后由我发送');assert.deepEqual(view.sent,[]);

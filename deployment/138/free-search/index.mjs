@@ -1,7 +1,7 @@
-// Server-only provider using the fixed OpenClaw runtime's public plugin SDK.
+// Resolve the SDK from the running OpenClaw installation on Windows or Linux.
 import { createRequire } from 'node:module';
 import { parseRss } from './rss.mjs';
-const require = createRequire('/opt/openclaw/package.json');
+const require = createRequire(process.env.EASEL_OPENCLAW_ENTRY || process.argv[1] || '/opt/openclaw/package.json');
 const { definePluginEntry } = require('openclaw/plugin-sdk/plugin-entry');
 const { createWebSearchProviderContractFields } = require('openclaw/plugin-sdk/provider-web-search-contract');
 const { withTrustedWebSearchEndpoint, readResponseText, wrapWebContent } = require('openclaw/plugin-sdk/provider-web-search');

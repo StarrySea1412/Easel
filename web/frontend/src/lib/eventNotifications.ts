@@ -32,6 +32,13 @@ function record(value: unknown): value is Record<string, unknown> {
 function validId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 1000;
 }
+function sessionFromChatNotice(id: string): string | undefined {
+  return /^chat:([A-Za-z0-9_.-]{1,120}):/.exec(id)?.[1];
+}
+function belongsToDeletedSession(notice: Pick<EventNotice, 'id' | 'target'>): boolean {
+  const sessionId = notice.target?.page === 'chat' ? notice.target.sessionId : sessionFromChatNotice(notice.id);
+  return Boolean(sessionId && deletedSessions.has(sessionId));
+}
 function outputPath(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 4096
     && ![...value].some(character => character === '\\' || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
@@ -77,9 +84,10 @@ try {
       || !Number.isFinite(row.at) || row.at <= 0 || Number.isNaN(new Date(row.at).getTime())) continue;
     ids.add(row.id);
     const target = targetFrom(row.target);
-    if (target?.page === 'chat' && deletedSessions.has(target.sessionId)) continue;
-    notices.push({ id: row.id, message: row.message.slice(0, 600), tone: row.tone as ToastTone,
-      at: row.at, read: row.read === true, target: targetFrom(row.target) });
+    const notice = { id: row.id, message: row.message.slice(0, 600), tone: row.tone as ToastTone,
+      at: row.at, read: row.read === true, target };
+    if (belongsToDeletedSession(notice)) continue;
+    notices.push(notice);
     if (notices.length === limit) break;
   }
   const storedSeen = record(stored) && Array.isArray(stored.seen) ? stored.seen.filter(validId) : [];
@@ -129,7 +137,7 @@ export function syncEvents(): Promise<void> {
         const actions = new Map(notices.map(notice => [notice.id, notice.action]));
         notices = data.notices.filter((row): row is EventNotice => record(row) && validId(row.id) && typeof row.message === 'string' && ['info', 'success', 'error'].includes(String(row.tone)) && typeof row.at === 'number' && Number.isFinite(row.at) && row.at > 0)
           .slice(0, limit).map(row => ({ ...row, target: targetFrom(row.target), action: actions.get(row.id) }))
-          .filter(row => row.target?.page !== 'chat' || !deletedSessions.has(row.target.sessionId));
+          .filter(row => !belongsToDeletedSession(row));
         seen = new Set(data.seen.filter(validId).slice(0, seenLimit));
       } while (pending.length);
       syncState = 'saved';
@@ -155,8 +163,8 @@ export const subscribeEvents = (listener: () => void) => {
 export const readEvents = () => notices;
 
 export function recordEvent(message: string, tone: ToastTone, action?: ToastNotice['action'], id?: string, target?: NoticeTarget): boolean {
-  if (target?.page === 'chat' && deletedSessions.has(target.sessionId)) return false;
   const identifier = validId(id) ? id : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  if (belongsToDeletedSession({ id: identifier, target: targetFrom(target) })) return false;
   if (seen.has(identifier)) return false;
   seen = new Set([identifier, ...seen].slice(0, seenLimit));
   notices = [{ id: identifier, message: message.slice(0, 600), tone, at: Date.now(), read: false,
@@ -199,6 +207,6 @@ export function clearEvents(): void {
 export function removeSessionEvents(sessionId: string): void {
   if (!/^[A-Za-z0-9_.-]{1,120}$/.test(sessionId)) return;
   deletedSessions.add(sessionId);
-  notices = notices.filter(row => row.target?.page !== 'chat' || row.target.sessionId !== sessionId);
+  notices = notices.filter(row => !belongsToDeletedSession(row));
   queue({ method: 'POST', suffix: '/remove', body: { sessionId } });
 }

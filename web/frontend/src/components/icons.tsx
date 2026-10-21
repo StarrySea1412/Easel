@@ -263,6 +263,11 @@ export const IconSpark = ({ size, className, strokeWidth }: P) => (
 export const IconOpenClaw = ({ size = 18, className, style }: P) => (
   <img src={openClawLogo} width={size} height={size} className={className} style={{ objectFit:'contain', flexShrink:0, ...style }} alt="" aria-hidden="true" />
 );
+export const IconCube = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="M3 8v8l9 5 9-5V8M12 13v8" />
+  </svg>
+);
 export const IconKey = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.3-9.3" /><path d="m17 5 3 3" /><path d="m15 7 3 3" />

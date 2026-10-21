@@ -1,3 +1,10 @@
+## 0.11.2 · 2026-10-21 · Search recovery and latest acceptance build / 搜索修复与138验收更新
+
+- Repair Easel's accidental safety-only plugin allowlist; preserve explicit operator restrictions and load the bundled search provider across Windows/Linux. / 修复安全插件误建白名单导致网络搜索禁用，保留明确禁用策略，适配Windows/Linux插件SDK加载。
+- Ship the relocated workspace and safety plugin in Linux releases; retain image prompt tools, visible clipboard/prompt reverse engineering and inspiration from 0.11.1. / Linux发布补齐迁移后的workspace及安全插件，包含0.11.1剪贴板外置、提示词反推及灵感常显界面。
+- Restore channel-first model selection and remove deleted-chat notifications including late legacy events. / 恢复顶部渠道切换与当前渠道模型列表，清理已删除对话通知及晚到旧事件。
+- Deployment evidence and known full-suite failures: [138 verification record](docs/release-138-0.11.2-2026-10-21.md). Installers are unchanged. / 部署证据及全量测试已知失败见记录，安装器不发布。
+
 ## 0.11.1 · 2026-10-21 · Visible image prompt tools / 生图常用入口常显
 
 - Keep clipboard paste, prompt reverse engineering and inspiration examples visible; use shared SVG icons and confirm before replacing an existing prompt. / 剪贴板、提示词反推与灵感示例常显，复用SVG图标，替换已有描述先用应用确认框。

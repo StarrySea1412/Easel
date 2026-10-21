@@ -50,7 +50,8 @@ COPY web/ ./web/
 COPY scripts/ ./scripts/
 COPY skills/ ./skills/
 COPY profiles/_template/ ./profiles/_template/
-COPY openclaw/workspace/ ./openclaw/workspace/
+COPY agents/workspace/ ./agents/workspace/
+COPY openclaw/easel-agent-safety/ ./openclaw/easel-agent-safety/
 COPY LICENSE ./
 COPY release-manifest.json ./
 COPY deployment/138/ ./deployment/138/

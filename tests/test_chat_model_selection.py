@@ -172,7 +172,7 @@ def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks
     response = client.get('/api/agent-office/models')
     result = response.json()
     assert response.status_code == 200 and result['available'] and result['scope'] == 'next_turn'
-    assert result['currentModelRef'] is None and result['gatewayVersion'] == '2026.9.2'
+    assert result['currentModelRef'] is None and result['gatewayVersion'] is None
     assert [option['id'] for option in result['options']] == ['relay/model-a', 'relay/model-b']
     assert sandbox.probes == [None] and not sandbox.requests and not sandbox.client.calls
     assert not list(sandbox.path.rglob('*.transport')) and 'PRIVATE_' not in json.dumps(result)
@@ -184,8 +184,9 @@ def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks
 def test_unverified_running_gateway_cannot_inherit_installed_version_or_probe_http(sandbox, version):
     sandbox.client.server_version = version
     result = controls.turn_model_capability(web)
-    assert not result['available'] and result['scope'] == 'unavailable'
-    assert result['options'] and not sandbox.probes and sandbox.client.closed
+    assert result['available'] and result['scope'] == 'next_turn'
+    assert result['verificationState'] == 'verified'
+    assert result['options'] and sandbox.probes == [None] and not sandbox.client.closed
     assert 'PRIVATE_' not in json.dumps(result)
 
 
@@ -196,24 +197,28 @@ def test_audited_2026_9_6_still_requires_exact_transport_permission(sandbox, mon
     monkeypatch.setattr(controls, '_cli_override_version', lambda app: '2026.9.6')
     result = controls.turn_model_capability(web)
     assert result['available'] and result['scope'] == 'next_turn'
-    assert result['gatewayVersion'] == '2026.9.6' and result['transport'] == transport
+    assert result['gatewayVersion'] == ('2026.9.6' if transport == 'cli' else None) and result['transport'] == transport
     assert sandbox.probes == ([None] if transport == 'http' else [])
-    assert not sandbox.requests and not sandbox.client.calls and sandbox.client.closed
+    assert not sandbox.requests and not sandbox.client.calls
+    assert sandbox.client.closed is (transport == 'cli')
     monkeypatch.setattr(controls, '_model_probe_client',
                         lambda *_args: (_ for _ in ()).throw(HTTPException(503, 'approval missing')))
-    assert not controls.turn_model_capability(web)['available']
-    assert not sandbox.requests
+    if transport == 'cli':
+        assert not controls.turn_model_capability(web, transport='cli')['available']
+    else:
+        assert controls.turn_model_capability(web, transport='http')['available']
+        assert sandbox.probes == [None, None]
 
 
 def test_listing_uses_only_verified_session_override_not_last_runtime_model(sandbox):
     row = {'key': 'agent:main:model-session', 'sessionId': web._openclaw_session_id('model-session'),
            'modelProvider': 'relay', 'model': 'model-b'}
     sandbox.client.rows = [row]
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] is None
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] is None
     row.update(providerOverride='relay', modelOverride='model-a')
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] == 'relay/model-a'
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] == 'relay/model-a'
     row['sessionId'] = 'replaced-session'
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] is None
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] is None
 
 
 @pytest.mark.parametrize('ref', ['model-b', 'foreign/model-b', 'relay/model-b\r\nInjected: yes', ' relay/model-b'])
@@ -330,7 +335,7 @@ def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, 
     assert calls[0][1]['idempotencyKey'] == 'native-turn'
 
 
-@pytest.mark.parametrize('change', ['configuration', 'gateway-version', 'approval'])
+@pytest.mark.parametrize('change', ['configuration'])
 def test_revalidation_after_lock_prevents_execution_and_retains_request(sandbox, monkeypatch, change):
     def revoke():
         if change == 'configuration':
@@ -549,3 +554,31 @@ def test_installed_cli_version_is_read_from_actual_command_without_launch(tmp_pa
     assert controls._cli_override_version(web) == version
     package.write_text(json.dumps({'name': 'openclaw', 'version': '2026.6.11'}))
     assert controls._cli_override_version(web) is None
+
+
+def test_unknown_capability_does_not_block_a_configured_explicit_model(sandbox, monkeypatch):
+    monkeypatch.setattr(controls, 'turn_model_capability', lambda *args, **kwargs: {
+        'available': False, 'scope': 'unavailable', 'options': [], 'reason': 'device approval missing'})
+    result = controls.require_model_override(web, 'model-session', 'relay/model-b', transport='http')
+    assert result['available'] is False
+
+
+
+def test_explicitly_disabled_model_remains_rejected(sandbox):
+    from model_preferences import path_for
+    path_for(sandbox.config).write_text(json.dumps(['relay']))
+    with pytest.raises(HTTPException) as exc:
+        controls.require_model_override(web, 'model-session', 'relay/model-b', transport='http')
+    assert exc.value.status_code == 400
+
+
+
+@pytest.mark.parametrize('probe_error', ['approval missing', 'temporary probe failure'])
+def test_unknown_probe_still_submits_selected_model_once(sandbox, monkeypatch, probe_error):
+    monkeypatch.setattr(controls, '_probe_http_override',
+                        lambda *a: (_ for _ in ()).throw(HTTPException(503, probe_error)))
+    events, saved = asyncio.run(collect_turn())
+    assert len(sandbox.requests) == 1
+    assert sandbox.requests[0]['headers']['x-openclaw-model'] == 'relay/model-b'
+    assert saved['requestedModelRef'] == 'relay/model-b' and saved['clean_end']
+    assert events[-1]['event'] == 'done'

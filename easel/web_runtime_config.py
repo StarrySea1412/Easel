@@ -11,7 +11,7 @@ PLUGIN_PATH = '/opt/openclaw/node_modules/@openclaw/duckduckgo-plugin'
 FREE_SEARCH_PATH = '/app/deployment/138/free-search'
 
 
-def configure_free_search(value: dict, *, allow_plugin=False) -> tuple[dict, list[str]]:
+def configure_free_search(value: dict, *, allow_plugin=False, plugin_path=FREE_SEARCH_PATH) -> tuple[dict, list[str]]:
     """Use the reachable public RSS provider without overriding operator policy."""
     result = copy.deepcopy(value)
     search = result.get('tools', {}).get('web', {}).get('search', {})
@@ -28,11 +28,36 @@ def configure_free_search(value: dict, *, allow_plugin=False) -> tuple[dict, lis
         allowed.append('easel-search')
     plugins = result.setdefault('plugins', {})
     paths = plugins.setdefault('load', {}).setdefault('paths', [])
-    if FREE_SEARCH_PATH not in paths:
-        paths.append(FREE_SEARCH_PATH)
+    if str(plugin_path) not in paths:
+        paths.append(str(plugin_path))
     plugins.setdefault('entries', {}).setdefault('easel-search', {})['enabled'] = True
     result.setdefault('tools', {}).setdefault('web', {}).setdefault('search', {}).update(provider='easel-search', enabled=True)
     return result, ['web search: enable public Bing RSS provider'] if result != before else []
+
+
+def configure_agent_safety_plugins(value: dict, safety_path: Path, search_path: Path) -> tuple[dict, bool]:
+    """Add our guard without turning an unrestricted plugin policy into a denylist."""
+    result = copy.deepcopy(value)
+    plugins = result.setdefault('plugins', {})
+    if not isinstance(plugins, dict):
+        return result, False
+    paths = plugins.setdefault('load', {}).setdefault('paths', [])
+    if isinstance(paths, list) and str(safety_path) not in paths:
+        paths.append(str(safety_path))
+    allowed = plugins.get('allow')
+    if isinstance(allowed, list):
+        # Earlier Easel startup accidentally created this single-plugin list.
+        # Repair only that signature and the already-selected shipped provider.
+        search = result.get('tools', {}).get('web', {}).get('search', {})
+        if (set(allowed) == {'easel-agent-safety'} and plugins.get('enabled') is not False
+                and search.get('provider') == 'easel-search' and search.get('enabled') is True
+                and 'easel-search' not in plugins.get('deny', [])
+                and plugins.get('entries', {}).get('easel-search', {}).get('enabled') is not False
+                and any(Path(item) == search_path for item in paths if isinstance(item, str))):
+            allowed.append('easel-search')
+        if 'easel-agent-safety' not in allowed:
+            allowed.append('easel-agent-safety')
+    return result, result != value
 
 
 def configure_browser_runtime(value: dict, auth: dict) -> tuple[dict, list[str]]:

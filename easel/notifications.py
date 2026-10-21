@@ -46,6 +46,14 @@ def notice(value):
     return result
 
 
+def session_from_chat_notice(ident):
+    """Recover the conversation identity from legacy completion notice IDs."""
+    if not isinstance(ident, str) or not ident.startswith('chat:'):
+        return None
+    session_id = ident[5:].split(':', 1)[0]
+    return session_id if re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', session_id) else None
+
+
 class NotificationStore:
     def __init__(self, outputs: Path):
         self.path = outputs / '_notifications' / 'history.sqlite3'
@@ -74,8 +82,9 @@ class NotificationStore:
         with self.database() as db, db:
             for row in rows:
                 target = row.get('target', {})
-                if target.get('page') == 'chat' and db.execute(
-                        'SELECT 1 FROM deleted_sessions WHERE id=?', (target.get('sessionId'),)).fetchone():
+                session_id = target.get('sessionId') if target.get('page') == 'chat' else session_from_chat_notice(row['id'])
+                if session_id and db.execute(
+                        'SELECT 1 FROM deleted_sessions WHERE id=?', (session_id,)).fetchone():
                     db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (row['id'], row['at']))
                     continue
                 if db.execute('INSERT OR IGNORE INTO seen VALUES (?,?)', (row['id'], row['at'])).rowcount:
@@ -116,7 +125,8 @@ class NotificationStore:
             ids = []
             for ident, payload in db.execute('SELECT id,payload FROM notices'):
                 target = json.loads(payload).get('target', {})
-                if target.get('page') == 'chat' and target.get('sessionId') == session_id:
+                if ((target.get('page') == 'chat' and target.get('sessionId') == session_id)
+                        or session_from_chat_notice(ident) == session_id):
                     ids.append(ident)
             for ident in ids:
                 db.execute('DELETE FROM notices WHERE id=?', (ident,))

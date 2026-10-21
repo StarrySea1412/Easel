@@ -245,7 +245,8 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
         option['label'] = f"{option['channelName']} · {option['model']}"
     result = {'available': False, 'scope': 'unavailable', 'currentModelRef': None,
               'options': all_options, 'reason': '尚未配置可选择的已启用渠道模型。',
-              'gatewayVersion': None, 'transport': None}
+              'gatewayVersion': None, 'transport': None, 'verificationState': 'unknown',
+              'verifiedModelRef': None}
     config = office._read_json(web.openclaw_state_dir() / 'openclaw.json', web.openclaw_state_dir(), set()) or {}
     agents = config.get('agents', {})
     defaults = agents.get('defaults', {}) if isinstance(agents, dict) else {}
@@ -254,9 +255,6 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
     if isinstance(default_ref, str) and default_ref in {option['id'] for option in options}:
         result['defaultModelRef'] = default_ref
     if not options:
-        return result
-    if hasattr(web, 'check_gateway') and not web.check_gateway():
-        result['reason'] = 'OpenClaw 未连接，正在自动恢复。连接恢复后请重试。'
         return result
     client = None
     try:
@@ -267,6 +265,17 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
             _error('当前会话传输方式不支持指定模型。', 503)
         result['transport'] = transport
         credentials = credentials if credentials is not None else web.gateway_credentials()
+        if transport == 'http':
+            # HTTP chat does not need a paired WebSocket device. Probe the same
+            # authenticated endpoint used by the turn with an empty message;
+            # the gateway rejects it before creating a run or invoking a model.
+            _probe_http_override(web, session, credentials, model_ref)
+            result.update(available=True, scope='next_turn', reason=None,
+                          verificationState='verified', verifiedModelRef=model_ref)
+            if not session:
+                return result
+            # Optional metadata enriches inherited selection and effort levels;
+            # missing WebSocket approval cannot revoke the HTTP probe result.
         if transport == 'cli' and _cli_override_version(web) is None:
             _error('当前 CLI 版本尚未核验指定模型语义，任务不会改用默认模型。', 503)
         client = _model_probe_client(transport, credentials)
@@ -292,8 +301,6 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
                         option['thinkingLevels'] = list(dict.fromkeys(levels))
             except Exception:
                 pass  # Missing policy is unknown, never an invented off-only list.
-        if transport == 'http':
-            _probe_http_override(web, session, credentials, model_ref)
         # Only a stored session override can preselect the next turn. The last
         # runtime model is historical evidence, not a persistent selection.
         if session and 'sessions.list' in client.methods:
@@ -307,17 +314,19 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
                        if isinstance(row.get('providerOverride'), str) and isinstance(row.get('modelOverride'), str) else None)
                 if ref in {option['id'] for option in all_options}:
                     result['currentModelRef'] = ref
-        result.update(available=True, scope='next_turn', reason=None)
+        result.update(available=True, scope='next_turn', reason=None,
+                      verificationState='verified', verifiedModelRef=model_ref)
     except HTTPException as exc:
-        result['reason'] = str(exc.detail)
-    except ModuleNotFoundError:
-        result['reason'] = '本机缺少网关连接组件，请使用 Easel 的完整运行环境启动工作台。'
+        if not result['available']:
+            result['reason'] = str(exc.detail)
     except OSError:
         # A closed gateway socket says nothing about the user's channel test.
-        result['reason'] = 'OpenClaw 网关未连接，正在自动恢复。连接恢复后请重试。'
+        if not result['available']:
+            result['reason'] = '运行网关暂未连接，模型状态尚未核验。'
     except Exception:
         # Transport/schema/auth errors can contain credentials or private URLs.
-        result['reason'] = 'OpenClaw 连接验证失败，请在设置中检查网关授权与版本。'
+        if not result['available']:
+            result['reason'] = '暂未取得网关的模型能力核验结果。'
     finally:
         if client is not None:
             client.close()
@@ -327,8 +336,9 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
 def require_model_override(web, session: str | None, model_ref: str, *, transport=None, credentials=None, thinking_level=None) -> dict:
     validate_requested_model(web, model_ref)
     capability = turn_model_capability(web, session, model_ref, transport=transport, credentials=credentials)
-    if not capability['available']:
-        _model_error('chat_model_override_unavailable', capability['reason'])
+    # Capability detection is advisory. A configured, enabled model remains a
+    # valid explicit user choice when automatic probing is inconclusive; the
+    # actual gateway response then determines success or exposes its rejection.
     validate_thinking_level(capability, model_ref, thinking_level)
     return capability
 

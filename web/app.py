@@ -2511,16 +2511,15 @@ def _sync_agent_safety_guard() -> None:
             config = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
         except (OSError, ValueError):
             return
-        changed = False
-        plugins = config.setdefault('plugins', {})
-        if isinstance(plugins, dict):
-            load = plugins.setdefault('load', {})
-            paths = load.setdefault('paths', []) if isinstance(load, dict) else []
-            if isinstance(load, dict) and isinstance(paths, list) and str(AGENT_SAFETY_PLUGIN) not in paths:
-                paths.append(str(AGENT_SAFETY_PLUGIN)); changed = True
-            allowed = plugins.setdefault('allow', [])
-            if isinstance(allowed, list) and 'easel-agent-safety' not in allowed:
-                allowed.append('easel-agent-safety'); changed = True
+        from easel.web_runtime_config import configure_agent_safety_plugins, configure_free_search
+        search_path = PROJECT_ROOT / 'deployment/138/free-search'
+        allowed = config.get('plugins', {}).get('allow')
+        legacy_allow = isinstance(allowed, list) and set(allowed) == {'easel-agent-safety'}
+        config, search_changes = configure_free_search(
+            config, allow_plugin=legacy_allow, plugin_path=search_path)
+        config, changed = configure_agent_safety_plugins(
+            config, AGENT_SAFETY_PLUGIN, search_path)
+        changed = changed or bool(search_changes)
         agents = config.setdefault('agents', {})
         if not isinstance(agents, dict):
             agents = {}
@@ -9253,9 +9252,9 @@ class OfficeStopRequest(OfficeControlRequest):
 
 
 @app.get('/api/agent-office/models')
-async def api_office_models(sessionId: str | None = None):
+async def api_office_models(sessionId: str | None = None, modelRef: str | None = None):
     import office_controls
-    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId)
+    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId, modelRef)
     capability['agentRuntime'] = await asyncio.to_thread(_agent_runtime_config)
     return capability
 

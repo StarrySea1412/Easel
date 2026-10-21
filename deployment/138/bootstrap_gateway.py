@@ -5,7 +5,8 @@ from pathlib import Path
 import secrets
 import shutil
 
-from easel.web_runtime_config import configure_web_runtime, configure_browser_runtime, configure_free_search
+from easel.web_runtime_config import (configure_web_runtime, configure_browser_runtime,
+                                      configure_free_search, configure_agent_safety_plugins)
 
 ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
@@ -52,12 +53,29 @@ def bootstrap():
         value, changes = configure_browser_runtime(value, json.loads(Path(browser_auth).read_text()))
         if changes:
             config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    # Configure the shipped provider before Gateway loads its plugin registry.
+    # Repair only the old Easel-created allowlist; operator restrictions survive.
+    value = json.loads(config.read_text(encoding='utf-8'))
+    allowed = value.get('plugins', {}).get('allow')
+    legacy_allow = isinstance(allowed, list) and set(allowed) == {'easel-agent-safety'}
+    value, search_changes = configure_free_search(value, allow_plugin=legacy_allow,
+                                                  plugin_path=ROOT / 'deployment/138/free-search')
+    value, guard_changed = configure_agent_safety_plugins(value, ROOT / 'openclaw/easel-agent-safety',
+                                                         ROOT / 'deployment/138/free-search')
+    if search_changes or guard_changed:
+        config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     # OpenClaw 2026.9.6 owns identity creation in state/openclaw.sqlite.
     # Do not fabricate a retired device.json or modify its pairing tables.
     # Only server-managed directories are synchronized; state, MEMORY and identity stay.
     skill_destination = WORKSPACE / 'skills'
     skill_destination.mkdir(exist_ok=True)
-    for source in (ROOT / 'skills/openclaw').iterdir():
+    skill_sources = {}
+    for skill_root in (ROOT / 'skills/openclaw', ROOT / 'skills/builtin'):
+        if skill_root.is_dir():
+            for source in skill_root.iterdir():
+                if source.is_dir():
+                    skill_sources[source.name] = source
+    for source in skill_sources.values():
         if not source.is_dir():
             continue
         destination = skill_destination / source.name
@@ -74,7 +92,10 @@ def bootstrap():
         else:
             shutil.rmtree(shared)
     shutil.copytree(ROOT / 'skills/shared', shared)
-    for source in (ROOT / 'openclaw/workspace').glob('*.md'):
+    workspace_source = ROOT / 'agents/workspace'
+    if not workspace_source.is_dir():
+        workspace_source = ROOT / 'openclaw/workspace'
+    for source in workspace_source.glob('*.md'):
         destination = WORKSPACE / source.name
         if destination.exists():
             destination.unlink()

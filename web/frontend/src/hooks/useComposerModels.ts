@@ -27,9 +27,21 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController(); setLoading(true); setError('');
-    fetchOfficeTaskModels(sessionId, controller.signal).then(value => { if (!controller.signal.aborted) setCapability(value); })
-      .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂不可用。'); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    let readingCapability = false;
+    const readCapability = async () => {
+      if (controller.signal.aborted || readingCapability) return;
+      readingCapability = true;
+      try {
+        const value = await fetchOfficeTaskModels(sessionId, controller.signal, modelRef || undefined);
+        if (!controller.signal.aborted) { setCapability(value); setError(''); }
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂未读取。');
+      } finally {
+        readingCapability = false;
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void readCapability();
     let readingHealth = false;
     const readHealth = () => {
       if (controller.signal.aborted || readingHealth) return;
@@ -39,9 +51,9 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
         .finally(() => { readingHealth = false; });
     };
     readHealth();
-    const timer = setInterval(readHealth, 60000);
+    const timer = setInterval(() => { readHealth(); void readCapability(); }, 60000);
     return () => { clearInterval(timer); controller.abort(); };
-  }, [sessionId, revision, enabled]);
+  }, [sessionId, revision, enabled, modelRef]);
   const options = capability?.options.filter(option => option.configured && isCompleteModelRef(option.id)) || [];
   const selected = options.find(option => option.id === modelRef && option.enabled !== false);
   const effectiveRef = selected?.id || capability?.currentModelRef || capability?.defaultModelRef || '';
@@ -56,7 +68,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
     return () => controller.abort();
   }, [effectiveRef, effectiveDisabled, revision, enabled]);
   const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
-  const ready = modelRef ? (!loading && capability?.available === true && Boolean(selected)) : !automaticDisabled;
+  const ready = modelRef ? Boolean(selected) : !automaticDisabled;
   const choose = (value: string) => {
     if (value && !options.some(option => option.id === value && option.enabled !== false)) return;
     setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');

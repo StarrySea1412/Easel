@@ -14,6 +14,41 @@ from easel.web_runtime_config import PLUGIN_PATH, configure_web_runtime, configu
 from easel import web_runtime_config
 
 
+def test_safety_guard_preserves_unrestricted_plugins_and_repairs_legacy_search_allowlist():
+    safety = Path('/app/openclaw/easel-agent-safety')
+    search_path = Path(FREE_SEARCH_PATH)
+    helper = web_runtime_config.configure_agent_safety_plugins
+    original = {'models': {'private': 'unchanged'}}
+    result, changed = helper(original, safety, search_path)
+    assert changed and 'allow' not in result['plugins']
+    assert result['plugins']['load']['paths'] == [str(safety)]
+    assert result['models'] == original['models']
+    configured, _ = configure_free_search(original)
+    configured['plugins']['allow'] = ['easel-agent-safety']
+    repaired, changed = helper(configured, safety, search_path)
+    assert changed and repaired['plugins']['allow'] == ['easel-agent-safety', 'easel-search']
+    assert configured['plugins']['allow'] == ['easel-agent-safety']
+    assert helper(repaired, safety, search_path) == (repaired, False)
+    for change in ('disabled-search', 'disabled-plugins', 'deny-search', 'custom-allow'):
+        policy = json.loads(json.dumps(configured))
+        if change == 'disabled-search': policy['tools']['web']['search']['enabled'] = False
+        if change == 'disabled-plugins': policy['plugins']['enabled'] = False
+        if change == 'deny-search': policy['plugins']['deny'] = ['easel-search']
+        if change == 'custom-allow': policy['plugins']['allow'] = ['custom-plugin']
+        result, _ = helper(policy, safety, search_path)
+        assert 'easel-search' not in result['plugins']['allow']
+
+
+def test_local_search_path_is_explicit_and_repeated_configuration_is_idempotent(tmp_path):
+    location = tmp_path / 'free-search'
+    original = {'plugins': {'allow': ['easel-agent-safety']}, 'models': {'private': 'unchanged'}}
+    configured, changes = configure_free_search(original, allow_plugin=True, plugin_path=location)
+    assert configured['plugins']['load']['paths'] == [str(location)]
+    assert configured['plugins']['allow'] == ['easel-agent-safety', 'easel-search']
+    assert configured['models'] == original['models'] and 'unchanged' not in str(changes)
+    assert configure_free_search(configured, plugin_path=location) == (configured, [])
+
+
 def test_defaults_add_pinned_provider_without_mutating_input():
     original = {'tools': {'toolSearch': False}, 'models': {'secretFixture': 'never-print'}}
     result, changes = configure_web_runtime(original)

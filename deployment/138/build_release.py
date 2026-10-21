@@ -11,7 +11,8 @@ import tarfile
 import zipfile
 
 PREFIXES = ('easel/', 'web/', 'scripts/', 'skills/', 'profiles/_template/',
-            'openclaw/workspace/', 'deployment/138/', 'requirements/', 'docs/', 'tests/')
+            'openclaw/workspace/', 'openclaw/easel-agent-safety/', 'agents/workspace/',
+            'deployment/138/', 'requirements/', 'docs/', 'tests/')
 FILES = {'pyproject.toml', '.dockerignore', 'LICENSE', 'AGENTS.md', 'README.md', 'README_EN.md', 'CHANGELOG.md'}
 PRIVATE_PARTS = {'.git', '.venv', 'node_modules', '__pycache__', 'outputs', 'logs', '.codex', '.openclaw'}
 PRIVATE_NAMES = {'cookies.json', 'auth.json', 'device-auth.json', 'install-state.json', 'wechat-publisher.yaml'}

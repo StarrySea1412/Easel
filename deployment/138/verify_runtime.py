@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIXES = ('easel/', 'web/', 'scripts/', 'skills/', 'profiles/_template/',
-            'openclaw/workspace/', 'deployment/138/')
+            'openclaw/workspace/', 'agents/workspace/', 'openclaw/easel-agent-safety/', 'deployment/138/')
 FILES = {'pyproject.toml', 'LICENSE'}
 
 
