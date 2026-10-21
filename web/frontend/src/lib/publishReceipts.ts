@@ -18,6 +18,13 @@ export function publishPlatformLabel(platform: string): string {
   return PLATFORM_LABELS[platform] || platform;
 }
 
+export function publishReceiptAction(receipt: PublishReceipt): { label: string; target: 'accounts' | 'publish' } | null {
+  if (receipt.platformStatus === 'login_required' || receipt.verification?.state === 'login_required') return { label: '前往账号中心', target: 'accounts' };
+  if (receipt.platformStatus === 'auth_check_unavailable') return { label: '检查账号状态', target: 'accounts' };
+  if (receipt.outcome === 'failed') return { label: '返回发布中心处理', target: 'publish' };
+  return null;
+}
+
 export function isPublishOutcome(value: unknown): value is PublishOutcome {
   return typeof value === 'string' && Object.hasOwn(PUBLISH_OUTCOMES, value);
 }

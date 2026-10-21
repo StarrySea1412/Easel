@@ -6,7 +6,7 @@ import {
   IconChat,
   IconNewChat, IconChevron,
   IconDashboard, IconAgentOffice, IconOpenClaw,
-  IconLoader, IconPublish,
+  IconLoader, IconPublish, IconHistory,
 } from './icons';
 import { IconGear, IconImage, IconMoon, IconSun } from './settingsIcons';
 import { readTheme, setThemePreference, subscribeTheme } from '../lib/theme';
@@ -23,7 +23,7 @@ import {readSeenStatuses, subscribeSeenStatuses} from '../lib/seenStatus';
 import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
-export type Page = 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
+export type Page = 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'publish-receipts' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
   eventNotifications?: React.ReactNode;
@@ -325,6 +325,7 @@ export default function Sidebar({
             {railItem('chat','对话',<IconChat size={19}/>)}
             {railItem('image','生图工坊',<IconImage size={19}/>)}
             {railItem('publish','内容发布',<IconPublish size={19}/>)}
+            {railItem('publish-receipts','发布回执',<IconHistory size={19}/>)}
             {railItem('automation','定时任务',<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2M17 4l2-2M5 4 3 2"/></svg>)}
             <SidebarMoreMenu currentPage={currentPage} onNavigate={navigate}/>
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}

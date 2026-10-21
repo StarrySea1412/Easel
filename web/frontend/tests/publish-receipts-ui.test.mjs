@@ -15,6 +15,7 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: w
 const { createRoot } = await import('react-dom/client');
 const { usePublishReceipts } = await loadTsModule('../src/hooks/usePublishReceipts.ts');
 const { default: PublishReceiptCenter, PublishReceiptCard } = await loadTsModule('../src/components/PublishReceiptCenter.tsx');
+const { default: PublishReceiptsPage } = await loadTsModule('../src/components/PublishReceiptsPage.tsx');
 const { default: PublishPage } = await loadTsModule('../src/components/PublishPage.tsx');
 const { default: CalendarPage } = await loadTsModule('../src/components/CalendarPage.tsx');
 const { savePublishDraft } = await loadTsModule('../src/lib/store.ts');
@@ -44,7 +45,7 @@ async function fixture(t, initial = [], page = 'other') {
   savePublishDraft({ title: '本次要发布的标题', body: '本次内容正文。', platforms: ['zhihu'], overrides: {}, tags: '' });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = {
-    model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0,
+    model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0, accountsOpened: 0, outputsOpened: 0,
     list: null, detail: null, publish: null, sms: null, verify: null, precheck: null, reports: [], report: null,
     whoami: null, accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
@@ -84,7 +85,8 @@ async function fixture(t, initial = [], page = 'other') {
     h.model = model;
     return createElement('main', null,
       createElement(PublishReceiptCenter, { model, onConfigure: () => { h.configured++; }, onOpenPublish: () => { h.publishPageOpened++; } }),
-      page === 'publish' ? createElement(PublishPage, { persona: '', publishReceipts: model })
+      page === 'receipts' ? createElement(PublishReceiptsPage, { model, onConfigure: () => { h.configured++; }, onOpenPublish: () => { h.publishPageOpened++; }, onAccounts: () => { h.accountsOpened++; } })
+      : page === 'publish' ? createElement(PublishPage, { persona: '', publishReceipts: model, onOpenAccounts: () => { h.accountsOpened++; }, onOpenOutputs: () => { h.outputsOpened++; } })
         : page === 'calendar' ? createElement(CalendarPage) : createElement('section', { 'data-testid': 'other-page' }, '其他页面'),
     );
   }
@@ -432,7 +434,7 @@ test('mixed platform readiness explicitly excludes video targets and restores im
   assert.equal(view.container.querySelector('.media-chip').getAttribute('aria-label'), '移除素材 02.png');
   view.h.confirm = false;
   await view.click(view.button('发布到 3 个平台'));
-  assert.match(view.h.confirmations[0], /本次不会提交：抖音（抖音需要视频/);
+  assert.match(view.h.confirmations[0], /本次不会提交：抖音（需要视频/);
   assert.equal(view.posts().length, 0);
   view.h.confirm = true;
   view.h.publish = (platform, payload) => {
@@ -582,7 +584,7 @@ test('returning to the publish page expires an online snapshot and broadcasts th
   now += 601000;
   await act(async () => window.dispatchEvent(new window.Event('focus')));
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.loggedIn, false);
-  assert.match(view.container.querySelector('.publish-readiness').textContent, /需登录/);
+  assert.match(view.container.querySelector('.publish-readiness').textContent, /未登录/);
   await view.click(view.button('发布到 1 个平台'));
   assert.equal(view.posts().length, 0);
   assert.equal(view.h.confirmations.length, 0);
@@ -621,5 +623,62 @@ test('publish targets follow shared login events and disable offline platforms w
   assert.match(target('抖音').getAttribute('aria-label'), /未登录/);
   assert.equal(target('抖音').querySelector('.publish-spinner'), null);
   assert.equal(view.container.querySelector('[id$="-publish-body"]').value, '本次内容正文。');
+  assert.equal(view.posts().length, 0);
+});
+
+
+test('standalone receipts page searches real model rows and offers failure recovery without republishing', async t => {
+  const failed = completed({ outcome: 'failed', url: '', platformStatus: 'login_required',
+    message: '知乎发布页要求登录，请前往账号中心确认登录后再试。', evidence: { submissionAttempted: false } });
+  const view = await fixture(t, [failed, completed({ receiptId: 'b'.repeat(32), title: '另一篇已发布内容' })], 'receipts');
+  assert.equal(view.container.querySelector('h1').textContent, '发布回执');
+  assert.equal(view.container.querySelectorAll('.publish-receipts-page .publish-receipt').length, 2);
+  assert.match(view.container.textContent, /未执行发布提交/);
+  await view.click(view.button('前往账号中心'));
+  assert.equal(view.h.accountsOpened, 1);
+  await view.click(view.container.querySelector('[aria-label="筛选发布状态"][role="combobox"]'));
+  await view.click([...document.querySelectorAll('[role="option"]')].find(el => el.textContent.includes('需要处理')));
+  assert.equal(view.container.querySelectorAll('.publish-receipts-page .publish-receipt').length, 1);
+  await view.click(view.container.querySelector('[aria-label="筛选发布状态"][role="combobox"]'));
+  await view.click([...document.querySelectorAll('[role="option"]')].find(el => el.textContent.includes('全部状态')));
+  await view.type(view.container.querySelector('[aria-label="搜索发布回执"]'), '另一篇');
+  assert.equal(view.container.querySelectorAll('.publish-receipts-page .publish-receipt').length, 1);
+  await view.type(view.container.querySelector('[aria-label="搜索发布回执"]'), '不存在的回执');
+  assert.match(view.container.textContent, /没有匹配的发布回执/);
+  assert.equal(view.posts().length, 0);
+});
+
+test('missing-video preparation tells the requirement and focuses the media picker while another platform runs', async t => {
+  const view = await fixture(t, [makeReceipt()], 'publish');
+  view.h.accounts = [{ platform: 'douyin', loggedIn: true }, { platform: 'zhihu', loggedIn: true }];
+  await act(async () => { setWhoamiCache('douyin', { loggedIn: true, verified: true, checkedAt: Date.now(), name: '', avatar: '' }); });
+  await view.render('other');
+  savePublishDraft({ title: '跨平台测试', body: '正文', platforms: ['douyin', 'zhihu'], overrides: {}, tags: '' });
+  await view.render('publish');
+  const row = [...view.container.querySelectorAll('.publish-readiness-row')].find(el => el.textContent.includes('抖音'));
+  assert.match(row.textContent, /缺少视频/);
+  assert.match(row.textContent, /去补充/);
+  await view.click(row);
+  const media = view.container.querySelector('[aria-label="补充发布素材"]');
+  assert.equal(document.activeElement, media);
+  assert.ok(media.querySelector('.media-grid'));
+  assert.match(media.textContent, /抖音：缺少视频/);
+  await view.click(view.button('前往内容库'));
+  assert.equal(view.h.outputsOpened, 1);
+  assert.equal(view.posts().length, 0);
+});
+
+test('unknown account preparation keeps its action aligned with the displayed login issue despite missing video', async t => {
+  const view = await fixture(t, [], 'other');
+  view.h.accounts = [{ platform: 'douyin', supported: true, loggedIn: null }];
+  view.h.whoami = () => ({ loggedIn: false, verified: false, authState: 'unknown', checkedAt: Date.now(), name: '', avatar: '' });
+  savePublishDraft({ title: '账号待确认', body: '正文', platforms: ['douyin'], overrides: {}, tags: '' });
+  await view.render('publish');
+  const row = [...view.container.querySelectorAll('.publish-readiness-row')].find(el => el.textContent.includes('抖音'));
+  assert.match(row.textContent, /登录状态待在线确认/);
+  assert.match(row.textContent, /检查账号/);
+  assert.doesNotMatch(row.textContent, /去补充/);
+  await view.click(row);
+  assert.equal(view.container.querySelector('.media-grid'), null);
   assert.equal(view.posts().length, 0);
 });

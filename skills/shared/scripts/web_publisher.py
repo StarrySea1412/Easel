@@ -246,7 +246,7 @@ PLATFORMS: dict[str, dict] = {
         "login_probe_url": "https://www.zhihu.com/",
         "publish_url": "https://zhuanlan.zhihu.com/write",
         "profile": "ZhihuProfile",
-        "login_check": ".AppHeader-profile, .AppHeader-userInfo",
+        "login_check": ".AppHeader-profile, .AppHeader-userInfo, .ColumnPageHeader-profile, .AppHeader-profileEntry",
         "login_strict": True,
         "logged_out_selector": ".SignContainer, .Login-content, button:has-text('登录')",
         "login_qr_switch": "button:has-text('扫码登录'), [role='tab']:has-text('扫码登录'), "
@@ -649,7 +649,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 _settle_login(page, cfg)  # 等客户端跳转/登录外壳渲染落定
             except Exception:
                 pass
-            if _is_logged_in(page, cfg):
+            if _publish_login_confirmed(browser, page, cfg):
                 logged = True
                 break
             try:
@@ -657,7 +657,15 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
             except Exception:
                 break
         if not logged:
-            _die(f"{cfg['name']}未登录：发布页被重定向到登录/落地页。请先在账号页扫码登录后重试。", 6)
+            reason = 'login_required' if _explicit_login_required(page, cfg) else 'auth_check_unavailable'
+            message = (f"{cfg['name']}发布页要求登录，请前往账号中心确认登录后再试。"
+                       if reason == 'login_required' else
+                       f"暂时无法确认{cfg['name']}发布权限，未提交内容；请检查账号状态或稍后重试。")
+            publish_receipt.emit(publish_receipt.make_receipt(
+                a.platform, 'failed', platform_status=reason, message=message,
+                evidence={'kind': 'preflight', 'reason': reason, 'submissionAttempted': False}))
+            browser.close()
+            _die(message, 6)
         # 外壳已登录但发布子系统鉴权可能已失效（快手 onvideo token 短命）→ 提前明确报错，
         # 避免后续 upload 因发布态失效而晦涩超时。仅明确失效才拦，瞬时错误放行。
         if cfg.get("login_probe") and _probe_publish_auth(page, cfg) == "expired":
@@ -993,6 +1001,30 @@ def _authenticated_account(browser, cfg: dict) -> dict | None:
     except Exception:
         pass
     return None
+
+
+def _explicit_login_required(page, cfg: dict) -> bool:
+    """Missing layout selectors are unknown; only an actual login prompt is negative evidence."""
+    try:
+        if any(marker in urlsplit(page.url).path.lower() for marker in _LOGIN_MARKERS):
+            return True
+        return any(element.is_visible()
+                   for selector in (cfg.get('logged_out_selector') or '').split(',') if selector.strip()
+                   for element in page.query_selector_all(selector.strip()))
+    except Exception:
+        return False
+
+
+def _publish_login_confirmed(browser, page, cfg: dict) -> bool:
+    # Share the identity proof used by whoami. The column editor has a different
+    # header from the home page; absence of the home-page avatar is not a logout.
+    if cfg.get('profile') == 'ZhihuProfile':
+        parsed = urlsplit(page.url)
+        if parsed.scheme != 'https' or parsed.hostname not in {'www.zhihu.com', 'zhuanlan.zhihu.com'}:
+            return False
+        if _authenticated_account(browser, cfg) is not None:
+            return not _explicit_login_required(page, cfg)
+    return _is_logged_in(page, cfg)
 
 
 def _login_qr_state(page, cfg: dict) -> str:

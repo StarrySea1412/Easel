@@ -3,24 +3,28 @@ import type { ReactNode } from 'react';
 import type { PublishReceipt } from '../lib/api';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { useModalFocus } from '../hooks/useModalFocus';
-import { canVerifyPublishReceipt, isFinalPublishReceipt, publishNotificationLabel, publishPlatformLabel, publishReceiptStatus, receiptPublicUrl } from '../lib/publishReceipts';
+import { canVerifyPublishReceipt, isFinalPublishReceipt, publishNotificationLabel, publishPlatformLabel, publishReceiptStatus, receiptPublicUrl, publishReceiptAction } from '../lib/publishReceipts';
+import { NativeSelect as Select } from './ui/Select';
 import { IconHistory, IconRefresh } from './icons';
 import PlatformIcon from './PlatformIcon';
 import PublishSpinner from './PublishSpinner';
 import '../styles/publish-receipts.css';
 import { showToast } from '../lib/toast';
 
-export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, checkBusy = false, children }: {
+export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, onAccounts, onOpenPublish, checkBusy = false, children }: {
   receipt: PublishReceipt;
   onConfigure?: () => void;
   onVerify?: () => void;
   onCheck?: (automatic?: boolean) => Promise<void>;
+  onAccounts?: () => void;
+  onOpenPublish?: () => void;
   checkBusy?: boolean;
   children?: ReactNode;
 }) {
   const status = publishReceiptStatus(receipt);
   const url = receiptPublicUrl(receipt);
   const final = isFinalPublishReceipt(receipt);
+  const action = publishReceiptAction(receipt);
   const label = publishPlatformLabel(receipt.platform);
   const previewId = receipt.contentId || receipt.evidence?.previewContentId;
   const preview = receipt.platform === 'xiaohongshu' && typeof previewId === 'string' && /^[0-9a-f]{24}$/.test(previewId)
@@ -34,6 +38,8 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, ch
     <time dateTime={receipt.createdAt}>{new Date(receipt.createdAt).toLocaleString('zh-CN')}</time>
     <p>{status.description}</p>
     {receipt.message && receipt.message !== status.description && <p className="publish-receipt-message">{receipt.message}</p>}
+    {receipt.evidence?.submissionAttempted === false && <p className="publish-receipt-message">已在提交前停止，未执行发布提交。</p>}
+    {action && (action.target === 'accounts' ? onAccounts : onOpenPublish) && <button className="btn btn-sm" onClick={action.target === 'accounts' ? onAccounts : onOpenPublish}>{action.label}</button>}
     {receipt.storageWarning && <p className="notice-error" role="alert">{receipt.storageWarning}</p>}
     {url ? <a className="publish-receipt-link" href={url} target="_blank" rel="noopener noreferrer">查看已发布作品 ↗</a>
       : receipt.outcome === 'published' && <p className="publish-receipt-message">平台未返回可验证的公开作品地址，请到平台核对。</p>}
@@ -123,35 +129,46 @@ function PublishSmsForm({ receipt, onSubmit }: { receipt: PublishReceipt; onSubm
   </form>;
 }
 
-export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish, showEntry = true }: {
+export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish, onAccounts, showEntry = true, mode = 'modal' }: {
   model: PublishReceiptsModel;
   onConfigure: () => void;
   onOpenPublish: () => void;
+  onAccounts?: () => void;
   showEntry?: boolean;
+  mode?: 'modal' | 'page' | 'notices';
 }) {
   const titleId = useId();
   const dialogId = useId();
-  const modalRef = useModalFocus(model.isOpen, model.close);
+  const modalRef = useModalFocus(mode === 'modal' && model.isOpen, model.close);
+  const [query, setQuery] = useState('');
+  const [platform, setPlatform] = useState('all');
+  const [filter, setFilter] = useState('all');
   const latest = model.notices[0];
   const latestUrl = latest ? receiptPublicUrl(latest) : null;
   const ordered = [...model.active, ...model.receipts.filter(isFinalPublishReceipt)];
+  const filtered = ordered.filter(receipt => (platform === 'all' || receipt.platform === platform)
+    && (filter === 'all' || (filter === 'attention' ? receipt.outcome === 'failed' || receipt.outcome === 'unverified' || receipt.state === 'sms_required'
+      : filter === 'active' ? !isFinalPublishReceipt(receipt) || receipt.outcome === 'submitted' : receipt.outcome === filter))
+    && `${receipt.title} ${receipt.message} ${publishPlatformLabel(receipt.platform)}`.toLowerCase().includes(query.trim().toLowerCase()));
   const count = model.verification.length || model.notices.length || model.active.length || model.checking.length;
   const configure = () => { model.close(); onConfigure(); };
   const seenNotices = useRef(new Set<string>());
+  const focused = useRef('');
+  useEffect(() => { setQuery(''); setPlatform('all'); setFilter('all'); focused.current = ''; }, [model.focusedReceiptId]);
   useEffect(() => {
-    if (!model.isOpen || !model.focusedReceiptId) return;
+    if ((mode !== 'page' && !model.isOpen) || !model.focusedReceiptId || focused.current === model.focusedReceiptId) return;
     const card = modalRef.current?.querySelector<HTMLElement>('[data-receipt-id="'+model.focusedReceiptId+'"]');
-    if (card) { card.tabIndex = -1; card.scrollIntoView?.({block:'center'}); card.focus({preventScroll:true}); }
-  }, [model.isOpen,model.focusedReceiptId,model.receipts,modalRef]);
+    if (card) { focused.current = model.focusedReceiptId; card.tabIndex = -1; card.scrollIntoView?.({block:'center'}); card.focus({preventScroll:true}); }
+  });
   useEffect(() => {
-    if (showEntry) return;
+    if (showEntry || mode === 'page') return;
     for (const receipt of model.notices) {
       const key = `${receipt.receiptId}:${receipt.outcome}`;
       if (seenNotices.current.has(key)) continue;
       seenNotices.current.add(key);
       showToast(`${publishPlatformLabel(receipt.platform)} · ${publishReceiptStatus(receipt).label}`, receipt.outcome === 'failed' ? 'error' : 'info', { label: '查看回执', run: model.open });
     }
-  }, [model.notices, model.open, showEntry]);
+  }, [model.notices, model.open, showEntry, mode]);
   return <>
     {showEntry && <div className="publish-receipts-bar" aria-label="发布回执与提醒">
       <button type="button" className="publish-receipts-entry" onClick={model.open}
@@ -171,12 +188,22 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
           : <span className="publish-receipts-idle">结果与作品地址保存在这里</span>}
       </div>
     </div>}
-    {model.isOpen && <div className="overlay publish-receipts-overlay" onClick={event => { if (event.target === event.currentTarget) model.close(); }}>
-      <div className="modal publish-receipts-modal" id={dialogId} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={modalRef}>
+    {(mode === 'page' || mode === 'modal' && model.isOpen) && <div className={mode === 'page' ? 'publish-receipts-page' : 'overlay publish-receipts-overlay'} onClick={event => { if (mode === 'modal' && event.target === event.currentTarget) model.close(); }}>
+      <div className={mode === 'page' ? 'publish-receipts-content' : 'modal publish-receipts-modal'} id={dialogId} role={mode === 'page' ? 'region' : 'dialog'} aria-modal={mode === 'modal' ? true : undefined} aria-labelledby={titleId} tabIndex={-1} ref={modalRef}>
         <div className="publish-receipts-modal-heading">
-          <div><h2 id={titleId}>发布回执</h2><p>切换页面或刷新后，可继续查看当前工作台的记录。</p></div>
-          <button className="btn btn-sm" onClick={model.close} aria-label="关闭发布回执">关闭</button>
+          <div>{mode === 'page' ? <h1 id={titleId}>发布回执</h1> : <h2 id={titleId}>发布回执</h2>}<p>{mode === 'page' ? `最近 ${model.receipts.length} 条记录 · 自动更新平台结果` : '切换页面或刷新后，可继续查看当前工作台的记录。'}</p></div>
+          {mode === 'modal' && <button className="btn btn-sm" onClick={model.close} aria-label="关闭发布回执">关闭</button>}
+          {mode === 'page' && <button className="btn btn-sm" onClick={onOpenPublish}>前往发布中心</button>}
         </div>
+        {mode === 'page' && <div className="publish-receipts-filters">
+          <input className="field" type="search" aria-label="搜索发布回执" placeholder="搜索标题、平台或失败原因" value={query} onChange={event => setQuery(event.target.value)} />
+          <Select aria-label="筛选发布平台" value={platform} onChange={event => setPlatform(event.target.value)}>
+            <option value="all">全部平台</option>{[...new Set(model.receipts.map(receipt => receipt.platform))].map(key => <option key={key} value={key}>{publishPlatformLabel(key)}</option>)}
+          </Select>
+          <Select aria-label="筛选发布状态" value={filter} onChange={event => setFilter(event.target.value)}>
+            <option value="all">全部状态</option><option value="attention">需要处理</option><option value="active">处理中 / 待审核</option><option value="published">已发布</option><option value="draft">已存草稿</option>
+          </Select>
+        </div>}
         <div className="publish-receipts-actions">
           <button className="btn btn-sm" onClick={() => void model.refresh()} disabled={model.refreshing}><IconRefresh size={13} />{model.refreshing ? '更新中…' : '刷新回执'}</button>
           {model.notices.length > 0 && <button className="btn btn-sm" onClick={model.dismissNotices}>全部标为已读</button>}
@@ -192,7 +219,8 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
           </div>}
           {!model.loaded && !model.error && <p className="dash-empty">正在读取发布回执…</p>}
           {model.loaded && ordered.length === 0 && <p className="dash-empty">还没有发布回执。确认发布后，平台结果和可用的作品地址会保存在这里。</p>}
-          {ordered.map(receipt => <PublishReceiptCard key={receipt.receiptId} receipt={receipt} onConfigure={configure}
+          {mode === 'page' && model.loaded && ordered.length > 0 && filtered.length === 0 && <p className="dash-empty">没有匹配的发布回执，请调整搜索或筛选。</p>}
+          {(mode === 'page' ? filtered : ordered).map(receipt => <PublishReceiptCard key={receipt.receiptId} receipt={receipt} onConfigure={configure} onAccounts={onAccounts} onOpenPublish={onOpenPublish}
             onCheck={automatic => model.verify(receipt.receiptId, automatic)} checkBusy={model.verificationBusyIds.includes(receipt.receiptId)}>
             {!isFinalPublishReceipt(receipt) && receipt.state === 'sms_required' && <PublishSmsForm receipt={receipt} onSubmit={model.submitSms} />}
           </PublishReceiptCard>)}

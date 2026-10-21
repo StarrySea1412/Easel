@@ -83,3 +83,25 @@ test('missing and queued mail configuration never changes the platform result', 
   assert.equal(publishNotificationLabel({ state: 'skipped' }), '本次未发送邮件');
   assert.equal(publishNotificationLabel(), '邮件通知状态待确认');
 });
+
+
+test('media requirements distinguish video, image cover and text-only publication', async () => {
+  const { publishMediaIssue } = await loadTsModule('../src/lib/publishPreparation.ts');
+  assert.equal(publishMediaIssue('zhihu', []), null);
+  for (const platform of ['douyin', 'bilibili', 'weixin-channels']) {
+    assert.equal(publishMediaIssue(platform, []).code, 'video_required');
+    assert.match(publishMediaIssue(platform, ['cover.png']).message, /当前选择的是图片/);
+    assert.equal(publishMediaIssue(platform, ['video.mp4']), null);
+  }
+  assert.match(publishMediaIssue('wechat-oa', ['video.mp4']).message, /封面图/);
+  assert.equal(publishMediaIssue('wechat-oa', ['cover.png']), null);
+  assert.match(publishMediaIssue('xiaohongshu', []).message, /至少选择一个/);
+});
+
+test('receipt deep links restore a precise safe target and reject malformed ids', async () => {
+  const { publishReceiptHash, parsePublishReceiptHash } = await loadTsModule('../src/lib/publishReceiptNavigation.ts');
+  assert.deepEqual(parsePublishReceiptHash(publishReceiptHash('a'.repeat(32))), { receiptId: 'a'.repeat(32) });
+  assert.deepEqual(parsePublishReceiptHash('#/publish-receipts'), { receiptId: undefined });
+  assert.equal(parsePublishReceiptHash('#/publish-receipts/../accounts'), null);
+  assert.equal(parsePublishReceiptHash('#/publish-receipts/not-a-receipt'), null);
+});

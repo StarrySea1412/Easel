@@ -21,11 +21,12 @@ import { useVideoStudio } from './hooks/useVideoStudio';
 import { useDemoDataPreference } from './hooks/useDemoDataPreference';
 import { usePublishReceipts } from './hooks/usePublishReceipts';
 import PublishReceiptCenter from './components/PublishReceiptCenter';
+import { parsePublishReceiptHash, publishReceiptHash } from './lib/publishReceiptNavigation';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
 import CreationWorkspaceHost from './components/CreationWorkspaceHost';
 import CreationWorkspaceSlot from './components/CreationWorkspaceSlot';
-import { creationSessionDeleted, currentCreation, creationRevision, subscribeCreation, creationReceiptSession, selectCreation, requestCreationPanel } from './lib/creationWorkspace';
+import { creationSessionDeleted, currentCreation, creationRevision, subscribeCreation, selectCreation, requestCreationPanel } from './lib/creationWorkspace';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
 import { notificationOutputPath, removeSessionEvents, startEventSync } from './lib/eventNotifications';
@@ -77,6 +78,7 @@ const OutputsPage = createLazyPage('内容库', () => import('./components/Outpu
 const ActivityPage = createLazyPage('运行记录', () => import('./components/ActivityPage'));
 const AgentOfficePage = createLazyPage('Agent 办公室', () => import('./components/AgentOfficePage'));
 const AccountsPage = createLazyPage('账号', () => import('./components/AccountsPage'));
+const PublishReceiptsPage = createLazyPage('发布回执', () => import('./components/PublishReceiptsPage'));
 const ContentAnalysisPage = createLazyPage('内容分析', () => import('./components/ContentAnalysisPage'));
 const ProfilePage = createLazyPage('画像', () => import('./components/ProfilePage'));
 const TrendsPage = createLazyPage('热点雷达', () => import('./components/TrendsPage'));
@@ -111,13 +113,32 @@ export default function App() {
   useEffect(() => startEventSync(), []);
   const [currentPage, setPageState] = useState<Page>('dashboard');
   const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
+    if (page === 'publish-receipts' && !parsePublishReceiptHash(window.location.hash)) window.location.hash = publishReceiptHash();
+    else if (page !== 'publish-receipts' && parsePublishReceiptHash(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
     window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));
     setPageState(page);
   }, []);
   const imageStudio = useImageStudio(currentPage === 'image' && !currentCreation('image').sessionId);
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
-  const publishReceipts = usePublishReceipts();
+  const receiptState = usePublishReceipts();
+  const { open: openReceiptState } = receiptState;
+  const openReceipts = useCallback((receiptId?: unknown) => {
+    openReceiptState(receiptId);
+    window.location.hash = publishReceiptHash(receiptId);
+    setCurrentPage('publish-receipts');
+  }, [openReceiptState, setCurrentPage]);
+  const publishReceipts = { ...receiptState, open: openReceipts };
+  useEffect(() => {
+    const navigateReceipts = () => {
+      const route = parsePublishReceiptHash(window.location.hash);
+      if (route) { openReceiptState(route.receiptId); setCurrentPage('publish-receipts'); }
+      else if (!window.location.hash || window.location.hash === '#') setPageState(page => page === 'publish-receipts' ? 'publish' : page);
+    };
+    window.addEventListener('hashchange', navigateReceipts);
+    navigateReceipts();
+    return () => window.removeEventListener('hashchange', navigateReceipts);
+  }, [openReceiptState, setCurrentPage]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
   const [settingsModelRef, setSettingsModelRef] = useState<string>();
   const [skillConfiguration, setSkillConfiguration] = useState<string>();
@@ -356,7 +377,7 @@ export default function App() {
     const outcomes = { published: '平台确认已发布', submitted: '已提交，待确认发布', draft: '已保存草稿', unverified: '发布状态待核验', failed: '发布失败' };
     for (const receipt of publishReceipts.notices) {
       if (receipt?.outcome) showToast(`${receipt.platform} · ${outcomes[receipt.outcome]}`, receipt.outcome === 'published' ? 'success' : receipt.outcome === 'failed' ? 'error' : 'info',
-        undefined, `publish:${receipt.receiptId}:${receipt.outcome}`, creationReceiptSession(receipt) ? {page:'chat', sessionId:creationReceiptSession(receipt)!,tool:'publish',receiptId:receipt.receiptId} : { page: 'publish' });
+        undefined, `publish:${receipt.receiptId}:${receipt.outcome}`, { page: 'publish-receipts', receiptId: receipt.receiptId });
     }
   }, [publishReceipts.notices]);
   useEffect(() => {
@@ -1524,6 +1545,10 @@ export default function App() {
         return <CalendarPage />;
       case 'publish':
         return <CreationWorkspaceSlot kind="publish" sessionId={currentCreation('publish').sessionId}/>;
+      case 'publish-receipts':
+        return <PublishReceiptsPage model={publishReceipts} onOpenPublish={() => setCurrentPage('publish')}
+          onAccounts={() => setCurrentPage('accounts')}
+          onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />;
       case 'breakdown':
         return <BreakdownPage persona={selectedPersona} onStart={handleStartBreakdown} onOpenRun={handleOpenBreakdownRun} />;
       case 'skills':
@@ -1582,6 +1607,8 @@ export default function App() {
         onOpenSettings={()=>{setSettingsSection('image');setCurrentPage('settings');}}
         onOpenVideoSettings={()=>{setSettingsSection('video');setCurrentPage('settings');}}
         onOpenOutputs={()=>{setOutputFilter('image');setCurrentPage('outputs');}}
+        onOpenPublishOutputs={()=>{setOutputFilter('all');setCurrentPage('outputs');}}
+        onOpenAccounts={()=>setCurrentPage('accounts')}
         onExpand={kind=>setCurrentPage(kind)} />
       <Sidebar
         currentPage={currentPage}
@@ -1616,22 +1643,23 @@ export default function App() {
             if (target.tool) {
               requestCreationPanel(target.tool,target.sessionId);
             }
-            if(target.receiptId) publishReceipts.open(target.receiptId);
+            if(target.receiptId) { publishReceipts.open(target.receiptId); return; }
           }
           if (target.page === 'image' && target.medium) videoStudio.setViewMode(target.medium);
           if (target.page === 'outputs') {
             setOutputFilter(target.filter || 'all');
             setOutputJumpPath(target.path || '');
           }
+          if (target.page === 'publish-receipts') { publishReceipts.open(target.receiptId); return; }
           setCurrentPage(target.page);
         }} />}
       />
       <main className="main-content">
         <StorageNotice onOpenBackup={() => { setSettingsSection('backup'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
-        <PublishReceiptCenter model={publishReceipts} showEntry={false}
+        <PublishReceiptCenter model={publishReceipts} showEntry={false} mode="notices"
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
           onOpenPublish={() => setCurrentPage('publish')} />
-        {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
+        {(['trends', 'ideas', 'calendar', 'publish', 'publish-receipts', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}
         <div className="page-host">

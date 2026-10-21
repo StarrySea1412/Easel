@@ -483,3 +483,55 @@ def test_bilibili_dry_run_does_not_upload_or_read_back(bili_args, calendar, monk
     monkeypatch.setattr(rb, "capture_bilibili_snapshot", lambda *_a: pytest.fail("must not access the platform in dry-run"))
     assert bili.cmd_upload(bili_args) == 0
     assert receipts.PREFIX not in capsys.readouterr().out and calendar == []
+
+
+def test_zhihu_publish_uses_the_same_identity_proof_as_account_center(browser, calendar, monkeypatch, tmp_path, capsys):
+    browser.url = "https://zhuanlan.zhihu.com/p/123456789"
+    monkeypatch.setattr(wp, "_profile_dir", lambda *_a: tmp_path)
+    monkeypatch.setattr(wp, "_settle_login", lambda *_a: None)
+    monkeypatch.setattr(wp, "_is_logged_in", lambda *_a: False)
+    calls = []
+    def identity(*args):
+        calls.append(args)
+        return {"id": "synthetic-account", "name": "synthetic-name"}
+    monkeypatch.setattr(wp, "_authenticated_account", identity)
+    monkeypatch.setattr(wp, "_resolve_steps", lambda *_a: [])
+    assert wp.cmd_publish(publish_args(tmp_path, platform="zhihu", media=None)) == 0
+    row = read_receipt(capsys)
+    assert calls and row["outcome"] == "published"
+
+
+@pytest.mark.parametrize("url,identity,visible_login,expected", [
+    ("https://zhuanlan.zhihu.com/write", True, False, True),
+    ("https://www.zhihu.com/signin", True, True, False),
+    ("https://zhuanlan.zhihu.com/write", True, True, False),
+    ("https://zhuanlan.zhihu.com/write", False, False, False),
+    ("https://foreign.test/write", True, False, False),
+])
+def test_zhihu_missing_layout_is_unknown_but_visible_login_still_blocks(monkeypatch, url, identity, visible_login, expected):
+    page = SimpleNamespace(url=url, query_selector_all=lambda _s: [SimpleNamespace(is_visible=lambda: True)] if visible_login else [])
+    monkeypatch.setattr(wp, "_authenticated_account", lambda *_a: {"id": "a", "name": "b"} if identity else None)
+    monkeypatch.setattr(wp, "_is_logged_in", lambda *_a: False)
+    assert wp._publish_login_confirmed(object(), page, wp.PLATFORMS["zhihu"]) is expected
+
+
+@pytest.mark.parametrize("selector", [".ColumnPageHeader-profile", ".AppHeader-profileEntry"])
+def test_current_zhihu_editor_header_is_recognized(selector):
+    page = SimpleNamespace(url="https://zhuanlan.zhihu.com/write",
+                           query_selector=lambda value: SimpleNamespace(is_visible=lambda: True) if value == selector else None)
+    assert wp._is_logged_in(page, wp.PLATFORMS["zhihu"])
+
+
+@pytest.mark.parametrize("expired", [True, False])
+def test_publish_preflight_emits_a_specific_safe_reason(browser, monkeypatch, tmp_path, capsys, expired):
+    browser.url = "https://www.zhihu.com/signin" if expired else "https://zhuanlan.zhihu.com/write"
+    monkeypatch.setattr(wp, "_profile_dir", lambda *_a: tmp_path)
+    monkeypatch.setattr(wp, "_settle_login", lambda *_a: None)
+    monkeypatch.setattr(wp, "_publish_login_confirmed", lambda *_a: False)
+    monkeypatch.setattr(wp, "_resolve_steps", lambda *_a: [])
+    with pytest.raises(SystemExit):
+        wp.cmd_publish(publish_args(tmp_path, platform="zhihu", media=None))
+    row = read_receipt(capsys)
+    assert row["outcome"] == "failed" and row["evidence"]["submissionAttempted"] is False
+    assert row["platformStatus"] == ("login_required" if expired else "auth_check_unavailable")
+    assert "提交前流程失败" not in row["message"]

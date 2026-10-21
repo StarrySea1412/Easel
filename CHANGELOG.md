@@ -1,3 +1,10 @@
+## 0.12.0 · 2026-10-21 · Publishing receipts page / 独立发布回执页
+
+- Add sidebar/creation/notification navigation, refreshable deep links, search and shared platform/state selectors; retain verification, SMS and notification controls. / 新增侧栏、创作导航及通知入口，支持刷新后回到指定回执、搜索与共享筛选控件，保留核实/短信/通知设置。
+- Explain missing video or cover image requirements and focus the media picker; link to the content library when it has no media. / 素材缺失显示视频或封面图要求并定位选择区，空库可前往内容库。
+- Reuse the verified Zhihu identity API in publication preflight, recognize the current column-editor header, distinguish unknown checks from explicit login prompts and persist actionable failure reasons. / 发布预检复用知乎身份接口并适配当前专栏页，区分检查未知与明确登录要求，持久化可处理的失败原因。
+- Source, checks and deployment scope: [verification record](docs/publish-receipts-page-0.12.0-2026-10-21.md). Host 138 and installers remain on their previous versions. / 源码、验证及部署边界见记录，138与安装器保持原版本。
+
 ## 0.11.2 · 2026-10-21 · Search recovery and latest acceptance build / 搜索修复与138验收更新
 
 - Repair Easel's accidental safety-only plugin allowlist; preserve explicit operator restrictions and load the bundled search provider across Windows/Linux. / 修复安全插件误建白名单导致网络搜索禁用，保留明确禁用策略，适配Windows/Linux插件SDK加载。

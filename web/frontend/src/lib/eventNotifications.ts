@@ -4,7 +4,8 @@ export type NoticeTarget =
   | { page: 'chat'; sessionId: string; tool?: 'image'|'publish'; receiptId?:string }
   | { page: 'image'; medium?: 'image' | 'video' }
   | { page: 'outputs'; filter?: 'all' | 'image' | 'video'; path?: string }
-  | { page: 'publish' };
+  | { page: 'publish' }
+  | { page: 'publish-receipts'; receiptId?: string };
 export type EventNotice = {
   id: string; message: string; tone: ToastTone; at: number; read: boolean;
   target?: NoticeTarget; action?: ToastNotice['action'];
@@ -56,6 +57,8 @@ function targetFrom(value: unknown): NoticeTarget | undefined {
     ...(outputPath(value.path) ? { path: outputPath(value.path) } : {}),
   };
   if (value.page === 'publish') return { page: 'publish' };
+  if (value.page === 'publish-receipts') return { page: 'publish-receipts',
+    ...(typeof value.receiptId === 'string' && /^[a-f0-9]{32}$/.test(value.receiptId) ? { receiptId: value.receiptId } : {}) };
   return undefined;
 }
 

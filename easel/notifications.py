@@ -31,8 +31,10 @@ def notice(value):
                 result['target']['tool'] = target['tool']
             if isinstance(target.get('receiptId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['receiptId']):
                 result['target']['receiptId'] = target['receiptId']
-        elif page in ('image', 'outputs', 'publish'):
+        elif page in ('image', 'outputs', 'publish', 'publish-receipts'):
             result['target'] = dict(page=page)
+            if page == 'publish-receipts' and isinstance(target.get('receiptId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['receiptId']):
+                result['target']['receiptId'] = target['receiptId']
             if page == 'image' and target.get('medium') in ('image', 'video'):
                 result['target']['medium'] = target['medium']
             if page == 'outputs':

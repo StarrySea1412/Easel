@@ -19,6 +19,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
+import { publishMediaIssue } from '../lib/publishPreparation';
 import { useChatArtifacts, type PreparedCreationDraft } from '../hooks/useChatArtifacts';
 import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, hydrateAccountIdentities, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
@@ -30,6 +31,8 @@ interface PublishPageProps {
   targetSessionId?: string | null;
   active?: boolean;
   getSourceText?: () => string;
+  onOpenAccounts?: () => void;
+  onOpenOutputs?: () => void;
 }
 
 // 平台列表须与后端 LOGIN_RUNNERS 对齐（有登录/发布链路的才列）
@@ -46,11 +49,6 @@ const LABEL2KEY = Object.fromEntries(PLATFORMS.map((p) => [p.label, p.key]));
 
 // 能一键发布的平台（有后端 publisher）
 const PUBLISHABLE = new Set(['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'zhihu', 'bilibili', 'wechat-oa']);
-// 必须附带媒体的平台（无媒体发不了）——公众号需要一张封面图，也计入
-const MEDIA_REQUIRED = new Set(['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'bilibili', 'wechat-oa']);
-// 只能发视频的平台（抖音/视频号/B站：图文不走此链路，必须视频）
-const VIDEO_ONLY = new Set(['douyin', 'weixin-channels', 'bilibili']);
-const VIDEO_RE = /\.(mp4|mov|webm|mkv|avi|m4v|flv|ts)$/i;
 
 function parseSections(text: string): Record<string, string> {
   const parts = text.split(/^\s*={2,}\s*(.+?)\s*={2,}\s*$/m);
@@ -59,7 +57,7 @@ function parseSections(text: string): Record<string, string> {
   return map;
 }
 
-export default function PublishPage({ persona, publishReceipts, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, active = true }: PublishPageProps) {
+export default function PublishPage({ persona, publishReceipts, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, onOpenAccounts, onOpenOutputs, active = true }: PublishPageProps) {
   const fieldPrefix = useId();
   const workspace = ensureCreation('publish', sourceSessionId);
   const deliveries = useChatArtifacts(sourceSessionId || '', active && Boolean(sourceSessionId), false);
@@ -100,6 +98,9 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
   const [mediaError, setMediaError] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<string[]>(draft0.media || []);
   const [showPicker, setShowPicker] = useState(false);
+  const mediaSection = useRef<HTMLElement>(null);
+  const [preparationHelp, setPreparationHelp] = useState('');
+  useEffect(() => { setPreparationHelp(''); }, [selectedMedia]);
   const [blocked, setBlocked] = useState<Record<string, string>>({});
   const publishing = publishReceipts.submitting || publishReceipts.active.some(item => platforms.includes(item.platform));
 
@@ -217,12 +218,31 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
     if (accountsError) return '账号状态未知';
     if (connectionOf(key) === 'unknown') return '登录状态待在线确认，提交前将重新检查。';
     if (!loginOf(key)) return '未登录，请先连接账号。';
-    if (MEDIA_REQUIRED.has(key) && selectedMedia.length === 0) return '需附带图片或视频。';
-    if (VIDEO_ONLY.has(key) && !selectedMedia.some(path => VIDEO_RE.test(path))) return `${PLATFORMS.find(p => p.key === key)?.label}需要视频，请从内容库选择。`;
+    const mediaIssue = publishMediaIssue(key, selectedMedia);
+    if (mediaIssue) return mediaIssue.message;
     if (!isWhoamiFresh(getWhoamiCache()[key])) return '登录状态待在线确认，提交前将重新检查。';
     return '';
   };
   const readyCount = selectedPlatforms.filter(p => !preparationIssue(p.key)).length;
+  const preparationMediaIssue = (key: string) => {
+    const mediaIssue = publishMediaIssue(key, selectedMedia);
+    return mediaIssue && preparationIssue(key) === mediaIssue.message ? mediaIssue : null;
+  };
+  const openPreparation = (key: string) => {
+    setPreviewPlatform(key);
+    if (platformBusy(key)) { publishReceipts.open(publishReceipts.active.find(receipt => receipt.platform === key)?.receiptId); return; }
+    const issue = preparationIssue(key);
+    setPreparationHelp(issue ? `${publishPlatformLabel(key)}：${issue}` : '');
+    if (preparationMediaIssue(key)) {
+      setShowPicker(true);
+      mediaSection.current?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+      mediaSection.current?.focus({ preventScroll: true });
+    } else if (issue && !loginOf(key) && onOpenAccounts) {
+      onOpenAccounts();
+    } else if (issue) {
+      void loadAccounts(true);
+    }
+  };
 
   // A. 智能一稿多改（流式：逐字改写，直接流进每个平台卡片）
   const adapt = () => {
@@ -320,12 +340,10 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
       if (['login_required', 'not_connected'].includes(connectionOf(target.key))) {
         errors[target.key] = '未登录，请先连接账号。';
         failureKinds[target.key] = { stage: 'preflight', code: 'login_required' };
-      } else if (MEDIA_REQUIRED.has(target.key) && selectedMedia.length === 0) {
-        errors[target.key] = '需附带图片或视频。';
-        failureKinds[target.key] = { stage: 'preflight', code: 'media_required' };
-      } else if (VIDEO_ONLY.has(target.key) && !selectedMedia.some(path => VIDEO_RE.test(path))) {
-        errors[target.key] = `${target.label}需要视频，请从内容库选择。`;
-        failureKinds[target.key] = { stage: 'preflight', code: 'video_required' };
+      } else if (publishMediaIssue(target.key, selectedMedia)) {
+        const issue = publishMediaIssue(target.key, selectedMedia)!;
+        errors[target.key] = issue.message;
+        failureKinds[target.key] = { stage: 'preflight', code: issue.code };
       }
       else requests.push({ platform: target.key, payload: { title, body: effective(target.key), media: [...selectedMedia], tags, persona: persona || undefined } });
     }
@@ -489,12 +507,13 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
             <p className="publish-field-help">用逗号分隔，小红书将关联对应话题。</p>
           </section>
 
-          <section className="publish-section publish-media-section">
+          <section className="publish-section publish-media-section" ref={mediaSection} tabIndex={-1} aria-label="补充发布素材">
             <div className="publish-section-heading"><div><h2>配图 / 视频</h2><span className="publish-media-count">{selectedMedia.length ? `${selectedMedia.length} 个素材` : '未选择'}</span></div>
               <button className="btn btn-sm" aria-expanded={showPicker} aria-controls={fieldPrefix+"-publish-media-picker"} onClick={() => setShowPicker(v => !v)}>
                 <IconSkills size={13} />{showPicker ? '收起' : '选择媒体'}
               </button>
             </div>
+            {preparationHelp && <p className="publish-preparation-help" role="status">{preparationHelp}</p>}
             {selectedMedia.length ? <div className="publish-media-selection">
               {selectedMedia.map((path, index) => <div className="publish-media-item" key={path}>
                 <button className="media-chip" onClick={() => toggleMedia(path)} title="点击移除" aria-label={`移除素材 ${mediaFiles.find(f => f.path === path)?.name || path}`}>
@@ -510,7 +529,7 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
             {showPicker && <div className="media-grid" id={fieldPrefix+"-publish-media-picker"} aria-label="内容库素材">
               {mediaLoading && <div className="dash-empty"><PublishSpinner />正在加载媒体…</div>}
               {!mediaLoading && mediaError && <div className="dash-empty">媒体列表暂不可用，请重试。</div>}
-              {!mediaLoading && !mediaError && mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频</div>}
+              {!mediaLoading && !mediaError && mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频，请先添加或生成素材。{onOpenOutputs && <button className="btn btn-sm" onClick={onOpenOutputs}>前往内容库</button>}</div>}
               {mediaFiles.slice(0, 40).map(f => <button key={f.path} aria-pressed={selectedMedia.includes(f.path)} aria-label={`选择素材 ${f.name}`}
                 className={`media-cell ${selectedMedia.includes(f.path) ? 'sel' : ''}`} onClick={() => toggleMedia(f.path)} title={f.name}>
                 {f.kind === 'image' ? <img src={mediaUrl(f.path)} alt={f.name} loading="lazy" /> : <span className="media-vid">视频<br />{f.name.slice(0, 12)}</span>}
@@ -616,12 +635,13 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
           <section className="publish-action-panel" aria-label="发布操作">
             {selectedPlatforms.length > 0 && <div className="publish-readiness" aria-label="各平台发布准备">
               {selectedPlatforms.map(p => {
-                const receipt = publishReceipts.receipts.find(item => item.platform === p.key);
+                const receipt = publishReceipts.active.find(item => item.platform === p.key);
                 const busy = platformBusy(p.key);
-                return <button key={p.key} className="publish-readiness-row" onClick={() => setPreviewPlatform(p.key)}>
+                const issue = preparationIssue(p.key);
+                return <button key={p.key} className="publish-readiness-row" onClick={() => openPreparation(p.key)} title={busy ? '查看平台发布状态' : issue || '查看平台预览'}>
                   <span><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span>
                   <span className={busy ? 'is-busy' : preparationIssue(p.key) ? 'needs-attention' : 'is-ready'}>
-                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : preparationIssue(p.key) ? accountsLoading ? '读取账号中…' : accountsError || connectionOf(p.key) === 'unknown' ? '状态待确认' : !loginOf(p.key) ? '需登录' : '需补充素材' : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
+                    {busy && <PublishSpinner />}{busy ? (receipt ? publishReceiptStatus(receipt).label : '正在提交…') : issue ? <>{issue}<span className="publish-preparation-action">{preparationMediaIssue(p.key) ? '去补充 →' : '检查账号 →'}</span></> : p.key === 'wechat-oa' ? '就绪 · 保存草稿' : '已就绪'}
                   </span>
                 </button>;
               })}

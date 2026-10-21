@@ -121,3 +121,9 @@
   .publish-studio .pv-body, .publish-studio .pv-foot, .publish-studio .pv-head { padding-left: 14px; padding-right: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .publish-studio .publish-platform { transition: none; } }
+.publish-studio .publish-readiness-row { align-items: flex-start; gap: 12px; }
+.publish-studio .publish-readiness-row > span:last-child { max-width: 72%; white-space: normal; text-align: right; line-height: 1.65; overflow-wrap: anywhere; }
+.publish-studio .publish-readiness-row > .needs-attention { display: block; }
+.publish-studio .publish-preparation-action { display: block; color: var(--accent-start); text-decoration: underline; text-underline-offset: 3px; }
+.publish-studio .publish-preparation-help { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text); line-height: 1.7; }
+.publish-studio .publish-media-section:focus { outline: 2px solid var(--focus-ring); outline-offset: 3px; }

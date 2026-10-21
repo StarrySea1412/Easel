@@ -81,3 +81,11 @@ def test_session_cleanup_route_and_stale_client_cannot_revive(tmp_path, monkeypa
             assert (await client.post('/api/notifications/remove', json={'sessionId': 'gone', 'ids': ['keep']})).status_code == 400
             assert (await client.post('/api/notifications/remove', json={'sessionId': '../bad'})).status_code == 422
     asyncio.run(exercise())
+
+
+def test_receipt_notice_target_survives_persistence_without_unknown_fields(tmp_path):
+    store = NotificationStore(tmp_path)
+    row = value('publish:synthetic')
+    row['target'] = {'page': 'publish-receipts', 'receiptId': 'a' * 32, 'secret': 'never-persist'}
+    store.add([row])
+    assert store.list()['notices'][0]['target'] == {'page': 'publish-receipts', 'receiptId': 'a' * 32}
