@@ -23,6 +23,9 @@ import { usePublishReceipts } from './hooks/usePublishReceipts';
 import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
+import CreationWorkspaceHost from './components/CreationWorkspaceHost';
+import CreationWorkspaceSlot from './components/CreationWorkspaceSlot';
+import { creationSessionDeleted, currentCreation, creationRevision, subscribeCreation, creationReceiptSession, selectCreation, requestCreationPanel } from './lib/creationWorkspace';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
 import { notificationOutputPath, removeSessionEvents, startEventSync } from './lib/eventNotifications';
@@ -38,6 +41,7 @@ import OnboardingWizard from './components/OnboardingWizard';
 import type { SettingsSection } from './components/SettingsPanel';
 import type { OfficeTaskRequest } from './components/agent-office/OfficeTaskComposer';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
+import { ensureGateway } from './lib/gatewayRecovery';
 import { codexRequest } from './lib/codex';
 import type { PersonaItem, UploadedFile, ChatQuestion, ThinkingLevel } from './lib/api';
 import { questionStatus } from './lib/api';
@@ -55,6 +59,7 @@ import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import { createConversationBackup, createImportedSessions, type ConversationBackup } from './lib/conversationBackup';
 import { exportRawConversationStorage } from './lib/conversationStorageBackup';
 import { addChatDraftQuote, clearChatDraft, setChatDraftText } from './lib/chatDrafts';
+import { analysisChatMessage, defaultAnalysisRequest } from './lib/analysisComposer';
 import { enqueueChat, getChatQueue, getQueueRevision, subscribeChatQueue, dispatchQueuedMessage, dispatchSelectedQueuedMessage, pauseChatQueue, clearChatQueue } from './lib/chatQueue';
 import { requirementsForSelection, writeSelectedSkills, writeSkillRequirements } from './lib/selectedSkills';
 import type { SkillRequirements } from './lib/selectedSkills';
@@ -63,7 +68,6 @@ import { adoptBreakdownRun, createBreakdownSession, loadSessionsWithBreakdown, r
 import { buildBreakdownReportPrompt } from './lib/breakdownReport';
 import type { ActiveRun } from './lib/breakdownStore';
 
-const ImageStudioPage = createLazyPage('生图工坊', () => import('./components/ImageStudioPage'));
 const AutomationPage = createLazyPage('目标与定时任务', () => import('./components/AutomationPage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
 const SkillPage = createLazyPage('技能库', () => import('./components/SkillPage'));
@@ -76,7 +80,6 @@ const ProfilePage = createLazyPage('画像', () => import('./components/ProfileP
 const TrendsPage = createLazyPage('热点雷达', () => import('./components/TrendsPage'));
 const CalendarPage = createLazyPage('内容日历', () => import('./components/CalendarPage'));
 const IdeasPage = createLazyPage('选题库', () => import('./components/IdeasPage'));
-const PublishPage = createLazyPage('发布中心', () => import('./components/PublishPage'));
 const BreakdownPage = createLazyPage('爆款拆解', () => import('./components/BreakdownPage'));
 const SettingsPanel = createLazyPage('设置', () => import('./components/SettingsPanel'));
 
@@ -102,13 +105,14 @@ function markOnboardingSeen() {
 }
 
 export default function App() {
+  useSyncExternalStore(subscribeCreation, creationRevision);
   useEffect(() => startEventSync(), []);
   const [currentPage, setPageState] = useState<Page>('dashboard');
   const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
     window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));
     setPageState(page);
   }, []);
-  const imageStudio = useImageStudio(currentPage === 'image');
+  const imageStudio = useImageStudio(currentPage === 'image' && !currentCreation('image').sessionId);
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
   const publishReceipts = usePublishReceipts();
@@ -161,6 +165,7 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsWithBreakdown());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
+  const [gatewayRecoveryNote, setGatewayRecoveryNote] = useState('');
   const [gatewayRetryToken, setGatewayRetryToken] = useState(0);
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
@@ -261,7 +266,7 @@ export default function App() {
     setGatewayRetryToken(value => value + 1);
   }, []);
 
-  // 周期性读取网关状态：断开后退避重试，恢复后回到低频保活；不重发消息，也不重复启动网关进程。
+  // Offline recovery starts only the local gateway; messages are never replayed.
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -276,7 +281,15 @@ export default function App() {
         const data = await fetchStatus();
         if (cancelled) return;
         setPersonas(data.personas || []);
-        setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
+        if (data.gateway) {
+          setGatewayStatus('connected');setGatewayRecoveryNote('');
+          if (attempt > 0) window.dispatchEvent(new Event('easel:channel-names-changed'));
+        } else if (data.runtime === 'openclaw') {
+          const recovery=await ensureGateway();
+          if(cancelled)return;
+          setGatewayRecoveryNote(recovery.note);
+          setGatewayStatus(recovery.state==='starting'?'connecting':recovery.state==='connected'?'connected':'disconnected');
+        } else setGatewayStatus('disconnected');
         attempt = data.gateway ? 0 : attempt + 1;
         // 首次使用：没有任何个性化画像 且 未看过引导 → 推荐配置
         if ((data.personas || []).length === 0 && !onboardingSeen()) {
@@ -339,7 +352,7 @@ export default function App() {
     const outcomes = { published: '平台确认已发布', submitted: '已提交，待确认发布', draft: '已保存草稿', unverified: '发布状态待核验', failed: '发布失败' };
     for (const receipt of publishReceipts.notices) {
       if (receipt?.outcome) showToast(`${receipt.platform} · ${outcomes[receipt.outcome]}`, receipt.outcome === 'published' ? 'success' : receipt.outcome === 'failed' ? 'error' : 'info',
-        undefined, `publish:${receipt.receiptId}:${receipt.outcome}`, { page: 'publish' });
+        undefined, `publish:${receipt.receiptId}:${receipt.outcome}`, creationReceiptSession(receipt) ? {page:'chat', sessionId:creationReceiptSession(receipt)!,tool:'publish',receiptId:receipt.receiptId} : { page: 'publish' });
     }
   }, [publishReceipts.notices]);
   useEffect(() => {
@@ -739,11 +752,13 @@ export default function App() {
     thinkingLevel?: ThinkingLevel,
     kind?: 'breakdown',
   ) => {
-    const visible = displayText.trim();
-    const agentMessage = (legacyAgentText || displayText).trim();
-    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || stopRequests.current[sessionId]) return false;
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
     if (cur?.importedFromBackup) return false;
+    const history = truncateAt != null ? cur?.messages.slice(0, truncateAt) : cur?.messages;
+    const analysisMessage = analysisChatMessage(cur?.analysisContext, displayText, !history?.some(message => message.role === 'user'));
+    const visible = analysisMessage.content;
+    const agentMessage = (legacyAgentText || analysisMessage.agentContent).trim();
+    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || stopRequests.current[sessionId]) return false;
     const persona = cur?.persona || selectedPersona || undefined;
     const requirementSnapshot = requirementsForSelection(skillRequirements, selectedSkills);
     setSessions((prev) => {
@@ -761,7 +776,7 @@ export default function App() {
             ...(modelRef !== undefined ? { requestedModelRef: modelRef } : {}),
             ...(thinkingLevel !== undefined ? { requestedThinkingLevel: thinkingLevel } : {}),
             ...(attachments.length ? { attachments } : {}),
-            ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
+            ...(agentMessage !== visible ? { agentContent: agentMessage } : {}),
           } as ChatMessage],
         };
         updateSessionTitle(updated);
@@ -804,7 +819,7 @@ export default function App() {
       const next = [session, ...sessionsRef.current];
       if (!saveSessions(next)) throw new Error('分析对话未能保存，未发送模型请求');
       savePanelTools(session.id, ['analysis']);
-      setChatDraftText(session.id, binding.markdown);
+      setChatDraftText(session.id, defaultAnalysisRequest(binding));
       sessionsRef.current = next; setSessions(next);
       setActiveSessionId(session.id); setCurrentPage('chat');
     } catch (reason) { showToast(reason instanceof Error ? reason.message : '准备分析对话失败', 'error'); }
@@ -830,7 +845,8 @@ export default function App() {
       const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine,
         title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
           { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
-            ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) } : {}),
+            ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) }
+              : source.analysisContext ? { agentContent: analysisChatMessage(source.analysisContext, plan.text, true).agentContent } : {}),
             skillRequirements: original.skillRequirements, requestedModelRef: original.requestedModelRef, requestedThinkingLevel: original.requestedThinkingLevel }],
         editBranch: { sourceSessionId: sessionId, prefixLength: plan.prefix.length } };
       if (!writeSelectedSkills(branch.id, original.selectedSkills || [])
@@ -1293,6 +1309,7 @@ export default function App() {
     }
 
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
+    creationSessionDeleted(id);
     removeSessionEvents(id);
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
@@ -1400,7 +1417,7 @@ export default function App() {
           />
         );
       case 'image':
-        return <ImageStudioPage studio={imageStudio} video={videoStudio} sessionId={activeSessionId} onOpenVideoSettings={() => { setSettingsSection('video'); setCurrentPage('settings'); }} onOpenSettings={() => { setSettingsSection('image'); setCurrentPage('settings'); }} onOpenModels={() => { setSettingsSection('model'); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter(videoStudio.viewMode === 'video' ? 'video' : 'image'); setCurrentPage('outputs'); }} />;
+        return <CreationWorkspaceSlot kind="image" sessionId={currentCreation('image').sessionId}/>;
       case 'chat':
         return activeSession ? (
           <ChatPage
@@ -1461,13 +1478,13 @@ export default function App() {
       case 'calendar':
         return <CalendarPage />;
       case 'publish':
-        return <PublishPage persona={selectedPersona} publishReceipts={publishReceipts} />;
+        return <CreationWorkspaceSlot kind="publish" sessionId={currentCreation('publish').sessionId}/>;
       case 'breakdown':
         return <BreakdownPage persona={selectedPersona} onStart={handleStartBreakdown} onOpenRun={handleOpenBreakdownRun} />;
       case 'skills':
         return <SkillPage onOpenChat={handleSkillChat} />;
       case 'outputs':
-        return <OutputsPage initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
+        return <OutputsPage initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { selectCreation('image',null); videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { selectCreation('image',null); videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
         return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':
@@ -1514,6 +1531,12 @@ export default function App() {
   return (
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <ToastHost />
+      <CreationWorkspaceHost studio={imageStudio} video={videoStudio} receipts={publishReceipts} sessions={sessions} persona={selectedPersona}
+        onOpenChat={handleSessionSelect} onNewChat={()=>{const session=createSession(selectedPersona || undefined);setSessions(previous=>{const next=[session,...previous];saveSessions(next);return next;});return session.id;}}
+        onOpenSettings={()=>{setSettingsSection('image');setCurrentPage('settings');}}
+        onOpenVideoSettings={()=>{setSettingsSection('video');setCurrentPage('settings');}}
+        onOpenOutputs={()=>{setOutputFilter('image');setCurrentPage('outputs');}}
+        onExpand={kind=>setCurrentPage(kind)} />
       <Sidebar
         currentPage={currentPage}
         onPageChange={(page, preserveConversations = false) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsModelRef(undefined); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page, preserveConversations); }}
@@ -1535,6 +1558,7 @@ export default function App() {
         onSessionPin={handleSessionPin}
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
+        gatewayRecoveryNote={gatewayRecoveryNote}
         onGatewayRetry={retryGateway}
         eventNotifications={<EventNotificationCenter
           onNoticeAcknowledged={sessionId => markSessionSeenById(sessionId, sessionsRef.current)}
@@ -1542,6 +1566,10 @@ export default function App() {
           if (target.page === 'chat' && target.sessionId) {
             if (!sessionsRef.current.some(session => session.id === target.sessionId)) { removeSessionEvents(target.sessionId); return; }
             setActiveSessionId(target.sessionId);
+            if (target.tool) {
+              requestCreationPanel(target.tool,target.sessionId);
+            }
+            if(target.receiptId) publishReceipts.open(target.receiptId);
           }
           if (target.page === 'image' && target.medium) videoStudio.setViewMode(target.medium);
           if (target.page === 'outputs') {

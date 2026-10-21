@@ -255,6 +255,9 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
         result['defaultModelRef'] = default_ref
     if not options:
         return result
+    if hasattr(web, 'check_gateway') and not web.check_gateway():
+        result['reason'] = 'OpenClaw 未连接，正在自动恢复。连接恢复后请重试。'
+        return result
     client = None
     try:
         if model_ref is not None and model_ref not in {option['id'] for option in options}:
@@ -307,12 +310,14 @@ def turn_model_capability(web, session: str | None = None, model_ref: str | None
         result.update(available=True, scope='next_turn', reason=None)
     except HTTPException as exc:
         result['reason'] = str(exc.detail)
+    except ModuleNotFoundError:
+        result['reason'] = '本机缺少网关连接组件，请使用 Easel 的完整运行环境启动工作台。'
     except OSError:
         # A closed gateway socket says nothing about the user's channel test.
-        result['reason'] = '运行网关当前未连接，暂时无法核验本轮指定模型；改用「自动沿用」仍可发送。'
+        result['reason'] = 'OpenClaw 网关未连接，正在自动恢复。连接恢复后请重试。'
     except Exception:
         # Transport/schema/auth errors can contain credentials or private URLs.
-        result['reason'] = '无法只读核验当前网关的指定模型能力，任务不会改用默认模型。'
+        result['reason'] = 'OpenClaw 连接验证失败，请在设置中检查网关授权与版本。'
     finally:
         if client is not None:
             client.close()

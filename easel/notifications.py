@@ -27,6 +27,10 @@ def notice(value):
         page = target.get('page')
         if page == 'chat' and isinstance(target.get('sessionId'), str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', target['sessionId']):
             result['target'] = dict(page=page, sessionId=target['sessionId'])
+            if target.get('tool') in ('image', 'publish'):
+                result['target']['tool'] = target['tool']
+            if isinstance(target.get('receiptId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['receiptId']):
+                result['target']['receiptId'] = target['receiptId']
         elif page in ('image', 'outputs', 'publish'):
             result['target'] = dict(page=page)
             if page == 'image' and target.get('medium') in ('image', 'video'):

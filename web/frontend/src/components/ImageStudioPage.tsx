@@ -15,6 +15,8 @@ import { firstStudioMedia, STUDIO_MEDIA_ACCEPT } from '../lib/studioClipboard';
 import { IconOutputs } from './icons';
 import { IconGear, IconImage } from './settingsIcons';
 import '../styles/image-studio.css';
+import { returnImageToChat, canReturnToSession, addImageToPublish } from '../lib/creationWorkspace';
+import { showToast } from '../lib/toast';
 
 const EXAMPLES = [
   ['产品摄影', '一杯咖啡放在窗边，清晨柔光，奶白色背景，产品摄影'],
@@ -27,9 +29,9 @@ const EDIT_EXAMPLES = [
   ['转为插画', '保留主体和构图，改成细腻的手绘插画风格。'],
 ];
 
-export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings, sessionId }: {
+export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenOutputs, onOpenModels, onOpenVideoSettings, sessionId, sourceSessionId = null, onOpenPublish }: {
   studio: ImageStudioController; onOpenSettings: () => void; onOpenOutputs: () => void; onOpenModels: () => void;
-  video?: VideoStudioController; onOpenVideoSettings?: () => void; sessionId?: string | null;
+  video?: VideoStudioController; onOpenVideoSettings?: () => void; sessionId?: string | null; sourceSessionId?: string | null; onOpenPublish?: () => void;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -121,6 +123,8 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
             <button disabled={locked} aria-pressed={!original} onClick={() => setPreviewChoice({ scope: previewScope, original: false })}>结果</button>
           </div>}
           {result && <div className="image-result-actions"><a href={result} target="_blank" rel="noreferrer">打开图片 ↗</a><a href={result} download>下载</a>
+            {sessionId && <button type="button" className="link-btn" disabled={!canReturnToSession(sessionId)} onClick={async()=>{try{await returnImageToChat(sessionId,result);showToast('图片已加入来源对话草稿','success');}catch(reason){showToast(reason instanceof Error?reason.message:'引用失败','error');}}}>添加到对话</button>}
+            {onOpenPublish && <button type="button" className="link-btn" onClick={()=>{try {addImageToPublish(sourceSessionId,result);onOpenPublish();showToast('图片已加入发布草稿','success');}catch(reason){showToast(reason instanceof Error?reason.message:'添加失败','error');}}}>用于发布</button>}
             <button className="link-btn" disabled={locked} onClick={() => void studio.useGalleryReference({ url: result, name: result.split('/').at(-1) || '生成图片.png', mtime: Date.now() / 1000, width: actual?.width, height: actual?.height })}>继续修改</button>
           </div>}
           {video && (previewUrl || result) && <button type="button" className="link-btn" disabled={locked || video.locked} onClick={() => {

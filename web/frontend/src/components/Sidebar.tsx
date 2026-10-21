@@ -43,6 +43,7 @@ interface SidebarProps {
   onSessionPin: (id: string, pinned: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
+  gatewayRecoveryNote?: string;
   onGatewayRetry?: () => void;
   runningSessions?: string[];
   stoppingSessions?: string[];
@@ -68,6 +69,7 @@ export default function Sidebar({
   onSessionPin,
   onNewChat,
   gatewayStatus,
+  gatewayRecoveryNote,
   onGatewayRetry,
   runningSessions = [],
   stoppingSessions = [],
@@ -175,6 +177,11 @@ export default function Sidebar({
   const navigate = (page: Page, preserveConversations = false) => {
     if (preserveConversations) {
       changeExpanded(true);
+      if (page === 'chat' && !listedSessions.some(session => session.id === activeSessionId)) {
+        const recent = listedSessions.filter(session => !session.archived && (session.messages.length > 0 || session.pinnedAt))
+          .sort((a, b) => b.created - a.created)[0];
+        if (recent) onSessionSelect(recent.id);
+      }
       onPageChange(page, true);
       return;
     }
@@ -266,7 +273,7 @@ export default function Sidebar({
       <div
         key={s.id}
         data-session-id={s.id}
-        className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
+        className={`session-item ${currentPage === 'chat' && s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => selectSession(s.id)}
         onPointerEnter={keepHover}
         onPointerLeave={leaveHover}
@@ -306,7 +313,7 @@ export default function Sidebar({
             <button type="button" className="sidebar-toggle sidebar-tool-toggle" aria-label={toolbarExpanded?'收起工具栏':'展开工具栏'} title={toolbarExpanded?'收起工具栏':'展开工具栏'} aria-expanded={toolbarExpanded} onClick={toggleToolbar}>
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d={toolbarExpanded?'m16 9-3 3 3 3':'m13 9 3 3-3 3'}/></svg><span className="nav-item-label">工具栏</span>
             </button>
-            {!expanded&&<button ref={toggleRef} type="button" className="sidebar-toggle sidebar-conversations-toggle" aria-label="展开对话列表" title={`展开对话列表 · ${runningCount}个正在运行`} aria-expanded={false} onClick={()=>changeExpanded(true)}><IconNewChat size={19}/><span className="nav-item-label">对话列表</span></button>}
+            {!expanded&&<button ref={toggleRef} type="button" className="sidebar-toggle sidebar-conversations-toggle" aria-label="展开对话列表" title={`展开对话列表 · ${runningCount}个正在运行`} aria-expanded={false} onClick={()=>navigate('chat', true)}><IconNewChat size={19}/><span className="nav-item-label">对话列表</span></button>}
           </div>
           <nav className="sidebar-nav" aria-label="主导航">
             {railItem('dashboard','工作台',<IconDashboard size={19}/>)}
@@ -318,7 +325,7 @@ export default function Sidebar({
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}
           </nav>
           <div className="sidebar-toolbar-bottom">
-            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击重试':'OpenClaw 网关正在连接'} title={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击立即重试':'OpenClaw 网关正在重连…'} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
+            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击重试':'OpenClaw 网关正在连接'} title={gatewayRecoveryNote || (gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击立即重试':'OpenClaw 网关正在自动启动…')} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
               <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>

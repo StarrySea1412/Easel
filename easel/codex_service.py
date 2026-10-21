@@ -22,6 +22,7 @@ from .gateway_auth import redact_gateway_text
 from .execution import codex_rows, page, iso, public_text
 from .artifacts import ArtifactStore, PRESENT_TOOL
 from .image_jobs import ImageJobs, read_config, GENERATE_TOOL
+from .creation_drafts import CreationDrafts, PREPARE_TOOL
 from .browser_tools import BROWSER_TOOL
 from .browser_runtime import BrowserError
 
@@ -304,13 +305,17 @@ class CodexService:
                 params['developerInstructions'] += instructions(state['sessionId'])
             ticket = ArtifactStore(self.outputs).bind(state['sessionId'], state['turn_id'])
             script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/image_job.py'
+            publish_script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/prepare_publish.py'
+            params['developerInstructions'] += (f'用户要求准备发布内容时，调用easel_prepare_publish登记可编辑草稿，必须提供固定requestId和body。'
+                f'旧会话缺此工具时，将正文保存为UTF-8文件，执行 python "{publish_script}" --ticket {ticket} --request-id "<固定标识>" --body-file "<正文文件>"。'
+                '草稿自动关联当前对话，可在辅助面板查看。该工具不发布；账号预检和最终提交由用户在发布中心确认。')
             params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
                 f'旧会话缺此工具时可执行 python "{script}" submit --ticket {ticket} --request-id "<固定标识>" --prompt "<提示词>"。'
                 '可能产生图片费用，只用专用生图通道，不改请求标识重试，不隐式换模型；任务完成后文件自动展示。')
             if state['threadId']:
                 response = client.rpc('thread/resume', {**params, 'threadId': state['threadId']})
             else:
-                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
+                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
                 response = client.rpc('thread/start', params)
             thread = response['thread']['id']
             with self.lock:
@@ -491,6 +496,16 @@ class CodexService:
 
     def _request(self, run, event):
         method, params = event['method'], event.get('params') or {}
+        if method == 'item/tool/call' and params.get('tool') == 'easel_prepare_publish' and not params.get('namespace'):
+            try:
+                state = run['state']
+                draft = CreationDrafts(self.outputs).prepare(state['sessionId'], state['turn_id'], params.get('arguments'))
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'draft': draft, 'requiresUserConfirmation': True}, ensure_ascii=False)}]}
+                self._event(state, 'activity', '发布草稿已准备，可在辅助面板编辑；尚未提交发布。')
+            except (ValueError, OSError, TypeError):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '草稿未接受，请核对正文、平台、固定请求标识和本机素材。未执行发布。'}]}
+            run['client'].reply(event['id'], result)
+            return False
         if method == 'item/tool/call' and params.get('tool') == 'easel_browser' and not params.get('namespace'):
             if not self.browser_service:
                 run['client'].reply(event['id'], {'success':False,'contentItems':[{'type':'inputText','text':'当前浏览器服务不可用。'}]})

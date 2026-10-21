@@ -13,6 +13,8 @@ import { accountConnection, hydrateAccountIdentities, useAccountChecks, useAccou
 import { analyticsScope, readAnalyticsCache, analyticsPending, analyticsError, subscribeAnalytics, analyticsRevision, selectedAnalyticsPlatform, selectAnalyticsPlatform } from '../lib/analyticsCache';
 import { watchWorkbenchChange } from '../lib/workbenchEvents';
 import AccountConnectionDot from './AccountConnectionDot';
+import AnalysisMetricChart from './AnalysisMetricChart';
+import { metricData } from '../lib/analysisVisuals';
 import PublishSpinner from './PublishSpinner';
 import { AccountAnalysisSkeleton, SkeletonCard } from './Skeleton';
 import DashboardCard from './ui/DashboardCard';
@@ -26,7 +28,8 @@ import ComposerSkillSuggestions from './ComposerSkillSuggestions';
 import { useComposerModels } from '../hooks/useComposerModels';
 import { loadThinkingLevel, saveThinkingLevel } from '../lib/thinkingLevel';
 import type { ThinkingPreference } from '../lib/thinkingLevel';
-import { ThinkingLevelPicker } from './ChatComposer';
+import { ThinkingLevelPicker } from './ThinkingLevelPicker';
+import { composerModelIssue } from '../lib/composerModelIssue';
 import { THINKING_LABELS } from '../lib/thinkingLevel';
 import type { ThinkingLevel } from '../lib/api';
 import { showToast } from '../lib/toast';
@@ -221,7 +224,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
     const snapshot = quickSkills.getSnapshot();
     if (!snapshot) return;
     const model = quickModels.getSnapshot();
-    if (!model) { setChatDraftError(DASHBOARD_DRAFT_SCOPE, '所选模型当前无法用于本轮，草稿已保留。请刷新或改用会话配置。'); return; }
+    if (!model) { setChatDraftError(DASHBOARD_DRAFT_SCOPE, composerModelIssue(quickModels)); return; }
     try {
       const accepted = onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements, quickThinking, model.modelRef);
       if (accepted !== true) {
@@ -428,7 +431,9 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
                         </div>
                         <div className="ana-wins" role="group" aria-label="增长对比时段">{WIN.map(([k, lab]) => <button key={k} type="button" aria-pressed={anaWin === k} className={`ana-win ${anaWin === k ? 'on' : ''}`} onClick={() => setAnaWin(k)}>{lab}</button>)}</div>
                         <p className="ana-wins-note" title="增长依赖跨对应时间段采集的历史快照；短时间重复刷新不会生成历史增长。">{d.growth?.[anaWin]?.since_days != null ? `对比 ${d.growth[anaWin]!.since_days} 天前` : '暂无该时段对比'}</p>
-                        {d.metricsNeedsRefresh && <section className="ana-period"><h3 className="ana-sub">平台指标</h3><button type="button" className="link-btn" disabled={analyticsPending(anaSel)} onClick={() => runAna(anaSel, true)} title="旧指标来源无法确认，保留账号资料与作品，重新读取平台账号总览">重新采集指标</button></section>}
+                        {d.metricsNeedsRefresh && <section className="ana-refresh-metrics"><h3 className="ana-sub">平台指标</h3><button type="button" className="link-btn" disabled={analyticsPending(anaSel)} onClick={() => runAna(anaSel, true)} title="旧指标来源无法确认，保留账号资料与作品，重新读取平台账号总览">重新采集指标</button></section>}
+                        {!!d.metrics?.length && <div className="ana-statistics">
+                        <AnalysisMetricChart title={d.metrics_title || '平台指标'} caption={d.metrics_source?.from && d.metrics_source.to ? d.metrics_source.from + ' — ' + d.metrics_source.to : '平台返回的汇总指标'} data={metricData(d.metrics)} />
                         {!!d.metrics?.length && <section className="ana-period" aria-label="平台统计指标" title={d.metrics_source ? `来源：抖音创作者中心 · ${d.metrics_source.section}；统计周期：${d.metrics_source.from} 至 ${d.metrics_source.to}` : undefined}>
                           <h3 className="ana-sub">{d.metrics_title || '平台指标'}</h3>
                           <table className="ana-metrics-table" aria-label={d.metrics_title || '平台指标'}>
@@ -440,7 +445,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
                               return <tr key={m.label}><th scope="row">{m.label}</th><td className="ana-metric-val">{m.value}</td><td className="ana-metric-vs" style={{ color }} title={has ? undefined : '平台未提供对比数据'}>{has ? vs : '—'}</td></tr>;
                             })}</tbody>
                           </table>
-                        </section>}
+                        </section>}</div>}
                       </div>
                       <section className="ana-col ana-col-notes" aria-label="最新作品">
                         <div className="ana-notes-head"><h3 className="ana-sub">最新作品</h3><button type="button" className="dash-more" onClick={openAnalysis}>查看全部 →</button></div>

@@ -60,7 +60,7 @@ test('closing hover aborts reads and clears the accessible description', async t
 test('keyboard preview closes for menus; quick pin never selects a different session', async t => {
   t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ records: [] }) }));
   const selected = [], pinned = [];
-  const view = await mount(t, Sidebar, { currentPage: 'chat', sessions: [session], activeSessionId: 'other', activeSessionHasMessages: true,
+  const view = await mount(t, Sidebar, { currentPage: 'chat', sessions: [session], activeSessionId: session.id, activeSessionHasMessages: true,
     personas: [], selectedPersona: '', gatewayStatus: '', onSessionSelect: id => selected.push(id),
     onSessionPin: (...args) => pinned.push(args), onPageChange() {}, onPersonaChange() {}, onNewProfile() {}, onNewChat() {}, onSessionRename() {}, onSessionArchive() {}, onSessionDelete() {} });
   await act(async () => view.container.querySelector('[aria-label="展开对话列表"]').click());
@@ -79,7 +79,7 @@ test('keyboard preview closes for menus; quick pin never selects a different ses
 test('hover preview stays reachable across the pointer gap and edits its title without selecting the chat',async t=>{
   t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({records:[]})}));
   const saved=[],selected=[];
-  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:'other',activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
+  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:session.id,activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
   await act(async()=>view.container.querySelector('[aria-label="展开对话列表"]').click());
   const title=view.container.querySelector('.session-select');
   await act(async()=>title.focus());
@@ -107,7 +107,7 @@ test('hover-card rename rejects blank titles, ignores composing Enter and cancel
   t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({records:[]})}));
   t.mock.method(window,'matchMedia',()=>({matches:true}));
   const saved=[],selected=[];
-  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:'other',activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
+  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:session.id,activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
   await act(async()=>view.container.querySelector('[aria-label="展开对话列表"]').click());
   // The row keeps no quick-rename button; the hover card's title pencil is the entry.
   assert.equal(view.container.querySelector('.session-quick-rename'),null,'no duplicate rename icon in the row');
@@ -130,7 +130,7 @@ test('hover-card rename rejects blank titles, ignores composing Enter and cancel
 test('double-clicking a session title renames it in place without selecting a chat',async t=>{
   t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({records:[]})}));
   const saved=[],selected=[];
-  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:'other',activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
+  const view=await mount(t,Sidebar,{currentPage:'chat',sessions:[session],activeSessionId:session.id,activeSessionHasMessages:true,personas:[],selectedPersona:'',gatewayStatus:'connected',onSessionSelect:id=>selected.push(id),onSessionRename:(id,title)=>saved.push({id,title}),onPageChange(){},onPersonaChange(){},onNewProfile(){},onNewChat(){},onSessionPin(){},onSessionArchive(){},onSessionDelete(){}});
   await act(async()=>view.container.querySelector('[aria-label="展开对话列表"]').click());
   const title=view.container.querySelector('.session-select');
   assert.equal(title.getAttribute('title'),'单击打开 · 双击重命名（F2）');

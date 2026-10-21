@@ -5,6 +5,7 @@ import Select from './ui/Select';
 import '../styles/chat-message-settings.css';
 
 export type MessageSettingsActions = {
+  creation?: (text: string, kind: 'image'|'publish') => void;
   quote: (text: string, target: string) => void;
   targets: { value: string; label: string }[];
   goal: (text: string, mode: 'new' | 'append' | 'replace') => void;
@@ -24,6 +25,10 @@ function SettingsDialog({ text, actions, onClose }: { text: string; actions: Mes
       <blockquote>{text}</blockquote>
       <section><h3>引用对话</h3><Select aria-label="引用到哪个对话" value={target} onChange={setTarget} options={[{ value: 'current', label: '当前对话' }, ...actions.targets]} />
         <button type="button" className="btn" onClick={quote}>引用到输入框</button></section>
+      {actions.creation && <section><h3>创作工具</h3><div className="modal-choice-row">
+        <button type="button" className="btn" onClick={()=>{actions.creation?.(text,'image');onClose();}}>送到生图工坊</button>
+        <button type="button" className="btn" onClick={()=>{actions.creation?.(text,'publish');onClose();}}>送到发布中心</button>
+      </div></section>}
       <section><h3>目标</h3><p>先放入目标编辑框，确认后再保存或开始。</p>
         <div className="modal-choice-row">{actions.hasGoal ? <><button type="button" className="btn" disabled={actions.goalBlocked} onClick={() => goal('append')}>追加到当前目标</button>
           <button type="button" className="btn" disabled={actions.goalBlocked} onClick={() => goal('replace')}>替换当前目标</button></>

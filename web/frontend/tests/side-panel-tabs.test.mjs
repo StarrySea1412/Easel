@@ -7,6 +7,7 @@ import { loadTsModule } from './load-ts.mjs';
 // 辅助对话多实例面板（标签条 / “＋打开标签页”选择器 / 逐标签关闭 / 空态）的组件行为。
 globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/' }).window;
 globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
 Object.defineProperty(globalThis,'localStorage',{value:window.localStorage,configurable:true});
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true });
@@ -48,6 +49,39 @@ test('empty analysis conversations open their material panel immediately and sho
   assert.equal(view.container.querySelector('.chat-panel-launcher-tab'),null);
 });
 
+test('analysis composer presents the snapshot as a material card and preserves the old stored draft', async t => {
+  const view = fixture(t);
+  const markdown='# Works\n\n## 真实材料（JSON数据）\n\n```json\n[{"id":"one-work","title":"关于镜头语言的作品","body":"真实正文"}]\n```';
+  const analysisContext={id:'card-context',platform:'douyin',accountId:'owner',accountName:'Creator',sessionId:'analysis-card',kind:'content-analysis',contentIds:['one-work'],sourceHash:'hash',markdown,createdAt:'2026-10-21T00:00:00Z',status:'prepared',result:null};
+  setChatDraftText('analysis-card',markdown);
+  await view.render(createElement(ChatPage,{session:{id:'analysis-card',title:'作品分析 · Creator',created:1,messages:[],conversationType:'content-analysis',analysisContext}}));
+  const textarea=view.container.querySelector('.chat-input');
+  assert.doesNotMatch(textarea.value,/JSON|one-work|真实材料/);
+  assert.match(textarea.value,/改进建议/);
+  assert.equal(getChatDraft('analysis-card').text,markdown,'presentation does not discard the original persisted draft');
+  const card=view.container.querySelector('[aria-label="作品分析材料"]');
+  assert.match(card.textContent,/Creator/);assert.match(card.textContent,/抖音/);assert.match(card.textContent,/1 篇作品/);
+  assert.match(card.textContent,/关于镜头语言的作品/);assert.equal(card.querySelector('pre'),null);
+  assert.equal(view.container.querySelector('.suggestions'),null,'analysis offers relevant actions instead of general chat suggestions');
+  await view.click(view.container.querySelector('[aria-label="分析重点"] button'));
+  assert.match(getChatDraft('analysis-card').text,/内容主题/);
+  await view.click(view.container.querySelector('[aria-label="收起侧边面板"]'));
+  await view.click(card.querySelector('[aria-label="查看分析材料"]'));
+  const dialog=document.querySelector('[role="dialog"]');
+  assert.ok(dialog);assert.match(dialog.textContent,/真实正文/);
+  assert.equal(dialog.querySelector('details:last-child').open,false,'raw data stays folded');
+  await view.click([...dialog.querySelectorAll('button')].find(button=>button.textContent==='在辅助面板查看'));
+  assert.equal(document.querySelector('[role="dialog"]'),null);
+  const tab=[...view.container.querySelectorAll('[role=tab]')].find(item=>item.textContent==='分析材料');
+  assert.equal(tab.getAttribute('aria-selected'),'true');
+  assert.equal(view.container.querySelector('.chat-analysis-panel').closest('.chat-panel-content').hidden,false);
+  const opener=card.querySelector('[aria-label="查看分析材料"]');opener.focus();
+  await view.click(opener);
+  assert.ok(document.querySelector('[role="dialog"]'),'opening an already visible material panel still gives feedback');
+  await act(async()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('[role="dialog"]'),null);assert.equal(document.activeElement,opener);
+});
+
 test('the tab bar lists every side chat and switches between them', async t => {
   const view = fixture(t);
   await view.render(createElement(ChatPage, { session: parent, sideSessions: [sideA, sideB] }));
@@ -63,6 +97,26 @@ test('the tab bar lists every side chat and switches between them', async t => {
   assert.equal(tabs[1].getAttribute('aria-selected'), 'false');
 });
 
+test('multiple analysis works use a readable selector and bounded previous/next actions',async t=>{
+  const view=fixture(t);
+  const works=[{id:'first-work',title:'第一篇完整标题',body:'第一篇正文',metrics:{likes:3}},{id:'last-work',title:'第二篇完整标题',body:'第二篇正文',metrics:{likes:8}}];
+  const analysisContext={id:'nav-context',platform:'douyin',accountId:'owner',accountName:'Creator',sessionId:'work-navigation',kind:'content-analysis',contentIds:works.map(work=>work.id),sourceHash:'hash',markdown:'## 真实材料\n```json\n'+JSON.stringify(works)+'\n```',createdAt:'2026-10-21T00:00:00Z',status:'prepared',result:null};
+  await view.render(createElement(ChatPage,{session:{id:'work-navigation',title:'作品分析',created:1,messages:[],conversationType:'content-analysis',analysisContext}}));
+  assert.equal(view.container.querySelector('.analysis-evidence-picker'),null);
+  const previous=view.container.querySelector('[aria-label="上一篇作品"]');
+  assert.equal(previous.disabled,true);
+  await view.click(view.container.querySelector('[aria-label="下一篇作品"]'));
+  assert.match(view.container.querySelector('.analysis-evidence-work').textContent,/第二篇完整标题/);
+  assert.equal(view.container.querySelector('[aria-label="下一篇作品"]').disabled,true);
+  const selector=view.container.querySelector('[aria-label="选择分析作品"]');
+  await act(async()=>selector.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})));
+  assert.match(document.querySelector('[role="listbox"]').textContent,/第一篇完整标题.*第二篇完整标题/);
+  await act(async()=>selector.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true})));
+  await act(async()=>selector.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+  assert.equal(document.querySelector('[role="listbox"]'),null);
+  assert.match(view.container.querySelector('.analysis-evidence-work').textContent,/第一篇完整标题/);
+});
+
 test('the + button opens the full panel home without creating a chat, then lets the user choose', async t => {
   const view = fixture(t), calls=[];
   await view.render(createElement(ChatPage,{session:parent,sideSessions:[sideA],onSideChat:mode=>{calls.push(mode);return 's3';}}));
@@ -71,7 +125,7 @@ test('the + button opens the full panel home without creating a chat, then lets 
   assert.ok(home);assert.match(home.textContent,/新增面板/);assert.match(home.textContent,/推荐/);
   assert.deepEqual(calls,[],'opening the launcher must not create a child');
   const rows=[...home.querySelectorAll('.chat-panel-tool-grid button')];
-  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','来源','终端','变更','分析材料','辅助对话']);
+  assert.deepEqual(rows.map(row=>row.querySelector('strong').textContent),['文件','浏览器','来源','终端','变更','分析材料','生图工坊','发布中心','辅助对话']);
   await view.click(rows.find(row=>row.querySelector('strong').textContent==='辅助对话'));
   assert.deepEqual(calls,['create']);assert.equal(view.container.querySelector('.chat-panel-home'),null);
 });

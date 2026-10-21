@@ -20,12 +20,14 @@ import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
-import { addChatDraftQuote } from '../lib/chatDrafts';
+import { addChatDraftQuote, setChatDraftText } from '../lib/chatDrafts';
 import type { MessageSettingsActions } from './ChatMessageSettings';
 import '../styles/chat-workspace.css';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import ChatPanelHome from './ChatPanelHome';
 import ChatAnalysisPanel from './ChatAnalysisPanel';
+import CreationWorkspaceSlot from './CreationWorkspaceSlot';
+import { requestCreationPanel, takeCreationPanel } from '../lib/creationWorkspace';
 import ChatBrowserPanel from './ChatBrowserPanel';
 import ChatSourcesPanel from './ChatSourcesPanel';
 import ChatPanelIcon from './ChatPanelIcon';
@@ -146,6 +148,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   // 无目标时面板默认落在辅助对话标签上（有目标时保持“目标”优先的既有行为）。
   useEffect(()=>{
     if(panelTab==='goal'&&!goal){if(session.analysisContext)setPanelTab('analysis');else if(sideSessions.length)setPanelTab('side');else if(openedTools.length)setPanelTab('new');}
+    if(panelTab==='side'&&!sideSessions.length)setPanelTab(openedTools[0] || 'new');
   },[panelTab,goal,sideSessions.length,openedTools.length,session.analysisContext]);
   const PANEL_WIDTH_KEY='easel:chat-panel-width';
   const [panelWidth,setPanelWidth]=useState(()=>{const {ok,value}=readLocalValue(PANEL_WIDTH_KEY);const n=value?Number(value):NaN;return ok&&Number.isFinite(n)&&n>=280&&n<=720?n:480;});
@@ -187,6 +190,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   const closeGoalEditor=()=>{setGoalEditor(null);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('.chat-page textarea.chat-input')?.focus());};
   const editableGoal = goal && !['completed','cancelled'].includes(goal.status) ? goal : undefined;
   const messageSettings: MessageSettingsActions = {
+    creation: (text, kind) => { requestCreationPanel(kind, session.id, text); openTool(kind); },
     targets: [...sideSessions.map(side => ({ value: side.id, label: `侧边对话 · ${side.title}` })), ...(onSideChat ? [{ value: 'new-side', label: '新建侧边对话' }] : [])],
     hasGoal: Boolean(editableGoal),
     goalBlocked: taskBusy || Boolean(stream || stopping || session.pendingTurnId) || session.engine === 'codex',
@@ -203,7 +207,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     },
   };
   const panelVisible=panelOpen&&!goalEditor&&!session.importedFromBackup&&Boolean(goal||sideSessions.length||openedTools.length||panelTab==='new'||panelTab==='side');
-  const withGoal=(content:React.ReactNode)=><div className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&(panelTab==='new'||openedTools.includes(panelTab as PanelTool)||panelTab==='side'&&activeSide)?' has-side-panel':''}`}>
+  const withGoal=(content:React.ReactNode)=><div data-creation-session={session.id} className={`chat-goal-workspace${panelVisible&&panelTab==='goal'&&goal?' has-goal-panel':''}${panelVisible&&(panelTab==='new'||openedTools.includes(panelTab as PanelTool)||panelTab==='side'&&activeSide)?' has-side-panel':''}`}>
     {content}
     {panelVisible&&<aside className="chat-side-panel" style={{width:panelWidth}} aria-label="对话侧边面板">
       <header className="chat-side-panel-head">
@@ -252,17 +256,44 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             messageSettings={{...messageSettings, targets:[{value:session.id,label:'主对话'}, ...messageSettings.targets.filter(target=>target.value!==activeSide.id)], quote:(text,target)=>{if(target==='current')addChatDraftQuote(activeSide.id, `来自「${activeSide.title}」：\n${text}`);else messageSettings.quote(`来自「${activeSide.title}」：\n${text}`,target===session.id?'current':target);}}}
             onQuoteFromMain={()=>onQuoteFromMain?.(activeSide.id)} onQuoteToMain={()=>onQuoteToMain?.(activeSide.id)}/>
         :panelTab==='side'?<div className="chat-side-panel-empty"><p>没有打开的辅助对话。</p><button type="button" className="btn btn-sm" onClick={()=>{const id=onSideChat?.('create');if(id)setActiveSideId(id);}}>新建辅助对话</button><button type="button" className="link-btn" onClick={openNewPanel}>新增其他面板</button></div>:null}
-      {openedTools.map(tool=><PanelMaterialQuote key={`${session.id}:${tool}`} sessionId={session.id} tool={tool} hidden={panelTab!==tool}>{tool==='analysis'?<ChatAnalysisPanel session={session} onOpenAnalysis={onOpenAnalysis}/>:tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
+      {openedTools.map(tool=><PanelMaterialQuote key={`${session.id}:${tool}`} sessionId={session.id} tool={tool} hidden={panelTab!==tool}>{tool==='image'||tool==='publish'?<CreationWorkspaceSlot kind={tool} sessionId={session.id} compact active={panelVisible&&panelTab===tool}/>:tool==='analysis'?<ChatAnalysisPanel session={session} onOpenAnalysis={onOpenAnalysis}/>:tool==='browser'?<ChatBrowserPanel sessionId={session.id} active={panelTab==='browser'} onSiteIcon={onBrowserIcon}/>:tool==='sources'?<ChatSourcesPanel session={session} active={panelTab==='sources'} onLocate={turnId=>{
         const messageIndex=session.messages.findIndex(message=>message.turnId===turnId);
         const index=messageIndex>=0?nodes.findLastIndex(node=>node.messageIndex<=messageIndex):turnId===session.pendingTurnId?nodes.length-1:-1;
         if(index<0){showToast('这条来源对应的对话暂不在本地记录中。','info');return;}
         if(window.innerWidth<=900)setPanelOpen(false);
         requestAnimationFrame(()=>jumpTo(index));
-      }}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</PanelMaterialQuote>)}
+      }}/>:tool==='files'?<ChatPanelFiles key={selectedFileId} sessionId={session.id} deliveries={deliveries} selectedId={selectedFileId}/>:<ChatPanelExecution session={session} kind={tool}/>}</PanelMaterialQuote>)}
       <div className="chat-side-panel-resize" role="separator" aria-orientation="vertical" aria-label="调整侧边面板宽度" onPointerDown={startPanelResize}/>
     </aside>}
   </div>;
   const deliveries = useChatArtifacts(session.id, !session.importedFromBackup, Boolean(stream));
+  const preparedSignature = deliveries.creationDrafts.map(item=>item.id).join(',');
+  const imageSignature = deliveries.jobs.map(item=>item.jobId).join(',');
+  useEffect(()=>{
+    const openRequested = () => {
+      const tool = takeCreationPanel(session.id);
+      if (tool) openTool(tool);
+    };
+    openRequested();
+    window.addEventListener('easel:open-creation-panel',openRequested);
+    return () => window.removeEventListener('easel:open-creation-panel',openRequested);
+  // The listener follows the current tab list without discarding pending navigation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[session.id,openedTools]);
+  useEffect(()=>{
+    const fresh: ('image'|'publish')[] = [];
+    for (const [tool,signature] of [['publish',preparedSignature],['image',imageSignature]] as const) {
+      if (!signature) continue;
+      const key='easel:creation-panel-seen:'+session.id+':'+tool;
+      try { if(sessionStorage.getItem(key)===signature)continue;sessionStorage.setItem(key,signature); } catch { continue; }
+      fresh.push(tool);
+    }
+    if(!fresh.length)return;
+    updateTools([...new Set([...openedTools,...fresh])]);
+    setPanelTab(fresh.at(-1)!);setPanelOpen(true);
+  // Open once per new host task; ordinary poll responses must not steal the selected tab.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[session.id,preparedSignature,imageSignature]);
   const [suggestionError, setSuggestionError] = useState('');
   const suggestionContext = useRef({ sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) });
   suggestionContext.current = { sessionId: session.id, blocked: Boolean(stream || stopping || session.importedFromBackup) };
@@ -351,10 +382,13 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
       <div className="chat-page chat-welcome-page">
         {header}
         <div className="chat-hero">
-          <h1 className="chat-hero-title">{greeting()}</h1>
-          <p className="chat-hero-sub">从一个想法开始，一起把内容做好。</p>
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
-          {!goalEditor&&<div className="suggestions">
+          <h1 className="chat-hero-title">{session.analysisContext ? session.analysisContext.kind === 'content-analysis' ? '从作品中，找到下一步' : '看清账号的内容方向' : greeting()}</h1>
+          <p className="chat-hero-sub">{session.analysisContext ? '材料已就绪，选择分析重点或补充你的问题。' : '从一个想法开始，一起把内容做好。'}</p>
+          <ChatComposer key={session.id} analysisContext={session.analysisContext} onOpenAnalysisMaterial={()=>{setPanelOpen(true);setPanelTab('analysis');}} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} hero isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onOpenModels={onOpenModels} />
+          {!goalEditor&&session.analysisContext&&<div className="chat-analysis-suggestions" aria-label="分析重点">
+            {[['内容方向','根据这些作品，分析内容主题、目标受众和值得继续的方向，逐项引用证据。'],['逐篇分析','逐篇分析这些作品的内容结构、表达和表现，列出具体可修改之处；缺少材料时说明需要补什么。'],['下一篇选题','基于已有作品提出下一篇选题与创作方案，说明各自依据和需要验证的假设。']].map(([label,text])=><button key={label} type="button" className="btn btn-sm" onClick={()=>setChatDraftText(session.id,text)}><IconEdit size={14}/>{label}</button>)}
+          </div>}
+          {!goalEditor&&!session.analysisContext&&<div className="suggestions">
             {SUGGESTIONS.map((s) => (
               <button key={s.title} className="suggestion-card" title={s.prompt}
                 onClick={() => void sendSuggestion(s.prompt)}>
@@ -474,7 +508,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
               {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
           </div>}
-          <ChatComposer key={session.id} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} />
+          <ChatComposer key={session.id} analysisContext={session.analysisContext} onOpenAnalysisMaterial={()=>{setPanelOpen(true);setPanelTab('analysis');}} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} />
         </div>}
       </div>}
     </div>

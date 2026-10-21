@@ -1,4 +1,5 @@
-import { IconFile, IconFolder, IconCompass, IconTerminal, IconEdit, IconChat, IconTarget, IconChevron, IconSources } from './icons';
+import { IconFile, IconFolder, IconCompass, IconTerminal, IconEdit, IconChat, IconTarget, IconChevron, IconSources, IconPublish } from './icons';
+import { IconImage } from './settingsIcons';
 import type { ChatSession } from '../lib/store';
 import type { ChatArtifact } from '../lib/chatArtifacts';
 import type { PanelTool } from '../lib/chatPanels';
@@ -20,6 +21,8 @@ const tools = [
   { id: 'terminal', title: '终端', hint: '查看命令与执行输出', Icon: IconTerminal },
   { id: 'changes', title: '变更', hint: '查看文件变更回执', Icon: IconEdit },
   { id: 'analysis', title: '分析材料', hint: '提取账号作品材料并引用到对话', Icon: IconEdit },
+  { id: 'image', title: '生图工坊', hint: '带入对话材料，图片可回到草稿', Icon: IconImage },
+  { id: 'publish', title: '发布中心', hint: '准备发布草稿，查看任务和回执', Icon: IconPublish },
   { id: 'side', title: '辅助对话', hint: '独立讨论旁支问题', Icon: IconChat },
 ] as const;
 

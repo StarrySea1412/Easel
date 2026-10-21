@@ -772,6 +772,7 @@ export interface PublishVerification {
 }
 
 export interface PublishReceipt {
+  sourceSessionId?: string;
   receiptId: string;
   platform: string;
   title: string;
@@ -798,8 +799,9 @@ export interface PublishResult extends Partial<PublishReceipt> {
 }
 
 export interface PublishRequest {
+  sourceSessionId?: string | null;
   platform: string;
-  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string };
+  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string; sourceSessionId?: string };
 }
 
 export interface PublishingPolicy {

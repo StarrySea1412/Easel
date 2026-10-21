@@ -30,8 +30,9 @@ def router(outputs, history=None):
     def snapshot(session: str, after: int = 0):
         try:
             from .image_jobs import ImageJobs
+            from .creation_drafts import CreationDrafts
             projected = history(session) if history else {'messages': [], 'warnings': []}
-            return {**store().snapshot(session, after=after), 'jobs': ImageJobs(outputs()).list(session), **projected}
+            return {**store().snapshot(session, after=after), 'jobs': ImageJobs(outputs()).list(session), 'creationDrafts': CreationDrafts(outputs()).list(session), **projected}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 

@@ -1,0 +1,40 @@
+.creation-workspace-slot { min-width:0; min-height:0; height:100%; overflow:auto; }
+.creation-workspace-mount { min-width:0; height:100%; }
+.creation-workspace-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--surface); }
+.creation-workspace-toolbar strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.creation-workspace-identity { display:flex; align-items:center; gap:8px; flex:1 1 140px; min-width:0; }
+.creation-tool-icon { display:grid; place-items:center; flex-shrink:0; width:30px; height:30px; border-radius:8px; background:var(--surface-2); color:var(--text-secondary); }
+.creation-workspace-navigation { display:flex; align-items:center; gap:5px; min-width:0; max-width:100%; }
+.creation-target-button,.creation-icon-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:32px; padding:6px 9px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text-secondary); font:inherit; font-size:12px; cursor:pointer; }
+.creation-target-button { max-width:220px; border-color:var(--border); background:var(--surface-2); }
+.creation-target-button span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.creation-target-button svg,.creation-icon-button svg { flex-shrink:0; }
+.creation-target-button > svg:last-child { transform:rotate(90deg); }
+.creation-target-button[aria-expanded=true] > svg:last-child { transform:rotate(-90deg); }
+.creation-icon-button { width:32px; padding:0; }
+.creation-target-button:hover,.creation-icon-button:hover { background:var(--surface-hover); color:var(--text); border-color:var(--border); }
+.creation-workspace-toolbar button:focus-visible,.creation-actionbar button:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
+.creation-toolbar-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex-basis:100%; }
+.creation-actionbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:16px; padding:10px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; }
+.creation-actionbar:empty { display:none; }
+.creation-actionbar > .creation-return-actions { display:contents; }
+.creation-actionbar > .creation-agent-jobs { flex-basis:100%; }
+.creation-actionbar .btn,.creation-toolbar-actions .btn,.creation-target .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px; white-space:nowrap; }
+.creation-actionbar .btn svg,.creation-toolbar-actions .btn svg { flex-shrink:0; }
+.is-compact .creation-workspace-identity { flex-basis:100%; }
+.is-compact .creation-workspace-navigation { width:100%; }
+.is-compact .creation-target-button { flex:1; max-width:none; justify-content:flex-start; min-width:0; }
+.is-compact .creation-target-button > svg:last-child { margin-left:auto; }
+.creation-target { display:flex; flex-wrap:wrap; gap:8px; flex-basis:100%; min-width:0; }
+.creation-return-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+.is-compact .creation-workspace-mount .image-page,.is-compact .creation-workspace-mount .publish-page { padding:16px; height:auto; max-width:100%; }
+.is-compact .creation-workspace-mount .publish-workspace { grid-template-columns:minmax(0,1fr); gap:16px; }
+.is-compact .creation-workspace-mount .image-page-heading,.is-compact .creation-workspace-mount .publish-heading { display:none; }
+.is-compact .creation-workspace-mount .publish-side { width:100%; min-width:0; }
+.is-compact .creation-workspace-mount .publish-section { padding:14px; }
+.is-compact .creation-workspace-mount .publish-master-body { min-height:180px; }
+.creation-agent-jobs { margin:12px 16px; padding:12px; border:1px solid var(--border); border-radius:10px; font-size:12px; }
+.creation-agent-jobs p { overflow-wrap:anywhere; }
+.creation-agent-images { display:flex; flex-wrap:wrap; gap:10px; }
+.creation-agent-images article { width:150px; }
+.creation-agent-images img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; }

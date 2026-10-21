@@ -1,8 +1,8 @@
 import { readLocalValue, writeLocalValue } from './localPersistence';
 
-export const PANEL_TOOLS = ['files', 'browser', 'sources', 'terminal', 'changes', 'analysis'] as const;
+export const PANEL_TOOLS = ['files', 'browser', 'sources', 'terminal', 'changes', 'analysis', 'image', 'publish'] as const;
 export type PanelTool = typeof PANEL_TOOLS[number];
-export const PANEL_LABELS: Record<PanelTool, string> = { files: '文件', browser: '浏览器', sources: '来源', terminal: '终端', changes: '变更', analysis: '分析材料' };
+export const PANEL_LABELS: Record<PanelTool, string> = { files: '文件', browser: '浏览器', sources: '来源', terminal: '终端', changes: '变更', analysis: '分析材料', image: '生图工坊', publish: '发布中心' };
 const keyFor = (sessionId: string) => `easel:chat-panel-tools:${sessionId}`;
 
 export function loadPanelTools(sessionId: string): PanelTool[] {

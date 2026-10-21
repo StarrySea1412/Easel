@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@antv/g2": "^5.4.8",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.4.12",
     "marked": "^18.0.6",

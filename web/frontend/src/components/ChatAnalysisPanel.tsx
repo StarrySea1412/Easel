@@ -7,6 +7,10 @@ import { showToast } from '../lib/toast';
 import { watchWorkbenchChange } from '../lib/workbenchEvents';
 import OutputMessageContent from './OutputMessageContent';
 import PublishSpinner from './PublishSpinner';
+import AnalysisEvidenceOverview from './AnalysisEvidenceOverview';
+import PlatformIcon from './PlatformIcon';
+import { IconChart, IconCopy, IconChevron, IconChat, IconImport } from './icons';
+import '../styles/analysis-visuals.css';
 
 export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session: ChatSession; onOpenAnalysis?: () => void }) {
   const context = session.analysisContext;
@@ -38,14 +42,14 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
     finally { setWriting(false); }
   };
   return <section className="chat-panel-home chat-analysis-panel" aria-label="分析辅助面板">
-    <h2>{context.kind === 'content-analysis' ? '作品分析' : '账号分析'} · {context.accountName}</h2>
-    <p className="ca-caption">{context.platform} · {context.contentIds.length} 篇 · {new Date(context.createdAt).toLocaleString('zh-CN')}</p>
-    <div className="ca-bench-actions"><button className="btn btn-sm" onClick={extract}>提取选中内容 / 全部材料</button>{onOpenAnalysis && <button className="ca-text-button" onClick={onOpenAnalysis}>查看分析结果 →</button>}{latest && <button className="btn btn-sm" disabled={writing || Boolean(session.pendingTurnId) || saved?.stale} onClick={() => void writeback()}>{writing ? <PublishSpinner/> : '回填最新答复'}</button>}</div>
+    <header className="analysis-panel-heading"><span className="analysis-panel-heading-icon"><IconChart size={18}/></span><div><h2>{context.kind === 'content-analysis' ? '作品分析' : '账号分析'} · {context.accountName}</h2><div className="analysis-panel-source"><PlatformIcon platform={context.platform} name={context.platform}/><span>{context.contentIds.length} 篇</span><time dateTime={context.createdAt}>{new Date(context.createdAt).toLocaleString('zh-CN')}</time></div></div></header>
+    <div className="analysis-panel-actions"><button className="btn btn-sm" title="提取选中内容；未选中时提取全部材料" onMouseDown={event=>event.preventDefault()} onClick={extract}><IconCopy size={14}/>提取材料</button>{onOpenAnalysis && <button className="btn btn-sm" onClick={onOpenAnalysis}><IconChart size={14}/>查看分析结果<IconChevron size={12}/></button>}{latest && <button className="btn btn-sm" disabled={writing || Boolean(session.pendingTurnId) || saved?.stale} onClick={() => void writeback()}>{writing ? <PublishSpinner/> : <IconImport size={14}/>}<span>回填最新答复</span></button>}</div>
     {writeError && <p className="ca-error" role="alert">{writeError}</p>}
-    {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}>引用到分析对话</button></div>}
+    {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}><IconChat size={14}/>引用到分析对话</button></div>}
     {session.pendingTurnId && <span role="status" aria-label="分析执行中"><PublishSpinner /></span>}
     {saved?.stale && <p className="ca-caption">来源材料已更新，本对话保留历史快照；重新提取后可生成新分析。</p>}
     {saved?.result && <details open><summary>已回填的分析结果</summary><OutputMessageContent inert content={saved.result.markdown}/></details>}
-    <details open><summary>本轮 Markdown 材料</summary><div ref={material}><OutputMessageContent inert content={context.markdown}/></div></details>
+    <div ref={material}><AnalysisEvidenceOverview context={context}/>
+    <details><summary>原始 Markdown / JSON 材料</summary><OutputMessageContent inert content={context.markdown}/></details></div>
   </section>;
 }

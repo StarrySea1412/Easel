@@ -1764,6 +1764,49 @@ async def api_settings_bootstrap():
     }
 
 
+from easel.gateway_recovery import GatewayRecovery
+_gateway_recovery = GatewayRecovery()
+_auto_gateway_process = None
+
+
+def _start_offline_gateway():
+    global _auto_gateway_process
+    from easel.gateway_endpoint import gateway_host, resolve_gateway_port
+    if gateway_host() not in ('127.0.0.1', 'localhost', '[::1]'):
+        raise RuntimeError('Only a local gateway can be started')
+    command = openclaw_base_cmd() + ['--profile', OPENCLAW_PROFILE, 'gateway', 'run',
+                                   '--allow-unconfigured', '--bind', 'loopback', '--port',
+                                   str(resolve_gateway_port())]
+    logs = DATA_DIR / 'logs'
+    logs.mkdir(parents=True, exist_ok=True)
+    # Files avoid inherited PIPE handles keeping a timed-out Windows call alive.
+    if _auto_gateway_process is None or _auto_gateway_process.poll() is not None:
+        with (logs / 'gateway-recovery.log').open('ab') as output:
+            _auto_gateway_process = subprocess.Popen(command, cwd=PROJECT_ROOT, env=_proxy_env(), stdout=output,
+                                       stderr=output, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                                       start_new_session=os.name != 'nt')
+    process = _auto_gateway_process
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        if check_gateway():
+            return
+        if process.poll() is not None:
+            raise RuntimeError('Gateway exited before becoming ready')
+        time.sleep(1)
+    # A slow process is left intact; its startup lock prevents another instance.
+    raise TimeoutError('Gateway startup timed out')
+
+
+@app.post('/api/gateway/ensure')
+async def api_gateway_ensure():
+    if _direct_api_enabled() or _harness_settings()['runtime'] != 'openclaw':
+        return {'state': 'not_needed', 'note': '当前引擎无需 OpenClaw', 'retryAfter': 0}
+    from easel.gateway_endpoint import gateway_host
+    if gateway_host() not in ('127.0.0.1', 'localhost', '[::1]'):
+        return {'state': 'failed', 'note': '远程 OpenClaw 未连接，请在对应主机启动网关。', 'retryAfter': 300}
+    return _gateway_recovery.request(check_gateway, _start_offline_gateway)
+
+
 @app.post("/api/gateway/restart")
 async def api_gateway_restart():
     """重启本机 gateway，让刚保存的模型配置立刻生效。
@@ -1779,6 +1822,8 @@ async def api_gateway_restart():
         return {'ok': True, 'note': 'API 直连配置下一轮生效，无需重启 OpenClaw'}
     if _harness_settings()["runtime"] != "openclaw":
         raise HTTPException(409, "当前 Agent 使用独立按轮启动的进程，不需要重启 OpenClaw 网关")
+    if _gateway_recovery.snapshot()['state'] == 'starting':
+        return {'ok': False, 'note': 'OpenClaw 正在自动启动，请稍候。'}
     script = PROJECT_ROOT / 'scripts' / ('gateway.ps1' if os.name == 'nt' else 'gateway.sh')
     if not script.is_file():
         raise HTTPException(500, '找不到 gateway 启动脚本')
@@ -5166,6 +5211,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
     present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
     image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
+    publish_script = PROJECT_ROOT / 'skills/shared/scripts/prepare_publish.py'
+    message += (f'\n[Easel发布草稿] 用户要求准备发布内容时，先将正文写入UTF-8文件，实际执行 '
+                f'python "{publish_script}" --ticket {artifact_ticket} --request-id "<固定请求标识>" --body-file "<正文文件>"。'
+                '可加 --title、--tags、重复 --platform 和 --media；只使用真实本机素材。'
+                '命令只准备可编辑草稿，返回草稿ID后用户可在辅助面板查看；不自动发布或绕过发布中心最终确认。')
     message += (f'\n\n[Easel本轮文件交付]\n保存产物后，必须实际执行以下命令交付到当前对话；'
                 f'不依赖最终回复中的链接。命令只登记现有文件，不生成或扣费。\n'
                 f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
@@ -7967,6 +8017,7 @@ class PublishRequest(BaseModel):
     media: list[str] = []
     tags: str = ''
     persona: str = ''
+    sourceSessionId: str = ''
 
 
 class ManualPublishRequest(BaseModel):
@@ -8037,13 +8088,13 @@ def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
                 NotificationStore(OUTPUTS_DIR).add([dict(id=f'publish:{receipt_id}:{outcome}',
                     message=f"{result.get('platform', '发布')} · {descriptions[outcome]}",
                     tone='success' if outcome == 'published' else 'error' if outcome == 'failed' else 'info',
-                    at=int(time.time() * 1000), target=dict(page='publish'))])
+                    at=int(time.time() * 1000), target=(dict(page='chat',sessionId=result['sourceSessionId'],tool='publish',receiptId=receipt_id) if result.get('sourceSessionId') else dict(page='publish')))])
             except Exception:
                 pass  # A notification failure must not alter a publish receipt.
         return dict(result)
 
 
-def _begin_publish(platform: str, title: str) -> dict:
+def _begin_publish(platform: str, title: str, source_session: str = '') -> dict:
     with _PUBLISH_LOCK:
         if platform in _PUBLISH_ACTIVE:
             raise HTTPException(409, '该平台已有发布任务，请先查看现有任务。')
@@ -8052,7 +8103,7 @@ def _begin_publish(platform: str, title: str) -> dict:
         if _account_browser_busy(platform):
             raise HTTPException(409, '该平台正在登录或核验账号，请等待结束后再发布。')
         try:
-            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title)
+            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title, **({'source_session': source_session} if source_session else {}))
         except publish_receipts.ActivePublishError as exc:
             raise HTTPException(409, str(exc)) from None
         except local_records.RecordError as exc:
@@ -8412,6 +8463,8 @@ async def api_publish_sms(platform: str, req: PublishSmsRequest):
 @app.post("/api/publish/{platform}")
 async def api_publish(platform: str, req: PublishRequest):
     """Run an explicitly requested publication and retain its platform receipt."""
+    if req.sourceSessionId and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', req.sourceSessionId):
+        raise HTTPException(400, '来源对话标识无效')
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
@@ -8445,7 +8498,7 @@ async def api_publish(platform: str, req: PublishRequest):
     tags = req.tags or ''
     publish_type = '视频' if vids else ('文章' if platform == 'wechat-oa' else '图文')
     py = sys.executable
-    receipt = _begin_publish(platform, title)
+    receipt = _begin_publish(platform, title, req.sourceSessionId) if req.sourceSessionId else _begin_publish(platform, title)
     receipt_id = receipt['receiptId']
     status_file = PUBLISH_DIR / (receipt_id + '.status.json')
     code_file = PUBLISH_DIR / (receipt_id + '.code')

@@ -1,0 +1,10 @@
+.generated-file-picker { width:min(620px,calc(100vw - 24px)); max-height:calc(100dvh - 40px); display:flex; flex-direction:column; gap:16px; }
+.generated-file-picker header,.generated-file-picker footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.generated-file-picker h2 { display:flex; align-items:center; gap:8px; font-size:18px; }
+.generated-file-list { min-height:80px; overflow:auto; }
+.generated-file-list article { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
+.generated-file-list article>svg { flex-shrink:0; color:var(--text-tertiary); }
+.generated-file-list article>div { min-width:0; flex:1; }
+.generated-file-list strong,.generated-file-list small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.generated-file-list strong { font-size:13px; }
+.generated-file-list small,.generated-file-picker footer>span { color:var(--text-tertiary); font-size:11px; }

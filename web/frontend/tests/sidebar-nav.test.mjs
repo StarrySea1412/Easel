@@ -85,6 +85,7 @@ for (const savedOpen of [true, false]) test(`navigation collapses conversations 
   const view = await fixture(t, {}, { [CONVERSATIONS]: String(savedOpen), [TOOLBAR]: 'true' });
   await view.clickLabel('展开工具栏');
   for (const page of ['settings', 'accounts', 'analysis', 'agent-office', 'chat']) {
+    await view.clickLabel('工作台');
     await view.update({ currentPage: page });
     assert.equal(view.container.querySelector('.sidebar-conversations'), null);
     await view.clickLabel('展开对话列表');
@@ -105,12 +106,14 @@ test('automatic collapse restores focus if navigation removes the focused conver
   assert.equal(document.activeElement, view.byLabel('展开对话列表'));
 });
 
-test('mobile navigation keeps returning chat unobscured despite legacy expansion', async t => {
+test('mobile chat list explicitly opens chat and ordinary page navigation collapses it', async t => {
   t.mock.method(window, 'matchMedia', () => ({ matches: true }));
   const view = await fixture(t, {}, { [CONVERSATIONS]: 'true' });
   await view.update({ currentPage: 'settings' });
   await view.clickLabel('展开对话列表');
-  await view.update({ currentPage: 'chat' });
+  assert.equal(view.byLabel('对话').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  await view.update({ currentPage: 'settings' });
   assert.equal(view.container.querySelector('.sidebar-conversations'), null);
   assert.equal(localStorage.getItem(CONVERSATIONS), 'true');
   await view.clickLabel('展开对话列表');
@@ -216,7 +219,7 @@ test('selecting an existing conversation and creating a new one invoke their sep
   await view.clickLabel('展开对话列表');
   await view.clickText('此前的调研');
   assert.deepEqual(view.selected, ['s2']);
-  assert.deepEqual(view.visits, []);
+  assert.deepEqual(view.visits, ['chat']);
   assert.ok(view.container.querySelector('.sidebar-conversations'), 'session switching preserves the expanded list');
   await view.clickText('新建对话');
   assert.equal(view.actions.newChats, 1);
@@ -260,6 +263,40 @@ test('returning to chat retains the selected conversation', async t => {
   assert.equal(view.container.querySelector('.session-item.active .session-select').textContent, '此前的调研');
 });
 
+for (const page of ['accounts', 'settings', 'analysis', 'image', 'publish', 'activity']) test('conversation list opens chat from ' + page + ' without replacing the active session', async t => {
+  const view = await fixture(t, { currentPage: page, activeSessionId: 's2' });
+  assert.equal(view.container.querySelector('.session-item.active'), null);
+  await view.clickLabel('展开对话列表');
+  assert.deepEqual(view.visits, ['chat']);
+  assert.equal(view.byLabel('对话').getAttribute('aria-current'), 'page');
+  assert.ok(view.container.querySelector('.sidebar-conversations'));
+  assert.equal(view.container.querySelector('.session-item.active').dataset.sessionId, 's2');
+  assert.deepEqual(view.selected, []);
+  assert.equal(view.actions.newChats, 0);
+});
+
+for (const activeSessionId of [null, 'deleted']) test('chat list selects the newest visible conversation when active id is ' + activeSessionId, async t => {
+  const view = await fixture(t, { currentPage: 'accounts', activeSessionId, sessions: [
+    session('old', '旧对话', { created: 1, pinnedAt: 1 }),
+    session('new', '最新对话', { created: 20 }),
+    session('child', '辅助对话', { created: 100, parentSessionId: 'new' }),
+    session('archive', '归档对话', { created: 200, archived: true }),
+    session('unused', '隐藏空会话', { created: 300, messages: [] }),
+  ] });
+  await view.clickLabel('展开对话列表');
+  assert.deepEqual(view.selected, ['new']);
+  assert.deepEqual(view.visits, ['chat']);
+  assert.equal(view.actions.newChats, 0);
+});
+
+test('opening an empty chat list navigates without creating a session', async t => {
+  const view = await fixture(t, { currentPage: 'accounts', activeSessionId: null, sessions: [] });
+  await view.clickLabel('展开对话列表');
+  assert.deepEqual(view.visits, ['chat']);
+  assert.deepEqual(view.selected, []);
+  assert.equal(view.actions.newChats, 0);
+});
+
 test('small-screen backdrop and Escape dismiss conversations while preserving toolbar state', async t => {
   t.mock.method(window, 'matchMedia', () => ({ matches: true }));
   const view = await fixture(t);
@@ -275,7 +312,7 @@ test('small-screen backdrop and Escape dismiss conversations while preserving to
   assert.ok(view.shell().classList.contains('is-toolbar-expanded'));
   await view.clickLabel('展开对话列表');
   await view.clickLabel('对话');
-  assert.deepEqual(view.visits, ['chat']);
+  assert.deepEqual(view.visits, ['chat', 'chat', 'chat', 'chat']);
   assert.ok(view.container.querySelector('.sidebar-conversations'));
   assert.ok(view.byLabel('工作台'));
 });

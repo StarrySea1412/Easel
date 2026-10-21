@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { IconFile, IconImage, IconOutputs, IconPlus, IconSkills } from './icons';
 
 export type ComposerUploadKind = 'media' | 'files' | 'folder';
-export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkills, skillsDisabled = false }: {
-  disabled: boolean; uploading: boolean; onUpload: (kind: ComposerUploadKind) => void; onSkills: () => void; skillsDisabled?: boolean;
+export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkills, onOutputs, skillsDisabled = false }: {
+  disabled: boolean; uploading: boolean; onUpload: (kind: ComposerUploadKind) => void; onSkills: () => void; onOutputs?: () => void; skillsDisabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 12, top: 12, maxHeight: 300 });
@@ -43,6 +43,7 @@ export default function ComposerAddMenu({ disabled, uploading, onUpload, onSkill
       } else if (event.key === 'Tab') close();
     }}>
       <small>添加</small>
+      {onOutputs && <button type="button" role="menuitem" onClick={() => choose(onOutputs)}><IconOutputs size={17}/><span>已生成文件<small>从内容库选取已有产物</small></span></button>}
       <button type="button" role="menuitem" onClick={() => choose(() => onUpload('media'))}><IconImage size={17}/><span>图片或视频<small>添加参考图、视频素材</small></span></button>
       <button type="button" role="menuitem" onClick={() => choose(() => onUpload('files'))}><IconFile size={17}/><span>文件<small>文档、表格、PDF、音频等</small></span></button>
       <button type="button" role="menuitem" onClick={() => choose(() => onUpload('folder'))}><IconOutputs size={17}/><span>文件夹内素材<small>添加文件夹中支持的文件</small></span></button>

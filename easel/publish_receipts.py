@@ -200,9 +200,11 @@ class ReceiptStore:
                     raise
                 time.sleep(0.01 * (attempt + 1))
 
-    def create(self, receipt_id: str, platform: str, title: str) -> dict:
+    def create(self, receipt_id: str, platform: str, title: str, *, source_session: str = '') -> dict:
         if not RECEIPT_ID.fullmatch(receipt_id):
             raise ValueError('Invalid receipt ID')
+        if source_session and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', source_session):
+            raise ValueError('Invalid source session')
         def operation(items):
             for item in items:
                 if item['platform'] == platform and item.get('outcome') not in OUTCOMES:
@@ -216,6 +218,8 @@ class ReceiptStore:
                     'message': '发布处理中，请等待平台回执。',
                     'createdAt': now, 'updatedAt': now,
                     'notification': {'state': 'skipped', 'message': '待平台确认发布后再提醒。'}}
+            if source_session:
+                item['sourceSessionId'] = source_session
             items.append(item)
             return dict(item)
         return self._change(operation)
@@ -244,7 +248,7 @@ class ReceiptStore:
             for item in items:
                 if item['receiptId'] == receipt_id:
                     update = {key: value for key, value in changes.items()
-                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt'}}
+                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt', 'sourceSessionId'}}
                     # File-level optimistic retries make this claim atomic
                     # even when two readers identify the same creator work.
                     content_id = update.get('contentId') or item.get('contentId')

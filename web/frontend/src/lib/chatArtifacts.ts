@@ -1,3 +1,19 @@
+import type { PublishDraft } from './store';
+export interface PreparedCreationDraft { id: string; sessionId: string; turnId: string; createdAt: number; state: 'prepared'; draft: PublishDraft }
+export function decodeCreationDrafts(value: unknown, session: string): PreparedCreationDraft[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is PreparedCreationDraft => {
+    if (!item || typeof item !== 'object') return false;
+    const draft = item.draft;
+    return item.sessionId === session && typeof item.id === 'string' && /^[a-f0-9]{32}$/.test(item.id)
+      && typeof item.turnId === 'string' && Number.isFinite(item.createdAt) && item.state === 'prepared'
+      && draft && typeof draft.title === 'string' && typeof draft.body === 'string' && typeof draft.tags === 'string'
+      && Array.isArray(draft.platforms) && draft.platforms.every((x: unknown) => typeof x === 'string')
+      && Array.isArray(draft.media) && draft.media.every((x: unknown) => typeof x === 'string')
+      && draft.overrides && typeof draft.overrides === 'object' && !Array.isArray(draft.overrides)
+      && Object.values(draft.overrides).every(x => typeof x === 'string');
+  });
+}
 export interface ChatArtifact {
   id: string; sessionId: string; turnId: string; path: string; name: string;
   mimeType: string; version: string; size: number; status: 'ready' | 'missing' | 'failed';

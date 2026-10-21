@@ -19,6 +19,23 @@ const rawApp = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8
 const base = new URL('../src/', import.meta.url);
 let fixtureId = 0;
 
+test('analysis sends its full snapshot while storing a readable message and retains it on retry', async t => {
+  const analysisContext={id:'analysis-bound',platform:'douyin',accountId:'owner',accountName:'Creator',sessionId:'analysis-snapshot',kind:'content-analysis',contentIds:['work'],sourceHash:'hash',markdown:'# Frozen material\n\n## 真实材料\n```json\n[{"id":"work","body":"完整作品正文"}]\n```',createdAt:'2026-10-21T00:00:00Z',status:'prepared',result:null};
+  const saved={id:'analysis-snapshot',title:'作品分析 · Creator',created:1,messages:[],conversationType:'content-analysis',analysisContext};
+  const {harness,values}=await fixture(t,{easel_sessions:JSON.stringify([saved]),easel_active_session:saved.id});
+  await act(async()=>harness.sidebar.onSessionSelect(saved.id));
+  await act(async()=>{assert.equal(harness.pages['对话'].onSend('重点分析叙事节奏'),true);});
+  const run=harness.streams[0];
+  assert.ok(run.args[0].includes(analysisContext.markdown));
+  assert.match(run.args[0],/用户本轮要求\n\n重点分析叙事节奏/);
+  const message=JSON.parse(values.get('easel_sessions'))[0].messages[0];
+  assert.equal(message.content,'重点分析叙事节奏');assert.equal(message.agentContent,run.args[0]);
+  await act(async()=>run.args[5](new Error('synthetic inference failure')));
+  await act(async()=>harness.pages['对话'].onResend(0,message.content,undefined,message.agentContent));
+  assert.equal(harness.streams[1].args[0],run.args[0]);
+  assert.equal(harness.streams[1].args[0].split(analysisContext.markdown).length,2);
+});
+
 async function fixture(t, initial, realSidebar = false) {
   const harness = { pages: {}, calls: [], streams: [], intervals: new Map(), nextTimer: 0 };
   globalThis.__backupApp = harness;
@@ -44,6 +61,8 @@ async function fixture(t, initial, realSidebar = false) {
   const storeBase = await tsModuleUrl(new URL('lib/store.ts', base));
   const store = url(Buffer.from(storeBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence).replaceAll(draftsBase, drafts).replaceAll(queueBase, queue)) + `#${fixtureId}`;
   const breakdownStoreBase = await tsModuleUrl(new URL('lib/breakdownStore.ts', base));
+  const creationBase = await tsModuleUrl(new URL('lib/creationWorkspace.ts', base));
+  const creation = url(Buffer.from(creationBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase,persistence).replaceAll(draftsBase,drafts).replaceAll(storeBase,store)) + '#' + fixtureId;
   const breakdownStore = url(Buffer.from(breakdownStoreBase.slice(prefix.length), 'base64').toString().replaceAll(persistenceBase, persistence)) + `#${fixtureId}`;
   const breakdownChatBase = await tsModuleUrl(new URL('lib/breakdownChat.ts', base));
   const breakdownChat = url(Buffer.from(breakdownChatBase.slice(prefix.length), 'base64').toString().replaceAll(storeBase, store).replaceAll(breakdownStoreBase, breakdownStore)) + `#${fixtureId}`;
@@ -81,6 +100,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './lib/chatDrafts') target = drafts;
     else if (specifier === './lib/chatQueue') target = queue;
     else if (specifier === './lib/chatSteering') target = steering;
+    else if (specifier === './lib/creationWorkspace') target = creation;
     else if (specifier === './lib/api') target = api;
     else if (specifier === './lib/lazyPage') target = lazy;
     else if (specifier === './components/Sidebar') target = sidebar;
@@ -89,6 +109,7 @@ async function fixture(t, initial, realSidebar = false) {
     else if (specifier === './components/DashboardPage') target = dashboard;
     else if (specifier === './hooks/useImageStudio') target = image;
     else if (specifier === './components/ui/ConfirmModal') target = await tsModuleUrl(new URL('components/ui/ConfirmModal.tsx', base));
+    else if (specifier === './components/CreationWorkspaceHost') target = url("export default function Host(props){globalThis.__backupApp.creationHost=props;return null;}");
     else if (specifier.startsWith('./components/')) target = empty;
     else target = await tsModuleUrl(new URL(specifier + '.ts', base));
     replacements.push({ start: statement.moduleSpecifier.getStart(), end: statement.moduleSpecifier.end, text: JSON.stringify(target) });
@@ -246,7 +267,7 @@ test('App retains one global publish monitor on dashboard, settings and publish 
   await act(async () => harness.receiptCenter.onConfigure());
   assert.equal(harness.pages['设置'].navigationKey, navigationKey + 1);
   await act(async () => harness.receiptCenter.onOpenPublish());
-  assert.equal(harness.pages['发布中心'].publishReceipts, harness.receiptCenter.model);
+  assert.equal(harness.creationHost.receipts, harness.receiptCenter.model);
   assert.equal(harness.receiptCenter.model.open, open);
   await act(async () => harness.sidebar.onPageChange('dashboard'));
   assert.equal(harness.receiptCenter.model.open, open);

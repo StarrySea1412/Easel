@@ -139,6 +139,11 @@ export default function PublishReceiptCenter({ model, onConfigure, onOpenPublish
   const configure = () => { model.close(); onConfigure(); };
   const seenNotices = useRef(new Set<string>());
   useEffect(() => {
+    if (!model.isOpen || !model.focusedReceiptId) return;
+    const card = modalRef.current?.querySelector<HTMLElement>('[data-receipt-id="'+model.focusedReceiptId+'"]');
+    if (card) { card.tabIndex = -1; card.scrollIntoView?.({block:'center'}); card.focus({preventScroll:true}); }
+  }, [model.isOpen,model.focusedReceiptId,model.receipts,modalRef]);
+  useEffect(() => {
     if (showEntry) return;
     for (const receipt of model.notices) {
       const key = `${receipt.receiptId}:${receipt.outcome}`;

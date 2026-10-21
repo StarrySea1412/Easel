@@ -1,6 +1,6 @@
 import { confirmModal } from './ui/ConfirmModal';
 import { FailureMessage } from './FailureRecords';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useId } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
   fetchAccounts, fetchOutputs, mediaUrl, accountWhoami,
@@ -9,18 +9,27 @@ import {
 import type { AccountItem, OutputFile, PublishRequest, PublishFailureCode, PublishFailureStage } from '../lib/api';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { loadPublishDraft, savePublishDraft } from '../lib/store';
+import { ensureCreation, readCreationDraft, saveCreationDraft, returnCreationQuote, creationReceiptSession, canReturnToSession, backupCreationDraft, previousCreationDraft } from '../lib/creationWorkspace';
+import { creationMaterial, consumeCreationMaterial } from '../lib/creationWorkspace';
+import { showToast as globalToast } from '../lib/toast';
 import { renderMarkdown } from '../lib/sanitize';
-import { publishReceiptStatus } from '../lib/publishReceipts';
-import { IconPublish, IconCopy, IconCheck, IconCalendar, IconSkills, IconEdit, IconStop, IconTrash } from './icons';
+import { publishReceiptStatus, publishPlatformLabel, safePublishedUrl } from '../lib/publishReceipts';
+import { IconPublish, IconCopy, IconCheck, IconCalendar, IconSkills, IconEdit, IconStop, IconTrash, IconImport, IconChat, IconHistory } from './icons';
 import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
+import { useChatArtifacts, type PreparedCreationDraft } from '../hooks/useChatArtifacts';
 import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, hydrateAccountIdentities, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
   persona: string;
   publishReceipts: PublishReceiptsModel;
+  workspaceId?: string;
+  sourceSessionId?: string | null;
+  targetSessionId?: string | null;
+  active?: boolean;
+  getSourceText?: () => string;
 }
 
 // 平台列表须与后端 LOGIN_RUNNERS 对齐（有登录/发布链路的才列）
@@ -50,10 +59,19 @@ function parseSections(text: string): Record<string, string> {
   return map;
 }
 
-export default function PublishPage({ persona, publishReceipts }: PublishPageProps) {
-  const draft0 = loadPublishDraft();
+export default function PublishPage({ persona, publishReceipts, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, active = true }: PublishPageProps) {
+  const fieldPrefix = useId();
+  const workspace = ensureCreation('publish', sourceSessionId);
+  const deliveries = useChatArtifacts(sourceSessionId || '', active && Boolean(sourceSessionId), false);
+  const [loadedPreparation, setLoadedPreparation] = useState('');
+  const draft0 = workspaceId ? readCreationDraft(workspace) : loadPublishDraft();
   const [title, setTitle] = useState(draft0.title);
   const [body, setBody] = useState(draft0.body);
+  useEffect(()=>{
+    if (!active || title.trim() || body.trim()) return;
+    const text=creationMaterial(workspace);
+    if(text) {setBody(text);setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64));consumeCreationMaterial(workspace);}
+  },[active,title,body,workspace]);
   const [platforms, setPlatforms] = useState<string[]>(draft0.platforms);
   const [overrides, setOverrides] = useState<Record<string, string>>(draft0.overrides);
   const [tags, setTags] = useState(draft0.tags || '');
@@ -87,8 +105,9 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
-    savePublishDraft({ title, body, platforms, overrides, tags, media: selectedMedia });
-  }, [title, body, platforms, overrides, tags, selectedMedia]);
+    const draft = { title, body, platforms, overrides, tags, media: selectedMedia };
+    if (workspaceId) saveCreationDraft(workspace, draft); else savePublishDraft(draft);
+  }, [title, body, platforms, overrides, tags, selectedMedia, workspace, workspaceId]);
 
   useEffect(() => {
     mounted.current = true;
@@ -135,16 +154,24 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       setMediaFiles(files);
     }).catch(() => setMediaError('媒体列表加载失败，请重试。')).finally(() => setMediaLoading(false));
   }, [loadAccounts]);
-  useEffect(() => { loadAssets(); }, [loadAssets]);
+  useEffect(() => { if (active) loadAssets(); }, [active, loadAssets]);
+  useEffect(() => {
+    const sync = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.workspaceId === workspace.id && Array.isArray(detail.draft?.media)) setSelectedMedia(detail.draft.media);
+    };
+    window.addEventListener('easel:creation-draft-updated', sync);
+    return () => window.removeEventListener('easel:creation-draft-updated', sync);
+  }, [workspace.id]);
 
   useEffect(() => {
-    const sync = () => { setAccounts(rows => [...rows]); void loadAccounts(); };
+    const sync = () => { if (active) { setAccounts(rows => [...rows]); void loadAccounts(); } };
     const storage = (event: StorageEvent) => { if (event.key === 'easel_whoami') sync(); };
     window.addEventListener(ACCOUNT_STATE_EVENT, sync);
     window.addEventListener('storage', storage);
     return () => { window.removeEventListener(ACCOUNT_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
-  }, [loadAccounts]);
-  useEffect(() => watchAccountFreshness(() => { if (!checkLock.current) void loadAccounts(true); }), [loadAccounts]);
+  }, [loadAccounts, active]);
+  useEffect(() => active ? watchAccountFreshness(() => { if (!checkLock.current) void loadAccounts(true); }) : undefined, [loadAccounts, active]);
 
   const identities = useAccountIdentities();
   const connectionOf = (key: string) => accountConnection(accounts.find(a => a.platform === key), identities[key]);
@@ -372,7 +399,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
       setBlocked({ ...errors }); reportBlocked();
       showToast('账号状态已变化，内容已保留，请重新检查后发布。'); return;
     }
-    void publishReceipts.submit(confirmed);
+    void publishReceipts.submit(confirmed.map(request => ({ ...request, sourceSessionId })));
   };
 
   const copyFor = (key: string) => {
@@ -403,6 +430,36 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
           <button className="btn btn-sm publish-receipt-entry" onClick={publishReceipts.open}>查看全部发布回执</button>
         </div>
       </header>
+      <div className="creation-actionbar">
+      {sourceSessionId && <div className="creation-return-actions">
+        <button className="btn btn-sm" disabled={publishing || checking || adapting} onClick={async()=>{
+          const text = getSourceText?.().trim();
+          if (!text) { globalToast('先选择文字或填写对话草稿', 'info'); return; }
+          if (title.trim() || body.trim()) {
+            if (!(await confirmModal('保存当前版本后，用对话内容新建发布草稿？', {confirmLabel:'保存并新建'}))) return;
+            backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});
+          }
+          setBody(text); setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64)); setOverrides({});
+          consumeCreationMaterial(workspace);
+        }}><IconImport size={14}/>带入对话内容</button>
+        {Boolean(previousCreationDraft(workspace)) && <button className="link-btn" disabled={publishing || checking || adapting} onClick={async()=>{const draft=previousCreationDraft(workspace) as import('../lib/store').PublishDraft;if(typeof draft?.body!=='string'||!(await confirmModal('恢复上一份发布草稿？当前版本将保留。')))return;backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});setTitle(draft.title);setBody(draft.body);setPlatforms(draft.platforms);setOverrides(draft.overrides);setTags(draft.tags);setSelectedMedia(draft.media||[]);}}>恢复上一稿</button>}
+      </div>}
+      {deliveries.creationDrafts.length > 0 && <section className="creation-agent-jobs" aria-label="助手准备的发布草稿"><strong>助手准备的草稿</strong>{deliveries.creationDrafts.map((item:PreparedCreationDraft)=><div className="creation-return-actions" key={item.id}><span>{item.draft.title || item.draft.body.slice(0,30)}</span><button type="button" className="btn btn-sm" disabled={publishing || checking || adapting || loadedPreparation===item.id} onClick={async()=>{
+        if((title.trim() || body.trim()) && !(await confirmModal('保存当前版本后，载入这份助手草稿？',{confirmLabel:'保存并载入'})))return;
+        backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});
+        setTitle(item.draft.title);setBody(item.draft.body);setPlatforms(item.draft.platforms);setOverrides(item.draft.overrides);setTags(item.draft.tags);setSelectedMedia(item.draft.media||[]);setLoadedPreparation(item.id);
+      }}>{loadedPreparation===item.id?'已载入':'载入编辑'}</button></div>)}</section>}
+      {targetSessionId && <div className="creation-return-actions">
+        <button className="btn btn-sm" disabled={empty || !canReturnToSession(targetSessionId)} onClick={()=>{
+          try { returnCreationQuote(targetSessionId, '## 发布草稿\n' + title + '\n\n' + body + (tags ? '\n话题：'+tags : '') + (platforms.length ? '\n平台：'+platforms.map(publishPlatformLabel).join('、') : '') + (Object.keys(overrides).length ? '\n平台文案：\n'+Object.entries(overrides).map(([key,value])=>publishPlatformLabel(key)+'：'+value).join('\n') : '') + (selectedMedia.length ? '\n\n素材：' + selectedMedia.join('、') : '')); globalToast('发布草稿已加入目标对话', 'success'); }
+          catch(reason){globalToast(reason instanceof Error?reason.message:'引用失败','error');}
+        }}><IconChat size={14}/>添加到对话</button>
+        {publishReceipts.receipts.filter(receipt=>creationReceiptSession(receipt)===sourceSessionId).slice(0,3).map(receipt=><button key={receipt.receiptId} className="btn btn-sm" onClick={()=>{
+          try { const url=receipt.outcome==='published'?safePublishedUrl(receipt.platform,receipt.url):null;returnCreationQuote(targetSessionId, '## 发布回执\n平台：' + publishPlatformLabel(receipt.platform) + '\n标题：' + receipt.title + '\n状态：' + publishReceiptStatus(receipt).label + '\n时间：'+receipt.updatedAt+'\n' + receipt.message + (url ? '\n' + url : '')); globalToast('回执已加入目标对话','success'); }
+          catch(reason){globalToast(reason instanceof Error?reason.message:'引用失败','error');}
+        }}><IconHistory size={14}/>引用回执 · {receipt.platform}</button>)}
+      </div>}
+      </div>
       {(accountsError || mediaError) && <div className="notice-error publish-load-error" role="alert">
         {[accountsError, mediaError].filter(Boolean).join(' ')}
         <button className="btn btn-sm" onClick={loadAssets} disabled={accountsLoading || mediaLoading}>重试</button>
@@ -411,11 +468,11 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
         <div className="publish-editor">
           <section className="publish-section publish-content-section">
             <div className="publish-section-heading"><h2>内容</h2><span>通用正文 · 各平台可单独调整</span></div>
-            <label className="field-label" htmlFor="publish-title">标题</label>
-            <input id="publish-title" className="field publish-title-input" value={title} placeholder="一个清晰、有吸引力的标题"
+            <label className="field-label" htmlFor={fieldPrefix+"-publish-title"}>标题</label>
+            <input id={fieldPrefix+"-publish-title"} className="field publish-title-input" value={title} placeholder="一个清晰、有吸引力的标题"
               onChange={e => setTitle(e.target.value)} />
-            <label className="field-label publish-body-label" htmlFor="publish-body">正文 <span>{body.length} 字</span></label>
-            <textarea id="publish-body" className="field publish-master-body" value={body}
+            <label className="field-label publish-body-label" htmlFor={fieldPrefix+"-publish-body"}>正文 <span>{body.length} 字</span></label>
+            <textarea id={fieldPrefix+"-publish-body"} className="field publish-master-body" value={body}
               placeholder="写下内容，再为不同平台调整表达…" onChange={e => setBody(e.target.value)} />
             <div className="publish-editor-tools">
               {adapting ? <button className="btn btn-sm" onClick={stopAdapt}><IconStop size={13} /> 停止生成</button>
@@ -427,14 +484,14 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
               </button>
             </div>
             {adapting && <div className="adapt-hint" role="status"><PublishSpinner />正在生成平台版本，可切换预览查看。</div>}
-            <label className="field-label" htmlFor="publish-tags">话题标签 <span className="publish-optional">选填</span></label>
-            <input id="publish-tags" className="field" value={tags} placeholder="如 AI,Agent,效率工具" onChange={e => setTags(e.target.value)} />
+            <label className="field-label" htmlFor={fieldPrefix+"-publish-tags"}>话题标签 <span className="publish-optional">选填</span></label>
+            <input id={fieldPrefix+"-publish-tags"} className="field" value={tags} placeholder="如 AI,Agent,效率工具" onChange={e => setTags(e.target.value)} />
             <p className="publish-field-help">用逗号分隔，小红书将关联对应话题。</p>
           </section>
 
           <section className="publish-section publish-media-section">
             <div className="publish-section-heading"><div><h2>配图 / 视频</h2><span className="publish-media-count">{selectedMedia.length ? `${selectedMedia.length} 个素材` : '未选择'}</span></div>
-              <button className="btn btn-sm" aria-expanded={showPicker} aria-controls="publish-media-picker" onClick={() => setShowPicker(v => !v)}>
+              <button className="btn btn-sm" aria-expanded={showPicker} aria-controls={fieldPrefix+"-publish-media-picker"} onClick={() => setShowPicker(v => !v)}>
                 <IconSkills size={13} />{showPicker ? '收起' : '选择媒体'}
               </button>
             </div>
@@ -450,7 +507,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                 </div>}
               </div>)}
             </div> : <button className="publish-media-empty" onClick={() => setShowPicker(true)}><IconSkills size={22} /><span>从内容库添加素材</span><small>图片可多选，视频一次一个</small></button>}
-            {showPicker && <div className="media-grid" id="publish-media-picker" aria-label="内容库素材">
+            {showPicker && <div className="media-grid" id={fieldPrefix+"-publish-media-picker"} aria-label="内容库素材">
               {mediaLoading && <div className="dash-empty"><PublishSpinner />正在加载媒体…</div>}
               {!mediaLoading && mediaError && <div className="dash-empty">媒体列表暂不可用，请重试。</div>}
               {!mediaLoading && !mediaError && mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频</div>}
@@ -497,8 +554,8 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
             <div className="publish-preview-heading"><h2>平台预览</h2><span>内容示意，以平台实际展示为准</span></div>
             {platforms.length === 0 ? <div className="publish-preview-empty"><IconPublish size={28} /><p>先选择一个发布平台</p><span>多选后可切换查看各平台版本</span></div> : <>
               <div className="publish-preview-tabs" role="tablist" aria-label="切换平台预览">
-                {selectedPlatforms.map((p, index) => <button key={p.key} id={`publish-tab-${p.key}`} role="tab"
-                  aria-selected={activePreview === p.key} aria-controls={`publish-preview-${p.key}`} tabIndex={activePreview === p.key ? 0 : -1}
+                {selectedPlatforms.map((p, index) => <button key={p.key} id={`${fieldPrefix}-publish-tab-${p.key}`} role="tab"
+                  aria-selected={activePreview === p.key} aria-controls={`${fieldPrefix}-publish-preview-${p.key}`} tabIndex={activePreview === p.key ? 0 : -1}
                   onClick={() => setPreviewPlatform(p.key)} onKeyDown={event => {
                     let next = index;
                     if (event.key === 'ArrowRight') next = (index + 1) % selectedPlatforms.length;
@@ -521,7 +578,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                 const isEdit = editing === p.key;
                 const receipt = publishReceipts.receipts.find(item => item.platform === p.key);
                 const issue = preparationIssue(p.key);
-                return <div key={p.key} id={`publish-preview-${p.key}`} role="tabpanel" aria-labelledby={`publish-tab-${p.key}`}
+                return <div key={p.key} id={`${fieldPrefix}-publish-preview-${p.key}`} role="tabpanel" aria-labelledby={`${fieldPrefix}-publish-tab-${p.key}`}
                   hidden={activePreview !== p.key} className={`pv-card pv-${p.key}`} tabIndex={0}>
                   <div className="pv-head"><span className="pv-plat">{overrides[p.key] != null ? '独立版本' : '通用正文'}</span>
                     <span className={`pv-count ${over ? 'over' : ''}`}>{text.length}/{p.bodyLimit} 字</span></div>

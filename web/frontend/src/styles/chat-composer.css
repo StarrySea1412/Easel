@@ -49,6 +49,13 @@
 .chat-composer .attach-chip>svg { flex-shrink:0; }
 .chat-composer .attach-x { min-width:26px; min-height:26px; flex-shrink:0; }
 .chat-composer .composer-upload-error { margin:8px 4px; color:var(--red); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.composer-connection-notice { display:flex; gap:7px; align-items:center; margin:8px 4px; color:var(--text-secondary); font-size:12px; line-height:1.6; }
+.composer-connection-icon { display:flex; flex:none; margin-top:2px; color:var(--text-secondary); }
+.composer-connection-content { min-width:0; flex:1; }
+.composer-connection-content p { margin:0; overflow-wrap:anywhere; }
+.composer-connection-spinner { animation:composer-connection-spin 1s linear infinite; }
+@keyframes composer-connection-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .composer-connection-spinner { animation-duration:2.5s; } }
 .chat-composer button:focus-visible { outline:2px solid var(--text-secondary); outline-offset:3px; }
 @media(max-width:640px) {
  .chat-composer.composer { padding:12px 10px 8px; border-radius:var(--radius-lg); }

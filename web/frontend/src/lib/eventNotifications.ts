@@ -1,7 +1,7 @@
 import type { ToastTone, ToastNotice } from './toast';
 
 export type NoticeTarget =
-  | { page: 'chat'; sessionId: string }
+  | { page: 'chat'; sessionId: string; tool?: 'image'|'publish'; receiptId?:string }
   | { page: 'image'; medium?: 'image' | 'video' }
   | { page: 'outputs'; filter?: 'all' | 'image' | 'video'; path?: string }
   | { page: 'publish' };
@@ -39,7 +39,9 @@ function outputPath(value: unknown): string | undefined {
 }
 function targetFrom(value: unknown): NoticeTarget | undefined {
   if (!record(value)) return undefined;
-  if (value.page === 'chat') return validId(value.sessionId) ? { page: 'chat', sessionId: value.sessionId } : undefined;
+  if (value.page === 'chat') return validId(value.sessionId) ? { page: 'chat', sessionId: value.sessionId,
+    ...(value.tool === 'image' || value.tool === 'publish' ? {tool:value.tool} : {}),
+    ...(typeof value.receiptId==='string'&&/^[a-f0-9]{32}$/.test(value.receiptId)?{receiptId:value.receiptId}:{}) } : undefined;
   if (value.page === 'image') return { page: 'image', ...(value.medium === 'image' || value.medium === 'video' ? { medium: value.medium } : {}) };
   if (value.page === 'outputs') return {
     page: 'outputs',

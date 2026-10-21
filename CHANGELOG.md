@@ -1,3 +1,14 @@
+## 0.10.0 · 2026-10-21 · Creation collaboration and analysis / 创作协作与分析
+
+- Recover offline local OpenClaw, refresh model capability and clear stale send guards without extra buttons. / 本机OpenClaw离线自动恢复，恢复后刷新模型能力并清理旧报错，删除发送提示区多余按钮。
+- Open analysis material in an application dialog with a shared work selector and previous/next navigation. / 查看材料打开应用弹窗，逐篇作品使用共享列表与前后切换。
+- Share conversation-scoped image and publishing workspaces across panels and full pages; retain drafts/tasks and explicit return targets. / 生图与发布工作区按来源对话隔离，跨页保留草稿和任务，固定回填目标。
+- Return images, publish drafts and receipts without sending automatically; register assistant-prepared publish drafts idempotently and preserve preflight/confirmation. / 图片、草稿、回执可加入对话；助手可幂等准备发布草稿，沿用预检与确认。
+- Pick existing output files into chat; add compact SVG action icons and repair side-panel fallback/navigation. / 已生成文件可加入对话，工具栏统一图标，修复文件标签回退及跨页对话跳转。
+- Use AntV comparisons and SVG evidence coverage; show typed analysis material cards and keep raw JSON out of the composer. Preserve frozen data in agentContent. / 专业图表与材料证据卡；作品分析输入为自然语言，完整冻结材料通过增强上下文传递。
+- Scale sidebar icons with font size and ellipsize long labels with full hover names. / 侧栏图标随字号缩放，长文字自动省略，悬停显示全称。
+- Local/source delivery only; real inference/generation/publication, host 138 and installers remain separate gates. / 本机及隔离源码交付；未真实推理、生图、发布，未部署138或更新安装器。
+
 ## 0.9.2 · 2026-10-21 · Chat progress and latest message / 对话加载与返回底部
 
 - Restore the circular three-dot progress control during execution and pending reconnects; hover or focus reveals the jump-to-latest arrow. / 执行中及等待重连时保留圆形三点加载提示，悬停或聚焦可直接返回最新消息。

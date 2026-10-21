@@ -3,6 +3,7 @@ import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenRe
 import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel, ImagegenReference } from '../lib/api';
 import { restoreReference, validateReferenceFile, validateMaskFile } from '../lib/imageReferences';
 import { useImageReverse } from './useImageReverse';
+import { recordEvent } from '../lib/eventNotifications';
 
 export const IMAGE_SIZES: { id: string; label: string; ratio: string; use: string }[] = [
   { id: '1024x1024', label: '方图 1:1', ratio: '1 / 1', use: '头像 / 产品' },
@@ -19,6 +20,22 @@ export const IMAGE_SIZES: { id: string; label: string; ratio: string; use: strin
 const IMAGE_JOB_KEY = 'easel_imagegen_job';
 const IMAGE_DRAFT_KEY = 'easel_imagegen_draft';
 const IMAGE_REQUEST_KEY = 'easel_imagegen_pending_request';
+let submittingWorkspace: string | null = null;
+function claimImageWorkspace(owner: string): boolean {
+  if (submittingWorkspace && submittingWorkspace !== owner) return false;
+  try {
+    for (let index = 0; index < sessionStorage.length; index++) {
+      const key = sessionStorage.key(index);
+      if (key && key !== owner && (key === IMAGE_JOB_KEY || key.startsWith(IMAGE_JOB_KEY + ':'))) {
+        const job = JSON.parse(sessionStorage.getItem(key) || 'null');
+        if (job?.state === 'running') return false;
+      }
+    }
+  } catch { /* Server concurrency limits still apply if storage is unavailable. */ }
+  submittingWorkspace = owner;
+  return true;
+}
+function releaseImageWorkspace(owner: string) { if (submittingWorkspace === owner) submittingWorkspace = null; }
 
 /** Choose a supported ratio; 'auto' is not a promise to preserve source size. */
 export function closestImageSize(width: number, height: number): string {
@@ -36,38 +53,41 @@ function imageSize(value: unknown): string {
   return IMAGE_SIZES.find((item) => item.id === value)?.id || IMAGE_SIZES[0].id;
 }
 
-function restoreImageDraft(): { prompt: string; size: string; mode: 'generate'|'img2img'|'reverse'; reference:ImagegenReference|null; mask:ImagegenReference|null } {
+function restoreImageDraft(storageKey = IMAGE_DRAFT_KEY): { prompt: string; size: string; mode: 'generate'|'img2img'|'reverse'; reference:ImagegenReference|null; mask:ImagegenReference|null } {
   try {
-    const draft = JSON.parse(sessionStorage.getItem(IMAGE_DRAFT_KEY) || 'null');
+    const draft = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
     return { prompt: typeof draft?.prompt === 'string' ? draft.prompt : '', size: imageSize(draft?.size), mode: draft?.mode==='img2img'?'img2img':draft?.mode==='reverse'?'reverse':'generate', reference:restoreReference(draft?.reference), mask:restoreReference(draft?.mask) };
   } catch { return { prompt: '', size: IMAGE_SIZES[0].id, mode:'generate',reference:null,mask:null }; }
 }
 
-function restoreImageJob(): ImageStudioJob | null {
+function restoreImageJob(storageKey = IMAGE_JOB_KEY, draftKey = IMAGE_DRAFT_KEY): ImageStudioJob | null {
   try {
-    const job = JSON.parse(sessionStorage.getItem(IMAGE_JOB_KEY) || 'null');
+    const job = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
     return job && typeof job.jobId === 'string' && ['running', 'done', 'error'].includes(job.state)
       && typeof job.prompt === 'string' && Number.isFinite(job.started)
       && (job.url === null || typeof job.url === 'string') && (job.error === null || typeof job.error === 'string')
-      ? { ...job, size: imageSize(job.size ?? restoreImageDraft().size) } : null;
+      ? { ...job, size: imageSize(job.size ?? restoreImageDraft(draftKey).size) } : null;
   } catch { return null; }
 }
 
-export function useImageStudio(active: boolean) {
+export function useImageStudio(active: boolean, workspaceId?: string) {
+  const draftKey = workspaceId ? `${IMAGE_DRAFT_KEY}:${workspaceId}` : IMAGE_DRAFT_KEY;
+  const jobKey = workspaceId ? `${IMAGE_JOB_KEY}:${workspaceId}` : IMAGE_JOB_KEY;
+  const requestKey = workspaceId ? `${IMAGE_REQUEST_KEY}:${workspaceId}` : IMAGE_REQUEST_KEY;
   const pendingRequest = useRef<{ signature?: string; id?: string } | null>(null);
   const reverse = useImageReverse(active);
-  const [mode, setMode] = useState<'generate' | 'img2img' | 'reverse'>(()=>restoreImageDraft().mode);
-  const [reference, setReference] = useState<ImagegenReference|null>(()=>restoreImageDraft().reference);
-  const [mask, setMask] = useState<ImagegenReference|null>(()=>restoreImageDraft().mask);
+  const [mode, setMode] = useState<'generate' | 'img2img' | 'reverse'>(()=>restoreImageDraft(draftKey).mode);
+  const [reference, setReference] = useState<ImagegenReference|null>(()=>restoreImageDraft(draftKey).reference);
+  const [mask, setMask] = useState<ImagegenReference|null>(()=>restoreImageDraft(draftKey).mask);
   const [referenceBusy,setReferenceBusy] = useState(false);
   const referencePending = useRef(false);
   const mounted = useRef(false);
   const activePage = useRef(active);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // ── AI 生图工坊 ──
-  const [imgPrompt, setImgPrompt] = useState(() => restoreImageDraft().prompt);
-  const [imgSize, setImgSize] = useState(() => restoreImageDraft().size);
-  const [imgJob, setImgJob] = useState<ImageStudioJob | null>(restoreImageJob);
+  const [imgPrompt, setImgPrompt] = useState(() => restoreImageDraft(draftKey).prompt);
+  const [imgSize, setImgSize] = useState(() => restoreImageDraft(draftKey).size);
+  const [imgJob, setImgJob] = useState<ImageStudioJob | null>(() => restoreImageJob(jobKey,draftKey));
   const [imgSubmitting, setImgSubmitting] = useState(false);
   const imgSubmitPending = useRef(false);
   const [imgErr, setImgErr] = useState('');
@@ -99,15 +119,15 @@ export function useImageStudio(active: boolean) {
   }, [active, refreshGallery]);
   // 控制器驻留 App；草稿与任务保留到当前标签页，切页和刷新均可恢复。
   useEffect(() => {
-    try { sessionStorage.setItem(IMAGE_DRAFT_KEY, JSON.stringify({ prompt: imgPrompt, size: imgSize, mode, reference, mask })); }
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ prompt: imgPrompt, size: imgSize, mode, reference, mask })); }
     catch { /* 隐私模式下仍保留当前 App 内的草稿。 */ }
-  }, [imgPrompt, imgSize, mode, reference, mask]);
+  }, [draftKey, imgPrompt, imgSize, mode, reference, mask]);
   useEffect(() => {
     try {
-      if (imgJob) sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(imgJob));
-      else sessionStorage.removeItem(IMAGE_JOB_KEY);
+      if (imgJob) sessionStorage.setItem(jobKey, JSON.stringify(imgJob));
+      else sessionStorage.removeItem(jobKey);
     } catch { /* 隐私模式不可持久化时仍可在当前页面使用。 */ }
-  }, [imgJob]);
+  }, [jobKey, imgJob]);
 
   // 上一轮请求结束后再计时，避免慢接口导致重复轮询。
   useEffect(() => {
@@ -121,6 +141,10 @@ export function useImageStudio(active: boolean) {
         setImgErr('');
         if (job.state !== 'running') {
           setImgJob({ ...job, size: imageSize(job.size || imgJob.size) });
+          if (workspaceId?.startsWith('image:') && workspaceId !== 'image:standalone') {
+            const sessionId=workspaceId.slice('image:'.length);
+            recordEvent(job.state==='done'?'对话生图已完成':'对话生图失败',job.state==='done'?'success':'error',undefined,'creation-image:'+job.jobId+':'+job.state,{page:'chat',sessionId,tool:'image'});
+          }
           if (job.state === 'done') window.dispatchEvent(new Event('easel:outputs-updated'));
           if (job.state === 'done' && activePage.current) void refreshGallery();
           return;
@@ -138,7 +162,7 @@ export function useImageStudio(active: boolean) {
     };
     void poll();
     return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [imgJob, refreshGallery]);
+  }, [imgJob, refreshGallery, workspaceId]);
 
   // 生成等待计时：SkeletonImage 上显示已等待秒数（聚合站慢，明确告知比无限转圈安心）
   useEffect(() => {
@@ -154,6 +178,7 @@ export function useImageStudio(active: boolean) {
     if (!p || p.length > 2000 || loading || galleryError || !imgChannel?.configured || !imgChannel.model?.trim() || imgJob?.state === 'running' || imgSubmitPending.current || modelPending.current) return;
     if(referencePending.current)return;
     if(mode==='img2img'&&!reference){setImgErr('请先上传参考图。');return;}
+    if (!claimImageWorkspace(jobKey)) { setImgErr('另一个工作区已有生图任务，请等待完成后再生成。'); return; }
     imgSubmitPending.current = true;
     setImgSubmitting(true);
     setImgErr('');
@@ -161,23 +186,24 @@ export function useImageStudio(active: boolean) {
       const options = { model: imgChannel.model, ...(mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const}) };
       const signature = JSON.stringify([p, imgSize, options]);
       let previous = pendingRequest.current;
-      try { previous = previous || JSON.parse(sessionStorage.getItem(IMAGE_REQUEST_KEY) || 'null'); } catch { /* optional cache */ }
+      try { previous = previous || JSON.parse(sessionStorage.getItem(requestKey) || 'null'); } catch { /* optional cache */ }
       const requestId = previous?.signature === signature && typeof previous.id === 'string' ? previous.id : crypto.randomUUID();
       pendingRequest.current = { signature, id: requestId };
-      try { sessionStorage.setItem(IMAGE_REQUEST_KEY, JSON.stringify({ signature, id: requestId })); } catch { /* server still deduplicates this submission */ }
+      try { sessionStorage.setItem(requestKey, JSON.stringify({ signature, id: requestId })); } catch { /* server still deduplicates this submission */ }
       const { jobId } = await startImagegen(p, imgSize, 1, { ...options, requestId });
       const job: ImageStudioJob = { jobId, state: 'running', prompt: p, size: imgSize, url: null, error: null, started: Date.now() / 1000, ...options };
-      try { sessionStorage.setItem(IMAGE_JOB_KEY, JSON.stringify(job)); } catch { /* optional */ }
-      try { sessionStorage.removeItem(IMAGE_REQUEST_KEY); } catch { /* optional */ }
+      try { sessionStorage.setItem(jobKey, JSON.stringify(job)); } catch { /* optional */ }
+      try { sessionStorage.removeItem(requestKey); } catch { /* optional */ }
       pendingRequest.current = null;
       if (mounted.current) setImgJob(job);
     } catch (e) {
       if (mounted.current) setImgErr(e instanceof Error ? e.message : '发起失败');
     } finally {
+      releaseImageWorkspace(jobKey);
       imgSubmitPending.current = false;
       if (mounted.current) setImgSubmitting(false);
     }
-  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask, loading, galleryError]);
+  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask, loading, galleryError, jobKey, requestKey]);
 
   const saveModel = async (value: string): Promise<boolean> => {
     if (modelPending.current || imgSubmitPending.current || referencePending.current || imgJob?.state === 'running') return false;

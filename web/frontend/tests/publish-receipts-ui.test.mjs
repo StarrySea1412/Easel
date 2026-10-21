@@ -391,23 +391,23 @@ test('multiple previews switch by keyboard and preserve independent versions acr
   await act(async () => setWhoamiCache('xiaohongshu', { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟作者', avatar: '' }));
   await view.click(view.container.querySelector('.publish-platform-list button:nth-child(1)'));
   assert.equal(view.container.querySelectorAll('[role="tab"]').length, 2);
-  const xhs = view.container.querySelector('#publish-tab-xiaohongshu');
-  const zhihu = view.container.querySelector('#publish-tab-zhihu');
+  const xhs = view.container.querySelector('[id$="-publish-tab-xiaohongshu"]');
+  const zhihu = view.container.querySelector('[id$="-publish-tab-zhihu"]');
   assert.equal(xhs.getAttribute('aria-selected'), 'true');
   const visiblePanel = () => view.container.querySelector('[role="tabpanel"]:not([hidden])');
-  assert.equal(visiblePanel().id, 'publish-preview-xiaohongshu');
+  assert.ok(visiblePanel().id.endsWith('-publish-preview-xiaohongshu'));
   await view.click([...visiblePanel().querySelectorAll('button')].find(b => b.textContent === '编辑'));
   await view.type(visiblePanel().querySelector('textarea'), '小红书独立正文');
   await act(async () => xhs.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
   assert.equal(zhihu.getAttribute('aria-selected'), 'true');
   assert.equal(document.activeElement, zhihu);
   assert.equal(visiblePanel().querySelector('.pv-text').textContent, '本次内容正文。');
-  await view.type(view.container.querySelector('#publish-body'), '更新通用正文');
+  await view.type(view.container.querySelector('[id$="-publish-body"]'), '更新通用正文');
   await view.render('other'); await view.render('publish');
   assert.equal(view.container.querySelectorAll('[role="tabpanel"]:not([hidden])').length, 1);
-  assert.equal(view.container.querySelector('#publish-preview-xiaohongshu .pv-text').textContent, '小红书独立正文');
-  assert.equal(view.container.querySelector('#publish-preview-zhihu .pv-text').textContent, '更新通用正文');
-  await view.click(view.container.querySelector('#publish-tab-xiaohongshu'));
+  assert.equal(view.container.querySelector('[id$="-publish-preview-xiaohongshu"] .pv-text').textContent, '小红书独立正文');
+  assert.equal(view.container.querySelector('[id$="-publish-preview-zhihu"] .pv-text').textContent, '更新通用正文');
+  await view.click(view.container.querySelector('[id$="-publish-tab-xiaohongshu"]'));
   await view.click(view.button('使用通用正文'));
   assert.equal(visiblePanel().querySelector('.pv-text').textContent, '更新通用正文');
   assert.equal(view.posts().length, 0);
@@ -459,7 +459,7 @@ test('editor uses the durable outcome, preserves receipts when clearing its draf
   assert.match(view.container.querySelector('[role="dialog"]').textContent, /结果待核实/);
   await view.click(view.container.querySelector('[aria-label="关闭发布回执"]'));
   await view.click(view.button('清空内容'));
-  assert.equal(view.container.querySelector('#publish-title').value, '');
+  assert.equal(view.container.querySelector('[id$="-publish-title"]').value, '');
   assert.equal(view.model().receipts.length, 1);
   await view.click(view.button('查看全部发布回执'));
   await view.click(view.button('通知设置'));
@@ -506,7 +506,7 @@ for (const scenario of ['expired', 'unknown', 'error']) test(`publication checks
   await view.click(send);
   assert.equal(view.posts().length, 0);
   assert.equal(view.h.confirmations.length, 0);
-  assert.equal(view.container.querySelector('#publish-title').value, '本次要发布的标题');
+  assert.equal(view.container.querySelector('[id$="-publish-title"]').value, '本次要发布的标题');
   assert.match(view.container.textContent, scenario === 'expired' ? /未登录，请先连接账号/ : scenario === 'unknown' ? /模拟无法确认/ : /模拟检查超时/);
 });
 
@@ -541,7 +541,7 @@ test('all disconnected targets report preflight failures without sending content
   assert.ok(view.h.reports.every(r => !('title' in r) && !('media' in r) && !('message' in r)));
   assert.match(view.container.textContent, /尚未提交到平台/);
   assert.match(view.container.textContent, /错误编号：f{32}/);
-  assert.equal(view.container.querySelector('#publish-body').value, '本次内容正文。');
+  assert.equal(view.container.querySelector('[id$="-publish-body"]').value, '本次内容正文。');
 });
 
 test('a new failed receipt is reported once and initial failed history stays quiet', async t => {
@@ -620,6 +620,6 @@ test('publish targets follow shared login events and disable offline platforms w
   assert.equal(target('抖音').classList.contains('is-connected'), false);
   assert.match(target('抖音').getAttribute('aria-label'), /未登录/);
   assert.equal(target('抖音').querySelector('.publish-spinner'), null);
-  assert.equal(view.container.querySelector('#publish-body').value, '本次内容正文。');
+  assert.equal(view.container.querySelector('[id$="-publish-body"]').value, '本次内容正文。');
   assert.equal(view.posts().length, 0);
 });

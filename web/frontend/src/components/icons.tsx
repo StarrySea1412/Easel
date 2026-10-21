@@ -110,6 +110,12 @@ export const IconPlus = ({ size, className, strokeWidth }: P) => (
 export const IconChevron = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}><path d="m9 18 6-6-6-6" /></svg>
 );
+export const IconExpand = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className} aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6" /></svg>
+);
+export const IconImport = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className} aria-hidden="true"><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M3 12h12m-4-4 4 4-4 4" /></svg>
+);
 
 // ---- 分类图标（SKILL 卡 / Outputs 文件）----
 export const IconVideo = ({ size, className, strokeWidth }: P) => (

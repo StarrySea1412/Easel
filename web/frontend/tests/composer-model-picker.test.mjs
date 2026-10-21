@@ -53,7 +53,8 @@ test('configured complete models are keyboard selectable, stored explicitly and 
 
 test('removed saved model preserves draft until user chooses an available model', async t => {
   const view = await fixture(t, 'old/missing'); await view.render(); await view.type('不应被自动换模型'); await view.send();
-  assert.deepEqual(view.sent, []); assert.match(view.container.querySelector('[role=alert]').textContent, /草稿已保留/); assert.equal(view.values.get(KEY), 'old/missing');
+  assert.deepEqual(view.sent, []); assert.equal(view.container.querySelector('textarea').value, '不应被自动换模型'); assert.equal(view.values.get(KEY), 'old/missing');
+  assert.match(view.container.querySelector('[role=alert]').textContent,/old\/missing.*已移除或尚未配置/);
   await view.key('Home'); await view.key('Enter'); await view.send();
   assert.equal(view.sent[0][5], REF); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), REF);
 });
@@ -168,6 +169,10 @@ test('a passed channel test stays green and the menu names the real blocker inst
   assert.doesNotMatch(popup.textContent, /请在模型设置中检查连接/);
   assert.doesNotMatch(popup.textContent, /自动沿用|仅用于本轮|推理未测/);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance never probes a model');
+  await view.key('Escape');await view.type('保留这份材料');await view.send();
+  assert.deepEqual(view.sent,[]);assert.match(view.container.querySelector('[role=alert]').textContent,/OpenClaw 未连接/);
+  assert.equal(view.container.querySelector('textarea').value,'保留这份材料');
+  assert.equal(view.container.querySelector('[role=alert] button'),null);
 });
 
 test('unavailable runtime permits saving a channel choice but never silently sends with another model', async t => {
@@ -179,7 +184,7 @@ test('unavailable runtime permits saving a channel choice but never silently sen
   assert.equal(view.values.get(KEY),'other/model');
   await view.key('Escape'); await view.type('保留指定渠道'); await view.send();
   assert.deepEqual(view.sent,[]);
-  assert.match(view.container.querySelector('[role=alert]').textContent,/草稿已保留/);
+  assert.equal(view.container.querySelector('textarea').value,'保留指定渠道');
   assert.ok(view.calls.every(([,init])=>!init?.body));
 });
 
@@ -194,4 +199,33 @@ test('running composer keeps stop beside queue-send when a draft is present', as
   assert.equal(actions().length, 1); assert.equal(actions()[0].getAttribute('aria-label'), '停止生成');
   await view.type('停止中保留草稿'); await view.render({ stopping: true });
   assert.equal(actions().length, 2); assert.ok(actions().every(button => button.disabled));
+});
+
+test('automatic status refresh shows a spinner and clears a stale guard without sending the draft or adding buttons', async t => {
+  const view=await fixture(t,REF);view.h.capability=false;
+  view.h.reason='无法只读核验当前网关的指定模型能力，任务不会改用默认模型。';
+  await view.render();await view.type('恢复后由我发送');await view.send();
+  const alert=view.container.querySelector('[role=alert]');
+  assert.match(alert.textContent,/OpenClaw 连接检查未通过/);
+  assert.doesNotMatch(alert.textContent,/只读核验|草稿已保留|不会改用/);
+  let resolveProbe;const previous=globalThis.fetch;
+  t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('/agent-office/models')?new Promise(resolve=>{resolveProbe=resolve;}):previous(url,init));
+  assert.equal(alert.querySelector('button'),null);
+  await act(async()=>window.dispatchEvent(new window.Event('easel:channel-names-changed')));
+  assert.ok(view.container.querySelector('.composer-connection-spinner'));
+  assert.equal(view.container.querySelector('.composer-connection-notice').getAttribute('aria-busy'),'true');
+  await act(async()=>resolveProbe({ok:true,json:async()=>({available:true,scope:'next_turn',defaultModelRef:REF,options:[option]})}));
+  assert.equal(view.container.querySelector('.composer-connection-notice'),null);
+  assert.equal(view.container.querySelector('textarea').value,'恢复后由我发送');assert.deepEqual(view.sent,[]);
+});
+
+test('persisted legacy model error disappears on healthy mount while unrelated upload errors remain', async t => {
+  const {setChatDraftError}=await loadTsModule('../src/lib/chatDrafts.ts',import.meta.url);
+  const view=await fixture(t,REF);await view.render();await view.type('已有草稿');
+  // Session ids belong to this fixture's monotonic sequence.
+  const id=`model-picker-${sequence}`;
+  await act(async()=>setChatDraftError(id,'无法只读核验当前网关的指定模型能力，任务不会改用默认模型。 草稿已保留，消息尚未发送。'));
+  assert.equal(view.container.querySelector('[role=alert]'),null);assert.equal(view.container.querySelector('textarea').value,'已有草稿');
+  await act(async()=>setChatDraftError(id,'图片上传失败'));
+  assert.equal(view.container.querySelector('[role=alert]').textContent,'图片上传失败');
 });

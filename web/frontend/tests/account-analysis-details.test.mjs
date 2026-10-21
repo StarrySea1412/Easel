@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import { act, createElement } from 'react';
+import { loadTsModule } from './load-ts.mjs';
+globalThis.window=new JSDOM('<html><body></body></html>',{url:'https://easel.test/'}).window;
+globalThis.document=window.document;
+globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+Object.defineProperty(globalThis,'localStorage',{value:window.localStorage,configurable:true});
+Object.defineProperty(globalThis,'sessionStorage',{value:window.sessionStorage,configurable:true});
+const {createRoot}=await import('react-dom/client');
+const {default:Details}=await loadTsModule('../src/components/AccountAnalyticsDetails.tsx',import.meta.url);
+const cache=await loadTsModule('../src/lib/analyticsCache.ts',import.meta.url);
+test('cached account works render as safe cards with real metrics instead of a Markdown dump',async t=>{
+  localStorage.setItem('easel_whoami',JSON.stringify({douyin:{identityKey:'fixture',accountId:'owner'}}));
+  cache.restoreAnalyticsSnapshot('douyin',{platform:'douyin',loggedIn:true,nickname:'创作者',fetched_at:123,notes:[{title:'真实作品标题',url:'https://www.douyin.com/video/123',stat:'真实摘要\n正文材料'},{title:'缺少指标作品',url:'javascript:alert(1)'}],metrics_source:{schema:'douyin-account-overview-v2',section:'账号总览',period:'last_7_days',url:'https://creator.douyin.com/creator-micro/home',from:'2026-10-14',to:'2026-10-20'},metrics:[{label:'播放',value:'123',vs:'较前期 +5%'},{label:'未知指标',value:null}]},cache.analyticsScope('douyin'));
+  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+  t.after(async()=>{await act(async()=>root.unmount());container.remove();});
+  await act(async()=>root.render(createElement(Details,{platform:'douyin'})));
+  assert.equal(container.querySelectorAll('.account-work-card').length,2);
+  assert.equal(container.querySelector('a').href,'https://www.douyin.com/video/123');
+  assert.equal(container.querySelectorAll('a').length,1);assert.equal(container.querySelector('pre'),null);
+  assert.equal(container.querySelector('.account-work-excerpt').open,false);
+  assert.match(container.querySelector('.account-work-excerpt').textContent,/真实摘要/);
+  assert.match(container.querySelector('table').textContent,/123/);assert.match(container.querySelector('table').textContent,/较前期/);
+  assert.equal(container.querySelectorAll('.message-content').length,0);
+});

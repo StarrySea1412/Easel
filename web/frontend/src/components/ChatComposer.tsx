@@ -1,3 +1,4 @@
+import { ThinkingLevelPicker } from './ThinkingLevelPicker';
 import ChatCompactionIndicator from './ChatCompactionIndicator';
 import ChatContextUsage from './ChatContextUsage';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -9,14 +10,18 @@ import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
 import ComposerModelPicker from './ComposerModelPicker';
 import ComposerSkillSuggestions from './ComposerSkillSuggestions';
-import { createPortal } from 'react-dom';
 import { useComposerModels } from '../hooks/useComposerModels';
+import { composerModelIssue, isLegacyComposerModelIssue } from '../lib/composerModelIssue';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
-import { IconArrowUp, IconStop, IconChevron, IconOpenClaw, IconTerminal, IconTarget } from './icons';
+import { IconArrowUp, IconStop, IconOpenClaw, IconTerminal, IconTarget, IconLoader } from './icons';
 import ComposerAttachments from './ComposerAttachments';
 import ComposerAddMenu, { type ComposerUploadKind } from './ComposerAddMenu';
-import { loadThinkingLevel, saveThinkingLevel, resolveThinkingPreference, THINKING_LEVELS, THINKING_LABELS } from '../lib/thinkingLevel';
+import GeneratedFilePicker from './GeneratedFilePicker';
+import AnalysisComposerMaterial from './AnalysisComposerMaterial';
+import { analysisDraftText } from '../lib/analysisComposer';
+import type { AnalysisBinding } from '../lib/analysisBinding';
+import { loadThinkingLevel, saveThinkingLevel, THINKING_LABELS } from '../lib/thinkingLevel';
 import type { ThinkingPreference } from '../lib/thinkingLevel';
 import '../styles/chat-composer.css';
 import '../styles/thinking-level-picker.css';
@@ -36,6 +41,8 @@ import {useChatGoalComposer,type GoalEditor} from '../hooks/useChatGoalComposer'
 import '../styles/chat-goal.css';
 
 interface ChatComposerProps {
+  analysisContext?: AnalysisBinding;
+  onOpenAnalysisMaterial?: () => void;
   goalBusy?:boolean;
   goalActive?:boolean;
   goalStatus?:string;
@@ -68,7 +75,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMaterial, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -78,10 +85,10 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   const editingItem = queue.items.find(item => item.id === queueEdit?.id);
   const editingQueue = Boolean(editingItem);
   const { attachments, uploading, error: uploadError } = draft;
-  const input = editingQueue ? queueEdit!.text : draft.text;
+  const input = editingQueue ? queueEdit!.text : analysisDraftText(draft.text, analysisContext);
   const setInput = (value: string | ((current: string) => string)) => {
     if (editingQueue) setQueueEdit(current => current ? { ...current, text: typeof value === 'function' ? value(current.text) : value } : null);
-    else setChatDraftText(sessionId, value);
+    else setChatDraftText(sessionId, typeof value === 'function' ? value(input) : value);
   };
   const editQueued = (id: string, text: string) => {
     if(goalEditor){if(goalState.busy)return;onGoalClose?.();}
@@ -97,6 +104,14 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId, engine);
+  const [modelGuardShown, setModelGuardShown] = useState(false);
+  const legacyModelError = isLegacyComposerModelIssue(uploadError);
+  useEffect(() => {
+    if (legacyModelError) {
+      setChatDraftError(sessionId, '');
+      setModelGuardShown(!models.ready);
+    } else if (models.ready) setModelGuardShown(false);
+  }, [legacyModelError, models.ready, sessionId]);
   const goalBlocked=Boolean(isStreaming||stopping||goalBusy);
   const goalState=useChatGoalComposer({editor:goalEditor,sessionId,engine,
     modelRef:models.modelRef||models.capability?.currentModelRef||models.capability?.defaultModelRef||'',
@@ -109,6 +124,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(()=>{if(goalEditor)textareaRef.current?.focus();},[goalEditor]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [outputsOpen, setOutputsOpen] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement>(null), folderInputRef = useRef<HTMLInputElement>(null);
   const [skillPickerRequest, setSkillPickerRequest] = useState(0);
   const composingRef = useRef(false);
@@ -270,7 +286,8 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
     if(onGoal){const command=parseComposerCommand(input);if(command){dispatchCommand(command);return;}}
     if(goalBusy){setChatDraftError(sessionId,'目标轮次正在运行，本条消息尚未发送；请稍候或先暂停目标。');return;}
     const submitted = getChatDraft(sessionId);
-    const trimmed = submitted.quotes?.length ? `${submitted.quotes.map((text, index) => `引用 ${index + 1}：\n${appendQuotedText('', text).trim()}`).join('\n\n')}\n\n${submitted.text.trim()}`.trim() : submitted.text.trim();
+    const requestText = analysisDraftText(submitted.text, analysisContext).trim();
+    const trimmed = submitted.quotes?.length ? `${submitted.quotes.map((text, index) => `引用 ${index + 1}：\n${appendQuotedText('', text).trim()}`).join('\n\n')}\n\n${requestText}`.trim() : requestText;
     if ((!trimmed && submitted.attachments.length === 0) || stopping || submitted.uploading
       || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
@@ -278,7 +295,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
-      if (!model) { setChatDraftError(sessionId, '所选模型暂不可用，草稿已保留。请检查模型连接后重试。'); return; }
+      if (!model) { setModelGuardShown(true); return; }
       const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
         : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
       if (accepted === true) clearChatDraft(sessionId, submitted);
@@ -331,12 +348,13 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       <ChatCompactionIndicator event={compaction} />
       {commandOpen&&<ComposerGoalMenu id={`${inputId}-commands`} anchor={textareaRef} items={commandItems} selected={Math.min(commandIndex,commandItems.length-1)} onSelect={setCommandIndex} onChoose={chooseCommandItem}/>}
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
+      {!editingQueue && !goalEditor && analysisContext && <AnalysisComposerMaterial context={analysisContext} onOpen={onOpenAnalysisMaterial}/>}
       {!editingQueue && engine !== 'codex' && <ComposerSkillChips skills={skills} />}
       <textarea
         ref={textareaRef}
         id={inputId}
         className="chat-input"
-        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '描述你想完成的目标；完成以交付证据和你的确认为准' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
+        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '描述你想完成的目标；完成以交付证据和你的确认为准' : analysisContext ? '想重点分析什么？补充你的要求…' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
         value={displayedInput}
         disabled={Boolean(goalEditor&&goalState.fieldsLocked)}
         maxLength={goalEditor?6000:undefined}
@@ -357,7 +375,12 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
       {goalEditor&&Boolean(attachments.length||draft.quotes?.length||skills.selectedSkills.length)&&<p className="composer-skills-note">附件、引用和技能保留在普通消息草稿中，退出目标模式后可继续发送。</p>}
       {!editingQueue && engine !== 'codex' && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
-      {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
+      {(modelGuardShown || legacyModelError) && !models.ready && <div className="composer-connection-notice" role={models.loading ? 'status' : 'alert'} aria-busy={models.loading}>
+        <span className="composer-connection-icon" aria-hidden="true">{models.loading ? <IconLoader className="composer-connection-spinner" size={17}/> : <IconOpenClaw size={17}/>}</span>
+        <div className="composer-connection-content"><p>{models.loading ? '正在检查连接…' : composerModelIssue(models).replace(' 草稿已保留，消息尚未发送。', '')}</p>
+        </div>
+      </div>}
+      {uploadError && !legacyModelError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
       {draft.missingAttachments.length > 0 && <div className="composer-skills-note" role="status">
         <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
         <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
@@ -376,7 +399,8 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
           <Select className="composer-engine composer-engine-icon" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping || Boolean(goalEditor)}
             title={`对话引擎：${engine === 'codex' ? 'Codex' : 'OpenClaw'}`}
             options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
-          <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
           {onGoal && (goalEditor || Boolean(goalStatus)) && <button type="button" className={`composer-goal-btn${goalEditor?' is-active':''}`} aria-pressed={Boolean(goalEditor)} aria-label={goalEditor?'退出目标设置':'设置或查看目标'} title={goalEditor?'退出目标模式（Esc）':'设置或查看当前对话目标'} disabled={Boolean(goalEditor&&goalState.busy)||editingQueue} onClick={()=>goalEditor?closeGoal():openGoal()}><IconTarget size={16}/><span>目标</span>{goalEditor&&<span aria-hidden="true" className="composer-goal-exit">×</span>}</button>}
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
@@ -407,113 +431,4 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
 
 
 
-export function ThinkingLevelPicker({ value, onChange, disabled, supportedLevels }: { value: ThinkingPreference; onChange: (value: ThinkingPreference) => void; disabled: boolean; supportedLevels?: string[] }) {
-  const [open, setOpen] = useState(false);
-  const menuOpen = open && !disabled;
-  const strengthLevels = THINKING_LEVELS.filter(level => level !== 'adaptive' && supportedLevels?.includes(level));
-  const resolved = resolveThinkingPreference(value, supportedLevels);
-  const displayLevel = resolved ? THINKING_LABELS[resolved] : '自动';
-  const index = Math.max(0, strengthLevels.indexOf(resolved || 'medium'));
-  const minIndex = 0, maxIndex = Math.max(0, strengthLevels.length - 1);
-  const sliderIndex = Math.min(maxIndex, index);
-  const progress = maxIndex ? sliderIndex / maxIndex * 100 : 0;
-  const rootRef = useRef<HTMLDivElement>(null);
-  const sliderRef = useRef<HTMLInputElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 12, top: 12 });
-  const pickerId = useId();
-  const openMenu = () => {
-    if (disabled) return;
-    setOpen(true);
-  };
-  useLayoutEffect(() => {
-    if (!menuOpen) return;
-    const place = () => {
-      const root = rootRef.current?.getBoundingClientRect(), menu = menuRef.current?.getBoundingClientRect();
-      if (!root || !menu) return;
-      const above = root.top - menu.height - 8;
-      const top = Math.max(12, above >= 12 ? above : root.bottom + menu.height + 8 <= window.innerHeight - 12 ? root.bottom + 8 : window.innerHeight - menu.height - 12);
-      setMenuPosition({ left: Math.max(12, Math.min(root.right - menu.width, window.innerWidth - menu.width - 12)), top });
-    };
-    place(); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
-    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
-  }, [menuOpen, value, supportedLevels]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false); };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [menuOpen]);
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-  useEffect(() => {
-    if (menuOpen) {
-      if (sliderRef.current && !sliderRef.current.disabled) sliderRef.current.focus();
-      else menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-    }
-  }, [menuOpen]);
-  const choose = (nextIndex: number) => {
-    if (disabled) return;
-    const level = strengthLevels[Math.min(strengthLevels.length - 1, Math.max(0, Math.round(nextIndex)))];
-    if (level && supportedLevels?.length && !supportedLevels.includes(level)) {
-      return;
-    }
-    if (level && level !== value) onChange(level);
-  };
-  const closeAndFocus = () => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  };
-  const handleSliderKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (disabled) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      event.preventDefault(); choose(Math.min(maxIndex, index + 1));
-    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      event.preventDefault(); choose(Math.max(minIndex, index - 1));
-    } else if (event.key === 'Home') {
-      event.preventDefault(); choose(minIndex);
-    } else if (event.key === 'End') {
-      event.preventDefault(); choose(maxIndex);
-    } else if (event.key === 'Enter') {
-      event.preventDefault(); closeAndFocus();
-    }
-  };
-  return <div className={`thinking-level-picker${resolved === 'ultra' ? ' is-ultra' : ''}${resolved === 'adaptive' ? ' is-adaptive' : ''}`} ref={rootRef} style={{ '--thinking-progress': `${progress}%`, '--thinking-available': '100%' } as React.CSSProperties}>
-    <button ref={triggerRef} type="button" className="thinking-level-trigger" disabled={disabled}
-      aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls={menuOpen ? `${pickerId}-menu` : undefined} aria-label={`思考强度：${displayLevel}`} title={`思考强度：${displayLevel}${value === 'auto' ? '（自动选择最高支持档位）' : ''}`}
-      onClick={() => open ? setOpen(false) : openMenu()}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openMenu(); }
-        else if (event.key === 'ArrowUp') { event.preventDefault(); openMenu(); }
-        else if (event.key === 'Escape') setOpen(false);
-      }}>
-      <strong>{displayLevel}</strong><IconChevron size={13} />
-    </button>
-    {menuOpen && createPortal(<div ref={menuRef} id={`${pickerId}-menu`} className={`thinking-level-menu${resolved === 'ultra' ? ' is-ultra' : ''}${resolved === 'adaptive' ? ' is-adaptive' : ''}`} role="dialog" aria-label="思考强度"
-      style={{ ...menuPosition, '--thinking-progress': `${progress}%`, '--thinking-available': '100%' } as React.CSSProperties}
-      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAndFocus(); } }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-      {resolved && <div className="thinking-level-heading"><strong>{displayLevel}</strong>
-        <button type="button" className="thinking-level-reset" aria-label="恢复默认思考强度" title="恢复自适应最高" disabled={disabled || value === 'auto'}
-          onClick={() => { onChange('auto'); sliderRef.current?.focus(); }}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M3 7a5 5 0 1 1 .9 4M3 2v5h5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-      </div>}
-      <div className="thinking-level-modes">
-        <button type="button" className="thinking-level-auto" aria-pressed={value === 'auto'} disabled={disabled} onClick={() => onChange('auto')}>自适应最高</button>
-        {supportedLevels?.includes('adaptive') && <button type="button" className="thinking-level-adaptive" aria-pressed={value === 'adaptive'} title="由模型自动决定强度" disabled={disabled} onClick={() => onChange('adaptive')}>模型自适应</button>}
-      </div>
-      {strengthLevels.length > 1 && <div className="thinking-level-slider-wrap">
-        {resolved === 'ultra' && <div className="thinking-level-particles" aria-hidden="true">{Array.from({ length: 9 }, (_, particle) => <i key={particle} />)}</div>}
-        <input ref={sliderRef} className="thinking-level-slider" type="range" min={0} max={maxIndex} step={1} value={sliderIndex}
-          aria-label="思考强度" aria-valuetext={displayLevel} aria-describedby={`${pickerId}-hint`} disabled={disabled}
-          onChange={event => choose(Number(event.target.value))} onKeyDown={handleSliderKeyDown} />
-        <div className="thinking-level-ticks">{strengthLevels.map((level, tick) => <button type="button" key={level} data-thinking-level={level} disabled={disabled} aria-label={`选择${THINKING_LABELS[level]}思考强度`} aria-pressed={level===resolved} title={THINKING_LABELS[level]} className={`${level === resolved ? 'is-current' : tick < sliderIndex ? 'is-filled' : ''}`} onClick={()=>choose(tick)}><span/></button>)}</div>
-      </div>}
-      {strengthLevels.length > 0 ? <p className="thinking-level-supported">当前可选：{strengthLevels.map(level => THINKING_LABELS[level]).join(' · ')}</p> : <p className="thinking-level-supported">{supportedLevels?.includes('adaptive') ? '由模型自动决定思考强度。' : '尚未确认模型档位，沿用模型默认。'}</p>}
-      <span id={`${pickerId}-hint`} className="thinking-level-note">支持程度取决于模型，调整立即保存，对下一轮生效。</span>
-    </div>, document.body)}
-  </div>;
-}
+export { ThinkingLevelPicker } from './ThinkingLevelPicker';

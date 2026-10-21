@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification, reportPublishFailure } from '../lib/api';
 import type { PublishReceipt, PublishRequest } from '../lib/api';
+import { bindCreationReceipt } from '../lib/creationWorkspace';
 import { isFinalPublishReceipt, isPublishReceipt, mergePublishReceipts, publishPlatformLabel } from '../lib/publishReceipts';
 import { markWhoamiUnverified } from '../lib/whoami';
 
@@ -18,6 +19,7 @@ export function usePublishReceipts() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [focusedReceiptId, setFocusedReceiptId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submittingPlatforms, setSubmittingPlatforms] = useState<string[]>([]);
   const [submissionIssues, setSubmissionIssues] = useState<PublishSubmissionIssue[]>([]);
@@ -154,7 +156,8 @@ export function usePublishReceipts() {
           continue;
         }
         try {
-          const result = await publishNow(request.platform, request.payload);
+          const result = await publishNow(request.platform, {...request.payload, ...(request.sourceSessionId ? {sourceSessionId:request.sourceSessionId} : {})});
+          if (typeof result.receiptId === 'string') bindCreationReceipt(result.receiptId, request.sourceSessionId || null);
           if (!mounted.current) break;
           if (isPublishReceipt(result)) accept([result]);
           else if (typeof result.receiptId === 'string' && /^[0-9a-f]{32}$/.test(result.receiptId)) {
@@ -208,7 +211,10 @@ export function usePublishReceipts() {
     }
   }, [accept]);
 
-  const open = useCallback(() => setIsOpen(true), []);
+  const open = useCallback((receiptId?: unknown) => {
+    setFocusedReceiptId(typeof receiptId === 'string' && /^[a-f0-9]{32}$/.test(receiptId) ? receiptId : '');
+    setIsOpen(true);
+  }, []);
   const close = useCallback(() => setIsOpen(false), []);
   const dismissNotices = useCallback(() => setNoticeIds([]), []);
   const dismissIssues = useCallback(() => setSubmissionIssues([]), []);
@@ -221,7 +227,7 @@ export function usePublishReceipts() {
   const checking = receipts.filter(item => item.verification?.state === 'checking');
 
   return {
-    receipts, notices, active, verification, checking, loaded, refreshing, error, isOpen,
+    receipts, notices, active, verification, checking, loaded, refreshing, error, isOpen, focusedReceiptId,
     submitting, submittingPlatforms, submissionIssues, verificationBusyIds, refresh, submit, submitSms, verify,
     open, close, dismissNotices, dismissIssues,
     submittingLabel: submittingPlatforms.map(publishPlatformLabel).join('、'),

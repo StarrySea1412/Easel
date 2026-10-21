@@ -65,5 +65,14 @@ def test_closed_gateway_is_reported_as_gateway_not_channel(web, monkeypatch):
                         lambda *_: (_ for _ in ()).throw(ConnectionRefusedError(10061, 'refused')))
     result = controls.turn_model_capability(app, 'chat-1')
     assert not result['available'] and result['scope'] == 'unavailable'
-    assert '网关' in result['reason'] and '自动沿用' in result['reason']
+    assert '网关' in result['reason'] and '自动恢复' in result['reason']
     assert '未连' in result['reason'] and seen.probes == []
+
+
+def test_offline_gateway_stops_capability_probe_with_plain_recovery_message(web, monkeypatch):
+    app, seen = web
+    monkeypatch.setattr(app, 'check_gateway', lambda: False, raising=False)
+    result = controls.turn_model_capability(app, 'chat-1')
+    assert result['available'] is False
+    assert result['reason'] == 'OpenClaw 未连接，正在自动恢复。连接恢复后请重试。'
+    assert seen.probes == []

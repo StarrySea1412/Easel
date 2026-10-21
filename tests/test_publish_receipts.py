@@ -162,7 +162,7 @@ def api(tmp_path):
         '_read_schedule', '_write_schedule',
         '_awaiting_publish_verification', '_acquire_publish_verification', '_run_publish_verification', '_account_browser_busy',
         '_publish_verification_service', 'api_verify_publish_receipt', 'api_set_publish_verification',
-        '_complete_publish_receipt',
+        '_complete_publish_receipt', '_require_automated_publishing',
     }
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     nodes = [node for node in source.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -182,7 +182,8 @@ def api(tmp_path):
             workers.append(self)
     namespace = {
         'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel,
-        'Path': Path, 'json': json, 'os': os, 'sys': sys, 'time': time, 'uuid': uuid,
+        'Path': Path, 'json': json, 'os': os, 'sys': sys, 'time': time, 'uuid': uuid, 're': __import__('re'),
+        'publishing_mode': lambda settings: 'automated', 'read_settings': lambda path: {}, 'ENV_FILE': tmp_path / '.env',
         'asyncio': asyncio, 'local_records': local_records, 'publish_receipts': receipts,
         'publish_followup': publish_followup, '_PUBLISH_VERIFIER': None, 'LOGIN_PROCESSES': {},
         '_ACCOUNT_CLEARING': set(), '_WHOAMI_LOCK': threading.Lock(), '_WHOAMI_PROCESSES': {},
@@ -195,6 +196,7 @@ def api(tmp_path):
         'WECHAT_SKILL_SCRIPTS': ROOT / 'skills/openclaw/skill-wechat-publisher/scripts',
         '_PUBLISH_LOCK': threading.RLock(), '_PUBLISH_ACTIVE': {}, '_PUBLISH_VOLATILE': {},
         '_notify_email_completion': lambda **kwargs: {'state': 'unconfigured', 'message': 'not configured'},
+        '_skill_md_path': lambda skill: ROOT / 'skills/builtin' / skill / 'SKILL.md',
         '_publish_env': lambda: {}, '_proxy_env': lambda: {},
         '_safe_output_path': lambda rel: tmp_path / 'outputs' / rel,
         '_mp_login_status': lambda: {'state': 'success'},

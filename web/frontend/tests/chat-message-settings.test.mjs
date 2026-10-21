@@ -40,3 +40,13 @@ test('live goals cannot be overwritten and Escape cancels without side effects',
   await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   assert.equal(v.dialog(), null); assert.deepEqual(v.calls, []);
 });
+
+for (const [kind,label] of [['image','送到生图工坊'],['publish','送到发布中心']]) {
+  test('message selection opens '+kind+' with exact material and no send',async t=>{
+    const transfers=[];
+    const v=await fixture(t,{creation:(...args)=>transfers.push(args)});
+    await v.click(label);
+    assert.deepEqual(transfers,[['选中的完整消息',kind]]);
+    assert.deepEqual(v.calls,[]);assert.equal(v.dialog(),null);
+  });
+}
