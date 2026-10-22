@@ -110,13 +110,14 @@ class Session:
     events: deque = field(default_factory=lambda: deque(maxlen=160))
     control_origins: set = field(default_factory=set)
     touched: float = field(default_factory=time.monotonic)
+    downloads: list = field(default_factory=list)
 
 
 class BrowserService:
     MAX_SESSIONS = 8
     MAX_TABS = 6
-    ACTIONS = {'create', 'navigate', 'back', 'forward', 'reload', 'observe', 'click', 'fill', 'press', 'scroll', 'close', 'resize'}
-    MUTATING = {'click', 'fill', 'press'}
+    ACTIONS = {'create', 'navigate', 'back', 'forward', 'reload', 'observe', 'click', 'fill', 'press', 'scroll', 'close', 'resize', 'download'}
+    MUTATING = {'click', 'fill', 'press', 'download'}
 
     def __init__(self, outputs: Path, *, allowed_origins=None, launch=None, idle_seconds=1800):
         self.outputs = Path(outputs)
@@ -130,6 +131,7 @@ class BrowserService:
         self.thread = None
         self.browser = None
         self.playwright = None
+        self.downloads = None
         self._start_lock = threading.Lock()
         self._browser_lock = asyncio.Lock()
         self._stopped = False
@@ -190,6 +192,11 @@ class BrowserService:
         if self.browser and self.browser.is_connected():
             return
         if self.browser:
+            if self.downloads:
+                for session in self.sessions.values():
+                    await self.downloads.close_session(session)
+                await self.downloads.close()
+                self.downloads = None
             for session in self.sessions.values():
                 session.context = None
                 for tab in session.tabs.values():
@@ -250,7 +257,8 @@ class BrowserService:
     def _persist(self, session):
         path = self._folder(session.id) / 'tabs.json'
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {'tabs': [self._tab_info(tab) for tab in session.tabs.values()], 'events': list(session.events)}
+        data = {'tabs': [self._tab_info(tab) for tab in session.tabs.values()], 'events': list(session.events),
+                'downloads': session.downloads}
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
         tmp.replace(path)
@@ -267,6 +275,8 @@ class BrowserService:
             for old in list(self.sessions.values()):
                 if time.monotonic() - old.touched > self.idle_seconds and not any(job['state'] in ('queued', 'running') for job in old.jobs.values()):
                     if old.context:
+                        if self.downloads:
+                            await self.downloads.close_session(old)
                         await old.context.close()
                     del self.sessions[old.id]
             if len(self.sessions) >= self.MAX_SESSIONS:
@@ -274,6 +284,10 @@ class BrowserService:
             session = self.sessions[sid] = Session(sid)
             try:
                 saved = json.loads((self._folder(sid) / 'tabs.json').read_text(encoding='utf-8'))
+                session.downloads = saved.get('downloads', [])[:40]
+                for download in session.downloads:
+                    if download.get('state') not in {'completed', 'failed'}:
+                        download.update(state='failed', error='后端曾中断，下载未完成；不会自动重试。')
                 session.events.extend(saved.get('events', [])[-100:])
                 pending = {e.get('requestId'): e for e in session.events if e.get('requestId')}
                 for request_id, event in pending.items():
@@ -309,7 +323,8 @@ class BrowserService:
                 'snapshots': {tab.id: {**tab.snapshot, 'stale': self._tab_info(tab)['stale']} for tab in session.tabs.values() if tab.snapshot and tab.snapshot.get('id')},
                 'jobs': [self._job_info(job) for job in list(session.jobs.values())[-16:]],
                 'events': list(session.events)[-80:], 'controlOrigins': sorted(session.control_origins),
-                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs', 'live-input', 'user-takeover']}
+                'downloads': session.downloads,
+                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs', 'live-input', 'user-takeover', 'downloads']}
 
     async def _control(self, sid, url, enabled):
         session = await self._session(sid)
@@ -343,7 +358,7 @@ class BrowserService:
         await self._ensure_browser()
         if not session.context:
             session.context = await self.browser.new_context(viewport={'width': 1280, 'height': 800},
-                accept_downloads=False, service_workers='block', permissions=[])
+                accept_downloads=True, service_workers='block', permissions=[])
 
             # Popup pages do not silently acquire a UI identity or agent control.
             session.context.on('page', lambda page: page.on('popup', lambda popup: asyncio.create_task(popup.close())))
@@ -380,7 +395,10 @@ class BrowserService:
         page.on('response', lambda response: tab.logs.append({'at': now(), 'kind': 'network', 'status': response.status,
                     'url': public_text(response.url, limit=500)}))
         page.on('dialog', lambda dialog: asyncio.create_task(dialog.dismiss()))
-        page.on('download', lambda download: asyncio.create_task(download.cancel()))
+        if not self.downloads:
+            from .browser_downloads import BrowserDownloads
+            self.downloads = BrowserDownloads(self)
+        await self.downloads.bind(session, tab)
         def navigated(frame):
             if frame == page.main_frame:
                 tab.dirty = True
@@ -392,12 +410,15 @@ class BrowserService:
         """Fence new agent actions before draining the current page operation."""
         if not tab.user_control:
             tab.user_control = True
-            tab.dirty = True
+            # Fencing an idle page changes ownership, not its DOM. Keep its
+            # evidence usable for the user's selected element. Actual input
+            # and interrupted page operations invalidate it below.
             tab.page_revision += 1
             self._event(session, 'user_control', 'enabled', tab.id)
         tasks = []
         for job in session.jobs.values():
             if job.get('tabId') == tab.id and job['state'] in ('queued', 'running'):
+                tab.dirty = True
                 job['_task'].cancel()
                 tasks.append(job['_task'])
         if tasks:
@@ -704,7 +725,12 @@ class BrowserService:
                         if url != 'about:blank':
                             await self._validate_url(url)
                         tab.dirty = True
-                        await tab.page.goto(url, wait_until='domcontentloaded')
+                        before = {item['id'] for item in session.downloads}
+                        try:
+                            await tab.page.goto(url, wait_until='domcontentloaded')
+                        except Exception as error:
+                            if 'download' not in str(error).lower(): raise
+                            await self.downloads.wait_started(session, tab, before)
                     elif action == 'close':
                         await self._cast_stop(tab)
                         await tab.page.close()
@@ -740,8 +766,18 @@ class BrowserService:
                             if info['sensitive']:
                                 raise BrowserError('密码、验证码和支付信息请在受信浏览器中由你手动处理。', 403)
                             tab.dirty = True
-                            if action == 'click':
+                            if action == 'download' and not info.get('downloadCandidate'):
+                                raise BrowserError('该元素不是已识别的下载入口，请重新观察或手动选择。')
+                            if action in {'click', 'download'}:
+                                before = {item['id'] for item in session.downloads}
                                 await element.click()
+                                if action == 'download':
+                                    try:
+                                        rows = await self.downloads.wait_started(session, tab, before)
+                                    except asyncio.TimeoutError:
+                                        raise BrowserError('点击后未检测到文件下载；可能是预览或菜单，请重新观察，不自动重复点击。', 409) from None
+                                    job['downloadIds'] = [item['id'] for item in rows]
+                                    job['notice'] = '已开始下载，保存完成后会显示“已保存”。'
                             elif action == 'fill':
                                 value = payload.get('text')
                                 if not isinstance(value, str) or len(value) > 8000:
@@ -781,11 +817,12 @@ class BrowserService:
             nonlocal requested
             if request.is_navigation_request() and request.frame == tab.page.main_frame:
                 requested = True
-        def document_loaded():
+        def document_loaded(*_):
             if not loaded.done():
                 loaded.set_result(True)
         tab.page.on('request', request_started)
         tab.page.on('domcontentloaded', document_loaded)
+        tab.page.on('download', document_loaded)
         try:
             await tab.page.mouse.click(x, y)
             # Let the immediate event handlers/requests run before deciding
@@ -796,6 +833,7 @@ class BrowserService:
         finally:
             tab.page.remove_listener('request', request_started)
             tab.page.remove_listener('domcontentloaded', document_loaded)
+            tab.page.remove_listener('download', document_loaded)
             if not loaded.done():
                 loaded.cancel()
 
@@ -828,6 +866,21 @@ class BrowserService:
             raise BrowserError('页面截图已过期，请重新观察。', 404)
         return tab.images[snapshot_id]
 
+    async def _download_file(self, sid, download_id):
+        from .attachment_refs import attachment_scope
+        session = await self._session(sid)
+        row = next((item for item in session.downloads if item['id'] == download_id), None)
+        if not row or row.get('state') != 'completed' or not row.get('file'):
+            raise BrowserError('当前会话没有这个已完成的下载。', 404)
+        relative = Path(row['file']['path'])
+        if (relative.is_absolute() or '..' in relative.parts or len(relative.parts) != 4
+                or relative.parts[:2] != ('_inbox', attachment_scope(sid))):
+            raise BrowserError('下载文件归属无效。', 403)
+        full = (self.outputs / relative).resolve()
+        if not full.is_relative_to(self.outputs.resolve()) or not full.is_file():
+            raise BrowserError('下载文件不存在。', 404)
+        return str(full)
+
     async def _close_session(self, sid):
         session = await self._session(sid)
         for job in session.jobs.values():
@@ -835,6 +888,8 @@ class BrowserService:
                 await self._cancel(sid, job['id'])
         for tab in session.tabs.values():
             await self._cast_stop(tab)
+        if self.downloads:
+            await self.downloads.close_session(session)
         if session.context:
             await session.context.close()
         session.context = None
@@ -848,6 +903,8 @@ class BrowserService:
     async def _shutdown(self):
         for sid in list(self.sessions):
             await self._close_session(sid)
+        if self.downloads:
+            await self.downloads.close()
         if self.browser:
             await self.browser.close()
         if self.playwright:

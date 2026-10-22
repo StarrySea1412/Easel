@@ -1924,6 +1924,9 @@ export async function closeBrowserSession(sessionId: string): Promise<BrowserSta
 export function browserImageUrl(sessionId: string, tabId: string, snapshotId: string): string {
   return `${BASE}${browserPath(sessionId)}/tabs/${encodeURIComponent(tabId)}/snapshots/${encodeURIComponent(snapshotId)}/image`;
 }
+export function browserDownloadUrl(sessionId:string, downloadId:string):string {
+  return `${BASE}${browserPath(sessionId)}/downloads/${encodeURIComponent(downloadId)}/file`;
+}
 export function attachBrowserScreenshot(sessionId: string, tabId: string, snapshotId: string): Promise<{file:UploadedFile;snapshotId:string}> {
   return request(`${browserPath(sessionId)}/tabs/${encodeURIComponent(tabId)}/snapshots/${encodeURIComponent(snapshotId)}/attachment`, {method:'POST'});
 }

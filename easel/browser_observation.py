@@ -15,7 +15,10 @@ OBSERVE = r"""() => {
   const nodes = Array.from(candidates).filter(visible).slice(0, 120);
   const elements = nodes.map((el, i) => {
     const box = el.getBoundingClientRect();
-    return {ref:'e'+i,role:role(el),name:name(el),tag:el.tagName.toLowerCase(),
+    const label = name(el), href = el.getAttribute('href') || '';
+    const downloadCandidate = el.hasAttribute('download') || /\.(?:pdf|docx|pptx|xlsx|zip|png|jpe?g|webp|gif|mp4|webm|mp3|wav|m4a|txt|md|csv|json|srt)(?:[?#]|$)/i.test(href)
+      || /下载|导出|保存文件|保存图片|保存视频|\bdownload\b|\bexport\b|\bsave (?:image|video|file)\b/i.test(label);
+    return {ref:'e'+i,role:role(el),name:label,tag:el.tagName.toLowerCase(),downloadCandidate,
       disabled:!!el.disabled || el.getAttribute('aria-disabled') === 'true',
       sensitive: el.type === 'password' || /password|one-time-code|cc-number/.test(el.autocomplete || ''),
       x:Math.round(box.x),y:Math.round(box.y),width:Math.round(box.width),height:Math.round(box.height)};
@@ -35,6 +38,7 @@ OBSERVE = r"""() => {
   const faviconUrl = /^https?:$/.test(location.protocol) ? (icon?.href || new URL('/favicon.ico', location.href).href) : '';
   return {data:{title:document.title,url:location.href,text,faviconUrl,selection:String(getSelection() || '').slice(0,8000),
     viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},headings,elements,
+    downloadCandidates:elements.filter(el=>el.downloadCandidate&&!el.disabled&&!el.sensitive).map(el=>({ref:el.ref,name:el.name,role:el.role})),
     frames:Array.from(document.querySelectorAll('iframe')).map(el=>({title:el.title || '',src:el.getAttribute('src') || ''})).slice(0,20)},nodes,document};
 }"""
 

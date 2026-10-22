@@ -14,6 +14,7 @@ os.environ['HOME'] = str(browser_home)
 os.environ['XDG_CONFIG_HOME'] = str(browser_home / '.config')
 os.environ['XDG_CACHE_HOME'] = str(browser_home / '.cache')
 base = Path(__file__).resolve().parent
+Path('/tmp/easel-downloads').mkdir(mode=0o700, exist_ok=True)
 chrome = subprocess.Popen(['/opt/chromium/chromium-1243/chrome-linux64/chrome',
     '--headless', '--disable-gpu', '--no-first-run', '--disable-extensions',
     '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=18800',

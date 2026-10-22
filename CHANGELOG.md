@@ -1,3 +1,10 @@
+## 0.14.0 · 2026-10-22 · Browser file downloads / 网页文件下载
+
+- Detect download controls in page observations and expose a guarded download action to native browser tools and the OpenClaw bridge. Selecting an export menu does not count as a saved file. / 页面观察识别下载入口，原生工具及OpenClaw桥接可选择入口；导出菜单不算文件保存。
+- Capture actual Chromium downloads, including Blob files; save bounded files to the owning session with size, SHA-256 and persistent completion/error receipts. Reject empty files, HTML error pages, unsupported formats and mismatched file headers. / 捕获真实下载和Blob，按会话落盘并保存大小、哈希及完成/失败回执；拒绝空文件、HTML错误页、不支持格式及头部不符内容。
+- Transfer remote browser files through the existing private authenticated CDP gateway; add a download panel with local retrieval and draft attachment actions. Preserve idle-page evidence when the user takes control before selecting an observed download. / 复用私有认证CDP通道传输远程浏览器文件；新增下载面板、本机取回与草稿附件入口，修复空闲页面接管后首次选择下载证据过期。
+- [Usage, verification and upgrade boundaries / 使用、验证与升级边界](docs/browser-downloads-0.14.0-2026-10-22.md). Local HTTP/Blob downloads and isolated host 138 transfer passed. Authenticated target-site files, autonomous model execution, regular host 138 deployment and installer publication remain pending. / 本地HTTP/Blob及138隔离传输已验；目标站登录态文件、模型自主执行、138正式部署和安装器发布未验收。
+
 ## 0.13.4 · 2026-10-22 · Browser bridge access / 网页访问桥接
 
 - Authenticate same-host browser CLI requests with short-lived, request-bound signatures; keep external HTTPS, login and site-control checks. / 修复服务器模式桥接被HTTPS认证拒绝，仅接受本机、指定接口、绑定会话及原始请求内容的短期签名。

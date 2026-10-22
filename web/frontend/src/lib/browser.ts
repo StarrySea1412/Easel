@@ -1,6 +1,7 @@
 export interface BrowserElement {
   ref: string; role: string; name: string; tag: string; disabled: boolean; sensitive: boolean;
   x: number; y: number; width: number; height: number;
+  downloadCandidate?: boolean;
 }
 export interface BrowserSnapshot {
   id: string; tabId: string; sessionId: string; version: number; capturedAt: string; source: 'browser'; stale: boolean;
@@ -8,16 +9,23 @@ export interface BrowserSnapshot {
   viewport: { width: number; height: number; scrollX: number; scrollY: number };
   headings: { level: string; text: string }[]; elements: BrowserElement[];
   frames: { title: string; src: string }[];
+  downloadCandidates?: {ref:string;name:string;role:string}[];
   logs: { at: string; kind: string; text?: string; url?: string; status?: number; level?: string }[];
 }
 export interface BrowserTab { id: string; title: string; url: string; version: number; stale: boolean; closed: boolean; error: string; userControl?: boolean; viewport?: {width:number;height:number} }
 export interface BrowserJob { id: string; tabId?: string; action: string; state: 'queued'|'running'|'completed'|'cancelled'|'failed'; error?: string; snapshotId?: string; notice?: string; focusRef?: string; recovered?: boolean }
 export interface BrowserEvent { id: string; at: string; action: string; state: string; tabId?: string; requestId?: string; message: string }
+export interface BrowserDownload {
+  id:string; tabId:string; name:string; state:'receiving'|'saving'|'cancelling'|'completed'|'failed'; bytes:number;
+  sourceUrl:string; createdAt:string; finishedAt?:string; error?:string; sha256?:string;
+  file?:{id:string;name:string;path:string};
+}
 export interface BrowserState {
   sessionId: string; workspaceId: string; tabs: BrowserTab[]; snapshots: Record<string,BrowserSnapshot>;
   jobs: BrowserJob[]; events: BrowserEvent[]; controlOrigins: string[]; profile: 'isolated'; capabilities: string[];
+  downloads: BrowserDownload[];
 }
-export type BrowserAction = 'create'|'navigate'|'back'|'forward'|'reload'|'observe'|'click'|'fill'|'press'|'scroll'|'close'|'resize';
+export type BrowserAction = 'create'|'navigate'|'back'|'forward'|'reload'|'observe'|'click'|'fill'|'press'|'scroll'|'close'|'resize'|'download';
 export interface BrowserCommand {
   requestId: string; action: BrowserAction; tabId?: string; snapshotId?: string; ref?: string;
   url?: string; text?: string; key?: string; x?: number; y?: number; deltaY?: number; width?: number; height?: number;
@@ -44,7 +52,12 @@ export function decodeBrowserState(value: unknown, sessionId: string): BrowserSt
     }
     try { new URL(snapshot.url); } catch { throw new Error('页面来源地址无效，请重新观察。'); }
   }
-  return value as unknown as BrowserState;
+  if (value.downloads !== undefined && (!Array.isArray(value.downloads) || !value.downloads.every(row => object(row)
+    && typeof row.id === 'string' && typeof row.name === 'string' && typeof row.state === 'string' && typeof row.bytes === 'number'
+    && (!row.file || object(row.file) && typeof row.file.id === 'string' && typeof row.file.path === 'string' && typeof row.file.name === 'string')))) {
+    throw new Error('下载回执不完整，请更新后端并重新连接。');
+  }
+  return {...value,downloads:value.downloads||[]} as unknown as BrowserState;
 }
 export function browserQuote(snapshot: BrowserSnapshot, content: 'page'|'selection'|BrowserElement = 'page'): string {
   const body = content === 'page' ? snapshot.text.slice(0,12000) : content === 'selection' ? snapshot.selection

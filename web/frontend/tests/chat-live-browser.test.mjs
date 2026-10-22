@@ -41,6 +41,30 @@ test('analysis keeps existing drafts and screenshot attaches only to current cha
   assert.equal(v.requests.length,2,'no model request is made by analysis buttons');
 });
 
+test('download receipts distinguish pending and failed files, preserve ownership and add saved files to the current draft',async t=>{
+  const data=state('download-owner');data.capabilities=['downloads'];
+  data.downloads=[{id:'saved-file',tabId:'tab1',name:'报告.pdf',state:'completed',bytes:256,sourceUrl:'https://example.com/',createdAt:'2026-10-22',sha256:'a'.repeat(64),file:{id:'attachment-1',name:'报告.pdf',path:'_inbox/owned/download-guid/报告.pdf'}},
+    {id:'pending-file',tabId:'tab1',name:'视频.mp4',state:'receiving',bytes:100,sourceUrl:'https://example.com/',createdAt:'2026-10-22'},
+    {id:'failed-file',tabId:'tab1',name:'失效.pdf',state:'failed',bytes:0,error:'下载返回了网页',sourceUrl:'https://example.com/',createdAt:'2026-10-22'}];
+  data.snapshots.tab1.downloadCandidates=[{ref:'e0',name:'下载报告',role:'button'}];
+  const v=await setup(t,'download-owner',data);setChatDraftText('download-owner','保留草稿');
+  await v.click('文件与下载');
+  assert.equal(v.container.querySelectorAll('.browser-downloads a').length,1);
+  assert.match(v.container.querySelector('.browser-downloads a').href,/download-owner\/downloads\/saved-file\/file$/);
+  assert.match(v.container.querySelector('.browser-downloads').textContent,/正在下载/);
+  assert.match(v.container.querySelector('.browser-downloads [role=alert]').textContent,/返回了网页/);
+  await v.click('加入对话');
+  assert.equal(getChatDraft('download-owner').attachments[0].id,'attachment-1');
+  assert.equal(getChatDraft('download-owner').text,'保留草稿');
+  await act(async()=>v.container.querySelector('.browser-downloads>button').click());
+  const body=JSON.parse(v.requests[1].options.body);
+  assert.equal(body.action,'download');assert.equal(body.ref,'e0');assert.equal(body.snapshotId,'shot1');
+  await v.respond(1,{id:body.requestId,state:'completed',tabId:'tab1'});await v.respond(2,data);
+  await act(async()=>v.root.render(createElement(Panel,{sessionId:'download-other',active:false})));
+  await v.respond(3,state('download-other'));
+  assert.equal(v.container.querySelector('.browser-downloads'),null,'old session file links cannot survive a session switch');
+});
+
 test('element actions use current ref and snapshot, failures remain visible after refresh',async t=>{
   const v=await setup(t,'element-owner');await v.click('查看页面元素');
   await act(async()=>v.container.querySelector('.browser-element-list button').click());

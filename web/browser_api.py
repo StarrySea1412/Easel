@@ -8,7 +8,7 @@ from typing import Literal
 import uuid
 
 from fastapi import APIRouter, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from easel.attachment_refs import attachment_scope, attachment_id
@@ -80,6 +80,12 @@ def router(service: BrowserService):
     @api.post('/sessions/{sid}/commands')
     async def command(sid: str, body: BrowserCommand):
         return await invoke('command', sid, body.model_dump(exclude_none=True))
+
+    @api.get('/sessions/{sid}/downloads/{download_id}/file')
+    async def downloaded_file(sid: str, download_id: str):
+        path = await invoke('download_file', sid, download_id)
+        return FileResponse(path, filename=Path(path).name, media_type='application/octet-stream',
+                            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
     @api.post('/sessions/{sid}/agent/commands')
     async def agent_command(sid: str, body: BrowserCommand):

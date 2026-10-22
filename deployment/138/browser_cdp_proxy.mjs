@@ -26,6 +26,27 @@ function rewrite(value) {
 }
 const server = http.createServer((req, res) => {
   if (!authorized(req)) { res.writeHead(401, {'WWW-Authenticate':'Basic realm="Easel CDP"'}); return res.end('Authentication required'); }
+  // The browser and application have separate filesystems. Stream only named
+  // Chromium downloads over this existing private authenticated connection.
+  const download = /^\/easel-downloads\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(req.url);
+  if (download) {
+    const file = '/tmp/easel-downloads/' + download[1];
+    if (req.method === 'DELETE') {
+      for (const name of [file, file + '.crdownload']) { try { fs.unlinkSync(name); } catch (error) { if (error.code !== 'ENOENT') { res.writeHead(500); return res.end(); } } }
+      res.writeHead(204); return res.end();
+    }
+    if (req.method !== 'GET') { res.writeHead(405); return res.end(); }
+    let fd;
+    try {
+      fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.size > 100 * 1024 * 1024) { fs.closeSync(fd); res.writeHead(413); return res.end(); }
+      res.writeHead(200, {'Content-Type':'application/octet-stream', 'Content-Length':stat.size, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'});
+      const stream = fs.createReadStream(file, {fd});
+      stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
+    } catch { if (fd !== undefined) { try { fs.closeSync(fd); } catch {} } res.writeHead(404); res.end(); }
+    return;
+  }
   if (!permitted(req.url)) { res.writeHead(404); return res.end(); }
   const options=upstreamOptions(req); delete options.headers.authorization;
   const upstream=http.request(options, response => {

@@ -219,6 +219,13 @@
 .browser-view-tabs button[aria-pressed=true] { color:var(--text); }
 .browser-view-tabs button[aria-pressed=true]::after { content:''; position:absolute; bottom:-4px; left:4px; right:4px; height:2px; background:var(--text); }
 .browser-inspector-content { overflow:auto; min-height:0; padding:12px; }
+.browser-downloads { display:flex; flex-direction:column; gap:8px; font-size:12px; }
+.browser-downloads h4,.browser-downloads p { margin:0; line-height:1.6; }
+.browser-downloads p { color:var(--text-tertiary); }
+.browser-downloads article { display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--border); border-radius:8px; overflow-wrap:anywhere; }
+.browser-downloads article>div { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.browser-downloads button,.browser-downloads a { padding:6px 9px; color:var(--text-secondary); border:1px solid var(--border); background:var(--surface); border-radius:6px; text-align:left; text-decoration:none; overflow-wrap:anywhere; }
+.browser-downloads button:focus-visible,.browser-downloads a:focus-visible { outline:2px solid var(--text-secondary); outline-offset:2px; }
 .browser-inspector-content .chat-browser-page-text { padding:0; margin:0; border:0; font-size:12px; line-height:1.85; }
 .browser-elements > p { margin:0 0 10px; font-size:11px; color:var(--text-tertiary); line-height:1.7; }
 .browser-element-list { display:flex; flex-direction:column; gap:3px; max-height:220px; overflow:auto; }
