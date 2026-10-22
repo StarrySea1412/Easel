@@ -1,3 +1,10 @@
+## 0.13.3 · 2026-10-22 · Shared browser interaction / 同页网页操作
+
+- Restore the existing JPEG live view and session-owned pointer/keyboard transport; support committed Chinese composition and retain screenshot compatibility. / 迁回实时画面与输入，中文输入只发送提交文本，兼容旧截图模式。
+- Human input fences new Agent actions, cancels and drains the current tab operation, and leaves chat analysis running. Resume captures fresh evidence before releasing the fence; stale references remain rejected. / 人工接管当前标签，恢复前重新观察；旧动作不重放、旧元素不能沿用。
+- Isolate late resume responses by tab, bound input transport timeouts, and retry interrupted observations without repeating page actions. / 隔离晚到恢复回执，为输入增加超时；页面跳转时仅重新观察。
+- [Verification and upgrade boundaries / 验证与升级边界](docs/shared-browser-0.13.3-2026-10-22.md). No host 138 deployment, installer publication or paid-model acceptance.
+
 ## 0.13.2 · 2026-10-21 · Operation receipts / 操作详情记录
 
 - Decode OpenClaw's `{"id": ..., "args": {...}}` dispatcher envelope and namespaced `openclaw:*` ids, so `web_search`, `web_fetch`, `browser` and `ask_user` receipts keep their real tool, query, URL and failure reason instead of a generic "调用工具 · 操作详情未记录" row. / 修复工具回执只剩通用标题：解包调度信封与命名空间工具名，恢复真实工具、参数与失败原因。

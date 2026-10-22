@@ -330,3 +330,84 @@ def test_site_icon_is_a_bounded_raster_from_the_guarded_browser_not_a_remote_ui_
     missing = command(browser, 'navigate', opened['tabId'], url=site+'/')
     assert missing['state'] == 'completed'
     assert current(browser, opened['tabId'])['favicon'] == ''
+
+
+def test_live_input_is_manual_and_resume_invalidates_old_agent_evidence(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    before = current(browser, tab)
+    field = next(el for el in before['elements'] if el['name'] == '姓名')
+    browser.call('control', 'owner', site, True)
+    result = browser.call('input', 'owner', tab, [
+        {'type': 'click', 'x': field['x'] + 3, 'y': field['y'] + 3},
+        {'type': 'text', 'text': '人工中文输入'},
+    ])
+    assert result['userControl']
+    assert current(browser, tab)['stale']
+    with pytest.raises(BrowserError, match='用户正在操作'):
+        command(browser, 'click', tab, before['id'], actor='agent', ref=ref(before, '应用姓名'))
+    resumed = browser.call('takeover', 'owner', tab, False)
+    fresh = resumed['snapshots'][tab]
+    assert not resumed['tabs'][0]['userControl'] and not fresh['stale']
+    assert fresh['id'] != before['id']
+    stale = command(browser, 'click', tab, before['id'], actor='agent', ref=ref(before, '应用姓名'))
+    assert stale['state'] == 'failed' and '过期' in stale['error']
+    command(browser, 'observe', tab)
+    fresh = current(browser, tab)
+    accepted = command(browser, 'click', tab, fresh['id'], actor='agent', ref=ref(fresh, '应用姓名'))
+    assert accepted['state'] == 'completed'
+    assert '你好，人工中文输入' in current(browser, tab)['text']
+    saved = (browser._folder('owner') / 'tabs.json').read_text(encoding='utf-8')
+    assert '人工中文输入' not in saved, 'input text is not part of persisted browser jobs/events'
+
+
+def test_manual_input_cancels_slow_agent_operation_without_replaying(browser, site):
+    opened = command(browser, 'create', url=site)
+    tab = opened['tabId']
+    pending = browser.submit('command', 'owner', {'requestId': 'slow-agent', 'action': 'navigate',
+                                               'tabId': tab, 'url': site + '/slow'}, actor='agent')
+    stop = time.monotonic() + 3
+    while time.monotonic() < stop:
+        jobs = browser.call('state', 'owner')['jobs']
+        if any(j['id'] == 'slow-agent' and j['state'] == 'running' for j in jobs):
+            break
+        time.sleep(.01)
+    result = browser.call('input', 'owner', tab, [{'type':'wheel', 'deltaY':20}])
+    assert result['ok'] and pending.result(5)['state'] == 'cancelled'
+    assert browser.call('state', 'owner')['tabs'][0]['userControl']
+    with pytest.raises(BrowserError, match='用户正在操作'):
+        command(browser, 'navigate', tab, actor='agent', url=site+'/next')
+
+
+def test_resume_failure_keeps_manual_fence(browser, site, monkeypatch):
+    tab = command(browser, 'create', url=site)['tabId']
+    browser.call('takeover', 'owner', tab, True)
+    async def unavailable(*_args):
+        raise BrowserError('观察期间页面已跳转', 409)
+    monkeypatch.setattr(browser, '_observe', unavailable)
+    with pytest.raises(BrowserError, match='跳转'):
+        browser.call('takeover', 'owner', tab, False)
+    assert browser.call('state', 'owner')['tabs'][0]['userControl']
+
+
+def test_live_http_ownership_validation_and_no_input_replay(browser, site):
+    tab = command(browser, 'create', url=site)['tabId']
+    app = FastAPI(); app.include_router(router(browser))
+    with TestClient(app) as client:
+        path = f'/api/browser/sessions/owner/tabs/{tab}'
+        assert client.post(path.replace('/owner/', '/other/')+'/input', json={'events':[{'type':'text','text':'never'}]}).status_code == 404
+        assert client.get(path.replace('/owner/', '/other/')+'/cast').status_code == 404
+        assert client.post(path+'/input', json={'events':[{'type':'key','key':'unsupported'}]}).status_code == 400
+        assert not browser.call('state','owner')['tabs'][0]['userControl']
+        assert client.post(path+'/takeover', json={'enabled':True}).status_code == 200
+        assert client.post(path+'/takeover', json={'enabled':False}).status_code == 200
+
+
+def test_live_cast_frame_survives_manual_changes_and_stops_on_close(browser, site):
+    tab = command(browser, 'create', url=site)['tabId']
+    frame = browser.call('cast_next', 'owner', tab, 0)
+    assert base64.b64decode(frame['jpeg']).startswith(b'\xff\xd8')
+    browser.call('input', 'owner', tab, [{'type':'wheel','deltaY':100}])
+    assert browser.call('cast_next', 'owner', tab, 0)['jpeg']
+    assert command(browser, 'close', tab)['state'] == 'completed'
+    assert browser.sessions['owner'].tabs[tab].cast is None

@@ -17,11 +17,11 @@ function state(sid,stale=false){return {sessionId:sid,workspaceId:'workspace',pr
   snapshots:{tab1:{id:'shot1',tabId:'tab1',sessionId:sid,version:1,stale,source:'browser',capturedAt:'2026-10-19T10:00:00Z',
     title:'实际页面',url:'https://example.com/',text:'实际页面正文',selection:'',headings:[],viewport:{width:1280,height:800,scrollX:0,scrollY:0},elements:[element],frames:[],logs:[]}},jobs:[],events:[],controlOrigins:[]};}
 const reply=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
-async function setup(t,sid,initial=state(sid)){
+async function setup(t,sid,initial=state(sid),active=false){
   const requests=[];
   t.mock.method(globalThis,'fetch',(url,options={})=>new Promise((resolve,reject)=>requests.push({url,options,resolve,reject})));
   const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
-  await act(async()=>root.render(createElement(Panel,{sessionId:sid,active:false})));
+  await act(async()=>root.render(createElement(Panel,{sessionId:sid,active})));
   const respond=(index,data)=>act(async()=>requests[index].resolve(reply(data)));
   if(initial)await respond(0,initial);
   t.after(async()=>{await act(async()=>root.unmount());container.remove();});
@@ -133,4 +133,78 @@ test('page icons keep a default until loaded, reject remote URLs and recover fro
   await act(async()=>icons[1].querySelector('img').dispatchEvent(new window.Event('error')));
   assert.ok(icons[1].querySelector('svg'),'broken site icon restores the default at the same size');
   assert.equal(icons[1].querySelector('img'),null);
+});
+
+test('live page accepts human input during an agent operation and resumes only after fresh evidence',async t=>{
+  const sid='shared-live';const initial=state(sid);
+  initial.capabilities=['live-input','user-takeover'];
+  initial.jobs=[{id:'agent-busy',tabId:'tab1',state:'running',action:'navigate'}];
+  const v=await setup(t,sid,initial,true);
+  const surface=v.container.querySelector('.browser-live-surface');
+  assert.ok(surface,'real time view is the default for a compatible backend');
+  t.mock.method(surface,'getBoundingClientRect',()=>({left:0,top:0,width:1280,height:800}));
+  await act(async()=>surface.dispatchEvent(new window.MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:15,clientY:25,button:0})));
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,70)));
+  const input=v.requests.find(r=>r.url.endsWith('/input'));
+  assert.deepEqual(JSON.parse(input.options.body).events,[{type:'click',x:15,y:25}]);
+  await v.click('恢复Agent操作');
+  assert.equal(v.requests.some(r=>r.url.endsWith('/takeover')),false,'cannot resume while input is unacknowledged');
+  await v.respond(v.requests.indexOf(input),{ok:true,userControl:true});
+  await v.click('恢复Agent操作');
+  const resume=v.requests.find(r=>r.url.endsWith('/takeover'));
+  assert.deepEqual(JSON.parse(resume.options.body),{enabled:false});
+  const fresh=state(sid);fresh.capabilities=initial.capabilities;fresh.snapshots.tab1.id='fresh-after-input';
+  await v.respond(v.requests.indexOf(resume),fresh);
+  assert.equal(v.container.querySelector('[aria-label="恢复Agent操作"]'),null);
+});
+
+test('Chinese composition sends only committed text once and does not swallow navigation keys',async t=>{
+  const sid='ime-live',initial=state(sid);initial.capabilities=['live-input'];
+  const v=await setup(t,sid,initial,true);
+  const input=v.container.querySelector('[aria-label="网页键盘输入"]');
+  await act(async()=>{
+    input.dispatchEvent(new window.CompositionEvent('compositionstart',{bubbles:true}));
+    input.value='中文';input.dispatchEvent(new window.Event('input',{bubbles:true}));
+    input.dispatchEvent(new window.KeyboardEvent('keydown',{bubbles:true,key:'Enter',isComposing:true}));
+  });
+  assert.equal(v.requests.filter(r=>r.url.endsWith('/input')).length,0,'intermediate IME text is local only');
+  await act(async()=>{
+    input.dispatchEvent(new window.CompositionEvent('compositionend',{bubbles:true,data:'中文'}));
+    input.dispatchEvent(new window.Event('input',{bubbles:true}));
+  });
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,70)));
+  const sent=v.requests.find(r=>r.url.endsWith('/input'));
+  assert.deepEqual(JSON.parse(sent.options.body).events,[{type:'text',text:'中文'}]);
+  await v.respond(v.requests.indexOf(sent),{ok:true});
+});
+
+test('lost input acknowledgement is not retried and stale queued keys are discarded',async()=>{
+  const {createLiveInput}=await loadTsModule('../src/lib/browserLive.ts',import.meta.url);
+  const requests=[];const errors=[];
+  const channel=createLiveInput('input-owner','tab1',(_url,options)=>new Promise((resolve,reject)=>requests.push({options,resolve,reject})));
+  channel.onError(message=>errors.push(message));
+  channel.send({type:'text',text:'a'});
+  await new Promise(resolve=>setTimeout(resolve,70));
+  channel.send({type:'key',key:'Enter'});
+  requests[0].reject(new Error('lost ack'));
+  await new Promise(resolve=>setTimeout(resolve,70));
+  assert.equal(requests.length,1);assert.equal(channel.pending(),false);assert.equal(errors.length,1);
+  channel.close();
+});
+
+test('late resume response cannot clear takeover or replace evidence on another tab',async t=>{
+  const sid='resume-tabs',initial=state(sid);
+  initial.capabilities=['live-input'];initial.tabs[0].userControl=true;
+  initial.tabs.push({...initial.tabs[0],id:'tab2',title:'第二页'});
+  initial.snapshots.tab2={...initial.snapshots.tab1,tabId:'tab2',id:'shot2'};
+  const v=await setup(t,sid,initial,true);
+  await v.click('实际页面');
+  await v.click('恢复Agent操作');
+  const resume=v.requests.find(r=>r.url.endsWith('/takeover'));
+  assert.match(resume.url,/tab1\/takeover$/);
+  await v.click('第二页');
+  const old=structuredClone(initial);old.tabs.forEach(tab=>{tab.userControl=false;});
+  await v.respond(v.requests.indexOf(resume),old);
+  assert.ok(v.container.querySelector('[aria-label="恢复Agent操作"]'),'second tab remains under human control');
+  assert.match(v.container.querySelector('.browser-live-stage img').src,/tab2\/cast\?/);
 });

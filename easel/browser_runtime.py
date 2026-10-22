@@ -94,6 +94,11 @@ class Tab:
     cdp: object = None
     favicon_key: str = ''
     favicon: str = ''
+    cast: dict | None = None
+    cast_hook: bool = False
+    user_control: bool = False
+    control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    page_revision: int = 0
 
 
 @dataclass
@@ -288,8 +293,9 @@ class BrowserService:
     def _tab_info(self, tab):
         snapshot = tab.snapshot or {}
         closed = tab.closed or not tab.page or tab.page.is_closed()
-        return {'id': tab.id, 'url': snapshot.get('url', ''), 'title': snapshot.get('title', '') or '新标签页',
-                'version': tab.version, 'closed': bool(closed), 'stale': tab.dirty or bool(closed), 'error': tab.error}
+        return {'id': tab.id, 'url': tab.page.url if not closed else snapshot.get('url', ''), 'title': snapshot.get('title', '') or '新标签页',
+                'version': tab.version, 'closed': bool(closed), 'stale': tab.dirty or bool(closed), 'error': tab.error,
+                'userControl': tab.user_control, 'viewport': tab.page.viewport_size if not closed else None}
 
     @staticmethod
     def _job_info(job):
@@ -303,7 +309,7 @@ class BrowserService:
                 'snapshots': {tab.id: {**tab.snapshot, 'stale': self._tab_info(tab)['stale']} for tab in session.tabs.values() if tab.snapshot and tab.snapshot.get('id')},
                 'jobs': [self._job_info(job) for job in list(session.jobs.values())[-16:]],
                 'events': list(session.events)[-80:], 'controlOrigins': sorted(session.control_origins),
-                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs']}
+                'profile': 'isolated', 'capabilities': ['navigate', 'screenshot', 'dom', 'selection', 'click', 'fill', 'press', 'scroll', 'logs', 'live-input', 'user-takeover']}
 
     async def _control(self, sid, url, enabled):
         session = await self._session(sid)
@@ -375,10 +381,201 @@ class BrowserService:
                     'url': public_text(response.url, limit=500)}))
         page.on('dialog', lambda dialog: asyncio.create_task(dialog.dismiss()))
         page.on('download', lambda download: asyncio.create_task(download.cancel()))
-        page.on('framenavigated', lambda frame: setattr(tab, 'dirty', True) if frame == page.main_frame else None)
+        def navigated(frame):
+            if frame == page.main_frame:
+                tab.dirty = True
+                tab.page_revision += 1
+        page.on('framenavigated', navigated)
         return tab
 
+    async def _take_user_control(self, session, tab):
+        """Fence new agent actions before draining the current page operation."""
+        if not tab.user_control:
+            tab.user_control = True
+            tab.dirty = True
+            tab.page_revision += 1
+            self._event(session, 'user_control', 'enabled', tab.id)
+        tasks = []
+        for job in session.jobs.values():
+            if job.get('tabId') == tab.id and job['state'] in ('queued', 'running'):
+                job['_task'].cancel()
+                tasks.append(job['_task'])
+        if tasks:
+            # Never apply input while a cancelled operation still owns the page.
+            done, pending = await asyncio.wait(tasks, timeout=3)
+            if pending:
+                raise BrowserError('网页操作尚未停止，请稍后再输入；输入未重放。', 409)
+            for job in session.jobs.values():
+                if job.get('_task') in done and job['state'] in ('queued', 'running'):
+                    self._settle_cancelled(session, job)
+
+    async def _takeover(self, sid, tab_id, enabled):
+        session = await self._session(sid)
+        tab = self._tab(session, tab_id)
+        async with tab.control_lock:
+            if enabled:
+                await self._take_user_control(session, tab)
+            else:
+                # A fresh snapshot is required before the agent can act again.
+                async with deadline(12):
+                    async with tab.lock:
+                        await self._observe(session, tab)
+                        tab.user_control = False
+                        self._event(session, 'user_control', 'disabled', tab.id)
+        return await self._state(sid)
+
+    LIVE_KEYS = {'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown',
+                 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Control+A', 'Meta+A'}
+
+    async def _input(self, sid, tab_id, events):
+        session = await self._session(sid)
+        tab = self._tab(session, tab_id)
+        if not isinstance(events, list) or not 1 <= len(events) <= 40:
+            raise BrowserError('实时输入批次无效。')
+        viewport = tab.page.viewport_size or {'width': 1280, 'height': 800}
+        # Validate the whole batch before any side effect. Input bodies are never logged.
+        for event in events:
+            kind = event.get('type') if isinstance(event, dict) else None
+            if kind in ('click', 'move'):
+                if any(type(event.get(k)) not in (float, int) or not 0 <= event[k] < viewport[bound]
+                       for k, bound in [('x', 'width'), ('y', 'height')]):
+                    raise BrowserError('输入位置无效。')
+            elif kind == 'wheel':
+                if type(event.get('deltaY')) is not int or not -1600 <= event['deltaY'] <= 1600:
+                    raise BrowserError('滚动距离无效。')
+            elif kind == 'key':
+                if event.get('key') not in self.LIVE_KEYS:
+                    raise BrowserError('不支持的按键。')
+            elif kind == 'text':
+                if not isinstance(event.get('text'), str) or not 1 <= len(event['text']) <= 2000:
+                    raise BrowserError('输入文字须为2000字以内的非空文本。')
+            else:
+                raise BrowserError('不支持的实时输入。')
+        async with tab.control_lock:
+            await self._take_user_control(session, tab)
+            async with deadline(5):
+                async with tab.lock:
+                    for event in events:
+                        tab.dirty = True
+                        tab.page_revision += 1
+                        kind = event['type']
+                        if kind == 'click':
+                            await tab.page.mouse.click(event['x'], event['y'])
+                        elif kind == 'move':
+                            await tab.page.mouse.move(event['x'], event['y'])
+                        elif kind == 'wheel':
+                            await tab.page.mouse.wheel(0, event['deltaY'])
+                        elif kind == 'key':
+                            await tab.page.keyboard.press(event['key'])
+                        else:
+                            await tab.page.keyboard.insert_text(event['text'])
+        return {'ok': True, 'tabId': tab.id, 'userControl': True, 'pageRevision': tab.page_revision}
+
+    async def _cast_next(self, sid, tab_id, since=0):
+        session = await self._session(sid)
+        tab = self._tab(session, tab_id)
+        cast = await self._ensure_cast(tab)
+        cast['touched'] = time.monotonic()
+        if not cast['frame'] or cast['version'] <= int(since or 0):
+            return None
+        return {'version': cast['version'], 'jpeg': base64.b64encode(cast['frame']).decode('ascii'),
+                'width': cast['width'], 'height': cast['height']}
+
+    async def _ensure_cast(self, tab):
+        if tab.cast is None:
+            tab.cast = {'version': 0, 'frame': b'', 'width': 0, 'height': 0,
+                        'touched': time.monotonic(), 'watch': None}
+            cast = tab.cast
+            if not tab.cast_hook:
+                tab.cast_hook = True
+                tab.cdp.on('Page.screencastFrame', lambda event: self._cast_frame(tab, event))
+            viewport = (tab.snapshot or {}).get('viewport') or tab.page.viewport_size or {}
+            width, height = viewport.get('width', 1280), viewport.get('height', 800)
+            try:
+                await tab.cdp.send('Page.startScreencast', {'format': 'jpeg', 'quality': 70,
+                    'maxWidth': min(1920, int(width) or 1280), 'maxHeight': min(1600, int(height) or 800),
+                    'everyNthFrame': 1})
+            except Exception:
+                pass
+            try:
+                shot = await tab.page.screenshot(type='jpeg', quality=65, animations='disabled', timeout=8000)
+                if tab.cast is cast and not cast['frame']:
+                    cast.update(frame=shot, version=1, width=width, height=height)
+            except Exception:
+                pass
+            if tab.cast is not cast:
+                raise BrowserError('网页画面已关闭。', 409)
+            cast['watch'] = asyncio.create_task(self._cast_watch(tab))
+        return tab.cast
+
+    def _cast_frame(self, tab, event):
+        cast = tab.cast
+        try:
+            raw = base64.b64decode(event.get('data') or '')
+        except Exception:
+            raw = b''
+        if cast is not None and raw:
+            meta = event.get('metadata') or {}
+            cast['frame'] = raw
+            cast['version'] += 1
+            cast['width'] = int(meta.get('deviceWidth') or cast['width'] or 0)
+            cast['height'] = int(meta.get('deviceHeight') or cast['height'] or 0)
+            # Encoding activity is not evidence that a client is still watching.
+        if event.get('sessionId') is not None:
+            asyncio.create_task(self._cast_ack(tab, event['sessionId']))
+
+    async def _cast_ack(self, tab, screencast_id):
+        try:
+            await tab.cdp.send('Page.screencastFrameAck', {'sessionId': screencast_id})
+        except Exception:
+            pass
+
+    async def _cast_watch(self, tab):
+        """Stop an abandoned stream so an idle page is not encoded forever."""
+        try:
+            while True:
+                await asyncio.sleep(5)
+                cast = tab.cast
+                if cast is None:
+                    return
+                if tab.closed or not tab.page or tab.page.is_closed():
+                    tab.cast = None
+                    return
+                if time.monotonic() - cast['touched'] > 15:
+                    await self._cast_stop(tab)
+                    return
+        except asyncio.CancelledError:
+            return
+
+    async def _cast_stop(self, tab):
+        cast, tab.cast = tab.cast, None
+        if cast and cast.get('watch'):
+            cast['watch'].cancel()
+        if tab.cdp:
+            try:
+                await tab.cdp.send('Page.stopScreencast')
+            except Exception:
+                pass
+
     async def _observe(self, session, tab):
+        # A cancelled navigation can commit once more. Re-read only evidence;
+        # never repeat the page action that preceded this observation.
+        from playwright.async_api import Error as PlaywrightError
+        tab.dirty = True
+        for attempt in range(3):
+            try:
+                return await self._observe_once(session, tab)
+            except BrowserError as exc:
+                if exc.status != 409 or attempt == 2:
+                    raise
+            except PlaywrightError as exc:
+                if attempt == 2 or not any(reason in str(exc).lower() for reason in
+                    ('execution context was destroyed', 'cannot find context', 'most likely because of a navigation')):
+                    raise
+            await asyncio.sleep(.08)
+
+    async def _observe_once(self, session, tab):
+        page_revision = tab.page_revision
         for handle in tab.refs.values():
             await handle.dispose()
         tab.refs.clear()
@@ -400,7 +597,8 @@ class BrowserService:
             properties = await node_list.get_properties()
             tab.refs = {'e' + index: item.as_element() for index, item in properties.items() if item.as_element()}
             await node_list.dispose()
-            shot = await tab.page.screenshot(type='png', animations='disabled', timeout=10000)
+            shot = await tab.page.screenshot(type='png', animations='disabled', timeout=10000,
+                mask=[tab.page.locator('input[type=password],input[autocomplete=one-time-code],input[autocomplete^="cc-"]')])
             tab.version += 1
             snapshot_id = uuid.uuid4().hex
             data.update(id=snapshot_id, tabId=tab.id, sessionId=session.id, version=tab.version, capturedAt=now(),
@@ -412,7 +610,7 @@ class BrowserService:
                 same_document = await tab.page.evaluate('(doc) => doc === document', document)
             finally:
                 await document.dispose()
-            if tab.page.url != data['url'] or not same_document:
+            if tab.page.url != data['url'] or not same_document or page_revision != tab.page_revision:
                 raise BrowserError('观察期间页面已跳转，请重新观察。', 409)
             tab.images[snapshot_id] = shot
             while len(tab.images) > 3:
@@ -441,6 +639,10 @@ class BrowserService:
             return self._job_info(job)
         if action == 'create' and any(job['action']=='create' and job['state'] in ('queued','running') for job in session.jobs.values()):
             raise BrowserError('另一个网页标签正在打开，请等待或取消。', 409)
+        if actor == 'agent' and action != 'create':
+            tab = self._tab(session, payload.get('tabId'))
+            if tab.user_control:
+                raise BrowserError('用户正在操作网页；恢复Agent后重新观察再操作。', 409)
         if action in self.MUTATING and actor == 'agent':
             tab = self._tab(session, payload.get('tabId'))
             if origin(tab.page.url) not in session.control_origins:
@@ -504,6 +706,7 @@ class BrowserService:
                         tab.dirty = True
                         await tab.page.goto(url, wait_until='domcontentloaded')
                     elif action == 'close':
+                        await self._cast_stop(tab)
                         await tab.page.close()
                         tab.closed, tab.dirty = True, True
                     elif action in {'back', 'forward', 'reload'}:
@@ -630,6 +833,8 @@ class BrowserService:
         for job in session.jobs.values():
             if job['state'] in ('queued', 'running'):
                 await self._cancel(sid, job['id'])
+        for tab in session.tabs.values():
+            await self._cast_stop(tab)
         if session.context:
             await session.context.close()
         session.context = None

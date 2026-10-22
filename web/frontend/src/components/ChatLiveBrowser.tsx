@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { attachBrowserScreenshot, browserImageUrl, cancelBrowserCommand, closeBrowserSession, fetchBrowserState, runBrowserCommand, setBrowserControl } from '../lib/api';
-import { browserQuote, type BrowserAction, type BrowserCommand, type BrowserElement, type BrowserState } from '../lib/browser';
+import { browserQuote, decodeBrowserState, type BrowserAction, type BrowserCommand, type BrowserElement, type BrowserState } from '../lib/browser';
+import { browserCastUrl, createLiveInput, setUserBrowserControl, type LiveInputChannel, type LiveInputEvent } from '../lib/browserLive';
 import { addChatDraftQuote, appendChatDraftUploads, beginChatDraftUpload, finishChatDraftUpload, setChatDraftText } from '../lib/chatDrafts';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
 import { showToast } from '../lib/toast';
-import { IconChat, IconChevron, IconCompass, IconImage, IconPlus, IconRefresh, IconStop } from './icons';
+import { IconChat, IconChevron, IconCompass, IconImage, IconPlus, IconRefresh, IconSpark, IconStop } from './icons';
 import SiteIcon from './BrowserSiteIcon';
 import { recordPageSource } from '../lib/chatSources';
 
 type View = 'image'|'text'|'elements'|'logs';
 const tabKey = (sid: string) => `easel:browser-tab:${sid}`;
 const message = (error: unknown) => error instanceof Error ? error.message : '浏览器操作失败，请重试。';
-const operationNames: Record<string,string> = {create:'打开',navigate:'导航',back:'后退',forward:'前进',reload:'刷新',observe:'观察',click:'点击',fill:'填写',press:'按键',scroll:'滚动',resize:'适配网页',close:'关闭',agent_control:'Agent控制',network:'网络',close_session:'关闭会话'};
+const operationNames: Record<string,string> = {create:'打开',navigate:'导航',back:'后退',forward:'前进',reload:'刷新',observe:'观察',click:'点击',fill:'填写',press:'按键',scroll:'滚动',resize:'适配网页',close:'关闭',agent_control:'Agent控制',user_control:'人工接管',network:'网络',close_session:'关闭会话'};
 const stateNames: Record<string,string> = {queued:'等待中',running:'进行中',completed:'已完成',failed:'失败',cancelled:'已中断',enabled:'已允许',disabled:'已关闭',blocked:'已拦截'};
 
 function InspectIcon() {
@@ -30,8 +31,13 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   const [url,setUrl] = useState(''), [tabId,setTabId] = useState(''), [view,setView] = useState<View>('image');
   const [requestId,setRequestId] = useState(''), [selected,setSelected] = useState(''), [fill,setFill] = useState('');
   const [adding,setAdding] = useState(false), [imageFailed,setImageFailed] = useState(false);
+  const [notice,setNotice] = useState(''), [live,setLive] = useState(false), [liveNonce,setLiveNonce] = useState(0);
+  const [manual,setManual] = useState(false), [resuming,setResuming] = useState(false);
+  const composing = useRef(false), liveText = useRef<HTMLTextAreaElement>(null);
+  const controlEpoch = useRef(0);
   const [selectedText,setSelectedText] = useState(''), [addressFocused,setAddressFocused] = useState(false);
   const stage = useRef<HTMLDivElement>(null), menu = useRef<HTMLDetailsElement>(null), address = useRef<HTMLInputElement>(null);
+  const liveImage = useRef<HTMLImageElement>(null), liveChannel = useRef<LiveInputChannel|null>(null);
   const [viewport,setViewport] = useState<{width:number;height:number}|null>(null);
   const resizeFailed = useRef('');
   const commandPending = useRef(false);
@@ -70,7 +76,7 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   useEffect(()=>{
     const controller=new AbortController();
     generation.current++;commandPending.current=false;resizeFailed.current='';setState(null);setView('image');setError('');setConnectionError('');setUrl('');setSelected('');setRequestId('');
-    setTabId(readLocalValue(tabKey(sessionId)).value||'');
+    setTabId(readLocalValue(tabKey(sessionId)).value||'');setLive(true);setNotice('');setManual(false);setResuming(false);
     void refresh(controller.signal).catch(cause=>{if(!controller.signal.aborted)setConnectionError(message(cause));});
     return()=>{controller.abort();invalidate();};
   },[sessionId,refresh,invalidate]);
@@ -104,32 +110,51 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   const usable=Boolean(snapshot&&!snapshot.stale&&!current?.stale&&!busy);
   const element=snapshot?.elements.find(item=>item.ref===selected);
   const chooseTab=useCallback((id:string)=>{setTabId(id);writeLocalValue(tabKey(sessionId),id);setSelected('');setFill('');},[sessionId]);
-  const currentId=current?.id, currentUrl=current?.url;
+  const currentId=current?.id, currentUrl=current?.url, currentClosed=Boolean(current?.closed);
+  const supportsLive=Boolean(state?.capabilities.includes('live-input'));
+  const usingLive=live&&supportsLive;
+  const userControl=manual||Boolean(current?.userControl);
+  useEffect(()=>{controlEpoch.current++;setManual(false);setResuming(false);composing.current=false;},[currentId]);
   useEffect(()=>{if(currentId)setUrl(currentUrl==='about:blank'?'':currentUrl||'');},[currentId,currentUrl]);
   useEffect(()=>{setSelected('');setFill('');setSelectedText('');setImageFailed(false);},[snapshot?.id]);
+  useEffect(()=>{
+    if(!active||!usingLive||!currentId||currentClosed){liveChannel.current?.close();liveChannel.current=null;return;}
+    const channel=createLiveInput(sessionId,currentId);
+    const off=channel.onError(setNotice);
+    liveChannel.current=channel;
+    return()=>{off();channel.close();if(liveChannel.current===channel)liveChannel.current=null;};
+  },[active,usingLive,sessionId,currentId,currentClosed]);
 
   const run=useCallback(async(action:BrowserAction, extra:Partial<BrowserCommand>={})=>{
-    if(busy||commandPending.current)return;
+    if(commandPending.current)return;
     commandPending.current=true;
     const id=crypto.randomUUID(), epoch=generation.current;
-    setRequestId(id);if(action!=='resize')setError('');
+    setRequestId(id);if(action!=='resize'){setError('');setNotice('');}
     try{
+      if(current&&supportsLive&&action!=='create'&&action!=='observe'&&action!=='resize') {
+        const targetId=extra.tabId||current.id;
+        await setUserBrowserControl(sessionId,targetId,true);
+        if(generation.current!==epoch)return;
+        if(targetId===current.id)setManual(true);
+      } else if(busy) { return; }
       const job=await runBrowserCommand(sessionId,{requestId:id,action,...(action==='create'&&viewport?viewport:{}),...(current?{tabId:current.id,snapshotId:snapshot?.id}:{}),...extra});
       if(generation.current!==epoch)return;
       if(job.tabId&&action!=='close')chooseTab(job.tabId);
+      if(job.notice)setNotice(job.notice);
+      if(job.focusRef){setView('elements');setSelected(job.focusRef);}
       await refresh();
-      if(generation.current===epoch&&job.state!=='completed')setError(job.error||'页面操作未确认完成，请重新观察。');
+      if(generation.current===epoch&&job.state!=='completed'&&!job.recovered)setError(job.error||'页面操作未确认完成，请重新观察。');
     }catch(cause){if(generation.current===epoch)setError(message(cause));}
     finally{if(generation.current===epoch){commandPending.current=false;setRequestId('');}}
-  },[busy,sessionId,current,snapshot,viewport,refresh,chooseTab]);
+  },[busy,sessionId,current,snapshot,viewport,refresh,chooseTab,supportsLive]);
   useEffect(()=>{
-    if(!active||!current||!snapshot||!viewport||busy||snapshot.stale||current.stale)return;
+    if(!active||!current||!snapshot||!viewport||busy||userControl||snapshot.stale||current.stale)return;
     if(snapshot.viewport.width===viewport.width&&snapshot.viewport.height===viewport.height)return;
     const key=`${sessionId}:${current.id}:${viewport.width}:${viewport.height}`;
     if(resizeFailed.current===key)return;
     resizeFailed.current=key;
     void run('resize',viewport);
-  },[active,current,snapshot,viewport,busy,sessionId,run]);
+  },[active,current,snapshot,viewport,busy,userControl,sessionId,run]);
   const navigate=(event:React.FormEvent)=>{
     event.preventDefault();
     try{const target=new URL(/^[a-z][a-z\d+.-]*:/i.test(url.trim())?url.trim():'https://'+url.trim());if(!['http:','https:'].includes(target.protocol)||target.username||target.password)throw new Error();
@@ -168,6 +193,67 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
   };
 
   const inspect=(next:View)=>{setView(next);dismissMenu();};
+  const sendLive=(event:LiveInputEvent)=>{
+    if(resuming||!liveChannel.current)return;
+    setManual(true);
+    liveChannel.current.send(event);
+  };
+  const resumeAgent=async()=>{
+    if(!current||resuming)return;
+    if(composing.current||liveChannel.current?.pending()){setNotice('输入尚在发送，请稍后继续。');return;}
+    const epoch=generation.current;
+    setResuming(true);setNotice('');
+    const tabEpoch=controlEpoch.current;
+    try {
+      const result=decodeBrowserState(await setUserBrowserControl(sessionId,current.id,false),sessionId);
+      if(epoch===generation.current&&tabEpoch===controlEpoch.current){revision.current++;setState(result);setManual(false);}
+    } catch(cause){if(epoch===generation.current&&tabEpoch===controlEpoch.current)setNotice(message(cause));}
+    finally{if(epoch===generation.current&&tabEpoch===controlEpoch.current)setResuming(false);}
+  };
+  const toggleLive=()=>{
+    if(live){setLive(false);void run('observe');return;}
+    if(!current||currentClosed)return;
+    setLive(true);setLiveNonce(value=>value+1);setView('image');setError('');setNotice('');
+  };
+  const livePoint=(event:React.MouseEvent<HTMLDivElement>)=>{
+    const box=event.currentTarget.getBoundingClientRect();
+    // Input is sent in the page's CSS viewport, not in frame pixels: the
+    // streamed JPEG can be scaled or downsampled independently.
+    const width=current?.viewport?.width||snapshot?.viewport.width||1280;
+    const height=current?.viewport?.height||snapshot?.viewport.height||800;
+    const x=(event.clientX-box.left)/Math.max(1,box.width)*width;
+    const y=(event.clientY-box.top)/Math.max(1,box.height)*height;
+    return {x:Math.round(Math.max(0,Math.min(width-1,x))),y:Math.round(Math.max(0,Math.min(height-1,y)))};
+  };
+  const liveClick=(event:React.MouseEvent<HTMLDivElement>)=>{
+    if(event.button!==0)return;
+    event.preventDefault();
+    liveText.current?.focus({preventScroll:true});
+    const point=livePoint(event);
+    sendLive({type:'click',...point});
+  };
+  const liveWheel=(event:React.WheelEvent<HTMLDivElement>)=>{
+    if(!liveChannel.current)return;
+    event.preventDefault();
+    const delta=Math.max(-1600,Math.min(1600,Math.round(event.deltaY*(event.deltaMode===1?20:1))));
+    if(delta)sendLive({type:'wheel',deltaY:delta});
+  };
+  const liveKey=(event:React.KeyboardEvent<HTMLDivElement>)=>{
+    const channel=liveChannel.current;if(!channel)return;
+    if(composing.current||event.nativeEvent.isComposing||event.key==='Process')return;
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){
+      event.preventDefault();sendLive({type:'key',key:event.metaKey?'Meta+A':'Control+A'});return;
+    }
+    if(['Enter','Tab','Escape','Backspace','Delete','Home','End','PageUp','PageDown','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)){
+      event.preventDefault();sendLive({type:'key',key:event.key});
+    }
+  };
+  const livePaste=(event:React.ClipboardEvent<HTMLDivElement>)=>{
+    const text=event.clipboardData.getData('text');
+    if(!text)return;
+    event.preventDefault();
+    sendLive({type:'text',text:text.slice(0,2000)});
+  };
   const granted=Boolean(snapshot&&snapshot.url!=='about:blank'&&state?.controlOrigins.includes(new URL(snapshot.url).origin));
   const stopOrReload=()=>busy?void cancel():void run('reload');
   const reconnect=()=>{const epoch=generation.current;void refresh().then(()=>{if(epoch===generation.current)setError('');}).catch(cause=>{if(epoch===generation.current)setError(message(cause));});};
@@ -182,11 +268,13 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
       <button type="button" aria-label={`关闭网页：${tab.title}`} disabled={busy} onClick={()=>{chooseTab(tab.id);void run('close',{tabId:tab.id});}}>×</button>
     </span>)}<button type="button" className="browser-icon-button" aria-label="新建网页标签" title="新建网页标签" disabled={busy} onClick={()=>void run('create',{tabId:undefined})}><IconPlus size={15}/></button></div>}
     <div className="browser-toolbar">
-      <div className="browser-history-group"><button type="button" className="browser-icon-button" aria-label="网页后退" title="后退" disabled={!current||busy} onClick={()=>void run('back')}><IconChevron size={15} className="browser-back-icon"/></button><button type="button" className="browser-icon-button" aria-label="网页前进" title="前进" disabled={!current||busy} onClick={()=>void run('forward')}><IconChevron size={15}/></button></div>
+      <div className="browser-history-group"><button type="button" className="browser-icon-button" aria-label="网页后退" title="后退" disabled={!current||Boolean(requestId)} onClick={()=>void run('back')}><IconChevron size={15} className="browser-back-icon"/></button><button type="button" className="browser-icon-button" aria-label="网页前进" title="前进" disabled={!current||Boolean(requestId)} onClick={()=>void run('forward')}><IconChevron size={15}/></button></div>
       <button type="button" className="browser-icon-button browser-round-button" aria-label={busy?'停止操作':'刷新网页'} title={busy?'停止操作':'刷新网页'} disabled={!current&&!busy} onClick={stopOrReload}>{busy?<IconStop size={13}/>:<IconRefresh size={15}/>}</button>
       <button type="button" className="browser-icon-button browser-round-button" aria-label="查看页面元素" title="查看页面元素" aria-pressed={view==='elements'} disabled={!snapshot} onClick={()=>setView(view==='elements'?'image':'elements')}><InspectIcon/></button>
+      {supportsLive&&<button type="button" className={'browser-icon-button browser-round-button browser-live-toggle'+(usingLive?' is-on':'')} aria-label={usingLive?'退出实时画面':'实时画面'} aria-pressed={usingLive} title={usingLive?'退出实时画面':'实时画面：可直接点击和输入'} disabled={!current||currentClosed} onClick={toggleLive}><IconSpark size={15}/></button>}
+      {userControl&&<button type="button" className="browser-icon-button" aria-label="恢复Agent操作" title="恢复Agent操作" disabled={resuming} onClick={()=>void resumeAgent()}>{resuming?<IconRefresh size={15} className="spin"/>:<IconChevron size={15}/>}</button>}
       <form className="browser-location" onSubmit={navigate}>
-        <input ref={address} aria-label="交互网页地址" type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="输入网址" value={addressFocused?url:readableAddress(url)} onFocus={()=>{setAddressFocused(true);requestAnimationFrame(()=>address.current?.select());}} onBlur={()=>setAddressFocused(false)} onChange={event=>setUrl(event.target.value)} disabled={busy}/>
+        <input ref={address} aria-label="交互网页地址" type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="输入网址" value={addressFocused?url:readableAddress(url)} onFocus={()=>{setAddressFocused(true);requestAnimationFrame(()=>address.current?.select());}} onBlur={()=>setAddressFocused(false)} onChange={event=>setUrl(event.target.value)} disabled={Boolean(requestId)}/>
       </form>
       <button type="button" className="browser-icon-button browser-round-button browser-analyse-button" aria-label="分析此页" title="分析此页，加入对话草稿" disabled={!usable||adding} onClick={()=>void analyse()}><IconChat size={15}/></button>
       <details className="browser-more" ref={menu}>
@@ -209,9 +297,22 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
       </details>
     </div>
     {error&&<div role="alert" className="browser-error"><span>{error}</span>{current&&<button type="button" disabled={busy} onClick={()=>void run('observe')}>重新观察</button>}<button type="button" onClick={reconnect}>重新连接</button><button type="button" aria-label="收起浏览器提示" onClick={()=>{setError('');setConnectionError('');}}>×</button></div>}
+    {notice&&<div role="status" className="browser-notice"><span>{notice}</span><button type="button" aria-label="收起提示" onClick={()=>setNotice('')}>×</button></div>}
     <div className="browser-stage" ref={stage} aria-busy={busy}>
       {busy&&<div className="browser-loading-line" role="status"><span className="browser-sr-only">页面操作中</span></div>}
-      {snapshot&&snapshot.url!=='about:blank'?<button type="button" className="browser-screenshot" aria-label="网页截图，鼠标点击页面操作，键盘激活查看元素" disabled={!usable||imageFailed}
+      {usingLive&&active&&current&&!currentClosed?<div className="browser-live-stage">
+        <img ref={liveImage} src={`${browserCastUrl(sessionId,current.id)}?v=${liveNonce}`} alt={`实时画面：${current.title}`} draggable={false}
+          onError={()=>{setLive(false);setNotice('实时画面连接中断，已退回快照模式。');}}/>
+        <div className="browser-live-surface" tabIndex={0} role="application" aria-label="实时网页画面，可点击和输入"
+          onFocus={event=>{if(event.target===event.currentTarget)liveText.current?.focus({preventScroll:true});}}
+          onMouseDown={liveClick} onWheel={liveWheel} onKeyDown={liveKey} onPaste={livePaste}>
+          <textarea ref={liveText} className="browser-live-ime" aria-label="网页键盘输入" autoComplete="off" autoCorrect="off" spellCheck={false} disabled={resuming}
+            onCompositionStart={()=>{composing.current=true;}}
+            onCompositionEnd={event=>{composing.current=false;const value=event.currentTarget.value;event.currentTarget.value='';if(value)sendLive({type:'text',text:value.slice(0,2000)});}}
+            onInput={event=>{if(composing.current)return;const value=event.currentTarget.value;event.currentTarget.value='';if(value)sendLive({type:'text',text:value.slice(0,2000)});}}/>
+        </div>
+      </div>
+        :snapshot&&snapshot.url!=='about:blank'?<button type="button" className="browser-screenshot" aria-label="网页截图，鼠标点击页面操作，键盘激活查看元素" disabled={!usable||imageFailed}
         onWheel={event=>{if(usable&&Math.abs(event.deltaY)>4)void run('scroll',{deltaY:Math.round(Math.max(-1600,Math.min(1600,event.deltaY*(event.deltaMode===1?20:1))))});}}
         onKeyDown={event=>{if(['PageDown','PageUp','ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();if(usable)void run('scroll',{deltaY:['PageDown','ArrowDown'].includes(event.key)?600:-600});}}}
         onClick={event=>{
@@ -233,6 +334,6 @@ export default function ChatLiveBrowser({sessionId, active = true, onReadMode, o
         </div>
       </section>}
     </div>
-    {snapshot&&snapshot.url!=='about:blank'&&<footer className="browser-statusbar"><span className={'browser-status-dot'+(busy?' is-busy':snapshot.stale||current?.stale?' is-stale':'')}/><span title={`${snapshot.title} · 版本 ${snapshot.version}`}>{busy?'正在更新页面':snapshot.stale||current?.stale?'页面已变化，需重新观察':'页面快照 · 可点击与滚动'}</span>{granted&&<span className="browser-control-status">Agent可操作</span>}<div className="browser-scroll-actions"><button type="button" aria-label="向上滚动" title="向上滚动" disabled={!usable} onClick={()=>void run('scroll',{deltaY:-600})}><IconChevron size={12} className="browser-up-icon"/></button><button type="button" aria-label="向下滚动" title="向下滚动" disabled={!usable} onClick={()=>void run('scroll',{deltaY:600})}><IconChevron size={12} className="browser-down-icon"/></button></div></footer>}
+    {(usingLive&&current&&!currentClosed)||(snapshot&&snapshot.url!=='about:blank')?<footer className="browser-statusbar"><span className={'browser-status-dot'+(usingLive?' is-live':busy?' is-busy':snapshot?.stale||current?.stale?' is-stale':'')}/><span title={snapshot?`${snapshot.title} · 版本 ${snapshot.version}`:current?.title}>{usingLive?(userControl?'你正在操作网页':'实时画面'):busy?'正在更新页面':snapshot?.stale||current?.stale?'页面已变化，需重新观察':'页面快照 · 可点击与滚动'}</span>{granted&&!userControl&&<span className="browser-control-status">Agent可操作</span>}{!usingLive&&<div className="browser-scroll-actions"><button type="button" aria-label="向上滚动" title="向上滚动" disabled={!usable} onClick={()=>void run('scroll',{deltaY:-600})}><IconChevron size={12} className="browser-up-icon"/></button><button type="button" aria-label="向下滚动" title="向下滚动" disabled={!usable} onClick={()=>void run('scroll',{deltaY:600})}><IconChevron size={12} className="browser-down-icon"/></button></div>}</footer>:null}
   </section>;
 }

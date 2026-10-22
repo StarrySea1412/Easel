@@ -10,8 +10,8 @@ export interface BrowserSnapshot {
   frames: { title: string; src: string }[];
   logs: { at: string; kind: string; text?: string; url?: string; status?: number; level?: string }[];
 }
-export interface BrowserTab { id: string; title: string; url: string; version: number; stale: boolean; closed: boolean; error: string }
-export interface BrowserJob { id: string; tabId?: string; action: string; state: 'queued'|'running'|'completed'|'cancelled'|'failed'; error?: string; snapshotId?: string }
+export interface BrowserTab { id: string; title: string; url: string; version: number; stale: boolean; closed: boolean; error: string; userControl?: boolean; viewport?: {width:number;height:number} }
+export interface BrowserJob { id: string; tabId?: string; action: string; state: 'queued'|'running'|'completed'|'cancelled'|'failed'; error?: string; snapshotId?: string; notice?: string; focusRef?: string; recovered?: boolean }
 export interface BrowserEvent { id: string; at: string; action: string; state: string; tabId?: string; requestId?: string; message: string }
 export interface BrowserState {
   sessionId: string; workspaceId: string; tabs: BrowserTab[]; snapshots: Record<string,BrowserSnapshot>;
