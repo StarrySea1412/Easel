@@ -1397,7 +1397,7 @@ a.ana-note:hover { background: var(--surface-2); }
 .page-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .page-host > * { flex: 1; min-height: 0; }
 .subnav {
-  display: flex; align-items: center; flex-wrap: nowrap; min-width: 0; gap: 10px; flex-shrink: 0;
+  display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 10px; flex-shrink: 0;
   padding: 8px 16px; border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -1410,7 +1410,7 @@ a.ana-note:hover { background: var(--surface-2); }
 .subnav-back:hover { border-color: var(--accent-start); background: var(--accent-soft); }
 .subnav-back svg { color: var(--accent-start); }
 .subnav-div { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
-.subnav-tabs { display: flex; flex: 1; flex-wrap: nowrap; min-width: 0; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+.subnav-tabs { display: flex; flex: 1 1 280px; flex-wrap: wrap; min-width: 0; gap: 4px; }
 .subnav-tab {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; gap: 5px; white-space: nowrap;
   padding: 8px 12px; min-height: 34px; border-radius: var(--radius-sm); font-size: 12px;
@@ -1418,6 +1418,7 @@ a.ana-note:hover { background: var(--surface-2); }
 }
 .subnav-tab:hover { background: var(--surface-hover); color: var(--text); }
 .subnav-tab.active { background: var(--accent-soft); color: var(--accent-end); font-weight: 600; }
+.subnav-back:focus-visible, .subnav-tab:focus-visible { outline: 2px solid var(--accent-start); outline-offset: -2px; }
 
 /* 内容日历：平台活动 / 图例 / 来源 / 规划建议 */
 .cal-event.is-event { background: color-mix(in srgb, var(--ev) 18%, transparent); font-weight: 600; }
@@ -1725,7 +1726,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   .studio-size { flex: 1; min-width: 0; }
   .subnav { min-width: 0; padding-inline: 18px; }
   .subnav-div { display: none; }
-  .subnav-tab { flex-shrink: 0; }
+  .subnav-tabs { flex-basis: 100%; }
+  .subnav-tab { flex: 1 0 auto; }
   .session-actions { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) {

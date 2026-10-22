@@ -1,3 +1,8 @@
+## 0.14.2 · 2026-10-22 · Responsive creation navigation / 创作导航自适应
+
+- Wrap creation links within the available width, preserving complete labels and visible keyboard focus; remove forced horizontal scrolling and automatic page scrolling. / 顶部创作导航自动换行，完整显示入口及键盘焦点，移除强制横向滚动和切页自动滚动。
+- Includes the 0.14.1 model icon fix and 0.14.0 downloads; host 138 deployment is authorized and acceptance is tracked in the [receipt](docs/release-138-0.14.2-2026-10-22.md). / 包含模型图标与网页下载，138最终验收另记；GPT/Gemini全自动暂缓。
+
 ## 0.14.1 · 2026-10-22 · Recorded model icons / 历史模型图标
 
 - Prioritize the observed model identity in usage rankings, then fall back to the recorded provider; preserve compatible channel names and all usage values. / 用量排行优先实际模型品牌，未知模型回退记录渠道；修正DeepSeek显示为OpenAI/问号，渠道及统计不变。
