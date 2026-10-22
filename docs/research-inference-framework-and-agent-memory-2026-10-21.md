@@ -4,6 +4,8 @@
 
 ## 0. 结论速览
 
+**2026-10-22扩展**：产品与运行时层面的比较另见[ZCode、Codex、Grok Bot 与 DeepSeek Harness](agent-products-comparison-and-integration-2026-10-22.md)。Grok Bot 已找到官方产品文档；DeepSeek Harness 与本文 DeepInfer 是不同系统。优先级已修订为先补执行恢复/跨页一致性，再贯通目标验收与分层经验；原缓存度量和安全边界方案保留。本文历史来源日期不变，新增能力未实施。
+
 1. **DeepInfer 是卖方视角的集群系统**：PD 分离、四层负载均衡、3FS 上的 Block KVCache、SWA 近似重放、变长投机验证、CPU/GPU 异步调度。Easel 不拥有算力，调度类能力不可移植；可移植的是它"用结构换成本"的思路，以及它公开的度量口径。
 2. **可借鉴缓存复用的度量思路**：厂商自述线上输入缓存命中 96%，命中时单卡 prefill 吞吐是不命中的 25 倍，这不代表 Easel 可获得同样收益。Easel 已采集 `cacheRead`/`cacheWrite` 并按渠道、模型分组，缺少基于同组有效样本的缓存读取占比与覆盖率，以及提示词结构优化的对照验证。
 3. **它的开源边界写得很清楚**：引擎、算子、编解码开源；KV cache 系统、VE/Prefill/Decode 服务不开源。第三方拿到的是"引擎"，不是"能跑出 155 万亿 token/天的整套系统"。
