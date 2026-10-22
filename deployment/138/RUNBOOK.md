@@ -1,4 +1,4 @@
-> **Current deployment, 2026-10-20:** Production and isolated instances run 0.7.2 / `e63a08eac773`, fixed image `sha256:fd631a6ab44a62837e781b3e50d87ce81783a4483bfc05ed08ef24aa5d80e25c`. Production has HappyCoding configured with five models, keeping its existing default. HTTP/source hashes passed; final browser and business acceptance is delegated to the user. Earlier release notes below are historical. [Receipt, capacity limits and rollback](../../docs/release-138-0.7.2-2026-10-20.md).
+> **Current deployment, 2026-10-22:** Production 8444 and isolated 8445 run 0.13.3 / `228d8989a3d5`, fixed image `sha256:73297d3cfbcee1a4cb1b3f50749d22ce3b7f1546ca7f8021d302e444e990f8c6`. HTTPS login, Gateway, real search, frontend/source hashes and shared-browser cast/input/takeover passed. Existing credentials/providers and original files are retained. User business acceptance remains separate; installers are unchanged. Earlier notes below describe historical states. [Receipt, remaining limits, backups and rollback](../../docs/release-138-0.13.3-2026-10-22.md).
 
 # Easel 138 Linux deployment
 

@@ -3,7 +3,7 @@
 - Restore the existing JPEG live view and session-owned pointer/keyboard transport; support committed Chinese composition and retain screenshot compatibility. / 迁回实时画面与输入，中文输入只发送提交文本，兼容旧截图模式。
 - Human input fences new Agent actions, cancels and drains the current tab operation, and leaves chat analysis running. Resume captures fresh evidence before releasing the fence; stale references remain rejected. / 人工接管当前标签，恢复前重新观察；旧动作不重放、旧元素不能沿用。
 - Isolate late resume responses by tab, bound input transport timeouts, and retry interrupted observations without repeating page actions. / 隔离晚到恢复回执，为输入增加超时；页面跳转时仅重新观察。
-- [Verification and upgrade boundaries / 验证与升级边界](docs/shared-browser-0.13.3-2026-10-22.md). No host 138 deployment, installer publication or paid-model acceptance.
+- Host 138 production and isolated instances now run 0.13.3 / `228d8989a3d5`; HTTPS login, Gateway, search, assets and shared-browser transport passed. / 138正式与隔离已部署，登录、网关、搜索、资源和共享网页输入链路通过；真实模型并行与安装器仍未验收/发布。[Deployment and rollback / 部署回执与回滚](docs/release-138-0.13.3-2026-10-22.md) · [Local implementation / 本地实施](docs/shared-browser-0.13.3-2026-10-22.md)。下方旧版本“未部署”记录为各自开发时状态。
 
 ## 0.13.2 · 2026-10-21 · Operation receipts / 操作详情记录
 
