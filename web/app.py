@@ -4449,7 +4449,7 @@ def _chat_message(req: ChatRequest) -> str:
     message += ('\n\n〔目标进度〕当前为受保护的持续目标，优先调用easel_goal_update更新完整steps（id/title/status/detail）；'
                 '不要另建普通计划或派生Agent。完成需实际核验，失败保留未完成项。' if runtime.get('goalManaged') else planning_instructions())
     message += collaboration_instructions(runtime)
-    if req.sessionId and _browser_service.has_pages(req.sessionId):
+    if req.sessionId:
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
     specs = _selected_skill_specs(req)

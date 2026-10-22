@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 from pathlib import Path
 import secrets
@@ -15,6 +16,7 @@ import urllib.parse
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from .browser_bridge_auth import HEADER as BRIDGE_HEADER, MAX_BODY as BRIDGE_MAX_BODY, TOOL_PATH, verify as verify_bridge
 
 COOKIE = 'easel_access'
 LIFETIME = 12 * 60 * 60
@@ -107,6 +109,34 @@ class ServerAccessMiddleware:
         request = Request(scope, receive)
         path = request.url.path
         peer = (scope.get('client') or ('unknown',))[0]
+        if request.headers.get(BRIDGE_HEADER):
+            # Only the same-host CLI may authenticate one exact tool request.
+            # Public HTTPS/cookie access and all other endpoints stay unchanged.
+            try:
+                local = ipaddress.ip_address(peer).is_loopback
+            except ValueError:
+                local = False
+            if (not local or request.method != 'POST' or not TOOL_PATH.fullmatch(path)
+                    or request.headers.get('origin') or request.headers.get('host') not in self.authorities):
+                return await JSONResponse({'detail': '本机浏览器桥接认证无效。'}, status_code=403)(scope, receive, send)
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > BRIDGE_MAX_BODY:
+                    return await JSONResponse({'detail': '浏览器操作参数过长。'}, status_code=413)(scope, receive, send)
+            raw = bytes(body)
+            if not verify_bridge(self.store.key, path, raw, request.headers[BRIDGE_HEADER]):
+                return await JSONResponse({'detail': '本机浏览器桥接认证无效或已过期。'}, status_code=403)(scope, receive, send)
+            delivered = False
+
+            async def replay():
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {'type': 'http.request', 'body': raw, 'more_body': False}
+                return await receive()
+
+            return await self.app(scope, replay, send)
         forwarded = request.headers.get('x-forwarded-proto')
         # The Compose app port is private. Trust forwarding only from its nginx network.
         secure = request.url.scheme == 'https' or forwarded == 'https'

@@ -1,3 +1,10 @@
+## 0.13.4 · 2026-10-22 · Browser bridge access / 网页访问桥接
+
+- Authenticate same-host browser CLI requests with short-lived, request-bound signatures; keep external HTTPS, login and site-control checks. / 修复服务器模式桥接被HTTPS认证拒绝，仅接受本机、指定接口、绑定会话及原始请求内容的短期签名。
+- Include shared-browser instructions in empty chat sessions so OpenClaw can open the first page. / 空会话也提供首个网页打开说明，不因注入说明自动启动浏览器。
+- Verify a real page through production access middleware and Gemini signed-out content in the local Easel panel. / 真实Chromium与生产访问中间件联测，本地Easel实际显示Gemini未登录页面。
+- [Evidence and upgrade boundaries / 验证与升级边界](docs/browser-web-access-0.13.4-2026-10-22.md). ChatGPT human verification and host 138 site connectivity remain unresolved; no 0.13.4 deployment or installer publication.
+
 ## 0.13.3 · 2026-10-22 · Shared browser interaction / 同页网页操作
 
 - Restore the existing JPEG live view and session-owned pointer/keyboard transport; support committed Chinese composition and retain screenshot compatibility. / 迁回实时画面与输入，中文输入只发送提交文本，兼容旧截图模式。

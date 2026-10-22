@@ -80,7 +80,7 @@ def test_codex_worker_scopes_tool_and_stop_prevents_late_dispatch(tmp_path):
         browser.close()
 
 
-def test_openclaw_context_contains_owned_image_and_browser_bridge_only_when_available(tmp_path, monkeypatch):
+def test_openclaw_context_can_open_first_page_and_keeps_attachment_ownership(tmp_path, monkeypatch):
     import sys
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'web'))
     import app as web
@@ -90,8 +90,9 @@ def test_openclaw_context_contains_owned_image_and_browser_bridge_only_when_avai
     file=save_evidence(tmp_path,'owned',b'\x89PNG-test','shot')
     req=web.ChatRequest(sessionId='owned',message='分析',attachments=[file])
     first=web._chat_message(req)
-    assert 'image/read' in first and str(tmp_path/file['path']) in first
-    assert 'browser_page.py' not in first
+    import json
+    assert 'image/read' in first and json.dumps(str(tmp_path/file['path']), ensure_ascii=False)[1:-1] in first
+    assert 'browser_page.py' in first and '没有标签时用create' in first
     folder=browser._folder('owned');folder.mkdir(parents=True);(folder/'tabs.json').write_text('{"tabs":[]}')
     assert 'browser_page.py' in web._chat_message(req)
     from fastapi import HTTPException
