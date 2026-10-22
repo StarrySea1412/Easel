@@ -85,7 +85,7 @@ export default function ProjectUsageDashboard({data,summary,sessionTitles,onInsp
     </div>
     <section className="usage-model-ranking" aria-label="模型消耗排行"><header><div><h3><IconCoins size={16}/>模型消耗</h3><p>项目累计 · 按已记录 Token 排序，跨渠道同名模型分别统计</p></div><span>前 {data?.models.length||0} / {data?.modelCount||0} 项</span></header>
       {data?.models.length ? <div className="usage-model-grid">{data.models.map((row,i)=><article key={`${row.channelId}/${row.model}`} className={`usage-model-card is-${COLORS[i]}`}>
-        <div className="usage-model-top"><span className="usage-model-icon"><ObservedProviderIcon provider={row.provider} size={23}/></span><span>#{i+1}</span></div><h4 title={row.model}>{row.model||'模型未记录'}</h4><p>{row.channelName||row.provider||'渠道未记录'} · {row.summary.calls} 条记录</p>
+        <div className="usage-model-top"><span className="usage-model-icon"><ObservedProviderIcon provider={row.provider} model={row.model} size={23}/></span><span>#{i+1}</span></div><h4 title={row.model}>{row.model||'模型未记录'}</h4><p>{row.channelName||row.provider||'渠道未记录'} · {row.summary.calls} 条记录</p>
         <strong>{number(row.summary.totalTokens)}<small> Token</small></strong><div className="usage-model-track"><span style={{width:`${(row.summary.totalTokens||0)/peak*100}%`}}/></div><small>{row.summary.coverage.totalTokens<row.summary.calls?'部分上报 · ':''}记录费用 {number(row.summary.recordedCostUsd,'recordedCostUsd')}</small><CacheReuseMetric value={row.summary.cacheReuse}/>
       </article>)}</div>:<p className="usage-chart-empty">{data?'暂无模型用量记录':'服务尚未提供模型汇总；已有渠道明细见下方'}</p>}
       <p className="usage-chart-footnote"><IconChevron size={12}/>完整渠道、模型与会话统计见下方明细</p>

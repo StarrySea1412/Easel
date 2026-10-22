@@ -106,6 +106,31 @@ test('provider filter narrows the request browser and clears cleanly', async t =
   assert.match(view.text(), /2 \/ 2 次/);
 });
 
+test('model ranking uses recorded model brands across compatible channels and retains provider fallback', async t => {
+  const cases = [
+    ['happycoding', 'happycoding', 'deepseek-v4.1-flash', 'deepseek'],
+    ['unknown', '未命名渠道', 'deepseek-v4-flash', 'deepseek'],
+    ['openai', 'muyuan.do', 'deepseek-v4.1-flash', 'deepseek'],
+    ['openai', 'openai', 'deepseek-v4.1-flash', 'deepseek'],
+    ['relay', '写作渠道', 'claude-fixture', 'claude'],
+    ['openai', '谷歌兼容渠道', 'gemini-fixture', 'gemini'],
+    ['relay', 'GPT渠道', 'gpt-fixture', 'openai'],
+    ['anthropic', '旧记录', '', 'claude'],
+    ['unknown', '未知渠道', 'unrecognized', null],
+  ];
+  const models=cases.map(([provider,channelName,model],i)=>({channelId:`channel-${i}`,provider,channelName,model,summary:summary(1,100)}));
+  const payload=usagePayload('',{dashboard:{days:[],timezone:'Asia/Shanghai',rangeDays:30,undatedCalls:0,futureCalls:0,recentLimit:20,recent:[],models,modelCount:models.length}});
+  const view=await fixture(t,{embedded:true,sessionId:'',activityView:'project'},payload);await view.respondFirst();
+  const cards=[...view.container.querySelectorAll('.usage-model-card')];
+  assert.equal(cards.length,cases.length);
+  cases.forEach(([,channelName,model,brand],i)=>{
+    assert.equal(cards[i].querySelector('[data-provider-brand]')?.getAttribute('data-provider-brand')??null,brand);
+    assert.equal(cards[i].querySelector('h4').textContent,model||'模型未记录');
+    assert.match(cards[i].textContent,new RegExp(channelName));
+    assert.match(cards[i].textContent,/100/);
+  });
+});
+
 test('failed usage fetch surfaces the error without inventing numbers', async t => {
   const view = await fixture(t, { embedded: true });
   await act(async () => view.requests[0].reject(new Error('读取失败')));

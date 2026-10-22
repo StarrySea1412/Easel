@@ -20,10 +20,11 @@ import wenxin from '../assets/providers/wenxin-color.svg';
 
 const ICONS: Record<string, string> = { deepseek, openai, claude, gemini, qwen, moonshot, zhipu, minimax, doubao, siliconcloud, grok, mistral, fishaudio, hunyuan, spark, wenxin };
 
-/** Callers must supply an observed provider, never a guessed current config. */
-export function ObservedProviderIcon({provider,size=16}:{provider?:string;size?:number}) {
+/** Use the recorded model identity first, then the observed provider; never current config. */
+export function ObservedProviderIcon({provider,model,size=16}:{provider?:string;model?:string;size?:number}) {
   const aliases:Record<string,string>={anthropic:'claude',google:'gemini',dashscope:'qwen',xai:'grok',kimi:'moonshot',glm:'zhipu'};
-  const key=aliases[provider||'']||provider||'';
+  const modelBrand=model?providerBrand({name:'',slot:'',baseUrl:'',model}):null;
+  const key=modelBrand||aliases[provider||'']||provider||'';
   return ICONS[key]?<img src={ICONS[key]} alt="" width={size} height={size} draggable={false} data-provider-brand={key}/>:<span aria-hidden="true">?</span>;
 }
 

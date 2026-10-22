@@ -1,3 +1,8 @@
+## 0.14.1 · 2026-10-22 · Recorded model icons / 历史模型图标
+
+- Prioritize the observed model identity in usage rankings, then fall back to the recorded provider; preserve compatible channel names and all usage values. / 用量排行优先实际模型品牌，未知模型回退记录渠道；修正DeepSeek显示为OpenAI/问号，渠道及统计不变。
+- Host 138 deployment is authorized with the 0.14.0 download and 0.13.4 bridge changes; final identity and acceptance are recorded separately. / 已授权连同网页下载与桥接部署138，实际运行及验收以[部署回执](docs/release-138-0.14.1-2026-10-22.md)为准；GPT/Gemini全自动暂缓，安装器未发布。
+
 ## 0.14.0 · 2026-10-22 · Browser file downloads / 网页文件下载
 
 - Detect download controls in page observations and expose a guarded download action to native browser tools and the OpenClaw bridge. Selecting an export menu does not count as a saved file. / 页面观察识别下载入口，原生工具及OpenClaw桥接可选择入口；导出菜单不算文件保存。
