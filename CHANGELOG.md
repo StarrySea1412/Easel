@@ -6,7 +6,7 @@
 ## 0.14.1 · 2026-10-22 · Recorded model icons / 历史模型图标
 
 - Prioritize the observed model identity in usage rankings, then fall back to the recorded provider; preserve compatible channel names and all usage values. / 用量排行优先实际模型品牌，未知模型回退记录渠道；修正DeepSeek显示为OpenAI/问号，渠道及统计不变。
-- Host 138 deployment is authorized with the 0.14.0 download and 0.13.4 bridge changes; final identity and acceptance are recorded separately. / 已授权连同网页下载与桥接部署138，实际运行及验收以[部署回执](docs/release-138-0.14.1-2026-10-22.md)为准；GPT/Gemini全自动暂缓，安装器未发布。
+- Host 138 deployment is authorized with the 0.14.0 download and 0.13.4 bridge changes; final identity and acceptance are recorded separately. / 已授权连同网页下载与桥接部署138，实际运行及验收以[部署回执](docs/archive/2026/release-138-0.14.1-2026-10-22.md)为准；GPT/Gemini全自动暂缓，安装器未发布。
 
 ## 0.14.0 · 2026-10-22 · Browser file downloads / 网页文件下载
 
@@ -47,7 +47,7 @@
 - Add weighted cache-read ratios, coverage and invalid/missing counters to existing usage groups. / 原用量分组内增加加权缓存占比及有效、缺失、异常样本数。
 - Add one SQLite experience service for Web and CLI/Skill; explicit legacy import, pending proposals, revision-bound confirmation, editing, invalidation, restore, deletion and history. / 统一经验服务，支持旧文确认导入与完整条目生命周期，账号经验按稳定ID隔离。
 - Saved analysis creates evidence-bound candidates; references are serialized separately from exact user text in the compatible OpenClaw message. / 分析提案绑定原账号及材料哈希，消息分离用户原文和引用资料。
-- Limits and deployment gates: [implementation record](docs/inference-memory-0.13.0-2026-10-21.md). No host 138 upgrade, installer publication or paid-model evaluation. / 138、安装器及真实模型效果评估未执行。
+- Limits and deployment gates: [implementation record](docs/archive/2026/inference-memory-0.13.0-2026-10-21.md). No host 138 upgrade, installer publication or paid-model evaluation. / 138、安装器及真实模型效果评估未执行。
 - Distinguish analysis, generation and general chats with accessible icons; collapse composer material summaries with full material access. / 会话类型图标、默认收起的材料摘要与完整材料入口。
 
 ## 0.12.0 · 2026-10-21 · Publishing receipts page / 独立发布回执页
@@ -55,47 +55,47 @@
 - Add sidebar/creation/notification navigation, refreshable deep links, search and shared platform/state selectors; retain verification, SMS and notification controls. / 新增侧栏、创作导航及通知入口，支持刷新后回到指定回执、搜索与共享筛选控件，保留核实/短信/通知设置。
 - Explain missing video or cover image requirements and focus the media picker; link to the content library when it has no media. / 素材缺失显示视频或封面图要求并定位选择区，空库可前往内容库。
 - Reuse the verified Zhihu identity API in publication preflight, recognize the current column-editor header, distinguish unknown checks from explicit login prompts and persist actionable failure reasons. / 发布预检复用知乎身份接口并适配当前专栏页，区分检查未知与明确登录要求，持久化可处理的失败原因。
-- Source, checks and deployment scope: [verification record](docs/publish-receipts-page-0.12.0-2026-10-21.md). Host 138 and installers remain on their previous versions. / 源码、验证及部署边界见记录，138与安装器保持原版本。
+- Source, checks and deployment scope: [verification record](docs/archive/2026/publish-receipts-page-0.12.0-2026-10-21.md). Host 138 and installers remain on their previous versions. / 源码、验证及部署边界见记录，138与安装器保持原版本。
 
 ## 0.11.2 · 2026-10-21 · Search recovery and latest acceptance build / 搜索修复与138验收更新
 
 - Repair Easel's accidental safety-only plugin allowlist; preserve explicit operator restrictions and load the bundled search provider across Windows/Linux. / 修复安全插件误建白名单导致网络搜索禁用，保留明确禁用策略，适配Windows/Linux插件SDK加载。
 - Ship the relocated workspace and safety plugin in Linux releases; retain image prompt tools, visible clipboard/prompt reverse engineering and inspiration from 0.11.1. / Linux发布补齐迁移后的workspace及安全插件，包含0.11.1剪贴板外置、提示词反推及灵感常显界面。
 - Restore channel-first model selection and remove deleted-chat notifications including late legacy events. / 恢复顶部渠道切换与当前渠道模型列表，清理已删除对话通知及晚到旧事件。
-- Deployment evidence and known full-suite failures: [138 verification record](docs/release-138-0.11.2-2026-10-21.md). Installers are unchanged. / 部署证据及全量测试已知失败见记录，安装器不发布。
+- Deployment evidence and known full-suite failures: [138 verification record](docs/archive/2026/release-138-0.11.2-2026-10-21.md). Installers are unchanged. / 部署证据及全量测试已知失败见记录，安装器不发布。
 
 ## 0.11.1 · 2026-10-21 · Visible image prompt tools / 生图常用入口常显
 
 - Keep clipboard paste, prompt reverse engineering and inspiration examples visible; use shared SVG icons and confirm before replacing an existing prompt. / 剪贴板、提示词反推与灵感示例常显，复用SVG图标，替换已有描述先用应用确认框。
 - Installed image prompt Skills open separate unsent chat drafts with the current description and ratio, linked to the image auxiliary panel. / 已安装的图片提示词技能可携带描述与比例创建独立对话草稿并打开生图辅助面板，不自动发送或生成。
-- Local activation and browser acceptance remain pending; host 138 and installers unchanged. / 本机生效及实机验收仍待完成，138及安装器未变。[设计与验证](docs/image-studio-prompt-tools-2026-10-21.md)。
+- Local activation and browser acceptance remain pending; host 138 and installers unchanged. / 本机生效及实机验收仍待完成，138及安装器未变。[设计与验证](docs/archive/2026/image-studio-prompt-tools-2026-10-21.md)。
 
 ## 0.11.0 · 2026-10-21 · Content library organization / 内容库来源与整理
 
 - Return to a delivery-backed source or a clearly labeled legacy reference conversation; preserve unsent drafts and add the file as a deduplicated quote. Handle deletion, archive restoration and read-only backups. / 按真实交付记录返回来源对话，旧文件明确标记引用对话；保留未发送草稿，去重加入文件引用，区分已删除、归档恢复和只读备份。
 - Persist nested classification folders with create, rename, delete, file assignment and unfiled views. Keep physical file URLs intact and retain files when classifications are deleted. / 持久化嵌套分类文件夹，支持创建/改名/删除/文件归类及未归类视图，不移动文件，删除分类保留原文件。
-- Source implementation delivered; local activation and browser visual acceptance pending, host 138 and installers unchanged. / 隔离源码已实现，本机生效及浏览器视觉待验，138及安装器未更新。[调研与验收](docs/output-library-organization-2026-10-21.md)。
+- Source implementation delivered; local activation and browser visual acceptance pending, host 138 and installers unchanged. / 隔离源码已实现，本机生效及浏览器视觉待验，138及安装器未更新。[调研与验收](docs/archive/2026/output-library-organization-2026-10-21.md)。
 
 ## 0.10.4 · 2026-10-21 · Analysis material layout / 分析材料卡适配
 
 - Separate account title, metadata and material action; use container width for narrow columns, retain full title on hover and remove repeated labels. / 账号标题、平台信息与查看材料操作分行；按容器宽度适配窄分栏，标题省略且悬停保留全称，移除重复标签。
-- Materials, drafts and the existing dialog remain intact. Browser visual acceptance pending; host 138 and installers unchanged. / 保留材料、草稿与原弹窗。浏览器视觉待验，138与安装器未更新。[设计与验证](docs/analysis-composer-layout-2026-10-21.md)。
+- Materials, drafts and the existing dialog remain intact. Browser visual acceptance pending; host 138 and installers unchanged. / 保留材料、草稿与原弹窗。浏览器视觉待验，138与安装器未更新。[设计与验证](docs/archive/2026/analysis-composer-layout-2026-10-21.md)。
 
 ## 0.10.3 · 2026-10-21 · Recent conversation loading / 最近对话加载
 
-- Show five shared skeleton rows while the first remote conversation list is loading; preserve cached rows during background refresh and respect reduced motion. / 首次读取最近对话显示五行共享骨架，后台刷新保留原列表，减少动态效果时关闭微光。[验证与交付范围](docs/recent-conversations-skeleton-2026-10-21.md)。
+- Show five shared skeleton rows while the first remote conversation list is loading; preserve cached rows during background refresh and respect reduced motion. / 首次读取最近对话显示五行共享骨架，后台刷新保留原列表，减少动态效果时关闭微光。[验证与交付范围](docs/archive/2026/recent-conversations-skeleton-2026-10-21.md)。
 - Local/source only; host 138 and installers unchanged. / 仅本机及源码，138与安装器未更新。
 
 ## 0.10.2 · 2026-10-21 · Analysis switching and growth / 分析切换与账号增长
 
 - Analysis tabs gain icons, active states, headings and keyboard navigation while retaining workspaces. / 分析视图增加图标、选中态、标题与键盘切换，保留工作区。
 - Persist identity-scoped overview history; switch five real growth windows with baseline dates, missing comparisons and zero changes. Upgrade caches through read-only snapshots without collecting again. / 按账号身份保存历史，五时段切换真实增量与基准时间，区分缺失和持平，只读升级旧缓存不重新采集。
-- Local/source only; host 138 and installers unchanged. Browser acceptance pending due to denied access. / 仅本机和源码，138与安装器未改，浏览器访问受限待验收。[验证记录](docs/account-growth-windows-2026-10-21.md)。
+- Local/source only; host 138 and installers unchanged. Browser acceptance pending due to denied access. / 仅本机和源码，138与安装器未改，浏览器访问受限待验收。[验证记录](docs/archive/2026/account-growth-windows-2026-10-21.md)。
 
 ## 0.10.1 · 2026-10-21 · Analysis report reading and latest control / 分析报告阅读与返回底部
 
 - Hide the return control when the conversation is already at the bottom, including active runs and pending reconnects; show it only while scrolled away. / 对话已到底部时隐藏返回按钮，包括执行中与等待重连；仅离开底部时显示。
-- Share a research-informed report reader between the analysis panel and full page: separate existing conclusions and evidence, fold technical receipts, retain the original text and contain wide tables. / 辅助面板与完整分析页共用经过设计调研的报告阅读组件：结论与证据分节，技术回执折叠，保留完整原文，表格独立滚动。设计依据与验收见 [报告设计记录](docs/analysis-report-design-2026-10-21.md)。
+- Share a research-informed report reader between the analysis panel and full page: separate existing conclusions and evidence, fold technical receipts, retain the original text and contain wide tables. / 辅助面板与完整分析页共用经过设计调研的报告阅读组件：结论与证据分节，技术回执折叠，保留完整原文，表格独立滚动。设计依据与验收见 [报告设计记录](docs/archive/2026/analysis-report-design-2026-10-21.md)。
 - Local frontend fix only; host 138 and installers unchanged. / 仅本机前端修复，138与安装器未更新。
 
 ## 0.10.0 · 2026-10-21 · Creation collaboration and analysis / 创作协作与分析
@@ -182,7 +182,7 @@
 
 - Queue chat runs by provider across sessions and processes; queued work can be stopped and fails clearly after five minutes without being sent. Other providers remain parallel. / 按渠道跨会话、跨进程排队；等待中可停止，超过5分钟明确提示未发送，其他渠道仍可并行。
 - Classify only stored failures with an explicit HTTP 429 concurrency-limit detail as provider rate limits. Never replay the failed turn automatically. / 仅将包含明确HTTP 429并发上限的历史失败归为服务商限流，不自动重发。
-- Source changes and focused checks are pushed to `codex/chat-provider-queue-0.7.5`; host 138 remains on 0.7.4 and is not deployed in this change. / 源码及定向检查已推送；138仍为0.7.4，本次未部署或更新安装器。[Diagnosis and verification / 诊断与验证](docs/chat-provider-queue-2026-10-20.md).
+- Source changes and focused checks are pushed to `codex/chat-provider-queue-0.7.5`; host 138 remains on 0.7.4 and is not deployed in this change. / 源码及定向检查已推送；138仍为0.7.4，本次未部署或更新安装器。[Diagnosis and verification / 诊断与验证](docs/archive/2026/chat-provider-queue-2026-10-20.md).
 
 ## 0.7.4 · 2026-10-20 · Linux chat request fix / Linux 对话请求修复
 
@@ -194,12 +194,12 @@
 - Retain stale account identity while checking; distinguish unknown from platform-confirmed expiry. Automatically check on entry, focus, network recovery and every minute, with skeleton placeholders. / 自动检测、骨架屏，缓存过期和网络失败不再冒充退出。
 - Report visible scan acknowledgements for XHS, web platforms and WeChat; unify progress, retry messaging and success SVG. / 补齐真实已扫码回调与手机确认提示，统一成功弹窗。
 - Recover missing Chat streams only from the same completed turn; retain partial output, clear stale markers and pause queues when unknown. Never automatically replay inference. / 两条续接路径共用同轮恢复，缺失结果暂停队列。
-- Production and isolated host 138 now run 0.7.3 / 8e836509e4f1; HTTPS login, Gateway, assets and runtime hashes passed. Real phone scans and original conversation recovery remain for user acceptance. / 138已部署，保留账号与配置。[部署回执 / Evidence](docs/release-138-0.7.3-2026-10-20.md).
+- Production and isolated host 138 now run 0.7.3 / 8e836509e4f1; HTTPS login, Gateway, assets and runtime hashes passed. Real phone scans and original conversation recovery remain for user acceptance. / 138已部署，保留账号与配置。[部署回执 / Evidence](docs/archive/2026/release-138-0.7.3-2026-10-20.md).
 
 ## 0.7.2 deployment receipt · 2026-10-20 · 138部署补记
 
 - Activate committed `e63a08eac773` in isolated and production stacks, preserve snapshots and previous fixed images, and verify HTTPS login, Gateway, assets and runtime hashes. / 已按用户新授权更新138，运行源码与后续文档提交分别记录。
-- Add an enabled HappyCoding channel in production with five discovered Chat models, keeping the existing default. Credentials are runtime-only; no inference requests or installer publication. Final browser/business acceptance remains with the user. / 正式新增happycoding，未调用推理。[Receipt / 回执](docs/release-138-0.7.2-2026-10-20.md)。
+- Add an enabled HappyCoding channel in production with five discovered Chat models, keeping the existing default. Credentials are runtime-only; no inference requests or installer publication. Final browser/business acceptance remains with the user. / 正式新增happycoding，未调用推理。[Receipt / 回执](docs/archive/2026/release-138-0.7.2-2026-10-20.md)。
 
 ## 0.7.2 · 2026-10-20 · Sources search styling / 来源搜索框样式
 
@@ -216,35 +216,35 @@
 - Rebuild provider editing around separate saving, testing, default selection, enablement and persistent ordering. Saved models appear in Chat automatically; disabled choices remain visible and cannot start new runs. / 重整供应商流程，保存即进入对话列表，停用保留灰态并阻止新任务沿用。
 - Keep model discovery in the original field, support independent channel naming, and add read-only image-service model discovery with stale-response cancellation. / 获取模型原位选择、渠道独立命名、生图服务候选获取及过期响应隔离。
 - Default to 14px with a persistent 12–20px continuous slider. Scope progress control styles, group completed/remaining steps, and expand the recent-usage scroll area. / 默认14px连续字号，进度胶囊样式与分组修复，最近调用完整滚动。
-- Final browser acceptance is assigned to the user. No real model inference, host 138 deployment/restart or installer publication in this revision. / 浏览器最终验收交用户，本轮无真实推理、138部署/重启或安装器发布。[Evidence / 交付范围](docs/provider-flow-and-typography-2026-10-20.md)。
+- Final browser acceptance is assigned to the user. No real model inference, host 138 deployment/restart or installer publication in this revision. / 浏览器最终验收交用户，本轮无真实推理、138部署/重启或安装器发布。[Evidence / 交付范围](docs/archive/2026/provider-flow-and-typography-2026-10-20.md)。
 
 ## 0.6.2 · 2026-10-20 · Reliability fixes / 可靠性修复
 
-- Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/agent-retry-button-2026-10-20.md)。
+- Style the Agent behavior retry with the shared button, refresh icon and disabled loading state. / 隔离浏览器核对浅深色及键盘；全量前端1216项通过（含其他在途修复），本机7880新构建已核对，138未部署。[验证范围](docs/archive/2026/agent-retry-button-2026-10-20.md)。
 - Match the reference compact supplier rows with check/edit/more icons; More → Delete handles built-in and custom suppliers, stable identities and persisted configuration cleanup with rollback. / 删除先修改草稿，保存后生效；支持全删、键盘、焦点和390px布局。
 - Run actual model checks immediately using built-in text parameters; optional browser defaults and an independent availability section share the same result. Model discovery stays separate. / 无需先配置检测参数；真实请求可能计费，本轮只用隔离响应验收。
 - Reject malformed account caches and online identity payloads. Add safe page failure receipts that distinguish module loading from rendering and retain manual retry and diagnostic copy. / 不清空用户Cookie/profile；不上传错误原文、昵称、缓存或凭据。
 - Provider frontend51/model-health backend28 checks passed. Account frontend42/failure backend16 checks and production build/lint passed (20 existing warnings). Extended configuration/security suite:191 passed,2 pre-existing source-marker assertions failed. Real browser fixture recovery and read-only host138 inspection are documented separately. / 138仍0.3.5，原截图根因尚未确认；未部署/重启或发布安装器。
-- [Provider scope / 供应商验证](docs/provider-management-2026-10-20.md) · [138 account investigation / 账号页排障](docs/accounts-page-recovery-2026-10-20.md).
+- [Provider scope / 供应商验证](docs/archive/2026/provider-management-2026-10-20.md) · [138 account investigation / 账号页排障](docs/archive/2026/accounts-page-recovery-2026-10-20.md).
 
 ## 0.6.1 · 2026-10-20 · Web sources panel / 网页来源面板
 
 - Add Chat → Add panel → Sources: observed web results, safe original links, keyword filtering, turn navigation, attachments and actual tool counts. / 同网址合并保留轮次与操作证据，普通回答链接不冒充检索来源。
 - Extract bounded metadata from tool receipts, including native Codex/MCP/browser results; recover known legacy web-tool outputs. Load recent 10 turns in bounded batches, isolate sessions and preserve partial results on failure. / 本机手动浏览与正文读取只保留元数据，最多200次观察。
-- Backend36/frontend44 targeted checks, final build and lint (0 errors/20 existing warnings), real browser fixture checks and actual local7880 entry/empty state verified. Local7880 restarted; development revision remains null. No138 deployment/restart or installer. [Evidence / 验证范围](docs/chat-sources-2026-10-20.md).
+- Backend36/frontend44 targeted checks, final build and lint (0 errors/20 existing warnings), real browser fixture checks and actual local7880 entry/empty state verified. Local7880 restarted; development revision remains null. No138 deployment/restart or installer. [Evidence / 验证范围](docs/archive/2026/chat-sources-2026-10-20.md).
 
 ## 0.6.0 · 2026-10-20 · Usage dashboard / 用量图表仪表盘
 
 - Keep all recorded project totals as the default; add a 7/30-day area chart, date inspection, metric controls, reporting ring, recent usage and model ranking. / 支持方向键/Home/End及会话下钻，累计统计不随趋势范围变化。
 - Aggregate 30 Beijing-calendar days from the existing ledger; preserve missing values, partial coverage and zero recorded fees. Separate identical models on distinct observed channels. / 最近20条安全字段、前8个渠道模型排行；未知/未来时间单列，不纳入趋势。
-- Real isolated Chromium checks cover light/dark, empty windows, keyboard, drill-down and actual 390px layout with fixtures. Normal backend restart is needed for the additional response fields; the existing service, host 138 and installers remain unchanged. [Evidence / 验证范围](docs/usage-dashboard-2026-10-20.md).
+- Real isolated Chromium checks cover light/dark, empty windows, keyboard, drill-down and actual 390px layout with fixtures. Normal backend restart is needed for the additional response fields; the existing service, host 138 and installers remain unchanged. [Evidence / 验证范围](docs/archive/2026/usage-dashboard-2026-10-20.md).
 
 ## 0.5.0 · 2026-10-20 · Clearer Settings and Activity / 设置与运行记录整理
 
 - Group Settings into four labeled categories with consistent icons and plain-language descriptions; move collaboration limits into advanced settings while retaining drafts and legacy deep links. / 六种AI用途提供图标、说明及方向键切换，导入与供应商管理按需展开。
 - Open Activity on all recorded project usage, including eight expanded metrics, channel totals and the existing recent-session summary. Session details, tasks and failures remain accessible; exact turn links bypass the project view. / 无本地会话也能读取项目用量，未上报与部分数据继续明确。
 - Use compact task rows and readable failure stages; keep HTTP, build and correlation details in an expandable technical section. / 定时启用状态不代替最近执行结果，白名单复制及认证查询保留。
-- All 1,183 frontend tests, production build and lint pass (20 existing warnings). Real-browser checks use controlled responses and cover navigation, keyboard access, light/dark and an actual 390 CSS px iframe. No live model, SMTP, platform login or publication was exercised. Product version comes from `pyproject.toml`; 138 deployment and installer publication remain paused. [Evidence / 验证范围](docs/settings-activity-clarity-2026-10-20.md).
+- All 1,183 frontend tests, production build and lint pass (20 existing warnings). Real-browser checks use controlled responses and cover navigation, keyboard access, light/dark and an actual 390 CSS px iframe. No live model, SMTP, platform login or publication was exercised. Product version comes from `pyproject.toml`; 138 deployment and installer publication remain paused. [Evidence / 验证范围](docs/archive/2026/settings-activity-clarity-2026-10-20.md).
 
 ## 0.4.0 · 2026-10-20 · Inline actions and structured progress / 对话行为与进度胶囊
 
@@ -252,28 +252,28 @@
 - Give long tasks native update_plan/TodoWrite guidance and a bounded local CLI receipt fallback. Persist successful full-plan receipts; failure, stop and tool completion never check off unfinished steps. / 普通对话可独立拥有checklist，短问答不强制规划。
 - Add task-source summaries and bounded failure-ID inspection/copying to Activity, including direct links from import/publication failures. / 任务可返回原对话、定时或发布入口，失败刷新保留快照。
 - Fix Playwright startup under Windows Selector policy with a worker-owned Proactor loop; keep action errors through refresh and automatic resize, with serial visible-page polling. / 不改变全局事件循环或既有CDP/网络隔离。
-- Validation: 102 focused backend checks, full frontend 1,180 tests plus final focused regressions, build/lint and real isolated browser acceptance. Browser navigation/input/screenshot evidence is real; agent, task and publication observations use fixtures. Actual 390 CSS px layout and dark/light checked. 138 deployment remains paused; no paid inference, live platform publication or new installer. [Evidence and limitations / 证据边界](docs/chat-progress-capsule-2026-10-20.md).
+- Validation: 102 focused backend checks, full frontend 1,180 tests plus final focused regressions, build/lint and real isolated browser acceptance. Browser navigation/input/screenshot evidence is real; agent, task and publication observations use fixtures. Actual 390 CSS px layout and dark/light checked. 138 deployment remains paused; no paid inference, live platform publication or new installer. [Evidence and limitations / 证据边界](docs/archive/2026/chat-progress-capsule-2026-10-20.md).
 
 ## 0.3.6 · 2026-10-19 · Session freshness, ClawHub downloads and failure receipts
 
 - Pin `ownerHandle` when downloading a ClawHub archive; duplicate slugs otherwise return HTTP409. / 修复同名多作者技能下载漏传作者，保留官方409分类。
 - Visible Accounts/Publish pages refresh every minute, recheck online conclusions after two minutes and wake on focus/network recovery. Manual refresh and publication bypass the online cache; background checks pause while hidden or during the page's QR flow, remain serial and preserve newer account changes. / 失效结果跨组件与标签页同步；过期/未知不计为已连接，本地标记不能覆盖新失效结论，检查失败保留身份但提示待确认。
 - Bounded API journals and browser callbacks correlate failure IDs and retain stage/platform/build metadata. Publication reports account/media preflight blocks, identity and submission errors, and new failed/login-required receipts without retrying content. / 字段白名单排除标题、正文、素材路径、凭据与错误原文；沿用认证、轮转与限流。
-- Backend 218 and frontend 124 focused checks pass; production build/lint pass (20 existing warnings). Isolated real-browser checks cover expired-cache -> periodic offline detection -> publication blocked -> persisted error ID; official PPT download/import was separately verified in a temporary directory on 138. Host 138 remains 0.3.5 / `193278acf42f`; deployment is explicitly paused and live publication remains unverified. [Details / 详情](docs/clawhub-failure-events-2026-10-19.md).
+- Backend 218 and frontend 124 focused checks pass; production build/lint pass (20 existing warnings). Isolated real-browser checks cover expired-cache -> periodic offline detection -> publication blocked -> persisted error ID; official PPT download/import was separately verified in a temporary directory on 138. Host 138 remains 0.3.5 / `193278acf42f`; deployment is explicitly paused and live publication remains unverified. [Details / 详情](docs/archive/2026/clawhub-failure-events-2026-10-19.md).
 
 ## 0.3.5 · 2026-10-19 · Cancel owned login flows / 结束所属扫码流程
 
 - 关闭扫码窗口等待启动响应并取消对应attempt；结束前拦住新登录，失败可重试。Closing a QR dialog waits for startup and cancels only its owned attempt before allowing another login.
 - 后端等待子进程实际退出才释放名额；HTTP断开后继续结算，旧请求不能结束新重连，已确认登录等待保存且保留success。Disconnected clients cannot release reservations early; stale cancellation cannot stop a newer runner; confirmed logins finish persistence.
 - 保留Cookie/profile和既有作品；取消状态停止轮询、隐藏旧二维码。Profiles remain intact and cancelled flows no longer poll or expose stale QR images.
-- 验证：后端155项、前端50项、build/lint（20个既有warning），隔离真实浏览器键盘关闭、结算状态和切平台通过。真实平台登录/身份/上传/发布按用户要求暂停，138隔离/正式已运行0.3.5 / `193278acf42f`，HTTP认证、版本和前端资源摘要通过。[实现与验收](docs/account-login-cancellation-2026-10-19.md)。
+- 验证：后端155项、前端50项、build/lint（20个既有warning），隔离真实浏览器键盘关闭、结算状态和切平台通过。真实平台登录/身份/上传/发布按用户要求暂停，138隔离/正式已运行0.3.5 / `193278acf42f`，HTTP认证、版本和前端资源摘要通过。[实现与验收](docs/archive/2026/account-login-cancellation-2026-10-19.md)。
 
 ## 0.3.4 · 2026-10-19 · Platform login admission / 平台登录资源冲突
 
 - 自动账号核验串行并在扫码期间停止后续检查，收到429不再连打全部平台；本标签页的手动核验与登录启动共用队列。Account checks and login startup share a serial queue.
 - 浏览器名额在新登录进程启动前申请，已有二维码复用、凭据表单不额外占位；手动重连确认旧进程退出后立即释放，异常启动归还名额，HTTP断开不提前释放活任务。Reconnects reuse the active runner; restart retains the single-task limit.
 - 登录成功等待profile写入进程退出，再显示成功/触发身份核验，避免保存与读取争用。Wait for profile persistence before reporting login completion.
-- 验证：后端140项、前端46项及build/lint通过；138正式激活与用户扫码验收分别记录于[平台测试矩阵](docs/platform-login-testing-2026-10-19.md)。未公开发布内容，安装器未更新。
+- 验证：后端140项、前端46项及build/lint通过；138正式激活与用户扫码验收分别记录于[平台测试矩阵](docs/archive/2026/platform-login-testing-2026-10-19.md)。未公开发布内容，安装器未更新。
 
 ## 0.3.3 · 2026-10-19 · ClawHub import and selection / ClawHub导入选择
 
@@ -281,26 +281,26 @@
 - 创作框支持按明确作者和固定版本“导入并选择”；文件存放在持久数据目录，保存失败或风险拦截不计入选择；已导入项可选择/移除并保持真实显示名。Imports persist with owner/version provenance and resolve to actual source paths in both Web and CLI.
 - 导入仅保存文件，不执行脚本或安装钩子；限制归档体积/数量并拒绝越界路径和链接，不覆盖内置或其他作者技能。Import never executes hooks or shadows bundled skills.
 - 模型列表和推理检测带明确Easel User-Agent，兼容拒绝默认Python标识的上游。Model probes explicitly identify the Easel client.
-- 验证：后端定向144项、前端ClawHub/收藏/依赖11项通过；生产build/lint通过（0错误，20条warning）。138正式已运行0.3.3/dd33c38f02e4，HTTPS/登录/网关、199个原文件摘要、完整最小模型对话和ClawHub导入选择/刷新留存通过，390px技能选择及浏览器面板已核对。[发布回执](docs/release-138-0.3.3-2026-10-19.md)记录启动租约恢复及首次导入目录提示等限制。Production activation and focused UI checks passed; external skill execution, all workflows and installers remain outside acceptance.
+- 验证：后端定向144项、前端ClawHub/收藏/依赖11项通过；生产build/lint通过（0错误，20条warning）。138正式已运行0.3.3/dd33c38f02e4，HTTPS/登录/网关、199个原文件摘要、完整最小模型对话和ClawHub导入选择/刷新留存通过，390px技能选择及浏览器面板已核对。[发布回执](docs/archive/2026/release-138-0.3.3-2026-10-19.md)记录启动租约恢复及首次导入目录提示等限制。Production activation and focused UI checks passed; external skill execution, all workflows and installers remain outside acceptance.
 
 ## 0.3.2 · 2026-10-19 · Linux deployment compatibility / Linux部署兼容
 
 - Include the product version source in the Docker frontend stage; lock PPTX runtime dependencies with wheel hashes. / Docker前端补版本源，Linux锁补PPTX依赖及校验值。
 - Connect browser panels to the authenticated sandbox sidecar; connection failures do not launch Chromium inside the app container. / 浏览器面板复用鉴权沙箱，连接失败明确报错。
-- Audit host138 disk usage and remove only identified unused build artifacts. New image activation remains pending. / 现场核对138磁盘，定向处理无引用构建产物；新镜像尚未激活。[Evidence / 证据](docs/deployment-138-preparation-2026-10-19.md)。
+- Audit host138 disk usage and remove only identified unused build artifacts. New image activation remains pending. / 现场核对138磁盘，定向处理无引用构建产物；新镜像尚未激活。[Evidence / 证据](docs/archive/2026/deployment-138-preparation-2026-10-19.md)。
 
 ## 0.3.1 · 2026-10-19 · Explicit chat request protocols / 对话请求协议设置
 
 - Expose the shared protocol selector for built-in and custom chat channels; persist the selected API and use it for discovery, saved probes and OpenClaw requests. No provider-name inference or fallback between protocols. / 所有对话渠道明确选协议，保存、发现、检测与后续请求一致，不按名称猜测或跨协议重试。
 - Preserve legacy and unknown configurations, protect gateway-owned protocols, resolve custom discovery credentials by exact identity, and keep import compatibility aligned with saved APIs. / 保留旧配置与未知值、说明网关管理边界，修复自定义渠道列表身份，导入按当前协议匹配。
-- Fix narrow provider header geometry; 225 backend and 72 frontend focused checks, build/lint and isolated browser checks pass. No live supplier call or deployment. / 修复窄卡标题排版；定向后端225项/前端72项、构建/lint与隔离浏览器检查通过，未真实推理或部署。[Details / 详情](docs/model-protocol-settings-2026-10-19.md)。
+- Fix narrow provider header geometry; 225 backend and 72 frontend focused checks, build/lint and isolated browser checks pass. No live supplier call or deployment. / 修复窄卡标题排版；定向后端225项/前端72项、构建/lint与隔离浏览器检查通过，未真实推理或部署。[Details / 详情](docs/archive/2026/model-protocol-settings-2026-10-19.md)。
 
 ## 0.3.0 · 2026-10-19 · Browser panel and auxiliary-chat expansion
 
 - Major feature release from 0.2.8. Adds the redesigned browser panel, default icons for panel and web tabs, and explicit source-versus-running-version identification. Version source: `pyproject.toml`; the Vite UI embeds the same version.
 - Source release only. The verified 138 deployment remains 0.2.8 / `12f144c8848fc8a2fbc49a1acbfbbde1e63bb681`; 138 was not changed in this work.
-- Validation: 1,148 frontend tests, 23 final focused checks, 29 backend browser/version checks, lint (0 errors; 18 existing warnings) and production build pass. Desktop light/dark screenshots, default/site icons and menu keyboard actions verified in isolation. The 390px viewport override did not take effect, so this revision's narrow-screen visual check remains pending. See [verification and limits](docs/browser-redesign-version-2026-10-19.md).
-- Evaluated TypeSafe Jev for optional content checks; no SDK, credentials or model calls added. It does not replace the chat model or Subagent lifecycle implementation. / 完成Jev选型评估，建议先评中文内容质检，当前不作为核心依赖。[评估](docs/jev-evaluation-2026-10-19.md)。
+- Validation: 1,148 frontend tests, 23 final focused checks, 29 backend browser/version checks, lint (0 errors; 18 existing warnings) and production build pass. Desktop light/dark screenshots, default/site icons and menu keyboard actions verified in isolation. The 390px viewport override did not take effect, so this revision's narrow-screen visual check remains pending. See [verification and limits](docs/archive/2026/browser-redesign-version-2026-10-19.md).
+- Evaluated TypeSafe Jev for optional content checks; no SDK, credentials or model calls added. It does not replace the chat model or Subagent lifecycle implementation. / 完成Jev选型评估，建议先评中文内容质检，当前不作为核心依赖。[评估](docs/archive/2026/jev-evaluation-2026-10-19.md)。
 
 
 Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) are documented here, with earlier upstream history retained. Current feature development is on `codex/creator-workflow`.
@@ -310,7 +310,7 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 - Real per-chat Chromium tabs, navigation, screenshot/DOM/text/log observations and verified actions; retain the page reader mode. / 每对话独立Chromium标签，导航及版本化截图/DOM/正文/日志、操作后观察，保留正文读取模式。
 - Shared Codex dynamic tool and local CLI bridge for resumed threads/OpenClaw; current-session image evidence follows existing attachment paths. / 新Codex线程注册浏览器工具，旧线程与OpenClaw通过CLI共享同页；截图接入现有会话附件与视觉输入。
 - Fix redirect-hop guarding, early cancellation, empty-session slot usage and coordinate-click navigation races. / 修复重定向逐跳校验、早期取消、空面板占用会话及坐标点击导航竞态。
-- 40 backend / 58 targeted frontend tests, build/lint and real isolated browser UI pass; real model quality and deployment remain unverified. / 40项后端、58项前端定向、构建/lint和真实隔离浏览器界面通过；真实模型质量与部署另验。[Details / 详情](docs/browser-runtime-2026-10-19.md)。
+- 40 backend / 58 targeted frontend tests, build/lint and real isolated browser UI pass; real model quality and deployment remain unverified. / 40项后端、58项前端定向、构建/lint和真实隔离浏览器界面通过；真实模型质量与部署另验。[Details / 详情](docs/archive/2026/browser-runtime-2026-10-19.md)。
 
 ## 2026-10-19 · Panel launcher and browser page evidence / 新增面板与网页证据
 
@@ -324,7 +324,7 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 - Reuse the main composer in auxiliary chats, with child-scoped attachments/skills/model/effort, streaming, questions, Codex approvals, stop retry and artifacts. Only accepted sends clear the child draft. / 辅助对话复用主输入区，接入素材、技能、模型、思考强度、流式状态、问答、Codex审批、停止重试及产物；仅接收成功清理子草稿。
 - Persist closed tabs and reopen the original session; inherit the parent engine/persona and reconnect pending child turns. / 关闭标签保留记录及后台任务，重开原会话；新建继承父引擎/画像，刷新恢复既有子轮次。
 - Add identity/time-checked child reply summaries and spawn/status events to Agent Office. A reply is separate from completion; parent end does not prove child termination. / 办公室新增核验身份与时间的子回复及委派/状态事件；回复不等于完成，父轮结束不推定子任务停止。
-- Research Codex, DeepSeek Harness, Grok Bot and installed ZCode 3.16.1; document remaining durable-directory, follow-up and cancellation-settlement gaps. No live model call, backend restart, host 138 deployment or new installer. / 调研四个产品并明确持久目录、追问及取消结算差距；未调用真实模型、重启后端、部署138或更新安装包。[Details / 详情](docs/sidechat-subagent-deepening-2026-10-19.md).
+- Research Codex, DeepSeek Harness, Grok Bot and installed ZCode 3.16.1; document remaining durable-directory, follow-up and cancellation-settlement gaps. No live model call, backend restart, host 138 deployment or new installer. / 调研四个产品并明确持久目录、追问及取消结算差距；未调用真实模型、重启后端、部署138或更新安装包。[Details / 详情](docs/archive/2026/sidechat-subagent-deepening-2026-10-19.md).
 - Validation: 1,136 frontend tests and 159 targeted backend tests passed; build and lint passed (18 existing warnings). / 验证：前端全量1136项、后端定向159项、构建与lint通过（18个既有warning）。
 
 
@@ -508,102 +508,102 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 
 - Audit official Grok Bot, DeepSeek Harness, Codex and ZCode sources; document current capabilities and remaining gaps. / 保留输入区目标与列表运行数、结果Badge。
 - Suppress automatic continuation without admitted work tools; stop treating reworded text or step descriptions as progress. Require complete checks, a successful current run and explicit matching human approval. / 失败、停止、漏项与核验异常不冒充完成。
-- Scope goal panel errors and pending state to their goal identity. / 66项后端、59项前端、构建/lint及隔离浏览器已验；7880后端未重启，无付费调用，138/安装器另验。[证据与边界](docs/harness-followup-2026-10-17.md)。
+- Scope goal panel errors and pending state to their goal identity. / 66项后端、59项前端、构建/lint及隔离浏览器已验；7880后端未重启，无付费调用，138/安装器另验。[证据与边界](docs/archive/2026/harness-followup-2026-10-17.md)。
 
 ## 2026-10-16 · Inline goals and chat status / 输入区目标与对话状态
 
 - Replace the goal modal with an inline composer; keep current model, collapsed execution options, ordinary drafts and retry IDs. / 输入区直接设置，启动失败不重复创建，运行时保留暂停/停止入口。
 - Show deduplicated running counts on the chat icon and list; add completion/failure badges and separate stopped, queued, unconfirmed and goal review states. / 状态来自最近轮次回执，不推测旧消息或备份完成。
-- 89 focused checks and isolated 390px light/dark keyboard paths passed; build/lint passed with 18 existing warnings. / [用法与验收边界](docs/inline-goals-session-status-2026-10-16.md)，仅本机7880，138/安装器另验。
+- 89 focused checks and isolated 390px light/dark keyboard paths passed; build/lint passed with 18 existing warnings. / [用法与验收边界](docs/archive/2026/inline-goals-session-status-2026-10-16.md)，仅本机7880，138/安装器另验。
 
 ## 2026-10-16 · Hover rename / 对话悬浮重命名
 
 - Add a hover/focus pencil and F2 shortcut; make preview titles editable inside the floating card. / 跨列表与浮层保留悬浮，编辑期间不因鼠标移出而消失。
 - Require explicit save, reject blank titles and respect IME composition; preserve current chat/draft and restore focus. / 保留原菜单与会话持久化，手工改名不调用模型。
-- Validate 49 focused checks, build/lint and isolated 390px light/dark browser paths. / [用法及验收](docs/session-hover-rename-2026-10-16.md)，仅本机7880，138/安装器未更新。
+- Validate 49 focused checks, build/lint and isolated 390px light/dark browser paths. / [用法及验收](docs/archive/2026/session-hover-rename-2026-10-16.md)，仅本机7880，138/安装器未更新。
 
 ## 2026-10-16 · Conversation goal mode / 当前对话目标模式纠正
 
 - Move goal setup into the current chat with `/goal` and `/目标`; add a compact side panel for reported steps, elapsed time, pause/resume and blockers. / 按用户截图纠正主入口，定时任务保留独立管理。
 - Persist `easel_goal_update` steps using trusted tool admission and stop/revision barriers; preserve cumulative limits on revision and separate work completion from human quality approval. / 未收到步骤不造计划，未完成步骤不提前完成目标。
-- Verify focused backend/frontend checks, build/lint and isolated desktop/390px light/dark keyboard paths. / 本机7880可验；[实现与边界](docs/conversation-goal-mode-2026-10-16.md)，无付费调用，138/安装器未更新。
+- Verify focused backend/frontend checks, build/lint and isolated desktop/390px light/dark keyboard paths. / 本机7880可验；[实现与边界](docs/archive/2026/conversation-goal-mode-2026-10-16.md)，无付费调用，138/安装器未更新。
 
 ## 2026-10-16 · Goals and schedules implementation / 目标与定时任务首版
 
 - Add durable original-chat goals, evidence checks, human quality approval, model freezing and cumulative execution limits; retain unknown runs without automatic replay. / 增加停止屏障、人工接管、原生工具准入和生图预留，Token/金额暂不硬封顶。
 - Add timezone-aware schedules, next-run previews, pause/edit controls, missed-run policies, idempotent manual runs and original-chat history links. / 单个服务进程首版串行自动执行；编辑保留触发历史。
-- Validate backend95, frontend1048, final build/lint and isolated390px light/dark keyboard/chat paths; local7880 is ready. / 真实模型/账单、138、安装器及运营指标另验。[使用及验收](docs/schedules-goals-implementation-2026-10-16.md)。
+- Validate backend95, frontend1048, final build/lint and isolated390px light/dark keyboard/chat paths; local7880 is ready. / 真实模型/账单、138、安装器及运营指标另验。[使用及验收](docs/archive/2026/schedules-goals-implementation-2026-10-16.md)。
 
 ## 2026-10-16 · Schedules and goals research / 定时任务与目标方案
 
 - Review official ZCode goal/automation/off-peak docs and pinned source; verify local OpenClaw scheduling method availability without creating jobs. / 核对独立验收、停止/续跑、持久认领及验收故障默认通过的取舍。
-- Propose evidence-based goals, original-chat delivery, explicit models/budgets, cancellation barriers and one scheduling authority. / 先执行底座、再定时管理、最后运营指标；[设计及验收门槛](docs/schedules-goals-research-2026-10-16.md)。Research only; no new runtime implementation, paid calls, host138 or package changes.
+- Propose evidence-based goals, original-chat delivery, explicit models/budgets, cancellation barriers and one scheduling authority. / 先执行底座、再定时管理、最后运营指标；[设计及验收门槛](docs/archive/2026/schedules-goals-research-2026-10-16.md)。Research only; no new runtime implementation, paid calls, host138 or package changes.
 
 ## 2026-10-16 · Refined notification inbox / 通知列表精修
 
 - Replace repeated bordered cards with compact rows, quieter metadata, direct detail actions and distinct status glyphs; preserve read state, filters, confirmation and persistence. / 调整信息密度与视觉层级，保留全部通知功能。
-- Review official Linear/GitHub/Radix references and verify local real data plus isolated 390px light/dark and keyboard flows. / [调研、验收与边界](docs/notification-polish-2026-10-16.md)，仅本机7880，138/安装包不变。
+- Review official Linear/GitHub/Radix references and verify local real data plus isolated 390px light/dark and keyboard flows. / [调研、验收与边界](docs/archive/2026/notification-polish-2026-10-16.md)，仅本机7880，138/安装包不变。
 
 ## 2026-10-16 · Durable chat artifacts and image jobs / 对话产物与可靠生图任务
 
 - Add session/turn-bound file delivery, in-chat image/isolated HTML previews, downloads, byte hashes and local dependency refresh. / 新增真实文件校验、持久交付及原对话内预览，刷新不调用模型。
 - Share the dedicated image channel between workbench and runtime tools, with SQLite jobs, request deduplication, channel queues and success-receipt recovery. xjbh≤1, mlgb7≤4; ambiguous outcomes reserve capacity until explicit reconciliation. / 不自动重发或切换昂贵模型。
 - Recover explicit Gateway injections and verified local structured media payloads; retain original run outcomes. / 后台交付与原轮次终态分开，旧链接只迁移可核验归属的文件。
-- Validate with real temporary files, fake providers and a real browser; live provider billing/quality, host138 and packages remain unverified/unchanged. / 详见[实现及验收记录](docs/chat-artifact-iteration-2026-10-16.md)。
+- Validate with real temporary files, fake providers and a real browser; live provider billing/quality, host138 and packages remain unverified/unchanged. / 详见[实现及验收记录](docs/archive/2026/chat-artifact-iteration-2026-10-16.md)。
 
 ## 2026-10-16 · Chat artifact research / 对话产物链路调研
 
 - Trace generated files through Gateway/Codex adapters, chat history, previews and refresh; compare official Codex events with fixed DeepSeek Harness present/version/preview sources. / 定位文字交付、预览割裂与刷新缺口，核对138原会话106次实际工具调用。
-- Propose durable artifact identity/events, in-chat image/HTML previews, version/dependency refresh and shared generation jobs. Research only; no runtime change, paid call or138 deployment. / 本轮为方案；既有后端5项、链接4项通过，不代表新功能验收。[详细记录](docs/chat-artifact-harness-research-2026-10-16.md)。
+- Propose durable artifact identity/events, in-chat image/HTML previews, version/dependency refresh and shared generation jobs. Research only; no runtime change, paid call or138 deployment. / 本轮为方案；既有后端5项、链接4项通过，不代表新功能验收。[详细记录](docs/archive/2026/chat-artifact-harness-research-2026-10-16.md)。
 
 ## 2026-10-16 · DeepSeek Harness 对照调研 / DeepSeek Harness comparison
 
 - Compare the official DeepSeek Harness plugin/session/Agent/job/skill architecture with Easel's OpenClaw Gateway, Web supervisor, Agent Office and ClawHub boundaries. / 对照官方 DeepSeek Harness 的插件、会话、Agent、后台任务、技能和恢复语义，明确 Easel 当前 `chat_supervisor_lost` 的差异与优先借鉴项。
-- Recommend a durable run ledger and event-based recovery before considering plugin-runtime migration; no DSH dependency, model call, external plugin install, 138 deployment or installer release was made. / 优先建议补充逻辑轮次/run账本和事件化恢复，不直接移植 Cordis；本轮未引入 DSH、未调用模型、未安装外部插件、未部署138或更新安装包。[调研记录](docs/deepseek-harness-comparison-2026-10-16.md)。
+- Recommend a durable run ledger and event-based recovery before considering plugin-runtime migration; no DSH dependency, model call, external plugin install, 138 deployment or installer release was made. / 优先建议补充逻辑轮次/run账本和事件化恢复，不直接移植 Cordis；本轮未引入 DSH、未调用模型、未安装外部插件、未部署138或更新安装包。[调研记录](docs/archive/2026/deepseek-harness-comparison-2026-10-16.md)。
 
 ## 2026-10-16 · Context windows and chat reports / 上下文窗口与拆解对话
 
 - Separate sourced windows, configured limits and old runtime budgets; add explicit empty-field filling without rewriting manual values. GLM-5.3 reference is 1M; relay entitlement remains unverified. / 纠正默认20万与模型窗口混淆，增加来源和设置入口。
 - Start breakdowns in recent chats with the shared report reader, durable recovery, stop/retry/edit and ordinary follow-up. Adopt legacy jobs without another inference request; retain drafts/history, stopped flags and inert partial backup readers. / 拆解并入对话，报告排版、证据检查和操作保留。
-- Backend46 checks and the frontend1,038-case regression (one test assertion corrected and rerun) plus70 final focused checks passed; lint/build and specified390px dark/keyboard entries verified. No paid inference, deployment or package release. / 见[源码对照与验收记录](docs/context-window-chat-breakdown-2026-10-16.md)。
+- Backend46 checks and the frontend1,038-case regression (one test assertion corrected and rerun) plus70 final focused checks passed; lint/build and specified390px dark/keyboard entries verified. No paid inference, deployment or package release. / 见[源码对照与验收记录](docs/archive/2026/context-window-chat-breakdown-2026-10-16.md)。
 
 ## 2026-10-16 · Persistent notifications and Codex usage / 通知持久化与Codex用量
 
 - Save up to 1,000 project-local notifications with read/clear synchronization and retry; record chat/publish outcomes without an open page. Other browser-observed events retain their existing scope. / 通知保存到本机数据库，支持重试与跨标签已读/清空；对话和发布终态后端记录，其它页面观察动态不扩大为全部离线采集。
 - Import actual Codex usage notifications with saved thread baselines, replay deduplication and explicit historical lower bounds; expose last-request context without inventing category tokenization or invoices. / Codex用量接入项目账本，区分累计增量、最后请求下限与上下文快照；未知费用/分类不猜填。
 - Add Office return-to-chat; preserve valid replay around corrupt lines and move calendar subprocess work off the event loop. RSS source adds canonical deduplication and dated freshness filters, without enabling or deploying it. / 办公室增加返回入口，移植两项0.2.9可靠性修复；新闻修改只验证源模块。
-- Backend checks, all 1,036 frontend checks, lint/build and specified actual desktop/390px dark/keyboard entries passed. No new paid task,138 activation or installer release. / 详细边界见[本轮验收记录](docs/local-history-codex-usage-2026-10-16.md)。
+- Backend checks, all 1,036 frontend checks, lint/build and specified actual desktop/390px dark/keyboard entries passed. No new paid task,138 activation or installer release. / 详细边界见[本轮验收记录](docs/archive/2026/local-history-codex-usage-2026-10-16.md)。
 
 ## 2026-10-16 · Context accounting correction / 上下文统计来源纠正
 
 - Read current SQLite session metadata in addition to legacy JSON, scoped to project web sessions. / 修复当前运行时快照漏读，只读会话元数据、不返回提示词或凭据。
 - Preserve known categories independently, including skill-directory characters and installed/session/reported counts. Do not invent totals, percentages or loaded skill bodies. / 分别显示目录字符、技能数量与来源，部分报告不再导致整组未知。
-- Keep model-switch snapshots separate and explain token estimates. / 模型切换保留独立标注的上次占用，分类Token估算不等同真实分词或账单。详见[本轮验证与边界](docs/context-accounting-fix-2026-10-16.md)。仅本机7880，138与安装包不变。
+- Keep model-switch snapshots separate and explain token estimates. / 模型切换保留独立标注的上次占用，分类Token估算不等同真实分词或账单。详见[本轮验证与边界](docs/archive/2026/context-accounting-fix-2026-10-16.md)。仅本机7880，138与安装包不变。
 
 ## 2026-10-16 · Workbench entries and usage refinement / 工作台入口与消耗明细精修
 
 - Integrate the image studio launch into Recent outputs with a full-width action. / 生图入口整合到最近产物卡片，增加整行触达和键盘焦点。
 - Add ClawHub search/details to the composer picker, with external identity separation, abort/retry handling and a narrow-screen list/detail flow. / 创作技能弹窗增加ClawHub公开检索、详情及窄屏阅读；不安装或选中外部技能。
 - Give usage a dedicated empty state, reporting coverage and overview/request tabs; make shared styles independent of the Activity page and distinguish zero recorded fees from free usage. / 消耗明细重做空态、覆盖度和总览/请求层级，修复聊天入口缺样式，明确0费用记录的口径。
-- 55 distinct focused checks and lint/build passed; local HTTP and specified real-browser entries verified. Fixed desktop/390px, dark mode and complete browser keyboard checks remain pending. No paid calls,138 deployment or installer release. / 详见[本轮记录 / evidence](docs/workbench-usage-entry-refinement-2026-10-16.md)。
+- 55 distinct focused checks and lint/build passed; local HTTP and specified real-browser entries verified. Fixed desktop/390px, dark mode and complete browser keyboard checks remain pending. No paid calls,138 deployment or installer release. / 详见[本轮记录 / evidence](docs/archive/2026/workbench-usage-entry-refinement-2026-10-16.md)。
 
 ## 2026-10-16 · Notification refinement and night mode / 通知精修与夜间模式
 
 - Refine event hierarchy, date grouping, unread filters, accessible status actions, empty states and deliberate clear confirmation. / 改善通知层级、日期分组、未读筛选、可访问操作、空态及清空确认。
 - Add Settings → Appearance with persistent Light / Dark / Follow system, pre-paint theme initialization and cross-tab synchronization. Update shared colors and legacy office surfaces without recoloring media. / 设置新增外观，支持主题记忆、系统跟随、首屏初始化与跨标签同步，适配公共组件和旧办公室UI。
-- Frontend regression, build and focused desktop/390px browser checks; no paid inference,138 deployment or installer release. / 验证边界见[本轮记录](docs/appearance-notifications-2026-10-16.md)。
+- Frontend regression, build and focused desktop/390px browser checks; no paid inference,138 deployment or installer release. / 验证边界见[本轮记录](docs/archive/2026/appearance-notifications-2026-10-16.md)。
 
 ## 2026-10-16 · Edit sent messages / 历史消息重新编辑
 
 - Add inline Edit, Cancel and Send to historical user messages; sending creates a fresh branch with preceding visible context and session-owned attachment copies while preserving the source conversation. / 原位编辑历史用户消息，发送后带入此前可见文字与附件建立编辑分支，原记录保留并可返回。
 - Preserve per-message skill/model/thinking selections; guard active generation, queue, storage, duplicate and stale requests. Cancel remains usable during preparation. / 保留消息配置，处理生成/队列/存储/重复及过期请求，准备中仍可取消。
-- Relevant regressions, lint/build and desktop/390px browser checks completed without paid inference; local7880 only. / 真实生成尚未测试，138和安装包未更新；[行为与验证 / evidence](docs/chat-editing-2026-10-16.md)。
+- Relevant regressions, lint/build and desktop/390px browser checks completed without paid inference; local7880 only. / 真实生成尚未测试，138和安装包未更新；[行为与验证 / evidence](docs/archive/2026/chat-editing-2026-10-16.md)。
 
 ## 2026-10-15 · Context details and usable stop recovery / 上下文细则与停止恢复
 
 - Move notifications to the left toolbar beside Settings; add an anchored composer context ring, six explicitly estimated/unknown categories and a cumulative usage/cost entry. / 通知移到设置旁，输入框增加上下文圆环/分类/费用入口，实际快照与累计用量分别统计。
 - End orphaned replay after Web restarts and reconcile exact runs on explicit stop; retain received text/thinking, handle queued cancellation and keep Stop visible beside queue-send. / 修复重启后旧任务无限恢复及无法停止，保存确切运行标识和已收到内容，支持排队取消、请求期限与保留记录新建，输入草稿不隐藏停止。
-- Frontend 1,002 tests, relevant backend regressions, lint/build and focused desktop/390px browser checks passed. No new paid generation, 138 deployment or package release. / 验证范围和已解除的真实旧任务见[本轮记录 / evidence](docs/context-usage-notifications-2026-10-15.md)。
+- Frontend 1,002 tests, relevant backend regressions, lint/build and focused desktop/390px browser checks passed. No new paid generation, 138 deployment or package release. / 验证范围和已解除的真实旧任务见[本轮记录 / evidence](docs/archive/2026/context-usage-notifications-2026-10-15.md)。
 
 ## 2026-10-15 · Local workbench and GLM video / 本机工作台与GLM视频
 
@@ -611,18 +611,18 @@ Changes maintained by [StarrySea1412/Easel](https://github.com/StarrySea1412/Eas
 - Add global event history with accurate outcomes and destinations, plus current-session OpenClaw usage details; Codex usage remains explicitly unknown. / 新增全局事件通知及对应入口，准确区分停止/失败/发布状态；对话复用真实用量账本，缺字段与费用口径明确。
 - Save per-model context budgets transactionally, and show file/folder covers, actual birth times and consistent category counts. / 上下文窗口支持校验、清除及事务同步；内容库增加类型封面、真实创建时间与分类数量。
 - Adapt dedicated GLM video credentials to CogVideoX async submit/poll and bounded public-HTTPS downloads; validate text/image inputs and failures without paid calls. / 接入GLM文生/图生异步协议与受限下载，真实视频生成待用户填写凭据后测试。
-- Fix the Windows first-writer record-lock initialization race found in regression. Backend, frontend, lint/build and actual local read-only checks are recorded separately from user page acceptance. No 138 deployment or package release. / 修复Windows首次并发记录锁竞态；回归/构建/本机只读检查与用户页面验收分开，138和安装包未更新。见[验证记录 / evidence](docs/local-workbench-features-2026-10-15.md)。
+- Fix the Windows first-writer record-lock initialization race found in regression. Backend, frontend, lint/build and actual local read-only checks are recorded separately from user page acceptance. No 138 deployment or package release. / 修复Windows首次并发记录锁竞态；回归/构建/本机只读检查与用户页面验收分开，138和安装包未更新。见[验证记录 / evidence](docs/archive/2026/local-workbench-features-2026-10-15.md)。
 
 ## 2026-10-14 · Quick deploy verified on 138 / 138快速发布实测完成
 
 - Activate 0.2.8 / 12f144c8 through the Windows quick entry in isolation and live with the same fixed image; verify 1388 runtime source hashes, authentication/version/gateway, official updates and preserved files. / Windows快速入口完成隔离及正式发布，同一固定镜像，1388项运行源码与认证/版本/网关、官方记录、持久文件核对通过。
-- Nine isolated and eleven live actual Agent tool returns passed with matching real report downloads. Timeout causes and home trend icons/density are deployed; the user performs frontend interaction acceptance. / 隔离9次、正式11次真实工具回执无错，报告下载一致；超时提示和热点密度/图标已部署，前端交互由用户验收。见[回执 / receipt](docs/quick-deploy-138-acceptance-2026-10-14.md)。
+- Nine isolated and eleven live actual Agent tool returns passed with matching real report downloads. Timeout causes and home trend icons/density are deployed; the user performs frontend interaction acceptance. / 隔离9次、正式11次真实工具回执无错，报告下载一致；超时提示和热点密度/图标已部署，前端交互由用户验收。见[回执 / receipt](docs/archive/2026/quick-deploy-138-acceptance-2026-10-14.md)。
 
 ## 2026-10-14 · Home trend density and icons / 首页热点密度与图标
 
 - Reuse Weibo/Douyin icons and render up to five ranked topics per source; adapt columns to card width and remove forced blank space. / 复用微博、抖音图标，每源最多5条带排名，按卡片宽度切换列数并移除强制留白。
 - Preserve full topic actions, cache times and per-source errors, including when all sources fail. / 保留完整标题选题动作、缓存时间与各源错误，全来源失败也显示原因。
-- Forty simulated regressions, targeted lint, production build and local 7880 resource/backend checks passed. User frontend acceptance remains separate; this task does not deploy to 138. / 40项模拟回归、定向lint、生产构建及本机资源/后端核对通过；前端由用户验收，本轮未部署138。见[记录 / record](docs/dashboard-trends-2026-10-14.md)。
+- Forty simulated regressions, targeted lint, production build and local 7880 resource/backend checks passed. User frontend acceptance remains separate; this task does not deploy to 138. / 40项模拟回归、定向lint、生产构建及本机资源/后端核对通过；前端由用户验收，本轮未部署138。见[记录 / record](docs/archive/2026/dashboard-trends-2026-10-14.md)。
 
 ## 2026-10-14 · Quick deploy activation follow-up / 快速发布激活补齐
 
@@ -840,7 +840,7 @@ October 10 density and alignment: skill setup status and capability badges share
 - Added seven-platform diagnostic capabilities, optional advanced metrics, explicit sample quality and comparable cohorts, evidence-bound topics and frozen seven-day experiments. Platform changes automatically refresh live data and reject stale responses. / 新增七平台诊断、可选高级指标、样本质量、同条件比较、证据题材和实验；切平台自动读取并隔离旧响应。
 - Added composer model/thinking selection, measured model status, custom text and objective random image probes, durable opt-in schedules and a shared rolling quota. / 输入框可选模型/思考强度，展示实测状态；自定义文本/随机图片检测及默认关闭的自动测活统一限流。
 - Added conversation ticks and user-confirmed Agent title suggestions; fixed CC Switch mapping and Xiaohongshu browser-login recovery. / 新增侧边刻度和需保存的 Agent 命名建议，修复配置映射和小红书浏览器登录恢复。
-- Added the [operator handoff guide](docs/operator-handoff-2026-10-09.md), platform research and final-package audit boundaries. Frontend full suite: 755 passed; final changed-component suite: 47 passed. Backend combined affected suites: 422 passed, with 145 final focused checks passing (overlapping, not summed). TypeScript, lint and production build passed. / 检查覆盖模拟请求与界面契约，真实业务和最终 ZIP 尚未验收；旧包与公开安装器未更新。
+- Added the [operator handoff guide](docs/archive/2026/operator-handoff-2026-10-09.md), platform research and final-package audit boundaries. Frontend full suite: 755 passed; final changed-component suite: 47 passed. Backend combined affected suites: 422 passed, with 145 final focused checks passing (overlapping, not summed). TypeScript, lint and production build passed. / 检查覆盖模拟请求与界面契约，真实业务和最终 ZIP 尚未验收；旧包与公开安装器未更新。
 
 ### 2026-10-09 R28: current portable candidate acceptance extension
 
@@ -863,7 +863,7 @@ October 10 density and alignment: skill setup status and capability badges share
 - Keep Web publishing outcomes in the data directory with a persistent, shared receipt center across pages. A successful process exit no longer claims publication: pending review, draft, unknown, rejected and public results stay distinct. Only confirmed public outcomes enter the published calendar.
 - Connect Bilibili's existing before/after work readback to the Web runner and shared structured receipt. Carry validated public URLs through supported platform scripts, the backend, calendar and optional success email. Identify each operation separately so different works cannot suppress each other's notifications.
 - Keep mail queue, SMTP acceptance and failure separate from the platform outcome; honor the saved automatic-notification setting. Recover known results with a visible storage warning on disk failures, and mark interrupted operations as unverified after restart without retrying publication or email.
-- Rebuild and verify the frontend with 697 passing tests, lint and TypeScript; 258 publishing/backend/mail/storage/portable regressions pass, with the final manifest notification correction separately covered by 32 mail tests. Real browser checks cover simulated outcomes, reminders across pages, reload recovery, read state, navigation and the 390px receipt panel. Platform responses and SMTP are isolated test doubles; no real posts or mail were sent. Xiaohongshu/Channels public readback, continued checks after moderation and the independent scheduled-publishing executor remain outside this delivery. Details and final evidence: [publishing acceptance](docs/publish-receipts-2026-10-08.md).
+- Rebuild and verify the frontend with 697 passing tests, lint and TypeScript; 258 publishing/backend/mail/storage/portable regressions pass, with the final manifest notification correction separately covered by 32 mail tests. Real browser checks cover simulated outcomes, reminders across pages, reload recovery, read state, navigation and the 390px receipt panel. Platform responses and SMTP are isolated test doubles; no real posts or mail were sent. Xiaohongshu/Channels public readback, continued checks after moderation and the independent scheduled-publishing executor remain outside this delivery. Details and final evidence: [publishing acceptance](docs/archive/2026/publish-receipts-2026-10-08.md).
 
 ### 2026-10-09 R24: Windows portable preview acceptance
 
@@ -902,7 +902,7 @@ October 10 density and alignment: skill setup status and capability badges share
 
 - 2026-10-05 stage: Rework chat around a Codex-inspired conversation column, a neutral single-surface composer, a persistent conversation title and an optional turn-navigation popover. That stage's sidebar defaulted to an icon rail and expanded to recent chats; its layout/default was superseded by the independent two-column navigation above. Account previews expose seven original platform brand icons with explicit unverified-login wording.
 - Show and edit the image model inside the studio, persist the model ID against the existing service, and bind model/channel snapshots to actual queued jobs and output metadata. Accept clipboard images and video files with local previews; decode video reference frames in the browser without uploading the source video. Unsupported clipboard formats and video links have explicit fallback guidance.
-- Audit content analysis against the running local service: fictional examples and structured-import workflows are available, while the current environment has no logged-in platforms or configured chat model. Persistent live archiving still requires stable account/work IDs that most platform collectors do not return. Fix punctuation-only transcripts causing a saved account report to fail with an IndexError. See [chat, studio and analysis verification](docs/chat-studio-analysis-2026-10-05.md) for test counts and pending browser checks.
+- Audit content analysis against the running local service: fictional examples and structured-import workflows are available, while the current environment has no logged-in platforms or configured chat model. Persistent live archiving still requires stable account/work IDs that most platform collectors do not return. Fix punctuation-only transcripts causing a saved account report to fail with an IndexError. See [chat, studio and analysis verification](docs/archive/2026/chat-studio-analysis-2026-10-05.md) for test counts and pending browser checks.
 
 - Raise component test coverage by 20 tests: the grouped sidebar (section order, default collapse, persistence, active-group protection), UsagePanel (honest 未上报 placeholders, session/project scopes, provider filter, fetch failure), MessageBubble (sanitized markdown, attachment-only turns, streaming typing/live panels, thinking expansion, copy/retry actions, error alerts) and shared pieces (skeletons, platform brand vs neutral icon, chat turn navigation keyboard moves). Also fix the test loader so asset imports (svg/png) resolve as opaque URLs instead of being compiled as modules, which previously made any component importing assets untestable.
 
@@ -910,7 +910,7 @@ October 10 density and alignment: skill setup status and capability badges share
 
 - Extend the linear icon set with 14 new stroke icons (user/user-plus/info/spark/key/eye/eye-off/pin/clock/coins/settings/download/warn/play) and allow `style`/`aria-hidden` on all icon components. Replace remaining emoji glyphs across the UI: page-title icons on Skills, Activity, Content Analysis, Accounts and Profile; persona dimension cards switch from emoji to labeled badges; chat hero suggestion cards, account identity/refresh buttons, profile edit/delete/new buttons, dashboard analysis-note placeholders and dashboard empty-state actions now use the shared icon language instead of emoji.
 
-- Add phase-2 protected-data recovery in conversation backup: a review panel lists the guarded session/publish keys with size and content samples, and a confirmed replacement writes only the selected key — protection is lifted only after the write succeeds, failures stay retryable, and out-of-allowlist or oversize payloads are rejected. See [storage recovery acceptance](docs/interactive-acceptance-2026-10-04.md).
+- Add phase-2 protected-data recovery in conversation backup: a review panel lists the guarded session/publish keys with size and content samples, and a confirmed replacement writes only the selected key — protection is lifted only after the write succeeds, failures stay retryable, and out-of-allowlist or oversize payloads are rejected. See [storage recovery acceptance](docs/archive/2026/interactive-acceptance-2026-10-04.md).
 
 - Absorb the upstream `ai_video.py` UTF-8 stdout fix (Chinese check hints crashed with UnicodeEncodeError on Windows ANSI code pages) together with the `--env-file` override and its regression tests, taken from upstream ZJU-REAL/Easel commits dfd0fd1/d80b26c.
 
@@ -918,29 +918,29 @@ October 10 density and alignment: skill setup status and capability badges share
 - State in model settings that the channel self-test only verifies model API connectivity (GET /models with timing); chat execution additionally requires the local OpenClaw gateway to be online.
 - Persist the office demo team size across page remounts like the studio drafts; invalid stored values fall back to 6.
 
-- Add video creation to the image studio: an image/video medium switch preserving separate drafts and jobs, text-to-video and image-to-video with ratio and duration options, references reused from uploads or the gallery, job polling, cancellation and restart recovery. The backend runs at most two local jobs, validates MP4 box structure and first-frame decoding before publishing, redacts credentials from errors, and rejects the retired official OpenAI Videos endpoint while keeping the historical protocol for compatible gateways (pixel sizes, string durations, `input_reference`, credentialed content download with cross-origin credential stripping). See [video generation notes](docs/video-generation-2026-10-01.md). All six video providers were unconfigured on this machine, so no real generation was run.
+- Add video creation to the image studio: an image/video medium switch preserving separate drafts and jobs, text-to-video and image-to-video with ratio and duration options, references reused from uploads or the gallery, job polling, cancellation and restart recovery. The backend runs at most two local jobs, validates MP4 box structure and first-frame decoding before publishing, redacts credentials from errors, and rejects the retired official OpenAI Videos endpoint while keeping the historical protocol for compatible gateways (pixel sizes, string durations, `input_reference`, credentialed content download with cross-origin credential stripping). See [video generation notes](docs/archive/2026/video-generation-2026-10-01.md). All six video providers were unconfigured on this machine, so no real generation was run.
 - Derive each Agent's observed model identity from assistant call records (brand families, relay namespaces, turn/run bounds and child receipts), and display it on member details and the roster; configured models never rewrite an observed identity and unverifiable aliases stay unknown.
 - Add an office workflow panel with state lanes, parent-identity collaboration links and a scripted demo handoff timeline; only records reported for the current mode are shown.
 - Add the provider character review entry: a 14-brand plus wildcard design registry and three rotatable procedural 3D studies (Doubao, DeepSeek, wildcard) with standing/seated poses, fixed viewpoints and white-background reference export. The studies do not replace office characters.
-- Document the proposed 14-brand office character redesign and unknown-provider fallback, official visual references, modeling lessons and actual-run identity requirements. Concepts require review; runtime characters are unchanged by this documentation. See [design review](docs/model-provider-characters-2026-10-02.md).
+- Document the proposed 14-brand office character redesign and unknown-provider fallback, official visual references, modeling lessons and actual-run identity requirements. Concepts require review; runtime characters are unchanged by this documentation. See [design review](docs/archive/2026/model-provider-characters-2026-10-02.md).
 
-- Refine locally generated office bodies with species-specific shoulder/chest/waist profiles, sculpted ear shells and a continuous fox tail. Correct thumb orientation, pen/paper contact and workstation-facing poses; add state-driven eyes, brows and mouth expressions. Preserve the seated rig and editable colors; no Meshy account, cloud generation or new model download is required. See [local modeling verification](docs/local-character-modeling-2026-10-02.md).
+- Refine locally generated office bodies with species-specific shoulder/chest/waist profiles, sculpted ear shells and a continuous fox tail. Correct thumb orientation, pen/paper contact and workstation-facing poses; add state-driven eyes, brows and mouth expressions. Preserve the seated rig and editable colors; no Meshy account, cloud generation or new model download is required. See [local modeling verification](docs/archive/2026/local-character-modeling-2026-10-02.md).
 
 - Add in-place office appearance editing, searchable team zones, six role-specific workstations, continuous animal body surfaces, staged pen/paper handling and a seekable demo timeline. Fix stale completed/child activity and distinguish observed work from demo state. Full natural motion, handoffs and real task attribution remain in progress.
 - Simplify image editing around the canvas and preserved drafts; add a clearly fictional content-analysis example with filtering and evidence; expose per-source trend failures and retry controls; move activity navigation into the page header.
-- Update both repository homepages and development documentation for this fork, link the current development source explicitly, and direct issue reports to this repository. Retain upstream attribution and license information. See [workspace verification](docs/workspace-experience-validation-2026-10-01.md) and [the action plan](docs/workspace-experience-action-plan-2026-10-01.md).
+- Update both repository homepages and development documentation for this fork, link the current development source explicitly, and direct issue reports to this repository. Retain upstream attribution and license information. See [workspace verification](docs/archive/2026/workspace-experience-validation-2026-10-01.md) and [the action plan](docs/archive/2026/workspace-experience-action-plan-2026-10-01.md).
 
-- Refine animal shoulder/elbow/wrist articulation, tool contact, staged work gestures and restrained secondary motion, while keeping actions tied to observed evidence and terminal poses static. All 270 frontend tests, lint, build and HTTP resource checks pass; real WebGL checks cover sampled demo poses, controls and narrow layouts. See [animal motion iteration](docs/office-animal-motion-2026-10-01.md).
+- Refine animal shoulder/elbow/wrist articulation, tool contact, staged work gestures and restrained secondary motion, while keeping actions tied to observed evidence and terminal poses static. All 270 frontend tests, lint, build and HTTP resource checks pass; real WebGL checks cover sampled demo poses, controls and narrow layouts. See [animal motion iteration](docs/archive/2026/office-animal-motion-2026-10-01.md).
 
 - Search filenames and paths within the current bounded output snapshot, combine type filters, and sort by modification time, name, or size without clearing unread indicators outside the visible list.
-- Add explicit image and media loading, failure and retry states; isolate old resource events, release closed previews, and preserve playback while sorting. Real browser checks cover image recovery, video/audio playback and narrow layouts. See [media and search verification](docs/office-media-search-2026-10-01.md).
+- Add explicit image and media loading, failure and retry states; isolate old resource events, release closed previews, and preserve playback while sorting. Real browser checks cover image recovery, video/audio playback and narrow layouts. See [media and search verification](docs/archive/2026/office-media-search-2026-10-01.md).
 
 - Highlight newly observed and updated workspace outputs since the first successful snapshot; acknowledge individual files or only the current filtered list, with observation scope and reset behavior made explicit.
 - Export the currently filtered employee call/receipt records as JSON with exact identity, source, pairing and snapshot limits; exclude hidden payloads and handle download failures without discarding records.
-- Use the supported Three.js shadow-map mode. See [observation and export verification](docs/office-observation-export-2026-10-01.md).
+- Use the supported Three.js shadow-map mode. See [observation and export verification](docs/archive/2026/office-observation-export-2026-10-01.md).
 
 - Read UTF-8 text outputs directly in the office with bounded streaming, timeout/retry feedback, and cancellation on file or mode changes; keep markup inert and reject unsupported content.
-- Search visible employee tool/receipt summaries and filter failures, returns, or unmatched calls while preserving exact pairs, identity boundaries, and keyboard focus. See [text and record verification](docs/office-records-2026-10-01.md).
+- Search visible employee tool/receipt summaries and filter failures, returns, or unmatched calls while preserving exact pairs, identity boundaries, and keyboard focus. See [text and record verification](docs/archive/2026/office-records-2026-10-01.md).
 
 - Redraw office employees as 3D cats, rabbits, foxes and bears with editable appearance cards, evidence-driven work gestures, focused camera views, and labels that avoid employees and monitors.
 - Show task and tool records on desk screens and a readable selected-workstation panel; synchronize close-up selection and restore it after WebGL retry.
@@ -959,7 +959,7 @@ October 10 density and alignment: skill setup status and capability badges share
 - Preserve existing conversations during migration and browser storage failures. Show unsaved changes, retry pending writes, protect unreadable history, and keep real history beyond 100 sessions.
 - Keep activity details consistent with search and status filters, including empty results and unavailable deep-link targets.
 
-Latest implementation and exact validation scope: [responsive layouts, dashboard skills and office tasks](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md). Earlier boundaries remain in the [October 8 platform-analysis stage](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md), [2026-10-05 stage](docs/chat-studio-analysis-2026-10-05.md), [workspace experience iteration](docs/workspace-experience-validation-2026-10-01.md), [animal motion](docs/office-animal-motion-2026-10-01.md) and [professional office](docs/professional-office-2026-10-01.md) records. Earlier office browser checks used an isolated local workspace and simulated employee demonstrations; sampled poses do not establish collision-free motion at every instant or measured frame rates. Model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
+Latest implementation and exact validation scope: [responsive layouts, dashboard skills and office tasks](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/responsive-office-skills-2026-10-08.md). Earlier boundaries remain in the [October 8 platform-analysis stage](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/docs/analysis-platform-orca-2026-10-08.md), [2026-10-05 stage](docs/archive/2026/chat-studio-analysis-2026-10-05.md), [workspace experience iteration](docs/archive/2026/workspace-experience-validation-2026-10-01.md), [animal motion](docs/archive/2026/office-animal-motion-2026-10-01.md) and [professional office](docs/archive/2026/professional-office-2026-10-01.md) records. Earlier office browser checks used an isolated local workspace and simulated employee demonstrations; sampled poses do not establish collision-free motion at every instant or measured frame rates. Model and gateway protocol tests do not substitute for a real multi-agent run. These source changes are not included in the existing 0.2.6 installers.
 
 ## [0.2.6] - 2026-09-30
 
@@ -1122,14 +1122,14 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 
 - Replaced placeholder-like “waking the agent” and “thinking” activity text with ordered service events. / 将“唤醒 agent”“正在思考”等占位文案改为按顺序记录的服务事件。
 - Separated heartbeat notices and thinking summaries from actual work steps; missing events remain explicitly unknown. / 心跳提示与思考摘要和工作步骤分开；后台未上报时明确显示未知，不伪造进度。
-- Added completed, failed, stopped, reconnecting and backup-record states with narrow-screen layout coverage. Frontend tests (1025), build, lint and Python syntax checks passed; no paid task or 138 deployment. / 增加完成、失败、停止、重连和备份记录状态，并覆盖窄屏布局；前端1025项、构建、lint和Python语法检查通过，未发起付费任务或138部署。详见[工作进度记录](docs/work-progress-redesign-2026-10-16.md)。
+- Added completed, failed, stopped, reconnecting and backup-record states with narrow-screen layout coverage. Frontend tests (1025), build, lint and Python syntax checks passed; no paid task or 138 deployment. / 增加完成、失败、停止、重连和备份记录状态，并覆盖窄屏布局；前端1025项、构建、lint和Python语法检查通过，未发起付费任务或138部署。详见[工作进度记录](docs/archive/2026/work-progress-redesign-2026-10-16.md)。
 
 \n
 ## 2026-10-16 · Agent loop and long-conversation reliability / Agent loop 与长对话可靠性
 
 - Confirm normal multi-turn reuse: a stable OpenClaw session carries later prompts, tool calls and context compilation. / 确认正常多轮复用稳定 OpenClaw 会话，后续消息、工具调用和上下文编译都进入同一会话。
 - Document the real boundary: Easel's Web supervisor, SSE carrier and Gateway recovery run are not one durable state machine; `chat_supervisor_lost` is an outer reconciliation outcome, not proof that OpenClaw cannot run long conversations. / 记录真实边界：Easel Web supervisor、SSE 连接与 Gateway 恢复 run 尚未统一为持久状态机，`chat_supervisor_lost` 是外层对账结果，不是 OpenClaw 不支持长对话的证明。
-- Add a failure matrix and P0/P1/P2 repair order centered on a durable run ledger, recovery-attempt identity, stall/compaction events and startup version gates. No model call, paid retry, service restart or 138 deployment was made. / 增加故障矩阵和以持久 run 账本、恢复 attempt 身份、stall/compaction 事件及启动版本闸门为核心的修复顺序；本轮未调用模型、未付费重试、未重启服务或部署138。[调查记录](docs/agent-loop-long-conversation-investigation-2026-10-16.md)。
+- Add a failure matrix and P0/P1/P2 repair order centered on a durable run ledger, recovery-attempt identity, stall/compaction events and startup version gates. No model call, paid retry, service restart or 138 deployment was made. / 增加故障矩阵和以持久 run 账本、恢复 attempt 身份、stall/compaction 事件及启动版本闸门为核心的修复顺序；本轮未调用模型、未付费重试、未重启服务或部署138。[调查记录](docs/archive/2026/agent-loop-long-conversation-investigation-2026-10-16.md)。
 ## 2026-10-16 · Durable Agent run ledger / Agent 运行账本
 
 - Add a project-local per-turn ledger linking logical `turnId` to provider run identity, attempt, recovery relation, transport, event sequence, terminal state and resource settlement. / 增加项目级每轮运行账本，关联逻辑 `turnId`、provider run、attempt、恢复关系、传输层、事件序号、终态和资源结算。
