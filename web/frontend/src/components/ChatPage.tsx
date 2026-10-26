@@ -50,6 +50,7 @@ import { fetchOfficeTaskModels } from '../lib/officeControls';
 interface ChatPageProps {
   taskState?:TaskSnapshot;
   onTaskChange?:()=>void;
+  onOpenTask?:(id:string)=>void;
   onEngineChange?: (engine:'openclaw'|'codex') => void;
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
@@ -109,7 +110,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onOpenAnalysis, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
+function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onOpenAnalysis, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onOpenTask,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -250,7 +251,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
         <button type="button" className="chat-side-panel-close" aria-label="收起侧边面板" title="收起" onClick={()=>setPanelOpen(false)}>×</button>
       </header>
       {panelTab==='new'?<ChatPanelHome onTool={openTool} onSideChat={()=>{const id=onSideChat?.('create');if(id){setPanelTab('side');setActiveSideId(id);}}} onGoal={viewGoal} hasGoal={Boolean(goal)} artifacts={deliveries.items} onFile={id=>{setSelectedFileId(id);openTool('files');}} closedSessions={closedSideSessions} onReopen={id=>{if(onSideReopen?.(id)){setPanelTab('side');setActiveSideId(id);}}}/>:panelTab==='goal'&&goal
-        ? <ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})}/>
+        ? <ChatGoalPanel key={goal.id} goal={goal} runs={taskRuns} onChanged={()=>onTaskChange?.()} onClose={()=>setPanelOpen(false)} onEdit={()=>setGoalEditor({goal:!['completed','cancelled'].includes(goal.status)?goal:undefined,welcome:isEmpty})} onWorkspace={onOpenTask?()=>onOpenTask(goal.id):undefined}/>
         : panelTab==='side'&&activeSide?<SideChatThread key={activeSide.id} session={activeSide} stream={sideStreams[activeSide.id]} stopping={Boolean(sideStoppingSessions[activeSide.id])} stopError={sideStopErrors[activeSide.id]}
             onQuestionAnswered={qid=>onSideQuestionAnswered?.(activeSide.id,qid)} onSteer={onSideSteer?id=>onSideSteer(activeSide.id,id):undefined}
             onSend={(text,attachments,skills,requirements,thinking,model)=>onSideSend?.(activeSide.id,text,attachments,skills,requirements,thinking,model) ?? false}

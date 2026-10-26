@@ -36,7 +36,7 @@ import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import { getChatQueue, subscribeChatQueue, pauseChatQueue, updateQueuedMessage } from '../lib/chatQueue';
 import ComposerGoalMenu,{type ComposerCommandItem} from './ComposerGoalMenu';
 import {parseComposerCommand,suggestsCommand,type ComposerCommand} from '../lib/goalCommand';
-import ChatGoalComposer from './ChatGoalComposer';
+import ChatGoalComposer,{ChatGoalNotice} from './ChatGoalComposer';
 import {useChatGoalComposer,type GoalEditor} from '../hooks/useChatGoalComposer';
 import '../styles/chat-goal.css';
 
@@ -354,7 +354,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
         ref={textareaRef}
         id={inputId}
         className="chat-input"
-        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '描述你想完成的目标；完成以交付证据和你的确认为准' : analysisContext ? '想重点分析什么？补充你的要求…' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
+        placeholder={dragOver ? '松手添加素材…' : goalEditor ? '输入目标…' : analysisContext ? '想重点分析什么？补充你的要求…' : draft.quotes?.length ? '针对引用内容，补充你的想法…' : hero ? '描述你的想法，或添加素材…' : '继续对话，或提出新的想法…'}
         value={displayedInput}
         disabled={Boolean(goalEditor&&goalState.fieldsLocked)}
         maxLength={goalEditor?6000:undefined}
@@ -371,9 +371,8 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
         rows={2}
         autoFocus={hero}
       />
-      {goalEditor&&<ChatGoalComposer state={goalState} goal={goalEditor.goal} blocked={goalBlocked} onExit={closeGoal}/>}
+      {goalEditor&&<ChatGoalNotice state={goalState} goal={goalEditor.goal} blocked={goalBlocked}/>}
       {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
-      {goalEditor&&Boolean(attachments.length||draft.quotes?.length||skills.selectedSkills.length)&&<p className="composer-skills-note">附件、引用和技能保留在普通消息草稿中，退出目标模式后可继续发送。</p>}
       {!editingQueue && engine !== 'codex' && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
       {(modelGuardShown || legacyModelError) && !models.ready && <div className="composer-connection-notice" role={models.loading ? 'status' : 'alert'} aria-busy={models.loading}>
         <span className="composer-connection-icon" aria-hidden="true">{models.loading ? <IconLoader className="composer-connection-spinner" size={17}/> : <IconOpenClaw size={17}/>}</span>
@@ -389,8 +388,8 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
-      {goalBusy&&!goalEditor&&<p className="composer-skills-note" role="status">目标轮次正在运行。输入 /goal 查看目标；等本轮结束或先暂停后发送，草稿会保留。</p>}
-      {!goalBusy&&goalActive&&!goalEditor&&<p className="composer-skills-note" role="status">目标进行中：你的消息会优先处理，随后目标继续推进。输入 /goal pause 可暂停。</p>}
+      {goalBusy&&!goalEditor&&<p className="composer-skills-note" role="status">目标正在执行</p>}
+      {!goalBusy&&goalActive&&!goalEditor&&<p className="composer-skills-note" role="status">目标进行中</p>}
       <input ref={fileInputRef} type="file" multiple hidden onChange={uploadSelection}/>
       <input ref={mediaInputRef} type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.mp4,.mov,.webm,.m4v" multiple hidden onChange={uploadSelection}/>
       <input ref={folderInputRef} type="file" multiple hidden {...{ webkitdirectory: '' }} onChange={event => uploadSelection(event, true)}/>
@@ -401,7 +400,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
             options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
           {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
-          {onGoal && (goalEditor || Boolean(goalStatus)) && <button type="button" className={`composer-goal-btn${goalEditor?' is-active':''}`} aria-pressed={Boolean(goalEditor)} aria-label={goalEditor?'退出目标设置':'设置或查看目标'} title={goalEditor?'退出目标模式（Esc）':'设置或查看当前对话目标'} disabled={Boolean(goalEditor&&goalState.busy)||editingQueue} onClick={()=>goalEditor?closeGoal():openGoal()}><IconTarget size={16}/><span>目标</span>{goalEditor&&<span aria-hidden="true" className="composer-goal-exit">×</span>}</button>}
+          {goalEditor?<ChatGoalComposer state={goalState} goal={goalEditor.goal} onExit={closeGoal}/>:onGoal&&Boolean(goalStatus)&&<button type="button" className="composer-goal-btn" aria-pressed={false} aria-label="设置或查看目标" title="设置或查看当前对话目标" disabled={editingQueue} onClick={()=>openGoal()}><IconTarget size={16}/><span>目标</span></button>}
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
           {goalEditor&&goalState.modelLocked?<Select className="composer-goal-locked-model" aria-label="目标执行模型" value={goalState.executionModel} disabled onChange={()=>{}} options={[{value:goalState.executionModel,label:goalState.executionModel}]}/>:engine === 'codex' ? <Select aria-label="选择模型" value={models.modelRef} disabled={stopping || models.loading}

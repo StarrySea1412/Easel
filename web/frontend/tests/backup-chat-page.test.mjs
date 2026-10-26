@@ -87,7 +87,6 @@ test('goal request errors and pending state stay scoped to their goal when switc
   });
   const render = g=>view.render(createElement(ChatPage,{session,...actions.props,taskState:{goals:[g],runs:[],plans:[],serverTime:1}}));
   await render(goal);
-  await view.click(view.container.querySelector('.chat-goal-panel-details summary'));
   const recheck=[...view.container.querySelectorAll('.chat-goal-panel button')].find(b=>b.textContent==='重新核验结果');
   await view.click(recheck);
   assert.equal(recheck.disabled,true);

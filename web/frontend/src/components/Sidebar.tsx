@@ -24,7 +24,7 @@ import {readSeenStatuses, subscribeSeenStatuses} from '../lib/seenStatus';
 import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
-export type Page = 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'publish-receipts' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
+export type Page = 'tasks' | 'automation' | 'image' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'publish-receipts' | 'breakdown' | 'skills' | 'outputs' | 'activity' | 'agent-office' | 'accounts' | 'analysis' | 'profile' | 'settings';
 
 interface SidebarProps {
   eventNotifications?: React.ReactNode;
@@ -324,6 +324,7 @@ export default function Sidebar({
           <nav className="sidebar-nav" aria-label="主导航">
             {railItem('dashboard','工作台',<IconDashboard size={19}/>)}
             {railItem('chat','对话',<IconChat size={19}/>)}
+            {railItem('tasks','任务工作区',<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 8 1 1 2-2m2 1h3m-8 6 1 1 2-2m2 1h3"/></svg>)}
             {railItem('image','生图工坊',<IconImage size={19}/>)}
             {railItem('publish','内容发布',<IconPublish size={19}/>)}
             {railItem('publish-receipts','发布回执',<IconHistory size={19}/>)}

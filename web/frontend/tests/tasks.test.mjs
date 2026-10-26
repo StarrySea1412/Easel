@@ -8,13 +8,13 @@ const {createRoot}=await import('react-dom/client');
 const {mergeTaskSessions,planNeedsAttention}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
-const {default:GoalOptions}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
+const {default:GoalOptions,ChatGoalNotice}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
 const {useChatGoalComposer}=await loadTsModule('../src/hooks/useChatGoalComposer.ts',import.meta.url);
 // Exercise goal persistence independently; shared input/keyboard behavior is in composer tests.
 function GoalComposer({seed,goal,modelRef='',onConfigured,blocked=false,...props}){
   const state=useChatGoalComposer({...props,modelRef,blocked,editor:{seed,goal,onConfigured}});
   return createElement('form',{onSubmit:event=>{event.preventDefault();void state.save();}},
-    createElement(GoalOptions,{state,goal,blocked,onExit:props.onClose}),
+    createElement(GoalOptions,{state,goal,onExit:props.onClose}),createElement(ChatGoalNotice,{state,goal,blocked}),
     createElement('button',{type:'submit',className:'btn-primary',disabled:!state.canSubmit},state.label));
 }
 const goal={id:'goal',sessionId:'chat',title:'验收目标',objective:'生成选题并交付文件',modelRef:'fixture/model',status:'blocked',phase:'review',iterations:2,maxIterations:5,activeSeconds:20,maxSeconds:1200,maxTools:40,maxImages:0,criteria:[{type:'file',label:'文件',value:'topic/page.html'},{type:'review',label:'质量',value:''}],checks:[{state:'passed',detail:'已核验'},{state:'pending',detail:'等待确认'}],currentTurnId:'turn',reason:'等待用户验收'};
@@ -57,7 +57,7 @@ test('conversation goal panel shows reported steps and blockers separately from 
   const requests=[];t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push(JSON.parse(options.body));return new Response('{}');});
   const g={...goal,status:'active',phase:'running',steps:[{id:'a',title:'核对材料',status:'completed'},{id:'b',title:'生成页面',status:'in_progress'},{id:'c',title:'等待截图',status:'blocked',detail:'需要提供原图'}]};
   await act(async()=>root.render(createElement(GoalPanel,{goal:g,runs:[],onChanged:()=>changed++,onClose:()=>{},onEdit:()=>{}})));
-  assert.match(host.textContent,/1\/3/);assert.match(host.textContent,/需要提供原图/);assert.match(host.textContent,/最终验收单独确认/);
+  assert.match(host.textContent,/1\/3/);assert.match(host.textContent,/需要提供原图/);assert.match(host.textContent,/验收 1\/2/);
   assert.equal(host.querySelectorAll('li.completed').length,1);
   await act(async()=>host.querySelector('[aria-label="暂停目标"]').click());assert.equal(requests[0].action,'stop');assert.equal(changed,1);
   assert.ok(!host.textContent.includes('100%'));
@@ -90,7 +90,7 @@ test('inline goal never silently substitutes an unavailable explicit model and d
   t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({available:true,scope:'next_turn',currentModelRef:'fixture/expensive',options:[{id:'fixture/expensive',provider:'fixture',model:'expensive',configured:true}]}));});
   const props={sessionId:'safe',engine:'openclaw',seed:'只用指定模型',modelRef:'fixture/missing',onClose:()=>{},onChanged:()=>{}};
   await act(async()=>root.render(createElement(GoalComposer,props)));
-  assert.match(host.querySelector('[role=alert]').textContent,/不会自动更换模型/);
+  assert.match(host.querySelector('[role=alert]').textContent,/所选模型不可用/);
   assert.equal(host.querySelector('button[type=submit]')?.disabled??host.querySelector('.btn-primary').disabled,true);
   await act(async()=>host.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
   assert.equal(requests.length,1);
@@ -106,8 +106,8 @@ test('budget-limited goal shows the limit state and active goals explain user-me
   assert.match(host.textContent,/已达到目标轮次或时长上限。/);
   assert.ok(!host.textContent.includes('已完成'));
   await act(async()=>root.render(createElement(GoalPanel,{goal:{...goal,status:'active',phase:'queued',reason:''},runs:[],onChanged:()=>{},onClose:()=>{},onEdit:()=>{}})));
-  assert.match(host.textContent,/你的消息会优先处理/);
-  assert.match(host.textContent,/\/goal pause/);
+  assert.match(host.textContent,/等待下一轮/);
+  assert.ok(host.querySelector('[aria-label="暂停目标"]'));
   // A terminal goal keeps its real state even when the phase still says budget.
   await act(async()=>root.render(createElement(GoalPanel,{goal:{...goal,status:'cancelled',phase:'budget',reason:'已取消'},runs:[],onChanged:()=>{},onClose:()=>{},onEdit:()=>{}})));
   assert.match(host.textContent,/已取消/);

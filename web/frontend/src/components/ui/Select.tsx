@@ -36,12 +36,14 @@ export interface SelectProps extends Pick<AriaAttributes, 'aria-label' | 'aria-l
   className?: string;
   title?: string;
   triggerIcon?: ReactNode;
+  triggerLabel?: string;
+  menuMinWidth?: number;
   header?: SelectFooterOption;
   footer?: SelectFooterOption;
 }
 
 /** Single-choice combobox. Focus stays on the trigger while navigating its listbox. */
-export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, triggerIcon, header, footer, ...aria }: SelectProps) {
+export default function Select({ id, name, value, options, onChange, placeholder = '请选择', disabled = false, required = false, className = '', title, triggerIcon, triggerLabel, menuMinWidth = 240, header, footer, ...aria }: SelectProps) {
   const generatedId = useId();
   const triggerId = id || `select-${generatedId}`;
   const listId = `${triggerId}-options`;
@@ -212,7 +214,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       const above = rect.top - gap - margin;
       const upwards = below < 220 && above > below;
       const maxHeight = Math.max(80, Math.min(320, upwards ? above : below));
-      const width = Math.max(0, Math.min(Math.max(rect.width, 240), viewportWidth - margin * 2));
+      const width = Math.max(0, Math.min(Math.max(rect.width, menuMinWidth), viewportWidth - margin * 2));
       // 高度由“可滚动的候选列表 + 固定底栏”组成，翻转定位按两者之和估算。
       const optionsHeight = scrollRef.current?.scrollHeight ?? 0;
       const headerHeight = headerWrapRef.current?.offsetHeight ?? 0;
@@ -235,7 +237,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [expanded]);
+  }, [expanded, menuMinWidth]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -268,7 +270,7 @@ export default function Select({ id, name, value, options, onChange, placeholder
       aria-required={required || undefined} disabled={disabled} {...aria}
       onClick={() => expanded ? setOpen(false) : show()} onKeyDown={onKeyDown}
       onBlur={(event) => { if (!popupRef.current?.contains(event.relatedTarget as Node) && !submenuRef.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
-      <span className="easel-select-icon" aria-hidden="true">{triggerIcon ?? selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{selected?.label || value || placeholder}</span>
+      <span className="easel-select-icon" aria-hidden="true">{triggerIcon ?? selected?.icon}</span><span className={`easel-select-value${selected ? '' : ' is-placeholder'}`}>{triggerLabel ?? (selected?.label || value || placeholder)}</span>
       <svg className="easel-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
     </button>
     {name && <input type="hidden" name={name} value={value} disabled={disabled} />}

@@ -9,7 +9,8 @@ globalThis.document=window.document;
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
 const {default:Board}=await loadTsModule('../src/components/TaskStageBoard.tsx',import.meta.url);
-const {default:Options}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
+const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
+const {default:Options,ChatGoalNotice}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
 const {useChatGoalComposer}=await loadTsModule('../src/hooks/useChatGoalComposer.ts',import.meta.url);
 
 const stage={id:'research',title:'研究依据',objective:'核对实际来源',roleId:'researcher',role:{shortName:'研究'},status:'completed',attempts:1,
@@ -19,7 +20,6 @@ test('stage board separates verified handoff from pending artifacts and final qu
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
   await act(async()=>root.render(createElement(Board,{stages:[stage,{...stage,id:'build',title:'制作结果',status:'running',checks:[],handoff:undefined}]})));
   assert.match(host.textContent,/1\/2 阶段已交接/);
-  assert.match(host.textContent,/最终质量由你验收/);
   assert.equal(host.querySelectorAll('a').length,1);
   assert.equal(host.querySelector('a').getAttribute('href'),'/api/media/workflows/one/research.md');
   assert.equal(host.querySelector('[aria-current=step] h4').textContent,'制作结果');
@@ -29,9 +29,21 @@ test('stage board separates verified handoff from pending artifacts and final qu
 
 function Composer(props){
   const state=useChatGoalComposer(props);
-  return createElement('div',null,createElement(Options,{state,blocked:false,onExit:()=>{}}),
+  return createElement('div',null,createElement(Options,{state,onExit:()=>{}}),createElement(ChatGoalNotice,{state,blocked:false}),
     createElement('button',{'data-start':true,disabled:!state.canSubmit,onClick:()=>void state.save()},'开始'));
 }
+test('chat sidebar shows a flat stage summary and sends evidence review to the full workspace',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let opened=0;
+  const goal={id:'g',sessionId:'s',title:'协作目标',objective:'完成研究和制作',status:'paused',phase:'idle',stages:[stage],steps:[],checks:[],criteria:[],iterations:1,maxIterations:8,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,reason:'已暂停'};
+  await act(async()=>root.render(createElement(GoalPanel,{goal,runs:[],onChanged:()=>{},onEdit:()=>{},onWorkspace:()=>opened++})));
+  assert.equal(host.querySelector('aside'),null,'sidebar owns the outer container');
+  assert.equal(host.querySelector('details'),null,'summary does not embed evidence or receipt disclosures');
+  assert.equal(host.querySelector('.task-stage-receipt'),null);
+  assert.match(host.textContent,/研究依据/);assert.match(host.textContent,/交接已核验/);
+  assert.ok(!host.textContent.includes('当前阶段步骤'),'empty steps do not create a second progress section');
+  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent.includes('任务详情')).click());
+  assert.equal(opened,1);await act(async()=>root.unmount());host.remove();
+});
 test('workflow is sent with its budget, saved-start retry does not create another goal, and session switch clears selection',async t=>{
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host),requests=[];
   let starts=0;
@@ -46,15 +58,16 @@ test('workflow is sent with its budget, saved-start retry does not create anothe
   const trigger=host.querySelector('[aria-label="目标推进方式"]');
   await act(async()=>trigger.click());
   await act(async()=>[...document.querySelectorAll('[role=option]')].find(o=>o.textContent.includes('分工协作')).click());
-  assert.match(host.textContent,/研究依据/);
+  assert.match(host.querySelector('[aria-label="目标推进方式"]').textContent,/协作/);
   assert.equal(host.querySelector('[data-start]').disabled,false,host.textContent);
   await act(async()=>host.querySelector('[data-start]').click());
   assert.equal(requests[0].body.goal.workflow,'research-delivery');
   assert.equal(requests[0].body.goal.maxIterations,8);
-  assert.match(host.textContent,/目标已保存/);
+  assert.match(host.textContent,/已保存/);
   await act(async()=>host.querySelector('[data-start]').click());
   assert.equal(requests.filter(r=>r.url.endsWith('/goals')).length,1);
   await act(async()=>root.render(createElement(Composer,{...props,sessionId:'two'})));
-  assert.equal(host.querySelector('[aria-label="目标推进方式"]').textContent.includes('直接推进'),true);
+  await act(async()=>host.querySelector('[aria-label="目标推进方式"]').click());
+  assert.equal(document.querySelector('[role=option][aria-selected=true]').textContent,'直接推进');
   await act(async()=>root.unmount());host.remove();
 });

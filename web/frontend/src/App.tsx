@@ -8,7 +8,9 @@ import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
 import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib/sideChat';
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
-import { taskRequest, mergeTaskSessions, type TaskSnapshot } from './lib/tasks';
+import { taskRequest, mergeTaskSessions } from './lib/tasks';
+import { useTaskSnapshot } from './hooks/useTaskSnapshot';
+import { taskWorkspaceHash, parseTaskWorkspaceHash } from './lib/taskWorkspace';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
@@ -73,6 +75,7 @@ import { buildBreakdownReportPrompt } from './lib/breakdownReport';
 import type { ActiveRun } from './lib/breakdownStore';
 
 const AutomationPage = createLazyPage('目标与定时任务', () => import('./components/AutomationPage'));
+const TaskWorkspacePage = createLazyPage('任务工作区', () => import('./components/TaskWorkspacePage'));
 const ChatPage = createLazyPage('对话', () => import('./components/ChatPage'));
 const SkillPage = createLazyPage('技能库', () => import('./components/SkillPage'));
 const OutputsPage = createLazyPage('内容库', () => import('./components/OutputsPage'));
@@ -113,12 +116,20 @@ export default function App() {
   useSyncExternalStore(subscribeCreation, creationRevision);
   useEffect(() => startEventSync(), []);
   const [currentPage, setPageState] = useState<Page>('dashboard');
+  const [taskTarget,setTaskTarget] = useState<string|undefined>(()=>parseTaskWorkspaceHash(window.location.hash)?.goalId);
   const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
+    if (page !== 'tasks' && parseTaskWorkspaceHash(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (page === 'tasks' && !parseTaskWorkspaceHash(window.location.hash)) { setTaskTarget(undefined); window.location.hash = taskWorkspaceHash(); }
     if (page === 'publish-receipts' && !parsePublishReceiptHash(window.location.hash)) window.location.hash = publishReceiptHash();
     else if (page !== 'publish-receipts' && parsePublishReceiptHash(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
     window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));
     setPageState(page);
   }, []);
+  useEffect(()=>{
+    const navigateTasks=()=>{const route=parseTaskWorkspaceHash(window.location.hash);if(route){setTaskTarget(route.goalId);setCurrentPage('tasks');}else setPageState(page=>page==='tasks'?'dashboard':page);};
+    window.addEventListener('hashchange',navigateTasks);navigateTasks();
+    return()=>window.removeEventListener('hashchange',navigateTasks);
+  },[setCurrentPage]);
   const imageStudio = useImageStudio(currentPage === 'image' && !currentCreation('image').sessionId);
   const videoStudio = useVideoStudio(currentPage === 'image');
   const demoDataPreference = useDemoDataPreference();
@@ -340,17 +351,12 @@ export default function App() {
   // 最新 sessions 的 ref，供回调里读取而不必进依赖数组（避免闭包过期/频繁重建）
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
-  const [tasks,setTasks]=useState<TaskSnapshot>({goals:[],plans:[],runs:[],serverTime:0});
-  const [taskRevision,setTaskRevision]=useState(0);
+  const {snapshot:tasks,sessions:taskSessions,sync:taskSync,refresh:refreshTasks}=useTaskSnapshot();
   useEffect(()=>{
-    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;
-    async function poll(){try{
-      const [state,remote]=await Promise.all([taskRequest<TaskSnapshot>('',undefined,'GET',controller.signal),taskRequest<{sessions:ChatSession[]}>('/sessions',undefined,'GET',controller.signal)]);
-      if(controller.signal.aborted)return;
-      setTasks(state);setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);if(next!==old)saveSessions(next);return next;});
-    }catch{/* Keep the last confirmed snapshot; never infer completion from a failed read. */}finally{if(!controller.signal.aborted){setSessionsLoading(false);timer=setTimeout(()=>void poll(),3000);}}}
-    void poll();return()=>{controller.abort();clearTimeout(timer);};
-  },[taskRevision]);
+    if(!taskSessions)return;
+    setSessions(old=>{const next=mergeTaskSessions(old,taskSessions,outputSessionDeleted);if(next!==old)saveSessions(next);return next;});
+  },[taskSessions]);
+  useEffect(()=>{if(!taskSync.loading)setSessionsLoading(false);},[taskSync.loading]);
 
   // 当前活跃会话 id 的 ref：供跨标签「谁在用会话 X」查询时即时应答（见挂载 effect）
   const activeIdRef = useRef<string | null>(activeSessionId);
@@ -1352,6 +1358,19 @@ export default function App() {
     setCurrentPage('chat', true);
   }, [sessions]);
 
+  async function openTaskConversation(id:string) {
+    if(outputSessionDeleted(id)){showToast('原对话已删除，保留任务历史记录','info');return;}
+    try {
+      const remote=await taskRequest<{sessions:ChatSession[]}>('/sessions');
+      if(outputSessionDeleted(id)){showToast('原对话已删除','info');return;}
+      const next=mergeTaskSessions(sessionsRef.current,remote.sessions,outputSessionDeleted);
+      const target=next.find(session=>session.id===id);
+      if(!target||target.importedFromBackup){showToast('原对话不在当前可用记录中','info');return;}
+      if(next!==sessionsRef.current){saveSessions(next);sessionsRef.current=next;setSessions(next);}
+      refreshTasks();setActiveSessionId(id);setSelectedPersona(target.persona||'');setCurrentPage('chat');
+    }catch(e){showToast(e instanceof Error?e.message:'对话暂不可读','error');}
+  }
+
   const handleOutputConversation = useCallback(async (id: string, file: {path:string;name:string}) => {
     let target=sessionsRef.current.find(session=>session.id===id);
     if (!target) { showToast(outputSessionDeleted(id) ? '原对话已删除' : '未找到原对话，可能已删除或不在当前记录中', 'info'); return false; }
@@ -1522,7 +1541,8 @@ export default function App() {
             onSideReorder={handleSideReorder}
             onShare={handleShareConversation}
             onLoadShare={handleLoadShareAppends}
-            onTaskChange={()=>setTaskRevision(v=>v+1)}
+            onTaskChange={refreshTasks}
+            onOpenTask={id=>{setTaskTarget(id);window.location.hash=taskWorkspaceHash(id);setCurrentPage('tasks');}}
             onEngineChange={engine=>setSessions(prev=>{const next=prev.map(s=>s.id===activeSession.id&&!s.messages.length&&!s.pendingTurnId?{...s,engine}:s);saveSessions(next);return next;})}
             stream={streams[activeSession.id]}
             stopping={Boolean(stoppingSessions[activeSession.id])}
@@ -1551,7 +1571,15 @@ export default function App() {
       case 'trends':
         return <TrendsPage onUseTopic={handleUseTopic} />;
       case 'automation':
-        return <AutomationPage sessions={sessions} sessionId={activeSessionId} initialDraft={automationDraft} onDraftConsumed={()=>setAutomationDraft(null)} onOpen={id=>{void taskRequest<{sessions:ChatSession[]}>('/sessions').then(remote=>{setSessions(old=>{const next=mergeTaskSessions(old,remote.sessions);saveSessions(next);return next;});setTaskRevision(v=>v+1);setActiveSessionId(id);setCurrentPage('chat');}).catch(e=>showToast(e instanceof Error?e.message:'对话暂不可读','error'));}}/>;
+        return <AutomationPage sessions={sessions} sessionId={activeSessionId} initialDraft={automationDraft} onDraftConsumed={()=>setAutomationDraft(null)} onOpen={id=>void openTaskConversation(id)}/>;
+      case 'tasks':
+        return <TaskWorkspacePage data={tasks} sessions={sessions} sync={taskSync} selectedId={taskTarget}
+          onSelect={id=>{setTaskTarget(id);window.location.hash=taskWorkspaceHash(id);}} onRefresh={refreshTasks}
+          onOpenChat={id=>void openTaskConversation(id)}
+          onOpenActivity={(sessionId,turnId='')=>{setActivityTarget({sessionId,turnId,key:Date.now()});setCurrentPage('activity');}}
+          onOpenOffice={sessionId=>{setOfficeTarget({sessionId,key:Date.now()});setCurrentPage('agent-office');}}
+          onNew={()=>{const session=createSession(selectedPersona||undefined);setSessions(old=>{const next=[session,...old];saveSessions(next);return next;});setChatDraftText(session.id,'/goal ');setActiveSessionId(session.id);setCurrentPage('chat');}}
+          onSchedules={()=>setCurrentPage('automation')}/>;
       case 'ideas':
         return <IdeasPage onUseTopic={handleUseTopic} />;
       case 'calendar':

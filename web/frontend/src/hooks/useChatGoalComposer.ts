@@ -39,8 +39,8 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
     void fetchOfficeTaskModels(sessionId,controller.signal).then(value=>{
       if(controller.signal.aborted)return;
       const ready=Boolean(value.available&&executionModel&&value.options.some(option=>option.configured&&option.id===executionModel));
-      setVerifiedModel(ready?executionModel:'');setError(ready?'':'当前所选模型不可用，请在底部模型入口重新选择；不会自动更换模型。');
-    }).catch(()=>{if(!controller.signal.aborted)setError('模型暂不可核验，请刷新模型后重试。');})
+      setVerifiedModel(ready?executionModel:'');setError(ready||!executionModel?'':'所选模型不可用');
+    }).catch(()=>{if(!controller.signal.aborted&&executionModel)setError('模型连接检查失败');})
       .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
   },[enabled,sessionId,executionModel,unsupported,goal,revision,savedId]);
@@ -65,7 +65,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
       }
       if(start)await taskRequest(`/goals/${key}/action`,{action:goal?'resume':'start'});
       if(current()){onChanged?.();onClose?.();}
-    }catch(e){if(current())setError((key?'目标已保存，尚未确认启动。':'')+(e instanceof Error?e.message:'保存失败，请重试。'));}
+    }catch(e){if(current())setError((key?'已保存，启动失败：':'')+(e instanceof Error?e.message:'保存失败'));}
     finally{if(current()){submitting.current=false;setBusy(false);}}
   }
   return{objective,setObjective,workflow,setWorkflow,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
