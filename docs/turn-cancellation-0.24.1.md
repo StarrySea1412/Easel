@@ -28,3 +28,7 @@
 实际本机HTTP及再次重启核对管理员登录、排队取消、延迟提交拒绝、新轮保留、未知图片仍返回images_pending、合成供应商核对后停止确认、删除图片和14个入口资源。原停止回执及派发状态均为明确合成数据；所有合成排期保持暂停，无模型、图片供应商或平台调用。入口http://127.0.0.1:7891/，gaojitest/gaoji仅适用于该本机隔离数据；运行0.24.1/development、revision=null，不代表发行SHA或138升级。
 
 真实浏览器读取定时任务入口及当前版本，实际320/390/1280 CSS像素的scrollWidth分别等于视口宽度；视口已恢复。本轮未修改界面结构，未重新宣称所有菜单/真实模型任务已验收。截图cancellation-schedules-1280.png和cancellation-schedules-390.png及检查日志保留本机.artifacts，不提交。完整大版本和历史未完范围继续保留，Git回执另记。
+
+## Git交付
+
+功能与验证提交b2964d70dad8717f3acf01b6cc7155bf056a1f1b已推送starry/codex/turn-cancellation-0.24.1并核对同SHA；main仅双语首页7fd1e3d44666ab6fb3b7e2fdc901e02a0d2eac0c已推送核对，功能未并main。本条另作纯文档回执，完整大版本保持进行中。
