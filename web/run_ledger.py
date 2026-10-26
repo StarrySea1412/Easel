@@ -304,6 +304,7 @@ def mark(
     error: Any = _UNSET,
     settled: bool | None = None,
     resource_settled: bool | None = None,
+    resource_facts: dict[str, bool] | None = None,
     expected_revision: int | None = None,
     **details: Any,
 ) -> dict[str, Any] | None:
@@ -337,6 +338,11 @@ def mark(
             record["settled"] = bool(record.get('settled') or settled)
         if resource_settled is not None:
             record["resourceSettled"] = bool(record.get('resourceSettled') or resource_settled)
+        if resource_facts is not None:
+            facts = record.setdefault('resourceFacts', {})
+            for key in ('provider', 'browser'):
+                if key in resource_facts:
+                    facts[key] = facts.get(key) is True or resource_facts[key] is True
         if status in TERMINAL_STATUSES:
             record["terminalAt"] = record.get("terminalAt") or _now()
         event_details = {key: value for key, value in details.items() if value is not None}

@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import threading
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,7 +16,8 @@ import web.app as web
 @pytest.mark.parametrize("parts", [["complete"], ["开始", "中间", "结束"], ["a" * 8192, "tail"]])
 @pytest.mark.parametrize("buffered", [True, False])
 @pytest.mark.parametrize("raw_failure", [False, True])
-def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buffered, raw_failure):
+@pytest.mark.parametrize('cleanup_failure', [False, True])
+def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buffered, raw_failure, cleanup_failure):
     # The production model/engine contract changed after this fixture was written.
     # Keep every write and credential lookup inside this synthetic environment.
     state=tmp_path/'state';state.mkdir();(state/'openclaw.json').write_text('{}',encoding='utf-8')
@@ -24,6 +26,11 @@ def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buff
     monkeypatch.setattr(web,'OPENCLAW_SESSIONS_DIR',tmp_path/'transcripts')
     monkeypatch.setattr(web,'_codex_service',CodexService(tmp_path/'outputs'))
     monkeypatch.setattr(web,'gateway_credentials',lambda:GatewayCredentials('token',token='isolated-fixture'))
+    cleanup = {'fail': cleanup_failure}
+    def cancel_browser(*_):
+        if cleanup['fail']:
+            raise TimeoutError('Isolated browser cleanup fixture')
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: cleanup_failure, call=cancel_browser))
     monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(web, "DEBUG_DIR", tmp_path / "debug")
     monkeypatch.setattr(web, "SHARED_RAW_STREAM", tmp_path / "absent-raw.jsonl")
@@ -99,12 +106,27 @@ def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buff
         assert tokens == parts
         assert [json.loads(event["data"]) for event in received
                 if event["event"] == "thinking"] == ["thinking"]
-        assert received[-1]["event"] == "done"
+        assert received[-1]['event'] == ('recovery_required' if cleanup_failure else 'done')
         snapshot = await web.api_chat_last("buffered", turn_id="buffered-turn")
         assert snapshot["text"] == "".join(parts)
         replay = web._read_job_events("buffered-turn")
         assert [event["data"] for event in replay if event["event"] == "token"] == parts
-        assert replay[-1]["event"] == "done"
+        assert replay[-1]['event'] == ('recovery_required' if cleanup_failure else 'done')
+        record = web.run_ledger.read(web._run_ledger_root(), 'buffered-turn')
+        assert record['resourceSettled'] is not cleanup_failure
+        from easel.task_store import TaskStore
+        store = TaskStore(web.OUTPUTS_DIR)
+        assert store.pending_chat('buffered') == ('buffered-turn' if cleanup_failure else None)
+        if cleanup_failure:
+            cleanup['fail'] = False
+            from chat_recovery import reconcile_orphan
+            result = await asyncio.to_thread(reconcile_orphan, web, 'buffered', 'buffered-turn')
+            assert result == {'stopped': True, 'status': 'already_finished'}
+            assert store.pending_chat('buffered') is None
+            assert web.run_ledger.read(web._run_ledger_root(), 'buffered-turn')['resourceSettled']
+            assert web._read_job_events('buffered-turn')[-1]['event'] == 'done'
+            restored = await web.api_chat_last('buffered', turn_id='buffered-turn')
+            assert restored['text'] == ''.join(parts) and restored['clean_end'] and not restored['error']
         assert not web._RUNNING_CHAT
         assert not web._session_lock("buffered").locked()
 

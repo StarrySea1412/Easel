@@ -296,8 +296,8 @@ class TaskStore:
     def session_work(self, session):
         with self.db() as db:
             return [row[0] for row in db.execute(
-                "SELECT turn FROM runs WHERE session=? AND state IN ('running','unconfirmed') UNION SELECT turn FROM chat_leases WHERE session=? AND until>?",
-                (session, session, self.clock()))]
+                "SELECT turn FROM runs WHERE session=? AND state IN ('running','unconfirmed') UNION SELECT turn FROM chat_leases WHERE session=?",
+                (session, session))]
 
     def change_goal(self, key, action):
         with self.db() as db:
@@ -352,7 +352,7 @@ class TaskStore:
                 g = json.loads(row[0]); session = g['sessionId']
                 if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed')", (session,)).fetchone():
                     continue
-                if db.execute('SELECT 1 FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone():
+                if db.execute('SELECT 1 FROM chat_leases WHERE session=?', (session,)).fetchone():
                     continue
                 row = db.execute("SELECT * FROM runs WHERE goal=? AND state='queued'", (g['id'],)).fetchone()
                 if row:
@@ -439,7 +439,10 @@ class TaskStore:
                 # A late result cannot restart a paused/replaced goal; an already
                 # written budget wrap-up keeps its phase.
                 if g['phase'] != 'budget':
+                    recovered_failure = g['status'] == 'blocked' and g['phase'] == 'unconfirmed' and state == 'failed'
                     g['phase'] = 'idle'
+                    if recovered_failure:
+                        g.update(phase='run_failed', reason=reason or '后台已确认结束，本轮未正常完成。')
             elif state == 'stopped':
                 # Interruptions pause the objective; records stay valid for resume.
                 g.update(status='paused', phase='idle', reason=reason or '本轮被中断，目标已暂停；继续时从当前记录恢复。')
@@ -525,8 +528,8 @@ class TaskStore:
             self._require_session(db, session)
             if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('queued','running','unconfirmed')", (session,)).fetchone():
                 raise TaskConflict('目标轮次正在运行或等待结算，本条消息尚未发送；请稍候，或先在目标面板暂停。')
-            row = db.execute('SELECT turn FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone()
-            if row and row[0] != turn:
+            row = db.execute('SELECT turn FROM chat_leases WHERE session=?', (session,)).fetchone()
+            if row:
                 raise TaskConflict('该会话仍有运行，请等待或停止。')
             # Human input takes priority without cancelling the goal: holding the
             # chat lease defers continuation to the next idle safe boundary.
@@ -535,6 +538,12 @@ class TaskStore:
     def release_chat(self, session, turn):
         with self.db() as db:
             db.execute('DELETE FROM chat_leases WHERE session=? AND turn=?', (session, turn))
+
+    def pending_chat(self, session):
+        """Elapsed local time is not evidence that an external run stopped."""
+        with self.db() as db:
+            row = db.execute('SELECT turn FROM chat_leases WHERE session=?', (session,)).fetchone()
+            return row[0] if row else None
 
     def save_plan(self, data, next_at, key=None):
         with self.db() as db:

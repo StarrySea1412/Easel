@@ -58,6 +58,7 @@ class TaskService:
         self.loop = None
         self.work = set()
         self.closing = False
+        self.recovery_checks = {}
 
     @property
     def store(self):
@@ -150,9 +151,18 @@ class TaskService:
                 await asyncio.to_thread(store.trigger_plan, p['id'], scheduled_at=due,
                     next_at=next_time(p['schedule'], now), missed=missed, effective_at=effective)
         # Unknown runs can only settle from positive existing ledger evidence.
+        checked_external = False
         for r in await asyncio.to_thread(store.running):
             if r['state'] == 'unconfirmed':
-                await self.settle(r)
+                if await self.settle(r):
+                    continue
+                if (not checked_external and getattr(self.web, '_CrossProcLock', None)
+                        and now >= self.recovery_checks.get(r['turnId'], 0)):
+                    from chat_recovery import reconcile_orphan
+                    self.recovery_checks[r['turnId']] = now + 15
+                    checked_external = True
+                    await asyncio.to_thread(reconcile_orphan, self.web, r['sessionId'], r['turnId'])
+                    await self.settle(r)
         if self.work:
             return
         pair = await asyncio.to_thread(store.claim, self.owner)

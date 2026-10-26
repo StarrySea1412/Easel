@@ -12,6 +12,7 @@ else:
 import hashlib
 import ipaddress
 import json
+import logging
 import re
 import shutil
 import signal
@@ -29,6 +30,8 @@ from contextlib import asynccontextmanager
 import ipaddress
 from pathlib import Path
 from typing import Annotated, Literal
+
+log = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -5135,6 +5138,16 @@ async def api_chat_run_events(turn_id: str, after: int = Query(0, ge=0), limit: 
     return JSONResponse(page, headers={'Cache-Control':'no-store'})
 
 
+@app.post('/api/chat/runs/{turn_id}/reconcile')
+async def api_chat_run_reconcile(turn_id: str, sessionId: str = Query(..., pattern=r'^[A-Za-z0-9_.-]{1,120}$')):
+    from chat_recovery import reconcile_orphan
+    record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
+    if not record or record.get('sessionId') != sessionId:
+        raise HTTPException(404, '对话运行记录不存在')
+    result = await asyncio.to_thread(reconcile_orphan, sys.modules[__name__], sessionId, turn_id)
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
 @app.get("/api/chat/jobs/{turn_id}/stream")
 async def api_chat_job_stream(turn_id: str, after: int = 0):
     """Replay missed events, then tail this turn until its terminal event arrives."""
@@ -5170,6 +5183,24 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                     # The append-only log survived a web restart; its former
                     # supervisor did not. Do not tail it forever or resubmit it.
                     latest_ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id) or ledger or {}
+                    if latest_ledger.get('sessionId'):
+                        from chat_recovery import reconcile_orphan
+                        recovered = await asyncio.to_thread(reconcile_orphan, sys.modules[__name__],
+                            latest_ledger['sessionId'], turn_id)
+                        if recovered['status'] == 'owned':
+                            # Another web worker still owns the OS session lock.
+                            # Keep tailing its durable log instead of declaring it lost.
+                            if time.monotonic() - idle_since >= 15:
+                                yield {'event': 'ping', 'data': '{}'}
+                                idle_since = time.monotonic()
+                            await asyncio.sleep(0.25)
+                            continue
+                        if recovered['stopped']:
+                            if _read_job_events(turn_id, cursor):
+                                continue
+                            yield {'event': 'done', 'data': json.dumps({'sessionKey': latest_ledger['sessionId'],
+                                'stopped': latest_ledger.get('status') == 'stopped'})}
+                            return
                     provider = latest_ledger.get('providerRunId')
                     status = latest_ledger.get('status')
                     if provider and status not in run_ledger.TERMINAL_STATUSES:
@@ -5204,21 +5235,32 @@ async def api_chat_stream(req: ChatRequest):
     store = TaskStore(OUTPUTS_DIR)
     req = req.model_copy(update={'sessionId': req.sessionId or uuid.uuid4().hex,
                                  'turnId': req.turnId or uuid.uuid4().hex})
+    if req.engine != 'codex':
+        pending = await asyncio.to_thread(store.pending_chat, req.sessionId)
+        if pending:
+            from chat_recovery import reconcile_orphan
+            await asyncio.to_thread(reconcile_orphan, sys.modules[__name__], req.sessionId, pending)
     try:
-        store.reserve_chat(req.sessionId, req.turnId)
+        await asyncio.to_thread(store.reserve_chat, req.sessionId, req.turnId)
     except TaskConflict as exc:
         raise HTTPException(409, str(exc)) from None
-    release = lambda: store.release_chat(req.sessionId, req.turnId)
+    async def release():
+        if req.engine == 'codex':
+            await asyncio.to_thread(store.release_chat, req.sessionId, req.turnId)
+            return
+        record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), req.turnId)
+        if record is None or record.get('resourceSettled') is True:
+            await asyncio.to_thread(store.release_chat, req.sessionId, req.turnId)
     try:
         if req.engine == 'codex':
             # Codex has its own persistent execution fence; goals only admit
             # OpenClaw-bound conversations, so do not extend its stream lifetime.
             result = await start_chat_run(req)
-            release()
+            await release()
             return result
         return await start_chat_run(req, on_done=release)
     except BaseException:
-        release()
+        await release()
         raise
 
 
@@ -5358,6 +5400,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
         last_progress_at = time.monotonic()
         stall_warning_sent = False
+        proc = None
+        is_http = False
+        run_info = {}
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
         save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
@@ -6206,7 +6251,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     _run_ledger_root(), turn_id, event='terminal', status=terminal_status,
                     provider_run_id=run_info.get('run_id'), last_event_id=event_seq,
                     stop_reason='user_stopped' if user_stopped else run_info.get('stop_reason'),
-                    error=turn_error, settled=True, resource_settled=True,
+                    error=turn_error, settled=True,
                 )
                 if audit_context is not None:
                     try:
@@ -6242,13 +6287,27 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             })
             await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                             error=error, stop_reason='supervisor_failed',
-                            settled=True, resource_settled=True)
+                            settled=True)
         finally:
+            from chat_recovery import settle_resources
+            resources_settled = False
             try:
-                if _browser_service.has_pages(sk):
-                    await asyncio.to_thread(_browser_service.call, 'cancel_agents', sk)
-            except (ValueError, TimeoutError, RuntimeError):
-                to_client('activity', '浏览器操作结算未确认，请在浏览器面板重新观察。')
+                provider_settled = proc is None or (bool(run_info.get('http_done')) if is_http else proc.poll() is not None)
+                facts = (await asyncio.to_thread(settle_resources, sys.modules[__name__], sk,
+                    provider_settled=provider_settled)) if xlock.acquired else {'provider': provider_settled, 'browser': True}
+                record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
+                if record and not record.get('settled'):
+                    await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
+                        event='terminal', status='stopped' if user_stopped else 'failed', settled=True,
+                        error=turn_error, stop_reason='user_stopped' if user_stopped else 'supervisor_failed')
+                await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
+                    event='resources_settled' if all(facts.values()) else 'resources_pending',
+                    resource_settled=all(facts.values()), resource_facts=facts)
+                resources_settled = all(facts.values())
+            except Exception:
+                log.warning('运行收尾尚未持久确认：%s', turn_id, exc_info=True)
+            if not resources_settled:
+                to_client('activity', '后台资源结算未确认。')
             if execution_tail is not None:
                 # 停止轮询后补读一次：最后一个工具回执通常落在上一拍之后。
                 execution_tail.cancel()
@@ -6272,7 +6331,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 lock.release()
                 _RUNNING_CHAT.pop(sk, None)
                 _ACTIVE_SKILL_TURNS.pop(sk, None)
-            to_client("done", sessionKey=sk, stopped=user_stopped)
+            if on_done is not None:
+                try:
+                    await on_done()
+                except Exception:
+                    resources_settled = False
+                    log.warning('运行占位释放仍待重试：%s', turn_id, exc_info=True)
+            if resources_settled:
+                to_client("done", sessionKey=sk, stopped=user_stopped)
+            else:
+                to_client('recovery_required', '后台资源尚未确认结束，请重试停止核实。')
             _CHAT_JOBS.pop(turn_id, None)
             if observe:
                 client_q.put_nowait(CLIENT_DONE)
@@ -6283,8 +6351,6 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
     def _bg_done(t):
         _BG_TASKS.discard(t)
-        if on_done is not None:
-            on_done()
         if _CHAT_JOBS.get(turn_id) == (sk, cancel_job):
             _CHAT_JOBS.pop(turn_id, None)
         try:
@@ -6331,6 +6397,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 yield {"id": str(item["id"]), "event": "thinking", "data": json.dumps(item["text"], ensure_ascii=False)}
             elif t == "activity":
                 yield {"id": str(item["id"]), "event": "activity", "data": json.dumps(item["text"], ensure_ascii=False)}
+            elif t == 'recovery_required':
+                yield {'id': str(item['id']), 'event': t, 'data': json.dumps(item['text'], ensure_ascii=False)}
             elif t == "question":
                 yield {"id": str(item["id"]), "event": "question", "data": item["text"]}
             elif t == "error":
@@ -6443,7 +6511,8 @@ async def api_chat_stop(req: StopRequest):
             deadline = time.monotonic() + 3
             while target_turn in _CHAT_JOBS and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
-            return {'stopped': target_turn not in _CHAT_JOBS}
+            record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), target_turn)
+            return {'stopped': target_turn not in _CHAT_JOBS and bool(record and record.get('resourceSettled'))}
     elif req.turnId and _ACTIVE_SKILL_TURNS.get(sk) != req.turnId:
         if proc is not None:
             return {"stopped": False}
@@ -6475,7 +6544,8 @@ async def api_chat_stop(req: StopRequest):
         deadline = time.monotonic() + 35
         while _RUNNING_CHAT.get(sk) is proc and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
-        return {"stopped": _RUNNING_CHAT.get(sk) is not proc}
+        record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), target_turn) if target_turn else None
+        return {"stopped": _RUNNING_CHAT.get(sk) is not proc and bool(record and record.get('resourceSettled'))}
     if proc is None and target_turn:
         from chat_recovery import stop_orphan
         return await asyncio.to_thread(stop_orphan, sys.modules[__name__], sk, target_turn)

@@ -3,16 +3,20 @@ import asyncio
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 import app as web
-from chat_recovery import stop_orphan
+from chat_recovery import stop_orphan, reconcile_orphan
+from easel.task_store import TaskStore, TaskConflict
 
 
 @pytest.fixture
 def lost(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path)
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'raw.jsonl')
     monkeypatch.setattr(web, 'gateway_credentials', lambda: None)
@@ -73,10 +77,10 @@ def test_old_stop_does_not_overwrite_new_turn_while_gateway_is_awaited(lost):
     assert len(events.read_text(encoding='utf-8').splitlines()) == 4
 
 
-def test_already_saved_final_does_not_send_another_abort(lost):
+def test_unconfirmed_legacy_done_marker_does_not_prove_resource_release(lost):
     marker, events, calls, state = lost
     marker.write_text(json.dumps({'status': 'done', 'turn_id': 'lost-turn', 'text': 'complete'}))
-    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['status'] == 'already_finished'
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped'] is False
     assert calls == [] and json.loads(marker.read_text(encoding='utf-8'))['text'] == 'complete'
 
 
@@ -111,3 +115,222 @@ def test_replay_with_existing_log_and_no_owner_ends_with_actionable_recovery(los
     events = asyncio.run(asyncio.wait_for(replay(), 1))
     assert events[-1]['event'] == 'recovery_required'
     assert '停止' in json.loads(events[-1]['data'])
+
+
+def durable_lost():
+    store = TaskStore(web.OUTPUTS_DIR)
+    store.reserve_chat('recovery-chat', 'lost-turn')
+    web.run_ledger.accept(web._run_ledger_root(), 'lost-turn', session_id='recovery-chat',
+                          session_key='agent:main:recovery-chat')
+    web.run_ledger.mark(web._run_ledger_root(), 'lost-turn', status='running',
+                        provider_run_id='exact-run', transport='native')
+    return store
+
+
+def test_passive_recovery_confirms_exact_run_without_abort_or_model_dispatch(lost):
+    marker, events, calls, state = lost
+    store = durable_lost()
+    state['wait'] = {'status': 'ok', 'runId': 'exact-run'}
+    assert reconcile_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': True, 'status': 'already_finished'}
+    assert [method for method, _ in calls] == ['agent.wait']
+    saved = json.loads(marker.read_text(encoding='utf-8'))
+    assert saved['text'] == 'corrected reply' and not saved['clean_end']
+    assert saved['error']['code'] == 'chat_supervisor_lost'
+    record = web.run_ledger.read(web._run_ledger_root(), 'lost-turn')
+    assert record['status'] == 'failed' and record['resourceSettled']
+    assert record['resourceFacts'] == {'provider': True, 'browser': True}
+    assert store.pending_chat('recovery-chat') is None
+    before = marker.read_bytes(), events.read_bytes(), record['eventSeq']
+    assert reconcile_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert (marker.read_bytes(), events.read_bytes(), web.run_ledger.read(web._run_ledger_root(), 'lost-turn')['eventSeq']) == before
+    assert [method for method, _ in calls] == ['agent.wait']
+
+
+def test_passive_active_run_keeps_every_fact_and_chat_reservation(lost):
+    marker, events, calls, state = lost
+    store = durable_lost()
+    state['wait'] = {'status': 'timeout', 'runId': 'exact-run'}
+    before = marker.read_bytes(), events.read_bytes(), web.run_ledger.read(web._run_ledger_root(), 'lost-turn')
+    assert reconcile_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': False, 'status': 'active'}
+    assert (marker.read_bytes(), events.read_bytes(), web.run_ledger.read(web._run_ledger_root(), 'lost-turn')) == before
+    assert store.pending_chat('recovery-chat') == 'lost-turn'
+    assert [method for method, _ in calls] == ['agent.wait']
+
+
+def test_failed_browser_cleanup_retains_reservation_and_retries_without_second_abort(lost, monkeypatch):
+    marker, events, calls, state = lost
+    store = durable_lost()
+    cleanup = {'fail': True, 'calls': 0}
+    def cancel(*_):
+        cleanup['calls'] += 1
+        if cleanup['fail']:
+            raise TimeoutError('Isolated cleanup fixture')
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: True, call=cancel))
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': False, 'status': 'unconfirmed'}
+    record = web.run_ledger.read(web._run_ledger_root(), 'lost-turn')
+    assert record['status'] == 'stopped' and record['settled'] and not record['resourceSettled']
+    assert record['resourceFacts'] == {'provider': True, 'browser': False}
+    assert store.pending_chat('recovery-chat') == 'lost-turn'
+    assert not any(e['event'] == 'done' for e in web._read_job_events('lost-turn'))
+    cleanup['fail'] = False
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert cleanup['calls'] == 2 and [method for method, _ in calls] == ['chat.abort']
+    assert store.pending_chat('recovery-chat') is None
+    assert web.run_ledger.read(web._run_ledger_root(), 'lost-turn')['resourceSettled']
+
+
+def test_settled_reply_with_pending_resources_still_requires_provider_confirmation(lost):
+    marker, events, calls, state = lost
+    store = durable_lost()
+    web.run_ledger.mark(web._run_ledger_root(), 'lost-turn', status='failed', settled=True)
+    state['wait'] = {'status': 'timeout', 'runId': 'exact-run'}
+    assert not reconcile_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert store.pending_chat('recovery-chat') == 'lost-turn'
+    assert calls[0][0] == 'agent.wait'
+
+
+def test_durable_provider_identity_wins_over_an_outdated_marker(lost):
+    marker, events, calls, state = lost
+    durable_lost()
+    marker.write_text(json.dumps({'status': 'running', 'turn_id': 'lost-turn', 'gateway_run_id': 'outdated-run'}))
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert calls[0][1]['runId'] == 'exact-run'
+
+
+def test_recovered_final_stays_separate_from_an_incomplete_log_tail(lost):
+    marker, events, calls, state = lost
+    durable_lost()
+    with events.open('ab') as stream:
+        stream.write(b'{"id":5,"event":"token","data":"\xe4\xb8')
+    original = events.read_bytes()
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert events.read_bytes().startswith(original + b'\n')
+    assert web._read_job_events('lost-turn')[-1]['event'] == 'done'
+    assert json.loads(marker.read_text(encoding='utf-8'))['text'] == 'corrected reply'
+
+
+def test_expired_and_duplicate_chat_reservations_require_positive_release(tmp_path):
+    now = [1000]
+    store = TaskStore(tmp_path, clock=lambda: now[0])
+    store.reserve_chat('fixture-session', 'fixture-turn')
+    now[0] += 7201
+    for turn in ['fixture-turn', 'another-turn']:
+        with pytest.raises(TaskConflict):
+            store.reserve_chat('fixture-session', turn)
+    assert store.session_work('fixture-session') == ['fixture-turn']
+    store.release_chat('fixture-session', 'another-turn')
+    assert store.pending_chat('fixture-session') == 'fixture-turn'
+    store.release_chat('fixture-session', 'fixture-turn')
+    store.reserve_chat('fixture-session', 'another-turn')
+
+
+def test_http_passive_check_is_scoped_and_disables_caching(lost):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    marker, events, calls, state = lost
+    durable_lost()
+    state['wait'] = {'status': 'timeout', 'runId': 'exact-run'}
+    app = FastAPI()
+    app.post('/api/chat/runs/{turn_id}/reconcile')(web.api_chat_run_reconcile)
+    with TestClient(app) as client:
+        response = client.post('/api/chat/runs/lost-turn/reconcile?sessionId=recovery-chat')
+        assert response.status_code == 200 and response.json()['status'] == 'active'
+        assert response.headers['cache-control'] == 'no-store'
+        assert client.post('/api/chat/runs/lost-turn/reconcile?sessionId=another-session').status_code == 404
+    assert [method for method, _ in calls] == ['agent.wait']
+
+
+def test_replay_automatically_reconciles_finished_orphan_without_a_new_request(lost):
+    marker, events, calls, state = lost
+    store = durable_lost()
+    state['wait'] = {'status': 'ok', 'runId': 'exact-run'}
+    async def replay():
+        response = await web.api_chat_job_stream('lost-turn')
+        return [event async for event in response.body_iterator]
+    received = asyncio.run(asyncio.wait_for(replay(), 3))
+    assert received[-1]['event'] == 'error'
+    assert json.loads(received[-1]['data'])['code'] == 'chat_supervisor_lost'
+    assert [method for method, _ in calls] == ['agent.wait']
+    assert store.pending_chat('recovery-chat') is None
+
+
+def _hold_session_in_process(root, ready, release):
+    web.SESSIONS_DIR = Path(root)
+    lock = web._CrossProcLock('recovery-chat')
+    try:
+        if lock.acquire(timeout=1):
+            ready.set()
+            release.wait(10)
+            with web._job_event_file('lost-turn').open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps({'id': 5, 'event': 'done', 'data': {'sessionKey': 'recovery-chat'}}) + '\n')
+    finally:
+        lock.release()
+
+
+def test_other_web_process_keeps_ownership_and_is_never_stopped(lost, monkeypatch):
+    import multiprocessing
+    marker, events, calls, state = lost
+    store = durable_lost()
+    ctx = multiprocessing.get_context('spawn')
+    ready, release = ctx.Event(), ctx.Event()
+    child = ctx.Process(target=_hold_session_in_process, args=(str(web.SESSIONS_DIR), ready, release))
+    child.start()
+    try:
+        assert ready.wait(8)
+        before = marker.read_bytes(), events.read_bytes()
+        assert stop_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': False, 'status': 'owned'}
+        assert (marker.read_bytes(), events.read_bytes()) == before
+        assert calls == [] and store.pending_chat('recovery-chat') == 'lost-turn'
+        import chat_recovery
+        observed = []
+        original = chat_recovery.reconcile_orphan
+        def check_owner(*args, **kwargs):
+            result = original(*args, **kwargs)
+            observed.append(result['status'])
+            release.set()
+            return result
+        monkeypatch.setattr(chat_recovery, 'reconcile_orphan', check_owner)
+        async def replay():
+            response = await web.api_chat_job_stream('lost-turn')
+            return [event async for event in response.body_iterator]
+        received = asyncio.run(asyncio.wait_for(replay(), 3))
+        assert observed == ['owned'] and received[-1]['event'] == 'done'
+        assert calls == [] and all(e['event'] != 'recovery_required' for e in received)
+    finally:
+        release.set()
+        child.join(8)
+        if child.is_alive():
+            child.terminate()
+            child.join(3)
+    assert child.exitcode == 0
+
+
+def test_goal_recovery_settles_only_from_positive_existing_provider_receipt(lost, monkeypatch):
+    from task_service import TaskService
+    from easel.task_rules import GoalSpec
+    marker, events, calls, state = lost
+    store = TaskStore(web.OUTPUTS_DIR)
+    goal = store.create_goal(GoalSpec(objective='隔离恢复夹具：保留初稿', modelRef='fixture/model',
+        criteria=[{'type': 'file', 'label': '初稿', 'value': 'draft.txt'}]).model_dump(), session='recovery-chat')
+    store.change_goal(goal['id'], 'start')
+    _, run = store.claim('lost-owner')
+    store.bind_provider('recovery-chat', run['turnId'], 'exact-run')
+    with store.db() as db:
+        db.execute('UPDATE runs SET lease=0 WHERE id=?', (run['id'],))
+    assert store.claim('new-owner') is None
+    assert store.running()[0]['state'] == 'unconfirmed'
+    web.run_ledger.accept(web._run_ledger_root(), run['turnId'], session_id='recovery-chat', session_key='agent:main:recovery-chat')
+    web.run_ledger.mark(web._run_ledger_root(), run['turnId'], status='running', provider_run_id='exact-run', transport='native')
+    marker.write_text(json.dumps({'status': 'running', 'turn_id': run['turnId']}))
+    web._job_event_file(run['turnId']).write_bytes(events.read_bytes())
+    state['wait'] = {'status': 'ok', 'runId': 'exact-run'}
+    service = TaskService(web)
+    def unexpected(*_):
+        raise AssertionError('Recovery must not dispatch a model')
+    monkeypatch.setattr(service, 'admit', unexpected)
+    asyncio.run(service.tick())
+    assert [method for method, _ in calls] == ['agent.wait']
+    assert store.running() == [] and len(store.snapshot()['runs']) == 1
+    saved = store.get('goals', goal['id'])
+    assert saved['status'] == 'blocked' and saved['phase'] == 'run_failed'
+    assert store.snapshot()['runs'][0]['text'] == 'corrected reply'
