@@ -35,3 +35,9 @@ pyproject.toml与前端包同步0.28.0，构建版本仍从pyproject读取。任
 本机入口http://127.0.0.1:7891/，gaojitest/gaoji仅用于.artifacts/acceptance-data隔离环境，正常密码哈希；不适用于生产。运行0.28.0/development、revision=null，无配置模型且网关离线；不是发行构建SHA，也不表示138已升级。没有付费模型、生图或平台发布执行；工作台可能自动读取公共热点/状态，不能据此宣称零平台HTTP请求。Git交付回执另记。
 
 完整跨角色调度、自动审查返工、全部引擎原生恢复、语义归并/通用任务提炼、真实模型质量成本与内容业务链，以及完整历史未完项继续保留。
+
+## Git交付
+
+功能/验证0ad27bc2a1dfbf5a9b74f31e53e3de8842b71f54已推送starry/codex/stage-rework-0.28.0并核对同SHA；main仅README.md与README_EN.md，提交d99fa18e8b736d116a12be76d13a0004a851d833已推送核对，未合并功能。新文档HTTP200。本机构建入口index-DZvTdiS-.js，dist/index.html的SHA-256为454b48b2f6a7630ef1eb435c19ba071b2a31f335f84b3cee90806b3fc2c62936；运行接口仍明确development/revision=null，不冒充发行SHA。
+
+此Git回执另作纯文档提交；仅本批交付，完整目标保持进行中，138与安装器未更新。
