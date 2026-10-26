@@ -129,7 +129,7 @@ def project_after(method):
 
 
 class MemoryStore:
-    def __init__(self, root: Path, profiles: Path | None = None, source_resolver=None):
+    def __init__(self, root: Path, profiles: Path | None = None, source_resolver=None, extraction_source_resolver=None):
         self.root = Path(root).resolve()
         self.profiles = Path(profiles) if profiles is not None else self.root / 'profiles'
         if linked(self.profiles) or self.profiles.resolve().parent != self.root:
@@ -143,6 +143,7 @@ class MemoryStore:
             raise ValueError('记忆数据库路径无效')
         from easel.memory_sources import analysis_source
         self.resolve_source = source_resolver or (lambda binding: analysis_source(self.root / 'outputs', binding))
+        self.resolve_extraction_source = extraction_source_resolver or (lambda binding: analysis_source(self.root / 'outputs', binding, require_settled=True))
         with self.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS profiles(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,revision INTEGER NOT NULL DEFAULT 0,managed INTEGER NOT NULL DEFAULT 0,projected_hash TEXT,projected_revision INTEGER NOT NULL DEFAULT -1);
@@ -152,6 +153,7 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS uses(profile_id TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,session_id,turn_id));
                 CREATE TABLE IF NOT EXISTS tombstones(profile_id TEXT NOT NULL,dedupe TEXT NOT NULL,PRIMARY KEY(profile_id,dedupe));
                 CREATE TABLE IF NOT EXISTS policies(profile_id TEXT PRIMARY KEY,data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS extractions(profile_id TEXT NOT NULL,fingerprint TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,fingerprint));
                 CREATE TABLE IF NOT EXISTS replacements(profile_id TEXT NOT NULL,old_id TEXT NOT NULL,new_id TEXT NOT NULL,old_revision INTEGER NOT NULL,new_revision INTEGER NOT NULL,PRIMARY KEY(profile_id,new_id));
             ''')
 
@@ -295,6 +297,11 @@ class MemoryStore:
             if replaces:
                 self._replacement(db, profile, replaces, selected_scope, selected_conditions)
             return self._insert(db, profile, text, selected_scope, source, selected_conditions=selected_conditions, replaces=replaces)
+
+    @project_after
+    def extract_analysis(self, name, data):
+        from easel.memory_extraction import extract
+        return extract(self, name, data)
 
     @staticmethod
     def _replacement_binding(value):
@@ -602,5 +609,6 @@ class MemoryStore:
             db.execute('DELETE FROM uses WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM tombstones WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM policies WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM extractions WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM replacements WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM profiles WHERE id=?', (profile['id'],))

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from easel.profile_memory import Conflict
 
 
-def create_router(store_getter):
+def create_router(store_getter, extraction_recorder=None):
     router = APIRouter(prefix='/api/persona/{name}/memory')
 
     async def payload(request, ui=False):
@@ -49,6 +49,14 @@ def create_router(store_getter):
     async def propose(name: str, request: Request):
         entry = run(run(store_getter).propose, name, await payload(request))
         return {'entry': entry, 'state': run(run(store_getter).state, name)}
+
+    @router.post('/extract-analysis')
+    async def extract_analysis(name: str, request: Request):
+        store = run(store_getter)
+        receipt = run(store.extract_analysis, name, await payload(request))
+        if extraction_recorder:
+            run(extraction_recorder, receipt)
+        return {'extraction': receipt, 'state': run(store.state, name)}
 
     @router.post('/policy')
     async def policy(name: str, request: Request):

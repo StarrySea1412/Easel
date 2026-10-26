@@ -860,7 +860,7 @@ export default function App() {
     const identity = analyticsScope(request.platform);
     try {
       const session = createSession(selectedPersona);
-      const binding = await analysisRequest<AnalysisBinding>('/conversations', 'POST', { ...request, sessionId: session.id });
+      const binding = await analysisRequest<AnalysisBinding>('/conversations', 'POST', { ...request, sessionId: session.id, persona: session.persona || '' });
       if (identity !== analyticsScope(request.platform)) throw new Error('账号已切换，请在当前账号重新提取材料');
       session.conversationType = binding.kind; session.analysisContext = binding;
       session.title = `${binding.kind === 'content-analysis' ? '作品分析' : '账号分析'} · ${binding.accountName}`;

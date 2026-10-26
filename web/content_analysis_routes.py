@@ -12,7 +12,7 @@ from content_analysis import ADVANCED_METRICS, METRICS, PLATFORMS, Store, markdo
 from content_analysis_sync import SyncService
 
 
-def create_router(root_getter, capture, providers_getter=lambda: [], *, session_getter=None, generation_getter=None):
+def create_router(root_getter, capture, providers_getter=lambda: [], *, session_getter=None, generation_getter=None, experience_extractor=None, profile_resolver=None):
     router = APIRouter(prefix='/api/content-analysis')
     synchronizer = SyncService(root_getter, capture, session_getter, generation_getter)
 
@@ -68,7 +68,7 @@ def create_router(root_getter, capture, providers_getter=lambda: [], *, session_
     @router.post('/conversations')
     async def prepare_conversation(request: Request):
         from analysis_conversations import AnalysisConversations
-        return run(AnalysisConversations(store()).prepare, await payload(request))
+        return run(AnalysisConversations(store(), profile_resolver).prepare, await payload(request))
 
     @router.get('/conversations')
     async def list_conversations(platform: str, accountId: str):
@@ -78,7 +78,12 @@ def create_router(root_getter, capture, providers_getter=lambda: [], *, session_
     @router.post('/conversations/{context_id}/result')
     async def save_conversation_result(context_id: str, request: Request):
         from analysis_conversations import AnalysisConversations
-        return run(AnalysisConversations(store()).save_result, context_id, await payload(request))
+        service = AnalysisConversations(store())
+        binding = run(service.save_result, context_id, await payload(request))
+        if experience_extractor:
+            receipt = experience_extractor(binding)
+            binding = run(service.record_extraction, context_id, binding['result'], receipt)
+        return binding
 
     @router.post('/import')
     async def import_content(request: Request):

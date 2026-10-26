@@ -11,5 +11,6 @@
 .memory-header-actions,.memory-policy-control { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .memory-header-actions { gap:12px; }.memory-policy-control { font-size:12px; white-space:nowrap; }
 .memory-condition-fields { display:grid; gap:8px; margin:10px 0; min-width:0; }.memory-condition-tags { display:flex; flex-wrap:wrap; gap:6px; }.memory-applicability { display:block; overflow-wrap:anywhere; }.memory-conditions { margin-bottom:10px; }.profile-memory summary { overflow-wrap:anywhere; }
+.memory-related p { white-space:pre-wrap; overflow-wrap:anywhere; }
 @container profile-memory (max-width:420px){.profile-memory header{display:grid;grid-template-columns:minmax(0,1fr) auto}.memory-header-actions{grid-row:2;grid-column:1/-1}.memory-refresh{grid-row:1;grid-column:2}.memory-policy-control{flex-wrap:nowrap}}
 @media(max-width:600px){.profile-memory{padding:14px}.memory-entry{padding:12px}.memory-scope>label{flex-basis:100%}.memory-entry-actions .btn{white-space:normal}}

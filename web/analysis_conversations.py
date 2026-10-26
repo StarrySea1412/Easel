@@ -6,11 +6,13 @@ import re
 import uuid
 
 from content_analysis import account_material_hash, now, scope
+from easel.profile_memory import digest
 
 
 class AnalysisConversations:
-    def __init__(self, store):
+    def __init__(self, store, profile_resolver=None):
         self.store = store
+        self.profile_resolver = profile_resolver
         with store.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS analysis_conversations (id TEXT PRIMARY KEY, platform TEXT NOT NULL, account_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL)')
 
@@ -29,12 +31,19 @@ class AnalysisConversations:
         contents = [c for c in report['contents'] if not content_id or c['id'] == content_id]
         if not contents:
             raise ValueError('当前账号下没有所选作品，不能创建分析上下文')
+        persona = data.get('persona') or ''
+        if persona:
+            from easel.persona import valid_persona_name
+            if not valid_persona_name(persona):
+                raise ValueError('分析画像无效')
         created = now()
         binding = {'id': str(uuid.uuid4()), 'platform': platform, 'accountId': account_id,
                    'accountName': report['account']['name'], 'sessionId': session_id,
                    'kind': 'content-analysis' if content_id else 'account-analysis',
                    'contentIds': [c['id'] for c in contents], 'sourceHash': account_material_hash(contents),
-                   'createdAt': created, 'status': 'prepared', 'result': None}
+                   'persona': persona, 'createdAt': created, 'status': 'prepared', 'result': None}
+        if persona and self.profile_resolver:
+            binding['personaId'] = self.profile_resolver(persona)['profileId']
         evidence = [{'id': c['id'], **{k: c.get(k) for k in
                     ('title', 'body', 'transcript', 'coverText', 'comments', 'tags', 'url', 'publishedAt',
                      'snapshotAt', 'period', 'metrics', 'advancedMetrics', 'format', 'paid')}} for c in contents]
@@ -48,6 +57,8 @@ class AnalysisConversations:
                  '仅有标题不能声称看过视频或正文；缺少发布时间、同龄指标或投放信息时不做因果归因。',
                  '不要用通用字数阈值、泛泛平台常识或填空模板充当账号诊断；无法判断就说清需要补什么。',
                  '以 Markdown 输出，保留引用作品 ID；不要执行发布、登录、删除或其他账号操作。',
+                 '仅当有可复用结论时，另附二级标题“经验候选”，最多3条原文短项，格式为“- [作品ID: 实际ID] 观察、建议与局限”。'
+                 '只能引用本次提供的作品ID，不造效果与因果结论；没有依据就省略该章节。条目仅供用户确认，不直接成为规则。',
                  '## 真实材料（JSON数据）', '```json', json.dumps(evidence, ensure_ascii=False, indent=2), '```']
         binding['markdown'] = '\n\n'.join(lines)
         if len(binding['markdown']) > 500_000:
@@ -65,6 +76,8 @@ class AnalysisConversations:
         for row in rows:
             binding = json.loads(row[0])
             _, current = self._current(binding)
+            if binding.get('result'):
+                binding['result']['versionHash'] = digest([binding['sourceHash'], binding['result']['markdown']])
             result.append({**binding, 'stale': not current})
         return result
 
@@ -86,8 +99,31 @@ class AnalysisConversations:
             selected = [c for c in current_rows if c['id'] in binding['contentIds']]
             if len(selected) != len(binding['contentIds']) or account_material_hash(selected) != binding['sourceHash']:
                 raise ValueError('作品材料已更新，请重新提取后分析；原对话和历史报告保留')
+            if binding.get('result') and binding['result']['turnId'] == turn_id and binding['result']['markdown'] == text.strip():
+                if 'versionHash' not in binding['result']:
+                    binding['result']['versionHash'] = digest([binding['sourceHash'], text.strip()])
+                    db.execute('UPDATE analysis_conversations SET data=? WHERE id=?', (json.dumps(binding, ensure_ascii=False), context_id))
+                return binding
+            binding.pop('experienceExtraction', None)
             binding['status'] = 'completed'
-            binding['result'] = {'markdown': text.strip(), 'turnId': turn_id, 'at': now(),
+            binding['result'] = {'versionHash': digest([binding['sourceHash'], text.strip()]), 'markdown': text.strip(), 'turnId': turn_id, 'at': now(),
                                  'notice': '来自分析对话的模型解读，引用与判断需结合原始材料复核。'}
             db.execute('UPDATE analysis_conversations SET data=? WHERE id=?', (json.dumps(binding, ensure_ascii=False), context_id))
         return binding
+
+
+    def record_extraction(self, context_id, result, receipt):
+        """A stale post-save callback cannot annotate a newer report."""
+        with self.store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT data FROM analysis_conversations WHERE id=?', (context_id,)).fetchone()
+            if not row:
+                raise LookupError('分析上下文不存在')
+            binding = json.loads(row[0])
+            current = binding.get('result')
+            matches_receipt = (current and receipt.get('sourceHash') == digest([binding['sourceHash'], current['markdown']])
+                               and receipt.get('turnId') == current['turnId'])
+            if current and (current == result or result is None and matches_receipt):
+                binding['experienceExtraction'] = receipt
+                db.execute('UPDATE analysis_conversations SET data=? WHERE id=?', (json.dumps(binding, ensure_ascii=False), context_id))
+            return binding

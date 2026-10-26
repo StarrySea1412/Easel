@@ -98,3 +98,6 @@
 .analysis-writing-action { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
 .analysis-writing-action .btn { display:inline-flex; align-items:center; gap:6px; }
 .analysis-writing-action .ca-error { flex-basis:100%; margin:0; overflow-wrap:anywhere; }
+
+.analysis-memory-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.analysis-memory-actions small { color:var(--text-secondary); overflow-wrap:anywhere; }

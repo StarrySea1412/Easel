@@ -8,7 +8,7 @@ import { watchWorkbenchChange } from '../lib/workbenchEvents';
 import OutputMessageContent from './OutputMessageContent';
 import AnalysisResultReport from './AnalysisResultReport';
 import PublishSpinner from './PublishSpinner';
-import { proposeMemory } from '../lib/profileMemory';
+import { proposeMemory, extractAnalysisMemory, extractionSummary } from '../lib/profileMemory';
 import AnalysisEvidenceOverview from './AnalysisEvidenceOverview';
 import PlatformIcon from './PlatformIcon';
 import { IconChart, IconCopy, IconChevron, IconChat, IconImport } from './icons';
@@ -16,6 +16,8 @@ import '../styles/analysis-visuals.css';
 
 export default function ChatAnalysisPanel({ session, onOpenAnalysis, onWriteFromAnalysis }: { session: ChatSession; onOpenAnalysis?: () => void; onWriteFromAnalysis?: () => Promise<void> }) {
   const context = session.analysisContext;
+  const activeBinding = useRef(context?.id);
+  activeBinding.current = context?.id;
   const [saved, setSaved] = useState<AnalysisBinding | null>(null);
   const [quote, setQuote] = useState('');
   const [writing, setWriting] = useState(false);
@@ -53,6 +55,13 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis, onWriteFrom
     if(!selected){setMemoryError('先在已保存的分析结果中选取一段结论，或在下方填写其中的原文片段。');setCandidate('');return;}
     setMemoryError('');setCandidate(selected);
   };
+  const extractCandidates=async()=>{
+    if(!saved?.persona||!saved.result||savingMemory)return;
+    setSavingMemory(true);setMemoryError('');
+    try{const receipt=await extractAnalysisMemory(saved.persona,saved.id,saved.result.versionHash);if(activeBinding.current===saved.id)setSaved({...saved,experienceExtraction:receipt});}
+    catch(reason){if(activeBinding.current===saved.id)setMemoryError(reason instanceof Error?reason.message:'提取候选失败');}
+    finally{setSavingMemory(false);}
+  };
   const saveMemory=async()=>{
     if(!session.persona||!saved?.result||savingMemory)return;
     setSavingMemory(true);setMemoryError('');
@@ -67,7 +76,7 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis, onWriteFrom
     {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}><IconChat size={14}/>引用到分析对话</button></div>}
     {session.pendingTurnId && <span role="status" aria-label="分析执行中"><PublishSpinner /></span>}
     {saved?.stale && <p className="ca-caption">来源材料已更新，本对话保留历史快照；重新提取后可生成新分析。</p>}
-    {saved?.result && <>{onWriteFromAnalysis && <div className="analysis-writing-action"><button className="btn btn-sm" disabled={preparingWriting || saved.stale || Boolean(session.pendingTurnId) || session.importedFromBackup} onClick={async () => {setPreparingWriting(true); setWritingError(''); try {await onWriteFromAnalysis();} catch (reason) {setWritingError(reason instanceof Error ? reason.message : '准备写作失败');} finally {setPreparingWriting(false);}}}>{preparingWriting ? <PublishSpinner/> : <IconChat size={14}/>}据此写一篇</button>{writingError && <p role="alert" className="ca-error">{writingError}</p>}</div>}<div ref={resultMaterial}><AnalysisResultReport result={saved.result}/></div><details className="analysis-memory-candidate"><summary>保存画像经验</summary><div className="ca-material-quote"><button className="btn btn-sm" disabled={saved.stale||!session.persona||savingMemory} onMouseDown={event=>event.preventDefault()} onClick={extractMemory}>选取结论加入画像</button><p>{session.persona?`保存到「${session.persona}」的待确认经验，仅适用于原平台账号。`:'先为当前对话选择画像，再保存经验。'}</p><label>候选结论（已保存结果的原文片段）<textarea rows={3} value={candidate} onChange={event=>setCandidate(event.target.value)}/></label><button className="btn btn-sm" disabled={!candidate.trim()||!session.persona||saved.stale||savingMemory} onClick={()=>void saveMemory()}>{savingMemory&&<PublishSpinner/>}保存候选</button>{memoryError&&<p role="alert" className="ca-error">{memoryError}</p>}</div></details></>}
+    {saved?.result && <>{onWriteFromAnalysis && <div className="analysis-writing-action"><button className="btn btn-sm" disabled={preparingWriting || saved.stale || Boolean(session.pendingTurnId) || session.importedFromBackup} onClick={async () => {setPreparingWriting(true); setWritingError(''); try {await onWriteFromAnalysis();} catch (reason) {setWritingError(reason instanceof Error ? reason.message : '准备写作失败');} finally {setPreparingWriting(false);}}}>{preparingWriting ? <PublishSpinner/> : <IconChat size={14}/>}据此写一篇</button>{writingError && <p role="alert" className="ca-error">{writingError}</p>}</div>}<div ref={resultMaterial}><AnalysisResultReport result={saved.result}/></div><details className="analysis-memory-candidate"><summary>保存画像经验</summary><div className="ca-material-quote"><div className="analysis-memory-actions"><button className="btn btn-sm" disabled={saved.stale||!saved.persona||savingMemory} title={saved.persona?`提取到「${saved.persona}」`:'此分析未绑定提取画像，可手工保存原文'} onClick={()=>void extractCandidates()}>提取经验候选</button>{saved.experienceExtraction&&<small role="status" title={saved.experienceExtraction.message}>{extractionSummary(saved.experienceExtraction)}</small>}<button className="btn btn-sm" disabled={saved.stale||!session.persona||savingMemory} onMouseDown={event=>event.preventDefault()} onClick={extractMemory}>选取结论加入画像</button></div><p>{session.persona?`保存到「${session.persona}」的待确认经验，仅适用于原平台账号。`:'先为当前对话选择画像，再保存经验。'}</p><label>候选结论（已保存结果的原文片段）<textarea rows={3} value={candidate} onChange={event=>setCandidate(event.target.value)}/></label><button className="btn btn-sm" disabled={!candidate.trim()||!session.persona||saved.stale||savingMemory} onClick={()=>void saveMemory()}>{savingMemory&&<PublishSpinner/>}保存候选</button>{memoryError&&<p role="alert" className="ca-error">{memoryError}</p>}</div></details></>}
     <div ref={material}><AnalysisEvidenceOverview context={context}/>
     <details><summary>原始 Markdown / JSON 材料</summary><OutputMessageContent inert content={context.markdown}/></details></div>
   </section>;

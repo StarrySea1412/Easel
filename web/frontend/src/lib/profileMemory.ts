@@ -1,10 +1,16 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { publishWorkbenchChange, watchWorkbenchChange } from './workbenchEvents';
 
+export type MemoryExtraction = {id?:string;status:'completed'|'deferred'|'skipped';reason:string;message?:string;profileName?:string;profileId?:string;profileRevision?:number;createdCount?:number;existingCount?:number;entryIds?:string[];sourceHash?:string};
+export function extractionSummary(value?:MemoryExtraction):string {
+  if (!value) return '';
+  if (value.status === 'completed') return value.reason === 'no-explicit-candidates' ? '没有明确的经验候选' : value.reason === 'previously-deleted' ? '候选已删除，未重新创建' : `新增${value.createdCount||0}条 · 已有${value.existingCount||0}条`;
+  return value.reason === 'no-profile' ? '未绑定提取画像' : '经验提取待处理';
+}
 export type MemoryScope = {kind:'profile'} | {kind:'account';platform:string;accountId:string};
 export type MemoryConditions = {version:1;taskTypes:string[];allKeywords:string[];excludeKeywords:string[]};
 export type MemoryReplacement = {id:string;revision:number;contentHash:string;scopeHash:string;conditionsHash:string};
-export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected'|'superseded';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;conditions?:MemoryConditions;conditionsHash?:string;replaces?:MemoryReplacement;replacementHash?:string;supersededBy?:{id:string;revision:number};quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
+export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected'|'superseded';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;conditions?:MemoryConditions;conditionsHash?:string;replaces?:MemoryReplacement;replacementHash?:string;supersededBy?:{id:string;revision:number};quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;relatedCandidates?:{id:string;revision:number;kind:string}[];source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
 export const memoryTaskTypes:Record<string,string> = {'account-analysis':'账号分析',writing:'写作','image-generation':'生图',publication:'发布',coding:'编程',general:'通用任务'};
 export const emptyConditions = ():MemoryConditions => ({version:1,taskTypes:[],allKeywords:[],excludeKeywords:[]});
 export function conditionLabel(value?:MemoryConditions):string {
@@ -76,4 +82,10 @@ export async function proposeMemory(name:string, text:string, scope:MemoryScope,
 export async function mutateMemory(name:string,path:string,body:unknown) {
   try { const value=await memoryRequest<MemoryState>(name,path,'POST',body);accept(value,path);return value; }
   catch(error){void refreshMemory(name);throw error;}
+}
+
+export async function extractAnalysisMemory(name:string,bindingId:string,sourceHash?:string):Promise<MemoryExtraction> {
+  const result=await memoryRequest<{extraction:MemoryExtraction;state:MemoryState}>(name,'/extract-analysis','POST',{bindingId,sourceHash});
+  accept(result.state,'extract-analysis');
+  return result.extraction;
 }

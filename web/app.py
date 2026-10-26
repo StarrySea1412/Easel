@@ -1888,11 +1888,38 @@ def _memory_analysis_source(binding_id):
 
 def _memory_store():
     from easel.profile_memory import MemoryStore
-    return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR, _memory_analysis_source)
+    from easel.memory_sources import analysis_source
+    return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR, _memory_analysis_source,
+        lambda binding: analysis_source(OUTPUTS_DIR, binding, _run_ledger_root(), require_settled=True))
+
+
+def _extract_analysis_experience(binding):
+    import sqlite3
+    name = binding.get('persona')
+    if not name:
+        return {'status': 'skipped', 'reason': 'no-profile', 'modelRequests': 0}
+    from easel.memory_sources import UnsettledSource
+    from easel.profile_memory import Conflict
+    try:
+        return _memory_store().extract_analysis(name, {'bindingId': binding['id'],
+            'sourceHash': binding['result'].get('versionHash'), 'turnId': binding['result']['turnId']})
+    except UnsettledSource as exc:
+        return {'status': 'deferred', 'reason': 'turn-unsettled', 'message': str(exc), 'modelRequests': 0}
+    except (Conflict, LookupError, ValueError, OSError, sqlite3.Error) as exc:
+        # Saving an analysis and proposing experience have separate outcomes.
+        return {'status': 'deferred', 'reason': 'unavailable',
+                'message': str(exc) if isinstance(exc, (Conflict, LookupError, ValueError)) else '经验存储暂不可用，可稍后重试提取', 'modelRequests': 0}
 
 
 from profile_memory_routes import create_router as _memory_router
-app.include_router(_memory_router(_memory_store))
+def _record_analysis_extraction(receipt):
+    from analysis_conversations import AnalysisConversations
+    from content_analysis import Store
+    return AnalysisConversations(Store(OUTPUTS_DIR / '_analytics/workbench')).record_extraction(
+        receipt['bindingId'], None, receipt)
+
+
+app.include_router(_memory_router(_memory_store, _record_analysis_extraction))
 
 
 def _persona_file_path(name: str, filename: str) -> Path:
@@ -8385,7 +8412,9 @@ app.include_router(_content_analysis_router(
     lambda: OUTPUTS_DIR / "_analytics" / "workbench", api_analytics, _image_reverse_providers,
     session_getter=lambda platform: _account_logged_in(platform, LOGIN_RUNNERS[platform])
     and platform not in _ACCOUNT_CLEARING,
-    generation_getter=_content_analysis_session_generation))
+    generation_getter=_content_analysis_session_generation,
+    experience_extractor=_extract_analysis_experience,
+    profile_resolver=lambda name: _memory_store().state(name)))
 
 
 class AnalysisWritingRequest(BaseModel):

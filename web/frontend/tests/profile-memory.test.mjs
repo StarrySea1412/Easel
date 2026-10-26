@@ -182,3 +182,41 @@ test('token recall is explicitly estimated while v1 historical receipts retain c
  assert.equal(lib.memoryRecallSummary({...base,version:2,usedTokens:350,budgetTokens:4000}),'1条 · 估算 350/4000 token');
  assert.equal(lib.memoryRecallSummary({...base,version:2,selectedCount:0,reason:'prompt-budget'}),'本轮提示已超出估算预算');
 });
+
+test('extraction uses the original profile and report version, preserves a manual draft and stays folded',async t=>{
+ const {default:Panel}=await loadTsModule('../src/components/ChatAnalysisPanel.tsx');
+ const binding={id:'extraction-binding',sourceHash:'material-version',persona:'original-profile',platform:'douyin',accountId:'A',accountName:'隔离样例',sessionId:'analysis-extraction',contentIds:['n1'],kind:'account-analysis',createdAt:'2026-10-26',markdown:'合成分析材料',result:{versionHash:'version-1',turnId:'t',at:'2026-10-26',markdown:'## 经验候选\n- [作品ID: n1] 摄影教程先展示成品，仅单个样本需复核。',notice:''}};
+ const calls=[],changes=[];const receive=event=>changes.push(event.detail);window.addEventListener('easel:workbench-changed',receive);t.after(()=>window.removeEventListener('easel:workbench-changed',receive));
+ const receipt={status:'completed',reason:'selected',profileName:'original-profile',profileId:'original-profile',profileRevision:2,createdCount:1,existingCount:0};
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{calls.push({url,options});if(String(url).includes('/conversations?'))return response({conversations:[binding]});if(String(url).endsWith('/extract-analysis'))return response({extraction:receipt,state:state('original-profile',2)});throw Error('Unexpected request '+url);});
+ const container=document.createElement('div');document.body.append(container);const root=createRoot(container);t.after(async()=>{await act(async()=>root.unmount());container.remove();});
+ await act(async()=>root.render(createElement(Panel,{session:{id:'analysis-extraction',persona:'changed-profile',messages:[],analysisContext:binding}})));
+ const details=container.querySelector('.analysis-memory-candidate');assert.equal(details.open,false);
+ const field=details.querySelector('textarea');await fill(field,'我的手工候选草稿');
+ await act(async()=>[...details.querySelectorAll('button')].find(button=>button.textContent==='提取经验候选').click());
+ const writes=calls.filter(call=>call.options.method==='POST');assert.equal(writes.length,1);assert.match(writes[0].url,/original-profile/);
+ assert.deepEqual(JSON.parse(writes[0].options.body),{bindingId:'extraction-binding',sourceHash:'version-1'});
+ assert.equal(field.value,'我的手工候选草稿');assert.equal(details.open,false);assert.match(details.textContent,/新增1条 · 已有0条/);
+ assert.ok(changes.some(change=>change.name==='original-profile'&&change.revision===2));
+});
+
+test('automatic writeback publishes a bodyless experience invalidation receipt',async t=>{
+ const {saveAnalysisChatResult}=await loadTsModule('../src/lib/analysisConversations.ts');
+ const events=[];const listener=event=>events.push(event.detail);window.addEventListener('easel:workbench-changed',listener);t.after(()=>window.removeEventListener('easel:workbench-changed',listener));
+ t.mock.method(globalThis,'fetch',async()=>response({id:'binding',experienceExtraction:{status:'completed',reason:'selected',profileName:'auto-profile',profileId:'pid',profileRevision:3}}));
+ await saveAnalysisChatResult({id:'s',analysisContext:{id:'binding',platform:'douyin',accountId:'A'}},{role:'assistant',turnId:'t',content:'原始合成报告正文'});
+ assert.deepEqual(events.filter(event=>event.domain==='profile-memory'),[{domain:'profile-memory',name:'auto-profile',profileId:'pid',revision:3,reason:'analysis-extraction'}]);
+ assert.equal(lib.extractionSummary({status:'completed',reason:'no-explicit-candidates'}),'没有明确的经验候选');
+ assert.equal(lib.extractionSummary({status:'completed',reason:'previously-deleted'}),'候选已删除，未重新创建');
+});
+
+test('related entries remain folded, reference versions and do not retain deleted bodies',async t=>{
+ const name='related-extraction';const old={...entry('prior'),revision:2,text:'可供比较的原结论'};
+ const fresh={...entry('fresh'),relatedCandidates:[{id:'prior',revision:1,kind:'lexical-overlap'},{id:'removed',revision:1,kind:'normalized-text'}]};
+ let current=state(name,3,[fresh,old]);t.mock.method(globalThis,'fetch',async()=>response(current));
+ const v=await mount(t,name);let details=[...v.container.querySelectorAll('details')].find(node=>node.textContent.includes('相近条目'));
+ assert.equal(details.open,false);assert.match(details.textContent,/字面相近，未自动合并/);assert.match(details.textContent,/引用 v1 · 当前 v2/);assert.match(details.textContent,/原条目已删除/);
+ current=state(name,4,[fresh]);await act(async()=>publishWorkbenchChange({domain:'profile-memory',name,revision:4,reason:'delete'}));
+ details=[...v.container.querySelectorAll('details')].find(node=>node.textContent.includes('相近条目'));assert.doesNotMatch(details.textContent,/可供比较的原结论/);
+ assert.equal(details.querySelectorAll('button').length,0);
+});
