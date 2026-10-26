@@ -100,7 +100,7 @@ export function readCreationDraft(workspace: CreationWorkspace): PublishDraft {
   return workspace.sessionId ? { title:'', body:'', platforms:[], overrides:{}, tags:'', media:[] } : loadPublishDraft();
 }
 export function saveCreationDraft(workspace: CreationWorkspace, draft: PublishDraft) { return writeLocalValue(key(workspace.id), JSON.stringify(draft)); }
-export function backupCreationDraft(workspace: CreationWorkspace, draft: unknown) { writeLocalValue(key(workspace.id) + ':previous', JSON.stringify(draft)); }
+export function backupCreationDraft(workspace: CreationWorkspace, draft: unknown) { return writeLocalValue(key(workspace.id) + ':previous', JSON.stringify(draft)); }
 export function previousCreationDraft(workspace: CreationWorkspace): unknown { try { return JSON.parse(readLocalValue(key(workspace.id) + ':previous').value || 'null'); } catch { return null; } }
 export function addImageToPublish(sessionId: string | null, url: string) {
   if (sessionId && !canReturnToSession(sessionId)) throw new Error('来源对话已删除，请选择其他目标');

@@ -200,13 +200,15 @@ class ReceiptStore:
                     raise
                 time.sleep(0.01 * (attempt + 1))
 
-    def create(self, receipt_id: str, platform: str, title: str, *, source_session: str = '') -> dict:
+    def create(self, receipt_id: str, platform: str, title: str, *, source_session: str = '', preparation: dict | None = None) -> dict:
         if not RECEIPT_ID.fullmatch(receipt_id):
             raise ValueError('Invalid receipt ID')
         if source_session and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', source_session):
             raise ValueError('Invalid source session')
         def operation(items):
             for item in items:
+                if preparation and item.get('preparation', {}).get('acceptanceId') == preparation['acceptanceId']:
+                    raise ValueError('这份确认稿已有回执：' + item['receiptId'] + '，请先核对结果')
                 if item['platform'] == platform and item.get('outcome') not in OUTCOMES:
                     raise ActivePublishError(item['receiptId'])
                 if item['receiptId'] == receipt_id:
@@ -220,6 +222,8 @@ class ReceiptStore:
                     'notification': {'state': 'skipped', 'message': '待平台确认发布后再提醒。'}}
             if source_session:
                 item['sourceSessionId'] = source_session
+            if preparation:
+                item['preparation'] = json.loads(json.dumps(preparation))
             items.append(item)
             return dict(item)
         return self._change(operation)
@@ -248,7 +252,7 @@ class ReceiptStore:
             for item in items:
                 if item['receiptId'] == receipt_id:
                     update = {key: value for key, value in changes.items()
-                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt', 'sourceSessionId'}}
+                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt', 'sourceSessionId', 'preparation'}}
                     # File-level optimistic retries make this claim atomic
                     # even when two readers identify the same creator work.
                     content_id = update.get('contentId') or item.get('contentId')

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification, reportPublishFailure } from '../lib/api';
 import type { PublishReceipt, PublishRequest } from '../lib/api';
+import { acceptCreationDraft } from '../lib/chatArtifacts';
 import { bindCreationReceipt } from '../lib/creationWorkspace';
 import { isFinalPublishReceipt, isPublishReceipt, mergePublishReceipts, publishPlatformLabel } from '../lib/publishReceipts';
 import { markWhoamiUnverified } from '../lib/whoami';
@@ -155,8 +156,12 @@ export function usePublishReceipts() {
           issue(request, '该平台已有发布任务，请先查看现有回执。');
           continue;
         }
+        let submissionStarted = false;
         try {
-          const result = await publishNow(request.platform, {...request.payload, ...(request.sourceSessionId ? {sourceSessionId:request.sourceSessionId} : {})});
+          const acceptanceId = request.preparationId && request.sourceSessionId
+            ? await acceptCreationDraft(request.sourceSessionId, request.preparationId, crypto.randomUUID(), request.platform, request.payload, request.accountIdentity || '') : undefined;
+          submissionStarted = true;
+          const result = await publishNow(request.platform, {...request.payload, ...(request.sourceSessionId ? {sourceSessionId:request.sourceSessionId} : {}), ...(acceptanceId ? {acceptanceId} : {})});
           if (typeof result.receiptId === 'string') bindCreationReceipt(result.receiptId, request.sourceSessionId || null);
           if (!mounted.current) break;
           if (isPublishReceipt(result)) accept([result]);
@@ -168,6 +173,10 @@ export function usePublishReceipts() {
             throw new Error('服务未返回可恢复的发布回执，请先到平台核对结果，避免重复发布。');
           }
         } catch (cause) {
+          if (!submissionStarted) {
+            issue(request, (cause instanceof Error ? cause.message : '确认稿核对失败') + '，尚未提交，草稿已保留。');
+            continue;
+          }
           const id = await reportPublishFailure(request.platform, 'submit', 'receipt_missing', cause);
           const message = cause instanceof Error ? cause.message : '发布请求中断';
           issue(request, `${message}${id && !message.includes(id) ? `（错误编号：${id}）` : ''} 请先查看回执或到平台核对，避免重复发布。`);

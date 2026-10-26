@@ -70,6 +70,7 @@ export interface StreamState extends ChatTiming {
 
 /** 发布中心草稿：持久化到 localStorage，切页/刷新都不丢。 */
 export interface PublishDraft {
+  preparationId?: string;
   title: string;
   body: string;
   platforms: string[];
@@ -118,6 +119,7 @@ export function loadPublishDraft(): PublishDraft {
       title: typeof value.title === 'string' ? value.title : '',
       body: typeof value.body === 'string' ? value.body : '',
       tags: typeof value.tags === 'string' ? value.tags : '',
+      ...(typeof value.preparationId === 'string' && /^[a-f0-9]{32}$/.test(value.preparationId) ? {preparationId:value.preparationId} : {}),
       ...(Array.isArray(value.media) ? { media: [...new Set(value.media.filter((p): p is string => typeof p === 'string' && p.length > 0))] } : {}),
       platforms: Array.isArray(value.platforms) ? value.platforms.filter((p): p is string => typeof p === 'string') : [...PUBLISH_DEFAULT.platforms],
       overrides: record(value.overrides) ? Object.fromEntries(Object.entries(value.overrides).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {},

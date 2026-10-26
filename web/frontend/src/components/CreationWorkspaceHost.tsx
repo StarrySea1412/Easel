@@ -102,6 +102,6 @@ function WorkspaceInstance(props: Props & {workspace:CreationWorkspace}) {
     {deliveries.note && <p role="status">{deliveries.note}</p>}
   </section>}{workspace.kind === 'image'
     ? <ImageStudioPage active={active} onPromptSkill={props.onPromptSkill} studio={studio} video={workspace.sessionId ? undefined : props.video} sessionId={targetId} sourceSessionId={workspace.sessionId} onOpenPublish={()=>{selectCreation('publish',workspace.sessionId);onExpand('publish');}} onOpenSettings={props.onOpenSettings} onOpenVideoSettings={props.onOpenVideoSettings} onOpenModels={props.onOpenSettings} onOpenOutputs={props.onOpenOutputs}/>
-    : <PublishPage workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={props.persona} publishReceipts={props.receipts} onOpenAccounts={props.onOpenAccounts} onOpenOutputs={props.onOpenPublishOutputs || props.onOpenOutputs}/>
+    : <PublishPage workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={source ? source.persona || '' : props.persona} publishReceipts={props.receipts} onOpenAccounts={props.onOpenAccounts} onOpenOutputs={props.onOpenPublishOutputs || props.onOpenOutputs}/>
   }</div>,container);
 }

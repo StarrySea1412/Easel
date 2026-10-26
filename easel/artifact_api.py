@@ -1,5 +1,5 @@
 """Authenticated by the host app's existing middleware; files resolve by delivery ID."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from .artifacts import ArtifactStore, file_path, preview_html, preview_prefix, CSS_URL, related_path
@@ -43,6 +43,27 @@ def router(outputs, history=None):
             return {'sessionId': session, 'jobs': ImageJobs(outputs()).list(session)}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @routes.get('/{session}/drafts/{ident}')
+    def checked_draft(session: str, ident: str):
+        from .creation_drafts import CreationDrafts
+        try:
+            return CreationDrafts(outputs()).checked(session, ident)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else '草稿素材不可用，请重新准备') from exc
+
+    @routes.post('/{session}/drafts/{ident}/accept')
+    def accept_draft(session: str, ident: str, body: dict = Body(...)):
+        from .creation_drafts import CreationDrafts
+        try:
+            return CreationDrafts(outputs()).accept(session, ident, body.get('requestId'),
+                body.get('platform'), body.get('payload'), body.get('accountIdentity', ''))
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else '草稿素材不可用，请重新准备') from exc
 
     @routes.post('/{session}/jobs/{ident}/acknowledge')
     def acknowledge(session: str, ident: str):

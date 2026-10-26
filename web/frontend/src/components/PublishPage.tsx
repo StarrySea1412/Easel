@@ -21,6 +21,7 @@ import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
 import { publishMediaIssue } from '../lib/publishPreparation';
 import { useChatArtifacts, type PreparedCreationDraft } from '../hooks/useChatArtifacts';
+import { checkedCreationDraft } from '../lib/chatArtifacts';
 import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, hydrateAccountIdentities, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
@@ -61,14 +62,15 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
   const fieldPrefix = useId();
   const workspace = ensureCreation('publish', sourceSessionId);
   const deliveries = useChatArtifacts(sourceSessionId || '', active && Boolean(sourceSessionId), false);
-  const [loadedPreparation, setLoadedPreparation] = useState('');
   const draft0 = workspaceId ? readCreationDraft(workspace) : loadPublishDraft();
+  const [loadedPreparation, setLoadedPreparation] = useState(draft0.preparationId || '');
+  const [loadingPreparation, setLoadingPreparation] = useState(false);
   const [title, setTitle] = useState(draft0.title);
   const [body, setBody] = useState(draft0.body);
   useEffect(()=>{
     if (!active || title.trim() || body.trim()) return;
     const text=creationMaterial(workspace);
-    if(text) {setBody(text);setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64));consumeCreationMaterial(workspace);}
+    if(text) {setBody(text);setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64));setLoadedPreparation('');consumeCreationMaterial(workspace);}
   },[active,title,body,workspace]);
   const [platforms, setPlatforms] = useState<string[]>(draft0.platforms);
   const [overrides, setOverrides] = useState<Record<string, string>>(draft0.overrides);
@@ -106,9 +108,11 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
-    const draft = { title, body, platforms, overrides, tags, media: selectedMedia };
+    const draft = { title, body, platforms, overrides, tags, media: selectedMedia, preparationId:loadedPreparation || undefined };
     if (workspaceId) saveCreationDraft(workspace, draft); else savePublishDraft(draft);
-  }, [title, body, platforms, overrides, tags, selectedMedia, workspace, workspaceId]);
+  }, [title, body, platforms, overrides, tags, selectedMedia, loadedPreparation, workspace, workspaceId]);
+  const currentDraft = {title,body,platforms,overrides,tags,media:selectedMedia,preparationId:loadedPreparation || undefined};
+  const currentDraftRef = useRef(currentDraft); currentDraftRef.current = currentDraft;
 
   useEffect(() => {
     mounted.current = true;
@@ -417,7 +421,7 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
       setBlocked({ ...errors }); reportBlocked();
       showToast('账号状态已变化，内容已保留，请重新检查后发布。'); return;
     }
-    void publishReceipts.submit(confirmed.map(request => ({ ...request, sourceSessionId })));
+    void publishReceipts.submit(confirmed.map(request => ({ ...request, sourceSessionId, preparationId:loadedPreparation || undefined, accountIdentity:getWhoamiCache()[request.platform]?.identityKey || '' })));
   };
 
   const copyFor = (key: string) => {
@@ -455,17 +459,24 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
           if (!text) { globalToast('先选择文字或填写对话草稿', 'info'); return; }
           if (title.trim() || body.trim()) {
             if (!(await confirmModal('保存当前版本后，用对话内容新建发布草稿？', {confirmLabel:'保存并新建'}))) return;
-            backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});
+            backupCreationDraft(workspace,currentDraftRef.current);
           }
-          setBody(text); setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64)); setOverrides({});
+          setBody(text); setTitle(text.split('\n')[0].replace(/^#+\s*/, '').slice(0,64)); setOverrides({}); setLoadedPreparation('');
           consumeCreationMaterial(workspace);
         }}><IconImport size={14}/>带入对话内容</button>
-        {Boolean(previousCreationDraft(workspace)) && <button className="link-btn" disabled={publishing || checking || adapting} onClick={async()=>{const draft=previousCreationDraft(workspace) as import('../lib/store').PublishDraft;if(typeof draft?.body!=='string'||!(await confirmModal('恢复上一份发布草稿？当前版本将保留。')))return;backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});setTitle(draft.title);setBody(draft.body);setPlatforms(draft.platforms);setOverrides(draft.overrides);setTags(draft.tags);setSelectedMedia(draft.media||[]);}}>恢复上一稿</button>}
+        {Boolean(previousCreationDraft(workspace)) && <button className="link-btn" disabled={publishing || checking || adapting || loadingPreparation} onClick={async()=>{const draft=previousCreationDraft(workspace) as import('../lib/store').PublishDraft;if(typeof draft?.body!=='string'||!(await confirmModal('恢复上一份发布草稿？当前版本将保留。')))return;backupCreationDraft(workspace,currentDraftRef.current);setTitle(draft.title);setBody(draft.body);setPlatforms(draft.platforms);setOverrides(draft.overrides);setTags(draft.tags);setSelectedMedia(draft.media||[]);setLoadedPreparation(draft.preparationId||'');}}>恢复上一稿</button>}
       </div>}
-      {deliveries.creationDrafts.length > 0 && <section className="creation-agent-jobs" aria-label="助手准备的发布草稿"><strong>助手准备的草稿</strong>{deliveries.creationDrafts.map((item:PreparedCreationDraft)=><div className="creation-return-actions" key={item.id}><span>{item.draft.title || item.draft.body.slice(0,30)}</span><button type="button" className="btn btn-sm" disabled={publishing || checking || adapting || loadedPreparation===item.id} onClick={async()=>{
+      {deliveries.creationDrafts.length > 0 && <section className="creation-agent-jobs" aria-label="助手准备的发布草稿"><strong>助手准备的草稿</strong>{deliveries.creationDrafts.map((item:PreparedCreationDraft)=><div className="creation-return-actions" key={item.id}><span>{item.draft.title || item.draft.body.slice(0,30)}</span><button type="button" className="btn btn-sm" disabled={publishing || checking || adapting || loadingPreparation || loadedPreparation===item.id} onClick={async()=>{
         if((title.trim() || body.trim()) && !(await confirmModal('保存当前版本后，载入这份助手草稿？',{confirmLabel:'保存并载入'})))return;
-        backupCreationDraft(workspace,{title,body,platforms,overrides,tags,media:selectedMedia});
-        setTitle(item.draft.title);setBody(item.draft.body);setPlatforms(item.draft.platforms);setOverrides(item.draft.overrides);setTags(item.draft.tags);setSelectedMedia(item.draft.media||[]);setLoadedPreparation(item.id);
+        const before=JSON.stringify(currentDraftRef.current); setLoadingPreparation(true);
+        try {
+          const checked=await checkedCreationDraft(item.sessionId,item.id);
+          if (!mounted.current) return;
+          if (before!==JSON.stringify(currentDraftRef.current)) throw new Error('草稿已修改，请再次载入');
+          if (!backupCreationDraft(workspace,currentDraftRef.current)) throw new Error('上一稿未能保存，请检查浏览器存储后重试');
+          setTitle(checked.draft.title);setBody(checked.draft.body);setPlatforms(checked.draft.platforms);setOverrides(checked.draft.overrides);setTags(checked.draft.tags);setSelectedMedia(checked.draft.media||[]);setLoadedPreparation(checked.id);
+        } catch(reason) { globalToast(reason instanceof Error?reason.message:'载入失败，当前草稿已保留','error'); }
+        finally { if(mounted.current)setLoadingPreparation(false); }
       }}>{loadedPreparation===item.id?'已载入':'载入编辑'}</button></div>)}</section>}
       {targetSessionId && <div className="creation-return-actions">
         <button className="btn btn-sm" disabled={empty || !canReturnToSession(targetSessionId)} onClick={()=>{

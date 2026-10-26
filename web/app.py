@@ -8340,6 +8340,7 @@ class PublishRequest(BaseModel):
     tags: str = ''
     persona: str = ''
     sourceSessionId: str = ''
+    acceptanceId: str = ''
 
 
 class ManualPublishRequest(BaseModel):
@@ -8416,7 +8417,7 @@ def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
         return dict(result)
 
 
-def _begin_publish(platform: str, title: str, source_session: str = '') -> dict:
+def _begin_publish(platform: str, title: str, source_session: str = '', preparation: dict | None = None) -> dict:
     with _PUBLISH_LOCK:
         if platform in _PUBLISH_ACTIVE:
             raise HTTPException(409, '该平台已有发布任务，请先查看现有任务。')
@@ -8425,11 +8426,15 @@ def _begin_publish(platform: str, title: str, source_session: str = '') -> dict:
         if _account_browser_busy(platform):
             raise HTTPException(409, '该平台正在登录或核验账号，请等待结束后再发布。')
         try:
-            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title, **({'source_session': source_session} if source_session else {}))
+            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title,
+                **({'source_session': source_session} if source_session else {}),
+                **({'preparation': preparation} if preparation else {}))
         except publish_receipts.ActivePublishError as exc:
             raise HTTPException(409, str(exc)) from None
         except local_records.RecordError as exc:
             raise HTTPException(exc.status_code, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
         _PUBLISH_ACTIVE[platform] = receipt['receiptId']
         _PUBLISH_VOLATILE[receipt['receiptId']] = receipt
         return receipt
@@ -8798,9 +8803,19 @@ async def api_publish(platform: str, req: PublishRequest):
         raise HTTPException(400, '选择的画像不存在或名称非法')
     if not req.title.strip() and not req.body.strip():
         raise HTTPException(400, '标题/正文不能为空')
+    preparation, sealed_media = None, None
+    if req.acceptanceId:
+        from easel.creation_drafts import CreationDrafts
+        try:
+            preparation, sealed_media = CreationDrafts(OUTPUTS_DIR).verify_acceptance(
+                req.sourceSessionId, req.acceptanceId, platform,
+                {'title': req.title, 'body': req.body, 'tags': req.tags, 'media': req.media, 'persona': req.persona},
+                _account_identity_key(platform))
+        except (ValueError, LookupError, OSError) as exc:
+            raise HTTPException(409, str(exc) if isinstance(exc, (ValueError, LookupError)) else '确认稿素材不可用，请重新确认') from exc
     imgs, vids = [], []
-    for rel in req.media or []:
-        full = _safe_output_path(rel)
+    for rel in sealed_media if sealed_media is not None else req.media or []:
+        full = rel if sealed_media is not None else _safe_output_path(rel)
         if full.suffix.lower() in VIDEO_EXTS:
             vids.append(str(full))
         elif full.suffix.lower() in IMAGE_EXTS:
@@ -8820,7 +8835,8 @@ async def api_publish(platform: str, req: PublishRequest):
     tags = req.tags or ''
     publish_type = '视频' if vids else ('文章' if platform == 'wechat-oa' else '图文')
     py = sys.executable
-    receipt = _begin_publish(platform, title, req.sourceSessionId) if req.sourceSessionId else _begin_publish(platform, title)
+    receipt = (_begin_publish(platform, title, req.sourceSessionId, preparation) if preparation else
+               _begin_publish(platform, title, req.sourceSessionId) if req.sourceSessionId else _begin_publish(platform, title))
     receipt_id = receipt['receiptId']
     status_file = PUBLISH_DIR / (receipt_id + '.status.json')
     code_file = PUBLISH_DIR / (receipt_id + '.code')

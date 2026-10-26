@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--tags', default='')
     parser.add_argument('--platform', action='append', default=[])
     parser.add_argument('--media', action='append', default=[])
+    parser.add_argument('--analysis-binding', default='')
     args = parser.parse_args()
     try:
         session, turn = ArtifactStore(OUTPUTS_DIR).ticket_scope(args.ticket)
@@ -29,10 +30,10 @@ def main():
             raise ValueError('正文文件过大')
         draft = CreationDrafts(OUTPUTS_DIR).prepare(session, turn, {'requestId': args.request_id,
             'title': args.title, 'body': path.read_text(encoding='utf-8-sig'), 'tags': args.tags,
-            'platforms': args.platform, 'media': args.media})
+            'platforms': args.platform, 'media': args.media, 'analysisBindingId': args.analysis_binding})
         print(json.dumps({'ok': True, 'draft': draft, 'requiresUserConfirmation': True}, ensure_ascii=False))
         return 0
-    except (ValueError, OSError):
+    except (ValueError, OSError, LookupError):
         print(json.dumps({'ok': False, 'error': '草稿未接受，请核对当前会话凭据、正文文件及本机素材。未执行发布。'}, ensure_ascii=False))
         return 1
 

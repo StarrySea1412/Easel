@@ -19,6 +19,9 @@
 .creation-actionbar:empty { display:none; }
 .creation-actionbar > .creation-return-actions { display:contents; }
 .creation-actionbar > .creation-agent-jobs { flex-basis:100%; }
+.publish-page .creation-actionbar { padding:0; border:0; border-radius:0; background:transparent; }
+.publish-page .creation-actionbar > .creation-agent-jobs { margin:0; padding:0; border:0; border-radius:0; }
+.publish-page .creation-agent-jobs .creation-return-actions { margin:6px 0 0; }
 .creation-actionbar .btn,.creation-toolbar-actions .btn,.creation-target .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:32px; white-space:nowrap; }
 .creation-actionbar .btn svg,.creation-toolbar-actions .btn svg { flex-shrink:0; }
 .is-compact .creation-workspace-identity { flex-basis:100%; }

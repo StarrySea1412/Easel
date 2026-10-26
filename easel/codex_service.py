@@ -519,7 +519,7 @@ class CodexService:
                 draft = CreationDrafts(self.outputs).prepare(state['sessionId'], state['turn_id'], params.get('arguments'))
                 result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'draft': draft, 'requiresUserConfirmation': True}, ensure_ascii=False)}]}
                 self._event(state, 'activity', '发布草稿已准备，可在辅助面板编辑；尚未提交发布。')
-            except (ValueError, OSError, TypeError):
+            except (ValueError, OSError, TypeError, LookupError):
                 result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '草稿未接受，请核对正文、平台、固定请求标识和本机素材。未执行发布。'}]}
             run['client'].reply(event['id'], result)
             return False

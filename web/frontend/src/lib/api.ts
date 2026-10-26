@@ -790,6 +790,7 @@ export interface PublishVerification {
 }
 
 export interface PublishReceipt {
+  preparation?: {preparationId:string;acceptanceId:string;sourceTurnId:string;payloadHash:string;persona:string;edited:boolean;mediaVersions:{path:string;sha256:string;size:number}[]};
   sourceSessionId?: string;
   receiptId: string;
   platform: string;
@@ -817,9 +818,11 @@ export interface PublishResult extends Partial<PublishReceipt> {
 }
 
 export interface PublishRequest {
+  preparationId?: string;
+  accountIdentity?: string;
   sourceSessionId?: string | null;
   platform: string;
-  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string; sourceSessionId?: string };
+  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string; sourceSessionId?: string; acceptanceId?: string };
 }
 
 export interface PublishingPolicy {

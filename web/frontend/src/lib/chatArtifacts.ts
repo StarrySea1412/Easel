@@ -1,5 +1,26 @@
 import type { PublishDraft } from './store';
 export interface PreparedCreationDraft { id: string; sessionId: string; turnId: string; createdAt: number; state: 'prepared'; draft: PublishDraft }
+
+async function creationRequest(session: string, ident: string, body?: unknown) {
+  const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+  const response = await fetch(`${base}/api/chat/artifacts/${encodeURIComponent(session)}/drafts/${encodeURIComponent(ident)}${body ? '/accept' : ''}`, {
+    cache: 'no-store', ...(body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {}),
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : '草稿核对失败，请重试');
+  return value;
+}
+export async function checkedCreationDraft(session: string, ident: string): Promise<PreparedCreationDraft> {
+  const value = await creationRequest(session, ident);
+  const [draft] = decodeCreationDrafts([value], session);
+  if (!draft || draft.id !== ident) throw new Error('草稿来源不一致，请刷新');
+  return draft;
+}
+export async function acceptCreationDraft(session: string, ident: string, requestId: string, platform: string, payload: {title:string;body:string;media:string[];tags?:string;persona?:string}, accountIdentity: string): Promise<string> {
+  const value = await creationRequest(session, ident, {requestId, platform, payload, accountIdentity});
+  if (value.sessionId !== session || value.preparationId !== ident || value.platform !== platform || !/^[a-f0-9]{32}$/.test(value.id)) throw new Error('确认稿来源不一致，请重新确认');
+  return value.id;
+}
 export function decodeCreationDrafts(value: unknown, session: string): PreparedCreationDraft[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is PreparedCreationDraft => {
