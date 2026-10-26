@@ -29,4 +29,8 @@
 
 本机隔离http://127.0.0.1:7891/已实际重启，正常哈希管理员gaojitest/gaoji登录通过；任务/会话接口和入口引用的11个静态资源HTTP检查通过。API和前端均0.20.1；build=development、revision=null，没有发行构建SHA。仅适用于本机隔离测试，138与安装器未更新。
 
-截图和DOM尺寸记录保存在本机.artifacts/task-responsive-1280.png、task-responsive-1000-expanded.png、task-responsive-390.png及task-responsive-metrics.json，不提交验收临时文件。Git交付单独追加，完整大版本未完项继续保留。
+截图和DOM尺寸记录保存在本机.artifacts/task-responsive-1280.png、task-responsive-1000-expanded.png、task-responsive-390.png及task-responsive-metrics.json，不提交验收临时文件。完整大版本未完项继续保留。
+
+## Git交付
+
+功能和验证记录f56444286eaaa968bf03dc47f7ba8239b5e14a2e已推送starry/codex/task-responsive-0.20.1并核对同SHA。main仅双语首页8591200cfca3d0f29594c3c48a70f1851bc0a05b已推送核对，未合并功能代码。此回执另作纯文档提交，不递增产品版本。
