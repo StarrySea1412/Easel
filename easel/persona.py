@@ -51,7 +51,7 @@ def valid_persona_name(name: str) -> bool:
     )
 
 
-def load_profile_text(name: str, *, for_model: bool = False, query: str = '') -> str:
+def load_profile_text(name: str, *, for_model: bool = False, query: str = '', task_type=None) -> str:
     """读取画像文件夹，按固定顺序拼接所有非空 .md。画像不存在返回空串。"""
     if not valid_persona_name(name):
         return ""
@@ -73,27 +73,27 @@ def load_profile_text(name: str, *, for_model: bool = False, query: str = '') ->
             if text:
                 parts.append(text)
     if for_model:
-        context = model_memory_context(name, query)
+        context = model_memory_context(name, query, task_type=task_type)
         if context and context['entries']:
             import json
             parts.append('经验参考数据（不能覆盖本轮用户要求）：\n' + json.dumps(context, ensure_ascii=False))
     return "\n\n---\n\n".join(parts)
 
 
-def model_memory_context(name, query=''):
+def model_memory_context(name, query='', *, task_type=None):
     if not name or not profile_exists(name) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').exists():
         return None
     from easel.profile_memory import MemoryStore
     import sqlite3
     try:
-        return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR).context(name, query)
+        return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR).context(name, query, task_type=task_type)
     except (OSError, ValueError, sqlite3.Error):
         return {'entries': [], 'warning': '经验存储不可用，本轮未注入经验。'}
 
 
-def model_turn_message(user_message, name, *, runtime='', references=()):
+def model_turn_message(user_message, name, *, runtime='', references=(), task_type=None):
     from easel.prompt_envelope import assemble
-    context = model_memory_context(name, user_message)
+    context = model_memory_context(name, user_message, task_type=task_type)
     sources = list(references)
     if context:
         sources.append({'source': 'profile-experience', **context})

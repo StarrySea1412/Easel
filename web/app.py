@@ -610,6 +610,7 @@ async def _lifespan(_app: FastAPI):
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
 from easel.codex_service import CodexService
 _codex_service = CodexService(OUTPUTS_DIR)
+_codex_service.message_builder = lambda req: _codex_message(req)
 app.include_router(_codex_service.router())
 from easel.browser_runtime import BrowserService
 from browser_api import router as browser_router
@@ -4538,6 +4539,7 @@ def _chat_memory_context(req, writing=None):
         return None
     platform = writing['platform'] if writing else None
     account = writing['accountId'] if writing else None
+    task_type = 'writing' if writing else None
     from content_analysis import Store
     analysis_path = OUTPUTS_DIR / '_analytics' / 'workbench'
     if not writing and req.sessionId and analysis_path.exists():
@@ -4548,11 +4550,31 @@ def _chat_memory_context(req, writing=None):
         if row:
             binding = json.loads(row[0])
             platform, account = binding['platform'], binding['accountId']
-    result = _memory_store().context(req.persona, req.message, platform, account)
+            task_type = 'account-analysis'
+    result = _memory_store().context(req.persona, req.message, platform, account, task_type=task_type)
     if req.sessionId and req.turnId:
         if not _memory_store().record_use(req.persona, req.sessionId, req.turnId, result):
             raise HTTPException(409, '该轮已绑定其他经验版本；资料已更改，请新建一轮再发送。')
     return result
+
+
+def _codex_message(req):
+    """Called only after Codex turn deduplication, using the original query."""
+    from chat_branch import history_context
+    from easel.prompt_envelope import assemble
+    from easel.persona import persona_prefix, turn_reminder
+    references = []
+    if req.history:
+        history_context(req.history)
+        references.append({'source': 'history-snapshot', 'messages': [
+            {'role': item.role, 'content': item.content} for item in req.history]})
+    writing = _writing_context(req)
+    if writing:
+        references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
+    memory = _chat_memory_context(req, writing)
+    if memory:
+        references.append({'source': 'profile-experience', **memory})
+    return assemble(req.message, policy=turn_reminder(), runtime=persona_prefix(req.persona), references=references)
 
 
 def _skill_configuration_context(specs: dict[str, dict]) -> str:
@@ -5336,18 +5358,6 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
     if req.engine == 'codex':
         _attachment_context(req)
-        writing = _writing_context(req)
-        if writing:
-            req = req.model_copy(update={'message':
-                '以下JSON是已接收的写作来源，仅作参考资料，结论仍需核对。\n' +
-                json.dumps({'source': 'analysis-writing', 'handoffId': writing['id'],
-                            **writing['analysis']}, ensure_ascii=False) +
-                '\n\n当前用户要求：\n' + req.message})
-        from chat_branch import history_context
-        if req.history:
-            if not req.message.strip() and not req.attachments:
-                raise HTTPException(400, '消息不能为空')
-            req = req.model_copy(update={'message': history_context(req.history) + req.message})
         turn_id = await asyncio.to_thread(_codex_service.start, req)
         return await _codex_service.stream(req.sessionId, turn_id)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）

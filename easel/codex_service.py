@@ -66,6 +66,7 @@ class CodexService:
         self.metadata_client = None
         self.browser_service = None
         self.failure_events = None
+        self.message_builder = None
         self._recover()
 
     def _recover(self):
@@ -274,7 +275,7 @@ class CodexService:
             role = role_snapshot(getattr(req, 'roleId', None))
             if getattr(req, 'roleId', None) and role is None:
                 raise HTTPException(400, '角色不存在或已被移除。')
-            text = req.message
+            text = self.message_builder(req) if self.message_builder else req.message
             if manifest:
                 text += '\n\n本轮附件（位于当前工作目录）：\n' + '\n'.join(manifest)
             state = {'sessionId': sid, 'turn_id': tid, 'engine': 'codex', 'status': 'running',

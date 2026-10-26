@@ -153,11 +153,11 @@ def test_codex_dispatch_receives_the_checked_source_with_a_controlled_transport(
     class Transport:
         def bind(self, *args, **kwargs): pass
         def start(self, req):
-            captured.append(req)
+            captured.append(web._codex_message(req))
             return 'synthetic-turn'
         async def stream(self, session, turn): return {'session': session, 'turn': turn}
     monkeypatch.setattr(web, '_codex_service', Transport())
     result = asyncio.run(web.start_chat_run(web.ChatRequest(message='只准备可编辑稿', engine='codex', sessionId=context['sessionId'])))
     assert result['turn'] == 'synthetic-turn' and len(captured) == 1
-    assert 'analysis-writing' in captured[0].message and '隔离合成分析' in captured[0].message
-    assert captured[0].message.endswith('只准备可编辑稿')
+    assert 'analysis-writing' in captured[0] and '隔离合成分析' in captured[0]
+    assert '只准备可编辑稿' in captured[0]

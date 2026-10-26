@@ -62,6 +62,60 @@ def text_value(value):
     return value.strip()
 
 
+TASK_TYPES = ('account-analysis', 'writing', 'image-generation', 'publication', 'coding', 'general')
+
+
+def conditions(value=None):
+    """Literal predicates only. Empty v1 conditions preserve legacy applicability."""
+    if value is None:
+        value = {}
+    if not isinstance(value, dict) or set(value) - {'version', 'taskTypes', 'allKeywords', 'excludeKeywords'} or value.get('version', 1) != 1:
+        raise ValueError('经验适用条件格式无效')
+    result = {'version': 1}
+    for key in ('taskTypes', 'allKeywords', 'excludeKeywords'):
+        items = value.get(key, [])
+        if not isinstance(items, list) or len(items) > 12:
+            raise ValueError('每组适用条件最多12项')
+        clean = []
+        for item in items:
+            if not isinstance(item, str) or not item.strip() or len(item) > 80 or any(ord(c) < 32 for c in item):
+                raise ValueError('适用条件须为1至80字的文字')
+            item = item.strip().casefold()
+            if key == 'taskTypes' and item not in TASK_TYPES:
+                raise ValueError('任务类型无效')
+            clean.append(item)
+        result[key] = sorted(set(clean))
+    if set(result['allKeywords']) & set(result['excludeKeywords']):
+        raise ValueError('包含和排除关键词不能相同')
+    return result
+
+
+def conditional(value):
+    return any(value[key] for key in ('taskTypes', 'allKeywords', 'excludeKeywords'))
+
+
+def applicable(value, query, task_type):
+    query = query.casefold()
+    return ((not value['taskTypes'] or task_type in value['taskTypes'])
+            and all(word in query for word in value['allKeywords'])
+            and not any(word in query for word in value['excludeKeywords']))
+
+
+def entry_data(raw):
+    entry = json.loads(raw)
+    entry.setdefault('conditions', conditions())
+    entry.setdefault('conditionsHash', digest(entry['conditions']))
+    return entry
+
+
+def candidate_key(text, selected_scope, source_hash, selected_conditions=None, replaces=None):
+    selected_conditions = conditions(selected_conditions)
+    identity = [text, selected_scope, source_hash]
+    if conditional(selected_conditions) or replaces:
+        identity.extend([selected_conditions, replaces])
+    return digest(identity)
+
+
 def project_after(method):
     @wraps(method)
     def mutation(self, name, *args, **kwargs):
@@ -98,6 +152,7 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS uses(profile_id TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,session_id,turn_id));
                 CREATE TABLE IF NOT EXISTS tombstones(profile_id TEXT NOT NULL,dedupe TEXT NOT NULL,PRIMARY KEY(profile_id,dedupe));
                 CREATE TABLE IF NOT EXISTS policies(profile_id TEXT PRIMARY KEY,data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS replacements(profile_id TEXT NOT NULL,old_id TEXT NOT NULL,new_id TEXT NOT NULL,old_revision INTEGER NOT NULL,new_revision INTEGER NOT NULL,PRIMARY KEY(profile_id,new_id));
             ''')
 
     @contextmanager
@@ -132,7 +187,7 @@ class MemoryStore:
         row = db.execute('SELECT data FROM entries WHERE id=? AND profile_id=?', (entry_id, profile['id'])).fetchone()
         if not row:
             raise LookupError('经验条目不存在')
-        return json.loads(row[0])
+        return entry_data(row[0])
 
     def _policy(self, db, profile):
         row = db.execute('SELECT data FROM policies WHERE profile_id=?', (profile['id'],)).fetchone()
@@ -193,17 +248,26 @@ class MemoryStore:
         except (OSError, sqlite3.Error):
             return 'unavailable'
 
-    def _insert(self, db, profile, text, selected_scope, source, quality='hypothesis'):
-        key = digest([text, selected_scope, source.get('sourceHash')])
+    def _insert(self, db, profile, text, selected_scope, source, quality='hypothesis', selected_conditions=None, replaces=None):
+        selected_conditions = conditions(selected_conditions)
+        key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces)
         if db.execute('SELECT 1 FROM tombstones WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone():
             raise Conflict('该候选已永久删除；相同来源的晚到提案不会重新创建')
         old = db.execute('SELECT data FROM entries WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone()
         if old:
-            return json.loads(old[0])  # Rejection cannot be resurrected by a late task.
+            return entry_data(old[0])  # Rejection cannot be resurrected by a late task.
+        for row in db.execute('SELECT data FROM entries WHERE profile_id=?', (profile['id'],)):
+            existing = entry_data(row[0])
+            source_hash = digest(existing['text']) if existing['source']['type'] == 'manual' else existing['source'].get('sourceHash')
+            if candidate_key(existing['text'], existing['scope'], source_hash, existing['conditions'], existing.get('replaces')) == key:
+                return existing
         entry = {'id': uuid.uuid4().hex, 'profileId': profile['id'], 'text': text,
                  'scope': selected_scope, 'scopeHash': digest(selected_scope), 'contentHash': digest(text),
                  'source': source, 'quality': quality, 'status': 'pending', 'revision': 1,
                  'createdAt': now(), 'updatedAt': now(), 'confirmedAt': None, 'reviewAfter': None}
+        entry.update(conditions=selected_conditions, conditionsHash=digest(selected_conditions))
+        if replaces:
+            entry.update(replaces=replaces, replacementHash=digest(replaces))
         db.execute('INSERT INTO entries VALUES(?,?,?,?)', (entry['id'], profile['id'], key, json.dumps(entry, ensure_ascii=False)))
         self._save(db, entry)
         return entry
@@ -217,13 +281,43 @@ class MemoryStore:
                 raise Conflict('当前画像已关闭保存候选；可在经验管理中开启')
             text, selected_scope = text_value(data.get('text')), scope(data.get('scope'))
             source = self._source(data.get('source'), text, selected_scope)
-            return self._insert(db, profile, text, selected_scope, source)
+            selected_conditions = conditions(data.get('conditions'))
+            replaces = data.get('replaces')
+            # Retry identity remains stable even after the old entry was superseded.
+            if replaces is not None:
+                replaces = self._replacement_binding(replaces)
+            key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces)
+            previous = db.execute('SELECT data FROM entries WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone()
+            if previous:
+                return entry_data(previous[0])
+            if 'profileRevision' in data and profile['revision'] != data['profileRevision']:
+                raise Conflict('经验列表已有更新；草稿保留，请刷新后重选')
+            if replaces:
+                self._replacement(db, profile, replaces, selected_scope, selected_conditions)
+            return self._insert(db, profile, text, selected_scope, source, selected_conditions=selected_conditions, replaces=replaces)
+
+    @staticmethod
+    def _replacement_binding(value):
+        keys = ('id', 'revision', 'contentHash', 'scopeHash', 'conditionsHash')
+        if not isinstance(value, dict) or set(value) != set(keys) or not isinstance(value['revision'], int):
+            raise ValueError('请选择要替代的经验版本')
+        if not all(isinstance(value[key], str) and value[key] for key in keys if key != 'revision'):
+            raise ValueError('替代经验的版本信息无效')
+        return {key: value[key] for key in keys}
+
+    def _replacement(self, db, profile, binding, selected_scope, selected_conditions):
+        old = self._entry(db, profile, binding['id'])
+        if old['status'] != 'active' or any(old[key] != binding[key] for key in binding):
+            raise Conflict('要替代的经验已有更新，请重新选择当前版本')
+        if old['scope'] != selected_scope or old['conditions'] != selected_conditions:
+            raise Conflict('替代经验须使用相同账号范围和适用条件')
+        return old
 
     def _projection(self, profile, entries):
         rows = [f'# 经验沉淀\n\n<!-- Easel managed profile={profile["id"]} revision={profile["revision"]}; edit through the memory service -->',
-                '以下仅为当前画像的跨平台参考经验；账号经验须按平台与账号从服务读取。']
+                '以下仅为当前画像无条件的跨平台参考经验；账号或条件经验须按任务从服务读取。']
         for entry in entries:
-            if entry['status'] == 'active' and entry['scope']['kind'] == 'profile':
+            if entry['status'] == 'active' and entry['scope']['kind'] == 'profile' and not conditional(entry.get('conditions', conditions())):
                 rows.append(f'## {entry["id"]} · v{entry["revision"]} · {entry["quality"]}\n\n{entry["text"]}')
         return '\n\n'.join(rows) + '\n'
 
@@ -262,7 +356,7 @@ class MemoryStore:
             warning = '经验已保存在数据库，但兼容文件写入失败；修复写入权限后刷新重试。'
         with self.connect() as db:
             profile = self._profile(db, name)
-            entries = [json.loads(row[0]) for row in db.execute('SELECT data FROM entries WHERE profile_id=? ORDER BY rowid DESC', (profile['id'],))]
+            entries = [entry_data(row[0]) for row in db.execute('SELECT data FROM entries WHERE profile_id=? ORDER BY rowid DESC', (profile['id'],))]
             policy = self._policy(db, profile)
         for entry in entries:
             entry['sourceStatus'] = self.source_status(entry)
@@ -300,7 +394,10 @@ class MemoryStore:
             db.execute('BEGIN IMMEDIATE')
             profile = self._profile(db, name)
             entry = self._entry(db, profile, entry_id)
-            if action == 'accept' and entry['status'] == 'active' and entry.get('acceptedFrom') == data.get('revision') and entry['contentHash'] == data.get('contentHash') and entry['scopeHash'] == data.get('scopeHash'):
+            confirmed = (entry['contentHash'] == data.get('contentHash') and entry['scopeHash'] == data.get('scopeHash')
+                         and entry['conditionsHash'] == data.get('conditionsHash', digest(conditions()))
+                         and entry.get('replacementHash') == data.get('replacementHash'))
+            if action == 'accept' and entry['status'] == 'active' and entry.get('acceptedFrom') == data.get('revision') and confirmed:
                 return entry
             if entry['revision'] != data.get('revision') or profile['revision'] != data.get('profileRevision'):
                 raise Conflict('经验版本已改变；你的草稿保留，请刷新后对照')
@@ -310,7 +407,7 @@ class MemoryStore:
                 for row in db.execute('SELECT data FROM revisions WHERE entry_id=?', (entry_id,)).fetchall():
                     version = json.loads(row[0])
                     source_hash = digest(version['text']) if version['source']['type'] == 'manual' else version['source'].get('sourceHash')
-                    db.execute('INSERT OR IGNORE INTO tombstones VALUES(?,?)', (profile['id'], digest([version['text'], version['scope'], source_hash])))
+                    db.execute('INSERT OR IGNORE INTO tombstones VALUES(?,?)', (profile['id'], candidate_key(version['text'], version['scope'], source_hash, version.get('conditions'), version.get('replaces'))))
                 db.execute('DELETE FROM revisions WHERE entry_id=?', (entry_id,))
                 db.execute('DELETE FROM entries WHERE id=?', (entry_id,))
                 if entry['source']['type'] == 'legacy':
@@ -318,13 +415,37 @@ class MemoryStore:
                 db.execute('UPDATE profiles SET revision=revision+1 WHERE id=?', (profile['id'],))
                 return None
             if action in ('accept', 'restore'):
-                allowed = 'pending' if action == 'accept' else 'invalidated'
-                if not profile['managed'] or entry['status'] != allowed:
+                allowed = ('pending',) if action == 'accept' else ('invalidated', 'superseded')
+                if not profile['managed'] or entry['status'] not in allowed:
                     raise Conflict('请先导入旧资料；只能确认待处理候选或恢复失效条目')
-                if entry['contentHash'] != data.get('contentHash') or entry['scopeHash'] != data.get('scopeHash'):
+                if not confirmed:
                     raise Conflict('确认内容或适用范围已改变')
                 if self.source_status(entry) != 'available':
                     raise Conflict('来源已更改或缺失，请重新提取候选')
+                if action == 'restore':
+                    # Identifier-only topology survives body deletion, including
+                    # multiple deleted intermediate versions in a chain.
+                    graph = {}
+                    for link in db.execute('SELECT old_id,new_id FROM replacements WHERE profile_id=?', (profile['id'],)):
+                        graph.setdefault(link['old_id'], set()).add(link['new_id'])
+                        graph.setdefault(link['new_id'], set()).add(link['old_id'])
+                    connected, pending = set(), [entry['id']]
+                    while pending:
+                        related = pending.pop()
+                        if related in connected:
+                            continue
+                        connected.add(related)
+                        pending.extend(graph.get(related, set()) - connected)
+                    for row in db.execute('SELECT data FROM entries WHERE profile_id=?', (profile['id'],)):
+                        other = entry_data(row[0])
+                        if other['id'] != entry['id'] and other['id'] in connected and other['status'] == 'active':
+                            raise Conflict('关联经验仍有效，请先处理后再恢复旧经验')
+                elif entry.get('replaces'):
+                    old = self._replacement(db, profile, entry['replaces'], entry['scope'], entry['conditions'])
+                    db.execute('INSERT INTO replacements VALUES(?,?,?,?,?)', (profile['id'], old['id'], entry['id'], old['revision'], entry['revision'] + 1))
+                    old.update(status='superseded', supersededBy={'id': entry['id'], 'revision': entry['revision'] + 1},
+                               revision=old['revision'] + 1, updatedAt=now())
+                    self._save(db, old)
                 entry.update(status='active', confirmedAt=now(), acceptedFrom=entry['revision'])
             elif action == 'reject' and entry['status'] == 'pending':
                 entry['status'] = 'rejected'
@@ -336,6 +457,11 @@ class MemoryStore:
                 entry['acceptedFrom'] = None
                 entry['userEdited'] = True
                 entry['quality'] = 'hypothesis' if entry['source']['type'] == 'analysis' else entry['quality']
+                if 'conditions' in data:
+                    entry['conditions'] = conditions(data['conditions'])
+                    if entry['status'] == 'pending' and entry.get('replaces'):
+                        self._replacement(db, profile, entry['replaces'], entry['scope'], entry['conditions'])
+                    entry['conditionsHash'] = digest(entry['conditions'])
                 review = data.get('reviewAfter')
                 if review is not None:
                     try:
@@ -352,7 +478,7 @@ class MemoryStore:
     def history(self, name, entry_id):
         with self.connect() as db:
             self._entry(db, self._profile(db, name), entry_id)
-            return [json.loads(row[0]) for row in db.execute('SELECT data FROM revisions WHERE entry_id=? ORDER BY revision DESC', (entry_id,))]
+            return [entry_data(row[0]) for row in db.execute('SELECT data FROM revisions WHERE entry_id=? ORDER BY revision DESC', (entry_id,))]
 
     def legacy_snapshot(self, name):
         with self.connect() as db:
@@ -368,7 +494,8 @@ class MemoryStore:
                     or context.get('policy', self._policy(db, profile)) != self._policy(db, profile)):
                 return False
             value = {'turnId': turn_id, 'profileId': profile['id'], 'profileRevision': context['revision'],
-                     'at': now(), 'entries': [{'id': row['id'], 'revision': row['revision']} for row in context['entries']]}
+                     'at': now(), 'entries': [{'id': row['id'], 'revision': row['revision'],
+                         **({'conditionsHash': row['conditionsHash']} if conditional(row.get('conditions', conditions())) else {})} for row in context['entries']]}
             if 'recall' in context:
                 value.update(recall=context['recall'], policy=context['policy'])
             # Retries keep the original turn binding, never rewrite history.
@@ -397,11 +524,15 @@ class MemoryStore:
                 self._insert(db, profile, text_value(text), {'kind': 'profile'}, {'type': 'file-change', 'sourceHash': digest(text), 'capturedAt': None}, 'legacy-unverified')
             db.execute('UPDATE profiles SET projected_hash=? WHERE id=?', (digest(text), profile['id']))
 
-    def context(self, name, query='', platform=None, account_id=None, budget=5000):
+    def context(self, name, query='', platform=None, account_id=None, budget=5000, *, task_type=None):
+        if task_type is not None and task_type not in TASK_TYPES:
+            raise ValueError('任务类型无效')
         state = self.state(name)
         limit = min(max(budget, 0), 12000)
         receipt = {'version': 1, 'budgetChars': limit, 'usedChars': 0, 'maxEntries': 8,
                    'matchedCount': 0, 'selectedCount': 0, 'skippedBudgetCount': 0, 'reason': 'empty'}
+        if task_type:
+            receipt['taskType'] = task_type
         result = {'entries': [], 'profileId': state['profileId'], 'revision': state['revision'],
                   'warning': state['warning'], 'policy': state['policy'], 'recall': receipt}
         if not state['policy']['readEnabled'] or not state['managed'] or not state['projectionReady']:
@@ -415,6 +546,8 @@ class MemoryStore:
             if entry['status'] != 'active' or entry['sourceStatus'] != 'available':
                 continue
             if selected['kind'] == 'account' and (selected['platform'] != platform or selected['accountId'] != account_id):
+                continue
+            if not applicable(entry['conditions'], query, task_type):
                 continue
             score = len(words & terms(entry['text']))
             if query.strip() and not score:
@@ -446,4 +579,5 @@ class MemoryStore:
             db.execute('DELETE FROM uses WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM tombstones WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM policies WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM replacements WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM profiles WHERE id=?', (profile['id'],))

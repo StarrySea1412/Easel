@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'http://localhost/'});
 globalThis.document=window.document;
+globalThis.HTMLElement=window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
 const lib=await loadTsModule('../src/lib/profileMemory.ts');
@@ -120,4 +121,56 @@ test('recall preview explains disabled reading inside the existing disclosure',a
  assert.match(v.container.querySelector('[role="status"]').textContent,/已关闭读取经验/);
  assert.equal(lib.memoryRecallSummary({reason:'selected',selectedCount:2,usedChars:42,budgetChars:5000}),'2条 · 42/5000字');
 });
+async function fill(field,value){await act(async()=>{const proto=field.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(field,value);field.dispatchEvent(new window.Event('input',{bubbles:true}));});}
+async function choose(container,label,text){await act(async()=>container.querySelector(`[aria-label="${label}"]`).click());await act(async()=>[...document.querySelectorAll('[role="option"]')].find(option=>option.textContent.includes(text)).click());}
+
+test('conditional replacement proposal retains its bound old version and draft after a conflict',async t=>{
+ const old={...entry('old'),scope:{kind:'profile'},status:'active',revision:2,conditions:{version:1,taskTypes:['writing'],allKeywords:['摄影'],excludeKeywords:[]},conditionsHash:'conditions'};
+ let current=state('conditional-proposal',3,[old]);const writes=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{if(options.method==='POST'){writes.push(JSON.parse(options.body));current=state('conditional-proposal',4,[{...old,revision:3}]);return response({detail:'要替代的经验已有更新'},409);}return response(current);});
+ const v=await mount(t,'conditional-proposal');
+ assert.equal(v.container.querySelector('.memory-conditions').open,false);
+ await fill(v.container.querySelector('.memory-new textarea'),'摄影新版草稿');
+ await choose(v.container,'添加适用任务类型','写作');
+ await fill(v.container.querySelector('.memory-condition-fields input'),'摄影');
+ await choose(v.container,'替代旧经验','v2');
+ await act(async()=>v.button('保存为待确认候选').click());
+ assert.equal(v.container.querySelector('.memory-new textarea').value,'摄影新版草稿');
+ assert.ok(v.container.querySelector('[aria-label="移除写作"]'));
+ assert.deepEqual(writes[0].conditions,old.conditions);assert.equal(writes[0].replaces.revision,2);assert.equal(writes[0].profileRevision,3);
+ await act(async()=>v.button('保存为待确认候选').click());
+ assert.equal(writes[1].replaces.revision,2,'refresh must not silently rebind a selected version');
+ assert.match(v.container.querySelector('[role="alert"]').textContent,/已有更新/);
+});
+
+test('replacement confirmation shows old and new text and submits the bound condition identity',async t=>{
+ const old={...entry('before'),scope:{kind:'profile'},status:'active',revision:2,conditions:lib.emptyConditions(),conditionsHash:'unrestricted'};
+ const candidate={...entry('after'),scope:{kind:'profile'},text:'摄影新版',conditions:lib.emptyConditions(),conditionsHash:'unrestricted',replaces:{id:'before',revision:2,contentHash:'hash',scopeHash:'scope',conditionsHash:'unrestricted'},replacementHash:'replacement'};
+ let current=state('replacement-confirm',4,[candidate,old]);const writes=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{if(options.method==='POST'){writes.push(JSON.parse(options.body));current=state('replacement-confirm',6,[{...candidate,status:'active',revision:2},{...old,status:'superseded',revision:3,supersededBy:{id:'after',revision:2}}]);}return response(current);});
+ const v=await mount(t,'replacement-confirm');
+ await act(async()=>v.button('确认生效').click());
+ let dialog=document.querySelector('[role="dialog"]');assert.ok(dialog);assert.match(dialog.textContent,/摄影新版/);assert.match(dialog.textContent,/摄影教程采用分步清单/);
+ await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='取消').click());assert.equal(writes.length,0);
+ await act(async()=>v.button('确认生效').click());dialog=document.querySelector('[role="dialog"]');
+ await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='确认替代').click());
+ assert.equal(writes[0].conditionsHash,'unrestricted');assert.equal(writes[0].replacementHash,'replacement');assert.equal(writes[0].profileRevision,4);
+ assert.match(v.container.textContent,/已替代/);assert.match(v.container.textContent,/后续版本 v2/);
+});
+
+test('condition edits survive revision conflict and recall preview sends the selected task type',async t=>{
+ const rule={version:1,taskTypes:['writing'],allKeywords:[],excludeKeywords:[]};
+ let current=state('condition-edit',1,[{...entry(),conditions:rule,conditionsHash:'writing'}]);const requests=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{requests.push({url,options});if(String(url).endsWith('/edit')){current=state('condition-edit',2,[{...entry(),revision:2,conditions:rule,conditionsHash:'writing'}]);return response({detail:'版本已改变'},409);}if(String(url).includes('/context?'))return response({entries:[]});return response(current);});
+ const v=await mount(t,'condition-edit');
+ await act(async()=>v.button('编辑').click());
+ await fill(v.container.querySelector('.memory-editor .memory-condition-fields input'),'摄影、教程');
+ await act(async()=>v.button('保存修订').click());
+ assert.equal(v.container.querySelector('.memory-editor .memory-condition-fields input').value,'摄影、教程');
+ const body=JSON.parse(requests.find(row=>row.url.endsWith('/edit')).options.body);assert.deepEqual(body.conditions.allKeywords,['摄影','教程']);
+ await choose(v.container,'预览任务类型','写作');
+ await act(async()=>v.button('查看可用经验').click());
+ assert.ok(requests.some(row=>String(row.url).includes('taskType=writing')));
+});
+
 test.after(()=>window.happyDOM.abort());

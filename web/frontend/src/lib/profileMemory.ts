@@ -2,7 +2,17 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { publishWorkbenchChange, watchWorkbenchChange } from './workbenchEvents';
 
 export type MemoryScope = {kind:'profile'} | {kind:'account';platform:string;accountId:string};
-export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
+export type MemoryConditions = {version:1;taskTypes:string[];allKeywords:string[];excludeKeywords:string[]};
+export type MemoryReplacement = {id:string;revision:number;contentHash:string;scopeHash:string;conditionsHash:string};
+export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected'|'superseded';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;conditions?:MemoryConditions;conditionsHash?:string;replaces?:MemoryReplacement;replacementHash?:string;supersededBy?:{id:string;revision:number};quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
+export const memoryTaskTypes:Record<string,string> = {'account-analysis':'账号分析',writing:'写作','image-generation':'生图',publication:'发布',coding:'编程',general:'通用任务'};
+export const emptyConditions = ():MemoryConditions => ({version:1,taskTypes:[],allKeywords:[],excludeKeywords:[]});
+export function conditionLabel(value?:MemoryConditions):string {
+  return value ? [...value.taskTypes.map(type=>memoryTaskTypes[type]||type),...value.allKeywords.map(word=>`含“${word}”`),...value.excludeKeywords.map(word=>`排除“${word}”`)].join(' · ') : '';
+}
+export function sameConditions(a?:MemoryConditions,b?:MemoryConditions):boolean {
+  return (['taskTypes','allKeywords','excludeKeywords'] as const).every(key=>JSON.stringify([...(a?.[key]||[])].sort())===JSON.stringify([...(b?.[key]||[])].sort()));
+}
 export type MemoryPolicy = {readEnabled:boolean;candidatesEnabled:boolean};
 export type MemoryRecall = {version:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
 export type MemoryContext = {entries:MemoryEntry[];recall?:MemoryRecall};
@@ -55,9 +65,11 @@ export function useProfileMemory(name:string) {
   },[name]);
   return value;
 }
-export async function proposeMemory(name:string, text:string, scope:MemoryScope, source:{type:string;bindingId?:string}={type:'manual'}):Promise<MemoryEntry> {
-  const result = await memoryRequest<{entry:MemoryEntry;state:MemoryState}>(name,'/candidates','POST',{text,scope,source});
-  accept(result.state,'candidate'); return result.entry;
+export async function proposeMemory(name:string, text:string, scope:MemoryScope, source:{type:string;bindingId?:string}={type:'manual'}, options:{conditions?:MemoryConditions;replaces?:MemoryReplacement|null;profileRevision?:number}={}):Promise<MemoryEntry> {
+  try {
+    const result = await memoryRequest<{entry:MemoryEntry;state:MemoryState}>(name,'/candidates','POST',{text,scope,source,...options});
+    accept(result.state,'candidate'); return result.entry;
+  } catch(error) { void refreshMemory(name); throw error; }
 }
 export async function mutateMemory(name:string,path:string,body:unknown) {
   try { const value=await memoryRequest<MemoryState>(name,path,'POST',body);accept(value,path);return value; }

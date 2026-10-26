@@ -75,8 +75,8 @@ def create_router(store_getter):
         return run(run(store_getter).state, name)
 
     @router.get('/context')
-    def context(name: str, query: str = '', platform: str | None = None, accountId: str | None = None):
-        return run(run(store_getter).context, name, query[:2000], platform, accountId)
+    def context(name: str, query: str = '', platform: str | None = None, accountId: str | None = None, taskType: str | None = None):
+        return run(lambda: store_getter().context(name, query[:2000], platform, accountId, task_type=taskType))
 
     @router.get('/legacy')
     def legacy(name: str):
