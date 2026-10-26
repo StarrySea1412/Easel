@@ -94,3 +94,7 @@
 .analysis-evidence-stepper .btn { display:grid; place-items:center; min-width:28px; padding:6px; }
 .analysis-work-previous { transform:rotate(90deg); }.analysis-work-next { transform:rotate(-90deg); }
 @media(max-width:480px) { .analysis-evidence-navigation { flex-wrap:wrap; }.analysis-work-select { flex-basis:100%; }.analysis-evidence-stepper { margin-left:auto; } }
+
+.analysis-writing-action { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.analysis-writing-action .btn { display:inline-flex; align-items:center; gap:6px; }
+.analysis-writing-action .ca-error { flex-basis:100%; margin:0; overflow-wrap:anywhere; }

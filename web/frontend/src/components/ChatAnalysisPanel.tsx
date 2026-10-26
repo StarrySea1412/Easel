@@ -14,12 +14,14 @@ import PlatformIcon from './PlatformIcon';
 import { IconChart, IconCopy, IconChevron, IconChat, IconImport } from './icons';
 import '../styles/analysis-visuals.css';
 
-export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session: ChatSession; onOpenAnalysis?: () => void }) {
+export default function ChatAnalysisPanel({ session, onOpenAnalysis, onWriteFromAnalysis }: { session: ChatSession; onOpenAnalysis?: () => void; onWriteFromAnalysis?: () => Promise<void> }) {
   const context = session.analysisContext;
   const [saved, setSaved] = useState<AnalysisBinding | null>(null);
   const [quote, setQuote] = useState('');
   const [writing, setWriting] = useState(false);
   const [writeError, setWriteError] = useState('');
+  const [preparingWriting, setPreparingWriting] = useState(false);
+  const [writingError, setWritingError] = useState('');
   const material = useRef<HTMLDivElement>(null);
   const resultMaterial=useRef<HTMLDivElement>(null);
   const [candidate,setCandidate]=useState(''),[savingMemory,setSavingMemory]=useState(false),[memoryError,setMemoryError]=useState('');
@@ -65,7 +67,7 @@ export default function ChatAnalysisPanel({ session, onOpenAnalysis }: { session
     {quote && <div className="ca-material-quote"><label>发送前编辑引用<textarea rows={9} value={quote} onChange={event => setQuote(event.target.value)} /></label><button className="btn btn-sm" onClick={() => { addChatDraftQuote(session.id, quote); setQuote(''); showToast('材料已加入当前分析对话草稿', 'success'); }}><IconChat size={14}/>引用到分析对话</button></div>}
     {session.pendingTurnId && <span role="status" aria-label="分析执行中"><PublishSpinner /></span>}
     {saved?.stale && <p className="ca-caption">来源材料已更新，本对话保留历史快照；重新提取后可生成新分析。</p>}
-    {saved?.result && <><div ref={resultMaterial}><AnalysisResultReport result={saved.result}/></div><div className="ca-material-quote"><button className="btn btn-sm" disabled={saved.stale||!session.persona||savingMemory} onMouseDown={event=>event.preventDefault()} onClick={extractMemory}>选取结论加入画像</button><p>{session.persona?`保存到「${session.persona}」的待确认经验，仅适用于原平台账号。`:'先为当前对话选择画像，再保存经验。'}</p><label>候选结论（已保存结果的原文片段）<textarea rows={3} value={candidate} onChange={event=>setCandidate(event.target.value)}/></label><button className="btn btn-sm" disabled={!candidate.trim()||!session.persona||saved.stale||savingMemory} onClick={()=>void saveMemory()}>{savingMemory&&<PublishSpinner/>}保存候选</button>{memoryError&&<p role="alert" className="ca-error">{memoryError}</p>}</div></>}
+    {saved?.result && <>{onWriteFromAnalysis && <div className="analysis-writing-action"><button className="btn btn-sm" disabled={preparingWriting || saved.stale || Boolean(session.pendingTurnId) || session.importedFromBackup} onClick={async () => {setPreparingWriting(true); setWritingError(''); try {await onWriteFromAnalysis();} catch (reason) {setWritingError(reason instanceof Error ? reason.message : '准备写作失败');} finally {setPreparingWriting(false);}}}>{preparingWriting ? <PublishSpinner/> : <IconChat size={14}/>}据此写一篇</button>{writingError && <p role="alert" className="ca-error">{writingError}</p>}</div>}<div ref={resultMaterial}><AnalysisResultReport result={saved.result}/></div><details className="analysis-memory-candidate"><summary>保存画像经验</summary><div className="ca-material-quote"><button className="btn btn-sm" disabled={saved.stale||!session.persona||savingMemory} onMouseDown={event=>event.preventDefault()} onClick={extractMemory}>选取结论加入画像</button><p>{session.persona?`保存到「${session.persona}」的待确认经验，仅适用于原平台账号。`:'先为当前对话选择画像，再保存经验。'}</p><label>候选结论（已保存结果的原文片段）<textarea rows={3} value={candidate} onChange={event=>setCandidate(event.target.value)}/></label><button className="btn btn-sm" disabled={!candidate.trim()||!session.persona||saved.stale||savingMemory} onClick={()=>void saveMemory()}>{savingMemory&&<PublishSpinner/>}保存候选</button>{memoryError&&<p role="alert" className="ca-error">{memoryError}</p>}</div></details></>}
     <div ref={material}><AnalysisEvidenceOverview context={context}/>
     <details><summary>原始 Markdown / JSON 材料</summary><OutputMessageContent inert content={context.markdown}/></details></div>
   </section>;

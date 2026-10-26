@@ -1,4 +1,5 @@
 import { saveAnalysisChatResult, type AnalysisBinding, type AnalysisChatRequest } from './lib/analysisConversations';
+import { prepareWriting, writingSession, seedWritingDraft } from './lib/writingHandoff';
 import { analysisRequest } from './lib/contentAnalysis';
 import { analyticsScope } from './lib/analyticsCache';
 import { savePanelTools } from './lib/chatPanels';
@@ -805,7 +806,7 @@ export default function App() {
     const visible = analysisMessage.content;
     const agentMessage = (legacyAgentText || analysisMessage.agentContent).trim();
     if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || stopRequests.current[sessionId]) return false;
-    const persona = cur?.persona || selectedPersona || undefined;
+    const persona = cur?.writingContext ? cur.writingContext.persona || undefined : cur?.persona || selectedPersona || undefined;
     const requirementSnapshot = requirementsForSelection(skillRequirements, selectedSkills);
     setSessions((prev) => {
       const next = prev.map((s) => {
@@ -873,6 +874,26 @@ export default function App() {
     finally { analysisPreparing.current.delete(key); }
   }, [selectedPersona]);
 
+  const writingPreparing = useRef(new Set<string>());
+  const handleWriting = useCallback(async (sourceId: string) => {
+    if (writingPreparing.current.has(sourceId)) return;
+    const source = sessionsRef.current.find(session => session.id === sourceId);
+    if (!source) throw new Error('原分析对话已删除');
+    writingPreparing.current.add(sourceId);
+    try {
+      const context = await prepareWriting(source);
+      if (!sessionsRef.current.some(session => session.id === sourceId)) throw new Error('原分析对话已删除');
+      const target = writingSession(source, context, sessionsRef.current);
+      if (!sessionsRef.current.some(session => session.id === target.id)) {
+        const next = [target, ...sessionsRef.current];
+        if (!saveSessions(next)) throw new Error('写作对话未能保存，未发送模型请求');
+        sessionsRef.current = next; setSessions(next);
+      }
+      seedWritingDraft(target);
+      setActiveSessionId(target.id); setCurrentPage('chat');
+    } finally { writingPreparing.current.delete(sourceId); }
+  }, [setCurrentPage]);
+
   const editRequests = useRef(new Set<string>());
   const handleEditMessage = useCallback(async (sessionId: string, userIndex: number, text: string, signal: AbortSignal) => {
     if (editRequests.current.has(sessionId)) throw new Error('另一条消息正在准备编辑分支，请稍候。');
@@ -890,6 +911,7 @@ export default function App() {
         || getChatQueue(sessionId).items.length) throw new Error('原对话状态已变化，请重新打开编辑。');
       const original = remapEditedMessage(plan.original, result.attachments);
       const branch: ChatSession = { ...createSession(source.persona), id: result.sessionId, engine: source.engine, conversationType: source.analysisContext?.kind || source.conversationType,
+        writingContext: result.writingContext,
         title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
           { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
             ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) }
@@ -1529,6 +1551,7 @@ export default function App() {
             session={activeSession}
             taskState={tasks}
             onOpenAnalysis={() => { if (activeSession.analysisContext) setAnalysisPlatform(activeSession.analysisContext.platform); setCurrentPage('analysis'); }}
+            onWriteFromAnalysis={() => handleWriting(activeSession.id)}
             sideSessions={sideChatsOf(activeSession, sessions)}
             closedSideSessions={sideChatsOf(activeSession, sessions, true).filter(item=>item.sideClosed)}
             onSideReopen={handleSideReopen}
@@ -1555,7 +1578,7 @@ export default function App() {
             stopError={stopErrors[activeSession.id]}
             onSend={(displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef) => handleSendMessage(activeSession.id, displayText, attachments, selectedSkills, skillRequirements, thinkingLevel, modelRef)}
             onEdit={(index, text, signal) => handleEditMessage(activeSession.id, index, text, signal)}
-            onOpenSource={id => { if (sessionsRef.current.some(session => session.id === id)) setActiveSessionId(id); else showToast('原对话已删除，当前编辑分支仍可继续。', 'info'); }}
+            onOpenSource={id => { if (sessionsRef.current.some(session => session.id === id)) setActiveSessionId(id); else showToast(activeSession.writingContext ? '原分析已删除，已有写作内容保留；后续生成需重新准备' : '原对话已删除，当前编辑分支仍可继续。', 'info'); }}
             onStop={() => handleStopStream(activeSession.id)}
             onSteer={id => handleSteer(activeSession.id, id)}
             onNewChat={handleNewChat}
@@ -1625,6 +1648,11 @@ export default function App() {
   };
 
   const handlePersonaChange = useCallback((persona: string) => {
+    const writing = sessionsRef.current.find(session => session.id === activeSessionId)?.writingContext;
+    if (writing && (persona || '') !== writing.persona) {
+      showToast('写作沿用接收时的画像；可回原分析切换画像后重新准备', 'info');
+      return;
+    }
     setSelectedPersona(persona);
     setCurrentPage('chat');
     // 修复：选/切画像不再新建空会话丢上下文。就地把当前会话的画像设为新选的、

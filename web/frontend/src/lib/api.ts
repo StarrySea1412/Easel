@@ -1112,7 +1112,7 @@ export function stopChat(sessionId: string, turnId?: string): Promise<{ stopped:
   });
 }
 
-export function prepareChatBranch(sourceSessionId: string, attachments: UploadedFile[], signal: AbortSignal): Promise<{ sessionId: string; attachments: Record<string, UploadedFile> }> {
+export function prepareChatBranch(sourceSessionId: string, attachments: UploadedFile[], signal: AbortSignal): Promise<{ sessionId: string; attachments: Record<string, UploadedFile>; writingContext?: import('./writingHandoff').WritingContext }> {
   return request('/api/chat/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sourceSessionId, attachments }), signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
 }

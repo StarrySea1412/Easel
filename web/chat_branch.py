@@ -27,7 +27,14 @@ def prepare(web, source_session, attachments):
     except OSError:
         shutil.rmtree(directory, ignore_errors=True)
         raise HTTPException(500, '无法复制分支附件，原对话未修改，请重试。') from None
-    return {'sessionId': session, 'attachments': copied}
+    from easel.writing_handoffs import WritingHandoffs
+    try:
+        ledger = web._run_ledger_root() if hasattr(web, '_run_ledger_root') else None
+        writing = WritingHandoffs(web.OUTPUTS_DIR, ledger).branch(source_session, session)
+    except (ValueError, LookupError) as exc:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise HTTPException(409, str(exc)) from exc
+    return {'sessionId': session, 'attachments': copied, **({'writingContext': writing} if writing else {})}
 
 
 def history_context(history):

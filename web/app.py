@@ -4452,7 +4452,10 @@ def _chat_message(req: ChatRequest) -> str:
     references = ([{'source': 'attachments', 'text': context}] if context else [])
     if req.history:
         references.append({'source': 'history-snapshot', 'messages': [{'role': item.role, 'content': item.content} for item in req.history]})
-    memory = _chat_memory_context(req)
+    writing = _writing_context(req)
+    if writing:
+        references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
+    memory = _chat_memory_context(req, writing)
     if memory:
         references.append({'source': 'profile-experience', **memory})
     message = ''
@@ -4521,13 +4524,23 @@ def _chat_message(req: ChatRequest) -> str:
                     runtime=persona_prefix(req.persona) + '\n' + message, references=references)
 
 
-def _chat_memory_context(req):
+def _writing_context(req):
+    from easel.writing_handoffs import WritingHandoffs
+    try:
+        return WritingHandoffs(OUTPUTS_DIR, _run_ledger_root()).checked(
+            req.sessionId, persona=req.persona, engine=req.engine)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _chat_memory_context(req, writing=None):
     if not req.persona or not profile_exists(req.persona) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').is_file():
         return None
-    platform = account = None
+    platform = writing['platform'] if writing else None
+    account = writing['accountId'] if writing else None
     from content_analysis import Store
     analysis_path = OUTPUTS_DIR / '_analytics' / 'workbench'
-    if req.sessionId and analysis_path.exists():
+    if not writing and req.sessionId and analysis_path.exists():
         store = Store(analysis_path)
         with store.connect() as db:
             table = db.execute("SELECT 1 FROM sqlite_master WHERE name='analysis_conversations'").fetchone()
@@ -5323,6 +5336,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
     if req.engine == 'codex':
         _attachment_context(req)
+        writing = _writing_context(req)
+        if writing:
+            req = req.model_copy(update={'message':
+                '以下JSON是已接收的写作来源，仅作参考资料，结论仍需核对。\n' +
+                json.dumps({'source': 'analysis-writing', 'handoffId': writing['id'],
+                            **writing['analysis']}, ensure_ascii=False) +
+                '\n\n当前用户要求：\n' + req.message})
         from chat_branch import history_context
         if req.history:
             if not req.message.strip() and not req.attachments:
@@ -8319,6 +8339,39 @@ app.include_router(_content_analysis_router(
     session_getter=lambda platform: _account_logged_in(platform, LOGIN_RUNNERS[platform])
     and platform not in _ACCOUNT_CLEARING,
     generation_getter=_content_analysis_session_generation))
+
+
+class AnalysisWritingRequest(BaseModel):
+    sourceSessionId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')]
+    persona: str = ''
+    engine: Literal['openclaw', 'codex'] = 'openclaw'
+
+
+@app.post('/api/content-analysis/conversations/{binding_id}/writing')
+async def api_analysis_writing(binding_id: str, req: AnalysisWritingRequest):
+    if req.persona and (not valid_persona_name(req.persona) or not profile_exists(req.persona)):
+        raise HTTPException(400, '选择的画像不存在或名称非法')
+    from easel.writing_handoffs import WritingHandoffs
+    try:
+        return await asyncio.to_thread(WritingHandoffs(OUTPUTS_DIR, _run_ledger_root()).prepare,
+                                       binding_id, req.sourceSessionId, req.persona, req.engine)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get('/api/writing-handoffs/{session_id}')
+async def api_writing_handoff(session_id: str):
+    from easel.writing_handoffs import WritingHandoffs
+    service = WritingHandoffs(OUTPUTS_DIR, _run_ledger_root())
+    try:
+        item = await asyncio.to_thread(service.checked, session_id)
+        if not item:
+            raise HTTPException(404, '写作来源不存在')
+        return service.public(item)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 app.include_router(_conversation_titles_router(_conversation_title_runner))
 
 from skill_meta import create_router as _skill_meta_router

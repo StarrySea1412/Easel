@@ -96,6 +96,10 @@ class CreationDrafts:
         binding = payload.get('analysisBindingId', '')
         if not isinstance(binding, str) or len(binding) > 200:
             raise ValueError('分析来源标识无效')
+        from .writing_handoffs import WritingHandoffs
+        writing_source = WritingHandoffs(self.root).analysis(session, binding)
+        if writing_source:
+            binding = writing_source['bindingId']
         fingerprint = digest(draft) if not binding else digest([draft, binding])
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -119,8 +123,10 @@ class CreationDrafts:
 
     def analysis(self, session, binding):
         from .memory_sources import analysis_source
-        source = analysis_source(self.root, binding)
-        if source['sessionId'] != session:
+        from .writing_handoffs import WritingHandoffs
+        writing_source = WritingHandoffs(self.root).analysis(session, binding)
+        source = writing_source or analysis_source(self.root, binding)
+        if source['sessionId'] != session and not writing_source:
             raise ValueError('分析来源不属于当前对话')
         self.require_session(source['sessionId'])
         return {key: value for key, value in source.items() if key not in {'markdown', 'limitation'}}

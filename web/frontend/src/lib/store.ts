@@ -10,6 +10,7 @@ import { decodeChatTiming } from './chatTiming';
 import type { ChatTiming } from './chatTiming';
 import { decodeChatReasoning, type ChatReasoning } from './chatReasoning';
 import { isAnalysisBinding, type AnalysisBinding } from './analysisBinding';
+import { isWritingContext, type WritingContext } from './writingHandoff';
 
 export interface ChatMessage extends ChatTiming, ChatReasoning {
   shareAppend?: { token: string; appendId: string; at: number; source: { model: string; harness: string } }; // 来自分享接管的回传标记
@@ -35,6 +36,7 @@ export interface ChatMessage extends ChatTiming, ChatReasoning {
 export interface ChatSession {
   conversationType?: 'general' | 'account-analysis' | 'content-analysis' | 'content-generation';
   analysisContext?: AnalysisBinding;
+  writingContext?: WritingContext;
   editBranch?: { sourceSessionId: string; prefixLength: number };
   engine?: 'openclaw' | 'codex';
   id: string;
@@ -211,6 +213,7 @@ function decodeSessions(raw: string): ChatSession[] {
     session.engine = value.engine === 'codex' ? 'codex' : 'openclaw';
     if (['general','account-analysis','content-analysis','content-generation'].includes(String(value.conversationType))) session.conversationType = value.conversationType as ChatSession['conversationType'];
     if (isAnalysisBinding(value.analysisContext) && value.analysisContext.sessionId === id && value.importedFromBackup !== true) session.analysisContext = value.analysisContext;
+    if (isWritingContext(value.writingContext) && value.writingContext.sessionId === id && value.importedFromBackup !== true) session.writingContext = value.writingContext;
     if (record(value.editBranch) && typeof value.editBranch.sourceSessionId === 'string'
       && Number.isInteger(value.editBranch.prefixLength) && Number(value.editBranch.prefixLength) >= 0
       && Number(value.editBranch.prefixLength) <= messages.length) {
@@ -266,7 +269,7 @@ function prune(sessions: ChatSession[]): ChatSession[] {
   const pruned = sessions.filter((s) => {
     // 辅助对话（子会话）是用户显式开的旁支：即使还没有消息也逐个保留（有独立的关闭入口），
     // 否则多开两个空辅助对话会在保存时被静默丢掉。
-    if (s.parentSessionId || parents.has(s.id) || s.analysisContext) return true;
+    if (s.parentSessionId || parents.has(s.id) || s.analysisContext || s.writingContext) return true;
     if (s.archived || s.pinnedAt || s.messages.length > 0 || s.pendingTurnId || (!s.importedFromBackup && (hasChatDraft(s.id) || hasChatQueue(s.id)))) return true;
     if (keptEmpty) return false;
     keptEmpty = true;
