@@ -17,7 +17,7 @@
 
 环境配置保留EASEL_CHAT_PROMPT_BUDGET_TOKENS（默认180000，范围16000–10000000）和EASEL_CHAT_PROMPT_RESERVE_TOKENS（默认16000，范围0–5000000）。新增EASEL_MEMORY_BUDGET_TOKENS（默认4000，范围0–100000），0只关闭本轮可选经验分配。提高配置不会改变模型真实容量；预算小于必要内容加预留时会拒绝。
 
-召回v2保留budgetChars/usedChars，增加estimator、budgetTokens/usedTokens与分别按字符、经验token、最终提示跳过的计数。模型派发路径另有promptAdmission，包含配置预算、预留、含预留的估算、余量与准入；scope=local-assembled-input、nativeContextMeasured=false。HTTP召回预览仅是经验分配，没有完整对话预算。旧v1历史不重写，UI继续显示原字数；新摘要标明“估算”，放在原折叠区内。
+召回v2保留budgetChars/usedChars，增加estimator、budgetTokens/usedTokens与分别按字符、经验token、最终提示跳过的计数。模型派发路径另有promptAdmission，包含配置预算、预留、含预留的估算、余量与准入；scope=local-assembled-input、nativeContextMeasured=false。HTTP召回预览仅是经验分配，没有完整对话预算。关闭读取只停止新增经验召回，已经提交的参考可能仍在本地或原生会话历史中；本批不清除历史，也不能撤回模型已见内容。旧v1历史不重写，UI继续显示原字数；新摘要标明“估算”，放在原折叠区内。
 
 ## 升级与回退
 
@@ -30,3 +30,7 @@ pyproject和前端包同步0.26.0。无需数据库schema迁移，旧使用回�
 实际本机HTTP核对隔离管理员登录、0.25有效/已替代经验仍保留、新v2召回与未知任务不匹配、非流式和流式两入口超额413，以及14个页面入口资源。没有为验收启动模型，所有合成定时计划仍暂停，目标没有active记录。真实浏览器经“更多→画像”进入既有隔离样例，方向键/Enter选择写作并触发预览，原折叠区显示“1条 · 估算 402/4000 token”；实际320/390/1280 CSS像素均无横溢，未添加常驻卡片。最终后端再次重启后重复HTTP核对通过；定时任务菜单进入、暂停状态、模板与摘要网格实际可见，320/390/1280均无横溢。临时视口覆盖已恢复。
 
 本机入口http://127.0.0.1:7891/，管理员gaojitest/gaoji仅适用于.artifacts/acceptance-data隔离环境，版本0.26.0/development、revision=null；不是发行构建SHA或138升级。验收截图和脚本保存在忽略的.artifacts目录，未提交个人数据。无付费模型、供应商或平台发布调用。自动提取/语义去重、跨角色完整调度、全部引擎原生恢复、真实内容业务链和完整历史未完项继续保留。
+
+## Git交付
+
+功能/验证c9db6705a5c28b476e6d09067fc606c46bea42b4已推送starry/codex/context-budget-0.26.0并核对同SHA；main仅双语首页8eb68780015a4f902b290a262341d77630976f98已推送核对，未合并功能。新文档链接HTTP200。此Git回执另作纯文档提交；完整大版本仍进行中，138与安装器未更新。
