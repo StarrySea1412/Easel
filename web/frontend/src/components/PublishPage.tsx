@@ -556,7 +556,7 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
           <div className="publish-draft-actions">
             <button className="btn btn-sm btn-ghost" disabled={empty} onClick={() => addToCalendar(platforms[0] || 'xiaohongshu')}><IconCalendar size={14} />存入今日日历</button>
             <button className="btn btn-sm btn-ghost publish-clear" disabled={empty || adapting || publishing || checking}
-              onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setSelectedMedia([]); setCheckResult(''); setBlocked({}); showToast('已清空内容和素材，发布回执保留'); }}>
+              onClick={() => { setTitle(''); setBody(''); setTags(''); setOverrides({}); setSelectedMedia([]); setLoadedPreparation(''); setCheckResult(''); setBlocked({}); showToast('已清空内容和素材，发布回执保留'); }}>
               <IconTrash size={13} />清空内容
             </button>
           </div>

@@ -76,6 +76,16 @@ test('source version conflict leaves existing editor and previous version untouc
   assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/zhihu').length,0);
 });
 
+test('clearing a loaded editor releases its preparation binding and permits another load',async t=>{
+  const view=await setup(t);await view.click('载入编辑');
+  assert.equal(workspace.readCreationDraft(own).preparationId,item.id);
+  await view.click('清空内容');
+  assert.equal(workspace.readCreationDraft(own).body,'');
+  assert.equal(workspace.readCreationDraft(own).preparationId,undefined);
+  assert.equal(view.button('已载入'),undefined);
+  assert.ok(!view.button('载入编辑').disabled);
+});
+
 test('edits during a draft read are preserved when its response arrives',async t=>{
   const view=await setup(t),gate=deferred();view.h.checked=()=>gate.promise;
   await view.click('载入编辑');
