@@ -56,6 +56,7 @@ export default function TaskWorkspacePage({data,sessions,sync,selectedId,onSelec
   goals.sort((a,b)=>priority[taskBucket(a,data.runs)]-priority[taskBucket(b,data.runs)] || (b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
   const selected = selectedId ? data.goals.find(goal=>goal.id===selectedId) : goals[0];
   return <section className="task-workspace-page" aria-label="任务工作区">
+    <div className="task-workspace-content">
     <header className="task-workspace-header"><h1>任务工作区</h1><div className="task-actions"><button type="button" className="btn btn-sm" onClick={onSchedules}>定时计划</button><button type="button" className="btn btn-primary" onClick={onNew}>新建目标</button></div></header>
     <div className="task-workspace-sync"><span role={sync.error?'alert':'status'}>{sync.loading?'正在读取…':sync.error||`${sync.readAt?new Date(sync.readAt).toLocaleTimeString('zh-CN'):''} 更新`}</span><button type="button" className="btn btn-sm" onClick={onRefresh} disabled={sync.refreshing}>{sync.refreshing?'读取中…':'刷新'}</button></div>
     <div className="task-workspace-layout"><aside className="task-workspace-index" aria-label="任务列表">
@@ -64,6 +65,7 @@ export default function TaskWorkspacePage({data,sessions,sync,selectedId,onSelec
       {!goals.length?<p className="task-workspace-empty-note">{sync.loading?'正在读取…':data.goals.length?'没有匹配任务':'暂无任务'}</p>:<ul>{goals.map(goal=>{const stage=goal.stages?.find(item=>item.status!=='completed');const unconfirmed=data.runs.some(run=>run.goalId===goal.id&&run.state==='unconfirmed');return <li key={goal.id}><button type="button" aria-current={selected?.id===goal.id?'true':undefined} onClick={()=>onSelect(goal.id)}><span className={`task-workspace-list-status ${taskBucket(goal,data.runs)}`}>{unconfirmed?'等待核实':goal.phase==='review'&&!['completed','cancelled'].includes(goal.status)?'等待验收':taskStatus[goal.status]||goal.status}</span><strong>{goal.title}</strong><small>{stage?.title||sessions.find(session=>session.id===goal.sessionId)?.title||'查看目标记录'}</small></button></li>;})}</ul>}
     </aside>
       {selected?<TaskDetail key={selected.id} goal={selected} runs={data.runs.filter(run=>run.goalId===selected.id)} stale={Boolean(sync.error)||sync.loading} onRefresh={onRefresh} onOpenChat={onOpenChat} onOpenActivity={onOpenActivity} onOpenOffice={onOpenOffice}/>:<div className="task-workspace-empty"><h2>{sync.loading?'正在读取…':selectedId?'未找到这条任务':'暂无任务'}</h2>{!sync.loading&&<button type="button" className="btn" onClick={selectedId?()=>onSelect():onNew}>{selectedId?'返回列表':'新建目标'}</button>}</div>}
+    </div>
     </div>
   </section>;
 }
