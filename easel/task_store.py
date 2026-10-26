@@ -264,12 +264,31 @@ class TaskStore:
             goals = [json.loads(r[0]) for r in db.execute('SELECT data FROM goals' + where + ' ORDER BY rowid DESC LIMIT 300', args)]
             runs = [json.loads(r[0]) for r in db.execute('SELECT data FROM runs' + where + ' ORDER BY rowid DESC LIMIT 500', args)]
             plans = [json.loads(r[0]) for r in db.execute('SELECT data FROM plans ORDER BY rowid DESC')]
+            plans = [p for p in plans if not session or p.get('sessionId') == session][:200]
             deleted = self._deleted_sessions(db)
             removed = {row['id'] for row in deleted}
             for g in goals:
                 g['sessionDeleted'] = g['sessionId'] in removed
+            # Count durable trigger records, not the capped 100-row display history.
+            counts = {r['plan']: r for r in db.execute('''
+                SELECT t.plan, COUNT(*) AS triggers, COUNT(t.run) AS launched,
+                       SUM(CASE WHEN g.status='active' THEN 1 ELSE 0 END) AS active
+                FROM (SELECT plan,run FROM slots UNION ALL
+                      SELECT plan,run FROM manual_requests) t
+                LEFT JOIN goals g ON g.id=t.run GROUP BY t.plan
+            ''')}
+            for p in plans:
+                count = counts.get(p['id'])
+                p.update(triggerCount=count['triggers'] if count else 0,
+                         launchedCount=count['launched'] if count else 0,
+                         activeCount=count['active'] if count else 0)
+                last = p.get('lastResult') or next(iter((p.get('history') or [])[-1:]), None)
+                row = db.execute('SELECT data FROM goals WHERE id=?', (last['goalId'],)).fetchone() if last and last.get('goalId') else None
+                latest = json.loads(row[0]) if row else None
+                p['lastGoal'] = ({**{k: latest.get(k) for k in ('id', 'sessionId', 'status', 'phase', 'reason')},
+                                  'sessionDeleted': latest['sessionId'] in removed} if latest else None)
             return {'goals': goals,
-                    'plans': [p for p in plans if not session or p.get('sessionId') == session][:200],
+                    'plans': plans,
                     'runs': runs,
                     'serverTime': self.clock(), 'deletedSessions': deleted,
                     'revision': db.execute('SELECT COALESCE(MAX(seq),0) FROM events').fetchone()[0],

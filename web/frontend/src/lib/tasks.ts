@@ -9,7 +9,8 @@ export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:
 export interface TaskRun { id:string; goalId:string; sessionId:string; turnId:string; state:string; iteration:number; startedAt:number; finishedAt?:number; reason?:string; text?:string; stageId?:string;roleId?:string }
 export interface TaskSchedule { kind:'once'|'interval'|'daily'|'workdays'|'weekly'|'monthly'; timezone:string; at?:number; minutes:number; time:string; weekdays:number[]; day?:number }
 export interface PlanSpec { title:string; sessionId?:string; goal:GoalSpec; schedule:TaskSchedule; missedPolicy:'skip'|'coalesce'; freshnessSeconds:number }
-export interface TaskPlan extends PlanSpec { id:string; enabled:boolean; nextAt:number|null; history?:{at:number; status:string; reason:string; goalId?:string; sessionId?:string; trigger:string}[] }
+export interface PlanTrigger { at:number; status:string; reason:string; goalId?:string; sessionId?:string; trigger:string }
+export interface TaskPlan extends PlanSpec { id:string; enabled:boolean; nextAt:number|null; history?:PlanTrigger[]; lastResult?:PlanTrigger|null; triggerCount?:number; launchedCount?:number; activeCount?:number; lastGoal?:Pick<TaskGoal,'id'|'sessionId'|'status'|'phase'|'reason'|'sessionDeleted'>|null; reason?:string }
 export interface SessionTombstone {id:string;at:number;revision:number}
 export interface TaskSessionState {sessions:ChatSession[];deletedSessions?:SessionTombstone[]}
 export interface TaskSnapshot { goals:TaskGoal[]; runs:TaskRun[]; plans:TaskPlan[]; serverTime:number; revision?:number; deletedSessions?:SessionTombstone[] }

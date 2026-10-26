@@ -56,3 +56,55 @@
 .task-message-label { font-size:11px; color:var(--text-tertiary); border-top:1px solid var(--border); margin:16px 0 0; padding-top:14px }
 @media(max-width:1050px) { .automation-sections { grid-template-columns:1fr }.criterion-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr) }.criterion-row>.btn:last-child { grid-column:2; justify-self:end } }
 @media(max-width:560px) { .automation-page { padding:22px 16px }.automation-header { display:block }.automation-header>.task-actions { margin-top:18px }.automation-header h1 { font-size:23px }.automation-form { padding:18px 14px }.automation-fields { grid-template-columns:1fr; gap:0 }.automation-budget { grid-template-columns:repeat(2,minmax(0,1fr)) }.criterion-row { grid-template-columns:1fr }.criterion-row>.btn:last-child { grid-column:1; justify-self:end }.goal-card,.plan-card { padding:16px }.goal-limits { grid-template-columns:repeat(2,minmax(0,1fr)); row-gap:12px }.chat-goal-slot { padding:8px 12px 0 }.task-card-heading { gap:10px }.task-actions .btn { min-height:34px } }
+
+.automation-page{container:automation/inline-size;padding:0;min-width:0}
+.automation-content{padding:clamp(20px,3.5vw,40px);box-sizing:border-box;min-width:0}
+.automation-header{align-items:center;flex-wrap:wrap;margin-bottom:22px;gap:12px}
+.automation-header h1{font-size:28px;line-height:1.4;margin:0}
+.automation-header>.task-actions{margin:0}
+.automation-toolbar{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.automation-filters{display:flex;gap:4px;flex-wrap:wrap;min-width:0}
+.automation-filters button{display:inline-flex;gap:5px;align-items:center;background:transparent;border:0;border-radius:var(--radius-sm);font:inherit;font-size:12px;padding:7px 9px;color:var(--text-secondary);cursor:pointer}
+.automation-filters button[aria-pressed=true]{background:var(--surface-2);color:var(--text);font-weight:600}
+.automation-filters button span{font-size:10px;color:var(--text-tertiary);font-variant-numeric:tabular-nums}
+.automation-toolbar>input{width:180px;max-width:100%;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit;font-size:12px}
+.automation-service{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:14px 0 20px;font-size:11px;color:var(--text-tertiary);min-width:0}
+.automation-service>details{min-width:0;max-width:680px}.automation-service summary{cursor:pointer;line-height:1.7}.automation-service p{font-size:12px;line-height:1.7;color:var(--text-secondary);overflow-wrap:anywhere}
+.automation-service>span{flex-shrink:0;padding-top:2px;font-variant-numeric:tabular-nums}
+.automation-notice{font-size:12px;color:var(--text-secondary);line-height:1.6;margin:12px 0}
+.automation-plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;min-width:0}
+.automation-plans .automation-empty{grid-column:1/-1;border:0;min-height:0;padding:24px 0;font-size:13px;color:var(--text-secondary)}
+.automation-plans .plan-card{padding:16px;margin:0;min-width:0}
+.plan-heading{display:flex;align-items:flex-start;gap:8px;min-width:0}
+.plan-heading h2{flex:1;min-width:0;font-size:14px;line-height:1.6;font-weight:600;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.plan-state{flex-shrink:0;font-size:10px;line-height:22px;color:var(--text-tertiary)}
+.plan-state.is-active,.plan-timing .is-active{color:var(--green)}.plan-state.is-attention{color:var(--amber)}
+.plan-card .plan-more{position:relative;border:0;padding:0;margin:-4px -5px 0 0;z-index:2;font-size:12px}
+.plan-more>summary{display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;width:30px;height:30px;border-radius:var(--radius-sm);color:var(--text-secondary)}
+.plan-more>summary::-webkit-details-marker{display:none}.plan-more>summary:hover{background:var(--surface-2)}
+.plan-menu{position:absolute;right:0;top:32px;min-width:148px;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:4px;box-shadow:0 6px 20px #0002;z-index:4}
+.plan-menu button{display:block;text-align:left;width:100%;padding:9px;border:0;border-radius:var(--radius-xs);background:transparent;color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.plan-menu button:hover{background:var(--surface-2)}.plan-menu button:disabled{opacity:.45;cursor:default}
+.plan-card .plan-objective{font-size:12px;line-height:1.7;color:var(--text-secondary);margin:10px 0 12px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.plan-timing{display:flex;gap:5px 12px;flex-wrap:wrap;font-size:11px;line-height:1.7;color:var(--text-secondary)}
+.plan-card .plan-next{font-size:10px;color:var(--text-tertiary);margin:4px 0 0;overflow-wrap:anywhere}
+.plan-card .plan-result{font-size:11px;color:var(--text-secondary);line-height:1.6;margin:6px 0 0;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.plan-footer{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text-tertiary)}
+.plan-footer .btn{font-size:11px;padding:4px 9px;min-height:28px}
+.plan-card .plan-records{margin:0;padding:0;border:0;font-size:11px}.plan-records>summary{width:fit-content}.plan-records[open]{flex-basis:100%}
+.plan-history li{font-size:11px;overflow-wrap:anywhere}.plan-history .btn{font-size:11px}
+.automation-templates{margin-top:30px;padding-top:22px;border-top:1px solid var(--border)}
+.automation-templates h2{font-size:12px;font-weight:500;color:var(--text-secondary);margin:0 0 14px}
+.automation-templates>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.automation-templates button{display:grid;gap:6px;text-align:left;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-md);background:transparent;color:var(--text);font:inherit;cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.automation-templates button:hover{background:var(--surface-2)}.automation-templates button:disabled{opacity:.5;cursor:default}
+.automation-templates strong{font-size:13px;font-weight:500}.automation-templates span,.automation-templates small{font-size:11px;line-height:1.6;color:var(--text-tertiary)}
+.automation-form{margin-top:18px;padding:20px;min-width:0}
+.automation-form>.automation-editor{border:0;padding:0;margin:0;min-width:0}
+.automation-editor>label{display:flex;flex-direction:column;gap:8px;font-size:12px;margin:16px 0}
+.automation-advanced{font-size:12px;margin:6px 0 18px}.automation-advanced>summary{cursor:pointer;color:var(--text-secondary);padding:8px 0}
+.automation-form .schedule-preview{padding:0;background:transparent;margin-top:16px;font-size:11px}
+.automation-form .schedule-preview strong{font-weight:500}.schedule-preview ol{display:flex;gap:4px 18px;flex-wrap:wrap;list-style:none;padding:0;margin:6px 0 0;color:var(--text-secondary)}
+.automation-page :focus-visible{outline:2px solid var(--focus-ring);outline-offset:3px}
+@container automation (max-width:760px){.automation-plans{grid-template-columns:minmax(0,1fr)}.automation-fields{grid-template-columns:1fr;gap:0}.criterion-row{grid-template-columns:minmax(0,1fr)}.criterion-row>.btn:last-child{grid-column:1;justify-self:end}.automation-budget{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container automation (max-width:480px){.automation-content{padding:20px 12px}.automation-header{display:flex;align-items:flex-start}.automation-header h1{font-size:24px}.automation-header>.task-actions{margin:0;gap:6px}.automation-toolbar>input{width:100%}.automation-service{flex-wrap:wrap;gap:6px;margin-bottom:16px}.automation-templates>div{grid-template-columns:minmax(0,1fr)}.automation-form{padding:16px 12px}.automation-form .task-card-heading{flex-wrap:wrap}.automation-plans .plan-card{padding:14px}.automation-filters button{padding:6px 8px}.automation-page .btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}.plan-heading{flex-wrap:wrap}.plan-heading h2{flex-basis:60%}}
