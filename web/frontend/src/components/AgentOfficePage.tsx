@@ -107,13 +107,18 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
   const detailElement = useRef<HTMLElement>(null);
   const panelElements = useRef<Partial<Record<OfficePanel, HTMLDivElement | null>>>({});
   const panelId = useId();
+  const availableSessions = useMemo(() => sessions.filter((session) => !session.importedFromBackup && (!session.parentSessionId||session.taskWorker)), [sessions]);
+  const sessionId = sessionChoice
+    ? availableSessions.find((session) => session.id === sessionChoice)?.id ?? null
+    : availableSessions.find((session) => session.id === activeSessionId)?.id ?? availableSessions[0]?.id ?? null;
   const [panelChoice, setPanelChoice] = useState<OfficePanel>('details');
-  const panel = panelChoice === 'compose' && (mode !== 'live' || !onStartTask) ? 'details' : panelChoice;
+  const canCompose=Boolean(onStartTask&&!availableSessions.find(session=>session.id===sessionId)?.taskWorker);
+  const panel = panelChoice === 'compose' && (mode !== 'live' || !canCompose) ? 'details' : panelChoice;
   const panels: { id: OfficePanel; label: string }[] = [
     { id: 'details', label: '任务与成员' },
     { id: 'workflow', label: '协作进展' },
     { id: 'outputs', label: '产出' },
-    ...(mode === 'live' && onStartTask ? [{ id: 'compose' as const, label: '发起任务' }] : []),
+    ...(mode === 'live' && canCompose ? [{ id: 'compose' as const, label: '发起任务' }] : []),
   ];
   const pendingPanelFocus = useRef<OfficePanel | null>(null);
   const [panelNavigation, setPanelNavigation] = useState(0);
@@ -133,10 +138,6 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
   const appearances = useEmployeeAppearances();
   const assignments = useEmployeeAssignments();
   const elapsedRef = useRef(0);
-  const availableSessions = useMemo(() => sessions.filter((session) => !session.importedFromBackup && !session.parentSessionId), [sessions]);
-  const sessionId = sessionChoice
-    ? availableSessions.find((session) => session.id === sessionChoice)?.id ?? null
-    : availableSessions.find((session) => session.id === activeSessionId)?.id ?? availableSessions[0]?.id ?? null;
   const live = useAgentOffice(mode === 'live' && !showStudy && !showProviders ? sessionId : null, mode === 'live' && sessionId !== null && !showStudy && !showProviders);
   const rawAgents = useMemo(() => mode === 'demo'
     ? createTeamDemoOfficeAgents(elapsed, demoTeamSize)
@@ -468,8 +469,8 @@ export default function AgentOfficePage({ initialSessionId, demoEnabled = true, 
           <div className="office-detail-panel" id={`${panelId}-panel-outputs`} role="tabpanel" aria-labelledby={`${panelId}-tab-outputs`} hidden={panel !== 'outputs'} tabIndex={-1} ref={element => { panelElements.current.outputs = element; }}>
             <div className="office-output-anchor" ref={outputElement} tabIndex={-1} role="region" aria-label="工作区产出与文件位置"><OfficeOutputMonitor mode={mode} onOpenOutputs={onOpenOutputs} /></div>
           </div>
-          {mode === 'live' && onStartTask && <div className="office-detail-panel" id={`${panelId}-panel-compose`} role="tabpanel" aria-labelledby={`${panelId}-tab-compose`} hidden={panel !== 'compose'} tabIndex={-1} ref={element => { panelElements.current.compose = element; }}>
-        {mode === 'live' && onStartTask && <OfficeTaskComposer session={availableSessions.find(session => session.id === sessionId) ?? null}
+          {mode === 'live' && canCompose && onStartTask && <div className="office-detail-panel" id={`${panelId}-panel-compose`} role="tabpanel" aria-labelledby={`${panelId}-tab-compose`} hidden={panel !== 'compose'} tabIndex={-1} ref={element => { panelElements.current.compose = element; }}>
+        {mode === 'live' && canCompose && onStartTask && <OfficeTaskComposer session={availableSessions.find(session => session.id === sessionId) ?? null}
           stream={sessionId ? streams[sessionId] : undefined} stopping={sessionId ? stoppingSessions?.[sessionId] : false} stopError={sessionId ? stopErrors?.[sessionId] : undefined}
           onSubmit={request => {
             const startedSessionId = onStartTask(request);

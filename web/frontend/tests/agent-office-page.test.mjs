@@ -134,6 +134,16 @@ test('a run-record link enters live mode for the exact session and preserves its
   assert.deepEqual(opened, [['two', 'turn-two']]);
 });
 
+test('an internal task worker can be inspected without exposing a new task composer',async t=>{
+  const child=session('stage-worker',{parentSessionId:'one',taskWorker:true});
+  const view=await fixture(t,{initialSessionId:child.id,sessions:[session('one'),child],onStartTask:()=>assert.fail('must not create a new worker task')},
+    {[child.id]:snapshot([agent('worker')],{turnId:'stage-turn'})},false);
+  assert.ok(view.harness.hookCalls.every(call=>call.enabled&&call.sessionId===child.id));
+  assert.equal(view.harness.composer,null);
+  assert.equal(view.button('发起任务'),undefined);
+  await view.select('one');assert.ok(view.harness.composer,'parent conversation retains normal task entry');
+});
+
 test('a deleted run-record target stays empty without showing a different session', async t => {
   const view = await fixture(t, { initialSessionId: 'deleted', sessions: [session('one')] }, { one: snapshot([agent('must-not-appear')]) });
   assert.ok(view.harness.hookCalls.every(call => !call.enabled && call.sessionId === null));

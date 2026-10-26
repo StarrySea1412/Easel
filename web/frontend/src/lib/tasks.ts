@@ -2,12 +2,12 @@ import type { ChatSession } from './store';
 
 export interface TaskCriterion { type:'file'|'text'|'review'; label:string; value:string }
 export interface TaskCheck extends TaskCriterion { state:'pending'|'passed'|'failed'|'error'; detail?:string; evidence?:string }
-export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|null }
-export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string; review?:{decision:'pass'|'revise'|'blocked';summary:string;findings:string[]} }
+export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|'parallel-reviewed-delivery'|null }
+export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; dependsOn?:string[]; steps?:GoalStep[]; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string; review?:{decision:'pass'|'revise'|'blocked';summary:string;findings:string[]} }
 export interface GoalStep { id:string; title:string; status:'pending'|'in_progress'|'completed'|'blocked'; detail?:string }
 export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number; sessionDeleted?:boolean; revision?:number; lastRework?:{id:string;title:string;reason:string;fromRevision:number;toRevision:number} }
 export interface StageReworkReceipt { id:string; goalId:string; fromRevision:number; toRevision:number; at:number; request:{stageId:string;revision:number;reason:string}; stages:TaskStage[];source?:'human'|'reviewer' }
-export interface TaskRun { id:string; goalId:string; sessionId:string; turnId:string; state:string; iteration:number; startedAt:number; finishedAt?:number; reason?:string; text?:string; stageId?:string;roleId?:string }
+export interface TaskRun { id:string; goalId:string; sessionId:string; turnId:string; state:string; iteration:number; startedAt:number; finishedAt?:number; reason?:string; text?:string; stageId?:string;roleId?:string;parentSessionId?:string;maxRunSeconds?:number }
 export interface TaskSchedule { kind:'once'|'interval'|'daily'|'workdays'|'weekly'|'monthly'; timezone:string; at?:number; minutes:number; time:string; weekdays:number[]; day?:number }
 export interface PlanSpec { title:string; sessionId?:string; goal:GoalSpec; schedule:TaskSchedule; missedPolicy:'skip'|'coalesce'; freshnessSeconds:number }
 export interface PlanTrigger { at:number; status:string; reason:string; goalId?:string; sessionId?:string; trigger:string }
@@ -33,6 +33,35 @@ export async function taskRequest<T>(path='', body?:unknown, method='POST', sign
   return result as T;
 }
 export const taskStatus:Record<string,string>={draft:'待启动',active:'进行中',paused:'已暂停',blocked:'需要处理',completed:'已完成',cancelled:'已取消',running:'运行中',unconfirmed:'等待核实',failed:'失败',stopped:'已停止',queued:'排队中',skipped:'已跳过'};
+
+/** Only inspection pages receive these contexts; sidebar and saved chats do not. */
+export function taskInspectionSessions(sessions:ChatSession[], runs:TaskRun[], goals:TaskGoal[]):ChatSession[] {
+  const workers=new Map<string,ChatSession>();
+  for(const run of runs.slice().sort((a,b)=>a.iteration-b.iteration)) {
+    const goal=goals.find(item=>item.id===run.goalId);
+    if(!goal||goal.workflow!=='parallel-reviewed-delivery'||run.parentSessionId!==goal.sessionId
+      ||run.sessionId===goal.sessionId||sessions.some(item=>item.id===run.sessionId))continue;
+    let worker=workers.get(run.sessionId);
+    if(!worker) {
+      worker={id:run.sessionId,parentSessionId:goal.sessionId,taskWorker:true,created:run.startedAt*1000,
+        title:`${goal.title} · ${goal.stages?.find(stage=>stage.id===run.stageId)?.title||run.stageId||'工作阶段'}`,messages:[]};
+      workers.set(run.sessionId,worker);
+    }
+    if(run.text)worker.messages.push({role:'assistant',content:run.text,turnId:run.turnId,taskRunId:run.id});
+  }
+  return workers.size?[...sessions,...workers.values()]:sessions;
+}
+
+export function stageReworkStages(stages:TaskStage[], stageId:string):TaskStage[] {
+  const index=stages.findIndex(stage=>stage.id===stageId);
+  if(index<0)return [];
+  if(stages[index].dependsOn===undefined)return stages.slice(index);
+  const affected=new Set([stageId]);
+  for(let pass=0;pass<stages.length;pass++)for(const stage of stages) {
+    if(stage.dependsOn?.some(id=>affected.has(id)))affected.add(stage.id);
+  }
+  return stages.filter(stage=>affected.has(stage.id));
+}
 export function goalElapsed(goal:TaskGoal, runs:TaskRun[], now=Date.now()/1000):number {
   return goal.activeSeconds + runs.filter(r=>r.goalId===goal.id&&r.state==='running'&&!r.finishedAt).reduce((sum,r)=>sum+Math.max(0,now-r.startedAt),0);
 }

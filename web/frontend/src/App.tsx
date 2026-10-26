@@ -9,7 +9,7 @@ import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
 import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib/sideChat';
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
-import { taskRequest, mergeTaskSessions, type TaskSessionState, type SessionTombstone } from './lib/tasks';
+import { taskRequest, mergeTaskSessions, taskInspectionSessions, type TaskSessionState, type SessionTombstone } from './lib/tasks';
 import { useTaskSnapshot } from './hooks/useTaskSnapshot';
 import { taskWorkspaceHash, parseTaskWorkspaceHash, isScheduleWorkspaceHash } from './lib/taskWorkspace';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
@@ -26,7 +26,7 @@ import { useDemoDataPreference } from './hooks/useDemoDataPreference';
 import { usePublishReceipts } from './hooks/usePublishReceipts';
 import PublishReceiptCenter from './components/PublishReceiptCenter';
 import { parsePublishReceiptHash, publishReceiptHash } from './lib/publishReceiptNavigation';
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from 'react';
 import Sidebar from './components/Sidebar';
 import CreationWorkspaceHost from './components/CreationWorkspaceHost';
 import CreationWorkspaceSlot from './components/CreationWorkspaceSlot';
@@ -362,6 +362,7 @@ export default function App() {
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   const {snapshot:tasks,sessions:taskSessions,sync:taskSync,refresh:refreshTasks}=useTaskSnapshot();
+  const inspectionSessions=useMemo(()=>taskInspectionSessions(sessions,tasks.runs,tasks.goals),[sessions,tasks.runs,tasks.goals]);
   const synchronizedDeleted=useRef(new Set<string>());
   useEffect(()=>{
     const deleted=tasks.deletedSessions||[];
@@ -1639,9 +1640,9 @@ export default function App() {
       case 'analysis':
         return <ContentAnalysisPage onAnalysisChat={handleAnalysisChat} demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
-        return <ActivityPage onOpenChat={handleSessionSelect} onOpenSchedules={()=>setCurrentPage('automation')} onOpenPublish={()=>setCurrentPage('publish')} key={activityTarget?.key||"default"} sessions={sessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
+        return <ActivityPage onOpenChat={id=>void openTaskConversation(inspectionSessions.find(item=>item.id===id&&item.taskWorker)?.parentSessionId||id)} onOpenSchedules={()=>setCurrentPage('automation')} onOpenPublish={()=>setCurrentPage('publish')} key={activityTarget?.key||"default"} sessions={inspectionSessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
       case 'agent-office':
-        return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={sessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={handleSessionSelect} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
+        return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={inspectionSessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={id=>void openTaskConversation(inspectionSessions.find(item=>item.id===id&&item.taskWorker)?.parentSessionId||id)} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage key={selectedPersona} persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} onSource={id=>{const source=sessionsRef.current.find(item=>item.id===id);if(!source||source.importedFromBackup||outputSessionDeleted(id)){showToast('原对话已删除或不在当前记录中','info');return;}handleSessionSelect(id);}} />;
       case 'settings':

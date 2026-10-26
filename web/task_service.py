@@ -16,6 +16,7 @@ from typing import Literal
 from easel.task_store import TaskStore, TaskConflict, SAFE_ID
 from easel.task_rules import GoalSpec, Criterion, Schedule, next_time, latest_time, upcoming, check_goal
 from easel.image_jobs import ImageJobs
+from easel.task_graph import parallel
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class TaskService:
         self.owner = uuid.uuid4().hex
         self.loop = None
         self.work = set()
+        self.parallel_goal = None
         self.closing = False
         self.recovery_checks = {}
 
@@ -178,18 +180,31 @@ class TaskService:
                     else:
                         await asyncio.to_thread(reconcile_orphan, self.web, r['sessionId'], r['turnId'])
                     await self.settle(r)
-        if self.work:
+        if self.work and self.parallel_goal is None:
             return
-        pair = await asyncio.to_thread(store.claim, self.owner)
-        if pair:
+        preferred = self.parallel_goal if self.work else None
+        while len(self.work) < 2:
+            pair = await asyncio.to_thread(store.claim, self.owner, preferred) if preferred else await asyncio.to_thread(store.claim, self.owner)
+            if not pair:
+                break
+            g, r = pair
+            self.parallel_goal = g['id'] if parallel(g) else None
             task = asyncio.create_task(self.execute(*pair))
             self.work.add(task)
-            task.add_done_callback(self.work.discard)
+            task.add_done_callback(self._finished)
+            if not parallel(g):
+                break
+            preferred = g['id']
+
+    def _finished(self, task):
+        self.work.discard(task)
+        if not self.work:
+            self.parallel_goal = None
 
     async def execute(self, g, r):
         store, web = self.store, self.web
         try:
-            await asyncio.to_thread(self.admit, g, g['sessionId'])
+            await asyncio.to_thread(self.admit, g, r['sessionId'])
             if g.get('configHash') and g['configHash'] != self.config_hash():
                 raise TaskConflict('模型配置已变化，请停止并重新建立目标确认新配置。')
             current = await asyncio.to_thread(store.get, 'goals', g['id'])
@@ -213,10 +228,11 @@ class TaskService:
             receipts = await asyncio.to_thread(store.rework_receipts, g['id']) if r.get('reworkId') else []
             rework = next((item for item in receipts if item['id'] == r.get('reworkId')), None)
             prompt += stage_prompt(g, r, rework)
-            req = web.ChatRequest(message=prompt, sessionId=g['sessionId'], turnId=r['turnId'],
+            req = web.ChatRequest(message=prompt, sessionId=r['sessionId'], turnId=r['turnId'],
                                   modelRef=g['modelRef'], thinkingLevel='low', roleId=r.get('roleId'))
             await web.start_chat_run(req, observe=False)
-            deadline = time.monotonic() + max(0, g['maxSeconds'] - g['activeSeconds'])
+            allowance = r.get('maxRunSeconds', g['maxSeconds'] - g['activeSeconds'])
+            deadline = time.monotonic() + max(0, allowance - (time.time() - r['startedAt']))
             stopping = False
             while not self.closing:
                 if not await asyncio.to_thread(store.heartbeat, r['id'], self.owner):
@@ -227,7 +243,7 @@ class TaskService:
                     stopping = True
                     if expired:
                         await asyncio.to_thread(store.conclude_budget, g['id'], '已达到目标时长上限，正在停止后台运行。')
-                    await web.api_chat_stop(web.StopRequest(sessionId=g['sessionId'], turnId=r['turnId']))
+                    await web.api_chat_stop(web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
                 if await self.settle(r):
                     return
                 if stopping and expired:
@@ -293,11 +309,11 @@ class TaskService:
             except TaskConflict as exc:
                 conflict(exc)
             await self.cleanup_deleted_sessions()
-            for turn in await asyncio.to_thread(self.session_work, session):
+            for actual, turn in await asyncio.to_thread(self.session_work_items, session):
                 try:
-                    await asyncio.wait_for(self.web.api_chat_stop(self.web.StopRequest(sessionId=session, turnId=turn)), timeout=5)
+                    await asyncio.wait_for(self.web.api_chat_stop(self.web.StopRequest(sessionId=actual, turnId=turn)), timeout=5)
                 except Exception:
-                    log.warning('对话删除已保存，后台停止仍待确认：%s', session)
+                    log.warning('对话删除已保存，后台停止仍待确认：%s', actual)
             return {'deleted': True, 'tombstone': marker,
                     'stopPending': bool(await asyncio.to_thread(self.session_work, session))}
 
@@ -308,7 +324,7 @@ class TaskService:
         @router.get('/workflows')
         def workflows():
             from easel.task_stages import WORKFLOWS
-            return {'workflows': WORKFLOWS, 'execution': 'sequential', 'externalPublishing': False}
+            return {'workflows': WORKFLOWS, 'execution': 'workflow-dependent', 'maxParallel': 2, 'externalPublishing': False}
 
         @router.post('/preview')
         def preview(req: Schedule):
@@ -426,12 +442,18 @@ class TaskService:
         return router
 
     def session_work(self, session):
-        turns = set(self.store.session_work(session))
-        turns.update(ImageJobs(self.web.OUTPUTS_DIR).pending_turns(session))
+        return sorted({turn for _, turn in self.session_work_items(session)})
+
+    def session_work_items(self, session):
+        items = set()
         codex = getattr(self.web, '_codex_service', None)
-        if codex and codex.owns(session):
-            turns.update(codex.session_work(session))
-        return sorted(turns)
+        for related in self.store.related_sessions(session):
+            turns = set(self.store.session_work(related, include_children=False))
+            turns.update(ImageJobs(self.web.OUTPUTS_DIR).pending_turns(related))
+            if codex and codex.owns(related):
+                turns.update(codex.session_work(related))
+            items.update((related, turn) for turn in turns)
+        return sorted(items)
 
     async def cleanup_deleted_sessions(self):
         """Retry the durable notification cleanup outbox after interruptions."""

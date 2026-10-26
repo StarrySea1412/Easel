@@ -49,19 +49,19 @@ class GoalSpec(BaseModel):
     maxSeconds: int = Field(default=1200, ge=60, le=7200, strict=True)
     maxTools: int = Field(default=40, ge=1, le=200, strict=True)
     maxImages: int = Field(default=0, ge=0, le=16, strict=True)
-    workflow: Literal['research-delivery', 'reviewed-delivery'] | None = None
+    workflow: Literal['research-delivery', 'reviewed-delivery', 'parallel-reviewed-delivery'] | None = None
     stages: list[GoalStage] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode='after')
     def stage_contract(self):
         if self.workflow and self.stages:
             raise ValueError('选择内置协作流程或自定义阶段之一')
-        count = 4 if self.workflow else len(self.stages)
+        count = 5 if self.workflow == 'parallel-reviewed-delivery' else 4 if self.workflow else len(self.stages)
         if count > self.maxIterations:
             raise ValueError('执行轮次上限不能少于协作阶段数')
         if len({s.id for s in self.stages}) != len(self.stages):
             raise ValueError('阶段ID不能重复')
-        if self.workflow == 'reviewed-delivery' and not any(c.type == 'review' for c in self.criteria):
+        if self.workflow in ('reviewed-delivery', 'parallel-reviewed-delivery') and not any(c.type == 'review' for c in self.criteria):
             raise ValueError('审查协作必须保留用户最终质量验收项')
         return self
 

@@ -1,5 +1,5 @@
 import {useRef,useState} from 'react';
-import {taskRequest, type TaskGoal, type TaskRun, type StageReworkReceipt} from '../lib/tasks';
+import {taskRequest, stageReworkStages, type TaskGoal, type TaskRun, type StageReworkReceipt} from '../lib/tasks';
 import TaskStageBoard from './TaskStageBoard';
 
 export default function TaskStageRecovery({goal,runs,disabled,onChanged}:{goal:TaskGoal;runs:TaskRun[];disabled:boolean;onChanged:()=>void}) {
@@ -7,7 +7,7 @@ export default function TaskStageRecovery({goal,runs,disabled,onChanged}:{goal:T
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [receipts,setReceipts]=useState<StageReworkReceipt[]|null>(null),[historyBusy,setHistoryBusy]=useState(false);
   const returnFocus=useRef<HTMLElement|null>(null);
-  const stages=goal.stages||[], index=stages.findIndex(stage=>stage.id===draft?.stageId);
+  const stages=goal.stages||[];
   const live=runs.some(run=>['queued','running','unconfirmed'].includes(run.state));
   const unavailable=disabled||busy||live||goal.status==='active'||!goal.revision;
   const terminal=goal.sessionDeleted||['completed','cancelled'].includes(goal.status);
@@ -36,7 +36,7 @@ export default function TaskStageRecovery({goal,runs,disabled,onChanged}:{goal:T
   return <>
     <TaskStageBoard stages={stages} onRework={terminal?undefined:select} disabled={unavailable}/>
     {draft&&!terminal&&<form className="task-stage-rework" aria-label="确认阶段重做" onSubmit={event=>{event.preventDefault();void confirm();}}>
-      <p>{stages.slice(index).map(stage=>stage.title).join(' → ')} 将重新执行。旧回执保留，累计预算不变。</p>
+      <p>{stageReworkStages(stages,draft.stageId).map(stage=>stage.title).join(' → ')} 将重新执行。旧回执保留，累计预算不变。</p>
       <label>重做原因<textarea autoFocus value={draft.reason} maxLength={1200} rows={2} disabled={busy} onChange={event=>setDraft({...draft,reason:event.target.value,requestId:crypto.randomUUID()})}/></label>
       {versionChanged&&<p role="status">目标版本已变化，请取消后重新选择阶段。</p>}
       <div className="task-actions"><button type="submit" className="btn btn-sm btn-primary" disabled={unavailable||versionChanged||draft.reason.trim().length<3}>{busy?'保存中…':'确认重做'}</button><button type="button" className="btn btn-sm" disabled={busy} onClick={()=>{setDraft(null);setError('');returnFocus.current?.focus();}}>取消</button></div>

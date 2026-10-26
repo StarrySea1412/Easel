@@ -18,6 +18,7 @@
 - [用户需求与交付清单](user-requirements-2026-10-08.md)（历史与追加要求的单一事实来源）
 - [统一功能验收清单](functional-checklist-2026-10-21.md)
 - [二次开发计划](secondary-development-plan.md) / [二次开发进度](secondary-development-progress.md)
+- [0.30.0 依赖图与并行角色](parallel-workflow-0.30.0.md)
 - [0.29.0 结构化审查与限次返工](review-loop-0.29.0.md)
 - [138 0.14.2 发布回执](release-138-0.14.2-2026-10-22.md)
 

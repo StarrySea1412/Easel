@@ -45,6 +45,24 @@ function Composer(props){
   return createElement('div',null,createElement(Options,{state,onExit:()=>{}}),createElement(ChatGoalNotice,{state,blocked:false}),
     createElement('button',{'data-start':true,disabled:!state.canSubmit,onClick:()=>void state.save()},'开始'));
 }
+
+test('parallel choice keeps compact goal controls and sends the separate workflow with shared limits',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host),requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));
+    requests.push(JSON.parse(options.body));return new Response(JSON.stringify({id:'parallel'}));
+  });
+  await act(async()=>root.render(createElement(Composer,{sessionId:'parent',engine:'openclaw',modelRef:'fixture/model',editor:{seed:'隔离合成并行目标'},blocked:false})));
+  await act(async()=>host.querySelector('[aria-label="目标推进方式"]').click());
+  await act(async()=>[...document.querySelectorAll('[role=option]')].find(item=>item.textContent==='并行协作').click());
+  assert.match(host.querySelector('[aria-label="目标推进方式"]').title,/并行协作/);
+  assert.equal(host.querySelector('[data-start]').disabled,false,host.textContent);
+  await act(async()=>host.querySelector('[data-start]').click());
+  assert.equal(requests[0].goal.workflow,'parallel-reviewed-delivery');
+  assert.equal(requests[0].goal.maxSeconds,1200);assert.equal(requests[0].goal.maxTools,40);
+  assert.equal(requests[0].goal.maxIterations,8);assert.equal(requests[0].goal.criteria[0].type,'review');
+  await act(async()=>root.unmount());host.remove();
+});
 test('chat sidebar shows a flat stage summary and sends evidence review to the full workspace',async()=>{
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let opened=0;
   const goal={id:'g',sessionId:'s',title:'协作目标',objective:'完成研究和制作',status:'paused',phase:'idle',stages:[stage],steps:[],checks:[],criteria:[],iterations:1,maxIterations:8,activeSeconds:0,maxSeconds:1200,maxTools:40,maxImages:0,toolsUsed:0,imagesUsed:0,reason:'已暂停'};

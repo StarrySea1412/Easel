@@ -7,6 +7,8 @@ import sqlite3
 import time
 import uuid
 
+from easel.task_graph import parallel, ready_stages, affected_stages, ancestors, worker_session
+
 
 SAFE_ID = re.compile(r'[A-Za-z0-9_.-]{1,120}\Z')
 
@@ -92,7 +94,8 @@ class TaskStore:
 
     @staticmethod
     def _require_session(db, session):
-        if session and db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (session,)).fetchone():
+        if session and (db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (session,)).fetchone() or db.execute(
+                'SELECT 1 FROM runs r JOIN goals g ON r.goal=g.id JOIN deleted_sessions d ON g.session=d.id WHERE r.session=?', (session,)).fetchone()):
             raise TaskConflict('原对话已删除，请新建对话。')
 
     def require_session(self, session):
@@ -120,7 +123,7 @@ class TaskStore:
                     g.update(status='cancelled', reason='原对话已删除', cancelRequested=True,
                              stopEpoch=g['stopEpoch'] + 1)
                     self._goal(db, g)
-            for row in db.execute("SELECT data FROM runs WHERE session=? AND state='queued'", (session,)).fetchall():
+            for row in db.execute("SELECT data FROM runs WHERE (session=? OR goal IN (SELECT id FROM goals WHERE session=?)) AND state='queued'", (session, session)).fetchall():
                 r = json.loads(row[0]); r.update(state='stopped', finishedAt=at, reason='原对话已删除')
                 db.execute("UPDATE runs SET state='stopped',data=? WHERE id=?", (json.dumps(r), r['id']))
             for row in db.execute('SELECT data FROM plans').fetchall():
@@ -176,7 +179,7 @@ class TaskStore:
     def revise_goal(self, key, objective, criteria):
         with self.db() as db:
             g = self._get(db, 'goals', key)
-            if g.get('workflow') == 'reviewed-delivery' and not any(c['type'] == 'review' for c in criteria):
+            if g.get('workflow') in ('reviewed-delivery', 'parallel-reviewed-delivery') and not any(c['type'] == 'review' for c in criteria):
                 raise TaskConflict('审查协作必须保留用户最终质量验收项。')
             if g['status'] in ('active', 'completed', 'cancelled') or db.execute(
                     "SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed','queued')", (key,)).fetchone():
@@ -222,27 +225,32 @@ class TaskStore:
                 raise TaskConflict('目标版本已变化，请刷新并重新确认重做范围。')
             if g['status'] in ('active', 'completed', 'cancelled'):
                 raise TaskConflict('请先暂停并等待结算；终态目标请新建目标。')
-            if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed','queued')", (g['sessionId'],)).fetchone() or db.execute(
+            if db.execute("SELECT 1 FROM runs WHERE (session=? OR goal=?) AND state IN ('running','unconfirmed','queued')", (g['sessionId'], key)).fetchone() or db.execute(
                     'SELECT 1 FROM chat_leases WHERE session=?', (g['sessionId'],)).fetchone():
                 raise TaskConflict('该会话仍有后台运行尚未结算，不能重做阶段。')
-            if image_db.execute("SELECT 1 FROM jobs WHERE scope>=? AND scope<? AND status IN ('queued','running','unconfirmed') LIMIT 1",
-                                (g['sessionId'] + ':', g['sessionId'] + ';')).fetchone():
-                raise TaskConflict('该会话仍有生图尚未结算，不能重做阶段。')
+            related = {g['sessionId']} | {row[0] for row in db.execute('SELECT DISTINCT session FROM runs WHERE goal=?', (key,))}
+            for session in related:
+                if image_db.execute("SELECT 1 FROM jobs WHERE scope>=? AND scope<? AND status IN ('queued','running','unconfirmed') LIMIT 1",
+                                    (session + ':', session + ';')).fetchone():
+                    raise TaskConflict('该会话仍有生图尚未结算，不能重做阶段。')
             stages = g.get('stages', [])
             index = next((i for i, s in enumerate(stages) if s['id'] == stage_id), None)
             if index is None:
                 raise TaskConflict('协作阶段不存在。')
-            if any(s['status'] != 'completed' for s in stages[:index]):
+            retained = [s for s in stages if s not in affected_stages(g, stage_id)] if parallel(g) else stages[:index]
+            required = ancestors(g, stage_id) if parallel(g) else {s['id'] for s in stages[:index]}
+            if any(s['status'] != 'completed' for s in stages if s['id'] in required):
                 raise TaskConflict('起点前仍有未完成阶段，请从更早的阶段重做。')
-            if all(s['status'] == 'pending' for s in stages[index:]):
+            affected = affected_stages(g, stage_id)
+            if all(s['status'] == 'pending' for s in affected):
                 raise TaskConflict('所选阶段及后续尚未执行，无需重做。')
-            if g['maxIterations'] - g['iterations'] < len(stages) - index:
+            if g['maxIterations'] - g['iterations'] < len(affected):
                 raise TaskConflict('剩余轮次不足以重做所选阶段及后续；累计预算保留，请新建目标。')
             if g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
                 raise TaskConflict('已达到累计执行预算，不能通过重做重置；请新建目标。')
             from easel.task_stages import validate_handoffs
             try:
-                validate_handoffs(self.outputs, {'stages': stages[:index]})
+                validate_handoffs(self.outputs, {**g, 'stages': retained})
             except ValueError as exc:
                 raise TaskConflict(str(exc)) from None
             receipt = self._archive_stage_rework(db, g, index, request_id, reason)
@@ -253,17 +261,19 @@ class TaskStore:
         """Caller has already established settled resources and retained inputs."""
         stages, revision = g['stages'], g['revision']
         stage_id = stages[index]['id']
+        affected = affected_stages(g, stage_id)
+        affected_ids = {s['id'] for s in affected}
         receipt = {'id': request_id, 'goalId': g['id'], 'source': 'reviewer' if automatic else 'human',
                    'request': {'stageId': stage_id, 'revision': revision, 'reason': reason},
                    'fromRevision': revision, 'toRevision': revision + 1, 'at': self.clock(),
-                   'stages': stages[index:], 'checks': g.get('checks', []), 'steps': g.get('steps', []),
+                   'stages': affected, 'checks': g.get('checks', []), 'steps': g.get('steps', []),
                    'reviewedTurnId': g.get('reviewedTurnId'), 'currentTurnId': g.get('currentTurnId')}
         db.execute('INSERT INTO stage_reworks VALUES(?,?,?)', (g['id'], request_id, json.dumps(receipt, ensure_ascii=False)))
-        g['stages'] = stages[:index] + [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts', 'reviewGate') if k in s},
-                                       'status': 'pending', 'checks': []} for s in stages[index:]]
+        g['stages'] = [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts', 'reviewGate', 'dependsOn') if k in s},
+                       'status': 'pending', 'checks': []} if s['id'] in affected_ids else s for s in stages]
         summary = {k: receipt[k] for k in ('id', 'source', 'fromRevision', 'toRevision', 'at')}
         summary.update(stageId=stage_id, title=stages[index]['title'], reason=reason,
-                       affected=[{'id': s['id'], 'title': s['title']} for s in stages[index:]])
+                       affected=[{'id': s['id'], 'title': s['title']} for s in affected])
         g.update(status='active' if automatic else 'paused', phase='queued' if automatic else 'idle',
                  revision=revision + 1, stopEpoch=g['stopEpoch'] + 1,
                  currentStageId=stage_id, currentTurnId=None, reviewedTurnId=None, checks=[], steps=[],
@@ -281,7 +291,7 @@ class TaskStore:
         reason = ''
         if g.get('autoReworksUsed', 0) >= stage['reviewGate']['maxAutoReworks']:
             reason = '已用完自动返工次数，请检查审查意见后人工处理。'
-        elif g['maxIterations'] - g['iterations'] < len(g['stages']) - index or g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
+        elif g['maxIterations'] - g['iterations'] < len(affected_stages(g, target)) or g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
             reason = '剩余累计预算不足以完成返工和后续阶段，请保留记录并新建目标。'
         if reason:
             stage['status'] = 'blocked'
@@ -312,9 +322,15 @@ class TaskStore:
                 raise TaskConflict('步骤更新没有匹配当前运行的工具准入记录。')
             if g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
                 raise TaskConflict('目标已停止或修改，拒绝晚到的步骤更新。')
-            g.update(steps=progress, progressUpdatedAt=self.clock(), progressSource='agent')
+            if parallel(g):
+                r['steps'] = progress
+                db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r, ensure_ascii=False), r['id']))
+                next(s for s in g['stages'] if s['id'] == r['stageId'])['steps'] = progress
+            else:
+                g['steps'] = progress
+            g.update(progressUpdatedAt=self.clock(), progressSource='agent')
             self._goal(db, g)
-            self._event(db, session, 'goal_progress', {'goalId':g['id'], 'runId':r['id'], 'steps':progress})
+            self._event(db, g['sessionId'], 'goal_progress', {'goalId':g['id'], 'runId':r['id'], 'steps':progress})
             return {'ok':True, 'goalId':g['id'], 'completed':sum(s['status']=='completed' for s in progress),
                     'total':len(progress), 'qualityApproved':False}
 
@@ -371,7 +387,8 @@ class TaskStore:
         with self.db() as db:
             where, args = (' WHERE session=?', (session,)) if session else ('', ())
             goals = [json.loads(r[0]) for r in db.execute('SELECT data FROM goals' + where + ' ORDER BY rowid DESC LIMIT 300', args)]
-            runs = [json.loads(r[0]) for r in db.execute('SELECT data FROM runs' + where + ' ORDER BY rowid DESC LIMIT 500', args)]
+            run_where, run_args = (' WHERE session=? OR goal IN (SELECT id FROM goals WHERE session=?)', (session, session)) if session else ('', ())
+            runs = [json.loads(r[0]) for r in db.execute('SELECT data FROM runs' + run_where + ' ORDER BY rowid DESC LIMIT 500', run_args)]
             plans = [json.loads(r[0]) for r in db.execute('SELECT data FROM plans ORDER BY rowid DESC')]
             plans = [p for p in plans if not session or p.get('sessionId') == session][:200]
             deleted = self._deleted_sessions(db)
@@ -421,11 +438,16 @@ class TaskStore:
                 s['messages'] = [json.loads(r[0]) for r in db.execute('SELECT data FROM messages WHERE session=? ORDER BY seq', (s['id'],))]
             return {'sessions': rows, 'deletedSessions': self._deleted_sessions(db)}
 
-    def session_work(self, session):
+    def session_work(self, session, include_children=True):
         with self.db() as db:
             return [row[0] for row in db.execute(
-                "SELECT turn FROM runs WHERE session=? AND state IN ('running','unconfirmed') UNION SELECT turn FROM chat_leases WHERE session=?",
-                (session, session))]
+                "SELECT turn FROM runs WHERE (session=? OR (? AND goal IN (SELECT id FROM goals WHERE session=?))) AND state IN ('running','unconfirmed') UNION SELECT turn FROM chat_leases WHERE session=?",
+                (session, include_children, session, session))]
+
+    def related_sessions(self, session):
+        with self.db() as db:
+            return sorted({session} | {r[0] for r in db.execute(
+                'SELECT DISTINCT r.session FROM runs r JOIN goals g ON r.goal=g.id WHERE g.session=?', (session,))})
 
     def change_goal(self, key, action):
         with self.db() as db:
@@ -462,7 +484,7 @@ class TaskStore:
             self._goal(db, g); self._event(db, g['sessionId'], 'goal_' + action, {'goalId': key})
             return g
 
-    def claim(self, owner):
+    def claim(self, owner, goal_id=None):
         with self.db() as db:
             for row in db.execute("SELECT * FROM runs WHERE state='running' AND lease<?", (self.clock(),)).fetchall():
                 r = json.loads(row['data']); g = self._get(db, 'goals', row['goal'])
@@ -477,7 +499,14 @@ class TaskStore:
                 self._goal(db, g)
             for row in db.execute("SELECT data FROM goals WHERE status='active' ORDER BY rowid").fetchall():
                 g = json.loads(row[0]); session = g['sessionId']
-                if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed')", (session,)).fetchone():
+                if goal_id is not None and g['id'] != goal_id:
+                    continue
+                live = [json.loads(row[0]) for row in db.execute("SELECT data FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (g['id'],))]
+                if parallel(g):
+                    candidates = ready_stages(g)
+                    if len(live) >= 2 or any(r['state'] == 'unconfirmed' for r in live) or not candidates:
+                        continue
+                elif db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed')", (session,)).fetchone():
                     continue
                 if db.execute('SELECT 1 FROM chat_leases WHERE session=?', (session,)).fetchone():
                     continue
@@ -492,9 +521,18 @@ class TaskStore:
                          'revision': g['revision'], 'stopEpoch': g['stopEpoch'], 'createdAt': self.clock()}
                 from easel.task_stages import current_stage
                 from easel.task_rules import check_goal
-                stage = current_stage(g)
+                stage = candidates[0] if parallel(g) else current_stage(g)
+                if parallel(g):
+                    remaining = g['maxSeconds'] - g['activeSeconds'] - sum(item.get('maxRunSeconds', 0) for item in live)
+                    if remaining < 1:
+                        self._conclude_budget(db, g, '可用时长预算已不足，未派发新的并行阶段。'); continue
+                    r.update(sessionId=worker_session(g, stage), parentSessionId=session,
+                             maxRunSeconds=remaining / min(2 - len(live), len(candidates)), steps=[])
+                    scopes = self.path.parent / 'scopes'
+                    scopes.mkdir(exist_ok=True)
+                    (scopes / r['sessionId']).touch()
                 if stage:
-                    stage.update(status='running', attempts=stage.get('attempts', 0) + 1)
+                    stage.update(status='running', attempts=stage.get('attempts', 0) + 1, turnId=r['turnId'])
                     stage['baseline'] = check_goal(self.outputs, stage, '')[0]
                     r.update(stageId=stage['id'], roleId=stage['roleId'], role=stage['role'])
                     g['currentStageId'] = stage['id']
@@ -505,7 +543,7 @@ class TaskStore:
                 if g.get('lastRework') and g['lastRework']['toRevision'] == g['revision']:
                     r['reworkId'] = g['lastRework']['id']
                 db.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
-                           (r['id'], g['id'], session, r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
+                           (r['id'], g['id'], r['sessionId'], r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
                 g.update(iterations=r['iteration'], phase='running', currentTurnId=r['turnId'])
                 self._goal(db, g)
                 return g, r
@@ -549,7 +587,7 @@ class TaskStore:
             db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], r['turnId'], json.dumps({
                 'role': 'assistant', 'content': text or reason or ('本轮被中断，目标已暂停，可从当前记录继续。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
                 'requestedModelRef': r.get('modelRef'), 'roleId': r.get('roleId'),
-                'taskStageId': r.get('stageId'), 'taskRunId': r['id']}, ensure_ascii=False)))
+                'taskStageId': r.get('stageId'), 'taskRunId': r['id'], 'sourceSessionId': r['sessionId']}, ensure_ascii=False)))
             g['activeSeconds'] += max(0, self.clock() - r.get('countedAt', r['startedAt']))
             r['countedAt'] = self.clock()
             db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r, ensure_ascii=False), run))
@@ -576,7 +614,7 @@ class TaskStore:
             elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
                 # A late result cannot restart a paused/replaced goal; an already
                 # written budget wrap-up keeps its phase.
-                if g['phase'] != 'budget':
+                if g['phase'] != 'budget' and not (parallel(g) and g['status'] == 'blocked' and g['phase'] != 'unconfirmed'):
                     recovered_failure = g['status'] == 'blocked' and g['phase'] == 'unconfirmed' and state == 'failed'
                     g['phase'] = 'idle'
                     if recovered_failure:
@@ -667,7 +705,7 @@ class TaskStore:
     def reserve_chat(self, session, turn):
         with self.db() as db:
             self._require_session(db, session)
-            if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('queued','running','unconfirmed')", (session,)).fetchone():
+            if db.execute("SELECT 1 FROM runs WHERE (session=? OR goal IN (SELECT id FROM goals WHERE session=?)) AND state IN ('queued','running','unconfirmed')", (session, session)).fetchone():
                 raise TaskConflict('目标轮次正在运行或等待结算，本条消息尚未发送；请稍候，或先在目标面板暂停。')
             row = db.execute('SELECT turn FROM chat_leases WHERE session=?', (session,)).fetchone()
             if row:
@@ -790,7 +828,7 @@ class TaskStore:
             if tool in ('sessions_spawn', 'spawn_agent', 'subagents', 'cron', 'gateway', 'sessions_send'):
                 g.update(status='blocked', reason='目标尝试了未授权的派生或调度操作，已暂停。', phase='tool_policy'); self._goal(db, g)
                 return {'allowed': False, 'reason': '目标首版不允许派生 Agent、创建嵌套计划或修改网关。'}
-            if self.clock() - r['startedAt'] + g['activeSeconds'] >= g['maxSeconds']:
+            if self.clock() - r['startedAt'] >= min(r.get('maxRunSeconds', g['maxSeconds']), g['maxSeconds'] - g['activeSeconds']):
                 return {'allowed': False, 'reason': '目标执行时长已达上限。'}
             reservation = provider_run + ':' + tool + ':' + call
             if db.execute('SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():

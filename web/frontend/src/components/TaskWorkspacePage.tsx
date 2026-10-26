@@ -35,11 +35,12 @@ function TaskDetail({goal,runs,stale,onRefresh,onOpenChat,onOpenActivity,onOpenO
     </div>}
     {tab==='checks'&&<GoalCard goal={goal} runs={runs} onChange={onRefresh} disabled={stale}/>}
     {tab==='runs'&&<section className="task-workspace-runs" aria-label="任务执行记录">
-      <div className="task-actions"><button type="button" className="btn btn-sm" onClick={()=>onOpenOffice(goal.sessionId)}>查看角色与工具</button><button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(goal.sessionId)}>查看会话运行记录</button></div>
+      {goal.workflow!=='parallel-reviewed-delivery'&&<div className="task-actions"><button type="button" className="btn btn-sm" onClick={()=>onOpenOffice(goal.sessionId)}>查看角色与工具</button><button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(goal.sessionId)}>查看会话运行记录</button></div>}
       {runs.length?<ol>{runs.slice().sort((a,b)=>b.iteration-a.iteration).map(run=><li key={run.id}><div><strong>第{run.iteration}轮 · {taskStatus[run.state]||run.state}</strong><time>{stamp(run.finishedAt||run.startedAt)}</time></div>
         {(run.stageId||run.roleId)&&<p>{goal.stages?.find(stage=>stage.id===run.stageId)?.title||run.stageId} · {goal.stages?.find(stage=>stage.roleId===run.roleId)?.role?.shortName||run.roleId}</p>}
         {run.reason&&<p>{run.reason}</p>}{run.text&&<details><summary>本轮回执</summary><pre>{run.text}</pre></details>}
-        <button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(goal.sessionId,run.turnId)}>查看本轮核验</button>
+        <button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(run.sessionId,run.turnId)}>查看本轮核验</button>
+        {run.parentSessionId&&<button type="button" className="btn btn-sm" onClick={()=>onOpenOffice(run.sessionId)}>查看角色与工具</button>}
       </li>)}</ol>:<p className="task-workspace-empty-note">还没有派发执行轮次。</p>}
     </section>}
   </article>;

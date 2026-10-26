@@ -10,13 +10,24 @@ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
 const {default:Workspace}=await loadTsModule('../src/components/TaskWorkspacePage.tsx',import.meta.url);
 const {useTaskSnapshot}=await loadTsModule('../src/hooks/useTaskSnapshot.ts',import.meta.url);
-const {mergeTaskSessions,mergeSessionTombstones}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
+const {mergeTaskSessions,mergeSessionTombstones,taskInspectionSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {taskBucket,parseTaskWorkspaceHash,taskWorkspaceHash}=await loadTsModule('../src/lib/taskWorkspace.ts',import.meta.url);
 const goal={id:'g1',sessionId:'s1',title:'研究与交付',objective:'核对材料并产出报告',modelRef:'fixture/model',criteria:[{type:'review',label:'内容质量',value:''}],checks:[],maxIterations:8,maxSeconds:1200,maxTools:40,maxImages:0,iterations:2,activeSeconds:10,toolsUsed:2,imagesUsed:0,status:'paused',phase:'idle',reason:'用户暂停',createdAt:1};
 const active={...goal,id:'g2',sessionId:'s2',title:'进行中的图片准备',status:'active',phase:'running',reason:''};
 const history={...goal,id:'g3',sessionId:'s3',title:'历史任务',status:'completed',phase:'review',reason:''};
 const sync={loading:false,refreshing:false,readAt:1000,error:''};
 const data={goals:[history,active,goal],runs:[],plans:[],serverTime:1000};
+
+test('worker receipts produce inspection contexts without mutating saved chat history',()=>{
+  const sessions=[{id:goal.sessionId,title:'父对话',created:1,messages:[]}];
+  const worker={id:'run',goalId:goal.id,parentSessionId:goal.sessionId,sessionId:'stage-worker',stageId:'research',iteration:1,startedAt:2,turnId:'turn',text:'合成研究交接'};
+  const inspected=taskInspectionSessions(sessions,[worker,{...worker,id:'retry',turnId:'retry',iteration:3}], [{...goal,workflow:'parallel-reviewed-delivery'}]);
+  assert.equal(sessions.length,1);assert.equal(sessions[0].messages.length,0);
+  assert.equal(inspected.length,2);assert.equal(inspected[1].taskWorker,true);
+  assert.equal(inspected[1].parentSessionId,goal.sessionId);assert.deepEqual(inspected[1].messages.map(item=>item.turnId),['turn','retry']);
+  assert.equal(taskInspectionSessions(sessions,[{...worker,parentSessionId:'foreign'}],[{...goal,workflow:'parallel-reviewed-delivery'}]),sessions);
+  assert.equal(taskInspectionSessions(sessions,[worker],[goal]),sessions);
+});
 
 test('task inbox treats unconfirmed work as attention and preserves explicit route identity',()=>{
   assert.equal(taskBucket(history,[]),'history');
@@ -98,6 +109,21 @@ test('deleted conversation retains task evidence without offering a broken conve
   assert.ok(![...host.querySelectorAll('button')].some(element=>element.textContent==='回到对话 ↗'));
   await act(async()=>button(host,'验收与控制').click());
   assert.ok(![...host.querySelectorAll('button')].some(element=>element.textContent==='继续目标'));
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('parallel run navigation uses internal worker identity while the chat link keeps the parent',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host),activity=[],office=[],chat=[];
+  const parallel={...goal,workflow:'parallel-reviewed-delivery'};
+  const run={id:'parallel-run',goalId:goal.id,sessionId:'stage-synthetic-worker',parentSessionId:goal.sessionId,turnId:'parallel-turn',state:'completed',iteration:1,startedAt:1};
+  await act(async()=>root.render(createElement(Workspace,props({selectedId:goal.id,data:{...data,goals:[parallel],runs:[run]},
+    onOpenActivity:(...args)=>activity.push(args),onOpenOffice:id=>office.push(id),onOpenChat:id=>chat.push(id)}))));
+  await act(async()=>button(host,'回到对话 ↗').click());assert.deepEqual(chat,[goal.sessionId]);
+  await act(async()=>button(host,'执行记录1').click());
+  assert.ok(!host.textContent.includes('查看会话运行记录'),'parent summary would omit worker evidence');
+  await act(async()=>button(host,'查看本轮核验').click());
+  await act(async()=>button(host,'查看角色与工具').click());
+  assert.deepEqual(activity,[['stage-synthetic-worker','parallel-turn']]);assert.deepEqual(office,['stage-synthetic-worker']);
   await act(async()=>root.unmount());host.remove();
 });
 

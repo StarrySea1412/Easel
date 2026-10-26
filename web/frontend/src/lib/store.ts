@@ -49,6 +49,7 @@ export interface ChatSession {
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
   pinnedAt?: number; // Local pin order, independent of streaming or active selection.
   parentSessionId?: string; // 辅助对话：挂在父会话下的子会话，只出现在侧边栏面板里
+  taskWorker?: boolean; // Transient inspection context derived from task receipts; never saved as a chat.
   sideOrder?: number; // 辅助对话标签顺序（同一父会话内 0 起；缺省按创建时间）
   sideClosed?: boolean; // 关闭标签保留子会话、草稿和后台任务，可从打开标签页恢复
   share?: { token: string; title: string; createdAt: number }; // 对话分享：完整快照的本地 token

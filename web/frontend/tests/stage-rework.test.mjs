@@ -21,6 +21,16 @@ async function mount(props={}) {
 async function choose(host) {
   await act(async()=>host.querySelectorAll('.task-stage-content button')[1].click());
 }
+
+test('parallel rework excludes a completed independent branch from confirmation',async()=>{
+  const parallelStages=stages.map(stage=>({...stage,dependsOn:({research:[],build:['research','plan'],review:['build'],deliver:['review']})[stage.id]}));
+  parallelStages.splice(1,0,{...stages[0],id:'plan',title:'独立约束',dependsOn:[]});
+  const view=await mount({goal:{...goal,workflow:'parallel-reviewed-delivery',stages:parallelStages}});
+  await act(async()=>view.host.querySelectorAll('.task-stage-content button')[0].click());
+  assert.match(view.host.querySelector('form').textContent,/研究依据 → 制作结果 → 审查结果 → 整理交付/);
+  assert.ok(!view.host.querySelector('form').textContent.includes('独立约束'));
+  await view.close();
+});
 async function reason(host,text) {
   await act(async()=>{const input=host.querySelector('textarea');const setter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;setter.call(input,text);input.dispatchEvent(new window.Event('input',{bubbles:true}));input.dispatchEvent(new window.Event('change',{bubbles:true}));});
 }
