@@ -61,6 +61,8 @@ class TaskStore:
           CREATE TABLE IF NOT EXISTS chat_leases(session TEXT PRIMARY KEY, turn TEXT, until REAL);
           CREATE TABLE IF NOT EXISTS image_reservations(goal TEXT, request TEXT, PRIMARY KEY(goal,request));
           CREATE TABLE IF NOT EXISTS tool_reservations(goal TEXT, call TEXT, PRIMARY KEY(goal,call));
+          CREATE TABLE IF NOT EXISTS stage_reworks(goal TEXT, request TEXT, data TEXT,
+            PRIMARY KEY(goal,request));
         ''')
         try:
             db.execute('BEGIN IMMEDIATE')
@@ -188,6 +190,83 @@ class TaskStore:
             self._goal(db, g)
             self._event(db, g['sessionId'], 'goal_revised', {'goalId':key, 'revision':g['revision']})
             return g
+
+    def rework_stage(self, key, *, stage_id, revision, request_id, reason):
+        """Archive superseded handoffs and prepare an explicit, paused retry.
+
+        No model request, budget reset, file deletion or file restoration occurs.
+        The request receipt and new revision commit in the same transaction.
+        """
+        from easel.image_jobs import ImageJobs
+        # Match image submission's lock order (images, then tasks). Keep the
+        # image queue stable until the paused revision is committed.
+        with ImageJobs(self.outputs).db() as image_db:
+            image_db.execute('BEGIN IMMEDIATE')
+            return self._rework_stage(key, stage_id=stage_id, revision=revision,
+                                      request_id=request_id, reason=reason, image_db=image_db)
+
+    def _rework_stage(self, key, *, stage_id, revision, request_id, reason, image_db):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            self._require_session(db, g['sessionId'])
+            request = {'stageId': stage_id, 'revision': revision, 'reason': reason}
+            row = db.execute('SELECT data FROM stage_reworks WHERE goal=? AND request=?', (key, request_id)).fetchone()
+            if row:
+                receipt = json.loads(row[0])
+                if receipt['request'] != request:
+                    raise TaskConflict('该请求标识已用于不同的重做内容，请刷新后重试。')
+                return {'goal': g, 'receipt': receipt, 'replayed': True}
+            if g['revision'] != revision:
+                raise TaskConflict('目标版本已变化，请刷新并重新确认重做范围。')
+            if g['status'] in ('active', 'completed', 'cancelled'):
+                raise TaskConflict('请先暂停并等待结算；终态目标请新建目标。')
+            if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed','queued')", (g['sessionId'],)).fetchone() or db.execute(
+                    'SELECT 1 FROM chat_leases WHERE session=?', (g['sessionId'],)).fetchone():
+                raise TaskConflict('该会话仍有后台运行尚未结算，不能重做阶段。')
+            if image_db.execute("SELECT 1 FROM jobs WHERE scope>=? AND scope<? AND status IN ('queued','running','unconfirmed') LIMIT 1",
+                                (g['sessionId'] + ':', g['sessionId'] + ';')).fetchone():
+                raise TaskConflict('该会话仍有生图尚未结算，不能重做阶段。')
+            stages = g.get('stages', [])
+            index = next((i for i, s in enumerate(stages) if s['id'] == stage_id), None)
+            if index is None:
+                raise TaskConflict('协作阶段不存在。')
+            if any(s['status'] != 'completed' for s in stages[:index]):
+                raise TaskConflict('起点前仍有未完成阶段，请从更早的阶段重做。')
+            if all(s['status'] == 'pending' for s in stages[index:]):
+                raise TaskConflict('所选阶段及后续尚未执行，无需重做。')
+            if g['maxIterations'] - g['iterations'] < len(stages) - index:
+                raise TaskConflict('剩余轮次不足以重做所选阶段及后续；累计预算保留，请新建目标。')
+            if g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
+                raise TaskConflict('已达到累计执行预算，不能通过重做重置；请新建目标。')
+            from easel.task_stages import validate_handoffs
+            try:
+                validate_handoffs(self.outputs, {'stages': stages[:index]})
+            except ValueError as exc:
+                raise TaskConflict(str(exc)) from None
+            receipt = {'id': request_id, 'goalId': key, 'request': request,
+                       'fromRevision': revision, 'toRevision': revision + 1, 'at': self.clock(),
+                       'stages': stages[index:], 'checks': g.get('checks', []), 'steps': g.get('steps', []),
+                       'reviewedTurnId': g.get('reviewedTurnId'), 'currentTurnId': g.get('currentTurnId')}
+            db.execute('INSERT INTO stage_reworks VALUES(?,?,?)', (key, request_id, json.dumps(receipt, ensure_ascii=False)))
+            # Preserve the original role contract and cumulative attempt count.
+            g['stages'] = stages[:index] + [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts') if k in s},
+                                           'status': 'pending', 'checks': []} for s in stages[index:]]
+            summary = {k: receipt[k] for k in ('id', 'fromRevision', 'toRevision', 'at')}
+            summary.update(stageId=stage_id, title=stages[index]['title'], reason=reason,
+                           affected=[{'id': s['id'], 'title': s['title']} for s in stages[index:]])
+            g.update(status='paused', phase='idle', revision=revision + 1, stopEpoch=g['stopEpoch'] + 1,
+                     currentStageId=stage_id, currentTurnId=None, reviewedTurnId=None, checks=[], steps=[],
+                     noProgress=0, lastFingerprint=None, cancelRequested=False, lastRework=summary,
+                     reason='已准备从“' + stages[index]['title'] + '”重做，确认后继续；累计预算保留。')
+            self._goal(db, g)
+            self._event(db, g['sessionId'], 'stage_rework', {'goalId': key, **summary})
+            return {'goal': g, 'receipt': receipt, 'replayed': False}
+
+    def rework_receipts(self, key):
+        with self.db() as db:
+            self._get(db, 'goals', key)
+            return [json.loads(row[0]) for row in db.execute(
+                'SELECT data FROM stage_reworks WHERE goal=? ORDER BY rowid DESC', (key,))]
 
     def update_progress(self, session, call, steps):
         from easel.task_rules import GoalProgress
@@ -390,6 +469,8 @@ class TaskStore:
                     r.update(stageId=stage['id'], roleId=stage['roleId'], role=stage['role'])
                     g['currentStageId'] = stage['id']
                 r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'], workTools=0)
+                if g.get('lastRework') and g['lastRework']['toRevision'] == g['revision']:
+                    r['reworkId'] = g['lastRework']['id']
                 db.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
                            (r['id'], g['id'], session, r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
                 g.update(iterations=r['iteration'], phase='running', currentTurnId=r['turnId'])

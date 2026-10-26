@@ -6,7 +6,7 @@ const labels: Record<TaskStage['status'], string> = {
   pending: '待开始', running: '执行中', completed: '交接已核验', blocked: '需要处理', unconfirmed: '等待核实',
 };
 
-export default function TaskStageBoard({ stages, compact=false }: { stages: TaskStage[]; compact?:boolean }) {
+export default function TaskStageBoard({ stages, compact=false, onRework, disabled=false }: { stages: TaskStage[]; compact?:boolean; onRework?:(id:string)=>void; disabled?:boolean }) {
   const finished = stages.filter(stage => stage.status === 'completed').length;
   return <section className={`task-stage-board${compact?' is-compact':''}`} aria-label="分工协作阶段">
     <div className="task-stage-heading"><strong>分工协作</strong><span>{finished}/{stages.length} 阶段已交接</span></div>
@@ -23,6 +23,7 @@ export default function TaskStageBoard({ stages, compact=false }: { stages: Task
               {check?.detail && <small>{check.detail}</small>}</li>;
           })}</ul>
           {stage.handoff && <p className="task-stage-receipt">{stage.handoff}</p>}
+          {onRework && stages.slice(0,index).every(item=>item.status==='completed') && <button type="button" className="btn btn-sm" disabled={disabled} onClick={()=>onRework(stage.id)}>从此阶段重做</button>}
         </details>}
       </div>
     </li>)}</ol>

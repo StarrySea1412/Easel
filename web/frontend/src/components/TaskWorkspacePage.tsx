@@ -4,7 +4,7 @@ import {taskStatus, type TaskGoal, type TaskSnapshot, type TaskRun} from '../lib
 import {taskBucket, taskBuckets, type TaskBucket} from '../lib/taskWorkspace';
 import type {TaskSync} from '../hooks/useTaskSnapshot';
 import GoalCard from './GoalCard';
-import TaskStageBoard from './TaskStageBoard';
+import TaskStageRecovery from './TaskStageRecovery';
 import '../styles/task-workspace.css';
 
 interface Props {
@@ -30,7 +30,7 @@ function TaskDetail({goal,runs,stale,onRefresh,onOpenChat,onOpenActivity,onOpenO
     {tab==='progress'&&<div className="task-workspace-progress">
       <p className="task-workspace-objective">{goal.objective}</p>
       {goal.reason&&!(goal.sessionDeleted&&goal.reason==='原对话已删除')&&<p className="task-workspace-reason" role="status">{goal.reason}</p>}
-      {goal.stages?.length?<TaskStageBoard stages={goal.stages}/>:<section aria-label="目标工作步骤"><h3>工作步骤</h3>{goal.steps?.length?<ol className="task-workspace-steps">{goal.steps.map(step=><li key={step.id}><span>{({completed:'✓',in_progress:'◉',blocked:'!',pending:'○'})[step.status]}</span><div><strong>{step.title}</strong><small>{step.detail||({completed:'助手已报告完成',in_progress:'正在推进',blocked:'需要处理',pending:'待开始'})[step.status]}</small></div></li>)}</ol>:<p className="task-workspace-empty-note">尚未收到步骤更新。执行后会显示实际进展。</p>}</section>}
+      {goal.stages?.length?<TaskStageRecovery goal={goal} runs={runs} disabled={stale} onChanged={onRefresh}/>:<section aria-label="目标工作步骤"><h3>工作步骤</h3>{goal.steps?.length?<ol className="task-workspace-steps">{goal.steps.map(step=><li key={step.id}><span>{({completed:'✓',in_progress:'◉',blocked:'!',pending:'○'})[step.status]}</span><div><strong>{step.title}</strong><small>{step.detail||({completed:'助手已报告完成',in_progress:'正在推进',blocked:'需要处理',pending:'待开始'})[step.status]}</small></div></li>)}</ol>:<p className="task-workspace-empty-note">尚未收到步骤更新。执行后会显示实际进展。</p>}</section>}
       <div className="task-workspace-next"><button type="button" className="btn btn-sm" onClick={()=>setTab('checks')}>查看验收</button></div>
     </div>}
     {tab==='checks'&&<GoalCard goal={goal} runs={runs} onChange={onRefresh} disabled={stale}/>}

@@ -45,6 +45,14 @@ class GoalRevision(BaseModel):
     criteria: list[Criterion] = Field(min_length=1, max_length=16)
 
 
+class StageRework(BaseModel):
+    model_config = {'extra': 'forbid', 'str_strip_whitespace': True}
+    stageId: str = Field(min_length=1, max_length=80, pattern=r'^[A-Za-z0-9_.-]+$')
+    revision: int = Field(ge=1, strict=True)
+    requestId: str = Field(min_length=1, max_length=120, pattern=r'^[A-Za-z0-9_.-]+$')
+    reason: str = Field(min_length=3, max_length=1200)
+
+
 class PlanAction(BaseModel):
     model_config = {'extra': 'forbid'}
     action: Literal['enable', 'pause', 'run']
@@ -202,7 +210,9 @@ class TaskService:
                 '只报告实际做过的工作；卡在权限、材料或用户决策时将相关步骤设为blocked并说明缺失信息。'
                 '只处理尚未通过项，保存并交付真实文件；步骤completed只表示自报工作完成，不能替代质量验收。'
                 '不要自称质量已通过，不派生Agent、不创建计划。')
-            prompt += stage_prompt(g, r)
+            receipts = await asyncio.to_thread(store.rework_receipts, g['id']) if r.get('reworkId') else []
+            rework = next((item for item in receipts if item['id'] == r.get('reworkId')), None)
+            prompt += stage_prompt(g, r, rework)
             req = web.ChatRequest(message=prompt, sessionId=g['sessionId'], turnId=r['turnId'],
                                   modelRef=g['modelRef'], thinkingLevel='low', roleId=r.get('roleId'))
             await web.start_chat_run(req, observe=False)
@@ -362,6 +372,21 @@ class TaskService:
                 spec = {**g, 'objective':req.objective, 'criteria':[c.model_dump() for c in req.criteria]}
                 self.validate_goal(spec, g['sessionId'])
                 return self.store.revise_goal(key, req.objective, spec['criteria'])
+            except (TaskConflict, ValueError) as exc:
+                conflict(exc)
+
+        @router.post('/goals/{key}/rework')
+        def rework(key: str, req: StageRework):
+            try:
+                return self.store.rework_stage(key, stage_id=req.stageId, revision=req.revision,
+                                               request_id=req.requestId, reason=req.reason)
+            except (TaskConflict, ValueError) as exc:
+                conflict(exc)
+
+        @router.get('/goals/{key}/reworks')
+        def reworks(key: str):
+            try:
+                return JSONResponse({'receipts': self.store.rework_receipts(key)}, headers={'Cache-Control': 'no-store'})
             except (TaskConflict, ValueError) as exc:
                 conflict(exc)
 

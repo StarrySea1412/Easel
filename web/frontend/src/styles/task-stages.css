@@ -15,3 +15,8 @@
 .task-stage-content details a{color:var(--accent-start);padding:4px 0;text-underline-offset:3px}
 .task-stage-receipt{max-height:160px;overflow:auto;padding-left:10px;border-left:2px solid var(--border);color:var(--text-secondary)}
 .task-stage-board.is-compact .task-stage-heading{margin-bottom:18px}.task-stage-board.is-compact .task-stage{padding-bottom:16px}.task-stage-board.is-compact .task-stage:last-child{padding-bottom:4px}
+.task-stage-rework{padding:8px 0 16px;border-top:1px solid var(--border);font-size:11px;line-height:1.7}
+.task-stage-rework p,.task-stage-history p{overflow-wrap:anywhere;white-space:pre-wrap}
+.task-stage-rework label{display:grid;gap:5px;margin:8px 0}.task-stage-rework textarea{width:100%;box-sizing:border-box;min-width:0;resize:vertical;font:inherit;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:8px}
+.task-stage-feedback,.task-stage-history{font-size:11px;line-height:1.7;margin:8px 0 16px}.task-stage-history summary{cursor:pointer;padding:4px 0}
+.task-stage-history ul{list-style:none;margin:0;padding:0}.task-stage-history>ul>li{padding:10px 0;border-bottom:1px solid var(--border)}.task-stage-history small{display:block;overflow-wrap:anywhere}.task-stage-history details{margin:4px 0}
