@@ -97,6 +97,7 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS legacy(profile_id TEXT PRIMARY KEY,hash TEXT NOT NULL,text TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS uses(profile_id TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,session_id,turn_id));
                 CREATE TABLE IF NOT EXISTS tombstones(profile_id TEXT NOT NULL,dedupe TEXT NOT NULL,PRIMARY KEY(profile_id,dedupe));
+                CREATE TABLE IF NOT EXISTS policies(profile_id TEXT PRIMARY KEY,data TEXT NOT NULL);
             ''')
 
     @contextmanager
@@ -132,6 +133,28 @@ class MemoryStore:
         if not row:
             raise LookupError('经验条目不存在')
         return json.loads(row[0])
+
+    def _policy(self, db, profile):
+        row = db.execute('SELECT data FROM policies WHERE profile_id=?', (profile['id'],)).fetchone()
+        return json.loads(row[0]) if row else {'readEnabled': True, 'candidatesEnabled': True}
+
+    @project_after
+    def set_policy(self, name, data):
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            profile = self._profile(db, name)
+            if profile['revision'] != data.get('profileRevision'):
+                raise Conflict('经验设置已改变，请刷新后重试')
+            policy = self._policy(db, profile)
+            for key in policy:
+                if key in data:
+                    if not isinstance(data[key], bool):
+                        raise ValueError('经验开关须为布尔值')
+                    policy[key] = data[key]
+            if policy != self._policy(db, profile):
+                db.execute('INSERT OR REPLACE INTO policies VALUES(?,?)', (profile['id'], json.dumps(policy)))
+                db.execute('UPDATE profiles SET revision=revision+1 WHERE id=?', (profile['id'],))
+            return policy
 
     def _save(self, db, entry):
         raw = json.dumps(entry, ensure_ascii=False)
@@ -187,11 +210,13 @@ class MemoryStore:
 
     @project_after
     def propose(self, name, data):
-        text, selected_scope = text_value(data.get('text')), scope(data.get('scope'))
-        source = self._source(data.get('source'), text, selected_scope)
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             profile = self._profile(db, name)
+            if not self._policy(db, profile)['candidatesEnabled']:
+                raise Conflict('当前画像已关闭保存候选；可在经验管理中开启')
+            text, selected_scope = text_value(data.get('text')), scope(data.get('scope'))
+            source = self._source(data.get('source'), text, selected_scope)
             return self._insert(db, profile, text, selected_scope, source)
 
     def _projection(self, profile, entries):
@@ -238,6 +263,7 @@ class MemoryStore:
         with self.connect() as db:
             profile = self._profile(db, name)
             entries = [json.loads(row[0]) for row in db.execute('SELECT data FROM entries WHERE profile_id=? ORDER BY rowid DESC', (profile['id'],))]
+            policy = self._policy(db, profile)
         for entry in entries:
             entry['sourceStatus'] = self.source_status(entry)
             entry['needsReview'] = entry['sourceStatus'] != 'available' or bool(entry['reviewAfter'] and entry['reviewAfter'] < now()[:10])
@@ -245,7 +271,7 @@ class MemoryStore:
         legacy = path.read_text(encoding='utf-8') if not profile['managed'] and path.exists() else ''
         return {'profileId': profile['id'], 'name': name, 'revision': profile['revision'], 'managed': bool(profile['managed']),
                 'entries': entries, 'legacy': {'text': legacy, 'hash': digest(legacy)} if not profile['managed'] else None,
-                'projectionReady': not warning, 'warning': warning}
+                'projectionReady': not warning, 'warning': warning, 'policy': policy}
 
     @project_after
     def import_legacy(self, name, data):
@@ -336,13 +362,20 @@ class MemoryStore:
 
     def record_use(self, name, session_id, turn_id, context):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             profile = self._profile(db, name)
+            if (context['revision'] != profile['revision']
+                    or context.get('policy', self._policy(db, profile)) != self._policy(db, profile)):
+                return False
             value = {'turnId': turn_id, 'profileId': profile['id'], 'profileRevision': context['revision'],
                      'at': now(), 'entries': [{'id': row['id'], 'revision': row['revision']} for row in context['entries']]}
+            if 'recall' in context:
+                value.update(recall=context['recall'], policy=context['policy'])
             # Retries keep the original turn binding, never rewrite history.
             db.execute('INSERT OR IGNORE INTO uses VALUES(?,?,?,?)', (profile['id'], session_id, turn_id, json.dumps(value)))
             saved = json.loads(db.execute('SELECT data FROM uses WHERE profile_id=? AND session_id=? AND turn_id=?', (profile['id'], session_id, turn_id)).fetchone()[0])
-            return saved['entries'] == value['entries']
+            return (saved['entries'] == value['entries']
+                    and ('recall' not in saved or (saved['recall'] == value.get('recall') and saved['policy'] == value.get('policy'))))
 
     def usage(self, name, session_id):
         with self.connect() as db:
@@ -366,8 +399,15 @@ class MemoryStore:
 
     def context(self, name, query='', platform=None, account_id=None, budget=5000):
         state = self.state(name)
-        if not state['managed'] or not state['projectionReady']:
-            return {'entries': [], 'profileId': state['profileId'], 'revision': state['revision'], 'warning': state['warning']}
+        limit = min(max(budget, 0), 12000)
+        receipt = {'version': 1, 'budgetChars': limit, 'usedChars': 0, 'maxEntries': 8,
+                   'matchedCount': 0, 'selectedCount': 0, 'skippedBudgetCount': 0, 'reason': 'empty'}
+        result = {'entries': [], 'profileId': state['profileId'], 'revision': state['revision'],
+                  'warning': state['warning'], 'policy': state['policy'], 'recall': receipt}
+        if not state['policy']['readEnabled'] or not state['managed'] or not state['projectionReady']:
+            receipt['reason'] = ('read-disabled' if not state['policy']['readEnabled'] else
+                                 'unmanaged' if not state['managed'] else 'projection-unavailable')
+            return result
         words = terms(query)
         rows = []
         for entry in state['entries']:
@@ -381,13 +421,20 @@ class MemoryStore:
                 continue
             rows.append((score, entry))
         rows.sort(key=lambda item: (-item[0], item[1]['id']))
-        selected, remaining = [], min(max(budget, 0), 12000)
-        for _, entry in rows[:8]:
+        selected, remaining = [], limit
+        receipt['matchedCount'] = len(rows)
+        for _, entry in rows:
+            if len(selected) == receipt['maxEntries']:
+                break
             if len(entry['text']) > remaining:
+                receipt['skippedBudgetCount'] += 1
                 continue
             selected.append(entry)
             remaining -= len(entry['text'])
-        return {'entries': selected, 'profileId': state['profileId'], 'revision': state['revision'], 'warning': None}
+        receipt.update(usedChars=limit - remaining, selectedCount=len(selected),
+                       reason='selected' if selected else 'budget-exhausted' if rows else 'no-match' if query.strip() else 'empty')
+        result['entries'] = selected
+        return result
 
     def purge_profile(self, name):
         with self.connect() as db:
@@ -398,4 +445,5 @@ class MemoryStore:
             db.execute('DELETE FROM legacy WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM uses WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM tombstones WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM policies WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM profiles WHERE id=?', (profile['id'],))

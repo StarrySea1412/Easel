@@ -58,7 +58,7 @@ Grok Bot 的官方资料已足以完成产品比较，无须用户寻找仓库�
 | 多执行器 | `easel/harnesses/` 有 adapter 与权限/模型/工作区契约；默认仍保持 OpenClaw | 代码在位不等于每个引擎已启用或验收；独立 CodexService 与通用 adapter 的能力不能互相冒用 |
 | 办公室 | `web/agent_office.py` 读取当前范围的委派、工具和回执证据 | 观测面板不是统一委派调度器；角色名称不构成独立账号权限或任务交接证明 |
 | 跨页与分析 | `workbenchEvents.ts`、分析持久化、账号绑定和材料哈希已有 | 全局事件是通知失效/重读的机制，不能替代持久事实、版本检查和漏事件恢复 |
-| 长期经验 | 画像文件、Skill日期/来源约定、按画像使用经验已有 | 统一来源、版本、失效、冲突处理、读写控制与可追溯候选仍待实现；不能声称已具强制审批隔离 |
+| 长期经验 | 0.13已有SQLite统一来源、候选确认、版本、失效、冲突与账号过滤；0.21候选补画像独立读/候选开关、预算召回与无正文回执 | 自动提取/语义去重、结构化条件/替代关系、其他引擎与真实模型效果对照仍待完成；应用确认流程不是同OS身份下的强隔离 |
 
 对应当前分支的入口：[CodexService](../easel/codex_service.py)、[运行账本](../web/run_ledger.py)、[执行状态](../easel/execution_store.py)、[目标服务](../web/task_service.py)、[目标存储](../easel/task_store.py)、[事件通信](../web/frontend/src/lib/workbenchEvents.ts)。
 

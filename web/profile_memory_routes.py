@@ -50,6 +50,12 @@ def create_router(store_getter):
         entry = run(run(store_getter).propose, name, await payload(request))
         return {'entry': entry, 'state': run(run(store_getter).state, name)}
 
+    @router.post('/policy')
+    async def policy(name: str, request: Request):
+        store = run(store_getter)
+        run(store.set_policy, name, await payload(request, True))
+        return run(store.state, name)
+
     @router.post('/import')
     async def migrate(name: str, request: Request):
         run(run(store_getter).import_legacy, name, await payload(request, True))

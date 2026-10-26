@@ -3,7 +3,15 @@ import { publishWorkbenchChange, watchWorkbenchChange } from './workbenchEvents'
 
 export type MemoryScope = {kind:'profile'} | {kind:'account';platform:string;accountId:string};
 export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
-export type MemoryState = {name:string;profileId:string;revision:number;managed:boolean;entries:MemoryEntry[];legacy:{text:string;hash:string}|null;projectionReady:boolean;warning:string|null};
+export type MemoryPolicy = {readEnabled:boolean;candidatesEnabled:boolean};
+export type MemoryRecall = {version:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
+export type MemoryContext = {entries:MemoryEntry[];recall?:MemoryRecall};
+export type MemoryState = {name:string;profileId:string;revision:number;managed:boolean;entries:MemoryEntry[];legacy:{text:string;hash:string}|null;projectionReady:boolean;warning:string|null;policy?:MemoryPolicy};
+export function memoryRecallSummary(recall?:MemoryRecall):string {
+  if (!recall) return '本轮没有选用经验。';
+  if (recall.selectedCount) return `${recall.selectedCount}条 · ${recall.usedChars}/${recall.budgetChars}字`;
+  return ({'read-disabled':'已关闭读取经验',unmanaged:'旧经验尚未托管','projection-unavailable':'兼容文件待修复','budget-exhausted':'匹配经验超出本轮预算','no-match':'没有匹配当前任务的经验',empty:'当前范围没有有效经验'} as Record<string,string>)[recall.reason] || '本轮没有选用经验。';
+}
 type ReadState = {data?:MemoryState;loading:boolean;error:string};
 const empty:ReadState = {loading:false,error:''};
 const reads = new Map<string,ReadState>();

@@ -92,4 +92,32 @@ test('deleted entries cannot reappear from a delayed historical body read',async
  await act(async()=>finish(response({revisions:[{...entry(),text:'已被删除的旧正文'}]})));
  assert.doesNotMatch(container.textContent,/已被删除的旧正文/);
 });
+test('independent profile controls retain a candidate draft and persist only the changed setting',async t=>{
+ let current={...state('policy'),policy:{readEnabled:true,candidatesEnabled:true}};const writes=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{
+  if(options.method==='POST') {const body=JSON.parse(options.body);writes.push({url,body});current={...current,revision:current.revision+1,policy:{...current.policy,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='profileRevision'))}};}
+  return response(current);
+ });
+ const v=await mount(t,'policy');
+ const textarea=v.container.querySelector('.memory-new textarea');
+ await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(textarea,'未保存的经验草稿');textarea.dispatchEvent(new window.Event('input',{bubbles:true}));});
+ const switches=()=>[...v.container.querySelectorAll('[role="switch"]')];
+ await act(async()=>switches()[0].click());
+ assert.equal(switches()[0].getAttribute('aria-checked'),'false');assert.equal(switches()[1].getAttribute('aria-checked'),'true');
+ assert.equal(textarea.disabled,false);
+ assert.deepEqual(writes[0].body,{profileRevision:1,readEnabled:false});assert.ok(writes[0].url.endsWith('/policy'));
+ await act(async()=>switches()[1].click());
+ assert.equal(textarea.disabled,true);assert.equal(textarea.value,'未保存的经验草稿');
+ assert.equal(v.button('保存为待确认候选').disabled,true);
+ await act(async()=>switches()[1].click());
+ assert.equal(textarea.disabled,false);assert.equal(textarea.value,'未保存的经验草稿');
+ assert.equal(v.button('保存为待确认候选').disabled,false);
+});
+test('recall preview explains disabled reading inside the existing disclosure',async t=>{
+ t.mock.method(globalThis,'fetch',async url=>String(url).includes('/context?')?response({entries:[],recall:{reason:'read-disabled',selectedCount:0,budgetChars:5000,usedChars:0}}):response({...state('preview',1,[]),policy:{readEnabled:false,candidatesEnabled:true}}));
+ const v=await mount(t,'preview');
+ await act(async()=>v.button('查看可用经验').click());
+ assert.match(v.container.querySelector('[role="status"]').textContent,/已关闭读取经验/);
+ assert.equal(lib.memoryRecallSummary({reason:'selected',selectedCount:2,usedChars:42,budgetChars:5000}),'2条 · 42/5000字');
+});
 test.after(()=>window.happyDOM.abort());

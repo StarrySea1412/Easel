@@ -118,6 +118,13 @@ def persona_prefix(name: str | None) -> str:
             try:
                 with sqlite3.connect(database) as connection:
                     row = connection.execute('SELECT managed FROM profiles WHERE name=?', (name,)).fetchone()
+                    has_policy = connection.execute("SELECT 1 FROM sqlite_master WHERE name='policies'").fetchone()
+                    policy_row = connection.execute('SELECT data FROM policies WHERE profile_id=(SELECT id FROM profiles WHERE name=?)', (name,)).fetchone() if has_policy else None
+                    if policy_row:
+                        import json
+                        if not json.loads(policy_row[0])['readEnabled']:
+                            return (f'我当前使用的画像是「{name}」。偏好与红线读取该画像preferences.md。'
+                                    '本画像已关闭读取经验；本轮不读取memory.md、经验数据库或账号经验历史。')
             except sqlite3.Error:
                 return '画像经验存储不可用；本轮不得读取经验文件或数据库。'
             if row and row[0]:
