@@ -38,4 +38,8 @@
 - 本机截图 `.artifacts/compact-goal-019-desktop.png`、`.artifacts/compact-goal-019-390.png`、`.artifacts/task-workspace-019-390.png` 留作视觉回执。合成会话通知的“查看”未通过有效会话跳转，不计作通过。
 - 入口 `http://127.0.0.1:7891/`，本地隔离测试管理员 `gaojitest` / `gaoji` 使用正常密码哈希，实际登录通过；不适用于公网生产。运行接口显示0.19.0 / development、revision=null，不冒充发行SHA；138和安装器未更新。
 
-Git提交、远端SHA与main双语首页回执在推送核对后追加。完整大版本继续保持未完成。
+## Git交付
+
+- 本批功能与文档提交 `6b422c1ec6330c69d4c7ef26d76a6f0a94295352` 已推送 `starry/codex/run-recovery-0.19.0`，`ls-remote`核对同SHA。
+- main仅同步 `README.md` / `README_EN.md` 两文件，提交 `d0907ab72c73e1f6c493fd8a54cf1dc7c5832189` 已推送并核对同SHA；文档使用明确开发分支链接，未合并功能。
+- 本回执另作纯文档提交并推送，不再改版本。源码交付不表示本机development构建有发行revision，也不表示138或安装器已升级；完整大版本继续保持未完成。
