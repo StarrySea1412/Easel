@@ -161,7 +161,14 @@ class TaskService:
                     from chat_recovery import reconcile_orphan
                     self.recovery_checks[r['turnId']] = now + 15
                     checked_external = True
-                    await asyncio.to_thread(reconcile_orphan, self.web, r['sessionId'], r['turnId'])
+                    goal = await asyncio.to_thread(store.get, 'goals', r['goalId'])
+                    if goal.get('cancelRequested'):
+                        try:
+                            await self.web.api_chat_stop(self.web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
+                        except Exception:
+                            log.warning('目标停止仍待确认，稍后按原轮次重试：%s', r['goalId'])
+                    else:
+                        await asyncio.to_thread(reconcile_orphan, self.web, r['sessionId'], r['turnId'])
                     await self.settle(r)
         if self.work:
             return
@@ -233,14 +240,14 @@ class TaskService:
         ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
         if not ledger or not ledger.get('settled') or not ledger.get('resourceSettled'):
             return False
-        jobs = ImageJobs(web.OUTPUTS_DIR).list(r['sessionId'])
-        unsettled = [j for j in jobs if j.get('turnId') == r['turnId'] and j.get('phase') in ('queued', 'running', 'unconfirmed')]
-        if unsettled:
+        if await asyncio.to_thread(ImageJobs(web.OUTPUTS_DIR).pending, r['sessionId'], r['turnId']):
             return False
         text = ''
         try:
-            marker = json.loads(web._turn_file('web:' + r['sessionId']).read_text(encoding='utf-8'))
-            if marker.get('turn_id') == r['turnId']:
+            archive = web._run_snapshot_file(r['turnId']) if hasattr(web, '_run_snapshot_file') else None
+            path = archive if archive and archive.is_file() else web._turn_file('web:' + r['sessionId'])
+            marker = json.loads(path.read_text(encoding='utf-8'))
+            if marker.get('turn_id') == r['turnId'] and marker.get('session_id', r['sessionId']) == r['sessionId']:
                 text = marker.get('text', '')
         except (OSError, ValueError):
             pass
@@ -340,7 +347,10 @@ class TaskService:
                 if req.action in ('pause', 'stop', 'cancel'):
                     for r in await asyncio.to_thread(self.store.running):
                         if r['goalId'] == key:
-                            await self.web.api_chat_stop(self.web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
+                            try:
+                                await self.web.api_chat_stop(self.web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
+                            except Exception:
+                                log.warning('目标状态已保存，后台停止待重试：%s', key)
                 return result
             except (TaskConflict, ValueError) as exc:
                 conflict(exc)
@@ -392,6 +402,7 @@ class TaskService:
 
     def session_work(self, session):
         turns = set(self.store.session_work(session))
+        turns.update(ImageJobs(self.web.OUTPUTS_DIR).pending_turns(session))
         codex = getattr(self.web, '_codex_service', None)
         if codex and codex.owns(session):
             turns.update(codex.session_work(session))

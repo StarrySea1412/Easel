@@ -6609,8 +6609,24 @@ class StopRequest(BaseModel):
 
 @app.post("/api/chat/stop")
 async def api_chat_stop(req: StopRequest):
-    """用户显式停止当前会话正在跑的对话 agent：终止进程 → supervisor 收尾释放会话锁 →
-    下一句立刻能发（不再卡「上一条还在跑」）。仅此显式入口会杀进程；客户端断线不经此路径。"""
+    """Stop the exact producer and fence its image work before awaiting cleanup."""
+    sk = (req.sessionId or '').strip()
+    target_turn = req.turnId or _ACTIVE_SKILL_TURNS.get(sk)
+    if sk and not target_turn and _codex_service.owns(sk):
+        target_turn = _codex_service.snapshot(sk).get('turn_id')
+    if sk and target_turn:
+        try:
+            await asyncio.to_thread(ImageJobs(OUTPUTS_DIR).cancel_turn, sk, target_turn)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+    result = await _stop_chat_producer(req)
+    if sk and target_turn and await asyncio.to_thread(ImageJobs(OUTPUTS_DIR).pending, sk, target_turn):
+        return {**result, 'stopped': False, 'status': 'images_pending'}
+    return result
+
+
+async def _stop_chat_producer(req: StopRequest):
+    """Only an explicit stop terminates a producer; disconnects keep observing."""
     if req.sessionId and _codex_service.owns(req.sessionId):
         return await asyncio.to_thread(_codex_service.stop, req.sessionId, req.turnId)
     sk = (req.sessionId or "").strip()

@@ -243,7 +243,7 @@ class TaskStore:
 
     def _conclude_budget(self, db, g, reason):
         """Limit reached: stop substantive work and leave one honest wrap-up."""
-        g.update(status='blocked', phase='budget', reason=reason)
+        g.update(status='blocked', phase='budget', reason=reason, cancelRequested=True)
         text = self._budget_summary(g, reason)
         db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], 'goal-budget-' + g['id'], json.dumps({
             'role': 'assistant', 'content': text, 'turnId': 'goal-budget-' + g['id'], 'taskGoalId': g['id']}, ensure_ascii=False)))
@@ -334,8 +334,7 @@ class TaskStore:
                 for row in db.execute("SELECT * FROM runs WHERE goal=? AND state='queued'", (key,)).fetchall():
                     r = json.loads(row['data']); r.update(state='stopped', finishedAt=self.clock())
                     db.execute("UPDATE runs SET state='stopped',data=? WHERE id=?", (json.dumps(r), row['id']))
-                if action != 'pause':
-                    g['cancelRequested'] = True
+                g['cancelRequested'] = True
             elif action in ('start', 'resume'):
                 if g['status'] == 'active':
                     return g
@@ -453,7 +452,13 @@ class TaskStore:
                 g.update(phase='unconfirmed' if not resource_settled else 'idle',
                          reason='原对话已删除，后台停止待确认' if not resource_settled else '原对话已删除')
             elif not resource_settled:
-                g.update(status='blocked', phase='unconfirmed', reason=reason or '外部资源未结算，未自动重发。')
+                # Resource uncertainty must not undo a user's cancellation or
+                # erase the budget wrap-up. Both still fence later stages.
+                if g['status'] not in ('paused', 'cancelled'):
+                    g['status'] = 'blocked'
+                if g['phase'] != 'budget':
+                    g['phase'] = 'unconfirmed'
+                g['reason'] = reason or '外部资源未结算，未自动重发。'
             elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
                 # A late result cannot restart a paused/replaced goal; an already
                 # written budget wrap-up keeps its phase.
@@ -462,6 +467,8 @@ class TaskStore:
                     g['phase'] = 'idle'
                     if recovered_failure:
                         g.update(phase='run_failed', reason=reason or '后台已确认结束，本轮未正常完成。')
+                    elif g.get('cancelRequested') and g['status'] in ('paused', 'cancelled'):
+                        g['reason'] = '已取消' if g['status'] == 'cancelled' else '已暂停自动推进'
             elif state == 'stopped':
                 # Interruptions pause the objective; records stay valid for resume.
                 g.update(status='paused', phase='idle', reason=reason or '本轮被中断，目标已暂停；继续时从当前记录恢复。')

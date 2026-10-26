@@ -23,6 +23,7 @@ from .artifacts import ArtifactStore, scope, file_path, inspect_file
 SIZES = {'auto', '1024x1024', '768x1024', '1024x768', '864x1536', '1536x864',
          '1024x1280', '1280x1024', '1024x1536', '1536x1024'}
 EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+CANCELLED = '所属轮次已停止；图片未提交生成端。'
 GENERATE_TOOL = {'type': 'function', 'name': 'easel_generate_image',
     'description': 'Submit an explicitly requested image to the configured dedicated image channel. May incur image fees. Same requestId is idempotent; never change it to retry a pending or unknown job. Returns a durable job ID; successful files appear in this chat automatically. No fallback model.',
     'inputSchema': {'type': 'object', 'additionalProperties': False, 'required': ['requestId', 'prompt'],
@@ -74,6 +75,8 @@ class ImageJobs:
             db.execute('''CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, scope TEXT, request TEXT,
                 fingerprint TEXT, channel TEXT, config TEXT, status TEXT, owner TEXT, lease REAL,
                 created REAL, data TEXT, UNIQUE(scope,request))''')
+            db.execute('''CREATE TABLE IF NOT EXISTS cancelled_turns(
+                scope TEXT PRIMARY KEY, requested REAL NOT NULL)''')
             with db:
                 yield db
         finally:
@@ -108,6 +111,8 @@ class ImageJobs:
                 if row['fingerprint'] != fingerprint:
                     raise ValueError('该请求标识已用于不同参数；未重复生成')
                 return self.public(row)
+            if db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (owner_scope,)).fetchone():
+                raise ValueError('所属轮次已停止；未创建新的图片任务。')
             host, config_id, limit = channel(config)
             if session:
                 from easel.task_store import TaskStore
@@ -139,6 +144,42 @@ class ImageJobs:
             return [self.public(row) for row in db.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 1000')
                     if json.loads(row['data']).get('sessionId') == session][:100]
 
+    def pending_turns(self, session):
+        """Lifecycle queries must not use the truncated presentation list."""
+        scope(session)
+        with self.db() as db:
+            rows = db.execute("SELECT data FROM jobs WHERE scope>=? AND scope<? "
+                              "AND status IN ('queued','running','unconfirmed')",
+                              (session + ':', session + ';'))
+            return sorted({json.loads(row['data'])['turnId'] for row in rows})
+
+    def pending(self, session, turn):
+        owner_scope = f'{scope(session)}:{scope(turn)}'
+        with self.db() as db:
+            return db.execute("SELECT 1 FROM jobs WHERE scope=? AND status IN "
+                              "('queued','running','unconfirmed') LIMIT 1", (owner_scope,)).fetchone() is not None
+
+    def cancel_turn(self, session, turn):
+        """Fence late submissions; a running provider request retains its slot."""
+        owner_scope = f'{scope(session)}:{scope(turn)}'
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('INSERT OR IGNORE INTO cancelled_turns VALUES(?,?)', (owner_scope, time.time()))
+            requested = db.execute('SELECT requested FROM cancelled_turns WHERE scope=?', (owner_scope,)).fetchone()[0]
+            rows = db.execute("SELECT * FROM jobs WHERE scope=? AND status IN "
+                              "('queued','running','unconfirmed')", (owner_scope,)).fetchall()
+            for row in rows:
+                data = json.loads(row['data'])
+                data['cancelRequestedAt'] = requested
+                status = row['status']
+                if status == 'queued':
+                    status = 'error'
+                    data.update(error=CANCELLED, finished=time.time())
+                elif not data.get('error'):
+                    data['error'] = '已请求停止；图片执行结果及供应商状态仍待确认。'
+                db.execute('UPDATE jobs SET status=?,data=? WHERE id=?',
+                           (status, json.dumps(data, ensure_ascii=False), row['id']))
+
     def claim(self, config, owner, now=None):
         now = time.time() if now is None else now
         try:
@@ -156,6 +197,10 @@ class ImageJobs:
                 return None
             for row in db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall():
                 data = json.loads(row['data'])
+                if db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (row['scope'],)).fetchone():
+                    data.update(error=CANCELLED, finished=time.time())
+                    db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
+                    continue
                 if data.get('sessionId'):
                     from easel.task_store import TaskStore
                     if not TaskStore(self.outputs).image_allowed(data['sessionId'], data['turnId']):
@@ -171,6 +216,29 @@ class ImageJobs:
                 db.execute("UPDATE jobs SET status='running',owner=?,lease=? WHERE id=?", (owner, now + 45, row['id']))
                 return data
         return None
+
+    def dispatch(self, ident, owner):
+        """Persist the last local admission immediately before invoking generation."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute("SELECT * FROM jobs WHERE id=? AND owner=? AND status='running'", (ident, owner)).fetchone()
+            if row is None:
+                return False
+            data = json.loads(row['data'])
+            # This admission is single-use, including for calls retried by a host.
+            if data.get('dispatchAt') is not None:
+                return False
+            cancelled = db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (row['scope'],)).fetchone()
+            if data.get('sessionId'):
+                from easel.task_store import TaskStore
+                cancelled = cancelled or not TaskStore(self.outputs).image_allowed(data['sessionId'], data['turnId'])
+            if cancelled:
+                data.update(error=CANCELLED, finished=time.time())
+                db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), ident))
+                return False
+            data['dispatchAt'] = time.time()
+            db.execute('UPDATE jobs SET data=? WHERE id=?', (json.dumps(data, ensure_ascii=False), ident))
+            return True
 
     def deliver(self, job, owner, values):
         if job.get('sessionId'):
@@ -296,6 +364,8 @@ class ImageWorker:
             env.update({k: str(config.get(k, '')).strip() for k in ('IMG_BASE_URL', 'IMG_API_KEY', 'IMG_MODEL')})
             env['IMG_MODEL'] = job['model']
             env['EASEL_DATA_DIR'] = str(jobs.outputs.parent)
+            if not jobs.dispatch(ident, self.owner):
+                return
             result = self.runner(cmd, cwd=str(self.code), env=env, capture_output=True, text=True, timeout=900)
             if result.returncode != 0:
                 # A failed local process may already have submitted remotely.

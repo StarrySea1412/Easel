@@ -323,7 +323,7 @@ test('inline goal setup survives goal-created polling, retries the saved ID and 
   const commandInput=view.container.querySelector('textarea');
   await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(commandInput,'/goal 完成内容卡片');commandInput.dispatchEvent(new window.Event('input',{bubbles:true}));});
   await act(async()=>{commandInput.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));});
-  assert.equal(view.container.querySelector('.composer-goal-btn')?.getAttribute('aria-label'),'退出目标设置','/goal opens the goal setup');
+  assert.ok(view.container.querySelector('[aria-label="退出目标设置"]'),'/goal opens the goal setup');
   assert.equal(document.querySelector('[role=dialog]'),null);
   const input=view.container.querySelector('textarea');
   assert.equal(input.value,'完成内容卡片','the command text becomes the objective');
