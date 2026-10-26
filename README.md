@@ -1,4 +1,4 @@
-**正在迭代：0.20.0 候选。** 每轮独立快照保留旧回复，重启后按精确原运行和日志游标继续观察新增输出；排队不覆盖当前回复，取消启动后晚取得的锁会释放。保留紧凑工具栏、事务账本与持久删除。完整原生接管和大版本尚未完成，138和安装器未更新。参见[实现、验证与升级边界](https://github.com/StarrySea1412/Easel/blob/codex/run-observation-0.20.0/docs/run-observation-0.20.0.md)。
+**正在迭代：0.20.1 候选。** 任务工作区按实际内容宽度响应：宽窗口左右分栏，窄窗口上下排列，侧栏展开后同步调整。保留紧凑目标菜单与0.20.0逐轮恢复能力；完整大版本尚未完成，138和安装器未更新。参见[响应式修复与验证](https://github.com/StarrySea1412/Easel/blob/codex/task-responsive-0.20.1/docs/task-workspace-responsive-0.20.1.md)及[运行恢复边界](https://github.com/StarrySea1412/Easel/blob/codex/task-responsive-0.20.1/docs/run-observation-0.20.0.md)。
 
 > **138已更新 · 0.14.2（2026-10-22）**：DeepSeek用量图标已按实际模型显示；顶部创作导航自动换行，修复横向滚动条和菜单截断。已完成隔离与正式登录、资源/运行SHA、真实HTTP附件下载及正式浏览器桌面/窄屏验收。运行提交`15c763550657`，保留模型、认证、对话和作品。GPT/Gemini全自动仍暂缓，安装器未发布。[完整部署回执](https://github.com/StarrySea1412/Easel/blob/codex/deploy-138-0.14.0/docs/release-138-0.14.2-2026-10-22.md)。
 
