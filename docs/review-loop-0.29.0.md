@@ -45,3 +45,7 @@ pyproject.toml和前端包同步0.29.0，构建版本从pyproject读取。沿用
 本机入口http://127.0.0.1:7891/，管理员gaojitest/gaoji仅适用于`.artifacts/acceptance-data`隔离测试环境，使用正常密码哈希，不适用于生产。运行接口为0.29.0/development、revision=null，不是发行构建SHA。截图/合成夹具/日志仅在本机`.artifacts`，不提交。未调用付费模型、生图或平台发布；工作台可能读取公共热点/状态，不据此宣称零平台HTTP。
 
 完整并发/层级角色调度、全部引擎原生恢复、通用任务提炼/语义归并、真实模型质量成本/内容业务及完整历史清单仍未完成，继续原大版本目标。源码、构建、Git、本机隔离验收、138和安装器分别核对。
+
+## Git交付
+
+功能/验证a3b7d7930ac00f1238780ec34f133f1213fa6d85已推送starry/codex/review-loop-0.29.0并核对同SHA；main仅双语README，提交c471ecebcb7efe99ee1f0554a4722afda0c01b90已推送并核对，未合并功能。新文档HTTP200，main首页明确分支文档链接已读取核对。本条另作纯文档交付回执，完整目标继续；138和安装器未更新。
