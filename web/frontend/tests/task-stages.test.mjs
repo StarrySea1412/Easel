@@ -27,6 +27,19 @@ test('stage board separates verified handoff from pending artifacts and final qu
   await act(async()=>root.unmount());host.remove();
 });
 
+test('model review is labelled as a recommendation inside existing stage records',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  const reviewed={...stage,id:'review',title:'审查结果',review:{decision:'pass',summary:'合成建议通过，仍需人工检查',findings:[]}};
+  await act(async()=>root.render(createElement(Board,{stages:[reviewed]})));
+  assert.match(host.querySelector('.task-stage-status').textContent,/模型建议通过/);
+  assert.equal(host.querySelector('details').open,false);
+  assert.match(host.querySelector('details').textContent,/仍需人工检查/);
+  await act(async()=>root.render(createElement(Board,{stages:[{...reviewed,status:'blocked',review:{decision:'revise',summary:'合成：需补充说明',findings:['合成：缺少实际检查步骤']}}]})));
+  assert.match(host.querySelector('.task-stage-status').textContent,/需要处理 · 模型建议返工/);
+  assert.match(host.querySelector('details').textContent,/缺少实际检查步骤/);
+  await act(async()=>root.unmount());host.remove();
+});
+
 function Composer(props){
   const state=useChatGoalComposer(props);
   return createElement('div',null,createElement(Options,{state,onExit:()=>{}}),createElement(ChatGoalNotice,{state,blocked:false}),
@@ -61,7 +74,7 @@ test('workflow is sent with its budget, saved-start retry does not create anothe
   assert.match(host.querySelector('[aria-label="目标推进方式"]').textContent,/协作/);
   assert.equal(host.querySelector('[data-start]').disabled,false,host.textContent);
   await act(async()=>host.querySelector('[data-start]').click());
-  assert.equal(requests[0].body.goal.workflow,'research-delivery');
+  assert.equal(requests[0].body.goal.workflow,'reviewed-delivery');
   assert.equal(requests[0].body.goal.maxIterations,8);
   assert.match(host.textContent,/已保存/);
   await act(async()=>host.querySelector('[data-start]').click());

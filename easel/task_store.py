@@ -176,6 +176,8 @@ class TaskStore:
     def revise_goal(self, key, objective, criteria):
         with self.db() as db:
             g = self._get(db, 'goals', key)
+            if g.get('workflow') == 'reviewed-delivery' and not any(c['type'] == 'review' for c in criteria):
+                raise TaskConflict('审查协作必须保留用户最终质量验收项。')
             if g['status'] in ('active', 'completed', 'cancelled') or db.execute(
                     "SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed','queued')", (key,)).fetchone():
                 raise TaskConflict('请先停止并等待结算，再修改未完成目标。')
@@ -243,24 +245,52 @@ class TaskStore:
                 validate_handoffs(self.outputs, {'stages': stages[:index]})
             except ValueError as exc:
                 raise TaskConflict(str(exc)) from None
-            receipt = {'id': request_id, 'goalId': key, 'request': request,
-                       'fromRevision': revision, 'toRevision': revision + 1, 'at': self.clock(),
-                       'stages': stages[index:], 'checks': g.get('checks', []), 'steps': g.get('steps', []),
-                       'reviewedTurnId': g.get('reviewedTurnId'), 'currentTurnId': g.get('currentTurnId')}
-            db.execute('INSERT INTO stage_reworks VALUES(?,?,?)', (key, request_id, json.dumps(receipt, ensure_ascii=False)))
-            # Preserve the original role contract and cumulative attempt count.
-            g['stages'] = stages[:index] + [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts') if k in s},
-                                           'status': 'pending', 'checks': []} for s in stages[index:]]
-            summary = {k: receipt[k] for k in ('id', 'fromRevision', 'toRevision', 'at')}
-            summary.update(stageId=stage_id, title=stages[index]['title'], reason=reason,
-                           affected=[{'id': s['id'], 'title': s['title']} for s in stages[index:]])
-            g.update(status='paused', phase='idle', revision=revision + 1, stopEpoch=g['stopEpoch'] + 1,
-                     currentStageId=stage_id, currentTurnId=None, reviewedTurnId=None, checks=[], steps=[],
-                     noProgress=0, lastFingerprint=None, cancelRequested=False, lastRework=summary,
-                     reason='已准备从“' + stages[index]['title'] + '”重做，确认后继续；累计预算保留。')
+            receipt = self._archive_stage_rework(db, g, index, request_id, reason)
             self._goal(db, g)
-            self._event(db, g['sessionId'], 'stage_rework', {'goalId': key, **summary})
             return {'goal': g, 'receipt': receipt, 'replayed': False}
+
+    def _archive_stage_rework(self, db, g, index, request_id, reason, *, automatic=False):
+        """Caller has already established settled resources and retained inputs."""
+        stages, revision = g['stages'], g['revision']
+        stage_id = stages[index]['id']
+        receipt = {'id': request_id, 'goalId': g['id'], 'source': 'reviewer' if automatic else 'human',
+                   'request': {'stageId': stage_id, 'revision': revision, 'reason': reason},
+                   'fromRevision': revision, 'toRevision': revision + 1, 'at': self.clock(),
+                   'stages': stages[index:], 'checks': g.get('checks', []), 'steps': g.get('steps', []),
+                   'reviewedTurnId': g.get('reviewedTurnId'), 'currentTurnId': g.get('currentTurnId')}
+        db.execute('INSERT INTO stage_reworks VALUES(?,?,?)', (g['id'], request_id, json.dumps(receipt, ensure_ascii=False)))
+        g['stages'] = stages[:index] + [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts', 'reviewGate') if k in s},
+                                       'status': 'pending', 'checks': []} for s in stages[index:]]
+        summary = {k: receipt[k] for k in ('id', 'source', 'fromRevision', 'toRevision', 'at')}
+        summary.update(stageId=stage_id, title=stages[index]['title'], reason=reason,
+                       affected=[{'id': s['id'], 'title': s['title']} for s in stages[index:]])
+        g.update(status='active' if automatic else 'paused', phase='queued' if automatic else 'idle',
+                 revision=revision + 1, stopEpoch=g['stopEpoch'] + 1,
+                 currentStageId=stage_id, currentTurnId=None, reviewedTurnId=None, checks=[], steps=[],
+                 noProgress=0, lastFingerprint=None, cancelRequested=False, lastRework=summary,
+                 reason=('审查建议返工，下一阶段：' + stages[index]['title']) if automatic else
+                        ('已准备从“' + stages[index]['title'] + '”重做，确认后继续；累计预算保留。'))
+        self._event(db, g['sessionId'], 'stage_rework', {'goalId': g['id'], **summary})
+        return receipt
+
+    def _review_rework(self, db, g, r):
+        from easel.task_stages import stage_for_run
+        stage = stage_for_run(g, r)
+        target = stage['review']['targetStageId']
+        index = next(i for i, s in enumerate(g['stages']) if s['id'] == target)
+        reason = ''
+        if g.get('autoReworksUsed', 0) >= stage['reviewGate']['maxAutoReworks']:
+            reason = '已用完自动返工次数，请检查审查意见后人工处理。'
+        elif g['maxIterations'] - g['iterations'] < len(g['stages']) - index or g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
+            reason = '剩余累计预算不足以完成返工和后续阶段，请保留记录并新建目标。'
+        if reason:
+            stage['status'] = 'blocked'
+            g.update(status='blocked', phase='review_rework_limit', reason=reason)
+            return
+        # read_review already rechecked the current upstream file versions.
+        self._archive_stage_rework(db, g, index, 'review-' + r['id'],
+                                   '审查建议返工：' + stage['review']['summary'], automatic=True)
+        g['autoReworksUsed'] = g.get('autoReworksUsed', 0) + 1
 
     def rework_receipts(self, key):
         with self.db() as db:
@@ -468,6 +498,9 @@ class TaskStore:
                     stage['baseline'] = check_goal(self.outputs, stage, '')[0]
                     r.update(stageId=stage['id'], roleId=stage['roleId'], role=stage['role'])
                     g['currentStageId'] = stage['id']
+                    if stage.get('reviewGate'):
+                        from easel.stage_review import review_contract
+                        r['reviewContract'] = review_contract(g, r)
                 r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'], workTools=0)
                 if g.get('lastRework') and g['lastRework']['toRevision'] == g['revision']:
                     r['reworkId'] = g['lastRework']['id']
@@ -555,8 +588,9 @@ class TaskStore:
                 g.update(status='paused', phase='idle', reason=reason or '本轮被中断，目标已暂停；继续时从当前记录恢复。')
             elif state != 'completed':
                 g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
-            elif g.get('stages') and not settle_stage(g, r, text, stage_checks, self.clock()):
-                pass  # Advancement and evidence failure are durable stage transitions.
+            elif g.get('stages') and not settle_stage(g, r, text, stage_checks, self.clock(), outputs=self.outputs):
+                if g['phase'] == 'stage_rework':
+                    self._review_rework(db, g, r)
             elif not valid_checks(g, checks) or any(c['state'] == 'error' for c in checks):
                 g.update(status='blocked', phase='verification_error', reason='证据核验异常或验收项不完整，已停止自动推进。')
             elif any(c['type'] == 'review' and c['state'] == 'passed' for c in checks) and g.get('reviewedTurnId') != r['turnId']:

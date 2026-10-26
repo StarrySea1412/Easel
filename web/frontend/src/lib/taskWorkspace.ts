@@ -19,3 +19,7 @@ export function parseTaskWorkspaceHash(hash: string): {goalId?: string} | null {
   const match = /^#\/tasks(?:\/([A-Za-z0-9_.-]{1,120}))?\/?$/.exec(hash);
   return match ? {goalId:match[1]} : null;
 }
+
+export function isScheduleWorkspaceHash(hash: string): boolean {
+  return /^#\/schedules\/?$/.test(hash);
+}

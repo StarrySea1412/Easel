@@ -18,7 +18,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
 }) {
   const goal=editor?.goal;
   const [objective,setObjective]=useState('');
-  const [workflow,setWorkflow]=useState<''|'research-delivery'>('');
+  const [workflow,setWorkflow]=useState<''|NonNullable<GoalSpec['workflow']>>('');
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[savedId,setSavedId]=useState('');
   const [loading,setLoading]=useState(false),[verifiedModel,setVerifiedModel]=useState(''),[revision,setRevision]=useState(0),[savedModel,setSavedModel]=useState('');
   const submitting=useRef(false),saved=useRef(''),generation=useRef(0);

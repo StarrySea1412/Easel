@@ -11,7 +11,7 @@ import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
 import { taskRequest, mergeTaskSessions, type TaskSessionState, type SessionTombstone } from './lib/tasks';
 import { useTaskSnapshot } from './hooks/useTaskSnapshot';
-import { taskWorkspaceHash, parseTaskWorkspaceHash } from './lib/taskWorkspace';
+import { taskWorkspaceHash, parseTaskWorkspaceHash, isScheduleWorkspaceHash } from './lib/taskWorkspace';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
@@ -119,15 +119,24 @@ export default function App() {
   const [currentPage, setPageState] = useState<Page>('dashboard');
   const [taskTarget,setTaskTarget] = useState<string|undefined>(()=>parseTaskWorkspaceHash(window.location.hash)?.goalId);
   const setCurrentPage = useCallback((page: Page, preserveConversations = false) => {
-    if (page !== 'tasks' && parseTaskWorkspaceHash(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    const hash = window.location.hash;
+    const routedPage = ['tasks', 'automation', 'publish-receipts'].includes(page);
+    if (!routedPage && (parseTaskWorkspaceHash(hash) || isScheduleWorkspaceHash(hash) || parsePublishReceiptHash(hash))) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
     if (page === 'tasks' && !parseTaskWorkspaceHash(window.location.hash)) { setTaskTarget(undefined); window.location.hash = taskWorkspaceHash(); }
+    if (page === 'automation' && !isScheduleWorkspaceHash(window.location.hash)) window.location.hash = '#/schedules';
     if (page === 'publish-receipts' && !parsePublishReceiptHash(window.location.hash)) window.location.hash = publishReceiptHash();
-    else if (page !== 'publish-receipts' && parsePublishReceiptHash(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
     window.dispatchEvent(new window.CustomEvent('easel:page-navigation', { detail: { page, preserveConversations } }));
     setPageState(page);
   }, []);
   useEffect(()=>{
-    const navigateTasks=()=>{const route=parseTaskWorkspaceHash(window.location.hash);if(route){setTaskTarget(route.goalId);setCurrentPage('tasks');}else setPageState(page=>page==='tasks'?'dashboard':page);};
+    const navigateTasks=()=>{
+      const route=parseTaskWorkspaceHash(window.location.hash);
+      if(route){setTaskTarget(route.goalId);setCurrentPage('tasks');}
+      else if(isScheduleWorkspaceHash(window.location.hash))setCurrentPage('automation');
+      else setPageState(page=>page==='tasks'||page==='automation'?'dashboard':page);
+    };
     window.addEventListener('hashchange',navigateTasks);navigateTasks();
     return()=>window.removeEventListener('hashchange',navigateTasks);
   },[setCurrentPage]);

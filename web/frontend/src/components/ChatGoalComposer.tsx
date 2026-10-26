@@ -1,5 +1,5 @@
 import type {ChatGoalComposerState} from '../hooks/useChatGoalComposer';
-import type {TaskGoal} from '../lib/tasks';
+import type {TaskGoal,GoalSpec} from '../lib/tasks';
 import Select from './ui/Select';
 import {IconTarget} from './icons';
 import '../styles/chat-goal.css';
@@ -10,8 +10,8 @@ export default function ChatGoalComposer({state,goal,onExit}:{state:ChatGoalComp
     <Select className="composer-goal-workflow" aria-label="目标推进方式" value={state.workflow||''}
       triggerIcon={<IconTarget size={16}/>} triggerLabel={state.workflow?'协作':'目标'} menuMinWidth={132}
       title={`目标推进方式：${state.workflow?'分工协作':'直接推进'}`}
-      disabled={state.fieldsLocked||Boolean(goal)} onChange={value=>state.setWorkflow(value as ''|'research-delivery')}
-      options={[{value:'',label:'直接推进'},{value:'research-delivery',label:'分工协作'}]}/>
+      disabled={state.fieldsLocked||Boolean(goal)} onChange={value=>state.setWorkflow(value as ''|NonNullable<GoalSpec['workflow']>)}
+      options={[{value:'',label:'直接推进'},{value:state.workflow==='research-delivery'?'research-delivery':'reviewed-delivery',label:'分工协作'}]}/>
     <button type="button" className="composer-goal-close" aria-label="退出目标设置" title="退出目标模式（Esc）" disabled={state.busy} onClick={onExit}>×</button>
   </span>;
 }

@@ -83,3 +83,15 @@ test('superseded receipts are folded and fetched only on demand',async t=>{
   assert.equal(reads,1);assert.match(history.textContent,/版本 1 → 2/);assert.match(history.textContent,/合成修改原因/);
   await view.close();
 });
+
+test('automatic review rework keeps original findings inside folded history',async t=>{
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({receipts:[{
+    id:'auto',source:'reviewer',fromRevision:1,toRevision:2,request:{reason:'合成模型建议返工'},
+    stages:[{...stages[2],review:{decision:'revise',summary:'合成：制作缺少说明',findings:['合成：请补充实际检查步骤']}}],
+  }]})));
+  const view=await mount({goal:{...goal,lastRework:{id:'auto'}}}),history=view.host.querySelector('.task-stage-history');
+  await act(async()=>{history.open=true;await new Promise(resolve=>setTimeout(resolve,0));});
+  assert.match(history.textContent,/自动审查返工/);assert.match(history.textContent,/请补充实际检查步骤/);
+  assert.equal(history.querySelector('details').open,false);
+  await view.close();
+});

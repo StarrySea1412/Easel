@@ -45,8 +45,8 @@ export default function TaskStageRecovery({goal,runs,disabled,onChanged}:{goal:T
     {error&&<p className="task-error" role="alert">{error}</p>}
     {goal.lastRework&&<details className="task-stage-history" onToggle={event=>{if(event.target===event.currentTarget&&event.currentTarget.open)void history();}}><summary>阶段重做记录</summary>
       {historyBusy?<p role="status">正在读取…</p>:receipts?<ul>{receipts.map(receipt=><li key={receipt.id}>
-        <strong>版本 {receipt.fromRevision} → {receipt.toRevision} · {receipt.stages[0]?.title}</strong><p>{receipt.request.reason}</p>
-        {receipt.stages.map(stage=><details key={stage.id}><summary>{stage.title} · 原回执</summary><p>{stage.handoff||'当时尚无已核验交接正文'}</p><ul>{stage.checks.map((check,i)=><li key={i}>{check.label} · {({passed:'已核验',failed:'未通过',pending:'待核验',error:'核验异常'})[check.state]}{check.detail&&<small>{check.detail}</small>}</li>)}</ul></details>)}
+        <strong>版本 {receipt.fromRevision} → {receipt.toRevision} · {receipt.stages[0]?.title}{receipt.source==='reviewer'?' · 自动审查返工':''}</strong><p>{receipt.request.reason}</p>
+        {receipt.stages.map(stage=><details key={stage.id}><summary>{stage.title} · 原回执</summary>{!stage.review&&<p>{stage.handoff||'当时尚无已核验交接正文'}</p>}{stage.review&&<><p>{stage.review.summary}</p><ul>{stage.review.findings.map((finding,i)=><li key={i}>{finding}</li>)}</ul></>}<ul>{stage.checks.map((check,i)=><li key={i}>{check.label} · {({passed:'已核验',failed:'未通过',pending:'待核验',error:'核验异常'})[check.state]}{check.detail&&<small>{check.detail}</small>}</li>)}</ul></details>)}
       </li>)}</ul>:<button type="button" className="btn btn-sm" onClick={()=>void history()}>重试读取</button>}
     </details>}
   </>;
