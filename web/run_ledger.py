@@ -92,6 +92,7 @@ def create(
     session_id: str,
     session_key: str,
     model_ref: str | None = None,
+    role_id: str | None = None,
     engine: str = "openclaw",
     attempt: int = 1,
     recovery_of: str | None = None,
@@ -108,6 +109,7 @@ def create(
         if existing is not None:
             return copy.deepcopy(existing)
         now = _now()
+        from easel.agent_roles import role_snapshot
         record: dict[str, Any] = {
             "schemaVersion": 1,
             "turnId": turn_id,
@@ -115,6 +117,8 @@ def create(
             "sessionKey": session_key,
             "engine": engine,
             "modelRef": model_ref,
+            "roleId": role_id,
+            "role": role_snapshot(role_id),
             "attempt": max(1, int(attempt or 1)),
             "recoveryOf": recovery_of,
             "providerRunId": None,

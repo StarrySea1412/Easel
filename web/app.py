@@ -4312,6 +4312,7 @@ async def api_chat_branch(req: ChatBranchRequest):
 
 
 class ChatRequest(BaseModel):
+    roleId: Annotated[str, Field(pattern=r'^[a-z][a-z-]{1,50}$')] | None = None
     engine: Literal['openclaw', 'codex'] = 'openclaw'
     message: str
     history: list[HistoryMessage] = Field(default_factory=list, max_length=200)
@@ -4431,6 +4432,14 @@ def _chat_agent_runtime(req: ChatRequest) -> dict:
     return runtime
 
 
+def _chat_role_contract(req: ChatRequest) -> str:
+    from easel.agent_roles import role_context
+    contract = role_context(req.roleId)
+    if req.roleId and not contract:
+        raise HTTPException(400, '角色不存在或已被移除，请刷新后重试')
+    return contract
+
+
 def _chat_message(req: ChatRequest) -> str:
     from chat_branch import history_context
     context = _attachment_context(req)
@@ -4449,6 +4458,7 @@ def _chat_message(req: ChatRequest) -> str:
     message += ('\n\n〔目标进度〕当前为受保护的持续目标，优先调用easel_goal_update更新完整steps（id/title/status/detail）；'
                 '不要另建普通计划或派生Agent。完成需实际核验，失败保留未完成项。' if runtime.get('goalManaged') else planning_instructions())
     message += collaboration_instructions(runtime)
+    message += '\n\n' + _chat_role_contract(req)
     if req.sessionId:
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
@@ -5210,6 +5220,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     记下该文件尾偏移、实时 tail 之后追加的行，用 runId 闩锁隔离本轮，把 assistant_text_stream 的
     token delta 转成 SSE `token`、thinking delta 转成 `thinking`。stdout 仅留作错误/兜底。
     """
+    _chat_role_contract(req)  # Reject invalid contracts before creating or binding any run.
     if req.sessionId:
         _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
     if req.engine == 'codex':
@@ -5274,7 +5285,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             'message': '该轮已有终态，请新建轮次继续，避免重复提交。', 'turnId': turn_id,
         })
     run_ledger.create(_run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
-                      model_ref=requested_model_ref, engine=req.engine)
+                      model_ref=requested_model_ref, engine=req.engine, role_id=req.roleId)
     artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
     present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
     image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
@@ -5321,7 +5332,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             return terminal_timing or {'startedAt': started_at_ms}
 
         def save_turn(key, status, text, extra=None):
-            _save_turn(key, status, text, {**(extra or {}), **timing(status == 'done')})
+            _save_turn(key, status, text, {**(extra or {}), 'roleId': req.roleId, **timing(status == 'done')})
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
@@ -9369,6 +9380,12 @@ class OfficeModelRequest(OfficeControlRequest):
 
 class OfficeStopRequest(OfficeControlRequest):
     expectedRunId: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+@app.get('/api/agent-roles')
+async def api_agent_roles():
+    from easel.agent_roles import ROLE_SCHEMA_VERSION, list_roles
+    return {'schemaVersion': ROLE_SCHEMA_VERSION, 'roles': list_roles()}
 
 
 @app.get('/api/agent-office/models')

@@ -18,6 +18,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
 }) {
   const goal=editor?.goal;
   const [objective,setObjective]=useState('');
+  const [workflow,setWorkflow]=useState<''|'research-delivery'>('');
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[savedId,setSavedId]=useState('');
   const [loading,setLoading]=useState(false),[verifiedModel,setVerifiedModel]=useState(''),[revision,setRevision]=useState(0),[savedModel,setSavedModel]=useState('');
   const submitting=useRef(false),saved=useRef(''),generation=useRef(0);
@@ -27,6 +28,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
   useEffect(()=>{
     generation.current++;saved.current='';submitting.current=false;
     setObjective(seed);
+    setWorkflow(goal?.workflow||'');
     setSavedId('');setSavedModel('');setVerifiedModel('');setError('');setBusy(false);
     return()=>invalidateGeneration(generation);
   },[enabled,sessionId,seed,goal]);
@@ -56,7 +58,8 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
         // the single human-review criterion that Codex-style mode relies on.
         const criteriaForSave=goal?.criteria.length?goal.criteria:[{type:'review' as const,label:'目标结果由我验收',value:''}];
         if(goal){await taskRequest(`/goals/${goal.id}`,{objective:objective.trim(),criteria:criteriaForSave},'PUT');key=goal.id;}
-        else{const spec:GoalSpec={objective:objective.trim(),modelRef:executionModel,criteria:criteriaForSave,...DEFAULT_GOAL_LIMITS};key=(await taskRequest<TaskGoal>('/goals',{sessionId,goal:spec})).id;}
+        else{const spec:GoalSpec={objective:objective.trim(),modelRef:executionModel,criteria:criteriaForSave,...DEFAULT_GOAL_LIMITS,
+          ...(workflow?{workflow,maxIterations:8}: {})};key=(await taskRequest<TaskGoal>('/goals',{sessionId,goal:spec})).id;}
         if(!current())return;
         saved.current=key;setSavedId(key);setSavedModel(executionModel);onChanged?.();editor?.onConfigured?.();
       }
@@ -65,7 +68,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
     }catch(e){if(current())setError((key?'目标已保存，尚未确认启动。':'')+(e instanceof Error?e.message:'保存失败，请重试。'));}
     finally{if(current()){submitting.current=false;setBusy(false);}}
   }
-  return{objective,setObjective,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
+  return{objective,setObjective,workflow,setWorkflow,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
     modelLocked:Boolean(goal||savedId||busy),fieldsLocked:busy||locked||Boolean(savedId)||unsupported,
     label:busy?'正在设置目标':savedId?'重试启动目标':goal?'保存并继续目标':'开始目标',
     refreshModel:()=>setRevision(value=>value+1),save};

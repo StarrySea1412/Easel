@@ -574,7 +574,10 @@ class BrowserService:
             cast['watch'].cancel()
         if tab.cdp:
             try:
-                await tab.cdp.send('Page.stopScreencast')
+                # A detached/unresponsive renderer can leave this CDP request
+                # pending forever. Cast cleanup must not prevent closing its
+                # context and the owned Playwright driver.
+                await asyncio.wait_for(tab.cdp.send('Page.stopScreencast'), timeout=2)
             except Exception:
                 pass
 

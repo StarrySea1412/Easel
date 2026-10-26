@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import {goalElapsed,taskRequest,taskStatus,type TaskGoal,type TaskRun} from '../lib/tasks';
 import '../styles/chat-goal.css';
+import TaskStageBoard from './TaskStageBoard';
 
 function duration(seconds:number){const s=Math.floor(seconds);return s>=3600?`${Math.floor(s/3600)}小时${Math.floor(s%3600/60)}分` : s>=60?`${Math.floor(s/60)}分${s%60}秒`:`${s}秒`;}
 export default function ChatGoalPanel({goal,runs,onChanged,onClose,onEdit}:{goal:TaskGoal;runs:TaskRun[];onChanged:()=>void;onClose:()=>void;onEdit:()=>void}){
@@ -14,14 +15,15 @@ export default function ChatGoalPanel({goal,runs,onChanged,onClose,onEdit}:{goal
   const status=unknown?'等待核实':!terminal&&goal.phase==='waiting_input'?'等待你的输入':!terminal&&goal.phase==='review'?'等待验收':!terminal&&goal.phase==='budget'?'已达执行上限':taskStatus[goal.status]||goal.status;
   async function action(value:string){setBusy(true);setError('');try{await taskRequest(`/goals/${goal.id}/action`,{action:value});onChanged();}catch(e){setError(e instanceof Error?e.message:'操作失败');}finally{setBusy(false);}}
   return <aside className="chat-goal-panel" aria-label="当前对话目标">
-    <header><strong>目标</strong><time>{duration(elapsed)}</time><div>
+    <header><strong>{goal.stages?.length?'任务工作区':'目标'}</strong><time>{duration(elapsed)}</time><div>
       {(active||live)&&<button aria-label="暂停目标" disabled={busy} onClick={()=>void action('stop')}>Ⅱ</button>}
       {!terminal&&!active&&!live&&goal.phase!=='review'&&<button aria-label={goal.status==='draft'?'启动目标':'继续目标'} disabled={busy} onClick={()=>void action(goal.status==='draft'?'start':'resume')}>▷</button>}
       <button aria-label="收起目标面板" onClick={onClose}>↗</button>
     </div></header>
     <div className="chat-goal-panel-body">
       <section className="chat-goal-target"><div><span className="goal-symbol" aria-hidden="true">◎</span><h3>{goal.objective}</h3></div><span className={`chat-goal-state ${goal.status}`}>{status}</span></section>
-      <section className="chat-goal-progress" aria-label="目标进展"><div className="chat-goal-section-heading"><span>进展</span><span>{steps.length?`${done}/${steps.length}`:'尚无步骤'}</span></div>
+      {!!goal.stages?.length&&<TaskStageBoard stages={goal.stages}/>}
+      <section className="chat-goal-progress" aria-label="目标进展"><div className="chat-goal-section-heading"><span>{goal.stages?.length?'当前阶段步骤':'进展'}</span><span>{steps.length?`${done}/${steps.length}`:'尚无步骤'}</span></div>
         {steps.length?<ol>{steps.map(s=><li className={s.status} key={s.id}><span className="chat-goal-step-mark" aria-label={{pending:'待处理',in_progress:'进行中',completed:'已完成',blocked:'被阻塞'}[s.status]}>{s.status==='completed'?'✓':s.status==='in_progress'?'◉':s.status==='blocked'?'!':'○'}</span><div><p>{s.title}</p>{s.detail&&<small>{s.detail}</small>}</div></li>)}</ol>:<p className="chat-goal-no-steps">尚未收到步骤更新。工作开始后，助手会在这里报告实际进展。</p>}
       </section>
       {goal.reason&&!steps.some(s=>s.detail===goal.reason)&&<p className="chat-goal-reason" role="status">{goal.reason}</p>}

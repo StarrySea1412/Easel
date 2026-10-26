@@ -33,6 +33,7 @@
 
 ## 辅助面板与下一版本
 
+- [0.16.0 候选任务工作区：实现、证据与剩余范围](agent-workspace-0.16.0.md)
 - [对话侧栏研究](chat-side-panel-research-2026-10-18.md)
 - [面板首页与浏览器研究](panel-home-browser-research-2026-10-19.md)
 - [对话辅助面板：生图与发布协作规划](chat-panel-creation-publishing-plan-2026-10-21.md)

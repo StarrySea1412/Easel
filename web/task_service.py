@@ -91,7 +91,9 @@ class TaskService:
         if session and self.web._codex_service.owns(session):
             raise TaskConflict('首版目标使用 OpenClaw，请选择 OpenClaw 对话。')
         office_controls.validate_requested_model(self.web, spec['modelRef'])
-        for c in spec['criteria']:
+        from easel.task_stages import prepare_stages
+        criteria = spec['criteria'] + [c for s in prepare_stages(spec, 'validation') for c in s['criteria']]
+        for c in criteria:
             if c['type'] == 'file':
                 from easel.artifacts import file_path
                 file_path(self.web.OUTPUTS_DIR, c['value'])
@@ -167,6 +169,11 @@ class TaskService:
             if current['status'] != 'active' or current['stopEpoch'] != r['stopEpoch']:
                 await asyncio.to_thread(store.finish, r['id'], owner=self.owner, state='stopped', reason='派发前已停止。')
                 return
+            from easel.task_stages import stage_prompt, validate_handoffs
+            try:
+                await asyncio.to_thread(validate_handoffs, web.OUTPUTS_DIR, g)
+            except ValueError as exc:
+                raise TaskConflict(str(exc)) from None
             prompt = ('[Easel 持久目标 / 第' + str(r['iteration']) + '轮]\n' + g['objective'] +
                 '\n验收标准：' + json.dumps(g['criteria'], ensure_ascii=False) +
                 '\n前次检查：' + json.dumps(g.get('checks', []), ensure_ascii=False) +
@@ -176,7 +183,9 @@ class TaskService:
                 '只报告实际做过的工作；卡在权限、材料或用户决策时将相关步骤设为blocked并说明缺失信息。'
                 '只处理尚未通过项，保存并交付真实文件；步骤completed只表示自报工作完成，不能替代质量验收。'
                 '不要自称质量已通过，不派生Agent、不创建计划。')
-            req = web.ChatRequest(message=prompt, sessionId=g['sessionId'], turnId=r['turnId'], modelRef=g['modelRef'], thinkingLevel='low')
+            prompt += stage_prompt(g, r)
+            req = web.ChatRequest(message=prompt, sessionId=g['sessionId'], turnId=r['turnId'],
+                                  modelRef=g['modelRef'], thinkingLevel='low', roleId=r.get('roleId'))
             await web.start_chat_run(req, observe=False)
             deadline = time.monotonic() + max(0, g['maxSeconds'] - g['activeSeconds'])
             stopping = False
@@ -225,9 +234,13 @@ class TaskService:
             pass
         g = await asyncio.to_thread(store.get, 'goals', r['goalId'])
         checks, fingerprint = await asyncio.to_thread(check_goal, web.OUTPUTS_DIR, g, text)
+        from easel.task_stages import stage_for_run, check_stage
+        stage = stage_for_run(g, r)
+        stage_checks = (await asyncio.to_thread(check_stage, web.OUTPUTS_DIR, stage, text))[0] if stage else None
         state = 'completed' if ledger['status'] == 'completed' else 'stopped' if ledger['status'] == 'stopped' else 'failed'
         await asyncio.to_thread(store.finish, r['id'], owner=r['owner'], text=text, state=state,
-            checks=checks, fingerprint=fingerprint, reason=(ledger.get('error') or {}).get('message', ''))
+            checks=checks, fingerprint=fingerprint, stage_checks=stage_checks,
+            reason=(ledger.get('error') or {}).get('message', ''))
         return True
 
     def router(self):
@@ -248,6 +261,11 @@ class TaskService:
         def capability():
             return self.guard_status()
 
+        @router.get('/workflows')
+        def workflows():
+            from easel.task_stages import WORKFLOWS
+            return {'workflows': WORKFLOWS, 'execution': 'sequential', 'externalPublishing': False}
+
         @router.post('/preview')
         def preview(req: Schedule):
             return {'times': upcoming(req, time.time())}
@@ -267,6 +285,12 @@ class TaskService:
             try:
                 g = await asyncio.to_thread(self.store.get, 'goals', key)
                 if req.action in ('recheck', 'approve'):
+                    from easel.task_stages import validate_handoffs
+                    try:
+                        validate_handoffs(self.web.OUTPUTS_DIR, g)
+                    except ValueError as exc:
+                        self.store.invalidate_handoff(key, str(exc))
+                        raise TaskConflict(str(exc)) from None
                     runs = self.store.snapshot(g['sessionId'])['runs']
                     r = next((r for r in runs if r['turnId'] == g.get('currentTurnId')), None)
                     if not r:

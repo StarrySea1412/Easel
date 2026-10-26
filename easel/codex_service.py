@@ -262,11 +262,16 @@ class CodexService:
                 manifest.append(target.relative_to(workspace).as_posix())
                 if source.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}:
                     images.append(str(target))
+            from easel.agent_roles import role_snapshot
+            role = role_snapshot(getattr(req, 'roleId', None))
+            if getattr(req, 'roleId', None) and role is None:
+                raise HTTPException(400, '角色不存在或已被移除。')
             text = req.message
             if manifest:
                 text += '\n\n本轮附件（位于当前工作目录）：\n' + '\n'.join(manifest)
             state = {'sessionId': sid, 'turn_id': tid, 'engine': 'codex', 'status': 'running',
-                     'outcome': 'running', 'text': '', 'thinking': '', 'thinkingStatus': 'waiting',
+                     'outcome': 'running', 'roleId': getattr(req, 'roleId', None), 'role': role,
+                     'text': '', 'thinking': '', 'thinkingStatus': 'waiting',
                      'items': [], 'pending': [], 'seq': 0, 'requestedModelRef': selected,
                      'requestedThinkingLevel': req.thinkingLevel, 'workspace': str(workspace),
                      'webSearch': 'cached', 'startedAt': int(time.time() * 1000), 'threadId': binding.get('threadId')}
@@ -294,6 +299,9 @@ class CodexService:
                       'approvalsReviewer': 'user', 'sandbox': 'workspace-write',
                       'config': {'web_search': 'cached'},
                       'developerInstructions': '你正在 Easel 本地工作台中协助用户。用中文回答。产出保存在当前工作目录。仅使用本轮明确提供的附件。思考摘要和工具记录以真实协议事件为准，不编造。'}
+            if state.get('role'):
+                from easel.agent_roles import role_context
+                params['developerInstructions'] += '\n' + role_context(state['roleId'])
             params['developerInstructions'] += ('保存产物后调用easel_present交付已有文件到当前对话；'
                 '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
                 'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'

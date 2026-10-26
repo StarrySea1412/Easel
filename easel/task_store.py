@@ -95,7 +95,10 @@ class TaskStore:
             raise TaskConflict('无效会话。')
         if db.execute("SELECT 1 FROM goals WHERE session=? AND status NOT IN ('completed','cancelled')", (session,)).fetchone():
             raise TaskConflict('该会话已有目标，请先完成或取消。')
-        goal = {**spec, 'id': ident(), 'sessionId': session, 'title': title or spec['objective'][:50],
+        goal_id = ident()
+        from easel.task_stages import prepare_stages
+        goal = {**spec, 'id': goal_id, 'stages': prepare_stages(spec, goal_id),
+                'sessionId': session, 'title': title or spec['objective'][:50],
                 'planId': plan, 'revision': 1, 'stopEpoch': 0, 'status': 'draft', 'phase': 'idle',
                 'iterations': 0, 'activeSeconds': 0, 'createdAt': self.clock(), 'checks': [],
                 'noProgress': 0, 'reason': '', 'lastFingerprint': None, 'imagesUsed': 0, 'toolsUsed': 0}
@@ -123,7 +126,11 @@ class TaskStore:
             if g['status'] in ('active', 'completed', 'cancelled') or db.execute(
                     "SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed','queued')", (key,)).fetchone():
                 raise TaskConflict('请先停止并等待结算，再修改未完成目标。')
+            from easel.task_stages import prepare_stages
+            stage_spec = {s['id']: {k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria')}
+                          for s in g.get('stages', [])}
             g.update(objective=objective, title=objective[:50], criteria=criteria, checks=[], steps=[],
+                     stages=prepare_stages({**g, 'stages': list(stage_spec.values())}, g['id']),
                      revision=g['revision'] + 1, stopEpoch=g['stopEpoch'] + 1,
                      phase='idle', noProgress=0, lastFingerprint=None, reviewedTurnId=None, currentTurnId=None,
                      reason='目标已修改，确认后继续；累计限额保留。')
@@ -157,6 +164,18 @@ class TaskStore:
             if g['status'] == 'active':
                 g.update(status='blocked', phase=phase, reason=reason)
                 self._goal(db, g)
+            return g
+
+    def invalidate_handoff(self, key, reason):
+        with self.db() as db:
+            g = self._get(db, 'goals', key)
+            if g['status'] != 'cancelled':
+                if db.execute("SELECT 1 FROM goals WHERE session=? AND id<>? AND status NOT IN ('completed','cancelled')",
+                              (g['sessionId'], key)).fetchone():
+                    raise TaskConflict('当前会话已有后续目标；历史证据变化不能替换当前目标。')
+                g.update(status='blocked', phase='evidence_changed', reason=reason, reviewedTurnId=None)
+                self._goal(db, g)
+                self._event(db, g['sessionId'], 'handoff_changed', {'goalId': key})
             return g
 
     @staticmethod
@@ -239,6 +258,9 @@ class TaskStore:
                     raise TaskConflict('后台运行尚未结算；先核实或停止，不能重复提交。')
                 if g['iterations'] >= g['maxIterations'] or g['activeSeconds'] >= g['maxSeconds']:
                     raise TaskConflict('已达到执行上限；请保留记录并新建有明确预算的目标。')
+                if g.get('stages') and all(s['status'] == 'completed' for s in g['stages']):
+                    g['stages'][-1]['status'] = 'pending'
+                    g['steps'] = []
                 g.update(status='active', phase='queued', reason='', cancelRequested=False)
             else:
                 raise TaskConflict('不支持的目标操作。')
@@ -251,6 +273,9 @@ class TaskStore:
                 r = json.loads(row['data']); g = self._get(db, 'goals', row['goal'])
                 # Even before acknowledgement, the previous process may have sent it.
                 r.update(state='unconfirmed', reason='执行进程失联，未自动重发。')
+                from easel.task_stages import stage_for_run
+                if stage := stage_for_run(g, r):
+                    stage['status'] = 'unconfirmed'
                 db.execute("UPDATE runs SET state='unconfirmed',data=? WHERE id=?", (json.dumps(r), r['id']))
                 if g['status'] not in ('paused', 'cancelled'):
                     g.update(status='blocked', phase='unconfirmed', reason=r['reason'])
@@ -270,6 +295,14 @@ class TaskStore:
                     r = {'id': ident(), 'goalId': g['id'], 'sessionId': session,
                          'turnId': 'goal-' + ident(), 'iteration': g['iterations'] + 1,
                          'revision': g['revision'], 'stopEpoch': g['stopEpoch'], 'createdAt': self.clock()}
+                from easel.task_stages import current_stage
+                from easel.task_rules import check_goal
+                stage = current_stage(g)
+                if stage:
+                    stage.update(status='running', attempts=stage.get('attempts', 0) + 1)
+                    stage['baseline'] = check_goal(self.outputs, stage, '')[0]
+                    r.update(stageId=stage['id'], roleId=stage['roleId'], role=stage['role'])
+                    g['currentStageId'] = stage['id']
                 r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'], workTools=0)
                 db.execute('INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
                            (r['id'], g['id'], session, r['turnId'], 'running', owner, self.clock() + 90, 1, json.dumps(r)))
@@ -302,7 +335,7 @@ class TaskStore:
         with self.db() as db:
             return db.execute("SELECT 1 FROM runs WHERE session=? AND turn=? AND state='running'", (session, turn)).fetchone() is not None
 
-    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True):
+    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True, stage_checks=None):
         with self.db() as db:
             r = self._get(db, 'runs', run)
             if r.get('owner') != owner:
@@ -311,16 +344,23 @@ class TaskStore:
                 return self._get(db, 'goals', r['goalId'])
             g = self._get(db, 'goals', r['goalId'])
             r.update(state=state if resource_settled else 'unconfirmed', text=text[-200000:],
-                     finishedAt=self.clock(), checks=checks or [], reason=reason)
+                     finishedAt=self.clock(), checks=checks or [], stageChecks=stage_checks or [], reason=reason)
             db.execute('UPDATE runs SET state=?,data=? WHERE id=?', (r['state'], json.dumps(r, ensure_ascii=False), run))
             db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], r['turnId'], json.dumps({
                 'role': 'assistant', 'content': text or reason or ('本轮被中断，目标已暂停，可从当前记录继续。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
-                'requestedModelRef': r.get('modelRef'), 'taskRunId': r['id']}, ensure_ascii=False)))
+                'requestedModelRef': r.get('modelRef'), 'roleId': r.get('roleId'),
+                'taskStageId': r.get('stageId'), 'taskRunId': r['id']}, ensure_ascii=False)))
             g['activeSeconds'] += max(0, self.clock() - r.get('countedAt', r['startedAt']))
             r['countedAt'] = self.clock()
             db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r, ensure_ascii=False), run))
             if checks is not None:
                 g['checks'] = checks
+            from easel.task_stages import settle_stage, stage_for_run
+            stage = stage_for_run(g, r)
+            stale = g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']
+            if stage and (not resource_settled or state != 'completed' or stale):
+                stage.update(status='unconfirmed' if not resource_settled else 'pending' if state == 'stopped' else 'blocked',
+                             turnId=r['turnId'])
             if not resource_settled:
                 g.update(status='blocked', phase='unconfirmed', reason=reason or '外部资源未结算，未自动重发。')
             elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
@@ -333,6 +373,8 @@ class TaskStore:
                 g.update(status='paused', phase='idle', reason=reason or '本轮被中断，目标已暂停；继续时从当前记录恢复。')
             elif state != 'completed':
                 g.update(status='blocked', phase='run_failed', reason=reason or '本轮未正常完成，请检查记录。')
+            elif g.get('stages') and not settle_stage(g, r, text, stage_checks, self.clock()):
+                pass  # Advancement and evidence failure are durable stage transitions.
             elif not valid_checks(g, checks) or any(c['state'] == 'error' for c in checks):
                 g.update(status='blocked', phase='verification_error', reason='证据核验异常或验收项不完整，已停止自动推进。')
             elif any(c['type'] == 'review' and c['state'] == 'passed' for c in checks) and g.get('reviewedTurnId') != r['turnId']:
@@ -344,6 +386,8 @@ class TaskStore:
                 g.update(status='completed', phase='idle', reason='所有验收项通过。')
             elif checks and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='blocked', phase='review', reason='自动检查已结束，等待用户验收。')
+            elif g.get('stages'):
+                g.update(status='blocked', phase='final_checks', reason='阶段交接已结束，但最终验收条件未通过；检查结果后可继续最后阶段。')
             else:
                 g['noProgress'] = g['noProgress'] + 1 if g.get('lastFingerprint') == fingerprint else 0
                 g['lastFingerprint'] = fingerprint
@@ -373,6 +417,8 @@ class TaskStore:
                 raise TaskConflict('请等待后台结算再验收。')
             if g['status'] == 'cancelled':
                 raise TaskConflict('已取消目标保留历史，不能重新验收。')
+            if any(s['status'] != 'completed' for s in g.get('stages', [])):
+                raise TaskConflict('协作阶段尚未完成，不能提前验收整个目标。')
             if db.execute("SELECT 1 FROM goals WHERE session=? AND id<>? AND status NOT IN ('completed','cancelled')", (g['sessionId'], key)).fetchone():
                 raise TaskConflict('当前会话已有后续目标，历史目标不能改变当前执行状态。')
             row = db.execute('SELECT data FROM runs WHERE goal=? AND turn=?', (key, g.get('currentTurnId'))).fetchone()

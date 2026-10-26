@@ -1,3 +1,11 @@
+## 0.16.0 候选 · 2026-10-26
+
+- 基于已交付 0.14.2 与最新文档整理基线；独立在途 0.15.0 未混入。
+- 目标增加可选的研究、制作、审查、交付协作流程，复用持久任务准入、预算和停止边界。每阶段有独立角色/轮次、文件核验和交接回执，最终质量仍需用户确认。
+- 新增目标协作阶段视图、推进方式选择及实际交接文件入口。文件缺失、旧版本复用、上游证据变化、失联或停止后的晚到结果均不能直接交接。
+- 修复 Linux 浏览器桥接将 Path 直接交给 shlex.quote 导致聊天首个请求失败的问题；保留 0.14.2 的下载、鉴权及导航修复。
+- 状态：开发候选，完整大版本仍在迭代；138、真实模型、安装器和外部发布未验收/未更新。详见 [本轮交付边界](docs/agent-workspace-0.16.0.md)。
+
 ## 0.14.2 · 2026-10-22 · Responsive creation navigation / 创作导航自适应
 
 - Wrap creation links within the available width, preserving complete labels and visible keyboard focus; remove forced horizontal scrolling and automatic page scrolling. / 顶部创作导航自动换行，完整显示入口及键盘焦点，移除强制横向滚动和切页自动滚动。

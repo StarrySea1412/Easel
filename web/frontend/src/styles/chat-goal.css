@@ -46,5 +46,27 @@
 .composer-goal-options .task-error .link-btn{margin-left:8px}
 .composer-goal-options :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .composer-goal-options button:disabled{opacity:.5;cursor:default}
+.goal-workflow-choice{display:flex;align-items:center;gap:12px;margin:10px 0;font-size:12px}
+.goal-workflow-choice .ui-select{min-width:150px;max-width:100%}
+.goal-workflow-preview{display:flex;flex-wrap:wrap;gap:6px;font-size:11px}
+.goal-workflow-preview>span{border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 8px;background:var(--surface-2)}
+.goal-workflow-preview>span+span:before{content:'→';margin-right:6px;color:var(--text-tertiary)}
+.goal-workflow-preview>p{flex-basis:100%;margin:3px 0;line-height:1.6}
+.task-stage-board{border-top:1px solid var(--border);padding:15px 0 0;margin-bottom:8px}
+.task-stage-heading{display:flex;justify-content:space-between;gap:8px;font-size:11px}.task-stage-heading>span{color:var(--text-tertiary)}
+.task-stage-boundary{font-size:10px;line-height:1.7;color:var(--text-tertiary);margin:8px 0 16px}
+.task-stage-board ol,.task-stage-board ul{list-style:none;padding:0;margin:0}
+.task-stage-board .task-stage{position:relative;display:flex;gap:10px;padding:0 0 18px;min-width:0}
+.task-stage-number{flex:0 0 24px;height:24px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--border-strong);font-size:11px;color:var(--text-tertiary)}
+.task-stage.running .task-stage-number{color:var(--accent-start);border-color:var(--accent-start)}
+.task-stage.completed .task-stage-number{color:var(--green);border-color:var(--green)}
+.task-stage.blocked .task-stage-number,.task-stage.unconfirmed .task-stage-number{color:var(--amber);border-color:var(--amber)}
+.task-stage-content{flex:1;min-width:0}.task-stage-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.task-stage-title h4{font-size:12px;font-weight:500;margin:2px 0}.task-stage-title>span,.task-stage-status{color:var(--text-tertiary);font-size:10px}
+.task-stage-status{margin:4px 0 6px}.task-stage-content details{font-size:10px;line-height:1.7;color:var(--text-secondary)}
+.task-stage-content summary{cursor:pointer;min-height:24px;line-height:24px}.task-stage-content details p{overflow-wrap:anywhere;white-space:pre-wrap}
+.task-stage-content details li{margin:8px 0}.task-stage-content details a,.task-stage-content details small{display:block;overflow-wrap:anywhere}
+.task-stage-content details a{color:var(--accent-start);padding:4px 0;text-underline-offset:3px}
+.task-stage-receipt{max-height:160px;overflow:auto;padding:8px;background:var(--surface-2);border-radius:var(--radius-sm)}
 @media(max-width:1000px){.chat-goal-panel{position:absolute;z-index:30;right:12px;top:58px;width:296px;max-width:calc(100% - 24px);max-height:calc(100% - 82px);margin:0;box-shadow:0 8px 32px #00000018}}
 @media(max-width:560px){.chat-goal-budget{grid-template-columns:repeat(2,minmax(0,1fr))}.chat-goal-panel{right:10px;top:54px;width:300px}.chat-goal-panel>header button{min-width:30px;min-height:30px}}

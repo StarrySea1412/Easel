@@ -22,6 +22,24 @@ class Criterion(BaseModel):
         return self
 
 
+class GoalStage(BaseModel):
+    model_config = {'extra': 'forbid'}
+    id: str = Field(min_length=1, max_length=80, pattern=r'^[A-Za-z0-9_.-]+$')
+    title: str = Field(min_length=1, max_length=160)
+    roleId: str
+    objective: str = Field(min_length=3, max_length=3000)
+    criteria: list[Criterion] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode='after')
+    def valid_contract(self):
+        from easel.agent_roles import get_role
+        if not get_role(self.roleId):
+            raise ValueError('阶段角色不存在')
+        if any(c.type == 'review' for c in self.criteria):
+            raise ValueError('阶段交接使用文件或文字证据；人工质量验收放在最终目标')
+        return self
+
+
 class GoalSpec(BaseModel):
     model_config = {'extra': 'forbid'}
     objective: str = Field(min_length=3, max_length=6000)
@@ -31,6 +49,19 @@ class GoalSpec(BaseModel):
     maxSeconds: int = Field(default=1200, ge=60, le=7200, strict=True)
     maxTools: int = Field(default=40, ge=1, le=200, strict=True)
     maxImages: int = Field(default=0, ge=0, le=16, strict=True)
+    workflow: Literal['research-delivery'] | None = None
+    stages: list[GoalStage] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode='after')
+    def stage_contract(self):
+        if self.workflow and self.stages:
+            raise ValueError('选择内置协作流程或自定义阶段之一')
+        count = 4 if self.workflow else len(self.stages)
+        if count > self.maxIterations:
+            raise ValueError('执行轮次上限不能少于协作阶段数')
+        if len({s.id for s in self.stages}) != len(self.stages):
+            raise ValueError('阶段ID不能重复')
+        return self
 
 
 class GoalStep(BaseModel):

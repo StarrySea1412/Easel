@@ -1,4 +1,5 @@
 from dataclasses import replace
+import subprocess
 
 import pytest
 
@@ -55,7 +56,16 @@ def test_file_permissions_respect_workspace_sandbox_and_resolved_paths(tmp_path)
     workspace.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (workspace / "escape").symlink_to(outside, target_is_directory=True)
+    escape = workspace / 'escape'
+    try:
+        escape.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, 'winerror', None) != 1314:
+            raise
+        # Directory junctions exercise the same resolved-path escape on Windows
+        # without requiring Developer Mode or an elevated test process.
+        subprocess.run(['cmd', '/c', 'mklink', '/J', str(escape), str(outside)],
+                       check=True, capture_output=True)
     request = RunRequest("", workspace, {}, codex_auto_approve=True)
     assert can_auto_approve(FILE_CHANGE, {"grantRoot": str(workspace / "outputs")}, request)
     for root in (str(outside), "../outside", "escape", "", None):
