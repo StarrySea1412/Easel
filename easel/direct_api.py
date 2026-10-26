@@ -80,7 +80,7 @@ async def _sse_payloads(response: httpx.Response):
 
 async def stream_chat(settings: dict[str, str], content: str | list, *,
                       system: str = SYSTEM_PROMPT, history_file: Path | None = None,
-                      timeout: float = 300):
+                      timeout: float = 300, content_builder=None):
     """Yield (token/thinking/finish, text); persist only complete exchanges."""
     base, model, key = api_config(settings)
     history = []
@@ -91,9 +91,19 @@ async def stream_chat(settings: dict[str, str], content: str | list, *,
                 raise ValueError
         except (OSError, ValueError):
             raise DirectAPIError("直连会话历史损坏，请新建会话") from None
+    from easel.context_budget import ContextBudgetError, require_admitted, serialized
+    def payload(value):
+        return {"model": model, "stream": True,
+                "messages": [{"role": "system", "content": system}, *history,
+                             {"role": "user", "content": value}]}
+    try:
+        if content_builder:
+            content = content_builder(lambda value: serialized(payload(value), compact=True))
+        body = payload(content)
+        require_admitted(serialized(body, compact=True))
+    except ContextBudgetError as exc:
+        raise DirectAPIError(str(exc)) from None
     user = {"role": "user", "content": content}
-    body = {"model": model, "stream": True,
-            "messages": [{"role": "system", "content": system}, *history, user]}
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     text = []
     finish_reason = None

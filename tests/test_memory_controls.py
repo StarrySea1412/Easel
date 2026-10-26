@@ -82,8 +82,12 @@ def test_budget_continues_after_first_eight_oversized_matches(store):
     compact = active(store, '摄影短结论')
     context = store.context('one', '摄影教程分步操作和灯光布置', budget=10)
     assert [row['id'] for row in context['entries']] == [compact['id']]
-    assert context['recall'] == {'version': 1, 'budgetChars': 10, 'usedChars': 5, 'maxEntries': 8,
-                                 'matchedCount': 9, 'selectedCount': 1, 'skippedBudgetCount': 8, 'reason': 'selected'}
+    receipt = context['recall']
+    assert {key: receipt[key] for key in ('version', 'budgetChars', 'usedChars', 'maxEntries',
+            'matchedCount', 'selectedCount', 'skippedBudgetCount', 'reason')} == {
+            'version': 2, 'budgetChars': 10, 'usedChars': 5, 'maxEntries': 8,
+            'matchedCount': 9, 'selectedCount': 1, 'skippedBudgetCount': 8, 'reason': 'selected'}
+    assert receipt['skippedCharBudgetCount'] == 8 and receipt['usedTokens'] > 5
     assert store.context('one', '摄影', budget=-1)['recall']['reason'] == 'budget-exhausted'
     assert store.context('one', '旅游')['recall']['reason'] == 'no-match'
 

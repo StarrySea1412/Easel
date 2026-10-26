@@ -174,3 +174,11 @@ test('condition edits survive revision conflict and recall preview sends the sel
 });
 
 test.after(()=>window.happyDOM.abort());
+
+
+test('token recall is explicitly estimated while v1 historical receipts retain character units',()=>{
+ const base={version:1,budgetChars:5000,usedChars:12,selectedCount:1};
+ assert.equal(lib.memoryRecallSummary(base),'1条 · 12/5000字');
+ assert.equal(lib.memoryRecallSummary({...base,version:2,usedTokens:350,budgetTokens:4000}),'1条 · 估算 350/4000 token');
+ assert.equal(lib.memoryRecallSummary({...base,version:2,selectedCount:0,reason:'prompt-budget'}),'本轮提示已超出估算预算');
+});

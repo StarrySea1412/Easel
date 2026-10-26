@@ -255,6 +255,7 @@ def test_writing_and_analysis_identity_use_saved_context_for_both_engines(store,
     message = web._codex_message(request)
     assert writing['text'] in message and analysis['text'] not in message
     assert store.usage('one', request.sessionId)[0]['recall']['taskType'] == 'writing'
+    request.turnId = 'standalone-preview-turn'
     assert web._chat_memory_context(request, handoff)['entries'][0]['id'] == writing['id']
     from content_analysis import Store
     source = Store(web.OUTPUTS_DIR / '_analytics' / 'workbench')

@@ -524,21 +524,33 @@ class MemoryStore:
                 self._insert(db, profile, text_value(text), {'kind': 'profile'}, {'type': 'file-change', 'sourceHash': digest(text), 'capturedAt': None}, 'legacy-unverified')
             db.execute('UPDATE profiles SET projected_hash=? WHERE id=?', (digest(text), profile['id']))
 
-    def context(self, name, query='', platform=None, account_id=None, budget=5000, *, task_type=None):
+    def context(self, name, query='', platform=None, account_id=None, budget=5000, *, task_type=None,
+                token_budget=None, prompt_builder=None):
         if task_type is not None and task_type not in TASK_TYPES:
             raise ValueError('任务类型无效')
         state = self.state(name)
         limit = min(max(budget, 0), 12000)
-        receipt = {'version': 1, 'budgetChars': limit, 'usedChars': 0, 'maxEntries': 8,
+        from easel.context_budget import ESTIMATOR, admit, estimate_tokens, experience_reference, memory_budget, serialized
+        tokens = memory_budget() if token_budget is None else min(max(int(token_budget), 0), 100_000)
+        receipt = {'version': 2, 'estimator': ESTIMATOR, 'budgetTokens': tokens, 'usedTokens': 0,
+                   'skippedCharBudgetCount': 0, 'skippedTokenBudgetCount': 0, 'skippedPromptBudgetCount': 0,
+                   'budgetChars': limit, 'usedChars': 0, 'maxEntries': 8,
                    'matchedCount': 0, 'selectedCount': 0, 'skippedBudgetCount': 0, 'reason': 'empty'}
         if task_type:
             receipt['taskType'] = task_type
         result = {'entries': [], 'profileId': state['profileId'], 'revision': state['revision'],
                   'warning': state['warning'], 'policy': state['policy'], 'recall': receipt}
+        def finish():
+            reference = experience_reference(result)
+            receipt['usedTokens'] = estimate_tokens(serialized(reference)) if reference else 0
+            if prompt_builder:
+                receipt['promptAdmission'] = admit(prompt_builder(result)).public()
+            return result
+
         if not state['policy']['readEnabled'] or not state['managed'] or not state['projectionReady']:
             receipt['reason'] = ('read-disabled' if not state['policy']['readEnabled'] else
                                  'unmanaged' if not state['managed'] else 'projection-unavailable')
-            return result
+            return finish()
         words = terms(query)
         rows = []
         for entry in state['entries']:
@@ -560,14 +572,25 @@ class MemoryStore:
             if len(selected) == receipt['maxEntries']:
                 break
             if len(entry['text']) > remaining:
-                receipt['skippedBudgetCount'] += 1
+                receipt['skippedCharBudgetCount'] += 1
+                continue
+            candidate = {**result, 'entries': [*selected, entry]}
+            if estimate_tokens(serialized(experience_reference(candidate))) > tokens:
+                receipt['skippedTokenBudgetCount'] += 1
+                continue
+            if prompt_builder and not admit(prompt_builder(candidate)).admitted:
+                receipt['skippedPromptBudgetCount'] += 1
                 continue
             selected.append(entry)
             remaining -= len(entry['text'])
+        receipt['skippedBudgetCount'] = sum(receipt[key] for key in (
+            'skippedCharBudgetCount', 'skippedTokenBudgetCount', 'skippedPromptBudgetCount'))
         receipt.update(usedChars=limit - remaining, selectedCount=len(selected),
                        reason='selected' if selected else 'budget-exhausted' if rows else 'no-match' if query.strip() else 'empty')
         result['entries'] = selected
-        return result
+        if prompt_builder and not admit(prompt_builder(result)).admitted:
+            receipt['reason'] = 'prompt-budget'
+        return finish()
 
     def purge_profile(self, name):
         with self.connect() as db:

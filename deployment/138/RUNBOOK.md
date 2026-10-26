@@ -1,3 +1,5 @@
+> **0.26.0 source candidate, not deployed:** Shared local context budgeting requires matching frontend/backend builds and a consistent data backup. Native hidden history/image accounting remains unknown; no installer or host switch is included. [Configuration, verification and rollback limits](../../docs/context-budget-0.26.0.md).
+
 > **Current deployment, 2026-10-20:** Production and isolated instances run 0.7.2 / `e63a08eac773`, fixed image `sha256:fd631a6ab44a62837e781b3e50d87ce81783a4483bfc05ed08ef24aa5d80e25c`. Production has HappyCoding configured with five models, keeping its existing default. HTTP/source hashes passed; final browser and business acceptance is delegated to the user. Earlier release notes below are historical. [Receipt, capacity limits and rollback](../../docs/archive/2026/release-138-0.7.2-2026-10-20.md).
 
 # Easel 138 Linux deployment

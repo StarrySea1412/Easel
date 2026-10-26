@@ -28,10 +28,11 @@ from easel.paths import child_env, data_root
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
 from easel.persona import model_turn_message as chat_turn_message
-from easel.persona import load_profile_text
+from easel.persona import load_profile_text, model_api_message
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, history_path,
                               read_settings, stream_chat)
 from easel.timeouts import TIMEOUT_CHAT
+from easel.context_budget import ContextBudgetError
 from easel import harnesses
 from easel.harnesses.base import HarnessError
 
@@ -157,18 +158,19 @@ def cmd_chat(_args) -> int:
             except (EOFError, KeyboardInterrupt):
                 print()
                 return 0
-            except (HarnessError, asyncio.TimeoutError) as error:
+            except (HarnessError, ContextBudgetError, asyncio.TimeoutError) as error:
                 print(f"\nAgent 执行失败：{error or '请求超时'}")
     if runtime == "api":
         print("  API 直连模式（文字问答；/exit 退出）\n")
         system = SYSTEM_PROMPT
         if selected_persona:
-            system += "\n\n当前画像参考资料：\n" + load_profile_text(selected_persona, for_model=True)
+            system += "\n\n当前画像参考资料：\n" + load_profile_text(selected_persona, for_model=True, include_memory=False)
         async def reply(message):
             async for kind, text in stream_chat(
                     read_settings(), message, system=system,
                     history_file=history_path(PROJECT_ROOT / "outputs" / "_sessions", session_key),
-                    timeout=TIMEOUT_CHAT):
+                    timeout=TIMEOUT_CHAT, content_builder=lambda builder: model_api_message(
+                        message, selected_persona, prompt_builder=builder)):
                 if kind == "token":
                     print(text, end="", flush=True)
         while True:

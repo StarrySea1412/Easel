@@ -70,7 +70,8 @@ except Exception:  # 邮箱通知未安装/依赖缺失：钩子降级为空操�
     _notify_email_web_turn = None  # type: ignore
 from easel.persona import load_profile_text, persona_prefix, chat_turn_message, profile_exists, valid_persona_name, _FILE_ORDER
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
-from chat_budget import LONG_TASK_OUTPUT_RULE, admit
+from chat_budget import LONG_TASK_OUTPUT_RULE
+from easel.context_budget import ContextBudgetError, experience_reference, require_admitted
 from link_reader import LinkReader
 from image_reverse import (
     Provider as ImageReverseProvider, reverse_image,
@@ -611,6 +612,7 @@ app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
 from easel.codex_service import CodexService
 _codex_service = CodexService(OUTPUTS_DIR)
 _codex_service.message_builder = lambda req: _codex_message(req)
+_codex_service.budgeted_message_builder = lambda req, builder: _codex_message(req, prompt_builder=builder)
 app.include_router(_codex_service.router())
 from easel.browser_runtime import BrowserService
 from browser_api import router as browser_router
@@ -1476,7 +1478,8 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
 def _publishing_message(message: str) -> str:
     if publishing_mode(read_settings(ENV_FILE)) == 'automated':
         return message
-    return message + '\n\n当前为人工提交模式：准备并交付发布素材，由用户人工提交；不要调用发布脚本或自动上传、提交平台。'
+    rule = '\n\n当前为人工提交模式：准备并交付发布素材，由用户人工提交；不要调用发布脚本或自动上传、提交平台。'
+    return message if message.endswith(rule) else message + rule
 
 
 def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None,
@@ -1488,6 +1491,7 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
         _chat_failure_events().record_chat(turn_id=failure_turn_id, session_id=sk, error=error)
         return error['message']
     msg = _publishing_message(msg)
+    _require_chat_budget(msg)
     # 跨进程锁：同一会话同时刻只跑一个 openclaw，防并发 takeover 崩溃（rc=1）
     xlock = _CrossProcLock(sk)
     if not xlock.acquire(timeout=min(timeout, 300)):
@@ -4444,7 +4448,35 @@ def _chat_role_contract(req: ChatRequest) -> str:
     return contract
 
 
-def _chat_message(req: ChatRequest) -> str:
+def _require_chat_budget(message):
+    try:
+        return require_admitted(message)
+    except ContextBudgetError as exc:
+        raise HTTPException(413, exc.public()) from None
+
+
+def _chat_delivery_instructions(artifact_ticket):
+    message = ''
+    present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
+    image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
+    publish_script = PROJECT_ROOT / 'skills/shared/scripts/prepare_publish.py'
+    message += (f'\n[Easel发布草稿] 用户要求准备发布内容时，先将正文写入UTF-8文件，实际执行 '
+                f'python "{publish_script}" --ticket {artifact_ticket} --request-id "<固定请求标识>" --body-file "<正文文件>"。'
+                '可加 --title、--tags、重复 --platform 和 --media；只使用真实本机素材。'
+                '命令只准备可编辑草稿，返回草稿ID后用户可在辅助面板查看；不自动发布或绕过发布中心最终确认。')
+    message += (f'\n\n[Easel本轮文件交付]\n保存产物后，必须实际执行以下命令交付到当前对话；'
+                f'不依赖最终回复中的链接。命令只登记现有文件，不生成或扣费。\n'
+                f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
+                f'多个文件重复 --file 参数。若有easel_present工具可直接调用：ticket={artifact_ticket}，files为真实路径列表。'
+                f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
+                f'HTML预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
+                f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
+                f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
+                f'该调用可能产生图片费用，只用已配置图片通道；返回job后等待自动交付，勿换requestId重复提交。')
+    return message
+
+
+def _chat_message(req: ChatRequest, *, suffix='') -> str:
     from chat_branch import history_context
     context = _attachment_context(req)
     if not req.message.strip() and not context:
@@ -4456,9 +4488,6 @@ def _chat_message(req: ChatRequest) -> str:
     writing = _writing_context(req)
     if writing:
         references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
-    memory = _chat_memory_context(req, writing)
-    if memory:
-        references.append({'source': 'profile-experience', **memory})
     message = ''
     from easel.plan_progress import instructions as planning_instructions, collaboration_instructions
     runtime = _chat_agent_runtime(req)
@@ -4521,8 +4550,16 @@ def _chat_message(req: ChatRequest) -> str:
     message += '\n\n' + LONG_TASK_OUTPUT_RULE
     from easel.prompt_envelope import assemble
     from easel.persona import turn_reminder
-    return assemble(req.message, policy=_publishing_message(turn_reminder()),
-                    runtime=persona_prefix(req.persona) + '\n' + message, references=references)
+    policy = _publishing_message(turn_reminder())
+    runtime_text = persona_prefix(req.persona) + '\n' + message
+    def render(memory):
+        reference = experience_reference(memory)
+        return assemble(req.message, policy=policy, runtime=runtime_text,
+                        references=[*references, *([reference] if reference else [])]) + suffix
+    memory = _chat_memory_context(req, writing, prompt_builder=render)
+    text = render(memory)
+    _require_chat_budget(text)
+    return text
 
 
 def _writing_context(req):
@@ -4534,7 +4571,7 @@ def _writing_context(req):
         raise HTTPException(409, str(exc)) from exc
 
 
-def _chat_memory_context(req, writing=None):
+def _chat_memory_context(req, writing=None, *, prompt_builder=None):
     if not req.persona or not profile_exists(req.persona) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').is_file():
         return None
     platform = writing['platform'] if writing else None
@@ -4551,14 +4588,15 @@ def _chat_memory_context(req, writing=None):
             binding = json.loads(row[0])
             platform, account = binding['platform'], binding['accountId']
             task_type = 'account-analysis'
-    result = _memory_store().context(req.persona, req.message, platform, account, task_type=task_type)
-    if req.sessionId and req.turnId:
+    result = _memory_store().context(req.persona, req.message, platform, account, task_type=task_type,
+                                     prompt_builder=prompt_builder)
+    if req.sessionId and req.turnId and result['recall'].get('promptAdmission', {}).get('admitted', True):
         if not _memory_store().record_use(req.persona, req.sessionId, req.turnId, result):
             raise HTTPException(409, '该轮已绑定其他经验版本；资料已更改，请新建一轮再发送。')
     return result
 
 
-def _codex_message(req):
+def _codex_message(req, *, prompt_builder=None):
     """Called only after Codex turn deduplication, using the original query."""
     from chat_branch import history_context
     from easel.prompt_envelope import assemble
@@ -4571,10 +4609,16 @@ def _codex_message(req):
     writing = _writing_context(req)
     if writing:
         references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
-    memory = _chat_memory_context(req, writing)
-    if memory:
-        references.append({'source': 'profile-experience', **memory})
-    return assemble(req.message, policy=turn_reminder(), runtime=persona_prefix(req.persona), references=references)
+    policy, runtime = turn_reminder(), persona_prefix(req.persona)
+    def render(memory):
+        reference = experience_reference(memory)
+        return assemble(req.message, policy=policy, runtime=runtime,
+                        references=[*references, *([reference] if reference else [])])
+    memory = _chat_memory_context(req, writing, prompt_builder=lambda context:
+                                 prompt_builder(render(context)) if prompt_builder else render(context))
+    text = render(memory)
+    _require_chat_budget(prompt_builder(text) if prompt_builder else text)
+    return text
 
 
 def _skill_configuration_context(specs: dict[str, dict]) -> str:
@@ -5361,17 +5405,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         turn_id = await asyncio.to_thread(_codex_service.start, req)
         return await _codex_service.stream(req.sessionId, turn_id)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
-    message = _chat_message(req)
-    admission = admit(message)
-    if not admission.admitted:
-        raise HTTPException(413, {
-            'code': 'chat_context_budget',
-            'category': 'context_budget',
-            'retryable': True,
-            'message': ('本轮上下文已接近运行时安全预算，未提交模型请求；请先让当前会话总结/压缩，'
-                        '或新建对话后分批继续，避免触发模型输出截断。'),
-            **admission.public(),
-        })
+    delivery_suffix = _chat_delivery_instructions('0' * 48)
+    message = _chat_message(req, suffix=delivery_suffix)
     requested_model_ref = req.modelRef
     requested_thinking_level = req.thinkingLevel
     import office_controls
@@ -5419,22 +5454,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         raise HTTPException(409, {'code':'chat_ledger_unavailable','category':'conflict','retryable':False,
             'message':'已有运行记录无法核对，未派发。请保留记录并检查服务状态。','turnId':turn_id}) from None
     artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
-    present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
-    image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
-    publish_script = PROJECT_ROOT / 'skills/shared/scripts/prepare_publish.py'
-    message += (f'\n[Easel发布草稿] 用户要求准备发布内容时，先将正文写入UTF-8文件，实际执行 '
-                f'python "{publish_script}" --ticket {artifact_ticket} --request-id "<固定请求标识>" --body-file "<正文文件>"。'
-                '可加 --title、--tags、重复 --platform 和 --media；只使用真实本机素材。'
-                '命令只准备可编辑草稿，返回草稿ID后用户可在辅助面板查看；不自动发布或绕过发布中心最终确认。')
-    message += (f'\n\n[Easel本轮文件交付]\n保存产物后，必须实际执行以下命令交付到当前对话；'
-                f'不依赖最终回复中的链接。命令只登记现有文件，不生成或扣费。\n'
-                f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
-                f'多个文件重复 --file 参数。若有easel_present工具可直接调用：ticket={artifact_ticket}，files为真实路径列表。'
-                f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
-                f'HTML预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
-                f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
-                f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
-                f'该调用可能产生图片费用，只用已配置图片通道；返回job后等待自动交付，勿换requestId重复提交。')
+    message = message[:-len(delivery_suffix)] + _chat_delivery_instructions(artifact_ticket)
+    _require_chat_budget(message)
     if turn_id in _CHAT_JOBS:
         raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
     cancel_job = threading.Event()

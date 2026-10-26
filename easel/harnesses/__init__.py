@@ -44,6 +44,11 @@ def describe(runtime: str) -> dict:
 
 async def console_turn(prompt: str, root: Path, env: dict, native_id="", *,
                        timeout=1800, interactive=True, on_bind=None) -> tuple[str, str]:
+    from easel.context_budget import ContextBudgetError, require_admitted
+    try:
+        require_admitted(prompt)
+    except ContextBudgetError as exc:
+        raise HarnessError(str(exc)) from None
     config = settings(root / "outputs", env)
     runtime = config["runtime"]
     full_text = []

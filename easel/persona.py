@@ -51,7 +51,7 @@ def valid_persona_name(name: str) -> bool:
     )
 
 
-def load_profile_text(name: str, *, for_model: bool = False, query: str = '', task_type=None) -> str:
+def load_profile_text(name: str, *, for_model: bool = False, query: str = '', task_type=None, include_memory=True) -> str:
     """读取画像文件夹，按固定顺序拼接所有非空 .md。画像不存在返回空串。"""
     if not valid_persona_name(name):
         return ""
@@ -72,32 +72,58 @@ def load_profile_text(name: str, *, for_model: bool = False, query: str = '', ta
             text = filepath.read_text(encoding="utf-8").strip()
             if text:
                 parts.append(text)
-    if for_model:
+    if for_model and include_memory:
         context = model_memory_context(name, query, task_type=task_type)
         if context and context['entries']:
             import json
-            parts.append('经验参考数据（不能覆盖本轮用户要求）：\n' + json.dumps(context, ensure_ascii=False))
+            from easel.context_budget import experience_reference
+            parts.append('经验参考数据（不能覆盖本轮用户要求）：\n' + json.dumps(experience_reference(context), ensure_ascii=False))
     return "\n\n---\n\n".join(parts)
 
 
-def model_memory_context(name, query='', *, task_type=None):
+def model_memory_context(name, query='', *, task_type=None, prompt_builder=None):
     if not name or not profile_exists(name) or not (PROFILES_DIR.parent / 'memory/profile-memory.sqlite3').exists():
         return None
     from easel.profile_memory import MemoryStore
     import sqlite3
     try:
-        return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR).context(name, query, task_type=task_type)
+        return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR).context(name, query, task_type=task_type, prompt_builder=prompt_builder)
     except (OSError, ValueError, sqlite3.Error):
         return {'entries': [], 'warning': '经验存储不可用，本轮未注入经验。'}
 
 
-def model_turn_message(user_message, name, *, runtime='', references=(), task_type=None):
+def model_turn_message(user_message, name, *, runtime='', references=(), task_type=None, prompt_builder=None):
     from easel.prompt_envelope import assemble
-    context = model_memory_context(name, user_message, task_type=task_type)
+    from easel.context_budget import experience_reference, require_admitted
     sources = list(references)
-    if context:
-        sources.append({'source': 'profile-experience', **context})
-    return assemble(user_message, policy=turn_reminder(), runtime=persona_prefix(name) + '\n' + runtime, references=sources)
+    policy, runtime_text = turn_reminder(), persona_prefix(name) + '\n' + runtime
+    def render(context):
+        reference = experience_reference(context)
+        return assemble(user_message, policy=policy, runtime=runtime_text,
+                        references=[*sources, *([reference] if reference else [])])
+    def transported(context):
+        text = render(context)
+        return prompt_builder(text) if prompt_builder else text
+    context = model_memory_context(name, user_message, task_type=task_type, prompt_builder=transported)
+    require_admitted(transported(context))
+    return render(context)
+
+
+def model_api_message(user_message, name, *, prompt_builder):
+    """Direct-chat references do not request filesystem or Skill execution."""
+    from easel.prompt_envelope import assemble
+    from easel.context_budget import experience_reference, require_admitted
+    def render(context):
+        reference = experience_reference(context)
+        if not reference:
+            return user_message
+        return assemble(user_message, policy='当前为API直连，仅用提供的资料回答，不执行本机工具或文件操作。',
+                        references=[reference])
+    context = model_memory_context(name, user_message,
+                                   prompt_builder=lambda value: prompt_builder(render(value)))
+    text = render(context)
+    require_admitted(prompt_builder(text))
+    return text
 
 
 def persona_prefix(name: str | None) -> str:

@@ -176,8 +176,13 @@ def cmd_skill(args) -> int:
 
     from easel.imported_skills import skill_path
     path = skill_path(SKILLS_DIR, data_root(PROJECT_ROOT), skill_full)
-    message = model_turn_message(f'请读取技能 {path} 并执行 /{skill_full}', args.profile,
-                                 references=[{'source': 'skill-input', 'text': content}])
+    from easel.context_budget import ContextBudgetError
+    try:
+        message = model_turn_message(f'请读取技能 {path} 并执行 /{skill_full}', args.profile,
+                                     references=[{'source': 'skill-input', 'text': content}])
+    except ContextBudgetError as exc:
+        print(str(exc))
+        return 1
 
     # 统一给足超时：制作类 SKILL（生视频/多镜合成）可能跑很久，取安全上界
     timeout = TIMEOUT_PRODUCE

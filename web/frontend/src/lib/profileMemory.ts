@@ -14,13 +14,15 @@ export function sameConditions(a?:MemoryConditions,b?:MemoryConditions):boolean 
   return (['taskTypes','allKeywords','excludeKeywords'] as const).every(key=>JSON.stringify([...(a?.[key]||[])].sort())===JSON.stringify([...(b?.[key]||[])].sort()));
 }
 export type MemoryPolicy = {readEnabled:boolean;candidatesEnabled:boolean};
-export type MemoryRecall = {version:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
+export type MemoryRecall = {version:number;estimator?:string;budgetTokens?:number;usedTokens?:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
 export type MemoryContext = {entries:MemoryEntry[];recall?:MemoryRecall};
 export type MemoryState = {name:string;profileId:string;revision:number;managed:boolean;entries:MemoryEntry[];legacy:{text:string;hash:string}|null;projectionReady:boolean;warning:string|null;policy?:MemoryPolicy};
 export function memoryRecallSummary(recall?:MemoryRecall):string {
   if (!recall) return '本轮没有选用经验。';
-  if (recall.selectedCount) return `${recall.selectedCount}条 · ${recall.usedChars}/${recall.budgetChars}字`;
-  return ({'read-disabled':'已关闭读取经验',unmanaged:'旧经验尚未托管','projection-unavailable':'兼容文件待修复','budget-exhausted':'匹配经验超出本轮预算','no-match':'没有匹配当前任务的经验',empty:'当前范围没有有效经验'} as Record<string,string>)[recall.reason] || '本轮没有选用经验。';
+  if (recall.selectedCount) return recall.version >= 2 && recall.usedTokens !== undefined && recall.budgetTokens !== undefined
+    ? `${recall.selectedCount}条 · 估算 ${recall.usedTokens}/${recall.budgetTokens} token`
+    : `${recall.selectedCount}条 · ${recall.usedChars}/${recall.budgetChars}字`;
+  return ({'read-disabled':'已关闭读取经验',unmanaged:'旧经验尚未托管','projection-unavailable':'兼容文件待修复','prompt-budget':'本轮提示已超出估算预算','budget-exhausted':'匹配经验超出本轮预算','no-match':'没有匹配当前任务的经验',empty:'当前范围没有有效经验'} as Record<string,string>)[recall.reason] || '本轮没有选用经验。';
 }
 type ReadState = {data?:MemoryState;loading:boolean;error:string};
 const empty:ReadState = {loading:false,error:''};

@@ -1,6 +1,8 @@
 """Local Codex sessions and durable, replayable UI events (App Server 0.147)."""
 from __future__ import annotations
 
+from easel.context_budget import ContextBudgetError
+
 import asyncio
 import hashlib
 import json
@@ -67,6 +69,7 @@ class CodexService:
         self.browser_service = None
         self.failure_events = None
         self.message_builder = None
+        self.budgeted_message_builder = None
         self._recover()
 
     def _recover(self):
@@ -275,15 +278,26 @@ class CodexService:
             role = role_snapshot(getattr(req, 'roleId', None))
             if getattr(req, 'roleId', None) and role is None:
                 raise HTTPException(400, '角色不存在或已被移除。')
-            text = self.message_builder(req) if self.message_builder else req.message
-            if manifest:
-                text += '\n\n本轮附件（位于当前工作目录）：\n' + '\n'.join(manifest)
             state = {'sessionId': sid, 'turn_id': tid, 'engine': 'codex', 'status': 'running',
                      'outcome': 'running', 'roleId': getattr(req, 'roleId', None), 'role': role,
                      'text': '', 'thinking': '', 'thinkingStatus': 'waiting',
                      'items': [], 'pending': [], 'seq': 0, 'requestedModelRef': selected,
                      'requestedThinkingLevel': req.thinkingLevel, 'workspace': str(workspace),
                      'webSearch': 'cached', 'startedAt': int(time.time() * 1000), 'threadId': binding.get('threadId')}
+            from easel.context_budget import ContextBudgetError, require_admitted
+            ticket = ArtifactStore(self.outputs).bind(sid, tid)
+            params = self._thread_params(state, model, ticket)
+            effort = (state['requestedThinkingLevel'] or model['defaultEffort']).replace('off', 'none')
+            suffix = ('\n\n本轮附件（位于当前工作目录）：\n' + '\n'.join(manifest)) if manifest else ''
+            def transported(text):
+                return self._local_payload(text + suffix, params, images, effort)
+            try:
+                text = (self.budgeted_message_builder(req, transported) if self.budgeted_message_builder
+                        else self.message_builder(req) if self.message_builder else req.message)
+                text += suffix
+                state['promptAdmission'] = require_admitted(self._local_payload(text, params, images, effort)).public()
+            except ContextBudgetError as exc:
+                raise HTTPException(413, exc.public()) from None
             state['usageCursor'] = binding.get('usageCursor') if binding.get('threadId') else dict.fromkeys(
                 ('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens', 'totalTokens'), 0)
             binding['lastTurnId'] = tid
@@ -291,7 +305,7 @@ class CodexService:
             self._persist(state)
             self._event(state, 'timing', {'startedAt': state['startedAt']})
             self._event(state, 'activity', 'Codex 正在启动；等待实际事件。')
-            run = {'state': state, 'client': None, 'queue': None, 'requests': {},
+            run = {'threadParams': params, 'effort': effort, 'state': state, 'client': None, 'queue': None, 'requests': {},
                    'inputImages': images, 'browserJobs': set(), 'browserFinished': False, 'browserStop':threading.Event(),
                    'startedMonotonic': time.monotonic(),
                    'finished': threading.Event(), 'controlLock': threading.Lock()}
@@ -299,40 +313,56 @@ class CodexService:
             threading.Thread(target=self._run, args=(run, text, model), daemon=True, name='easel-codex-turn').start()
             return tid
 
+    def _thread_params(self, state, model, ticket):
+        params = {'cwd': state['workspace'], 'model': model['model'], 'approvalPolicy': 'on-request',
+                  'approvalsReviewer': 'user', 'sandbox': 'workspace-write',
+                  'config': {'web_search': 'cached'},
+                  'developerInstructions': '你正在 Easel 本地工作台中协助用户。用中文回答。产出保存在当前工作目录。仅使用本轮明确提供的附件。思考摘要和工具记录以真实协议事件为准，不编造。'}
+        if state.get('role'):
+            from easel.agent_roles import role_context
+            params['developerInstructions'] += '\n' + role_context(state['roleId'])
+        params['developerInstructions'] += ('保存产物后调用easel_present交付已有文件到当前对话；'
+            '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
+            'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'
+            'HTML使用自包含CSS/脚本或本地资源；预览隔离运行，不依赖外部CDN、联网接口或嵌套网页。')
+        params['developerInstructions'] += ('复杂或长任务先使用原生update_plan提交可验收的步骤，执行中持续更新；'
+            '短问答不强制建计划。工具回执不代表步骤完成，实际核验后才能标completed；失败或中断不得自动勾选剩余步骤。')
+        if self.browser_service:
+            from .browser_bridge import instructions
+            params['developerInstructions'] += instructions(state['sessionId'])
+        script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/image_job.py'
+        publish_script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/prepare_publish.py'
+        params['developerInstructions'] += (f'用户要求准备发布内容时，调用easel_prepare_publish登记可编辑草稿，必须提供固定requestId和body。'
+            f'旧会话缺此工具时，将正文保存为UTF-8文件，执行 python "{publish_script}" --ticket {ticket} --request-id "<固定标识>" --body-file "<正文文件>"。'
+            '草稿自动关联当前对话，可在辅助面板查看。该工具不发布；账号预检和最终提交由用户在发布中心确认。')
+        params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
+            f'旧会话缺此工具时可执行 python "{script}" submit --ticket {ticket} --request-id "<固定标识>" --prompt "<提示词>"。'
+            '可能产生图片费用，只用专用生图通道，不改请求标识重试，不隐式换模型；任务完成后文件自动展示。')
+        if state['threadId']:
+            params['threadId'] = state['threadId']
+        else:
+            params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
+        return params
+
+    @staticmethod
+    def _local_payload(text, params, images, effort):
+        from easel.context_budget import serialized
+        return serialized({'thread': params, 'turn': {'threadId': params.get('threadId', ''),
+                           'model': params['model'], 'summary': 'auto', 'effort': effort,
+                           'input': [{'type': 'text', 'text': text}] +
+                           [{'type': 'localImage', 'path': path} for path in images]}})
+
     def _run(self, run, text, model):
         state, client, thread = run['state'], None, None
         try:
+            from easel.context_budget import require_admitted
+            require_admitted(self._local_payload(text, run['threadParams'], run.get('inputImages', []), run['effort']))
             client = self.factory(Path(state['workspace']))
             run['client'] = client
-            params = {'cwd': state['workspace'], 'model': model['model'], 'approvalPolicy': 'on-request',
-                      'approvalsReviewer': 'user', 'sandbox': 'workspace-write',
-                      'config': {'web_search': 'cached'},
-                      'developerInstructions': '你正在 Easel 本地工作台中协助用户。用中文回答。产出保存在当前工作目录。仅使用本轮明确提供的附件。思考摘要和工具记录以真实协议事件为准，不编造。'}
-            if state.get('role'):
-                from easel.agent_roles import role_context
-                params['developerInstructions'] += '\n' + role_context(state['roleId'])
-            params['developerInstructions'] += ('保存产物后调用easel_present交付已有文件到当前对话；'
-                '不要只在最终回复中写链接。如果旧会话没有该工具，在一次命令工具输出独立一行 '
-                'EASEL_PRESENT {"files":[{"path":"相对工作目录的实际文件路径"}]}，由宿主校验交付。'
-                'HTML使用自包含CSS/脚本或本地资源；预览隔离运行，不依赖外部CDN、联网接口或嵌套网页。')
-            params['developerInstructions'] += ('复杂或长任务先使用原生update_plan提交可验收的步骤，执行中持续更新；'
-                '短问答不强制建计划。工具回执不代表步骤完成，实际核验后才能标completed；失败或中断不得自动勾选剩余步骤。')
-            if self.browser_service:
-                from .browser_bridge import instructions
-                params['developerInstructions'] += instructions(state['sessionId'])
-            ticket = ArtifactStore(self.outputs).bind(state['sessionId'], state['turn_id'])
-            script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/image_job.py'
-            publish_script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/prepare_publish.py'
-            params['developerInstructions'] += (f'用户要求准备发布内容时，调用easel_prepare_publish登记可编辑草稿，必须提供固定requestId和body。'
-                f'旧会话缺此工具时，将正文保存为UTF-8文件，执行 python "{publish_script}" --ticket {ticket} --request-id "<固定标识>" --body-file "<正文文件>"。'
-                '草稿自动关联当前对话，可在辅助面板查看。该工具不发布；账号预检和最终提交由用户在发布中心确认。')
-            params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
-                f'旧会话缺此工具时可执行 python "{script}" submit --ticket {ticket} --request-id "<固定标识>" --prompt "<提示词>"。'
-                '可能产生图片费用，只用专用生图通道，不改请求标识重试，不隐式换模型；任务完成后文件自动展示。')
+            params = run['threadParams']
             if state['threadId']:
-                response = client.rpc('thread/resume', {**params, 'threadId': state['threadId']})
+                response = client.rpc('thread/resume', params)
             else:
-                params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
                 response = client.rpc('thread/start', params)
             thread = response['thread']['id']
             with self.lock:
@@ -344,10 +374,13 @@ class CodexService:
             events = client.subscribe(thread)
             run['queue'] = events
             self._require_session(state['sessionId'])
-            started = client.rpc('turn/start', {'threadId': thread, 'input': [{'type': 'text', 'text': text}] +
-                [{'type':'localImage','path':path} for path in run.get('inputImages',[])],
-                'model': model['model'], 'effort': (state['requestedThinkingLevel'] or model['defaultEffort']).replace('off', 'none'),
-                'summary': 'auto'})
+            turn_params = {'threadId': thread, 'input': [{'type': 'text', 'text': text}] +
+                [{'type': 'localImage', 'path': path} for path in run.get('inputImages', [])],
+                'model': model['model'], 'effort': run['effort'],
+                'summary': 'auto'}
+            from easel.context_budget import serialized
+            state['promptAdmission'] = require_admitted(serialized({'thread': params, 'turn': turn_params})).public()
+            started = client.rpc('turn/start', turn_params)
             state['codexTurnId'] = started['turn']['id']
             self._persist(state)
             while True:
@@ -361,6 +394,9 @@ class CodexService:
                     if self._consume(run, event):
                         break
                     self._persist(state)
+        except ContextBudgetError as exc:
+            with self.lock:
+                state.update(outcome='rejected', error=exc.public(), promptAdmission=exc.admission.public())
         except Exception as exc:
             with self.lock:
                 state.update(outcome='unconfirmed', error={'message': safe(str(exc))[:1500]})
@@ -699,10 +735,16 @@ class CodexService:
                     if receipts[req.requestId] == 'accepted':
                         return {'ok': True, 'turnId': turn}
                     raise HTTPException(409, '上次插话回执未确认，为避免重复未重发。')
+                from easel.context_budget import require_admitted, serialized
+                payload = {'threadId': thread, 'expectedTurnId': turn,
+                           'input': [{'type': 'text', 'text': req.message}]}
+                try:
+                    require_admitted(serialized(payload))
+                except ContextBudgetError as exc:
+                    raise HTTPException(413, exc.public()) from None
                 receipts[req.requestId] = 'unconfirmed'
                 self._persist(state)
-            result = client.rpc('turn/steer', {'threadId': thread, 'expectedTurnId': turn,
-                'input': [{'type': 'text', 'text': req.message}]})
+            result = client.rpc('turn/steer', payload)
             with self.lock:
                 receipts[req.requestId] = 'accepted'
                 self._persist(state)
