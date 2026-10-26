@@ -37,3 +37,7 @@ HTTP沿用`/api/persona/{name}/memory`，候选增加`conditions`和可选`repla
 真实浏览器从更多菜单进入画像，经共享画像选择进入明确隔离样例；验证任务类型方向键/Enter、折叠保留草稿、确认弹窗新旧正文、Escape取消与Tab/Enter确认、旧版本历史和未知类型/写作类型两种召回。最终显示1条有效经验和2条已替代经验。实际320/390/1280 CSS像素的scrollWidth等于视口宽度，窗口覆盖已恢复。样例图片conditions-390.png和conditions-1280.png及日志保留本机.artifacts，不提交。未检查入口不计为通过。
 
 本机入口http://127.0.0.1:7891/，管理员gaojitest/gaoji仅适用此隔离数据；版本0.25.0/development、revision=null，不代表发行SHA或138升级。Git回执另记，完整目标继续。
+
+## Git交付
+
+功能与验证f063ffa15fdcfe598bd845786c4488bf867bb8b6已推送starry/codex/experience-conditions-0.25.0并核对同SHA；main仅双语首页d1e1219af323f143a3cc2a0f6b854791d481d679已推送核对，功能未并main。新文档链接HTTP200。本条另作纯文档回执；自动提取/语义去重、统一预算、完整调度/恢复和真实业务验收仍未完成，完整大版本保持进行中。
