@@ -1,5 +1,6 @@
 import type {ChatGoalComposerState} from '../hooks/useChatGoalComposer';
 import type {TaskGoal,GoalSpec} from '../lib/tasks';
+import {goalWorkflowOptions} from '../lib/tasks';
 import Select from './ui/Select';
 import {IconTarget} from './icons';
 import '../styles/chat-goal.css';
@@ -9,9 +10,9 @@ export default function ChatGoalComposer({state,goal,onExit}:{state:ChatGoalComp
   return <span className="composer-goal-control" onKeyDown={event=>{if(event.key==='Escape'&&!event.nativeEvent.isComposing){event.preventDefault();event.stopPropagation();onExit();}}}>
     <Select className="composer-goal-workflow" aria-label="目标推进方式" value={state.workflow||''}
       triggerIcon={<IconTarget size={16}/>} triggerLabel={state.workflow?'协作':'目标'} menuMinWidth={132}
-      title={`目标推进方式：${state.workflow==='parallel-reviewed-delivery'?'并行协作':state.workflow?'分工协作':'直接推进'}`}
+      title={`目标推进方式：${goalWorkflowOptions(state.workflow||null).find(option=>option.value===(state.workflow||''))?.label}`}
       disabled={state.fieldsLocked||Boolean(goal)} onChange={value=>state.setWorkflow(value as ''|NonNullable<GoalSpec['workflow']>)}
-      options={[{value:'',label:'直接推进'},{value:state.workflow==='research-delivery'?'research-delivery':'reviewed-delivery',label:'分工协作'},{value:'parallel-reviewed-delivery',label:'并行协作'}]}/>
+      options={goalWorkflowOptions(state.workflow||null)}/>
     <button type="button" className="composer-goal-close" aria-label="退出目标设置" title="退出目标模式（Esc）" disabled={state.busy} onClick={onExit}>×</button>
   </span>;
 }

@@ -2,8 +2,8 @@ import type { ChatSession } from './store';
 
 export interface TaskCriterion { type:'file'|'text'|'review'; label:string; value:string }
 export interface TaskCheck extends TaskCriterion { state:'pending'|'passed'|'failed'|'error'; detail?:string; evidence?:string }
-export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|'parallel-reviewed-delivery'|null }
-export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; dependsOn?:string[]; steps?:GoalStep[]; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string; review?:{decision:'pass'|'revise'|'blocked';summary:string;findings:string[]} }
+export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|'parallel-reviewed-delivery'|'planned-reviewed-delivery'|null }
+export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; dependsOn?:string[]; access?:'read'|'write'; groupPath?:string[]; planGate?:{schemaVersion:number}; plan?:{nodeCount:number;groupCount:number}; steps?:GoalStep[]; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string; review?:{decision:'pass'|'revise'|'blocked';summary:string;findings:string[]} }
 export interface GoalStep { id:string; title:string; status:'pending'|'in_progress'|'completed'|'blocked'; detail?:string }
 export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number; sessionDeleted?:boolean; revision?:number; lastRework?:{id:string;title:string;reason:string;fromRevision:number;toRevision:number} }
 export interface StageReworkReceipt { id:string; goalId:string; fromRevision:number; toRevision:number; at:number; request:{stageId:string;revision:number;reason:string}; stages:TaskStage[];source?:'human'|'reviewer' }
@@ -34,12 +34,19 @@ export async function taskRequest<T>(path='', body?:unknown, method='POST', sign
 }
 export const taskStatus:Record<string,string>={draft:'待启动',active:'进行中',paused:'已暂停',blocked:'需要处理',completed:'已完成',cancelled:'已取消',running:'运行中',unconfirmed:'等待核实',failed:'失败',stopped:'已停止',queued:'排队中',skipped:'已跳过'};
 
+export function goalWorkflowOptions(current?:GoalSpec['workflow']) {
+  return [{value:'',label:'直接推进'},{value:current==='research-delivery'?'research-delivery':'reviewed-delivery',label:'分工协作'},
+    {value:'parallel-reviewed-delivery',label:'并行协作'},{value:'planned-reviewed-delivery',label:'任务拆解'}];
+}
+export function workflowIterations(workflow:GoalSpec['workflow']|'') {return workflow==='planned-reviewed-delivery'?16:workflow?8:5;}
+export function graphWorkflow(goal:Pick<GoalSpec,'workflow'>) {return goal.workflow==='parallel-reviewed-delivery'||goal.workflow==='planned-reviewed-delivery';}
+
 /** Only inspection pages receive these contexts; sidebar and saved chats do not. */
 export function taskInspectionSessions(sessions:ChatSession[], runs:TaskRun[], goals:TaskGoal[]):ChatSession[] {
   const workers=new Map<string,ChatSession>();
   for(const run of runs.slice().sort((a,b)=>a.iteration-b.iteration)) {
     const goal=goals.find(item=>item.id===run.goalId);
-    if(!goal||goal.workflow!=='parallel-reviewed-delivery'||run.parentSessionId!==goal.sessionId
+    if(!goal||!graphWorkflow(goal)||run.parentSessionId!==goal.sessionId
       ||run.sessionId===goal.sessionId||sessions.some(item=>item.id===run.sessionId))continue;
     let worker=workers.get(run.sessionId);
     if(!worker) {

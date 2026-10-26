@@ -31,16 +31,16 @@ test('plan lifecycle separates repeating success, completed once, review and pau
   assert.equal(scheduleLabel({...schedule,kind:'weekly',weekdays:[4,0]}),'每周一、五 18:30');
 });
 
-async function setup(t){
+async function setup(t,snapshotValue=snapshot){
   const h={reads:0,requests:[],failRead:false,failSave:false,preview:null,action:null,opened:[]};
   t.mock.method(globalThis,'fetch',async(url,options={})=>{
     const path=String(url),body=options.body?JSON.parse(options.body):undefined;h.requests.push({path,body,method:options.method});
     let value;
-    if(path==='/api/tasks'){h.reads++;if(h.failRead)throw new Error('隔离读取失败');value=snapshot;}
+    if(path==='/api/tasks'){h.reads++;if(h.failRead)throw new Error('隔离读取失败');value=snapshotValue;}
     else if(path.startsWith('/api/agent-office/models'))value={available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',label:'隔离模型',configured:true}],reason:''};
     else if(path==='/api/tasks/capability')value={ready:true,reason:''};
     else if(path==='/api/tasks/preview')value=h.preview?await h.preview(body):{times:[2000,3000,4000]};
-    else if(path==='/api/tasks/plans'){if(h.failSave)return new Response(JSON.stringify({detail:'隔离保存失败'}),{status:409});value={id:'new-plan'};}
+    else if(path==='/api/tasks/plans'||/^\/api\/tasks\/plans\/[^/]+$/.test(path)){if(h.failSave)return new Response(JSON.stringify({detail:'隔离保存失败'}),{status:409});value={id:'new-plan'};}
     else if(path.endsWith('/action'))value=h.action?await h.action():{};
     else throw new Error('Unexpected fixture route '+path);
     return new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});
@@ -105,4 +105,23 @@ test('manual run registers a request id once and leaves the saved schedule uncha
   await act(async()=>{run.click();run.click();});
   const actions=v.h.requests.filter(r=>r.path.endsWith('/action'));assert.equal(actions.length,1);assert.equal(actions[0].body.action,'run');assert.ok(actions[0].body.requestId);
   assert.equal(actions[0].body.schedule,undefined);await act(async()=>gate.resolve({}));
+});
+
+test('template can use planned execution without enabling the schedule or multiplying budgets',async t=>{
+  const v=await setup(t);await act(async()=>v.host.querySelector('[aria-label="计划模板"] button').click());
+  await v.choose('指定执行模型','隔离模型');await v.choose('计划推进方式','任务拆解');
+  await v.click('保存为暂停计划');
+  const saved=v.h.requests.find(r=>r.path==='/api/tasks/plans').body;
+  assert.equal(saved.goal.workflow,'planned-reviewed-delivery');assert.equal(saved.goal.maxIterations,16);
+  assert.equal(saved.goal.maxSeconds,1200);assert.equal(saved.goal.maxTools,40);assert.equal(saved.goal.criteria[0].type,'review');
+  assert.equal(v.h.requests.filter(r=>r.path.endsWith('/action')).length,0);
+});
+
+test('editing a planned schedule preserves its protocol and custom iteration limit',async t=>{
+  const planned={...first,enabled:false,goal:{...goal,workflow:'planned-reviewed-delivery',maxIterations:13}};
+  const v=await setup(t,{...snapshot,plans:[planned]});await v.click('编辑计划');
+  assert.match(v.host.querySelector('[aria-label="计划推进方式"]').textContent,/任务拆解/);
+  await v.click('保存为暂停计划');
+  const saved=v.h.requests.find(r=>r.path==='/api/tasks/plans/p1').body;
+  assert.equal(saved.goal.workflow,'planned-reviewed-delivery');assert.equal(saved.goal.maxIterations,13);
 });

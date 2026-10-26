@@ -27,6 +27,8 @@ test('worker receipts produce inspection contexts without mutating saved chat hi
   assert.equal(inspected[1].parentSessionId,goal.sessionId);assert.deepEqual(inspected[1].messages.map(item=>item.turnId),['turn','retry']);
   assert.equal(taskInspectionSessions(sessions,[{...worker,parentSessionId:'foreign'}],[{...goal,workflow:'parallel-reviewed-delivery'}]),sessions);
   assert.equal(taskInspectionSessions(sessions,[worker],[goal]),sessions);
+  const planned=taskInspectionSessions(sessions,[worker],[{...goal,workflow:'planned-reviewed-delivery'}]);
+  assert.equal(planned[1].id,worker.sessionId);assert.equal(planned[1].taskWorker,true);
 });
 
 test('task inbox treats unconfirmed work as attention and preserves explicit route identity',()=>{

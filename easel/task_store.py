@@ -7,7 +7,7 @@ import sqlite3
 import time
 import uuid
 
-from easel.task_graph import parallel, ready_stages, affected_stages, ancestors, worker_session
+from easel.task_graph import parallel, admissible_stages, affected_stages, ancestors, worker_session, PLANNED_WORKFLOW
 
 
 SAFE_ID = re.compile(r'[A-Za-z0-9_.-]{1,120}\Z')
@@ -179,7 +179,7 @@ class TaskStore:
     def revise_goal(self, key, objective, criteria):
         with self.db() as db:
             g = self._get(db, 'goals', key)
-            if g.get('workflow') in ('reviewed-delivery', 'parallel-reviewed-delivery') and not any(c['type'] == 'review' for c in criteria):
+            if g.get('workflow') in ('reviewed-delivery', 'parallel-reviewed-delivery', PLANNED_WORKFLOW) and not any(c['type'] == 'review' for c in criteria):
                 raise TaskConflict('审查协作必须保留用户最终质量验收项。')
             if g['status'] in ('active', 'completed', 'cancelled') or db.execute(
                     "SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed','queued')", (key,)).fetchone():
@@ -187,6 +187,8 @@ class TaskStore:
             from easel.task_stages import prepare_stages
             stage_spec = {s['id']: {k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria')}
                           for s in g.get('stages', [])}
+            if g.get('workflow') == PLANNED_WORKFLOW:
+                self._retire_plan(g)
             g.update(objective=objective, title=objective[:50], criteria=criteria, checks=[], steps=[],
                      stages=prepare_stages({**g, 'stages': list(stage_spec.values())}, g['id']),
                      revision=g['revision'] + 1, stopEpoch=g['stopEpoch'] + 1,
@@ -244,7 +246,8 @@ class TaskStore:
             affected = affected_stages(g, stage_id)
             if all(s['status'] == 'pending' for s in affected):
                 raise TaskConflict('所选阶段及后续尚未执行，无需重做。')
-            if g['maxIterations'] - g['iterations'] < len(affected):
+            required_rounds = 4 if stages[index].get('planGate') else len(affected)
+            if g['maxIterations'] - g['iterations'] < required_rounds:
                 raise TaskConflict('剩余轮次不足以重做所选阶段及后续；累计预算保留，请新建目标。')
             if g['activeSeconds'] >= g['maxSeconds'] or g['toolsUsed'] >= g['maxTools']:
                 raise TaskConflict('已达到累计执行预算，不能通过重做重置；请新建目标。')
@@ -268,9 +271,16 @@ class TaskStore:
                    'fromRevision': revision, 'toRevision': revision + 1, 'at': self.clock(),
                    'stages': affected, 'checks': g.get('checks', []), 'steps': g.get('steps', []),
                    'reviewedTurnId': g.get('reviewedTurnId'), 'currentTurnId': g.get('currentTurnId')}
+        if stages[index].get('planGate') and g.get('taskPlan'):
+            receipt['taskPlan'] = g['taskPlan']
         db.execute('INSERT INTO stage_reworks VALUES(?,?,?)', (g['id'], request_id, json.dumps(receipt, ensure_ascii=False)))
-        g['stages'] = [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts', 'reviewGate', 'dependsOn') if k in s},
-                       'status': 'pending', 'checks': []} if s['id'] in affected_ids else s for s in stages]
+        if stages[index].get('planGate'):
+            from easel.task_stages import prepare_stages
+            self._retire_plan(g)
+            g['stages'] = prepare_stages(g, g['id'])
+        else:
+            g['stages'] = [{**{k: s[k] for k in ('id', 'title', 'roleId', 'objective', 'criteria', 'role', 'attempts', 'reviewGate', 'dependsOn', 'access', 'groupId', 'groupPath') if k in s},
+                           'status': 'pending', 'checks': []} if s['id'] in affected_ids else s for s in stages]
         summary = {k: receipt[k] for k in ('id', 'source', 'fromRevision', 'toRevision', 'at')}
         summary.update(stageId=stage_id, title=stages[index]['title'], reason=reason,
                        affected=[{'id': s['id'], 'title': s['title']} for s in affected])
@@ -282,6 +292,13 @@ class TaskStore:
                         ('已准备从“' + stages[index]['title'] + '”重做，确认后继续；累计预算保留。'))
         self._event(db, g['sessionId'], 'stage_rework', {'goalId': g['id'], **summary})
         return receipt
+
+    @staticmethod
+    def _retire_plan(g):
+        attempts = g.setdefault('retiredStageAttempts', {})
+        for stage in g.get('stages', []):
+            attempts[stage['id']] = max(attempts.get(stage['id'], 0), stage.get('attempts', 0))
+        g.pop('taskPlan', None)
 
     def _review_rework(self, db, g, r):
         from easel.task_stages import stage_for_run
@@ -503,7 +520,7 @@ class TaskStore:
                     continue
                 live = [json.loads(row[0]) for row in db.execute("SELECT data FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (g['id'],))]
                 if parallel(g):
-                    candidates = ready_stages(g)
+                    candidates = admissible_stages(g, live)
                     if len(live) >= 2 or any(r['state'] == 'unconfirmed' for r in live) or not candidates:
                         continue
                 elif db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('running','unconfirmed')", (session,)).fetchone():
@@ -526,8 +543,9 @@ class TaskStore:
                     remaining = g['maxSeconds'] - g['activeSeconds'] - sum(item.get('maxRunSeconds', 0) for item in live)
                     if remaining < 1:
                         self._conclude_budget(db, g, '可用时长预算已不足，未派发新的并行阶段。'); continue
+                    slots = 1 if stage.get('access') == 'write' else min(2 - len(live), len(candidates))
                     r.update(sessionId=worker_session(g, stage), parentSessionId=session,
-                             maxRunSeconds=remaining / min(2 - len(live), len(candidates)), steps=[])
+                             maxRunSeconds=remaining / slots, steps=[])
                     scopes = self.path.parent / 'scopes'
                     scopes.mkdir(exist_ok=True)
                     (scopes / r['sessionId']).touch()
@@ -536,6 +554,9 @@ class TaskStore:
                     stage['baseline'] = check_goal(self.outputs, stage, '')[0]
                     r.update(stageId=stage['id'], roleId=stage['roleId'], role=stage['role'])
                     g['currentStageId'] = stage['id']
+                    if stage.get('planGate'):
+                        from easel.task_planning import plan_contract
+                        r['planContract'] = plan_contract(g, r)
                     if stage.get('reviewGate'):
                         from easel.stage_review import review_contract
                         r['reviewContract'] = review_contract(g, r)

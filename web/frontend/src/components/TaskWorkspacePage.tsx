@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import type {ChatSession} from '../lib/store';
-import {taskStatus, type TaskGoal, type TaskSnapshot, type TaskRun} from '../lib/tasks';
+import {taskStatus, graphWorkflow, type TaskGoal, type TaskSnapshot, type TaskRun} from '../lib/tasks';
 import {taskBucket, taskBuckets, type TaskBucket} from '../lib/taskWorkspace';
 import type {TaskSync} from '../hooks/useTaskSnapshot';
 import GoalCard from './GoalCard';
@@ -35,7 +35,7 @@ function TaskDetail({goal,runs,stale,onRefresh,onOpenChat,onOpenActivity,onOpenO
     </div>}
     {tab==='checks'&&<GoalCard goal={goal} runs={runs} onChange={onRefresh} disabled={stale}/>}
     {tab==='runs'&&<section className="task-workspace-runs" aria-label="任务执行记录">
-      {goal.workflow!=='parallel-reviewed-delivery'&&<div className="task-actions"><button type="button" className="btn btn-sm" onClick={()=>onOpenOffice(goal.sessionId)}>查看角色与工具</button><button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(goal.sessionId)}>查看会话运行记录</button></div>}
+      {!graphWorkflow(goal)&&<div className="task-actions"><button type="button" className="btn btn-sm" onClick={()=>onOpenOffice(goal.sessionId)}>查看角色与工具</button><button type="button" className="btn btn-sm" onClick={()=>onOpenActivity(goal.sessionId)}>查看会话运行记录</button></div>}
       {runs.length?<ol>{runs.slice().sort((a,b)=>b.iteration-a.iteration).map(run=><li key={run.id}><div><strong>第{run.iteration}轮 · {taskStatus[run.state]||run.state}</strong><time>{stamp(run.finishedAt||run.startedAt)}</time></div>
         {(run.stageId||run.roleId)&&<p>{goal.stages?.find(stage=>stage.id===run.stageId)?.title||run.stageId} · {goal.stages?.find(stage=>stage.roleId===run.roleId)?.role?.shortName||run.roleId}</p>}
         {run.reason&&<p>{run.reason}</p>}{run.text&&<details><summary>本轮回执</summary><pre>{run.text}</pre></details>}

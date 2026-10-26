@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from easel.artifacts import file_path
 from easel.task_rules import check_goal
+from easel.task_graph import parallel, ancestors
 
 
 class ReviewDecision(BaseModel):
@@ -19,16 +20,22 @@ class ReviewDecision(BaseModel):
 
 def review_contract(goal, run):
     upstream = []
+    targets = []
+    required = ancestors(goal, run['stageId']) if parallel(goal) else None
     for stage in goal['stages']:
-        if stage['id'] == run['stageId']:
+        if required is None and stage['id'] == run['stageId']:
             break
+        if required is not None and stage['id'] not in required:
+            continue
         if stage['status'] != 'completed':
             raise ValueError('审查前的协作阶段尚未完成。')
         upstream.append({'stageId': stage['id'], 'turnId': stage['turnId'],
                          'checks': [{k: c.get(k, '') for k in ('type', 'label', 'value', 'evidence')}
                                     for c in stage['checks']]})
+        if not stage.get('planGate'):
+            targets.append(stage['id'])
     return {'schemaVersion': 1, 'goalId': goal['id'], 'revision': run['revision'], 'turnId': run['turnId'],
-            'inputs': upstream, 'allowedTargets': [s['stageId'] for s in upstream]}
+            'inputs': upstream, 'allowedTargets': targets}
 
 
 def review_prompt(stage, run):

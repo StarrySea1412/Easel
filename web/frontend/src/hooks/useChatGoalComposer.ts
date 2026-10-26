@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {fetchOfficeTaskModels} from '../lib/officeControls';
-import {taskRequest,type TaskGoal,type GoalSpec} from '../lib/tasks';
+import {taskRequest,workflowIterations,type TaskGoal,type GoalSpec} from '../lib/tasks';
 
 function invalidateGeneration(ref:{current:number}){ref.current++;}
 
@@ -59,7 +59,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
         const criteriaForSave=goal?.criteria.length?goal.criteria:[{type:'review' as const,label:'目标结果由我验收',value:''}];
         if(goal){await taskRequest(`/goals/${goal.id}`,{objective:objective.trim(),criteria:criteriaForSave},'PUT');key=goal.id;}
         else{const spec:GoalSpec={objective:objective.trim(),modelRef:executionModel,criteria:criteriaForSave,...DEFAULT_GOAL_LIMITS,
-          ...(workflow?{workflow,maxIterations:8}: {})};key=(await taskRequest<TaskGoal>('/goals',{sessionId,goal:spec})).id;}
+          ...(workflow?{workflow,maxIterations:workflowIterations(workflow)}: {})};key=(await taskRequest<TaskGoal>('/goals',{sessionId,goal:spec})).id;}
         if(!current())return;
         saved.current=key;setSavedId(key);setSavedModel(executionModel);onChanged?.();editor?.onConfigured?.();
       }

@@ -46,6 +46,34 @@ function Composer(props){
     createElement('button',{'data-start':true,disabled:!state.canSubmit,onClick:()=>void state.save()},'开始'));
 }
 
+test('planned choice sends decomposition protocol while preserving time and tool limits',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host),requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true}]}));
+    requests.push(JSON.parse(options.body));return new Response(JSON.stringify({id:'planned'}));
+  });
+  await act(async()=>root.render(createElement(Composer,{sessionId:'parent',engine:'openclaw',modelRef:'fixture/model',editor:{seed:'隔离合成任务拆解'},blocked:false})));
+  await act(async()=>host.querySelector('[aria-label="目标推进方式"]').click());
+  await act(async()=>[...document.querySelectorAll('[role=option]')].find(item=>item.textContent==='任务拆解').click());
+  assert.match(host.querySelector('[aria-label="目标推进方式"]').title,/任务拆解/);
+  assert.equal(host.querySelector('[data-start]').disabled,false,host.textContent);
+  await act(async()=>host.querySelector('[data-start]').click());
+  assert.equal(requests[0].goal.workflow,'planned-reviewed-delivery');assert.equal(requests[0].goal.maxIterations,16);
+  assert.equal(requests[0].goal.maxSeconds,1200);assert.equal(requests[0].goal.maxTools,40);assert.equal(requests[0].goal.criteria[0].type,'review');
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('plan records stay folded with a short summary and grouped stages remain flat',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  const planner={...stage,id:'decompose',title:'拆解任务',planGate:{schemaVersion:1},plan:{nodeCount:3,groupCount:2},handoff:'RAW_PLAN_CONTRACT_SENTINEL'};
+  await act(async()=>root.render(createElement(Board,{stages:[planner,{...stage,groupPath:['本地交付','材料核对']}]})));
+  assert.match(host.textContent,/3 项任务 · 2 个分组/);assert.match(host.textContent,/本地交付 \/ 材料核对/);
+  assert.ok(!host.textContent.includes('RAW_PLAN_CONTRACT_SENTINEL'));
+  assert.equal(host.querySelectorAll('.task-stage-board').length,1);assert.equal(host.querySelectorAll('details[open]').length,0);
+  assert.equal(host.querySelectorAll('a').length,2);
+  await act(async()=>root.unmount());host.remove();
+});
+
 test('parallel choice keeps compact goal controls and sends the separate workflow with shared limits',async t=>{
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host),requests=[];
   t.mock.method(globalThis,'fetch',async(url,options={})=>{

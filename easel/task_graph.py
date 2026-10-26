@@ -2,10 +2,11 @@
 import hashlib
 
 PARALLEL_WORKFLOW = 'parallel-reviewed-delivery'
+PLANNED_WORKFLOW = 'planned-reviewed-delivery'
 
 
 def parallel(goal):
-    return goal.get('workflow') == PARALLEL_WORKFLOW
+    return goal.get('workflow') in (PARALLEL_WORKFLOW, PLANNED_WORKFLOW)
 
 
 def ancestors(goal, stage_id):
@@ -23,6 +24,16 @@ def ready_stages(goal):
     completed = {s['id'] for s in goal.get('stages', []) if s['status'] == 'completed'}
     return [s for s in goal.get('stages', []) if s['status'] in ('pending', 'blocked')
             and set(s.get('dependsOn', [])).issubset(completed)]
+
+
+def admissible_stages(goal, live):
+    ready = ready_stages(goal)
+    if goal.get('workflow') != PLANNED_WORKFLOW:
+        return ready
+    running = {run['stageId'] for run in live}
+    if any(stage.get('access') == 'write' and stage['id'] in running for stage in goal['stages']):
+        return []
+    return [stage for stage in ready if not live or stage.get('access') != 'write']
 
 
 def affected_stages(goal, stage_id):

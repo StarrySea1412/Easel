@@ -8,8 +8,8 @@
 .task-stage.completed .task-stage-number{color:var(--green);border-color:var(--green)}
 .task-stage.blocked .task-stage-number,.task-stage.unconfirmed .task-stage-number{color:var(--amber);border-color:var(--amber)}
 .task-stage-content{flex:1;min-width:0}.task-stage-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.task-stage-title h4{font-size:12px;font-weight:500;margin:2px 0}.task-stage-title>span,.task-stage-status{color:var(--text-tertiary);font-size:10px}
-.task-stage-status{margin:4px 0 6px}.task-stage-content details{font-size:10px;line-height:1.7;color:var(--text-secondary)}
+.task-stage-title h4{font-size:12px;font-weight:500;margin:2px 0;min-width:0;overflow-wrap:anywhere}.task-stage-title>span,.task-stage-status{color:var(--text-tertiary);font-size:10px}
+.task-stage-status{margin:4px 0 6px;overflow-wrap:anywhere}.task-stage-content details{font-size:10px;line-height:1.7;color:var(--text-secondary)}
 .task-stage-content summary{cursor:pointer;min-height:24px;line-height:24px}.task-stage-content details p{overflow-wrap:anywhere;white-space:pre-wrap}
 .task-stage-content details li{margin:8px 0}.task-stage-content details a,.task-stage-content details small{display:block;overflow-wrap:anywhere}
 .task-stage-content details a{color:var(--accent-start);padding:4px 0;text-underline-offset:3px}
