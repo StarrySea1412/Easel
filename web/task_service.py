@@ -213,14 +213,14 @@ class TaskService:
         except Exception as exc:
             # Starting may have partially reached the provider: retain its slot
             # whenever a ledger exists, and never turn an uncertain failure into retry.
-            ledger = web.run_ledger.read(web._run_ledger_root(), r['turnId'])
+            ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
             safe = ledger is None
             reason = str(exc.detail) if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else str(exc) if isinstance(exc, TaskConflict) else '运行启动或验收失败，请检查服务状态；未自动重发。'
             await asyncio.to_thread(store.finish, r['id'], owner=self.owner, state='failed', reason=reason, resource_settled=safe)
 
     async def settle(self, r):
         web, store = self.web, self.store
-        ledger = web.run_ledger.read(web._run_ledger_root(), r['turnId'])
+        ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
         if not ledger or not ledger.get('settled') or not ledger.get('resourceSettled'):
             return False
         jobs = ImageJobs(web.OUTPUTS_DIR).list(r['sessionId'])

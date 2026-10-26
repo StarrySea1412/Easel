@@ -2,18 +2,21 @@
 
 The web supervisor is intentionally process-local, while the provider run may
 outlive the browser connection (and sometimes the web process).  This module
-keeps the small amount of identity needed to reconcile those two lifetimes in
-one atomic JSON file per logical turn.  It never stores prompts, model output,
-credentials, or tool arguments.
+keeps identity and lifecycle events in one transactional SQLite ledger. Legacy
+JSON files are imported lazily and retained as compatibility projections. It
+never stores prompts, model output, credentials, or tool arguments.
 """
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+import hashlib
 import json
+import logging
 import os
 import re
-import threading
 import time
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +24,104 @@ from typing import Any
 SAFE_ID = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
 TERMINAL_STATUSES = frozenset({"completed", "failed", "stopped", "unknown"})
 _UNSET = object()
-_LOCK = threading.RLock()
+STORAGE_VERSION = 1
+log = logging.getLogger(__name__)
+
+
+class LedgerError(ValueError):
+    """Existing facts could not be read; never interpret this as a new turn."""
+
+
+class RunExists(LedgerError):
+    def __init__(self, record):
+        super().__init__('Logical turn already accepted')
+        self.record = record
+
+
+def _database(root):
+    return Path(root) / 'ledger.sqlite3'
+
+
+@contextmanager
+def _db(root):
+    Path(root).mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(_database(root), timeout=15)
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        version = db.execute('PRAGMA user_version').fetchone()[0]
+        if version not in (0, STORAGE_VERSION):
+            raise LedgerError('Unsupported run ledger storage version')
+        db.execute('CREATE TABLE IF NOT EXISTS runs(turn TEXT PRIMARY KEY, data TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS events(turn TEXT, seq INTEGER, data TEXT NOT NULL, PRIMARY KEY(turn,seq))')
+        db.execute('CREATE TABLE IF NOT EXISTS legacy_snapshots(turn TEXT PRIMARY KEY, source BLOB NOT NULL, sha256 TEXT NOT NULL, imported_at TEXT NOT NULL)')
+        if not version:
+            db.execute(f'PRAGMA user_version={STORAGE_VERSION}')
+        yield db
+        db.commit()
+    except sqlite3.Error as exc:
+        db.rollback()
+        raise LedgerError('Run ledger storage is unavailable') from exc
+    except BaseException:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _store(db, record):
+    db.execute('INSERT INTO runs VALUES(?,?) ON CONFLICT(turn) DO UPDATE SET data=excluded.data',
+               (record['turnId'], json.dumps(record, ensure_ascii=False)))
+    if record.get('events'):
+        event = record['events'][-1]
+        db.execute('INSERT OR IGNORE INTO events VALUES(?,?,?)',
+                   (record['turnId'], event['seq'], json.dumps(event, ensure_ascii=False)))
+
+
+def _load(db, path):
+    turn = path.stem
+    found = db.execute('SELECT data FROM runs WHERE turn=?', (turn,)).fetchone()
+    if found:
+        try:
+            value = json.loads(found[0])
+        except (ValueError, TypeError):
+            raise LedgerError('Unreadable run ledger snapshot') from None
+        if not isinstance(value, dict) or value.get('turnId') != turn:
+            raise LedgerError('Mismatched run ledger snapshot')
+        return value
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        value = json.loads(raw)
+        if (not isinstance(value, dict) or value.get('schemaVersion') != 1 or value.get('turnId') != turn
+                or not isinstance(value.get('sessionId'), str) or not isinstance(value.get('events'), list)
+                or type(value.get('eventSeq')) is not int or value['eventSeq'] < 1):
+            raise ValueError()
+        for event in value['events']:
+            if not isinstance(event, dict) or type(event.get('seq')) is not int or not 1 <= event['seq'] <= value['eventSeq']:
+                raise ValueError()
+    except (ValueError, UnicodeError, TypeError):
+        raise LedgerError('Unreadable legacy run ledger; retain it for recovery') from None
+    db.execute('INSERT INTO legacy_snapshots VALUES(?,?,?,?)',
+               (turn, raw, hashlib.sha256(raw).hexdigest(), _now()))
+    _store(db, value)
+    db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?)',
+                  [(turn, event['seq'], json.dumps(event, ensure_ascii=False)) for event in value['events']])
+    return value
+
+
+def _project(root, turn):
+    # Serialize projections through the same database lock. A delayed writer
+    # always exports the newest committed record, never its older local copy.
+    try:
+        with _db(root) as db:
+            path = _path(root, turn)
+            record = _load(db, path)
+            if record:
+                _atomic_write(path, record)
+    except OSError:
+        log.warning('Run ledger committed; compatibility projection unavailable: %s', turn)
 
 
 def _now() -> str:
@@ -34,22 +134,62 @@ def _path(root: Path, turn_id: str) -> Path:
     return root / "runs" / f"{turn_id}.json"
 
 
-def _read_path(path: Path) -> dict[str, Any] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return None
-    return value if isinstance(value, dict) else None
-
-
 def read(root: Path, turn_id: str) -> dict[str, Any] | None:
     """Read a run snapshot without exposing mutable module state."""
     try:
-        with _LOCK:
-            value = _read_path(_path(root, turn_id))
+        path = _path(root, turn_id)
+        if not _database(root).exists() and not path.exists():
+            return None
+        with _db(root) as db:
+            value = _load(db, path)
             return copy.deepcopy(value) if value is not None else None
+    except ValueError as exc:
+        if isinstance(exc, LedgerError):
+            raise
+        return None
+
+
+def event_page(root, turn_id, *, after=0, limit=100):
+    """Read a consistent event page; imported history may have an explicit gap."""
+    if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 200:
+        raise ValueError('Invalid event cursor or page size')
+    try:
+        path = _path(root, turn_id)
     except ValueError:
         return None
+    if not _database(root).exists() and not path.exists():
+        return None
+    with _db(root) as db:
+        record = _load(db, path)
+        if record is None:
+            return None
+        first = db.execute('SELECT MIN(seq) FROM events WHERE turn=?', (turn_id,)).fetchone()[0]
+        rows = db.execute('SELECT data FROM events WHERE turn=? AND seq>? ORDER BY seq LIMIT ?',
+                          (turn_id, after, limit+1)).fetchall()
+        events = [json.loads(row[0]) for row in rows[:limit]]
+        return {'turnId': turn_id, 'events': events, 'after': after,
+                'next': events[-1]['seq'] if events else after, 'revision': record['eventSeq'],
+                'hasMore': len(rows) > limit, 'firstAvailableSeq': first,
+                'historyTruncated': first is not None and after < first-1}
+
+
+def backup(root, target):
+    """SQLite online backup, including a consistent snapshot of all events."""
+    target = Path(target)
+    if target.exists():
+        raise FileExistsError(target)
+    if not _database(root).is_file():
+        raise FileNotFoundError(_database(root))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(_database(root), timeout=15) as source:
+        if source.execute('PRAGMA user_version').fetchone()[0] != STORAGE_VERSION:
+            raise LedgerError('Unsupported run ledger storage version')
+        target.open('xb').close()
+        with sqlite3.connect(target) as destination:
+            source.backup(destination)
+            if destination.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                raise LedgerError('Run ledger backup verification failed')
+    return target
 
 
 def _public_error(value: Any) -> dict[str, Any] | None:
@@ -96,6 +236,7 @@ def create(
     engine: str = "openclaw",
     attempt: int = 1,
     recovery_of: str | None = None,
+    _new_only: bool = False,
 ) -> dict[str, Any]:
     """Create the first ledger row, or return the existing row unchanged.
 
@@ -104,39 +245,50 @@ def create(
     has been requested.
     """
     path = _path(root, turn_id)
-    with _LOCK:
-        existing = _read_path(path)
+    with _db(root) as db:
+        existing = _load(db, path)
         if existing is not None:
-            return copy.deepcopy(existing)
-        now = _now()
-        from easel.agent_roles import role_snapshot
-        record: dict[str, Any] = {
-            "schemaVersion": 1,
-            "turnId": turn_id,
-            "sessionId": session_id,
-            "sessionKey": session_key,
-            "engine": engine,
-            "modelRef": model_ref,
-            "roleId": role_id,
-            "role": role_snapshot(role_id),
-            "attempt": max(1, int(attempt or 1)),
-            "recoveryOf": recovery_of,
-            "providerRunId": None,
-            "transport": None,
-            "status": "accepted",
-            "settled": False,
-            "resourceSettled": False,
-            "eventSeq": 0,
-            "events": [],
-            "createdAt": now,
-            "updatedAt": now,
-            "terminalAt": None,
-            "stopReason": None,
-            "error": None,
-        }
-        _event(record, "accepted", attempt=record["attempt"], recoveryOf=recovery_of)
-        _atomic_write(path, record)
+            record = existing
+        else:
+            now = _now()
+            from easel.agent_roles import role_snapshot
+            record: dict[str, Any] = {
+                "schemaVersion": 1,
+                "turnId": turn_id,
+                "sessionId": session_id,
+                "sessionKey": session_key,
+                "engine": engine,
+                "modelRef": model_ref,
+                "roleId": role_id,
+                "role": role_snapshot(role_id),
+                "attempt": max(1, int(attempt or 1)),
+                "recoveryOf": recovery_of,
+                "providerRunId": None,
+                "transport": None,
+                "status": "accepted",
+                "settled": False,
+                "resourceSettled": False,
+                "eventSeq": 0,
+                "events": [],
+                "createdAt": now,
+                "updatedAt": now,
+                "terminalAt": None,
+                "stopReason": None,
+                "error": None,
+            }
+            _event(record, "accepted", attempt=record["attempt"], recoveryOf=recovery_of)
+            _store(db, record)
+    if existing is not None:
+        if _new_only:
+            raise RunExists(record)
         return copy.deepcopy(record)
+    _project(root, turn_id)
+    return copy.deepcopy(record)
+
+
+def accept(root, turn_id, **kwargs):
+    """Only the winner may dispatch; duplicates retain the existing identity."""
+    return create(root, turn_id, _new_only=True, **kwargs)
 
 
 def mark(
@@ -152,6 +304,7 @@ def mark(
     error: Any = _UNSET,
     settled: bool | None = None,
     resource_settled: bool | None = None,
+    expected_revision: int | None = None,
     **details: Any,
 ) -> dict[str, Any] | None:
     """Apply one lifecycle transition atomically and append a compact event."""
@@ -159,26 +312,31 @@ def mark(
         path = _path(root, turn_id)
     except ValueError:
         return None
-    with _LOCK:
-        record = _read_path(path)
+    if not _database(root).exists() and not path.exists():
+        return None
+    with _db(root) as db:
+        record = _load(db, path)
         if record is None:
             return None
-        if status is not None:
+        if expected_revision is not None and record['eventSeq'] != expected_revision:
+            raise LedgerError('Run ledger changed; reread before reconciling')
+        final = record.get('settled') and record.get('resourceSettled') and record.get('status') in TERMINAL_STATUSES
+        if status is not None and not final:
             record["status"] = status
         if provider_run_id is not _UNSET and provider_run_id is not None:
             record["providerRunId"] = provider_run_id
         if transport is not _UNSET:
             record["transport"] = transport
         if last_event_id is not _UNSET:
-            record["lastEventId"] = max(0, int(last_event_id or 0))
-        if stop_reason is not _UNSET:
+            record["lastEventId"] = max(int(record.get('lastEventId') or 0), int(last_event_id or 0), 0)
+        if stop_reason is not _UNSET and not final:
             record["stopReason"] = stop_reason
-        if error is not _UNSET:
+        if error is not _UNSET and not final:
             record["error"] = _public_error(error)
         if settled is not None:
-            record["settled"] = bool(settled)
+            record["settled"] = bool(record.get('settled') or settled)
         if resource_settled is not None:
-            record["resourceSettled"] = bool(resource_settled)
+            record["resourceSettled"] = bool(record.get('resourceSettled') or resource_settled)
         if status in TERMINAL_STATUSES:
             record["terminalAt"] = record.get("terminalAt") or _now()
         event_details = {key: value for key, value in details.items() if value is not None}
@@ -187,8 +345,9 @@ def mark(
         if last_event_id is not _UNSET:
             event_details.setdefault("lastEventId", record.get("lastEventId", 0))
         _event(record, event or status or "updated", **event_details)
-        _atomic_write(path, record)
-        return copy.deepcopy(record)
+        _store(db, record)
+    _project(root, turn_id)
+    return copy.deepcopy(record)
 
 
 def is_active(record: dict[str, Any] | None) -> bool:

@@ -30,7 +30,7 @@ import ipaddress
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -4770,17 +4770,20 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     if not path.is_file():
         return []
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        events = []
+        with path.open('rb') as stream:
+            for line in stream:
+                try:
+                    # Complete legacy final records may omit the newline;
+                    # partial JSON/UTF-8 tails are retried on the next read.
+                    event = json.loads(line)
+                    if (isinstance(event, dict) and type(event.get('id')) is int and event['id'] > after
+                            and isinstance(event.get('event'), str) and event['event']):
+                        events.append(event)
+                except (ValueError, UnicodeError, TypeError):
+                    continue
+    except OSError:
         return []
-    events = []
-    for line in text.splitlines():
-        try:
-            event = json.loads(line)
-            if int(event.get("id", 0)) > after:
-                events.append(event)
-        except (ValueError, TypeError, AttributeError):
-            continue
     return events
 
 
@@ -5084,7 +5087,7 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
         return _codex_service.snapshot(session_id, turn_id)
     f = _turn_file(f"web:{session_id}")
     if not f.is_file():
-        ledger = run_ledger.read(_run_ledger_root(), turn_id) if turn_id else None
+        ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id) if turn_id else None
         return {"status": "none", "text": "", **({"run": ledger} if ledger else {})}
     try:
         payload = json.loads(f.read_text(encoding="utf-8"))
@@ -5107,7 +5110,7 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
                 except (OSError, ValueError, KeyError, TypeError):
                     # Optional diagnostics must never erase the saved reply.
                     pass
-        ledger = run_ledger.read(_run_ledger_root(), payload.get('turn_id') or turn_id or '')
+        ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), payload.get('turn_id') or turn_id or '')
         if ledger is not None:
             payload['run'] = ledger
         return payload
@@ -5118,10 +5121,18 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
 @app.get("/api/chat/runs/{turn_id}")
 async def api_chat_run(turn_id: str):
     """Return the durable identity/lifecycle row for one logical chat turn."""
-    record = run_ledger.read(_run_ledger_root(), turn_id)
+    record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
     if record is None:
         raise HTTPException(404, "对话运行账本不存在或已失效")
-    return record
+    return JSONResponse(record, headers={'Cache-Control':'no-store'})
+
+
+@app.get('/api/chat/runs/{turn_id}/events')
+async def api_chat_run_events(turn_id: str, after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200)):
+    page = await asyncio.to_thread(run_ledger.event_page, _run_ledger_root(), turn_id, after=after, limit=limit)
+    if page is None:
+        raise HTTPException(404, '对话运行账本不存在或已失效')
+    return JSONResponse(page, headers={'Cache-Control':'no-store'})
 
 
 @app.get("/api/chat/jobs/{turn_id}/stream")
@@ -5132,7 +5143,7 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
         return await _codex_service.stream(codex_session, turn_id, after)
     # A stale browser-side pendingTurnId must fail promptly instead of receiving
     # heartbeats forever. The frontend can then recover from the final snapshot.
-    ledger = run_ledger.read(_run_ledger_root(), turn_id)
+    ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
     if not _job_event_file(turn_id).is_file() and ledger is None:
         raise HTTPException(404, "对话任务记录不存在或已失效")
 
@@ -5158,7 +5169,7 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                 if turn_id not in _CHAT_JOBS:
                     # The append-only log survived a web restart; its former
                     # supervisor did not. Do not tail it forever or resubmit it.
-                    latest_ledger = run_ledger.read(_run_ledger_root(), turn_id) or ledger or {}
+                    latest_ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id) or ledger or {}
                     provider = latest_ledger.get('providerRunId')
                     status = latest_ledger.get('status')
                     if provider and status not in run_ledger.TERMINAL_STATUSES:
@@ -5270,8 +5281,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     CLIENT_DONE = object()
     sk = req.sessionId or f"web-{int(time.time() * 1000)}"
     turn_id = req.turnId or uuid.uuid4().hex
-    existing_ledger = run_ledger.read(_run_ledger_root(), turn_id)
-    if existing_ledger is not None:
+    try:
+        await asyncio.to_thread(run_ledger.accept, _run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
+                          model_ref=requested_model_ref, engine=req.engine, role_id=req.roleId)
+    except run_ledger.RunExists as duplicate:
+        existing_ledger = duplicate.record
         # A retry must use a new logical turn and point recoveryOf at the old
         # one. Reusing an existing ID would risk sending a paid request twice.
         if run_ledger.is_active(existing_ledger):
@@ -5284,8 +5298,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             'code': 'chat_run_already_settled', 'category': 'conflict', 'retryable': False,
             'message': '该轮已有终态，请新建轮次继续，避免重复提交。', 'turnId': turn_id,
         })
-    run_ledger.create(_run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
-                      model_ref=requested_model_ref, engine=req.engine, role_id=req.roleId)
+    except run_ledger.LedgerError:
+        raise HTTPException(409, {'code':'chat_ledger_unavailable','category':'conflict','retryable':False,
+            'message':'已有运行记录无法核对，未派发。请保留记录并检查服务状态。','turnId':turn_id}) from None
     artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
     present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
     image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
@@ -5347,7 +5362,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
         save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
                                          "requestedThinkingLevel": requested_thinking_level})
-        run_ledger.mark(_run_ledger_root(), turn_id, event='supervisor_started', status='running',
+        await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='supervisor_started', status='running',
                         transport='pending')
 
         event_path = _job_event_file(turn_id)
@@ -5497,7 +5512,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             if isinstance(response_id, str) and response_id.startswith('chatcmpl_'):
                                 run_info['run_id'] = response_id
                                 hproc._office_run_id = response_id
-                                run_ledger.mark(_run_ledger_root(), turn_id, event='provider_accepted',
+                                await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='provider_accepted',
                                                 status='running', provider_run_id=response_id,
                                                 transport='http')
                             for reasoning, snapshot, block, event_id in provider_reasoning(d):
@@ -5608,7 +5623,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                                'requestedThinkingLevel': requested_thinking_level,
                                                'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
                     to_client('error', error)
-                    run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                    await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                                     error=error, stop_reason='provider_queue_timeout',
                                     settled=True, resource_settled=True)
                     return
@@ -5637,7 +5652,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                            'requestedThinkingLevel': requested_thinking_level,
                                            'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
                 to_client('error', error)
-                run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                                 error=error, stop_reason='provider_queue_timeout',
                                 settled=True, resource_settled=True)
                 return
@@ -5753,7 +5768,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     to_client("error", error)
                     return
             _RUNNING_CHAT[sk] = proc         # 注册运行中进程（HTTP 模式为伪进程），供 /api/chat/stop
-            run_ledger.mark(_run_ledger_root(), turn_id, event='transport_started', status='running',
+            await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='transport_started', status='running',
                             transport='http' if is_http else 'native')
             if cancel_job.is_set():
                 _STOPPED_CHAT.add(sk)
@@ -6011,7 +6026,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                 time.monotonic() - last_progress_at >= STALL_WARNING_SECONDS):
                             stall_warning_sent = True
                             idle_seconds = int(time.monotonic() - last_progress_at)
-                            run_ledger.mark(
+                            await asyncio.to_thread(run_ledger.mark,
                                 _run_ledger_root(), turn_id, event='stall_warning', status='running',
                                 last_event_id=event_seq, idleSeconds=idle_seconds,
                             )
@@ -6187,7 +6202,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 })
                 terminal_status = ('stopped' if user_stopped else
                                    'failed' if turn_error is not None or not clean_end else 'completed')
-                run_ledger.mark(
+                await asyncio.to_thread(run_ledger.mark,
                     _run_ledger_root(), turn_id, event='terminal', status=terminal_status,
                     provider_run_id=run_info.get('run_id'), last_event_id=event_seq,
                     stop_reason='user_stopped' if user_stopped else run_info.get('stop_reason'),
@@ -6225,7 +6240,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 'requestedThinkingLevel': requested_thinking_level,
                 'error': error, 'clean_end': False, 'stop_reason': 'supervisor_failed',
             })
-            run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+            await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                             error=error, stop_reason='supervisor_failed',
                             settled=True, resource_settled=True)
         finally:

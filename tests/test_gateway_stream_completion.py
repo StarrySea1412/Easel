@@ -6,6 +6,8 @@ import threading
 
 import httpx
 import pytest
+from easel.codex_service import CodexService
+from easel.gateway_auth import GatewayCredentials
 
 import web.app as web
 
@@ -14,6 +16,14 @@ import web.app as web
 @pytest.mark.parametrize("buffered", [True, False])
 @pytest.mark.parametrize("raw_failure", [False, True])
 def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buffered, raw_failure):
+    # The production model/engine contract changed after this fixture was written.
+    # Keep every write and credential lookup inside this synthetic environment.
+    state=tmp_path/'state';state.mkdir();(state/'openclaw.json').write_text('{}',encoding='utf-8')
+    monkeypatch.setattr(web,'openclaw_state_dir',lambda:state)
+    monkeypatch.setattr(web,'OUTPUTS_DIR',tmp_path/'outputs')
+    monkeypatch.setattr(web,'OPENCLAW_SESSIONS_DIR',tmp_path/'transcripts')
+    monkeypatch.setattr(web,'_codex_service',CodexService(tmp_path/'outputs'))
+    monkeypatch.setattr(web,'gateway_credentials',lambda:GatewayCredentials('token',token='isolated-fixture'))
     monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(web, "DEBUG_DIR", tmp_path / "debug")
     monkeypatch.setattr(web, "SHARED_RAW_STREAM", tmp_path / "absent-raw.jsonl")
@@ -26,7 +36,6 @@ def test_gateway_stream_preserves_every_token(tmp_path, monkeypatch, parts, buff
     monkeypatch.setattr(web, "_chat_message", lambda req: req.message)
     monkeypatch.setattr(web, "_heal_openclaw_session", lambda sk: None)
     monkeypatch.setattr(web, "openclaw_base_cmd", lambda: ["unused-openclaw"])
-    monkeypatch.setattr(web, "_agent_thinking_level", lambda: "off")
     monkeypatch.setattr(web, "_proxy_env", dict)
     monkeypatch.setattr(web, "question_bridge_supported", lambda: False)
     monkeypatch.setattr(web, "GatewayClient", None)

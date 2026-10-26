@@ -51,7 +51,7 @@ Grok Bot 的官方资料已足以完成产品比较，无须用户寻找仓库�
 
 | 主题 | 已有证据 | 仍需补齐或验证 |
 | --- | --- | --- |
-| 执行账本 | `web/run_ledger.py`：持久 turnId、providerRunId、eventSeq、attempt/recoveryOf、settled/resourceSettled；同 turn 防重复提交 | 这是逐轮原子 JSON 与有限事件摘要，不是完整会话事件日志；跨进程接管、恢复执行关联与全部消费者一致性仍须核验 |
+| 执行账本 | 0.18.0候选 `web/run_ledger.py`：SQLite事务首次受理、生命周期事件分页、旧JSON原文导入、终态/游标单调与在线备份；保留turn/provider身份 | 只涵盖普通聊天生命周期，正文仍用JSONL；不是全量会话事件系统，跨进程接管、恢复执行关联与全部消费者一致性仍须核验 |
 | 普通执行计划 | `easel/execution_store.py`：operations、plan、timeline 已持久化，处理迟到工具事件 | 不再按旧报告写“没有待办”；补目标验收、证据与普通执行的关联，避免两套进度各自判完成 |
 | 目标与排期 | `easel/task_store.py`、`web/task_service.py`：revision、stopEpoch、owner/lease、checks、预算/预留与收尾检查 | `validate_goal()`仍限制首版为 OpenClaw；需要按已启用引擎明确目标能力，不能把它误写为全系统没有目标 |
 | Codex 控制 | `easel/codex_service.py`：steer、interrupt、按游标重放、恢复不盲发 turn/start；`web/app.py`已有服务接线 | 本轮未发现原生 `thread/goal/*` 调用。须验证本机协议版本，并明确原生与 Easel 目标谁调度，不能双重续跑 |
@@ -136,3 +136,7 @@ Grok Bot 文档明确同账号 Bots 共享电脑/文件/浏览器登录态，但
 ## 2026-10-26 P0-R增量：服务端删除事实
 
 0.17.0补齐持久删除、绑定计划停用、跨页单调补读与迟到回执边界，保留历史和文件；本机隔离验证不代表P0-R整体通过。完整恢复、外部停止确认、经验召回与业务链仍未完成。详见[实现与升级边界](session-lifecycle-0.17.0.md)。
+
+## 2026-10-26 P0-R增量：事务运行账本
+
+0.18.0将普通聊天首次受理与生命周期事件改为事务事实，增加旧数据原文留存、版本、分页游标、历史缺口与备份；修复回放坏行和旧终态兼容。不是全量会话事件系统或完整跨进程接管，P0-R整体仍未完成。详见[本批记录](run-ledger-0.18.0.md)。
