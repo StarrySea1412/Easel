@@ -23,13 +23,13 @@ function TaskDetail({goal,runs,stale,onRefresh,onOpenChat,onOpenActivity,onOpenO
   const currentStage = goal.stages?.find(stage => stage.status!=='completed');
   return <article className="task-workspace-detail" aria-label={`任务详情：${goal.title}`}>
     <header><div><span className="task-eyebrow">{goal.stages?.length?'分工协作':'持续目标'} · {taskStatus[goal.status]||goal.status}</span><h2>{goal.title}</h2></div>
-      <button type="button" className="btn btn-sm" onClick={()=>onOpenChat(goal.sessionId)}>回到对话 ↗</button>
+      {goal.sessionDeleted?<span className="task-eyebrow">原对话已删除</span>:<button type="button" className="btn btn-sm" onClick={()=>onOpenChat(goal.sessionId)}>回到对话 ↗</button>}
     </header>
     <div className="task-workspace-context"><span>{currentStage?`当前阶段 · ${currentStage.title}`:goal.stages?.length?'阶段已交接，查看最终验收':'按目标步骤推进'}</span><span>{goal.iterations}/{goal.maxIterations}轮</span></div>
     <div className="task-workspace-tabs" role="group" aria-label="任务详情视图">{([['progress','进展与交接'],['checks','验收与控制'],['runs','执行记录']] as const).map(([id,label])=><button type="button" key={id} aria-pressed={tab===id} onClick={()=>setTab(id)}>{label}{id==='runs'&&<span>{runs.length}</span>}</button>)}</div>
     {tab==='progress'&&<div className="task-workspace-progress">
       <p className="task-workspace-objective">{goal.objective}</p>
-      {goal.reason&&<p className="task-workspace-reason" role="status">{goal.reason}</p>}
+      {goal.reason&&!(goal.sessionDeleted&&goal.reason==='原对话已删除')&&<p className="task-workspace-reason" role="status">{goal.reason}</p>}
       {goal.stages?.length?<TaskStageBoard stages={goal.stages}/>:<section aria-label="目标工作步骤"><h3>工作步骤</h3>{goal.steps?.length?<ol className="task-workspace-steps">{goal.steps.map(step=><li key={step.id}><span>{({completed:'✓',in_progress:'◉',blocked:'!',pending:'○'})[step.status]}</span><div><strong>{step.title}</strong><small>{step.detail||({completed:'助手已报告完成',in_progress:'正在推进',blocked:'需要处理',pending:'待开始'})[step.status]}</small></div></li>)}</ol>:<p className="task-workspace-empty-note">尚未收到步骤更新。执行后会显示实际进展。</p>}</section>}
       <div className="task-workspace-next"><button type="button" className="btn btn-sm" onClick={()=>setTab('checks')}>查看验收</button></div>
     </div>}

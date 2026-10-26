@@ -52,6 +52,8 @@ class TaskStore:
           CREATE TABLE IF NOT EXISTS manual_requests(plan TEXT, request TEXT, run TEXT,
             PRIMARY KEY(plan,request));
           CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, data TEXT);
+          CREATE TABLE IF NOT EXISTS deleted_sessions(id TEXT PRIMARY KEY, at REAL,
+            revision INTEGER, notice_pending INTEGER DEFAULT 1);
           CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,
             session TEXT, turn TEXT UNIQUE, data TEXT);
           CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,8 +85,56 @@ class TaskStore:
                    (goal['id'], goal['sessionId'], goal['status'], json.dumps(goal, ensure_ascii=False)))
 
     def _event(self, db, session, kind, value):
-        db.execute('INSERT INTO events(session,kind,data,at) VALUES(?,?,?,?)',
-                   (session, kind, json.dumps(value, ensure_ascii=False), self.clock()))
+        return db.execute('INSERT INTO events(session,kind,data,at) VALUES(?,?,?,?)',
+                   (session, kind, json.dumps(value, ensure_ascii=False), self.clock())).lastrowid
+
+    @staticmethod
+    def _require_session(db, session):
+        if session and db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (session,)).fetchone():
+            raise TaskConflict('原对话已删除，请新建对话。')
+
+    def require_session(self, session):
+        with self.db() as db:
+            self._require_session(db, session)
+
+    @staticmethod
+    def _deleted_sessions(db):
+        return [dict(row) for row in db.execute('SELECT id,at,revision FROM deleted_sessions ORDER BY revision')]
+
+    def delete_session(self, session):
+        """Commit deletion and scheduling changes together; retain run/artifact history."""
+        if not isinstance(session, str) or not SAFE_ID.fullmatch(session):
+            raise TaskConflict('无效会话。')
+        with self.db() as db:
+            row = db.execute('SELECT id,at,revision FROM deleted_sessions WHERE id=?', (session,)).fetchone()
+            if row:
+                return dict(row)
+            at = self.clock()
+            revision = self._event(db, session, 'session_deleted', {})
+            db.execute('INSERT INTO deleted_sessions VALUES(?,?,?,1)', (session, at, revision))
+            for row in db.execute('SELECT data FROM goals WHERE session=?', (session,)).fetchall():
+                g = json.loads(row[0])
+                if g['status'] not in ('completed', 'cancelled'):
+                    g.update(status='cancelled', reason='原对话已删除', cancelRequested=True,
+                             stopEpoch=g['stopEpoch'] + 1)
+                    self._goal(db, g)
+            for row in db.execute("SELECT data FROM runs WHERE session=? AND state='queued'", (session,)).fetchall():
+                r = json.loads(row[0]); r.update(state='stopped', finishedAt=at, reason='原对话已删除')
+                db.execute("UPDATE runs SET state='stopped',data=? WHERE id=?", (json.dumps(r), r['id']))
+            for row in db.execute('SELECT data FROM plans').fetchall():
+                p = json.loads(row[0])
+                if p.get('sessionId') == session:
+                    p.update(enabled=False, nextAt=None, revision=p['revision'] + 1, reason='原对话已删除')
+                    db.execute('UPDATE plans SET enabled=0,due=NULL,data=? WHERE id=?', (json.dumps(p, ensure_ascii=False), p['id']))
+            return dict(id=session, at=at, revision=revision)
+
+    def pending_session_cleanup(self):
+        with self.db() as db:
+            return [row[0] for row in db.execute('SELECT id FROM deleted_sessions WHERE notice_pending=1')]
+
+    def complete_session_cleanup(self, session):
+        with self.db() as db:
+            db.execute('UPDATE deleted_sessions SET notice_pending=0 WHERE id=?', (session,))
 
     def create_goal(self, spec, *, session=None, title=None, plan=None, db=None):
         if db is None:
@@ -93,6 +143,7 @@ class TaskStore:
         session = session or 'task-' + ident()
         if not SAFE_ID.fullmatch(session):
             raise TaskConflict('无效会话。')
+        self._require_session(db, session)
         if db.execute("SELECT 1 FROM goals WHERE session=? AND status NOT IN ('completed','cancelled')", (session,)).fetchone():
             raise TaskConflict('该会话已有目标，请先完成或取消。')
         goal_id = ident()
@@ -213,10 +264,16 @@ class TaskStore:
             goals = [json.loads(r[0]) for r in db.execute('SELECT data FROM goals' + where + ' ORDER BY rowid DESC LIMIT 300', args)]
             runs = [json.loads(r[0]) for r in db.execute('SELECT data FROM runs' + where + ' ORDER BY rowid DESC LIMIT 500', args)]
             plans = [json.loads(r[0]) for r in db.execute('SELECT data FROM plans ORDER BY rowid DESC')]
+            deleted = self._deleted_sessions(db)
+            removed = {row['id'] for row in deleted}
+            for g in goals:
+                g['sessionDeleted'] = g['sessionId'] in removed
             return {'goals': goals,
                     'plans': [p for p in plans if not session or p.get('sessionId') == session][:200],
                     'runs': runs,
-                    'serverTime': self.clock(), 'budgetMode': 'iterations_time_tools_images',
+                    'serverTime': self.clock(), 'deletedSessions': deleted,
+                    'revision': db.execute('SELECT COALESCE(MAX(seq),0) FROM events').fetchone()[0],
+                    'budgetMode': 'iterations_time_tools_images',
                     'limitations': 'Token及金额不提供硬封顶；子Agent在目标运行中禁用。质量项由用户验收。'}
 
     def due_plans(self, now):
@@ -226,18 +283,29 @@ class TaskStore:
                 'SELECT data FROM plans WHERE enabled=1 AND due<=? ORDER BY due', (now,))]
 
     def session_snapshots(self):
+        return self.session_state()['sessions']
+
+    def session_state(self):
+        # Hold the transaction while constructing both parts of the read.
         with self.db() as db:
-            rows = [json.loads(r[0]) for r in db.execute('SELECT data FROM sessions ORDER BY rowid DESC LIMIT 300')]
+            rows = [json.loads(r[0]) for r in db.execute('SELECT s.data FROM sessions s LEFT JOIN deleted_sessions d ON s.id=d.id WHERE d.id IS NULL ORDER BY s.rowid DESC LIMIT 300')]
             for s in rows:
-                s['messages'] = [json.loads(r[0]) for r in db.execute(
-                    'SELECT data FROM messages WHERE session=? ORDER BY seq', (s['id'],))]
-            return rows
+                s['messages'] = [json.loads(r[0]) for r in db.execute('SELECT data FROM messages WHERE session=? ORDER BY seq', (s['id'],))]
+            return {'sessions': rows, 'deletedSessions': self._deleted_sessions(db)}
+
+    def session_work(self, session):
+        with self.db() as db:
+            return [row[0] for row in db.execute(
+                "SELECT turn FROM runs WHERE session=? AND state IN ('running','unconfirmed') UNION SELECT turn FROM chat_leases WHERE session=? AND until>?",
+                (session, session, self.clock()))]
 
     def change_goal(self, key, action):
         with self.db() as db:
             g = self._get(db, 'goals', key)
+            if action not in ('pause', 'stop', 'cancel'):
+                self._require_session(db, g['sessionId'])
             if g['status'] in ('completed', 'cancelled'):
-                if action == 'cancel' and g['status'] == 'cancelled':
+                if action in ('cancel','stop','pause') and g['status'] == 'cancelled':
                     return g
                 raise TaskConflict('终态目标保留历史，不能修改执行状态；请新建目标。')
             if action in ('pause', 'stop', 'cancel'):
@@ -361,7 +429,11 @@ class TaskStore:
             if stage and (not resource_settled or state != 'completed' or stale):
                 stage.update(status='unconfirmed' if not resource_settled else 'pending' if state == 'stopped' else 'blocked',
                              turnId=r['turnId'])
-            if not resource_settled:
+            deleted = db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (g['sessionId'],)).fetchone()
+            if deleted:
+                g.update(phase='unconfirmed' if not resource_settled else 'idle',
+                         reason='原对话已删除，后台停止待确认' if not resource_settled else '原对话已删除')
+            elif not resource_settled:
                 g.update(status='blocked', phase='unconfirmed', reason=reason or '外部资源未结算，未自动重发。')
             elif g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'] or g['revision'] != r['revision']:
                 # A late result cannot restart a paused/replaced goal; an already
@@ -413,6 +485,7 @@ class TaskStore:
     def apply_checks(self, key, checks, *, review=None):
         with self.db() as db:
             g = self._get(db, 'goals', key)
+            self._require_session(db, g['sessionId'])
             if db.execute("SELECT 1 FROM runs WHERE goal=? AND state IN ('running','unconfirmed')", (key,)).fetchone():
                 raise TaskConflict('请等待后台结算再验收。')
             if g['status'] == 'cancelled':
@@ -449,6 +522,7 @@ class TaskStore:
 
     def reserve_chat(self, session, turn):
         with self.db() as db:
+            self._require_session(db, session)
             if db.execute("SELECT 1 FROM runs WHERE session=? AND state IN ('queued','running','unconfirmed')", (session,)).fetchone():
                 raise TaskConflict('目标轮次正在运行或等待结算，本条消息尚未发送；请稍候，或先在目标面板暂停。')
             row = db.execute('SELECT turn FROM chat_leases WHERE session=? AND until>?', (session, self.clock())).fetchone()
@@ -464,6 +538,7 @@ class TaskStore:
 
     def save_plan(self, data, next_at, key=None):
         with self.db() as db:
+            self._require_session(db, data.get('sessionId'))
             previous = self._get(db, 'plans', key) if key else None
             if previous and previous['enabled']:
                 raise TaskConflict('编辑前先暂停计划，当前运行会保留。')
@@ -476,6 +551,7 @@ class TaskStore:
     def trigger_plan(self, key, *, scheduled_at=None, request=None, next_at=None, missed=False, effective_at=None):
         with self.db() as db:
             p = self._get(db, 'plans', key)
+            self._require_session(db, p.get('sessionId'))
             if scheduled_at is not None:
                 if not p['enabled'] or p['nextAt'] != scheduled_at:
                     return None
@@ -511,7 +587,10 @@ class TaskStore:
 
     def set_plan_enabled(self, key, enabled, next_at):
         with self.db() as db:
-            p = self._get(db, 'plans', key); p.update(enabled=enabled, nextAt=next_at)
+            p = self._get(db, 'plans', key)
+            if enabled:
+                self._require_session(db, p.get('sessionId'))
+            p.update(enabled=enabled, nextAt=next_at)
             db.execute('UPDATE plans SET enabled=?,due=?,data=? WHERE id=?', (int(enabled), next_at, json.dumps(p, ensure_ascii=False), key))
             return p
 
@@ -532,6 +611,8 @@ class TaskStore:
 
     def image_allowed(self, session, turn):
         with self.db() as db:
+            if db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (session,)).fetchone():
+                return False
             row = db.execute('SELECT goal,state FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
             if not row:
                 return True
@@ -541,6 +622,8 @@ class TaskStore:
     def guard(self, session, provider_run, call, tool):
         """Atomic before-tool admission, called by the native Gateway hook."""
         with self.db() as db:
+            if db.execute('SELECT 1 FROM deleted_sessions WHERE id=?', (session,)).fetchone():
+                return {'allowed': False, 'reason': '原对话已删除，未派发新的操作。'}
             rows = db.execute('SELECT data FROM runs WHERE session=? ORDER BY rowid DESC', (session,)).fetchall()
             runs = [json.loads(row[0]) for row in rows]
             known = next((r for r in runs if provider_run and r.get('providerRunId') == provider_run), None)

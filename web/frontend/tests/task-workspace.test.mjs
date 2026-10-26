@@ -10,7 +10,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
 const {default:Workspace}=await loadTsModule('../src/components/TaskWorkspacePage.tsx',import.meta.url);
 const {useTaskSnapshot}=await loadTsModule('../src/hooks/useTaskSnapshot.ts',import.meta.url);
-const {mergeTaskSessions}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
+const {mergeTaskSessions,mergeSessionTombstones}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {taskBucket,parseTaskWorkspaceHash,taskWorkspaceHash}=await loadTsModule('../src/lib/taskWorkspace.ts',import.meta.url);
 const goal={id:'g1',sessionId:'s1',title:'研究与交付',objective:'核对材料并产出报告',modelRef:'fixture/model',criteria:[{type:'review',label:'内容质量',value:''}],checks:[],maxIterations:8,maxSeconds:1200,maxTools:40,maxImages:0,iterations:2,activeSeconds:10,toolsUsed:2,imagesUsed:0,status:'paused',phase:'idle',reason:'用户暂停',createdAt:1};
 const active={...goal,id:'g2',sessionId:'s2',title:'进行中的图片准备',status:'active',phase:'running',reason:''};
@@ -33,6 +33,14 @@ test('late task history cannot reinsert a deleted session or alter an imported b
   const late=[{id:'deleted',messages:[{turnId:'late'}]},{id:'backup',messages:[{turnId:'late'}]}];
   assert.equal(mergeTaskSessions(original,late,id=>id==='deleted'),original);
   assert.equal(original[0].messages.length,0);
+});
+
+test('server deletion removes an existing live cache while preserving a read-only backup',()=>{
+  const local=[{id:'removed',messages:[]},{id:'backup',importedFromBackup:true,messages:[]},{id:'kept',messages:[]}];
+  const result=mergeTaskSessions(local,[{id:'removed',messages:[{turnId:'late'}]}],id=>id==='removed'||id==='backup');
+  assert.deepEqual(result.map(s=>s.id),['backup','kept']);
+  const older={id:'removed',at:1,revision:2},newer={id:'removed',at:2,revision:3};
+  assert.deepEqual(mergeSessionTombstones([newer],[older],[]),[newer]);
 });
 
 function button(host,label){const found=[...host.querySelectorAll('button')].find(element=>element.textContent.trim()===label);assert.ok(found,`button ${label} exists`);return found;}
@@ -80,6 +88,33 @@ test('run links carry their actual session and turn, and unconfirmed receipts ar
   await act(async()=>button(host,'执行记录1').click());
   assert.match(host.querySelector('.task-workspace-runs').textContent,/等待核实/);
   await act(async()=>button(host,'查看本轮核验').click());assert.deepEqual(links,[['s1','turn-1']]);
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('deleted conversation retains task evidence without offering a broken conversation jump',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  await act(async()=>root.render(createElement(Workspace,props({selectedId:goal.id,data:{...data,goals:[{...goal,status:'cancelled',sessionDeleted:true,reason:'原对话已删除'}]}}))));
+  assert.match(host.textContent,/原对话已删除/);
+  assert.ok(![...host.querySelectorAll('button')].some(element=>element.textContent==='回到对话 ↗'));
+  await act(async()=>button(host,'验收与控制').click());
+  assert.ok(![...host.querySelectorAll('button')].some(element=>element.textContent==='继续目标'));
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('session metadata still carries deletions when task reads fail and older reads omit them',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let exposed,second=false;
+  const marker={id:'removed',at:1,revision:10};
+  t.mock.method(globalThis,'fetch',async url=>{
+    if(String(url).endsWith('/sessions'))return new Response(JSON.stringify({sessions:[],deletedSessions:second?[]:[marker]}));
+    if(!second)throw Error('isolated task read unavailable');
+    return new Response(JSON.stringify(data));
+  });
+  function Harness(){exposed=useTaskSnapshot();return createElement('div',null);}
+  await act(async()=>root.render(createElement(Harness)));
+  assert.deepEqual(exposed.snapshot.deletedSessions,[marker]);assert.match(exposed.sync.error,/任务状态读取失败/);
+  second=true;await act(async()=>exposed.refresh());
+  assert.deepEqual(exposed.snapshot.deletedSessions,[marker]);
+  assert.equal(exposed.snapshot.goals.length,data.goals.length);
   await act(async()=>root.unmount());host.remove();
 });
 

@@ -20,10 +20,10 @@ export default function GoalCard({goal,runs,onChange,onOpen,disabled=false}:{goa
     {error&&<p className="task-error" role="alert">{error}</p>}
     <div className="task-actions">
       {onOpen&&<button className="btn btn-sm" onClick={()=>onOpen(goal.sessionId)}>打开对话</button>}
-      {!terminal&&!live&&goal.status!=='active'&&goal.phase!=='review'&&<button className="btn btn-sm btn-primary" disabled={busy||disabled} onClick={()=>void action(goal.status==='draft'?'start':'resume')}>{goal.status==='draft'?'启动目标':'继续目标'}</button>}
+      {!terminal&&!live&&!goal.sessionDeleted&&goal.status!=='active'&&goal.phase!=='review'&&<button className="btn btn-sm btn-primary" disabled={busy||disabled} onClick={()=>void action(goal.status==='draft'?'start':'resume')}>{goal.status==='draft'?'启动目标':'继续目标'}</button>}
       {(goal.status==='active'||live)&&<button className="btn btn-sm" disabled={busy} onClick={()=>void action('stop')}>停止目标</button>}
-      {!!goal.currentTurnId&&!live&&goal.status!=='cancelled'&&<button className="btn btn-sm" disabled={busy||disabled} onClick={()=>void action('recheck')}>重新核验</button>}
-      {!terminal&&goal.phase==='review'&&!live&&<button className="btn btn-sm btn-primary" disabled={busy||disabled} onClick={()=>void action('approve')}>我已检查，确认通过</button>}
+      {!!goal.currentTurnId&&!live&&goal.status!=='cancelled'&&!goal.sessionDeleted&&<button className="btn btn-sm" disabled={busy||disabled} onClick={()=>void action('recheck')}>重新核验</button>}
+      {!terminal&&!goal.sessionDeleted&&goal.phase==='review'&&!live&&<button className="btn btn-sm btn-primary" disabled={busy||disabled} onClick={()=>void action('approve')}>我已检查，确认通过</button>}
       {!terminal&&goal.status!=='active'&&!live&&<button className="btn btn-sm" disabled={busy||disabled} onClick={()=>void action('cancel')}>取消目标</button>}
       {busy&&<span role="status">正在保存…</span>}
     </div>

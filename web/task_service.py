@@ -88,6 +88,7 @@ class TaskService:
 
     def validate_goal(self, spec, session):
         import office_controls
+        self.store.require_session(session)
         if session and self.web._codex_service.owns(session):
             raise TaskConflict('首版目标使用 OpenClaw，请选择 OpenClaw 对话。')
         office_controls.validate_requested_model(self.web, spec['modelRef'])
@@ -137,6 +138,7 @@ class TaskService:
 
     async def tick(self):
         store = self.store
+        await self.cleanup_deleted_sessions()
         now = time.time()
         for p in await asyncio.to_thread(store.due_plans, now):
             due = p.get('nextAt')
@@ -255,7 +257,22 @@ class TaskService:
 
         @router.get('/sessions')
         def sessions():
-            return {'sessions': self.store.session_snapshots()}
+            return JSONResponse(self.store.session_state(), headers={'Cache-Control':'no-store'})
+
+        @router.post('/sessions/{session}/delete')
+        async def delete_session(session: str):
+            try:
+                marker = await asyncio.to_thread(self.store.delete_session, session)
+            except TaskConflict as exc:
+                conflict(exc)
+            await self.cleanup_deleted_sessions()
+            for turn in await asyncio.to_thread(self.session_work, session):
+                try:
+                    await asyncio.wait_for(self.web.api_chat_stop(self.web.StopRequest(sessionId=session, turnId=turn)), timeout=5)
+                except Exception:
+                    log.warning('对话删除已保存，后台停止仍待确认：%s', session)
+            return {'deleted': True, 'tombstone': marker,
+                    'stopPending': bool(await asyncio.to_thread(self.session_work, session))}
 
         @router.get('/capability')
         def capability():
@@ -284,6 +301,8 @@ class TaskService:
         async def action(key: str, req: Action):
             try:
                 g = await asyncio.to_thread(self.store.get, 'goals', key)
+                if req.action not in ('pause','stop','cancel'):
+                    await asyncio.to_thread(self.store.require_session, g['sessionId'])
                 if req.action in ('recheck', 'approve'):
                     from easel.task_stages import validate_handoffs
                     try:
@@ -360,3 +379,21 @@ class TaskService:
                 conflict(exc)
 
         return router
+
+    def session_work(self, session):
+        turns = set(self.store.session_work(session))
+        codex = getattr(self.web, '_codex_service', None)
+        if codex and codex.owns(session):
+            turns.update(codex.session_work(session))
+        return sorted(turns)
+
+    async def cleanup_deleted_sessions(self):
+        """Retry the durable notification cleanup outbox after interruptions."""
+        from easel.notifications import NotificationStore
+        store = self.store
+        for session in await asyncio.to_thread(store.pending_session_cleanup):
+            try:
+                await asyncio.to_thread(NotificationStore(self.web.OUTPUTS_DIR).remove_session, session)
+                await asyncio.to_thread(store.complete_session_cleanup, session)
+            except Exception:
+                log.warning('删除后的通知清理稍后重试：%s', session, exc_info=True)

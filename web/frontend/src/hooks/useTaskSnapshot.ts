@@ -1,5 +1,5 @@
 import {useEffect, useState, useCallback} from 'react';
-import {taskRequest, type TaskSnapshot} from '../lib/tasks';
+import {taskRequest, mergeSessionTombstones, type TaskSnapshot, type TaskSessionState} from '../lib/tasks';
 import type {ChatSession} from '../lib/store';
 
 export interface TaskSync {loading:boolean; refreshing:boolean; readAt:number|null; error:string}
@@ -23,11 +23,12 @@ export function useTaskSnapshot() {
       controller.signal.addEventListener('abort',abort,{once:true});
       const [tasks,remote] = await Promise.allSettled([
         taskRequest<TaskSnapshot>('',undefined,'GET',attempt.signal),
-        taskRequest<{sessions:ChatSession[]}>('/sessions',undefined,'GET',attempt.signal),
+        taskRequest<TaskSessionState>('/sessions',undefined,'GET',attempt.signal),
       ]);
       clearTimeout(deadline);controller.signal.removeEventListener('abort',abort);
       if (controller.signal.aborted) return;
-      if (tasks.status === 'fulfilled') setSnapshot(tasks.value);
+      setSnapshot(old=>({...(tasks.status==='fulfilled'?tasks.value:old),
+        deletedSessions:mergeSessionTombstones(old.deletedSessions,tasks.status==='fulfilled'?tasks.value.deletedSessions:undefined,remote.status==='fulfilled'?remote.value.deletedSessions:undefined)}));
       if (remote.status === 'fulfilled') setSessions(remote.value.sessions);
       const errors = [tasks.status==='rejected'?'任务状态读取失败':'',remote.status==='rejected'?'对话同步失败':''].filter(Boolean);
       setSync(old => ({loading:false,refreshing:false,readAt:tasks.status==='fulfilled'?Date.now():old.readAt,error:errors.join('；')}));

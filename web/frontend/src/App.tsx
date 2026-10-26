@@ -8,7 +8,7 @@ import { chatErrorDetail } from './lib/chatErrors';
 import { pickMergeTarget } from './lib/sessionMerge';
 import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib/sideChat';
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
-import { taskRequest, mergeTaskSessions } from './lib/tasks';
+import { taskRequest, mergeTaskSessions, type TaskSessionState, type SessionTombstone } from './lib/tasks';
 import { useTaskSnapshot } from './hooks/useTaskSnapshot';
 import { taskWorkspaceHash, parseTaskWorkspaceHash } from './lib/taskWorkspace';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
@@ -352,10 +352,16 @@ export default function App() {
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   const {snapshot:tasks,sessions:taskSessions,sync:taskSync,refresh:refreshTasks}=useTaskSnapshot();
+  const synchronizedDeleted=useRef(new Set<string>());
   useEffect(()=>{
-    if(!taskSessions)return;
-    setSessions(old=>{const next=mergeTaskSessions(old,taskSessions,outputSessionDeleted);if(next!==old)saveSessions(next);return next;});
-  },[taskSessions]);
+    const deleted=tasks.deletedSessions||[];
+    if(!taskSessions&&!deleted.length)return;
+    const ids=new Set(deleted.map(row=>row.id)),isDeleted=(id:string)=>ids.has(id)||outputSessionDeleted(id);
+    if(deleted.some(row=>!synchronizedDeleted.current.has(row.id)))rememberOutputReferences(sessionsRef.current);
+    for(const row of deleted)if(!synchronizedDeleted.current.has(row.id)){markOutputSessionDeleted(row.id);removeSessionEvents(row.id);synchronizedDeleted.current.add(row.id);}
+    setSessions(old=>{const next=mergeTaskSessions(old,taskSessions||[],isDeleted);if(next!==old)saveSessions(next);return next;});
+    setActiveSessionId(current=>current&&isDeleted(current)&&!sessionsRef.current.find(s=>s.id===current)?.importedFromBackup?null:current);
+  },[taskSessions,tasks.deletedSessions]);
   useEffect(()=>{if(!taskSync.loading)setSessionsLoading(false);},[taskSync.loading]);
 
   // 当前活跃会话 id 的 ref：供跨标签「谁在用会话 X」查询时即时应答（见挂载 effect）
@@ -1361,8 +1367,9 @@ export default function App() {
   async function openTaskConversation(id:string) {
     if(outputSessionDeleted(id)){showToast('原对话已删除，保留任务历史记录','info');return;}
     try {
-      const remote=await taskRequest<{sessions:ChatSession[]}>('/sessions');
-      if(outputSessionDeleted(id)){showToast('原对话已删除','info');return;}
+      const remote=await taskRequest<TaskSessionState>('/sessions');
+      for(const row of remote.deletedSessions||[])markOutputSessionDeleted(row.id);
+      if(outputSessionDeleted(id)||remote.deletedSessions?.some(row=>row.id===id)){refreshTasks();showToast('原对话已删除','info');return;}
       const next=mergeTaskSessions(sessionsRef.current,remote.sessions,outputSessionDeleted);
       const target=next.find(session=>session.id===id);
       if(!target||target.importedFromBackup){showToast('原对话不在当前可用记录中','info');return;}
@@ -1393,34 +1400,32 @@ export default function App() {
 
   const handleSessionDelete = useCallback(async (id: string) => {
     const target = sessionsRef.current.find((s) => s.id === id);
-    if (!target?.importedFromBackup && target?.messages.some(m => m.taskGoalId || m.taskRunId)) {
-      showToast('这条对话包含服务端目标记录，请使用归档保留结果；归档不会停止计划或目标。', 'info');
-      return;
-    }
-    if (!(await confirmModal('确定删除这条对话？'))) return;
+    if (!target || !(await confirmModal('删除对话并停止关联目标？'))) return;
     const latest = sessionsRef.current.find(session => session.id === id);
     if (!latest) return;
-    if (!latest.importedFromBackup && latest.messages.some(message => message.taskGoalId || message.taskRunId)) {
-      showToast('这条对话已有目标执行记录，请归档保留。', 'info'); return;
+    let stopPending=false;
+    if(!latest.importedFromBackup){
+      try{
+        const result=await taskRequest<{deleted:boolean;tombstone:SessionTombstone;stopPending:boolean}>(`/sessions/${encodeURIComponent(id)}/delete`,{});
+        if(!result.deleted||result.tombstone?.id!==id)throw Error('删除状态未确认，请重试');
+        stopPending=result.stopPending;
+        refreshTasks();
+      }catch(e){showToast(e instanceof Error?e.message:'删除未同步，请重试','error');return;}
     }
 
     if (target && !target.importedFromBackup) { clearChatDraft(id); clearChatQueue(id); }
     creationSessionDeleted(id);
     rememberOutputReferences(sessionsRef.current);
-    markOutputSessionDeleted(id);
-    removeSessionEvents(id);
+    if(!latest.importedFromBackup){markOutputSessionDeleted(id);removeSessionEvents(id);}
     const wasRunning = Boolean(streamCtl.current[id]);
-    const stopped = wasRunning
-      ? stopChat(id).catch(() => ({ stopped: false }))
-      : Promise.resolve({ stopped: false });
     streamCtl.current[id]?.abort();   // 删除正在流式的会话时中止其流
     clearStream(id);
     try { sessionStorage.removeItem(`easel_pending_turn:${id}`); } catch { /* ignore */ }
 
-    if (target?.sessionKey && !target.importedFromBackup) {
+    if (target?.sessionKey && !target.importedFromBackup && !wasRunning && !stopPending) {
       // Do not delete OpenClaw's session record while its agent is still
       // writing to it; the stop endpoint waits for backend cleanup first.
-      void stopped.then(() => deleteRemoteSession(target.sessionKey as string)).catch(() => {});
+      void deleteRemoteSession(target.sessionKey).catch(() => {});
     }
 
     setSessions((prev) => {
@@ -1439,7 +1444,8 @@ export default function App() {
       }
       return updated;
     });
-  }, [activeSessionId, clearStream]);
+    if(stopPending)showToast('对话已删除，后台停止待确认','info');
+  }, [activeSessionId, clearStream, refreshTasks]);
 
   // 首次引导：跳过（用通用模式）
   const dismissRecommend = useCallback(() => {

@@ -224,10 +224,18 @@ class CodexService:
         # Only these UI fields, never auth blobs or email addresses.
         return {k: result[k] for k in ('type', 'authUrl', 'loginId') if k in result}
 
+    def _require_session(self, sid):
+        from .task_store import TaskStore, TaskConflict
+        try:
+            TaskStore(self.outputs).require_session(sid)
+        except TaskConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+
     def start(self, req):
         sid, tid = req.sessionId, req.turnId
         key(sid or '')
         key(tid or '')
+        self._require_session(sid)
         if req.selectedSkills or req.skillRequirements:
             raise HTTPException(400, 'Codex 的 Easel 技能适配尚未接通，请清空技能选择。')
         if not req.message.strip() and not req.attachments:
@@ -334,6 +342,7 @@ class CodexService:
                 self._write(self.folder(state['sessionId']) / 'session.json', binding)
             events = client.subscribe(thread)
             run['queue'] = events
+            self._require_session(state['sessionId'])
             started = client.rpc('turn/start', {'threadId': thread, 'input': [{'type': 'text', 'text': text}] +
                 [{'type':'localImage','path':path} for path in run.get('inputImages',[])],
                 'model': model['model'], 'effort': (state['requestedThinkingLevel'] or model['defaultEffort']).replace('off', 'none'),
@@ -633,6 +642,7 @@ class CodexService:
         return values
 
     def _active(self, req):
+        self._require_session(req.sessionId)
         run = self.active.get(req.sessionId)
         if not run or run['state']['turn_id'] != req.turnId or not run['state'].get('codexTurnId'):
             raise HTTPException(409, '此轮已结束或尚未启动；控制请求未发送。')
@@ -696,6 +706,12 @@ class CodexService:
                 receipts[req.requestId] = 'accepted'
                 self._persist(state)
         return {'ok': True, 'turnId': result.get('turnId', turn)}
+
+    def session_work(self, sid):
+        """Include unsettled persisted turns even after the chat lease was released."""
+        state = self.snapshot(sid)
+        turn = state.get('turn_id')
+        return [turn] if turn and (state.get('status') == 'running' or state.get('outcome') == 'unconfirmed') else []
 
     def stop(self, sid, tid):
         req = Control(sessionId=sid, turnId=tid or '')

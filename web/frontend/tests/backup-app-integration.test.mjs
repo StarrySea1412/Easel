@@ -130,6 +130,66 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
   { role: 'user', content: '原提问' }, { role: 'assistant', content: '原回答' },
 ] };
 
+function sessionLifecycleNetwork(t) {
+  const network={state:{sessions:[],deletedSessions:[]},calls:[],deletion:null};
+  t.mock.method(globalThis,'fetch',async request=>{
+    const path=String(request);network.calls.push(path);
+    if(path.endsWith('/delete'))return network.deletion ? network.deletion() : {
+      ok:true,json:async()=>({deleted:true,tombstone:{id:decodeURIComponent(path.split('/').at(-2)),at:1,revision:1},stopPending:false})};
+    return {ok:true,json:async()=>path.endsWith('/api/tasks/sessions') ? network.state :
+      path.endsWith('/api/tasks') ? {goals:[],plans:[],runs:[],serverTime:1,deletedSessions:network.state.deletedSessions} : []};
+  });
+  return network;
+}
+
+async function confirmSessionDelete(harness,id) {
+  await act(async()=>{void harness.sidebar.onSessionDelete(id);});
+  assert.match(document.querySelector('[role=dialog]').textContent,/删除对话并停止关联目标/);
+  await act(async()=>[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent==='确定').click());
+}
+
+test('session deletion waits for the server commit and keeps failed deletions retryable',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  let finish;
+  network.deletion=()=>new Promise(resolve=>{finish=resolve;});
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id,
+    'easel:chat-draft:original':JSON.stringify({version:1,text:'保留草稿',attachmentNames:[]})});
+  await confirmSessionDelete(v.harness,sourceSession.id);
+  assert.ok(v.harness.sidebar.sessions.some(s=>s.id===sourceSession.id));
+  await act(async()=>finish({ok:false,json:async()=>({detail:'隔离测试：服务暂不可用'})}));
+  assert.ok(v.harness.sidebar.sessions.some(s=>s.id===sourceSession.id));
+  assert.match(v.values.get('easel:chat-draft:original'),/保留草稿/);
+  network.deletion=null;
+  await confirmSessionDelete(v.harness,sourceSession.id);
+  assert.ok(!v.harness.sidebar.sessions.some(s=>s.id===sourceSession.id));
+  assert.equal(network.calls.filter(path=>path.endsWith('/original/delete')).length,2);
+});
+
+test('task conversations can be deleted and readonly backup deletion stays local',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const task={...sourceSession,messages:[{role:'assistant',content:'任务历史',taskGoalId:'fixture-goal'}]};
+  const backup={id:'backup-only',title:'只读备份',created:1,messages:[],importedFromBackup:true};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([task,backup]),easel_active_session:task.id});
+  await confirmSessionDelete(v.harness,task.id);
+  assert.ok(!v.harness.sidebar.sessions.some(s=>s.id===task.id));
+  await confirmSessionDelete(v.harness,backup.id);
+  assert.ok(!v.harness.sidebar.sessions.some(s=>s.id===backup.id));
+  assert.equal(network.calls.filter(path=>path.endsWith('/delete')).length,1);
+});
+
+test('cross-page refresh removes a remotely deleted chat even if browser storage fails',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  await act(async()=>v.harness.sidebar.onPageChange('tasks'));
+  t.mock.method(v.storage,'setItem',()=>{throw new Error('isolated unavailable storage');});
+  network.state={sessions:[sourceSession],deletedSessions:[{id:sourceSession.id,at:1,revision:2}]};
+  await act(async()=>v.harness.pages['任务工作区'].onRefresh());
+  assert.ok(!v.harness.sidebar.sessions.some(s=>s.id===sourceSession.id));
+  network.state={sessions:[sourceSession],deletedSessions:[]};
+  await act(async()=>v.harness.pages['任务工作区'].onRefresh());
+  assert.ok(!v.harness.sidebar.sessions.some(s=>s.id===sourceSession.id));
+});
+
 test('image prompt Skill starts a separate unsent conversation with a linked image panel and preserves old drafts', async t => {
   const oldDraft = JSON.stringify({ version: 1, text: '旧对话不能覆盖', attachmentNames: [] });
   const v = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: sourceSession.id,
@@ -368,6 +428,7 @@ function deferredStop() {
 }
 
 test('send callbacks queue a busy draft and reject read-only or deleted sessions', async t => {
+  sessionLifecycleNetwork(t);
   const imported = { id: 'readonly', title: '备份', created: 1, importedFromBackup: true, messages: [] };
   const { harness } = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, imported]), easel_active_session: 'original' });
   await act(async () => harness.sidebar.onSessionSelect('original'));
@@ -925,6 +986,7 @@ for (const messages of [[], sourceSession.messages]) test(`an explicit new-chat 
 });
 
 test('actual App pins through the Sidebar, persists across reload and preserves archive/restore and deletion behavior', async t => {
+  sessionLifecycleNetwork(t);
   const second = { ...sourceSession, id: 'pin-second', title: '待置顶会话' };
   const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession, second]), easel_active_session: sourceSession.id }, true);
   await act(async () => view.container.querySelector('[aria-label="展开对话列表"]').click());

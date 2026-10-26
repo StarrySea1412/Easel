@@ -5,12 +5,24 @@ export interface TaskCheck extends TaskCriterion { state:'pending'|'passed'|'fai
 export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|null }
 export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string }
 export interface GoalStep { id:string; title:string; status:'pending'|'in_progress'|'completed'|'blocked'; detail?:string }
-export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number }
+export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number; sessionDeleted?:boolean }
 export interface TaskRun { id:string; goalId:string; sessionId:string; turnId:string; state:string; iteration:number; startedAt:number; finishedAt?:number; reason?:string; text?:string; stageId?:string;roleId?:string }
 export interface TaskSchedule { kind:'once'|'interval'|'daily'|'workdays'|'weekly'|'monthly'; timezone:string; at?:number; minutes:number; time:string; weekdays:number[]; day?:number }
 export interface PlanSpec { title:string; sessionId?:string; goal:GoalSpec; schedule:TaskSchedule; missedPolicy:'skip'|'coalesce'; freshnessSeconds:number }
 export interface TaskPlan extends PlanSpec { id:string; enabled:boolean; nextAt:number|null; history?:{at:number; status:string; reason:string; goalId?:string; sessionId?:string; trigger:string}[] }
-export interface TaskSnapshot { goals:TaskGoal[]; runs:TaskRun[]; plans:TaskPlan[]; serverTime:number }
+export interface SessionTombstone {id:string;at:number;revision:number}
+export interface TaskSessionState {sessions:ChatSession[];deletedSessions?:SessionTombstone[]}
+export interface TaskSnapshot { goals:TaskGoal[]; runs:TaskRun[]; plans:TaskPlan[]; serverTime:number; revision?:number; deletedSessions?:SessionTombstone[] }
+
+/** Deletion is monotonic even when independent reads arrive out of order. */
+export function mergeSessionTombstones(...sources:(SessionTombstone[]|undefined)[]):SessionTombstone[]{
+  const rows=new Map<string,SessionTombstone>();
+  for(const source of sources)for(const row of source||[]){
+    if(!row||!/^[A-Za-z0-9_.-]{1,120}$/.test(row.id)||!Number.isFinite(row.at)||!Number.isSafeInteger(row.revision)||row.revision<1)continue;
+    if(!rows.has(row.id)||rows.get(row.id)!.revision<row.revision)rows.set(row.id,row);
+  }
+  return [...rows.values()].sort((a,b)=>a.revision-b.revision);
+}
 const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
 export async function taskRequest<T>(path='', body?:unknown, method='POST', signal?:AbortSignal):Promise<T> {
   const response=await fetch(`${base}/api/tasks${path}`,{method:body===undefined?'GET':method,cache:'no-store',signal,...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
@@ -30,7 +42,8 @@ export function planNeedsAttention(plan:TaskPlan, goals:TaskGoal[]):boolean {
   return Boolean(goal&&goal.status==='blocked');
 }
 export function mergeTaskSessions(local:ChatSession[], remote:ChatSession[], deleted:(id:string)=>boolean=()=>false):ChatSession[]{
-  let changed=false;const result=[...local];
+  const result=local.filter(session=>session.importedFromBackup||!deleted(session.id));
+  let changed=result.length!==local.length;
   for(const incoming of remote){
     if(deleted(incoming.id))continue;
     const index=result.findIndex(s=>s.id===incoming.id);
