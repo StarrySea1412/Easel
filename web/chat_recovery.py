@@ -62,11 +62,15 @@ def _saved_content(web, turn_id, marker):
 def _finish_replay(web, turn_id, events, session_id, aborted, error):
     if any(event.get('event') == 'done' for event in events):
         return
-    sequence = max((event['id'] for event in events), default=0)
     final = []
     if error and not any(event.get('event') == 'error' for event in events):
         final.append({'event': 'error', 'data': error})
     final.append({'event': 'done', 'data': {'sessionKey': session_id, 'stopped': aborted}})
+    _append_events(web, turn_id, events, final)
+
+
+def _append_events(web, turn_id, events, final):
+    sequence = max((event['id'] for event in events), default=0)
     path = web._job_event_file(turn_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Do not glue a recovered terminal onto a partial UTF-8/JSON tail.
@@ -78,6 +82,30 @@ def _finish_replay(web, turn_id, events, session_id, aborted, error):
                 stream.write(b'\n')
         for offset, event in enumerate(final, 1):
             stream.write((json.dumps({'id': sequence + offset, **event}, ensure_ascii=False) + '\n').encode('utf-8'))
+
+
+def _observe(web, session_id, turn_id, marker, ledger, run_id):
+    point = marker.get('rawObservation') or (ledger or {}).get('observation')
+    if not isinstance(point, dict) or not run_id or (ledger or {}).get('transport') != 'native':
+        return False, False
+    from chat_observation import read
+    observed = read(web.SHARED_RAW_STREAM, point, run_id, web._openclaw_session_id(session_id))
+    if observed is None:
+        return False, False
+    events, text, thinking = _saved_content(web, turn_id, marker)
+    updates = []
+    # The live supervisor may have a newer canonical final snapshot. Raw replay
+    # only extends an already received prefix, never replaces it with less data.
+    if observed['text'].startswith(text) and observed['text'] != text:
+        text = observed['text']
+        updates.append({'event': 'text_snapshot', 'data': text})
+    if observed['thinking'].startswith(thinking) and observed['thinking'] != thinking:
+        updates.append({'event': 'thinking', 'data': observed['thinking'][len(thinking):]})
+        thinking = observed['thinking']
+    if updates:
+        _append_events(web, turn_id, events, updates)
+    marker.update(text=text, thinking=thinking, rawObservation=observed['checkpoint'])
+    return True, observed['hasMore']
 
 
 def reconcile_orphan(web, session_id, turn_id, *, stop=False):
@@ -94,14 +122,20 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         if ledger and ledger.get('sessionId') != session_id:
             return result('unavailable')
         path = web._turn_file(f'web:{session_id}')
+        archive = web._run_snapshot_file(turn_id)
+        independent = archive.is_file() or bool(ledger)
         try:
-            marker = json.loads(path.read_text(encoding='utf-8'))
+            marker = json.loads((archive if archive.is_file() else path).read_text(encoding='utf-8'))
         except FileNotFoundError:
             if not ledger:
                 return result('unavailable')
             marker = {'turn_id': turn_id, 'status': 'running'}
         if marker.get('turn_id') != turn_id:
-            return result('superseded')
+            if not ledger:
+                return result('superseded')
+            marker = {'turn_id': turn_id, 'status': 'running'}
+        if marker.get('session_id', session_id) != session_id:
+            return result('unavailable')
         prior = marker.get('recovery') or {}
         final = bool(ledger and ledger.get('settled') and ledger.get('resourceSettled')
                      and ledger.get('status') in web.run_ledger.TERMINAL_STATUSES)
@@ -113,6 +147,9 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         provider_settled = final or (ledger or {}).get('resourceFacts', {}).get('provider') is True or prior.get('providerSettled') is True
         run_id = ((ledger or {}).get('providerRunId') or marker.get('gateway_run_id') or _legacy_run_id(web, turn_id))
         aborted = (ledger or {}).get('status') == 'stopped' or prior.get('aborted') is True
+        observing = more_observations = False
+        if not final and not (ledger or {}).get('settled'):
+            observing, more_observations = _observe(web, session_id, turn_id, marker, ledger, run_id)
         if not provider_settled:
             if (ledger or {}).get('transport') not in (None, 'native'):
                 return result('unavailable')
@@ -133,8 +170,23 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
                 provider_settled = (isinstance(receipt, dict) and receipt.get('runId') == run_id
                                     and receipt.get('status') in ('ok', 'error'))
                 if not provider_settled:
+                    if observing:
+                        if web._save_turn(f'web:{session_id}', 'running', marker.get('text', ''), marker,
+                                          expected_latest=turn_id) is False:
+                            return result('unconfirmed')
+                        if (not stop and isinstance(receipt, dict) and receipt.get('runId') == run_id
+                                and receipt.get('status') == 'timeout'):
+                            return result('observing')
                     return result('active' if isinstance(receipt, dict) and receipt.get('runId') == run_id
                                   and receipt.get('status') == 'timeout' else 'unconfirmed')
+        if observing:
+            _, more_observations = _observe(web, session_id, turn_id, marker, ledger, run_id)
+            if more_observations:
+                marker['recovery'] = {**prior, 'providerSettled': True}
+                if web._save_turn(f'web:{session_id}', 'running', marker.get('text', ''), marker,
+                                  expected_latest=turn_id) is False:
+                    return result('unconfirmed')
+                return result('observing')
         events, text, thinking = _saved_content(web, turn_id, marker)
         prior_terminal = bool(ledger and ledger.get('settled') and ledger.get('status') in web.run_ledger.TERMINAL_STATUSES)
         saved_reply = marker.get('status') == 'done' and marker.get('clean_end') is True
@@ -149,21 +201,38 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
                       clean_end=(status == 'completed' and marker.get('clean_end') is True),
                       stop_reason=(ledger or {}).get('stopReason') if prior_terminal else 'user_stopped' if aborted else 'supervisor_lost',
                       error=error, recovery={'providerSettled': True, 'resourceSettled': False, 'aborted': aborted})
-        if path.is_file() and json.loads(path.read_text(encoding='utf-8')).get('turn_id') != turn_id:
+        try:
+            latest_marker = json.loads(path.read_text(encoding='utf-8'))
+            latest_matches = isinstance(latest_marker, dict) and latest_marker.get('turn_id') == turn_id
+        except FileNotFoundError:
+            latest_matches = True
+        except (ValueError, UnicodeError):
+            # Preserve the damaged latest marker. An independently identified
+            # turn can still finish without assuming session browser ownership.
+            latest_matches = False
+        if not latest_matches and not independent:
             return result('superseded')
         if ledger:
             ledger = web.run_ledger.mark(web._run_ledger_root(), turn_id, event='provider_reconciled', status=status,
                 expected_revision=ledger['eventSeq'], settled=True, resource_facts={'provider': True},
                 stop_reason=marker['stop_reason'], error=error)
-        web._save_turn(f'web:{session_id}', 'done', text, marker)
-        facts = settle_resources(web, session_id, provider_settled=True)
+        if web._save_turn(f'web:{session_id}', 'done', text, marker, expected_latest=turn_id) is False:
+            return result('unconfirmed')
+        if latest_matches:
+            facts = settle_resources(web, session_id, provider_settled=True)
+        else:
+            # Browser jobs currently have session ownership, not turn ownership.
+            # An old turn must never cancel jobs belonging to a newer turn.
+            facts = {'provider': True, 'browser': (ledger or {}).get('resourceFacts', {}).get('browser') is True
+                     or not web._browser_service.has_pages(session_id)}
         if not all(facts.values()):
             if ledger:
                 web.run_ledger.mark(web._run_ledger_root(), turn_id, event='resources_pending', resource_facts=facts)
             return result('unconfirmed')
         _finish_replay(web, turn_id, events, session_id, aborted, error)
         marker['recovery']['resourceSettled'] = True
-        web._save_turn(f'web:{session_id}', 'done', text, marker)
+        if web._save_turn(f'web:{session_id}', 'done', text, marker, expected_latest=turn_id) is False:
+            return result('unconfirmed')
         if ledger:
             web.run_ledger.mark(web._run_ledger_root(), turn_id, event='resources_settled',
                 settled=True, resource_settled=True, resource_facts=facts,

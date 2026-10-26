@@ -3,10 +3,13 @@ import asyncio
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 import web.app as web
+from easel.codex_service import CodexService
+from easel.gateway_auth import GatewayCredentials
 
 
 REAL_POPEN = subprocess.Popen
@@ -16,6 +19,19 @@ REAL_RESOLVE_TRANSPORT = web._resolve_transport
 
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
+    import office_controls
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'openclaw.json').write_text('{}', encoding='utf-8')
+    monkeypatch.setattr(web, 'openclaw_state_dir', lambda: state)
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, 'OPENCLAW_SESSIONS_DIR', tmp_path / 'transcripts')
+    monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
+    monkeypatch.setattr(web, '_codex_service', CodexService(tmp_path / 'outputs'))
+    monkeypatch.setattr(web, 'gateway_credentials', lambda: GatewayCredentials('token', token='isolated-fixture'))
+    monkeypatch.setattr(web, '_native_agent_client', lambda _: None)
+    monkeypatch.setattr(office_controls, 'require_enabled_inherited_model', lambda *_: None)
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(web, "SHARED_RAW_STREAM", tmp_path / "raw.jsonl")
     monkeypatch.setattr(web, "_session_locks", {})
@@ -25,7 +41,7 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_chat_message", lambda req: req.message)
     monkeypatch.setattr(web, "_heal_openclaw_session", lambda sk: None)
     monkeypatch.setattr(web, "openclaw_base_cmd", lambda: ["unused-openclaw"])
-    monkeypatch.setattr(web, "_agent_thinking_level", lambda: "off")
+    monkeypatch.setattr(web, "THINKING_LEVEL", 'off')
     monkeypatch.setattr(web, "_proxy_env", dict)
     monkeypatch.setattr(web, "question_bridge_supported", lambda: False)
     monkeypatch.setattr(web, "_resolve_transport", lambda sk: "cli")
@@ -37,6 +53,10 @@ def sandbox(tmp_path, monkeypatch):
 
         def __init__(self, sk):
             pass
+
+        @property
+        def acquired(self):
+            return Lock.held
 
         def acquire(self, timeout):
             Lock.held = Lock.allow
@@ -130,6 +150,28 @@ def test_snapshot_writes_remain_inside_both_locks(sandbox, monkeypatch):
     assert not sandbox.held
 
 
+def test_failed_final_snapshot_keeps_reservation_until_retry(sandbox, monkeypatch):
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    original = web._save_turn
+    def fail_final(key, status, *args, **kwargs):
+        return False if status == 'done' else original(key, status, *args, **kwargs)
+    monkeypatch.setattr(web, '_save_turn', fail_final)
+    async def scenario():
+        response = await web.api_chat_stream(web.ChatRequest(
+            message='synthetic failed snapshot', sessionId='snapshot-failure', turnId='failed-snapshot-turn'))
+        return await collect(response)
+    events = asyncio.run(scenario())
+    record = web.run_ledger.read(web._run_ledger_root(), 'failed-snapshot-turn')
+    assert record['settled'] and not record['resourceSettled']
+    assert events[-1]['event'] == 'recovery_required'
+    store = TaskStore(web.OUTPUTS_DIR)
+    assert store.pending_chat('snapshot-failure') == 'failed-snapshot-turn'
+    monkeypatch.setattr(web, '_save_turn', original)
+    assert reconcile_orphan(web, 'snapshot-failure', 'failed-snapshot-turn')['stopped']
+    assert store.pending_chat('snapshot-failure') is None
+
+
 def test_invalid_transport_pin_finishes_turn_and_releases_ownership(sandbox, monkeypatch, tmp_path):
     monkeypatch.setattr(web, "_resolve_transport", REAL_RESOLVE_TRANSPORT)
     monkeypatch.setattr(web, "OPENCLAW_SESSIONS_DIR", tmp_path / "openclaw-sessions")
@@ -145,7 +187,7 @@ def test_invalid_transport_pin_finishes_turn_and_releases_ownership(sandbox, mon
         assert events[-1]["event"] == "done"
         snapshot = await web.api_chat_last("broken-pin", turn_id="broken-pin-turn")
         assert snapshot["status"] == "done"
-        assert snapshot["stop_reason"] == "spawn_failed"
+        assert snapshot["stop_reason"] == "supervisor_failed"
         assert not web._session_lock("broken-pin").locked()
         assert not sandbox.held
         # A damaged pin must not silently move an established HTTP session to
@@ -158,12 +200,13 @@ def test_invalid_transport_pin_finishes_turn_and_releases_ownership(sandbox, mon
 def test_process_lock_waiter_can_acquire_after_owner_releases(sandbox, monkeypatch):
     async def scenario():
         tried = asyncio.Event()
-        owner_released = False
+        owner_released = threading.Event()
+        loop = asyncio.get_running_loop()
 
         def acquire(self, timeout):
-            sandbox.held = owner_released
-            tried.set()
-            return owner_released
+            loop.call_soon_threadsafe(tried.set)
+            sandbox.held = owner_released.wait(2) if timeout > 0 else owner_released.is_set()
+            return sandbox.held
 
         monkeypatch.setattr(sandbox, "acquire", acquire)
         web._save_turn("web:retry-lock", "running", "owner result", {"turn_id": "owner"})
@@ -173,7 +216,7 @@ def test_process_lock_waiter_can_acquire_after_owner_releases(sandbox, monkeypat
         try:
             await asyncio.wait_for(tried.wait(), timeout=2)
             assert web._turn_file("web:retry-lock").read_bytes() == original
-            owner_released = True
+            owner_released.set()
             await collect(response)
             snapshot = await web.api_chat_last("retry-lock", turn_id="waiter")
             assert snapshot["stop_reason"] == "spawn_failed"
@@ -347,6 +390,7 @@ finally:
             child.stdin.write("release\n")
             child.stdin.flush()
             assert await asyncio.to_thread(child.wait, timeout=5) == 0
+            monkeypatch.setattr(web, 'TIMEOUT_CHAT', 10)
             # With the real owner gone, the next turn must acquire the same
             # session and reach the simulated CLI startup failure normally.
             response = await web.api_chat_stream(web.ChatRequest(

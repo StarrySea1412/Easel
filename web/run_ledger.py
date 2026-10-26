@@ -305,6 +305,7 @@ def mark(
     settled: bool | None = None,
     resource_settled: bool | None = None,
     resource_facts: dict[str, bool] | None = None,
+    observation: dict | None = None,
     expected_revision: int | None = None,
     **details: Any,
 ) -> dict[str, Any] | None:
@@ -343,6 +344,10 @@ def mark(
             for key in ('provider', 'browser'):
                 if key in resource_facts:
                     facts[key] = facts.get(key) is True or resource_facts[key] is True
+        if observation is not None and 'observation' not in record:
+            # Only the original dispatch may establish the raw stream boundary;
+            # incremental parser/body state lives in the per-turn snapshot.
+            record['observation'] = copy.deepcopy(observation)
         if status in TERMINAL_STATUSES:
             record["terminalAt"] = record.get("terminalAt") or _now()
         event_details = {key: value for key, value in details.items() if value is not None}

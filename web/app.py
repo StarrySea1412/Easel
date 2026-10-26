@@ -4768,6 +4768,12 @@ def _job_event_file(turn_id: str) -> Path:
     return SESSIONS_DIR / "jobs" / f"{safe}.jsonl"
 
 
+def _run_snapshot_file(turn_id: str) -> Path:
+    if not isinstance(turn_id, str) or not run_ledger.SAFE_ID.fullmatch(turn_id):
+        raise ValueError('invalid turn id')
+    return SESSIONS_DIR / 'jobs' / f'{turn_id}.snapshot.json'
+
+
 def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     path = _job_event_file(turn_id)
     if not path.is_file():
@@ -4824,7 +4830,8 @@ def _raw_event_for_run(line: str, expected_run_id: str | None,
     return event
 
 
-def _save_turn(sk: str, status: str, text: str, extra: dict | None = None) -> None:
+def _save_turn(sk: str, status: str, text: str, extra: dict | None = None, *,
+               expected_latest: str | None = None) -> bool:
     """持久化本轮结果（running/done），供 SSE 连接中断后前端用 /api/chat/last 取回。
 
     后端跑完整轮不依赖客户端连接——长任务时 webide 代理会掐断 SSE，但 openclaw 仍跑到底，
@@ -4835,6 +4842,8 @@ def _save_turn(sk: str, status: str, text: str, extra: dict | None = None) -> No
         payload = {"status": status, "text": text, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         if extra:
             payload.update(extra)
+        payload['session_id'] = sk.removeprefix('web:')
+        payload['snapshotVersion'] = 1
         if status == 'done' and isinstance(payload.get('error'), dict) and payload.get('stop_reason') != 'user_stopped' and payload.get('stopped') is not True:
             event_id = _chat_failure_events().record_chat(
                 turn_id=payload.get('turn_id'), session_id=sk.removeprefix('web:'),
@@ -4842,15 +4851,42 @@ def _save_turn(sk: str, status: str, text: str, extra: dict | None = None) -> No
                 duration=payload.get('elapsedMs', 0))
             if event_id:
                 payload['error'] = {**payload['error'], 'failureEventId': event_id}
-        tmp = _turn_file(sk).with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, _turn_file(sk))
+        encoded = json.dumps(payload, ensure_ascii=False)
+        if payload.get('turn_id'):
+            archive = _run_snapshot_file(payload['turn_id'])
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            if archive.is_file():
+                previous = json.loads(archive.read_text(encoding='utf-8'))
+                if previous.get('session_id', payload['session_id']) != payload['session_id']:
+                    return False
+                if previous.get('status') == 'done' and status == 'running':
+                    return True
+            tmp = archive.with_suffix('.tmp')
+            tmp.write_text(encoded, encoding='utf-8')
+            os.replace(tmp, archive)
+        latest = _turn_file(sk)
+        publish = expected_latest is None
+        if expected_latest is not None:
+            try:
+                latest_marker = json.loads(latest.read_text(encoding='utf-8'))
+                publish = isinstance(latest_marker, dict) and latest_marker.get('turn_id') == expected_latest
+            except FileNotFoundError:
+                publish = True
+            except (ValueError, UnicodeError):
+                # Unknown ownership is not permission to replace damaged data.
+                # The independent turn snapshot is already durably saved.
+                publish = False
+        if publish:
+            tmp = latest.with_suffix('.tmp')
+            tmp.write_text(encoded, encoding='utf-8')
+            os.replace(tmp, latest)
         if status == 'done' and sk.startswith('web:') and payload.get('turn_id'):
             from easel.notifications import chat_finished
             chat_finished(OUTPUTS_DIR, sk[4:], payload['turn_id'],
                           failed=bool(payload.get('error')), stopped=payload.get('stopped') is True)
+        return True
     except Exception:
-        pass
+        return False
 
 
 # 后台 supervisor 任务集合：持有强引用防被 GC；每个对话流的 openclaw run 跑在这里，
@@ -5089,11 +5125,20 @@ async def api_chat_last(session_id: str, turn_id: str | None = None):
     if _codex_service.owns(session_id):
         return _codex_service.snapshot(session_id, turn_id)
     f = _turn_file(f"web:{session_id}")
+    if turn_id:
+        try:
+            archive = _run_snapshot_file(turn_id)
+        except ValueError:
+            raise HTTPException(400, '无效轮次标识') from None
+        if archive.is_file():
+            f = archive
     if not f.is_file():
         ledger = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id) if turn_id else None
         return {"status": "none", "text": "", **({"run": ledger} if ledger else {})}
     try:
         payload = json.loads(f.read_text(encoding="utf-8"))
+        if payload.get('session_id', session_id) != session_id:
+            return {'status': 'none', 'text': ''}
         if turn_id and payload.get("turn_id") != turn_id:
             return {"status": "stale", "text": "", "turn_id": payload.get("turn_id")}
         old_error = payload.get('error') or {}
@@ -5187,13 +5232,13 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                         from chat_recovery import reconcile_orphan
                         recovered = await asyncio.to_thread(reconcile_orphan, sys.modules[__name__],
                             latest_ledger['sessionId'], turn_id)
-                        if recovered['status'] == 'owned':
+                        if recovered['status'] in ('owned', 'observing'):
                             # Another web worker still owns the OS session lock.
                             # Keep tailing its durable log instead of declaring it lost.
                             if time.monotonic() - idle_since >= 15:
                                 yield {'event': 'ping', 'data': '{}'}
                                 idle_since = time.monotonic()
-                            await asyncio.sleep(0.25)
+                            await asyncio.sleep(2 if recovered['status'] == 'observing' else 0.25)
                             continue
                         if recovered['stopped']:
                             if _read_job_events(turn_id, cursor):
@@ -5380,6 +5425,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         started_at_ms = int(time.time() * 1000)
         started_monotonic = time.monotonic()
         terminal_timing = None
+        snapshot_owned = False
+        snapshot_published = False
+        snapshot_confirmed = False
 
         def timing(terminal=False):
             nonlocal terminal_timing
@@ -5389,7 +5437,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             return terminal_timing or {'startedAt': started_at_ms}
 
         def save_turn(key, status, text, extra=None):
-            _save_turn(key, status, text, {**(extra or {}), 'roleId': req.roleId, **timing(status == 'done')})
+            nonlocal snapshot_published, snapshot_confirmed
+            publish = snapshot_owned and not snapshot_published
+            saved = _save_turn(key, status, text,
+                {**(extra or {}), 'roleId': req.roleId, **timing(status == 'done')},
+                expected_latest=None if publish else turn_id)
+            if publish and saved is not False:
+                snapshot_published = True
+            if status == 'done':
+                snapshot_confirmed = saved is not False
+            return saved
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
@@ -5404,9 +5461,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         is_http = False
         run_info = {}
 
-        # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
-        save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
-                                         "requestedThinkingLevel": requested_thinking_level})
+        # The ledger admits this turn, but a queued request does not yet own the
+        # session's latest snapshot. Publish only after both session locks.
         await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='supervisor_started', status='running',
                         transport='pending')
 
@@ -5616,12 +5672,26 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         xlock.cancel_event = cancel_job
         lock_acquired = False
         user_stopped = False
+        async def acquire_process_lock(target, timeout):
+            def claim():
+                acquired = target.acquire(timeout)
+                # Cancelling an executor future cannot cancel its worker. If it
+                # acquires after our finally block, the worker releases itself.
+                if acquired and cancel_job.is_set():
+                    target.release()
+                    return False
+                return acquired
+            try:
+                return await loop.run_in_executor(None, claim)
+            except asyncio.CancelledError:
+                cancel_job.set()
+                raise
         def cancelled_before_start():
             save_turn(pk, 'done', '', {'turn_id': turn_id, 'clean_end': False, 'stop_reason': 'user_stopped',
                                       'requestedModelRef': requested_model_ref,
                                       'requestedThinkingLevel': requested_thinking_level})
             run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='stopped',
-                            stop_reason='user_stopped', settled=True, resource_settled=True)
+                            stop_reason='user_stopped', settled=True)
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
         try:
@@ -5634,19 +5704,26 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             await lock.acquire()
             lock_acquired = True
             # flock 可能阻塞（等另一进程/标签跑完），放线程池避免卡住事件循环
-            got = await loop.run_in_executor(None, xlock.acquire, min(TIMEOUT_CHAT, 300))
+            got = await acquire_process_lock(xlock, min(TIMEOUT_CHAT, 300))
             if cancel_job.is_set():
                 user_stopped = True
                 cancelled_before_start()
                 return
             if not got:
+                error = {'code': 'chat_session_busy', 'category': 'execution', 'retryable': True,
+                         'message': '该会话仍由另一运行持有，本轮未发送到模型。', 'stage': 'session_queue'}
                 save_turn(pk, "done", "这个会话正在另一个窗口运行，请稍候再试。", {
                     "turn_id": turn_id, "clean_end": False, "stop_reason": "session_lock_timeout",
                     "requestedModelRef": requested_model_ref,
                     "requestedThinkingLevel": requested_thinking_level,
+                    'error': error,
                 })
-                to_client("activity", "⏳ 这个会话正在另一个窗口运行，请稍候再试")
+                to_client('error', error)
                 return
+
+            snapshot_owned = True
+            save_turn(pk, 'running', '', {'turn_id': turn_id, 'requestedModelRef': requested_model_ref,
+                                          'requestedThinkingLevel': requested_thinking_level})
 
             provider_wait_started = time.monotonic()
             provider_wait_timeout = min(TIMEOUT_CHAT, 300)
@@ -5670,7 +5747,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     to_client('error', error)
                     await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                                     error=error, stop_reason='provider_queue_timeout',
-                                    settled=True, resource_settled=True)
+                                    settled=True)
                     return
                 try:
                     await asyncio.wait_for(provider_lock.acquire(), timeout=min(0.2, remaining))
@@ -5682,7 +5759,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 cancelled_before_start()
                 return
             remaining = max(0.0, provider_wait_timeout - (time.monotonic() - provider_wait_started))
-            got_provider = await loop.run_in_executor(None, provider_xlock.acquire, remaining)
+            got_provider = await acquire_process_lock(provider_xlock, remaining)
             if cancel_job.is_set():
                 user_stopped = True
                 cancelled_before_start()
@@ -5699,7 +5776,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 to_client('error', error)
                 await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='terminal', status='failed',
                                 error=error, stop_reason='provider_queue_timeout',
-                                settled=True, resource_settled=True)
+                                settled=True)
                 return
 
             # Resolve credentials after queueing, so a rotation while the prior
@@ -5739,6 +5816,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 raw_start_offset = SHARED_RAW_STREAM.stat().st_size
             except OSError:
                 raw_start_offset = 0
+            from chat_observation import capture
+            raw_observation = await asyncio.to_thread(capture, SHARED_RAW_STREAM)
+            if not is_http and raw_observation is not None:
+                await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
+                    event='observation_ready', observation=raw_observation)
             def _mark_gateway_acceptance(run_id):
                 save_turn(pk, 'running', '', {'turn_id': turn_id, 'gateway_run_id': run_id,
                                               'requestedModelRef': requested_model_ref,
@@ -5814,7 +5896,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     return
             _RUNNING_CHAT[sk] = proc         # 注册运行中进程（HTTP 模式为伪进程），供 /api/chat/stop
             await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id, event='transport_started', status='running',
-                            transport='http' if is_http else 'native')
+                            transport='http' if is_http else 'native',
+                            observation=raw_observation if not is_http else None)
             if cancel_job.is_set():
                 _STOPPED_CHAT.add(sk)
                 await asyncio.to_thread(proc.terminate)
@@ -6273,6 +6356,15 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         )
                     except Exception:
                         pass
+        except asyncio.CancelledError:
+            cancel_job.set()
+            user_stopped = True
+            save_turn(pk, 'done', ''.join(full_text), {
+                'turn_id': turn_id, 'thinking': ''.join(full_thinking),
+                'requestedModelRef': requested_model_ref, 'clean_end': False,
+                'stop_reason': 'cancelled', 'stopped': True,
+            })
+            raise
         except Exception as e:
             error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
                      and str(e.detail.get('code', '')).startswith('chat_model_')
@@ -6301,9 +6393,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         event='terminal', status='stopped' if user_stopped else 'failed', settled=True,
                         error=turn_error, stop_reason='user_stopped' if user_stopped else 'supervisor_failed')
                 await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
-                    event='resources_settled' if all(facts.values()) else 'resources_pending',
-                    resource_settled=all(facts.values()), resource_facts=facts)
-                resources_settled = all(facts.values())
+                    event='resources_settled' if all(facts.values()) and snapshot_confirmed else 'resources_pending',
+                    resource_settled=all(facts.values()) and snapshot_confirmed, resource_facts=facts)
+                resources_settled = all(facts.values()) and snapshot_confirmed
             except Exception:
                 log.warning('运行收尾尚未持久确认：%s', turn_id, exc_info=True)
             if not resources_settled:
@@ -6355,7 +6447,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             _CHAT_JOBS.pop(turn_id, None)
         try:
             exc = t.exception()   # 取出异常避免「never retrieved」告警
-        except Exception:
+        except (asyncio.CancelledError, Exception):
             exc = None
         if exc is not None:
             # supervisor 意外崩溃：解锁 forward，别让它空等

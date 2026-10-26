@@ -4,6 +4,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning
 import app as web
 import skill_audit
+from easel.codex_service import CodexService
+from easel.gateway_auth import GatewayCredentials
+
+
+@pytest.fixture(autouse=True)
+def isolated_supervisor(tmp_path, monkeypatch):
+    import office_controls
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'openclaw.json').write_text('{}', encoding='utf-8')
+    monkeypatch.setattr(web, 'openclaw_state_dir', lambda: state)
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, 'OPENCLAW_SESSIONS_DIR', tmp_path / 'transcripts')
+    monkeypatch.setattr(web, '_codex_service', CodexService(tmp_path / 'outputs'))
+    monkeypatch.setattr(web, 'gateway_credentials', lambda: GatewayCredentials('token', token='isolated-fixture'))
+    monkeypatch.setattr(web, '_native_agent_client', lambda _: None)
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
+    monkeypatch.setattr(web, '_direct_api_enabled', lambda: False)
+    monkeypatch.setattr(web, '_chat_backend', lambda _: 'openclaw')
+    monkeypatch.setattr(web, '_session_locks', {})
+    monkeypatch.setattr(web, '_BG_TASKS', set())
+    monkeypatch.setattr(office_controls, 'require_enabled_inherited_model', lambda *_: None)
 
 
 @pytest.mark.parametrize('field', ['reasoning_content', 'reasoning', 'reasoning_summary', 'thinking'])
@@ -101,9 +124,11 @@ def test_actual_cli_supervisor_retains_thinking_and_job_replay(tmp_path, monkeyp
         def poll(self): return 1 if failed else 0
 
     class CrossLock:
-        def __init__(self, key): pass
-        def acquire(self, timeout): return True
-        def release(self): pass
+        def __init__(self, key): self.acquired = False
+        def acquire(self, timeout):
+            self.acquired = True
+            return True
+        def release(self): self.acquired = False
 
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
@@ -171,9 +196,11 @@ def test_http_supervisor_waits_for_raw_tail_and_retains_provider_summary(tmp_pat
         async def __aexit__(self, *args): pass
         def stream(self, *args, **kwargs): return Response()
     class CrossLock:
-        def __init__(self, key): pass
-        def acquire(self, timeout): return True
-        def release(self): pass
+        def __init__(self, key): self.acquired = False
+        def acquire(self, timeout):
+            self.acquired = True
+            return True
+        def release(self): self.acquired = False
     monkeypatch.setattr(httpx, 'AsyncClient', Client)
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
