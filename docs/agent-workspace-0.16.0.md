@@ -52,7 +52,7 @@
 
 ## Git检查点
 
-阶段协作候选 `f828446501aec422ba4a092df569c0ff8330e62c` 已推送并核对 `starry/codex/agent-workspace-0.16.0`。默认分支仅双语首页更新为 `207d32debb99faa6215dd2fa608b4b93dfaf145d`，已推送并核对；功能没有合并main。后续独立工作区及聊天侧栏收平仍在本分支继续，最终提交另记。
+阶段协作检查点为 `f828446501aec422ba4a092df569c0ff8330e62c`。独立工作区、侧栏收平及紧凑目标输入交付提交 `782e59b70611cc756e68e31dbeec04a9c03b6451` 已推送并核对 `starry/codex/agent-workspace-0.16.0`；随后仅补本文回执。默认分支仅双语首页更新为 `70bbab3590ecc9ec27fe4232d3c2f331484c04bc`，已推送并核对，diff仅README.md与README_EN.md；功能没有合并main。138和安装器未更新，完整大版本仍未完成。
 
 ## 部署边界与回滚
 
