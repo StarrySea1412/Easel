@@ -16,6 +16,7 @@ export interface ChatMessage extends ChatTiming, ChatReasoning {
   shareAppend?: { token: string; appendId: string; at: number; source: { model: string; harness: string } }; // 来自分享接管的回传标记
   taskRunId?:string;
   taskGoalId?:string;
+  sourceSessionId?:string;
   externalSource?: 'gateway-injected';
   kind?: 'breakdown'; // User material; the immediately following answer uses the report reader.
   stopped?: boolean;
@@ -168,6 +169,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   for (const key of ['agentContent', 'turnId', 'thinking', 'activity', 'taskRunId', 'taskGoalId'] as const) {
     if (typeof value[key] === 'string') message[key] = value[key];
   }
+  if(typeof value.sourceSessionId==='string'&&/^[A-Za-z0-9_.-]{1,120}$/.test(value.sourceSessionId))message.sourceSessionId=value.sourceSessionId;
   if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');
   if (value.skillRequirements !== undefined) message.skillRequirements = requirementsForSelection(value.skillRequirements, message.selectedSkills || []);
   if (typeof value.requestedModelRef === 'string' && value.requestedModelRef.length <= 500

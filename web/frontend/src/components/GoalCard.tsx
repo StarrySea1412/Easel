@@ -13,7 +13,7 @@ export default function GoalCard({goal,runs,onChange,onOpen,disabled=false}:{goa
     <p className="goal-objective">{goal.objective}</p>
     <div className="task-evidence-heading"><strong>验收 {passed} / {goal.criteria.length}</strong><span>以实际证据为准</span></div>
     <ul className="goal-checks">{goal.criteria.map((c,i)=>{const check=goal.checks[i];return <li key={i}><span className={`goal-check-mark ${check?.state||'pending'}`} aria-hidden="true">{check?.state==='passed'?'✓':check?.state==='failed'||check?.state==='error'?'!':'○'}</span><div><strong>{c.label}</strong><small>{check?.detail||(c.type==='review'?'由你检查质量后确认':c.type==='file'?c.value:'本轮输出需包含：'+c.value)}</small></div></li>;})}</ul>
-    <dl className="goal-limits"><div><dt>执行轮次</dt><dd>{goal.iterations} / {goal.maxIterations}</dd></div><div><dt>已结算时长</dt><dd>{Math.round(goal.activeSeconds)} / {goal.maxSeconds} 秒</dd></div><div><dt>工具</dt><dd>{goal.toolsUsed||0} / {goal.maxTools}</dd></div><div><dt>生图</dt><dd>{goal.imagesUsed||0} / {goal.maxImages}</dd></div></dl>
+    <dl className="goal-limits"><div><dt>执行轮次</dt><dd>{goal.iterations} / {goal.maxIterations}</dd></div><div><dt>已结算时长</dt><dd>{Math.round(goal.activeSeconds)} / {goal.maxSeconds} 秒</dd></div><div><dt>{goal.toolBudgetMode==='observed'?'工具观察':'工具'}</dt><dd>{goal.toolsUsed||0} / {goal.maxTools}</dd></div><div><dt>生图</dt><dd>{goal.imagesUsed||0} / {goal.maxImages}</dd></div></dl>
     <p className="task-model">锁定模型 · {goal.modelRef}</p>
     {goal.reason&&<p className="task-reason" role="status">{goal.reason}</p>}
     {live&&goal.status!=='active'&&<p className="task-reason">后台结算中，确认结束后才可恢复或发送消息。</p>}

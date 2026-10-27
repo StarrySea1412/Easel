@@ -29,6 +29,8 @@ from .creation_drafts import CreationDrafts, PREPARE_TOOL
 from .browser_tools import BROWSER_TOOL
 from .browser_runtime import BrowserError
 from .local_records import _write_lock, RecordConflict
+from .codex_tasks import CodexTasks, DELIVER_TOOL
+from .task_store import TaskConflict
 
 
 def safe(value):
@@ -100,19 +102,22 @@ class CodexService:
         folder.mkdir(parents=True, exist_ok=True)
         return _write_lock(folder / 'owner', 'Codex 会话')
 
-    @staticmethod
-    def _write(path, data):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(safe(data), ensure_ascii=False), encoding='utf-8')
-        tmp.replace(path)
+    def _write(self, path, data):
+        # Windows readers hold the destination open; serialize all in-process
+        # snapshots/bindings with replacement, including startup/final cleanup.
+        with self.lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(safe(data), ensure_ascii=False), encoding='utf-8')
+            tmp.replace(path)
 
     def folder(self, sid):
         return self.root / key(sid)
 
     def binding(self, sid):
-        path = self.folder(sid) / 'session.json'
-        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+        with self.lock:
+            path = self.folder(sid) / 'session.json'
+            return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
 
     def bind(self, sid, engine, legacy=False):
         with self.lock:
@@ -248,6 +253,26 @@ class CodexService:
         # Only these UI fields, never auth blobs or email addresses.
         return {k: result[k] for k in ('type', 'authUrl', 'loginId') if k in result}
 
+    def task_config_hash(self):
+        # Hash internally; the native configuration may contain private values.
+        client = self._metadata()
+        config = client.rpc('config/read', {'includeLayers': False}).get('config')
+        if not isinstance(config, dict):
+            raise TaskConflict('Codex配置不可核对，未启用目标。')
+        return hashlib.sha256(json.dumps({'version': client.version, 'config': config},
+                                        sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+    @staticmethod
+    def require_task_hooks(client, workspace):
+        entries = client.rpc('hooks/list', {'cwds': [str(workspace)]}).get('data')
+        if (not isinstance(entries, list) or not entries
+                or any(not isinstance(row, dict) or row.get('errors') or not isinstance(row.get('hooks'), list) for row in entries)):
+            raise TaskConflict('Codex运行钩子不可核对，未派发目标。')
+        if any(hook.get('enabled') and hook.get('eventName') in ('stop', 'subagentStop')
+               and hook.get('trustStatus') in ('trusted', 'managed')
+               for row in entries for hook in row['hooks']):
+            raise TaskConflict('Codex存在运行结束钩子，可能另行续跑；请使用独立Codex配置执行Easel目标。')
+
     def _require_session(self, sid):
         from .task_store import TaskStore, TaskConflict
         try:
@@ -331,6 +356,9 @@ class CodexService:
                      'items': [], 'pending': [], 'seq': 0, 'requestedModelRef': selected,
                      'requestedThinkingLevel': req.thinkingLevel, 'workspace': str(workspace),
                      'webSearch': 'cached', 'startedAt': int(time.time() * 1000), 'threadId': binding.get('threadId')}
+            task_mode = CodexTasks(self.outputs).prepare(state)
+            if task_mode:
+                self.require_task_hooks(self._metadata(), workspace)
             from easel.context_budget import ContextBudgetError, require_admitted
             ticket = ArtifactStore(self.outputs).bind(sid, tid)
             params = self._thread_params(state, model, ticket)
@@ -393,6 +421,20 @@ class CodexService:
             params['threadId'] = state['threadId']
         else:
             params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
+            if state.get('taskGoal'):
+                params['dynamicTools'].append(DELIVER_TOOL)
+        if state.get('taskGoal'):
+            # Easel alone schedules turns/roles. Never enable native goal/delegation loops.
+            params['config'].update({'features.goals': False, 'features.multi_agent': False,
+                                     'features.multi_agent_v2': False, 'features.image_generation': False,
+                                     'features.memories': False})
+            params['developerInstructions'] += (
+                '\n本轮由Easel目标调度器管理，只执行当前步骤，不创建原生目标或子Agent。'
+                '工具为观察上限，达到后宿主请求中断；不得以其他工具绕过。'
+                '验收及交接文件按条件中的相对路径写入当前工作目录，调用easel_task_deliver登记到共享证据目录。'
+                '若恢复的旧线程缺少该工具，在命令输出独立一行EASEL_TASK_DELIVER '
+                '{"files":[{"path":"与验收条件相同的相对路径"}]}，宿主会校验。'
+                '仅在工作目录保存文件或调用easel_present不能代替任务交接。')
         return params
 
     @staticmethod
@@ -410,13 +452,33 @@ class CodexService:
             try:
                 if run.get('client'):
                     run['client'].close()
+                run['clientClosed'] = True
             finally:
                 with self.lock:
+                    self._task_cleanup_receipt(run)
                     if self.active.get(run['state']['sessionId']) is run:
                         self.active.pop(run['state']['sessionId'], None)
                     run['finished'].set()
                 if run.get('owner'):
                     run['owner'].__exit__(None, None, None)
+
+    def _task_cleanup_receipt(self, run):
+        state = run['state']
+        if (state.get('taskGoal') and run.get('clientClosed') and not run.get('browserJobs')
+                and not run.get('browserCleanupFailed')):
+            state['resourceSettled'] = True
+            self._persist(state)
+
+    def _stop_task_async(self, run):
+        if run.get('taskStopping'):
+            return
+        run['taskStopping'] = True
+        def stop():
+            try:
+                self.stop(run['state']['sessionId'], run['state']['turn_id'])
+            except Exception:
+                pass  # Preserve the unconfirmed run; never invent a terminal receipt.
+        threading.Thread(target=stop, daemon=True, name='easel-codex-task-stop').start()
 
     def _run_owned(self, run, text, model):
         state, client, thread = run['state'], None, None
@@ -425,6 +487,8 @@ class CodexService:
             require_admitted(self._local_payload(text, run['threadParams'], run.get('inputImages', []), run['effort']))
             client = self.factory(Path(state['workspace']))
             run['client'] = client
+            if state.get('taskGoal'):
+                self.require_task_hooks(client, state['workspace'])
             params = run['threadParams']
             if state['threadId']:
                 response = client.rpc('thread/resume', params)
@@ -446,8 +510,19 @@ class CodexService:
                 'summary': 'auto'}
             from easel.context_budget import serialized
             state['promptAdmission'] = require_admitted(serialized({'thread': params, 'turn': turn_params})).public()
+            if state.get('taskGoal'):
+                CodexTasks(self.outputs).context(state, current=True)
+            run['turnSubmitted'] = True
             started = client.rpc('turn/start', turn_params)
             state['codexTurnId'] = started['turn']['id']
+            if state.get('taskGoal'):
+                tasks = CodexTasks(self.outputs)
+                if not tasks.store.bind_provider(state['sessionId'], state['turn_id'], state['codexTurnId']):
+                    self._stop_task_async(run)
+                try:
+                    tasks.context(state, current=True)
+                except TaskConflict:
+                    self._stop_task_async(run)
             self._persist(state)
             while True:
                 try:
@@ -465,7 +540,8 @@ class CodexService:
                 state.update(outcome='rejected', error=exc.public(), promptAdmission=exc.admission.public())
         except Exception as exc:
             with self.lock:
-                state.update(outcome='unconfirmed', error={'message': safe(str(exc))[:1500]})
+                state.update(outcome='rejected' if state.get('taskGoal') and not run.get('turnSubmitted') else 'unconfirmed',
+                             error={'message': safe(str(exc))[:1500]})
         finally:
             self._cancel_browser_jobs(run)
             with self.lock:
@@ -529,6 +605,12 @@ class CodexService:
             item = safe(raw_item)
             if not isinstance(item, dict):
                 return False
+            if (state.get('taskGoal') and item.get('id') and item.get('type') not in
+                    ('userMessage', 'agentMessage', 'reasoning', 'plan', 'contextCompaction', 'dynamicToolCall', 'hookPrompt')):
+                decision = CodexTasks(self.outputs).store.observe_codex_tool(
+                    state['sessionId'], state['turn_id'], state['codexTurnId'], item['id'], item.get('type', 'unknown'))
+                if decision['stop']:
+                    self._stop_task_async(run)
             if isinstance(raw_item.get('aggregatedOutput'), str) and len(raw_item['aggregatedOutput']) > 64000:
                 item['_outputTruncated'] = True
             for index, change in enumerate(raw_item.get('changes') or []):
@@ -546,6 +628,12 @@ class CodexService:
                                 self._present_files(state, json.loads(line[len('EASEL_PRESENT '):]).get('files'), item['id'])
                             except (ValueError, OSError, TypeError, KeyError):
                                 self._event(state, 'activity', '文件交付未通过校验，请核对实际路径和文件。')
+                        if state.get('taskGoal') and line.startswith('EASEL_TASK_DELIVER '):
+                            try:
+                                values = CodexTasks(self.outputs).deliver(state, json.loads(line[len('EASEL_TASK_DELIVER '):]).get('files'))
+                                self._event(state, 'artifacts', {'artifacts': values})
+                            except (ValueError, OSError, TypeError):
+                                self._event(state, 'activity', '任务交接未通过路径、文件或运行状态校验。')
                 old = next((i for i in state['items'] if i['id'] == item['id']), None)
                 if old is None:
                     item['_startedAt'] = iso(time.time()) if method == 'item/started' else None
@@ -581,6 +669,11 @@ class CodexService:
                 self._execution_event(state)
         elif method == 'turn/plan/updated':
             state['plan'] = safe(params.get('plan') or [])
+            if state.get('taskGoal'):
+                try:
+                    CodexTasks(self.outputs).progress(state, params.get('plan'))
+                except (ValueError, KeyError, TypeError):
+                    self._event(state, 'activity', '目标步骤未更新，请核对运行状态及步骤内容。')
             self._execution_event(state)
         elif method == 'thread/tokenUsage/updated':
             from .codex_usage import observe
@@ -612,6 +705,24 @@ class CodexService:
 
     def _request(self, run, event):
         method, params = event['method'], event.get('params') or {}
+        if run['state'].get('taskGoal') and method == 'item/tool/call':
+            try:
+                CodexTasks(self.outputs).guard(run['state'], params.get('callId') or event['id'], params.get('tool', 'unknown'))
+            except TaskConflict as exc:
+                run['client'].reply(event['id'], {'success': False, 'contentItems': [{'type': 'inputText', 'text': str(exc)}]})
+                self._stop_task_async(run)
+                return False
+        if method == 'item/tool/call' and params.get('tool') == 'easel_task_deliver' and not params.get('namespace'):
+            try:
+                if not run['state'].get('taskGoal'):
+                    raise TaskConflict('当前轮次未绑定Codex目标。')
+                values = CodexTasks(self.outputs).deliver(run['state'], params.get('arguments', {}).get('files'))
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'artifacts': values, 'qualityApproved': False}, ensure_ascii=False)}]}
+                self._event(run['state'], 'artifacts', {'artifacts': values})
+            except (ValueError, OSError, TypeError, AttributeError):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '交接未接受：文件须存在于工作目录且路径匹配当前阶段/最终文件条件，目标必须仍在运行。'}]}
+            run['client'].reply(event['id'], result)
+            return False
         if method == 'item/tool/call' and params.get('tool') == 'easel_prepare_publish' and not params.get('namespace'):
             try:
                 state = run['state']
@@ -683,6 +794,7 @@ class CodexService:
             with self.lock:
                 if run.get('browserFinished'):
                     run.setdefault('browserJobs',set()).discard(args['requestId'])
+                    self._task_cleanup_receipt(run)
                     return
                 # Submit under the same lock used by stop, so cancellation cannot
                 # run before the host has registered this browser operation.
@@ -693,7 +805,7 @@ class CodexService:
                 try:
                     self.browser_service.call('cancel',run['state']['sessionId'],args['requestId'])
                 except (BrowserError, TimeoutError):
-                    pass
+                    run['browserCleanupFailed'] = True
             text = str(exc) if isinstance(exc, BrowserError) else '浏览器工具未完成，请先重新观察；不要重复执行未确认操作。'
             result = {'success':False,'contentItems':[{'type':'inputText','text':public_text(text,limit=800)}]}
         try:
@@ -703,6 +815,7 @@ class CodexService:
         finally:
             with self.lock:
                 run.setdefault('browserJobs',set()).discard(args['requestId'])
+                self._task_cleanup_receipt(run)
 
     def _cancel_browser_jobs(self, run):
         with self.lock:
@@ -714,14 +827,14 @@ class CodexService:
                 try:
                     self.browser_service.call('cancel',run['state']['sessionId'],request_id)
                 except (BrowserError, TimeoutError):
-                    pass
+                    run['browserCleanupFailed'] = True
             # Older resumed threads use the CLI bridge, whose calls do not
             # appear as dynamic tool requests on this App Server connection.
             if self.browser_service.has_pages(run['state']['sessionId']):
                 try:
                     self.browser_service.call('cancel_agents',run['state']['sessionId'])
                 except (BrowserError, TimeoutError):
-                    pass
+                    run['browserCleanupFailed'] = True
 
     def _present_files(self, state, files, call):
         if not isinstance(files, list) or not 1 <= len(files) <= 16:
@@ -835,6 +948,9 @@ class CodexService:
             with self._owner(sid):
                 state = self.snapshot(sid, tid)
                 if state.get('status') != 'running' and state.get('outcome') != 'unconfirmed':
+                    if state.get('taskGoal') and state.get('outcome') in ('completed', 'failed', 'interrupted', 'rejected'):
+                        state['resourceSettled'] = self.task_browser_settled(sid)
+                        self._persist(state)
                     return state
                 client = None
                 try:
@@ -845,6 +961,8 @@ class CodexService:
                     # Deleted sessions may settle their history, but never dispatch again.
                     recovered = copy.deepcopy(state)
                     project(recovered, native, safe)
+                    if state.get('taskGoal'):
+                        recovered['resourceSettled'] = self.task_browser_settled(sid)
                     state = recovered
                     state['recoveryEventAfter'] = state.get('seq', 0)
                     state['recovery'] = {'source': 'codex-persisted-turn', 'status': 'adopted',
@@ -866,6 +984,15 @@ class CodexService:
                 return state
         except RecordConflict:
             raise HTTPException(409, '原轮次仍被运行或核对操作占用，请稍后读取。') from None
+
+    def task_browser_settled(self, sid):
+        if not self.browser_service or not self.browser_service.has_pages(sid):
+            return True
+        try:
+            state = self.browser_service.call('state', sid)
+            return all(job.get('state') not in ('queued', 'running') for job in state.get('jobs', []))
+        except (BrowserError, TimeoutError):
+            return False
 
     def stop(self, sid, tid):
         req = Control(sessionId=sid, turnId=tid or '')

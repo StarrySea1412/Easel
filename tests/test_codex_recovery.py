@@ -143,7 +143,7 @@ def _hold_owner(root, ready, release):
     service = CodexService(Path(root))
     with service._owner('s'):
         ready.set()
-        release.wait(12)
+        release.wait(60)
 
 
 def test_other_process_owner_prevents_restart_rewrite_and_reconciliation(case):
@@ -153,7 +153,7 @@ def test_other_process_owner_prevents_restart_rewrite_and_reconciliation(case):
     child = context.Process(target=_hold_owner, args=(str(service.outputs), ready, release))
     child.start()
     try:
-        assert ready.wait(8)
+        assert ready.wait(30), 'spawned owner did not initialize within the cold-start allowance'
         # A still-running owner, not a stale timestamp, establishes ownership.
         state.update(status='running', outcome='running')
         service._persist(state)

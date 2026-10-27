@@ -18,6 +18,6 @@ export default function ChatGoalComposer({state,goal,onExit}:{state:ChatGoalComp
 }
 
 export function ChatGoalNotice({state,goal,blocked}:{state:ChatGoalComposerState;goal?:TaskGoal;blocked:boolean}){
-  if(!(state.unsupported||blocked||state.locked||state.error))return null;
-  return <p role={state.error?'alert':'status'} className={`composer-goal-notice ${state.error?'task-error':'task-reason'}`}>{state.unsupported?'此引擎暂不支持目标':blocked||state.locked?'请先暂停当前任务':state.error}{state.error&&!goal&&!state.savedId&&<button type="button" className="link-btn" aria-label="重新检查模型" title="重新检查模型" onClick={state.refreshModel} disabled={state.loading||state.busy}>↻</button>}</p>;
+  if(!(state.unsupported||blocked||state.locked||state.error||state.toolBudgetMode==='observed'))return null;
+  return <p role={state.error?'alert':'status'} className={`composer-goal-notice ${state.error?'task-error':'task-reason'}`}>{state.unsupported?'此引擎暂不支持目标':blocked||state.locked?'请先暂停当前任务':state.error||(state.toolBudgetMode==='observed'?'Codex工具达到观察上限时请求停止，已发出或并行操作可能超额。':'')}{state.error&&!goal&&!state.savedId&&<button type="button" className="link-btn" aria-label="重新检查模型" title="重新检查模型" onClick={state.refreshModel} disabled={state.loading||state.busy}>↻</button>}</p>;
 }

@@ -38,7 +38,9 @@ async function setup(t,snapshotValue=snapshot,powerOptions={}){
     let value;
     if(path==='/api/tasks'){h.reads++;if(h.failRead)throw new Error('隔离读取失败');value=snapshotValue;}
     else if(path.startsWith('/api/agent-office/models'))value={available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',label:'隔离模型',configured:true}],reason:''};
-    else if(path==='/api/tasks/capability')value={ready:true,reason:''};
+    else if(path==='/api/tasks/capability')value={ready:powerOptions.openReady??true,reason:powerOptions.openReady===false?'OpenClaw离线':''};
+    else if(path==='/api/tasks/capability?engine=codex')value={ready:powerOptions.nativeReady??true,reason:''};
+    else if(path==='/api/codex/runtime')value=powerOptions.nativeRuntime??{available:true,auth:'authenticated',options:[{id:'codex/fixture',provider:'codex',model:'fixture',configured:true,label:'隔离原生模型'}]};
     else if(path==='/api/tasks/runtime'){if(options.method==='POST')h.powerEnabled=body.keepAwake;value={supported:h.powerSupported,enabled:h.powerEnabled,active:false,reason:h.powerReason};}
     else if(path==='/api/tasks/preview')value=h.preview?await h.preview(body):{times:[2000,3000,4000]};
     else if(path==='/api/tasks/plans'||/^\/api\/tasks\/plans\/[^/]+$/.test(path)){if(h.failSave)return new Response(JSON.stringify({detail:'隔离保存失败'}),{status:409});value={id:'new-plan'};}
@@ -47,7 +49,7 @@ async function setup(t,snapshotValue=snapshot,powerOptions={}){
     return new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});
   });
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
-  await act(async()=>root.render(createElement(AutomationPage,{sessions:[],sessionId:null,onOpen:id=>h.opened.push(id)})));
+  await act(async()=>root.render(createElement(AutomationPage,{sessions:powerOptions.sessions??[],sessionId:powerOptions.sessionId??null,onOpen:id=>h.opened.push(id)})));
   t.after(async()=>{await act(async()=>root.unmount());host.remove();});
   const button=text=>[...host.querySelectorAll('button')].find(el=>el.textContent.trim()===text);
   const click=async text=>act(async()=>{assert.ok(button(text),text);button(text).click();});
@@ -58,6 +60,34 @@ async function setup(t,snapshotValue=snapshot,powerOptions={}){
   };
   return {h,host,button,click,choose};
 }
+
+test('native schedules remain runnable when OpenClaw is offline and save explicit observation mode',async t=>{
+  const native={...first,enabled:false,goal:{...goal,engine:'codex',toolBudgetMode:'observed',modelRef:'codex/fixture'}};
+  const v=await setup(t,{...snapshot,plans:[native]},{openReady:false,sessions:[{id:'native-chat',title:'原生对话',engine:'codex'},{id:'open-chat',title:'旧引擎对话',engine:'openclaw'}]});
+  assert.equal(v.button('立即运行一次').disabled,false);
+  assert.equal(v.host.querySelector('.automation-service summary').textContent,'执行设置');
+  await v.click('新建计划');await v.choose('计划执行引擎','Codex');
+  await v.choose('指定执行模型','隔离原生模型');
+  await act(async()=>v.host.querySelector('[aria-label="任务对话"]').click());
+  assert.ok([...document.querySelectorAll('[role=option]')].some(el=>el.textContent.includes('原生对话')));
+  assert.ok(![...document.querySelectorAll('[role=option]')].some(el=>el.textContent.includes('旧引擎对话')));
+  await act(async()=>[...document.querySelectorAll('[role=option]')].find(el=>el.textContent.includes('原生对话')).click());
+  const input=v.host.querySelector('textarea');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(input,'隔离原生计划');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  assert.match(v.host.textContent,/并行操作可能超额/);
+  await v.click('保存为暂停计划');
+  const saved=v.h.requests.find(row=>row.path==='/api/tasks/plans');
+  assert.equal(saved.body.goal.engine,'codex');assert.equal(saved.body.goal.toolBudgetMode,'observed');assert.equal(saved.body.sessionId,'native-chat');
+  assert.ok(!v.h.requests.some(row=>row.path.endsWith('/action')));
+});
+
+test('native authentication failure prevents saving without substituting an OpenClaw model',async t=>{
+  const v=await setup(t,snapshot,{nativeRuntime:{available:true,auth:'login_required',options:[]},nativeReady:false});
+  await v.click('新建计划');await v.choose('计划执行引擎','Codex');
+  assert.match(v.host.querySelector('[role=alert]').textContent,/请先登录/);
+  assert.equal(v.button('保存为暂停计划').disabled,true);
+  assert.ok(!v.host.querySelector('[aria-label="指定执行模型"]').textContent.includes('fixture/model'));
+});
 
 test('keep-awake switch is off by default and persists an explicit preference',async t=>{
   const v=await setup(t),control=v.host.querySelector('[role="switch"][aria-label="任务运行时保持后端主机唤醒"]');

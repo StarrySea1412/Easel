@@ -42,6 +42,8 @@ class GoalStage(BaseModel):
 
 class GoalSpec(BaseModel):
     model_config = {'extra': 'forbid'}
+    engine: Literal['openclaw', 'codex'] = 'openclaw'
+    toolBudgetMode: Literal['admission', 'observed'] = 'admission'
     objective: str = Field(min_length=3, max_length=6000)
     modelRef: str = Field(min_length=3, max_length=300, pattern=r'^[^\s/]+/[^\s]+$')
     criteria: list[Criterion] = Field(min_length=1, max_length=16)
@@ -54,6 +56,10 @@ class GoalSpec(BaseModel):
 
     @model_validator(mode='after')
     def stage_contract(self):
+        if (self.engine == 'codex') != (self.toolBudgetMode == 'observed'):
+            raise ValueError('Codex目标须明确使用工具观察上限；OpenClaw目标使用调用前准入上限')
+        if self.engine == 'codex' and not self.modelRef.startswith('codex/'):
+            raise ValueError('Codex目标须选择本机Codex模型')
         if self.workflow and self.stages:
             raise ValueError('选择内置协作流程或自定义阶段之一')
         count = 5 if self.workflow == 'parallel-reviewed-delivery' else 4 if self.workflow else len(self.stages)

@@ -70,6 +70,51 @@ function callbacks() {
   };
 }
 
+test('Codex task summaries read the original worker and never query system goal notes as native turns',async t=>{
+  const originalObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  t.after(() => { globalThis.ResizeObserver = originalObserver; });
+  const view=fixture(t),actions=callbacks();
+  t.mock.method(globalThis,'fetch',async(url)=>{
+    view.requests.push([url]);
+    if(String(url).includes('/api/codex/turn/')){
+      const [sessionId,turn_id]=String(url).split('/').slice(-2);
+      return {ok:true,json:async()=>({sessionId,turn_id,status:'done',outcome:'completed',pending:[],items:[],thinkingStatus:'unavailable'})};
+    }
+    return {ok:true,json:async()=>({records:[]})};
+  });
+  const session={id:'parent-native',title:'原生任务汇总',created:1,engine:'codex',messages:[
+    {role:'assistant',content:'目标已建立',turnId:'goal-record',taskGoalId:'goal'},
+    {role:'assistant',content:'工作阶段已完成',turnId:'original-turn',taskRunId:'run',sourceSessionId:'actual-worker'}]};
+  await view.render(createElement(ChatPage,{session,...actions.props,taskState:{goals:[],plans:[],runs:[
+    {id:'run',goalId:'goal',parentSessionId:session.id,sessionId:'actual-worker',turnId:'original-turn',iteration:1,state:'completed',startedAt:1}],serverTime:1}}));
+  const paths=view.requests.map(([url])=>String(url));
+  assert.ok(paths.some(path=>path.includes('/api/codex/turn/actual-worker/original-turn')));
+  assert.ok(!paths.some(path=>path.includes('/api/codex/turn/parent-native/')||path.includes('/goal-record')));
+  assert.equal(view.container.querySelectorAll('.codex-run-panel').length,1);
+  assert.ok(!view.container.textContent.includes('历史记录未保存思考摘要状态'));
+});
+
+test('Activity native audit reads the exact worker turn and keeps older targets while the parent has a pending turn', async t => {
+  const view=fixture(t);
+  t.mock.method(globalThis,'fetch',async url=>{
+    view.requests.push([url]);
+    if(String(url).includes('/api/codex/turn/')) {
+      const [sessionId,turn_id]=String(url).split('/').slice(-2);
+      return {ok:true,json:async()=>({sessionId,turn_id,status:'done',outcome:'completed',pending:[],items:[],thinkingStatus:'unavailable'})};
+    }
+    return {ok:true,json:async()=>({records:[]})};
+  });
+  const parent={id:'native-parent',engine:'codex',created:1,title:'原生父对话',pendingTurnId:'new-turn',messages:[
+    {role:'assistant',content:'阶段完成',taskRunId:'run',turnId:'saved-turn',sourceSessionId:'native-worker'}]};
+  await view.render(createElement(ActivityPage,{sessions:[parent],activeSessionId:parent.id,streams:{},target:{sessionId:parent.id,turnId:'saved-turn'}}));
+  assert.ok(view.container.querySelector('[role="tab"][aria-selected="true"]').textContent.includes('执行核验'));
+  assert.ok(view.requests.some(([url])=>String(url).includes('/api/codex/turn/native-worker/saved-turn')));
+  assert.ok(!view.requests.some(([url])=>String(url).includes('/skill-audit')||String(url).includes('/api/codex/turn/native-parent/')));
+  assert.equal(view.container.querySelectorAll('.codex-run-panel').length,1);
+  assert.ok(!view.container.textContent.includes('未找到指定轮次'));
+});
+
 test('goal request errors and pending state stay scoped to their goal when switching chats or goals', async t => {
   const originalObserver = globalThis.ResizeObserver;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };

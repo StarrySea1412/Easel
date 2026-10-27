@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {fetchOfficeTaskModels} from '../lib/officeControls';
+import {fetchCodexRuntime} from '../lib/codex';
 import {taskRequest,workflowIterations,type TaskGoal,type GoalSpec} from '../lib/tasks';
 
 function invalidateGeneration(ref:{current:number}){ref.current++;}
@@ -12,7 +13,7 @@ export const DEFAULT_GOAL_LIMITS={maxIterations:5,maxSeconds:1200,maxTools:40,ma
 export type GoalEditor = {seed?:string;modelRef?:string;onConfigured?:()=>void;goal?:TaskGoal;welcome?:boolean};
 
 /** Goal state is separate from the ordinary draft; both use the same composer. */
-export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,onChanged,onClose}:{
+export function useChatGoalComposer({editor,sessionId,engine='openclaw',modelRef,blocked,onChanged,onClose}:{
   editor?:GoalEditor|null;sessionId:string;engine:string;modelRef:string;blocked:boolean;
   onChanged?:()=>void;onClose?:()=>void;
 }) {
@@ -22,7 +23,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[savedId,setSavedId]=useState('');
   const [loading,setLoading]=useState(false),[verifiedModel,setVerifiedModel]=useState(''),[revision,setRevision]=useState(0),[savedModel,setSavedModel]=useState('');
   const submitting=useRef(false),saved=useRef(''),generation=useRef(0);
-  const enabled=Boolean(editor),unsupported=engine==='codex';
+  const enabled=Boolean(editor),unsupported=!['openclaw','codex'].includes(engine);
   const seed=editor?.seed||goal?.objective||'';
   const executionModel=savedModel||goal?.modelRef||modelRef||editor?.modelRef||'';
   useEffect(()=>{
@@ -36,14 +37,15 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
     if(!enabled||unsupported||savedId)return;
     if(goal){setVerifiedModel(executionModel);setLoading(false);return;}
     const controller=new AbortController();setLoading(true);setVerifiedModel('');
-    void fetchOfficeTaskModels(sessionId,controller.signal).then(value=>{
+    const request=engine==='codex'?fetchCodexRuntime(controller.signal):fetchOfficeTaskModels(sessionId,controller.signal);
+    void request.then(value=>{
       if(controller.signal.aborted)return;
-      const ready=Boolean(value.available&&executionModel&&value.options.some(option=>option.configured&&option.id===executionModel));
+      const ready=Boolean(value.available&&(!('auth' in value)||value.auth!=='login_required')&&executionModel&&value.options.some(option=>option.configured&&option.id===executionModel));
       setVerifiedModel(ready?executionModel:'');setError(ready||!executionModel?'':'所选模型不可用');
     }).catch(()=>{if(!controller.signal.aborted&&executionModel)setError('模型连接检查失败');})
       .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
-  },[enabled,sessionId,executionModel,unsupported,goal,revision,savedId]);
+  },[enabled,sessionId,executionModel,unsupported,goal,revision,savedId,engine]);
   const locked=Boolean(goal&&['active','completed','cancelled'].includes(goal.status));
   const disabled=busy||blocked||locked||unsupported;
   const canSubmit=enabled&&!disabled&&!loading&&Boolean(executionModel)&&verifiedModel===executionModel&&objective.trim().length>=3&&objective.trim().length<=6000;
@@ -58,7 +60,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
         // the single human-review criterion that Codex-style mode relies on.
         const criteriaForSave=goal?.criteria.length?goal.criteria:[{type:'review' as const,label:'目标结果由我验收',value:''}];
         if(goal){await taskRequest(`/goals/${goal.id}`,{objective:objective.trim(),criteria:criteriaForSave},'PUT');key=goal.id;}
-        else{const spec:GoalSpec={objective:objective.trim(),modelRef:executionModel,criteria:criteriaForSave,...DEFAULT_GOAL_LIMITS,
+        else{const spec:GoalSpec={engine:engine as 'openclaw'|'codex',toolBudgetMode:engine==='codex'?'observed':'admission',objective:objective.trim(),modelRef:executionModel,criteria:criteriaForSave,...DEFAULT_GOAL_LIMITS,
           ...(workflow?{workflow,maxIterations:workflowIterations(workflow)}: {})};key=(await taskRequest<TaskGoal>('/goals',{sessionId,goal:spec})).id;}
         if(!current())return;
         saved.current=key;setSavedId(key);setSavedModel(executionModel);onChanged?.();editor?.onConfigured?.();
@@ -68,7 +70,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
     }catch(e){if(current())setError((key?'已保存，启动失败：':'')+(e instanceof Error?e.message:'保存失败'));}
     finally{if(current()){submitting.current=false;setBusy(false);}}
   }
-  return{objective,setObjective,workflow,setWorkflow,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
+  return{objective,setObjective,workflow,setWorkflow,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,toolBudgetMode:engine==='codex'?'observed':'admission',
     modelLocked:Boolean(goal||savedId||busy),fieldsLocked:busy||locked||Boolean(savedId)||unsupported,
     label:busy?'正在设置目标':savedId?'重试启动目标':goal?'保存并继续目标':'开始目标',
     refreshModel:()=>setRevision(value=>value+1),save};

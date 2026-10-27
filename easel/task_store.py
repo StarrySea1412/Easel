@@ -161,7 +161,7 @@ class TaskStore:
                 'noProgress': 0, 'reason': '', 'lastFingerprint': None, 'imagesUsed': 0, 'toolsUsed': 0}
         self._goal(db, goal)
         db.execute('INSERT OR IGNORE INTO sessions VALUES(?,?)', (session, json.dumps({
-            'id': session, 'title': title or spec['objective'][:50], 'engine': 'openclaw',
+            'id': session, 'title': title or spec['objective'][:50], 'engine': spec.get('engine', 'openclaw'),
             'created': int(self.clock() * 1000), 'messages': []}, ensure_ascii=False)))
         self._event(db, session, 'goal_created', {'goalId': goal['id']})
         scopes = self.path.parent / 'scopes'
@@ -607,7 +607,43 @@ class TaskStore:
         with self.db() as db:
             return db.execute("SELECT 1 FROM runs WHERE session=? AND turn=? AND state='running'", (session, turn)).fetchone() is not None
 
-    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True, stage_checks=None):
+    def run_context(self, session, turn, *, current=False):
+        """Resolve exact host-owned identities; callers never supply a goal ID."""
+        with self.db() as db:
+            row = db.execute('SELECT data FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
+            if not row:
+                return None
+            r = json.loads(row[0]); g = self._get(db, 'goals', r['goalId'])
+            if current:
+                self._require_session(db, session)
+                if (r['state'] != 'running' or g['status'] != 'active'
+                        or r['stopEpoch'] != g['stopEpoch'] or r['revision'] != g['revision']):
+                    raise TaskConflict('目标已停止、修改或尚未确认，拒绝新的操作。')
+            return g, r
+
+    def observe_codex_tool(self, session, turn, provider, call, tool):
+        """Count native events, including late/parallel excess; this is not admission."""
+        with self.db() as db:
+            row = db.execute('SELECT data FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
+            if not row or not provider or not call:
+                raise TaskConflict('缺少可核验的Codex运行身份。')
+            r = json.loads(row[0]); g = self._get(db, 'goals', r['goalId'])
+            if (g.get('engine') != 'codex' or g.get('toolBudgetMode') != 'observed'
+                    or r.get('providerRunId') != provider or r['state'] != 'running'):
+                raise TaskConflict('Codex工具事件与当前运行不匹配。')
+            reservation = provider + ':native:' + call
+            if not db.execute('SELECT 1 FROM tool_reservations WHERE goal=? AND call=?', (g['id'], reservation)).fetchone():
+                db.execute('INSERT INTO tool_reservations VALUES(?,?)', (g['id'], reservation))
+                g['toolsUsed'] += 1
+                r['workTools'] = r.get('workTools', 0) + 1
+                db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(r), r['id']))
+                if g['status'] == 'active' and g['toolsUsed'] >= g['maxTools']:
+                    self._conclude_budget(db, g, '原生工具已达到观察上限，已请求停止；已发出或并行工具可能超额。')
+                else:
+                    self._goal(db, g)
+            return {'stop': g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'], 'observed': g['toolsUsed']}
+
+    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True, stage_checks=None, message_metadata=None):
         with self.db() as db:
             r = self._get(db, 'runs', run)
             if r.get('owner') != owner:
@@ -620,6 +656,7 @@ class TaskStore:
             db.execute('UPDATE runs SET state=?,data=? WHERE id=?', (r['state'], json.dumps(r, ensure_ascii=False), run))
             db.execute('INSERT OR REPLACE INTO messages(session,turn,data) VALUES(?,?,?)', (g['sessionId'], r['turnId'], json.dumps({
                 'role': 'assistant', 'content': text or reason or ('本轮被中断，目标已暂停，可从当前记录继续。' if state == 'stopped' else '本轮已结束，请查看验收与产物记录。'), 'turnId': r['turnId'],
+                **{k:v for k,v in (message_metadata or {}).items() if k in ('thinking', 'thinkingStatus', 'startedAt', 'elapsedMs', 'stopped')},
                 'requestedModelRef': r.get('modelRef'), 'roleId': r.get('roleId'),
                 'taskStageId': r.get('stageId'), 'taskRunId': r['id'], 'sourceSessionId': r['sessionId']}, ensure_ascii=False)))
             g['activeSeconds'] += max(0, self.clock() - r.get('countedAt', r['startedAt']))

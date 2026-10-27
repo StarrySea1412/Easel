@@ -6,6 +6,8 @@ import type { ChatSession, StreamState } from '../lib/store';
 import { selectActivitySessions, type ActivityFilter, type ActivityTarget } from '../lib/activitySelection';
 import UsagePanel from './UsagePanel';
 import SkillAuditPanel from './SkillAuditPanel';
+import CodexRunPanel from './CodexRunPanel';
+import { taskMessageSession } from '../lib/tasks';
 import { IconHistory, IconChat, IconTarget, IconWarn, IconCoins, IconFile, IconSkills, IconChart, IconAgentOffice } from './icons';
 import { formatChatElapsed } from '../lib/chatTiming';
 import { chatErrorTitle } from '../lib/chatErrors';
@@ -68,6 +70,9 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
   });
   const titles = Object.fromEntries(sessions.map((item) => [item.id, item.title]));
   const latestReply = session?.messages.findLast(message => message.role === 'assistant');
+  const nativeMessage = session?.messages.findLast(message => message.role === 'assistant' && !message.taskGoalId && message.turnId && (!targetTurnId || message.turnId === targetTurnId));
+  const nativeTurnId = targetTurnId || session?.pendingTurnId || nativeMessage?.turnId;
+  const nativeSessionId = session && nativeMessage && nativeTurnId !== session.pendingTurnId ? taskMessageSession(session.id, nativeMessage) : session?.id;
   const receiving = Boolean(session && liveStreams[session.id]);
   const latestError = !receiving && !session?.importedFromBackup ? latestReply?.error : undefined;
   const emptyTitle = missingTarget
@@ -136,7 +141,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
               </div>
             </div>
 
-            {session && <p className="activity-turn-summary">{session.messages.filter(message=>message.role==='user').length} 轮对话
+            {session && !session.taskWorker && <p className="activity-turn-summary">{session.messages.filter(message=>message.role==='user').length} 轮对话
               {!receiving && latestReply?.elapsedMs !== undefined && <> · 最近一轮 {formatChatElapsed(latestReply.elapsedMs)}</>}
             </p>}
             {latestError && <div className="activity-error-summary" role="status">
@@ -174,7 +179,7 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
                     <button type="button" role="tab" key={id} id={`activity-tab-${id}`}
                       aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
                       aria-controls={`activity-panel-${id === 'audit' ? 'audit' : 'usage'}`} onClick={() => setTab(id)}>
-                      <span aria-hidden="true"><Icon size={15} /></span>{label}
+                      <span aria-hidden="true"><Icon size={15} /></span>{id === 'audit' && session.engine === 'codex' ? '执行核验' : label}
                     </button>
                   ))}
                 </div>
@@ -189,6 +194,8 @@ function ActivityWorkspace({ sessions, activeSessionId, streams, target, onOpenO
                       activityView={tab === 'usage' ? 'overview' : tab}
                       sessionTitles={titles}
                     />
+                  ) : session.engine === 'codex' ? (
+                    nativeTurnId && nativeSessionId ? <CodexRunPanel key={`${nativeSessionId}:${nativeTurnId}`} sessionId={nativeSessionId} turnId={nativeTurnId} streaming={receiving} /> : <p>尚无可核对的原生轮次。</p>
                   ) : (
                     <SkillAuditPanel
                       sessionId={session.id}

@@ -31,7 +31,7 @@ def test_native_hook_uses_trusted_session_and_durable_tool_budget(tmp_path):
     const normal=await hook({{toolName:'read',runId:'other',toolCallId:'one'}},{{sessionKey:'agent:main:ordinary-chat'}});
     console.log(JSON.stringify({{first:first??null,repeat:repeat??null,other,normal:normal??null,status:(await tool.execute()).details}}));
     """
-    result=subprocess.run([str(node),'--input-type=module','-e',source],cwd=root,capture_output=True,text=True,encoding='utf-8',timeout=30,
+    result=subprocess.run([str(node),'--input-type=module','-e',source],cwd=root,capture_output=True,text=True,encoding='utf-8',timeout=90,
         env={**os.environ,'EASEL_DATA_DIR':str(tmp_path),'EASEL_PYTHON':sys.executable})
     assert result.returncode==0,result.stderr
     receipt=json.loads(result.stdout)
@@ -60,7 +60,7 @@ def test_progress_tool_updates_only_after_trusted_hook_and_stops_on_pause(tmp_pa
     const receipt=await tool.execute('step-call',{{steps:[{{id:'one',title:'检查材料',status:'completed'}},{{id:'two',title:'完成页面',status:'in_progress'}}]}});
     console.log(JSON.stringify({{decision:decision??null,receipt:receipt.details}}));
     """
-    result=subprocess.run([str(node),'--input-type=module','-e',source],cwd=root,capture_output=True,text=True,encoding='utf-8',timeout=30,
+    result=subprocess.run([str(node),'--input-type=module','-e',source],cwd=root,capture_output=True,text=True,encoding='utf-8',timeout=90,
         env={**os.environ,'EASEL_DATA_DIR':str(tmp_path),'EASEL_PYTHON':sys.executable})
     assert result.returncode==0,result.stderr
     assert json.loads(result.stdout)['receipt']['completed']==1

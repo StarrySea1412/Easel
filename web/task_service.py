@@ -81,9 +81,14 @@ class TaskService:
     def store(self):
         return TaskStore(self.web.OUTPUTS_DIR)
 
-    def config_hash(self):
+    def config_hash(self, spec=None):
+        if spec and spec.get('engine') == 'codex':
+            return self.web._codex_service.task_config_hash()
         path = self.web.openclaw_state_dir() / 'openclaw.json'
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def spec_hash(self, spec):
+        return self.config_hash(spec) if spec.get('engine') == 'codex' else self.config_hash()
 
     def guard_status(self):
         """Invoke only a read-only native tool; this never starts an agent/model."""
@@ -107,9 +112,17 @@ class TaskService:
     def validate_goal(self, spec, session):
         import office_controls
         self.store.require_session(session)
-        if session and self.web._codex_service.owns(session):
-            raise TaskConflict('首版目标使用 OpenClaw，请选择 OpenClaw 对话。')
-        office_controls.validate_requested_model(self.web, spec['modelRef'])
+        engine = spec.get('engine', 'openclaw')
+        codex = self.web._codex_service
+        binding = codex.binding(session) if session and hasattr(codex, 'binding') else None
+        if session and ((binding and binding.get('engine') != engine)
+                        or (codex.owns(session) and engine != 'codex')):
+            raise TaskConflict('目标引擎与会话不匹配，请选择同引擎对话或新建独立对话。')
+        if engine == 'codex':
+            if spec.get('toolBudgetMode') != 'observed' or not spec['modelRef'].startswith('codex/'):
+                raise TaskConflict('Codex目标须明确使用原生模型与工具观察上限。')
+        else:
+            office_controls.validate_requested_model(self.web, spec['modelRef'])
         from easel.task_stages import prepare_stages
         criteria = spec['criteria'] + [c for s in prepare_stages(spec, 'validation') for c in s['criteria']]
         for c in criteria:
@@ -119,6 +132,17 @@ class TaskService:
 
     def admit(self, spec, session):
         self.validate_goal(spec, session)
+        if spec.get('configHash') and spec['configHash'] != self.spec_hash(spec):
+            raise TaskConflict('模型配置已变化，请编辑计划后保存，或重新建立目标确认新配置。')
+        if spec.get('engine') == 'codex':
+            runtime = self.web._codex_service.runtime()
+            if not runtime.get('available') or runtime.get('auth') == 'login_required':
+                raise TaskConflict(runtime.get('error') or '请先登录后端主机的Codex。')
+            if not any(m['id'] == spec['modelRef'] for m in runtime.get('options', [])):
+                raise TaskConflict('指定Codex模型当前不可用，未派发。')
+            codex = self.web._codex_service
+            codex.require_task_hooks(codex._metadata(), codex.root)
+            return
         guard = self.guard_status()
         if not guard['ready']:
             raise TaskConflict(guard['reason'])
@@ -174,7 +198,8 @@ class TaskService:
             if r['state'] == 'unconfirmed':
                 if await self.settle(r):
                     continue
-                if (not checked_external and getattr(self.web, '_CrossProcLock', None)
+                if (not checked_external
+                        and (getattr(self.web, '_CrossProcLock', None) or self.web._codex_service.owns(r['sessionId']))
                         and now >= self.recovery_checks.get(r['turnId'], 0)):
                     from chat_recovery import reconcile_orphan
                     self.recovery_checks[r['turnId']] = now + 15
@@ -185,6 +210,13 @@ class TaskService:
                             await self.web.api_chat_stop(self.web.StopRequest(sessionId=r['sessionId'], turnId=r['turnId']))
                         except Exception:
                             log.warning('目标停止仍待确认，稍后按原轮次重试：%s', r['goalId'])
+                        if goal.get('engine') == 'codex':
+                            try:
+                                await asyncio.to_thread(self.web._codex_service.reconcile, r['sessionId'], r['turnId'])
+                            except HTTPException:
+                                pass
+                    elif goal.get('engine') == 'codex':
+                        await asyncio.to_thread(self.web._codex_service.reconcile, r['sessionId'], r['turnId'])
                     else:
                         await asyncio.to_thread(reconcile_orphan, self.web, r['sessionId'], r['turnId'])
                     await self.settle(r)
@@ -214,8 +246,6 @@ class TaskService:
         power_lease = None
         try:
             await asyncio.to_thread(self.admit, g, r['sessionId'])
-            if g.get('configHash') and g['configHash'] != self.config_hash():
-                raise TaskConflict('模型配置已变化，请停止并重新建立目标确认新配置。')
             current = await asyncio.to_thread(store.get, 'goals', g['id'])
             if current['status'] != 'active' or current['stopEpoch'] != r['stopEpoch']:
                 await asyncio.to_thread(store.finish, r['id'], owner=self.owner, state='stopped', reason='派发前已停止。')
@@ -237,8 +267,13 @@ class TaskService:
             receipts = await asyncio.to_thread(store.rework_receipts, g['id']) if r.get('reworkId') else []
             rework = next((item for item in receipts if item['id'] == r.get('reworkId')), None)
             prompt += stage_prompt(g, r, rework)
+            if g.get('engine') == 'codex':
+                prompt = prompt.replace('easel_goal_update', '原生update_plan')
+                prompt += ('\n原生工具使用观察上限；只由Easel推进后续轮次，不设置原生goal。'
+                           '文件在当前工作目录按验收条件的相对路径保存，再用easel_task_deliver登记交接。')
             req = web.ChatRequest(message=prompt, sessionId=r['sessionId'], turnId=r['turnId'],
-                                  modelRef=g['modelRef'], thinkingLevel='low', roleId=r.get('roleId'))
+                                  modelRef=g['modelRef'], thinkingLevel=None if g.get('engine') == 'codex' else 'low',
+                                  engine=g.get('engine', 'openclaw'), roleId=r.get('roleId'))
             power_lease = self.power.acquire()
             await web.start_chat_run(req, observe=False)
             allowance = r.get('maxRunSeconds', g['maxSeconds'] - g['activeSeconds'])
@@ -270,8 +305,17 @@ class TaskService:
         except Exception as exc:
             # Starting may have partially reached the provider: retain its slot
             # whenever a ledger exists, and never turn an uncertain failure into retry.
-            ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
-            safe = ledger is None
+            if g.get('engine') == 'codex':
+                try:
+                    state = await asyncio.to_thread(web._codex_service.snapshot, r['sessionId'], r['turnId'])
+                    safe = state.get('resourceSettled') is True and state.get('outcome') != 'unconfirmed'
+                except HTTPException as state_exc:
+                    if state_exc.status_code != 404:
+                        raise
+                    safe = True
+            else:
+                ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
+                safe = ledger is None
             reason = str(exc.detail) if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else str(exc) if isinstance(exc, TaskConflict) else '运行启动或验收失败，请检查服务状态；未自动重发。'
             await asyncio.to_thread(store.finish, r['id'], owner=self.owner, state='failed', reason=reason, resource_settled=safe)
         finally:
@@ -280,12 +324,44 @@ class TaskService:
 
     async def settle(self, r):
         web, store = self.web, self.store
-        ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
-        if not ledger or not ledger.get('settled') or not ledger.get('resourceSettled'):
-            return False
+        message_metadata = {}
+        g = await asyncio.to_thread(store.get, 'goals', r['goalId'])
+        if g.get('engine') == 'codex':
+            try:
+                state = await asyncio.to_thread(web._codex_service.snapshot, r['sessionId'], r['turnId'])
+            except HTTPException as exc:
+                if exc.status_code == 404:
+                    return False
+                raise
+            if (state.get('status') != 'done' or state.get('outcome') not in ('completed', 'failed', 'interrupted', 'rejected')
+                    or state.get('resourceSettled') is not True):
+                return False
+            if not await asyncio.to_thread(web._codex_service.task_browser_settled, r['sessionId']):
+                return False
+            ledger = {'status': 'stopped' if state['outcome'] == 'interrupted' else
+                      'completed' if state['outcome'] == 'completed' else 'failed', 'error': state.get('error')}
+            text = state.get('text', '')
+            message_metadata = {k:state[k] for k in ('thinking', 'thinkingStatus', 'startedAt', 'elapsedMs', 'stopped') if k in state}
+        else:
+            ledger = await asyncio.to_thread(web.run_ledger.read, web._run_ledger_root(), r['turnId'])
+            if not ledger or not ledger.get('settled') or not ledger.get('resourceSettled'):
+                return False
+            text = self.read_run_text(r)
         if await asyncio.to_thread(ImageJobs(web.OUTPUTS_DIR).pending, r['sessionId'], r['turnId']):
             return False
-        text = ''
+        checks, fingerprint = await asyncio.to_thread(check_goal, web.OUTPUTS_DIR, g, text)
+        from easel.task_stages import stage_for_run, check_stage
+        stage = stage_for_run(g, r)
+        stage_checks = (await asyncio.to_thread(check_stage, web.OUTPUTS_DIR, stage, text))[0] if stage else None
+        state = 'completed' if ledger['status'] == 'completed' else 'stopped' if ledger['status'] == 'stopped' else 'failed'
+        await asyncio.to_thread(store.finish, r['id'], owner=r['owner'], text=text, state=state,
+            checks=checks, fingerprint=fingerprint, stage_checks=stage_checks,
+            message_metadata=message_metadata,
+            reason=(ledger.get('error') or {}).get('message', ''))
+        return True
+
+    def read_run_text(self, r):
+        web, text = self.web, ''
         try:
             archive = web._run_snapshot_file(r['turnId']) if hasattr(web, '_run_snapshot_file') else None
             path = archive if archive and archive.is_file() else web._turn_file('web:' + r['sessionId'])
@@ -294,16 +370,7 @@ class TaskService:
                 text = marker.get('text', '')
         except (OSError, ValueError):
             pass
-        g = await asyncio.to_thread(store.get, 'goals', r['goalId'])
-        checks, fingerprint = await asyncio.to_thread(check_goal, web.OUTPUTS_DIR, g, text)
-        from easel.task_stages import stage_for_run, check_stage
-        stage = stage_for_run(g, r)
-        stage_checks = (await asyncio.to_thread(check_stage, web.OUTPUTS_DIR, stage, text))[0] if stage else None
-        state = 'completed' if ledger['status'] == 'completed' else 'stopped' if ledger['status'] == 'stopped' else 'failed'
-        await asyncio.to_thread(store.finish, r['id'], owner=r['owner'], text=text, state=state,
-            checks=checks, fingerprint=fingerprint, stage_checks=stage_checks,
-            reason=(ledger.get('error') or {}).get('message', ''))
-        return True
+        return text
 
     def router(self):
         router = APIRouter(prefix='/api/tasks')
@@ -335,7 +402,12 @@ class TaskService:
                     'stopPending': bool(await asyncio.to_thread(self.session_work, session))}
 
         @router.get('/capability')
-        def capability():
+        def capability(engine: Literal['openclaw', 'codex'] = 'openclaw'):
+            if engine == 'codex':
+                runtime = self.web._codex_service.runtime()
+                ready = runtime.get('available') is True and runtime.get('auth') != 'login_required'
+                return {'ready': ready, 'reason': '' if ready else runtime.get('error') or '请先登录后端主机的Codex。',
+                        'engine': 'codex', 'toolBudgetMode': 'observed'}
             return self.guard_status()
 
         @router.get('/runtime')
@@ -364,7 +436,7 @@ class TaskService:
             try:
                 spec = req.goal.model_dump()
                 self.validate_goal(spec, req.sessionId)
-                spec['configHash'] = self.config_hash()
+                spec['configHash'] = self.spec_hash(spec)
                 return self.store.create_goal(spec, session=req.sessionId, title=req.title)
             except (TaskConflict, ValueError) as exc:
                 conflict(exc)
@@ -441,7 +513,7 @@ class TaskService:
             try:
                 data = req.model_dump()
                 self.validate_goal(data['goal'], req.sessionId)
-                data['goal']['configHash'] = self.config_hash()
+                data['goal']['configHash'] = self.spec_hash(data['goal'])
                 data.update(enabled=False)
                 times = upcoming(data['schedule'], time.time())
                 if not times:

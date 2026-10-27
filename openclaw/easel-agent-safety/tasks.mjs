@@ -4,6 +4,9 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 
 export const TASK_GUARD_VERSION = 2;
+// Cold Python startup and the SQLite lock can exceed five seconds on Windows.
+// Remain fail-closed; the outer hook deadline must outlive this bounded helper.
+const GUARD_TIMEOUT_MS = 20000;
 
 export function registerTasks(api) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -29,7 +32,7 @@ export function registerTasks(api) {
           const child = spawn(process.env.EASEL_PYTHON || (process.platform === 'win32' ? 'python' : 'python3'),
             [path.join(root,'skills/shared/scripts/task_guard.py'),'--session',session,'--run','','--call',String(call),'--tool','__update_progress'],
             {cwd:root,windowsHide:true,signal,env:{...process.env,EASEL_DATA_DIR:dataRoot,PYTHONIOENCODING:'utf-8'}});
-          let output='';const timer=setTimeout(()=>child.kill(),5000);
+          let output='';const timer=setTimeout(()=>child.kill(),GUARD_TIMEOUT_MS);
           child.stdin.end(JSON.stringify(args));child.stdin.on('error',()=>{});
           child.stdout.on('data',b=>{output+=b;if(output.length>8192)child.kill();});child.stderr.resume();
           child.on('error',()=>{clearTimeout(timer);reject(new Error('目标进展服务不可用'));});
@@ -49,7 +52,7 @@ export function registerTasks(api) {
             '--run', String(event.runId || ''), '--call', String(event.toolCallId || ''), '--tool', event.toolName],
           { cwd: root, windowsHide: true, env: { ...process.env, EASEL_DATA_DIR: dataRoot, PYTHONIOENCODING: 'utf-8' } });
         let output = '';
-        const timer = setTimeout(() => { child.kill(); reject(new Error('timeout')); }, 5000);
+        const timer = setTimeout(() => { child.kill(); reject(new Error('timeout')); }, GUARD_TIMEOUT_MS);
         child.stdout.on('data', b => { output += b; if (output.length > 8192) child.kill(); });
         child.stderr.resume();
         child.on('error', () => { clearTimeout(timer); reject(new Error('unavailable')); });
@@ -59,5 +62,5 @@ export function registerTasks(api) {
     } catch {
       return { block: true, blockReason: '目标执行保护暂不可用，请检查本地服务。' };
     }
-  }, { priority: 200, timeoutMs: 7000 });
+  }, { priority: 200, timeoutMs: GUARD_TIMEOUT_MS + 2000 });
 }

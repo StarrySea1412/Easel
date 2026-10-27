@@ -5,7 +5,7 @@ import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'https://easel.test/'});globalThis.document=window.document;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
-const {mergeTaskSessions,planNeedsAttention}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
+const {mergeTaskSessions,planNeedsAttention,taskMessageSession}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
 const {default:GoalOptions,ChatGoalNotice}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
@@ -29,6 +29,17 @@ test('task history merges into original chat without replacing local messages or
 test('imported backup is never converted into a live task session',()=>{
   const local=[{id:'chat',messages:[],importedFromBackup:true}];
   assert.equal(mergeTaskSessions(local,[{id:'chat',messages:[{turnId:'turn'}]}]),local);
+});
+
+test('same-text task receipts refresh source metadata and preserve exact worker identity',()=>{
+  const local=[{id:'parent',messages:[{role:'assistant',content:'相同正文',turnId:'turn',taskRunId:'run'}]}];
+  const remote=[{id:'parent',messages:[{...local[0].messages[0],sourceSessionId:'worker',thinkingStatus:'unavailable',elapsedMs:2000}]}];
+  const merged=mergeTaskSessions(local,remote);
+  assert.equal(merged[0].messages[0].sourceSessionId,'worker');assert.equal(merged[0].messages[0].elapsedMs,2000);
+  assert.equal(mergeTaskSessions(merged,remote),merged);
+  assert.equal(taskMessageSession('parent',merged[0].messages[0]),'worker');
+  assert.equal(taskMessageSession('parent',local[0].messages[0],[{id:'run',turnId:'turn',parentSessionId:'parent',sessionId:'worker'}]),'worker');
+  assert.equal(taskMessageSession('parent',local[0].messages[0],[{id:'run',turnId:'other',parentSessionId:'parent',sessionId:'foreign'}]),'parent');
 });
 test('goal review is explicit, tool counts are displayed, and unconfirmed run forbids resume',async t=>{
   const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let refresh=0;const requests=[];
@@ -96,6 +107,22 @@ test('inline goal never silently substitutes an unavailable explicit model and d
   assert.equal(requests.length,1);
   await act(async()=>root.render(createElement(GoalComposer,{...props,blocked:true})));
   assert.match(host.textContent,/请先暂停/);assert.equal(host.querySelector('.btn-primary').disabled,true);
+  await act(async()=>root.unmount());host.remove();
+});
+
+test('native chat goals use the current native model and disclose observed tools',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url)==='/api/codex/runtime')return new Response(JSON.stringify({available:true,auth:'authenticated',options:[{id:'codex/fixture',configured:true}]}));
+    assert.ok(!String(url).includes('agent-office/models'));
+    requests.push({url,body:JSON.parse(options.body)});
+    return new Response(JSON.stringify(String(url).endsWith('/goals')?{...goal,id:'native-goal'}:{}));
+  });
+  await act(async()=>root.render(createElement(GoalComposer,{sessionId:'native-chat',engine:'codex',seed:'完成当前原生对话目标',modelRef:'codex/fixture',onClose:()=>{},onChanged:()=>{}})));
+  assert.match(host.textContent,/观察上限/);
+  await act(async()=>host.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.equal(requests[0].body.goal.engine,'codex');assert.equal(requests[0].body.goal.toolBudgetMode,'observed');assert.equal(requests[0].body.goal.modelRef,'codex/fixture');
+  assert.equal(requests[1].body.action,'start');
   await act(async()=>root.unmount());host.remove();
 });
 

@@ -15,6 +15,7 @@
 
 ## 当前状态
 
+- [Codex目标与定时计划0.34.0候选](codex-tasks-0.34.0.md)（源码迭代，138未更新）
 - [用户需求与交付清单](user-requirements-2026-10-08.md)（历史与追加要求的单一事实来源）
 - [统一功能验收清单](functional-checklist-2026-10-21.md)
 - [二次开发计划](secondary-development-plan.md) / [二次开发进度](secondary-development-progress.md)

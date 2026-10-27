@@ -227,7 +227,7 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
   // ---- 助手消息 ----
   // 思考 / 活动：流式时用实时值；结束后用消息里持久化的值 —— 一直保留，不隐藏
   const effThinking = isStreaming ? (thinking || '') : (message.thinking || '');
-  const reasoningNote = !effThinking && (isStreaming || message.turnId || message.thinkingStatus) ?
+  const reasoningNote = !message.taskGoalId && !message.taskRunId && !effThinking && (isStreaming || message.turnId || message.thinkingStatus) ?
     (backupSnapshot ? '备份未保存思考摘要，无法核验原服务是否返回。' : isStreaming ?
       message.requestedThinkingLevel === 'off' ? '本轮请求关闭思考；行为记录仍会展示。' : '尚未收到可见思考摘要；操作记录会随执行更新。' :
       message.thinkingStatus === 'unavailable' ? '本轮未收到可见思考摘要。渠道或网关可能未传递摘要，提高思考档位也不保证返回。' : '历史记录未保存思考摘要状态，无法判断原服务是否返回。') : '';

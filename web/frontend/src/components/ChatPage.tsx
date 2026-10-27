@@ -12,7 +12,7 @@ import MessageBubble, { type BubbleActions } from './MessageBubble';
 import ChatArtifacts from './ChatArtifacts';
 import ChatGoalPanel from './ChatGoalPanel';
 import { type TaskSnapshot, type TaskGoal } from '../lib/tasks';
-import { taskRequest } from '../lib/tasks';
+import { taskRequest, taskMessageSession } from '../lib/tasks';
 import { showToast } from '../lib/toast';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
@@ -197,7 +197,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     creation: (text, kind) => { requestCreationPanel(kind, session.id, text); openTool(kind); },
     targets: [...sideSessions.map(side => ({ value: side.id, label: `侧边对话 · ${side.title}` })), ...(onSideChat ? [{ value: 'new-side', label: '新建侧边对话' }] : [])],
     hasGoal: Boolean(editableGoal),
-    goalBlocked: taskBusy || Boolean(stream || stopping || session.pendingTurnId) || session.engine === 'codex',
+    goalBlocked: taskBusy || Boolean(stream || stopping || session.pendingTurnId),
     quote: (text, target) => {
       const id = target === 'current' ? session.id : target === 'new-side' ? onSideChat?.('create') : sideSessions.find(side => side.id === target)?.id;
       if (!id) { showToast('目标对话不可用，请重新选择。', 'error'); return; }
@@ -477,7 +477,8 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
                 };
               }
             }
-            const auditTurn=live?session.pendingTurnId:msg.turnId;
+            const auditTurn=msg.taskGoalId?undefined:live?session.pendingTurnId:msg.turnId;
+            const auditSession=taskMessageSession(session.id,msg,taskState?.runs);
             if (actions && !isImported && !live && msg.content.trim()) actions.messageSettings = { text: msg.content, actions: messageSettings };
             const auditRecord=auditTurn?skillAudits.records.find(record=>record.turnId===auditTurn):undefined;
             const selectedSkills=i>0&&displayMessages[i-1].role==='user'?displayMessages[i-1].selectedSkills||[]:[];
@@ -496,8 +497,8 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
                 activitySteps={live ? stream!.activitySteps : undefined}
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
-                executionScope={`${session.id}:${auditTurn||''}`}
-                execution={!msg.externalSource && !isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => <><ChatAgentActivity sessionId={session.id} turnId={auditTurn}/>{session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={session.id} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} />}</> : undefined}
+                executionScope={`${auditSession}:${auditTurn||''}`}
+                execution={!msg.externalSource && !isImported && msg.role === 'assistant' && auditTurn ? onProgressOwnership => <><ChatAgentActivity sessionId={auditSession} turnId={auditTurn}/>{session.engine === 'codex' ? <CodexRunPanel key={auditTurn} sessionId={auditSession} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership}/> : <ChatExecutionPanel key={auditTurn} sessionId={auditSession} turnId={auditTurn} streaming={live} onProgressOwnership={onProgressOwnership} onOpen={onOpenAudit ? () => onOpenAudit(auditTurn) : undefined} />}</> : undefined}
                 status={!msg.externalSource && session.engine !== 'codex'&&!isImported&&msg.role==='assistant'&&(auditTurn||auditRecord)?<ChatSkillEvidence key={auditTurn} sessionId={session.id} turnId={auditTurn!} record={auditRecord} selectedSkills={selectedSkills} streaming={live} error={live?skillAudits.error:undefined} onOpen={auditTurn&&onOpenAudit?()=>onOpenAudit(auditTurn):undefined}/>:undefined}
               /></Fragment>
             );
@@ -568,6 +569,8 @@ function SideChatThread({ session, stream, stopping, stopError, onQuestionAnswer
 
 export default function ChatPage(props:ChatPageProps) {
   const {session,stream}=props;
-  const turnId=session.pendingTurnId||[...session.messages].reverse().find(message=>message.role==='assistant'&&!message.externalSource&&message.turnId)?.turnId||'';
-  return <ChatRunProvider sessionId={session.id} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent key={session.id} {...props}/></ChatRunProvider>;
+  const latest=[...session.messages].reverse().find(message=>message.role==='assistant'&&!message.externalSource&&!message.taskGoalId&&message.turnId);
+  const turnId=session.pendingTurnId||latest?.turnId||'';
+  const executionSession=session.pendingTurnId?session.id:latest?taskMessageSession(session.id,latest,props.taskState?.runs):session.id;
+  return <ChatRunProvider sessionId={executionSession} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent key={session.id} {...props}/></ChatRunProvider>;
 }

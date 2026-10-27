@@ -1,8 +1,8 @@
-import type { ChatSession } from './store';
+import type { ChatSession, ChatMessage } from './store';
 
 export interface TaskCriterion { type:'file'|'text'|'review'; label:string; value:string }
 export interface TaskCheck extends TaskCriterion { state:'pending'|'passed'|'failed'|'error'; detail?:string; evidence?:string }
-export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|'parallel-reviewed-delivery'|'planned-reviewed-delivery'|null }
+export interface GoalSpec { engine?:'openclaw'|'codex'; toolBudgetMode?:'admission'|'observed'; objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|'reviewed-delivery'|'parallel-reviewed-delivery'|'planned-reviewed-delivery'|null }
 export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; dependsOn?:string[]; access?:'read'|'write'; groupPath?:string[]; planGate?:{schemaVersion:number}; plan?:{nodeCount:number;groupCount:number}; steps?:GoalStep[]; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string; review?:{decision:'pass'|'revise'|'blocked';summary:string;findings:string[]} }
 export interface GoalStep { id:string; title:string; status:'pending'|'in_progress'|'completed'|'blocked'; detail?:string }
 export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number; sessionDeleted?:boolean; revision?:number; lastRework?:{id:string;title:string;reason:string;fromRevision:number;toRevision:number} }
@@ -41,6 +41,12 @@ export function goalWorkflowOptions(current?:GoalSpec['workflow']) {
 export function workflowIterations(workflow:GoalSpec['workflow']|'') {return workflow==='planned-reviewed-delivery'?16:workflow?8:5;}
 export function graphWorkflow(goal:Pick<GoalSpec,'workflow'>) {return goal.workflow==='parallel-reviewed-delivery'||goal.workflow==='planned-reviewed-delivery';}
 
+/** Parent chat summaries refer to the actual worker's native execution. */
+export function taskMessageSession(sessionId:string,message:ChatMessage,runs:TaskRun[]=[]):string {
+  const run=runs.find(row=>row.id===message.taskRunId&&row.turnId===message.turnId&&(row.parentSessionId===sessionId||row.sessionId===sessionId));
+  return run?.sessionId||(message.taskRunId&&message.sourceSessionId)||sessionId;
+}
+
 /** Only inspection pages receive these contexts; sidebar and saved chats do not. */
 export function taskInspectionSessions(sessions:ChatSession[], runs:TaskRun[], goals:TaskGoal[]):ChatSession[] {
   const workers=new Map<string,ChatSession>();
@@ -50,7 +56,7 @@ export function taskInspectionSessions(sessions:ChatSession[], runs:TaskRun[], g
       ||run.sessionId===goal.sessionId||sessions.some(item=>item.id===run.sessionId))continue;
     let worker=workers.get(run.sessionId);
     if(!worker) {
-      worker={id:run.sessionId,parentSessionId:goal.sessionId,taskWorker:true,created:run.startedAt*1000,
+      worker={id:run.sessionId,parentSessionId:goal.sessionId,taskWorker:true,engine:goal.engine||'openclaw',created:run.startedAt*1000,
         title:`${goal.title} · ${goal.stages?.find(stage=>stage.id===run.stageId)?.title||run.stageId||'工作阶段'}`,messages:[]};
       workers.set(run.sessionId,worker);
     }
@@ -89,7 +95,7 @@ export function mergeTaskSessions(local:ChatSession[], remote:ChatSession[], del
     const existing=result[index];if(existing.importedFromBackup)continue;
     const known=new Set(existing.messages.map(m=>m.turnId));
     const added=incoming.messages.filter(m=>m.turnId&&!known.has(m.turnId));
-    const updated=existing.messages.map(m=>{const replacement=incoming.messages.find(r=>r.turnId&&r.turnId===m.turnId&&r.taskRunId&&r.taskRunId===m.taskRunId);return replacement&&replacement.content!==m.content?replacement:m;});
+    const updated=existing.messages.map(m=>{const replacement=incoming.messages.find(r=>r.turnId&&r.turnId===m.turnId&&r.taskRunId&&r.taskRunId===m.taskRunId);return replacement&&(['content','sourceSessionId','thinking','thinkingStatus','startedAt','elapsedMs','stopped'] as const).some(key=>replacement[key]!==m[key])?replacement:m;});
     if(added.length||updated.some((m,i)=>m!==existing.messages[i])){result[index]={...existing,messages:[...updated,...added]};changed=true;}
   }
   return changed?result:local;
