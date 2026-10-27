@@ -11,6 +11,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'web')]
 import app as web
+from easel.image_jobs import ImageJobs, ImageWorker
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def library(tmp_path, monkeypatch):
     outputs.mkdir()
     monkeypatch.setattr(web, 'OUTPUTS_DIR', outputs)
     monkeypatch.setattr(web, 'IMAGEGEN_DIR', outputs / 'AI生图')
-    monkeypatch.setattr(web, '_IMAGEGEN_JOBS', {})
+    monkeypatch.setattr(web, '_IMAGE_WORKER', None)
     monkeypatch.setattr(web, '_read_env', lambda: {
         'IMG_BASE_URL': 'https://images.example.test/v1',
         'IMG_MODEL': 'test-image', 'IMG_API_KEY': 'secret-test-value',
@@ -62,26 +63,25 @@ def test_legacy_gallery_works_when_only_old_images_exist(library):
 
 
 def test_generation_prompt_and_requested_dimensions_survive_job_memory_loss(library, monkeypatch):
-    class ImmediateThread:
-        def __init__(self, *, target, **_):
-            self.target = target
-
-        def start(self):
-            self.target()
-
     def generate(cmd, **_):
         output = Path(cmd[cmd.index('--output') + 1])
         for index in (1, 2):
             save_image(output.with_name(f'{output.stem}-{index}.webp'), (160, 90))
         return SimpleNamespace(returncode=0, stdout='', stderr='')
 
-    monkeypatch.setattr(web.threading, 'Thread', ImmediateThread)
-    monkeypatch.setattr(web.subprocess, 'run', generate)
-    monkeypatch.setattr(web, 'child_env', lambda *_: {})
+    class InlineImageWorker(ImageWorker):
+        def tick(self):
+            jobs = ImageJobs(self.outputs())
+            job = jobs.claim(self.config(), self.owner)
+            if job:
+                self.run(jobs, job, self.config())
+
+    monkeypatch.setattr(web, '_IMAGE_WORKER', InlineImageWorker(
+        ROOT, lambda: library, lambda: web._read_env(), lambda: {}, runner=generate))
     prompt = '保留完整提示词。' * 30
     started = asyncio.run(web.api_imagegen_start(web.ImagegenRequest(prompt=prompt, size='864x1536', n=2)))
-    assert web._IMAGEGEN_JOBS[started['jobId']]['state'] == 'done'
-    web._IMAGEGEN_JOBS.clear()
+    durable_job = ImageJobs(library).get(started['jobId'])
+    assert durable_job['phase'] == 'done'
     files = flatten(web.api_outputs())
     assert len(files) == 2  # Hidden metadata must not appear as separate content files.
     for file in files:

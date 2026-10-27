@@ -1,6 +1,8 @@
+"""Focused whoami endpoint coverage using the current owned-process contract."""
 import asyncio
 import json
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -10,207 +12,169 @@ import web.app as web
 
 @pytest.fixture
 def account_state(tmp_path, monkeypatch):
-    monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {})
+    outputs = tmp_path / "outputs"
+    login_dir = outputs / "_login"
+    profiles = tmp_path / "browser-profiles"
+    monkeypatch.setattr(web, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(web, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(web, "LOGIN_DIR", login_dir)
+    monkeypatch.setattr(web, "PUBLISH_DIR", outputs / "_publish")
+    monkeypatch.setattr(web, "BROWSER_PROFILES", profiles)
     monkeypatch.setattr(web, "_WHOAMI_CACHE", {})
-    monkeypatch.setattr(web, "_WHOAMI_LOCK", threading.Lock())
-    monkeypatch.setattr(web, "_WHOAMI_TASKS", {})
+    monkeypatch.setattr(web, "_WHOAMI_PROCESSES", {})
+    monkeypatch.setattr(web, "_ACCOUNT_GENERATIONS", {})
+    monkeypatch.setattr(web, "_ACCOUNT_CLEARING", set())
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {})
+    monkeypatch.setattr(web, "_PUBLISH_LOCK", threading.RLock())
+    monkeypatch.setattr(web, "_PUBLISH_ACTIVE", {})
+    monkeypatch.setattr(web, "_proxy_env", lambda: {})
+    login_dir.mkdir(parents=True)
+    profiles.mkdir()
+    web._write_login_marker("xiaohongshu", "success")
     return tmp_path
 
 
-def test_whoami_does_not_start_browser_during_login(account_state, monkeypatch):
+def completed(payload, returncode=0):
+    return SimpleNamespace(stdout=json.dumps(payload), stderr="", returncode=returncode)
+
+
+def test_whoami_does_not_start_browser_while_login_owns_profile(account_state, monkeypatch):
     web.LOGIN_PROCESSES["xiaohongshu"] = SimpleNamespace(poll=lambda: None)
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: pytest.fail("login owns profile"))
-    result = asyncio.run(web.api_account_whoami("xiaohongshu"))
-    assert not result["loggedIn"]
-    assert not web._WHOAMI_CACHE
-
-
-def test_whoami_waits_for_successful_login_to_release_profile(account_state, monkeypatch):
-    web._write_login_marker("weixin-channels", "success")
-    events = []
-    process = SimpleNamespace(poll=lambda: None if not events else 0,
-                              wait=lambda **kwargs: events.append("released"))
-    web.LOGIN_PROCESSES["weixin-channels"] = process
-    def run(*args, **kwargs):
-        assert events == ["released"]
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            "loggedIn": True, "name": "Own channel", "avatar": "https://self.test/channel.png",
-        }))
-
-    monkeypatch.setattr(web.subprocess, "run", run)
-    result = asyncio.run(web.api_account_whoami("weixin-channels", force=True))
-    assert result["name"] == "Own channel"
-    assert result["avatar"] == "https://self.test/channel.png"
-
-
-def test_whoami_reports_profile_save_timeout_without_caching_empty_identity(account_state, monkeypatch):
-    web._write_login_marker("weixin-channels", "success")
-    def wait(**kwargs):
-        raise web.subprocess.TimeoutExpired("login", 8)
-
-    web.LOGIN_PROCESSES["weixin-channels"] = SimpleNamespace(poll=lambda: None, wait=wait)
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: pytest.fail("profile still locked"))
+    monkeypatch.setattr(web.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("login owns profile"))
     with pytest.raises(web.HTTPException) as error:
-        asyncio.run(web.api_account_whoami("weixin-channels", force=True))
+        asyncio.run(web.api_account_whoami("xiaohongshu"))
     assert error.value.status_code == 409
     assert not web._WHOAMI_CACHE
 
 
-def test_mp_whoami_reads_backend_account_not_configured_label(account_state, monkeypatch):
-    web._write_login_marker("wechat-oa-mp", "success")
-    monkeypatch.setattr(web, "_wechat_web_account", lambda: {"name": "Configured label"})
-    def run(command, **kwargs):
-        assert command[-2:] == ["whoami", "--no-proxy"]
-        assert command[1].endswith("weixin_mp_stats.py")
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            "loggedIn": True, "name": "Actual MP account", "avatar": "https://self.test/mp.png",
-        }))
+@pytest.mark.parametrize(
+    ("platform", "script", "argument"),
+    [
+        ("weixin-channels", "web_publisher.py", "weixin-channels"),
+        ("wechat-oa", "weixin_mp_stats.py", "whoami"),
+    ],
+)
+def test_whoami_uses_platform_runner_and_backend_identity(account_state, monkeypatch, platform, script, argument):
+    web._write_login_marker(platform, "success")
+    commands = []
 
-    monkeypatch.setattr(web.subprocess, "run", run)
-    result = asyncio.run(web.api_account_whoami("wechat-oa", force=True))
-    assert result["name"] == "Actual MP account"
-    assert result["avatar"] == "https://self.test/mp.png"
-    assert (account_state / "wechat-oa-mp.json").exists()
-    assert not (account_state / "wechat-oa.json").exists()
+    def run(_platform, command, _generation):
+        commands.append(command)
+        return completed({"loggedIn": True, "name": "Backend identity", "avatar": "https://self.test/me.png"})
+
+    monkeypatch.setattr(web, "_run_owned_whoami", run)
+    result = asyncio.run(web.api_account_whoami(platform, force=True))
+    assert result["name"] == "Backend identity"
+    assert result["avatar"] == "https://self.test/me.png"
+    assert script in commands[0][1]
+    assert argument in commands[0]
 
 
-def test_mp_expired_session_can_use_appid_without_faking_backend_login(account_state, monkeypatch):
-    web._write_login_marker("wechat-oa-mp", "success")
+def test_expired_wechat_browser_is_not_faked_by_app_credentials(account_state, monkeypatch):
+    web._write_login_marker("wechat-oa", "success")
     monkeypatch.setattr(web, "_wechat_has_credentials", lambda: True)
-    monkeypatch.setattr(web, "_wechat_web_account", lambda: {"name": "Configured label"})
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn":false,"name":"","avatar":""}'))
+    monkeypatch.setattr(web, "_run_owned_whoami", lambda *args: completed(
+        {"loggedIn": False, "reason": "auth_expired"}))
     result = asyncio.run(web.api_account_whoami("wechat-oa", force=True))
-    assert result == {"loggedIn": True, "name": "Configured label", "avatar": ""}
-    assert not (account_state / "wechat-oa-mp.json").exists()
+    assert result["loggedIn"] is False and result["verified"] is True
+    assert not web._account_logged_in("wechat-oa", web.LOGIN_RUNNERS["wechat-oa"])
 
 
-def test_douyin_whoami_does_not_use_model_proxy(account_state, monkeypatch):
-    def run(command, **kwargs):
-        assert command[-2:] == ["whoami", "--no-proxy"]
-        return SimpleNamespace(returncode=0, stdout='{"loggedIn":false,"name":"","avatar":""}')
-
-    monkeypatch.setattr(web.subprocess, "run", run)
-    assert not asyncio.run(web.api_account_whoami("douyin", force=True))["loggedIn"]
-
-
-def test_whoami_network_error_preserves_success_marker(account_state, monkeypatch):
-    web._write_login_marker("xiaohongshu", "success")
-    initial = (account_state / "xiaohongshu.json").read_bytes()
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout=json.dumps({"loggedIn": False, "error": "maintenance"})))
+def test_whoami_timeout_preserves_marker_and_does_not_cache_empty_identity(account_state, monkeypatch):
+    monkeypatch.setattr(web, "_run_owned_whoami", lambda *args: (_ for _ in ()).throw(
+        web.subprocess.TimeoutExpired("whoami", 150)))
     with pytest.raises(web.HTTPException) as error:
-        asyncio.run(web.api_account_whoami("xiaohongshu"))
-    assert error.value.status_code == 502
-    assert (account_state / "xiaohongshu.json").read_bytes() == initial
+        asyncio.run(web.api_account_whoami("xiaohongshu", force=True))
+    assert error.value.status_code == 504
     assert not web._WHOAMI_CACHE
+    assert (account_state / "outputs" / "_login" / "xiaohongshu.json").exists()
 
 
-def test_whoami_result_before_new_login_cannot_remove_success_marker(account_state, monkeypatch):
-    def run(*args, **kwargs):
-        web._write_login_marker("xiaohongshu", "success")
-        return SimpleNamespace(returncode=0, stdout='{"loggedIn": false}')
-
-    monkeypatch.setattr(web.subprocess, "run", run)
-    assert asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"]
-    assert (account_state / "xiaohongshu.json").exists()
-    assert not web._WHOAMI_CACHE
-
-
-def test_whoami_invalid_boolean_is_not_a_verified_logout(account_state, monkeypatch):
-    web._write_login_marker("xiaohongshu", "success")
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn": "false"}'))
-    with pytest.raises(web.HTTPException) as error:
-        asyncio.run(web.api_account_whoami("xiaohongshu"))
-    assert error.value.status_code == 502
-    assert not web._WHOAMI_CACHE
+def test_unknown_reply_preserves_last_verified_identity_without_caching(account_state, monkeypatch):
+    marker = account_state / "outputs" / "_login" / "xiaohongshu.json"
+    initial = marker.read_bytes()
+    monkeypatch.setattr(web, "_run_owned_whoami", lambda *args: completed(
+        {"loggedIn": False, "error": "maintenance"}))
+    result = asyncio.run(web.api_account_whoami("xiaohongshu", force=True))
+    assert result["loggedIn"] is True and result["authState"] == "unknown"
+    assert result["verified"] is False
+    assert not web._WHOAMI_CACHE and marker.read_bytes() == initial
 
 
-def test_unknown_account_identity_is_not_returned_as_verified_logout(account_state, monkeypatch):
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn":false,"name":"","avatar":"","error":"not ready"}'))
-    with pytest.raises(web.HTTPException) as error:
-        asyncio.run(web.api_account_whoami("weixin-channels", force=True))
-    assert error.value.status_code == 502
-    assert not web._WHOAMI_CACHE
-    assert not (account_state / "weixin-channels.json").exists()
-
-
-def test_unknown_account_identity_preserves_last_verified_identity(account_state, monkeypatch):
-    web._write_login_marker("weixin-channels", "success")
-    identity = {"loggedIn": True, "name": "Own channel", "avatar": "https://self.test/channel.png"}
-    web._WHOAMI_CACHE["weixin-channels"] = (web.time.time(), identity)
-    initial = (account_state / "weixin-channels.json").read_bytes()
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn":false,"error":"not ready"}'))
-    with pytest.raises(web.HTTPException) as error:
-        asyncio.run(web.api_account_whoami("weixin-channels", force=True))
-    assert error.value.status_code == 502
-    assert web._WHOAMI_CACHE["weixin-channels"][1] == identity
-    assert (account_state / "weixin-channels.json").read_bytes() == initial
-
-
-def test_manual_whoami_bypasses_server_cache(account_state, monkeypatch):
+def test_force_check_bypasses_current_cache_and_refreshes_identity(account_state, monkeypatch):
+    platform = "xiaohongshu"
+    identity = {"loggedIn": False, "name": "", "avatar": "", "identityKey": web._account_identity_key(platform)}
+    generation = web._account_check_generation(platform)
+    web._WHOAMI_CACHE[platform] = (time.time(), identity, generation)
     calls = []
-    web._WHOAMI_CACHE["xiaohongshu"] = (web.time.time(), {
-        "loggedIn": False, "name": "", "avatar": ""})
 
-    def run(*args, **kwargs):
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout='{"loggedIn": true}')
+    def run(*args):
+        calls.append(True)
+        return completed({"loggedIn": True, "name": "Current account"})
 
-    monkeypatch.setattr(web.subprocess, "run", run)
-    assert not asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"]
+    monkeypatch.setattr(web, "_run_owned_whoami", run)
+    assert asyncio.run(web.api_account_whoami(platform))["loggedIn"] is False
     assert not calls
-    assert asyncio.run(web.api_account_whoami("xiaohongshu", force=True))["loggedIn"]
+    assert asyncio.run(web.api_account_whoami(platform, force=True))["name"] == "Current account"
     assert len(calls) == 1
-    assert (account_state / "xiaohongshu.json").exists()
 
 
-def test_confident_logout_removes_expired_marker(account_state, monkeypatch):
-    web._write_login_marker("xiaohongshu", "success")
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn": false}'))
-    assert not asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"]
-    assert not (account_state / "xiaohongshu.json").exists()
-    assert not web._WHOAMI_CACHE["xiaohongshu"][1]["loggedIn"]
+def test_confident_logout_expires_marker_and_caches_verified_result(account_state, monkeypatch):
+    monkeypatch.setattr(web, "_run_owned_whoami", lambda *args: completed(
+        {"loggedIn": False, "reason": "login_required"}))
+    result = asyncio.run(web.api_account_whoami("xiaohongshu", force=True))
+    assert result["loggedIn"] is False and result["verified"] is True
+    marker = json.loads((account_state / "outputs" / "_login" / "xiaohongshu.json").read_text(encoding="utf-8"))
+    assert marker["state"] == "expired"
+    assert web._WHOAMI_CACHE["xiaohongshu"][1]["verified"] is True
 
 
-def test_concurrent_account_checks_share_one_browser(account_state, monkeypatch):
-    calls = []
-    entered = threading.Event()
-    release = threading.Event()
-    def run(*args, **kwargs):
-        calls.append(kwargs)
-        entered.set()
-        assert release.wait(timeout=2)
-        return SimpleNamespace(returncode=0, stdout='{"loggedIn":true,"name":"Me","avatar":""}')
+def test_changed_account_generation_rejects_late_identity(account_state, monkeypatch):
+    marker = account_state / "outputs" / "_login" / "xiaohongshu.json"
+    initial = marker.read_bytes()
 
-    monkeypatch.setattr(web.subprocess, "run", run)
+    def late_result(platform, command, generation):
+        web._ACCOUNT_GENERATIONS[platform] = "new-login"
+        return completed({"loggedIn": True, "name": "Old account"})
+
+    monkeypatch.setattr(web, "_run_owned_whoami", late_result)
+    with pytest.raises(web.HTTPException) as error:
+        asyncio.run(web.api_account_whoami("xiaohongshu", force=True))
+    assert error.value.status_code == 409
+    assert marker.read_bytes() == initial and not web._WHOAMI_CACHE
+
+
+def test_concurrent_checks_never_launch_two_profile_writers(account_state, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+
+    class Process:
+        returncode = None
+
+        def wait(self, timeout):
+            started.set()
+            assert release.wait(timeout=3)
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    def spawn(command, **options):
+        options["stdout"].write(b'{"loggedIn":true,"name":"Me"}')
+        options["stdout"].flush()
+        return Process()
+
+    monkeypatch.setattr(web.subprocess, "Popen", spawn)
+
     async def check():
-        first = asyncio.create_task(web.api_account_whoami("xiaohongshu"))
-        assert await asyncio.to_thread(entered.wait, 2)
-        second = asyncio.create_task(web.api_account_whoami("xiaohongshu", force=True))
-        await asyncio.sleep(0)
+        first = asyncio.create_task(web.api_account_whoami("xiaohongshu", force=True))
+        assert await asyncio.to_thread(started.wait, 3)
+        with pytest.raises(web.HTTPException) as error:
+            await web.api_account_whoami("xiaohongshu", force=True)
+        assert error.value.status_code == 409
         release.set()
-        return await asyncio.gather(first, second)
+        result = await first
+        return result
 
-    results = asyncio.run(check())
-    assert len(calls) == 1
-    assert calls[0]["timeout"] == 35
-    assert calls[0]["encoding"] == "utf-8"
-    assert results[0] == results[1]
-    assert not web._WHOAMI_TASKS
-
-
-def test_incomplete_identity_does_not_stay_cached_for_ten_minutes(account_state, monkeypatch):
-    web._write_login_marker("xiaohongshu", "success")
-    web._WHOAMI_CACHE["xiaohongshu"] = (web.time.time() - 61, {
-        "loggedIn": True, "name": "", "avatar": ""})
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"loggedIn":true,"name":"Me","avatar":"https://self.test/avatar"}'))
-    result = asyncio.run(web.api_account_whoami("xiaohongshu"))
+    result = asyncio.run(check())
     assert result["name"] == "Me"
-    assert result["avatar"]
+    assert not web._WHOAMI_PROCESSES

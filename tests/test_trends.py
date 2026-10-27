@@ -1,141 +1,114 @@
-"""热点雷达回归测试：各平台响应格式归一化 + 取不到数据要能被识别出来。
+"""Compatibility coverage for the current durable trend-source service.
 
-背景（2026-10-01）：热点雷达六个平台里三个是空的——B站其实是解析器的锅（备用源返回 50 条
-纯字符串数组，而解析器只认对象数组，全被丢掉），知乎/头条则是压根没有备用源且主源被限流。
-这个文件守住两件事：各家格式都解析得出来、以及"取不到"要和"真的没数据"分开。
+The former tests imported the deleted web.app parser/cache globals. The
+implementation now lives in ``web.trend_sources``; detailed source tests stay
+in ``tests/test_trend_sources.py``.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "web"))
-
-import app as web  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "web"))
+import trend_sources as trends
 
 
 @pytest.fixture(autouse=True)
-def isolated_trend_cache(monkeypatch):
-    monkeypatch.setattr(web, "_TREND_CACHE", {})
+def clean_trend_state():
+    trends._CACHE.clear()
+    trends._LAST.clear()
+    trends._SOURCE_COOLDOWNS.clear()
+    yield
+    trends._CACHE.clear()
+    trends._LAST.clear()
+    trends._SOURCE_COOLDOWNS.clear()
 
 
-# ---- 各家响应格式 ----
-
-def test_parse_hot_handles_plain_string_array():
-    """xxapi 的 B站热榜：data 就是一串标题字符串，没有对象包着。"""
-    items = web._parse_hot({"code": 200, "data": ["凉哈皮谈首登亚运解说台", "   ", "holymoly亚运金牌"]})
-    assert [i["title"] for i in items] == ["凉哈皮谈首登亚运解说台", "holymoly亚运金牌"]
-    assert all(i["hot"] == "" and i["url"] == "" for i in items)
+def raw(value):
+    return json.dumps(value).encode()
 
 
-def test_parse_hot_handles_capitalized_fields():
-    """头条官方热榜：Title / HotValue / Url 全是大写开头，热度还会是数字。"""
-    items = web._parse_hot({"data": [
-        {"ClusterId": 1, "Title": "农民交公粮能否视同缴社保", "HotValue": 1234567,
-         "Url": "https://www.toutiao.com/trending/1/"},
-    ]})
-    assert items == [{"title": "农民交公粮能否视同缴社保", "hot": "1234567",
-                      "url": "https://www.toutiao.com/trending/1/"}]
+def test_parser_normalizes_plain_rows_and_search_links():
+    source = trends.SOURCES["bilibili"][0]
+    items, updated = trends.parse(source, raw({"code": 200, "data": ["AI 开源", "  ", "新品发布"]}), "bilibili")
+    assert [item["title"] for item in items] == ["AI 开源", "新品发布"]
+    assert items[0]["url"].startswith("https://search.bilibili.com/all?keyword=")
+    assert items[0]["linkKind"] == "search" and updated is None
 
 
-def test_parse_hot_handles_nested_target_and_rewrites_zhihu_url():
-    """知乎官方热榜：正文在 target 里，链接给的是 api.zhihu.com，要点开得换成网页地址。"""
-    items = web._parse_hot({"data": [
-        {"type": "hot_list_feed", "card_id": "Q_1",
-         "target": {"id": 2088649572151194406, "title": "迪拜航空客机返航",
-                    "url": "https://api.zhihu.com/questions/2088649572151194406",
-                    "metrics_area": {"text": "387 万热度"}}},
-    ]})
-    assert items == [{"title": "迪拜航空客机返航", "hot": "387 万热度",
-                      "url": "https://www.zhihu.com/question/2088649572151194406"}]
+def test_parser_distinguishes_auth_and_empty_source_errors():
+    source = trends.sixty("zhihu")
+    with pytest.raises(trends.SourceError) as error:
+        trends.parse(source, raw({"code": -8, "msg": "请携带Key", "data": ""}), "zhihu")
+    assert error.value.code == "authentication"
+    with pytest.raises(trends.SourceError) as empty:
+        trends.parse(trends.SOURCES["weibo"][0], raw({"code": 200, "data": []}), "weibo")
+    assert empty.value.code == "empty"
 
 
-def test_parse_hot_keeps_original_shape_working():
-    """60s 那套老格式（data 直接是对象数组）不能被新写法改坏。"""
-    items = web._parse_hot({"data": [{"title": "迪拜航空确认航班发生事故", "hot": "118万",
-                                      "url": "https://s.weibo.com/x"}]})
-    assert items == [{"title": "迪拜航空确认航班发生事故", "hot": "118万", "url": "https://s.weibo.com/x"}]
+def test_parser_rejects_unsafe_zhihu_question_links():
+    source = trends._zhihu_sources()[0]
+    payload = {"data": [{"type": "hot_list_feed", "target": {
+        "type": "question", "title": "公开问题", "url": "https://api.zhihu.com/questions/123?private=1"
+    }}]}
+    with pytest.raises(trends.SourceError) as error:
+        trends.parse(source, raw(payload), "zhihu")
+    assert error.value.code == "empty"
 
 
-def test_parse_hot_accepts_nested_data_wrapper():
-    items = web._parse_hot({"data": {"list": [{"word": "热词", "num": 42}]}})
-    assert items == [{"title": "热词", "hot": "42", "url": ""}]
-
-
-@pytest.mark.parametrize("bad", [
-    {}, {"data": None}, {"data": "不是列表"}, {"data": [1, 2, 3]}, {"data": [{"hot": "1"}]}, [],
-])
-def test_parse_hot_returns_empty_on_junk(bad):
-    """垃圾/空响应要安静地返回空列表，不能抛异常（抛了整条平台就断）。"""
-    assert web._parse_hot(bad) == []
-
-
-def test_trend_web_url_passes_through_other_urls():
-    assert web._trend_web_url("") == ""
-    assert web._trend_web_url("https://s.weibo.com/x") == "https://s.weibo.com/x"
-    assert web._trend_web_url("https://api.zhihu.com/questions/abc") == "https://api.zhihu.com/questions/abc"
-
-
-# ---- 源表本身 ----
-
-def test_every_platform_has_a_source():
-    """每个能选中的平台都要有主源，别出现"按钮在但没人给它取数据"。"""
-    assert set(web.TREND_SOURCES) == set(web.TREND_LABELS)
-    for pf, (primary, backup) in web.TREND_SOURCES.items():
-        assert primary and primary.startswith("http"), f"{pf} 缺主源"
-        if backup:
-            assert backup.startswith("http")
-
-
-# ---- 接口：取不到 vs 真的没有 ----
-
-def test_trends_marks_unavailable_platform(monkeypatch):
-    """/api/trends 要给每个平台带 ok 标：空列表＝这个平台取不到，不是"今天没热搜"。"""
-    web._TREND_CACHE.clear()
-    monkeypatch.setattr(web, "_fetch_platform",
-                        lambda pf: [{"title": f"{pf} 的头条", "hot": "", "url": ""}] if pf == "weibo" else [])
-    data = asyncio.run(web.api_trends("weibo,bilibili", 15))
-    by_pf = {g["platform"]: g for g in data["trends"]}
-    assert by_pf["weibo"]["ok"] is True and len(by_pf["weibo"]["items"]) == 1
-    assert by_pf["bilibili"]["ok"] is False and by_pf["bilibili"]["items"] == []
-
-
-def test_trends_ignores_unknown_platform(monkeypatch):
-    """乱传平台名不能把接口带崩，也不能凭空多出渠道。"""
-    web._TREND_CACHE.clear()
-    monkeypatch.setattr(web, "_fetch_platform", lambda pf: [])   # 测试不打真实网络
-    data = asyncio.run(web.api_trends("weibo,不存在", 5))
-    assert [g["platform"] for g in data["trends"]] == ["weibo"]
-    assert [g["label"] for g in data["trends"]] == ["微博"]
-
-
-@pytest.mark.parametrize("primary_result", [None, {"data": []}, {"data": "invalid"}])
-def test_fetch_platform_falls_back_on_error_or_empty_response(monkeypatch, primary_result):
-    primary, backup = web.TREND_SOURCES["weibo"]
+def test_fetch_uses_backup_and_preserves_failure_provenance(monkeypatch):
+    sources = trends.SOURCES["weibo"]
     calls = []
 
-    def fetch(url):
+    def download(url):
         calls.append(url)
-        if url == primary:
-            if primary_result is None:
-                raise OSError("unavailable")
-            return primary_result
-        return {"data": [{"title": "备用热点"}]}
+        if url == sources[0].url:
+            raise trends.SourceError("rate_limited", "HTTP 429", retry_at=2000)
+        return raw({"code": 200, "data": [{"title": "备用热点"}]})
 
-    monkeypatch.setattr(web, "_http_get_json", fetch)
-    assert web._fetch_platform("weibo") == [{"title": "备用热点", "hot": "", "url": ""}]
-    assert calls == [primary, backup]
+    monkeypatch.setattr(trends, "_download", download)
+    result = trends._fetch("weibo")
+    assert result["status"] == "fresh" and result["items"][0]["title"] == "备用热点"
+    assert result["attempts"][0]["code"] == "rate_limited"
+    assert calls == [source.url for source in sources]
 
 
-def test_trends_reuses_cached_items_when_all_sources_fail(monkeypatch):
-    items = [{"title": "缓存热点", "hot": "", "url": ""}]
-    web._TREND_CACHE["weibo"] = (0, items)
-    monkeypatch.setattr(web, "_fetch_platform", lambda platform: [])
-    data = asyncio.run(web.api_trends("weibo", 15))
-    assert data["trends"][0]["items"] == items
-    assert data["trends"][0]["ok"] is True
+def test_fetch_keeps_stale_data_after_failed_refresh(monkeypatch):
+    clock = [1000]
+    monkeypatch.setattr(trends.time, "time", lambda: clock[0])
+    monkeypatch.setattr(trends, "_download", lambda url: raw({"code": 200, "data": [{"title": "旧热点"}]}))
+    first = trends._fetch("weibo")
+    clock[0] += 301
+
+    def fail(url):
+        raise trends.SourceError("timeout", "来源响应超时")
+
+    monkeypatch.setattr(trends, "_download", fail)
+    stale = trends._fetch("weibo", refresh=True)
+    assert stale["status"] == "stale"
+    assert stale["items"] == first["items"] and stale["error"]["code"] == "timeout"
+
+
+def test_fetch_trends_filters_unknown_platforms_and_applies_limit(monkeypatch):
+    monkeypatch.setattr(trends, "_fetch", lambda platform, refresh=False: {
+        "platform": platform, "items": [{"title": str(i)} for i in range(5)], "fetchedAt": 100,
+        "status": "fresh", "label": trends.LABELS[platform]
+    })
+    result = asyncio.run(trends.fetch_trends("weibo,unknown,weibo,ithome", limit=2))
+    assert [group["platform"] for group in result["trends"]] == ["weibo", "ithome"]
+    assert all(len(group["items"]) == 2 for group in result["trends"])
+
+
+def test_app_endpoint_delegates_to_current_service(monkeypatch):
+    import app
+
+    async def fake_fetch(platforms, limit, refresh):
+        return {"trends": [{"platform": platforms, "items": [], "status": "error"}], "updated": 0}
+
+    monkeypatch.setattr(trends, "fetch_trends", fake_fetch)
+    result = asyncio.run(app.api_trends("weibo,unknown", 7, True))
+    assert result["trends"][0]["platform"] == "weibo,unknown"
