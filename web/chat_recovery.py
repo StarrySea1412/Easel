@@ -147,6 +147,7 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         provider_settled = final or (ledger or {}).get('resourceFacts', {}).get('provider') is True or prior.get('providerSettled') is True
         run_id = ((ledger or {}).get('providerRunId') or marker.get('gateway_run_id') or _legacy_run_id(web, turn_id))
         aborted = (ledger or {}).get('status') == 'stopped' or prior.get('aborted') is True
+        outcome = None
         observing = more_observations = False
         if not final and not (ledger or {}).get('settled'):
             observing, more_observations = _observe(web, session_id, turn_id, marker, ledger, run_id)
@@ -167,8 +168,9 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
                     and receipt.get('aborted') is False and receipt.get('runIds') == [])
             if not provider_settled:
                 receipt = client._rpc('agent.wait', {'runId': run_id, 'timeoutMs': 1000}, timeout=5)
-                provider_settled = (isinstance(receipt, dict) and receipt.get('runId') == run_id
-                                    and receipt.get('status') in ('ok', 'error'))
+                from easel.gateway_reconciliation import wait_outcome
+                outcome = wait_outcome(receipt, run_id, web._openclaw_session_id(session_id))
+                provider_settled = outcome is not None
                 if not provider_settled:
                     if observing:
                         if web._save_turn(f'web:{session_id}', 'running', marker.get('text', ''), marker,
@@ -179,10 +181,22 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
                             return result('observing')
                     return result('active' if isinstance(receipt, dict) and receipt.get('runId') == run_id
                                   and receipt.get('status') == 'timeout' else 'unconfirmed')
+        if outcome is not None:
+            # Save the canonical receipt before advancing a bounded raw cursor,
+            # marking the ledger or cleaning resources. A crash/retry can finish
+            # from this exact-turn snapshot without asking the gateway again.
+            if outcome['text'] is not None:
+                outcome['text'] = web.redact_gateway_text(outcome['text'], web.gateway_credentials())
+            marker['recovery'] = {**prior, 'providerSettled': True, 'outcome': outcome}
+            if web._save_turn(f'web:{session_id}', 'running', marker.get('text', ''), marker,
+                              expected_latest=turn_id) is False:
+                return result('unconfirmed')
+        else:
+            outcome = prior.get('outcome')
         if observing:
             _, more_observations = _observe(web, session_id, turn_id, marker, ledger, run_id)
             if more_observations:
-                marker['recovery'] = {**prior, 'providerSettled': True}
+                marker['recovery'] = {**marker.get('recovery', prior), 'providerSettled': True}
                 if web._save_turn(f'web:{session_id}', 'running', marker.get('text', ''), marker,
                                   expected_latest=turn_id) is False:
                     return result('unconfirmed')
@@ -190,16 +204,28 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         events, text, thinking = _saved_content(web, turn_id, marker)
         prior_terminal = bool(ledger and ledger.get('settled') and ledger.get('status') in web.run_ledger.TERMINAL_STATUSES)
         saved_reply = marker.get('status') == 'done' and marker.get('clean_end') is True
+        recovered_reply = (not prior_terminal and not aborted and isinstance(outcome, dict)
+                           and outcome.get('complete') is True and isinstance(outcome.get('text'), str))
+        if not prior_terminal and not aborted and isinstance(outcome, dict) and isinstance(outcome.get('text'), str):
+            canonical = web.redact_gateway_text(outcome['text'], web.gateway_credentials())
+            if canonical != text:
+                _append_events(web, turn_id, events, [{'event': 'text_snapshot', 'data': canonical}])
+                events = web._read_job_events(turn_id)
+                text = canonical
         error = (ledger or {}).get('error') if prior_terminal else marker.get('error') if saved_reply else None
-        if not prior_terminal and not saved_reply and not aborted:
-            error = {'code': 'chat_supervisor_lost', 'category': 'connection', 'retryable': True,
+        if not prior_terminal and not saved_reply and not recovered_reply and not aborted:
+            error = outcome.get('error') if isinstance(outcome, dict) else None
+            error = error or {'code': 'chat_supervisor_lost', 'category': 'connection', 'retryable': True,
                      'message': '后台已确认结束，已保留收到的内容；本轮连接中断，未自动重发。'}
-        status = ledger['status'] if prior_terminal else 'stopped' if aborted else 'completed' if saved_reply else 'failed'
+        status = ledger['status'] if prior_terminal else 'stopped' if aborted else 'completed' if saved_reply or recovered_reply else 'failed'
+        reason = ((ledger or {}).get('stopReason') if prior_terminal else 'user_stopped' if aborted
+                  else (outcome.get('stopReason') or ('reconciled' if recovered_reply else 'supervisor_lost'))
+                  if isinstance(outcome, dict) else 'supervisor_lost')
         # Persist the exact provider receipt before browser cleanup. A retry can
         # finish failed cleanup without another abort, even after a web restart.
         marker.update(status='done', text=text, thinking=thinking, gateway_run_id=run_id,
-                      clean_end=(status == 'completed' and marker.get('clean_end') is True),
-                      stop_reason=(ledger or {}).get('stopReason') if prior_terminal else 'user_stopped' if aborted else 'supervisor_lost',
+                      clean_end=(status == 'completed' and (saved_reply or recovered_reply)),
+                      stop_reason=reason,
                       error=error, recovery={'providerSettled': True, 'resourceSettled': False, 'aborted': aborted})
         try:
             latest_marker = json.loads(path.read_text(encoding='utf-8'))
@@ -212,12 +238,12 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
             latest_matches = False
         if not latest_matches and not independent:
             return result('superseded')
+        if web._save_turn(f'web:{session_id}', 'done', text, marker, expected_latest=turn_id) is False:
+            return result('unconfirmed')
         if ledger:
             ledger = web.run_ledger.mark(web._run_ledger_root(), turn_id, event='provider_reconciled', status=status,
                 expected_revision=ledger['eventSeq'], settled=True, resource_facts={'provider': True},
                 stop_reason=marker['stop_reason'], error=error)
-        if web._save_turn(f'web:{session_id}', 'done', text, marker, expected_latest=turn_id) is False:
-            return result('unconfirmed')
         if latest_matches:
             facts = settle_resources(web, session_id, provider_settled=True)
         else:

@@ -131,20 +131,21 @@ class GatewayAgentProc:
                 client.close()
 
     def _settle_disconnected_run(self):
-        # A dropped socket is not proof that the gateway stopped writing history.
-        # Never re-dispatch a paid request; retain the lock until abort or final.
+        # A lost receiver does not cancel a running request. Reconnect only to
+        # observe its exact identity; abort remains an explicit user action.
+        from easel.gateway_reconciliation import wait_outcome
         while True:
             try:
                 if self._abort_confirmed.is_set():
                     return
-                if self._abort():
+                if self._stop.is_set() and self._accepted_run.is_set() and self._abort():
                     return
                 client = self.client_factory()
                 try:
                     result = client._rpc('agent.wait', {'runId': self._office_run_id, 'timeoutMs': 1000}, timeout=5)
-                    if (isinstance(result, dict) and result.get('status') in ('ok', 'error')
-                            and result.get('runId') == self._office_run_id):
-                        return
+                    outcome = wait_outcome(result, self._office_run_id, self.params.get('sessionId'))
+                    if outcome is not None:
+                        return outcome
                 finally:
                     client.close()
             except Exception:
@@ -175,9 +176,21 @@ class GatewayAgentProc:
                 self.returncode = 0
         except Exception as exc:
             self.error_text = str(exc)
+            outcome = None
             if not getattr(exc, 'rpc_response', False):
-                self._settle_disconnected_run()
-            self.returncode = 1
+                outcome = self._settle_disconnected_run()
+            if outcome is not None and not self._stop.is_set():
+                self.stop_reason = outcome['stopReason']
+                text = outcome['text']
+                self.result = {'status': 'ok' if outcome['complete'] else 'error',
+                               'result': {'payloads': [{'text': text}] if text is not None else []}}
+                if text is not None:
+                    self._lines.put(text + '\n')
+                self.clean_end = outcome['complete']
+                self.error_text = None if self.clean_end else outcome['error']['message']
+                self.returncode = 0 if self.clean_end else 1
+            else:
+                self.returncode = 1
         finally:
             self.client.close()
             self._lines.put(None)

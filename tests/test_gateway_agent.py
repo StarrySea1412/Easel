@@ -89,12 +89,13 @@ def test_disconnect_reconciles_without_resending_prompt():
             if method == 'agent':
                 kw['on_accepted']({'runId': 'accepted-run'})
                 raise OSError('connection reset')
-            return {'aborted': True, 'runIds': ['accepted-run']}
+            assert method == 'agent.wait'
+            return {'status': 'ok', 'runId': 'accepted-run'}
         def close(self): pass
     proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'turn', 'agentId': 'main',
         'sessionKey': 'agent:main:chat'}, 10)
-    assert proc.wait(1) == 1 and 'connection reset' in proc.error_text
-    assert calls == ['agent', 'chat.abort']
+    assert proc.wait(1) == 1 and not proc.clean_end
+    assert calls == ['agent', 'agent.wait']
 
 
 def test_confirmed_abort_releases_receiver_even_when_final_never_arrives():

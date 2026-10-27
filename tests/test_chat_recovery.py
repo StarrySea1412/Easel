@@ -276,7 +276,9 @@ def test_other_web_process_keeps_ownership_and_is_never_stopped(lost, monkeypatc
     child = ctx.Process(target=_hold_session_in_process, args=(str(web.SESSIONS_DIR), ready, release))
     child.start()
     try:
-        assert ready.wait(8)
+        # Windows spawn imports the full web application before acquiring this
+        # lock. Bound cold-start separately from the short lock/SSE assertions.
+        assert ready.wait(30), f'owner process did not start (exitcode={child.exitcode})'
         before = marker.read_bytes(), events.read_bytes()
         assert stop_orphan(web, 'recovery-chat', 'lost-turn') == {'stopped': False, 'status': 'owned'}
         assert (marker.read_bytes(), events.read_bytes()) == before

@@ -5338,13 +5338,13 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
                         from chat_recovery import reconcile_orphan
                         recovered = await asyncio.to_thread(reconcile_orphan, sys.modules[__name__],
                             latest_ledger['sessionId'], turn_id)
-                        if recovered['status'] in ('owned', 'observing'):
+                        if recovered['status'] in ('owned', 'observing', 'active'):
                             # Another web worker still owns the OS session lock.
                             # Keep tailing its durable log instead of declaring it lost.
                             if time.monotonic() - idle_since >= 15:
                                 yield {'event': 'ping', 'data': '{}'}
                                 idle_since = time.monotonic()
-                            await asyncio.sleep(2 if recovered['status'] == 'observing' else 0.25)
+                            await asyncio.sleep(0.25 if recovered['status'] == 'owned' else 2)
                             continue
                         if recovered['stopped']:
                             if _read_job_events(turn_id, cursor):
