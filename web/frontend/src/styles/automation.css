@@ -68,8 +68,14 @@
 .automation-filters button[aria-pressed=true]{background:var(--surface-2);color:var(--text);font-weight:600}
 .automation-filters button span{font-size:10px;color:var(--text-tertiary);font-variant-numeric:tabular-nums}
 .automation-toolbar>input{width:180px;max-width:100%;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit;font-size:12px}
-.automation-service{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:14px 0 20px;font-size:11px;color:var(--text-tertiary);min-width:0}
-.automation-service>details{min-width:0;max-width:680px}.automation-service summary{cursor:pointer;line-height:1.7}.automation-service p{font-size:12px;line-height:1.7;color:var(--text-secondary);overflow-wrap:anywhere}
+.automation-service{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 20px;font-size:11px;color:var(--text-tertiary);min-width:0;flex-wrap:wrap}
+.automation-service-main{display:flex;align-items:center;gap:18px;min-width:0;flex:1;flex-wrap:wrap}
+.automation-service-main>details{min-width:0;max-width:680px}.automation-service summary{cursor:pointer;line-height:1.7}.automation-service p{font-size:12px;line-height:1.7;color:var(--text-secondary);overflow-wrap:anywhere}
+.automation-power{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;flex-wrap:wrap}
+.automation-power>span{font-size:12px;line-height:1.5;color:var(--text-secondary);overflow-wrap:anywhere}
+.automation-power>small{font-size:11px;line-height:1.5;color:var(--text-tertiary);overflow-wrap:anywhere}
+.automation-power>small[role=alert]{color:var(--danger,var(--red))}
+.automation-power>.easel-switch{width:44px;min-height:36px}
 .automation-service>span{flex-shrink:0;padding-top:2px;font-variant-numeric:tabular-nums}
 .automation-notice{font-size:12px;color:var(--text-secondary);line-height:1.6;margin:12px 0}
 .automation-plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;min-width:0}
@@ -107,4 +113,4 @@
 .automation-form .schedule-preview strong{font-weight:500}.schedule-preview ol{display:flex;gap:4px 18px;flex-wrap:wrap;list-style:none;padding:0;margin:6px 0 0;color:var(--text-secondary)}
 .automation-page :focus-visible{outline:2px solid var(--focus-ring);outline-offset:3px}
 @container automation (max-width:760px){.automation-plans{grid-template-columns:minmax(0,1fr)}.automation-fields{grid-template-columns:1fr;gap:0}.criterion-row{grid-template-columns:minmax(0,1fr)}.criterion-row>.btn:last-child{grid-column:1;justify-self:end}.automation-budget{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@container automation (max-width:480px){.automation-content{padding:20px 12px}.automation-header{display:flex;align-items:flex-start}.automation-header h1{font-size:24px}.automation-header>.task-actions{margin:0;gap:6px}.automation-toolbar>input{width:100%}.automation-service{flex-wrap:wrap;gap:6px;margin-bottom:16px}.automation-templates>div{grid-template-columns:minmax(0,1fr)}.automation-form{padding:16px 12px}.automation-form .task-card-heading{flex-wrap:wrap}.automation-plans .plan-card{padding:14px}.automation-filters button{padding:6px 8px}.automation-page .btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}.plan-heading{flex-wrap:wrap}.plan-heading h2{flex-basis:60%}}
+@container automation (max-width:480px){.automation-content{padding:20px 12px}.automation-header{display:flex;align-items:flex-start}.automation-header h1{font-size:24px}.automation-header>.task-actions{margin:0;gap:6px}.automation-toolbar>input{width:100%}.automation-service{gap:6px;margin-bottom:16px}.automation-service-main{align-items:flex-start;flex-direction:column;gap:4px;width:100%}.automation-power{width:100%;justify-content:space-between}.automation-power>span{flex:1;min-width:0}.automation-power>small{flex-basis:100%}.automation-templates>div{grid-template-columns:minmax(0,1fr)}.automation-form{padding:16px 12px}.automation-form .task-card-heading{flex-wrap:wrap}.automation-plans .plan-card{padding:14px}.automation-filters button{padding:6px 8px}.automation-page .btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}.plan-heading{flex-wrap:wrap}.plan-heading h2{flex-basis:60%}}

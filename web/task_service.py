@@ -17,6 +17,7 @@ from easel.task_store import TaskStore, TaskConflict, SAFE_ID
 from easel.task_rules import GoalSpec, Criterion, Schedule, next_time, latest_time, upcoming, check_goal
 from easel.image_jobs import ImageJobs
 from easel.task_graph import parallel
+from easel.task_power import TaskPower
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,11 @@ class PlanAction(BaseModel):
     requestId: str | None = Field(default=None, min_length=1, max_length=120, pattern=r'^[A-Za-z0-9_.-]+$')
 
 
+class TaskRuntimeRequest(BaseModel):
+    model_config = {'extra': 'forbid'}
+    keepAwake: bool = Field(strict=True)
+
+
 class TaskService:
     def __init__(self, web):
         self.web = web
@@ -69,6 +75,7 @@ class TaskService:
         self.parallel_goal = None
         self.closing = False
         self.recovery_checks = {}
+        self.power = TaskPower()
 
     @property
     def store(self):
@@ -126,6 +133,7 @@ class TaskService:
 
     def start(self):
         self.closing = False
+        self.power.set_enabled(self.store.keep_awake_enabled())
         self.loop = asyncio.create_task(self.serve())
 
     async def close(self):
@@ -203,6 +211,7 @@ class TaskService:
 
     async def execute(self, g, r):
         store, web = self.store, self.web
+        power_lease = None
         try:
             await asyncio.to_thread(self.admit, g, r['sessionId'])
             if g.get('configHash') and g['configHash'] != self.config_hash():
@@ -230,11 +239,16 @@ class TaskService:
             prompt += stage_prompt(g, r, rework)
             req = web.ChatRequest(message=prompt, sessionId=r['sessionId'], turnId=r['turnId'],
                                   modelRef=g['modelRef'], thinkingLevel='low', roleId=r.get('roleId'))
+            power_lease = self.power.acquire()
             await web.start_chat_run(req, observe=False)
             allowance = r.get('maxRunSeconds', g['maxSeconds'] - g['activeSeconds'])
             deadline = time.monotonic() + max(0, allowance - (time.time() - r['startedAt']))
             stopping = False
             while not self.closing:
+                try:
+                    self.power.set_enabled(await asyncio.to_thread(store.keep_awake_enabled))
+                except Exception:
+                    log.warning('保持主机唤醒设置暂不可读；保留当前防休眠状态。')
                 if not await asyncio.to_thread(store.heartbeat, r['id'], self.owner):
                     return
                 current = await asyncio.to_thread(store.get, 'goals', g['id'])
@@ -260,6 +274,9 @@ class TaskService:
             safe = ledger is None
             reason = str(exc.detail) if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else str(exc) if isinstance(exc, TaskConflict) else '运行启动或验收失败，请检查服务状态；未自动重发。'
             await asyncio.to_thread(store.finish, r['id'], owner=self.owner, state='failed', reason=reason, resource_settled=safe)
+        finally:
+            if power_lease:
+                power_lease.release()
 
     async def settle(self, r):
         web, store = self.web, self.store
@@ -320,6 +337,18 @@ class TaskService:
         @router.get('/capability')
         def capability():
             return self.guard_status()
+
+        @router.get('/runtime')
+        async def runtime():
+            enabled = await asyncio.to_thread(self.store.keep_awake_enabled)
+            return self.power.set_enabled(enabled)
+
+        @router.post('/runtime')
+        async def update_runtime(req: TaskRuntimeRequest):
+            if req.keepAwake and not self.power.supported:
+                raise HTTPException(409, '此后端主机不支持保持唤醒。')
+            await asyncio.to_thread(self.store.set_keep_awake_enabled, req.keepAwake)
+            return self.power.set_enabled(req.keepAwake)
 
         @router.get('/workflows')
         def workflows():

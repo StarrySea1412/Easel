@@ -46,6 +46,7 @@ class TaskStore:
             WHERE status NOT IN ('completed','cancelled');
           CREATE TABLE IF NOT EXISTS plans(id TEXT PRIMARY KEY, enabled INTEGER, due REAL, data TEXT);
           CREATE INDEX IF NOT EXISTS plans_due ON plans(enabled,due);
+          CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, goal TEXT, session TEXT, turn TEXT UNIQUE,
             state TEXT, owner TEXT, lease REAL, dispatched INTEGER DEFAULT 0, data TEXT);
           CREATE UNIQUE INDEX IF NOT EXISTS one_live_task_session ON runs(session)
@@ -443,6 +444,18 @@ class TaskStore:
         with self.db() as db:
             return [json.loads(r[0]) for r in db.execute(
                 'SELECT data FROM plans WHERE enabled=1 AND due<=? ORDER BY due', (now,))]
+
+    def keep_awake_enabled(self):
+        with self.db() as db:
+            row = db.execute("SELECT value FROM settings WHERE key='keepAwake'").fetchone()
+            return bool(row and row[0] == 'true')
+
+    def set_keep_awake_enabled(self, enabled):
+        with self.db() as db:
+            db.execute("INSERT INTO settings(key,value) VALUES('keepAwake',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                       ('true' if enabled else 'false',))
+            return enabled
 
     def session_snapshots(self):
         return self.session_state()['sessions']

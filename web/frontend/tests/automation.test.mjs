@@ -31,14 +31,15 @@ test('plan lifecycle separates repeating success, completed once, review and pau
   assert.equal(scheduleLabel({...schedule,kind:'weekly',weekdays:[4,0]}),'每周一、五 18:30');
 });
 
-async function setup(t,snapshotValue=snapshot){
-  const h={reads:0,requests:[],failRead:false,failSave:false,preview:null,action:null,opened:[]};
+async function setup(t,snapshotValue=snapshot,powerOptions={}){
+  const h={reads:0,requests:[],failRead:false,failSave:false,preview:null,action:null,opened:[],powerEnabled:powerOptions.enabled??false,powerSupported:powerOptions.supported??true,powerReason:powerOptions.reason??''};
   t.mock.method(globalThis,'fetch',async(url,options={})=>{
     const path=String(url),body=options.body?JSON.parse(options.body):undefined;h.requests.push({path,body,method:options.method});
     let value;
     if(path==='/api/tasks'){h.reads++;if(h.failRead)throw new Error('隔离读取失败');value=snapshotValue;}
     else if(path.startsWith('/api/agent-office/models'))value={available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',label:'隔离模型',configured:true}],reason:''};
     else if(path==='/api/tasks/capability')value={ready:true,reason:''};
+    else if(path==='/api/tasks/runtime'){if(options.method==='POST')h.powerEnabled=body.keepAwake;value={supported:h.powerSupported,enabled:h.powerEnabled,active:false,reason:h.powerReason};}
     else if(path==='/api/tasks/preview')value=h.preview?await h.preview(body):{times:[2000,3000,4000]};
     else if(path==='/api/tasks/plans'||/^\/api\/tasks\/plans\/[^/]+$/.test(path)){if(h.failSave)return new Response(JSON.stringify({detail:'隔离保存失败'}),{status:409});value={id:'new-plan'};}
     else if(path.endsWith('/action'))value=h.action?await h.action():{};
@@ -57,6 +58,32 @@ async function setup(t,snapshotValue=snapshot){
   };
   return {h,host,button,click,choose};
 }
+
+test('keep-awake switch is off by default and persists an explicit preference',async t=>{
+  const v=await setup(t),control=v.host.querySelector('[role="switch"][aria-label="任务运行时保持后端主机唤醒"]');
+  assert.equal(control.getAttribute('aria-checked'),'false');
+  await act(async()=>control.click());
+  assert.equal(control.getAttribute('aria-checked'),'true');
+  assert.deepEqual(v.h.requests.find(row=>row.path==='/api/tasks/runtime'&&row.method==='POST').body,{keepAwake:true});
+  assert.match(v.host.textContent,/任务运行时保持后端主机唤醒/);
+});
+
+test('keep-awake system failures remain visible without changing the saved preference',async t=>{
+  const v=await setup(t);v.h.powerReason='系统未能启用防休眠。';
+  await act(async()=>v.host.querySelector('[role="switch"][aria-label="任务运行时保持后端主机唤醒"]').click());
+  assert.equal(v.host.querySelector('[role="switch"][aria-label="任务运行时保持后端主机唤醒"]').getAttribute('aria-checked'),'true');
+  assert.match(v.host.querySelector('[role="alert"]').textContent,/系统未能启用防休眠/);
+});
+
+test('an unsupported host can clear a previously enabled preference',async t=>{
+  const v=await setup(t,snapshot,{supported:false,enabled:true,reason:'此后端主机不支持防休眠。'});
+  const control=v.host.querySelector('[role="switch"][aria-label="任务运行时保持后端主机唤醒"]');
+  assert.equal(control.disabled,false);
+  assert.equal(control.getAttribute('aria-checked'),'true');
+  await act(async()=>control.click());
+  assert.equal(control.getAttribute('aria-checked'),'false');
+  assert.deepEqual(v.h.requests.find(row=>row.path==='/api/tasks/runtime'&&row.method==='POST').body,{keepAwake:false});
+});
 
 test('filters use live result metadata and total count, and open the original result',async t=>{
   const v=await setup(t);assert.equal(v.host.querySelectorAll('.plan-card').length,4);
