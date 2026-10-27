@@ -1,10 +1,10 @@
-import type { OfficeAgent, OfficeEvent } from './agentOffice';
+import type { OfficeAgent, OfficeEvent, OfficeRelation } from './agentOffice';
 
 export type WorkflowLane = 'active' | 'waiting' | 'finished' | 'attention';
-export interface WorkflowLink { from: string; to: string; label: string; kind: 'parent' | 'demo-handoff'; delivered?: boolean }
+export interface WorkflowLink { from: string; to: string; label: string; kind: 'parent' | 'demo-handoff' | 'assignment' | 'dependency'; delivered?: boolean }
 
 /** Relations come from explicit parent identities; prose and return status never create dependencies. */
-export function deriveOfficeWorkflow(agents: OfficeAgent[], events: OfficeEvent[], mode: 'live' | 'demo', elapsed = 0) {
+export function deriveOfficeWorkflow(agents: OfficeAgent[], events: OfficeEvent[], mode: 'live' | 'demo', elapsed = 0, relations: OfficeRelation[] = []) {
   const members = agents.filter(agent => agent.source === mode);
   const ids = new Set(members.map(agent => agent.id));
   const lanes: Record<WorkflowLane, OfficeAgent[]> = { active: [], waiting: [], finished: [], attention: [] };
@@ -14,7 +14,13 @@ export function deriveOfficeWorkflow(agents: OfficeAgent[], events: OfficeEvent[
     lanes[lane].push(agent);
   }
   const links: WorkflowLink[] = members.filter(agent => agent.parentId && agent.parentId !== agent.id && ids.has(agent.parentId))
-    .map(agent => ({ from: agent.parentId!, to: agent.id, label: '协作上级 → 成员', kind: 'parent' }));
+    .map(agent => ({ from: agent.parentId!, to: agent.id, label: agent.assignment ? '调度分工' : '协作上级 → 成员', kind: agent.assignment ? 'assignment' : 'parent' }));
+  if (mode === 'live') for (const relation of relations) {
+    if (relation.kind === 'dependency' && ids.has(relation.from) && ids.has(relation.to) && relation.from !== relation.to
+      && !links.some(link=>link.from===relation.from&&link.to===relation.to&&link.kind==='dependency')) {
+      links.push({...relation,label:'阶段依赖'});
+    }
+  }
   if (mode === 'demo') {
     const handoffs: [string, string, number, string][] = [
       ['researcher', 'designer', 17, '研究摘要'], ['researcher', 'writer', 17, '受众结论'],

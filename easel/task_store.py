@@ -401,6 +401,26 @@ class TaskStore:
                 return g
             return self._conclude_budget(db, g, reason)
 
+    def office_context(self, session):
+        """Bounded, read-only task context for an exact parent or worker session."""
+        if not SAFE_ID.fullmatch(session):
+            raise TaskConflict('无效会话。')
+        if not self.path.is_file():
+            return {'goal': None, 'runs': []}
+        with sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True, timeout=5) as db:
+            db.row_factory = sqlite3.Row
+            db.execute('BEGIN')
+            self._require_session(db, session)
+            row = db.execute("SELECT data FROM goals WHERE session=? ORDER BY CASE WHEN status NOT IN ('completed','cancelled') THEN 0 ELSE 1 END,rowid DESC LIMIT 1", (session,)).fetchone()
+            if not row:
+                run = db.execute('SELECT goal FROM runs WHERE session=? ORDER BY rowid DESC LIMIT 1', (session,)).fetchone()
+                row = db.execute('SELECT data FROM goals WHERE id=?', (run['goal'],)).fetchone() if run else None
+            if not row:
+                return {'goal': None, 'runs': []}
+            goal = json.loads(row['data'])
+            runs = [json.loads(r['data']) for r in db.execute('SELECT data FROM runs WHERE goal=? AND session NOT IN (SELECT id FROM deleted_sessions) ORDER BY rowid DESC LIMIT 301', (goal['id'],))]
+            return {'goal': goal, 'runs': runs[:300], 'truncated': len(runs) > 300}
+
     def snapshot(self, session=None):
         with self.db() as db:
             where, args = (' WHERE session=?', (session,)) if session else ('', ())

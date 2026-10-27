@@ -16,6 +16,16 @@ test('returned tool results do not finish tasks or cross source/identity boundar
   assert.equal(flow.lanes.active.length,1); assert.equal(flow.lanes.finished.length,0);
   assert.deepEqual(flow.records.map(x=>x.id),['r']);
 });
+
+test('scheduled assignments and dependencies require explicit current members', () => {
+  const members=[agent('root','waiting'),{...agent('first','done','root'),assignment:{stageId:'facts'}},
+    {...agent('second','working','root'),assignment:{stageId:'draft'}}];
+  const relation={from:'first',to:'second',kind:'dependency',delivered:true};
+  const flow=deriveOfficeWorkflow(members,[],'live',0,[relation,relation,{...relation,from:'absent'}]);
+  assert.equal(flow.links.filter(link=>link.kind==='assignment').length,2);
+  assert.deepEqual(flow.links.filter(link=>link.kind==='dependency'),[{...relation,label:'阶段依赖'}]);
+  assert.equal(deriveOfficeWorkflow(members,[],'live').links.filter(link=>link.kind==='dependency').length,0);
+});
 test('demo handoffs follow seek time, never leak into live data, and reverse on replay', () => {
   const members = ['coordinator','researcher','designer','writer','tester','reviewer'].map(id=>agent(id,'working',undefined,'demo'));
   const links = t=>deriveOfficeWorkflow(members,[],'demo',t).links;

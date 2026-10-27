@@ -20,6 +20,7 @@ function toolAction(name: string): [OfficeActionKind, string] {
 
 /** Specific live gestures require an observed, unmatched tool call. */
 export function describeOfficeAction(agent: OfficeAgent, events: OfficeEvent[]): OfficeAction {
+  if (agent.engine === 'codex' && agent.state === 'done') return {kind:'completed',label:'本轮已结束',evidence:'observed'};
   const terminal = TERMINAL[agent.state];
   if (terminal) return { kind: terminal[0], label: terminal[1], evidence: agent.source === 'demo' ? 'demo' : 'observed' };
   if (agent.source === 'demo') {

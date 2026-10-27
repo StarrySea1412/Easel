@@ -352,6 +352,7 @@ class CodexService:
                 raise HTTPException(400, '角色不存在或已被移除。')
             state = {'sessionId': sid, 'turn_id': tid, 'engine': 'codex', 'status': 'running',
                      'outcome': 'running', 'roleId': getattr(req, 'roleId', None), 'role': role,
+                     'requestSummary': public_text(req.message, limit=500),
                      'text': '', 'thinking': '', 'thinkingStatus': 'waiting',
                      'items': [], 'pending': [], 'seq': 0, 'requestedModelRef': selected,
                      'requestedThinkingLevel': req.thinkingLevel, 'workspace': str(workspace),

@@ -9664,6 +9664,10 @@ async def api_chat_execution(session_id: str, turn_id: str, before: int | None =
 @app.get('/api/agent-office')
 async def api_agent_office(sessionId: str):
     import agent_office
+    import native_office
+    native = await asyncio.to_thread(native_office.snapshot, sys.modules[__name__], sessionId)
+    if native is not None:
+        return native
     def execution_state():
         process = _RUNNING_CHAT.get(sessionId)
         turn_id = _ACTIVE_SKILL_TURNS.get(sessionId, '')

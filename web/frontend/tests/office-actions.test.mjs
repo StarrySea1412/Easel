@@ -18,6 +18,12 @@ test('returned failures end tool gestures without promoting the whole run to fai
     assert.equal(describeOfficeAction({ ...worker, state }, [call]).kind, kind);
   }
 });
+
+test('native turn completion does not claim the whole goal was accepted', () => {
+  const action=describeOfficeAction({...worker,engine:'codex',state:'done'},[]);
+  assert.equal(action.label,'本轮已结束');
+  assert.equal(action.kind,'completed');
+});
 test('demo actions are explicitly synthetic and live prose never selects a gesture', () => {
   assert.equal(describeOfficeAction({ ...worker, id: 'designer', source: 'demo' }, []).kind, 'designing');
   assert.equal(describeOfficeAction({ ...worker, task: 'design image', role: 'designer' }, []).kind, 'unreported');

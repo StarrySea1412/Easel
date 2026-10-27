@@ -101,7 +101,7 @@ test('ambiguous or invalid operation IDs cannot collapse unrelated calls into an
   assert.equal(invalid.length, 2);
 });
 
-async function fixture(t, props = {}) {
+async function fixture(t, props = {}, artifacts) {
   const calls = { closed: 0, chat: 0 };
   const trigger = document.createElement('button'); trigger.textContent = '员工状态入口'; document.body.append(trigger); trigger.focus();
   const host = document.createElement('div'); document.body.append(host);
@@ -112,7 +112,10 @@ async function fixture(t, props = {}) {
   let mounted = true;
   const render = async patch => { currentProps = { ...currentProps, ...patch }; await act(async () => root.render(createElement(OfficeProcessPanel, currentProps))); };
   const unmount = async () => { if (mounted) { await act(async () => root.unmount()); mounted = false; } };
-  t.mock.method(globalThis, 'fetch', () => { throw new Error('Process panel must not fetch'); });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (artifacts && url === '/api/chat/artifacts/worker') return {ok:true,json:async()=>({sessionId:'worker',artifacts})};
+    throw new Error('Process panel must not fetch: '+url);
+  });
   t.after(async () => { await unmount(); host.remove(); trigger.remove(); });
   await render();
   return { calls, trigger, originalOverflow, render, unmount,
@@ -121,6 +124,26 @@ async function fixture(t, props = {}) {
     key: async (key, shiftKey = false) => act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true }))),
   };
 }
+
+const nativeAgent={...childAgent,id:'worker:worker',engine:'codex',
+  execution:{engine:'codex',sessionId:'worker',turnId:'native-turn'},
+  assignment:{goalId:'goal',stageId:'facts',role:'研究',handoff:'completed',attempts:2},
+  process:{thinking:'成员摘要',text:'成员回复 <script>原样展示</script>',activity:'成员步骤',thinkingStatus:'available',outcome:'completed'}};
+
+test('native member process and delivered files belong to its exact turn without parent content', async t => {
+  const file={id:'a'.repeat(32),sessionId:'worker',turnId:'native-turn',name:'本轮文件.txt',path:'delivery/result.txt',mimeType:'text/plain',version:'v1',size:10,status:'ready',revision:1};
+  const view=await fixture(t,{agent:nativeAgent,turnId:'native-turn'},[file,{...file,id:'b'.repeat(32),turnId:'older-turn',name:'不属于本轮.txt'}]);
+  const dialog=view.dialog();
+  assert.match(dialog.textContent,/成员摘要/);
+  assert.match(dialog.textContent,/成员回复 <script>原样展示<\/script>/);
+  assert.equal(dialog.querySelector('script'),null);
+  assert.doesNotMatch(dialog.textContent,/模型实际返回的当前思考|不属于本轮|子任务最新回复/);
+  assert.match(dialog.querySelector('[aria-label="成员交付文件"]').textContent,/本轮文件.txt/);
+  const unavailable=selectOfficeProcess({agent:nativeAgent,session,stream,turnId:'wrong-turn'});
+  assert.equal(unavailable.origin,'unavailable');
+  await view.render({turnId:'wrong-turn'});
+  assert.doesNotMatch(view.dialog().textContent,/成员回复|成员摘要|本轮文件.txt/);
+});
 
 test('dialog keeps long actual thinking readable as text, exposes accurate identity and never dumps tool parameters', async t => {
   const thinking = '实际模型内容 <script>不会执行</script>\n'.repeat(500);

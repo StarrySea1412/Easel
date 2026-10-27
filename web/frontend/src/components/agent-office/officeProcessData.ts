@@ -24,6 +24,12 @@ export function selectOfficeProcess({ agent, session, stream, turnId }: { agent:
     thinking: '', activity: DEMO_PROCESS[agent.id] || '演示流程：接收任务、处理内容并返回结果。', origin: 'demo',
     explanation: '这是预设的模拟过程摘要，不是模型实际返回的思考或真实工具执行。',
   };
+  if (agent.engine === 'scheduler') return unavailable('目标调度记录；模型过程在对应任务成员中查看。');
+  if (agent.engine === 'codex') {
+    if (!agent.execution || agent.execution.turnId !== turnId || !agent.process || session?.importedFromBackup
+      || ![`root:${agent.execution.sessionId}`,`worker:${agent.execution.sessionId}`].includes(agent.id)) return unavailable('原生轮次记录未确认，未使用其他会话的过程。');
+    return {thinking:agent.process.thinking,activity:agent.process.activity,origin:'history',explanation:agent.process.thinkingStatus === 'unavailable' ? '本轮服务未返回思考摘要。' : '来自该成员原生轮次的已保存记录。'};
+  }
   if (agent.parentId) return unavailable('该子 Agent 未上报内部思考和活动正文。这里只展示它自己的调用与状态记录，不使用主 Agent 的思考补充。');
   if (!session || agent.id !== `root:${session.id}`) return unavailable('没有与该 Agent 精确对应的会话，无法读取它的思考和活动正文。');
   if (session.importedFromBackup) return unavailable('导入备份不关联实时员工过程，不能用于核验该员工的思考。');

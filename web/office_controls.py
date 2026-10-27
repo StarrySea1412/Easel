@@ -585,6 +585,9 @@ def confirmed_stop_snapshot(web, snapshot):
 
 def operate(web, session: str, turn: str, agent: str, action='controls', model_ref=None,
             *, expected_run_id: str | None = None):
+    import native_office
+    if native_office.owns(web, session):
+        _error('Codex 成员请在原对话或任务工作区操作。')
     if action != 'controls' and not _MUTATION_LOCK.acquire(blocking=False):
         _error('另一个 Agent 控制正在处理，请稍候重试。')
     client = None

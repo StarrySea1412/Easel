@@ -106,6 +106,27 @@ function session(id, extra = {}) { return { id, title: `会话 ${id}`, created: 
 function snapshot(agents, extra = {}) { return { agents, loading: false, error: null, observedAt: '2026-09-30T08:00:00Z', coverage: '来自本轮结构化执行记录，未上报角色不补全', ...extra }; }
 function agent(id, extra = {}) { return { id, name: `Agent ${id}`, role: '协作角色', task: `正在处理任务 ${id}`, state: 'working', source: 'live', ...extra }; }
 
+test('native parent uses member run identity, hides OpenClaw controls and dispatch, and separates stage handoff', async t => {
+  const opened=[];
+  const root=agent('root:one',{engine:'scheduler',state:'waiting'});
+  const worker=agent('worker:worker',{engine:'codex',parentId:root.id,state:'done',
+    execution:{engine:'codex',sessionId:'worker',turnId:'worker-turn'},
+    assignment:{goalId:'goal',stageId:'facts',role:'研究',handoff:'blocked',attempts:2}});
+  const view=await fixture(t,{initialSessionId:'one',onOpenActivity:(...args)=>opened.push(args),onStartTask:()=>assert.fail('native office dispatched OpenClaw')},
+    {one:snapshot([root,worker],{turnId:'latest-other-worker'})});
+  assert.equal(view.button('查看运行记录').disabled,true);
+  assert.equal(view.harness.controlTargets.length,0);
+  assert.equal(view.harness.composer,null);
+  assert.equal(view.container.querySelector('[role="tab"][id$="compose"]'),null);
+  await view.click(view.container.querySelector('[data-scene-agent="worker:worker"]'));
+  assert.match(view.container.querySelector('.office-agent-detail').textContent,/阶段交接：待处理 · 第 2 次/);
+  await view.click(view.button('查看本轮运行记录'));
+  await view.click(view.button('查看运行记录'));
+  assert.deepEqual(opened,[['worker','worker-turn'],['worker','worker-turn']]);
+  assert.equal(view.harness.controlTargets.length,0);
+  assert.deepEqual(view.harness.fetches,[]);
+});
+
 test('entry shows task details before the optional scene without mounting WebGL', async t => {
   const view = await fixture(t, {}, {}, false);
   const toggle = view.container.querySelector('.office-scene-toggle');

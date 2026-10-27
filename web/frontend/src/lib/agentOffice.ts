@@ -16,6 +16,10 @@ export interface OfficeAgent {
   action?: OfficeAction;
   appearance?: EmployeeAppearance;
   observedModel?: OfficeObservedModel;
+  engine?: 'codex' | 'scheduler';
+  execution?: { engine: 'codex'; sessionId: string; turnId: string };
+  assignment?: { goalId: string; stageId?: string; role: string; handoff: string; attempts: number };
+  process?: { thinking: string; text: string; thinkingStatus: string; outcome: string; activity: string; truncated: boolean };
   latestReply?: { text: string; at: string; source: 'parent_tool_receipt'; truncated: boolean };
 }
 
@@ -28,7 +32,10 @@ export interface OfficeSnapshot {
   /** Confirmed identities in this snapshot, not a claim about all backend agents. */
   observedAgentCount?: number;
   identityScanLimited?: boolean;
+  links?: OfficeRelation[];
 }
+
+export interface OfficeRelation { from: string; to: string; kind: 'parent' | 'assignment' | 'dependency'; delivered?: boolean }
 
 export interface OfficeEvent {
   id: string;
@@ -67,16 +74,26 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
   const ids = new Set<string>();
   const agents = value.agents.map((item): OfficeAgent => {
     if (!record(item) || typeof item.id !== 'string' || !/^[A-Za-z0-9_.:-]{1,160}$/.test(item.id) || ids.has(item.id)
-      || (item.role !== 'root' && item.role !== 'subagent')) throw new Error('Agent 身份数据无效。');
+      || !['root','subagent','worker'].includes(String(item.role))) throw new Error('Agent 身份数据无效。');
     ids.add(item.id);
+    const execution = record(item.execution) && item.execution.engine === 'codex'
+      && typeof item.execution.sessionId === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(item.execution.sessionId)
+      && typeof item.execution.turnId === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(item.execution.turnId)
+      && (item.role==='worker' ? item.id===`worker:${item.execution.sessionId}` : item.id===`root:${sessionId}`&&item.execution.sessionId===sessionId)
+      ? {engine:'codex' as const,sessionId:item.execution.sessionId,turnId:item.execution.turnId} : undefined;
+    const process = execution && record(item.process) && item.process.sessionId === execution.sessionId && item.process.turnId === execution.turnId ? item.process : undefined;
     return {
       id: item.id,
       name: shortText(item.name, item.role === 'root' ? '主 Agent' : '子 Agent', 80),
-      role: item.role === 'root' ? '任务协调' : '协作 Agent',
+      role: item.role === 'worker' ? '任务成员' : item.engine === 'scheduler' ? '目标调度' : item.role === 'root' ? '任务协调' : '协作 Agent',
       task: shortText(item.task, '尚未观察到任务说明'),
       state: Object.hasOwn(STATUS_MAP, String(item.status)) ? STATUS_MAP[String(item.status)] : 'unknown',
       source: 'live',
       observedModel: decodeObservedModel(item.observedModel),
+      ...(item.engine === 'codex' || item.engine === 'scheduler' ? {engine:item.engine} : {}),
+      ...(execution ? {execution} : {}),
+      ...(record(item.assignment) && typeof item.assignment.goalId === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(item.assignment.goalId) ? {assignment:{goalId:item.assignment.goalId,stageId:shortText(item.assignment.stageId,'',120),role:shortText(item.assignment.role,'',80),handoff:shortText(item.assignment.handoff,'pending',40),attempts:typeof item.assignment.attempts === 'number' && Number.isFinite(item.assignment.attempts) ? item.assignment.attempts : 1}} : {}),
+      ...(process ? {process:{thinking:shortText(process.thinking,'',8000),text:shortText(process.text,'',8000),thinkingStatus:shortText(process.thinkingStatus,'unknown',40),outcome:shortText(process.outcome,'unconfirmed',40),truncated:process.truncated===true,activity:Array.isArray(process.plan)?process.plan.filter(record).slice(0,32).map(row=>`${shortText(row.step,'',300)} · ${row.status==='completed'?'已完成':row.status==='in_progress'?'进行中':'待处理'}`).join('\n'):''}} : {}),
       ...(item.role==='subagent' && record(item.latestReply) && item.latestReply.source==='parent_tool_receipt'
         && typeof item.latestReply.text==='string' && typeof item.latestReply.at==='string' && Number.isFinite(Date.parse(item.latestReply.at))
         ? {latestReply:{text:shortText(item.latestReply.text,'',1600),at:item.latestReply.at,source:'parent_tool_receipt' as const,truncated:item.latestReply.truncated===true}} : {}),
@@ -106,6 +123,7 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
   }
   return {
     agents, events,
+    links: Array.isArray(value.links) ? value.links.filter(record).filter(link=>typeof link.from==='string'&&typeof link.to==='string'&&ids.has(link.from)&&ids.has(link.to)&&link.from!==link.to&&['parent','assignment','dependency'].includes(String(link.kind))).slice(0,128).map(link=>({from:link.from as string,to:link.to as string,kind:link.kind as OfficeRelation['kind'],...(typeof link.delivered==='boolean'?{delivered:link.delivered}:{})})) : [],
     observedAgentCount: agents.length,
     identityScanLimited: record(value.coverage) && value.coverage.identityScanLimited === true,
     turnId: typeof value.turnId === 'string' && /^[A-Za-z0-9_.-]{1,120}$/.test(value.turnId) ? value.turnId : null,

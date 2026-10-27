@@ -34,6 +34,33 @@ function teamPayload(count) {
   return raw;
 }
 
+test('native members accept only their own execution/process and validated roster dependencies', () => {
+  const raw = payload();
+  raw.agents = [
+    {id:'root:one',role:'root',engine:'scheduler',status:'waiting'},
+    {id:'worker:child',parentId:'root:one',role:'worker',engine:'codex',status:'completed',
+      execution:{engine:'codex',sessionId:'child',turnId:'native-turn'},
+      assignment:{goalId:'goal',stageId:'facts',role:'研究',handoff:'completed',attempts:2},
+      process:{sessionId:'child',turnId:'native-turn',text:'自己的回复',thinking:'自己的摘要',plan:[{step:'阅读',status:'completed'}]}},
+  ];
+  raw.links=[{from:'root:one',to:'worker:child',kind:'assignment'},
+    {from:'absent',to:'worker:child',kind:'dependency'},
+    {from:'worker:child',to:'worker:child',kind:'dependency'}];
+  let decoded=decodeOfficeSnapshot(raw,'one');
+  assert.equal(decoded.agents[0].role,'目标调度');
+  assert.equal(decoded.agents[1].role,'任务成员');
+  assert.equal(decoded.agents[1].assignment.attempts,2);
+  assert.equal(decoded.agents[1].process.text,'自己的回复');
+  assert.match(decoded.agents[1].process.activity,/阅读 · 已完成/);
+  assert.equal(decoded.links.length,1);
+  raw.agents[1].process.turnId='another-turn';
+  assert.equal(decodeOfficeSnapshot(raw,'one').agents[1].process,undefined);
+  raw.agents[1].execution.sessionId='another-session';
+  decoded=decodeOfficeSnapshot(raw,'one');
+  assert.equal(decoded.agents[1].execution,undefined);
+  assert.equal(decoded.agents[1].process,undefined);
+});
+
 for (const count of [9, 12, 20, 50, 65, 100]) test(`all ${count} confirmed identities are decoded independently of the visible room capacity`, () => {
   const result = decodeOfficeSnapshot(teamPayload(count), 'one');
   assert.equal(result.agents.length, count);

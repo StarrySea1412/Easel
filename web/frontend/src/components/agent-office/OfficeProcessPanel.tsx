@@ -5,6 +5,7 @@ import type { ChatSession, StreamState } from '../../lib/store';
 import { selectOfficeProcess, selectOfficeEventSteps } from './officeProcessData';
 import { createOfficeRecordExport, downloadOfficeRecordExport, type OfficeRecordExportInput, type OfficeRecordFilter } from './officeProcessExport';
 import './office-process-panel.css';
+import OfficeMemberFiles from './OfficeMemberFiles';
 
 export interface OfficeProcessPanelProps {
   agent: OfficeAgent;
@@ -155,7 +156,7 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
       <div className="office-process-body" tabIndex={0} role="region" aria-label="员工过程内容">
         <div className={`office-process-status office-process-status--${agent.state}`}>
           <span className="office-process-badge">{visibleState}</span>
-          <p>{agent.source === 'demo' ? '这是模拟员工的演示状态。' : STATUS_EXPLANATION[agent.state]}</p>
+          <p>{agent.source === 'demo' ? '这是模拟员工的演示状态。' : agent.engine === 'codex' && agent.state === 'done' ? '本轮已结束，交接与质量以任务记录为准。' : STATUS_EXPLANATION[agent.state]}</p>
         </div>
         {stale && agent.source === 'live' && <p className="office-process-warning" role="status">观测更新已中断。员工状态和调用记录可能不是最新，已取得的内容继续保留。</p>}
         <dl className="office-process-identity">
@@ -163,23 +164,25 @@ export default function OfficeProcessPanel(props: OfficeProcessPanelProps) {
           <div><dt>轮次</dt><dd>{agent.source === 'demo' ? '预设模拟轮次' : turnId || '未提供轮次标识'}</dd></div>
           <div><dt>当前任务</dt><dd>{agent.task || '尚未上报任务说明'}</dd></div>
         </dl>
-        {agent.source==='live'&&agent.parentId&&<section className="office-process-section" aria-label="子 Agent 最新回复">
+        {agent.source==='live'&&agent.parentId&&!agent.assignment&&<section className="office-process-section" aria-label="子 Agent 最新回复">
           <div className="office-process-section-heading"><h3>子任务最新回复</h3><span>{agent.latestReply ? new Date(agent.latestReply.at).toLocaleString('zh-CN',{hour12:false}) : '尚未收到'}</span></div>
           <p className="office-process-note">来自父会话工具回执中已确认子身份的回复摘要。回复与任务完成分别核验。</p>
           {agent.latestReply?<><div className="office-process-text" data-testid="office-child-reply">{agent.latestReply.text}</div>{agent.latestReply.truncated&&<p className="office-process-note">摘要已达到 1600 字上限。</p>}</>:<p className="office-process-empty">当前记录没有该子 Agent 可核验的回复正文。</p>}
         </section>}
+        {agent.source==='live'&&agent.engine==='codex'&&agent.process&&process.origin!=='unavailable'&&<section className="office-process-section" aria-label="原生轮次回复"><h3>本轮回复</h3><div className="office-process-text">{agent.process.text||'尚未返回回复正文。'}</div>{agent.process.truncated&&<p>正文或摘要已截取，完整内容见本轮运行记录。</p>}</section>}
         {process.error && <section className="office-process-error" aria-label="本轮错误"><strong>本轮已记录错误</strong><p>{process.error.message}</p>{process.error.code && <code>{process.error.code}</code>}</section>}
         <section className="office-process-section" aria-labelledby={`${titleId}-thinking`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-thinking`}>{agent.source === 'demo' ? '模拟过程摘要' : '模型返回的思考'}</h3><span>{process.origin === 'stream' ? '本轮实时返回' : process.origin === 'history' ? '本轮已保存' : agent.source === 'demo' ? '模拟数据' : '未提供'}</span></div>
           <p className="office-process-note">{process.explanation}</p>
           {agent.source === 'demo' ? <div className="office-process-text office-process-text--demo">{process.activity}</div>
             : process.thinking ? <div className="office-process-text" data-testid="office-thinking">{process.thinking}</div>
-              : process.origin !== 'unavailable' && <p className="office-process-empty">模型服务没有返回可展示的本轮思考或摘要。工作状态不代表思考正文已经可用。</p>}
+              : process.origin !== 'unavailable' && agent.engine !== 'codex' && <p className="office-process-empty">模型服务没有返回可展示的本轮思考或摘要。工作状态不代表思考正文已经可用。</p>}
         </section>
         {agent.source === 'live' && process.activity && <section className="office-process-section" aria-labelledby={`${titleId}-activity`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-activity`}>{process.origin === 'stream' ? '当前活动' : '本轮工作步骤'}</h3><span>{process.origin === 'stream' ? '来自本轮会话流' : '来自本轮已保存记录'}</span></div>
           <div className="office-process-text" data-testid="office-activity">{process.activity}</div>
         </section>}
+        {agent.source==='live'&&agent.execution&&process.origin!=='unavailable'&&<OfficeMemberFiles key={`${agent.execution.sessionId}:${agent.execution.turnId}`} execution={agent.execution}/>}
         <section className="office-process-section" aria-labelledby={`${titleId}-tools`}>
           <div className="office-process-section-heading"><h3 id={`${titleId}-tools`}>调用与回执</h3><span>{steps.length} 条{agent.source === 'demo' ? '模拟记录' : '可见记录'}</span></div>
           <p className="office-process-note">{agent.source === 'demo' ? '以下记录来自预设演示。' : '仅展示当前快照提供的工具名称、过程摘要与回执状态；未上报的工具输出正文不可见。'}</p>
