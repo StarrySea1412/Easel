@@ -582,6 +582,8 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
+    global _HARNESS_LOOP
+    _HARNESS_LOOP = asyncio.get_running_loop()
     from easel.storage_location import apply_pending
     await asyncio.to_thread(apply_pending, DATA_DIR)
     # Install the fail-closed Agent guard before serving any local request.
@@ -600,6 +602,13 @@ async def _lifespan(_app: FastAPI):
         yield
     finally:
         await _task_service.close()
+        alternate = list(_DIRECT_CHAT_TASKS | _HARNESS_TASKS)
+        for task in alternate:
+            task.cancel()
+        await asyncio.gather(*alternate, return_exceptions=True)
+        from easel.harnesses.rpc import close_sessions
+        await close_sessions()
+        _HARNESS_LOOP = None
         await asyncio.to_thread(_image_worker().stop)
         await asyncio.to_thread(_codex_service.close)
         await asyncio.to_thread(_browser_service.close)
@@ -1490,6 +1499,22 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
     def failed(error):
         _chat_failure_events().record_chat(turn_id=failure_turn_id, session_id=sk, error=error)
         return error['message']
+    runtime = _chat_backend(session_id)
+    if runtime not in ('api', 'openclaw'):
+        async def execute():
+            errors = []
+            request = ChatRequest(message=msg, sessionId=sk)
+            result = await _run_harness_chat(request, sk, msg, runtime, _harness_settings(),
+                lambda kind, text: errors.append(text) if kind == 'error' else None,
+                timeout, interactive=False)
+            if errors:
+                raise HTTPException(502, errors[0])
+            return result
+        if _HARNESS_LOOP is not None and _HARNESS_LOOP.is_running():
+            return asyncio.run_coroutine_threadsafe(execute(), _HARNESS_LOOP).result(timeout + 15)
+        return asyncio.run(execute())
+    if runtime == 'api':
+        raise HTTPException(409, 'API直连请使用聊天入口；当前操作需要本机工具。')
     msg = _publishing_message(msg)
     _require_chat_budget(msg)
     # 跨进程锁：同一会话同时刻只跑一个 openclaw，防并发 takeover 崩溃（rc=1）
@@ -2242,7 +2267,7 @@ def _chat_model(slot: str, env: dict, providers: dict | None = None) -> str:
     return 'deepseek-chat' if slot == 'openai' else 'claude-sonnet-4-6'
 
 
-def _model_channels() -> dict:
+def _model_channels(runtime: str | None = None) -> dict:
     import office_controls
     from model_preferences import disabled_providers
     config_path = openclaw_state_dir() / 'openclaw.json'
@@ -2250,7 +2275,8 @@ def _model_channels() -> dict:
     catalog = office_controls.configured_models(config_path, include_disabled=True)
     env = _read_env()
     primary = ""
-    direct = _direct_api_enabled()
+    runtime = runtime or _harness_settings()['runtime']
+    direct = runtime == 'api'
     providers = {}
     try:
         oc = openclaw_state_dir() / "openclaw.json"
@@ -2365,6 +2391,19 @@ def _model_channels() -> dict:
     from model_preferences import provider_order
     order = provider_order(config_path)
     chat_rows.sort(key=lambda row: order.index(row.get('providerId', row.get('slot'))) if row.get('providerId', row.get('slot')) in order else len(order))
+    if direct:
+        chat_rows = [{
+            'slot': 'direct-api', 'providerId': 'direct-api', 'order': 1,
+            'name': 'direct-api', 'channelName': 'API 直连', 'sub': '仅聊天',
+            'type': 'openai', 'protocol': 'openai', 'model': env.get('EASEL_DIRECT_API_MODEL', ''),
+            'baseUrl': env.get('EASEL_DIRECT_API_BASE_URL', ''),
+            'keyMasked': _mask_key(env.get('EASEL_DIRECT_API_KEY', '')),
+            'role': '主', 'result': '已配置' if direct_ready else '未配置',
+            'enabled': True, 'deletable': False, 'protocolEditable': False,
+            'chatModels': [env['EASEL_DIRECT_API_MODEL']] if env.get('EASEL_DIRECT_API_MODEL') else [],
+        }]
+    elif runtime != 'openclaw':
+        chat_rows = []  # Native authentication/models belong to the selected CLI.
     channels: dict = {"chat": {"rows": chat_rows}, "transcribe": {"rows": trans_rows}}
     try:
         import model_registry as _mr  # skills/shared/scripts 已在 sys.path 上
@@ -2408,7 +2447,7 @@ def _model_channels() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {"channels": channels, "primary": primary,
-            "transport": "api" if direct else "openclaw"}
+            "transport": runtime}
 
 
 class ChatTransportRequest(BaseModel):
@@ -3059,6 +3098,28 @@ class ModelSaveRequest(BaseModel):
 async def api_settings_models_save(req: ModelSaveRequest):
     """保存模型通道：.env 就地更新（key 留空=不改）；chat 同步 openclaw；媒体通道写 provider 配置。"""
     ch0 = (req.channel or "").strip()
+    if ch0 == 'chat':
+        runtime = _harness_settings()['runtime']
+        if runtime not in ('api', 'openclaw'):
+            raise HTTPException(409, '当前底座使用原生认证；请在底座设置中保存模型。')
+        if runtime == 'api':
+            if (len(req.rows) != 1 or req.rows[0].slot != 'direct-api'
+                    or req.deletedProviders or req.providerOrder is not None):
+                raise HTTPException(400, 'API直连请保存唯一的直连通道。')
+            keys = ('EASEL_DIRECT_API_BASE_URL', 'EASEL_DIRECT_API_MODEL', 'EASEL_DIRECT_API_KEY')
+            if any(key in os.environ for key in keys):
+                raise HTTPException(409, '运行环境已指定直连配置，请修改启动环境后重启。')
+            row, current = req.rows[0], read_settings(ENV_FILE)
+            updates = {key: value.strip() for key, value in zip(keys, (row.baseUrl, row.model, row.key)) if value.strip()}
+            if (updates.get(keys[0], '').rstrip('/') not in ('', current.get(keys[0], '').rstrip('/'))
+                    and not row.key.strip() and current.get(keys[2], '').strip()):
+                raise HTTPException(400, '更换根地址时请重新填写Key。')
+            try:
+                api_config({**current, **updates})
+            except DirectAPIError as exc:
+                raise HTTPException(400, str(exc)) from None
+            _commit_model_configuration(updates)
+            return {'ok': True, 'transport': 'api', **_model_channels()}
     if ch0 != 'chat' and req.deletedProviders:
         raise HTTPException(400, '供应商删除仅适用于对话渠道')
     if ch0 not in ('chat', 'transcribe', 'speech', 'image', 'video', 'music'):
@@ -3489,16 +3550,23 @@ async def api_models_available(req: ModelsFetchRequest):
 async def api_models_selftest(req: SelftestRequest):
     """Read saved model lists using each channel's configured protocol, without inference."""
     channel = (req.channel or "all").strip()
-    env = _read_env()
-    targets: list[tuple[str, str, str]] = []
+    direct = _direct_api_enabled()
+    if channel in ('chat', 'all') and _harness_settings()['runtime'] not in ('api', 'openclaw'):
+        raise HTTPException(409, '当前底座使用原生模型配置。')
+    env = read_settings(ENV_FILE) if direct else _read_env()
+    targets: list[tuple[str, str, str, str]] = []
     if channel in ("chat", "all"):
-        for slot in _CHAT_PROTOCOLS:
-            base, key = _saved_base_for('chat', slot), _saved_key_for('chat', slot)
-            if base.strip() and key.strip():
-                targets.append((base.strip().rstrip("/"), key.strip(), _chat_protocol(slot)))
+        if direct:
+            base, _, key = api_config(env, require_model=False)
+            targets.append((base, key, 'openai', 'direct-api'))
+        else:
+            for slot in _CHAT_PROTOCOLS:
+                base, key = _saved_base_for('chat', slot), _saved_key_for('chat', slot)
+                if base.strip() and key.strip():
+                    targets.append((base.strip().rstrip("/"), key.strip(), _chat_protocol(slot), slot))
     if channel in ("transcribe", "all") and (env.get("SILICONFLOW_API_KEY") or "").strip():
         targets.append(((env.get("SILICONFLOW_BASE_URL") or "https://api.siliconflow.cn/v1").strip().rstrip("/"),
-                        env["SILICONFLOW_API_KEY"].strip(), 'openai'))
+                        env["SILICONFLOW_API_KEY"].strip(), 'openai', 'siliconflow'))
 
     # 这里会把真实 API Key 当 Bearer 发出去，所以目标地址必须先过闸：
     # 合法 http(s)、且不指向本机/内网/云元数据；跳转也不跟（跟了等于绕过前面的判断）。
@@ -3508,7 +3576,7 @@ async def api_models_selftest(req: SelftestRequest):
 
     _opener = urllib.request.build_opener(_NoRedirect)
 
-    def _probe(base: str, key: str, protocol: str) -> dict:
+    def _probe(base: str, key: str, protocol: str, slot: str) -> dict:
         t0 = time.time()
         if protocol not in _CHAT_APIS:
             return {'baseUrl': base, 'ok': False, 'ms': 0, 'detail': '已保存请求协议不支持模型列表查询'}
@@ -3520,7 +3588,7 @@ async def api_models_selftest(req: SelftestRequest):
         try:
             _model_health_service().reserve_legacy()
             headers = ({'x-api-key': key, 'anthropic-version': '2023-06-01'}
-                       if protocol == 'anthropic' else {'Authorization': f'Bearer {key}'})
+                       if protocol == 'anthropic' else {'Authorization': f'Bearer {key}'} if key else {})
             headers['User-Agent'] = 'Easel/' + application_version()
             suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
             rq = urllib.request.Request(base + suffix, headers=headers)
@@ -3534,7 +3602,7 @@ async def api_models_selftest(req: SelftestRequest):
             return {"baseUrl": base, "ok": False, "ms": int((time.time() - t0) * 1000),
                     "detail": _redact(f"{type(e).__name__}: {e}", key)[:140]}
 
-    results = await asyncio.to_thread(lambda: [_probe(b, k, p) for b, k, p in targets])
+    results = await asyncio.to_thread(lambda: [_probe(b, k, p, s) for b, k, p, s in targets])
     return {"channel": channel, "results": results, "testedAt": int(time.time())}
 
 
@@ -3660,24 +3728,45 @@ _CHANNEL_CONNECTION_LOCK = threading.Lock()
 @app.get('/api/settings/models/connection')
 async def api_channel_connection(modelRef: str):
     def check():
-        target = _model_health_service().target(modelRef)
+        runtime = _harness_settings()['runtime']
+        if runtime != 'openclaw':
+            from alternate_chat import model_capability
+            capability = model_capability(sys.modules[__name__])
+            if modelRef not in {row['id'] for row in capability['options']}:
+                raise HTTPException(400, '所选模型不属于当前底座，请刷新后重试。')
+            if runtime != 'api':
+                return {'modelRef': modelRef, 'state': 'unverified', 'channelName': capability['options'][0]['channelName'],
+                        'detail': '使用原生 CLI 的模型与认证；尚未验证推理。'}
+            base, model, key = api_config(read_settings(ENV_FILE))
+            if not _model_target_allowed(base, 'direct-api'):
+                raise HTTPException(400, '已保存的接口地址不可检测。')
+            target = model_health.Target(modelRef, 'direct-api', model, 'openai', base, key)
+        else:
+            target = _model_health_service().target(modelRef)
         fingerprint = channel_profiles.fingerprint(target)
         with _CHANNEL_CONNECTION_LOCK:
             cached = _CHANNEL_CONNECTIONS.get(fingerprint)
             if cached and time.monotonic() - cached[0] < 60:
                 result = cached[1]
             else:
-                result = _discover_models(target.base, target.key, target.protocol)
+                result = (_discover_models(target.base, target.key, target.protocol, saved_direct=True)
+                          if runtime == 'api' else _discover_models(target.base, target.key, target.protocol))
                 _CHANNEL_CONNECTIONS[fingerprint] = (time.monotonic(), result)
                 while len(_CHANNEL_CONNECTIONS) > 128:
                     _CHANNEL_CONNECTIONS.pop(next(iter(_CHANNEL_CONNECTIONS)))
         # Reject a late response after the channel configuration changes.
-        current = _model_health_service().target(modelRef)
+        if runtime == 'api':
+            base, model, key = api_config(read_settings(ENV_FILE))
+            if not _direct_api_enabled():
+                raise HTTPException(409, '底座配置已变化，请重新检测。')
+            current = model_health.Target('direct-api/' + model, 'direct-api', model, 'openai', base, key)
+        else:
+            current = _model_health_service().target(modelRef)
         if channel_profiles.fingerprint(current) != fingerprint:
             raise HTTPException(409, '渠道配置已变化，请重新检测。')
         ok = result.get('ok') is True
         return {'modelRef': modelRef, 'state': 'success' if ok else 'unverified' if result.get('kind') in ('not_found', 'unsupported') else 'failed',
-                'channelName': _channel_labels().get(target.provider, {}).get('name', '未命名渠道'),
+                'channelName': 'API 直连' if runtime == 'api' else _channel_labels().get(target.provider, {}).get('name', '未命名渠道'),
                 'detail': ('渠道模型列表已读取；模型推理尚未验证。' if ok else str(result.get('message') or '渠道模型列表读取失败，推理能力尚未验证。')),
                 'modelListed': target.model in result.get('models', []), 'checkedAt': int(time.time()), 'kind': result.get('kind', 'unknown')}
     return await asyncio.to_thread(check)
@@ -3834,6 +3923,8 @@ def _is_loopback_url(u: str) -> bool:
 
 def _saved_key_for(channel: str, slot: str) -> str:
     """该通道/槽位已保存的 Key（供「不重填也能获取模型」）；没有给空串。"""
+    if channel == 'chat' and slot == 'direct-api':
+        return read_settings(ENV_FILE).get('EASEL_DIRECT_API_KEY', '')
     env = _read_env()
     if channel == "chat":
         if slot not in _CHAT_PROTOCOLS:
@@ -3855,6 +3946,8 @@ def _saved_key_for(channel: str, slot: str) -> str:
 
 
 def _saved_base_for(channel: str, slot: str) -> str:
+    if channel == 'chat' and slot == 'direct-api':
+        return read_settings(ENV_FILE).get('EASEL_DIRECT_API_BASE_URL', '')
     env = _read_env()
     if channel == 'chat':
         if slot not in _SLOT_ENV_KEYS:
@@ -3892,7 +3985,7 @@ def _ssrf_safe_allow_local() -> bool:
 
 
 def _discover_models(base: str, key: str, protocol: str = "openai",
-                     timeout: float = 10.0) -> dict:
+                     timeout: float = 10.0, *, saved_direct: bool = False) -> dict:
     """向服务商查询可用模型列表 → {ok, kind, message, models, elapsedMs}。
     OpenAI 兼容：GET {base}/models（Bearer）；Anthropic：GET {base}/v1/models（x-api-key）。"""
     base = (base or "").strip().rstrip("/")
@@ -3900,7 +3993,8 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
         return {"ok": False, "kind": "invalid_url", "models": [],
                 "message": "地址需是合法的 http(s):// 根地址"}
     local_ok = _ssrf_safe_allow_local()
-    if not _ssrf_safe(base) and not (local_ok and _is_loopback_url(base)):
+    if (not _ssrf_safe(base) and not (local_ok and _is_loopback_url(base))
+            and not (saved_direct and _model_target_allowed(base, 'direct-api'))):
         return {"ok": False, "kind": "blocked_target", "models": [],
                 "message": "目标指向本机/内网地址，已拒绝（避免服务端被当作内网跳板）"}
     suffix = '/v1/models' if protocol == 'anthropic' and not base.endswith('/v1') else '/models'
@@ -3912,7 +4006,10 @@ def _discover_models(base: str, key: str, protocol: str = "openai",
             headers["anthropic-version"] = _ANTHROPIC_VERSION
         else:
             headers["Authorization"] = f"Bearer {key}"
-    opener = urllib.request.build_opener(_NoRedirect)
+    handlers = [_NoRedirect]
+    if saved_direct and base == _saved_base_for('chat', 'direct-api').strip().rstrip('/'):
+        handlers.append(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     t0 = time.time()
     try:
         with opener.open(urllib.request.Request(url, headers=headers), timeout=timeout) as resp:
@@ -3987,22 +4084,26 @@ async def api_models_discover(req: ModelDiscoverRequest):
     if not base:
         raise HTTPException(400, "请先填写或选择 Base URL")
     slot = (req.slot or "").strip()
+    direct = channel == 'chat' and slot == 'direct-api'
+    if direct and not _direct_api_enabled():
+        raise HTTPException(409, '请先保存API直连底座，再读取直连模型。')
     typed = (req.apiKey or "").strip()
     if typed and any(c.isspace() for c in typed):
         raise HTTPException(400, 'API Key 不能包含空白字符')
     key = typed or _saved_key_for(channel, slot)
     proto = (req.protocol or "").strip().lower()
-    expected = _chat_protocol(slot) if channel == 'chat' else 'openai'
+    expected = _chat_protocol(slot) if channel == 'chat' and not direct else 'openai'
     if proto and proto not in _CHAT_APIS:
         raise HTTPException(400, '不支持的模型协议')
-    if channel != 'chat' and proto and proto != expected:
+    if (channel != 'chat' or direct) and proto and proto != expected:
         raise HTTPException(400, '协议与目标槽位不匹配')
     proto = proto or expected or 'openai'
     if proto not in _CHAT_APIS:
         raise HTTPException(400, '已保存协议不支持模型列表查询，请明确选择支持的请求协议')
     if key and not typed and base != _saved_base_for(channel, slot).strip().rstrip('/'):
         raise HTTPException(400, '更换 Base URL 时必须重新填写 API Key，未向新地址发送已保存的密钥')
-    result = await asyncio.to_thread(_discover_models, base, key, proto)
+    result = await asyncio.to_thread(_discover_models, base, key, proto,
+                                    **({'saved_direct': True} if direct else {}))
     result.update({
         "channel": channel,
         "slot": slot,
@@ -4618,7 +4719,8 @@ def _chat_memory_context(req, writing=None, *, prompt_builder=None):
             task_type = 'account-analysis'
     store = _memory_store()
     proposal = ''
-    if req.sessionId and req.turnId and getattr(req, 'engine', 'openclaw') in ('openclaw', 'codex'):
+    if (req.sessionId and req.turnId and (getattr(req, 'engine', 'openclaw') == 'codex'
+            or _harness_settings()['runtime'] == 'openclaw')):
         from easel.run_experience import instructions
         try:
             bound = store.bind_run(req.persona, req.sessionId, req.turnId, engine=getattr(req, 'engine', 'openclaw'),
@@ -4634,6 +4736,56 @@ def _chat_memory_context(req, writing=None, *, prompt_builder=None):
         if not _memory_store().record_use(req.persona, req.sessionId, req.turnId, result):
             raise HTTPException(409, '该轮已绑定其他经验版本；资料已更改，请新建一轮再发送。')
     return result
+
+
+def _direct_chat_content(req: ChatRequest, *, prompt_builder=None) -> tuple[str | list, str]:
+    """Chat-only input: actual attachment bytes, no fictional local tools."""
+    _attachment_context(req)
+    if not req.message.strip() and not req.attachments:
+        raise HTTPException(400, '消息不能为空')
+    system = SYSTEM_PROMPT
+    if req.persona:
+        if not _valid_persona_name(req.persona) or not profile_exists(req.persona):
+            raise HTTPException(400, '画像不存在或名称无效')
+        system += '\n\n当前画像：\n' + load_profile_text(req.persona)
+    system += '\n' + _chat_role_contract(req)
+    from easel.prompt_envelope import assemble
+    from easel.context_budget import serialized
+    from chat_branch import history_context
+    references, images = [], []
+    for attachment in req.attachments:
+        path = _safe_output_target(attachment.path)
+        if path.suffix.lower() in TEXT_EXTS:
+            if path.stat().st_size > 65536:
+                raise HTTPException(413, 'API直连文本附件不能超过64 KiB')
+            try:
+                references.append({'source': 'attachment', 'name': attachment.name, 'text': path.read_text(encoding='utf-8')})
+            except UnicodeError:
+                raise HTTPException(400, '文本附件需要UTF-8编码') from None
+        elif path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}:
+            if path.stat().st_size > 4 * 1024 * 1024:
+                raise HTTPException(413, 'API直连图片附件不能超过4 MiB')
+            encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+            mime = mimetypes.guess_type(path.name)[0] or 'image/png'
+            images.append({'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{encoded}'}})
+        else:
+            raise HTTPException(400, 'API直连支持文本和图片附件；此附件需要文件处理工具')
+    if req.history:
+        history_context(req.history)
+        references.append({'source': 'history-snapshot', 'messages': [item.model_dump() for item in req.history]})
+    writing = _writing_context(req)
+    if writing:
+        references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
+    def render(memory):
+        reference = experience_reference(memory)
+        refs = [*references, *([reference] if reference else [])]
+        text = assemble(req.message or '请分析这些附件', policy='', references=refs) if refs else req.message.strip() or '请分析这些附件'
+        return [{'type': 'text', 'text': text}, *images] if images else text
+    memory = _chat_memory_context(req, writing, prompt_builder=lambda m:
+        prompt_builder(render(m)) if prompt_builder else serialized({'system': system, 'content': render(m)}))
+    content = render(memory)
+    _require_chat_budget(serialized({'system': system, 'content': content}))
+    return content, system
 
 
 def _codex_message(req, *, prompt_builder=None):
@@ -5021,6 +5173,7 @@ _CHAT_JOBS: dict[str, tuple[str, threading.Event]] = {}
 # 被用户显式停止的会话 key：supervisor 据此把本轮当作正常「已停止」收尾（不报「被中断」、释放会话锁）。
 _STOPPED_CHAT: set = set()
 _HARNESS_TASKS: set = set()
+_HARNESS_LOOP = None
 _HARNESS_QUESTIONS: dict = {}
 
 
@@ -5056,7 +5209,7 @@ async def _harness_ask(sk: str, questions: list[dict], emit) -> dict:
 
 
 async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: str,
-                            config: dict, emit, timeout: int = TIMEOUT_CHAT, *, interactive=True) -> str:
+                            config: dict, emit, timeout: int = TIMEOUT_CHAT, *, interactive=True, lifecycle=None) -> str:
     pk = f"web:{sk}"
     turn_id = req.turnId or uuid.uuid4().hex
     full_text: list[str] = []
@@ -5065,6 +5218,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
     error_message = ""
     lock = _session_lock(sk)
     xlock = _CrossProcLock(sk)
+    if lifecycle:
+        xlock.cancel_event = lifecycle.cancel
     acquired = False
     claimed = False
     locked = False
@@ -5090,6 +5245,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         locked = True
         deadline = time.monotonic() + min(timeout, 300)
         while not acquired and time.monotonic() < deadline:
+            if lifecycle and lifecycle.cancel.is_set():
+                raise asyncio.CancelledError
             acquired = xlock.acquire(0)
             if not acquired:
                 xlock.release()
@@ -5101,10 +5258,12 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         record = harness_store.binding(SESSIONS_DIR, sk)
         native_id = record.get("native_id", "")
         harness_store.bind(SESSIONS_DIR, sk, runtime, native_id)
+        if lifecycle:
+            lifecycle.before_dispatch()
         _STOPPED_CHAT.discard(sk)
         proc._task = task
         _RUNNING_CHAT[sk] = proc
-        _save_turn(pk, "running", "", {"turn_id": turn_id, "runtime": runtime})
+        (lifecycle.save if lifecycle else _save_turn)(pk, "running", "", {"turn_id": turn_id, "runtime": runtime})
         claimed = True
         env = {**read_settings(ENV_FILE), **_proxy_env(), "EASEL_AGENT_RUNTIME": runtime,
                "EASEL_ROOT": str(PROJECT_ROOT)}
@@ -5130,27 +5289,29 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         error_message = "Agent 执行失败，请检查本机 CLI、登录和模型配置"
         emit("error", error_message)
     finally:
-        if claimed:
-            snapshot = "".join(full_text) + (f"\n\n❌ {error_message}" if error_message else "")
-            _save_turn(pk, "done", snapshot, {
-                "turn_id": turn_id, "runtime": runtime,
-                "clean_end": clean_end, "stop_reason": reason})
+        try:
+            if claimed:
+                snapshot = "".join(full_text) + (f"\n\n❌ {error_message}" if error_message else "")
+                (lifecycle.save if lifecycle else _save_turn)(pk, "done", snapshot, {
+                    "turn_id": turn_id, "runtime": runtime,
+                    "clean_end": clean_end, "stop_reason": reason})
         # 注意：claim 失败（锁被占/底座已切换）时刻意**不**落盘——保留上一轮的
         # 结果快照不被失败轮覆盖（见 test_failed_ownership_check_does_not_overwrite_
         # previous_result）；错误经 SSE 事件流（job log）回放可见。
-        proc.finish()
-        if _RUNNING_CHAT.get(sk) is proc:
-            _RUNNING_CHAT.pop(sk, None)
-        if claimed:
-            _STOPPED_CHAT.discard(sk)
-        xlock.release()
-        if locked:
-            lock.release()
-        _HARNESS_TASKS.discard(task)
+        finally:
+            proc.finish()
+            if _RUNNING_CHAT.get(sk) is proc:
+                _RUNNING_CHAT.pop(sk, None)
+            if claimed:
+                _STOPPED_CHAT.discard(sk)
+            xlock.release()
+            if locked:
+                lock.release()
+            _HARNESS_TASKS.discard(task)
     return "".join(full_text)
 
 
-async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit) -> str:
+async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit, *, lifecycle=None) -> str:
     """Run one API turn with the same stop/recovery/session locking as Gateway chat."""
     pk = f"web:{sk}"
     turn_id = req.turnId or uuid.uuid4().hex
@@ -5160,6 +5321,8 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
     error_message = ""
     lock = _session_lock(sk)
     xlock = _CrossProcLock(sk)
+    if lifecycle:
+        xlock.cancel_event = lifecycle.cancel
     proc = _GatewayHttpProc()
     acquired = False
     claimed = False
@@ -5174,6 +5337,8 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
         locked = True
         deadline = time.monotonic() + min(TIMEOUT_CHAT, 300)
         while True:
+            if lifecycle and lifecycle.cancel.is_set():
+                raise asyncio.CancelledError
             acquired = xlock.acquire(0)
             if acquired:
                 break
@@ -5189,7 +5354,12 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
                 or (OPENCLAW_SESSIONS_DIR / f"{_openclaw_session_id(sk)}.jsonl").is_file()
                 or (OPENCLAW_SESSIONS_DIR / f"{_openclaw_session_id(pk)}.jsonl").is_file()):
             raise DirectAPIError("此会话属于 OpenClaw，请新建会话使用 API 直连")
-        _save_turn(pk, "running", "", {"turn_id": turn_id})
+        if lifecycle:
+            if _chat_backend(sk) != 'api':
+                raise DirectAPIError('底座已切换，请使用新对话重试')
+            lifecycle.before_dispatch()
+            harness_store.bind(SESSIONS_DIR, sk, 'api')
+        (lifecycle.save if lifecycle else _save_turn)(pk, "running", "", {"turn_id": turn_id})
         claimed = True
         proc._task = asyncio.current_task()
         _RUNNING_CHAT[sk] = proc
@@ -5199,7 +5369,8 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
             nonlocal clean_end, reason
             async for kind, text in stream_chat(
                     settings, content, system=system,
-                    history_file=history_path(SESSIONS_DIR, sk), timeout=TIMEOUT_CHAT):
+                    history_file=history_path(SESSIONS_DIR, sk), timeout=TIMEOUT_CHAT,
+                    **({'content_builder': lambda builder: _direct_chat_content(req, prompt_builder=builder)[0]} if lifecycle else {})):
                 if kind == "finish":
                     clean_end, reason = True, text
                 else:
@@ -5223,7 +5394,7 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
         snapshot = "".join(full_text) + (f"\n\n❌ {error_message}" if error_message else "")
         try:
             if claimed:
-                _save_turn(pk, "done", snapshot, {
+                (lifecycle.save if lifecycle else _save_turn)(pk, "done", snapshot, {
                     "turn_id": turn_id, "clean_end": clean_end, "stop_reason": reason,
                 })
         finally:
@@ -5400,6 +5571,8 @@ async def api_chat_stream(req: ChatRequest):
     req = req.model_copy(update={'sessionId': req.sessionId or uuid.uuid4().hex,
                                  'turnId': req.turnId or uuid.uuid4().hex})
     if req.engine != 'codex':
+        if req.sessionId and _codex_service.owns(req.sessionId):
+            raise HTTPException(409, '此会话属于原生Codex，请使用原引擎继续。')
         pending = await asyncio.to_thread(store.pending_chat, req.sessionId)
         if pending:
             from chat_recovery import reconcile_orphan
@@ -5438,6 +5611,12 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     token delta 转成 SSE `token`、thinking delta 转成 `thinking`。stdout 仅留作错误/兜底。
     """
     _chat_role_contract(req)  # Reject invalid contracts before creating or binding any run.
+    if req.engine != 'codex':
+        runtime = _chat_backend(req.sessionId)
+        if runtime != 'openclaw':
+            from alternate_chat import start
+            return await start(sys.modules[__name__], req, runtime, _harness_settings(),
+                               observe=observe, on_done=on_done)
     if req.sessionId:
         _codex_service.bind(req.sessionId, req.engine, legacy=_turn_file(f'web:{req.sessionId}').exists())
     if req.engine == 'codex':
@@ -6743,7 +6922,7 @@ async def _stop_chat_producer(req: StopRequest):
         # Keep the exact process fence until supervisor cleanup instead of
         # returning false after five seconds and silently abandoning steering.
         deadline = time.monotonic() + 35
-        while _RUNNING_CHAT.get(sk) is proc and time.monotonic() < deadline:
+        while (_RUNNING_CHAT.get(sk) is proc or target_turn in _CHAT_JOBS) and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
         record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), target_turn) if target_turn else None
         return {"stopped": _RUNNING_CHAT.get(sk) is not proc and bool(record and record.get('resourceSettled'))}
@@ -6759,6 +6938,32 @@ async def api_chat(req: ChatRequest):
     if req.modelRef is not None:
         raise HTTPException(400, {'code': 'chat_model_requires_stream', 'category': 'configuration',
                                  'retryable': False, 'message': '指定渠道模型请使用流式任务入口。'})
+    runtime = _chat_backend(req.sessionId) if req.engine != 'codex' else 'openclaw'
+    if runtime != 'openclaw':
+        from alternate_chat import start
+        from easel.task_store import TaskStore, TaskConflict
+        req = req.model_copy(update={'sessionId': req.sessionId or uuid.uuid4().hex,
+                                    'turnId': req.turnId or uuid.uuid4().hex})
+        store = TaskStore(OUTPUTS_DIR)
+        try:
+            store.reserve_chat(req.sessionId, req.turnId)
+        except TaskConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        async def release():
+            record = run_ledger.read(_run_ledger_root(), req.turnId)
+            if record is None or record.get('resourceSettled'):
+                store.release_chat(req.sessionId, req.turnId)
+        try:
+            result = await start(sys.modules[__name__], req, runtime, _harness_settings(),
+                observe=False, on_done=release, interactive=False)
+            await asyncio.shield(result['task'])
+            marker = json.loads(_run_snapshot_file(req.turnId).read_text(encoding='utf-8'))
+            if not marker.get('clean_end'):
+                raise HTTPException(502, '运行未正常完成，请查看原轮次记录。')
+            return {'response': marker['text'], 'sessionKey': req.sessionId}
+        except BaseException:
+            await release()
+            raise
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
@@ -9176,18 +9381,8 @@ def _write_baseline_profile(name: str, form: dict) -> None:
 
 @app.delete("/api/session/{session_key}")
 async def api_delete_session(session_key: str):
-    """删除 OpenClaw 本地的 session 记录。"""
-    sessions_file = openclaw_state_dir() / 'agents' / 'main' / 'sessions' / 'sessions.json'
-    if not sessions_file.is_file():
-        return {'deleted': False, 'reason': 'sessions file not found'}
-    data = json.loads(sessions_file.read_text(encoding="utf-8"))
-    full_key = f'agent:main:{session_key}' if not session_key.startswith('agent:') else session_key
-    for key in (full_key, session_key):
-        if key in data:
-            del data[key]
-            sessions_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            return {'deleted': True}
-    return {'deleted': False, 'reason': 'session not found'}
+    """Legacy alias for the durable, engine-independent deletion fence."""
+    return await _task_service.delete_session(session_key.removeprefix('agent:main:'))
 
 
 @app.get("/api/trends")
@@ -9658,6 +9853,16 @@ async def api_chat_execution(session_id: str, turn_id: str, before: int | None =
         raise HTTPException(400, '执行记录分页参数无效')
     if _codex_service.owns(session_id):
         return _codex_service.execution(session_id, turn_id, before, limit)
+    try:
+        record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
+    except run_ledger.LedgerError:
+        raise HTTPException(400, '无效的运行标识。') from None
+    if record and str(record.get('transport', '')).startswith('harness_'):
+        if record.get('sessionId') != session_id:
+            raise HTTPException(404, '本轮不属于此会话。')
+        return {'sessionId': session_id, 'turnId': turn_id, 'engine': record['engine'],
+                'source': record['transport'], 'operations': [], 'timeline': [], 'plan': [],
+                'warnings': [], 'total': 0, 'nextBefore': None}
     process = _RUNNING_CHAT.get(session_id)
     live = process is not None and process.poll() is None and _ACTIVE_SKILL_TURNS.get(session_id) == turn_id
     journal = read_execution(OUTPUTS_DIR, session_id, turn_id)
@@ -9731,8 +9936,8 @@ async def api_agent_roles():
 
 @app.get('/api/agent-office/models')
 async def api_office_models(sessionId: str | None = None, modelRef: str | None = None):
-    import office_controls
-    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId, modelRef)
+    from alternate_chat import model_capability
+    capability = await asyncio.to_thread(model_capability, sys.modules[__name__], sessionId, modelRef)
     capability['agentRuntime'] = await asyncio.to_thread(_agent_runtime_config)
     return capability
 

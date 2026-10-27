@@ -94,6 +94,8 @@ class TaskService:
     def guard_status(self):
         """Invoke only a read-only native tool; this never starts an agent/model."""
         web = self.web
+        if hasattr(web, '_harness_settings') and web._harness_settings()['runtime'] != 'openclaw':
+            return {'ready': False, 'reason': '当前底座未接入目标预算保护，请选择原生Codex或切回OpenClaw。'}
         request = urllib.request.Request(web.chat_completions_url().split('/v1/')[0] + '/tools/invoke',
             data=json.dumps({'tool': 'easel_task_guard', 'args': {}, 'sessionKey': 'agent:main:easel-guard-probe'}).encode(),
             headers={'Content-Type': 'application/json', **web.gateway_credentials().headers()}, method='POST')
@@ -114,6 +116,9 @@ class TaskService:
         import office_controls
         self.store.require_session(session)
         engine = spec.get('engine', 'openclaw')
+        if (engine == 'openclaw' and hasattr(self.web, '_harness_settings')
+                and self.web._harness_settings()['runtime'] != 'openclaw'):
+            raise TaskConflict('当前底座未接入目标预算保护，请切回OpenClaw或选择原生Codex。')
         codex = self.web._codex_service
         binding = codex.binding(session) if session and hasattr(codex, 'binding') else None
         if session and ((binding and binding.get('engine') != engine)
@@ -394,18 +399,7 @@ class TaskService:
 
         @router.post('/sessions/{session}/delete')
         async def delete_session(session: str):
-            try:
-                marker = await asyncio.to_thread(self.store.delete_session, session)
-            except TaskConflict as exc:
-                conflict(exc)
-            await self.cleanup_deleted_sessions()
-            for actual, turn in await asyncio.to_thread(self.session_work_items, session):
-                try:
-                    await asyncio.wait_for(self.web.api_chat_stop(self.web.StopRequest(sessionId=actual, turnId=turn)), timeout=5)
-                except Exception:
-                    log.warning('对话删除已保存，后台停止仍待确认：%s', actual)
-            return {'deleted': True, 'tombstone': marker,
-                    'stopPending': bool(await asyncio.to_thread(self.session_work, session))}
+            return await self.delete_session(session)
 
         @router.get('/capability')
         def capability(engine: Literal['openclaw', 'codex'] = 'openclaw'):
@@ -550,6 +544,20 @@ class TaskService:
 
     def session_work(self, session):
         return sorted({turn for _, turn in self.session_work_items(session)})
+
+    async def delete_session(self, session):
+        try:
+            marker = await asyncio.to_thread(self.store.delete_session, session)
+        except TaskConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        await self.cleanup_deleted_sessions()
+        for actual, turn in await asyncio.to_thread(self.session_work_items, session):
+            try:
+                await asyncio.wait_for(self.web.api_chat_stop(self.web.StopRequest(sessionId=actual, turnId=turn)), timeout=5)
+            except Exception:
+                log.warning('对话删除已保存，后台停止仍待确认：%s', actual)
+        return {'deleted': True, 'tombstone': marker,
+                'stopPending': bool(await asyncio.to_thread(self.session_work, session))}
 
     def session_work_items(self, session):
         items = set()

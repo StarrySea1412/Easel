@@ -104,6 +104,10 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId, engine);
+  const runtime = engine === 'codex' ? 'codex' : models.capability?.runtime || 'openclaw';
+  const alternate = engine !== 'codex' && runtime !== 'openclaw';
+  const chatOnly = runtime === 'api';
+  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）'} as Record<string,string>)[runtime] || 'OpenClaw';
   const [modelGuardShown, setModelGuardShown] = useState(false);
   const legacyModelError = isLegacyComposerModelIssue(uploadError);
   useEffect(() => {
@@ -113,7 +117,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
     } else if (models.ready) setModelGuardShown(false);
   }, [legacyModelError, models.ready, sessionId]);
   const goalBlocked=Boolean(isStreaming||stopping||goalBusy);
-  const goalState=useChatGoalComposer({editor:goalEditor,sessionId,engine,
+  const goalState=useChatGoalComposer({editor:goalEditor,sessionId,engine:alternate?runtime:engine,
     modelRef:models.modelRef||models.capability?.currentModelRef||models.capability?.defaultModelRef||'',
     blocked:goalBlocked||uploading||draft.missingAttachments.length>0,onChanged:onGoalChanged,onClose:onGoalClose});
   const closeGoal=()=>{if(!goalState.busy){onGoalClose?.();requestAnimationFrame(()=>textareaRef.current?.focus());}};
@@ -292,12 +296,13 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
       || submitted.missingAttachments.length || composingRef.current) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     try {
-      const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
+      const snapshot = engine === 'codex' || chatOnly ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
       if (!model) { setModelGuardShown(true); return; }
-      const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
-        : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
+      const effort = alternate ? undefined : thinkingLevel;
+      const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, effort, model.modelRef)
+        : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, effort);
       if (accepted === true) clearChatDraft(sessionId, submitted);
       else setChatDraftError(sessionId, '当前消息未被接收，草稿已保留，请稍后重试。');
     } catch {
@@ -349,7 +354,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
       {commandOpen&&<ComposerGoalMenu id={`${inputId}-commands`} anchor={textareaRef} items={commandItems} selected={Math.min(commandIndex,commandItems.length-1)} onSelect={setCommandIndex} onChoose={chooseCommandItem}/>}
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
       {!editingQueue && !goalEditor && analysisContext && <AnalysisComposerMaterial context={analysisContext} onOpen={onOpenAnalysisMaterial}/>}
-      {!editingQueue && engine !== 'codex' && <ComposerSkillChips skills={skills} />}
+      {!editingQueue && engine !== 'codex' && !chatOnly && <ComposerSkillChips skills={skills} />}
       <textarea
         ref={textareaRef}
         id={inputId}
@@ -373,7 +378,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
       />
       {goalEditor&&<ChatGoalNotice state={goalState} goal={goalEditor.goal} blocked={goalBlocked}/>}
       {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
-      {!editingQueue && engine !== 'codex' && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
+      {!editingQueue && engine !== 'codex' && !chatOnly && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
       {(modelGuardShown || legacyModelError) && !models.ready && <div className="composer-connection-notice" role={models.loading ? 'status' : 'alert'} aria-busy={models.loading}>
         <span className="composer-connection-icon" aria-hidden="true">{models.loading ? <IconLoader className="composer-connection-spinner" size={17}/> : <IconOpenClaw size={17}/>}</span>
         <div className="composer-connection-content"><p>{models.loading ? '正在检查连接…' : composerModelIssue(models).replace(' 草稿已保留，消息尚未发送。', '')}</p>
@@ -384,7 +389,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
         <p>文本草稿已恢复。刷新前的素材需要重新添加：{draft.missingAttachments.join('、')}。确认素材后才能发送。</p>
         <button type="button" className="composer-attach-btn" onClick={() => dismissMissingDraftAttachments(sessionId)}>忽略这些素材</button>
       </div>}
-      {engine !== 'codex' && skills.notice && <p className="composer-skills-note" role="status">{skills.notice}
+      {engine !== 'codex' && !chatOnly && skills.notice && <p className="composer-skills-note" role="status">{skills.notice}
         {skills.restorePending && <button type="button" className="link-btn" onClick={() => skills.retryRestore()}>重试恢复技能</button>}
       </p>}
       {models.notice && <p className="composer-skills-note" role="status">{models.notice}</p>}
@@ -396,18 +401,18 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
       <div className="composer-bar">
         <div className="composer-tools" hidden={editingQueue}>
           <Select className="composer-engine composer-engine-icon" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping || Boolean(goalEditor)}
-            title={`对话引擎：${engine === 'codex' ? 'Codex' : 'OpenClaw'}`}
-            options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
-          <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+            title={`对话引擎：${engine === 'codex' ? 'Codex' : runtimeLabel}`}
+            options={[{value:'openclaw',label:runtimeLabel,icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
+          <ComposerAddMenu skillsDisabled={engine === 'codex' || chatOnly} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
           {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
           {goalEditor?<ChatGoalComposer state={goalState} goal={goalEditor.goal} onExit={closeGoal}/>:onGoal&&Boolean(goalStatus)&&<button type="button" className="composer-goal-btn" aria-pressed={false} aria-label="设置或查看目标" title="设置或查看当前对话目标" disabled={editingQueue} onClick={()=>openGoal()}><IconTarget size={16}/><span>目标</span></button>}
-          {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
+          {engine !== 'codex' && !chatOnly && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
           {goalEditor&&goalState.modelLocked?<Select className="composer-goal-locked-model" aria-label="目标执行模型" value={goalState.executionModel} disabled onChange={()=>{}} options={[{value:goalState.executionModel,label:goalState.executionModel}]}/>:engine === 'codex' ? <Select aria-label="选择模型" value={models.modelRef} disabled={stopping || models.loading}
             options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
             : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}
-          <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}
-            supportedLevels={supportedThinking} />
+          {!alternate && <ThinkingLevelPicker value={preferredThinking} onChange={changeThinkingLevel} disabled={stopping}
+            supportedLevels={supportedThinking} />}
         </div>
         {editingQueue && <div className="composer-queue-edit-actions">
           <span>编辑待发送消息</span>

@@ -10,6 +10,7 @@ export default function ChatAgentActivity({sessionId,turnId}:{sessionId:string;t
   if(!run||run.sessionId!==sessionId||run.turnId!==turnId||run.engine==='codex')return null;
   const {office}=run, current=office.turnId===turnId;
   const snapshot=run.execution.current?.turnId===turnId?run.execution.current:null;
+  if(!snapshot || snapshot.engine && snapshot.engine !== 'openclaw')return null;
   const children=current?office.agents.filter(agent=>agent.parentId):[];
   const spawn=snapshot?.operations.filter(row=>['sessions_spawn','spawn_agent'].includes(row.name)).at(-1);
   const collaboration=children.length?`已观察到 ${children.length} 个子 Agent`:spawn?.status==='failed'||spawn?.status==='denied'?'委派请求未成功':spawn?'已记录委派请求，等待身份回执':'尚未收到委派回执';

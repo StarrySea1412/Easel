@@ -8,6 +8,7 @@ import DemoDataSettingsCard from './settings/DemoDataSettingsCard';
 import type { ComponentProps, ComponentType } from 'react';
 import { ProviderBoard } from './settings/ProviderBoard';
 import CodexSettings from './CodexSettings';
+import HarnessSettings from './HarnessSettings';
 import ModelAvailabilityPanel, { ModelCheckFeedback } from './settings/ModelAvailabilityPanel';
 import { useModelAvailability } from '../hooks/useModelAvailability';
 import ChannelNameEditor from './settings/ChannelNameEditor';
@@ -20,7 +21,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import EnvBoard from './EnvBoard';
 import { Sk as Skeleton, SkeletonCard } from './Skeleton';
 import {
-  fetchEnvTools,
+  fetchEnvTools, fetchHarnessSettings,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchModelPresets, discoverModels,
   fetchImportSources, previewImport, applyImport, discoverImportModels,
@@ -92,6 +93,16 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   // Keep legacy deep links, while grouping settings by the user's task.
   const normalizeSection = (section: SettingsSection): SettingsSection => section.startsWith('channel:') || section === 'image' || section === 'video' || section === 'import' ? 'model' : section === 'general' || section === 'appearance' ? 'more' : section === 'backup' ? 'system' : section;
   const [sec, setSec] = useState<SettingsSection>(normalizeSection(initialSection));
+  const [harness, setHarness] = useState('');
+  const [, setHarnessPreview] = useState('');
+  useEffect(() => {
+    let alive = true;
+    void fetchHarnessSettings().then(value => { if (alive) setHarness(value.runtime); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (harness) window.dispatchEvent(new Event('easel:channel-names-changed'));
+  }, [harness]);
   const [chan, setChan] = useState<Chan>(initialSection.startsWith('channel:') ? initialSection.slice(8) as Chan : initialSection === 'image' ? 'image' : initialSection === 'video' ? 'video' : 'chat');
   const [importOpen, setImportOpen] = useState(initialSection === 'import');
   useEffect(() => {
@@ -135,7 +146,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     }
   }, []);
 
-  useEffect(() => { void refreshEnv(); }, [refreshEnv]);
+  useEffect(() => { if (sec === 'env') void refreshEnv(); }, [refreshEnv, sec]);
 
   const okCount = tools.filter((t) => t.state === 'ok').length;
   const total = tools.length;
@@ -152,7 +163,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     return { ref: `${providerIdentity(row)}/${row.model}`, identity: configIdentity(row), label: modelConfigLabel(row),
       needsSave: !saved || configIdentity(saved) !== configIdentity(row) || (row.chatModels !== undefined && !row.chatModels.includes(row.model)),
       reason: !row.model || PLACEHOLDERS.has(row.model) ? '请先选择或输入模型名称。'
-        : (!row.keyMasked || row.keyMasked === '—') && !row.keyNew?.trim() ? '请先填写 API Key。' : undefined };
+        : row.slot !== 'direct-api' && (!row.keyMasked || row.keyMasked === '—') && !row.keyNew?.trim() ? '请先填写 API Key。' : undefined };
   };
   const [providerDetailsOpen, setProviderDetailsOpen] = useState(true);
   const [modelLoading, setModelLoading] = useState(true);
@@ -366,7 +377,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   }, [impSource, impSlot, impPath, impPreview, impModels, impBusy, savedChatRows, clearModelDiscovery]);
 
   useEffect(() => {
+    if (!harness) return;
     let alive = true;
+    setModelLoading(true);
     fetchWithRetry(() => fetchModelChannels(), 5, 15000)
       .then((d) => {
         if (!alive) return;
@@ -385,7 +398,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       .catch((e) => { if (alive) setModelErr(e instanceof Error ? e.message : '模型配置读取失败'); })
       .finally(() => { if (alive) setModelLoading(false); });
     return () => { alive = false; };
-  }, []);
+  }, [harness]);
 
   const doSelftest = useCallback(async (channel: string) => {
     setTesting(true);
@@ -445,7 +458,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
     setSavedNote('');
     try {
       const d = await saveModelConfig(channel, payload, channel === 'chat' && rowIndex === undefined ? deletedProviders : [],
-        channel === 'chat' && rowIndex === undefined ? allRows.map(providerIdentity) : undefined);
+        channel === 'chat' && harness === 'openclaw' && rowIndex === undefined ? allRows.map(providerIdentity) : undefined);
       if (!mounted.current) return;
       clearModelDiscovery(channel);
       if (channel === 'chat') {
@@ -474,7 +487,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         setSaving(false);
       }
     }
-  }, [chan, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders, modelLoading, clearModelDiscovery]);
+  }, [chan, harness, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders, modelLoading, clearModelDiscovery]);
 
   const checkModel = async (index: number) => {
     const row = chatRows[index], target = modelCheckTarget(row);
@@ -668,7 +681,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const removeRow = (i: number) => {
     if (modelLoading || modelSavePending.current || impApplying.current) return;
     const removed = chatRows[i];
-    if (!removed) return;
+    if (!removed || removed.deletable === false) return;
     // Removing a row changes the indexes of every later provider card.
     clearModelDiscovery('chat');
     const provider = removed.providerId || (removed.slot === 'custom' ? removed.deletable ? removed.name : '' : removed.slot);
@@ -787,13 +800,16 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
               <button type="button" aria-pressed={sec === 'employees'} onClick={() => setSec('employees')}><IconMonitor size={16} />角色形象</button>
             </div>
           </>}
-          <div hidden={sec !== 'agent-runtime'} className="agent-runtime-panel"><AgentRuntimeSettings onOpenModels={() => { setSec('model'); setChan('chat'); }} /></div>
+          <div hidden={sec !== 'agent-runtime'} className="agent-runtime-panel">
+            {harness === 'openclaw' && <AgentRuntimeSettings onOpenModels={() => { setSec('model'); setChan('chat'); }} />}
+          </div>
           {sec === 'employees' && <EmployeeAppearanceSettings
             defaultModelLabel={modelConfigLabel(savedChatRows.find((row) => row.role === '主'))}
             onOpenModels={() => { setSec('model'); setChan('chat'); }} onOpenOffice={onOpenOffice} />}
             {sec === 'model' && (
               <section className="st-sec active">
                   <div className="settings-section-heading"><h2>模型与渠道</h2><p>先选用途，再选择要使用的 AI。渠道就是提供 AI 服务的供应商。</p></div>
+                  <HarnessSettings onChange={setHarness} onSelect={setHarnessPreview}/>
                   <div className="tabbar" role="tablist" aria-label="模型能力通道" onKeyDown={event => {
                     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                     event.preventDefault();
@@ -817,10 +833,10 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                       <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>连接配置与对话可选模型</small></summary>
                     <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
                     <div className="panel-top">
-                      <button type="button" className="adv-btn model-add-provider" disabled={modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
-                      <button type="button" className="adv-btn" onClick={() => setImportOpen(true)}><IconUpload size={15}/> 导入已有配置</button>
+                      <button type="button" className="adv-btn model-add-provider" disabled={harness !== 'openclaw' || modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
+                      <button type="button" className="adv-btn" disabled={harness !== 'openclaw'} onClick={() => setImportOpen(true)}><IconUpload size={15}/> 导入已有配置</button>
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
-                      <span className="desc">拖动调整顺序，保存后生效；测试无需额外设置。</span>
+                      {harness === 'openclaw' && <span className="desc">拖动调整顺序，保存后生效；测试无需额外设置。</span>}
                       <span className="spacer" />
                     </div>
                     {renderBoard(chatRows, {
@@ -844,7 +860,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                       },
                       health: (i) => {
                         const row = chatRows[i];
-                        return row.model && row.slot ? <ChannelNameEditor key={providerIdentity(row)} provider={providerIdentity(row)}/> : null;
+                        return row.model && row.slot && row.slot !== 'direct-api' ? <ChannelNameEditor key={providerIdentity(row)} provider={providerIdentity(row)}/> : null;
                       },
                       presets: presets.chat,
                       discovery: (i) => discover[`chat:${i}`],

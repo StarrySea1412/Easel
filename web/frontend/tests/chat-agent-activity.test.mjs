@@ -14,7 +14,7 @@ test('Agent behavior retry uses Easel button styling and disables during refresh
  let refreshes=0;
  const agent={id:'root:main',name:'Main',role:'任务协调',task:'',state:'working',source:'live',action:{kind:'thinking',label:'思考中',evidence:'observed'}};
  const office={turnId:'turn-1',agents:[agent],events:[],observedAt:null,observedAgentCount:1,identityScanLimited:false,coverage:'',error:'读取失败',loading:false,refresh:()=>refreshes++};
- const run={sessionId:'session-1',turnId:'turn-1',engine:'openclaw',streaming:true,execution:{},office};
+ const run={sessionId:'session-1',turnId:'turn-1',engine:'openclaw',streaming:true,execution:{current:{sessionId:'session-1',turnId:'turn-1',engine:'openclaw',operations:[]}},office};
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  t.after(async()=>{await act(async()=>root.unmount());host.remove();});
  const render=async value=>act(async()=>root.render(createElement(ChatRunContext.Provider,{value},createElement(Activity,{sessionId:'session-1',turnId:'turn-1'}))));
@@ -26,4 +26,9 @@ test('Agent behavior retry uses Easel button styling and disables during refresh
  await render({...run,office:{...office,loading:true}});
  button=host.querySelector('.chat-agent-refresh');assert.equal(button.disabled,true);assert.match(button.textContent,/读取中/);
  await act(async()=>button.click());assert.equal(refreshes,1);
+ for(const engine of ['api','acp','opencode','codex']){
+  await render({...run,execution:{current:{...run.execution.current,engine}}});
+  assert.equal(host.querySelector('.chat-agent-activity'),null,'another runtime never borrows OpenClaw behavior');
+ }
+ await render({...run,execution:{}});assert.equal(host.querySelector('.chat-agent-activity'),null,'unknown runtime waits for exact-turn evidence');
 });

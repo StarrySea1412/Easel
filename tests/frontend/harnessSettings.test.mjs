@@ -23,20 +23,15 @@ test('settings defer environment probes and wait for the actual runtime before l
   assert.match(panel, /const \[harness, setHarness\] = useState\(''\)/);
   assert.match(panel, /if \(sec === 'env'\) void refreshEnv\(\)/);
   assert.match(panel, /if \(!harness\) return;/);
-  assert.match(panel, /if \(harness !== 'openclaw'\) return;/);
+  assert.match(panel, /<HarnessSettings onChange=\{setHarness\}/);
+  assert.match(panel, /harness === 'openclaw' && <AgentRuntimeSettings/);
 });
 
-test('sidebar keeps its settings button unwrapped beside a truncated status', () => {
-  const css = readFileSync(new URL('../../web/frontend/src/styles/index.css', import.meta.url), 'utf8');
+test('sidebar uses the actual runtime status and retains the settings navigation entry', () => {
   const sidebar = readFileSync(new URL('../../web/frontend/src/components/Sidebar.tsx', import.meta.url), 'utf8');
-  const status = css.match(/\.sidebar-status-text\s*\{([^}]+)\}/)?.[1];
-  const gear = css.match(/\.settings-gear\s*\{([^}]+)\}/)?.[1];
-  assert.ok(status && gear);
-  assert.match(sidebar, /className="sidebar-status-text"/);
-  assert.match(status, /min-width:\s*0/);
-  assert.match(status, /text-overflow:\s*ellipsis/);
-  assert.match(gear, /flex-shrink:\s*0/);
-  assert.match(gear, /white-space:\s*nowrap/);
+  assert.match(sidebar, /aria-label=\{`\$\{runtimeLabel\} \$\{runtimeStatus\}`\}/);
+  assert.match(sidebar, /runtime==='api'\?'已配置':'CLI 已安装'/);
+  assert.match(sidebar, /railItem\('settings','设置'/);
 });
 
 function setup({ runtime = 'openclaw', locked = false, installed = true, saveError = '', modelError = '',

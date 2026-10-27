@@ -99,10 +99,10 @@ test('embedded goal keeps the ordinary composer tools and toggles back to the sa
   assert.ok(view.container.querySelector('[aria-label="开始目标"]'));
   assert.ok(view.container.querySelector('.thinking-level-trigger'));
   assert.equal(view.container.querySelector('.chat-goal-settings'), null, 'goal mode carries no settings form');
-  assert.match(view.container.textContent, /输入的内容就是目标/);
+  assert.doesNotMatch(view.container.textContent, /输入的内容就是目标/, 'compact goal mode has no persistent explanation');
   assert.equal(view.container.querySelector('form'),null);
   assert.equal(view.container.querySelector('[aria-label="创作消息"]'), null);
-  const toggle = view.container.querySelector('.composer-goal-btn');
+  const toggle = view.container.querySelector('[aria-label="退出目标设置"]');
   assert.equal(toggle.getAttribute('aria-label'), '退出目标设置');
   await view.click(toggle);
   assert.equal(closed, 1);

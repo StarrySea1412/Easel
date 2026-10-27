@@ -19,7 +19,7 @@ async function fixture(t, saved) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); }, removeItem: key => values.delete(key) } });
   const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success', reason: '' };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', defaultModelRef: REF, options: h.options, ...(h.reason ? { reason: h.reason } : {}) }
+    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', defaultModelRef: REF, options: h.options, ...(h.runtime ? {runtime:h.runtime,currentModelRef:h.options[0]?.id} : {}), ...(h.reason ? { reason: h.reason } : {}) }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
         : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
         : url === '/api/upload/limits' ? { max_mb: 50 } : [];
@@ -49,6 +49,21 @@ test('configured complete models are keyboard selectable, stored explicitly and 
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
   assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
+});
+
+test('API composer uses the saved route despite an old channel preference and omits unsupported effort and skills', async t => {
+  const view = await fixture(t, 'old/openclaw-model');
+  view.h.runtime = 'api';
+  view.h.options = [{id:'direct-api/local',provider:'direct-api',model:'local',label:'API 直连 · local',channelName:'API 直连',configured:true}];
+  view.values.set('easel_thinking_preference', 'high');
+  await view.render();
+  assert.match(view.container.querySelector('[aria-label="对话引擎"]').getAttribute('title'), /API 直连/);
+  assert.equal(view.container.querySelector('.thinking-level-picker'), null);
+  await view.key('ArrowDown'); await view.key('Enter');
+  assert.equal(view.values.get(KEY), 'old/openclaw-model', 'choosing the saved API model cannot replace the other engine preference');
+  await view.type('本机协议检查'); await view.send();
+  assert.deepEqual(view.sent[0], ['本机协议检查', [], [], {}, undefined, 'direct-api/local']);
+  assert.equal(view.values.get(KEY), 'old/openclaw-model', 'another engine preference is preserved');
 });
 
 test('removed saved model preserves draft until user chooses an available model', async t => {

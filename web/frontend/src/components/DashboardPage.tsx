@@ -129,6 +129,8 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
   const quickText = quickDraft.text;
   const quickSkills = useComposerSkills(DASHBOARD_DRAFT_SCOPE, 'creation');
   const quickModels = useComposerModels(null);
+  const quickAlternate = Boolean(quickModels.capability?.runtime && quickModels.capability.runtime !== 'openclaw');
+  const quickChatOnly = quickModels.capability?.runtime === 'api';
   const [quickPreferredThinking, setQuickThinking] = useState<ThinkingPreference>(()=>loadThinkingLevel());
   const quickEffectiveModel = quickModels.selected || quickModels.options.find(option=>option.id===(quickModels.capability?.currentModelRef || quickModels.capability?.defaultModelRef));
   const quickSupportedThinking = quickEffectiveModel?.thinkingLevels;
@@ -221,19 +223,19 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
         : '创作助手尚未连接，草稿已保留，请检查设置后重试。');
       return;
     }
-    const snapshot = quickSkills.getSnapshot();
+    const snapshot = quickChatOnly ? {selectedSkills: [], skillRequirements: {}} : quickSkills.getSnapshot();
     if (!snapshot) return;
     const model = quickModels.getSnapshot();
     if (!model) { setChatDraftError(DASHBOARD_DRAFT_SCOPE, composerModelIssue(quickModels)); return; }
     try {
-      const accepted = onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements, quickThinking, model.modelRef);
+      const accepted = onQuickPrompt(text, snapshot.selectedSkills, snapshot.skillRequirements, quickAlternate ? undefined : quickThinking, model.modelRef);
       if (accepted !== true) {
         setChatDraftError(DASHBOARD_DRAFT_SCOPE, '本次创作未被接收，草稿和技能已保留，请稍后重试。');
         return;
       }
       // A callback may replace the draft; its newer content is never ours to clear.
       if (getChatDraft(DASHBOARD_DRAFT_SCOPE) !== submitted) return;
-      const skillsCleared = quickSkills.clear(snapshot.revision);
+      const skillsCleared = 'revision' in snapshot ? quickSkills.clear(snapshot.revision) : true;
       if (skillsCleared === null) return;
       clearChatDraft(DASHBOARD_DRAFT_SCOPE, submitted);
       if (!skillsCleared || !isDashboardDraftTextCleared()) {
@@ -288,7 +290,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
         <label className="dash-launch-label" htmlFor="quick-create">今天，你想创作什么？</label>
         {/* 直达创作：一句话开干，不用先想「该去哪个页面」 */}
         <div className="dash-launch">
-          <ComposerSkillChips skills={quickSkills} />
+          {!quickChatOnly && <ComposerSkillChips skills={quickSkills} />}
           <textarea
             className="dash-launch-input"
             id="quick-create"
@@ -305,12 +307,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
             onCompositionStart={() => { composingQuick.current = true; }}
             onCompositionEnd={() => { composingQuick.current = false; }}
           />
-          <ComposerSkillSuggestions text={quickText} skills={quickSkills}/>
+          {!quickChatOnly && <ComposerSkillSuggestions text={quickText} skills={quickSkills}/>}
           <div className="dash-composer-bar">
             <div className="dash-composer-tools">
-            <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />
+            {!quickChatOnly && <ComposerSkillPicker skills={quickSkills} setInput={setQuickText} />}
             <ComposerModelPicker models={quickModels} onOpenModels={onOpenModels} />
-            <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} />
+            {!quickAlternate && <ThinkingLevelPicker value={quickPreferredThinking} onChange={changeQuickThinking} disabled={gatewayStatus !== 'connected'} supportedLevels={quickSupportedThinking} />}
             </div>
             <button type="button" className="btn btn-primary dash-launch-btn" onClick={submitQuick} disabled={!quickText.trim()}>
               开始创作 →

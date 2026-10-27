@@ -803,7 +803,9 @@ def test_web_stream_replay_resume_and_delete(sandbox, monkeypatch):
     assert sandbox.post("/api/settings/harness", json={"runtime": "opencode"}).status_code == 200
     assert sandbox.post("/api/chat", json={"sessionId": "same", "message": "hello"}).status_code == 409
     assert sandbox.delete("/api/session/same").json()["deleted"]
-    assert not store.binding(web.SESSIONS_DIR, "same")
+    # Durable deletion retains source identity for audit and fences reuse.
+    assert store.binding(web.SESSIONS_DIR, "same")["native_id"] == "durable-native"
+    assert sandbox.post('/api/chat/stream', json={'message':'again','sessionId':'same'}).status_code == 409
 
 
 def test_native_stream_disconnect_keeps_background_turn_and_result(sandbox, monkeypatch):
@@ -866,22 +868,103 @@ def test_web_stop_timeout_and_lock_cleanup(sandbox, monkeypatch):
         monkeypatch.setattr(web.harnesses, "adapter", lambda runtime: Fake())
         events = []
         emit = lambda kind, text: events.append((kind, text))
-        req = web.ChatRequest(message="hello", sessionId="stoppable")
-        task = asyncio.create_task(web._run_harness_chat(req, "stoppable", "hello", "codex",
-                                                       web._harness_settings(), emit))
+        req = web.ChatRequest(message="hello", sessionId="stoppable", turnId='stoppable-first')
+        await web.api_chat_stream(req)
         await asyncio.wait_for(started.wait(), 3)
         result = await web.api_chat_stop(web.StopRequest(sessionId="stoppable"))
-        await task
+        await asyncio.gather(*list(web._BG_TASKS))
         assert result["stopped"] and not web._RUNNING_CHAT and not web._HARNESS_TASKS
         assert not web._session_lock("stoppable").locked()
         last = json.loads(web._turn_file("web:stoppable").read_text(encoding="utf-8"))
         assert last["stop_reason"] == "stopped" and not last["clean_end"]
-        await web._run_harness_chat(req, "stoppable", "hello", "codex", web._harness_settings(), emit, timeout=0.1)
+        original = web._run_harness_chat
+        async def timed(*args, **kwargs):
+            return await original(*args, **kwargs, timeout=0.1)
+        monkeypatch.setattr(web, '_run_harness_chat', timed)
+        await web.api_chat_stream(req.model_copy(update={'turnId':'stoppable-timeout'}))
+        await asyncio.gather(*list(web._BG_TASKS))
         last = json.loads(web._turn_file("web:stoppable").read_text(encoding="utf-8"))
         assert last["stop_reason"] == "timeout" and not web._session_lock("stoppable").locked()
         assert "执行超时" in last["text"]
 
     asyncio.run(exercise())
+
+
+def test_actual_alternate_route_deduplicates_turn_and_preserves_terminal_resources(sandbox, monkeypatch):
+    calls = []
+    class Fake:
+        async def run(self, request, emit, ask, bind):
+            calls.append(request)
+            bind('original-native')
+            emit('token', '协议替身完成')
+    monkeypatch.setattr(web.harnesses, 'adapter', lambda _: Fake())
+    body = {'message':'isolated fixture','sessionId':'dedup','turnId':'dedup-turn'}
+    assert sandbox.post('/api/chat/stream', json=body).status_code == 200
+    assert sandbox.post('/api/chat/stream', json=body).status_code == 409
+    record = web.run_ledger.read(web._run_ledger_root(), 'dedup-turn')
+    assert record['transport'] == 'harness_codex' and record['engine'] == 'codex'
+    assert record['status'] == 'completed' and record['resourceSettled']
+    assert len(calls) == 1
+
+
+def test_alternate_configuration_change_while_queued_never_dispatches(sandbox, monkeypatch):
+    async def scenario():
+        lock = web._session_lock('config-change')
+        await lock.acquire()
+        monkeypatch.setattr(web.harnesses, 'adapter', lambda _: pytest.fail('configuration changed before dispatch'))
+        response = await web.api_chat_stream(web.ChatRequest(message='fixture', sessionId='config-change', turnId='config-change-turn'))
+        await response.body_iterator.__anext__()
+        await asyncio.sleep(0)
+        config = web._harness_settings()
+        config['models']['codex'] = 'changed-model'
+        store.write_json(web.OUTPUTS_DIR / '_harness/config.json', config)
+        lock.release()
+        await asyncio.gather(*list(web._BG_TASKS))
+        await response.body_iterator.aclose()
+        marker = json.loads(web._run_snapshot_file('config-change-turn').read_text(encoding='utf-8'))
+        assert not marker['clean_end']
+        assert any(e['event'] == 'error' for e in web._read_job_events('config-change-turn'))
+    asyncio.run(scenario())
+
+
+def test_unconfirmed_alternate_restart_never_borrows_gateway_recovery(sandbox, monkeypatch):
+    from chat_recovery import reconcile_orphan
+    turn = 'unknown-acp'
+    web.run_ledger.accept(web._run_ledger_root(), turn, session_id='unknown', session_key='unknown', engine='acp')
+    web.run_ledger.mark(web._run_ledger_root(), turn, status='running', transport='harness_acp', provider_run_id='native-session-is-not-turn')
+    web._save_turn('web:unknown', 'running', 'partial', {'turn_id':turn, 'runtime':'acp'})
+    monkeypatch.setattr(web, '_native_agent_client', lambda *_: pytest.fail('no exact ACP turn recovery protocol'))
+    for stop in (False, True):
+        assert reconcile_orphan(web, 'unknown', turn, stop=stop)['status'] == 'unavailable'
+    assert web.run_ledger.read(web._run_ledger_root(), turn)['status'] == 'running'
+
+
+def test_alternate_task_admission_cannot_bypass_goal_budget(sandbox):
+    from easel.task_store import TaskConflict
+    with pytest.raises(TaskConflict, match='预算保护'):
+        web._task_service.validate_goal({'engine':'openclaw'}, None)
+
+
+@pytest.mark.parametrize('runtime', ['acp', 'opencode'])
+def test_http_route_runs_actual_acp_process_and_reuses_original_session(sandbox, monkeypatch, tmp_path, runtime):
+    import easel.harnesses.acp as protocol
+    command = [sys.executable, str(FIXTURE), 'acp']
+    monkeypatch.setattr(protocol, 'acp_command', lambda _: command)
+    monkeypatch.setattr(protocol, 'base_command', lambda _: command)
+    monkeypatch.setenv('FAKE_HARNESS_AUDIT', str(tmp_path / 'audit.jsonl'))
+    monkeypatch.setenv('FAKE_HARNESS_MODE', 'stable-resume')
+    store.write_json(web.OUTPUTS_DIR / '_harness/config.json', {
+        'runtime': runtime, 'models': {runtime:'test-model'}, 'sandbox':'read-only'})
+    monkeypatch.setattr(web, '_native_agent_client', lambda *_: pytest.fail('no gateway dispatch'))
+    for i in range(2):
+        response = sandbox.post('/api/chat/stream', json={
+            'message':'isolated protocol fixture', 'sessionId':'actual-acp', 'turnId':f'actual-acp-{i}'})
+        assert response.status_code == 200 and '你好' in response.text and 'event: done' in response.text
+        record = web.run_ledger.read(web._run_ledger_root(), f'actual-acp-{i}')
+        assert record['transport'] == 'harness_' + runtime and record['resourceSettled']
+    methods = [event.get('method') for event in audit(tmp_path)]
+    assert methods.count('initialize') == 1 and methods.count('session/new') == 1
+    assert methods.count('session/prompt') == 2
 
 
 def test_repeated_stop_does_not_interrupt_process_cleanup(monkeypatch):

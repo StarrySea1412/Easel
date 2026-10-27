@@ -213,6 +213,7 @@ export default function App() {
   const [sessionsLoading, setSessionsLoading] = useState(() => loadSessions().length === 0);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
+  const [runtime, setRuntime] = useState('openclaw');
   const [gatewayRecoveryNote, setGatewayRecoveryNote] = useState('');
   const [gatewayRetryToken, setGatewayRetryToken] = useState(0);
   const [showRecommend, setShowRecommend] = useState(false);
@@ -328,6 +329,7 @@ export default function App() {
       try {
         const data = await fetchStatus();
         if (cancelled) return;
+        setRuntime(data.runtime || 'openclaw');
         setPersonas(data.personas || []);
         if (data.gateway) {
           setGatewayStatus('connected');setGatewayRecoveryNote('');
@@ -1735,6 +1737,7 @@ export default function App() {
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
         gatewayRecoveryNote={gatewayRecoveryNote}
+        runtime={runtime}
         onGatewayRetry={retryGateway}
         eventNotifications={<EventNotificationCenter
           onNoticeAcknowledged={sessionId => markSessionSeenById(sessionId, sessionsRef.current)}

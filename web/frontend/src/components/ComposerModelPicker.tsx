@@ -39,7 +39,7 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
   const icon = <span className={`composer-model-health ${dotState}`} role="img" aria-label={statusTitle} title={statusTitle}><span className="composer-model-status-dot" /></span>;
   return <div className="composer-model-picker">
     <span className="composer-model-health-label">{statusTitle}</span>
-    {!models.loading && !models.options.length && onOpenModels ? <button type="button" className="easel-select composer-model-select" aria-label="模型设置" disabled={disabled} onClick={() => onOpenModels(targetRef)}>{icon}<span className="easel-select-value">选择模型</span><IconChevron size={12}/></button> : <Select aria-label="选择模型" title={effective ? `${channelName} · ${effective.model}` : '选择模型'} value={models.modelRef} placeholder={effective?.model || '选择模型'} disabled={disabled}
+    {!models.loading && !models.options.length && onOpenModels ? <button type="button" className="easel-select composer-model-select" aria-label="模型设置" disabled={disabled} onClick={() => onOpenModels(targetRef)}>{icon}<span className="easel-select-value">{models.capability?.runtime && models.capability.available ? '原生默认模型' : '选择模型'}</span><IconChevron size={12}/></button> : <Select aria-label="选择模型" title={effective ? `${channelName} · ${effective.model}` : '选择模型'} value={models.modelRef} placeholder={effective?.model || '选择模型'} disabled={disabled}
       className="composer-model-select" triggerIcon={icon}
       options={currentOptions.map(option => ({ value: !models.modelRef && option.id === effective?.id ? '' : option.id,
         label: `${option.channelName || option.provider} · ${option.model}${option.enabled === false ? ' · 已停用' : ''}`,

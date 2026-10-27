@@ -10,6 +10,7 @@ export interface Operation {
 }
 export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {
+  engine?: string;
   runtime?: {subagentsConfigured:boolean; subagentReason?:string};
   sessionId: string; turnId: string; operations: Operation[]; warnings: string[];
   total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[]; timeline?:ExecutionEntry[];

@@ -26,7 +26,7 @@ export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,f
   const progress=progressEntries(rawProgress);
   const activityLabel=typeof activity==='string'?activity.split('\n').at(-1):Array.isArray(activity)?activity.filter(item=>typeof item==='string').at(-1):'';
   const latest=progressText(rawProgress.at(-1)||activityLabel||'');
-  const label=run.execution.error?'进度更新中断':failed?'本轮失败':stopped?'本轮已停止':latest==='等待你回答'?latest:current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':latest||progress.at(-1)||goal?.title||(run.streaming?'正在执行':'本轮记录'));
+  const label=run.execution.error?'进度更新中断':failed?'本轮失败':stopped?'本轮已停止':!run.streaming&&snapshot?.engine&&snapshot.engine!=='openclaw'?'本轮记录':latest==='等待你回答'?latest:current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':latest||progress.at(-1)||goal?.title||(run.streaming?'正在执行':'本轮记录'));
   if(!plan.length&&!goal&&!run.streaming&&!progress.length&&!latest&&!failed&&!stopped&&!run.execution.error)return null;
   const elapsed=elapsedMs??(run.streaming&&startedAt!==undefined?Math.max(0,now-startedAt):undefined);
   const state=failed||run.execution.error?'error':stopped?'stopped':run.streaming?'running':plan.length&&completed===plan.length?'done':'idle';

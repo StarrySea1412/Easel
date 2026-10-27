@@ -95,10 +95,14 @@ def test_stream_history_and_recovery_without_openclaw(sandbox, monkeypatch, lega
     assert "技能库" not in requests[0]["messages"][-1]["content"]
     last = sandbox.get("/api/chat/last/same", params={"turn_id": "second"}).json()
     assert last["text"] == "测试成功" and last["clean_end"] is True
+    execution = sandbox.get('/api/chat/execution/same/second').json()
+    assert execution['engine'] == 'api' and execution['operations'] == []
+    assert sandbox.get('/api/chat/execution/another/second').status_code == 404
     replay = sandbox.get("/api/chat/jobs/second/stream").text
     assert "测试成功" in replay and "event: done" in replay
     assert sandbox.delete("/api/session/same").json()["deleted"]
-    assert not direct_api.history_path(web.SESSIONS_DIR, "same").exists()
+    assert direct_api.history_path(web.SESSIONS_DIR, "same").exists()
+    assert sandbox.post('/api/chat/stream', json={'message':'again','sessionId':'same'}).status_code == 409
 
 
 @pytest.mark.parametrize("status,events", [
@@ -137,6 +141,68 @@ def test_nonstream_and_model_save_without_openclaw(sandbox, monkeypatch):
     assert sandbox.post("/api/chat", json={"message": "hello", "sessionId": "sync"}).json()["response"] == "OK"
     assert captured[0]["model"] == "another-model"
     assert sandbox.post("/api/skill", json={"skill": "check-compliance", "input": "hi"}).status_code == 409
+
+
+def test_composer_uses_saved_api_model_and_keyless_connection(sandbox, monkeypatch):
+    web.ENV_FILE.write_text(f'EASEL_AGENT_RUNTIME=api\nEASEL_DIRECT_API_BASE_URL={BASE}\n'
+                            'EASEL_DIRECT_API_MODEL=keyless\n', encoding='utf-8')
+    capability = sandbox.get('/api/agent-office/models?modelRef=old/other').json()
+    assert capability['available'] and capability['runtime'] == 'api'
+    assert capability['currentModelRef'] == 'direct-api/keyless'
+    assert [row['id'] for row in capability['options']] == ['direct-api/keyless']
+    assert 'gateway-secret' not in json.dumps(capability)
+    rows = sandbox.get('/api/settings/models').json()['channels']['chat']['rows']
+    assert len(rows) == 1 and rows[0]['slot'] == 'direct-api'
+    assert rows[0]['result'] == '已配置' and rows[0]['model'] == 'keyless'
+    calls = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, *_): return b'{"data":[{"id":"keyless"}]}'
+    class Opener:
+        def open(self, request, **kwargs):
+            calls.append((request.full_url, request.get_header('Authorization')))
+            return Response()
+    monkeypatch.setattr(web.urllib.request, 'build_opener', lambda *_: Opener())
+    monkeypatch.setattr(web, '_ssrf_safe', lambda _: False)
+    monkeypatch.setattr(web, '_ssrf_safe_allow_local', lambda: False)
+    monkeypatch.setattr(web, '_CHANNEL_CONNECTIONS', {})
+    response = sandbox.get('/api/settings/models/connection?modelRef=direct-api/keyless')
+    assert response.status_code == 200 and response.json()['modelListed']
+    assert calls == [(BASE + '/models', None)]
+    assert not web._discover_models('http://localhost:50289/v1', '', saved_direct=True)['ok']
+    assert sandbox.get('/api/settings/models/connection?modelRef=other/keyless').status_code == 400
+    guard = web._task_service.guard_status()
+    assert not guard['ready'] and '预算保护' in guard['reason']
+
+
+@pytest.mark.parametrize('key', ['', 'gateway-secret'])
+def test_settings_discovery_uses_only_saved_direct_target_and_credentials(sandbox, monkeypatch, key):
+    web.ENV_FILE.write_text(f'EASEL_AGENT_RUNTIME=api\nEASEL_DIRECT_API_BASE_URL={BASE}\n'
+                            f'EASEL_DIRECT_API_MODEL=model\nEASEL_DIRECT_API_KEY={key}\n', encoding='utf-8')
+    monkeypatch.setattr(web, '_ssrf_safe', lambda _: False)
+    monkeypatch.setattr(web, '_ssrf_safe_allow_local', lambda: False)
+    calls = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, *_): return b'{"data":[{"id":"model"}]}'
+    class Opener:
+        def open(self, request, **kwargs):
+            calls.append((request.full_url, request.get_header('Authorization')))
+            return Response()
+    monkeypatch.setattr(web.urllib.request, 'build_opener', lambda *_: Opener())
+    response = sandbox.post('/api/models/discover', json={'slot': 'direct-api', 'baseUrl': BASE})
+    assert response.status_code == 200 and response.json()['models'] == ['model']
+    assert response.json()['keySource'] == ('saved' if key else 'none')
+    assert 'gateway-secret' not in response.text
+    assert calls == [(BASE + '/models', 'Bearer ' + key if key else None)]
+    changed = sandbox.post('/api/models/discover', json={
+        'slot': 'direct-api', 'baseUrl': 'http://localhost:50289/v1'})
+    assert changed.status_code == 400 if key else changed.json()['kind'] == 'blocked_target'
+    assert sandbox.post('/api/models/discover', json={
+        'slot': 'direct-api', 'baseUrl': BASE, 'protocol': 'anthropic'}).status_code == 400
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("legacy_transport", ["api", "http"])
@@ -201,6 +267,8 @@ def test_text_attachment_and_persona_are_inlined(sandbox, monkeypatch, tmp_path)
         bodies.append(json.loads(request.content))
         return httpx.Response(200, text=sse(chunk("OK", finish="stop"), "[DONE]"))
     upstream(monkeypatch, reply)
+    web._direct_chat_content(web.ChatRequest(message='请分析', sessionId=session, persona='demo',
+        attachments=[{'id':web._attachment_id(scope, rel), 'name':'note.txt', 'path':rel}]))
     response = sandbox.post("/api/chat", json={"message": "请分析", "sessionId": session, "persona": "demo",
         "attachments": [{"id": web._attachment_id(scope, rel), "name": "note.txt", "path": rel}]})
     assert response.status_code == 200, response.text
@@ -464,7 +532,7 @@ def test_direct_save_rejects_placeholder_and_keeps_valid_config(sandbox):
     assert web.ENV_FILE.read_text(encoding="utf-8") == before
 
 
-def test_snapshot_write_failure_still_releases_session(sandbox, monkeypatch):
+def test_snapshot_write_failure_releases_local_lock_but_keeps_durable_lease(sandbox, monkeypatch):
     original = web._save_turn
     def save(session, status, *args, **kwargs):
         if status == "done":
@@ -473,11 +541,12 @@ def test_snapshot_write_failure_still_releases_session(sandbox, monkeypatch):
     monkeypatch.setattr(web, "_save_turn", save)
     upstream(monkeypatch, lambda request: httpx.Response(
         200, text=sse(chunk("complete", finish="stop"), "[DONE]")))
-    with pytest.raises(OSError):
-        sandbox.post("/api/chat", json={"message": "test", "sessionId": "disk"})
+    assert sandbox.post("/api/chat", json={"message": "test", "sessionId": "disk"}).status_code == 502
     assert not web._RUNNING_CHAT
     assert not web._DIRECT_CHAT_TASKS
     assert not web._session_lock("disk").locked()
+    from easel.task_store import TaskStore
+    assert TaskStore(web.OUTPUTS_DIR).pending_chat('disk')
 
 
 def test_generated_stream_turn_id_matches_recovery_and_replay(sandbox, monkeypatch):

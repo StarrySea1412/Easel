@@ -23,6 +23,13 @@ async function setup(t){
   const click=async(selector)=>act(async()=>container.querySelector(selector).click());
   return {container,requests,render,respond,click};
 }
+test('finished alternate runs retain historical activity without presenting it as current execution',async t=>{
+  const v=await setup(t);await v.render('a',{activity:'正在通过 API 思考…'});
+  await v.respond(0,{...snapshot(),engine:'api',plan:[],progress:[]});
+  assert.equal(v.container.querySelector('.chat-progress-capsule').textContent,'本轮记录');
+  assert.equal(v.container.querySelector('.chat-agent-activity'),null);
+});
+
 test('capsule and inline operations share one reader; only explicit plan updates check steps',async t=>{
   const v=await setup(t);
   assert.equal(v.requests.filter(r=>String(r.url).includes('/execution/')).length,1);

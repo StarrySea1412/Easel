@@ -11,8 +11,10 @@ export function useComposerModels(sessionId: string | null, engine: 'openclaw'|'
   return engine === 'codex' ? codex : openclaw;
 }
 function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
-  const modelRef = useSyncExternalStore(subscribeComposerModel, loadComposerModel);
+  const storedModelRef = useSyncExternalStore(subscribeComposerModel, loadComposerModel);
   const [capability, setCapability] = useState<OfficeModelCapability | null>(null);
+  const alternate = Boolean(capability?.runtime && capability.runtime !== 'openclaw');
+  const modelRef = alternate ? capability?.currentModelRef || '' : storedModelRef;
   const [health, setHealth] = useState<ModelHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -32,7 +34,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
       if (controller.signal.aborted || readingCapability) return;
       readingCapability = true;
       try {
-        const value = await fetchOfficeTaskModels(sessionId, controller.signal, modelRef || undefined);
+        const value = await fetchOfficeTaskModels(sessionId, controller.signal, storedModelRef || undefined);
         if (!controller.signal.aborted) { setCapability(value); setError(''); }
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂未读取。');
@@ -53,7 +55,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
     readHealth();
     const timer = setInterval(() => { readHealth(); void readCapability(); }, 60000);
     return () => { clearInterval(timer); controller.abort(); };
-  }, [sessionId, revision, enabled, modelRef]);
+  }, [sessionId, revision, enabled, storedModelRef]);
   const options = capability?.options.filter(option => option.configured && isCompleteModelRef(option.id)) || [];
   const selected = options.find(option => option.id === modelRef && option.enabled !== false);
   const effectiveRef = selected?.id || capability?.currentModelRef || capability?.defaultModelRef || '';
@@ -68,8 +70,9 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
     return () => controller.abort();
   }, [effectiveRef, effectiveDisabled, revision, enabled]);
   const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
-  const ready = modelRef ? Boolean(selected) : !automaticDisabled;
+  const ready = !loading && !error && (alternate ? capability?.available === true : modelRef ? Boolean(selected) : !automaticDisabled);
   const choose = (value: string) => {
+    if (alternate) return;
     if (value && !options.some(option => option.id === value && option.enabled !== false)) return;
     setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
   };

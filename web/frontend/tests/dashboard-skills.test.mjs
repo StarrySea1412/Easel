@@ -122,7 +122,7 @@ async function fixture(t, initial = {}) {
     else if (path.startsWith('/api/skill/')) data = skillDetail(decodeURIComponent(path.split('/').at(-1)));
     else if (path.startsWith('/api/trends?')) data = { trends: h.trends, updated: 0 };
     else if (path === '/api/upload/limits') data = { max_mb: 50 };
-    else if (path.startsWith('/api/agent-office/models')) data = { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
+    else if (path.startsWith('/api/agent-office/models')) data = initial.runtime === 'api' ? {available:true,scope:'next_turn',runtime:'api',currentModelRef:'direct-api/local',options:[{id:'direct-api/local',provider:'direct-api',model:'local',configured:true}]} : { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
     else if (path === '/api/settings/models/health') data = { results:[], schedules:[] };
     else if (path.startsWith('/api/settings/models/connection?')) data = { modelRef:'fixture/model',state:'unverified',channelName:'测试渠道',detail:'仅模拟配置，不发起推理' };
     else if (path.startsWith('/api/analytics/') && path.endsWith('/snapshot')) data = {data:initial.snapshot || null,running:false};
@@ -205,6 +205,16 @@ async function fixture(t, initial = {}) {
     },
   };
 }
+
+test('API dashboard uses its saved model without skills or effort and clears the submitted draft', async t => {
+  const view = await fixture(t, {runtime:'api'});
+  await view.render(); await view.type('本机快捷发送检查'); await view.send();
+  assert.deepEqual(view.h.sent, [['本机快捷发送检查', [], {}]]);
+  assert.deepEqual(view.h.sentRoute, [undefined, 'direct-api/local']);
+  assert.equal(view.trigger(), null);
+  assert.equal(view.container.querySelector('.thinking-level-trigger'), null);
+  assert.equal(view.input().value, '');
+});
 
 test('Dashboard uses the actual picker, keeps existing text when choosing skills or examples, and removes picks explicitly', async t => {
   const view = await fixture(t);

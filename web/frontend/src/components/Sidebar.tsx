@@ -45,6 +45,7 @@ interface SidebarProps {
   onSessionPin: (id: string, pinned: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
+  runtime?: string;
   gatewayRecoveryNote?: string;
   onGatewayRetry?: () => void;
   runningSessions?: string[];
@@ -73,6 +74,7 @@ export default function Sidebar({
   onSessionPin,
   onNewChat,
   gatewayStatus,
+  runtime = 'openclaw',
   gatewayRecoveryNote,
   onGatewayRetry,
   runningSessions = [],
@@ -80,6 +82,9 @@ export default function Sidebar({
   taskState,
   sessionsLoading = false,
 }: SidebarProps) {
+  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）'} as Record<string,string>)[runtime] || 'OpenClaw';
+  const runtimeStatus = runtime === 'openclaw' ? (gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击重试':'网关正在连接')
+    : gatewayStatus==='connected' ? (runtime==='api'?'已配置':'CLI 已安装') : gatewayStatus==='connecting'?'正在读取':'配置未就绪';
   // 辅助对话（子会话）只在侧边面板里出现，不进主列表。
   const listedSessions = sessions.filter((s) => !s.parentSessionId);
   // 已读状态（lib/seenStatus）是外部存储：终态点“看过即清除”，变化时重算角标。
@@ -333,8 +338,8 @@ export default function Sidebar({
             {railItem('agent-office','Agent 办公室',<IconAgentOffice size={19}/>)}
           </nav>
           <div className="sidebar-toolbar-bottom">
-            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击重试':'OpenClaw 网关正在连接'} title={gatewayRecoveryNote || (gatewayStatus==='connected'?'OpenClaw 网关已连接':gatewayStatus==='disconnected'?'OpenClaw 网关离线，点击立即重试':'OpenClaw 网关正在自动启动…')} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
-              <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">OpenClaw · {gatewayStatus==='connected'?'已连接':gatewayStatus==='disconnected'?'已离线':'重连中…'}</span>
+            <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={`${runtimeLabel} ${runtimeStatus}`} title={gatewayRecoveryNote || `${runtimeLabel} · ${runtimeStatus}`} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
+              <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">{runtimeLabel} · {runtimeStatus}</span>
             </button>
             <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
             {eventNotifications}

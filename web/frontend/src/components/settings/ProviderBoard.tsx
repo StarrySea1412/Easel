@@ -39,6 +39,7 @@ const SLOT_EDIT: Record<string, { model: boolean; base: boolean }> = {
   openai: { model: true, base: true }, relay: { model: true, base: true },
   anthropic: { model: true, base: true }, siliconflow: { model: true, base: true },
   custom: { model: true, base: true },
+  'direct-api': { model: true, base: true },
 };
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
@@ -62,7 +63,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
           const discovery = ops?.discovery?.(i);
           const discovering = discovery === 'loading';
           const checking = ops?.onCheck ? ops.checkBusy?.(i) === true : discovering;
-          const needsKey = !r.keyNew?.trim() && (!r.keyMasked || r.keyMasked === '—');
+          const needsKey = r.slot !== 'direct-api' && !r.keyNew?.trim() && (!r.keyMasked || r.keyMasked === '—');
           const checkReason = ops?.onCheck ? ops.checkReason?.(i) : needsKey ? '先填写 API Key，再检测连接' : undefined;
           const subtitle = !r.slot && r.role === '免配';
           const local = r.type === 'local';
@@ -89,7 +90,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
           return (
             <article data-provider-key={rowKey(r)} className={`provider-card${isChat && r.enabled === false ? ' is-disabled' : ''}${dragging ? ' is-dragging' : ''}`}>
               <div className="provider-compact-row">
-              {ops?.onMove && <button type="button" className="provider-drag-handle" disabled={ops.saving}
+              {ops?.onMove && count > 1 && <button type="button" className="provider-drag-handle" disabled={ops.saving}
                 aria-label={`排序${title}，第${i + 1}项，共${count}项`} title="拖动排序；方向键上下移动，Home/End 移到首尾，保存后生效"
                 onPointerDown={event => { if (event.button !== 0 || event.isPrimary === false) return; event.preventDefault(); event.currentTarget.focus(); onGrab?.(event.pointerId); }}
                 onKeyDown={event => { const to = event.key === 'ArrowUp' ? i - 1 : event.key === 'ArrowDown' ? i + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null; if (to !== null) { event.preventDefault(); ops.onMove?.(i, to); } }}>
@@ -108,7 +109,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
                 {isChat && ops?.onPrimary && <button type="button" className="adv-btn provider-text-action provider-default-action" aria-label={`设${title}为默认模型`} disabled={!r.model || ops.saving || ops.primaryBusy || (ops.primarySaved?.(i) && !dirty)} title={`保存${title}当前模型并设为新对话默认`} onClick={() => ops.onPrimary?.(i)}>{ops.primarySaved?.(i) && !dirty ? '默认模型' : '设为默认'}</button>}
                 {(ops?.onCheck || ops?.onDiscover) && <button type="button" className="adv-btn provider-text-action provider-connection-action" aria-label={`检测${title}${ops.onCheck ? '模型可用性' : '连接'}`} title={checkReason || `${ops?.checkLabel?.(i) || '直接测试'}：使用内置参数，供应商可能计费`} disabled={Boolean(checkReason) || checking || ops.saving} aria-busy={checking} onClick={() => ops.onCheck ? ops.onCheck(i) : ops.onDiscover?.(i)}>{checking ? <span className="spin"/> : <IconPlay size={14}/>}<span>{checking ? '测试中' : ops?.checkLabel?.(i) || '测试'}</span></button>}
                 {ops?.onRow && <button type="button" className="adv-btn provider-icon-action" aria-label={`编辑${title}配置`} title="编辑配置" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(!expanded)}><IconEdit size={16}/></button>}
-                {ops?.onRemove && <ProviderActionsMenu title={title} disabled={ops.saving} onDelete={() => ops.onRemove?.(i)}/>}
+                {ops?.onRemove && r.deletable !== false && <ProviderActionsMenu title={title} disabled={ops.saving} onDelete={() => ops.onRemove?.(i)}/>}
               </div>}
               </div>
               {ops?.checkFeedback?.(i)}
@@ -191,7 +192,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
                     <span>{discovery.message}</span>
                     {!discovery.ok && <small>请核对地址、协议和 Key；获取失败也可手动输入模型并保存。</small>}
                     {discovery.ok && !choices.length && <small>接口没有返回模型列表，请手动填写模型后保存。</small>}
-                    {discovery.ok && <small>{hhmm(discovery.fetchedAt)} · {discovery.keySource === 'input' ? '使用刚填的 Key' : '使用已保存的 Key'} · 只读取候选列表，尚未进行模型推理</small>}
+                    {discovery.ok && <small>{hhmm(discovery.fetchedAt)} · {discovery.keySource === 'input' ? '使用刚填的 Key' : discovery.keySource === 'saved' ? '使用已保存的 Key' : '未使用 Key'} · 只读取候选列表，尚未进行模型推理</small>}
                   </>}</div>}
                   {ops?.onDiscover && needsKey && <span className="hint">先填写 API Key，或从配置导入；填写后可读取模型列表。</span>}
                 </span>
@@ -200,7 +201,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
                   <span className="hint">当前通道使用预置模型，此配置入口不支持覆盖。需要其他模型时，可切换到支持自定义模型的提供商。</span></>
               )}
               </SettingsField>
-              {ops?.channel === 'chat' && <SettingsField label="上下文窗口（Token）">
+              {ops?.channel === 'chat' && r.slot !== 'direct-api' && <SettingsField label="上下文窗口（Token）">
                 <input className="mock" type="number" aria-label="上下文窗口（Token）" min="1024" max="10000000" step="1"
                   value={r.contextWindow ?? ''} placeholder={reference ? `自动匹配；原厂参考 ${reference.label}` : '自动匹配模型目录（留空）'}
                   onChange={event => ops?.onRow?.(i, { contextWindow: event.target.value === '' ? null : Number(event.target.value) })} />

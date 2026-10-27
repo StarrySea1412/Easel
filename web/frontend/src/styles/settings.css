@@ -439,7 +439,7 @@
   .settings-page .provider-compact-row { gap: 6px; }
   .settings-page .provider-compact-row { flex-wrap:wrap; }
   .settings-page .provider-compact-row .provider-toggle { flex-basis:calc(100% - 30px); }
-  .settings-page .provider-quick-actions { margin-left:26px; flex-wrap:wrap; }
+  .settings-page .provider-quick-actions { margin-left:26px; flex:0 1 auto; max-width:calc(100% - 26px); min-width:0; flex-wrap:wrap; }
   .settings-page .provider-head { gap: 9px; }
   .settings-page .provider-heading { min-width: 0; }
   .settings-page .provider-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; }
@@ -536,5 +536,5 @@
   .settings-page .tabbar { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .settings-page .tab { padding:10px; gap:8px; font-size:12px; }
   .settings-page .tab small { font-size:10px; }
-  .settings-page summary small { flex-basis:100%; margin-left:24px; }
+  .settings-page summary small { flex:1 1 calc(100% - 24px); min-width:0; overflow-wrap:anywhere; margin-left:24px; }
 }

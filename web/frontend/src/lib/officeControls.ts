@@ -9,6 +9,7 @@ export const OFFICE_MODEL_SCOPE_LABELS: Record<OfficeModelScope, string> = {
 export type OfficeStopScope = 'agent' | 'session' | 'unavailable';
 export interface OfficeModelOption { id: string; provider: string; model: string; label: string; configured: boolean; enabled?: boolean; thinkingLevels?: string[]; channelName?: string }
 export interface OfficeModelCapability {
+  runtime?: string;
   available: boolean;
   scope: OfficeModelScope;
   currentModelRef: string | null;
@@ -55,6 +56,7 @@ export function decodeOfficeModelCapability(value: unknown): OfficeModelCapabili
   }
   const scope = modelScope(model.scope);
   return { available: model.available === true && scope !== 'unavailable', scope,
+    ...(typeof model.runtime === 'string' ? {runtime:text(model.runtime)} : {}),
     currentModelRef: typeof model.currentModelRef === 'string' ? text(model.currentModelRef) : null,
     ...(typeof model.defaultModelRef === 'string' ? {defaultModelRef:text(model.defaultModelRef)} : {}),
     options, reason: text(model.reason, '当前暂不支持指定模型。'),
