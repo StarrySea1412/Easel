@@ -119,9 +119,16 @@ async function fixture(t, initial, realSidebar = false) {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) return;
+    disposed = true;
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  t.after(dispose);
   await act(async () => root.render(createElement(StrictMode, null, createElement(App))));
-  return { harness, storage, values, container, persistence: await import(persistence),
+  return { harness, storage, values, container, dispose, persistence: await import(persistence),
     queue: await import(queue), settings: async () => { await act(async () => harness.sidebar.onPageChange('settings')); return harness.pages['设置'].conversationBackup; },
   };
 }
@@ -515,7 +522,7 @@ test('dashboard transfers selected skills and creation requirements before sendi
 
 for (const previousType of [undefined, 'content-generation', 'account-analysis']) test(`topic creation persists its purpose while retaining analysis identity (${previousType || 'ordinary'})`, async t => {
   const source = { ...sourceSession, conversationType: previousType };
-  const { harness, values } = await fixture(t, { easel_sessions: JSON.stringify([source]), easel_active_session: source.id });
+  const { harness, values, dispose } = await fixture(t, { easel_sessions: JSON.stringify([source]), easel_active_session: source.id });
   await act(async () => harness.pages['工作台'].onUseTopic('隔离创作选题'));
   assert.equal(harness.streams.length, 1);
   assert.equal(harness.streams[0].args[2], source.id, 'topic merges into the selected session');
@@ -524,6 +531,7 @@ for (const previousType of [undefined, 'content-generation', 'account-analysis']
   await act(async () => { harness.streams[0].args[20]('隔离测试已完成'); harness.streams[0].args[4](); });
   const persisted = JSON.parse(values.get('easel_sessions'));
   assert.equal(persisted.find(item => item.id === source.id).conversationType, expected);
+  await dispose();
   const reopened = await fixture(t, { easel_sessions: JSON.stringify(persisted), easel_active_session: source.id });
   assert.equal(reopened.harness.sidebar.sessions.find(item => item.id === source.id).conversationType, expected, 'local decoder retains purpose after reopening');
   assert.equal(reopened.harness.streams.length, 0, 'reopening never sends a request');
@@ -735,6 +743,7 @@ test('natural completion wins a stop race and prevents a delayed stop response f
 });
 
 test('office navigation opens the selected session and its activity without cancelling an ongoing chat', async t => {
+  const network = sessionLifecycleNetwork(t);
   const view = await fixture(t, { easel_sessions: JSON.stringify([sourceSession]), easel_active_session: 'original' });
   const { harness } = view;
   await act(async () => harness.sidebar.onSessionSelect('original'));
@@ -754,6 +763,7 @@ test('office navigation opens the selected session and its activity without canc
   assert.equal(run.controller.signal.aborted, false);
   assert.equal(harness.streams.length, 1);
   assert.deepEqual(harness.calls, []);
+  assert.ok(network.calls.some(path => path.endsWith('/api/tasks/sessions')));
 });
 
 test('import uses latest queued state, preserves live controllers and exports all received tokens despite quota failure', async t => {
@@ -931,6 +941,7 @@ for (const messages of [[], sourceSession.messages]) test(`archiving the final $
   assert.equal(JSON.parse(view.values.get('easel_sessions')).length, 1);
   assert.deepEqual(view.harness.calls, []);
 
+  await view.dispose();
   const reloaded = await fixture(t, Object.fromEntries(view.values), true);
   await act(async () => reloaded.harness.sidebar.onPageChange('chat'));
   await act(async () => reloaded.container.querySelector('[aria-label="展开对话列表"]').click());
@@ -966,7 +977,7 @@ test('archiving the active conversation switches only to an existing unarchived 
 
 for (const messages of [[], sourceSession.messages]) test(`an explicit new-chat action preserves archived ${messages.length ? 'populated' : 'empty'} history across reload`, async t => {
   const original = { ...sourceSession, messages };
-  const { harness, container, values } = await fixture(t, {
+  const { harness, container, values, dispose } = await fixture(t, {
     easel_sessions: JSON.stringify([original]), easel_active_session: original.id,
   });
   await act(async () => harness.sidebar.onSessionArchive(sourceSession.id, true));
@@ -977,6 +988,7 @@ for (const messages of [[], sourceSession.messages]) test(`an explicit new-chat 
   assert.equal(archived.archived, true);
   assert.deepEqual(archived.messages, messages);
   assert.equal(harness.streams.length, 0);
+  await dispose();
   const reopened = await fixture(t, Object.fromEntries(values));
   assert.equal(reopened.harness.sidebar.sessions.length, 2);
   assert.equal(reopened.harness.sidebar.sessions.find(item => item.id === original.id).archived, true);
@@ -997,6 +1009,7 @@ test('actual App pins through the Sidebar, persists across reload and preserves 
   const pinnedAt = JSON.parse(view.values.get('easel_sessions')).find(item => item.id === second.id).pinnedAt;
   assert.ok(pinnedAt > 0);
   assert.equal(view.container.querySelector('.sidebar-pinned .session-select').textContent, '待置顶会话');
+  await view.dispose();
   const reloaded = await fixture(t, Object.fromEntries(view.values), true);
   assert.equal(reloaded.harness.sidebar.sessions.find(item => item.id === second.id).pinnedAt, pinnedAt);
   await act(async () => reloaded.harness.sidebar.onSessionArchive(second.id, true));

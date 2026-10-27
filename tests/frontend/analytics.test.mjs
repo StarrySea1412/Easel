@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
+import { browserModules } from './browser-module.mjs';
 
 const require = createRequire(new URL('../../web/frontend/package.json', import.meta.url));
 const ts = require('typescript');
@@ -21,17 +22,26 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function setup() {
   let data = {}, errors = {};
-  const pending = [], storage = new Map(), exports = {};
+  const pending = [], exports = {};
+  const context = browserModules();
+  const cache = context.load(new URL('../../web/frontend/src/lib/analyticsCache.ts', import.meta.url));
+  context.globals.localStorage.setItem('easel_whoami', JSON.stringify(Object.fromEntries(
+    ['xiaohongshu', 'zhihu'].map(platform => [platform, { identityKey: platform + '-identity', accountId: 'isolated-owner' }]))));
   runInNewContext(outputText, {
     exports, Error,
+    selectAnalyticsPlatform: cache.selectAnalyticsPlatform,
+    readAnalyticsCache: cache.readAnalyticsCache, analyticsScope: cache.analyticsScope,
+    accounts: [], whoamiMap: {}, accountConnection: () => 'online', accountChecks: new Set(),
+    mounted: {current: true}, dataVersion: {current: 1}, setAnaBusy() {}, showToast() {},
     anaPending: { current: new Set() },
     setAnaSel: () => {},
     setAnaErrors: update => { errors = update(errors); },
     setAnaData: update => { data = update(data); },
-    fetchAccountAnalytics: platform => new Promise((resolve, reject) => pending.push({ platform, resolve, reject })),
-    localStorage: { setItem: (key, value) => storage.set(key, value) },
+    fetchAccountAnalytics: (platform, force) => cache.collectAnalytics(platform,
+      () => new Promise((resolve, reject) => pending.push({ platform, resolve, reject })), force),
   });
-  return { exports, pending, storage, get data() { return data; }, get errors() { return errors; } };
+  return { exports, pending, cache, storage: context.globals.sessionStorage,
+    get data() { return data; }, get errors() { return errors; } };
 }
 
 test('repeated clicks share one fetch and refresh is possible afterwards', async () => {
@@ -41,8 +51,8 @@ test('repeated clicks share one fetch and refresh is possible afterwards', async
   assert.equal(view.pending.length, 1);
   view.pending[0].resolve({ platform: 'xiaohongshu', loggedIn: true, followers: 0 });
   await settle();
-  assert.equal(view.data.xiaohongshu.followers, 0);
-  view.exports.runAna('xiaohongshu');
+  assert.equal(view.data.xiaohongshu.loggedIn, true);
+  view.exports.runAna('xiaohongshu', true);
   assert.equal(view.pending.length, 2);
 });
 
@@ -52,9 +62,10 @@ test('a completed request does not persist another platforms loading state', asy
   view.exports.runAna('zhihu');
   view.pending[0].resolve({ platform: 'xiaohongshu', loggedIn: true });
   await settle();
-  const cache = JSON.parse(view.storage.get('easel_analytics'));
-  assert.equal(cache.xiaohongshu.loggedIn, true);
+  const cache = JSON.parse(view.storage.getItem('easel:analytics-cache:v1'));
+  assert.equal(cache.xiaohongshu.data.loggedIn, true);
   assert.equal(cache.zhihu, undefined);
+  assert.equal(view.cache.analyticsPending('zhihu'), true);
 });
 
 test('failed fetch displays the server reason and can retry', async () => {
@@ -66,7 +77,7 @@ test('failed fetch displays the server reason and can retry', async () => {
   assert.equal(view.errors.xiaohongshu, '登录目录正被占用');
   view.exports.runAna('xiaohongshu');
   assert.equal(view.pending.length, 2);
-  assert.equal(view.errors.xiaohongshu, '');
+  assert.equal(view.cache.analyticsError('xiaohongshu'), '');
 });
 
 test('analytics requests have platform-specific bounded deadlines', async () => {
@@ -80,11 +91,12 @@ test('analytics requests have platform-specific bounded deadlines', async () => 
   const exports = {}, calls = [];
   runInNewContext(compiled, {
     exports, encodeURIComponent,
+    collectAnalytics: (_platform, capture) => capture(),
     AbortSignal: { timeout: duration => ({ duration }) },
     request: async (path, options) => { calls.push({ path, options }); return {}; },
   });
   await exports.fetchAccountAnalytics('xiaohongshu');
   await exports.fetchAccountAnalytics('wechat-oa');
-  assert.equal(calls[0].options.signal.duration, 105000);
+  assert.equal(calls[0].options.signal.duration, 195000);
   assert.equal(calls[1].options.signal.duration, 195000);
 });

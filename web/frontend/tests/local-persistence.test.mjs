@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tsModuleUrl } from './load-ts.mjs';
+import { Window } from 'happy-dom';
+
+globalThis.window = new Window({ url: 'https://easel.test/' });
 
 const prefix = 'data:text/javascript;base64,';
 const storeUrl = await tsModuleUrl(new URL('../src/lib/store.ts', import.meta.url));

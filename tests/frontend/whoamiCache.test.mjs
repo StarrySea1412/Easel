@@ -1,31 +1,20 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
-
-const require = createRequire(new URL('../../web/frontend/package.json', import.meta.url));
-const ts = require('typescript');
-const source = readFileSync(new URL('../../web/frontend/src/lib/whoami.ts', import.meta.url), 'utf8');
-const { outputText } = ts.transpileModule(source, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-});
+import { browserModules } from './browser-module.mjs';
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function setup() {
   const entries = new Map();
   const pending = [];
-  const exports = {};
-  runInNewContext(outputText, {
-    exports, Date,
-    require: () => ({
-      accountWhoami: platform => new Promise(resolve => pending.push({ platform, resolve })),
-    }),
+  const context = browserModules({
     localStorage: {
       getItem: key => entries.get(key) ?? null,
       setItem: (key, value) => entries.set(key, String(value)),
     },
   });
+  const api = context.load(new URL('../../web/frontend/src/lib/api.ts', import.meta.url));
+  api.accountWhoami = platform => new Promise(resolve => pending.push({ platform, resolve }));
+  const exports = context.load(new URL('../../web/frontend/src/lib/whoami.ts', import.meta.url));
   return { exports, pending, entries };
 }
 
@@ -38,7 +27,7 @@ test('legacy and previously incorrect account identity caches are ignored', () =
   view.entries.set('easel_whoami_v3', view.entries.get('easel_whoami'));
   assert.equal(view.exports.getWhoamiCache().xiaohongshu, undefined);
   view.exports.setWhoamiCache('xiaohongshu', { loggedIn: true, name: 'Me', avatar: '' });
-  assert.equal(JSON.parse(view.entries.get('easel_whoami_v4')).xiaohongshu.name, 'Me');
+  assert.equal(JSON.parse(view.entries.get('easel_whoami')).xiaohongshu.name, 'Me');
 });
 test('a verification started before login cannot overwrite the new login cache', async () => {
   const view = setup();
@@ -74,7 +63,7 @@ test('fresh verification still updates and caches the actual account result', as
 
 test('incomplete account identity is refreshed after one minute instead of ten', () => {
   const view = setup();
-  view.entries.set('easel_whoami_v4', JSON.stringify({
+  view.entries.set('easel_whoami', JSON.stringify({
     xiaohongshu: { loggedIn: true, name: '', avatar: '', ts: Date.now() - 61_000 },
     zhihu: { loggedIn: true, name: 'Me', avatar: 'https://self.test/avatar', ts: Date.now() - 61_000 },
   }));

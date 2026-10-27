@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
-const { setSessionPinned } = await loadTsModule('../src/lib/store.ts', import.meta.url);
 
 // Real Sidebar with simulated DOM and controlled account snapshots. These checks
 // exercise both columns and navigation, not real viewport pixels or live sessions.
@@ -12,6 +11,7 @@ globalThis.document = window.document;
 globalThis.sessionStorage = window.sessionStorage;
 globalThis.localStorage = window.localStorage;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { setSessionPinned } = await loadTsModule('../src/lib/store.ts', import.meta.url);
 const { createRoot } = await import('react-dom/client');
 const { default: Sidebar } = await loadTsModule('../src/components/Sidebar.tsx', import.meta.url);
 const CONVERSATIONS = 'easel:sidebar-conversations-open-v2';

@@ -41,10 +41,11 @@ test('changing persona on a populated conversation preserves its identity and hi
   const original = { id: 'original', persona: '旧画像', messages: [{ role: 'user', content: '历史' }] };
   const { state, changePersona } = setup([original], original.id);
   changePersona('新画像');
-  assert.equal(state.sessions.length, 2);
-  assert.equal(state.activeSessionId, 'new-session');
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.activeSessionId, original.id);
   assert.equal(state.sessions[0].persona, '新画像');
-  assert.equal(state.sessions[1], original);
+  assert.notEqual(state.sessions[0], original);
+  assert.equal(state.sessions[0].messages, original.messages);
   assert.equal(original.persona, '旧画像');
   assert.equal(original.messages[0].content, '历史');
   assert.equal(state.selectedPersona, '新画像');
@@ -62,12 +63,15 @@ test('an empty conversation adopts its persona without creating another conversa
   assert.equal(state.saved, state.sessions);
 });
 
-test('switching to general mode creates an unbound conversation and keeps the old one', () => {
+test('switching to general mode keeps the current conversation and history', () => {
   const original = { id: 'original', persona: '旧画像', messages: [{ role: 'user', content: '历史' }] };
   const { state, changePersona } = setup([original], original.id);
   changePersona('');
   assert.equal(state.sessions[0].persona, undefined);
-  assert.equal(state.sessions[1], original);
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.activeSessionId, original.id);
+  assert.equal(state.sessions[0].messages, original.messages);
+  assert.equal(original.persona, '旧画像');
   assert.equal(state.selectedPersona, '');
 });
 

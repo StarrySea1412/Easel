@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadTsModule } from './load-ts.mjs';
+import { Window } from 'happy-dom';
+
+// The real store imports cross-page event subscriptions. Supply the browser
+// surface even though these tests only exercise serialized backup data.
+globalThis.window = new Window({ url: 'https://easel.test/' });
 
 const {
   createConversationBackup, parseConversationBackup, createImportedSessions,

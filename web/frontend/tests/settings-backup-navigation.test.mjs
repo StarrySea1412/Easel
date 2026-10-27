@@ -11,6 +11,7 @@ import { selectOption, optionValues } from './select-helpers.mjs';
 // cards and APIs are stubs. This verifies React behavior, not browser/backend.
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.Event = window.Event;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const moduleUrl = code => `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
@@ -72,6 +73,7 @@ async function fixture(t, responseOverrides = {}) {
   const harness = {
     calls: [], backupProps: null, employeeProps: null, officeOpens: 0,
     responses: {
+      fetchHarnessSettings: { runtime: 'openclaw' },
       fetchEnvTools: { tools: [], python: 'simulated-python' },
       fetchModelPresets: { presets: {} },
       fetchModelChannels: { channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: [] }])) },

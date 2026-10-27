@@ -59,7 +59,7 @@ function setup(responses = [automaticPolicy]) {
     render() {
       cursor = 0;
       pending = [];
-      const tree = exports.default({ persona: 'travel-brand' });
+      const tree = exports.default({ persona: 'travel-brand', publishReceipts: {} });
       pending.forEach(callback => callback());
       return tree;
     },

@@ -31,6 +31,8 @@ jobs:
         run: npm ci
       - name: Run frontend regression tests
         run: npm test
+      - name: Run shared frontend contracts
+        run: node --test ../../tests/frontend/*.test.mjs
       - name: Lint frontend
         run: npm run lint
       - name: Build production frontend
@@ -169,27 +171,6 @@ jobs:
         if: matrix.shell == 'pwsh'
         shell: pwsh
         run: ./tests/ps_tolerance_probe.ps1
-
-  # 现有 test job 从不构建前端，而 doctor.py 把 web/frontend/dist/index.html 当作安装成功的
-  # 判据之一 —— TypeScript 一旦编译不过，CI 全绿而用户装完打开是空白页。
-  frontend:
-    name: Frontend build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - name: Frontend regression tests
-        run: node --test ../../tests/frontend/*.test.mjs
-      - run: npm run build
 
   # 真·跑一遍安装。只在 nightly / 手动触发 / 打了 ci:full-install 标签的 PR 上跑：
   # 一次完整安装要下 ~1GB（pip 的 opencv/faster-whisper/rembg + npm + Chromium），

@@ -32,7 +32,7 @@ function compile(expression) {
 function serialize(rows) {
   const code = compile(`${payload.initializer.getText(parsed)};`);
   return JSON.parse(JSON.stringify(runInNewContext(code, {
-    rows, PLACEHOLDERS: new Set(['—', '官方', '（未配置）', '本机', '内建默认']),
+    rows, channel: 'chat', PLACEHOLDERS: new Set(['—', '官方', '（未配置）', '本机', '内建默认']),
   })));
 }
 
@@ -65,12 +65,14 @@ test('existing undeclared models and direct API rows omit the reasoning declarat
   assert.equal(Object.hasOwn(direct, 'thinkingFormat'), false);
 });
 
-test('new custom rows default to reasoning disabled and the OpenAI dialect', () => {
+test('new custom rows keep reasoning undeclared until the user chooses a capability', () => {
   let added;
   const callback = runInNewContext(compile(`(${addProvider.initializer.getText(parsed)});`), {
+    setProviderDetailsOpen() {}, setSavedNote() {}, crypto,
     setChatRows: update => { added = JSON.parse(JSON.stringify(update([]))); },
   });
   callback();
-  assert.equal(added[0].thinking, false);
-  assert.equal(added[0].thinkingFormat, 'openai');
+  assert.equal(added[0].type, 'openai');
+  assert.equal(Object.hasOwn(serialize(added)[0], 'thinking'), false);
+  assert.equal(Object.hasOwn(serialize(added)[0], 'thinkingFormat'), false);
 });

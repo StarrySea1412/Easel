@@ -1,18 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
-
-const require = createRequire(new URL('../../web/frontend/package.json', import.meta.url));
-const ts = require('typescript');
-const source = readFileSync(new URL('../../web/frontend/src/lib/api.ts', import.meta.url), 'utf8');
-const { outputText } = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-  },
-});
+import { browserModules } from './browser-module.mjs';
 
 /**
  * streamChat 回归：首发 POST 5xx → jobs 流 404 必须**终结**并触发 onError。
@@ -22,23 +10,15 @@ const { outputText } = ts.transpileModule(source, {
  */
 function loadApi(fetchImpl) {
   const calls = { fetch: 0, post: 0, jobs: 0, onError: [], onDone: 0, onRecovery: 0, onInterrupted: 0 };
-  const module = { exports: {} };
-  const sandbox = {
-    exports: module.exports,
-    require: (name) => require(name),
-    console,
-    window: { location: { pathname: '/' } },
-    AbortController,
-    TextDecoder,
+  const context = browserModules({
     setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms ?? 0, 2)),
     clearTimeout,
     fetch: (...args) => {
       calls.fetch += 1;
       return fetchImpl(...args);
     },
-  };
-  runInNewContext(outputText, sandbox);
-  return { api: module.exports, calls };
+  });
+  return { api: context.load(new URL('../../web/frontend/src/lib/api.ts', import.meta.url)), calls };
 }
 
 function jsonResponse(status, detail) {

@@ -19,11 +19,14 @@ for (const platform of ['zhihu', 'xiaohongshu', 'weixin-channels']) {
     const calls = [];
     const exports = {};
     runInNewContext(outputText, {
-      exports, encodeURIComponent,
+      exports, encodeURIComponent, URLSearchParams,
+      accountBrowserRequest: run => run(),
       request: async (path, options) => { calls.push({ path, options }); return { state: 'starting' }; },
     });
-    assert.equal((await exports.startLogin(platform)).state, 'starting');
+    assert.equal((await exports.startLogin(platform, false, { restart: true })).state, 'starting');
     assert.equal(calls[0].path, `/api/login/${platform}?restart=true`);
     assert.equal(calls[0].options.method, 'POST');
+    await exports.startLogin(platform);
+    assert.equal(calls[1].path, `/api/login/${platform}`, 'opening an existing login does not restart it implicitly');
   });
 }

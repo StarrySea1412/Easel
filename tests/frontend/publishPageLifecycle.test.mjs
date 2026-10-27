@@ -18,7 +18,7 @@ function isAliveAssignment(node, value) {
   return ts.isExpressionStatement(node)
     && ts.isBinaryExpression(node.expression)
     && node.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken
-    && node.expression.left.getText(parsed) === 'aliveRef.current'
+    && node.expression.left.getText(parsed) === 'mounted.current'
     && node.expression.right.kind === (value ? ts.SyntaxKind.TrueKeyword : ts.SyntaxKind.FalseKeyword);
 }
 
@@ -71,14 +71,12 @@ test('PublishPage only marks itself dead from the unmount cleanup', () => {
     'mount body must not immediately mark PublishPage dead');
 
   const cleanup = statements.find(statement => ts.isReturnStatement(statement));
-  assert.equal(cleanup?.expression?.getText(parsed), 'cleanupPublishActivity',
-    'lifecycle effect must return the unmount cleanup callback');
-
-  const cleanupStatements = findCallbackStatements('cleanupPublishActivity');
+  const cleanupStatements = statementsOfArrowBody(cleanup?.expression);
+  assert.ok(cleanupStatements.length, 'lifecycle effect must return its unmount cleanup');
   assert.ok(cleanupStatements.some(statement => isAliveAssignment(statement, false)),
     'unmount cleanup must mark PublishPage dead');
   assert.ok(cleanupStatements.some(statement => statement.getText(parsed).includes('adaptCtl.current?.abort()')),
     'unmount cleanup must abort the active adaptation stream');
-  assert.ok(cleanupStatements.some(statement => statement.getText(parsed).includes('pollTimers.current.clear()')),
-    'unmount cleanup must clear publish status polling timers');
+  for (const timer of ['toastTimer', 'copyTimer']) assert.ok(cleanupStatements.some(statement => statement.getText(parsed).includes(`clearTimeout(${timer}.current)`)),
+    'unmount cleanup must clear its page timers; publishing receipt polling belongs to the shared service');
 });

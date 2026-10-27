@@ -3,6 +3,11 @@ from pathlib import Path
 
 import pytest
 
+# Claim the repository's package before importlib collection reaches skill
+# suites that also have a top-level tests/__init__.py. Cross-suite fixtures must
+# resolve here regardless of collection order; the skill tests still collect.
+import tests  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def isolate_web_outputs(request, tmp_path_factory, monkeypatch):
