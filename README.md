@@ -1,4 +1,4 @@
-**正在迭代：0.39.0 候选。** Agent可对本轮已读取的经验提出语义合并或冲突修订，用户展开新旧对照、明确确认后，才原子替代所选旧版本。画像、账号和适用条件隔离；任一来源变化或删除时暂停相关召回。复用原轮次，不额外请求模型；语义建议仍需人工复核。紧凑定时页与独立执行服务保留。完整大版本、全部引擎恢复与真实质量成本仍未完成，138和安装器未更新。参见[实现、验证与升级限制](https://github.com/StarrySea1412/Easel/blob/codex/experience-consolidation-0.39.0/docs/experience-consolidation-0.39.0.md)。
+**完整迭代进行中 · 产品0.39.0候选。** 已有来源绑定的经验归并、紧凑定时页和独立执行服务；语义建议仍须人工确认。本轮修复全量测试收集冲突、重复CI配置及浏览器测试夹具，产品版本不变。全量回归仍有未通过项，全部引擎恢复、真实质量成本与业务验收尚未完成；138和安装器未更新。参见[当前回归核查与发布门槛](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/regression-audit-2026-10-27.md)和[经验归并实现与升级限制](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/experience-consolidation-0.39.0.md)。
 
 > **138已更新 · 0.14.2（2026-10-22）**：DeepSeek用量图标已按实际模型显示；顶部创作导航自动换行，修复横向滚动条和菜单截断。已完成隔离与正式登录、资源/运行SHA、真实HTTP附件下载及正式浏览器桌面/窄屏验收。运行提交`15c763550657`，保留模型、认证、对话和作品。GPT/Gemini全自动仍暂缓，安装器未发布。[完整部署回执](https://github.com/StarrySea1412/Easel/blob/codex/deploy-138-0.14.0/docs/release-138-0.14.2-2026-10-22.md)。
 
