@@ -49,12 +49,14 @@ def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monke
     class CrossLock:
         def __init__(self, key):
             self.cancel_event = None
+            self.acquired = False
 
         def acquire(self, timeout):
+            self.acquired = True
             return True
 
         def release(self):
-            return None
+            self.acquired = False
 
     class Process:
         def __init__(self, *args, **kwargs):
@@ -75,10 +77,10 @@ def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monke
     monkeypatch.setattr(web, 'OUTPUTS_DIR', outputs)
     monkeypatch.setattr(web, 'OPENCLAW_SESSIONS_DIR', transcripts)
     monkeypatch.setattr(web, '_resolve_transport', lambda key: 'cli')
-    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_chat_message', lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
-    monkeypatch.setattr(web, '_save_turn', lambda *args: None)
+    monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     monkeypatch.setattr(web, '_job_event_file', lambda value: tmp_path / 'events' / (value + '.jsonl'))
     monkeypatch.setattr(web, '_CrossProcLock', CrossLock)
     monkeypatch.setattr(web, 'openclaw_base_cmd', lambda: ['fake-openclaw'])

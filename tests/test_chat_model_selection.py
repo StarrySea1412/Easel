@@ -83,7 +83,7 @@ def sandbox(tmp_path, monkeypatch):
     provider_locks = {}
     fixture.provider_locks = provider_locks
     monkeypatch.setattr(web, '_provider_lock', lambda key: provider_locks.setdefault(key, asyncio.Lock()))
-    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_chat_message', lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
     monkeypatch.setattr(web, '_resolve_transport', lambda key: fixture.transport)

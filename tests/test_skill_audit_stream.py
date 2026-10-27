@@ -4,6 +4,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,11 @@ import skill_audit
 @pytest.mark.parametrize('failure', ['begin', 'finish', 'transport'])
 def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, monkeypatch, failure):
     saved, calls, cross_locks = [], [], []
+    save_turn = web._save_turn
+
+    def record_turn(*args, **kwargs):
+        saved.append(args)
+        return save_turn(*args, **kwargs)
 
     class CrossLock:
         def __init__(self, key):
@@ -58,12 +64,14 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
     monkeypatch.setattr(skill_audit, 'begin', begin)
     monkeypatch.setattr(skill_audit, 'finish', finish)
     monkeypatch.setattr(web, '_resolve_transport', transport)
-    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_chat_message', lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
-    monkeypatch.setattr(web, '_save_turn', lambda *args: saved.append(args))
+    monkeypatch.setattr(web, '_save_turn', record_turn)
+    monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     monkeypatch.setattr(web, '_job_event_file', lambda turn: tmp_path / 'events' / (turn + '.jsonl'))
     monkeypatch.setattr(web, '_CrossProcLock', CrossLock)
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, 'openclaw_base_cmd', lambda: ['fake-openclaw'])
     monkeypatch.setattr(web, '_proxy_env', lambda: {})
     monkeypatch.setattr(web, 'question_bridge_supported', None)
@@ -92,9 +100,9 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
         # Let the supervisor completion callback retrieve unexpected exceptions.
         await asyncio.sleep(0)
         assert not lock.locked()
-        assert len(cross_locks) == 1
-        assert not cross_locks[0].acquired
-        assert cross_locks[0].releases == 1
+        assert len(cross_locks) == 2
+        assert all(not item.acquired for item in cross_locks)
+        assert [item.releases for item in cross_locks] == [1, 1]
         assert 'audit-stream' not in web._RUNNING_CHAT
         assert not web._BG_TASKS
         done = [event for event in events if event['event'] == 'done']

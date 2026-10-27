@@ -5,6 +5,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 import urllib.error
 
@@ -171,6 +172,7 @@ def test_sync_auth_failure_passes_credentials_and_returns_only_safe_classified_m
             'gateway agent requires credentials before opening a websocket; pair this device; --token synthetic-sync-secret')
     monkeypatch.setattr(web, 'gateway_credentials', lambda: GatewayCredentials('token', token='synthetic-sync-secret'))
     monkeypatch.setattr(web, '_CrossProcLock', Lock)
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
     monkeypatch.setattr(web, '_openclaw_session_id', lambda key: 'synthetic-session-id')
     monkeypatch.setattr(web, 'openclaw_base_cmd', lambda: ['fake-cli'])
@@ -200,7 +202,7 @@ def test_cli_auth_error_is_structured_retained_and_not_rendered_as_model_output(
     monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'absent-raw.jsonl')
     monkeypatch.setattr(web, '_CrossProcLock', Lock)
-    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_chat_message', lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
     monkeypatch.setattr(web, '_resolve_transport', lambda key: 'cli')
@@ -228,17 +230,18 @@ def test_cli_auth_error_is_structured_retained_and_not_rendered_as_model_output(
 @pytest.fixture
 def stream_sandbox(tmp_path, monkeypatch):
     class Lock:
-        def __init__(self, key): pass
-        def acquire(self, timeout): return True
-        def release(self): pass
+        def __init__(self, key): self.acquired = False
+        def acquire(self, timeout): self.acquired = True; return True
+        def release(self): self.acquired = False
     monkeypatch.setattr(web, 'gateway_credentials', lambda: GatewayCredentials('token', token='synthetic-http-token'))
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
     monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'absent-raw.jsonl')
     monkeypatch.setattr(web, '_CrossProcLock', Lock)
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, '_session_lock', lambda key: asyncio.Lock())
-    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_chat_message', lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
     monkeypatch.setattr(web, '_resolve_transport', lambda key: 'http')
@@ -253,6 +256,7 @@ def stream_sandbox(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('case,code', [
     ('401', 'gateway_auth_rejected'),
+    ('403', 'gateway_auth_rejected'),
     ('503', 'gateway_request_failed'),
     ('sse-error-object', 'gateway_auth_rejected'),
     ('sse-error-string', 'gateway_auth_rejected'),
@@ -297,7 +301,12 @@ def test_http_failures_preserve_text_order_and_recovery_error(stream_sandbox, mo
         errors = [json.loads(e['data']) for e in events if e['event'] == 'error']
         saved = await web.api_chat_last('http-test', 'http-turn')
         replay = web._read_job_events('http-turn')
-        assert saved['status'] == 'done' and events[-1]['event'] == replay[-1]['event'] == 'done'
+        settled = case in ('401', '403', 'complete', 'length', 'max_tokens')
+        terminal_event = 'done' if settled else 'recovery_required'
+        assert saved['status'] == 'done' and events[-1]['event'] == replay[-1]['event'] == terminal_event
+        record = web.run_ledger.read(web._run_ledger_root(), 'http-turn')
+        assert record['resourceSettled'] is settled
+        assert record['resourceFacts']['provider'] is settled
         if case in ('length', 'max_tokens'):
             assert saved['text'].startswith('已收到的回答') and '被截断' in saved['text']
             assert saved['stop_reason'] == case
@@ -314,11 +323,16 @@ def test_http_failures_preserve_text_order_and_recovery_error(stream_sandbox, mo
             assert [e['data'] for e in replay if e['event'] == 'error'] == errors
             if case == 'partial-eof':
                 kinds = [e['event'] for e in events]
-                assert kinds.index('token') < kinds.index('error') < kinds.index('done')
+                assert kinds.index('token') < kinds.index('error') < kinds.index('recovery_required')
         else:
             assert not errors and saved['error'] is None
             assert ([row['code'] for row in web._chat_failure_events().recent()] == ['model_output_limit'] if case in ('length', 'max_tokens') else web._chat_failure_events().recent() == [])
         assert 'synthetic-http-token' not in json.dumps(events) + json.dumps(saved) + json.dumps(replay)
+        # A settled rejection is still a failed turn, never permission to reuse its ID.
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as duplicate:
+            await web.api_chat_stream(web.ChatRequest(message='retry', sessionId='http-test', turnId='http-turn'))
+        assert duplicate.value.status_code == 409
     asyncio.run(exercise())
 
 
@@ -373,6 +387,8 @@ def test_client_disconnect_keeps_http_failure_recoverable(stream_sandbox, monkey
         assert failure['id'] == saved['error']['failureEventId']
         assert not saved['clean_end'] and not saved['text']
         replay = web._read_job_events('disconnect-turn')
-        assert replay[-1]['event'] == 'done'
+        assert replay[-1]['event'] == 'recovery_required'
+        record = web.run_ledger.read(web._run_ledger_root(), 'disconnect-turn')
+        assert record['resourceSettled'] is False
         assert [e['data'] for e in replay if e['event'] == 'error'] == [saved['error']]
     asyncio.run(exercise())

@@ -131,7 +131,7 @@ def test_web_intake_read_and_prompt_preserve_user_request(tmp_path, monkeypatch)
         context = first.json()
         assert client.get('/read/' + context['sessionId']).json() == context
         assert client.post('/intake/' + binding['id'], json={'sourceSessionId': 'analysis-chat'}).json() == context
-    monkeypatch.setattr(web, '_chat_memory_context', lambda req, writing=None: None)
+    monkeypatch.setattr(web, '_chat_memory_context', lambda req, writing=None, **kwargs: None)
     monkeypatch.setattr(web, '_chat_agent_runtime', lambda req: {})
     monkeypatch.setattr(web, '_chat_role_contract', lambda req: '')
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})

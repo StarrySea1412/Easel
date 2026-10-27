@@ -38,7 +38,7 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_BG_TASKS", set())
     monkeypatch.setattr(web, "_direct_api_enabled", lambda: False)
     monkeypatch.setattr(web, "_chat_backend", lambda session_id: "openclaw")
-    monkeypatch.setattr(web, "_chat_message", lambda req: req.message)
+    monkeypatch.setattr(web, "_chat_message", lambda req, *, suffix='': req.message + suffix)
     monkeypatch.setattr(web, "_heal_openclaw_session", lambda sk: None)
     monkeypatch.setattr(web, "openclaw_base_cmd", lambda: ["unused-openclaw"])
     monkeypatch.setattr(web, "THINKING_LEVEL", 'off')

@@ -5878,6 +5878,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             "POST", chat_completions_url(),
                             json=body, headers=headers) as resp:
                         if resp.status_code != 200:
+                            # Authentication rejection proves the provider never admitted this turn.
+                            if resp.status_code in (401, 403):
+                                run_info['http_rejected'] = True
                             raw = (await resp.aread())[:200].decode("utf-8", "replace")
                             _emit('error', gateway_error(raw, status=resp.status_code, fallback='gateway_request_failed'))
                             return
@@ -6674,7 +6677,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             from chat_recovery import settle_resources
             resources_settled = False
             try:
-                provider_settled = proc is None or (bool(run_info.get('http_done')) if is_http else proc.poll() is not None)
+                provider_settled = proc is None or (
+                    bool(run_info.get('http_done') or run_info.get('http_rejected')) if is_http
+                    else proc.poll() is not None)
                 facts = (await asyncio.to_thread(settle_resources, sys.modules[__name__], sk,
                     provider_settled=provider_settled)) if xlock.acquired else {'provider': provider_settled, 'browser': True}
                 record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
