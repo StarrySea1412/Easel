@@ -4,6 +4,7 @@ from __future__ import annotations
 from easel.context_budget import ContextBudgetError
 
 import asyncio
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -27,6 +28,7 @@ from .image_jobs import ImageJobs, read_config, GENERATE_TOOL
 from .creation_drafts import CreationDrafts, PREPARE_TOOL
 from .browser_tools import BROWSER_TOOL
 from .browser_runtime import BrowserError
+from .local_records import _write_lock, RecordConflict
 
 
 def safe(value):
@@ -76,21 +78,27 @@ class CodexService:
         # A dead host cannot keep waiting for approvals. Do not replay turn/start.
         for path in self.root.glob('*/turns/*.json'):
             try:
-                state = json.loads(path.read_text(encoding='utf-8'))
-                if state.get('status') == 'running':
-                    state.update(status='done', outcome='unconfirmed', pending=[],
-                                 error={'message': 'Easel 后端曾中断；此轮完成状态未确认，未自动重发。'})
-                    # A restart cannot establish the time when the old task stopped.
-                    # Preserve only a measured elapsed value, never count downtime.
-                    state.pop('startedAt', None)
-                    for item in state.get('items', []):
-                        if item.get('status') == 'inProgress':
-                            item['status'] = 'unconfirmed'
-                    self._write(path, state)
-                    self._execution_event(state)
-                    self._event(state, 'error', state['error'])
-            except (OSError, ValueError, KeyError):
+                with _write_lock(path.parent.parent / 'owner', 'Codex 会话'):
+                    state = json.loads(path.read_text(encoding='utf-8'))
+                    if self._state_path(state['sessionId'], state['turn_id']) != path:
+                        continue
+                    if state.get('status') == 'running':
+                        state.update(status='done', outcome='unconfirmed', pending=[],
+                                     error={'message': 'Easel 后端曾中断；此轮完成状态未确认，可核对原生结果。'})
+                        state.pop('startedAt', None)
+                        for item in state.get('items', []):
+                            if item.get('status') == 'inProgress':
+                                item['status'] = 'unconfirmed'
+                        self._write(path, state)
+                        self._execution_event(state)
+                        self._event(state, 'error', state['error'])
+            except (OSError, ValueError, KeyError, RecordConflict):
                 continue
+
+    def _owner(self, sid):
+        folder = self.folder(sid)
+        folder.mkdir(parents=True, exist_ok=True)
+        return _write_lock(folder / 'owner', 'Codex 会话')
 
     @staticmethod
     def _write(path, data):
@@ -112,7 +120,16 @@ class CodexService:
             if current and current['engine'] != engine or legacy and engine != 'openclaw':
                 raise HTTPException(409, '会话引擎已绑定；请新建会话切换引擎。')
             if not current:
-                self._write(self.folder(sid) / 'session.json', {'engine': engine, 'sessionId': sid})
+                try:
+                    with self._owner(sid):
+                        # Another backend may have bound it while this process waited.
+                        current = self.binding(sid)
+                        if current and current['engine'] != engine:
+                            raise HTTPException(409, '会话引擎已绑定；请新建会话切换引擎。')
+                        if not current:
+                            self._write(self.folder(sid) / 'session.json', {'engine': engine, 'sessionId': sid})
+                except RecordConflict:
+                    raise HTTPException(409, '会话正在被另一运行使用。') from None
 
     def owns(self, sid):
         binding = self.binding(sid)
@@ -131,7 +148,10 @@ class CodexService:
             path = self._state_path(sid, tid)
             if not path.exists():
                 raise HTTPException(404, 'Codex 任务记录不存在。')
-            return json.loads(path.read_text(encoding='utf-8'))
+            state = json.loads(path.read_text(encoding='utf-8'))
+            if state.get('sessionId') != sid or state.get('turn_id') != tid:
+                raise HTTPException(409, 'Codex 记录身份不匹配，未采用该记录。')
+            return state
 
     def _persist(self, state):
         if (self.failure_events is not None and state.get('status') == 'done'
@@ -236,6 +256,29 @@ class CodexService:
             raise HTTPException(409, str(exc)) from None
 
     def start(self, req):
+        # Hold ownership across admission, native execution and resource cleanup.
+        key(req.sessionId or '')
+        key(req.turnId or '')
+        self._require_session(req.sessionId)
+        if self._state_path(req.sessionId, req.turnId).exists() and self.owns(req.sessionId):
+            self.snapshot(req.sessionId, req.turnId)
+            return req.turnId
+        owner = self._owner(req.sessionId)
+        try:
+            owner.__enter__()
+        except RecordConflict:
+            if self._state_path(req.sessionId, req.turnId).exists():
+                return req.turnId  # Attach only; never dispatch a duplicate.
+            raise HTTPException(409, '此 Codex 会话仍由另一运行或核对操作占用。') from None
+        transferred = False
+        try:
+            result, transferred = self._start(req, owner)
+            return result
+        finally:
+            if not transferred:
+                owner.__exit__(None, None, None)
+
+    def _start(self, req, owner):
         sid, tid = req.sessionId, req.turnId
         key(sid or '')
         key(tid or '')
@@ -244,6 +287,8 @@ class CodexService:
             raise HTTPException(400, 'Codex 的 Easel 技能适配尚未接通，请清空技能选择。')
         if not req.message.strip() and not req.attachments:
             raise HTTPException(400, '消息或附件不能为空。')
+        if self.session_work(sid):
+            raise HTTPException(409, '此会话有未确认的原轮次，请先核对结果；本条消息未发送。')
         runtime = self.runtime()
         if not runtime['available'] or runtime['auth'] == 'login_required':
             raise HTTPException(503, runtime.get('error', '请先登录本机 Codex。'))
@@ -257,9 +302,11 @@ class CodexService:
                 raise HTTPException(409, '此会话没有绑定 Codex。')
             existing = self._state_path(sid, tid)
             if existing.exists():
-                return tid  # Idempotency: retry attaches to this job, never duplicates it.
+                return tid, False  # Attach only; never dispatch a duplicate.
             if sid in self.active:
                 raise HTTPException(409, '此会话上一轮仍在运行。')
+            if self.session_work(sid):
+                raise HTTPException(409, '此会话有未确认的原轮次，请先核对结果；本条消息未发送。')
             workspace = self.outputs / 'codex' / key(sid)[:24]
             workspace.mkdir(parents=True, exist_ok=True)
             manifest, images = [], []
@@ -308,10 +355,14 @@ class CodexService:
             run = {'threadParams': params, 'effort': effort, 'state': state, 'client': None, 'queue': None, 'requests': {},
                    'inputImages': images, 'browserJobs': set(), 'browserFinished': False, 'browserStop':threading.Event(),
                    'startedMonotonic': time.monotonic(),
-                   'finished': threading.Event(), 'controlLock': threading.Lock()}
+                   'finished': threading.Event(), 'controlLock': threading.Lock(), 'owner': owner}
             self.active[sid] = run
-            threading.Thread(target=self._run, args=(run, text, model), daemon=True, name='easel-codex-turn').start()
-            return tid
+            try:
+                threading.Thread(target=self._run, args=(run, text, model), daemon=True, name='easel-codex-turn').start()
+            except Exception:
+                self.active.pop(sid, None)
+                raise
+            return tid, True
 
     def _thread_params(self, state, model, ticket):
         params = {'cwd': state['workspace'], 'model': model['model'], 'approvalPolicy': 'on-request',
@@ -353,6 +404,21 @@ class CodexService:
                            [{'type': 'localImage', 'path': path} for path in images]}})
 
     def _run(self, run, text, model):
+        try:
+            self._run_owned(run, text, model)
+        finally:
+            try:
+                if run.get('client'):
+                    run['client'].close()
+            finally:
+                with self.lock:
+                    if self.active.get(run['state']['sessionId']) is run:
+                        self.active.pop(run['state']['sessionId'], None)
+                    run['finished'].set()
+                if run.get('owner'):
+                    run['owner'].__exit__(None, None, None)
+
+    def _run_owned(self, run, text, model):
         state, client, thread = run['state'], None, None
         try:
             from easel.context_budget import require_admitted
@@ -427,10 +493,6 @@ class CodexService:
             if client:
                 if thread:
                     client.unsubscribe(thread)
-                client.close()
-            with self.lock:
-                self.active.pop(state['sessionId'], None)
-                run['finished'].set()
 
     def _consume(self, run, event):
         state = run['state']
@@ -752,9 +814,58 @@ class CodexService:
 
     def session_work(self, sid):
         """Include unsettled persisted turns even after the chat lease was released."""
-        state = self.snapshot(sid)
-        turn = state.get('turn_id')
-        return [turn] if turn and (state.get('status') == 'running' or state.get('outcome') == 'unconfirmed') else []
+        turns = []
+        with self.lock:
+            for path in (self.folder(sid) / 'turns').glob('*.json'):
+                try:
+                    state = json.loads(path.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    raise HTTPException(503, 'Codex会话历史损坏，未发送新消息。') from None
+                turn = state.get('turn_id')
+                if (state.get('sessionId') != sid or not isinstance(turn, str)
+                        or self._state_path(sid, turn) != path):
+                    raise HTTPException(503, 'Codex会话历史身份不匹配，未发送新消息。')
+                if state.get('status') != 'done' or state.get('outcome') == 'unconfirmed':
+                    turns.append(turn)
+        return sorted(set(turns))
+
+    def reconcile(self, sid, tid):
+        from .codex_recovery import read_turn, project
+        try:
+            with self._owner(sid):
+                state = self.snapshot(sid, tid)
+                if state.get('status') != 'running' and state.get('outcome') != 'unconfirmed':
+                    return state
+                client = None
+                try:
+                    if not state.get('threadId') or not state.get('codexTurnId'):
+                        raise CodexError('原生线程或轮次标识缺失，无法确认结果。')
+                    client = self.factory(self.root)
+                    native = read_turn(client, state)
+                    # Deleted sessions may settle their history, but never dispatch again.
+                    recovered = copy.deepcopy(state)
+                    project(recovered, native, safe)
+                    state = recovered
+                    state['recoveryEventAfter'] = state.get('seq', 0)
+                    state['recovery'] = {'source': 'codex-persisted-turn', 'status': 'adopted',
+                                         'checkedAt': int(time.time() * 1000)}
+                    self._event(state, 'text_snapshot', state['text'])
+                    self._execution_event(state)
+                    self._event(state, 'error' if state.get('error') else 'done', state.get('error') or
+                        {'sessionKey': 'codex:' + state['threadId'], 'stopped': state['stopped']})
+                except Exception as exc:
+                    state['recovery'] = {'source': 'codex-persisted-turn', 'status': 'unconfirmed',
+                        'checkedAt': int(time.time() * 1000), 'message': safe(str(exc))[:1500]}
+                    self._persist(state)
+                finally:
+                    if client:
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+                return state
+        except RecordConflict:
+            raise HTTPException(409, '原轮次仍被运行或核对操作占用，请稍后读取。') from None
 
     def stop(self, sid, tid):
         req = Control(sessionId=sid, turnId=tid or '')
@@ -792,6 +903,8 @@ class CodexService:
                         if event['id'] <= cursor:
                             continue
                         cursor = event['id']
+                        if event['event'] in ('done', 'error') and event['id'] <= self.snapshot(sid, tid).get('recoveryEventAfter', 0):
+                            continue
                         yield {'id': str(cursor), 'event': event['event'], 'data': json.dumps(event['data'], ensure_ascii=False)}
                         if event['event'] in ('done', 'error'):
                             return
@@ -839,5 +952,9 @@ class CodexService:
         @router.post('/steer')
         async def steer(req: Control):
             return await asyncio.to_thread(self.steer, req)
+
+        @router.post('/reconcile')
+        async def reconcile(req: Control):
+            return await asyncio.to_thread(self.reconcile, req.sessionId, req.turnId)
 
         return router

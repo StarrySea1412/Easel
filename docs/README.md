@@ -18,6 +18,7 @@
 - [用户需求与交付清单](user-requirements-2026-10-08.md)（历史与追加要求的单一事实来源）
 - [统一功能验收清单](functional-checklist-2026-10-21.md)
 - [二次开发计划](secondary-development-plan.md) / [二次开发进度](secondary-development-progress.md)
+- [0.32.0 Codex 原生结果核对](codex-reconciliation-0.32.0.md)
 - [0.31.0 结构化任务拆解与层级计划](task-planning-0.31.0.md)
 - [0.30.0 依赖图与并行角色](parallel-workflow-0.30.0.md)
 - [0.29.0 结构化审查与限次返工](review-loop-0.29.0.md)

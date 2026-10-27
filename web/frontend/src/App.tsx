@@ -48,6 +48,7 @@ import type { OfficeTaskRequest } from './components/agent-office/OfficeTaskComp
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import { ensureGateway } from './lib/gatewayRecovery';
 import { codexRequest } from './lib/codex';
+import { CODEX_RECOVERED, applyCodexResult } from './lib/codexRecovery';
 import type { PersonaItem, UploadedFile, ChatQuestion, ThinkingLevel } from './lib/api';
 import { questionStatus } from './lib/api';
 import { deleteSession as deleteRemoteSession } from './lib/api';
@@ -497,6 +498,22 @@ export default function App() {
       return next;
     });
   }, []);
+
+  useEffect(()=>{
+    const recovered = (event: Event)=>{
+      const detail = (event as CustomEvent<{sessionId:string;turnId:string}>).detail;
+      if (!detail?.sessionId || !detail.turnId || outputSessionDeleted(detail.sessionId)) return;
+      void codexRequest<Parameters<typeof applyCodexResult>[2]>(`turn/${encodeURIComponent(detail.sessionId)}/${encodeURIComponent(detail.turnId)}`).then(snapshot=>{
+        if (streamAcc.current[detail.sessionId] || outputSessionDeleted(detail.sessionId)) return;
+        setSessions(previous=>{
+          const next=previous.map(session=>session.id===detail.sessionId?applyCodexResult(session,detail.turnId,snapshot):session);
+          saveSessions(next);return next;
+        });
+      }).catch(()=>showToast('结果读取失败，请重新核对。','error'));
+    };
+    window.addEventListener(CODEX_RECOVERED,recovered);
+    return()=>window.removeEventListener(CODEX_RECOVERED,recovered);
+  },[]);
 
   // Both fresh and restored streams can lose their event log. Read only the
   // exact turn snapshot; never replay the prompt or adopt another turn's reply.

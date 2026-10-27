@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { codexRequest, type CodexTurn, type CodexPending } from '../lib/codex';
 import '../styles/codex.css';
 import ChatExecutionPanel from './ChatExecutionPanel';
+import { CODEX_RECOVERED } from '../lib/codexRecovery';
 
 function print(value: unknown) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
 function RequestCard({request, sessionId, turnId, refresh}: {request: CodexPending; sessionId:string; turnId:string; refresh:()=>void}) {
@@ -31,22 +32,44 @@ function RequestCard({request, sessionId, turnId, refresh}: {request: CodexPendi
 }
 export default function CodexRunPanel({sessionId,turnId,streaming,onProgressOwnership}: {sessionId:string;turnId:string;streaming:boolean;onProgressOwnership?:(owned:boolean)=>void}) {
   const [turn,setTurn]=useState<CodexTurn|null>(null), [error,setError]=useState(''), [revision,setRevision]=useState(0);
+  const [checking,setChecking]=useState(false);
+  const notifiedRecovery=useRef('');
   useEffect(()=>{
     const controller=new AbortController(); let reading=false;
     const read=async()=>{if(reading || controller.signal.aborted)return; reading=true;
       try { const value=await codexRequest<CodexTurn>(`turn/${encodeURIComponent(sessionId)}/${encodeURIComponent(turnId)}`,undefined,controller.signal);
-        if(!controller.signal.aborted && value.sessionId===sessionId && value.turn_id===turnId){setTurn(value);setError('');} }
+        if(!controller.signal.aborted && value.sessionId===sessionId && value.turn_id===turnId){
+          setTurn(value);setError('');
+          const recoveryKey=`${sessionId}:${turnId}`;
+          if(value.recovery?.status==='adopted'&&notifiedRecovery.current!==recoveryKey){
+            notifiedRecovery.current=recoveryKey;
+            window.dispatchEvent(new CustomEvent(CODEX_RECOVERED,{detail:{sessionId,turnId}}));
+          }
+        } }
       catch(cause){if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'记录读取失败。');}
       finally{reading=false;}
     }; void read(); const timer=streaming?setInterval(()=>void read(),1500):undefined;
     return()=>{controller.abort();clearInterval(timer);};
   },[sessionId,turnId,streaming,revision]);
   const current=turn?.sessionId===sessionId&&turn.turn_id===turnId?turn:null;
+  const reconcile=async()=>{
+    setChecking(true);setError('');
+    try {
+      const value=await codexRequest<CodexTurn>('reconcile',{sessionId,turnId});
+      if(value.sessionId!==sessionId||value.turn_id!==turnId)throw new Error('结果不属于本轮。');
+      setTurn(value);setRevision(v=>v+1);
+    }catch(cause){setError(cause instanceof Error?cause.message:'核对失败。');}
+    finally{setChecking(false);}
+  };
   const reasoning=current?.thinkingStatus==='available'?'服务已返回思考摘要':current?.thinkingStatus==='partial'?'思考摘要不完整（本轮中断或失败）':current?.thinkingStatus==='unavailable'?'本轮服务未返回思考摘要':'等待服务返回思考摘要';
   return <div className="codex-run-panel">
-    <p className="codex-reasoning-state" role="status">Codex · {reasoning}{current?.outcome==='interrupted'?' · 已停止':''}</p>
+    <p className="codex-reasoning-state" role="status">Codex · {current?.outcome==='unconfirmed'?'结果未确认':reasoning}{current?.outcome==='interrupted'?' · 已停止':''}
+      {current?.outcome==='unconfirmed'&&<button type="button" className="btn btn-sm" disabled={checking} onClick={()=>void reconcile()}>{checking?'核对中…':'核对结果'}</button>}
+      {current?.recovery?.status==='adopted'&&' · 已收回原轮次结果'}
+    </p>
+    {current?.outcome==='unconfirmed'&&current.recovery?.message&&<p role="status">{current.recovery.message}</p>}
     {current?.pending.map(request=><RequestCard key={request.requestId} request={request} sessionId={sessionId} turnId={turnId} refresh={()=>setRevision(v=>v+1)}/>)}
-    <ChatExecutionPanel sessionId={sessionId} turnId={turnId} streaming={streaming} onProgressOwnership={onProgressOwnership}/>
+    <ChatExecutionPanel key={revision} sessionId={sessionId} turnId={turnId} streaming={streaming} onProgressOwnership={onProgressOwnership}/>
     <details className="execution-runtime"><summary>本轮引擎与用量</summary><p>请求模型：{current?.requestedModelRef || '等待回执'} · 运行模型：{current?.actualModel || '未返回'}。网页检索：{current?.webSearch==='cached'?'缓存检索':'未上报'}。</p>{Boolean(current?.tokenUsage)&&<pre>{print(current?.tokenUsage)}</pre>}</details>
     {error && <p role="alert">{error}<button type="button" onClick={()=>setRevision(v=>v+1)}>重新读取</button></p>}
   </div>;
