@@ -16,6 +16,8 @@ export default function ProfileMemoryManager({name,onSource}:{name:string;onSour
   const [text,setText]=useState(''),[busy,setBusy]=useState(false),[failure,setFailure]=useState('');
   const [editing,setEditing]=useState<{entry:MemoryEntry;profileRevision:number;text:string;date:string;conditions:MemoryConditions}|null>(null);
   const [draftConditions,setDraftConditions]=useState(emptyConditions),[replacement,setReplacement]=useState<MemoryReplacement|null>(null);
+  const [consolidationKind,setConsolidationKind]=useState<''|'merge'|'conflict'>('');
+  const [consolidationEntries,setConsolidationEntries]=useState<MemoryReplacement[]>([]),[consolidationReason,setConsolidationReason]=useState('');
   const [previewType,setPreviewType]=useState(''),[draftKey,setDraftKey]=useState(0);
   const [history,setHistory]=useState<{id:string;rows:MemoryEntry[]}|null>(null);
   const [evidence,setEvidence]=useState<{id:string;quote:string;limitation:string;turnId:string}|null>(null);
@@ -23,20 +25,34 @@ export default function ProfileMemoryManager({name,onSource}:{name:string;onSour
   const [context,setContext]=useState<MemoryContext|null>(null);
   const [externalFile,setExternalFile]=useState<{text:string;hash:string}|null>(null);
   const currentRevision=useRef(data?.revision);currentRevision.current=data?.revision;
+  const confirming=useRef(false);
   useEffect(()=>{setContext(null);setHistory(null);setEvidence(null);setSnapshot('');setExternalFile(null);},[data?.revision]);
   const selected:MemoryScope=scopeKind==='profile'?{kind:'profile'}:{kind:'account',platform,accountId:account.trim()};
   const policy=data?.policy??{readEnabled:true,candidatesEnabled:true};
   const run=async(action:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setFailure('');try{await action();}catch(reason){setFailure(reason instanceof Error?reason.message:'经验操作失败');}finally{setBusy(false);}};
-  const change=(entry:MemoryEntry,action:string,extra:Record<string,unknown>={})=>run(async()=>{
-    if(!data)return;
+  const change=async(entry:MemoryEntry,action:string,extra:Record<string,unknown>={})=>{
+    if(!data||busy||confirming.current)return;
+    confirming.current=true;
+    try {
     if(action==='delete'&&!await confirmModal('永久删除这条经验及其历史版本？删除后将停止读取，相关旧资料快照也会清理。',{confirmLabel:'永久删除'}))return;
     if(action==='accept'&&entry.replaces){const old=data.entries.find(row=>row.id===entry.replaces?.id);if(!await confirmModal(`用新经验替代旧经验？\n\n旧：${old?.text||'原经验已不可用'}\n\n新：${entry.text}`,{confirmLabel:'确认替代'}))return;}
-    await mutateMemory(name,`/entries/${entry.id}/${action}`,{revision:entry.revision,profileRevision:data.revision,contentHash:entry.contentHash,scopeHash:entry.scopeHash,conditionsHash:entry.conditionsHash,replacementHash:entry.replacementHash,...extra});
-    setContext(null);if(action==='delete'){setHistory(null);setSnapshot('');}
-  });
+    if(action==='accept'&&entry.consolidation){const old=entry.consolidation.entries.map(reference=>{const row=data.entries.find(item=>item.id===reference.id);return `v${reference.revision}：${row?.text||'原经验已不可用'}`;}).join('\n\n');if(!await confirmModal(`${entry.consolidation.kind==='merge'?'合并经验':'修订冲突'}，替代${entry.consolidation.entries.length}条旧经验？\n\n${old}\n\n原因：${entry.consolidation.reason}\n\n新：${entry.text}`,{confirmLabel:'确认归并'}))return;}
+    await run(async()=>{
+      await mutateMemory(name,`/entries/${entry.id}/${action}`,{revision:entry.revision,profileRevision:data.revision,contentHash:entry.contentHash,scopeHash:entry.scopeHash,conditionsHash:entry.conditionsHash,replacementHash:entry.replacementHash,consolidationHash:entry.consolidationHash,...extra});
+      setContext(null);if(action==='delete'){setHistory(null);setSnapshot('');}
+    });
+    } finally { confirming.current=false; }
+  };
   const rows=data?.entries.filter(entry=>(filter==='all'||(filter==='review'?entry.needsReview:entry.status===filter))&&`${entry.text} ${scopeLabel(entry.scope)}`.toLowerCase().includes(query.toLowerCase()))||[];
   const toggle=(key:keyof MemoryPolicy,value:boolean)=>run(async()=>{if(data)await mutateMemory(name,'/policy',{profileRevision:data.revision,[key]:value});});
   const replacements=data?.entries.filter(entry=>entry.status==='active'&&scopeLabel(entry.scope)===scopeLabel(selected)&&sameConditions(entry.conditions,draftConditions))||[];
+  const consolidationReady=!consolidationKind||(consolidationReason.trim()&&consolidationEntries.length>=(consolidationKind==='merge'?2:1)&&consolidationEntries.every(reference=>replacements.some(row=>row.id===reference.id&&row.revision===reference.revision&&row.sourceStatus==='available')));
+  const saveProposal=()=>run(async()=>{
+    if(!data)return;
+    await proposeMemory(name,text,selected,{type:'manual'},{conditions:draftConditions,replaces:replacement,profileRevision:data.revision,
+      ...(consolidationKind?{consolidation:{kind:consolidationKind,reason:consolidationReason,entries:consolidationEntries}}:{})});
+    setText('');setDraftConditions(emptyConditions());setReplacement(null);setConsolidationKind('');setConsolidationEntries([]);setConsolidationReason('');setDraftKey(value=>value+1);
+  });
   return <section className="profile-memory" aria-label="经验沉淀管理">
     <header><h2>经验沉淀</h2><div className="memory-header-actions">{data&&<><span className="memory-policy-control">读取经验<Switch aria-label="读取经验" checked={policy.readEnabled} disabled={busy||loading} onChange={value=>void toggle('readEnabled',value)}/></span><span className="memory-policy-control">保存候选<Switch aria-label="保存候选" checked={policy.candidatesEnabled} disabled={busy||loading} onChange={value=>void toggle('candidatesEnabled',value)}/></span></>}</div><button className="btn btn-sm memory-refresh" disabled={loading||busy} onClick={()=>void refreshMemory(name)}>{loading&&<PublishSpinner/>}刷新</button></header>
     {(failure||error||data?.warning)&&<p className="notice-error" role="alert">{failure||error||data?.warning}</p>}
@@ -44,7 +60,19 @@ export default function ProfileMemoryManager({name,onSource}:{name:string;onSour
     {data&&<>
       <div className="memory-scope"><label>适用范围<Select value={scopeKind} onChange={event=>setScope(event.target.value)}><option value="profile">当前画像，跨平台</option><option value="account">指定平台账号</option></Select></label>{scopeKind==='account'&&<><label>平台<Select value={platform} onChange={event=>setPlatform(event.target.value)}>{['zhihu','xiaohongshu','douyin','kuaishou','weixin-channels','bilibili','wechat-oa'].map(value=><option key={value} value={value}>{({zhihu:'知乎',xiaohongshu:'小红书',douyin:'抖音',kuaishou:'快手','weixin-channels':'视频号',bilibili:'B站','wechat-oa':'公众号'} as Record<string,string>)[value]}</option>)}</Select></label><label>稳定账号ID<input className="field" value={account} onChange={event=>setAccount(event.target.value)} placeholder="使用账号ID，不填写昵称"/></label></>}</div>
       {!data.managed&&<div className="memory-legacy"><h3>旧经验尚未托管</h3><p>原文与哈希会保留，日期和来源不明时保持未知。导入后的旧内容仍需确认，不自动变成已验证效果。</p><details><summary>查看导入原文</summary><pre>{data.legacy?.text||'旧文件为空'}</pre></details><button className="btn btn-sm" disabled={busy||scopeKind==='account'&&!account.trim()} onClick={()=>void run(async()=>{await mutateMemory(name,'/import',{hash:data.legacy?.hash,profileRevision:data.revision,scope:selected});})}>确认导入并开始管理</button></div>}
-      {data.managed&&<><label className="memory-new">提出新经验<textarea className="field" rows={3} disabled={!policy.candidatesEnabled} value={text} onChange={event=>setText(event.target.value)} placeholder="可复用的结论与局限"/></label><details className="memory-conditions"><summary>适用条件与替代{conditionLabel(draftConditions)||replacement?' · 已设置':''}</summary><MemoryConditionsEditor key={draftKey} value={draftConditions} disabled={busy||!policy.candidatesEnabled} onChange={setDraftConditions}/><label>替代旧经验<Select aria-label="替代旧经验" value={replacement?.id||''} disabled={busy||!policy.candidatesEnabled} onChange={event=>{const old=replacements.find(row=>row.id===event.target.value);setReplacement(old?.conditionsHash?{id:old.id,revision:old.revision,contentHash:old.contentHash,scopeHash:old.scopeHash,conditionsHash:old.conditionsHash}:null);}}><option value="">独立保存</option>{replacement&&!replacements.some(row=>row.id===replacement.id)&&<option value={replacement.id} disabled>所选版本需重选</option>}{replacements.map(row=><option key={row.id} value={row.id}>v{row.revision} · {row.text.slice(0,48)}</option>)}</Select></label></details><button className="btn btn-sm" disabled={busy||!policy.candidatesEnabled||!text.trim()||scopeKind==='account'&&!account.trim()} onClick={()=>void run(async()=>{await proposeMemory(name,text,selected,{type:'manual'},{conditions:draftConditions,replaces:replacement,profileRevision:data.revision});setText('');setDraftConditions(emptyConditions());setReplacement(null);setDraftKey(value=>value+1);})}>保存为待确认候选</button></>}
+      {data.managed&&<>
+        <label className="memory-new">提出新经验<textarea className="field" rows={3} disabled={!policy.candidatesEnabled} value={text} onChange={event=>setText(event.target.value)} placeholder="可复用的结论与局限"/></label>
+        <details className="memory-conditions"><summary>适用条件与替代{conditionLabel(draftConditions)||replacement||consolidationKind?' · 已设置':''}</summary>
+          <MemoryConditionsEditor key={draftKey} value={draftConditions} disabled={busy||!policy.candidatesEnabled} onChange={setDraftConditions}/>
+          <label>经验归并<Select aria-label="经验归并" value={consolidationKind} disabled={busy||!policy.candidatesEnabled} onChange={event=>{setConsolidationKind(event.target.value as ''|'merge'|'conflict');setConsolidationEntries([]);setReplacement(null);}}><option value="">不归并</option><option value="merge">合并经验</option><option value="conflict">修订冲突</option></Select></label>
+          {consolidationKind?<>
+            <div className="memory-consolidation-options" role="group" aria-label="归并旧经验">{replacements.map(row=><label key={row.id}><input type="checkbox" checked={consolidationEntries.some(reference=>reference.id===row.id)} disabled={busy||!policy.candidatesEnabled||row.sourceStatus!=='available'||!consolidationEntries.some(reference=>reference.id===row.id)&&consolidationEntries.length>=8} onChange={event=>{const binding=row.conditionsHash?{id:row.id,revision:row.revision,contentHash:row.contentHash,scopeHash:row.scopeHash,conditionsHash:row.conditionsHash}:null;if(binding)setConsolidationEntries(previous=>event.target.checked?[...previous,binding]:previous.filter(reference=>reference.id!==row.id));}}/><span>v{row.revision} · {row.text}</span></label>)}{!replacements.length&&<small>当前范围与条件没有可归并的有效经验。</small>}</div>
+            <label>归并原因<textarea className="field" rows={2} maxLength={1000} disabled={busy||!policy.candidatesEnabled} value={consolidationReason} onChange={event=>setConsolidationReason(event.target.value)}/></label>
+            {!!consolidationEntries.length&&<><small>已选{consolidationEntries.length}条{consolidationEntries.some(reference=>!replacements.some(row=>row.id===reference.id&&row.revision===reference.revision))?' · 版本已变化，请重选':''}</small><button className="btn btn-sm" disabled={busy} onClick={()=>setConsolidationEntries([])}>清除选择</button></>}
+          </>:<label>替代旧经验<Select aria-label="替代旧经验" value={replacement?.id||''} disabled={busy||!policy.candidatesEnabled} onChange={event=>{const old=replacements.find(row=>row.id===event.target.value);setReplacement(old?.conditionsHash?{id:old.id,revision:old.revision,contentHash:old.contentHash,scopeHash:old.scopeHash,conditionsHash:old.conditionsHash}:null);}}><option value="">独立保存</option>{replacement&&!replacements.some(row=>row.id===replacement.id)&&<option value={replacement.id} disabled>所选版本需重选</option>}{replacements.map(row=><option key={row.id} value={row.id}>v{row.revision} · {row.text.slice(0,48)}</option>)}</Select></label>}
+        </details>
+        <button className="btn btn-sm" disabled={busy||!policy.candidatesEnabled||!text.trim()||!consolidationReady||scopeKind==='account'&&!account.trim()} onClick={()=>void saveProposal()}>保存为待确认候选</button>
+      </>}
       {!data.projectionReady&&<button className="btn btn-sm" disabled={busy} onClick={()=>void run(async()=>{setExternalFile(await memoryRequest<{text:string;hash:string}>(name,'/file-changes'));})}>对照外部修改并修复</button>}
       {externalFile&&<div className="memory-legacy"><h3>当前外部文件原文</h3><pre>{externalFile.text||'文件为空或已删除'}</pre><p>确认后将原文保存为待确认候选，再从数据库重建兼容文件；原有有效经验保留。</p><button className="btn btn-sm" disabled={busy} onClick={()=>void run(async()=>{await mutateMemory(name,'/reconcile',{hash:externalFile.hash,profileRevision:data.revision});setExternalFile(null);})}>保存候选并重建</button></div>}
       <div className="memory-filters"><input className="field" type="search" aria-label="搜索经验" placeholder="搜索经验或账号" value={query} onChange={event=>setQuery(event.target.value)}/><Select aria-label="筛选经验状态" value={filter} onChange={event=>setFilter(event.target.value)}><option value="all">全部经验</option>{Object.entries(statuses).map(([value,label])=><option key={value} value={value}>{label}</option>)}<option value="review">需要复查</option></Select></div>
@@ -54,6 +82,7 @@ export default function ProfileMemoryManager({name,onSource}:{name:string;onSour
         <small>{entry.quality==='legacy-unverified'?'旧资料 · 未核验':entry.source.type==='run'?'任务提案 · 待复核':entry.source.type==='analysis'?'分析假设 · 需结合材料复核':'用户整理的经验参考'}{entry.userEdited?' · 用户修订':''} · {entry.source.capturedAt?new Date(entry.source.capturedAt).toLocaleString('zh-CN'):'观察日期未知'}</small>
         {entry.source.sampleCount!==undefined&&<p>依据 {entry.source.sampleCount} 篇已保存作品，不能据此断言因果或增长效果。</p>}
         {!!entry.relatedCandidates?.length&&<details className="memory-related"><summary>相近条目 · {entry.relatedCandidates.length}</summary><small>字面相近，未自动合并</small>{entry.relatedCandidates.map(reference=>{const old=data.entries.find(row=>row.id===reference.id);return <div key={reference.id}><small>引用 v{reference.revision}{old?` · 当前 v${old.revision} · ${statuses[old.status]}`:''}</small><p>{old?.text||'原条目已删除'}</p></div>;})}</details>}
+        {entry.consolidation&&<details className="memory-related"><summary>{entry.consolidation.kind==='merge'?'合并建议':'冲突修订'} · {entry.consolidation.entries.length}条</summary><p>{entry.consolidation.reason}</p>{entry.consolidation.entries.map(reference=>{const old=data.entries.find(row=>row.id===reference.id);return <div key={reference.id}><small>引用 v{reference.revision}{old?` · 当前 v${old.revision} · ${statuses[old.status]}`:''}</small><p>{old?.text||'原条目已删除'}</p></div>;})}</details>}
         {entry.needsReview&&<p className="notice-error">{entry.sourceStatus==='available'?'已到复查日期，仍保留，等待你复核。':entry.sourceStatus==='missing'?'原对话或材料已删除；该经验暂停注入，保留已确认记录供处理。':'来源已变化或不可用；该经验暂停注入，请重新提取候选。'}</p>}
         <div className="memory-entry-actions">
           {entry.status==='pending'&&<><button className="btn btn-sm btn-primary" disabled={busy||!data.managed||entry.sourceStatus!=='available'} onClick={()=>void change(entry,'accept')}>确认生效</button><button className="btn btn-sm" disabled={busy} onClick={()=>void change(entry,'reject')}>拒绝</button></>}

@@ -231,3 +231,45 @@ test('related entries remain folded, reference versions and do not retain delete
  details=[...v.container.querySelectorAll('details')].find(node=>node.textContent.includes('相近条目'));assert.doesNotMatch(details.textContent,/可供比较的原结论/);
  assert.equal(details.querySelectorAll('button').length,0);
 });
+
+test('semantic proposals stay folded, require a separate comparison confirmation and bind its hash',async t=>{
+ const a={...entry('merge-a'),status:'active',revision:2,text:'先核对文件存在。'},b={...entry('merge-b'),status:'active',revision:2,text:'HTTP 200不能证明内容通过验收。'};
+ const reference=row=>({id:row.id,revision:row.revision,contentHash:row.contentHash,scopeHash:row.scopeHash,conditionsHash:'conditions'});
+ const fresh={...entry('merge-new'),text:'文件存在与正文质量分别核验。',consolidation:{kind:'merge',reason:'分别保留存在性与质量边界。',entries:[reference(a),reference(b)]},consolidationHash:'exact-consolidation'};
+ let current=state('semantic-comparison',3,[fresh,a,b]);const requests=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{requests.push({url,options});if(options.method==='POST')current=state('semantic-comparison',4,[{...fresh,status:'active',revision:2},{...a,status:'superseded'},{...b,status:'superseded'}]);return response(current);});
+ const v=await mount(t,'semantic-comparison');const details=[...v.container.querySelectorAll('details')].find(node=>node.querySelector('summary')?.textContent==='合并建议 · 2条');
+ assert.equal(details.open,false);assert.match(details.textContent,/HTTP 200不能证明内容通过验收/);
+ v.button('确认生效').focus();
+ await act(async()=>{void v.button('确认生效').click();});
+ let dialog=document.querySelector('[role="dialog"]');assert.match(dialog.textContent,/替代2条旧经验/);assert.match(dialog.textContent,/先核对文件存在/);assert.match(dialog.textContent,/文件存在与正文质量/);
+ assert.equal(requests.filter(row=>row.options.method==='POST').length,0);
+ await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='取消').click());
+ assert.equal(document.activeElement,v.button('确认生效'));
+ assert.equal(requests.filter(row=>row.options.method==='POST').length,0);
+ await act(async()=>{void v.button('确认生效').click();});dialog=document.querySelector('[role="dialog"]');
+ await act(async()=>[...dialog.querySelectorAll('button')].find(button=>button.textContent==='确认归并').click());
+ const body=JSON.parse(requests.find(row=>row.url.endsWith('/accept')).options.body);assert.equal(body.consolidationHash,'exact-consolidation');
+ current=state('semantic-comparison',5,[{...fresh,status:'active',sourceStatus:'missing'},b]);
+ await act(async()=>lib.refreshMemory('semantic-comparison'));
+ assert.doesNotMatch(v.container.textContent,/先核对文件存在/);assert.match(v.container.textContent,/原条目已删除/);
+});
+
+test('manual consolidation retains exact selected versions and stale selection needs explicit reset',async t=>{
+ const a={...entry('manual-a'),status:'active',scope:{kind:'profile'},conditionsHash:'conditions'},b={...entry('manual-b'),status:'active',scope:{kind:'profile'},conditionsHash:'conditions'};
+ let current=state('manual-consolidation',1,[a,b]);const requests=[];
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{requests.push({url,options});return response(String(url).endsWith('/candidates')?{entry:entry('manual-new'),state:current}:current);});
+ const v=await mount(t,'manual-consolidation');await fill(v.container.querySelector('.memory-new textarea'),'保留否定与例外的合并结论。');
+ await choose(v.container,'经验归并','合并经验');
+ const checks=()=>[...v.container.querySelectorAll('.memory-consolidation-options input')];
+ await act(async()=>checks()[0].click());await act(async()=>checks()[1].click());
+ await fill(v.container.querySelector('.memory-conditions textarea'),'同一适用范围，保留各自约束。');
+ assert.equal(v.button('保存为待确认候选').disabled,false);
+ current=state('manual-consolidation',2,[{...a,revision:2},b]);await act(async()=>lib.refreshMemory('manual-consolidation'));
+ assert.equal(v.button('保存为待确认候选').disabled,true);assert.match(v.container.textContent,/版本已变化，请重选/);
+ await act(async()=>v.button('清除选择').click());await act(async()=>checks()[0].click());await act(async()=>checks()[1].click());
+ await act(async()=>v.button('保存为待确认候选').click());
+ const body=JSON.parse(requests.find(row=>row.url.endsWith('/candidates')).options.body);
+ assert.equal(body.consolidation.kind,'merge');assert.equal(body.consolidation.entries.find(row=>row.id===a.id).revision,2);assert.equal(body.profileRevision,2);
+ assert.equal(v.container.querySelector('.memory-new textarea').value,'');
+});

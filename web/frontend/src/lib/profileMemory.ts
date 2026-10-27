@@ -10,7 +10,8 @@ export function extractionSummary(value?:MemoryExtraction):string {
 export type MemoryScope = {kind:'profile'} | {kind:'account';platform:string;accountId:string};
 export type MemoryConditions = {version:1;taskTypes:string[];allKeywords:string[];excludeKeywords:string[]};
 export type MemoryReplacement = {id:string;revision:number;contentHash:string;scopeHash:string;conditionsHash:string};
-export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected'|'superseded';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;conditions?:MemoryConditions;conditionsHash?:string;replaces?:MemoryReplacement;replacementHash?:string;supersededBy?:{id:string;revision:number};quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;relatedCandidates?:{id:string;revision:number;kind:string}[];source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
+export type MemoryConsolidation = {kind:'merge'|'conflict';reason:string;entries:MemoryReplacement[]};
+export type MemoryEntry = {id:string;profileId:string;text:string;status:'pending'|'active'|'invalidated'|'rejected'|'superseded';revision:number;contentHash:string;scopeHash:string;scope:MemoryScope;conditions?:MemoryConditions;conditionsHash?:string;replaces?:MemoryReplacement;replacementHash?:string;consolidation?:MemoryConsolidation;consolidationHash?:string;supersededBy?:{id:string;revision:number};quality:string;reviewAfter:string|null;needsReview?:boolean;sourceStatus?:string;createdAt:string;updatedAt:string;confirmedAt:string|null;userEdited?:boolean;relatedCandidates?:{id:string;revision:number;kind:string}[];source:{type:string;bindingId?:string;sessionId?:string;turnId?:string;contentIds?:string[];sampleCount?:number;sourceHash:string;capturedAt:string|null;limitation?:string}};
 export const memoryTaskTypes:Record<string,string> = {'account-analysis':'账号分析',writing:'写作','image-generation':'生图',publication:'发布',coding:'编程',general:'通用任务'};
 export const emptyConditions = ():MemoryConditions => ({version:1,taskTypes:[],allKeywords:[],excludeKeywords:[]});
 export function conditionLabel(value?:MemoryConditions):string {
@@ -73,7 +74,7 @@ export function useProfileMemory(name:string) {
   },[name]);
   return value;
 }
-export async function proposeMemory(name:string, text:string, scope:MemoryScope, source:{type:string;bindingId?:string}={type:'manual'}, options:{conditions?:MemoryConditions;replaces?:MemoryReplacement|null;profileRevision?:number}={}):Promise<MemoryEntry> {
+export async function proposeMemory(name:string, text:string, scope:MemoryScope, source:{type:string;bindingId?:string}={type:'manual'}, options:{conditions?:MemoryConditions;replaces?:MemoryReplacement|null;consolidation?:MemoryConsolidation;profileRevision?:number}={}):Promise<MemoryEntry> {
   try {
     const result = await memoryRequest<{entry:MemoryEntry;state:MemoryState}>(name,'/candidates','POST',{text,scope,source,...options});
     accept(result.state,'candidate'); return result.entry;

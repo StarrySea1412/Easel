@@ -108,11 +108,13 @@ def entry_data(raw):
     return entry
 
 
-def candidate_key(text, selected_scope, source_hash, selected_conditions=None, replaces=None):
+def candidate_key(text, selected_scope, source_hash, selected_conditions=None, replaces=None, consolidation=None):
     selected_conditions = conditions(selected_conditions)
     identity = [text, selected_scope, source_hash]
     if conditional(selected_conditions) or replaces:
         identity.extend([selected_conditions, replaces])
+    if consolidation:
+        identity.extend(['consolidation/1', consolidation])
     return digest(identity)
 
 
@@ -160,6 +162,7 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS policies(profile_id TEXT PRIMARY KEY,data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS extractions(profile_id TEXT NOT NULL,fingerprint TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,fingerprint));
                 CREATE TABLE IF NOT EXISTS replacements(profile_id TEXT NOT NULL,old_id TEXT NOT NULL,new_id TEXT NOT NULL,old_revision INTEGER NOT NULL,new_revision INTEGER NOT NULL,PRIMARY KEY(profile_id,new_id));
+                CREATE TABLE IF NOT EXISTS consolidation_links(profile_id TEXT NOT NULL,old_id TEXT NOT NULL,new_id TEXT NOT NULL,old_revision INTEGER NOT NULL,new_revision INTEGER NOT NULL,PRIMARY KEY(profile_id,new_id,old_id));
                 CREATE TABLE IF NOT EXISTS run_bindings(profile_id TEXT NOT NULL,session TEXT NOT NULL,turn TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(session,turn));
                 CREATE TABLE IF NOT EXISTS run_proposals(profile_id TEXT NOT NULL,session TEXT NOT NULL,turn TEXT NOT NULL,fingerprint TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(session,turn,fingerprint));
             ''')
@@ -244,7 +247,12 @@ class MemoryStore:
             raise ValueError('来源类型无效')
         return {'type': 'manual', 'sourceHash': digest(text), 'capturedAt': None}
 
-    def source_status(self, entry):
+    def source_status(self, entry, _seen=None):
+        from easel.memory_consolidation import dependency_status
+        seen = set(_seen or ()) | {entry['id']}
+        dependency = dependency_status(self, entry, seen)
+        if dependency != 'available':
+            return dependency
         source = entry['source']
         if source['type'] not in ('analysis', 'run'):
             return 'available'
@@ -263,9 +271,9 @@ class MemoryStore:
         except (OSError, sqlite3.Error):
             return 'unavailable'
 
-    def _insert(self, db, profile, text, selected_scope, source, quality='hypothesis', selected_conditions=None, replaces=None):
+    def _insert(self, db, profile, text, selected_scope, source, quality='hypothesis', selected_conditions=None, replaces=None, consolidation=None):
         selected_conditions = conditions(selected_conditions)
-        key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces)
+        key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces, consolidation)
         if db.execute('SELECT 1 FROM tombstones WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone():
             raise Conflict('该候选已永久删除；相同来源的晚到提案不会重新创建')
         old = db.execute('SELECT data FROM entries WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone()
@@ -274,7 +282,7 @@ class MemoryStore:
         for row in db.execute('SELECT data FROM entries WHERE profile_id=?', (profile['id'],)):
             existing = entry_data(row[0])
             source_hash = digest(existing['text']) if existing['source']['type'] == 'manual' else existing['source'].get('sourceHash')
-            if candidate_key(existing['text'], existing['scope'], source_hash, existing['conditions'], existing.get('replaces')) == key:
+            if candidate_key(existing['text'], existing['scope'], source_hash, existing['conditions'], existing.get('replaces'), existing.get('consolidation')) == key:
                 return existing
         entry = {'id': uuid.uuid4().hex, 'profileId': profile['id'], 'text': text,
                  'scope': selected_scope, 'scopeHash': digest(selected_scope), 'contentHash': digest(text),
@@ -283,6 +291,8 @@ class MemoryStore:
         entry.update(conditions=selected_conditions, conditionsHash=digest(selected_conditions))
         if replaces:
             entry.update(replaces=replaces, replacementHash=digest(replaces))
+        if consolidation:
+            entry.update(consolidation=consolidation, consolidationHash=digest(consolidation))
         db.execute('INSERT INTO entries VALUES(?,?,?,?)', (entry['id'], profile['id'], key, json.dumps(entry, ensure_ascii=False)))
         self._save(db, entry)
         return entry
@@ -297,19 +307,27 @@ class MemoryStore:
             text, selected_scope = text_value(data.get('text')), scope(data.get('scope'))
             source = self._source(data.get('source'), text, selected_scope)
             selected_conditions = conditions(data.get('conditions'))
+            from easel.memory_consolidation import normalize, validate
+            consolidation = normalize(self, data.get('consolidation'))
             replaces = data.get('replaces')
+            if consolidation and replaces:
+                raise ValueError('归并和单条替代不能同时设置')
             # Retry identity remains stable even after the old entry was superseded.
             if replaces is not None:
                 replaces = self._replacement_binding(replaces)
-            key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces)
+            key = candidate_key(text, selected_scope, source.get('sourceHash'), selected_conditions, replaces, consolidation)
             previous = db.execute('SELECT data FROM entries WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone()
             if previous:
                 return entry_data(previous[0])
+            if db.execute('SELECT 1 FROM tombstones WHERE profile_id=? AND dedupe=?', (profile['id'], key)).fetchone():
+                raise Conflict('该候选已永久删除；相同来源的晚到提案不会重新创建')
             if 'profileRevision' in data and profile['revision'] != data['profileRevision']:
                 raise Conflict('经验列表已有更新；草稿保留，请刷新后重选')
             if replaces:
                 self._replacement(db, profile, replaces, selected_scope, selected_conditions)
-            return self._insert(db, profile, text, selected_scope, source, selected_conditions=selected_conditions, replaces=replaces)
+            if consolidation:
+                validate(self, db, profile, consolidation, selected_scope, selected_conditions)
+            return self._insert(db, profile, text, selected_scope, source, selected_conditions=selected_conditions, replaces=replaces, consolidation=consolidation)
 
     @project_after
     def extract_analysis(self, name, data):
@@ -331,7 +349,8 @@ class MemoryStore:
     @staticmethod
     def _replacement_binding(value):
         keys = ('id', 'revision', 'contentHash', 'scopeHash', 'conditionsHash')
-        if not isinstance(value, dict) or set(value) != set(keys) or not isinstance(value['revision'], int):
+        if (not isinstance(value, dict) or set(value) != set(keys)
+                or type(value['revision']) is not int or value['revision'] < 1):
             raise ValueError('请选择要替代的经验版本')
         if not all(isinstance(value[key], str) and value[key] for key in keys if key != 'revision'):
             raise ValueError('替代经验的版本信息无效')
@@ -349,7 +368,8 @@ class MemoryStore:
         rows = [f'# 经验沉淀\n\n<!-- Easel managed profile={profile["id"]} revision={profile["revision"]}; edit through the memory service -->',
                 '以下仅为当前画像无条件的跨平台参考经验；账号或条件经验须按任务从服务读取。']
         for entry in entries:
-            if entry['status'] == 'active' and entry['scope']['kind'] == 'profile' and not conditional(entry.get('conditions', conditions())):
+            if (entry['status'] == 'active' and entry['scope']['kind'] == 'profile'
+                    and not conditional(entry.get('conditions', conditions())) and self.source_status(entry) == 'available'):
                 rows.append(f'## {entry["id"]} · v{entry["revision"]} · {entry["quality"]}\n\n{entry["text"]}')
         return '\n\n'.join(rows) + '\n'
 
@@ -430,7 +450,8 @@ class MemoryStore:
             entry = self._entry(db, profile, entry_id)
             confirmed = (entry['contentHash'] == data.get('contentHash') and entry['scopeHash'] == data.get('scopeHash')
                          and entry['conditionsHash'] == data.get('conditionsHash', digest(conditions()))
-                         and entry.get('replacementHash') == data.get('replacementHash'))
+                         and entry.get('replacementHash') == data.get('replacementHash')
+                         and entry.get('consolidationHash') == data.get('consolidationHash'))
             if action == 'accept' and entry['status'] == 'active' and entry.get('acceptedFrom') == data.get('revision') and confirmed:
                 return entry
             if entry['revision'] != data.get('revision') or profile['revision'] != data.get('profileRevision'):
@@ -441,7 +462,7 @@ class MemoryStore:
                 for row in db.execute('SELECT data FROM revisions WHERE entry_id=?', (entry_id,)).fetchall():
                     version = json.loads(row[0])
                     source_hash = digest(version['text']) if version['source']['type'] == 'manual' else version['source'].get('sourceHash')
-                    db.execute('INSERT OR IGNORE INTO tombstones VALUES(?,?)', (profile['id'], candidate_key(version['text'], version['scope'], source_hash, version.get('conditions'), version.get('replaces'))))
+                    db.execute('INSERT OR IGNORE INTO tombstones VALUES(?,?)', (profile['id'], candidate_key(version['text'], version['scope'], source_hash, version.get('conditions'), version.get('replaces'), version.get('consolidation'))))
                 db.execute('DELETE FROM revisions WHERE entry_id=?', (entry_id,))
                 db.execute('DELETE FROM entries WHERE id=?', (entry_id,))
                 if entry['source']['type'] == 'legacy':
@@ -460,7 +481,7 @@ class MemoryStore:
                     # Identifier-only topology survives body deletion, including
                     # multiple deleted intermediate versions in a chain.
                     graph = {}
-                    for link in db.execute('SELECT old_id,new_id FROM replacements WHERE profile_id=?', (profile['id'],)):
+                    for link in db.execute('SELECT old_id,new_id FROM replacements WHERE profile_id=? UNION SELECT old_id,new_id FROM consolidation_links WHERE profile_id=?', (profile['id'], profile['id'])):
                         graph.setdefault(link['old_id'], set()).add(link['new_id'])
                         graph.setdefault(link['new_id'], set()).add(link['old_id'])
                     connected, pending = set(), [entry['id']]
@@ -474,6 +495,9 @@ class MemoryStore:
                         other = entry_data(row[0])
                         if other['id'] != entry['id'] and other['id'] in connected and other['status'] == 'active':
                             raise Conflict('关联经验仍有效，请先处理后再恢复旧经验')
+                elif entry.get('consolidation'):
+                    from easel.memory_consolidation import supersede
+                    supersede(self, db, profile, entry)
                 elif entry.get('replaces'):
                     old = self._replacement(db, profile, entry['replaces'], entry['scope'], entry['conditions'])
                     db.execute('INSERT INTO replacements VALUES(?,?,?,?,?)', (profile['id'], old['id'], entry['id'], old['revision'], entry['revision'] + 1))
@@ -495,6 +519,8 @@ class MemoryStore:
                     entry['conditions'] = conditions(data['conditions'])
                     if entry['status'] == 'pending' and entry.get('replaces'):
                         self._replacement(db, profile, entry['replaces'], entry['scope'], entry['conditions'])
+                    if entry.get('consolidation') and digest(entry['conditions']) != entry['conditionsHash']:
+                        raise Conflict('归并不能改变原适用条件')
                     entry['conditionsHash'] = digest(entry['conditions'])
                 review = data.get('reviewAfter')
                 if review is not None:
@@ -638,6 +664,7 @@ class MemoryStore:
             db.execute('DELETE FROM policies WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM extractions WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM replacements WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM consolidation_links WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM run_proposals WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM run_bindings WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM profiles WHERE id=?', (profile['id'],))
