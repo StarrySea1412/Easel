@@ -1,3 +1,8 @@
+## 0.14.3 · 2026-10-27 · Linux chat admission / Linux聊天启动修复
+
+- Normalize path arguments before POSIX/PowerShell quoting so shared-browser instructions no longer crash Linux chat before model admission. / 参数转义前统一转换路径类型，修复Linux聊天立即500及随后接回404。
+- Add cross-platform quoting and complete chat-context regressions; deploy independently from the unfinished major iteration. / 增加跨平台及完整聊天上下文回归，独立patch更新138；[部署与验收](docs/release-138-0.14.3-2026-10-27.md)。
+
 ## 0.14.2 · 2026-10-22 · Responsive creation navigation / 创作导航自适应
 
 - Wrap creation links within the available width, preserving complete labels and visible keyboard focus; remove forced horizontal scrolling and automatic page scrolling. / 顶部创作导航自动换行，完整显示入口及键盘焦点，移除强制横向滚动和切页自动滚动。
