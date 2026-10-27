@@ -6,7 +6,9 @@ from easel.profile_memory import MemoryStore
 
 def run(args):
     store = MemoryStore(data_root())
-    if args.action == 'propose':
+    if args.action == 'queue-run':
+        value = store.queue_run(args.session, args.turn, {'text': args.text, 'quote': args.quote}, name=args.profile)
+    elif args.action == 'propose':
         selected = {'kind': 'account', 'platform': args.platform, 'accountId': args.account} if args.platform else {'kind': 'profile'}
         value = store.propose(args.profile, {'text': args.text, 'scope': selected, 'source': {'type': 'manual'},
             'conditions': {'taskTypes': [args.task_type] if getattr(args, 'task_type', None) else [],
@@ -23,10 +25,13 @@ def run(args):
 
 def register(sub):
     parser = sub.add_parser('memory', help='读取画像经验或提出待确认候选（不自动生效）')
-    parser.add_argument('action', choices=['list', 'propose', 'context', 'extract-analysis'])
+    parser.add_argument('action', choices=['list', 'propose', 'context', 'extract-analysis', 'queue-run'])
     parser.add_argument('--profile', required=True)
     parser.add_argument('--text', default='')
     parser.add_argument('--binding', help='已保存分析来源ID，仅提取待确认候选')
+    parser.add_argument('--session', help='已由宿主固定画像的任务会话')
+    parser.add_argument('--turn', help='原任务轮次')
+    parser.add_argument('--quote', default='', help='最终回复中的依据原文，不能自行确认生效')
     parser.add_argument('--query', default='')
     parser.add_argument('--platform')
     parser.add_argument('--account')

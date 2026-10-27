@@ -31,6 +31,7 @@ from .browser_runtime import BrowserError
 from .local_records import _write_lock, RecordConflict
 from .codex_tasks import CodexTasks, DELIVER_TOOL
 from .task_store import TaskConflict
+from .run_experience import MEMORY_TOOL
 
 
 def safe(value):
@@ -421,7 +422,7 @@ class CodexService:
         if state['threadId']:
             params['threadId'] = state['threadId']
         else:
-            params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
+            params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL, MEMORY_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
             if state.get('taskGoal'):
                 params['dynamicTools'].append(DELIVER_TOOL)
         if state.get('taskGoal'):
@@ -465,10 +466,22 @@ class CodexService:
 
     def _task_cleanup_receipt(self, run):
         state = run['state']
-        if (state.get('taskGoal') and run.get('clientClosed') and not run.get('browserJobs')
+        if (run.get('clientClosed') and not run.get('browserJobs')
                 and not run.get('browserCleanupFailed')):
-            state['resourceSettled'] = True
-            self._persist(state)
+            if state.get('taskGoal'):
+                state['resourceSettled'] = True
+                self._persist(state)
+            self._memory_cleanup_receipt(state)
+
+    def _memory_cleanup_receipt(self, state):
+        from .run_experience import has_binding, from_outputs
+        try:
+            if has_binding(self.outputs, state['sessionId'], state['turn_id']):
+                state['memoryResourceSettled'] = True
+                self._persist(state)
+                from_outputs(self.outputs, state['sessionId'], state['turn_id'])
+        except (ValueError, LookupError, OSError, sqlite3.Error):
+            pass  # Experience availability cannot change the original task outcome.
 
     def _stop_task_async(self, run):
         if run.get('taskStopping'):
@@ -713,6 +726,17 @@ class CodexService:
                 run['client'].reply(event['id'], {'success': False, 'contentItems': [{'type': 'inputText', 'text': str(exc)}]})
                 self._stop_task_async(run)
                 return False
+        if method == 'item/tool/call' and params.get('tool') == 'easel_memory_candidate' and not params.get('namespace'):
+            try:
+                from .profile_memory import MemoryStore
+                state = run['state']
+                value = MemoryStore(self.outputs.parent, run_outputs=self.outputs).queue_run(
+                    state['sessionId'], state['turn_id'], params.get('arguments'))
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps(value, ensure_ascii=False)}]}
+            except (ValueError, LookupError, OSError, sqlite3.Error):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '候选未接受：须使用本轮原画像、简洁概括与最终回复的真实引文；不能自行确认生效。'}]}
+            run['client'].reply(event['id'], result)
+            return False
         if method == 'item/tool/call' and params.get('tool') == 'easel_task_deliver' and not params.get('namespace'):
             try:
                 if not run['state'].get('taskGoal'):
@@ -952,6 +976,8 @@ class CodexService:
                     if state.get('taskGoal') and state.get('outcome') in ('completed', 'failed', 'interrupted', 'rejected'):
                         state['resourceSettled'] = self.task_browser_settled(sid)
                         self._persist(state)
+                    if self.task_browser_settled(sid):
+                        self._memory_cleanup_receipt(state)
                     return state
                 client = None
                 try:
@@ -977,11 +1003,15 @@ class CodexService:
                         'checkedAt': int(time.time() * 1000), 'message': safe(str(exc))[:1500]}
                     self._persist(state)
                 finally:
+                    closed = client is None
                     if client:
                         try:
                             client.close()
+                            closed = True
                         except Exception:
                             pass
+                    if closed and self.task_browser_settled(sid):
+                        self._memory_cleanup_receipt(state)
                 return state
         except RecordConflict:
             raise HTTPException(409, '原轮次仍被运行或核对操作占用，请稍后读取。') from None

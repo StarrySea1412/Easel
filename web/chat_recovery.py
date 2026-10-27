@@ -265,6 +265,8 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
                 last_event_id=max((e['id'] for e in web._read_job_events(turn_id)), default=0))
         from easel.task_store import TaskStore
         TaskStore(web.OUTPUTS_DIR).release_chat(session_id, turn_id)
+        from easel.run_experience import from_outputs
+        from_outputs(web.OUTPUTS_DIR, session_id, turn_id, ledger=web._run_ledger_root())
         return result('stopped' if aborted and stop else 'already_finished', True)
     except (OSError, ValueError, TypeError):
         return result('unavailable')

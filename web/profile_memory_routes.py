@@ -98,6 +98,11 @@ def create_router(store_getter, extraction_recorder=None):
     def history(name: str, entry_id: str):
         return {'revisions': run(run(store_getter).history, name, entry_id)}
 
+    @router.get('/entries/{entry_id}/evidence')
+    def evidence(name: str, entry_id: str):
+        from easel.run_experience import evidence as read_evidence
+        return run(read_evidence, run(store_getter), name, entry_id)
+
     @router.post('/entries/{entry_id}/{action}')
     async def change(name: str, entry_id: str, action: str, request: Request):
         run(run(store_getter).change, name, entry_id, action, await payload(request, True))

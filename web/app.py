@@ -1890,7 +1890,8 @@ def _memory_store():
     from easel.profile_memory import MemoryStore
     from easel.memory_sources import analysis_source
     return MemoryStore(PROFILES_DIR.parent, PROFILES_DIR, _memory_analysis_source,
-        lambda binding: analysis_source(OUTPUTS_DIR, binding, _run_ledger_root(), require_settled=True))
+        lambda binding: analysis_source(OUTPUTS_DIR, binding, _run_ledger_root(), require_settled=True),
+        run_outputs=OUTPUTS_DIR, run_ledger=_run_ledger_root())
 
 
 def _extract_analysis_experience(binding):
@@ -4581,7 +4582,7 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
     runtime_text = persona_prefix(req.persona) + '\n' + message
     def render(memory):
         reference = experience_reference(memory)
-        return assemble(req.message, policy=policy, runtime=runtime_text,
+        return assemble(req.message, policy=policy, runtime=runtime_text + (memory or {}).get('proposalInstructions', ''),
                         references=[*references, *([reference] if reference else [])]) + suffix
     memory = _chat_memory_context(req, writing, prompt_builder=render)
     text = render(memory)
@@ -4615,8 +4616,20 @@ def _chat_memory_context(req, writing=None, *, prompt_builder=None):
             binding = json.loads(row[0])
             platform, account = binding['platform'], binding['accountId']
             task_type = 'account-analysis'
-    result = _memory_store().context(req.persona, req.message, platform, account, task_type=task_type,
-                                     prompt_builder=prompt_builder)
+    store = _memory_store()
+    proposal = ''
+    if req.sessionId and req.turnId and getattr(req, 'engine', 'openclaw') in ('openclaw', 'codex'):
+        from easel.run_experience import instructions
+        try:
+            bound = store.bind_run(req.persona, req.sessionId, req.turnId, engine=getattr(req, 'engine', 'openclaw'),
+                selected_scope={'kind': 'account', 'platform': platform, 'accountId': account} if platform and account else {'kind': 'profile'},
+                task_type=task_type)
+            proposal = instructions(bound, PROFILES_DIR.parent)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+    result = store.context(req.persona, req.message, platform, account, task_type=task_type,
+        prompt_builder=(lambda context: prompt_builder({**context, 'proposalInstructions': proposal})) if prompt_builder else None)
+    result['proposalInstructions'] = proposal
     if req.sessionId and req.turnId and result['recall'].get('promptAdmission', {}).get('admitted', True):
         if not _memory_store().record_use(req.persona, req.sessionId, req.turnId, result):
             raise HTTPException(409, '该轮已绑定其他经验版本；资料已更改，请新建一轮再发送。')
@@ -4639,7 +4652,7 @@ def _codex_message(req, *, prompt_builder=None):
     policy, runtime = turn_reminder(), persona_prefix(req.persona)
     def render(memory):
         reference = experience_reference(memory)
-        return assemble(req.message, policy=policy, runtime=runtime,
+        return assemble(req.message, policy=policy, runtime=runtime + (memory or {}).get('proposalInstructions', ''),
                         references=[*references, *([reference] if reference else [])])
     memory = _chat_memory_context(req, writing, prompt_builder=lambda context:
                                  prompt_builder(render(context)) if prompt_builder else render(context))
@@ -6508,6 +6521,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     resources_settled = False
                     log.warning('运行占位释放仍待重试：%s', turn_id, exc_info=True)
             if resources_settled:
+                from easel.run_experience import from_outputs
+                await asyncio.to_thread(from_outputs, OUTPUTS_DIR, sk, turn_id, ledger=_run_ledger_root())
                 to_client("done", sessionKey=sk, stopped=user_stopped)
             else:
                 to_client('recovery_required', '后台资源尚未确认结束，请重试停止核实。')

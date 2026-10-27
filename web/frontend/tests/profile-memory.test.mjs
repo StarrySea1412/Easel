@@ -18,6 +18,17 @@ const entry=(id='entry')=>({id,profileId:'pid',text:'摄影教程采用分步清
 const state=(name,revision=1,rows=[entry()])=>({name,profileId:name,revision,managed:true,entries:rows,legacy:null,projectionReady:true,warning:null});
 async function mount(t,name){const container=document.createElement('div');document.body.append(container);const root=createRoot(container);await act(async()=>root.render(createElement(Manager,{name,key:name})));t.after(async()=>{await act(async()=>root.unmount());container.remove();});return {container,root,button:text=>[...container.querySelectorAll('button')].find(b=>b.textContent===text)};}
 
+test('run proposals show literal evidence on demand and confirmation remains separate',async t=>{
+ const row={...entry(),source:{type:'run',sessionId:'original',turnId:'exact-turn',sourceHash:'h',capturedAt:null}};
+ const calls=[];t.mock.method(globalThis,'fetch',async url=>{calls.push(url);return response(String(url).endsWith('/evidence')?{quote:'原轮次的依据原文',limitation:'引文只证明出处，仍需复核。',turnId:'exact-turn'}:state('run-proposals',1,[row]));});
+ const v=await mount(t,'run-proposals');
+ assert.match(v.container.textContent,/任务提案 · 待复核/);assert.doesNotMatch(v.container.textContent,/原轮次的依据原文/);
+ await act(async()=>v.button('查看依据').click());
+ assert.match(v.container.textContent,/原轮次的依据原文/);assert.ok(v.button('确认生效'));
+ assert.equal(calls.filter(url=>String(url).endsWith('/evidence')).length,1);
+ assert.ok(calls.every(url=>!String(url).includes('/accept')));
+});
+
 test('candidate confirmation sends bound hashes and conflicts retain draft until explicit rebase',async t=>{
  let current=state('conflict');const requests=[];
  t.mock.method(globalThis,'fetch',async(url,options={})=>{requests.push({url,options});if(url.endsWith('/edit')){current=state('conflict',2,[{...entry(),revision:2,text:'另一窗口的新结论。'}]);return response({detail:'经验版本已改变；你的草稿保留'},409);}if(url.endsWith('/accept'))return response(state('conflict',2,[{...entry(),status:'active',revision:2}]));return response(current);});

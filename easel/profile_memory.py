@@ -129,7 +129,8 @@ def project_after(method):
 
 
 class MemoryStore:
-    def __init__(self, root: Path, profiles: Path | None = None, source_resolver=None, extraction_source_resolver=None):
+    def __init__(self, root: Path, profiles: Path | None = None, source_resolver=None, extraction_source_resolver=None,
+                 *, run_outputs=None, run_ledger=None):
         self.root = Path(root).resolve()
         self.profiles = Path(profiles) if profiles is not None else self.root / 'profiles'
         if linked(self.profiles) or self.profiles.resolve().parent != self.root:
@@ -144,6 +145,10 @@ class MemoryStore:
         from easel.memory_sources import analysis_source
         self.resolve_source = source_resolver or (lambda binding: analysis_source(self.root / 'outputs', binding))
         self.resolve_extraction_source = extraction_source_resolver or (lambda binding: analysis_source(self.root / 'outputs', binding, require_settled=True))
+        self.run_outputs = Path(run_outputs or self.root / 'outputs').resolve()
+        self.run_ledger = Path(run_ledger or self.run_outputs / '_sessions').resolve()
+        from easel.run_experience import source as run_source
+        self.resolve_run_source = lambda session, turn, engine: run_source(self.run_outputs, session, turn, engine, self.run_ledger)
         with self.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS profiles(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,revision INTEGER NOT NULL DEFAULT 0,managed INTEGER NOT NULL DEFAULT 0,projected_hash TEXT,projected_revision INTEGER NOT NULL DEFAULT -1);
@@ -155,6 +160,8 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS policies(profile_id TEXT PRIMARY KEY,data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS extractions(profile_id TEXT NOT NULL,fingerprint TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(profile_id,fingerprint));
                 CREATE TABLE IF NOT EXISTS replacements(profile_id TEXT NOT NULL,old_id TEXT NOT NULL,new_id TEXT NOT NULL,old_revision INTEGER NOT NULL,new_revision INTEGER NOT NULL,PRIMARY KEY(profile_id,new_id));
+                CREATE TABLE IF NOT EXISTS run_bindings(profile_id TEXT NOT NULL,session TEXT NOT NULL,turn TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(session,turn));
+                CREATE TABLE IF NOT EXISTS run_proposals(profile_id TEXT NOT NULL,session TEXT NOT NULL,turn TEXT NOT NULL,fingerprint TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(session,turn,fingerprint));
             ''')
 
     @contextmanager
@@ -209,6 +216,9 @@ class MemoryStore:
                         raise ValueError('经验开关须为布尔值')
                     policy[key] = data[key]
             if policy != self._policy(db, profile):
+                if not policy['candidatesEnabled']:
+                    from easel.run_experience import discard_profile
+                    discard_profile(db, profile['id'])
                 db.execute('INSERT OR REPLACE INTO policies VALUES(?,?)', (profile['id'], json.dumps(policy)))
                 db.execute('UPDATE profiles SET revision=revision+1 WHERE id=?', (profile['id'],))
             return policy
@@ -236,9 +246,12 @@ class MemoryStore:
 
     def source_status(self, entry):
         source = entry['source']
-        if source['type'] != 'analysis':
+        if source['type'] not in ('analysis', 'run'):
             return 'available'
         try:
+            if source['type'] == 'run':
+                current = self.resolve_run_source(source['sessionId'], source['turnId'], source['engine'])
+                return 'available' if current['sourceHash'] == source['sourceHash'] else 'changed'
             if not self.resolve_source:
                 return 'unavailable'
             current = self.resolve_source(source['bindingId'])
@@ -303,6 +316,18 @@ class MemoryStore:
         from easel.memory_extraction import extract
         return extract(self, name, data)
 
+    def bind_run(self, name, session, turn, **kwargs):
+        from easel.run_experience import bind
+        return bind(self, name, session, turn, **kwargs)
+
+    def queue_run(self, session, turn, data, *, name=None):
+        from easel.run_experience import queue
+        return queue(self, session, turn, data, name)
+
+    def settle_run(self, session, turn):
+        from easel.run_experience import settle
+        return settle(self, session, turn)
+
     @staticmethod
     def _replacement_binding(value):
         keys = ('id', 'revision', 'contentHash', 'scopeHash', 'conditionsHash')
@@ -356,6 +381,8 @@ class MemoryStore:
         return None
 
     def state(self, name):
+        from easel.run_experience import settle_pending
+        settle_pending(self, name)
         warning = None
         try:
             warning = self._sync_projection(name)
@@ -611,4 +638,6 @@ class MemoryStore:
             db.execute('DELETE FROM policies WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM extractions WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM replacements WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM run_proposals WHERE profile_id=?', (profile['id'],))
+            db.execute('DELETE FROM run_bindings WHERE profile_id=?', (profile['id'],))
             db.execute('DELETE FROM profiles WHERE id=?', (profile['id'],))

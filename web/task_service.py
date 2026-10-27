@@ -75,6 +75,7 @@ class TaskService:
         self.parallel_goal = None
         self.closing = False
         self.recovery_checks = {}
+        self.memory_check_at = 0
         self.power = TaskPower()
 
     @property
@@ -175,6 +176,11 @@ class TaskService:
         while not self.closing:
             try:
                 await self.tick()
+                if time.monotonic() >= self.memory_check_at:
+                    self.memory_check_at = time.monotonic() + 30
+                    from easel.run_experience import from_outputs
+                    await asyncio.to_thread(from_outputs, self.web.OUTPUTS_DIR,
+                        ledger=getattr(self.web, '_run_ledger_root', lambda: None)())
             except Exception:
                 log.exception('目标调度暂时失败；已持久化的任务不会重发')
             await asyncio.sleep(2)
