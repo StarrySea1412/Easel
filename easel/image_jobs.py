@@ -323,6 +323,14 @@ class ImageWorker:
         if self.thread:
             self.thread.join(timeout=2)
 
+    def pause_if_idle(self):
+        """Atomically fence new claims before an idle service shutdown."""
+        with self.lock:
+            if self.active:
+                return False
+            self.stop_event.set()
+            return True
+
     def _loop(self):
         while not self.stop_event.is_set():
             try:
@@ -336,12 +344,14 @@ class ImageWorker:
         jobs = ImageJobs(self.outputs())
         jobs.recover_receipts()
         with self.lock:
+            if self.stop_event.is_set():
+                return None
             for ident in self.active:
                 jobs.heartbeat(ident, self.owner)
-        job = jobs.claim(config, self.owner)
-        if job:
-            with self.lock:
+            job = jobs.claim(config, self.owner)
+            if job:
                 self.active.add(job['jobId'])
+        if job:
             threading.Thread(target=self.run, args=(jobs, job, config), name='easel-image-job', daemon=True).start()
         return job
 

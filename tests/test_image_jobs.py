@@ -18,6 +18,18 @@ from easel.image_jobs import ImageJobs, ImageWorker, channel
 CONFIG = {'IMG_BASE_URL': 'https://xjbh.lol/v1', 'IMG_MODEL': 'fixed-image', 'IMG_API_KEY': 'fixture-private-key'}
 
 
+def test_idle_shutdown_fences_claims_and_refuses_running_resources(tmp_path):
+    worker = ImageWorker(tmp_path, lambda: tmp_path / 'outputs', lambda: CONFIG, lambda: {})
+    job = submit(ImageJobs(tmp_path / 'outputs'))
+    worker.active.add(job['jobId'])
+    assert not worker.pause_if_idle()
+    assert not worker.stop_event.is_set()
+    worker.active.clear()
+    assert worker.pause_if_idle()
+    assert worker.tick() is None
+    assert ImageJobs(tmp_path / 'outputs').get(job['jobId'])['phase'] == 'queued'
+
+
 def submit(jobs, request='one', config=CONFIG):
     return jobs.submit({'prompt': '画一只猫'}, config, session='chat', turn='turn', request_id=request)
 

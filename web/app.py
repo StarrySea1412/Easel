@@ -5,6 +5,16 @@ import asyncio
 import base64
 import mimetypes
 import os
+if __name__ == '__main__' and os.environ.get('EASEL_DURABLE_RUNTIME', '1') == '1':
+    # The public web process must not import or initialize the execution app.
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from easel.runtime_env import web_environment
+    os.environ.update(web_environment(dict(os.environ)))
+    from easel.runtime_host import main as _runtime_main
+    raise SystemExit(_runtime_main(['serve']))
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -580,7 +590,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".webm", ".m4v"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI):
+async def _owned_lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
     global _HARNESS_LOOP
     _HARNESS_LOOP = asyncio.get_running_loop()
@@ -615,6 +625,16 @@ async def _lifespan(_app: FastAPI):
         await asyncio.to_thread(health.stop)
         await asyncio.to_thread(verification.stop)
         _stop_mp_login_on_shutdown()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Direct uvicorn launches share the same exclusion as the durable owner.
+    # A second web process must never start another scheduler on these data.
+    from easel.runtime_host import ownership
+    with ownership(DATA_DIR / '.execution-service' / 'application.lock'):
+        async with _owned_lifespan(_app):
+            yield
 
 
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
@@ -10099,4 +10119,10 @@ if __name__ == "__main__":
     if proxy_url:
         print(f"  {proxy_url}")
     print()
-    uvicorn.run(app, host=os.environ.get("EASEL_HOST", "0.0.0.0"), port=port, log_level="warning")
+    if os.environ.get('EASEL_DURABLE_RUNTIME', '1') == '1':
+        from easel.runtime_host import RuntimeProxy
+        target = RuntimeProxy()
+    else:
+        target = app
+    uvicorn.run(target, host=os.environ.get("EASEL_HOST", "0.0.0.0"), port=port,
+                proxy_headers=False, log_level="warning")

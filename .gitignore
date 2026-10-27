@@ -114,3 +114,5 @@ gui-test-screenshots/
 
 # Isolated browser acceptance data, local credentials and screenshots
 /.artifacts/
+# Private durable execution ownership and control credentials.
+.execution-service/

@@ -92,8 +92,8 @@ for module_name in (
     "skills.shared.scripts.account_stats", "skills.shared.scripts.douyin_publish",
     "skills.shared.scripts.weixin_mp_stats", "skills.shared.scripts.xhs_comment",
     "skills.shared.scripts.xhs_publish", "skills.shared.scripts.bili_login",
-    "skills.shared.scripts.manifest", "skills.openclaw.skill-data-tracker.scripts.track",
-    "skills.openclaw.skill-publish-log.scripts.log", "skills.openclaw.skill-publish-analytics.scripts.analyze",
+    "skills.shared.scripts.manifest", "skills.builtin.skill-data-tracker.scripts.track",
+    "skills.builtin.skill-publish-log.scripts.log", "skills.builtin.skill-publish-analytics.scripts.analyze",
 ):
     assert importlib.import_module(module_name).PROJECT_ROOT == app.DATA_DIR, module_name
 print(json.dumps({"profiles": str(app.PROFILES_DIR), "output": str(target)}))
@@ -170,7 +170,7 @@ def test_doctor_browser_deferral_keeps_other_requirements(ready_doctor, monkeypa
 @pytest.mark.parametrize("relative", [
     "skills/shared/scripts/ai_image.py", "skills/shared/scripts/ai_video.py",
     "skills/shared/scripts/ai_music.py", "skills/shared/scripts/voice_clone.py",
-    "skills/openclaw/ecom-details-image/scripts/generate_image.py",
+    "skills/builtin/ecom-details-image/scripts/generate_image.py",
 ])
 def test_media_loaders_use_data_config_without_stale_version_fallback(tmp_path, monkeypatch, relative):
     monkeypatch.syspath_prepend(str(PROJECT_ROOT / "skills/shared/scripts"))

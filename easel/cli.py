@@ -228,6 +228,11 @@ def cmd_web(args) -> int:
     return result.returncode
 
 
+def cmd_runtime(args) -> int:
+    from easel.runtime_host import main as runtime_main
+    return runtime_main([args.action])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="easel",
@@ -268,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     p_web = sub.add_parser("web", help="启动 Web UI")
     p_web.add_argument("--port", type=int, default=7860, help="端口（默认 7860）")
     p_web.set_defaults(func=cmd_web)
+
+    p_runtime = sub.add_parser('runtime', help='查看或空闲关闭独立执行服务')
+    p_runtime.add_argument('action', choices=('status', 'stop'), nargs='?', default='status')
+    p_runtime.set_defaults(func=cmd_runtime)
 
     # install（安装状态查看/管理；阶段执行走 setup 向导与发行版引导器）
     register_install(sub)

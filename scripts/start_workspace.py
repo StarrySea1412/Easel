@@ -222,6 +222,12 @@ def launch(root: Path, data: Path, args) -> int:
         if instance:
             url = f"http://127.0.0.1:{instance['port']}/"
             if args.restart:
+                # --restart is an explicit full restart (including pending
+                # storage migration). Refuse it while the owner has live work.
+                if (data / '.execution-service' / 'instance.json').exists():
+                    sys.path.insert(0, str(root))
+                    from easel.runtime_host import RuntimeManager
+                    RuntimeManager(data).stop()
                 stop_verified_web(instance)
                 state_file.unlink(missing_ok=True)
             else:
@@ -238,6 +244,11 @@ def launch(root: Path, data: Path, args) -> int:
                 raise RuntimeError('无法核验已有工作台的归属，未停止任何服务，也未开始迁移。')
     if args.reuse_only:
         raise RuntimeError('没有可复用的工作台。待迁移设置已保留；请重新启动并确认“重启并迁移”。')
+    if args.restart and (data / '.execution-service' / 'instance.json').exists():
+        # The observer may already be gone while its owner is still running.
+        sys.path.insert(0, str(root))
+        from easel.runtime_host import RuntimeManager
+        RuntimeManager(data).stop()
     logs = data / "logs"
     logs.mkdir(exist_ok=True)
     env['EASEL_GATEWAY_STARTUP_TIMEOUT'] = str(args.gateway_timeout)
@@ -266,7 +277,8 @@ def launch(root: Path, data: Path, args) -> int:
             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     url = f"http://127.0.0.1:{port}/"
-    if wait_for_web(process, url, expected, timeout=3000 if args.restart else 60):
+    startup_timeout = 120 if env.get('EASEL_DURABLE_RUNTIME', '1') == '1' else 60
+    if wait_for_web(process, url, expected, timeout=3000 if args.restart else startup_timeout):
         try:
             info = listener_info(port)
         except (OSError, ValueError, subprocess.TimeoutExpired):

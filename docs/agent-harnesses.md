@@ -1,5 +1,7 @@
 # Agent 底座接入与本地测试
 
+0.38.0源码启动默认将完整执行后端独立于网页进程。网页重启保留原生连接与唯一目标调度者；`python -m easel runtime status/stop`用于查看/空闲关闭，升级与内容迁移前须完整停止。执行服务自身死亡仍按具体引擎原轮次核对，不重发提示词。参见[执行服务及验证边界](durable-runtime-0.38.0.md)。138和安装器尚未更新。
+
 Easel 将执行底座与模型供应商分开。Web **设置 → 模型与渠道 → Agent 底座**
 统一选择仅聊天模式、OpenClaw、OpenCode、Codex 或通用 ACP。
 标准安装默认安装并使用 OpenClaw；设置中可切换到已安装的其它底座，不自动安装 Codex / OpenCode。

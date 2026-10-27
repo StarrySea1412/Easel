@@ -1,4 +1,4 @@
-"""Supervise Web/Gateway as child process groups; container restarts failed service."""
+"""Restart web observers independently; retain the single execution owner."""
 import os
 from pathlib import Path
 import signal
@@ -19,6 +19,16 @@ stopping = False
 def stop(_signal=None, _frame=None):
     global stopping
     stopping = True
+    # A full container stop explicitly closes the durable owner. Ordinary web
+    # crashes never reach this path and therefore do not interrupt its runs.
+    from easel.runtime_host import RuntimeManager, RuntimeUnavailable
+    manager = RuntimeManager()
+    try:
+        state = manager.read()
+        if state and state.get('port'):
+            manager.control(state, 'shutdown')
+    except RuntimeUnavailable:
+        pass  # Do not substitute an unverified PID kill for the private handshake.
     for child in reversed(children):
         if child.poll() is None:
             try:
@@ -33,6 +43,28 @@ def ready(url):
             return response.status == 200
     except OSError:
         return False
+
+
+def start_web():
+    return subprocess.Popen([sys.executable, '-m', 'uvicorn', 'application:app', '--app-dir',
+        str(ROOT / 'deployment/138'), '--host', '0.0.0.0', '--port', '7880', '--workers', '1',
+        '--no-proxy-headers', '--log-level', 'warning'], cwd=ROOT, start_new_session=True,
+        env={**os.environ, 'EASEL_DURABLE_RUNTIME': '1', 'EASEL_PORT': '7880'})
+
+
+def supervise_web():
+    failures = []
+    while not stopping:
+        if children[0].poll() is not None:
+            raise RuntimeError('Gateway exited; container restart required.')
+        if children[1].poll() is not None:
+            now = time.monotonic()
+            failures = [at for at in failures if now - at < 60]
+            if len(failures) >= 3:
+                raise RuntimeError('Web repeatedly failed; inspect runtime identity/configuration before retrying.')
+            failures.append(now)
+            children[1] = start_web()
+        time.sleep(.5)
 
 
 def run():
@@ -68,13 +100,8 @@ def run():
             time.sleep(0.5)
         finally:
             client.close()
-    children.append(subprocess.Popen([sys.executable, '-m', 'uvicorn', 'application:app', '--app-dir',
-        str(ROOT / 'deployment/138'), '--host', '0.0.0.0', '--port', '7880', '--workers', '1',
-        '--no-proxy-headers', '--log-level', 'warning'], cwd=ROOT, start_new_session=True))
-    while not stopping:
-        if any(child.poll() is not None for child in children):
-            raise RuntimeError('Supervised process exited; container restart required.')
-        time.sleep(0.5)
+    children.append(start_web())
+    supervise_web()
 
 
 if __name__ == '__main__':

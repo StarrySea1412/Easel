@@ -121,6 +121,23 @@ def test_restart_stops_only_verified_instance_then_starts(tmp_path, monkeypatch)
     assert events == [('stop', 21), ('gateway', 330)]
 
 
+def test_restart_without_web_stops_durable_owner_before_gateway(tmp_path, monkeypatch):
+    from easel import runtime_host
+    root, data = tmp_path / 'root', tmp_path / 'data'
+    (root / 'web/frontend/dist').mkdir(parents=True)
+    (root / 'web/frontend/dist/index.html').write_bytes(b'app')
+    (data / '.execution-service').mkdir(parents=True)
+    (data / '.execution-service/instance.json').write_text('mocked private identity')
+    events = []
+    monkeypatch.setattr(runtime_host, 'RuntimeManager', lambda directory: SimpleNamespace(
+        stop=lambda: events.append(('runtime', directory))))
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda *_a, **_k:
+        events.append(('gateway', None)) or SimpleNamespace(returncode=1))
+    with pytest.raises(RuntimeError, match='Gateway startup failed'):
+        launcher.main(['--root', str(root), '--data-dir', str(data), '--restart', '--no-browser'])
+    assert events == [('runtime', data), ('gateway', None)]
+
+
 def test_unverified_restart_never_stops_a_listener(tmp_path, monkeypatch):
     root = tmp_path / 'root'
     (root / 'web/frontend/dist').mkdir(parents=True)
