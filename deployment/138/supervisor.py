@@ -35,6 +35,15 @@ def ready(url):
         return False
 
 
+def check_children():
+    for name, child in zip(('Gateway', 'Web'), children):
+        code = child.poll()
+        if code is not None:
+            # Never log command arguments: they can contain credentials.
+            raise RuntimeError(f'Supervised {name} process pid={child.pid} exited with code={code}; '
+                               'container restart required. Check kernel OOM logs for code=-9.')
+
+
 def run():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -72,8 +81,7 @@ def run():
         str(ROOT / 'deployment/138'), '--host', '0.0.0.0', '--port', '7880', '--workers', '1',
         '--no-proxy-headers', '--log-level', 'warning'], cwd=ROOT, start_new_session=True))
     while not stopping:
-        if any(child.poll() is not None for child in children):
-            raise RuntimeError('Supervised process exited; container restart required.')
+        check_children()
         time.sleep(0.5)
 
 

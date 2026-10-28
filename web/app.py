@@ -4760,16 +4760,18 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
     if not path.is_file():
         return []
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        lines = path.read_bytes().splitlines()
+    except OSError:
         return []
     events = []
-    for line in text.splitlines():
+    for line in lines:
         try:
             event = json.loads(line)
-            if int(event.get("id", 0)) > after:
+            if (isinstance(event, dict) and type(event.get('id')) is int
+                    and event['id'] > after and isinstance(event.get('event'), str)
+                    and event['event']):
                 events.append(event)
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError, UnicodeError):
             continue
     return events
 
@@ -5186,7 +5188,14 @@ async def api_chat_stream(req: ChatRequest):
     try:
         store.reserve_chat(req.sessionId, req.turnId)
     except TaskConflict as exc:
-        raise HTTPException(409, str(exc)) from None
+        from chat_recovery import release_finished_chat
+        repaired = await asyncio.to_thread(release_finished_chat, sys.modules[__name__], store, req.sessionId)
+        if not repaired:
+            raise HTTPException(409, str(exc)) from None
+        try:
+            store.reserve_chat(req.sessionId, req.turnId)
+        except TaskConflict as retry_exc:
+            raise HTTPException(409, str(retry_exc)) from None
     release = lambda: store.release_chat(req.sessionId, req.turnId)
     try:
         if req.engine == 'codex':

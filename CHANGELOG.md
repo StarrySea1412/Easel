@@ -1,3 +1,9 @@
+## 0.14.5 · 2026-10-28 · Chat reservation recovery / 会话占用恢复
+
+- Release the exact orphan reservation after durable settlement; repair historical terminal reservations under the OS session lock before the next explicit message. Never replay a request or clear an active, mismatched or unconfirmed run. / 修复原轮次已结束却仍被两小时占用挡住的问题，保留内容和并发保护。
+- Persist a configurable 3 GiB application budget after a kernel-confirmed 2 GiB Gateway OOM; identify Gateway/Web PID and exit code in supervisor failures. / 修复重建丢失临时内存预算的问题，提供准确的子进程退出诊断。
+- [Scope, verification and host 138 receipt / 范围与实际回执](docs/chat-lease-recovery-0.14.5-2026-10-28.md).
+
 ## 0.14.4 · 2026-10-28 · Focused chat activity / 精简聊天行为提示
 
 - Remove empty plan, unavailable subagent configuration advice and repeated observation caveats from every chat turn. / 删除每轮固定出现的空计划、未配置子Agent提醒和重复免责声明。

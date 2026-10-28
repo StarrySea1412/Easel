@@ -49,7 +49,10 @@ services:
     tmpfs:
       - /tmp:size=512m,mode=1777
     shm_size: 256mb
-    mem_limit: 2g
+    # The 2 GiB cap killed the Gateway during observed chat/browser work.
+    # Keep the measured host override across recreations; isolated runs can
+    # select a smaller budget explicitly through their deployment env file.
+    mem_limit: ${EASEL_APP_MEMORY_LIMIT:-3g}
     cpus: 2.0
     pids_limit: 256
     cap_drop: [ALL]

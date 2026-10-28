@@ -96,3 +96,15 @@ def test_image_dependency_reuse_requires_every_locked_input(tmp_path, monkeypatc
         assert not builder.compatible(changed, baseline)
         missing = json.loads(json.dumps(candidate)); del missing['files'][name]
         assert not builder.compatible(missing, baseline)
+
+
+@pytest.mark.parametrize('name,code', [('Gateway', -9), ('Web', 1)])
+def test_supervisor_identifies_failed_child_without_logging_arguments(monkeypatch, name, code):
+    from types import SimpleNamespace
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    supervisor = load('supervisor')
+    live = SimpleNamespace(pid=101, poll=lambda: None)
+    failed = SimpleNamespace(pid=102, poll=lambda: code)
+    monkeypatch.setattr(supervisor, 'children', [failed, live] if name == 'Gateway' else [live, failed])
+    with pytest.raises(RuntimeError, match=f'{name} process pid=102 exited with code={code}'):
+        supervisor.check_children()
