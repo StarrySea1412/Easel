@@ -355,6 +355,15 @@ def validate_thinking_level(capability, model_ref, thinking_level):
             f'Thinking level "{thinking_level}" is not supported for {ref}. Use one of: {", ".join(levels)}.'))
 
 
+def automatic_thinking_level(capability, model_ref=None):
+    """Use this exact model's observed policy; unknown means runner default."""
+    ref = model_ref or capability.get('currentModelRef') or capability.get('defaultModelRef')
+    option = next((row for row in capability.get('options', []) if row.get('id') == ref), None)
+    levels = option.get('thinkingLevels') if option else None
+    order = ('ultra', 'max', 'adaptive', 'xhigh', 'high', 'medium', 'low', 'minimal', 'off')
+    return next((level for level in order if levels and level in levels), None)
+
+
 def _new_client():
     """Require existing matching pairing before any connection (no auto-pair)."""
     device = gateway._load_device()

@@ -5261,7 +5261,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     if requested_model_ref is not None:
         await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                 req.sessionId, requested_model_ref,
-                                transport='cli' if requested_thinking_level is not None else None,
+                                transport='cli' if requested_thinking_level is not None or req.autoContinue else None,
                                 thinking_level=requested_thinking_level)
     elif requested_thinking_level is not None:
         capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], req.sessionId, transport='cli')
@@ -5667,12 +5667,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             # turn runs is used by both transports on this turn.
             credentials = gateway_credentials()
             selected_transport = None
+            runtime_capability = None
             if requested_model_ref is not None:
-                selected_transport = ('cli' if requested_thinking_level is not None
+                selected_transport = ('cli' if requested_thinking_level is not None or req.autoContinue
                                       else await asyncio.to_thread(_resolve_transport, sk))
                 # Recheck the exact choice, running gateway and approved identity
                 # after queueing. Never remove the override or switch transports.
-                await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
+                runtime_capability = await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                         sk, requested_model_ref, transport=selected_transport, credentials=credentials,
                                         thinking_level=requested_thinking_level)
             _heal_openclaw_session(sk)
@@ -5690,6 +5691,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             # per-turn thinking field. Use the CLI when the user explicitly chose
             # a level so the value reaches OpenClaw's native --thinking option.
             is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None and not req.autoContinue
+            effective_thinking_level = requested_thinking_level
+            if not is_http and effective_thinking_level is None:
+                if runtime_capability is None:
+                    runtime_capability = await asyncio.to_thread(
+                        office_controls.turn_model_capability, sys.modules[__name__], sk,
+                        transport='cli', credentials=credentials)
+                effective_thinking_level = office_controls.automatic_thinking_level(runtime_capability, requested_model_ref)
             if cancel_job.is_set():
                 user_stopped = True
                 cancelled_before_start()
@@ -5744,9 +5752,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                             continuationCount=count, continuationReason=reason)
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
                                   'sessionId': _openclaw_session_id(sk), 'message': message,
-                                  'thinking': requested_thinking_level or THINKING_LEVEL,
                                   'deliver': False, 'timeout': TIMEOUT_CHAT,
                                   'idempotencyKey': turn_id}
+                        if effective_thinking_level is not None:
+                            params['thinking'] = effective_thinking_level
                         if requested_model_ref is not None:
                             params['model'] = requested_model_ref
                         proc = GatewayAgentProc(native_client,
@@ -5765,9 +5774,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         cmd = openclaw_base_cmd() + [
                             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                            "--thinking", requested_thinking_level or THINKING_LEVEL,
                             "--timeout", str(TIMEOUT_CHAT), "--message", message,
                         ]
+                        if effective_thinking_level is not None:
+                            cmd.extend(['--thinking', effective_thinking_level])
                         if requested_model_ref is not None:
                             cmd.extend(['--model', requested_model_ref])
                         env = credentials.environment(_proxy_env())

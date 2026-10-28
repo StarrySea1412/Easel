@@ -407,6 +407,44 @@ def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, 
     assert calls[0][1]['idempotencyKey'] == 'native-turn'
 
 
+@pytest.mark.parametrize('levels,expected', [(['off'],'off'), (['off','low','high'],'high'), (None,None)])
+def test_auto_continue_uses_exact_model_thinking_policy_not_global_medium(sandbox, monkeypatch, levels, expected):
+    calls=[]
+    monkeypatch.setattr(sandbox.client,'methods',sandbox.client.methods | {'models.list'})
+    def read(method, params):
+        if method=='models.list':
+            return {'models':[{'provider':'relay','id':'model-b',**({'thinkingLevels':[{'id':level} for level in levels]} if levels else {})}]}
+        assert method=='sessions.list'
+        return {'sessions':[]}
+    sandbox.client._rpc=read
+    class Native:
+        def _rpc(self, method, params, **kwargs):
+            assert method=='agent'
+            calls.append(params)
+            kwargs['on_accepted']({'runId':'automatic-thinking'})
+            return {'status':'ok','result':{'payloads':[{'text':'completed'}]}}
+        def close(self):pass
+    monkeypatch.setattr(web,'_native_agent_client',lambda credentials:Native())
+    monkeypatch.setattr(web,'THINKING_LEVEL','medium')
+    async def exercise():
+        response=await web.api_chat_stream(web.ChatRequest(message='test',sessionId='automatic-thinking-session',
+            turnId='automatic-thinking-turn',modelRef='relay/model-b',autoContinue=True))
+        return [event async for event in response.body_iterator]
+    events=asyncio.run(exercise())
+    assert len(calls)==1 and events[-1]['event']=='done'
+    if expected is None:assert 'thinking' not in calls[0]
+    else:assert calls[0]['thinking']==expected
+    assert not sandbox.probes and not sandbox.requests
+
+
+def test_automatic_thinking_does_not_borrow_another_models_policy():
+    capability={'defaultModelRef':'relay/a','options':[{'id':'relay/a','thinkingLevels':['off']},
+        {'id':'relay/b','thinkingLevels':['off','high']}]}
+    assert controls.automatic_thinking_level(capability)=='off'
+    assert controls.automatic_thinking_level(capability,'relay/b')=='high'
+    assert controls.automatic_thinking_level(capability,'relay/missing') is None
+
+
 def test_auto_continuation_uses_native_and_keeps_receipts_locks_and_run_identity(sandbox, monkeypatch):
     from easel.chat_continuation import CONTINUE_MESSAGE
     from easel.execution_store import read_snapshot
