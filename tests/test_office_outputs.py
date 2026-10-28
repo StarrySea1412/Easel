@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse
 from fastapi.testclient import TestClient
 import pytest
 
+from easel.artifacts import private_output
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'web'))
 import office_outputs as outputs
@@ -131,7 +133,8 @@ def test_endpoint_hrefs_reuse_existing_media_path_guard(tmp_path):
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), *nodes], type_ignores=[])
     ast.fix_missing_locations(module)
     app = FastAPI()
-    namespace = {'app': app, 'OUTPUTS_DIR': tmp_path, 'HTTPException': HTTPException, 'FileResponse': FileResponse}
+    namespace = {'app': app, 'OUTPUTS_DIR': tmp_path, 'HTTPException': HTTPException,
+                 'FileResponse': FileResponse, 'private_output': private_output}
     exec(compile(module, str(ROOT / 'web/app.py'), 'exec'), namespace)
     with TestClient(app) as client:
         response = client.get('/api/workspace-outputs')
@@ -146,3 +149,7 @@ def test_endpoint_hrefs_reuse_existing_media_path_guard(tmp_path):
         assert 'final%20%23.txt' in attachment.headers['content-disposition']
         assert client.get('/api/media/topic/%2e%2e/%2e%2e/outside.txt?download=1').status_code == 403
         assert client.get('/api/media/topic/%2e%2e/%2e%2e/outside.txt').status_code == 403
+        for folder in ('_artifacts', '_automation', '_browser'):
+            make_file(tmp_path, f'{folder}/private.txt')
+            for suffix in ('', '?download=1'):
+                assert client.get(f'/api/media/{folder}/private.txt' + suffix).status_code == 403

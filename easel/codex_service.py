@@ -7,6 +7,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import queue
 import re
@@ -32,6 +33,7 @@ from .local_records import _write_lock, RecordConflict
 from .codex_tasks import CodexTasks, DELIVER_TOOL
 from .task_store import TaskConflict
 from .run_experience import MEMORY_TOOL
+from . import codex_settlement
 
 
 def safe(value):
@@ -85,6 +87,10 @@ class CodexService:
                     state = json.loads(path.read_text(encoding='utf-8'))
                     if self._state_path(state['sessionId'], state['turn_id']) != path:
                         continue
+                    if codex_settlement.path(self, state['sessionId'], state['turn_id']).exists():
+                        with self.lock:
+                            codex_settlement.finish(self, state['sessionId'], state['turn_id'])
+                        continue
                     if state.get('status') == 'running':
                         state.update(status='done', outcome='unconfirmed', pending=[],
                                      error={'message': 'Easel 后端曾中断；此轮完成状态未确认，可核对原生结果。'})
@@ -109,7 +115,11 @@ class CodexService:
         with self.lock:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix('.tmp')
-            tmp.write_text(json.dumps(safe(data), ensure_ascii=False), encoding='utf-8')
+            with tmp.open('w', encoding='utf-8') as stream:
+                stream.write(json.dumps(safe(data), ensure_ascii=False))
+                stream.flush()
+                if path.suffix == '.recovery' or path.with_suffix('.recovery').exists():
+                    os.fsync(stream.fileno())
             tmp.replace(path)
 
     def folder(self, sid):
@@ -157,6 +167,10 @@ class CodexService:
             state = json.loads(path.read_text(encoding='utf-8'))
             if state.get('sessionId') != sid or state.get('turn_id') != tid:
                 raise HTTPException(409, 'Codex 记录身份不匹配，未采用该记录。')
+            if codex_settlement.path(self, sid, tid).exists():
+                state['outcome'] = 'unconfirmed'
+                state['recovery'] = {**state.get('recovery', {}), 'status': 'unconfirmed',
+                                     'message': '原生结果的本地记录尚待结算。'}
             return state
 
     def _persist(self, state):
@@ -198,11 +212,14 @@ class CodexService:
                 if item.get('type') == 'agentMessage' and item.get('phase') == 'commentary'
                 and item.get('text')][-50:]
 
-    def _execution_event(self, state):
+    def _execution_data(self, state):
         rows = codex_rows({**state, '_outputs': self.outputs})
-        self._event(state, 'execution', {'sessionId': state['sessionId'], 'turnId': state['turn_id'],
+        return {'sessionId': state['sessionId'], 'turnId': state['turn_id'],
             **page(rows, limit=100), 'source': 'codex',
-            'plan': state.get('plan', []), 'progress': self._progress(state), 'timeline': self._timeline(state, rows)})
+            'plan': state.get('plan', []), 'progress': self._progress(state), 'timeline': self._timeline(state, rows)}
+
+    def _execution_event(self, state):
+        self._event(state, 'execution', self._execution_data(state))
 
     def _event_path(self, sid, tid):
         return self.folder(sid) / 'turns' / (key(tid) + '.jsonl')
@@ -954,6 +971,16 @@ class CodexService:
         """Include unsettled persisted turns even after the chat lease was released."""
         turns = []
         with self.lock:
+            for journal in (self.folder(sid) / 'turns').glob('*.recovery'):
+                try:
+                    record = json.loads(journal.read_text(encoding='utf-8'))
+                    turn = record['turnId']
+                    if codex_settlement.path(self, sid, turn) != journal:
+                        raise ValueError('identity')
+                    codex_settlement.load(self, sid, turn)
+                except (OSError, ValueError, KeyError, TypeError, HTTPException):
+                    raise HTTPException(503, 'Codex恢复日志损坏，未发送新消息。') from None
+                turns.append(turn)
             for path in (self.folder(sid) / 'turns').glob('*.json'):
                 try:
                     state = json.loads(path.read_text(encoding='utf-8'))
@@ -972,6 +999,12 @@ class CodexService:
         try:
             with self._owner(sid):
                 state = self.snapshot(sid, tid)
+                if codex_settlement.path(self, sid, tid).exists():
+                    try:
+                        with self.lock:
+                            state = codex_settlement.finish(self, sid, tid)
+                    except (OSError, ValueError, TypeError, KeyError):
+                        return self.snapshot(sid, tid)
                 if state.get('status') != 'running' and state.get('outcome') != 'unconfirmed':
                     if state.get('taskGoal') and state.get('outcome') in ('completed', 'failed', 'interrupted', 'rejected'):
                         state['resourceSettled'] = self.task_browser_settled(sid)
@@ -990,18 +1023,19 @@ class CodexService:
                     project(recovered, native, safe)
                     if state.get('taskGoal'):
                         recovered['resourceSettled'] = self.task_browser_settled(sid)
-                    state = recovered
-                    state['recoveryEventAfter'] = state.get('seq', 0)
-                    state['recovery'] = {'source': 'codex-persisted-turn', 'status': 'adopted',
+                    recovered['recovery'] = {'source': 'codex-persisted-turn', 'status': 'adopted',
                                          'checkedAt': int(time.time() * 1000)}
-                    self._event(state, 'text_snapshot', state['text'])
-                    self._execution_event(state)
-                    self._event(state, 'error' if state.get('error') else 'done', state.get('error') or
-                        {'sessionKey': 'codex:' + state['threadId'], 'stopped': state['stopped']})
+                    with self.lock:
+                        codex_settlement.prepare(self, state, recovered)
+                        state = codex_settlement.finish(self, sid, tid)
                 except Exception as exc:
+                    state = self.snapshot(sid, tid)
                     state['recovery'] = {'source': 'codex-persisted-turn', 'status': 'unconfirmed',
                         'checkedAt': int(time.time() * 1000), 'message': safe(str(exc))[:1500]}
-                    self._persist(state)
+                    try:
+                        self._persist(state)
+                    except OSError:
+                        pass  # The pending journal still blocks another dispatch.
                 finally:
                     closed = client is None
                     if client:
@@ -1010,7 +1044,7 @@ class CodexService:
                             closed = True
                         except Exception:
                             pass
-                    if closed and self.task_browser_settled(sid):
+                    if closed and not codex_settlement.path(self, sid, tid).exists() and self.task_browser_settled(sid):
                         self._memory_cleanup_receipt(state)
                 return state
         except RecordConflict:
@@ -1048,25 +1082,32 @@ class CodexService:
         async def events():
             cursor, offset, heartbeat = max(0, after), 0, time.monotonic()
             while True:
-                with path.open('r', encoding='utf-8') as source:
-                    source.seek(offset)
-                    while True:
+                while True:
+                    # Close the reader before yielding to a slow observer. On
+                    # Windows an open reader can prevent atomic log replacement.
+                    with self.lock, path.open('rb') as source:
+                        source.seek(offset)
                         line_start = source.tell()
                         line = source.readline()
-                        if not line or not line.endswith('\n'):
+                        if not line or not line.endswith(b'\n'):
                             offset = line_start
                             break
                         offset = source.tell()
                         event = json.loads(line)
                         if event['id'] <= cursor:
                             continue
+                        if (event['event'] in ('done', 'error')
+                                and codex_settlement.path(self, sid, tid).exists()
+                                and event['id'] > self.snapshot(sid, tid).get('recoveryEventAfter', 0)):
+                            offset = line_start
+                            break
                         cursor = event['id']
                         if event['event'] in ('done', 'error') and event['id'] <= self.snapshot(sid, tid).get('recoveryEventAfter', 0):
                             continue
-                        yield {'id': str(cursor), 'event': event['event'], 'data': json.dumps(event['data'], ensure_ascii=False)}
-                        if event['event'] in ('done', 'error'):
-                            return
-                if self.snapshot(sid, tid)['status'] == 'done':
+                    yield {'id': str(cursor), 'event': event['event'], 'data': json.dumps(event['data'], ensure_ascii=False)}
+                    if event['event'] in ('done', 'error'):
+                        return
+                if self.snapshot(sid, tid)['status'] == 'done' and not codex_settlement.path(self, sid, tid).exists():
                     if offset < path.stat().st_size:
                         continue
                     return
