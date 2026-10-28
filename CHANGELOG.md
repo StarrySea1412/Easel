@@ -7,6 +7,7 @@
 - Verify the configured channel/model using synthetic images before correcting host-specific multimodal metadata and vision routing. Do not infer vision from a model name, probe an image-generation gateway, or recycle historical text-only claims. / 以合成图片实际回执修正138多模态配置与视觉路由；不按模型名猜能力，不再去生图网关试错。
 - Select automatic native thinking from the exact model's observed runtime policy; omit unknown defaults rather than imposing medium on an off-only model. Explicit choices remain validated. / 修复自动接续走原生网关时硬传medium导致off-only模型在读图前失败；按精确运行时能力选择自动档位，未知时由运行器决定。
 - Allow bounded Gateway cold startup (default 300 seconds, configurable 30–900) and align Docker startup grace. Process exits, authentication failures and deadline expiry still fail closed. / 修复138冷启动仍在初始化却被固定80秒期限终止；不把未就绪当作健康。
+- Host 138 production and isolation run fa0ff09e19ed, with verified runtime/HTTP assets, real synthetic-image replies over HTTP and browser, keyboard controls and 390px layout. Keep rollback data and the 3 GiB production budget; no installer release. / 正式已上线并完成真实读图验收，运行与备份详见回执。
 - [Diagnosis, verification, deployment and limitations / 原因与运行回执](docs/chat-auto-continue-0.14.6-2026-10-28.md).
 
 ## 0.14.5 · 2026-10-28 · Chat reservation recovery / 会话占用恢复
