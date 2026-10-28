@@ -108,3 +108,49 @@ def test_supervisor_identifies_failed_child_without_logging_arguments(monkeypatc
     monkeypatch.setattr(supervisor, 'children', [failed, live] if name == 'Gateway' else [live, failed])
     with pytest.raises(RuntimeError, match=f'{name} process pid=102 exited with code={code}'):
         supervisor.check_children()
+
+
+def test_gateway_cold_start_can_exceed_previous_80_second_limit(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    supervisor = load('supervisor')
+    clock = [0.0]
+    monkeypatch.delenv('EASEL_GATEWAY_STARTUP_TIMEOUT', raising=False)
+    monkeypatch.setattr(supervisor, 'children', [SimpleNamespace(pid=101, poll=lambda: None)])
+    monkeypatch.setattr(supervisor.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(supervisor.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(supervisor, 'ready', lambda url: clock[0] >= 120)
+    supervisor.wait_gateway_ready(supervisor.gateway_startup_timeout())
+    assert clock[0] == 120
+
+
+@pytest.mark.parametrize('state', ['timeout', 'stopping', 'exited'])
+def test_gateway_startup_still_rejects_unready_or_failed_process(monkeypatch, state):
+    from types import SimpleNamespace
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    supervisor = load('supervisor')
+    monkeypatch.setattr(supervisor, 'ready', lambda url: False)
+    monkeypatch.setattr(supervisor, 'stopping', state == 'stopping')
+    monkeypatch.setattr(supervisor, 'children', [SimpleNamespace(pid=101, poll=lambda: 1 if state == 'exited' else None)])
+    monkeypatch.setattr(supervisor.time, 'monotonic', lambda: 301)
+    with pytest.raises(RuntimeError):
+        supervisor.wait_gateway_ready(300)
+
+
+@pytest.mark.parametrize('value,expected', [('30', 30), ('900', 900), ('29', None), ('901', None), ('bad', None)])
+def test_gateway_startup_budget_is_bounded(monkeypatch, value, expected):
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    supervisor = load('supervisor')
+    monkeypatch.setenv('EASEL_GATEWAY_STARTUP_TIMEOUT', value)
+    if expected is None:
+        with pytest.raises(ValueError):
+            supervisor.gateway_startup_timeout()
+    else:
+        assert supervisor.gateway_startup_timeout() == expected
+
+
+def test_docker_startup_grace_uses_same_gateway_budget():
+    import yaml
+    app = yaml.safe_load((ROOT / 'deployment/138/compose.yaml').read_text())['services']['app']
+    budget = app['environment']['EASEL_GATEWAY_STARTUP_TIMEOUT']
+    assert app['healthcheck']['start_period'] == budget + 's'

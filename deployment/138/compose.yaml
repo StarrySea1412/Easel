@@ -33,6 +33,7 @@ services:
       EASEL_BROWSER_LIMIT: "1"
       EASEL_MEDIA_LIMIT: "1"
       EASEL_DEPLOYMENT_MODE: ${EASEL_DEPLOYMENT_MODE:-production}
+      EASEL_GATEWAY_STARTUP_TIMEOUT: ${EASEL_GATEWAY_STARTUP_TIMEOUT:-300}
       PYTHONUNBUFFERED: "1"
       PYTHONUTF8: "1"
       PLAYWRIGHT_BROWSERS_PATH: /opt/chromium
@@ -62,7 +63,7 @@ services:
       test: [CMD, python, /app/deployment/138/healthcheck.py]
       interval: 20s
       timeout: 6s
-      start_period: 90s
+      start_period: ${EASEL_GATEWAY_STARTUP_TIMEOUT:-300}s
       retries: 3
     logging:
       driver: json-file
