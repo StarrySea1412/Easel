@@ -110,11 +110,12 @@ class ExecutionStore:
         with self.lock:
             seq = payload.get('seq')
             if isinstance(seq, int):
-                if seq in self.seen:
+                identity = (str(payload.get('runId') or ''), seq)
+                if identity in self.seen:
                     return None
-                self.seen.add(seq)
+                self.seen.add(identity)
                 if len(self.seen) > 4096:
-                    self.seen = set(sorted(self.seen)[-2048:])
+                    self.seen = set(sorted(self.seen, key=lambda item: item[1])[-2048:])
             row_id = ident(self.session, self.turn, call)
             row = self.rows.get(row_id)
             if phase == 'start':

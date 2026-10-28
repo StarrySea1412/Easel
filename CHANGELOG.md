@@ -1,3 +1,10 @@
+## 0.14.6 · 2026-10-28 · Bounded chat continuation / 对话接续与工具修复
+
+- Continue confirmed idle-timeout, output-limit or short incomplete-plan endings in the same session, up to twice; retain model, locks, artifact ticket and progress. Never replay the original request. Unknown transport state, pending tools/questions and user stops do not trigger continuation. / 已确认终态后同会话接续，最多2次；沿用模型、会话锁、产物凭据与已有进度，不重放原消息，停止和待确认时不自动继续。
+- Stage validated image attachments under the existing allowed media root; preserve originals and current-session ownership. Use configured vision rather than a text-only chat override; wrap Linux pipefail scripts in explicitly quoted Bash. / 图片安全暂存，保留归属校验；固定使用已配置视觉模型，Linux脚本显式使用Bash。
+- Scope tool-event sequence deduplication to the runtime run, preserving receipts after continuation. / 按运行身份去重工具序号，保留接续后的真实回执。
+- [Diagnosis, verification, deployment and limitations / 原因与运行回执](docs/chat-auto-continue-0.14.6-2026-10-28.md).
+
 ## 0.14.5 · 2026-10-28 · Chat reservation recovery / 会话占用恢复
 
 - Release the exact orphan reservation after durable settlement; repair historical terminal reservations under the OS session lock before the next explicit message. Never replay a request or clear an active, mismatched or unconfirmed run. / 修复原轮次已结束却仍被两小时占用挡住的问题，保留内容和并发保护。

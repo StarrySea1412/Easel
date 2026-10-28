@@ -304,6 +304,9 @@ def test_uploads_are_scoped_to_the_owning_session(tmp_path, monkeypatch):
         sessionId="session-a",
         attachments=[first],
     )
+    from PIL import Image
+    Image.new('RGB', (1, 1)).save(tmp_path / first['path'])
+    monkeypatch.setattr(web, 'openclaw_state_dir', lambda: tmp_path / 'runtime-state')
     context = web._attachment_context(owned)
     assert f'outputs/{first["path"]}' in context
     assert second["path"] not in context

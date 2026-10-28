@@ -19,6 +19,7 @@ import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
 import ChatComposer from './ChatComposer';
+import ChatContinuationControls from './ChatContinuationControls';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
 import { addChatDraftQuote, setChatDraftText } from '../lib/chatDrafts';
 import type { MessageSettingsActions } from './ChatMessageSettings';
@@ -510,6 +511,14 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
 
       {!isImported && <div className="chat-input-area">
         {!isImported && <div className="chat-input-inner">
+          {session.engine !== 'codex' && <ChatContinuationControls key={session.id} sessionId={session.id}
+            busy={isStreaming || stopping || taskBusy || Boolean(session.pendingTurnId)}
+            canContinue={session.messages.at(-1)?.role === 'assistant' && !taskBusy}
+            onContinue={() => {
+              const previous = session.messages.findLast(message => message.role === 'user');
+              onSend('继续完成尚未完成的任务。先核对上轮工具回执和已有产物，从断点继续；不要重发原任务或重复已提交的生成、发布等操作。需要我确认或补材料时明确说明。',
+                undefined, previous?.selectedSkills, previous?.skillRequirements, previous?.requestedThinkingLevel, previous?.requestedModelRef);
+            }}/>}
           {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
             <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>
             <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}

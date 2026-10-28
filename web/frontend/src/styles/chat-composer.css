@@ -163,3 +163,7 @@
 .composer-add-menu button span { display:grid; gap:3px; }
 .composer-add-menu button small { color:var(--text-tertiary); font-size:10px; }
 .composer-add-menu hr { margin:5px; border:0; border-top:1px solid var(--border); }
+.chat-continuation-controls { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:4px 2px 8px; font-size:12px; color:var(--text-secondary); }
+.chat-continuation-controls label { display:flex; align-items:center; gap:6px; cursor:pointer; }
+.chat-continuation-controls input { accent-color:var(--accent); }
+.chat-continuation-controls label span { opacity:.7; }

@@ -1,4 +1,5 @@
 import { registerImportedSkillNames } from './skillDisplayNames';
+import { readChatAutoContinue } from './chatContinuation';
 import { collectAnalytics, analyticsScope, restoreAnalyticsSnapshot } from './analyticsCache';
 import { publishWorkbenchChange } from './workbenchEvents';
 import { decodeChatCompaction } from './chatCompaction';
@@ -1279,7 +1280,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(history?.length ? { history } : {}), ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
+              body: JSON.stringify({ message, autoContinue: readChatAutoContinue(sessionId), ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(history?.length ? { history } : {}), ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {

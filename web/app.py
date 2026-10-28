@@ -4312,6 +4312,7 @@ async def api_chat_branch(req: ChatBranchRequest):
 
 
 class ChatRequest(BaseModel):
+    autoContinue: bool = False
     engine: Literal['openclaw', 'codex'] = 'openclaw'
     message: str
     history: list[HistoryMessage] = Field(default_factory=list, max_length=200)
@@ -4409,7 +4410,11 @@ def _attachment_context(req: ChatRequest) -> str:
         seen.add(normalized)
         rows.append(f"- outputs/{normalized}")
         if full.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}:
-            images.append(str(full))
+            from easel.attachment_media import stage_image
+            try:
+                images.append(str(stage_image(full, openclaw_state_dir(), scope)))
+            except (OSError, ValueError):
+                raise HTTPException(400, '图片附件读取准备失败，请重新上传有效图片') from None
 
     return (
         "〔系统附件清单，仅供本轮执行，不要向用户复述文件上传过程或内部路径〕\n"
@@ -4418,7 +4423,9 @@ def _attachment_context(req: ChatRequest) -> str:
         + "\n需要纳入内容项目时，将清单内文件复制到 outputs/<项目>/assets/ 后再使用；"
           "保留 inbox 原件，确保重试仍可复现。"
         + ('\n图片附件须先用现有image/read工具实际读取，再分析视觉内容；不能凭文件名声称已看图。实际路径：\n'
-           + '\n'.join(images) if images else '')
+           + '\n'.join(images)
+           + '\n使用view_image时不要指定聊天模型覆盖已配置的图片理解模型。图片读取失败时明确说明；'
+             '禁止以像素统计、ASCII轮廓或文件名猜测冒充视觉理解，也不要读取.env或密钥来寻找模型。' if images else '')
     )
 
 
@@ -5666,7 +5673,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             # The OpenAI-compatible gateway endpoint does not expose a documented
             # per-turn thinking field. Use the CLI when the user explicitly chose
             # a level so the value reaches OpenClaw's native --thinking option.
-            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None
+            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None and not req.autoContinue
             if cancel_job.is_set():
                 user_stopped = True
                 cancelled_before_start()
@@ -5708,6 +5715,17 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         return
                     if native_client is not None:
                         from easel.gateway_agent import GatewayAgentProc
+                        from easel.chat_continuation import continuation_reason
+                        def _continuation(**values):
+                            if cancel_job.is_set() or sk in _STOPPED_CHAT:
+                                return None
+                            snapshot = execution_store.snapshot()
+                            return continuation_reason(**values, plan=snapshot.get('plan', []),
+                                                       operations=snapshot.get('operations', []))
+                        def _continued(count, reason):
+                            loop.call_soon_threadsafe(to_client, 'activity', f'原轮次已结束，自动继续 {count}/2（保留已有进度）')
+                            run_ledger.mark(_run_ledger_root(), turn_id, event='auto_continue', status='running',
+                                            continuationCount=count, continuationReason=reason)
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
                                   'sessionId': _openclaw_session_id(sk), 'message': message,
                                   'thinking': requested_thinking_level or THINKING_LEVEL,
@@ -5719,11 +5737,15 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
                             on_compaction=lambda event: loop.call_soon_threadsafe(_mark_compaction, event),
                             on_tool=tool_update,
+                            continuation=_continuation if req.autoContinue else None,
+                            on_continue=_continued,
                             on_accepted=lambda run_id: loop.call_soon_threadsafe(
                                 _mark_gateway_acceptance, run_id))
                     else:
                         proc = None
                     if proc is None:
+                        if req.autoContinue:
+                            to_client('activity', '当前运行器不支持安全自动继续；本轮结束后可手动继续。')
                         cmd = openclaw_base_cmd() + [
                             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
@@ -5849,6 +5871,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             for it in items:
                                 qid = it.get("id")
                                 if qid and qid not in pushed:
+                                    if hasattr(proc, '_pending_question'):
+                                        proc._pending_question = True
                                     pushed.add(qid)
                                     _emit("question", json.dumps({
                                         "id": qid,
