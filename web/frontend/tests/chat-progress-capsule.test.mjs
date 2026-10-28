@@ -31,6 +31,8 @@ test('capsule and inline operations share one reader; only explicit plan updates
   assert.equal(v.container.querySelector('.chat-progress-popover'),null);
   await v.click('.chat-progress-capsule');
   assert.equal(v.container.querySelectorAll('.chat-progress-popover li').length,3);
+  assert.match(v.container.querySelector('.chat-progress-popover').textContent,/核对现有实现.*实现任务清单.*验证实际结果/);
+  assert.equal(v.container.querySelector('.chat-agent-capabilities'),null);
   await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:execution',{detail:{...snapshot(),operations:[{id:'tool',name:'exec',status:'completed',command:'qa',path:'',output:'ok',diff:''}]}})));
   assert.match(v.container.querySelector('.chat-progress-capsule').textContent,/1\/3/);
   await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:execution',{detail:{...snapshot(),plan:plan.map(step=>({...step,status:'completed'}))}})));
@@ -51,6 +53,20 @@ test('observed root and child actions use exact office turn; config and foreign 
   await v.respond(index,{sessionId:'a',turnId:'t1',agents:[{id:'root:a',name:'主Agent',role:'root',status:'thinking',task:'qa',observedModel:identity},{id:'child',parentId:'root:a',name:'校验者',role:'subagent',status:'running',task:'核验',observedModel:{...identity,source:'configured'}}],events:[]});
   assert.match(v.container.textContent,/主 Agent.*正在思考/);assert.match(v.container.textContent,/test-record-model/);assert.match(v.container.textContent,/qa-channel/);assert.match(v.container.textContent,/子 Agent.*校验者/);assert.match(v.container.textContent,/模型未上报/);
   assert.equal(v.container.querySelector('[data-agent-id="child"] [data-provider-brand]'),null);
+  assert.equal(v.container.querySelector('.chat-agent-capabilities'),null);
+});
+
+test('failed delegation keeps the actual tool receipt without generic model configuration advice',async t=>{
+  const v=await setup(t);
+  await v.respond(0,{...snapshot(),plan:[],runtime:{subagentsConfigured:false,subagentReason:'先选启动模型并保存'},
+    operations:[{id:'spawn-denied',name:'sessions_spawn',kind:'tool',status:'denied',command:'',path:'',output:'委派被拒绝：启动深度为0',diff:''}]});
+  const record=v.container.querySelector('.chat-execution-row');
+  assert.ok(record);
+  assert.match(v.container.textContent,/委派子 Agent/);
+  assert.equal(v.container.querySelector('.chat-agent-capabilities'),null);
+  assert.doesNotMatch(v.container.textContent,/先选启动模型|复杂任务应先|未收到回执不代表/);
+  await act(async()=>record.querySelector('summary').click());
+  assert.match(v.container.textContent,/启动深度为0/);
 });
 test('stopped and failed runs preserve unchecked steps and expose interrupted progress reads',async t=>{
   const v=await setup(t);await v.respond(0,snapshot());await v.render('a',{stopped:true});await v.click('.chat-progress-capsule');assert.match(v.container.textContent,/本轮已停止，未完成步骤保留/);
@@ -84,7 +100,7 @@ test('backend provider-wait wording never remains in failed history',async t=>{
   assert.match(v.container.querySelector('.chat-progress-summary').textContent,/本轮失败/);
   assert.doesNotMatch(v.container.textContent,/180 秒|仍在等待 provider/);
   assert.match(v.container.textContent,/已读取材料/);
-  assert.match(v.container.querySelector('.chat-agent-capabilities').textContent,/未收到更新|历史记录未保存协作配置/);
+  assert.equal(v.container.querySelector('.chat-agent-capabilities'),null);
 });
 const handshake=['请求已收到，等待运行器确认','已进入运行器，等待模型事件'];
 const question='等待你回答问题，请查看输入框上方的选项卡。';

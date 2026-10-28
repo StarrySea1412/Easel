@@ -1,3 +1,9 @@
+## 0.14.4 · 2026-10-28 · Focused chat activity / 精简聊天行为提示
+
+- Remove empty plan, unavailable subagent configuration advice and repeated observation caveats from every chat turn. / 删除每轮固定出现的空计划、未配置子Agent提醒和重复免责声明。
+- Keep real plans in task progress, observed child identities in activity, and delegation outcomes in tool receipts. No change to Agent permissions or model settings. / 真实计划、子Agent身份和委派失败记录保留在对应入口，不改启动权限或模型配置。
+- Add regressions for ordinary chat, actual plans, observed children, failure details and retry controls. / 补充普通问答、真实计划/委派及读取重试回归；[使用与验收](docs/chat-activity-0.14.4-2026-10-28.md)。
+
 ## 0.14.3 · 2026-10-27 · Linux chat admission / Linux聊天启动修复
 
 - Normalize path arguments before POSIX/PowerShell quoting so shared-browser instructions no longer crash Linux chat before model admission. / 参数转义前统一转换路径类型，修复Linux聊天立即500及随后接回404。
