@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import uuid
+from collections import deque
 
 from fastapi import HTTPException
 
@@ -16,13 +17,62 @@ class Pool:
     def __init__(self, name: str, capacity: int):
         self.name, self.capacity, self.active = name, capacity, 0
         self.lock = threading.Lock()
+        self.waiters = deque()
 
     def acquire(self):
         with self.lock:
-            if self.active >= self.capacity:
+            if self.active >= self.capacity or self.waiters:
                 raise HTTPException(429, {'code': 'server_busy', 'message': '服务器已有任务运行，请稍后重试。', 'resource': self.name}, headers={'Retry-After': '5'})
             self.active += 1
         return Lease(self)
+
+    async def acquire_chat(self, cancelled, on_wait=None, *, timeout=600, max_waiters=16):
+        """FIFO waiting only for durable chat supervisors, never for HTTP retries."""
+        ticket = object()
+        with self.lock:
+            if cancelled.is_set():
+                return None
+            if self.active < self.capacity and not self.waiters:
+                self.active += 1
+                return Lease(self)
+            if len(self.waiters) >= max_waiters:
+                raise HTTPException(429, {
+                    'code': 'chat_server_queue_full', 'category': 'execution', 'retryable': True,
+                    'stage': 'agent_queue', 'resource': self.name,
+                    'message': '服务器等待队列已满；本轮未发送到模型，请稍后重试。',
+                })
+            self.waiters.append(ticket)
+        started, previous = time.monotonic(), None
+        try:
+            while True:
+                with self.lock:
+                    if cancelled.is_set():
+                        return None
+                    if self.waiters[0] is ticket and self.active < self.capacity:
+                        self.waiters.popleft()
+                        self.active += 1
+                        return Lease(self)
+                    position = self.waiters.index(ticket) + 1
+                if time.monotonic() - started >= timeout:
+                    raise HTTPException(429, {
+                        'code': 'chat_server_queue_timeout', 'category': 'execution', 'retryable': True,
+                        'stage': 'agent_queue', 'resource': self.name,
+                        'message': '服务器等待超时；本轮未发送到模型，可稍后手动继续。',
+                    })
+                if position != previous and on_wait is not None:
+                    on_wait(position)
+                previous = position
+                await asyncio.sleep(0.1)
+        finally:
+            with self.lock:
+                if ticket in self.waiters:
+                    self.waiters.remove(ticket)
+
+
+def queued_chat(call):
+    """The OpenClaw SSE supervisor owns admission; Codex keeps the old fence."""
+    call._easel_queued_chat = True
+    return call
 
 
 class Lease:
@@ -136,6 +186,10 @@ def install_limits(workspace):
         if inspect.iscoroutinefunction(call):
             @functools.wraps(call)
             async def asynchronous(*args, **kwargs):
+                if getattr(call, '_easel_queued_chat', False):
+                    req = kwargs.get('req') if 'req' in kwargs else args[0]
+                    if getattr(req, 'engine', 'openclaw') != 'codex':
+                        return await call(*args, **kwargs)
                 lease, previous = pools[group].acquire(), capture()
                 async def complete():
                     try:
@@ -181,4 +235,5 @@ def install_limits(workspace):
                 'deployment': {'mode': 'server', 'readOnlyRoot': True,
                                'environmentInstall': False, 'storageMigration': False},
                 'codex': os.environ.get('EASEL_CODEX_ENABLED', '0') == '1',
-                'resources': {name: {'capacity': pool.capacity, 'active': pool.active} for name, pool in pools.items()}}
+                'resources': {name: {'capacity': pool.capacity, 'active': pool.active,
+                                     'waiting': len(pool.waiters)} for name, pool in pools.items()}}

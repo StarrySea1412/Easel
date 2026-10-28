@@ -147,6 +147,78 @@ async def collect_turn(model_ref='relay/model-b', turn='model-turn', session='mo
     return events, await web.api_chat_last(session, turn)
 
 
+def test_server_queue_stop_retains_running_lease_and_sends_no_model_request(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        response = await web.api_chat_stream(web.ChatRequest(message='not dispatched', sessionId='queued-server',
+            turnId='queued-server-stop', modelRef='relay/model-b'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert len(pool.waiters) == 1 and not sandbox.requests
+        result = await web.api_chat_stop(web.StopRequest(sessionId='queued-server', turnId='queued-server-stop'))
+        events = [event async for event in response.body_iterator]
+        await asyncio.sleep(0)
+        assert result['stopped'] and json.loads(events[-1]['data'])['stopped'] is True
+        assert any('尚未发送到模型' in str(event['data']) for event in events)
+        assert pool.active == 1 and not pool.waiters and not sandbox.requests
+        ledger = web.run_ledger.read(web._run_ledger_root(), 'queued-server-stop')
+        assert ledger['status'] == 'stopped' and ledger['settled'] and ledger['resourceSettled']
+        running.release()
+    asyncio.run(exercise())
+
+
+def test_server_queue_dispatches_once_after_running_task_releases(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        task = asyncio.create_task(collect_turn(session='queued-dispatch', turn='queued-dispatch-turn'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert len(pool.waiters) == 1 and not sandbox.requests
+        running.release()
+        events, last = await task
+        await asyncio.sleep(0)
+        assert len(sandbox.requests) == 1 and last['clean_end'] is True
+        assert pool.active == 0 and not pool.waiters
+    asyncio.run(exercise())
+
+
+def test_browser_disconnect_keeps_the_same_queued_supervisor(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        response = await web.api_chat_stream(web.ChatRequest(message='dispatch only once', sessionId='queued-disconnect',
+            turnId='queued-disconnect-turn', modelRef='relay/model-b'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert pool.waiters and not sandbox.requests
+        await response.body_iterator.aclose()
+        assert 'queued-disconnect-turn' in web._CHAT_JOBS
+        running.release()
+        for _ in range(200):
+            if 'queued-disconnect-turn' not in web._CHAT_JOBS:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0)
+        saved = await web.api_chat_last('queued-disconnect', 'queued-disconnect-turn')
+        assert saved['clean_end'] and len(sandbox.requests) == 1
+        assert pool.active == 0 and not pool.waiters
+    asyncio.run(exercise())
+
+
 def test_stop_while_waiting_for_session_lock_cancels_only_queued_job(sandbox, monkeypatch):
     async def exercise():
         lock = asyncio.Lock()

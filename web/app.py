@@ -57,6 +57,7 @@ from easel.collection_errors import collection_failure
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.artifacts import ArtifactStore, private_output
+from easel.runtime_limits import queued_chat
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
     sys.path.insert(0, str(PROJECT_ROOT / "mcp" / "easel-notify"))
@@ -4426,6 +4427,8 @@ def _attachment_context(req: ChatRequest) -> str:
            + '\n'.join(images)
            + '\n使用view_image时不要指定聊天模型覆盖已配置的图片理解模型。图片读取失败时明确说明；'
              '禁止以像素统计、ASCII轮廓或文件名猜测冒充视觉理解，也不要读取.env或密钥来寻找模型。' if images else '')
+        + ('\n不要沿用历史回复里“对话模型纯文本”的判断；以本轮配置和实际读图回执为准。'
+           '不要把生图网关当作看图渠道，也不要枚举未配置模型探测。' if images else '')
     )
 
 
@@ -5184,6 +5187,7 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
 
 
 @app.post("/api/chat/stream")
+@queued_chat
 async def api_chat_stream(req: ChatRequest):
     annotate_failure(operation='chat', stage='request', modelRef=req.modelRef, sessionId=req.sessionId, turnId=req.turnId)
     # Durable admission shared with automatic goals. Existing supervisor still
@@ -5312,8 +5316,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
     cancel_job = threading.Event()
     _CHAT_JOBS[turn_id] = (sk, cancel_job)
+    agent_lease = None
 
     async def supervisor():
+        nonlocal agent_lease
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
         provider_key = _chat_provider_key(requested_model_ref)
         provider_lock = _provider_lock(provider_key)
@@ -5570,6 +5576,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
         try:
+            # Own capacity for the supervisor's whole lifetime, including
+            # cleanup. Queueing happens after durable admission, before tools.
+            pool = getattr(app.state, 'server_pools', {}).get('agent')
+            if pool is not None:
+                agent_lease = await pool.acquire_chat(cancel_job, lambda position: to_client(
+                    'activity', f'⏳ 服务器正在执行其他任务，本轮等待中（第{position}位）；尚未发送到模型，可停止取消。'))
+                if agent_lease is None:
+                    user_stopped = True
+                    cancelled_before_start()
+                    return
             while lock.locked() and not cancel_job.is_set():
                 await asyncio.sleep(0.1)
             if cancel_job.is_set():
@@ -6237,7 +6253,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         pass
         except Exception as e:
             error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
-                     and str(e.detail.get('code', '')).startswith('chat_model_')
+                     and str(e.detail.get('code', '')).startswith(('chat_model_', 'chat_server_queue_'))
                      else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
             save_turn(pk, 'done', ''.join(full_text), {
@@ -6290,6 +6306,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
     def _bg_done(t):
         _BG_TASKS.discard(t)
+        if agent_lease is not None:
+            agent_lease.release()
         if on_done is not None:
             on_done()
         if _CHAT_JOBS.get(turn_id) == (sk, cancel_job):

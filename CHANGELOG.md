@@ -3,6 +3,8 @@
 - Continue confirmed idle-timeout, output-limit or short incomplete-plan endings in the same session, up to twice; retain model, locks, artifact ticket and progress. Never replay the original request. Unknown transport state, pending tools/questions and user stops do not trigger continuation. / 已确认终态后同会话接续，最多2次；沿用模型、会话锁、产物凭据与已有进度，不重放原消息，停止和待确认时不自动继续。
 - Stage validated image attachments under the existing allowed media root; preserve originals and current-session ownership. Use configured vision rather than a text-only chat override; wrap Linux pipefail scripts in explicitly quoted Bash. / 图片安全暂存，保留归属校验；固定使用已配置视觉模型，Linux脚本显式使用Bash。
 - Scope tool-event sequence deduplication to the runtime run, preserving receipts after continuation. / 按运行身份去重工具序号，保留接续后的真实回执。
+- Queue accepted streaming OpenClaw chats before server execution admission, with FIFO positions, cancellation, a 16-waiter bound and a 10-minute wait limit. Retain the slot until supervisor cleanup ends, including browser disconnects. / 已接受的聊天先持久登记再有界排队，满载不再立即server_busy；断线不重发、停止不释放其他任务，保留执行并发限制。
+- Verify the configured channel/model using synthetic images before correcting host-specific multimodal metadata and vision routing. Do not infer vision from a model name, probe an image-generation gateway, or recycle historical text-only claims. / 以合成图片实际回执修正138多模态配置与视觉路由；不按模型名猜能力，不再去生图网关试错。
 - [Diagnosis, verification, deployment and limitations / 原因与运行回执](docs/chat-auto-continue-0.14.6-2026-10-28.md).
 
 ## 0.14.5 · 2026-10-28 · Chat reservation recovery / 会话占用恢复
