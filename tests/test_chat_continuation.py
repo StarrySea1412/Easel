@@ -44,10 +44,10 @@ def error_response():
     return error
 
 
-@pytest.mark.parametrize('mode', ['idle', 'limit', 'plan'])
+@pytest.mark.parametrize('mode', ['idle', 'limit', 'meta', 'plan'])
 def test_continues_in_same_session_without_replaying_original(mode):
     calls, continued = [], []
-    first = error_response() if mode == 'idle' else {'status':'ok','result':{'payloads':[{'text':'我会继续执行'}], **({'stopReason':'length'} if mode=='limit' else {})}}
+    first = error_response() if mode == 'idle' else {'status':'ok','result':{'payloads':[{'text':'我会继续执行'}], **({'stopReason':'length'} if mode=='limit' else {'meta': {'stopReason':'length', 'completion': {'finishReason':'length'}}} if mode=='meta' else {})}}
     results=[first, {'status':'ok','result':{'payloads':[{'text':'实际交付完成'}]}}]
     Client=make_client(results,calls)
     params={'idempotencyKey':'turn','agentId':'main','sessionKey':'agent:main:own','model':'relay/model','message':'ORIGINAL TASK'}

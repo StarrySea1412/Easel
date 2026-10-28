@@ -23,7 +23,7 @@ def _normalized_stop_reason(value, depth=0):
         incomplete = value.get('incomplete_details')
         if isinstance(incomplete, dict) and incomplete.get('reason') == 'max_output_tokens':
             return 'max_tokens'
-        for key in ('result', 'message', 'response', 'payload', 'data'):
+        for key in ('result', 'meta', 'completion', 'message', 'response', 'payload', 'data'):
             found = _normalized_stop_reason(value.get(key), depth + 1)
             if found:
                 return found
@@ -219,6 +219,8 @@ class GatewayAgentProc:
                 if self._stop.wait(min(2 * self.continuations, 4)):
                     break
                 self.client = self.client_factory()
+                if self._stop.is_set():
+                    break
                 self.params = {**self.params, 'message': CONTINUE_MESSAGE,
                     'idempotencyKey': self.params['idempotencyKey'].split(':continue:')[0] + f':continue:{self.continuations}',
                     'timeout': max(1, int(self.timeout - (time.monotonic() - started)))}
