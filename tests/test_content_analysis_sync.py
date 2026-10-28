@@ -231,13 +231,13 @@ def test_application_sync_reuses_existing_collector_and_validates_local_session(
     monkeypatch.setattr(web, '_proxy_env', lambda: {})
     monkeypatch.setattr(stats, 'ANALYTICS_DIR', outputs / '_analytics')
     calls = []
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd, *_):
         calls.append(cmd)
         if platform == 'xiaohongshu':
             # The real whoami does exactly this while a separate collector may be running.
             web._write_login_marker(platform, 'success', '同账号正常核验刷新')
         return SimpleNamespace(stdout=json.dumps(evidence()), stderr='', returncode=0)
-    monkeypatch.setattr(web.subprocess, 'run', fake_run)
+    monkeypatch.setattr(web, '_run_analytics_command', fake_run)
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app), base_url='http://127.0.0.1') as client:
             result = (await client.post('/api/content-analysis/sync', json={'platform': platform})).json()

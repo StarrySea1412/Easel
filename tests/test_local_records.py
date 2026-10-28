@@ -31,7 +31,7 @@ def api(tmp_path):
     names = {'ScheduleItem', 'IdeaItem', '_read_schedule', '_write_schedule', '_read_ideas', '_write_ideas',
              'api_schedule_list', 'api_schedule_create', 'api_schedule_update', 'api_schedule_delete',
              'api_ideas_list', 'api_ideas_create', 'api_ideas_update', 'api_ideas_delete',
-             '_record_published_schedule', 'api_schedule_context'}
+             '_record_published_schedule', 'api_schedule_context', '_schedule_lock'}
     source = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
     nodes = [node for node in source.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names]
     assert {node.name for node in nodes} == names
@@ -39,6 +39,7 @@ def api(tmp_path):
     ast.fix_missing_locations(module)
     app = FastAPI()
     namespace = {'app': app, 'HTTPException': HTTPException, 'BaseModel': BaseModel, 'local_records': store, 'asyncio': asyncio,
+                 '_SCHEDULE_LOCK': threading.Lock(),
                  'uuid': uuid, 'time': time, 'IDEAS_FILE': tmp_path / '_ideas.json',
                  'SCHEDULE_FILE': tmp_path / '_schedule.json', 'OUTPUTS_DIR': tmp_path,
                  'IDEA_STATUSES': {'pending', 'doing', 'done'}, 'SCHEDULE_KINDS': {'content', 'event'},

@@ -181,7 +181,7 @@ def test_analytics_normalizes_notes_and_marks_stale(analytics_tmp, monkeypatch):
         }, ensure_ascii=False)
         stderr = ""
 
-    monkeypatch.setattr(web.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *a, **k: _Proc())
     d = asyncio.run(web.api_analytics("xiaohongshu"))
     assert d["stale"] is True and d["lastGoodAt"] == now   # 失效时指向上次成功，不填空冒充
 
@@ -193,7 +193,7 @@ def test_analytics_normalizes_notes_and_marks_stale(analytics_tmp, monkeypatch):
         }, ensure_ascii=False)
         stderr = ""
 
-    monkeypatch.setattr(web.subprocess, "run", lambda *a, **k: _Proc2())
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *a, **k: _Proc2())
     d2 = asyncio.run(web.api_analytics("xiaohongshu"))
     n = d2["notes"][0]
     assert n["metrics"] == {"likes": None, "collects": None, "comments": None}

@@ -75,18 +75,27 @@ class _FakeLoginProc:
 
 
 def test_logout_terminates_inflight_login_runner(tmp_path, monkeypatch):
+    from easel import install_runner
     platform = "kuaishou"
     monkeypatch.setattr(web, "LOGIN_RUNNERS", {
         platform: {"name": "快手", "backend": "web", "wp": "kuaishou", "profile": "KuaishouProfile"}})
     monkeypatch.setattr(web, "BROWSER_PROFILES", tmp_path / "profiles")
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path / "_login")
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
     (tmp_path / "profiles" / "KuaishouProfile").mkdir(parents=True, exist_ok=True)
     fake = _FakeLoginProc()
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {platform: fake})
+    terminated = []
+    def stop_tree(process):
+        terminated.append(process)
+        process.kill()
+    monkeypatch.setattr(install_runner, 'terminate_phase_tree', stop_tree)
     result = asyncio.run(web.api_logout(platform))
     assert result["ok"] is True
     assert fake.terminated is True, "登出必须停掉仍在跑的登录进程，否则它会把 success 标记写回"
     assert platform not in web.LOGIN_PROCESSES
+    assert terminated == [fake]
 
 
 # ── web/app.py：_schedule.json 读-改-写必须有共享锁 ─────────────────────
@@ -473,7 +482,7 @@ def test_video_pipeline_gates_empty_phase_fails_and_python_placeholder(monkeypat
     with pytest.raises(SystemExit) as exc:
         aggregate.main()
     assert exc.value.code == 0
-    assert sys.executable in calls[-1][-1]
+    assert Path(sys.executable).as_posix() in calls[-1][-1].replace('\\', '/')
 
 
 def test_video_pipeline_stage_respects_empty_gate_failure(monkeypatch, tmp_path):

@@ -1509,7 +1509,7 @@ export interface ModelRow {
   role: string;
   result: string;
   /** 自定义供应商上游协议：openai（默认）| anthropic */
-  thinking?: boolean;
+  thinking?: boolean | null;
   thinkingFormat?: string;
   keyNew?: string;
   keyNew2?: string;
@@ -1666,7 +1666,7 @@ export interface ModelSaveRow {
   primary?: boolean;
   /** 自定义供应商上游协议：openai（默认）| anthropic */
   protocol?: string;
-  thinking?: boolean;
+  thinking?: boolean | null;
   thinkingFormat?: string;
 }
 

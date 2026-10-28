@@ -42,13 +42,13 @@ def _row(**kw):
     return base
 
 
-def test_custom_default_writes_no_api_field(client):
-    """不选协议 = openai 默认：不写 api 字段，与既有配置零差异。"""
+def test_custom_default_writes_explicit_chat_completions(client):
+    """默认协议必须明确，避免网关根据模型名猜测端点。"""
     c, oc = client
     r = c.post("/api/settings/models/save", json={"channel": "chat", "rows": [_row()]})
     assert r.status_code == 200, r.text
     provs = json.loads(oc.read_text())["models"]["providers"]
-    assert "claude-relay" in provs and "api" not in provs["claude-relay"]
+    assert provs["claude-relay"]["api"] == "openai-completions"
 
 
 def test_custom_anthropic_writes_messages_api(client):
@@ -61,8 +61,8 @@ def test_custom_anthropic_writes_messages_api(client):
     assert provs["claude-relay"]["api"] == "anthropic-messages"
 
 
-def test_custom_switch_back_to_openai_removes_api(client):
-    """从 anthropic 切回 openai：api 字段被清掉，不留脏状态。"""
+def test_custom_switch_back_to_openai_updates_api(client):
+    """切回 OpenAI 明确替换原生 Anthropic 端点。"""
     c, oc = client
     c.post("/api/settings/models/save",
            json={"channel": "chat", "rows": [_row(protocol="anthropic")]})
@@ -70,7 +70,7 @@ def test_custom_switch_back_to_openai_removes_api(client):
                json={"channel": "chat", "rows": [_row(protocol="openai")]})
     assert r.status_code == 200
     provs = json.loads(oc.read_text())["models"]["providers"]
-    assert "api" not in provs["claude-relay"]
+    assert provs["claude-relay"]["api"] == "openai-completions"
 
 
 def test_custom_invalid_protocol_rejected(client):

@@ -171,11 +171,11 @@ def test_private_link_query_is_not_persisted(local):
 
 def test_scrape_reply_cannot_restore_context_after_clear(local, monkeypatch):
     import_notes()
-    def response(*args, **kwargs):
-        assert kwargs["env"]["EASEL_ANALYTICS_MANAGED"] == "1"
+    def response(command, env, timeout):
+        assert env["EASEL_ANALYTICS_MANAGED"] == "1" and timeout == 180
         ae.clear(local, "import:alice")
         return SimpleNamespace(stdout=json.dumps({"loggedIn": True, "accountId": "alice", "notes": [note()]}), stderr="")
-    monkeypatch.setattr(web.subprocess, "run", response)
+    monkeypatch.setattr(web, "_run_analytics_command", response)
     with pytest.raises(web.HTTPException) as failure:
         asyncio.run(web.api_analytics("xiaohongshu"))
     assert failure.value.status_code == 409
@@ -184,7 +184,7 @@ def test_scrape_reply_cannot_restore_context_after_clear(local, monkeypatch):
 
 def test_scrape_without_account_id_invalidates_previous_evidence(local, monkeypatch):
     import_notes()
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *args, **kwargs: SimpleNamespace(
         stdout=json.dumps({"loggedIn": True, "notes": [note()]}), stderr=""))
     result = asyncio.run(web.api_analytics("xiaohongshu"))
     assert result["accountRequired"] and not result["account"]
@@ -243,7 +243,7 @@ def test_failed_or_malformed_scrape_keeps_existing_evidence(local, monkeypatch, 
     import_notes()
     before = {path: path.read_bytes() for path in local.rglob("*") if path.is_file()}
     payload = {"loggedIn": True, "accountId": "bob", "notes": [note()], **changes}
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *args, **kwargs: SimpleNamespace(
         stdout=json.dumps(payload), stderr="", returncode=returncode))
     with pytest.raises(web.HTTPException) as failure:
         asyncio.run(web.api_analytics("xiaohongshu"))
@@ -254,7 +254,7 @@ def test_failed_or_malformed_scrape_keeps_existing_evidence(local, monkeypatch, 
 def test_scrape_missing_notes_is_not_a_successful_empty_list(local, monkeypatch):
     import_notes()
     before = {path: path.read_bytes() for path in local.rglob("*") if path.is_file()}
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *args, **kwargs: SimpleNamespace(
         stdout=json.dumps({"loggedIn": True, "accountId": "bob"}), stderr="", returncode=0))
     with pytest.raises(web.HTTPException) as failure:
         asyncio.run(web.api_analytics("xiaohongshu"))
@@ -274,7 +274,7 @@ def test_growth_requires_numeric_evidence(current, baseline):
 def test_failed_platform_login_does_not_discard_imported_analysis(local, monkeypatch):
     import_notes(records=[note(fetched_at=int(time.time()))])
     before = ae.generation(local)
-    monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *args, **kwargs: SimpleNamespace(
         stdout=json.dumps({"loggedIn": False, "notes": []}), stderr="", returncode=0))
     data = asyncio.run(web.api_analytics("xiaohongshu"))
     assert ae.generation(local) == before and data["account"]["id"] == "import:alice"

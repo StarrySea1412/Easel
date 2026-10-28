@@ -47,6 +47,24 @@ test('custom reasoning declaration and dialect reach the save payload', () => {
   assert.equal(saved.thinkingFormat, 'deepseek');
 });
 
+test('automatic format explicitly clears a saved dialect for any OpenClaw provider', () => {
+  for (const slot of ['custom', 'openai', 'relay', 'anthropic']) {
+    const saved = serialize([{ ...row, slot, thinking: true, thinkingFormat: '' }])[0];
+    assert.equal(saved.thinking, true);
+    assert.equal(saved.thinkingFormat, '');
+  }
+});
+
+test('changing model drops the previous model capability draft', () => {
+  const updateRow = declarations.get('updateRow');
+  let updated;
+  const callback = runInNewContext(compile(`(${updateRow.initializer.getText(parsed)});`), { clearModelDiscovery() {} });
+  callback('chat', update => { updated = update([{ ...row, thinking: true, thinkingFormat: 'qwen', contextWindow: 32000 }]); }, 0, { model: 'plain-model' });
+  assert.equal(updated[0].thinking, undefined);
+  assert.equal(updated[0].thinkingFormat, undefined);
+  assert.equal(updated[0].contextWindow, undefined);
+});
+
 test('disabled reasoning and native Anthropic do not send a compatible dialect', () => {
   const disabled = serialize([{ ...row, thinking: false, thinkingFormat: 'deepseek' }])[0];
   assert.equal(disabled.thinking, false);

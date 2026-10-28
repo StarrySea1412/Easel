@@ -156,14 +156,16 @@ def test_publish_sample_complete_is_not_account_complete_and_extras_use_uv():
 @pytest.fixture
 def api_stub(tmp_path, monkeypatch):
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(web, '_ANALYTICS_TASKS', {})
     monkeypatch.setattr(web, '_proxy_env', lambda: {})
     calls = []
 
     def install(data, returncode=0):
-        def run(cmd, **_):
+        def run(cmd, *_):
             calls.append(cmd)
             return SimpleNamespace(stdout=json.dumps(data), stderr='', returncode=returncode)
-        monkeypatch.setattr(web.subprocess, 'run', run)
+        monkeypatch.setattr(web, '_run_analytics_command', run)
     return install, calls
 
 

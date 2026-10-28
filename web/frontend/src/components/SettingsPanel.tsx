@@ -157,7 +157,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const availability = useModelAvailability();
   const [availabilityOpen, setAvailabilityOpen] = useState(Boolean(targetModelRef));
   const providerIdentity = (row: ModelRow) => row.providerId || (row.slot === 'custom' ? row.name : row.slot) || '';
-  const configIdentity = (row: ModelRow) => JSON.stringify([providerIdentity(row), row.model, row.baseUrl, row.protocol || row.type, row.keyMasked, row.keyNew || '', row.contextWindow, row.enabled !== false]);
+  const configIdentity = (row: ModelRow) => JSON.stringify([providerIdentity(row), row.model, row.baseUrl, row.protocol || row.type, row.keyMasked, row.keyNew || '', row.contextWindow, row.thinking, row.thinkingFormat, row.enabled !== false]);
   const modelCheckTarget = (row: ModelRow) => {
     const saved = savedChatRows.find(item => providerIdentity(item) === providerIdentity(row));
     return { ref: `${providerIdentity(row)}/${row.model}`, identity: configIdentity(row), label: modelConfigLabel(row),
@@ -442,10 +442,9 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         key2: r.keyNew2 || '',
         primary: r.role === '主',
         protocol: channel === 'chat' ? r.protocol || r.type : undefined,
-        // 自定义供应商的推理开关只在该行有意义；其余行后端不读。
-        thinking: channel === 'chat' && r.slot === 'custom' ? r.thinking : undefined,
-        thinkingFormat: channel === 'chat' && r.slot === 'custom' && r.thinking && r.protocol !== 'anthropic'
-          ? (r.thinkingFormat || undefined) : undefined,
+        thinking: channel === 'chat' && r.slot !== 'direct-api' ? r.thinking : undefined,
+        thinkingFormat: channel === 'chat' && r.slot !== 'direct-api' && r.thinking && (r.protocol || r.type) !== 'anthropic'
+          ? (r.thinkingFormat ?? '') : undefined,
         contextWindow: channel === 'chat' ? r.contextWindow : undefined,
         enabled: channel === 'chat' ? r.enabled !== false : undefined,
       }));
@@ -707,7 +706,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   ) => {
     if (['slot', 'name', 'baseUrl', 'protocol', 'type', 'keyNew', 'keyNew2'].some(key => key in patch)) clearModelDiscovery(channel, i);
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r,
-      ...(channel === 'chat' && patch.model !== undefined && patch.model !== r.model ? { contextWindow: undefined } : {}), ...patch } : r)));
+      ...(channel === 'chat' && patch.model !== undefined && patch.model !== r.model ? { contextWindow: undefined, thinking: undefined, thinkingFormat: undefined } : {}), ...patch } : r)));
   };
 
   const updateMediaRow = (ch: string, i: number, patch: Partial<ModelRow>) => {

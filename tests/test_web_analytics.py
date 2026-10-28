@@ -15,8 +15,13 @@ import app as web
 
 
 @pytest.fixture(autouse=True)
-def isolated_inflight(monkeypatch):
-    monkeypatch.setattr(web, "_analytics_inflight", {})
+def isolated_inflight(monkeypatch, tmp_path):
+    monkeypatch.setattr(web, "_ANALYTICS_TASKS", {})
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(web, '_account_identity_key', lambda platform: 'fixture-account')
+    monkeypatch.setattr(web, '_content_analysis_session_generation', lambda platform: 'fixture-generation')
+    monkeypatch.setattr(web, '_last_note_snapshot_at', lambda platform: None)
 
 
 def test_concurrent_refreshes_share_one_fetch(monkeypatch):
@@ -29,7 +34,7 @@ def test_concurrent_refreshes_share_one_fetch(monkeypatch):
             await finish.wait()
             return {"platform": platform}
 
-        monkeypatch.setattr(web, "_fetch_analytics", fetch)
+        monkeypatch.setattr(web, "_capture_account_analytics", fetch)
         first = asyncio.create_task(web.api_analytics("xiaohongshu"))
         await started.wait()
         second = asyncio.create_task(web.api_analytics("xiaohongshu"))
@@ -38,7 +43,7 @@ def test_concurrent_refreshes_share_one_fetch(monkeypatch):
         assert await first == await second == {"platform": "xiaohongshu"}
         assert calls == ["xiaohongshu"]
         await asyncio.sleep(0)
-        assert web._analytics_inflight == {}
+        assert web._ANALYTICS_TASKS == {}
         assert await web.api_analytics("xiaohongshu") == {"platform": "xiaohongshu"}
         assert calls == ["xiaohongshu", "xiaohongshu"]
 
@@ -52,13 +57,14 @@ def test_cancelled_client_does_not_cancel_shared_fetch(monkeypatch):
             await finish.wait()
             return {"platform": platform}
 
-        monkeypatch.setattr(web, "_fetch_analytics", fetch)
+        monkeypatch.setattr(web, "_capture_account_analytics", fetch)
         client = asyncio.create_task(web.api_analytics("xiaohongshu"))
         await asyncio.sleep(0)
         client.cancel()
         with pytest.raises(asyncio.CancelledError):
             await client
-        assert not web._analytics_inflight["xiaohongshu"].cancelled()
+        key = (str(web.OUTPUTS_DIR.resolve()), 'xiaohongshu', 'fixture-account')
+        assert not web._ANALYTICS_TASKS[key].cancelled()
         other = asyncio.create_task(web.api_analytics("xiaohongshu"))
         finish.set()
         assert await other == {"platform": "xiaohongshu"}
@@ -71,48 +77,52 @@ def test_failed_refresh_can_be_retried(monkeypatch):
         async def fetch(platform):
             raise HTTPException(502, "Unavailable")
 
-        monkeypatch.setattr(web, "_fetch_analytics", fetch)
+        monkeypatch.setattr(web, "_capture_account_analytics", fetch)
         for attempt in range(2):
             with pytest.raises(HTTPException):
                 await web.api_analytics("xiaohongshu")
             await asyncio.sleep(0)
-            assert web._analytics_inflight == {}
+            assert web._ANALYTICS_TASKS == {}
 
     asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("code,payload,status", [
-    (0, {"loggedIn": True, "followers": None, "likes": None, "metrics": [], "notes": []}, 502),
+    (0, {"loggedIn": True, "notes": [1]}, 502),
     (1, {"loggedIn": True, "followers": 7}, 502),
     (0, {"error": "Platform maintenance"}, 502),
-    (0, {"loggedIn": True, "followers": 0}, None),
-    (0, {"loggedIn": False}, None),
+    (0, {"loggedIn": True, "followers": 0, "notes": []}, None),
+    (0, {"loggedIn": False, "notes": []}, None),
+    (0, {"loggedIn": True}, 502),
 ])
 def test_failed_or_empty_payload_is_not_success(monkeypatch, code, payload, status):
     monkeypatch.setattr(web, "_run_analytics_command", lambda *args: subprocess.CompletedProcess(
         [], code, json.dumps(payload), ""))
     if status:
         with pytest.raises(HTTPException) as error:
-            asyncio.run(web._fetch_analytics("xiaohongshu"))
+            asyncio.run(web._capture_account_analytics("xiaohongshu"))
         assert error.value.status_code == status
     else:
-        assert asyncio.run(web._fetch_analytics("xiaohongshu")) == payload
+        result = asyncio.run(web._capture_account_analytics("xiaohongshu"))
+        assert all(result[key] == value for key, value in payload.items())
+        assert result['stale'] is False
+        assert result['lastGoodAt'] is None
 
 
 def test_fetch_propagates_actionable_script_error(monkeypatch):
     monkeypatch.setattr(web, "_run_analytics_command", lambda *args: subprocess.CompletedProcess(
         [], 1, "", "ERROR: 小红书登录目录正被占用"))
     with pytest.raises(HTTPException, match="登录目录正被占用"):
-        asyncio.run(web._fetch_analytics("xiaohongshu"))
+        asyncio.run(web._capture_account_analytics("xiaohongshu"))
 
 
 def test_fetch_reports_bounded_timeout(monkeypatch):
-    runner = Mock(side_effect=subprocess.TimeoutExpired("fetch", 90))
+    runner = Mock(side_effect=subprocess.TimeoutExpired("fetch", 180))
     monkeypatch.setattr(web, "_run_analytics_command", runner)
     with pytest.raises(HTTPException) as error:
-        asyncio.run(web._fetch_analytics("xiaohongshu"))
+        asyncio.run(web._capture_account_analytics("xiaohongshu"))
     assert error.value.status_code == 504
-    assert runner.call_args.args[2] == 90
+    assert runner.call_args.args[2] == 180
     assert runner.call_args.args[1]["PYTHONIOENCODING"] == "utf-8"
     assert runner.call_args.args[1]["PYTHONUTF8"] == "1"
 
@@ -131,6 +141,7 @@ def test_subprocess_timeout_stops_browser_tree(monkeypatch):
     with pytest.raises(subprocess.TimeoutExpired):
         web._run_analytics_command(["python", "fetch"], {}, 1)
     assert popen.call_args.kwargs["encoding"] == "utf-8"
+    assert popen.call_args.kwargs["errors"] == "replace"
     assert popen.call_args.kwargs["start_new_session"] is (os.name != "nt")
     if os.name == "nt":
         assert killer.call_args.args[0] == ["taskkill", "/PID", "123456", "/T", "/F"]

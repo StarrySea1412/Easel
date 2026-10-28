@@ -1,6 +1,49 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, createRef, useEffect, useMemo, useState } from 'react';
 import { renderMarkdown } from '../lib/sanitize';
 import { externalizeMediaLinks, linkifyOutputs } from '../lib/linkifyOutputs';
+
+type MessageHtmlProps = { html: string; streaming: boolean };
+type DisclosureState = { key: string; open: boolean; focused: boolean };
+
+function disclosures(element: HTMLDivElement | null) {
+  const occurrences = new Map<string, number>();
+  return [...element?.querySelectorAll<HTMLDetailsElement>('details') || []].map(details => {
+    const summary = details.querySelector<HTMLElement>(':scope > summary');
+    const label = summary?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    const occurrence = occurrences.get(label) || 0;
+    occurrences.set(label, occurrence + 1);
+    return { details, summary, key: label ? `${label}\0${occurrence}` : '' };
+  });
+}
+
+/** Snapshot browser-owned disclosure state before React replaces changed HTML. */
+class MessageHtml extends Component<MessageHtmlProps, Record<string, never>, DisclosureState[]> {
+  private element = createRef<HTMLDivElement>();
+
+  shouldComponentUpdate(next: MessageHtmlProps) {
+    return next.html !== this.props.html;
+  }
+
+  getSnapshotBeforeUpdate(): DisclosureState[] {
+    return disclosures(this.element.current).map(({ details, summary, key }) => ({
+      key, open: details.open, focused: summary === details.ownerDocument.activeElement,
+    }));
+  }
+
+  componentDidUpdate(previous: MessageHtmlProps, _state: Record<string, never>, snapshot: DisclosureState[]) {
+    const byKey = new Map(snapshot.filter(item => item.key).map(item => [item.key, item]));
+    disclosures(this.element.current).forEach(({ details, summary, key }, index) => {
+      const saved = (key && byKey.get(key)) || (this.props.streaming || previous.streaming ? snapshot[index] : undefined);
+      if (!saved) return;
+      details.open = saved.open;
+      if (saved.focused) summary?.focus({ preventScroll: true });
+    });
+  }
+
+  render() {
+    return <div ref={this.element} dangerouslySetInnerHTML={{ __html: this.props.html }} />;
+  }
+}
 
 /** Verify local delivery targets against this running instance, including old replies. */
 export default function OutputMessageContent({ content, inert = false, streaming = false }: { content: string; inert?: boolean; streaming?: boolean }) {
@@ -60,5 +103,5 @@ export default function OutputMessageContent({ content, inert = false, streaming
     }
     return { html: template.innerHTML, warnings: [...warnings] };
   }, [source, links, checks, revision, inert, content, streaming]);
-  return <><div dangerouslySetInnerHTML={{ __html: rendered.html }} />{rendered.warnings.length > 0 && <p role="status" style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--amber)' }}>{rendered.warnings.join('；')}。请让 Agent 实际保存产物后再交付。 <button type="button" className="link-btn" onClick={() => setRevision(value => value + 1)}>重新检查文件</button></p>}</>;
+  return <><MessageHtml html={rendered.html} streaming={streaming} />{rendered.warnings.length > 0 && <p role="status" style={{ fontSize: 'calc(13px * var(--easel-font-scale, 1))', color: 'var(--amber)' }}>{rendered.warnings.join('；')}。请让 Agent 实际保存产物后再交付。 <button type="button" className="link-btn" onClick={() => setRevision(value => value + 1)}>重新检查文件</button></p>}</>;
 }

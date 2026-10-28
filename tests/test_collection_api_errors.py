@@ -25,24 +25,27 @@ def request(path):
                                           ('isolated-test', '服务端采集组件加载失败')])
 def test_analytics_missing_sibling_returns_classified_detail_and_preserves_saved_data(tmp_path, monkeypatch, mode, expected):
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path)
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(web, '_ANALYTICS_TASKS', {})
     monkeypatch.setenv('EASEL_DEPLOYMENT_MODE', mode)
     previous = tmp_path / '_analytics' / 'saved.json'
     previous.parent.mkdir()
     previous.write_text('SYNTHETIC_LAST_GOOD_DATA', encoding='utf-8')
     observed = {}
 
-    def failed_collector(command, **kwargs):
-        observed.update(kwargs)
+    def failed_collector(command, env, timeout):
+        observed.update(env=env, timeout=timeout)
         return SimpleNamespace(stdout='', stderr="ModuleNotFoundError: No module named 'account_evidence'", returncode=1)
 
-    monkeypatch.setattr(web.subprocess, 'run', failed_collector)
+    monkeypatch.setattr(web, '_run_analytics_command', failed_collector)
     response = request('/api/analytics/xiaohongshu')
     assert response.status_code == 500
     message = response.json()['detail']
     assert expected in message and '已保留原有数据' in message
     assert '可能未登录' not in message
     assert previous.read_text(encoding='utf-8') == 'SYNTHETIC_LAST_GOOD_DATA'
-    assert observed['encoding'] == 'utf-8' and observed['errors'] == 'replace'
+    assert observed['timeout'] == 180
+    assert observed['env']['PYTHONIOENCODING'] == 'utf-8' and observed['env']['PYTHONUTF8'] == '1'
     assert observed['env']['EASEL_ANALYTICS_MANAGED'] == '1'
     if mode:
         assert '镜像' in message and '重启当前源码项目' not in message

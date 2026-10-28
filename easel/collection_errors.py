@@ -7,6 +7,8 @@ def collection_failure(stderr: str, *, deployment_mode: str | None = None) -> tu
     text = stderr or ''
     mode = os.environ.get('EASEL_DEPLOYMENT_MODE', '') if deployment_mode is None else deployment_mode
     deployed = mode in {'production', 'isolated-test'}
+    if '登录目录正被占用' in text or 'processsingleton' in text.lower() or 'profile is already in use' in text.lower():
+        return 409, '登录目录正被占用，请等待当前登录或采集结束后重试。已保留原有数据。'
     module = re.search(r"ModuleNotFoundError: No module named ['\"]([^'\"]+)['\"]", text)
     if module:
         bundled = module.group(1) in {'account_evidence', 'account_stats', 'login_state', 'publish_receipt'}

@@ -14,12 +14,14 @@ from easel.collection_errors import collection_failure
     ("Executable doesn't exist at /browser", 500, '浏览器未就绪'),
     ('ConnectionError: request timed out', 502, '连接失败或超时'),
     ('unexpected response', 502, '未返回有效数据'),
+    ('ERROR: 小红书登录目录正被占用：C:/private/account/profile', 409, '登录目录正被占用'),
 ])
 def test_failure_explains_observed_cause(stderr, code, phrase):
     status, message = collection_failure(stderr, deployment_mode='')
     assert status == code and phrase in message
     assert '已保留原有数据' in message
     assert '可能未登录' not in message
+    assert 'C:/private' not in message
 
 
 def test_deployed_component_failures_point_to_image_maintenance_not_local_restart():

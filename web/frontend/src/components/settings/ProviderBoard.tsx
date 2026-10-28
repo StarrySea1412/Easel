@@ -145,7 +145,7 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
                     { value: 'openai', label: 'OpenAI Chat Completions', description: '/chat/completions' },
                     { value: 'openai-responses', label: 'OpenAI Responses', description: '/v1/responses' },
                     { value: 'anthropic', label: 'Anthropic Messages', description: '/v1/messages' }]}
-                  onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol })} />
+                  onChange={(protocol) => ops?.onRow?.(i, { protocol, type: protocol, thinkingFormat: '' })} />
                 <span className="hint">{r.protocolNote || '按服务商接口选择；保存后用于后续请求，不会自动切换协议。'}</span>
               </SettingsField>}
               {(ops?.presets || []).length > 0 && <SettingsField label="服务商预设（可选）"><Select
@@ -209,6 +209,14 @@ function ProviderCard({ r, i, count, ops, resultText, dragging, onGrab }: BoardP
                 {reference && <span className="hint">原厂参考：{reference.label}（{reference.tokens.toLocaleString('zh-CN')} Token） · <a href={reference.url} target="_blank" rel="noopener noreferrer">{reference.source} ↗</a>。{reference.note}
                   {r.contextWindow == null && <button type="button" className="adv-btn" onClick={() => ops?.onRow?.(i, { contextWindow: reference.tokens })}>填入参考值，保存后生效</button>}
                 </span>}
+              </SettingsField>}
+              {isChat && r.slot !== 'direct-api' && <SettingsField label="思考能力">
+                <label className="check-label"><input type="checkbox" aria-label="支持思考" checked={r.thinking === true}
+                  ref={node => { if (node) node.indeterminate = r.thinking == null; }}
+                  onChange={event => ops?.onRow?.(i, { thinking: event.target.checked })} />支持思考</label>
+                {r.thinking === true && protocol !== 'anthropic' && <Select aria-label="思考格式" value={r.thinkingFormat || ''}
+                  options={[{ value: '', label: '自动识别' }, ...['openai', 'deepseek', 'openrouter', 'qwen', 'qwen-chat-template', 'together', 'zai'].map(value => ({ value, label: value }))]}
+                  onChange={thinkingFormat => ops?.onRow?.(i, { thinkingFormat })} />}
               </SettingsField>}
               <SettingsField label="Base URL">
               {ed.base ? (

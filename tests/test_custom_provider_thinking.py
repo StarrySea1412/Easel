@@ -67,6 +67,21 @@ def test_enable_without_format_preserves_automatic_detection(client):
     assert save(client, thinking=True)["models"][0]["compat"] == {"supportsReasoningEffort": True}
 
 
+def test_empty_format_clears_only_dialect_and_keeps_effort_mapping(client):
+    seed(client, {'id': 'reasoner', 'name': 'Reasoner', 'reasoning': True,
+                  'compat': {'thinkingFormat': 'deepseek', 'supportsReasoningEffort': False,
+                             'reasoningEffortMap': {'medium': 'high'}, 'supportsTools': True}})
+    model = save(client, thinking=True, thinkingFormat='')['models'][0]
+    assert model['compat'] == {'supportsReasoningEffort': False,
+                                'reasoningEffortMap': {'medium': 'high'}, 'supportsTools': True}
+
+
+def test_switch_model_without_declaration_keeps_its_own_capability(client):
+    seed(client, {'id': 'reasoner', 'name': 'Reasoner', 'reasoning': False})
+    model = save(client, model='other')['models'][0]
+    assert model == {'id': 'other', 'name': 'Other', 'reasoning': True}
+
+
 def test_enable_preserves_other_model_metadata_and_effort_mapping(client):
     model = {
         "id": "reasoner", "name": "Reasoner 中文", "contextWindow": 32000,
@@ -139,6 +154,7 @@ def test_native_anthropic_declares_reasoning_without_openai_compat(client):
     ({"protocol": "anthropic", "thinking": True, "thinkingFormat": "deepseek"}, 400),
     ({"thinking": "yes"}, 422),
     ({"thinking": 1}, 422),
+    ({"model": "", "thinking": True}, 400),
 ])
 def test_invalid_declarations_do_not_change_config(client, values, status):
     api, config = client
@@ -155,20 +171,36 @@ def test_toggle_is_saved_even_when_other_fields_unchanged(client):
     assert save(client, thinking=False)["models"][0]["reasoning"] is False
 
 
-def test_idempotent_thinking_save_keeps_backup(client):
+def test_idempotent_thinking_save_does_not_rewrite_config(client, monkeypatch):
     save(client, thinking=True)
     _, config = client
-    backup = config.with_suffix(".json.bak-web")
-    before = backup.read_bytes()
+    before = config.read_bytes()
+    writes = []
+    original = web._atomic_model_bytes
+    def record(path, content):
+        writes.append(path)
+        return original(path, content)
+    monkeypatch.setattr(web, '_atomic_model_bytes', record)
     save(client, thinking=True)
-    assert backup.read_bytes() == before
+    assert config.read_bytes() == before
+    assert config not in writes
 
 
 def test_native_anthropic_preserves_unrelated_compat(client):
     model = {"id": "reasoner", "name": "Reasoner",
-             "compat": {"supportsTools": True}}
+             "compat": {"supportsTools": True, "thinkingFormat": "deepseek"}}
     seed(client, copy.deepcopy(model), api="anthropic-messages")
-    assert save(client, thinking=True)["models"][0] == {**model, "reasoning": True}
+    assert save(client, thinking=True)["models"][0] == {
+        **model, "reasoning": True, "compat": {"supportsTools": True}}
+
+
+def test_switch_to_anthropic_clears_compatible_dialect_only(client):
+    seed(client, {'id': 'reasoner', 'name': 'Reasoner', 'reasoning': True,
+                  'compat': {'thinkingFormat': 'deepseek', 'supportsTools': True}}, api='openai-completions')
+    provider = save(client, protocol='anthropic')
+    assert provider['api'] == 'anthropic-messages'
+    assert provider['models'][0]['compat'] == {'supportsTools': True}
+    assert provider['models'][1]['reasoning'] is True
 
 
 def test_enable_preserves_explicit_effort_parameter_opt_out(client):
@@ -182,7 +214,7 @@ def test_missing_or_malformed_compat_echoes_safely(client):
     api, _ = client
     rows = api.get("/api/settings/models").json()["channels"]["chat"]["rows"]
     saved_row = next(entry for entry in rows if entry["name"] == "test-relay")
-    assert saved_row["thinking"] is False
+    assert saved_row["thinking"] is None
     assert saved_row["thinkingFormat"] == ""
 
 
@@ -210,6 +242,17 @@ def test_cli_thinking_respects_main_agent_override(client, monkeypatch):
     config.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(web, "THINKING_LEVEL", "medium")
     assert web._agent_thinking_level() == "off"
+
+
+def test_explicit_model_reference_uses_its_capability(client, monkeypatch):
+    save(client, thinking=True, primary=True)
+    _, config = client
+    data = json.loads(config.read_text(encoding='utf-8'))
+    data['models']['providers']['test-relay']['models'].append({'id': 'plain', 'reasoning': False})
+    config.write_text(json.dumps(data), encoding='utf-8')
+    monkeypatch.setattr(web, 'THINKING_LEVEL', 'medium')
+    assert web._agent_thinking_level('test-relay/plain') == 'off'
+    assert web._agent_thinking_level('test-relay/reasoner') == 'medium'
 
 
 def test_cli_thinking_handles_missing_config(client, monkeypatch):

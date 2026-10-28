@@ -559,7 +559,7 @@ test('import writes a channel directly, reports the actual default and preserves
   await view.click(findButton(view, '2. 读取可导入渠道'));
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
   assert.equal(view.container.querySelector('.ii-ov'), null, 'replacement preview lines are gone');
-  assert.equal(view.container.querySelector('input[type="checkbox"]'), null);
+  assert.equal(view.container.querySelector('.model-inline-import input[type="checkbox"]'), null, 'import applies directly without a separate selection checkbox');
   await view.click(findButton(view, '导入'));
   const apply = view.harness.calls.find(call => call.name === 'applyImport');
   assert.deepEqual(apply.args, ['cc-switch', 'source-entry', 'openai', 'synthetic-source.db', 'synthetic-preview-token', 'imported-model-a']);

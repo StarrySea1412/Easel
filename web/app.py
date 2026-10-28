@@ -1511,6 +1511,28 @@ def _publishing_message(message: str) -> str:
     return message if message.endswith(rule) else message + rule
 
 
+def _agent_thinking_level(model_ref: str | None = None) -> str:
+    """Respect an explicit model opt-out for implicit CLI defaults only."""
+    try:
+        config = json.loads(_oc_config_path().read_text(encoding='utf-8'))
+        if model_ref is None:
+            agents = config.get('agents', {})
+            reference = agents.get('defaults', {}).get('model', {})
+            for agent in agents.get('list', []):
+                if isinstance(agent, dict) and agent.get('id') == 'main' and agent.get('model'):
+                    reference = agent['model']
+                    break
+            model_ref = reference.get('primary', '') if isinstance(reference, dict) else reference
+        provider, model = model_ref.split('/', 1)
+        models = config.get('models', {}).get('providers', {}).get(provider, {}).get('models', [])
+        selected = next((row for row in models if isinstance(row, dict) and row.get('id') == model), {})
+        if selected.get('reasoning') is False:
+            return 'off'
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return THINKING_LEVEL
+
+
 def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None,
                    thinking_level: str | None = None) -> str:
     sk = session_id or f'web-{int(time.time() * 1000)}'
@@ -1549,7 +1571,7 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
         # Keep CLI setup inside the same safe error boundary as execution.
         cmd = openclaw_base_cmd() + ['--profile', OPENCLAW_PROFILE, 'agent', '--agent', 'main',
                '--session-key', f'agent:main:{sk}', '--session-id', _openclaw_session_id(sk),
-               '--thinking', thinking_level or THINKING_LEVEL,
+               '--thinking', thinking_level or _agent_thinking_level(),
                '--timeout', str(timeout), '--message', msg]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=timeout + 30,
                            env=credentials.environment(_proxy_env()))
@@ -1567,7 +1589,8 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
 
 def check_gateway() -> bool:
     try:
-        with urllib.request.urlopen(healthz_url(), timeout=3) as response:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(healthz_url(), timeout=3) as response:
             return response.status == 200
     except (OSError, urllib.error.URLError):
         return False
@@ -2394,6 +2417,9 @@ def _model_channels(runtime: str | None = None) -> dict:
         models = models if isinstance(models, list) else []
         selected = next((item for item in models if isinstance(item, dict) and item.get('id') == row['model']), {})
         row['contextWindow'] = selected.get('contextWindow')
+        row['thinking'] = selected.get('reasoning') if isinstance(selected.get('reasoning'), bool) else None
+        compat = selected.get('compat')
+        row['thinkingFormat'] = compat.get('thinkingFormat', '') if isinstance(compat, dict) else ''
         from model_metadata import context_reference
         row['contextReference'] = context_reference(selected.get('id') or '')
 
@@ -2872,6 +2898,13 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 target = next((dict(item) for item in previous_models if isinstance(item, dict) and item.get('id') == model), {'id': model, 'name': model})
                 if vals.get('protocol') and not local_gateway:
                     target.pop('api', None)  # The selected model must inherit the protocol just saved.
+                    if api == 'anthropic-messages' and isinstance(target.get('compat'), dict):
+                        compat = dict(target['compat'])
+                        compat.pop('thinkingFormat', None)
+                        if compat:
+                            target['compat'] = compat
+                        else:
+                            target.pop('compat', None)
                 if not target.get('name'):
                     target['name'] = model
                 if 'contextWindow' in vals:
@@ -2882,6 +2915,26 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                         if isinstance(target.get('maxTokens'), int) and target['maxTokens'] > window:
                             raise ValueError('上下文窗口不能小于此模型已配置的输出上限')
                         target['contextWindow'] = window
+                if vals.get('thinking') is not None:
+                    target['reasoning'] = vals['thinking']
+                    compat = target.get('compat')
+                    compat = dict(compat) if isinstance(compat, dict) else {}
+                    if not vals['thinking']:
+                        for field in THINKING_COMPAT_KEYS:
+                            compat.pop(field, None)
+                    elif api != 'anthropic-messages':
+                        compat.setdefault('supportsReasoningEffort', True)
+                        if 'thinkingFormat' in vals:
+                            if vals['thinkingFormat']:
+                                compat['thinkingFormat'] = vals['thinkingFormat']
+                            else:
+                                compat.pop('thinkingFormat', None)
+                    else:
+                        compat.pop('thinkingFormat', None)
+                    if compat:
+                        target['compat'] = compat
+                    else:
+                        target.pop('compat', None)
                 models = [target, *[item for item in previous_models if isinstance(item, dict) and item.get('id') != model]]
                 if models != previous_models:
                     changed = True
@@ -3105,6 +3158,8 @@ class ModelSaveRow(BaseModel):
     protocol: str = ""
     enabled: bool | None = None
     contextWindow: int | None = Field(default=None, ge=1024, le=10000000, strict=True)
+    thinking: StrictBool | None = None
+    thinkingFormat: str | None = None
 
 
 class ModelSaveRequest(BaseModel):
@@ -3217,6 +3272,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
         base = (row.baseUrl or '').strip().rstrip('/')
         key = (row.key or '').strip()
         protocol = (row.protocol or '').strip().lower()
+        thinking_format = (row.thinkingFormat or '').strip().lower()
         if is_chat:
             pkey_for_protocol = name if slot == 'custom' else slot
             saved_protocol = _chat_protocol(pkey_for_protocol, model=model)
@@ -3226,6 +3282,17 @@ async def api_settings_models_save(req: ModelSaveRequest):
             saved_provider_base = _cur_prov.get(pkey_for_protocol, ('', ''))[0]
             if _is_local_gateway_base(saved_provider_base) and protocol != saved_protocol:
                 raise HTTPException(400, '此渠道由本地模型网关管理，请在网关配置中修改上游协议')
+        if row.thinking is not None or row.thinkingFormat is not None:
+            if not is_chat or slot == 'direct-api':
+                raise HTTPException(400, '思考能力声明仅适用于 OpenClaw 对话模型')
+            if not model:
+                raise HTTPException(400, '请先填写模型名称，再声明思考能力')
+            if thinking_format and thinking_format not in THINKING_FORMATS:
+                raise HTTPException(400, '不支持的思考格式')
+            if thinking_format and row.thinking is not True:
+                raise HTTPException(400, '选择思考格式时需要启用思考能力')
+            if protocol == 'anthropic' and thinking_format:
+                raise HTTPException(400, 'Anthropic 原生协议无需选择 OpenAI 兼容思考格式')
         if base and not _valid_base_url(base):
             raise HTTPException(400, 'Base URL 需是合法的 http(s):// 地址')
         if key and any(ch.isspace() for ch in key):
@@ -3304,6 +3371,10 @@ async def api_settings_models_save(req: ModelSaveRequest):
             provider_updates[pkey]['protocol'] = protocol
             if row.enabled is not None:
                 provider_updates[pkey]['enabled'] = row.enabled
+            if row.thinking is not None:
+                provider_updates[pkey]['thinking'] = row.thinking
+                if row.thinkingFormat is not None:
+                    provider_updates[pkey]['thinkingFormat'] = thinking_format
         # 同一条规矩也得覆盖 openclaw.json 这一侧：_sync_openclaw_chat 只在 key 非空时改
         # apiKey，却无条件改 baseUrl —— 只换地址、Key 留空，下一轮对话就会拿着原 Key 去打新地址。
         # 自定义供应商压根不写 .env，前面那道 _SLOT_ENV_KEYS 闸拦不到它。
@@ -6147,7 +6218,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         from easel.gateway_agent import GatewayAgentProc
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
                                   'sessionId': _openclaw_session_id(sk), 'message': message,
-                                  'thinking': requested_thinking_level or THINKING_LEVEL,
+                                  'thinking': requested_thinking_level or _agent_thinking_level(requested_model_ref),
                                   'deliver': False, 'timeout': TIMEOUT_CHAT,
                                   'idempotencyKey': turn_id}
                         if requested_model_ref is not None:
@@ -6164,7 +6235,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         cmd = openclaw_base_cmd() + [
                             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                            "--thinking", requested_thinking_level or THINKING_LEVEL,
+                            "--thinking", requested_thinking_level or _agent_thinking_level(requested_model_ref),
                             "--timeout", str(TIMEOUT_CHAT), "--message", message,
                         ]
                         if requested_model_ref is not None:
@@ -8516,12 +8587,13 @@ async def _capture_account_analytics(platform: str):
         # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
         cmd = [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch", "--platform", platform]
     ana_env = _proxy_env()
+    ana_env['PYTHONIOENCODING'] = 'utf-8'
+    ana_env['PYTHONUTF8'] = '1'
     if platform == "xiaohongshu":
         # Keep persistence in this process so a pending scrape cannot restore cleared/switched data.
         ana_env["EASEL_ANALYTICS_MANAGED"] = "1"
     try:
-        proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=ana_env,
-                                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
+        proc = await asyncio.to_thread(_run_analytics_command, cmd, ana_env, 180)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "抓取超时（浏览器起不来或网络慢）")
     data = None
@@ -9531,12 +9603,13 @@ async def api_schedule_update(sid: str, req: ScheduleItem):
 
 @app.delete("/api/schedule/{sid}")
 async def api_schedule_delete(sid: str):
-    items = _read_schedule()
-    new = [it for it in items if it.get("id") != sid]
-    if len(new) == len(items):
-        raise HTTPException(404, "排期不存在")
-    items[:] = new
-    _write_schedule(items)
+    with _schedule_lock():
+        items = _read_schedule()
+        new = [it for it in items if it.get("id") != sid]
+        if len(new) == len(items):
+            raise HTTPException(404, "排期不存在")
+        items[:] = new
+        _write_schedule(items)
     return {"ok": True, "deleted": sid}
 
 

@@ -51,6 +51,7 @@ test('API users can edit and save the actual model/address without a mandatory k
   await view.click(view.button('保存配置'));
   assert.deepEqual(view.calls, [{ kind: 'discover' }, { kind: 'save', model: 'another-model', baseUrl: 'https://models.example/v1' }]);
   assert.equal(view.container.querySelector('[aria-label="上下文窗口（Token）"]'), null);
+  assert.equal(view.container.querySelector('[aria-label="支持思考"]'), null);
   assert.equal(view.container.querySelector('.provider-drag-handle'), null);
   assert.equal(view.container.querySelector('[aria-label="供应商更多操作：API 直连"]'), null);
   assert.doesNotMatch(view.container.textContent, /此能力使用内建配置/);
@@ -60,4 +61,22 @@ test('other cloud providers retain the key requirement for model discovery', asy
   const view = await fixture(t, 'openai');
   assert.equal(view.button('获取模型列表').disabled, true);
   assert.ok(view.container.querySelector('[aria-label="上下文窗口（Token）"]'));
+});
+
+test('OpenClaw reasoning controls appear only when enabled and use the shared selector', async t => {
+  const view = await fixture(t, 'openai');
+  const toggle = view.container.querySelector('[aria-label="支持思考"]');
+  assert.equal(toggle.indeterminate, true);
+  assert.equal(view.container.querySelector('[aria-label="思考格式"]'), null);
+  await view.click(toggle);
+  assert.equal(view.container.querySelector('[aria-label="支持思考"]').checked, true);
+  const format = view.container.querySelector('[aria-label="思考格式"]');
+  assert.ok(format);
+  assert.equal(format.getAttribute('role'), 'combobox');
+  await view.click(format);
+  await view.click([...document.querySelectorAll('[role="option"]')].find(node => node.textContent === 'deepseek'));
+  assert.match(view.container.querySelector('[aria-label="思考格式"]').textContent, /deepseek/);
+  await view.click(view.container.querySelector('[aria-label="支持思考"]'));
+  assert.equal(view.container.querySelector('[aria-label="支持思考"]').checked, false);
+  assert.equal(view.container.querySelector('[aria-label="思考格式"]'), null);
 });

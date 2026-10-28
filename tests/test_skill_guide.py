@@ -26,14 +26,14 @@ import app as web  # noqa: E402
 def _guide(name: str, env: dict | None = None) -> dict:
     full = web.find_skill(name)
     assert full, f"技能不存在：{name}"
-    p = web.SKILLS_DIR / "openclaw" / full / "SKILL.md"
+    p = web._skill_md_path(full)
     desc, _layer, body = web._parse_skill_md(p)
     return web._skill_guide(full, desc, body, p, env or {})
 
 
 def _source(name: str) -> str:
     full = web.find_skill(name)
-    return (web.SKILLS_DIR / "openclaw" / full / "SKILL.md").read_text(encoding="utf-8")
+    return web._skill_md_path(full).read_text(encoding="utf-8")
 
 
 # ---- 抽样：写作 / 图片 / 视频 / 发布 ----
@@ -93,17 +93,15 @@ def test_guide_missing_sections_return_empty():
     assert g["whatYouGet"] == []          # 原文没有「输出」节
     assert g["needs"]["inputs"] == []
     assert g["needs"]["tools"] == ["redbook"]   # 来自 metadata.openclaw
-    assert g["needs"]["os"] == ["macos"]
+    assert g["needs"]["os"] == []  # 当前 redbook 支持 Linux/WSL，不再声明 macOS 专属
 
 
 def test_guide_all_skills_smoke():
     """全部技能都能提取出结构稳定的导读（不抛异常、类型不变）。"""
-    sd = web.SKILLS_DIR / "openclaw"
     count = 0
-    for d in sorted(sd.iterdir()):
-        p = d / "SKILL.md"
-        if not p.is_file():
-            continue
+    paths = sorted({p for root in ('builtin', 'openclaw') for p in (web.SKILLS_DIR / root).glob('*/SKILL.md')})
+    for p in paths:
+        d = p.parent
         count += 1
         desc, _layer, body = web._parse_skill_md(p)
         g = web._skill_guide(d.name, desc, body, p, env={})
