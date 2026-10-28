@@ -80,7 +80,7 @@ test('the actual stream API serializes selected skill requirements as structured
   assert.equal(url, '/api/chat/stream');
   assert.equal(options.method, 'POST');
   assert.deepEqual(JSON.parse(options.body), {
-    message: '用户原始正文', sessionId: 'session-a', turnId: 'turn-a', attachments: [],
+    message: '用户原始正文', autoContinue: true, sessionId: 'session-a', turnId: 'turn-a', attachments: [],
     selectedSkills: ['card-quote'], skillRequirements: { 'card-quote': '只用于后续这次发送' },
   });
   await send(undefined);
