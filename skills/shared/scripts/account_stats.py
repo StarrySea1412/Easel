@@ -702,6 +702,7 @@ def _scrape_xhs(context, page, result: dict) -> dict:
         own_stats = _xhs_own_stats(context, account)
     result.update({key: value for key, value in own_stats.items() if value is not None and value != ""})
     cfg = PLATFORMS["xiaohongshu"]
+    collect_notes = False
     if creator_logged_in:
         listener = None
         try:
@@ -742,8 +743,7 @@ def _scrape_xhs(context, page, result: dict) -> dict:
                     if result[key] is None:
                         result[key] = num_by_label(lines, labels, "before")
                 result["posts"] = num_by_label(lines, ["笔记数", "作品数", "内容数"], "before")
-                if any(result[key] is not None for key in ("followers", "likes", "posts")) or result["metrics"]:
-                    result["notes"] = _scrape_notes("xiaohongshu", page, cfg)
+                collect_notes = any(result[key] is not None for key in ("followers", "likes", "posts")) or bool(result["metrics"])
         except Exception:
             pass
         finally:
@@ -752,6 +752,10 @@ def _scrape_xhs(context, page, result: dict) -> dict:
                     page.remove_listener("response", listener)
                 except Exception:
                     pass
+    # Overview fallback is optional, but a failed note collection must reach the
+    # caller before either the CLI or Web commits a successful snapshot.
+    if collect_notes:
+        result["notes"] = _scrape_notes("xiaohongshu", page, cfg)
     has_overview = any(result[key] is not None for key in ("followers", "likes", "following", "posts"))
     if not has_overview and not result["metrics"]:
         raise RuntimeError("小红书账号已登录，但未取得创作数据；创作中心可能维护、需要重新登录或页面结构已变化，请稍后重试")
@@ -1155,6 +1159,13 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
             from urllib.parse import urlparse as _up, parse_qs as _pq
             token_map: dict = {}
 
+            def require_note_manager():
+                location = _up(page.url or "")
+                if (location.scheme != "https" or location.hostname != "creator.xiaohongshu.com"
+                        or location.username is not None or location.password is not None
+                        or location.path.rstrip("/") != "/new/note-manager" or _login_wall(page)):
+                    raise RuntimeError("笔记列表未加载或登录已失效，未确认空列表")
+
             def _on_resp(resp):  # 拦截 note-manager 的 JSON 接口，取每篇 xsec_token（可靠）
                 try:
                     if "json" in ((resp.headers or {}).get("content-type", "")):
@@ -1165,23 +1176,23 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
             listener = _on_resp
             page.goto("https://creator.xiaohongshu.com/new/note-manager",
                       wait_until="commit", timeout=8000)
-            if _login_wall(page):
-                return []
+            require_note_manager()
             try:
                 page.wait_for_selector(".note-card, [role='tab']", timeout=6000)
             except Exception:
-                return []
+                pass  # An empty account has no cards; validate the visible state below.
             _xhs_open_published_notes(page)
             try:
                 page.wait_for_selector(".note-card", timeout=4000)
             except Exception:
-                return []
+                pass
             page.wait_for_timeout(800)  # 等已发布列表接口回来
             out = []
             cards = page.evaluate(_XHS_NOTES_JS) or []
+            require_note_manager()  # Login redirects may happen during the asynchronous waits.
             if not cards:
                 body = page.inner_text("body")
-                if re.search(r"(passport|/login)", page.url or "") or not re.search(r"暂无笔记|还没有发布|暂无内容|暂无作品", body):
+                if not re.search(r"暂无笔记|还没有发布|暂无内容|暂无作品", body):
                     raise RuntimeError("笔记列表未加载或登录已失效，未确认空列表")
             for n in cards:
                 if not is_public_xhs_note(n):

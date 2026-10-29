@@ -305,3 +305,111 @@ def test_scrape_navigation_failure_is_not_an_empty_success():
     page = SimpleNamespace(on=lambda *args: None, goto=fail)
     with pytest.raises(RuntimeError, match="未保存本次快照"):
         st._scrape_notes("xiaohongshu", page, {})
+
+
+@pytest.mark.parametrize("failed_wait", [1, 2])
+@pytest.mark.parametrize("body,valid_empty", [("正在加载", False), ("暂无笔记", True)])
+def test_note_selector_timeout_still_requires_confirmed_empty(body, valid_empty, failed_wait):
+    calls = []
+    removed = []
+    def wait(*args, **kwargs):
+        calls.append(args[0])
+        if len(calls) == failed_wait:
+            raise TimeoutError("offline selector timeout")
+    page = SimpleNamespace(on=lambda *args: None, goto=lambda *args, **kwargs: None,
+        wait_for_selector=wait, wait_for_timeout=lambda *args: None,
+        evaluate=lambda *args: [], inner_text=lambda *args: body,
+        url="https://creator.xiaohongshu.com/new/note-manager",
+        remove_listener=lambda *args: removed.append(args))
+    if valid_empty:
+        assert st._scrape_notes("xiaohongshu", page, {}) == []
+    else:
+        with pytest.raises(RuntimeError, match="未保存本次快照"):
+            st._scrape_notes("xiaohongshu", page, {})
+    assert len(removed) == 1 and removed[0][0] == "response"
+
+
+@pytest.mark.parametrize("url", [
+    "https://creator.xiaohongshu.com/login",
+    "https://other.test/new/note-manager",
+    "http://creator.xiaohongshu.com/new/note-manager",
+    "https://user@creator.xiaohongshu.com/new/note-manager",
+])
+@pytest.mark.parametrize("has_cards", [False, True])
+def test_note_manager_rechecks_location_after_async_wait(url, has_cards):
+    page = SimpleNamespace(on=lambda *args: None, goto=lambda *args, **kwargs: None,
+        wait_for_selector=lambda *args, **kwargs: None,
+        evaluate=lambda *args: [{"title": "已发布笔记", "noteId": "note1"}] if has_cards else [],
+        inner_text=lambda *args: "暂无笔记",
+        url="https://creator.xiaohongshu.com/new/note-manager",
+        remove_listener=lambda *args: None)
+    page.wait_for_timeout = lambda *args: setattr(page, "url", url)
+    with pytest.raises(RuntimeError, match="未保存本次快照"):
+        st._scrape_notes("xiaohongshu", page, {})
+
+
+def test_visible_login_wall_after_wait_cannot_be_a_confirmed_empty_list():
+    visible = [False]
+    page = SimpleNamespace(on=lambda *args: None, goto=lambda *args, **kwargs: None,
+        wait_for_selector=lambda *args, **kwargs: None, evaluate=lambda *args: [],
+        wait_for_timeout=lambda *args: visible.__setitem__(0, True),
+        query_selector_all=lambda *args: [SimpleNamespace(is_visible=lambda: visible[0])],
+        inner_text=lambda *args: "暂无笔记", url="https://creator.xiaohongshu.com/new/note-manager",
+        remove_listener=lambda *args: None)
+    with pytest.raises(RuntimeError, match="未保存本次快照"):
+        st._scrape_notes("xiaohongshu", page, {})
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("failure", ["login", "loading"])
+def test_failed_note_collection_keeps_cli_and_web_storage(local, monkeypatch, managed, failure):
+    """Run the real note scraper -> creator collector -> CLI -> Web persistence path."""
+    import contextlib
+    import io
+    import analytics_transport
+
+    import_notes()
+    ae.ingest(local, [note()], "alice", int(time.time()))
+    st.record_snapshot("xiaohongshu", {"ts": int(time.time()), "followers": 12, "likes": 9, "posts": 1})
+    before = {path: path.read_bytes() for path in local.rglob("*") if path.is_file()}
+    monkeypatch.setattr(st, "_xhs_session", lambda *args: ({"userId": "alice"}, True))
+    monkeypatch.setattr(st, "_xhs_creator_stats", lambda *args: {"followers": 12, "likes": 9})
+    monkeypatch.setattr(st, "_poll_stable", lambda *args: [])
+    monkeypatch.setattr(analytics_transport, "prepare", lambda *args: None)
+    page = SimpleNamespace(on=lambda *args: None, remove_listener=lambda *args: None,
+        query_selector_all=lambda *args: [],
+        wait_for_timeout=lambda *args: None, evaluate=lambda *args: [],
+        inner_text=lambda *args: "正在加载",
+        url="https://creator.xiaohongshu.com/new/home")
+    def navigate(url, **kwargs):
+        page.url = "https://creator.xiaohongshu.com/login" if failure == "login" and "note-manager" in url else url
+    def wait(*args, **kwargs):
+        raise TimeoutError("offline selector timeout")
+    page.goto = navigate
+    page.wait_for_selector = wait
+    def scrape(*args):
+        return st._scrape_xhs(object(), page, {"nickname": "", "followers": None,
+            "likes": None, "following": None, "posts": None, "metrics": [], "notes": [], "logged_in": True})
+    monkeypatch.setattr(st, "_scrape", scrape)
+
+    def run_cli(command=None, env=None, timeout=None):
+        monkeypatch.setenv("EASEL_ANALYTICS_MANAGED", "1" if managed else "0")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = 0
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                code = st.cmd_fetch(SimpleNamespace(platform="xiaohongshu", no_proxy=True,
+                    proxy=None, headed=False, profile_base=None))
+            except SystemExit as exc:
+                code = exc.code
+        return SimpleNamespace(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
+
+    if managed:
+        monkeypatch.setattr(web, "_run_analytics_command", run_cli)
+        with pytest.raises(web.HTTPException) as failure:
+            asyncio.run(web.api_analytics("xiaohongshu"))
+        assert failure.value.status_code == 502
+    else:
+        output = run_cli()
+        assert output.returncode != 0 and "未保存本次快照" in output.stderr
+    assert {path: path.read_bytes() for path in local.rglob("*") if path.is_file()} == before
