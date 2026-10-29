@@ -22,6 +22,8 @@ import login_qr
 import login_state
 import web_publisher
 import xhs_publish
+from tests.test_xhs_login_recovery import InteractivePage, runner as xhs_runner, read_status
+from tests.test_login_start import web as account_web, isolated_account_state  # noqa: F401
 
 
 def qr_bytes(scale=3, border=4, content="easel-offline-login-test"):
@@ -620,102 +622,108 @@ def test_creator_existing_login_does_not_request_qr(tmp_path, monkeypatch):
     capture.assert_not_called()
 
 
-@pytest.mark.parametrize("capture_result,expected", [
-    (RuntimeError("平台拦截（300013）"), "error"),
-    (False, "success"),
-    (True, "expired"),
+@pytest.mark.parametrize("case,expected", [
+    ("platform_error", "error"),
+    ("already_logged_in", "success"),
+    ("unscanned_qr", "expired"),
 ])
 @pytest.mark.parametrize("explore_timeout", [False, True])
 def test_xhs_runner_persists_terminal_status_and_closes_browser(tmp_path, monkeypatch,
-                                                              capture_result, expected,
+                                                              case, expected,
                                                               explore_timeout):
-    from playwright import sync_api
-
-    page = xhs_page()
-    if explore_timeout:
-        page.goto.side_effect = TimeoutError("homepage timeout")
-    context = SimpleNamespace(pages=[page], close=Mock())
-
-    class Manager:
-        def __enter__(self):
-            return SimpleNamespace()
-
-        def __exit__(self, *args):
-            return False
-
-    monkeypatch.setattr(sync_api, "sync_playwright", Manager)
-    monkeypatch.setattr(xhs_publish, "_launch", lambda *args, **kwargs: context)
-    capture = Mock(side_effect=capture_result) if isinstance(capture_result, Exception) \
-        else Mock(return_value=capture_result)
-    monkeypatch.setattr(xhs_publish, "_capture_login_qr", capture)
-    args = SimpleNamespace(qr_out=str(tmp_path / "qr.png"), timeout=-1,
-                           status_file=str(tmp_path / "status.json"),
-                           profile_base=str(tmp_path / "profiles"), headed=False,
-                           proxy=None, no_proxy=True)
-    assert xhs_publish.cmd_login(args) == (0 if expected == "success" else 1)
-    status = login_state.read_status(args.status_file)
+    page = InteractivePage(qr=True)
+    page.logged = case == 'already_logged_in'
+    page.navigation_error = explore_timeout
+    if case == 'platform_error':
+        page.url = 'https://www.xiaohongshu.com/website-login/error?error_code=300013'
+    args, closed = xhs_runner(monkeypatch, tmp_path, page)
+    args.timeout = 1
+    monkeypatch.setattr(xhs_publish.time, 'time', lambda: 1000 + page.clock)
+    monkeypatch.setattr(xhs_publish, '_wait_sel', lambda *_: page)
+    if explore_timeout or expected == 'error':
+        expected = 'error'
+        with pytest.raises(SystemExit):
+            xhs_publish.cmd_login(args)
+    else:
+        assert xhs_publish.cmd_login(args) == (0 if expected == 'success' else 1)
+    status = read_status(args)
     assert status["state"] == expected
-    if expected == "error":
-        assert "300013" in status["message"]
-    context.close.assert_called_once()
-    capture.assert_called_once_with(page, Path(args.qr_out), creator_only=explore_timeout)
+    if explore_timeout and case != 'platform_error':
+        assert '无法打开' in status['message']
+    assert closed == [True]
+    if explore_timeout:
+        assert not page.waits
+    elif case == 'platform_error':
+        assert page.waits == [800]
+    else:
+        assert page.waits
 
 
 @pytest.mark.parametrize(("maintenance", "verified", "expected"), [
     (False, True, "success"),
-    (True, True, "success"),
+    (True, True, "error"),
     (True, False, "error"),
-    (False, False, "error"),
+    (False, False, "expired"),
 ])
-def test_xhs_scanned_login_checks_account_before_page_failure(
+def test_xhs_scanned_login_requires_identity_and_rejects_error_page(
         tmp_path, monkeypatch, maintenance, verified, expected):
-    from playwright import sync_api
-
-    page = xhs_page()
-    context = SimpleNamespace(pages=[page], close=Mock())
-
-    class Manager:
-        def __enter__(self):
-            return SimpleNamespace()
-
-        def __exit__(self, *args):
-            return False
-
-    monkeypatch.setattr(sync_api, "sync_playwright", Manager)
-    monkeypatch.setattr(xhs_publish, "_launch", lambda *args, **kwargs: context)
-    monkeypatch.setattr(xhs_publish, "_is_logged_in", lambda page: False)
-    monkeypatch.setattr(xhs_publish, "_capture_login_qr", Mock(return_value=True))
-    reason = "小红书当前入口显示维护页面" if maintenance else ""
-    monkeypatch.setattr(xhs_publish, "_login_error", Mock(side_effect=["settling", reason]))
-    monkeypatch.setattr(xhs_publish, "_qr_state", lambda page: "scanned")
-    account = Mock(side_effect=[None, {"userId": "verified"} if verified else None])
-    monkeypatch.setattr(xhs_publish, "_creator_account", account)
-    monkeypatch.setattr(xhs_publish, "time", SimpleNamespace(
-        time=Mock(side_effect=[0, 0, 1, 31]),
-        monotonic=Mock(side_effect=range(0, 100, 6))))
-    refresh = Mock()
-    monkeypatch.setattr(login_qr, "capture_qr", refresh)
-    qr_out = tmp_path / "qr.png"
-    qr_out.write_bytes(b"test-qr")
-    args = SimpleNamespace(
-        qr_out=str(qr_out), timeout=30, status_file=str(tmp_path / "status.json"),
-        profile_base=str(tmp_path / "profiles"), headed=False, proxy=None, no_proxy=True)
-    assert xhs_publish.cmd_login(args) == (0 if verified else 1)
-    status = login_state.read_status(args.status_file)
-    assert status["state"] == expected
-    assert account.call_count == 2
-    if not verified:
-        assert ("维护页面" if maintenance else "已扫码") in status["message"]
+    page = InteractivePage(qr=True)
+    page.get_by_text = lambda pattern: SimpleNamespace(first=SimpleNamespace(
+        is_visible=lambda **_: bool(pattern.search('已扫码，请确认'))))
+    def confirm_after_scan():
+        if page.clock >= 10:
+            page.logged = verified
+            if maintenance:
+                page.url = 'https://www.xiaohongshu.com/website-login/error'
+    page.after_wait = confirm_after_scan
+    args, closed = xhs_runner(monkeypatch, tmp_path, page)
+    args.timeout = 4
+    monkeypatch.setattr(xhs_publish.time, 'time', lambda: 1000 + page.clock)
+    monkeypatch.setattr(xhs_publish, '_wait_sel', lambda *_: page)
+    states = []
+    write = login_state.write_status
+    def track(*args, **kwargs):
+        states.append(args[1])
+        return write(*args, **kwargs)
+    monkeypatch.setattr(login_state, 'write_status', track)
+    if maintenance:
+        with pytest.raises(SystemExit):
+            xhs_publish.cmd_login(args)
     else:
-        assert not qr_out.exists()
-    refresh.assert_not_called()
-    context.close.assert_called_once()
+        assert xhs_publish.cmd_login(args) == (0 if verified else 1)
+    status = read_status(args)
+    assert status["state"] == expected
+    assert 'scanned' in states, 'visible phone acknowledgement precedes confirmation'
+    assert len(page.screenshots) == 1, 'a scanned QR is never refreshed'
+    if expected == 'success':
+        assert not Path(args.qr_out).exists()
+    assert closed == [True]
 
 
 @pytest.mark.parametrize("platform", ["xiaohongshu", "zhihu"])
 @pytest.mark.parametrize("refresh_missing", [False, True])
 def test_login_runner_refreshes_qr_and_handles_success(tmp_path, monkeypatch, platform,
                                                       refresh_missing):
+    if platform == 'xiaohongshu':
+        page = InteractivePage(qr=True)
+        at_close = []
+        args, closed = xhs_runner(monkeypatch, tmp_path, page,
+            on_close=lambda: at_close.append(read_status(args)['state']))
+        monkeypatch.setattr(xhs_publish.time, 'time', lambda: 1000 + page.clock)
+        monkeypatch.setattr(xhs_publish, '_wait_sel', lambda *_: page)
+        capture = login_qr.capture_element
+        def capture_then_redirect(*args, **kwargs):
+            result = capture(*args, **kwargs)
+            if refresh_missing:
+                page.qr = False
+            return result
+        monkeypatch.setattr(login_qr, 'capture_element', capture_then_redirect)
+        page.after_wait = lambda: setattr(page, 'logged', page.clock >= 10)
+        assert xhs_publish.cmd_login(args) == 0
+        assert len(page.screenshots) == (1 if refresh_missing else 2)
+        assert at_close == ['verifying' if refresh_missing else 'qr_ready']
+        assert read_status(args)['state'] == 'success' and closed == [True]
+        return
     from playwright import sync_api
 
     page = xhs_page()
@@ -739,20 +747,11 @@ def test_login_runner_refreshes_qr_and_handles_success(tmp_path, monkeypatch, pl
                            status_file=str(tmp_path / "status.json"),
                            profile_base=str(tmp_path / "profiles"), headed=False,
                            proxy=None, no_proxy=True)
-    if platform == "xiaohongshu":
-        monkeypatch.setattr(xhs_publish, "_launch", lambda *args, **kwargs: context)
-        monkeypatch.setattr(xhs_publish, "_is_logged_in", Mock(side_effect=[False, False, True]))
-        monkeypatch.setattr(xhs_publish, "_capture_login_qr", Mock(return_value=True))
-        errors = iter(["stop settling", ""])
-        monkeypatch.setattr(xhs_publish, "_login_error", lambda page: next(errors))
-        assert xhs_publish.cmd_login(args) == 0
-        selectors = xhs_publish.SELECTORS["qrcode"]
-    else:
-        monkeypatch.setattr(web_publisher, "_is_logged_in", Mock(side_effect=[False, False, True]))
-        monkeypatch.setattr(login_qr, "prepare_qr", Mock())
-        assert web_publisher.cmd_login_qr(args) == 0
-        selectors = web_publisher.PLATFORMS["zhihu"]["login_qr_selector"]
-    expected = {"attempts": 1, **({"minimum_size": 96} if platform == "xiaohongshu" else {})}
+    monkeypatch.setattr(web_publisher, "_is_logged_in", Mock(side_effect=[False, False, True]))
+    monkeypatch.setattr(login_qr, "prepare_qr", Mock())
+    assert web_publisher.cmd_login_qr(args) == 0
+    selectors = web_publisher.PLATFORMS["zhihu"]["login_qr_selector"]
+    expected = {"attempts": 1}
     refresh.assert_called_once_with(page, Path(args.qr_out), selectors, **expected)
     assert login_state.read_status(args.status_file)["state"] == "success"
     context.close.assert_called_once()
@@ -789,13 +788,12 @@ def test_zhihu_runner_handles_launch_failure_or_login_during_capture(tmp_path, m
 
 def web_functions():
     tree = ast.parse((ROOT / "web/app.py").read_text(encoding="utf-8"))
-    names = {"api_login_start", "_start_login", "_login_status"}
+    names = {"_login_status"}
     nodes = [node for node in tree.body
              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names]
     for node in nodes:
         node.decorator_list = []
-    env = {"json": json, "subprocess": subprocess, "sys": sys, "asyncio": asyncio,
-           "_LOGIN_START_LOCKS": {}}
+    env = {"json": json}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "web/app.py", "exec"), env)
     return env
 
@@ -834,34 +832,31 @@ def test_web_qr_cache_key_changes_within_same_second(tmp_path):
     assert env["_login_status"]("zhihu")["qrTs"] != first
 
 
-def test_repeated_web_login_preserves_existing_process_and_qr():
-    env = web_functions()
-    status = {"state": "qr_ready", "qr": "_login/zhihu.png"}
-    env.update(LOGIN_RUNNERS={"zhihu": {"backend": "web", "wp": "zhihu"}},
-               LOGIN_PROCESSES={"zhihu": SimpleNamespace(poll=lambda: None)},
-               _login_status=lambda platform: status)
-    assert asyncio.run(env["api_login_start"]("zhihu")) == {"mode": "qr", **status}
+def test_repeated_web_login_preserves_existing_process_and_qr(tmp_path, monkeypatch):
+    process = SimpleNamespace(poll=lambda: None, _easel_login_attempt='a' * 32)
+    monkeypatch.setattr(account_web, 'LOGIN_DIR', tmp_path)
+    monkeypatch.setattr(account_web, 'LOGIN_PROCESSES', {'zhihu': process})
+    launch = Mock()
+    monkeypatch.setattr(account_web.subprocess, 'Popen', launch)
+    login_state.write_status(str(tmp_path / 'zhihu.json'), 'qr_ready')
+    (tmp_path / 'zhihu.png').write_bytes(b'existing-qr')
+    status = asyncio.run(account_web.api_login_start('zhihu'))
+    assert status['state'] == 'qr_ready' and status['attemptId'] == 'a' * 32
+    assert account_web.LOGIN_PROCESSES['zhihu'] is process
+    assert (tmp_path / 'zhihu.png').read_bytes() == b'existing-qr'
+    launch.assert_not_called()
 
 
 def test_web_login_sets_child_utf8_without_changing_parent_env(tmp_path, monkeypatch):
-    env = web_functions()
-    original = {"PYTHONIOENCODING": "gbk", "https_proxy": "test-proxy"}
+    monkeypatch.setenv('PYTHONIOENCODING', 'gbk')
+    monkeypatch.setenv('https_proxy', 'http://proxy.invalid:8080')
     popen = Mock(return_value=SimpleNamespace(poll=lambda: None))
     monkeypatch.setattr(subprocess, "Popen", popen)
 
-    async def sleep(duration):
-        return None
-
-    env.update(LOGIN_RUNNERS={"zhihu": {"backend": "web", "wp": "zhihu"}},
-               LOGIN_PROCESSES={}, LOGIN_DIR=tmp_path, SHARED_SCRIPTS=SCRIPTS,
-               PROJECT_ROOT=ROOT, LOGIN_TIMEOUT=180, _WHOAMI_LOCK=threading.Lock(),
-               _WHOAMI_CACHE={}, _proxy_env=lambda: original.copy(),
-               _login_status=lambda platform: {"state": "qr_ready", "qr": ""},
-               asyncio=SimpleNamespace(sleep=sleep, Lock=asyncio.Lock))
-    asyncio.run(env["api_login_start"]("zhihu"))
+    asyncio.run(account_web.api_login_start('zhihu'))
     child_env = popen.call_args.kwargs["env"]
     assert child_env["PYTHONIOENCODING"] == "utf-8"
     assert child_env["PYTHONUTF8"] == "1"
-    assert original["PYTHONIOENCODING"] == "gbk"
-    assert child_env["https_proxy"] == "test-proxy"
+    assert os.environ['PYTHONIOENCODING'] == 'gbk'
+    assert child_env['https_proxy'] == 'http://proxy.invalid:8080'
     assert popen.call_args.kwargs["stdout"].closed

@@ -36,6 +36,24 @@ test('rewriting a cache entry cannot extend the original online verification tim
   assert.equal(isWhoamiFresh({loggedIn:true,name:'',avatar:'',checkedAt:Date.now()+60000}), false);
 });
 
+test('legacy display identities and browser write timestamps never count as online evidence', async t => {
+  localStorage.clear();
+  const now = Date.now();
+  for (const proof of [{ts: now}, {ts: now, checkedAt: now}, {ts: now, verified: true}]) {
+    const entry = {loggedIn: true, name: 'Saved identity', avatar: '', ...proof};
+    assert.equal(isWhoamiFresh(entry), false);
+    assert.equal(accountConnection({loggedIn: true}, entry), 'unknown');
+  }
+  localStorage.setItem('easel_whoami', JSON.stringify({zhihu: {loggedIn: true, name: 'Saved identity', avatar: '', ts: now}}));
+  const calls=[];
+  t.mock.method(globalThis, 'fetch', async url => {calls.push(url);return {ok:true,json:async()=>({loggedIn:true,verified:true,checkedAt:now,name:'',avatar:''})};});
+  assert.equal(getWhoamiCache().zhihu.name, 'Saved identity');
+  await verifyStale(['zhihu']);
+  assert.equal(calls.length, 1, 'the first online check must run even when the browser just saved the legacy entry');
+  assert.equal(getWhoamiCache().zhihu.name, 'Saved identity');
+  assert.equal(accountConnection(undefined, getWhoamiCache().zhihu), 'online');
+});
+
 test('every page uses evidence rather than local booleans to decide account state', () => {
   const now = Date.now();
   assert.equal(accountConnection({loggedIn: false, hasLocalSession: true}), 'unknown');

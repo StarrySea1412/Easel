@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -7,12 +8,27 @@ import pytest
 import web.app as web
 
 
-@pytest.mark.parametrize("platform", ["xiaohongshu", "zhihu", "wechat-oa"])
+@pytest.fixture(autouse=True)
+def isolated_account_state(tmp_path, monkeypatch):
+    for name, value in {
+        "DATA_DIR": tmp_path, "OUTPUTS_DIR": tmp_path / "outputs",
+        "LOGIN_DIR": tmp_path / "login", "BROWSER_PROFILES": tmp_path / "profiles",
+        "LOGIN_PROCESSES": {}, "_WHOAMI_CACHE": {}, "_ACCOUNT_GENERATIONS": {},
+        "_ACCOUNT_CLEARING": set(), "_WHOAMI_PROCESSES": {},
+        "_PUBLISH_ACTIVE": {}, "_PUBLISH_VOLATILE": {}, "_PUBLISH_LOCK": threading.RLock(),
+    }.items():
+        monkeypatch.setattr(web, name, value)
+    monkeypatch.setattr(web.app.state, 'server_pools', {}, raising=False)
+
+
+PLATFORMS = ["xiaohongshu", "zhihu", "weixin-channels", "douyin", "kuaishou", "bilibili", "wechat-oa"]
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
 def test_login_start_returns_without_waiting_for_qr(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {})
     monkeypatch.setattr(web, "_WHOAMI_CACHE", {})
-    monkeypatch.setattr(web, "_LOGIN_START_LOCKS", {})
     process = SimpleNamespace(poll=lambda: None)
     launch = Mock(return_value=process)
     monkeypatch.setattr(web.subprocess, "Popen", launch)
@@ -30,15 +46,16 @@ def test_login_start_returns_without_waiting_for_qr(tmp_path, monkeypatch, platf
     launch.assert_called_once()
     key = "wechat-oa-mp" if platform == "wechat-oa" else platform
     assert web.LOGIN_PROCESSES[key] is process
+    assert result["attemptId"] == process._easel_login_attempt
+    assert len(result["attemptId"]) == 32, 'closing can cancel the exact attempt immediately'
     assert launch.call_args.kwargs["stdout"].closed
 
 
-@pytest.mark.parametrize("platform", ["xiaohongshu", "zhihu", "wechat-oa"])
+@pytest.mark.parametrize("platform", PLATFORMS)
 def test_login_start_reports_immediate_runner_exit(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {})
     monkeypatch.setattr(web, "_WHOAMI_CACHE", {})
-    monkeypatch.setattr(web, "_LOGIN_START_LOCKS", {})
     monkeypatch.setattr(web.subprocess, "Popen", Mock(return_value=SimpleNamespace(poll=lambda: 1)))
     start = web.api_mp_login_start if platform == "wechat-oa" else web.api_login_start
     result = asyncio.run(start(platform))
@@ -49,17 +66,18 @@ def test_login_start_reports_immediate_runner_exit(tmp_path, monkeypatch, platfo
 def test_zhihu_restart_exits_old_runner_before_removing_qr(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
     monkeypatch.setattr(web, "_WHOAMI_CACHE", {})
-    monkeypatch.setattr(web, "_LOGIN_START_LOCKS", {})
     qr = tmp_path / "zhihu.png"
     qr.write_bytes(b"old-qr")
     (tmp_path / "zhihu.json").write_text('{"state":"qr_ready"}')
     order = []
     old = Mock()
     old.poll.return_value = None
-    old.terminate.side_effect = lambda: order.append("terminate")
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', lambda proc: order.append("terminate"))
     def wait(**kwargs):
         assert qr.exists()
+        assert kwargs == {'timeout': 5}
         order.append("wait")
+        old.poll.return_value = 0
 
     old.wait.side_effect = wait
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {"zhihu": old})
@@ -79,18 +97,18 @@ def test_zhihu_restart_exits_old_runner_before_removing_qr(tmp_path, monkeypatch
 
 def test_zhihu_restart_keeps_old_qr_if_runner_cannot_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
-    monkeypatch.setattr(web, "_LOGIN_START_LOCKS", {})
     qr = tmp_path / "zhihu.png"
     qr.write_bytes(b"old-qr")
     old = Mock()
     old.poll.return_value = None
     old.wait.side_effect = web.subprocess.TimeoutExpired("login", 8)
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', lambda proc: None)
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {"zhihu": old})
     launch = Mock()
     monkeypatch.setattr(web.subprocess, "Popen", launch)
     with pytest.raises(web.HTTPException) as failure:
         asyncio.run(web.api_login_start("zhihu", restart=True))
-    assert failure.value.status_code == 409
+    assert failure.value.status_code == 500
     assert qr.read_bytes() == b"old-qr"
     launch.assert_not_called()
 
@@ -99,16 +117,19 @@ def test_zhihu_restart_keeps_old_qr_if_runner_cannot_exit(tmp_path, monkeypatch)
 def test_login_restart_reaps_old_runner_before_replacing_qr(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
     monkeypatch.setattr(web, "_WHOAMI_CACHE", {})
-    monkeypatch.setattr(web, "_LOGIN_START_LOCKS", {})
     qr = tmp_path / f"{platform}.png"
     qr.write_bytes(b"old")
     process = Mock()
     process.poll.return_value = None
-    process.wait.side_effect = lambda **kwargs: qr.exists() or pytest.fail("removed before exit")
+    def exited(**kwargs):
+        assert qr.exists(), "removed before exit"
+        process.poll.return_value = 0
+    process.wait.side_effect = exited
+    monkeypatch.setattr('easel.install_runner.terminate_phase_tree', lambda proc: None)
     monkeypatch.setattr(web, "LOGIN_PROCESSES", {platform: process})
     def launch(*args, **kwargs):
         assert not qr.exists()
-        process.wait.assert_called_once_with(timeout=8)
+        process.wait.assert_called_once_with(timeout=5)
         return SimpleNamespace(poll=lambda: None)
 
     monkeypatch.setattr(web.subprocess, "Popen", launch)

@@ -1196,6 +1196,7 @@ def clean_agent_output(raw: str) -> str:
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
     env = child_env(PROJECT_ROOT)
+    env.update(PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
     # On Windows urllib falls back to the system proxy only when the proxy
     # environment is empty. Adding no_proxy alone would disable that fallback.
     system_proxies = urllib.request.getproxies()
@@ -7716,7 +7717,7 @@ async def _restart_owned_login(platform: str, key: str) -> None:
 
 @app.post("/api/login/{platform}")
 async def api_login_start(platform: str, visibleBrowser: bool = False, restart: bool = False):
-    """启动某平台登录：浏览器平台后台跑 QR runner，轮询到二维码就绪即返回。"""
+    """Register the owned QR runner and return its ID before browser startup."""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
@@ -7789,13 +7790,8 @@ async def api_login_start(platform: str, visibleBrowser: bool = False, restart: 
                                         creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             LOGIN_PROCESSES[platform] = proc
             admission.track(proc)
-    for _ in range(50):
-        await asyncio.sleep(0.5)
-        if _account_check_generation(platform) != login_generation:
-            raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
-        s = _login_status(platform)
-        if s['qr'] or s['state'] in ('qr_ready', 'success', 'error', 'expired'):
-            return {'mode': 'qr', **s}
+    if _account_check_generation(platform) != login_generation:
+        raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
     s = _login_status(platform)
     if s['state'] == 'unknown':
         s.update(state='starting', message='正在启动浏览器并准备二维码…')
@@ -8004,14 +8000,12 @@ async def api_mp_login_start(platform: str, restart: bool = False):
                                         creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             LOGIN_PROCESSES["wechat-oa-mp"] = proc
             admission.track(proc)
-    for _ in range(60):
-        await asyncio.sleep(0.5)
-        if _account_check_generation(platform) != login_generation:
-            raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
-        s = _mp_login_status()
-        if s["qr"] or s["state"] in ("qr_ready", "success", "error", "expired"):
-            return {"mode": "qr", **s}
-    return {"mode": "qr", **_mp_login_status()}
+    if _account_check_generation(platform) != login_generation:
+        raise HTTPException(409, '账号状态已变化，已结束旧登录请求')
+    status = _mp_login_status()
+    if status['state'] == 'unknown':
+        status.update(state='starting', message='正在启动浏览器并准备二维码…')
+    return {"mode": "qr", **status}
 
 
 @app.get("/api/accounts/{platform}/mp-login/status")

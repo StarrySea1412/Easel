@@ -361,6 +361,14 @@ def _capture_login_qr(page, qr_out: Path, *, creator_only: bool = False) -> bool
 
 
 def _is_logged_in(page) -> bool:
+    try:
+        location = urlsplit(page.url)
+        if (location.scheme != 'https' or location.hostname not in
+                ('www.xiaohongshu.com', 'xiaohongshu.com', 'creator.xiaohongshu.com')
+                or location.username is not None or location.password is not None):
+            return False
+    except (ValueError, AttributeError):
+        return False
     if _login_error(page):
         return False
     try:
@@ -1182,7 +1190,7 @@ def _wait_visible_login(page, qr_out: Path, status_file: str | None, timeout_s: 
                         and location.username is None and location.password is None)
         except (ValueError, AttributeError):
             official = False
-        if official and not verification and _query_safe(page, SELECTORS["login_ok"]) is not None:
+        if official and not verification and _is_logged_in(page):
             return "success"
         qr = _query_safe(page, SELECTORS["qrcode"]) if official and not verification else None
         captured = False
@@ -1262,18 +1270,11 @@ def cmd_login(a) -> int:
                 for _ in range(10):
                     page.wait_for_timeout(800)
                     _stop_on_login_page_error(page, sf)
-                    try:
-                        if page.query_selector(SELECTORS["login_ok"]) is not None:
-                            break  # 已登录
-                    except Exception:
-                        pass
+                    if _is_logged_in(page):
+                        break
 
                 # 已登录直接返回（页面可能仍在跳转，查询失败按未登录继续走登录流程）
-                try:
-                    logged_in = page.query_selector(SELECTORS["login_ok"]) is not None
-                except Exception:
-                    logged_in = False
-                if logged_in:
+                if _is_logged_in(page):
                     completed_message = "已登录"
                     return 0
 
@@ -1303,11 +1304,7 @@ def cmd_login(a) -> int:
                 deadline = time.time() + timeout_s
                 while time.time() < deadline:
                     _stop_on_login_page_error(page, sf)
-                    try:
-                        logged_in = page.query_selector(SELECTORS["login_ok"]) is not None
-                    except Exception:
-                        logged_in = False
-                    if logged_in:
+                    if _is_logged_in(page):
                         completed_message = "登录成功"
                         return 0
                     if login_state.report_scan(sf, page):

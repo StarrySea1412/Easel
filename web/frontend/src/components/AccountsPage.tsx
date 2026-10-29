@@ -185,7 +185,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
     try {
       const r = await accountWhoami(platform, true);
       if (!aliveRef.current || epoch !== (identityEpoch.current[platform] || 0) || before !== JSON.stringify(getWhoamiCache()[platform])) return null;
-      if (r.verified === false) {
+      if (!isWhoamiFresh(r)) {
         setWhoamiCache(platform, { ...r, verified: false });
         setWhoami((w) => ({ ...w, [platform]: getWhoamiCache()[platform] || r }));
         setVerification(value => ({ ...value, [platform]: { state: 'error', message: r.verificationMessage || '本次检查未能确认登录状态，保留上次状态，请稍后重试。' } }));
@@ -372,7 +372,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       if (s.state !== 'success') return;
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: true, hasLocalSession: true } : x));
       setWhoamiCache(a.platform, null); // A new login may select a different account.
-      setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '', checkedAt: Date.now(), verified: true });
+      setWhoamiCache(a.platform, { loggedIn: true, name: '', avatar: '', authState: 'unknown', verified: false });
       setVerification(value => ({ ...value, [a.platform]: { state: 'checking', message: '登录成功，正在读取账号身份…' } }));
       const identity = await runWhoami(a.platform);
       if (!current()) return;

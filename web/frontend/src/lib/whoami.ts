@@ -1,5 +1,5 @@
 // whoami 登录态：缓存 + 开页后台自愈校验。账号页与工作台「创作数据」卡片共用，
-// 避免对同一平台在 TTL 内重复起 headless 浏览器。缓存落 localStorage，条目带 ts。
+// 避免对同一平台在 TTL 内重复起 headless 浏览器。ts 仅用于未确认检查的退避，checkedAt 才是在线证据时间。
 import { useSyncExternalStore } from 'react';
 import { accountWhoami, decodeAccountWhoami, type AccountWhoami, type AccountItem } from './api';
 
@@ -65,8 +65,8 @@ export function setWhoamiCache(platform: string, r: AccountWhoami | null, option
 }
 
 export function isWhoamiFresh(e: AccountWhoami & { ts?: number } | undefined, ttlMs = WHOAMI_TTL_MS): boolean {
-  const at = e?.checkedAt ?? e?.ts;
-  return !!e && e.verified !== false && (e.loggedIn || e.authState === 'login_required' || e.authState === 'not_connected') && typeof at === 'number' && Number.isFinite(at)
+  const at = e?.checkedAt;
+  return !!e && e.verified === true && (e.loggedIn || e.authState === 'login_required' || e.authState === 'not_connected') && typeof at === 'number' && Number.isFinite(at)
     && at <= Date.now() && Date.now() - at < ttlMs;
 }
 
@@ -171,7 +171,7 @@ export async function verifyStale(platforms: string[], opts: VerifyOpts = {}): P
       try {
         const r = await accountWhoami(p, opts.force);
         if (version !== (requestVersions.get(p) || 0) || before !== JSON.stringify(getWhoamiCache()[p])) continue;
-        if (r.verified === false) {
+        if (!isWhoamiFresh(r, ttlMs)) {
           const message = r.verificationMessage || '本次检查未确认登录状态，请重试。';
           setWhoamiCache(p, { ...r, verified: false, verificationMessage: message });
           if (!opts.alive || opts.alive()) opts.onError?.(p, message);

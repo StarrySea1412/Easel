@@ -18,14 +18,21 @@ function setup() {
   return { exports, pending, entries };
 }
 
-test('legacy and previously incorrect account identity caches are ignored', () => {
+test('legacy identities remain display-only until a real account check confirms them', async () => {
   const view = setup();
   view.entries.set('easel_whoami', JSON.stringify({
     xiaohongshu: { loggedIn: true, name: 'Wrong feed author', avatar: '', ts: Date.now() },
   }));
   view.entries.set('easel_whoami_v2', view.entries.get('easel_whoami'));
   view.entries.set('easel_whoami_v3', view.entries.get('easel_whoami'));
-  assert.equal(view.exports.getWhoamiCache().xiaohongshu, undefined);
+  const legacy = view.exports.getWhoamiCache().xiaohongshu;
+  assert.equal(legacy.name, 'Wrong feed author');
+  assert.equal(view.exports.isWhoamiFresh(legacy), false);
+  assert.equal(view.exports.accountConnection({loggedIn:true}, legacy), 'unknown');
+  view.exports.verifyStale(['xiaohongshu']);
+  assert.equal(view.pending.length, 1);
+  view.pending[0].resolve({ loggedIn: true, verified: true, checkedAt: Date.now(), name: 'Me', avatar: '' });
+  await settle();
   view.exports.setWhoamiCache('xiaohongshu', { loggedIn: true, name: 'Me', avatar: '' });
   assert.equal(JSON.parse(view.entries.get('easel_whoami')).xiaohongshu.name, 'Me');
 });
@@ -55,19 +62,26 @@ test('fresh verification still updates and caches the actual account result', as
   const view = setup();
   const updates = [];
   view.exports.verifyStale(['xiaohongshu'], { onUpdate: (...args) => updates.push(args) });
-  view.pending[0].resolve({ loggedIn: true, name: '账号', avatar: '' });
+  view.pending[0].resolve({ loggedIn: true, verified: true, checkedAt: Date.now(), name: '账号', avatar: '' });
   await settle();
   assert.equal(view.exports.getWhoamiCache().xiaohongshu.loggedIn, true);
   assert.equal(updates.length, 1);
 });
 
-test('incomplete account identity is refreshed after one minute instead of ten', () => {
+test('verified accounts share the ten minute TTL even when display details are incomplete', async () => {
   const view = setup();
   view.entries.set('easel_whoami', JSON.stringify({
-    xiaohongshu: { loggedIn: true, name: '', avatar: '', ts: Date.now() - 61_000 },
-    zhihu: { loggedIn: true, name: 'Me', avatar: 'https://self.test/avatar', ts: Date.now() - 61_000 },
+    xiaohongshu: { loggedIn: true, verified: true, name: '', avatar: '', checkedAt: Date.now() - 61_000, ts: Date.now() },
+    zhihu: { loggedIn: true, verified: true, name: 'Me', avatar: 'https://self.test/avatar', checkedAt: Date.now() - 61_000, ts: Date.now() },
   }));
+  await view.exports.verifyStale(['xiaohongshu', 'zhihu']);
+  assert.equal(view.pending.length, 0);
+  const cache = JSON.parse(view.entries.get('easel_whoami'));
+  cache.xiaohongshu.checkedAt = Date.now() - 601_000;
+  view.entries.set('easel_whoami', JSON.stringify(cache));
   view.exports.verifyStale(['xiaohongshu', 'zhihu']);
   assert.equal(view.pending.length, 1);
   assert.equal(view.pending[0].platform, 'xiaohongshu');
+  view.pending[0].resolve({ loggedIn: true, verified: true, checkedAt: Date.now(), name: '', avatar: '' });
+  await settle();
 });

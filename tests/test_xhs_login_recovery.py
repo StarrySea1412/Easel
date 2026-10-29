@@ -223,6 +223,8 @@ class InteractivePage(Page):
                          '安全验证' if security else '小红书', 'IP 存在风险 300012' if risk else '')
         self.clock = 0
         self.logged = False
+        self.identity_visible = True
+        self.login_wall = False
         self.closed = False
         self.qr = qr
         self.screenshots = []
@@ -237,6 +239,13 @@ class InteractivePage(Page):
         if selector == publisher.SELECTORS['qrcode']:
             return self if self.qr else None
         raise AssertionError('Unexpected DOM access')
+
+    def query_selector_all(self, selector):
+        if selector == publisher.SELECTORS['login_ok']:
+            return [SimpleNamespace(is_visible=lambda: self.identity_visible)] if self.logged else []
+        if selector == publisher.SELECTORS['logged_out']:
+            return [SimpleNamespace(is_visible=lambda: True)] if self.login_wall else []
+        return []
 
     def is_visible(self):
         return True
@@ -390,3 +399,22 @@ def test_manual_login_success_is_not_accepted_on_an_unrelated_origin(monkeypatch
     assert publisher.cmd_login(args) == 1
 
     assert states == ['starting', 'verifying', 'expired'] and closed == [True]
+
+
+@pytest.mark.parametrize('headed', [False, True])
+@pytest.mark.parametrize('obstruction', ['hidden_identity', 'visible_login_wall', 'foreign_origin'])
+def test_login_requires_visible_identity_without_a_login_wall(monkeypatch, tmp_path, headed, obstruction):
+    page = InteractivePage(qr=True)
+    page.logged = True
+    page.identity_visible = obstruction != 'hidden_identity'
+    page.login_wall = obstruction == 'visible_login_wall'
+    if obstruction == 'foreign_origin':
+        page.url = 'https://example.test/explore'
+    args, closed = runner(monkeypatch, tmp_path, page)
+    args.headed, args.timeout = headed, 2
+    monkeypatch.setattr(publisher.time, 'monotonic', lambda: page.clock)
+    monkeypatch.setattr(publisher.time, 'time', lambda: 1000 + page.clock)
+    monkeypatch.setattr(publisher, '_wait_sel', lambda *_args: page)
+    assert publisher.cmd_login(args) == 1
+    assert read_status(args)['state'] == 'expired'
+    assert closed == [True]
