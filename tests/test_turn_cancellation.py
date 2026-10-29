@@ -161,7 +161,8 @@ def test_settlement_finds_old_image_beyond_display_limits(tmp_path, newer):
     assert all(j['jobId'] != value['jobId'] for j in jobs.list('chat'))
     root = tmp_path / 'ledger'
     ledger_for(root, run)
-    service = TaskService(SimpleNamespace(OUTPUTS_DIR=tmp_path, run_ledger=run_ledger, _run_ledger_root=lambda: root))
+    service = TaskService(SimpleNamespace(OUTPUTS_DIR=tmp_path, run_ledger=run_ledger,
+        _run_ledger_root=lambda: root, _turn_file=lambda _: tmp_path / 'missing-turn.json'))
     assert asyncio.run(service.settle(run)) is False
     assert jobs.pending_turns('chat') == [run['turnId']]
     assert service.store.get('goals', goal['id'])['status'] == 'active'

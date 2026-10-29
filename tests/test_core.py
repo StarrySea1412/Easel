@@ -383,16 +383,24 @@ def test_web_find_skill_matches_cli():
     assert web.find_skill("nope-xyz") is None
 
 
-def test_web_skill_list_reads_builtin_directory(monkeypatch):
+def test_web_skill_list_reads_builtin_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_read_env", lambda: {})
-    expected = {
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(web, '_SKILL_META_STORE', None)
+    builtin = {
         directory.name
         for directory in (PROJECT_ROOT / "skills" / "builtin").iterdir()
         if (directory / "SKILL.md").is_file()
     }
+    optional = {
+        directory.name
+        for directory in (PROJECT_ROOT / "skills" / "openclaw").iterdir()
+        if (directory / "SKILL.md").is_file()
+    }
     listed = asyncio.run(web.api_skills())
-    assert expected
-    assert {skill["name"] for skill in listed} == expected
+    assert builtin
+    assert {skill["name"] for skill in listed} == builtin | optional
+    assert len(listed) == len(builtin | optional), 'same-name skills must not be listed twice'
     assert all(skill["description"] for skill in listed)
 
 
@@ -523,7 +531,21 @@ def test_missing_job_stream_fails_promptly(tmp_path, monkeypatch):
     assert exc.value.status_code == 404
 
 
-def test_chat_stop_waits_for_process_and_supervisor_cleanup():
+def test_chat_stop_waits_for_process_and_supervisor_cleanup(tmp_path, monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    root = tmp_path / 'ledger'
+    monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path)
+    monkeypatch.setattr(web, '_run_ledger_root', lambda: root)
+    monkeypatch.setattr(web, '_RUNNING_CHAT', {})
+    monkeypatch.setattr(web, '_ACTIVE_SKILL_TURNS', {})
+    monkeypatch.setattr(web, '_CHAT_JOBS', {})
+    monkeypatch.setattr(web, '_STOPPED_CHAT', set())
+    monkeypatch.setattr(web, '_codex_service', SimpleNamespace(owns=lambda _: False))
+    monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
+    terminated = threading.Event()
+
     class FakeProcess:
         def __init__(self):
             self.returncode = None
@@ -534,6 +556,7 @@ def test_chat_stop_waits_for_process_and_supervisor_cleanup():
 
         def terminate(self):
             self.terminated = True
+            terminated.set()
 
         def wait(self, timeout=None):
             self.returncode = -15
@@ -541,18 +564,34 @@ def test_chat_stop_waits_for_process_and_supervisor_cleanup():
 
     async def scenario():
         session_id = "stop-cleanup-test"
+        turn_id = "owned-stop-turn"
         proc = FakeProcess()
+        web.run_ledger.accept(root, turn_id, session_id=session_id, session_key=session_id)
         web._RUNNING_CHAT[session_id] = proc
+        web._ACTIVE_SKILL_TURNS[session_id] = turn_id
+        web._CHAT_JOBS[turn_id] = (session_id, threading.Event())
+        release_cleanup = asyncio.Event()
 
         async def finish_supervisor():
-            while not proc.terminated:
-                await asyncio.sleep(0)
+            await release_cleanup.wait()
+            assert proc.terminated
+            web.run_ledger.mark(root, turn_id, status='stopped', settled=True, resource_settled=True)
             web._RUNNING_CHAT.pop(session_id, None)
+            web._ACTIVE_SKILL_TURNS.pop(session_id, None)
+            web._CHAT_JOBS.pop(turn_id, None)
 
         cleanup = asyncio.create_task(finish_supervisor())
-        result = await web.api_chat_stop(web.StopRequest(sessionId=session_id))
-        await cleanup
-        web._STOPPED_CHAT.discard(session_id)
+        stop = asyncio.create_task(web.api_chat_stop(web.StopRequest(sessionId=session_id, turnId=turn_id)))
+        try:
+            assert await asyncio.to_thread(terminated.wait, 5)
+            assert not stop.done(), 'process exit alone must not report supervisor resources settled'
+            assert not web.run_ledger.read(root, turn_id)['resourceSettled']
+        finally:
+            release_cleanup.set()
+        result = await asyncio.wait_for(stop, 3)
+        await asyncio.wait_for(cleanup, 3)
+        assert not web._RUNNING_CHAT and not web._CHAT_JOBS and not web._ACTIVE_SKILL_TURNS
+        assert web.run_ledger.read(root, turn_id)['resourceSettled']
         return result, proc
 
     result, proc = asyncio.run(scenario())

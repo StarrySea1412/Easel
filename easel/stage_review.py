@@ -18,7 +18,14 @@ class ReviewDecision(BaseModel):
     findings: list[str] = Field(max_length=8)
 
 
-def review_contract(goal, run):
+def review_artifacts(outputs, goal):
+    """Freeze declared deliverables, including inspect_file's local dependency hashes."""
+    criteria = [item for item in goal['criteria'] if item['type'] == 'file']
+    checks, _ = check_goal(outputs, {'criteria': criteria}, '')
+    return [{key: item[key] for key in ('type', 'label', 'value', 'state', 'evidence')} for item in checks]
+
+
+def review_contract(goal, run, *, outputs):
     upstream = []
     targets = []
     required = ancestors(goal, run['stageId']) if parallel(goal) else None
@@ -34,8 +41,8 @@ def review_contract(goal, run):
                                     for c in stage['checks']]})
         if not stage.get('planGate'):
             targets.append(stage['id'])
-    return {'schemaVersion': 1, 'goalId': goal['id'], 'revision': run['revision'], 'turnId': run['turnId'],
-            'inputs': upstream, 'allowedTargets': targets}
+    return {'schemaVersion': 2, 'goalId': goal['id'], 'revision': run['revision'], 'turnId': run['turnId'],
+            'inputs': upstream, 'artifacts': review_artifacts(outputs, goal), 'allowedTargets': targets}
 
 
 def review_prompt(stage, run):
@@ -45,6 +52,7 @@ def review_prompt(stage, run):
                'summary': '实际审查结论与局限', 'targetStageId': None, 'findings': []}
     return ('\n本阶段必须在指定review.json写入单个JSON对象，不能用普通Markdown代替。'
             '先实际读取并检查上游产物；contract原样保留。decision只选pass、revise、blocked之一。'
+            '同时检查contract.artifacts列出的目标实际文件及本地依赖，不能只检查交接说明；缺失或未通过的实际产物不能判pass。'
             'pass表示模型建议通过，不能代替用户质量验收；pass的findings必须为空且targetStageId为null。'
             '有具体可修复问题时选revise，findings列出1至8条具体问题，targetStageId选contract.allowedTargets中的上游起点。'
             '材料/权限/可验证性不足时选blocked，列出具体缺口且targetStageId为null，不猜测通过。'
@@ -64,7 +72,7 @@ def _unique_fields(pairs):
 def read_review(outputs, goal, run, stage, checks):
     """Read and recheck against the runner's frozen contract and handoff hashes."""
     contract = run.get('reviewContract')
-    if not contract or contract != review_contract(goal, run):
+    if not contract or contract != review_contract(goal, run, outputs=outputs):
         raise ValueError('审查输入版本不完整或已变化，未进入交付。')
     path, _ = file_path(outputs, stage['criteria'][0]['value'])
     with path.open('rb') as stream:
@@ -82,6 +90,8 @@ def read_review(outputs, goal, run, stage, checks):
     if any(not 3 <= len(item.strip()) <= 1200 for item in review['findings']):
         raise ValueError('审查问题需为3至1200字符的具体说明。')
     if review['decision'] == 'pass':
+        if any(item['state'] != 'passed' for item in contract['artifacts']):
+            raise ValueError('目标实际产物尚未通过核验，审查不能标为通过。')
         valid = not review['findings'] and review['targetStageId'] is None
     elif review['decision'] == 'revise':
         valid = bool(review['findings']) and review['targetStageId'] in contract['allowedTargets']

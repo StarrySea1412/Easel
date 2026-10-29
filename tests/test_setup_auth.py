@@ -330,7 +330,7 @@ def test_ps1_auth_branches_guard_base_url():
         ("EASEL_LLM_API_KEY", "EASEL_LLM_BASE_URL"),
         ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"),
     ]:
-        pattern = rf"\(\(Test-UsableKey \$envValues\['{key}'\]\) -and " \
+        pattern = rf"\(\(Is-UsableKey \$envValues\['{key}'\]\) -and " \
                   rf"\$envValues\.ContainsKey\('{companion}'\)\)"
         assert re.search(pattern, text), f"{key} 分支缺少括号化的 {companion} 守卫"
 

@@ -146,15 +146,16 @@ def test_actual_chat_start_rejects_duplicate_before_artifact_or_provider_work(tm
     monkeypatch.setattr(web,'OUTPUTS_DIR',tmp_path/'outputs')
     monkeypatch.setattr(web,'SESSIONS_DIR',tmp_path/'sessions')
     monkeypatch.setattr(web,'_run_ledger_root',lambda:tmp_path/'ledger')
+    monkeypatch.setattr(web,'_chat_backend',lambda _: 'openclaw')
     monkeypatch.setattr(web._codex_service,'bind',lambda *a,**k:None)
     monkeypatch.setattr(web,'_chat_role_contract',lambda *_:None)
-    monkeypatch.setattr(web,'_chat_message',lambda *_:'isolated fixture')
+    monkeypatch.setattr(web,'_chat_message',lambda *_, **kwargs:'isolated fixture' + kwargs.get('suffix', ''))
     monkeypatch.setattr(web,'_selected_skill_specs',lambda *_:[])
-    monkeypatch.setattr(web,'admit',lambda *_:SimpleNamespace(admitted=True))
     monkeypatch.setattr(office_controls,'require_model_override',lambda *a,**k:{})
     def unexpected(*a,**k):
         raise AssertionError('Duplicate entered post-admission work')
     monkeypatch.setattr(web,'ArtifactStore',unexpected)
+    monkeypatch.setattr(web,'_chat_provider_key',unexpected)
     ledger.accept(tmp_path/'ledger','duplicate-turn',session_id='fixture-session',session_key='fixture-session')
     if terminal:
         ledger.mark(tmp_path/'ledger','duplicate-turn',status='completed',settled=True,resource_settled=True)

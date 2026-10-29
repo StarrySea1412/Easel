@@ -233,7 +233,8 @@ def test_unnumbered_action_remains_valid_when_quantity_version_would_be_rejected
 def test_reviews_saved_under_older_validation_rules_are_hidden(source, monkeypatch):
     store, report = source
     with monkeypatch.context() as prior_rules:
-        prior_rules.setattr('content_analysis.REVIEW_RULE_VERSION', 1)
+        from easel.analysis_evidence import REVIEW_RULE_VERSION
+        prior_rules.setattr('easel.analysis_evidence.REVIEW_RULE_VERSION', REVIEW_RULE_VERSION - 1)
         store.save_review('xiaohongshu', 'a', report['contents'][0], {'findings': []})
         store.save_insights('xiaohongshu', 'a', report['contents'], {'facts': [], 'insights': []})
         previous = store.report('xiaohongshu', 'a')
@@ -242,6 +243,11 @@ def test_reviews_saved_under_older_validation_rules_are_hidden(source, monkeypat
     current = store.report('xiaohongshu', 'a')
     assert current['contents'][0]['aiReview'] is None
     assert current['accountInsights'] is None
+    with monkeypatch.context() as prior_rules:
+        prior_rules.setattr('easel.analysis_evidence.REVIEW_RULE_VERSION', REVIEW_RULE_VERSION - 1)
+        retained = store.report('xiaohongshu', 'a')
+        assert retained['contents'][0]['aiReview'] == previous['contents'][0]['aiReview']
+        assert retained['accountInsights'] == previous['accountInsights']
 
 
 @pytest.mark.parametrize('payload,expected,status', [

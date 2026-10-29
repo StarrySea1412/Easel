@@ -7,6 +7,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from easel.task_rules import GoalSpec, check_goal
@@ -20,7 +22,7 @@ import run_ledger
 
 def spec(**patch):
     return GoalSpec(objective='隔离合成：制作本地说明并审查可核验内容', modelRef='fixture/model',
-        criteria=[{'type':'review','label':'用户检查质量'}], workflow='reviewed-delivery',
+        criteria=patch.pop('criteria', [{'type':'review','label':'用户检查质量'}]), workflow='reviewed-delivery',
         maxIterations=patch.pop('maxIterations', 8), **patch).model_dump()
 
 
@@ -128,6 +130,157 @@ def test_changed_upstream_is_not_reviewed_evidence(tmp_path):
     path=tmp_path/g['stages'][1]['criteria'][0]['value'];path.write_text('审查期间修改了制作文件',encoding='utf-8')
     saved=finish(store,g,r,decision(r))
     assert saved['phase']=='review_invalid' and '证据已变化' in saved['reason']
+
+
+def artifact_review(outputs, *, missing=False):
+    """A declared deliverable and its local dependency are separate from handoff notes."""
+    folder = outputs / 'delivery'
+    folder.mkdir()
+    report, dependency = folder / 'index.html', folder / 'style.css'
+    if not missing:
+        report.write_text('<link rel="stylesheet" href="style.css"><p>实际交付版本一</p>', encoding='utf-8')
+        dependency.write_text('p { color: blue; }', encoding='utf-8')
+    store, goal, run = at_review(outputs, criteria=[
+        {'type': 'file', 'label': '实际网页', 'value': 'delivery/index.html'},
+        {'type': 'review', 'label': '用户检查质量'},
+    ])
+    return store, goal, run, report, dependency
+
+
+def test_review_freezes_declared_deliverable_in_addition_to_handoff_notes(tmp_path):
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    contract = run['reviewContract']
+    assert contract['schemaVersion'] == 2
+    assert contract['artifacts'] == [{k: check_goal(tmp_path, goal, '')[0][0][k]
+                                      for k in ('type', 'label', 'value', 'state', 'evidence')}]
+    assert contract['artifacts'][0]['state'] == 'passed'
+
+
+@pytest.mark.parametrize('change', ['body', 'dependency', 'delete'])
+def test_review_rejects_actual_artifact_changed_while_handoff_notes_are_unchanged(tmp_path, change):
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    if change == 'delete':
+        report.unlink()
+    else:
+        (report if change == 'body' else dependency).write_text('实际交付版本二', encoding='utf-8')
+    saved = finish(store, goal, run, decision(run))
+    assert saved['status'] == 'blocked' and saved['phase'] == 'review_invalid'
+    assert store.claim('next') is None
+
+
+def test_missing_actual_deliverable_cannot_receive_a_passing_review(tmp_path):
+    store, goal, run, report, dependency = artifact_review(tmp_path, missing=True)
+    saved = finish(store, goal, run, decision(run))
+    assert saved['status'] == 'blocked' and saved['phase'] == 'review_invalid'
+    assert '实际产物' in saved['reason']
+
+
+@pytest.mark.parametrize('change', ['body', 'dependency', 'delete'])
+def test_delivery_cannot_replace_reviewed_artifact_without_another_review(tmp_path, change):
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    finish(store, goal, run, decision(run))
+    goal, run = store.claim('worker')
+    assert run['stageId'] == 'deliver'
+    if change == 'delete':
+        report.unlink()
+    else:
+        (report if change == 'body' else dependency).write_text('未经本轮审查的新版本', encoding='utf-8')
+    saved = finish(store, goal, run)
+    assert saved['status'] == 'blocked' and saved['phase'] == 'handoff_failed'
+    assert saved['stages'][-1]['status'] != 'completed'
+    assert store.claim('next') is None
+
+
+def test_changed_reviewed_artifact_is_detected_before_the_next_dispatch(tmp_path):
+    from easel.task_stages import validate_handoffs
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    saved = finish(store, goal, run, decision(run))
+    dependency.write_text('p { color: red; }', encoding='utf-8')
+    with pytest.raises(ValueError, match='实际产物'):
+        validate_handoffs(tmp_path, saved)
+
+
+def test_unchanged_reviewed_deliverable_survives_restart_and_still_waits_for_human(tmp_path):
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    finish(store, goal, run, decision(run))
+    store = TaskStore(tmp_path)
+    goal, run = store.claim('worker')
+    saved = finish(store, goal, run)
+    assert saved['status'] == 'blocked' and saved['phase'] == 'review'
+    assert saved['stages'][2]['review']['contract']['artifacts'][0]['state'] == 'passed'
+    approved = store.apply_checks(saved['id'], check_goal(tmp_path, saved, '', True)[0], review=run['turnId'])
+    assert approved['status'] == 'completed'
+
+
+def test_legacy_inflight_review_is_not_silently_upgraded(tmp_path):
+    store, goal, run, *_ = artifact_review(tmp_path)
+    legacy = deepcopy(run['reviewContract'])
+    legacy.pop('artifacts')
+    legacy['schemaVersion'] = 1
+    with store.db() as db:
+        saved_run = store._get(db, 'runs', run['id'])
+        saved_run['reviewContract'] = legacy
+        db.execute('UPDATE runs SET data=? WHERE id=?', (json.dumps(saved_run), run['id']))
+    run['reviewContract'] = legacy
+    saved = finish(store, goal, run, decision(run))
+    assert saved['phase'] == 'review_invalid' and store.claim('next') is None
+    assert store.get('runs', run['id'])['reviewContract'] == legacy
+
+
+def test_legacy_completed_review_does_not_authorize_declared_files(tmp_path):
+    from easel.task_stages import validate_handoffs
+    store, goal, run, *_ = artifact_review(tmp_path)
+    saved = finish(store, goal, run, decision(run))
+    contract = saved['stages'][2]['review']['contract']
+    contract.pop('artifacts')
+    contract['schemaVersion'] = 1
+    with pytest.raises(ValueError, match='重新审查'):
+        validate_handoffs(tmp_path, saved)
+
+
+def test_missing_artifact_still_allows_bounded_revise_and_new_review(tmp_path):
+    store, goal, run, report, dependency = artifact_review(tmp_path, missing=True)
+    saved = finish(store, goal, run, decision(run, 'revise'))
+    assert saved['revision'] == 2 and saved['autoReworksUsed'] == 1
+    goal, run = store.claim('worker')
+    assert run['stageId'] == 'build'
+    report.write_text('<link rel="stylesheet" href="style.css"><p>补齐产物</p>', encoding='utf-8')
+    dependency.write_text('p { color: blue; }', encoding='utf-8')
+    finish(store, goal, run)
+    goal, run = store.claim('worker')
+    assert run['stageId'] == 'review' and run['reviewContract']['artifacts'][0]['state'] == 'passed'
+    finish(store, goal, run, decision(run))
+    goal, run = store.claim('worker')
+    assert run['stageId'] == 'deliver'
+    saved = finish(store, goal, run)
+    assert saved['phase'] == 'review' and saved['status'] == 'blocked'
+
+
+@pytest.mark.parametrize('action', ['approve', 'recheck'])
+@pytest.mark.parametrize('change', ['none', 'body', 'dependency', 'delete'])
+def test_actual_action_route_checks_reviewed_files_before_human_confirmation(tmp_path, action, change):
+    store, goal, run, report, dependency = artifact_review(tmp_path)
+    finish(store, goal, run, decision(run))
+    goal, run = store.claim('worker')
+    saved = finish(store, goal, run)
+    assert saved['phase'] == 'review'
+    if change == 'delete':
+        report.unlink()
+    elif change != 'none':
+        (report if change == 'body' else dependency).write_text('审查后已变化', encoding='utf-8')
+    app = FastAPI()
+    app.include_router(TaskService(SimpleNamespace(OUTPUTS_DIR=tmp_path)).router())
+    with TestClient(app) as client:
+        response = client.post(f"/api/tasks/goals/{goal['id']}/action", json={'action': action})
+    current = TaskStore(tmp_path).get('goals', goal['id'])
+    if change == 'none':
+        assert response.status_code == 200
+        assert current['status'] == ('completed' if action == 'approve' else 'blocked')
+        assert current.get('reviewedTurnId') == (run['turnId'] if action == 'approve' else None)
+    else:
+        assert response.status_code == 409 and '实际产物' in response.json()['detail']
+        assert current['status'] == 'blocked' and current['phase'] == 'evidence_changed'
+        assert not current.get('reviewedTurnId') and store.claim('next') is None
 
 
 def test_revise_archives_and_reopens_only_downstream_once_then_waits_for_human(tmp_path):

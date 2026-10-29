@@ -592,7 +592,7 @@ class TaskStore:
                         r['planContract'] = plan_contract(g, r)
                     if stage.get('reviewGate'):
                         from easel.stage_review import review_contract
-                        r['reviewContract'] = review_contract(g, r)
+                        r['reviewContract'] = review_contract(g, r, outputs=self.outputs)
                 r.update(state='running', owner=owner, startedAt=self.clock(), modelRef=g['modelRef'], workTools=0)
                 if g.get('lastRework') and g['lastRework']['toRevision'] == g['revision']:
                     r['reworkId'] = g['lastRework']['id']

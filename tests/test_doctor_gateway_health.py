@@ -1,6 +1,7 @@
 """Bounded doctor health retries; no real OpenClaw service or credentials."""
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,14 @@ class Reply:
     def __exit__(self, *args): pass
 
 
+def mock_probe_opener(monkeypatch, request):
+    def build(*handlers):
+        assert len(handlers) == 1 and isinstance(handlers[0], doctor.urllib.request.ProxyHandler)
+        assert handlers[0].proxies == {}, 'loopback health probes must bypass environment proxies'
+        return SimpleNamespace(open=request)
+    monkeypatch.setattr(doctor.urllib.request, 'build_opener', build)
+
+
 def test_transient_oserror_then_real_success_requires_second_request(monkeypatch):
     attempts, sleeps = [], []
     monkeypatch.setattr(doctor, 'healthz_url', lambda: 'http://127.0.0.1:12345/healthz')
@@ -22,7 +31,7 @@ def test_transient_oserror_then_real_success_requires_second_request(monkeypatch
         if len(attempts) == 1:
             raise OSError('temporary connection failure')
         return Reply(200)
-    monkeypatch.setattr(doctor.urllib.request, 'urlopen', request)
+    mock_probe_opener(monkeypatch, request)
     assert doctor._gateway_healthy() is True
     assert attempts == [('http://127.0.0.1:12345/healthz', 5)] * 2
     assert sleeps == [1]
@@ -34,7 +43,7 @@ def test_persistent_connection_failure_is_bounded_and_false(monkeypatch):
     def request(url, timeout):
         attempts.append(timeout)
         raise OSError('still unavailable')
-    monkeypatch.setattr(doctor.urllib.request, 'urlopen', request)
+    mock_probe_opener(monkeypatch, request)
     assert doctor._gateway_healthy() is False
     assert attempts == [5, 5, 5] and sleeps == [1, 1]
 
@@ -46,7 +55,7 @@ def test_non_200_responses_never_count_as_healthy(monkeypatch, status):
     def request(url, timeout):
         attempts.append(timeout)
         return Reply(status)
-    monkeypatch.setattr(doctor.urllib.request, 'urlopen', request)
+    mock_probe_opener(monkeypatch, request)
     assert doctor._gateway_healthy() is False
     assert len(attempts) == 3 and sleeps == [1, 1]
 
@@ -57,11 +66,15 @@ def test_first_http_200_does_not_sleep_or_retry(monkeypatch):
     def request(url, timeout):
         attempts.append(timeout)
         return Reply(200)
-    monkeypatch.setattr(doctor.urllib.request, 'urlopen', request)
+    mock_probe_opener(monkeypatch, request)
     assert doctor._gateway_healthy() is True and attempts == [5]
 
 
 def test_local_http_transient_503_then_200(monkeypatch):
+    for name in ('HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy'):
+        monkeypatch.setenv(name, 'http://127.0.0.1:1')
+    monkeypatch.setenv('NO_PROXY', '')
+    monkeypatch.setenv('no_proxy', '')
     requests = []
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):

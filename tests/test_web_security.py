@@ -388,18 +388,97 @@ def test_pin_transport_never_pins_cli(_tp):
     assert not web._transport_pin_file("web-x").exists()
 
 
-def test_http_mode_drops_raw_text_delta():
-    """HTTP 模式正文以 SSE 为准；raw 流里的 text_delta 必须丢弃，否则每个字进两次队列。"""
-    import inspect
-    src = inspect.getsource(web.api_chat_stream)
-    seg = src.split('et == "text_delta"')[1][:220]
-    assert "is_http" in seg, "HTTP 模式没有屏蔽 raw 流的正文，前端会看到重复内容"
+def _http_and_raw_events(tmp_path, monkeypatch):
+    """Exercise the actual supervisor with two isolated producers, without a model."""
+    import asyncio
+    from types import SimpleNamespace
+    import httpx
+    import office_controls
+    import skill_audit
+    from easel.codex_service import CodexService
+    from easel.gateway_auth import GatewayCredentials
+
+    raw = tmp_path / 'raw.jsonl'
+    raw.write_text('', encoding='utf-8')
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'openclaw.json').write_text('{}', encoding='utf-8')
+
+    class Response:
+        status_code = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def aiter_lines(self):
+            yield 'data: ' + json.dumps({'id': 'chatcmpl_security', 'choices': [{'delta': {'role': 'assistant'}}]})
+            raw.write_text('\n'.join(json.dumps(event) for event in [
+                {'runId': 'foreign', 'event': 'assistant_thinking_stream', 'evtType': 'thinking_delta', 'delta': 'PRIVATE_FOREIGN'},
+                {'runId': 'chatcmpl_security', 'event': 'assistant_thinking_stream', 'evtType': 'thinking_delta', 'delta': '原始流公开摘要'},
+                {'runId': 'chatcmpl_security', 'event': 'assistant_text_stream', 'evtType': 'text_delta', 'delta': '唯一正文'},
+                {'runId': 'chatcmpl_security', 'event': 'assistant_message_end'},
+            ]) + '\n', encoding='utf-8')
+            yield 'data: ' + json.dumps({'choices': [{'delta': {'content': '唯一正文'}}]})
+            yield 'data: ' + json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}]})
+            yield 'data: [DONE]'
+
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def stream(self, *args, **kwargs): return Response()
+
+    class CrossLock:
+        def __init__(self, key): self.acquired = False
+        def acquire(self, timeout):
+            self.acquired = True
+            return True
+        def release(self): self.acquired = False
+
+    isolated = {
+        'OUTPUTS_DIR': tmp_path / 'outputs', 'SESSIONS_DIR': tmp_path / 'sessions',
+        'DEBUG_DIR': tmp_path / 'debug', 'OPENCLAW_SESSIONS_DIR': tmp_path / 'transcripts',
+        'SHARED_RAW_STREAM': raw, '_CrossProcLock': CrossLock,
+        'openclaw_state_dir': lambda: state, '_run_ledger_root': lambda: tmp_path / 'ledger',
+        '_codex_service': CodexService(tmp_path / 'outputs'),
+        'gateway_credentials': lambda: GatewayCredentials('token', token='isolated-fixture'),
+        '_native_agent_client': lambda _: None,
+        '_browser_service': SimpleNamespace(has_pages=lambda _: False),
+        '_direct_api_enabled': lambda: False, '_chat_backend': lambda _: 'openclaw',
+        '_chat_message': lambda req, *, suffix='': req.message + suffix,
+        '_selected_skill_specs': lambda _: {}, '_heal_openclaw_session': lambda _: None,
+        '_resolve_transport': lambda _: 'http', '_pin_transport': lambda *args: None,
+        'openclaw_base_cmd': lambda: ['unused-cli'], '_proxy_env': dict,
+        'GatewayClient': None, 'question_bridge_supported': None, '_notify_email_web_turn': None,
+        '_session_locks': {}, '_RUNNING_CHAT': {}, '_STOPPED_CHAT': set(),
+        '_ACTIVE_SKILL_TURNS': {}, '_CHAT_JOBS': {}, '_BG_TASKS': set(),
+    }
+    for name, value in isolated.items():
+        monkeypatch.setattr(web, name, value)
+    monkeypatch.setattr(httpx, 'AsyncClient', Client)
+    monkeypatch.setattr(office_controls, 'require_enabled_inherited_model', lambda *_: None)
+    monkeypatch.setattr(skill_audit, 'begin', lambda *_: None)
+
+    async def scenario():
+        response = await web.api_chat_stream(web.ChatRequest(
+            message='隔离协议测试', sessionId='security-http', turnId='security-turn'))
+        async def collect(): return [event async for event in response.body_iterator]
+        events = await asyncio.wait_for(collect(), 5)
+        snapshot = await web.api_chat_last('security-http', 'security-turn')
+        return events, snapshot
+    return asyncio.run(scenario())
 
 
-def test_http_mode_still_tails_raw_stream_for_thinking():
-    """openclaw 的 chat/completions 不回传任何 reasoning 增量（实测该实现里 thinking/reasoning
-    出现 0 次），思考只在共享 raw 流里。HTTP 模式不 tail 它，思考面板就永远是空的。"""
-    import inspect
-    src = inspect.getsource(web.api_chat_stream)
-    seg = src.split("stdout_fut = None")[1][:600]
-    assert seg.count("_tail") >= 2, "HTTP 分支没有启动 raw 流 tail，思考流会整个丢失"
+def test_http_mode_drops_raw_text_delta(tmp_path, monkeypatch):
+    """HTTP正文和raw副本同时到达时，实际派发/持久化正文只能出现一次。"""
+    events, snapshot = _http_and_raw_events(tmp_path, monkeypatch)
+    assert [json.loads(event['data']) for event in events if event['event'] == 'token'] == ['唯一正文']
+    assert snapshot['text'] == '唯一正文'
+    assert events[-1]['event'] == 'done'
+
+
+def test_http_mode_still_tails_raw_stream_for_thinking(tmp_path, monkeypatch):
+    """HTTP只给正文时，仍消费本轮raw思考，且不得混入其他运行。"""
+    events, snapshot = _http_and_raw_events(tmp_path, monkeypatch)
+    assert ''.join(json.loads(event['data']) for event in events if event['event'] == 'thinking') == '原始流公开摘要'
+    assert snapshot['thinking'] == '原始流公开摘要'
+    assert snapshot['thinkingStatus'] == 'available'
+    assert 'PRIVATE_FOREIGN' not in json.dumps(events) + json.dumps(snapshot)

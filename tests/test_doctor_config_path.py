@@ -59,7 +59,7 @@ def _write_openclaw_config(path, primary):
         ("google-gemini-cli/gemini-2.5-pro", "gemini"),
     ],
 )
-def test_doctor_accepts_logged_in_agent_cli_without_api_key(tmp_path, monkeypatch, primary, cli):
+def test_doctor_recognizes_configured_agent_cli_without_api_key(tmp_path, monkeypatch, primary, cli):
     import easel.commands.doctor as doctor
 
     monkeypatch.setenv("EASEL_OPENCLAW_STATE_DIR", str(tmp_path))
@@ -68,7 +68,8 @@ def test_doctor_accepts_logged_in_agent_cli_without_api_key(tmp_path, monkeypatc
     _write_openclaw_config(tmp_path / "openclaw.json", primary)
     monkeypatch.setattr(doctor.shutil, "which", lambda cmd: f"/usr/bin/{cmd}" if cmd == cli else None)
 
-    assert doctor._env_key_valid() is True
+    assert doctor._env_key_valid() is False
+    assert doctor._primary_model_cli_available() == (True, "")
     assert doctor._primary_model_routable() == (True, "")
 
 

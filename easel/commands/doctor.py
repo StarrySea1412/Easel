@@ -440,9 +440,14 @@ def cmd_doctor(_args) -> int:
         except DirectAPIError as error:
             all_ok &= _check("API 配置", False, str(error))
     else:
-        env_ok = _env_key_valid()
-        all_ok &= _check(".env (API Key)", env_ok,
-                          "填 ANTHROPIC_API_KEY，或 EASEL_LLM_API_KEY + EASEL_LLM_BASE_URL")
+        cli_ok, _cli_detail = _primary_model_cli_available()
+        if cli_ok:
+            all_ok &= _check("主模型 CLI 配置（未验证登录）", True)
+            print("  CLI 登录与模型可用性请运行 easel ping 验证；不读取或迁移凭证")
+        else:
+            env_ok = _env_key_valid()
+            all_ok &= _check(".env (API Key)", env_ok,
+                              "填 ANTHROPIC_API_KEY，或 EASEL_LLM_API_KEY + EASEL_LLM_BASE_URL")
         # .env 填了不代表 OpenClaw 已配置同一 provider；正常诊断仍需对账。
         route_ok, route_detail = _primary_model_routable()
         all_ok &= _check("OpenClaw model routing", route_ok, route_detail)

@@ -94,6 +94,13 @@ def validate_handoffs(outputs, goal):
         if len(files) != len(saved) or any(c['state'] != 'passed' or c.get('evidence') != old.get('evidence')
                                           for c, old in zip(files, saved)):
             raise ValueError(f"{stage['title']}的交接证据已变化，请核对文件并从该阶段重做，或修改目标后重新执行；未自动重发。")
+        if stage.get('review', {}).get('decision') == 'pass':
+            from easel.stage_review import review_artifacts
+            current = review_artifacts(outputs, goal)
+            contract = stage['review'].get('contract', {})
+            if current and (contract.get('schemaVersion') != 2 or contract.get('artifacts') != current
+                            or any(item['state'] != 'passed' for item in current)):
+                raise ValueError('审查对应的目标实际产物或本地依赖已变化，请重新审查当前版本；未自动重发。')
 
 
 def stage_prompt(goal, run, rework=None):
@@ -141,6 +148,13 @@ def settle_stage(goal, run, text, checks, now, *, outputs=None):
         stage['status'] = 'blocked'
         goal.update(status='blocked', phase='waiting_input', reason='当前阶段仍有未完成步骤，未交接。')
         return False
+    if not stage.get('reviewGate'):
+        try:
+            validate_handoffs(outputs, goal)
+        except (OSError, ValueError) as exc:
+            stage['status'] = 'blocked'
+            goal.update(status='blocked', phase='handoff_failed', reason=str(exc))
+            return False
     if stage.get('planGate'):
         from easel.task_planning import read_plan
         try:
