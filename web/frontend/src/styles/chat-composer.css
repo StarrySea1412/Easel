@@ -163,7 +163,17 @@
 .composer-add-menu button span { display:grid; gap:3px; }
 .composer-add-menu button small { color:var(--text-tertiary); font-size:10px; }
 .composer-add-menu hr { margin:5px; border:0; border-top:1px solid var(--border); }
-.chat-continuation-controls { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:4px 2px 8px; font-size:12px; color:var(--text-secondary); }
-.chat-continuation-controls label { display:flex; align-items:center; gap:6px; cursor:pointer; }
-.chat-continuation-controls input { accent-color:var(--accent); }
-.chat-continuation-controls label span { opacity:.7; }
+.chat-continuation-controls { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:0 2px 4px; font-size:12px; color:var(--text-secondary); }
+.chat-continuation-toggle { display:flex; align-items:center; gap:6px; min-width:0; }
+.chat-continuation-toggle label { cursor:pointer; white-space:nowrap; }
+.chat-continuation-limit { color:var(--text-tertiary); font-size:11px; white-space:nowrap; }
+.chat-continuation-toggle .easel-switch { width:30px; min-height:30px; }
+.chat-continuation-toggle .easel-switch-track { width:28px; height:17px; padding:2px; }
+.chat-continuation-toggle .easel-switch-thumb { width:11px; height:11px; }
+.chat-continuation-toggle .easel-switch[aria-checked="true"] .easel-switch-thumb { transform:translateX(11px); }
+.chat-continuation-action { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:30px; padding:3px 6px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; white-space:nowrap; cursor:pointer; }
+.chat-continuation-action:hover:not(:disabled) { color:var(--text); background:var(--surface-hover); }
+.chat-continuation-action:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
+.chat-continuation-action:disabled { opacity:.45; cursor:not-allowed; }
+.chat-continuation-error { flex-basis:100%; color:var(--red); font-size:11px; }
+@media (pointer:coarse) { .chat-continuation-toggle .easel-switch,.chat-continuation-action { min-height:44px; } }

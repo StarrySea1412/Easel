@@ -1,5 +1,10 @@
 ## 0.43.3 · 2026-10-30 · Proxy cookie isolation / 代理Cookie隔离
 
+## 0.43.5 · 2026-10-30
+
+- 独立修复138自动继续控件：复用共享开关，次数提示与轻量继续操作同一行；保留禁用态、键盘和续接次数语义，不增加常驻说明面板。
+- 以正式0.43.3为基线，不包含0.43.4对话同步或0.44原生连接候选；现场部署与验收以`docs/release-138-0.43.5-2026-10-30.md`为准。
+
 - Prevent the shared reverse proxy client from retaining downstream cookies; preserve caller Cookie and response Set-Cookie headers, origin checks and streaming behavior. / 共享代理不再保存下游Cookie，保留调用者Cookie、响应Set-Cookie、来源校验及流式行为。
 - Reproduce an anonymous caller inheriting a prior isolated login before the fix; verify HTTP/HTTPS login, forged/missing cookies, two identities, writes and logout. / 稳定复现修复前匿名请求继承隔离登录态，补齐双协议、双身份及写入/登出回归。
 - Roll back the failed 0.43.2 isolated candidate; production stays on 0.14.6 until the new candidate passes real acceptance. Disk migration is independently complete. / 0.43.2隔离验收失败已回退，正式仍0.14.6；磁盘迁移独立完成。[Current evidence / 当前回执](docs/release-138-0.43.3-2026-10-30.md)。
