@@ -65,6 +65,29 @@ async function view(t, Component, props = {}) {
 }
 const buttonText = text => [...document.querySelectorAll('.global-events-panel button')].find(button => button.textContent === text);
 
+test('opening a notification waits for its target and keeps a failed target unread and retryable',async t=>{
+  events.clearEvents();events.recordEvent('跨浏览器完成记录','success',undefined,'cross-browser-open',{page:'chat',sessionId:'remote-session'});
+  let finish;let calls=0;const acknowledged=[];
+  const v=await view(t,Center,{onOpen:()=>{calls++;return new Promise(resolve=>{finish=resolve;});},onNoticeAcknowledged:id=>acknowledged.push(id)});
+  await v.click(v.node.querySelector('button'));
+  const trigger=document.querySelector('.event-message-link');
+  await v.click(trigger);assert.equal(calls,1);assert.equal(trigger.getAttribute('aria-busy'),'true');assert.ok(trigger.disabled);
+  assert.equal(events.readEvents()[0].read,false);assert.ok(document.querySelector('.global-events-panel'));
+  await v.click(trigger);assert.equal(calls,1);
+  await act(async()=>finish(false));
+  assert.equal(trigger.disabled,false);assert.equal(events.readEvents()[0].read,false);assert.deepEqual(acknowledged,[]);
+  await v.click(trigger);assert.equal(calls,2);
+  await act(async()=>finish(true));
+  assert.equal(events.readEvents()[0].read,true);assert.deepEqual(acknowledged,['remote-session']);assert.equal(document.querySelector('.global-events-panel'),null);
+});
+
+test('a rejected notification lookup retains the original record for another attempt',async t=>{
+  events.clearEvents();events.recordEvent('暂不可读的记录','success',undefined,'cross-browser-error',{page:'chat',sessionId:'error-session'});
+  const v=await view(t,Center,{onOpen:async()=>{throw Error('isolated network failure');}});
+  await v.click(v.node.querySelector('button'));await v.click(document.querySelector('.event-message-link'));
+  assert.equal(events.readEvents()[0].read,false);assert.ok(document.querySelector('.global-events-panel'));assert.equal(document.querySelector('.event-message-link').disabled,false);
+});
+
 test('appearance uses shared keyboard selector and applies selected mode immediately', async t => {
   const stop = theme.initializeTheme(); t.after(stop);
   const v = await view(t, Appearance);

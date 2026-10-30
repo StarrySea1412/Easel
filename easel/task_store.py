@@ -55,6 +55,7 @@ class TaskStore:
           CREATE TABLE IF NOT EXISTS manual_requests(plan TEXT, request TEXT, run TEXT,
             PRIMARY KEY(plan,request));
           CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, data TEXT);
+          CREATE TABLE IF NOT EXISTS conversation_snapshots(id TEXT PRIMARY KEY, data TEXT NOT NULL, revision INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS deleted_sessions(id TEXT PRIMARY KEY, at REAL,
             revision INTEGER, notice_pending INTEGER DEFAULT 1);
           CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,6 +119,7 @@ class TaskStore:
             at = self.clock()
             revision = self._event(db, session, 'session_deleted', {})
             db.execute('INSERT INTO deleted_sessions VALUES(?,?,?,1)', (session, at, revision))
+            db.execute('DELETE FROM conversation_snapshots WHERE id=?', (session,))
             for row in db.execute('SELECT data FROM goals WHERE session=?', (session,)).fetchall():
                 g = json.loads(row[0])
                 if g['status'] not in ('completed', 'cancelled'):

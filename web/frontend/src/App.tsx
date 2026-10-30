@@ -11,6 +11,7 @@ import { lastExchangeQuote, sideChatOf, sideChatsOf, sideChatTitle } from './lib
 import { createConversationShare, fetchShareAppends, mergeShareAppends } from './lib/conversationShare';
 import { taskRequest, mergeTaskSessions, taskInspectionSessions, type TaskSessionState, type SessionTombstone } from './lib/tasks';
 import { useTaskSnapshot } from './hooks/useTaskSnapshot';
+import {syncConversations, readServerConversation, readServerConversations, mergeServerConversation} from './lib/conversationSync';
 import { taskWorkspaceHash, parseTaskWorkspaceHash, isScheduleWorkspaceHash } from './lib/taskWorkspace';
 import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEditing';
 import { prepareChatBranch } from './lib/api';
@@ -364,6 +365,14 @@ export default function App() {
   // 最新 sessions 的 ref，供回调里读取而不必进依赖数组（避免闭包过期/频繁重建）
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  useEffect(() => {
+    const timer = setTimeout(() => { void syncConversations([...sessions].sort((a,b) => Number(b.id === activeSessionId) - Number(a.id === activeSessionId))); }, 350);
+    return () => clearTimeout(timer);
+  }, [sessions, activeSessionId]);
+  useEffect(() => {
+    const timer = setInterval(() => { void syncConversations(sessionsRef.current); }, 15000);
+    return () => clearInterval(timer);
+  }, []);
   const {snapshot:tasks,sessions:taskSessions,sync:taskSync,refresh:refreshTasks}=useTaskSnapshot();
   const inspectionSessions=useMemo(()=>taskInspectionSessions(sessions,tasks.runs,tasks.goals),[sessions,tasks.runs,tasks.goals]);
   const synchronizedDeleted=useRef(new Set<string>());
@@ -415,6 +424,29 @@ export default function App() {
   }, [streams]);
   const queueRevision = useSyncExternalStore(subscribeChatQueue, getQueueRevision);
   const streamCtl = useRef<Record<string, AbortController>>({});
+  useEffect(() => {
+    let cancelled=false,reading=false;
+    const refresh=async()=>{
+      if(reading||document.visibilityState==='hidden')return;
+      reading=true;
+      try {
+        const remote=await readServerConversations(sessionsRef.current);
+        if(cancelled)return;
+        setSessions(current=>{
+          let next=current;
+          for(const session of remote)if(!outputSessionDeleted(session.id)&&!streamCtl.current[session.id])next=mergeServerConversation(next,session);
+          if(next!==current){saveSessions(next);sessionsRef.current=next;}
+          return next;
+        });
+      }catch{/* Keep local history and retry when the workbench is reachable. */}
+      finally{reading=false;}
+    };
+    void refresh();
+    const timer=setInterval(()=>void refresh(),15000);
+    const focus=()=>void refresh();
+    window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
+    return()=>{cancelled=true;clearInterval(timer);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
+  }, []);
   const [activityTarget,setActivityTarget]=useState<{sessionId:string;turnId:string;key:number}|null>(null);
   const [officeTarget, setOfficeTarget] = useState<{ sessionId: string; key: number } | null>(null);
   const streamAcc = useRef<Record<string, ChatTiming & ChatReasoning & { turnId?:string; requestedModelRef?: string; requestedThinkingLevel?: ThinkingLevel; content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
@@ -1416,17 +1448,30 @@ export default function App() {
   }, [sessions]);
 
   async function openTaskConversation(id:string) {
-    if(outputSessionDeleted(id)){showToast('原对话已删除，保留任务历史记录','info');return;}
+    if(outputSessionDeleted(id)){showToast('原对话已删除，保留任务历史记录','info');return false;}
     try {
       const remote=await taskRequest<TaskSessionState>('/sessions');
       for(const row of remote.deletedSessions||[])markOutputSessionDeleted(row.id);
-      if(outputSessionDeleted(id)||remote.deletedSessions?.some(row=>row.id===id)){refreshTasks();showToast('原对话已删除','info');return;}
-      const next=mergeTaskSessions(sessionsRef.current,remote.sessions,outputSessionDeleted);
-      const target=next.find(session=>session.id===id);
-      if(!target||target.importedFromBackup){showToast('原对话不在当前可用记录中','info');return;}
+      if(outputSessionDeleted(id)||remote.deletedSessions?.some(row=>row.id===id)){refreshTasks();showToast('原对话已删除','info');return false;}
+      let next=mergeTaskSessions(sessionsRef.current,remote.sessions,outputSessionDeleted);
+      let target=next.find(session=>session.id===id);
+      if (!target || (!target.importedFromBackup && !streamCtl.current[id] && !remote.sessions.some(session=>session.id===id))) {
+        try {
+          const stored = await readServerConversation(id);
+          if (outputSessionDeleted(id)) { showToast('原对话已删除','info'); return false; }
+          next = mergeTaskSessions(sessionsRef.current,remote.sessions,outputSessionDeleted);
+          if (!streamCtl.current[id]) next = mergeServerConversation(next, stored);
+          target = next.find(session => session.id === id);
+        } catch (error) {
+          if (!target || (error as {status?:number})?.status===410) throw error;
+          // Existing local history stays readable during migration or an outage.
+        }
+      }
+      if(!target||target.importedFromBackup){showToast('原对话暂不可用，请稍后重试','info');return false;}
       if(next!==sessionsRef.current){saveSessions(next);sessionsRef.current=next;setSessions(next);}
       refreshTasks();setActiveSessionId(id);setSelectedPersona(target.persona||'');setCurrentPage('chat');
-    }catch(e){showToast(e instanceof Error?e.message:'对话暂不可读','error');}
+      return true;
+    }catch(e){showToast(e instanceof Error?e.message:'对话暂不可读，请重试','error');return false;}
   }
 
   const handleOutputConversation = useCallback(async (id: string, file: {path:string;name:string}) => {
@@ -1741,22 +1786,23 @@ export default function App() {
         onGatewayRetry={retryGateway}
         eventNotifications={<EventNotificationCenter
           onNoticeAcknowledged={sessionId => markSessionSeenById(sessionId, sessionsRef.current)}
-          onOpen={target => {
+          onOpen={async target => {
           if (target.page === 'chat' && target.sessionId) {
-            if (!sessionsRef.current.some(session => session.id === target.sessionId)) { removeSessionEvents(target.sessionId); return; }
-            setActiveSessionId(target.sessionId);
+            if (!await openTaskConversation(target.sessionId)) return false;
             if (target.tool) {
               requestCreationPanel(target.tool,target.sessionId);
             }
-            if(target.receiptId) { publishReceipts.open(target.receiptId); return; }
+            if(target.receiptId) { publishReceipts.open(target.receiptId); }
+            return true;
           }
           if (target.page === 'image' && target.medium) videoStudio.setViewMode(target.medium);
           if (target.page === 'outputs') {
             setOutputFilter(target.filter || 'all');
             setOutputJumpPath(target.path || '');
           }
-          if (target.page === 'publish-receipts') { publishReceipts.open(target.receiptId); return; }
+          if (target.page === 'publish-receipts') { publishReceipts.open(target.receiptId); return true; }
           setCurrentPage(target.page);
+          return true;
         }} />}
       />
       <main className="main-content">

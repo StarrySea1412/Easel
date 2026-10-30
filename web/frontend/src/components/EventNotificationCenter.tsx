@@ -17,12 +17,14 @@ function dateLabel(at: number) {
   return day(at) === day(today.getTime()) ? '今天' : day(at) === day(yesterday.getTime()) ? '昨天' : new Date(at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }: { onOpen: (target: NoticeTarget) => void; onNoticeAcknowledged?: (sessionId: string) => void }) {
+export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }: { onOpen: (target: NoticeTarget) => void | boolean | Promise<void | boolean>; onNoticeAcknowledged?: (sessionId: string) => void }) {
   const notices = useSyncExternalStore(subscribeEvents, readEvents);
   const sync = useSyncExternalStore(subscribeEvents, readEventSync);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const opening = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
   const filterButton = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
@@ -53,6 +55,19 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
     showToast(done ? `已清理 ${removable.length} 条提示记录。` : '清理未生效：服务暂不支持或未能确认，记录保持原样。', done ? 'success' : 'error');
     panel.current?.focus();
   };
+  const openNotice = async (notice: EventNotice) => {
+    if (opening.current) return;
+    opening.current = true; setOpeningId(notice.id);
+    try {
+      if (notice.target && await onOpen(notice.target) === false) return;
+      if (!notice.target) notice.action?.run();
+      markEventsRead(notice.id);
+      if (notice.target?.page === 'chat') onNoticeAcknowledged?.(notice.target.sessionId);
+      close();
+    } catch {
+      showToast('暂时无法打开，请重试', 'error');
+    } finally { opening.current = false; setOpeningId(null); }
+  };
   return <div className="global-events">
     <button ref={button} id={panelId + '-trigger'} type="button" className={'nav-item global-events-entry' + (open ? ' is-open' : '')} title={'事件通知，' + unread + ' 条未读'} aria-label={'事件通知，' + unread + ' 条未读'}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? dismiss() : setOpen(true)}>
@@ -75,10 +90,7 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
             <span className="event-notice-tone" role="img" aria-label={toneLabels[notice.tone]} title={toneLabels[notice.tone]}>{notice.tone === 'success' ? <NotificationIcon name='check' size={16} /> : notice.tone === 'error' ? <NotificationIcon name='triangle-alert' size={16} /> : <NotificationIcon name='info' size={16} />}</span>
             <div className="event-card-content"><div className="event-card-meta"><span>{sourceLabel(notice)}</span>
               <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString('zh-CN', { hour12: false })}>{new Date(notice.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time></div>
-              {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} onClick={() => {
-                  markEventsRead(notice.id); close();
-                  if (notice.target) onOpen(notice.target); else notice.action?.run();
-                }}><span className="event-card-message">{notice.message}</span></button>
+              {(notice.target || notice.action) ? <button type="button" className="event-view event-message-link" aria-label={'查看：' + notice.message} disabled={openingId !== null} aria-busy={openingId === notice.id} onClick={() => { void openNotice(notice); }}><span className="event-card-message">{notice.message}</span></button>
                 : <p className="event-card-message">{notice.message}</p>}
             </div>
             <div className="event-row-state">
@@ -94,7 +106,7 @@ export default function EventNotificationCenter({ onOpen, onNoticeAcknowledged }
       <footer className="event-panel-footer">
         {confirmClear ? <div className="event-clear-confirm"><span>清空本工作台的通知记录？</span><button autoFocus type="button" onClick={() => { setConfirmClear(false); panel.current?.focus(); }}>取消</button>
           <button type="button" className="event-clear-danger" onClick={() => { clearEvents(); setConfirmClear(false); panel.current?.focus(); }}>确认清空</button></div> : <>
-          <div className="event-history-note"><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已保存到本机' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本机记录'}</span><InlineInfo label="通知存储说明" hover>最近1000条保存在本工作台的数据目录，跨标签页和重启保留。页面关闭期间，对话任务的结束事件仍由后端记录；其它仅由页面观察的动态在打开时收录。清空记录会同步到其它标签页，不会停止任务。瞬时确认提示不再进入通知，旧版本留下的这类记录可用“清理提示记录”移除。</InlineInfo>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</div>
+          <div className="event-history-note"><span className={'event-sync-dot' + (sync === 'error' ? ' is-error' : '')} aria-hidden="true" /><span>{sync === 'saved' ? '已同步' : sync === 'syncing' ? '正在同步' : sync === 'error' ? '同步失败 · 记录已保留' : '本地记录'}</span><InlineInfo label="通知存储说明" hover>最近1000条保存在工作台服务器，登录同一工作台的不同浏览器可同步。点击对话通知会从服务器读取原对话；暂时不可读时保留通知供重试。页面关闭期间，对话任务的结束事件仍由后端记录。清空记录不会停止任务。</InlineInfo>{sync === 'error' && <button type="button" onClick={() => { void syncEvents(); }}>重试同步</button>}</div>
           <div className="event-footer-actions">
             {noise.length > 0 && <button type="button" className="event-clean-noise" title="瞬时确认提示不再进入通知；这些是旧版本留下的记录" onClick={cleanNoise}>清理 {noise.length} 条提示记录</button>}
             <button type="button" className="event-clear" disabled={!notices.length} onClick={() => setConfirmClear(true)}><NotificationIcon name='trash' size={13} />清空</button>

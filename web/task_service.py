@@ -385,6 +385,8 @@ class TaskService:
 
     def router(self):
         router = APIRouter(prefix='/api/tasks')
+        from conversation_sync import router as conversation_router
+        router.include_router(conversation_router(self.store))
 
         def conflict(exc):
             raise HTTPException(409, str(exc)) from None

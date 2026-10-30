@@ -195,7 +195,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   return message;
 }
 
-function decodeSessions(raw: string): ChatSession[] {
+export function decodeSessions(raw: string): ChatSession[] {
   const values: unknown = JSON.parse(raw);
   if (!Array.isArray(values)) throw new Error('Invalid session list');
   const sessions: ChatSession[] = [];

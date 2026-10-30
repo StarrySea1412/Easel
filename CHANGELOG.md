@@ -1,3 +1,11 @@
+## 0.43.4 · 2026-10-30 · Cross-browser conversation navigation / 跨浏览器通知定位
+
+- Persist visible normal conversations and retrieve them by original session ID; keep task authority and runtime ownership separate. / 普通对话可见正文持久保存，按原会话ID读取，不改变任务与运行归属。
+- Wait for successful navigation before acknowledging a notification; retain failed lookups for retry. / 跳转成功才标已读，失败保留通知。
+- Protect longer history and exact-revision regeneration, reject divergent stale writes and engine changes, and fence delayed sync after deletion. / 短副本保护、精确版本重生成、冲突及引擎归属约束、删除后迟到同步屏障。
+- Use a compact shared continuation switch and lightweight action. Legacy browser-only records require one source-browser refresh. / 续接开关紧凑统一；旧浏览器历史需来源端刷新一次迁移。
+- Candidate validation and actual deployment are tracked separately in [release evidence](docs/release-138-0.43.4-2026-10-30.md). / 候选验证与实际部署分别记录，未发布安装器。
+
 ## 0.43.3 · 2026-10-30 · Proxy cookie isolation / 代理Cookie隔离
 
 - Prevent the shared reverse proxy client from retaining downstream cookies; preserve caller Cookie and response Set-Cookie headers, origin checks and streaming behavior. / 共享代理不再保存下游Cookie，保留调用者Cookie、响应Set-Cookie、来源校验及流式行为。

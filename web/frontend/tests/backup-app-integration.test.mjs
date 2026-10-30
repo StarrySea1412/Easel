@@ -138,9 +138,14 @@ const sourceSession = { id: 'original', title: '保留当前工作', created: 10
 ] };
 
 function sessionLifecycleNetwork(t) {
-  const network={state:{sessions:[],deletedSessions:[]},calls:[],deletion:null};
-  t.mock.method(globalThis,'fetch',async request=>{
+  const network={state:{sessions:[],deletedSessions:[]},conversations:{},calls:[],deletion:null};
+  t.mock.method(globalThis,'fetch',async (request,init)=>{
     const path=String(request);network.calls.push(path);
+    if(path.endsWith('/api/tasks/conversations'))return {ok:true,json:async()=>init.method==='POST'?{id:JSON.parse(init.body).conversation.id,saved:true,revision:1}:{conversations:Object.keys(network.conversations).map(id=>({id,revision:1})),next:null}};
+    if(path.includes('/api/tasks/conversations/')){
+      const saved=network.conversations[decodeURIComponent(path.split('/').at(-1))];
+      return {ok:Boolean(saved),json:async()=>saved?{conversation:saved,revision:1}:{detail:'原对话尚未同步，请在原浏览器刷新一次后重试'}};
+    }
     if(path.endsWith('/delete'))return network.deletion ? network.deletion() : {
       ok:true,json:async()=>({deleted:true,tombstone:{id:decodeURIComponent(path.split('/').at(-2)),at:1,revision:1},stopPending:false})};
     return {ok:true,json:async()=>path.endsWith('/api/tasks/sessions') ? network.state :
@@ -148,6 +153,83 @@ function sessionLifecycleNetwork(t) {
   });
   return network;
 }
+
+test('a normal conversation notification hydrates the server copy without requiring a goal or local cache',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const saved={...sourceSession,id:'notice-normal-server',title:'普通对话的完整正文',engine:'openclaw',messages:[{role:'user',content:'原问题'},{role:'assistant',content:'原答案',turnId:'normal-turn'}]};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  network.conversations[saved.id]=saved;
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen({page:'chat',sessionId:saved.id}),true);});
+  assert.equal(v.harness.sidebar.activeSessionId,saved.id);
+  assert.equal(v.harness.pages['对话'].session.messages[0].content,'原问题');
+  assert.equal(v.harness.pages['对话'].session.messages[1].content,'原答案');
+  assert.ok(JSON.parse(v.values.get('easel_sessions')).some(session=>session.id===saved.id));
+  assert.equal(v.harness.streams.length,0);
+});
+
+test('a fresh computer automatically lists server conversations without opening a notification',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const saved={...sourceSession,id:'automatic-other-computer',title:'服务器保存的对话',engine:'openclaw'};
+  network.conversations[saved.id]=saved;
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,25));});
+  assert.ok(v.harness.sidebar.sessions.some(session=>session.id===saved.id&&session.messages[1].content==='原回答'));
+  assert.equal(v.harness.sidebar.activeSessionId,sourceSession.id);
+  assert.equal(v.harness.streams.length,0);
+});
+
+test('a notification loads its conversation from the server when this browser has no cached copy',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const remote={id:'notice-other-browser',title:'另一个浏览器的对话',created:20,persona:'remote-persona',messages:[{role:'assistant',content:'原对话正文',turnId:'remote-turn'}]};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  network.state.sessions=[remote];
+  const before=network.calls.filter(path=>path.endsWith('/api/tasks/sessions')).length;
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen({page:'chat',sessionId:remote.id}),true);});
+  assert.ok(network.calls.filter(path=>path.endsWith('/api/tasks/sessions')).length>before);
+  assert.equal(v.harness.sidebar.activeSessionId,remote.id);
+  assert.equal(v.harness.pages['对话'].session.title,remote.title);
+  assert.equal(v.harness.pages['对话'].session.messages[0].content,'原对话正文');
+  assert.equal(v.harness.streams.length,0);
+});
+
+test('a notification refreshes an existing short normal conversation from the server',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const saved={...sourceSession,id:'notice-stale-normal',engine:'openclaw'};
+  const short={...saved,messages:[saved.messages[0]]};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,short]),easel_active_session:sourceSession.id});
+  network.conversations[saved.id]=saved;
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen({page:'chat',sessionId:saved.id}),true);});
+  assert.equal(v.harness.pages['对话'].session.messages.length,2);
+  assert.equal(v.harness.pages['对话'].session.messages[1].content,'原回答');
+  assert.equal(v.harness.streams.length,0);
+});
+
+test('an unsynced existing local conversation remains readable from its notification',async t=>{
+  sessionLifecycleNetwork(t);
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen({page:'chat',sessionId:sourceSession.id}),true);});
+  assert.equal(v.harness.pages['对话'].session.messages[1].content,'原回答');
+});
+
+test('a temporarily missing notification target is retryable and is not treated as a deleted conversation',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession]),easel_active_session:sourceSession.id});
+  const target={page:'chat',sessionId:'notice-later-browser'};
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen(target),false);});
+  assert.equal(v.harness.sidebar.activeSessionId,sourceSession.id);
+  network.state.sessions=[{...sourceSession,id:target.sessionId,title:'稍后同步成功'}];
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen(target),true);});
+  assert.equal(v.harness.sidebar.activeSessionId,target.sessionId);
+});
+
+test('a notification respects an explicit server deletion even when a stale local conversation exists',async t=>{
+  const network=sessionLifecycleNetwork(t);
+  const gone={...sourceSession,id:'notice-server-deleted'};
+  const v=await fixture(t,{easel_sessions:JSON.stringify([sourceSession,gone]),easel_active_session:sourceSession.id});
+  network.state.deletedSessions=[{id:gone.id,at:1,revision:1}];
+  await act(async()=>{assert.equal(await v.harness.sidebar.eventNotifications.props.onOpen({page:'chat',sessionId:gone.id}),false);});
+  assert.equal(v.harness.sidebar.activeSessionId,sourceSession.id);
+});
 
 async function confirmSessionDelete(harness,id) {
   await act(async()=>{void harness.sidebar.onSessionDelete(id);});

@@ -29,7 +29,7 @@ const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$
 export async function taskRequest<T>(path='', body?:unknown, method='POST', signal?:AbortSignal):Promise<T> {
   const response=await fetch(`${base}/api/tasks${path}`,{method:body===undefined?'GET':method,cache:'no-store',signal,...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
   const result=await response.json();
-  if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:Array.isArray(result.detail)?result.detail.map((r:{msg:string})=>r.msg).join('；'):'任务请求失败，请重试');
+  if(!response.ok)throw Object.assign(new Error(typeof result.detail==='string'?result.detail:Array.isArray(result.detail)?result.detail.map((r:{msg:string})=>r.msg).join('；'):'任务请求失败，请重试'),{status:response.status});
   return result as T;
 }
 export const taskStatus:Record<string,string>={draft:'待启动',active:'进行中',paused:'已暂停',blocked:'需要处理',completed:'已完成',cancelled:'已取消',running:'运行中',unconfirmed:'等待核实',failed:'失败',stopped:'已停止',queued:'排队中',skipped:'已跳过'};

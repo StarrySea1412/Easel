@@ -20,11 +20,18 @@ test('toggle is scoped, blocks edits while running, manual continuation never re
   const container=document.createElement('div');document.body.append(container);const root=createRoot(container);let count=0;
   const render=(sessionId,busy=false)=>act(async()=>root.render(createElement(Controls,{key:sessionId,sessionId,busy,canContinue:true,onContinue:()=>count++})));
   try {
-    await render('one');assert.equal(container.querySelector('input').checked,true);
-    await act(async()=>container.querySelector('input').click());assert.equal(readChatAutoContinue('one'),false);
-    await act(async()=>container.querySelector('button').click());assert.equal(count,1);
-    await render('two',true);assert.equal(container.querySelector('input').checked,true);assert.ok(container.querySelector('button').disabled);
-    await render('one');assert.equal(container.querySelector('input').checked,false);
+    const toggle=()=>container.querySelector('[role=switch]');
+    const manual=()=>container.querySelector('[aria-label="继续未完成任务"]');
+    await render('one');assert.equal(toggle().getAttribute('aria-checked'),'true');
+    assert.equal(container.querySelector('input[type=checkbox]'),null);
+    assert.equal(manual().classList.contains('btn'),false);
+    assert.equal(document.getElementById(toggle().getAttribute('aria-labelledby')).textContent,'自动继续');
+    assert.equal(document.getElementById(toggle().getAttribute('aria-describedby')).textContent,'最多 2 次');
+    await act(async()=>toggle().click());assert.equal(readChatAutoContinue('one'),false);
+    await act(async()=>manual().click());assert.equal(count,1);
+    await render('two',true);assert.equal(toggle().getAttribute('aria-checked'),'true');assert.ok(toggle().disabled);assert.ok(manual().disabled);
+    await act(async()=>{toggle().click();manual().click();});assert.equal(count,1);assert.equal(readChatAutoContinue('two'),true);
+    await render('one');assert.equal(toggle().getAttribute('aria-checked'),'false');
   } finally {await act(async()=>root.unmount());container.remove();}
 });
 
