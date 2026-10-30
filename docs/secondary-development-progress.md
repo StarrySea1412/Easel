@@ -1281,3 +1281,6 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 已实现：`skills/shared/scripts/pptx_build.py`（Markdown 大纲 → `deck.pptx`（python-pptx，16:9 深色封面＋浅色内容页，三色主题，CJK latin/ea/cs 字体名）＋ `deck.html`＋逐页 `slide-NN.png`＋`deck.pdf`；`--skip-render` 无 Chromium 降级）；`skills/openclaw/pptx-slides/SKILL.md`（自研：触发词/大纲格式/设计规范/失败路径）＋ `EASEL-META.md`；依赖仅新增 `python-pptx`（pyproject 已声明）。
 - 已验证：`selftest` 全链路（含 pptx 读回与真实 Chromium 渲染）；`tests/test_pptx_build.py` **12 项**；样例 5 页逐页目检（修复封面备注归属、署名合并、引用页引号重复 3 处）；7880 `/api/skills` 识别新技能、`/api/media` 对 png/pdf/pptx 全 **200**；后端全量 **2946 passed（+12）/ 6 failed / 9 errors**（既有红灯不变）。
 - 交付边界：离线零付费模型；不做模板市场/转场动画/pptx 反向渲染；未改 138/安装包；示例产物在 `outputs/_pptx-slides-qa-2026-10-18/`（本机 QA，不入库）。调研与方案见[生成 PPT 的调研与方案](archive/2026/pptx-generation-research-2026-10-18.md)。
+## 2026-10-30 · 0.43.7：138提问卡片发布阻断修复
+
+0.43.6 的 ask_user 问答桥接修复已确认未进入138；隔离发布首次在构建阶段遇到闲置盘迁移后 root-owned 正式 release 回执不可读。构建脚本现将该只读失败安全降级为完整锁定构建，并加入回归测试；版本同步至0.43.7。隔离/正式切换与真实浏览器问答卡片验收仍进行中，不能以源码通过替代线上完成。[本次回执](release-138-0.43.7-2026-10-30.md)。

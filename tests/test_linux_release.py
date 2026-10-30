@@ -123,6 +123,20 @@ def test_image_reuse_allows_only_verified_release_metadata_change(monkeypatch):
         assert not builder.compatible(candidate, baseline, changed, old)
 
 
+def test_image_reuse_falls_back_when_live_receipt_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    receipt = tmp_path / 'Easel' / 'deployment-receipt.json'
+    receipt.parent.mkdir()
+    original_is_file = Path.is_file
+    def guarded_is_file(self):
+        if self == receipt:
+            raise PermissionError('protected release')
+        return original_is_file(self)
+    monkeypatch.setattr(Path, 'is_file', guarded_is_file)
+    assert builder.reusable(tmp_path, {'commit': 'x', 'files': {}}, ROOT) is None
+
+
 @pytest.mark.parametrize('name,code', [('Gateway', -9), ('Web', 1)])
 def test_supervisor_identifies_failed_child_without_logging_arguments(monkeypatch, name, code):
     from types import SimpleNamespace

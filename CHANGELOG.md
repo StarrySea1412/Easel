@@ -1,3 +1,8 @@
+## 0.43.7 · 2026-10-30 · 138 release build fallback / 发布构建兼容修复
+
+- Fall back to a full locked image build when a migrated root-owned active release receipt cannot be read; do not change data or runtime permissions. / 闲置盘迁移后正式 release 回执不可读时安全回退到完整锁定构建，不修改数据或运行权限。
+- Retain the 0.43.6 ask_user Gateway-authenticated question bridge and pending-card behavior. / 保留 0.43.6 的 ask_user 网关认证、待答状态和问题卡片修复。[Release receipt / 发布回执](docs/release-138-0.43.7-2026-10-30.md).
+
 ## 0.43.6 · 2026-10-30 · Ask-user bridge / 提问卡片修复
 
 - Pass configured Gateway token/password to ask_user question listing, status and answer RPCs; explicit missing credentials fail closed without falling back to a paired-device token. / 问答列表、状态与回答RPC统一使用已配置网关凭据；显式凭据缺失时安全失败，不回退到设备配对token。

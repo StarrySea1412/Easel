@@ -47,9 +47,18 @@ def compatible(candidate, baseline, candidate_project=None, baseline_project=Non
 def reusable(base, candidate, root):
     current = base / 'Easel'
     receipt = current / 'deployment-receipt.json'
-    if not receipt.is_file():
+    try:
+        readable = receipt.is_file()
+    except OSError:
+        # A migrated release may be intentionally root-owned. The builder
+        # can still produce a safe full image when the old receipt is unreadable.
         return None
-    recorded = json.loads(receipt.read_text())
+    if not readable:
+        return None
+    try:
+        recorded = json.loads(receipt.read_text())
+    except OSError:
+        return None
     image = recorded['image']
     inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image], text=True))[0]
     if inspection['Id'] != image:
