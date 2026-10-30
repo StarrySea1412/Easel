@@ -17,6 +17,11 @@
 !openclaw/
 !openclaw/workspace/
 !openclaw/workspace/**
+!openclaw/easel-agent-safety/
+!openclaw/easel-agent-safety/**
+!agents/
+!agents/workspace/
+!agents/workspace/**
 !profiles/
 !profiles/_template/
 !profiles/_template/**

@@ -9,6 +9,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_server_build_context_includes_runtime_agent_sources():
+    rules=(ROOT / '.dockerignore').read_text().splitlines()
+    for directory in ('agents/', 'agents/workspace/', 'openclaw/', 'openclaw/easel-agent-safety/'):
+        assert '!'+directory in rules
+    for directory in ('agents/workspace/', 'openclaw/easel-agent-safety/'):
+        assert '!'+directory+'**' in rules
+
+
 def test_linux_lock_covers_product_runtime_dependencies():
     import re
     import tomllib

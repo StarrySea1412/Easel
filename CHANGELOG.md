@@ -1,3 +1,9 @@
+## 0.43.1 · 2026-10-30 · 138 build correction / 构建修正
+
+- Include agent workspace and OpenClaw safety sources in the Docker allowlist; add a packaging regression. The failed 0.43.0 image was never activated. / 补齐镜像构建白名单及回归，失败的0.43.0未切换现网。
+- Make Windows PPTX CLI test encoding explicit without changing product behavior. / 测试子进程显式使用UTF8，不改产品输出契约。
+- Authorized host storage migration, full regressions and deployment acceptance are recorded separately. / 磁盘迁移、完整回归和新版验收分别记录。[Current evidence / 当前回执](docs/release-138-0.43.1-2026-10-30.md)。
+
 ## 0.43.0 · 2026-10-30 · 138 integration candidate / 138收尾候选
 
 - Merge the deployed 0.14.6 Linux, vision, queue, continuation and admission repairs into the current durable-runtime and compact-UI line, preserving both contracts. / 合入138已上线的Linux、读图、排队、接续与准入修复，保留当前持久执行和紧凑界面契约。

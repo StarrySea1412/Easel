@@ -1,5 +1,6 @@
 """pptx-slides 生成器（skills/shared/scripts/pptx_build.py）：解析、生成、CLI 与渲染。"""
 import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -100,7 +101,7 @@ def test_build_cli_end_to_end_without_render(tmp_path):
     out_dir = tmp_path / 'out'
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), 'build', '-i', str(src), '-o', str(out_dir), '--skip-render'],
-        capture_output=True, text=True, encoding='utf-8')
+        capture_output=True, text=True, encoding='utf-8', env={**os.environ, 'PYTHONUTF8': '1'})
     assert proc.returncode == 0, proc.stderr
     assert (out_dir / 'deck.pptx').is_file() and (out_dir / 'deck.html').is_file()
     assert '已按 --skip-render 跳过' in proc.stdout
@@ -111,7 +112,7 @@ def test_build_cli_rejects_bad_outline(tmp_path):
     src.write_text('没有主题行\n', encoding='utf-8')
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), 'build', '-i', str(src), '-o', str(tmp_path / 'o')],
-        capture_output=True, text=True, encoding='utf-8')
+        capture_output=True, text=True, encoding='utf-8', env={**os.environ, 'PYTHONUTF8': '1'})
     assert proc.returncode != 0
     assert 'ERROR' in proc.stderr and '大纲' in proc.stderr
 
