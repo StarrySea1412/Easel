@@ -388,11 +388,15 @@ class RuntimeProxy:
 
     async def lifespan(self, receive, send):
         import httpx
+        from http.cookiejar import CookieJar, DefaultCookiePolicy
         await receive()
         try:
             self.state = await asyncio.to_thread(self.manager.ensure)
+            # A shared reverse proxy forwards each caller's Cookie/Set-Cookie
+            # headers, but must never retain a downstream login for other callers.
+            cookies = CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
             self.client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=5), trust_env=False,
-                limits=httpx.Limits(max_connections=None, max_keepalive_connections=20))
+                limits=httpx.Limits(max_connections=None, max_keepalive_connections=20), cookies=cookies)
         except Exception as exc:
             await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
             return

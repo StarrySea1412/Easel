@@ -1,3 +1,9 @@
+## 0.43.3 · 2026-10-30 · Proxy cookie isolation / 代理Cookie隔离
+
+- Prevent the shared reverse proxy client from retaining downstream cookies; preserve caller Cookie and response Set-Cookie headers, origin checks and streaming behavior. / 共享代理不再保存下游Cookie，保留调用者Cookie、响应Set-Cookie、来源校验及流式行为。
+- Reproduce an anonymous caller inheriting a prior isolated login before the fix; verify HTTP/HTTPS login, forged/missing cookies, two identities, writes and logout. / 稳定复现修复前匿名请求继承隔离登录态，补齐双协议、双身份及写入/登出回归。
+- Roll back the failed 0.43.2 isolated candidate; production stays on 0.14.6 until the new candidate passes real acceptance. Disk migration is independently complete. / 0.43.2隔离验收失败已回退，正式仍0.14.6；磁盘迁移独立完成。[Current evidence / 当前回执](docs/release-138-0.43.3-2026-10-30.md)。
+
 ## 0.43.2 · 2026-10-30 · Concurrent settlement / 并发结算修正
 
 - Read run binding and proposal presence in one SQLite snapshot so concurrent settlement returns the durable receipt instead of a spurious empty result. Keep source/identity checks and transaction-time revalidation. / 修复同一轮并发结算时误回空回执，保留来源、身份与事务内复核。
