@@ -40,7 +40,9 @@ def checked(outcome='published', *, content_id=CID, status=None, matched=True):
 def harness(tmp_path):
     store = publish_receipts.ReceiptStore(tmp_path / 'receipts.json')
     store.create(RID, 'xiaohongshu', '本次作品')
-    clock = [time.time()]
+    # Keep the frozen clock at the same precision as persisted receipt dates.
+    # A float just below a millisecond can otherwise round into its future.
+    clock = [followup.timestamp(followup.iso(time.time()))]
     row = store.update(RID, {'outcome': 'submitted', 'state': 'finished', 'pending': False,
                             'contentId': CID, 'platformStatus': 'reviewing'})
     store.update(RID, {'verification': followup.initial_verification(row, now=clock[0])})
