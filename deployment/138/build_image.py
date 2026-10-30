@@ -47,18 +47,53 @@ def compatible(candidate, baseline, candidate_project=None, baseline_project=Non
 def reusable(base, candidate, root):
     current = base / 'Easel'
     receipt = current / 'deployment-receipt.json'
+    recorded = None
     try:
         readable = receipt.is_file()
     except OSError:
-        # A migrated release may be intentionally root-owned. The builder
-        # can still produce a safe full image when the old receipt is unreadable.
-        return None
-    if not readable:
-        return None
-    try:
-        recorded = json.loads(receipt.read_text())
-    except OSError:
-        return None
+        readable = False
+    if readable:
+        try:
+            recorded = json.loads(receipt.read_text())
+        except OSError:
+            pass
+
+    if recorded is None:
+        # Release directories may be root-owned after storage migration. Use
+        # the active production container as the baseline only when its image
+        # matches the deployment configuration exactly.
+        values = {}
+        env_file = base / 'easel-secrets' / 'deployment.env'
+        try:
+            for line in env_file.read_text().splitlines():
+                key, separator, value = line.partition('=')
+                if separator:
+                    values[key] = value
+        except OSError:
+            return None
+        image_ref = values.get('EASEL_IMAGE')
+        if not image_ref:
+            return None
+        containers = subprocess.check_output([
+            'docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=easel',
+            '--filter', 'label=com.docker.compose.service=app'], text=True).split()
+        if len(containers) != 1:
+            return None
+        container = json.loads(subprocess.check_output(['docker', 'inspect', containers[0]], text=True))[0]
+        inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image_ref], text=True))[0]
+        if container.get('Image') != inspection.get('Id'):
+            return None
+        image = inspection['Id']
+        baseline = json.loads(subprocess.check_output(
+            ['docker', 'run', '--rm', '--entrypoint', 'cat', image, '/app/release-manifest.json'], text=True))
+        if baseline.get('commit') != inspection.get('Config', {}).get('Labels', {}).get(
+                'org.opencontainers.image.revision'):
+            return None
+        baseline_project = subprocess.check_output(
+            ['docker', 'run', '--rm', '--entrypoint', 'cat', image, '/app/pyproject.toml'])
+        return (image, baseline) if compatible(candidate, baseline,
+            (root / 'pyproject.toml').read_bytes(), baseline_project) else None
+
     image = recorded['image']
     inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image], text=True))[0]
     if inspection['Id'] != image:

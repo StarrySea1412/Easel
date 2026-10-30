@@ -1,3 +1,8 @@
+## 0.43.8 · 2026-10-30 · Root-owned release compatibility / 发布恢复兼容
+
+- Reuse only the image confirmed by the active app container when the migrated release receipt is unreadable; reconstruct a verified rollback receipt and allow rollback to use the active release's Compose control files. / 迁移后旧release回执不可读时，只复用与活动app容器一致的镜像；校验后重建回滚收据，并用当前可读发行的Compose控制文件执行回退。
+- Preserve the 0.43.6 ask_user Gateway authentication and question-card fix. / 保留0.43.6 ask_user网关认证与提问卡片修复。[Release receipt / 发布回执](docs/release-138-0.43.8-2026-10-30.md).
+
 ## 0.43.7 · 2026-10-30 · 138 release build fallback / 发布构建兼容修复
 
 - Fall back to a full locked image build when a migrated root-owned active release receipt cannot be read; do not change data or runtime permissions. / 闲置盘迁移后正式 release 回执不可读时安全回退到完整锁定构建，不修改数据或运行权限。

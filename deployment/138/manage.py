@@ -137,28 +137,81 @@ def backup(base: Path, isolated: bool):
     return output
 
 
-def switch(base: Path, isolated: bool, source: Path):
-    verify(source)
+def switch(base: Path, isolated: bool, source: Path, *, verify_source=True, compose_source=None,
+           previous_receipt=None):
+    if verify_source:
+        verify(source)
+    control_source = compose_source or source
     current = base / ('Easel-test' if isolated else 'Easel')
     previous = current.with_name(current.name + '.previous')
     if current.exists() and not current.is_symlink():
         raise ValueError('Existing unmanaged Easel directory requires explicit migration.')
     if current.is_symlink():
         old = current.resolve()
-        old_receipt = old / 'deployment-receipt.json'
-        if old_receipt.exists():
-            (layout(base, isolated)['backups'] / 'previous-deployment.json').write_bytes(old_receipt.read_bytes())
+        if previous_receipt is None:
+            previous_receipt = previous_release_receipt(base, isolated)
+        (layout(base, isolated)['backups'] / 'previous-deployment.json').write_text(
+            json.dumps(previous_receipt, indent=2) + '\n')
         if previous.is_symlink():
             previous.unlink()
         previous.symlink_to(old, target_is_directory=True)
     temporary = current.with_name(current.name + '.switch')
-    compose(base, isolated, source, ['config', '--quiet'])
+    compose(base, isolated, control_source, ['config', '--quiet'])
     if temporary.is_symlink():
         temporary.unlink()
     temporary.symlink_to(source.resolve(), target_is_directory=True)
     temporary.replace(current)
-    compose(base, isolated, source, ['up', '-d', '--no-build'])
+    compose(base, isolated, control_source, ['up', '-d', '--no-build'])
     print('Active release:', current, '->', source)
+
+
+def previous_release_receipt(base: Path, isolated: bool):
+    current = base / ('Easel-test' if isolated else 'Easel')
+    if not current.is_symlink():
+        return None
+    old = current.resolve()
+    try:
+        return json.loads((old / 'deployment-receipt.json').read_text())
+    except OSError:
+        return active_receipt(base, isolated, old)
+
+
+def active_receipt(base: Path, isolated: bool, source: Path):
+    values = {}
+    for line in env_file(base, isolated).read_text().splitlines():
+        key, separator, value = line.partition('=')
+        if separator:
+            values[key] = value
+    image_ref = values.get('EASEL_IMAGE')
+    nginx = values.get('EASEL_NGINX_IMAGE')
+    if not image_ref or not nginx:
+        raise ValueError('Cannot reconstruct the previous release configuration.')
+    projects = ['easel-test' if isolated else 'easel']
+    containers = subprocess.check_output([
+        'docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=' + projects[0],
+        '--filter', 'label=com.docker.compose.service=app'], text=True).split()
+    if len(containers) != 1:
+        raise ValueError('Cannot identify the previous Easel app container.')
+    container = json.loads(subprocess.check_output(['docker', 'inspect', containers[0]], text=True))[0]
+    inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image_ref], text=True))[0]
+    if container.get('Image') != inspection.get('Id'):
+        raise ValueError('Previous deployment configuration does not match its app container.')
+    commit = inspection.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision')
+    if not isinstance(commit, str) or len(commit) != 40 or any(char not in '0123456789abcdef' for char in commit):
+        raise ValueError('Previous app image has no valid source revision.')
+    return {'commit': commit, 'image': inspection['Id'], 'nginx': nginx, 'source': str(source)}
+
+
+def verify_recorded_image(receipt):
+    inspection = json.loads(subprocess.check_output(
+        ['docker', 'image', 'inspect', receipt['image']], text=True))[0]
+    if inspection.get('Id') != receipt['image']:
+        raise ValueError('Recorded rollback image is not a fixed digest.')
+    revision = inspection.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision')
+    manifest = json.loads(subprocess.check_output(
+        ['docker', 'run', '--rm', '--entrypoint', 'cat', receipt['image'], '/app/release-manifest.json'], text=True))
+    if revision != receipt['commit'] or manifest.get('commit') != receipt['commit']:
+        raise ValueError('Recorded rollback image and source revision disagree.')
 
 
 def rollback(base: Path, isolated: bool):
@@ -168,9 +221,11 @@ def rollback(base: Path, isolated: bool):
     if not previous.is_symlink() or not receipt_path.is_file():
         raise ValueError('No recorded previous release/image; rollback refused.')
     receipt = json.loads(receipt_path.read_text())
+    verify_recorded_image(receipt)
+    active = current.resolve()
     compose(base, isolated, current.resolve(), ['stop', 'app'])
     configure(base, isolated, receipt['image'], receipt['nginx'])
-    switch(base, isolated, previous.resolve())
+    switch(base, isolated, previous.resolve(), verify_source=False, compose_source=active)
     print('Code and image restored; current data/state retained. Snapshot restore is separate.')
 
 
@@ -201,6 +256,7 @@ if __name__ == '__main__':
         if not args.image:
             parser.error('--image is required')
         verify(RELEASE)
+        previous = previous_release_receipt(args.base, args.isolated_test)
         paths = layout(args.base, args.isolated_test)
         if env_file(args.base, args.isolated_test).exists():
             backup(args.base, args.isolated_test)
@@ -209,6 +265,6 @@ if __name__ == '__main__':
         receipt = {'commit': verify(RELEASE)['commit'], 'image': inspection['Id'], 'nginx': args.nginx,
                    'source': str(RELEASE), 'activatedAt': datetime.now(timezone.utc).isoformat()}
         (RELEASE / 'deployment-receipt.json').write_text(json.dumps(receipt, indent=2))
-        switch(args.base, args.isolated_test, RELEASE)
+        switch(args.base, args.isolated_test, RELEASE, previous_receipt=previous)
     else:
         rollback(args.base, args.isolated_test)
