@@ -67,17 +67,39 @@ def supervise_web():
         time.sleep(.5)
 
 
+def check_children():
+    for name, child in zip(('Gateway', 'Web'), children):
+        code = child.poll()
+        if code is not None:
+            # Never log command arguments: they can contain credentials.
+            raise RuntimeError(f'Supervised {name} process pid={child.pid} exited with code={code}; '
+                               'container restart required. Check kernel OOM logs for code=-9.')
+
+
+def gateway_startup_timeout():
+    value = int(os.environ.get('EASEL_GATEWAY_STARTUP_TIMEOUT', '300'))
+    if not 30 <= value <= 900:
+        raise ValueError('EASEL_GATEWAY_STARTUP_TIMEOUT must be between 30 and 900 seconds.')
+    return value
+
+
+def wait_gateway_ready(deadline):
+    while not ready('http://127.0.0.1:18789/healthz'):
+        check_children()
+        if stopping or time.monotonic() >= deadline:
+            raise RuntimeError('Gateway failed readiness before startup deadline; see container logs.')
+        time.sleep(0.5)
+
+
 def run():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    startup_timeout = gateway_startup_timeout()
     bootstrap()
     children.append(subprocess.Popen(openclaw_base_cmd() + ['--profile', 'easel', 'gateway', 'run',
         '--port', '18789', '--bind', 'loopback'], cwd=ROOT, start_new_session=True))
-    deadline = time.monotonic() + 80
-    while not ready('http://127.0.0.1:18789/healthz'):
-        if stopping or children[0].poll() is not None or time.monotonic() > deadline:
-            raise RuntimeError('Gateway failed readiness; see container logs.')
-        time.sleep(0.5)
+    deadline = time.monotonic() + startup_timeout
+    wait_gateway_ready(deadline)
     # New server identity only; the loopback Gateway decides local pairing.
     # Never copy a desktop identity or edit the paired-device store.
     from easel.gateway_auth import resolve_credentials

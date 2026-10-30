@@ -147,6 +147,78 @@ async def collect_turn(model_ref='relay/model-b', turn='model-turn', session='mo
     return events, await web.api_chat_last(session, turn)
 
 
+def test_server_queue_stop_retains_running_lease_and_sends_no_model_request(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        response = await web.api_chat_stream(web.ChatRequest(message='not dispatched', sessionId='queued-server',
+            turnId='queued-server-stop', modelRef='relay/model-b'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert len(pool.waiters) == 1 and not sandbox.requests
+        result = await web.api_chat_stop(web.StopRequest(sessionId='queued-server', turnId='queued-server-stop'))
+        events = [event async for event in response.body_iterator]
+        await asyncio.sleep(0)
+        assert result['stopped'] and json.loads(events[-1]['data'])['stopped'] is True
+        assert any('尚未发送到模型' in str(event['data']) for event in events)
+        assert pool.active == 1 and not pool.waiters and not sandbox.requests
+        ledger = web.run_ledger.read(web._run_ledger_root(), 'queued-server-stop')
+        assert ledger['status'] == 'stopped' and ledger['settled'] and ledger['resourceSettled']
+        running.release()
+    asyncio.run(exercise())
+
+
+def test_server_queue_dispatches_once_after_running_task_releases(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        task = asyncio.create_task(collect_turn(session='queued-dispatch', turn='queued-dispatch-turn'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert len(pool.waiters) == 1 and not sandbox.requests
+        running.release()
+        events, last = await task
+        await asyncio.sleep(0)
+        assert len(sandbox.requests) == 1 and last['clean_end'] is True
+        assert pool.active == 0 and not pool.waiters
+    asyncio.run(exercise())
+
+
+def test_browser_disconnect_keeps_the_same_queued_supervisor(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    async def exercise():
+        pool = Pool('agent', 1)
+        monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+        running = pool.acquire()
+        response = await web.api_chat_stream(web.ChatRequest(message='dispatch only once', sessionId='queued-disconnect',
+            turnId='queued-disconnect-turn', modelRef='relay/model-b'))
+        for _ in range(50):
+            if pool.waiters:
+                break
+            await asyncio.sleep(0.01)
+        assert pool.waiters and not sandbox.requests
+        await response.body_iterator.aclose()
+        assert 'queued-disconnect-turn' in web._CHAT_JOBS
+        running.release()
+        for _ in range(200):
+            if 'queued-disconnect-turn' not in web._CHAT_JOBS:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0)
+        saved = await web.api_chat_last('queued-disconnect', 'queued-disconnect-turn')
+        assert saved['clean_end'] and len(sandbox.requests) == 1
+        assert pool.active == 0 and not pool.waiters
+    asyncio.run(exercise())
+
+
 def test_stop_while_waiting_for_session_lock_cancels_only_queued_job(sandbox, monkeypatch):
     async def exercise():
         lock = asyncio.Lock()
@@ -333,6 +405,83 @@ def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, 
     assert calls[0][1]['model'] == 'relay/model-b' and calls[0][1]['thinking'] == 'off'
     assert calls[0][1]['sessionId'] == web._openclaw_session_id('model-session')
     assert calls[0][1]['idempotencyKey'] == 'native-turn'
+
+
+@pytest.mark.parametrize('levels,expected', [(['off'],'off'), (['off','low','high'],'high'), (None,None)])
+def test_auto_continue_uses_exact_model_thinking_policy_not_global_medium(sandbox, monkeypatch, levels, expected):
+    calls=[]
+    monkeypatch.setattr(sandbox.client,'methods',sandbox.client.methods | {'models.list'})
+    def read(method, params):
+        if method=='models.list':
+            return {'models':[{'provider':'relay','id':'model-b',**({'thinkingLevels':[{'id':level} for level in levels]} if levels else {})}]}
+        assert method=='sessions.list'
+        return {'sessions':[]}
+    sandbox.client._rpc=read
+    class Native:
+        def _rpc(self, method, params, **kwargs):
+            assert method=='agent'
+            calls.append(params)
+            kwargs['on_accepted']({'runId':'automatic-thinking'})
+            return {'status':'ok','result':{'payloads':[{'text':'completed'}]}}
+        def close(self):pass
+    monkeypatch.setattr(web,'_native_agent_client',lambda credentials:Native())
+    monkeypatch.setattr(web,'THINKING_LEVEL','medium')
+    async def exercise():
+        response=await web.api_chat_stream(web.ChatRequest(message='test',sessionId='automatic-thinking-session',
+            turnId='automatic-thinking-turn',modelRef='relay/model-b',autoContinue=True))
+        return [event async for event in response.body_iterator]
+    events=asyncio.run(exercise())
+    assert len(calls)==1 and events[-1]['event']=='done'
+    if expected is None:assert 'thinking' not in calls[0]
+    else:assert calls[0]['thinking']==expected
+    assert not sandbox.probes and not sandbox.requests
+
+
+def test_automatic_thinking_does_not_borrow_another_models_policy():
+    capability={'defaultModelRef':'relay/a','options':[{'id':'relay/a','thinkingLevels':['off']},
+        {'id':'relay/b','thinkingLevels':['off','high']}]}
+    assert controls.automatic_thinking_level(capability)=='off'
+    assert controls.automatic_thinking_level(capability,'relay/b')=='high'
+    assert controls.automatic_thinking_level(capability,'relay/missing') is None
+
+
+def test_auto_continuation_uses_native_and_keeps_receipts_locks_and_run_identity(sandbox, monkeypatch):
+    from easel.chat_continuation import CONTINUE_MESSAGE
+    from easel.execution_store import read_snapshot
+    calls = []
+    class Client:
+        def _rpc(self, method, params, **kwargs):
+            assert method == 'agent'
+            calls.append(dict(params))
+            run = params['idempotencyKey']
+            kwargs['on_accepted']({'runId': run})
+            assert not sandbox.releases, 'both locks must cover all continuation runs'
+            for seq, phase in [(1, 'start'), (2, 'end')]:
+                kwargs['on_event']({'event': 'agent', 'payload': {
+                    'runId': run, 'sessionKey': params['sessionKey'], 'stream': 'tool', 'seq': seq,
+                    'data': {'phase': phase, 'toolCallId': run+'-tool', 'name': 'exec',
+                             'args': {'command': 'echo receipt'}, 'result': {'content': []}}}})
+            return {'status': 'ok', 'result': {'payloads': [{'text': 'partial' if len(calls)==1 else 'completed'}],
+                **({'stopReason': 'length'} if len(calls)==1 else {})}}
+        def close(self): pass
+    monkeypatch.setattr(web, '_native_agent_client', lambda credentials: Client())
+    monkeypatch.setattr(controls, '_model_probe_client', lambda *args: Client())
+    async def exercise():
+        response = await web.api_chat_stream(web.ChatRequest(message='ORIGINAL', sessionId='auto-session',
+            turnId='auto-turn', modelRef='relay/model-b', autoContinue=True))
+        events = [event async for event in response.body_iterator]
+        saved = await web.api_chat_last('auto-session', 'auto-turn')
+        assert saved['clean_end'] and saved['error'] is None
+        assert saved['text']=='partial\ncompleted' and saved['gateway_run_id']=='auto-turn:continue:1'
+        assert any('自动继续 1/2' in event.get('data', '') for event in events)
+        snapshot = read_snapshot(web.OUTPUTS_DIR, 'auto-session', 'auto-turn')
+        assert len(snapshot['operations']) == 2
+        assert events[-1]['event'] == 'done'
+    asyncio.run(exercise())
+    assert len(calls)==2 and not sandbox.requests
+    assert calls[0]['message'].startswith('ORIGINAL\n') and calls[1]['message']==CONTINUE_MESSAGE
+    assert calls[0]['sessionId']==calls[1]['sessionId']
+    assert calls[1]['model']=='relay/model-b' and sandbox.releases==[True, True]
 
 
 @pytest.mark.parametrize('change', ['configuration'])

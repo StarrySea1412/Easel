@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 import app as web
-from chat_recovery import stop_orphan, reconcile_orphan
+from chat_recovery import release_finished_chat, stop_orphan, reconcile_orphan
 from easel.task_store import TaskStore, TaskConflict
 
 
@@ -18,6 +18,8 @@ def lost(tmp_path, monkeypatch):
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
     monkeypatch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path)
+    monkeypatch.setattr(web, '_CHAT_JOBS', {})
+    monkeypatch.setattr(web, '_RUNNING_CHAT', {})
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'raw.jsonl')
     monkeypatch.setattr(web, 'gateway_credentials', lambda: None)
     marker = web._turn_file('web:recovery-chat')
@@ -37,6 +39,123 @@ def lost(tmp_path, monkeypatch):
         def close(self): pass
     monkeypatch.setattr(web, '_native_agent_client', lambda _: Client())
     return marker, events, calls, state
+
+
+def terminal_lease():
+    store = TaskStore(web.OUTPUTS_DIR)
+    store.reserve_chat('recovery-chat', 'lost-turn')
+    web.run_ledger.create(web._run_ledger_root(), 'lost-turn', session_id='recovery-chat',
+                          session_key='agent:main:recovery-chat')
+    web.run_ledger.mark(web._run_ledger_root(), 'lost-turn', status='failed',
+                        settled=True, resource_settled=True)
+    marker = web._turn_file('web:recovery-chat')
+    marker.write_text(json.dumps({'status': 'done', 'turn_id': 'lost-turn',
+                                 'error': {'code': 'chat_supervisor_lost'}, 'text': 'corrected reply'}))
+    with web._job_event_file('lost-turn').open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps({'id': 5, 'event': 'done',
+                                 'data': {'sessionKey': 'recovery-chat', 'stopped': False}}) + '\n')
+    return store
+
+
+@pytest.mark.parametrize('aborted', [True, False])
+def test_orphan_settlement_releases_exact_reservation(lost, aborted):
+    store = TaskStore(web.OUTPUTS_DIR)
+    store.reserve_chat('recovery-chat', 'lost-turn')
+    lost[3]['receipt'] = {'ok': True, 'aborted': aborted, 'runIds': ['exact-run'] if aborted else []}
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert store.chat_lease('recovery-chat') is None
+    store.reserve_chat('recovery-chat', 'new-turn')
+    assert store.chat_lease('recovery-chat') == 'new-turn'
+
+
+def test_saved_terminal_repairs_reservation_idempotently_without_gateway_call(lost):
+    store = terminal_lease()
+    before = lost[0].read_bytes(), lost[1].read_bytes()
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert store.chat_lease('recovery-chat') is None
+    assert lost[2] == [] and before == (lost[0].read_bytes(), lost[1].read_bytes())
+
+
+def test_settled_ledger_with_unfinished_marker_repairs_without_provider_request(lost):
+    store = terminal_lease()
+    lost[0].write_text(json.dumps({'status': 'running', 'turn_id': 'lost-turn', 'text': 'preserved'}))
+    assert stop_orphan(web, 'recovery-chat', 'lost-turn')['stopped']
+    assert store.chat_lease('recovery-chat') is None and lost[2] == []
+    marker = json.loads(lost[0].read_text())
+    assert marker['status'] == 'done' and marker['text'] == 'corrected reply'
+
+
+@pytest.mark.parametrize('fault', ['active', 'unsettled', 'resources_pending', 'foreign_session',
+                                  'foreign_turn', 'unknown', 'marker_running', 'new_marker',
+                                  'corrupt_marker', 'missing_ledger', 'local_job'])
+def test_admission_repair_keeps_unconfirmed_or_foreign_reservation(lost, fault, monkeypatch):
+    store = terminal_lease()
+    ledger = web.run_ledger.read(web._run_ledger_root(), 'lost-turn')
+    changes = {'active': {'status': 'running'}, 'unsettled': {'settled': False},
+               'resources_pending': {'resourceSettled': False}, 'foreign_session': {'sessionId': 'foreign'},
+               'foreign_turn': {'turnId': 'foreign'}, 'unknown': {'status': 'unknown'}}
+    ledger.update(changes.get(fault, {}))
+    monkeypatch.setattr(web.run_ledger, 'read', lambda *_: None if fault == 'missing_ledger' else ledger)
+    if fault == 'marker_running': lost[0].write_text(json.dumps({'status': 'running', 'turn_id': 'lost-turn'}))
+    if fault == 'new_marker': lost[0].write_text(json.dumps({'status': 'done', 'turn_id': 'new-turn'}))
+    if fault == 'corrupt_marker': lost[0].write_text('{')
+    if fault == 'local_job': monkeypatch.setattr(web, '_CHAT_JOBS', {'lost-turn': ('recovery-chat', None)})
+    assert not release_finished_chat(web, store, 'recovery-chat')
+    assert store.chat_lease('recovery-chat') == 'lost-turn'
+    assert lost[2] == []
+
+
+def test_admission_repair_does_not_release_a_live_process_lock(lost):
+    store = terminal_lease()
+    lock = web._CrossProcLock('recovery-chat')
+    assert lock.acquire(timeout=0)
+    try:
+        assert not release_finished_chat(web, store, 'recovery-chat')
+        assert store.chat_lease('recovery-chat') == 'lost-turn'
+    finally:
+        lock.release()
+
+
+def test_late_release_cannot_delete_a_newer_reservation(lost, monkeypatch):
+    store = terminal_lease()
+    original = store.release_chat
+    def replace_before_release(session, turn):
+        original(session, turn)
+        store.reserve_chat(session, 'newer-turn')
+        original(session, turn)
+    monkeypatch.setattr(store, 'release_chat', replace_before_release)
+    assert release_finished_chat(web, store, 'recovery-chat')
+    assert store.chat_lease('recovery-chat') == 'newer-turn'
+
+
+def test_api_next_send_repairs_old_terminal_and_dispatches_new_request_once(lost, monkeypatch):
+    store = terminal_lease()
+    before = lost[0].read_bytes(), lost[1].read_bytes()
+    dispatched = []
+    async def start(req, **kwargs):
+        dispatched.append(req.turnId)
+        assert store.chat_lease('recovery-chat') == 'next-turn'
+        await kwargs['on_done']()
+        return {'accepted': req.turnId}
+    monkeypatch.setattr(web, 'start_chat_run', start)
+    result = asyncio.run(web.api_chat_stream(web.ChatRequest(
+        message='explicit next message', sessionId='recovery-chat', turnId='next-turn')))
+    assert result == {'accepted': 'next-turn'} and dispatched == ['next-turn']
+    assert store.chat_lease('recovery-chat') is None and lost[2] == []
+    assert before == (lost[0].read_bytes(), lost[1].read_bytes())
+
+
+def test_api_unconfirmed_reservation_still_returns_409_without_dispatch(lost, monkeypatch):
+    store = TaskStore(web.OUTPUTS_DIR)
+    store.reserve_chat('recovery-chat', 'lost-turn')
+    async def no_dispatch(*args, **kwargs):
+        pytest.fail('unconfirmed run must not dispatch')
+    monkeypatch.setattr(web, 'start_chat_run', no_dispatch)
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_chat_stream(web.ChatRequest(message='next', sessionId='recovery-chat', turnId='next-turn')))
+    assert caught.value.status_code == 409
+    assert store.chat_lease('recovery-chat') == 'lost-turn'
 
 
 def test_orphan_stop_ends_replay_and_preserves_latest_text_without_a_paid_request(lost):

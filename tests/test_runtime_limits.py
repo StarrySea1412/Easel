@@ -4,7 +4,72 @@ from types import SimpleNamespace
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pytest
-from easel.runtime_limits import Pool, install_limits
+from easel.runtime_limits import Pool, install_limits, queued_chat
+
+
+def test_chat_queue_is_fifo_and_waiting_stop_does_not_release_running_slot():
+    import threading
+    async def scenario():
+        pool = Pool('agent', 1)
+        running = pool.acquire()
+        stopped, next_stop = threading.Event(), threading.Event()
+        positions = []
+        first = asyncio.create_task(pool.acquire_chat(stopped, positions.append))
+        second = asyncio.create_task(pool.acquire_chat(next_stop))
+        await asyncio.sleep(0.02)
+        assert positions == [1] and len(pool.waiters) == 2
+        stopped.set()
+        assert await first is None
+        assert pool.active == 1 and len(pool.waiters) == 1
+        with pytest.raises(HTTPException):
+            pool.acquire()
+        running.release()
+        lease = await second
+        assert pool.active == 1 and not pool.waiters
+        lease.release()
+        assert pool.active == 0
+    asyncio.run(scenario())
+
+
+def test_chat_queue_timeout_overflow_and_task_cancellation_cleanup():
+    import threading
+    async def scenario():
+        pool = Pool('agent', 1)
+        running = pool.acquire()
+        waiting = asyncio.create_task(pool.acquire_chat(threading.Event(), max_waiters=1))
+        await asyncio.sleep(0.02)
+        with pytest.raises(HTTPException) as error:
+            await pool.acquire_chat(threading.Event(), max_waiters=1)
+        assert error.value.detail['code'] == 'chat_server_queue_full'
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert not pool.waiters and pool.active == 1
+        with pytest.raises(HTTPException) as error:
+            await pool.acquire_chat(threading.Event(), timeout=0)
+        assert error.value.detail['code'] == 'chat_server_queue_timeout'
+        assert not pool.waiters and pool.active == 1
+        running.release()
+    asyncio.run(scenario())
+
+
+def test_only_marked_openclaw_chat_defers_outer_admission():
+    async def scenario():
+        app = FastAPI()
+        @app.post('/api/chat/stream')
+        @queued_chat
+        async def start(req):
+            return {'engine': req.engine}
+        workspace = SimpleNamespace(app=app, _BG_TASKS=set(), LOGIN_PROCESSES={}, check_gateway=lambda: True)
+        install_limits(workspace)
+        endpoint = next(route.endpoint for route in app.routes if route.path == '/api/chat/stream')
+        lease = app.state.server_pools['agent'].acquire()
+        assert await endpoint(req=SimpleNamespace(engine='openclaw')) == {'engine': 'openclaw'}
+        with pytest.raises(HTTPException):
+            await endpoint(req=SimpleNamespace(engine='codex'))
+        assert app.state.server_pools['agent'].active == 1
+        lease.release()
+    asyncio.run(scenario())
 
 
 def test_capacity_and_idempotent_release():
@@ -17,6 +82,31 @@ def test_capacity_and_idempotent_release():
     lease.release(); lease.release()
     assert pool.active == 0
     pool.acquire().release()
+
+
+def test_queue_capacity_waits_for_durable_resource_settlement(tmp_path):
+    import threading
+    import time
+    from web import run_ledger
+    pool = Pool('agent', 1)
+    lease = pool.acquire()
+    run_ledger.create(tmp_path, 'held-turn', session_id='chat', session_key='agent:main:chat')
+    run_ledger.mark(tmp_path, 'held-turn', status='failed', settled=True, resource_settled=False)
+    observed = threading.Event()
+    def settled():
+        observed.set()
+        return (run_ledger.read(tmp_path, 'held-turn') or {}).get('resourceSettled') is True
+    lease.watch(settled)
+    assert observed.wait(2)
+    with pytest.raises(HTTPException):
+        pool.acquire()
+    run_ledger.mark(tmp_path, 'held-turn', resource_settled=True)
+    deadline = time.monotonic() + 3
+    while pool.active and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert pool.active == 0
+    lease.release()
+    assert pool.active == 0
 
 
 @pytest.mark.parametrize('phase', ['done', 'error', 'unconfirmed'])

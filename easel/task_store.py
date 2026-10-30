@@ -793,6 +793,12 @@ class TaskStore:
             self._goal(db, g)
             return g
 
+    def chat_lease(self, session):
+        """Return the exact reservation, including expired rows, for reconciliation."""
+        with self.db() as db:
+            row = db.execute('SELECT turn FROM chat_leases WHERE session=?', (session,)).fetchone()
+            return row[0] if row else None
+
     def reserve_chat(self, session, turn):
         with self.db() as db:
             self._require_session(db, session)

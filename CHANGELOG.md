@@ -1,3 +1,39 @@
+## 0.43.0 · 2026-10-30 · 138 integration candidate / 138收尾候选
+
+- Merge the deployed 0.14.6 Linux, vision, queue, continuation and admission repairs into the current durable-runtime and compact-UI line, preserving both contracts. / 合入138已上线的Linux、读图、排队、接续与准入修复，保留当前持久执行和紧凑界面契约。
+- Keep server admission until durable resources settle; migrate recovery fixtures to the authoritative ledger and await async completion. / 服务器容量跟随持久资源结算，恢复夹具使用权威账本并等待异步回调，不以HTTP结束代替执行结算。
+- Reuse a fixed runtime for a verified version-only metadata change; all dependency/build changes still require a locked build. / 仅允许经manifest验证的版本元数据变化复用固定运行时，依赖或构建配置变化仍使用锁定构建。
+- Production vision challenge passed before upgrade; full regressions and isolated/production activation remain separate gates. / 升级前真实读图挑战通过，全量回归和隔离/正式切换分别记录。[Release evidence / 现场回执](docs/release-138-0.43.0-2026-10-30.md).
+
+## 0.14.6 · 2026-10-28 · Bounded chat continuation / 对话接续与工具修复
+
+- Continue confirmed idle-timeout, output-limit or short incomplete-plan endings in the same session, up to twice; retain model, locks, artifact ticket and progress. Never replay the original request. Unknown transport state, pending tools/questions and user stops do not trigger continuation. / 已确认终态后同会话接续，最多2次；沿用模型、会话锁、产物凭据与已有进度，不重放原消息，停止和待确认时不自动继续。
+- Stage validated image attachments under the existing allowed media root; preserve originals and current-session ownership. Use configured vision rather than a text-only chat override; wrap Linux pipefail scripts in explicitly quoted Bash. / 图片安全暂存，保留归属校验；固定使用已配置视觉模型，Linux脚本显式使用Bash。
+- Scope tool-event sequence deduplication to the runtime run, preserving receipts after continuation. / 按运行身份去重工具序号，保留接续后的真实回执。
+- Queue accepted streaming OpenClaw chats before server execution admission, with FIFO positions, cancellation, a 16-waiter bound and a 10-minute wait limit. Retain the slot until supervisor cleanup ends, including browser disconnects. / 已接受的聊天先持久登记再有界排队，满载不再立即server_busy；断线不重发、停止不释放其他任务，保留执行并发限制。
+- Verify the configured channel/model using synthetic images before correcting host-specific multimodal metadata and vision routing. Do not infer vision from a model name, probe an image-generation gateway, or recycle historical text-only claims. / 以合成图片实际回执修正138多模态配置与视觉路由；不按模型名猜能力，不再去生图网关试错。
+- Select automatic native thinking from the exact model's observed runtime policy; omit unknown defaults rather than imposing medium on an off-only model. Explicit choices remain validated. / 修复自动接续走原生网关时硬传medium导致off-only模型在读图前失败；按精确运行时能力选择自动档位，未知时由运行器决定。
+- Allow bounded Gateway cold startup (default 300 seconds, configurable 30–900) and align Docker startup grace. Process exits, authentication failures and deadline expiry still fail closed. / 修复138冷启动仍在初始化却被固定80秒期限终止；不把未就绪当作健康。
+- Host 138 production and isolation run fa0ff09e19ed, with verified runtime/HTTP assets, real synthetic-image replies over HTTP and browser, keyboard controls and 390px layout. Keep rollback data and the 3 GiB production budget; no installer release. / 正式已上线并完成真实读图验收，运行与备份详见回执。
+- [Diagnosis, verification, deployment and limitations / 原因与运行回执](docs/chat-auto-continue-0.14.6-2026-10-28.md).
+
+## 0.14.5 · 2026-10-28 · Chat reservation recovery / 会话占用恢复
+
+- Release the exact orphan reservation after durable settlement; repair historical terminal reservations under the OS session lock before the next explicit message. Never replay a request or clear an active, mismatched or unconfirmed run. / 修复原轮次已结束却仍被两小时占用挡住的问题，保留内容和并发保护。
+- Persist a configurable 3 GiB application budget after a kernel-confirmed 2 GiB Gateway OOM; identify Gateway/Web PID and exit code in supervisor failures. / 修复重建丢失临时内存预算的问题，提供准确的子进程退出诊断。
+- [Scope, verification and host 138 receipt / 范围与实际回执](docs/chat-lease-recovery-0.14.5-2026-10-28.md).
+
+## 0.14.4 · 2026-10-28 · Focused chat activity / 精简聊天行为提示
+
+- Remove empty plan, unavailable subagent configuration advice and repeated observation caveats from every chat turn. / 删除每轮固定出现的空计划、未配置子Agent提醒和重复免责声明。
+- Keep real plans in task progress, observed child identities in activity, and delegation outcomes in tool receipts. No change to Agent permissions or model settings. / 真实计划、子Agent身份和委派失败记录保留在对应入口，不改启动权限或模型配置。
+- Add regressions for ordinary chat, actual plans, observed children, failure details and retry controls. / 补充普通问答、真实计划/委派及读取重试回归；[使用与验收](docs/chat-activity-0.14.4-2026-10-28.md)。
+
+## 0.14.3 · 2026-10-27 · Linux chat admission / Linux聊天启动修复
+
+- Normalize path arguments before POSIX/PowerShell quoting so shared-browser instructions no longer crash Linux chat before model admission. / 参数转义前统一转换路径类型，修复Linux聊天立即500及随后接回404。
+- Add cross-platform quoting and complete chat-context regressions; deploy independently from the unfinished major iteration. / 增加跨平台及完整聊天上下文回归，独立patch更新138；[部署与验收](docs/release-138-0.14.3-2026-10-27.md)。
+
 ## 0.42.0 · 2026-10-30
 
 - 写作交接来源贯通会话生图的新受理、领取、最终本地派发检查及成功图片；来源变化后未提交的图片不调用生成端，已派发结果和相同请求原回执保留。

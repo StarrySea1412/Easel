@@ -70,6 +70,7 @@ from easel.collection_errors import collection_failure
 from easel import local_records, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.artifacts import ArtifactStore, private_output
+from easel.runtime_limits import queued_chat
 from easel.gateway_auth import resolve_credentials as gateway_credentials, gateway_error, redact_gateway_text
 try:
     sys.path.insert(0, str(PROJECT_ROOT / "mcp" / "easel-notify"))
@@ -4542,6 +4543,7 @@ async def api_chat_branch(req: ChatBranchRequest):
 
 class ChatRequest(BaseModel):
     roleId: Annotated[str, Field(pattern=r'^[a-z][a-z-]{1,50}$')] | None = None
+    autoContinue: bool = False
     engine: Literal['openclaw', 'codex'] = 'openclaw'
     message: str
     history: list[HistoryMessage] = Field(default_factory=list, max_length=200)
@@ -4639,7 +4641,11 @@ def _attachment_context(req: ChatRequest) -> str:
         seen.add(normalized)
         rows.append(f"- outputs/{normalized}")
         if full.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}:
-            images.append(str(full))
+            from easel.attachment_media import stage_image
+            try:
+                images.append(str(stage_image(full, openclaw_state_dir(), scope)))
+            except (OSError, ValueError):
+                raise HTTPException(400, '图片附件读取准备失败，请重新上传有效图片') from None
 
     return (
         "〔系统附件清单，仅供本轮执行，不要向用户复述文件上传过程或内部路径〕\n"
@@ -4648,7 +4654,11 @@ def _attachment_context(req: ChatRequest) -> str:
         + "\n需要纳入内容项目时，将清单内文件复制到 outputs/<项目>/assets/ 后再使用；"
           "保留 inbox 原件，确保重试仍可复现。"
         + ('\n图片附件须先用现有image/read工具实际读取，再分析视觉内容；不能凭文件名声称已看图。实际路径：\n'
-           + '\n'.join(images) if images else '')
+           + '\n'.join(images)
+           + '\n使用view_image时不要指定聊天模型覆盖已配置的图片理解模型。图片读取失败时明确说明；'
+             '禁止以像素统计、ASCII轮廓或文件名猜测冒充视觉理解，也不要读取.env或密钥来寻找模型。' if images else '')
+        + ('\n不要沿用历史回复里“对话模型纯文本”的判断；以本轮配置和实际读图回执为准。'
+           '不要把生图网关当作看图渠道，也不要枚举未配置模型探测。' if images else '')
     )
 
 
@@ -5654,6 +5664,7 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
 
 
 @app.post("/api/chat/stream")
+@queued_chat
 async def api_chat_stream(req: ChatRequest):
     annotate_failure(operation='chat', stage='request', modelRef=req.modelRef, sessionId=req.sessionId, turnId=req.turnId)
     # Durable admission shared with automatic goals. Existing supervisor still
@@ -5672,7 +5683,14 @@ async def api_chat_stream(req: ChatRequest):
     try:
         await asyncio.to_thread(store.reserve_chat, req.sessionId, req.turnId)
     except TaskConflict as exc:
-        raise HTTPException(409, str(exc)) from None
+        from chat_recovery import release_finished_chat
+        repaired = await asyncio.to_thread(release_finished_chat, sys.modules[__name__], store, req.sessionId)
+        if not repaired:
+            raise HTTPException(409, str(exc)) from None
+        try:
+            store.reserve_chat(req.sessionId, req.turnId)
+        except TaskConflict as retry_exc:
+            raise HTTPException(409, str(retry_exc)) from None
     async def release():
         if req.engine == 'codex':
             await asyncio.to_thread(store.release_chat, req.sessionId, req.turnId)
@@ -5726,7 +5744,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     if requested_model_ref is not None:
         await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                 req.sessionId, requested_model_ref,
-                                transport='cli' if requested_thinking_level is not None else None,
+                                transport='cli' if requested_thinking_level is not None or req.autoContinue else None,
                                 thinking_level=requested_thinking_level)
     elif requested_thinking_level is not None:
         capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], req.sessionId, transport='cli')
@@ -5771,8 +5789,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         raise HTTPException(409, '该轮任务已在运行，请恢复现有连接。')
     cancel_job = threading.Event()
     _CHAT_JOBS[turn_id] = (sk, cancel_job)
+    agent_lease = None
 
     async def supervisor():
+        nonlocal agent_lease
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
         provider_key = _chat_provider_key(requested_model_ref)
         provider_lock = _provider_lock(provider_key)
@@ -6060,6 +6080,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
         try:
+            # Own capacity for the supervisor's whole lifetime, including
+            # cleanup. Queueing happens after durable admission, before tools.
+            pool = getattr(app.state, 'server_pools', {}).get('agent')
+            if pool is not None:
+                agent_lease = await pool.acquire_chat(cancel_job, lambda position: to_client(
+                    'activity', f'⏳ 服务器正在执行其他任务，本轮等待中（第{position}位）；尚未发送到模型，可停止取消。'))
+                if agent_lease is None:
+                    user_stopped = True
+                    cancelled_before_start()
+                    return
             while lock.locked() and not cancel_job.is_set():
                 await asyncio.sleep(0.1)
             if cancel_job.is_set():
@@ -6148,12 +6178,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             # turn runs is used by both transports on this turn.
             credentials = gateway_credentials()
             selected_transport = None
+            runtime_capability = None
             if requested_model_ref is not None:
-                selected_transport = ('cli' if requested_thinking_level is not None
+                selected_transport = ('cli' if requested_thinking_level is not None or req.autoContinue
                                       else await asyncio.to_thread(_resolve_transport, sk))
                 # Recheck the exact choice, running gateway and approved identity
                 # after queueing. Never remove the override or switch transports.
-                await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
+                runtime_capability = await asyncio.to_thread(office_controls.require_model_override, sys.modules[__name__],
                                         sk, requested_model_ref, transport=selected_transport, credentials=credentials,
                                         thinking_level=requested_thinking_level)
             _heal_openclaw_session(sk)
@@ -6170,7 +6201,14 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             # The OpenAI-compatible gateway endpoint does not expose a documented
             # per-turn thinking field. Use the CLI when the user explicitly chose
             # a level so the value reaches OpenClaw's native --thinking option.
-            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None
+            is_http = (selected_transport or await asyncio.to_thread(_resolve_transport, sk)) == "http" and requested_thinking_level is None and not req.autoContinue
+            effective_thinking_level = requested_thinking_level
+            if not is_http and effective_thinking_level is None:
+                if runtime_capability is None:
+                    runtime_capability = await asyncio.to_thread(
+                        office_controls.turn_model_capability, sys.modules[__name__], sk,
+                        transport='cli', credentials=credentials)
+                effective_thinking_level = office_controls.automatic_thinking_level(runtime_capability, requested_model_ref)
             if cancel_job.is_set():
                 user_stopped = True
                 cancelled_before_start()
@@ -6217,28 +6255,45 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         return
                     if native_client is not None:
                         from easel.gateway_agent import GatewayAgentProc
+                        from easel.chat_continuation import continuation_reason
+                        def _continuation(**values):
+                            if cancel_job.is_set() or sk in _STOPPED_CHAT:
+                                return None
+                            snapshot = execution_store.snapshot()
+                            return continuation_reason(**values, plan=snapshot.get('plan', []),
+                                                       operations=snapshot.get('operations', []))
+                        def _continued(count, reason):
+                            loop.call_soon_threadsafe(to_client, 'activity', f'原轮次已结束，自动继续 {count}/2（保留已有进度）')
+                            run_ledger.mark(_run_ledger_root(), turn_id, event='auto_continue', status='running',
+                                            continuationCount=count, continuationReason=reason)
                         params = {'agentId': 'main', 'sessionKey': f'agent:main:{sk}',
                                   'sessionId': _openclaw_session_id(sk), 'message': message,
-                                  'thinking': requested_thinking_level or _agent_thinking_level(requested_model_ref),
                                   'deliver': False, 'timeout': TIMEOUT_CHAT,
                                   'idempotencyKey': turn_id}
+                        if effective_thinking_level is not None:
+                            params['thinking'] = effective_thinking_level
                         if requested_model_ref is not None:
                             params['model'] = requested_model_ref
                         proc = GatewayAgentProc(native_client,
                             lambda: office_controls._model_probe_client('cli', credentials), params, TIMEOUT_CHAT,
                             on_compaction=lambda event: loop.call_soon_threadsafe(_mark_compaction, event),
                             on_tool=tool_update,
+                            continuation=_continuation if req.autoContinue else None,
+                            on_continue=_continued,
                             on_accepted=lambda run_id: loop.call_soon_threadsafe(
                                 _mark_gateway_acceptance, run_id))
                     else:
                         proc = None
                     if proc is None:
+                        if req.autoContinue:
+                            to_client('activity', '当前运行器不支持安全自动继续；本轮结束后可手动继续。')
                         cmd = openclaw_base_cmd() + [
                             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
                             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-                            "--thinking", requested_thinking_level or _agent_thinking_level(requested_model_ref),
                             "--timeout", str(TIMEOUT_CHAT), "--message", message,
                         ]
+                        if effective_thinking_level is not None:
+                            cmd.extend(['--thinking', effective_thinking_level])
                         if requested_model_ref is not None:
                             cmd.extend(['--model', requested_model_ref])
                         env = credentials.environment(_proxy_env())
@@ -6359,6 +6414,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             for it in items:
                                 qid = it.get("id")
                                 if qid and qid not in pushed:
+                                    if hasattr(proc, '_pending_question'):
+                                        proc._pending_question = True
                                     pushed.add(qid)
                                     _emit("question", json.dumps({
                                         "id": qid,
@@ -6732,7 +6789,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             raise
         except Exception as e:
             error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
-                     and str(e.detail.get('code', '')).startswith('chat_model_')
+                     and str(e.detail.get('code', '')).startswith(('chat_model_', 'chat_server_queue_'))
                      else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
             save_turn(pk, 'done', ''.join(full_text), {
@@ -6812,6 +6869,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
     def _bg_done(t):
         _BG_TASKS.discard(t)
+        if agent_lease is not None:
+            agent_lease.watch(lambda: (run_ledger.read(_run_ledger_root(), turn_id) or {}).get('resourceSettled') is True)
         if _CHAT_JOBS.get(turn_id) == (sk, cancel_job):
             _CHAT_JOBS.pop(turn_id, None)
         try:

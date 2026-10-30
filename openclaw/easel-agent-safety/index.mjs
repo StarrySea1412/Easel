@@ -2,6 +2,7 @@ import { registerPresent } from './present.mjs';
 import { registerImage } from './image.mjs';
 import { registerTasks } from './tasks.mjs';
 import { registerPlan } from './plan.mjs';
+import { runtimeToolParams } from './runtime.mjs';
 
 function readModel(config) {
   const value = config?.agents?.defaults?.subagents?.model;
@@ -24,6 +25,8 @@ export default {
     registerImage(api);
     registerTasks(api);
     registerPlan(api);
+    api.on('before_tool_call', (event, ctx) => runtimeToolParams(event, ctx, api.config),
+      { matcher: ['exec', 'view_image'], priority: 110, timeoutMs: 15000 });
     api.on('before_tool_call', (event) => {
       if (event.toolName !== 'sessions_spawn' && event.toolName !== 'spawn_agent') return;
       const startupModel = readModel(api.config);

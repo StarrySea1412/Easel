@@ -88,10 +88,13 @@ def test_openclaw_context_can_open_first_page_and_keeps_attachment_ownership(tmp
     monkeypatch.setattr(web,'OUTPUTS_DIR',tmp_path)
     monkeypatch.setattr(web,'_browser_service',browser)
     file=save_evidence(tmp_path,'owned',b'\x89PNG-test','shot')
+    from PIL import Image
+    Image.new('RGB',(1,1)).save(tmp_path/file['path'])
+    monkeypatch.setattr(web,'openclaw_state_dir',lambda:tmp_path/'runtime-state')
     req=web.ChatRequest(sessionId='owned',message='分析',attachments=[file])
     first=web._chat_message(req)
     import json
-    assert 'image/read' in first and json.dumps(str(tmp_path/file['path']), ensure_ascii=False)[1:-1] in first
+    assert 'image/read' in first and json.dumps(str(tmp_path/'runtime-state/media/easel-attachments'), ensure_ascii=False)[1:-1] in first
     assert 'browser_page.py' in first and '没有标签时用create' in first
     folder=browser._folder('owned');folder.mkdir(parents=True);(folder/'tabs.json').write_text('{"tabs":[]}')
     assert 'browser_page.py' in web._chat_message(req)

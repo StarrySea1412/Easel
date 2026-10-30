@@ -7,6 +7,39 @@ import re
 SAFE_ID = re.compile(r'[A-Za-z0-9_.-]{1,160}\Z')
 
 
+def _release_finished(web, store, session_id, turn_id, marker, ledger):
+    # A lost HTTP connection, a terminal label alone, or an expired lease is
+    # not proof that the producer stopped. Require exact durable settlement.
+    if (not isinstance(marker, dict) or marker.get('turn_id') != turn_id
+            or marker.get('status') != 'done' or not isinstance(ledger, dict)
+            or ledger.get('sessionId') != session_id or ledger.get('turnId') != turn_id
+            or ledger.get('status') not in ('completed', 'failed', 'stopped')
+            or ledger.get('settled') is not True or ledger.get('resourceSettled') is not True):
+        return False
+    if any(job[0] == session_id for job in web._CHAT_JOBS.values()) or session_id in web._RUNNING_CHAT:
+        return False
+    store.release_chat(session_id, turn_id)
+    return True
+
+
+def release_finished_chat(web, store, session_id):
+    """Repair an old terminal reservation without starting or aborting a run."""
+    lock = web._CrossProcLock(session_id)
+    try:
+        if not lock.acquire(timeout=0):
+            return False
+        turn_id = store.chat_lease(session_id)
+        if not turn_id:
+            return False
+        marker = json.loads(web._turn_file(f'web:{session_id}').read_text(encoding='utf-8'))
+        ledger = web.run_ledger.read(web._run_ledger_root(), turn_id)
+        return _release_finished(web, store, session_id, turn_id, marker, ledger)
+    except (OSError, ValueError, TypeError):
+        return False
+    finally:
+        lock.release()
+
+
 def _legacy_run_id(web, turn_id):
     # Older markers omitted the accepted ID. Accept only the same unique ID
     # witnessed in the gateway stream; never abort an unscoped session.

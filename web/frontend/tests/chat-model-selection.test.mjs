@@ -43,7 +43,7 @@ test('streamChat sends one exact provider/model field alongside the original tas
   assert.equal((await result.terminal).kind, 'done');
   assert.equal(calls.length, 1); assert.equal(calls[0].method, 'POST');
   assert.equal(calls[0].url, '/workbench/api/chat/stream');
-  assert.deepEqual(JSON.parse(calls[0].body), { message: '用户原始任务', sessionId: 'session-a', turnId: 'turn-a',
+  assert.deepEqual(JSON.parse(calls[0].body), { message: '用户原始任务', autoContinue: false, sessionId: 'session-a', turnId: 'turn-a',
     attachments, selectedSkills: ['analysis'], skillRequirements: { analysis: '保留来源' }, modelRef: MODEL });
   assert.deepEqual(result.state.selections, [MODEL]);
 });
