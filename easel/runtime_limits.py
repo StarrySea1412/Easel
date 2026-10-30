@@ -127,9 +127,14 @@ def install_limits(workspace):
                 lease.watch(lambda: json.loads(status_file.read_text())['state'] in {'done', 'failed', 'unconfirmed'})
                 return
             if group == 'media' and isinstance(response, dict) and response.get('jobId'):
-                jobs = workspace._VIDEO_SERVICE.jobs if 'videogen' in path else workspace._IMAGEGEN_JOBS
                 identifier = response['jobId']
-                lease.watch(lambda: jobs.get(identifier, {}).get('state') in {'done', 'error', 'cancelled', 'unconfirmed'})
+                if path == '/api/imagegen':
+                    from .image_jobs import ImageJobs
+                    jobs = ImageJobs(workspace.OUTPUTS_DIR)
+                    lease.watch(lambda: jobs.get(identifier)['phase'] in {'done', 'error', 'cancelled', 'unconfirmed'})
+                else:
+                    jobs = workspace._VIDEO_SERVICE.jobs
+                    lease.watch(lambda: jobs.get(identifier, {}).get('state') in {'done', 'error', 'cancelled', 'unconfirmed'})
                 return
             lease.release()
 

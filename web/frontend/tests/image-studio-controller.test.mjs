@@ -25,9 +25,10 @@ const file = (name = 'source.png', type = 'image/png') => new File(['controlled-
 const galleryItem = { name: 'past.png', url: '/outputs/past.png', mtime: 1 };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 
-async function fixture(t, initial = {}) {
+async function fixture(t, initial = {}, workspaceId) {
   sessionStorage.clear();
-  sessionStorage.setItem(draftKey, JSON.stringify(initial));
+  const storageKey = workspaceId ? `${draftKey}:${workspaceId}` : draftKey;
+  sessionStorage.setItem(storageKey, JSON.stringify(initial));
   const requests = [];
   let serverModel = 'test-model';
   let galleryFailure = '';
@@ -44,14 +45,14 @@ async function fixture(t, initial = {}) {
   document.body.append(container);
   const root = createRoot(container);
   let current;
-  function Harness() { current = useImageStudio(true); return null; }
+  function Harness() { current = useImageStudio(true, workspaceId); return null; }
   await act(async () => root.render(createElement(Harness)));
   t.after(async () => { await act(async () => root.unmount()); container.remove(); sessionStorage.clear(); });
   return {
     requests, state: () => current,
     serverModel: model => { serverModel = model; },
     serverError: message => { galleryFailure = message; },
-    stored: () => JSON.parse(sessionStorage.getItem(draftKey)),
+    stored: () => JSON.parse(sessionStorage.getItem(storageKey)),
     uploads: () => requests.filter(r => r.url === '/api/imagegen/references'),
     starts: () => requests.filter(r => r.url === '/api/imagegen' && r.method === 'POST'),
     // Do not await a deferred network operation inside act: its reply is
@@ -61,6 +62,22 @@ async function fixture(t, initial = {}) {
     reject: async (request, error) => act(async () => { request.reject(error); }),
   };
 }
+
+test('session image workspace sends its actual origin while standalone remains independent', async t => {
+  const f = await fixture(t, {prompt: '为已确认稿件生成封面'}, 'image:write-owned');
+  await f.run(s => s.fireImagegen());
+  const body = JSON.parse(f.starts()[0].options.body);
+  assert.equal(body.sessionId, 'write-owned');
+  assert.ok(body.requestId);
+  await f.reply(f.starts()[0], json({jobId:'owned-job'}));
+});
+
+test('standalone image workspace does not claim a writing session', async t => {
+  const f = await fixture(t, {prompt: '独立工坊请求'}, 'image:standalone');
+  await f.run(s => s.fireImagegen());
+  assert.equal('sessionId' in JSON.parse(f.starts()[0].options.body), false);
+  await f.reply(f.starts()[0], json({jobId:'standalone-job'}));
+});
 
 test('uploading a reference selects its closest supported ratio and sends a real img2img payload', async t => {
   const f = await fixture(t, { prompt: '  把背景改成黄昏  ', size: '1024x1024', mode: 'generate' });

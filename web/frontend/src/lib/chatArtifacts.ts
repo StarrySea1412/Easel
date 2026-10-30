@@ -55,7 +55,7 @@ export function decodeExternalMessages(value: unknown): ExternalChatMessage[] {
 export function decodeImageJobs(value: unknown, session: string): ChatImageJob[] {
   if (!Array.isArray(value)) return [];
   return value.filter((row): row is ChatImageJob => row && row.sessionId === session && /^[a-f0-9]{32}$/.test(row.jobId)
-    && typeof row.turnId === 'string' && typeof row.prompt === 'string' && ['queued','running','done','error','unconfirmed'].includes(row.phase));
+    && typeof row.turnId === 'string' && !row.turnId.startsWith('studio-') && typeof row.prompt === 'string' && ['queued','running','done','error','unconfirmed'].includes(row.phase));
 }
 export function decodeArtifacts(value: unknown, session: string): ChatArtifact[] {
   if (!Array.isArray(value)) return [];
@@ -63,7 +63,7 @@ export function decodeArtifacts(value: unknown, session: string): ChatArtifact[]
     if (!row || typeof row !== 'object') return false;
     const a = row as Record<string, unknown>;
     return a.sessionId === session && /^[a-f0-9]{32}$/.test(String(a.id))
-      && typeof a.turnId === 'string' && typeof a.name === 'string' && typeof a.path === 'string'
+      && typeof a.turnId === 'string' && !a.turnId.startsWith('studio-') && typeof a.name === 'string' && typeof a.path === 'string'
       && typeof a.version === 'string' && typeof a.mimeType === 'string'
       && typeof a.size === 'number' && ['ready', 'missing', 'failed'].includes(String(a.status));
   });

@@ -113,6 +113,8 @@ class ImageJobs:
                 return self.public(row)
             if db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (owner_scope,)).fetchone():
                 raise ValueError('所属轮次已停止；未创建新的图片任务。')
+            from .writing_handoffs import WritingHandoffs
+            creation_source = WritingHandoffs(self.outputs).image_source(session) if session else None
             host, config_id, limit = channel(config)
             if session:
                 from easel.task_store import TaskStore
@@ -120,6 +122,8 @@ class ImageJobs:
             ident = uuid.uuid4().hex
             data = {**normalized, 'jobId': ident, 'requestId': request_id, 'started': time.time(),
                     'url': None, 'error': None, 'limit': limit}
+            if creation_source is not None:
+                data['creationSource'] = creation_source
             db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                        (ident, owner_scope, request_id, fingerprint, host, config_id, 'queued', None, 0, time.time(), json.dumps(data, ensure_ascii=False)))
         return self.get(ident, session=session)
@@ -137,6 +141,28 @@ class ImageJobs:
         if row is None or (session is not None and json.loads(row['data']).get('sessionId') != session):
             raise FileNotFoundError('任务不存在')
         return self.public(row)
+
+    def media_source(self, relative, sha256):
+        """Attribute only exact saved output bytes; sidecars locate, never attest."""
+        path, relative = file_path(self.outputs, relative)
+        metadata = path.with_name('.' + path.name + '.easel-image.json')
+        if not self.path.is_file() or not metadata.is_file() or metadata.is_symlink():
+            return None
+        try:
+            if metadata.stat().st_size > 128 * 1024:
+                return None
+            ident = json.loads(metadata.read_text(encoding='utf-8'))['jobId']
+            scope(ident)
+            with self.db() as db:
+                row = db.execute("SELECT data FROM jobs WHERE id=? AND status='done'", (ident,)).fetchone()
+            if not row:
+                return None
+            data = json.loads(row['data'])
+            if relative in data.get('paths', []) and data.get('imageHashes', {}).get(relative) == sha256:
+                return data.get('creationSource')
+        except (ValueError, OSError, KeyError, TypeError):
+            return None
+        return None
 
     def list(self, session):
         scope(session)
@@ -180,6 +206,19 @@ class ImageJobs:
                 db.execute('UPDATE jobs SET status=?,data=? WHERE id=?',
                            (status, json.dumps(data, ensure_ascii=False), row['id']))
 
+    def source_error(self, data):
+        """Recheck only before provider submission; old receipts remain readable."""
+        from .writing_handoffs import WritingHandoffs
+        try:
+            current = (WritingHandoffs(self.outputs).image_source(data['sessionId'])
+                       if data.get('sessionId') else None)
+            # Serialized comparison preserves JSON types as well as fields.
+            if json.dumps(current, sort_keys=True) != json.dumps(data.get('creationSource'), sort_keys=True):
+                raise ValueError('写作交接来源版本缺失或不同')
+        except (ValueError, LookupError):
+            return '写作来源已变化或不可用；图片未提交生成端，请回原分析重新准备。'
+        return None
+
     def claim(self, config, owner, now=None):
         now = time.time() if now is None else now
         try:
@@ -207,6 +246,12 @@ class ImageJobs:
                         data['error'] = '所属目标已停止或运行未确认；排队图片未提交供应商。'
                         db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
                         continue
+                error = self.source_error(data)
+                if error:
+                    data.update(error=error, finished=time.time())
+                    db.execute("UPDATE jobs SET status='error',data=? WHERE id=?",
+                               (json.dumps(data, ensure_ascii=False), row['id']))
+                    continue
                 if row['config'] != config_id:
                     data['error'] = '排队期间生图渠道或模型已变更；未提交到供应商，请确认配置后新建任务。'
                     db.execute("UPDATE jobs SET status='error', data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
@@ -236,12 +281,18 @@ class ImageJobs:
                 data.update(error=CANCELLED, finished=time.time())
                 db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), ident))
                 return False
+            error = self.source_error(data)
+            if error:
+                data.update(error=error, finished=time.time())
+                db.execute("UPDATE jobs SET status='error',data=? WHERE id=?",
+                           (json.dumps(data, ensure_ascii=False), ident))
+                return False
             data['dispatchAt'] = time.time()
             db.execute('UPDATE jobs SET data=? WHERE id=?', (json.dumps(data, ensure_ascii=False), ident))
             return True
 
     def deliver(self, job, owner, values):
-        if job.get('sessionId'):
+        if job.get('sessionId') and not job.get('turnId', '').startswith('studio-'):
             try:
                 artifacts = ArtifactStore(self.outputs).present(job['sessionId'], job['turnId'],
                     [{'path': path} for path in values['paths']], source='imagegen', call=job['jobId'])
@@ -384,6 +435,7 @@ class ImageWorker:
             files = sorted(p for p in output.parent.glob(output.stem + '*') if p.is_file() and p.suffix.lower() in EXTENSIONS)
             from PIL import Image
             dimensions = {}
+            image_hashes = {}
             if not files:
                 raise ValueError('生成端未返回实际图片')
             for image_path in files:
@@ -392,10 +444,15 @@ class ImageWorker:
                         dimensions = {'width': image.width, 'height': image.height}
                     image.verify()
                 metadata = {k: job.get(k) for k in ('prompt','size','model','mode','referenceId','maskId','jobId','started')}
+                from .creation_drafts import media_hash
+                image_hashes[image_path.relative_to(jobs.outputs).as_posix()] = media_hash(image_path)['sha256']
+                if job.get('creationSource') is not None:
+                    metadata['creationSource'] = job['creationSource']
                 metadata['created'] = job['started']
                 image_path.with_name(f'.{image_path.name}.easel-image.json').write_text(json.dumps(metadata, ensure_ascii=False), encoding='utf-8')
             values = {'url': '/api/media/AI生图/' + files[0].name,
                       'paths': [str(p.relative_to(jobs.outputs).as_posix()) for p in files], **dimensions, 'error': None}
+            values['imageHashes'] = image_hashes
             receipt = jobs.path.parent / 'image-receipts' / f'{ident}.json'
             receipt.parent.mkdir(parents=True, exist_ok=True)
             temporary = receipt.with_suffix('.tmp')

@@ -9723,6 +9723,7 @@ class ImagegenRequest(BaseModel):
     maskId: str | None = None
     model: str | None = None
     requestId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
+    sessionId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
 
 
 @app.post("/api/imagegen/references")
@@ -9783,7 +9784,12 @@ async def api_imagegen_start(req: ImagegenRequest):
         raise HTTPException(400, "请填写 1–200 个字符的有效生图模型名称")
     frozen = {**channel_env, 'IMG_MODEL': model}
     try:
-        job = ImageJobs(OUTPUTS_DIR).submit(req.model_dump(), frozen, request_id=req.requestId)
+        if req.sessionId and not req.requestId:
+            raise ValueError('会话生图需要固定请求标识')
+        # A user-triggered studio job is independent of the current model turn.
+        turn = 'studio-' + hashlib.sha256(req.requestId.encode()).hexdigest()[:40] if req.sessionId else None
+        job = ImageJobs(OUTPUTS_DIR).submit(req.model_dump(), frozen, request_id=req.requestId,
+                                           session=req.sessionId, turn=turn)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     # The lifecycle worker also polls durable submissions from agent tools.

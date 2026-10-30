@@ -101,3 +101,12 @@ class WritingHandoffs:
         if binding and binding != item['bindingId']:
             raise ValueError('准备稿的分析来源与写作交接不匹配')
         return {**item['analysis'], 'writingHandoffId': item['id']}
+
+    def image_source(self, session):
+        """Freeze an existing writing handoff, without copying report text."""
+        item = self.checked(session)
+        if not item:
+            return None
+        return {'schemaVersion': 1, **{key: item[key] for key in (
+            'sessionId', 'sourceSessionId', 'bindingId', 'sourceTurnId', 'sourceHash',
+            'platform', 'accountId', 'persona', 'engine')}, 'writingHandoffId': item['id']}

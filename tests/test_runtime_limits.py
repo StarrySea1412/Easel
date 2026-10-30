@@ -19,6 +19,34 @@ def test_capacity_and_idempotent_release():
     pool.acquire().release()
 
 
+@pytest.mark.parametrize('phase', ['done', 'error', 'unconfirmed'])
+def test_image_admission_follows_durable_queue_terminal_without_legacy_registry(tmp_path, phase):
+    import time
+    from easel.image_jobs import ImageJobs
+    app = FastAPI()
+    config = {'IMG_BASE_URL': 'https://fixture.invalid', 'IMG_MODEL': 'fixture', 'IMG_API_KEY': 'synthetic'}
+    jobs = ImageJobs(tmp_path)
+    @app.post('/api/imagegen')
+    async def image():
+        return jobs.submit({'prompt': 'isolated synthetic'}, config, request_id='request')
+    workspace = SimpleNamespace(app=app, OUTPUTS_DIR=tmp_path, _BG_TASKS=set(),
+        LOGIN_PROCESSES={}, check_gateway=lambda: True)
+    install_limits(workspace)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post('/api/imagegen')
+        assert response.status_code == 200, response.text
+        identifier = response.json()['jobId']
+        assert client.post('/api/imagegen').status_code == 429
+        ImageJobs(tmp_path).claim(config, 'isolated-worker')
+        ImageJobs(tmp_path).finish(identifier, 'isolated-worker', phase, {'error': None if phase == 'done' else 'isolated failure'})
+        deadline = time.monotonic() + 3
+        while app.state.server_pools['media'].active and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert app.state.server_pools['media'].active == 0
+        receipt = client.post('/api/imagegen')
+        assert receipt.status_code == 200 and receipt.json()['jobId'] == identifier
+
+
 def test_disconnect_does_not_release_an_active_background_task():
     app = FastAPI()
     tasks = set()

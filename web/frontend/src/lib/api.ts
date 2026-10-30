@@ -1805,7 +1805,7 @@ export function reverseImage(image: File, provider: string, instruction: string,
   return request('/api/image-reverse', { method: 'POST', body: data, signal });
 }
 
-export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string; model?: string; requestId?: string } = {}): Promise<ImagegenStart> {
+export function startImagegen(prompt: string, size = '1024x1024', n = 1, options: { mode?: 'text2img' | 'img2img'; referenceId?: string; maskId?: string; model?: string; requestId?: string; sessionId?: string } = {}): Promise<ImagegenStart> {
   return request('/api/imagegen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

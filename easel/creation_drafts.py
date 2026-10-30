@@ -152,7 +152,9 @@ class CreationDrafts:
                     temporary.unlink(missing_ok=True)
             else:
                 version = media_hash(path)
-            versions.append({'path': relative, **version})
+            from .image_jobs import ImageJobs
+            source = ImageJobs(self.root).media_source(relative, version['sha256'])
+            versions.append({'path': relative, **version, **({'creationSource': source} if source else {})})
         return versions
 
     def checked(self, session, ident):

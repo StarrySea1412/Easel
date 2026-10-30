@@ -12,6 +12,15 @@ const { default: Artifacts } = await loadTsModule('../src/components/ChatArtifac
 const artifact = (patch = {}) => ({ id: 'a'.repeat(32), sessionId: 'chat', turnId: 'turn', name: '页面.html', path: 'topic/page.html',
   mimeType: 'text/html', version: 'first', revision: 1, size: 500, status: 'ready', ...patch });
 
+test('manual studio receipts and old misregistered files never become assistant turns', async () => {
+  const { decodeImageJobs, decodeArtifacts } = await loadTsModule('../src/lib/chatArtifacts.ts', import.meta.url);
+  const assistant = {jobId:'b'.repeat(32), sessionId:'chat', turnId:'assistant-turn', prompt:'image', phase:'done'};
+  const manual = {...assistant, jobId:'c'.repeat(32), turnId:'studio-'+'d'.repeat(40)};
+  assert.deepEqual(decodeImageJobs([assistant,manual], 'chat'), [assistant]);
+  const ordinary = artifact();
+  assert.deepEqual(decodeArtifacts([ordinary,artifact({id:'d'.repeat(32),turnId:manual.turnId})], 'chat'), [ordinary]);
+});
+
 async function setup(t, initial) {
   let items = initial; const requests = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })));

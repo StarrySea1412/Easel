@@ -183,7 +183,8 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
     setImgSubmitting(true);
     setImgErr('');
     try {
-      const options = { model: imgChannel.model, ...(mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const}) };
+      const sessionId = workspaceId?.startsWith('image:') && workspaceId !== 'image:standalone' ? workspaceId.slice('image:'.length) : null;
+      const options = { model: imgChannel.model, ...(sessionId ? {sessionId} : {}), ...(mode==='img2img' ? {mode:'img2img' as const,referenceId:reference!.id,...(mask?{maskId:mask.id}:{})} : {mode:'text2img' as const}) };
       const signature = JSON.stringify([p, imgSize, options]);
       let previous = pendingRequest.current;
       try { previous = previous || JSON.parse(sessionStorage.getItem(requestKey) || 'null'); } catch { /* optional cache */ }
@@ -203,7 +204,7 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
       imgSubmitPending.current = false;
       if (mounted.current) setImgSubmitting(false);
     }
-  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask, loading, galleryError, jobKey, requestKey]);
+  }, [imgPrompt, imgSize, imgJob, imgChannel, mode, reference, mask, loading, galleryError, jobKey, requestKey, workspaceId]);
 
   const saveModel = async (value: string): Promise<boolean> => {
     if (modelPending.current || imgSubmitPending.current || referencePending.current || imgJob?.state === 'running') return false;
