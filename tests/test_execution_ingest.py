@@ -34,6 +34,19 @@ def test_ingest_keeps_progress_between_operations(tmp_path):
     assert orders == sorted(orders)
 
 
+def test_ask_user_waiting_state_is_persisted_and_cleared(tmp_path):
+    store = ExecutionStore(tmp_path, 's', 't')
+    store.ingest([receipt('ask-call', 'ask_user')])
+
+    waiting = store.waiting_for_user(True)
+    assert waiting['operations'][0]['waitingForUser'] is True
+    assert read_snapshot(tmp_path, 's', 't')['operations'][0]['waitingForUser'] is True
+
+    resumed = store.waiting_for_user(False)
+    assert resumed['operations'][0]['waitingForUser'] is False
+    assert store.waiting_for_user(False) is None
+
+
 def test_ingest_never_regresses_a_finished_receipt(tmp_path):
     store = ExecutionStore(tmp_path, 's', 't')
     store.ingest([receipt('a', 'web_search')])

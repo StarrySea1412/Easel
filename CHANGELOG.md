@@ -1,3 +1,8 @@
+## 0.43.6 · 2026-10-30 · Ask-user bridge / 提问卡片修复
+
+- Pass configured Gateway token/password to ask_user question listing, status and answer RPCs; explicit missing credentials fail closed without falling back to a paired-device token. / 问答列表、状态与回答RPC统一使用已配置网关凭据；显式凭据缺失时安全失败，不回退到设备配对token。
+- Keep question cards when status lookup is missing or unknown, and label confirmed pending ask_user operations as waiting for an answer. / 状态查询缺失或未知时保留问题卡片；确认有待答问题后，执行记录明确显示等待回答。[Release receipt / 发布回执](docs/release-138-0.43.6-2026-10-30.md).
+
 ## 0.43.3 · 2026-10-30 · Proxy cookie isolation / 代理Cookie隔离
 
 ## 0.43.5 · 2026-10-30

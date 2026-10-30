@@ -45,7 +45,12 @@ def adopt(existing, incoming):
     """Merge one transcript receipt into a journal row without regressing it."""
     merged = dict(existing)
     for key, value in incoming.items():
-        if key in ('id', 'order', 'source', 'status', 'truncated') or not _adds_detail(value):
+        if key in ('id', 'order', 'source', 'status', 'truncated'):
+            continue
+        if key == 'waitingForUser' and isinstance(value, bool):
+            merged[key] = value
+            continue
+        if not _adds_detail(value):
             continue
         merged[key] = value
     status = incoming.get('status')
@@ -100,6 +105,21 @@ class ExecutionStore:
                             'subagentReason': public_text(value.get('reason') or ('启动深度设为0，当前不允许委派。' if value.get('maxSpawnDepth') == 0 else ''), self.credentials, 500)}
             self.persist()
 
+    def waiting_for_user(self, waiting):
+        """Mark live ask_user calls while a matching pending question exists."""
+        changed = False
+        with self.lock:
+            for row in self.rows.values():
+                if row.get('name') == 'ask_user' and row.get('status') == 'running':
+                    value = waiting is True
+                    if row.get('waitingForUser') is not value:
+                        row['waitingForUser'] = value
+                        changed = True
+            if changed:
+                self.persist()
+                return self.snapshot()
+        return None
+
     def consume(self, payload):
         data = payload.get('data')
         if payload.get('stream') != 'tool' or not isinstance(data, dict):
@@ -145,6 +165,8 @@ class ExecutionStore:
                     if isinstance(data.get('output'), str):
                         result['content'] = data['output']
                 result = {**result, **({'isError': data['isError']} if 'isError' in data else {})}
+                if row.get('name') == 'ask_user':
+                    row['waitingForUser'] = False
                 returned(row, result, time.time(), self.credentials, partial=phase == 'update')
                 if phase != 'update':
                     from .plan_progress import receipt_plan
@@ -198,6 +220,8 @@ class ExecutionStore:
             for row in self.rows.values():
                 if row['status'] == 'running':
                     row['status'] = 'unconfirmed'
+                    if row.get('name') == 'ask_user':
+                        row['waitingForUser'] = False
             self.persist()
 
     def persist(self):

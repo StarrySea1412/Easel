@@ -16,6 +16,7 @@ import { editBranchPlan, editBranchSeed, remapEditedMessage } from './lib/chatEd
 import { prepareChatBranch } from './lib/api';
 import { decodeChatTiming, finishChatTiming } from './lib/chatTiming';
 import { decodeChatReasoning, type ChatReasoning } from './lib/chatReasoning';
+import { shouldKeepChatQuestion } from './lib/chatQuestionStatus';
 import type { ChatTiming } from './lib/chatTiming';
 import { drainStreamRun } from './lib/streamLifecycle';
 import { createLazyPage } from './lib/lazyPage';
@@ -642,8 +643,8 @@ export default function App() {
         if (answeredRef.current.has(q.id)) return;   // 本会话已答过：不再重现
         void questionStatus([q.id]).then((st) => {
           const s = st[q.id]?.status;
-          // 只显示仍 pending 的：answered/expired/cancelled/not_found/unknown 一律过滤
-          if (s && s !== 'pending' || answeredRef.current.has(q.id)) return;
+          // 查询失败或未知状态不能抹掉刚收到的问题；只过滤权威终态。
+          if (!shouldKeepChatQuestion(s) || answeredRef.current.has(q.id)) return;
           const a2 = streamAcc.current[sessionId]; if (a2 !== runAcc) return;
           if (a2.questions.some((x) => x.id === q.id)) return;
           a2.questions.push(q);
@@ -765,9 +766,8 @@ export default function App() {
         // 查询失败时保留原样（宁显示不丢题）。
         void questionStatus([q.id]).then((st) => {
           const s = st[q.id]?.status;
-          // 只显示仍 pending 的：answered/expired/cancelled/not_found/unknown 一律过滤
-          //（unknown 通常=问题已从 gateway 清理，即已答或已过期，重放旧事件时不该重现）
-          if (s && s !== 'pending' || answeredRef.current.has(q.id)) return;
+          // 重放查询暂时失败时保留卡片；只有权威终态才过滤。
+          if (!shouldKeepChatQuestion(s) || answeredRef.current.has(q.id)) return;
           const a2 = streamAcc.current[sessionId]; if (a2 !== runAcc) return;
           if (a2.questions.some((x) => x.id === q.id)) return;
           a2.questions.push(q);

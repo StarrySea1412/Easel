@@ -369,6 +369,7 @@ class GatewayClient:
                     else:
                         exc = GatewayQuestionError(f"{method} failed: {detail}")
                     exc.rpc_response = True
+                    exc.error_code = err.get('code')
                     exc.response_payload = msg.get('payload')
                     raise exc
                 payload = msg.get('payload')
