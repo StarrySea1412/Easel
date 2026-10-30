@@ -3,8 +3,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -439,3 +441,132 @@ def test_handoff_rechecks_saved_versions_and_protects_upstream_dependencies(tmp_
     with pytest.raises(TaskConflict, match='版本已变化'):
         bridge.prepare(state)
     assert (workspace/'work/shared.css').read_text(encoding='utf-8') == 'body{color:blue}'
+
+
+@pytest.mark.parametrize('role', ['reviewer', 'publisher'])
+@pytest.mark.parametrize('resource', ['delivery/result.css', 'delivery/style.css'])
+def test_non_writing_role_cannot_replace_final_files_through_html_dependencies(tmp_path, role, resource):
+    final = 'delivery/result.css' if resource.endswith('result.css') else 'delivery/result.html'
+    store, goal, run, state = active(tmp_path, criteria=[
+        {'type': 'file', 'label': '最终产物', 'value': final},
+        {'type': 'review', 'label': '人工验收', 'value': ''}], stages=[
+        {'id': 'inspect', 'title': '记录检查', 'roleId': role, 'objective': '检查既有产物并保存说明',
+         'criteria': [{'type': 'file', 'label': '检查说明', 'value': 'review/report.html'}]}])
+    target = tmp_path / resource
+    target.parent.mkdir(parents=True)
+    target.write_text('body{color:green}', encoding='utf-8')
+    if final.endswith('.html'):
+        (tmp_path / final).write_text('<link rel="stylesheet" href="style.css">', encoding='utf-8')
+    bridge = CodexTasks(tmp_path)
+    assert bridge.prepare(state)
+    workspace = Path(state['workspace'])
+    (workspace / 'review').mkdir()
+    (workspace / 'delivery').mkdir()
+    (workspace / 'review/report.html').write_text(
+        '<link rel="stylesheet" href="../' + resource + '">', encoding='utf-8')
+    (workspace / resource).write_text('body{color:red}', encoding='utf-8')
+    from easel.artifacts import ArtifactStore
+    with ArtifactStore(tmp_path).db() as db:
+        before = db.execute('SELECT * FROM events').fetchall()
+    with pytest.raises(TaskConflict, match='其他阶段|最终产物'):
+        bridge.deliver(state, [{'path': 'review/report.html'}])
+    assert target.read_text(encoding='utf-8') == 'body{color:green}'
+    assert not (tmp_path / 'review/report.html').exists()
+    with ArtifactStore(tmp_path).db() as db:
+        assert db.execute('SELECT * FROM events').fetchall() == before
+
+
+def test_dependency_alias_cannot_replace_upstream_evidence(tmp_path):
+    from easel.task_rules import check_goal
+    store, goal, run, state = active(tmp_path, stages=[
+        {'id': 'first', 'title': '上游资料', 'roleId': 'builder', 'objective': '保存上游网页',
+         'criteria': [{'type': 'file', 'label': '上游网页', 'value': 'work/first.html'}]},
+        {'id': 'second', 'title': '下游结果', 'roleId': 'builder', 'objective': '生成下游网页',
+         'criteria': [{'type': 'file', 'label': '下游网页', 'value': 'work/second.html'}]}])
+    root = tmp_path / 'work'
+    root.mkdir()
+    (root / 'first.html').write_text('<link rel="stylesheet" href="shared.css">', encoding='utf-8')
+    (root / 'shared.css').write_text('body{color:green}', encoding='utf-8')
+    try:
+        (tmp_path / 'alias').symlink_to(root, target_is_directory=True)
+    except OSError:
+        if sys.platform != 'win32':
+            pytest.skip('Creating directory symlinks is unavailable on this host')
+        linked = subprocess.run(['cmd.exe', '/c', 'mklink', '/J', str(tmp_path / 'alias'), str(root)],
+                                capture_output=True, check=False)
+        if linked.returncode:
+            pytest.skip('Creating directory junctions is unavailable on this host')
+    store.finish(run['id'], owner=run['owner'], stage_checks=check_goal(tmp_path, goal['stages'][0], '')[0])
+    goal, run = store.claim('second-owner')
+    store.bind_provider(run['sessionId'], run['turnId'], 'second-turn')
+    state.update(turn_id=run['turnId'], codexTurnId='second-turn')
+    bridge = CodexTasks(tmp_path)
+    bridge.prepare(state)
+    workspace = Path(state['workspace'])
+    (workspace / 'alias').mkdir()
+    (workspace / 'alias/shared.css').write_text('body{color:red}', encoding='utf-8')
+    (workspace / 'work/second.html').write_text(
+        '<link rel="stylesheet" href="../alias/shared.css">', encoding='utf-8')
+    with pytest.raises(TaskConflict, match='其他阶段'):
+        bridge.deliver(state, [{'path': 'work/second.html'}])
+    assert (root / 'shared.css').read_text(encoding='utf-8') == 'body{color:green}'
+    assert not (root / 'second.html').exists()
+
+
+@pytest.mark.parametrize('role', ['builder', 'reviewer'])
+def test_handoff_preserves_identical_final_resource_and_builder_can_update_it(tmp_path, role):
+    store, goal, run, state = active(tmp_path, criteria=[
+        {'type': 'file', 'label': '最终样式', 'value': 'delivery/result.css'}], stages=[
+        {'id': 'inspect', 'title': '阶段说明', 'roleId': role, 'objective': '生成本阶段网页说明',
+         'criteria': [{'type': 'file', 'label': '阶段网页', 'value': 'review/report.html'}]}])
+    target = tmp_path / 'delivery/result.css'
+    target.parent.mkdir()
+    target.write_text('body{color:green}', encoding='utf-8')
+    os.utime(target, ns=(1000000000000000000, 1000000000000000000))
+    before = target.stat().st_mtime_ns
+    workspace = Path(state['workspace'])
+    (workspace / 'delivery').mkdir()
+    (workspace / 'review').mkdir()
+    content = 'body{color:red}' if role == 'builder' else 'body{color:green}'
+    (workspace / 'delivery/result.css').write_text(content, encoding='utf-8')
+    (workspace / 'review/report.html').write_text(
+        '<link rel="stylesheet" href="../delivery/result.css">', encoding='utf-8')
+    result = CodexTasks(tmp_path).deliver(state, [{'path': 'review/report.html'}])
+    assert result[0]['path'] == 'review/report.html'
+    assert target.read_text(encoding='utf-8') == content
+    if role == 'reviewer':
+        assert target.stat().st_mtime_ns == before
+
+
+def test_native_delivery_rejection_is_reported_without_partial_files_or_receipts(tmp_path):
+    store, goal, run, state = active(tmp_path, criteria=[
+        {'type': 'file', 'label': '最终文件', 'value': 'delivery/result.css'}], stages=[
+        {'id': 'inspect', 'title': '审查资料', 'roleId': 'reviewer', 'objective': '保存独立审查记录',
+         'criteria': [{'type': 'file', 'label': '说明', 'value': 'review/notes.txt'},
+                      {'type': 'file', 'label': '网页', 'value': 'review/report.html'}]}])
+    target = tmp_path / 'delivery/result.css'
+    target.parent.mkdir()
+    target.write_text('body{color:green}', encoding='utf-8')
+    workspace = Path(state['workspace'])
+    (workspace / 'delivery').mkdir()
+    (workspace / 'review').mkdir()
+    (workspace / 'review/notes.txt').write_text('有效的阶段说明', encoding='utf-8')
+    (workspace / 'review/report.html').write_text(
+        '<link rel="stylesheet" href="../delivery/result.css">', encoding='utf-8')
+    (workspace / 'delivery/result.css').write_text('body{color:red}', encoding='utf-8')
+    bridge = CodexTasks(tmp_path)
+    bridge.prepare(state)
+    replies = []
+    native = {'state': state, 'client': SimpleNamespace(reply=lambda ident, result: replies.append(result))}
+    service = CodexService(tmp_path)
+    service._request(native, {'id': 'delivery-request', 'method': 'item/tool/call', 'params': {
+        'tool': 'easel_task_deliver', 'callId': 'delivery-call', 'arguments': {'files': [
+            {'path': 'review/notes.txt'}, {'path': 'review/report.html'}]}}})
+    assert replies[0]['success'] is False
+    assert target.read_text(encoding='utf-8') == 'body{color:green}'
+    assert not (tmp_path / 'review/notes.txt').exists()
+    assert not (tmp_path / 'review/report.html').exists()
+    from easel.artifacts import ArtifactStore
+    assert ArtifactStore(tmp_path).snapshot('parent')['artifacts'] == []
+    assert store.get('goals', goal['id'])['status'] == 'active'
+    assert store.get('runs', run['id'])['state'] == 'running'

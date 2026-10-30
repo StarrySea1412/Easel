@@ -135,16 +135,24 @@ class CodexTasks:
             if not stage or (stage.get('access', 'write') == 'write' and stage.get('roleId') not in ('reviewer', 'publisher')):
                 criteria += goal['criteria']
             allowed = {file_path(self.outputs, c['value'])[1] for c in criteria if c['type'] == 'file'}
-            protected = {file_path(self.outputs, c['value'])[1] for s in goal.get('stages', [])
-                         for c in s['criteria'] if c['type'] == 'file'} - allowed
+            declared = [*goal['criteria'], *(c for s in goal.get('stages', []) for c in s['criteria'])]
+            protected_names = {file_path(self.outputs, c['value'])[1] for c in declared
+                               if c['type'] == 'file'} - allowed
+            # Dependencies are copied too: a read/review handoff must not use
+            # HTML/CSS references to replace a final deliverable or its assets.
+            for name in list(protected_names):
+                protected_names.update(inspect_file(self.outputs, name)['dependencies'])
             for previous in goal.get('stages', []):
                 if previous['status'] != 'completed' or (stage and previous['id'] == stage['id']):
                     continue
                 for check in previous.get('checks', []):
                     if check['type'] == 'file' and check['state'] == 'passed':
                         info = inspect_file(self.outputs, file_path(self.outputs, check['value'])[1])
-                        protected.update(info['dependencies'])
-            copied, mains = {}, []
+                        protected_names.update(info['dependencies'])
+            # Compare actual targets, not only lexical names. In-root symlink
+            # directories/junctions and Windows case aliases share a target.
+            protected = {file_path(self.outputs, name)[0].resolve() for name in protected_names}
+            copied, targets, mains = {}, {}, []
             for item in files:
                 if not isinstance(item, dict) or not isinstance(item.get('path'), str):
                     raise TaskConflict('交接路径无效。')
@@ -152,12 +160,17 @@ class CodexTasks:
                 if relative not in allowed:
                     raise TaskConflict('交接路径必须匹配当前阶段或最终文件条件。')
                 _, values = self.bundle(workspace, relative)
-                if any(file_path(self.outputs, name)[0].read_bytes() != values[name]
-                       for name in protected.intersection(values)):
-                    raise TaskConflict('交接资源不得覆盖其他阶段的证据。')
-                for path in values:
-                    file_path(self.outputs, path)
-                copied.update(values); mains.append({'path': relative})
+                for name, data in values.items():
+                    target = file_path(self.outputs, name)[0].resolve()
+                    if target in protected:
+                        if not target.is_file() or target.read_bytes() != data:
+                            raise TaskConflict('交接资源不得覆盖其他阶段的证据或最终产物。')
+                        continue  # Reuse identical evidence without replacing it.
+                    if target in targets and targets[target] != data:
+                        raise TaskConflict('交接资源指向相同文件但内容冲突。')
+                    targets[target] = data
+                    copied[name] = data
+                mains.append({'path': relative})
             if sum(map(len, copied.values())) > MAX_FILE:
                 raise TaskConflict('单次交接超过64MiB。')
             self.copy_files(self.outputs, copied)
