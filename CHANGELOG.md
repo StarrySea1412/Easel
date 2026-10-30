@@ -1,3 +1,8 @@
+## 0.43.2 · 2026-10-30 · Concurrent settlement / 并发结算修正
+
+- Read run binding and proposal presence in one SQLite snapshot so concurrent settlement returns the durable receipt instead of a spurious empty result. Keep source/identity checks and transaction-time revalidation. / 修复同一轮并发结算时误回空回执，保留来源、身份与事务内复核。
+- Add a deterministic interleaving regression; retain earlier full-suite failures and separate source, storage, deployment and browser evidence. / 新增稳定并发交错回归，完整失败与部署验收分别记录。[Current evidence / 当前回执](docs/release-138-0.43.2-2026-10-30.md)。
+
 ## 0.43.1 · 2026-10-30 · 138 build correction / 构建修正
 
 - Include agent workspace and OpenClaw safety sources in the Docker allowlist; add a packaging regression. The failed 0.43.0 image was never activated. / 补齐镜像构建白名单及回归，失败的0.43.0未切换现网。

@@ -1,11 +1,13 @@
 """Original-run proposal pipeline. Synthetic evidence; no provider dispatch."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from threading import Event, get_ident
 from types import SimpleNamespace
 
 import pytest
@@ -124,6 +126,42 @@ def test_concurrent_proposals_and_settlement_are_bounded_and_idempotent(env):
     change(env, first, 'reject'); change(env, second, 'delete')
     assert env.memory.queue_run('s', 't', PROPOSAL) == receipts[0]
     assert [e['status'] for e in env.memory.state('one')['entries']] == ['rejected']
+
+
+def test_settlement_completed_after_initial_read_returns_same_receipt(env, monkeypatch):
+    bind(env)
+    env.memory.queue_run('s', 't', PROPOSAL)
+    finish(env)
+    original = env.memory.connect
+    paused, resume = Event(), Event()
+    worker = {'id': None, 'reads': 0}
+
+    @contextmanager
+    def interleaved_connection():
+        with original() as db:
+            yield db
+        if get_ident() == worker['id']:
+            worker['reads'] += 1
+            if worker['reads'] == 1:
+                paused.set()
+                assert resume.wait(15), 'competing settlement did not finish'
+
+    monkeypatch.setattr(env.memory, 'connect', interleaved_connection)
+
+    def settle_paused():
+        worker['id'] = get_ident()
+        return env.memory.settle_run('s', 't')
+
+    with ThreadPoolExecutor(1) as pool:
+        first = pool.submit(settle_paused)
+        try:
+            assert paused.wait(15), 'first settlement did not reach its initial read'
+            completed = env.memory.settle_run('s', 't')
+        finally:
+            resume.set()
+        assert first.result(timeout=15) == completed
+    assert completed['createdCount'] == 1
+    assert len(env.memory.state('one')['entries']) == 1
 
 
 @pytest.mark.parametrize('engine,patch', [

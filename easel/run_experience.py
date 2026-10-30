@@ -227,14 +227,21 @@ def discard_profile(db, profile_id):
 
 
 def settle(store, session, turn):
-    bound = binding(store, session, turn)
-    if not bound:
-        return None
-    if 'receipt' in bound:
-        return bound['receipt']
-    # No proposals means no work. Keep the binding available during execution.
+    ids(session, turn)
+    # Read the binding and proposal presence in one SQLite snapshot. Another
+    # settler may save its receipt and remove proposals between separate reads.
     with store.connect() as db:
-        if not db.execute('SELECT 1 FROM run_proposals WHERE session=? AND turn=?', (session, turn)).fetchone():
+        row = db.execute('''SELECT data, EXISTS(
+            SELECT 1 FROM run_proposals WHERE session=? AND turn=?)
+            FROM run_bindings WHERE session=? AND turn=?''',
+            (session, turn, session, turn)).fetchone()
+        if not row:
+            return None
+        bound = json.loads(row[0])
+        if 'receipt' in bound:
+            return bound['receipt']
+        # No proposals means no work. Keep the binding available during execution.
+        if not row[1]:
             return None
     try:
         evidence = store.resolve_run_source(session, turn, bound['engine'])
