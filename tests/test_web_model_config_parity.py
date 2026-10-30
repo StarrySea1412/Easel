@@ -25,8 +25,14 @@ import app  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def openclaw_engine(monkeypatch):
+def openclaw_engine(tmp_path, monkeypatch):
     monkeypatch.setenv("EASEL_AGENT_RUNTIME", "openclaw")
+    state = tmp_path / 'openclaw-state'
+    state.mkdir()
+    (state / 'openclaw.json').write_text('{"models":{"providers":{}}}', encoding='utf-8')
+    monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(state))
+    monkeypatch.setattr(app, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(app, 'ENV_FILE', tmp_path / '.env')
 
 
 @pytest.fixture
@@ -35,6 +41,7 @@ def oc_cfg(tmp_path, monkeypatch):
     cfg = tmp_path / "openclaw.json"
     cfg.write_text(json.dumps({"models": {"providers": {}}}), encoding="utf-8")
     monkeypatch.setattr(app, "_oc_config_path", lambda: cfg)
+    monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(tmp_path))
     return cfg
 
 
@@ -80,17 +87,22 @@ def test_primary_ref_never_double_prefixes(model, pkey, expected):
     assert ref == expected
 
 
-def test_placeholder_key_reports_missing(tmp_path, monkeypatch):
+@pytest.mark.parametrize('slot,key_env', [
+    ('openai', 'OPENAI_API_KEY'), ('anthropic', 'ANTHROPIC_API_KEY'),
+    ('relay', 'EASEL_LLM_API_KEY'),
+])
+def test_placeholder_key_reports_missing(tmp_path, monkeypatch, slot, key_env):
     """④ .env.example 的占位符必须显示「缺 key」，且不给出假掩码。
 
     这条最关键：安装不再在终端问 key、改为引导到浏览器，若面板谎报「已配置」，
     等于把用户送进一个无法自解释的死胡同。
     """
     envf = tmp_path / ".env"
-    envf.write_text("ANTHROPIC_API_KEY=sk-ant-REPLACE_ME\n"
+    envf.write_text(f"{key_env}=sk-ant-REPLACE_ME\n"
                     "CLAUDE_MODEL=anthropic/claude-sonnet-4-6\n", encoding="utf-8")
     monkeypatch.setattr(app, "ENV_FILE", envf)
     rows = app._model_channels()["channels"]["chat"]["rows"]
+    assert any(row['slot'] == slot for row in rows)
     assert rows, "应当仍然列出该槽位（只是标记为缺 key）"
     for r in rows:
         assert r["result"] == "缺 key", f"占位符被判为已配置：{r}"
@@ -187,7 +199,7 @@ def test_primary_row_reports_main_role(env_key, slot, tmp_path, monkeypatch, oc_
                     "CLAUDE_MODEL=anthropic/claude-opus-4-7\n", encoding="utf-8")
     monkeypatch.setattr(app, "ENV_FILE", envf)
     oc_cfg.write_text(json.dumps({
-        "agents": {"defaults": {"model": {"primary": "anthropic/claude-opus-4-7"}}},
+        "agents": {"defaults": {"model": {"primary": f"{slot}/claude-opus-4-7"}}},
         "models": {"providers": {}},
     }), encoding="utf-8")
 
@@ -225,3 +237,34 @@ def test_bare_model_name_also_matches_primary(tmp_path, monkeypatch, oc_cfg):
 
     rows = {r["slot"]: r for r in app._model_channels()["channels"]["chat"]["rows"]}
     assert rows["anthropic"]["role"] == "主"
+
+
+@pytest.mark.parametrize('slot', ['openai', 'anthropic', 'relay', 'fixture-custom'])
+@pytest.mark.parametrize('key,configured', [
+    ('sk-REPLACE_ME', False), ('', False), ('fixture-valid-credential', True),
+])
+def test_provider_credentials_use_the_same_presence_rule(oc_cfg, slot, key, configured):
+    original = json.dumps({'models': {'providers': {slot: {
+        'baseUrl': 'https://example.test/v1', 'apiKey': key,
+        'api': 'openai-completions', 'models': [{'id': 'fixture-model'}],
+    }}}})
+    oc_cfg.write_text(original, encoding='utf-8')
+    rows = app._model_channels()['channels']['chat']['rows']
+    row = next(item for item in rows if item['providerId'] == slot)
+    assert row['result'] == ('已配置' if configured else '缺 key')
+    assert bool(row['keyMasked']) == configured
+    assert oc_cfg.read_text(encoding='utf-8') == original
+
+
+def test_anthropic_and_relay_keep_distinct_primary_roles(oc_cfg, tmp_path):
+    (tmp_path / '.env').write_text(
+        'ANTHROPIC_API_KEY=fixture-direct-credential\n'
+        'EASEL_LLM_API_KEY=fixture-relay-credential\n'
+        'CLAUDE_MODEL=anthropic/fixture-model\n', encoding='utf-8')
+    oc_cfg.write_text(json.dumps({
+        'agents': {'defaults': {'model': {'primary': 'anthropic/fixture-model'}}},
+        'models': {'providers': {}},
+    }), encoding='utf-8')
+    rows = {row['slot']: row for row in app._model_channels()['channels']['chat']['rows']}
+    assert rows['anthropic']['role'] == '主'
+    assert rows['relay']['role'] == '备'

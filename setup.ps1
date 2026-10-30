@@ -6,9 +6,12 @@ param(
     [switch]$NonInteractive,
     [switch]$AllowWinget,
     [switch]$DeferBrowser,
+    [switch]$SkipOpenClaw,
+    [switch]$OpenClaw,
     [string]$DataDir = $env:EASEL_DATA_DIR
 )
 $ErrorActionPreference = 'Stop'
+if ($SkipOpenClaw -and $OpenClaw) { throw '不能同时指定 -SkipOpenClaw 和 -OpenClaw。' }
 $Root = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 if (-not $DataDir) { $DataDir = $Root }
 $DataDir = [System.IO.Path]::GetFullPath($DataDir)
@@ -380,6 +383,7 @@ Ok '系统环境检查完成'
 }
 
 function Invoke-openclaw {
+if ($SkipOpenClaw) { Info '保留现有执行引擎，跳过 OpenClaw 安装。'; return }
 
 Info '安装 OpenClaw...'
 $wantedVersion = if ($Manifest) { [string]$Manifest.dependencies.openclaw } else { 'latest' }
@@ -454,6 +458,11 @@ if ($LASTEXITCODE -ne 0) { Fail 'Playwright Chromium 安装失败，请检查官
 function Invoke-profile {
     $envPath = Join-Path $DataDir '.env'
     if (-not (Test-Path -LiteralPath $envPath)) { Copy-Item -LiteralPath (Join-Path $Root '.env.example') -Destination $envPath }
+    if ($SkipOpenClaw) {
+        & $Python -m easel.installation $DataDir api
+        if ($LASTEXITCODE -ne 0) { Fail '执行引擎设置初始化失败；已有配置未被替换。' }
+        return
+    }
     $profileDir = if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:EASEL_OPENCLAW_STATE_DIR } else { Join-Path $HOME '.openclaw-easel' }
     $configPath = Join-Path $profileDir 'openclaw.json'
     $previousConfigPath = $env:OPENCLAW_CONFIG_PATH
@@ -636,6 +645,7 @@ function Ensure-WorkspaceLink($LinkPath, $TargetPath, $Folder, $WorkspacePath) {
 }
 
 function Invoke-skills {
+if ($SkipOpenClaw) { Info '保留现有资料，跳过 OpenClaw 工作区同步。'; return }
 
 Info '同步 skills 与 workspace...'
 $workspace = $env:EASEL_OPENCLAW_WORKSPACE
@@ -691,6 +701,12 @@ foreach ($mapping in @(@{ name='easel-profiles'; folder='profiles' }, @{ name='o
 }
 
 function Invoke-gateway {
+if ($SkipOpenClaw) {
+    Info '验证基础工作台页面；本次不启动 OpenClaw Gateway。'
+    & $Python (Join-Path $Root 'easel\install_runner.py') --root $Root --data-dir $DataDir --verify-web
+    if ($LASTEXITCODE -ne 0) { Fail 'Web 页面启动验证失败。' }
+    return
+}
 
 Info '验证配置并启动 Gateway...'
 if (Test-OpenClawSupport @('config') 'validate') {
@@ -726,6 +742,10 @@ try {
         & ('Invoke-' + $Phase)
         exit 0
     }
+    if (-not $SkipOpenClaw -and -not $OpenClaw -and -not $NonInteractive -and -not [Console]::IsInputRedirected) {
+        $choice = Read-Host '是否安装 OpenClaw？可选 n，仅安装工作台并使用已有底座 [Y/n]'
+        if ($choice -match '^(n|no|否)$') { $SkipOpenClaw = $true }
+    }
     # Serialize the pre-Python bootstrap too, before touching its checkpoint.
     try { $setupLock = [System.IO.File]::Open((Join-Path $DataDir 'setup.lock'), [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None) }
     catch { Fail '另一个 Easel 安装正在使用此数据目录，请等待它完成。' }
@@ -743,6 +763,7 @@ try {
     if ($NonInteractive) { $runnerArgs += '--non-interactive' }
     if ($AllowWinget) { $runnerArgs += '--allow-winget' }
     if ($DeferBrowser) { $runnerArgs += '--defer-browser' }
+    if ($SkipOpenClaw) { $runnerArgs += '--skip-openclaw' }
     & $Python @runnerArgs
     exit $LASTEXITCODE
 } catch {

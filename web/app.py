@@ -2251,7 +2251,7 @@ async def api_env_job(job_id: str):
 
 def _mask_key(v: str) -> str:
     v = (v or "").strip()
-    if not v:
+    if not _is_set(v):
         return ""
     return f"{v[:5]}…{v[-4:]}" if len(v) > 14 else "已配置"
 
@@ -2345,8 +2345,8 @@ def _model_channels(runtime: str | None = None) -> dict:
     chat_rows = []
     ob = (env.get("OPENAI_BASE_URL") or providers.get("openai", {}).get("baseUrl") or "").strip()
     openai_key = str(env.get("OPENAI_API_KEY") or providers.get("openai", {}).get("apiKey") or "").strip()
-    ok_key = bool(openai_key)
-    if ob or ok_key:
+    ok_key = _is_set(openai_key)
+    if ob or openai_key:
         chat_rows.append({
             "slot": "openai", "order": 1, "name": "deepseek",
             "sub": "官方直连",
@@ -2362,7 +2362,7 @@ def _model_channels(runtime: str | None = None) -> dict:
             "slot": "anthropic", "order": len(chat_rows) + 1, "name": "anthropic", "sub": "官方直连",
             "type": "anthropic", "protocol": "anthropic", "model": _chat_model('anthropic', env, providers),
             "baseUrl": ab or "https://api.anthropic.com", "keyMasked": _mask_key(ak),
-            "role": "主" if primary.startswith('anthropic/') else "备", "result": "已配置" if ak else "缺 key",
+            "role": "主" if primary.startswith('anthropic/') else "备", "result": "已配置" if _is_set(ak) else "缺 key",
         })
     lb = (env.get("EASEL_LLM_BASE_URL") or providers.get("relay", {}).get("baseUrl") or "").strip()
     lk = str(env.get("EASEL_LLM_API_KEY") or providers.get("relay", {}).get("apiKey") or "").strip()
@@ -2371,7 +2371,7 @@ def _model_channels(runtime: str | None = None) -> dict:
             "slot": "relay", "order": len(chat_rows) + 1, "name": "relay", "sub": "中转站",
             "type": "anthropic", "protocol": "anthropic", "model": _chat_model('relay', env, providers),
             "baseUrl": lb or "（未配置）", "keyMasked": _mask_key(lk),
-            "role": "主" if primary.startswith('relay/') else "备", "result": "已配置" if lk else "缺 key",
+            "role": "主" if primary.startswith('relay/') else "备", "result": "已配置" if _is_set(lk) else "缺 key",
         })
 
     custom_rows = []
@@ -2424,7 +2424,7 @@ def _model_channels(runtime: str | None = None) -> dict:
         from model_metadata import context_reference
         row['contextReference'] = context_reference(selected.get('id') or '')
 
-    sf = bool((env.get("SILICONFLOW_API_KEY") or "").strip())
+    sf = _is_set(env.get("SILICONFLOW_API_KEY"))
     trans_rows = [
         {"order": 0, "name": "自带字幕", "sub": "视频自带 SRT/VTT 时直接读", "type": "脚本层",
          "model": "—", "baseUrl": "—", "keyMasked": "—", "role": "免配", "result": "优先"},
@@ -9208,6 +9208,7 @@ class PublishSmsRequest(BaseModel):
 async def api_publish_sms(platform: str, req: PublishSmsRequest):
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
+    _require_automated_publishing()
     with _PUBLISH_LOCK:
         receipt_id = _PUBLISH_ACTIVE.get(platform)
         if not receipt_id or (req.receiptId and req.receiptId != receipt_id):

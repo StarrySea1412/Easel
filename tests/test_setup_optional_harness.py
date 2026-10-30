@@ -115,24 +115,20 @@ def test_windows_skip_executes_real_branch_without_calling_openclaw(tmp_path, ex
     config_path = tmp_path / "outputs" / "_harness" / "config.json"
     if existing:
         store.write_json(config_path, {"runtime": "codex", "models": {"codex": "native-model"}})
-    source = (ROOT / "setup.ps1").read_text(encoding="utf-8-sig")
-    install_start = source.index("if (-not $SkipOpenClaw) {\nStep '2/8'")
-    install_end = source.index("Step '3/8'", install_start)
-    profile_start = source.index("$envPath = Join-Path $Root '.env'")
-    profile_end = source.index("\nShow-Summary", profile_start)
     script_path = tmp_path / "skip-probe.ps1"
     def ps_string(value):
         return "'" + str(value).replace("'", "''") + "'"
     script = (
-        "$ErrorActionPreference = 'Stop'\n$SkipOpenClaw = $true\n"
-        f"$Root = {ps_string(tmp_path)}\n$Python = {ps_string(sys.executable)}\n"
-        "function Info($Message) {}\nfunction Ok($Message) {}\n"
-        "function Step($Index, $Title, $Subtitle) {}\n"
-        "function Fail($Message) { throw $Message }\nfunction Read-EnvFile($Path) { return @{} }\n"
+        "$ErrorActionPreference = 'Stop'\n$SkipOpenClaw = $true\n$script:OcCaps=@{}\n"
+        f"$Root = {ps_string(tmp_path)}\n$DataDir = {ps_string(tmp_path)}\n$Python = {ps_string(sys.executable)}\n"
+        "$tokens=$null; $errors=$null\n"
+        f"$ast=[System.Management.Automation.Language.Parser]::ParseFile({ps_string(ROOT / 'setup.ps1')},[ref]$tokens,[ref]$errors)\n"
+        "if ($errors.Count) { throw ($errors | Out-String) }\n"
+        "$ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] },$false) | ForEach-Object { Invoke-Expression $_.Extent.Text }\n"
         "function openclaw { throw 'Must not call OpenClaw' }\n"
         "function npm { throw 'Must not install OpenClaw' }\n"
         "function Invoke-NativeCapture { throw 'Must not invoke OpenClaw or Gateway' }\n"
-        + source[install_start:install_end] + source[profile_start:profile_end])
+        "Invoke-openclaw\nInvoke-profile\nInvoke-skills\n")
     script_path.write_text(script, encoding="utf-8-sig")
     environment = {**os.environ, "PYTHONPATH": str(ROOT), "PYTHONUTF8": "1",
                    "PYTHONIOENCODING": "utf-8"}

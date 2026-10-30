@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(not BASH, reason="No usable native Bash")
 
 
 def workspace_block():
-    source = (ROOT / 'openclaw/sync.sh').read_text(encoding='utf-8')
+    source = (ROOT / 'agents/sync.sh').read_text(encoding='utf-8')
     return source[source.index('for f in "$OPENCLAW_WORKSPACE_SRC"/*.md; do'):
                   source.index('# AGENTS.md is injected every turn')]
 
@@ -54,7 +54,7 @@ def test_workspace_sync_fails_when_a_directory_blocks_replacement(tmp_path):
 
 
 def test_skill_cleanup_rejects_empty_destination_before_removal():
-    source = (ROOT / 'openclaw/sync.sh').read_text(encoding='utf-8')
+    source = (ROOT / 'agents/sync.sh').read_text(encoding='utf-8')
     guarded = next(line for line in source.splitlines() if '${OPENCLAW_SKILL_DST:?}' in line)
     result = subprocess.run([BASH, '-c', 'set -u\nOPENCLAW_SKILL_DST=""\nname=x\n' + guarded],
                             env=_shell_env(), capture_output=True, text=True,

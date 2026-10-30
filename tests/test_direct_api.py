@@ -287,6 +287,8 @@ def test_settings_quoted_values_and_environment_override(tmp_path, monkeypatch):
 
 def test_doctor_api_mode_skips_openclaw(tmp_path, monkeypatch):
     from easel.commands import doctor
+    monkeypatch.setenv('EASEL_DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('EASEL_AGENT_RUNTIME', 'api')
     (tmp_path / ".env").write_text("EASEL_CHAT_TRANSPORT=api\n" + "\n".join(f"{k}={v}" for k, v in SETTINGS.items()))
     monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
     def forbidden(*args):
@@ -514,6 +516,7 @@ def test_cancelled_queue_releases_tracking_without_overwriting_active_turn(sandb
 
 def test_doctor_recognizes_local_openclaw_backend(tmp_path, monkeypatch):
     from easel.commands import doctor
+    monkeypatch.setenv('EASEL_DATA_DIR', str(tmp_path))
     for key in SETTINGS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
@@ -598,3 +601,30 @@ oc_set() { printf '%s\\n' "$3" > "$PROVIDER_CAPTURE"; }
                                  "PROJECT_ROOT": str(tmp_path)}, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert env_file.read_text() == "EASEL_CHAT_TRANSPORT=http\n"
+
+
+@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode'])
+def test_doctor_uses_runtime_from_separate_data_directory(tmp_path, monkeypatch, capsys, runtime):
+    from easel.commands import doctor
+    from easel.harnesses import store
+    from easel import harnesses
+    source = tmp_path / 'source'
+    source.mkdir()
+    data = tmp_path / 'data'
+    data.mkdir()
+    (data / '.env').write_text('\n'.join(f'{key}={value}' for key, value in SETTINGS.items()), encoding='utf-8')
+    store.write_json(data / 'outputs/_harness/config.json', {'runtime': runtime})
+    monkeypatch.setattr(doctor, 'PROJECT_ROOT', source)
+    monkeypatch.setenv('EASEL_DATA_DIR', str(data))
+    monkeypatch.delenv('EASEL_AGENT_RUNTIME', raising=False)
+    monkeypatch.setattr(doctor, '_chromium_available', lambda: True)
+    monkeypatch.setattr(harnesses, 'describe', lambda selected: {'installed': True, 'install_hint': 'isolated'})
+    def forbidden(*args):
+        raise AssertionError('Doctor must use the data-directory engine and skip OpenClaw')
+    for name in ('_openclaw_version', '_node_version_ok', '_primary_model_routable', '_gateway_healthy', '_skills_synced',
+                 '_primary_model_cli_available', '_env_key_valid'):
+        monkeypatch.setattr(doctor, name, forbidden)
+    doctor.cmd_doctor(None)
+    output = capsys.readouterr().out
+    assert ('API 直连' if runtime == 'api' else runtime) in output
+    assert not (source / 'outputs').exists()

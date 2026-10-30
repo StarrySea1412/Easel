@@ -96,6 +96,8 @@ def sandbox(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text("OPENAI_BASE_URL=https://api.openai.com/v1\n", encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_file)
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
+    monkeypatch.setenv('EASEL_AGENT_RUNTIME', 'openclaw')
 
     oc_dir = tmp_path / ".openclaw-easel"
     oc_dir.mkdir()
@@ -105,7 +107,7 @@ def sandbox(tmp_path, monkeypatch):
                                             "models": [{"id": "m"}]}}},
         "agents": {"defaults": {"model": {"primary": "openai/m"}}},
     }, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(web.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setenv('EASEL_OPENCLAW_STATE_DIR', str(oc_dir))
 
     local = "http://127.0.0.1:7860"
     with TestClient(web.app, base_url=local, client=("127.0.0.1", 51234),

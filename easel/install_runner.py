@@ -46,7 +46,7 @@ def redact(text: str, base: Path) -> str:
 
 def phase_command(root: Path, base: Path, phase: str, *,
                   non_interactive: bool, allow_winget: bool,
-                  defer_browser: bool = False) -> list[str]:
+                  defer_browser: bool = False, skip_openclaw: bool = False) -> list[str]:
     if phase not in {p["id"] for p in ic.PHASES}:
         raise ValueError(f"未知安装阶段：{phase}")
     command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -56,6 +56,8 @@ def phase_command(root: Path, base: Path, phase: str, *,
         command.append("-NonInteractive")
     if allow_winget:
         command.append("-AllowWinget")
+    if skip_openclaw:
+        command.append("-SkipOpenClaw")
     if defer_browser and phase == "gateway":
         command.append("-DeferBrowser")
     return command
@@ -63,10 +65,11 @@ def phase_command(root: Path, base: Path, phase: str, *,
 
 def execute_phase(root: Path, base: Path, phase: str, *,
                   non_interactive: bool, allow_winget: bool,
-                  defer_browser: bool = False) -> tuple[bool, str]:
+                  defer_browser: bool = False, skip_openclaw: bool = False) -> tuple[bool, str]:
     env = dict(os.environ, EASEL_DATA_DIR=str(base), EASEL_ROOT=str(root), PYTHONUTF8="1")
     command = phase_command(root, base, phase, non_interactive=non_interactive,
-                            allow_winget=allow_winget, defer_browser=defer_browser)
+                            allow_winget=allow_winget, defer_browser=defer_browser,
+                            skip_openclaw=skip_openclaw)
     # Preserve console Read-Host for the developer entry point only. No secrets
     # entered there pass through the installer log stream.
     interactive = phase == "profile" and not non_interactive
@@ -174,13 +177,19 @@ def installation_lock(base: Path):
 
 def run_install(root: Path, base: Path, *, version: str | None = None,
                 non_interactive: bool = True, allow_winget: bool = False,
-                defer_browser: bool = False,
+                defer_browser: bool = False, skip_openclaw: bool = False,
                 execute=None, sleep=time.sleep, emit=print) -> int:
     root, base = root.resolve(), base.resolve()
     version = installation_version(root, version)
     executor = execute or execute_phase
     with installation_lock(base):
         state = ic.bind_installation(ic.load_state(base), root, version)
+        previous_choice = state['installation'].get('skipOpenClaw', False)
+        if previous_choice != skip_openclaw:
+            # A completed profile step belongs to the previous install mode.
+            # Base dependencies/builds remain reusable in both directions.
+            state['phases'].pop('profile', None)
+        state['installation']['skipOpenClaw'] = skip_openclaw
         # Check before system recreates a removed venv; otherwise stale successes
         # would skip the packages and browsers installed inside that environment.
         interpreter = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -205,6 +214,16 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
             for phase in ic.PHASES:
                 pid = phase["id"]
                 previous = state["phases"].get(pid) or {}
+                if skip_openclaw and pid in ('openclaw', 'skills'):
+                    if previous.get('status') != 'ok':
+                        state['phases'][pid] = {**previous, 'status': 'skipped',
+                            'skippedFor': 'optional-openclaw', 'lastRun': int(time.time()),
+                            'attempts': previous.get('attempts', 0),
+                            'detail': '已选择基础工作台，不安装或同步OpenClaw；保留已有引擎与资料。'}
+                        ic.save_state(state, base)
+                    report(f'[{pid}] 按选择跳过OpenClaw操作，保留已安装资料')
+                    continue
+                retry_optional = previous.get('skippedFor') == 'optional-openclaw'
                 retry_browser = pid == "chromium" and previous.get("status") != "ok" \
                     and bool(previous.get("deferred"))
                 if pid == "chromium" and defer_browser and previous.get("status") != "ok":
@@ -220,7 +239,7 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
                     continue
                 # The two cheap environmental checks always re-run. The costly
                 # dependency/build stages retain successful checkpoints.
-                if not ic.should_run(state, pid) and pid not in ("system", "gateway") and not retry_browser:
+                if not ic.should_run(state, pid) and pid not in ("system", "gateway") and not retry_browser and not retry_optional:
                     report(f"[{pid}] 已完成，跳过")
                     continue
                 attempt = 0
@@ -228,10 +247,13 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
                     attempt += 1
                     if pid == "chromium":
                         previous.pop("deferred", None)
+                    previous.pop('skippedFor', None)
                     ic.mark_running(state, pid, base=base)
                     report(f"[{pid}] {phase['title']}（本次第 {attempt} 次）")
                     try:
                         options = {"non_interactive": non_interactive, "allow_winget": allow_winget}
+                        if skip_openclaw:
+                            options['skip_openclaw'] = True
                         if pid == "gateway" and browser_deferred:
                             options["defer_browser"] = True
                         ok, detail = executor(root, base, pid, **options)
@@ -255,7 +277,11 @@ def run_install(root: Path, base: Path, *, version: str | None = None,
                     delay = ic.retry_wait_seconds(attempt)
                     report(f"[{pid}] 瞬时故障，{delay} 秒后重试")
                     sleep(delay)
-            if browser_deferred:
+            if skip_openclaw:
+                browser_detail = '平台浏览器仍待补装。' if browser_deferred else ''
+                report('基础工作台和 Web 页面验证通过；本次未安装或启动OpenClaw。'
+                       + browser_detail + '已有引擎选择保留，可在 Web 设置选择已安装底座并验证登录。')
+            elif browser_deferred:
                 report("基础工作台安装和 Web 页面验证通过。平台浏览器未安装；使用原数据目录、不加 -DeferBrowser 重跑安装可补装。模型服务可在 Web 设置中配置。")
             else:
                 report("完整安装环境和 Web 页面验证通过。模型服务可在 Web 设置中配置。")
@@ -313,6 +339,8 @@ def main(argv=None) -> int:
     parser.add_argument("--version")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--allow-winget", action="store_true")
+    parser.add_argument("--skip-openclaw", action="store_true",
+                        help="安装基础工作台，保留已有执行引擎，不安装或启动OpenClaw")
     parser.add_argument("--defer-browser", action="store_true",
                         help="仅暂缓 Chromium，完成基础工作台安装；下次不加此项即可补装")
     parser.add_argument("--verify-web", action="store_true")
@@ -323,7 +351,7 @@ def main(argv=None) -> int:
             return 0
         return run_install(args.root, args.data_dir, version=args.version,
                            non_interactive=args.non_interactive, allow_winget=args.allow_winget,
-                           defer_browser=args.defer_browser)
+                           defer_browser=args.defer_browser, skip_openclaw=args.skip_openclaw)
     except (OSError, ValueError, RuntimeError) as exc:
         print(redact(str(exc), args.data_dir), file=sys.stderr)
         return 1

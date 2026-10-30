@@ -32,16 +32,17 @@ def test_windows_optional_openclaw_is_an_explicit_install_choice() -> None:
     assert "[switch]$SkipOpenClaw" in before
     assert "[switch]$OpenClaw" in before
     assert "[switch]$NonInteractive" in before
-    assert "if (-not $SkipOpenClaw) {\nStep '2/8'" in text
-    assert "if ($SkipOpenClaw) {\n    Step '6/8'" in text
-    assert "& $Python -m easel.installation $Root api" in text
+    assert re.search(r'if \(\$SkipOpenClaw\) \{[^\n]*return \}', text[text.index('function Invoke-openclaw'):text.index('function Invoke-pydeps')])
+    assert 'if ($SkipOpenClaw)' in text[text.index('function Invoke-profile'):text.index('function Invoke-profile-content')]
+    assert "& $Python -m easel.installation $DataDir api" in text
+    assert "if ($SkipOpenClaw) { $runnerArgs += '--skip-openclaw' }" in text
     assert "[Console]::IsInputRedirected" in text
-    assert text.index("Step '5/8'") < text.index("$envPath = Join-Path $Root '.env'")
+    assert text.index("if ($SkipOpenClaw -and $OpenClaw)") < text.index('New-Item -ItemType Directory -Path $DataDir')
 
 
 def test_dependency_install_preserves_process_path() -> None:
     text = _read(SETUP_PS1)
-    start = text.index("function Install-RequiredCommand")
+    start = text.index("function Ensure-Command")
     body = text[start:text.index("function Read-EnvFile", start)]
     assert re.search(r"\$env:Path\s*=\s*\$env:Path\s*\+", body)
     assert "GetEnvironmentVariable('Path', 'Machine')" in body
@@ -54,7 +55,7 @@ def test_dependency_install_path_in_powershell(shell_name: str, tmp_path: Path) 
     if not executable:
         pytest.skip(f"{shell_name} is unavailable")
     text = _read(SETUP_PS1)
-    start = text.index("function Assert-Command")
+    start = text.index("function Require-Command")
     functions = text[start:text.index("function Read-EnvFile", start)]
     script = tmp_path / "path-probe.ps1"
     script.write_text(
@@ -75,7 +76,8 @@ function winget {
 }
 $originalPath = 'C:\easel probe\node;C:\easel probe\python'
 $env:Path = $originalPath
-Install-RequiredCommand 'easel-path-probe' 'Easel.Test' 'mock dependency'
+$AllowWinget = $true
+Ensure-Command 'easel-path-probe' 'Easel.Test' 'mock dependency'
 if (-not $script:Installed) { throw 'Mock dependency was not installed' }
 $expectedPath = $originalPath + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($env:Path -ne $expectedPath) { throw 'Process PATH was lost or registry PATH was not refreshed' }
@@ -169,10 +171,11 @@ def test_anthropic_provider_seed_declares_api() -> None:
     i = text.index("function Write-AnthropicProvider")
     seed = text[i: text.index("\n}", i)]
     assert "anthropic-messages" in seed, "种子 JSON 必须声明 api"
-    assert "timeoutSeconds" in seed, (
-        "timeoutSeconds 要折进种子，而不是事后单独 config set —— "
-        "那会让 2026.9.x 在重装时拒绝整块替换"
-    )
+    assert all(field in seed for field in ('baseUrl', 'models', 'apiKey'))
+    # Older OpenClaw schemas reject timeoutSeconds in the atomic seed. The
+    # optional field may be attempted only after the complete provider exists.
+    assert 'if ($anthropicSynced)' in text
+    assert re.search(r'if \(\$anthropicSynced\) \{\s*\$null = Try-OpenClawConfig "models.providers.\$syncedProvider.timeoutSeconds"', text)
 
 
 def test_no_memorysearch_provider_none() -> None:
@@ -197,7 +200,7 @@ def test_batch_fallback_is_not_exit_code_driven() -> None:
     「当前 OpenClaw 不支持 --batch-file」，排查时被这条错信息直接带偏。
     """
     text = _read(SETUP_PS1)
-    i = text.index("function Set-OpenClawConfigBatch")
+    i = text.index("function OpenClaw-ConfigBatch")
     body = text[i: text.index("\n}\n", i)]
     assert "Test-OpenClawSupport" in body, "回退必须由能力探测决定"
     assert "不支持 --batch-file" not in body or "Test-OpenClawSupport" in body

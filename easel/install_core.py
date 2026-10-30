@@ -104,7 +104,8 @@ def should_run(state: dict, pid: str) -> bool:
 def bind_installation(state: dict, root: Path, version: str) -> dict:
     """成功状态只属于同一发行版本和安装目录；旧版无 identity 也必须重验。"""
     identity = {"root": os.path.normcase(str(root.resolve())), "version": version}
-    if state.get("installation") != identity:
+    current = state.get('installation')
+    if not isinstance(current, dict) or any(current.get(key) != value for key, value in identity.items()):
         return {"version": STATE_VERSION, "installation": identity, "phases": {}}
     return state
 

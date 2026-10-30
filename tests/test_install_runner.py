@@ -51,6 +51,60 @@ def test_all_phases_executed_and_resume_skips_installs(installation):
     assert [p for p, _ in calls] == ["system", "gateway"]
 
 
+def test_native_install_skips_openclaw_and_preserves_phase_checkpoints(installation):
+    root, base = installation
+    calls = []
+    def execute(r, b, phase, **options):
+        calls.append((phase, options))
+        return True, 'isolated phase verified'
+    assert runner.run_install(root, base, skip_openclaw=True, execute=execute, emit=lambda _: None) == 0
+    assert [phase for phase, _ in calls] == ['system', 'pydeps', 'frontend', 'chromium', 'profile', 'gateway']
+    assert all(options.get('skip_openclaw') is True for _, options in calls)
+    state = ic.load_state(base)
+    assert state['installation']['skipOpenClaw'] is True
+    assert all(state['phases'][phase]['status'] == 'skipped' for phase in ('openclaw', 'skills'))
+    assert ic.overall(state)['status'] == 'done'
+    calls.clear()
+    assert runner.run_install(root, base, skip_openclaw=True, execute=execute, emit=lambda _: None) == 0
+    assert [phase for phase, _ in calls] == ['system', 'gateway']
+
+
+def test_native_install_can_add_openclaw_later_without_reinstalling_base(installation):
+    root, base = installation
+    calls = []
+    def execute(r, b, phase, **options):
+        calls.append(phase)
+        return True, 'isolated phase verified'
+    assert runner.run_install(root, base, skip_openclaw=True, execute=execute, emit=lambda _: None) == 0
+    calls.clear()
+    assert runner.run_install(root, base, execute=execute, emit=lambda _: None) == 0
+    assert calls == ['system', 'openclaw', 'profile', 'skills', 'gateway']
+    state = ic.load_state(base)
+    assert not state['installation']['skipOpenClaw']
+    assert all(state['phases'][phase]['status'] == 'ok' for phase in ('openclaw', 'profile', 'skills'))
+
+
+def test_native_choice_does_not_remove_an_existing_openclaw_installation(installation):
+    root, base = installation
+    calls = []
+    def execute(r, b, phase, **options):
+        calls.append(phase)
+        return True, 'isolated phase verified'
+    assert runner.run_install(root, base, execute=execute, emit=lambda _: None) == 0
+    installed = ic.load_state(base)['phases']['openclaw'].copy()
+    calls.clear()
+    assert runner.run_install(root, base, skip_openclaw=True, execute=execute, emit=lambda _: None) == 0
+    assert calls == ['system', 'profile', 'gateway']
+    assert ic.load_state(base)['phases']['openclaw'] == installed
+
+
+def test_phase_command_forwards_the_native_install_choice(installation):
+    root, base = installation
+    command = runner.phase_command(root, base, 'profile', non_interactive=True,
+                                   allow_winget=False, skip_openclaw=True)
+    assert '-SkipOpenClaw' in command and '-AllowWinget' not in command
+
+
 def test_deferred_browser_is_installed_on_next_full_run(installation):
     root, base = installation
     calls, deferred_output, full_output = [], [], []
@@ -322,7 +376,7 @@ def _ps_literal(value):
 
 def _ps_functions(body):
     """Load only function ASTs, never execute setup's real entry point."""
-    preamble = "$tokens=$null; $errors=$null\n"
+    preamble = "$ErrorActionPreference='Stop'\n$script:OcCaps=@{}\n$tokens=$null; $errors=$null\n"
     preamble += f"$ast=[System.Management.Automation.Language.Parser]::ParseFile({_ps_literal(ROOT / 'setup.ps1')}, [ref]$tokens, [ref]$errors)\n"
     preamble += "if ($errors.Count) { throw ($errors | Out-String) }\n"
     preamble += "$ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) | ForEach-Object { Invoke-Expression $_.Extent.Text }\n"
@@ -357,7 +411,7 @@ def test_existing_profile_is_validated_without_overwriting(installation, tmp_pat
     original = '{"models":{"custom":"untouched"}}'
     config.write_text(original, encoding="utf-8")
     result = _ps_functions(f"$Root={_ps_literal(root)}\n$DataDir={_ps_literal(base)}\n$env:EASEL_OPENCLAW_STATE_DIR={_ps_literal(profile)}\n"
-                           "function openclaw { if (($args -join ' ') -ne '--profile easel config validate') { throw 'unexpected config mutation' }; $global:LASTEXITCODE=0 }\nInvoke-profile")
+                           "function openclaw { $global:LASTEXITCODE=0; if (($args -join ' ') -eq '--profile easel config --help') { 'validate'; return }; if (($args -join ' ') -ne '--profile easel config validate') { throw 'unexpected config mutation' } }\nInvoke-profile")
     assert result.returncode == 0, result.stdout + result.stderr
     assert config.read_text(encoding="utf-8") == original
 
@@ -374,6 +428,7 @@ def test_profile_failure_keeps_pending_config_then_resume_commits(installation, 
     body += r'''
 function openclaw {
     $global:LASTEXITCODE=0
+    if ($args -contains '--help') { 'validate'; return }
     if ($args -contains 'onboard' -and $args -notcontains '--help') {
         [System.IO.File]::WriteAllText($env:OPENCLAW_CONFIG_PATH, '{"new":true}')
     }

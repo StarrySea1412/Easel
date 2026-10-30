@@ -140,6 +140,25 @@ def test_backend_rechecks_policy_after_automatic_page_was_loaded(client):
     assert client.post("/api/publish/douyin/sms", json={"code": "123456"}).status_code == 403
 
 
+def test_manual_policy_blocks_sms_for_an_active_receipt(client, tmp_path, monkeypatch):
+    receipt_id = 'a' * 32
+    publish_dir = tmp_path / '_publish'
+    publish_dir.mkdir()
+    monkeypatch.setattr(web, 'PUBLISH_DIR', publish_dir)
+    monkeypatch.setattr(web, '_PUBLISH_ACTIVE', {'douyin': receipt_id})
+    monkeypatch.setattr(web, '_get_publish_receipt', lambda rid: {
+        'receiptId': rid, 'platform': 'douyin', 'state': 'sms_required',
+    })
+    assert client.get('/api/publishing-policy').json()['automaticSubmission'] is True
+    web.ENV_FILE.write_text('EASEL_PUBLISH_MODE=manual\n', encoding='utf-8')
+    response = client.post('/api/publish/douyin/sms', json={
+        'code': '123456', 'receiptId': receipt_id,
+    })
+    assert response.status_code == 403
+    assert not list(publish_dir.iterdir())
+    assert web._PUBLISH_ACTIVE == {'douyin': receipt_id}
+
+
 def test_export_is_available_with_automatic_policy_without_changing_it(client):
     response = client.post("/api/manual-publish/xiaohongshu/export", json={
         "title": "人工审核稿", "reviewed": True,

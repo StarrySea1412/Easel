@@ -372,7 +372,7 @@ def cmd_doctor(_args) -> int:
     else:
         settings = read_settings(data_root(PROJECT_ROOT) / ".env")
         from easel import harnesses
-        runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
+        runtime = harnesses.settings(data_root(PROJECT_ROOT) / "outputs", settings)["runtime"]
         alternate = runtime not in ("api", "openclaw")
         direct = runtime == "api"
         print("  对话模式：" + (runtime if alternate else (
@@ -439,7 +439,7 @@ def cmd_doctor(_args) -> int:
             all_ok &= _check(f"API 配置 ({model})", True)
         except DirectAPIError as error:
             all_ok &= _check("API 配置", False, str(error))
-    else:
+    elif not alternate:
         cli_ok, _cli_detail = _primary_model_cli_available()
         if cli_ok:
             all_ok &= _check("主模型 CLI 配置（未验证登录）", True)

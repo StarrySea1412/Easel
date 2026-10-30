@@ -16,35 +16,18 @@ if (-not $env:EASEL_PYTHON -and (Test-Path -LiteralPath $VenvPython -PathType Le
 if ($env:EASEL_OPENCLAW_STATE_DIR) { $env:OPENCLAW_STATE_DIR = $env:EASEL_OPENCLAW_STATE_DIR }
 $LogFile = Join-Path $env:EASEL_DATA_DIR 'gateway.log'
 $ErrorLogFile = Join-Path $env:EASEL_DATA_DIR 'gateway.error.log'
-$ConfigDir = Join-Path $HOME ".openclaw-$ProfileName"
-if ($env:EASEL_OPENCLAW_STATE_DIR) { $ConfigDir = $env:EASEL_OPENCLAW_STATE_DIR }
-function ConvertTo-GatewayPort([string]$Raw) {
-    $value = $Raw.Trim()
-    if ($value -match '^\d+$') { $digits = $value }
-    elseif ($value -match '^\[[^\]]+\]:(\d+)$') { $digits = $matches[1] }
-    elseif ($value -match '^[^:]+:(\d+)$') { $digits = $matches[1] }
-    else { return 0 }
-    $number = 0
-    if ([int]::TryParse($digits, [ref]$number) -and $number -gt 0 -and $number -le 65535) { return $number }
-    return 0
+# The launcher and Web/doctor must resolve exactly the same endpoint. In
+# particular, JSON floats/strings are not valid configured ports in Python.
+$ResolverPython = $env:EASEL_PYTHON
+if (-not $ResolverPython) { $ResolverPython = (Get-Command python -ErrorAction Stop).Source }
+$resolvedPort = & $ResolverPython -c "import sys; sys.path.insert(0, sys.argv[1]); from easel.gateway_endpoint import resolve_gateway_port; print(resolve_gateway_port())" $Root
+if ($LASTEXITCODE -ne 0 -or @($resolvedPort).Count -ne 1 -or [string]$resolvedPort -notmatch '^\d+$') {
+    throw 'Cannot resolve the Easel gateway port; no service was started or stopped.'
 }
-function Get-ProfilePort([string]$Name) {
-    if (-not $Name -or $Name -ieq 'default') { return 18789 }
-    [long]$hash = 2166136261
-    foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) { $hash = (($hash -bxor $byte) * 16777619) -band 4294967295L }
-    return [int](20000 + $hash % 40000)
+$Port = 0
+if (-not [int]::TryParse([string]$resolvedPort, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+    throw 'Invalid Easel gateway port; no service was started or stopped.'
 }
-function Get-ConfiguredPort([string]$Directory) {
-    try {
-        $value = (Get-Content -LiteralPath (Join-Path $Directory 'openclaw.json') -Raw -Encoding UTF8 | ConvertFrom-Json).gateway.port
-        if (($value -is [int] -or $value -is [long] -or $value -is [double]) -and $value -eq [Math]::Floor($value) -and $value -gt 0 -and $value -le 65535) { return [int][Math]::Floor($value) }
-    } catch { }
-    return 0
-}
-$Port = ConvertTo-GatewayPort $env:OPENCLAW_GATEWAY_PORT
-if (-not $Port) { $Port = ConvertTo-GatewayPort $env:EASEL_GATEWAY_PORT }
-if (-not $Port) { $Port = Get-ConfiguredPort $ConfigDir }
-if (-not $Port) { $Port = Get-ProfilePort $ProfileName }
 $env:OPENCLAW_GATEWAY_PORT = "$Port"
 $StartupTimeout = 300
 if ($env:EASEL_GATEWAY_STARTUP_TIMEOUT) {
