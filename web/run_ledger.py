@@ -305,6 +305,7 @@ def mark(
     settled: bool | None = None,
     resource_settled: bool | None = None,
     resource_facts: dict[str, bool] | None = None,
+    completion_receipt: dict | None = None,
     observation: dict | None = None,
     expected_revision: int | None = None,
     **details: Any,
@@ -322,6 +323,21 @@ def mark(
             return None
         if expected_revision is not None and record['eventSeq'] != expected_revision:
             raise LedgerError('Run ledger changed; reread before reconciling')
+        if completion_receipt is not None:
+            receipt = completion_receipt
+            if (not isinstance(receipt, dict) or set(receipt) != {
+                    'schemaVersion', 'sessionId', 'turnId', 'runtime', 'eventSeq', 'eventBytes', 'sha256'}
+                    or type(receipt.get('schemaVersion')) is not int or receipt['schemaVersion'] != 1
+                    or receipt.get('runtime') not in ('api', 'codex', 'opencode', 'acp')
+                    or receipt.get('sessionId') != record['sessionId'] or receipt.get('turnId') != turn_id
+                    or receipt.get('runtime') != record.get('engine')
+                    or record.get('transport') != 'harness_' + str(receipt.get('runtime'))
+                    or type(receipt.get('eventSeq')) is not int or receipt['eventSeq'] < 1
+                    or type(receipt.get('eventBytes')) is not int or not 0 < receipt['eventBytes'] <= 64 * 1024 * 1024
+                    or not isinstance(receipt.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', receipt['sha256'])
+                    or (record.get('completionReceipt') is not None and record['completionReceipt'] != receipt)):
+                raise LedgerError('Completed producer evidence does not match the original run')
+            record['completionReceipt'] = copy.deepcopy(receipt)
         final = record.get('settled') and record.get('resourceSettled') and record.get('status') in TERMINAL_STATUSES
         if status is not None and not final:
             record["status"] = status

@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from web.run_ledger import create, is_active, mark, read
+import pytest
+
+from web.run_ledger import LedgerError, create, is_active, mark, read
 
 
 def test_ledger_preserves_identity_and_does_not_recreate_a_turn(tmp_path: Path):
@@ -38,3 +40,33 @@ def test_ledger_event_history_is_bounded_and_atomic_file_is_valid(tmp_path: Path
     assert value["eventSeq"] == 250 + 1
     assert len(value["events"]) == 200
     assert json.loads((tmp_path / "runs" / "turn-3.json").read_text(encoding="utf-8"))["turnId"] == "turn-3"
+
+
+@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode', 'acp'])
+def test_completion_receipt_is_small_identity_bound_and_immutable(tmp_path, runtime):
+    create(tmp_path, 'turn', session_id='chat', session_key='chat', engine=runtime)
+    mark(tmp_path, 'turn', transport='harness_' + runtime)
+    receipt = {'schemaVersion': 1, 'sessionId': 'chat', 'turnId': 'turn', 'runtime': runtime,
+               'eventSeq': 2, 'eventBytes': 120, 'sha256': 'a' * 64}
+    first = mark(tmp_path, 'turn', completion_receipt=receipt)
+    receipt['sha256'] = 'b' * 64
+    assert first['completionReceipt']['sha256'] == 'a' * 64
+    with pytest.raises(LedgerError):
+        mark(tmp_path, 'turn', completion_receipt=receipt, status='completed', settled=True)
+    assert read(tmp_path, 'turn') == first
+    assert mark(tmp_path, 'turn', completion_receipt=first['completionReceipt'])['completionReceipt'] == first['completionReceipt']
+
+
+@pytest.mark.parametrize('change', [
+    {'schemaVersion': True}, {'sessionId': 'other'}, {'turnId': 'other'}, {'runtime': 'unknown'},
+    {'eventSeq': True}, {'eventSeq': 0}, {'eventBytes': True}, {'eventBytes': 0},
+    {'eventBytes': 64 * 1024 * 1024 + 1}, {'sha256': 'A' * 64}, {'sha256': 'invalid'},
+    {'body': 'arbitrary content is not permitted'}])
+def test_invalid_completion_receipt_does_not_change_any_ledger_fact(tmp_path, change):
+    create(tmp_path, 'turn', session_id='chat', session_key='chat', engine='api')
+    before = mark(tmp_path, 'turn', transport='harness_api', status='running')
+    receipt = {'schemaVersion': 1, 'sessionId': 'chat', 'turnId': 'turn', 'runtime': 'api',
+               'eventSeq': 2, 'eventBytes': 120, 'sha256': 'a' * 64, **change}
+    with pytest.raises(LedgerError):
+        mark(tmp_path, 'turn', completion_receipt=receipt, status='completed', settled=True)
+    assert read(tmp_path, 'turn') == before

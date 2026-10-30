@@ -1,9 +1,10 @@
 """Durable web admission for the existing API and native harness adapters.
 
 This does not invent a native turn-recovery protocol. A lost producer stays
-unconfirmed; reconnecting only tails the original, persisted web event stream.
+unconfirmed unless its completed result and original events were already saved.
 """
 import asyncio
+import hashlib
 import json
 import threading
 import time
@@ -11,6 +12,92 @@ import uuid
 
 from fastapi import HTTPException
 from sse_starlette.sse import EventSourceResponse
+
+
+MAX_COMPLETION_BYTES = 64 * 1024 * 1024
+COMPLETION_RUNTIMES = frozenset({'api', 'codex', 'opencode', 'acp'})
+
+
+def _completion_bytes(path, *, extra_bytes=0):
+    with path.open('rb') as stream:
+        data = stream.read(MAX_COMPLETION_BYTES + extra_bytes + 1)
+    if len(data) > MAX_COMPLETION_BYTES + extra_bytes:
+        raise ValueError('Completion evidence exceeds the recovery limit')
+    return data
+
+
+def _completion_content(data, sequence):
+    text, thinking = '', ''
+    rows = data.splitlines(keepends=True)
+    if len(rows) != sequence or not rows:
+        raise ValueError('Incomplete completion events')
+    for index, line in enumerate(rows, 1):
+        event = json.loads(line)
+        if (not line.endswith(b'\n') or not isinstance(event, dict)
+                or type(event.get('id')) is not int or event['id'] != index
+                or not isinstance(event.get('event'), str) or 'data' not in event
+                or event['event'] in ('error', 'done', 'recovery_required')):
+            raise ValueError('Invalid completion events')
+        if event['event'] in ('token', 'text_snapshot', 'thinking'):
+            if not isinstance(event['data'], str):
+                raise ValueError('Invalid completion text')
+            if event['event'] == 'text_snapshot':
+                text = event['data']
+            elif event['event'] == 'token':
+                text += event['data']
+            else:
+                thinking += event['data']
+    return text, thinking
+
+
+def completion_receipt(web, session, turn, runtime, sequence, text, thinking):
+    """Bind an already returned producer result to this exact saved event stream."""
+    try:
+        data = _completion_bytes(web._job_event_file(turn))
+        if _completion_content(data, sequence) != (text, thinking):
+            return None
+        return {'schemaVersion': 1, 'sessionId': session, 'turnId': turn, 'runtime': runtime,
+                'eventSeq': sequence, 'eventBytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+    except (OSError, ValueError, TypeError, UnicodeError):
+        # Normal completion keeps its existing behavior. Missing or oversized
+        # evidence never authorizes recovery after the producer disappears.
+        return None
+
+
+def saved_completion(web, session, turn, marker, ledger):
+    """Read local terminal evidence only; never load a session or send a prompt."""
+    try:
+        receipt = marker.get('completionReceipt')
+        runtime = marker.get('runtime')
+        if (runtime not in COMPLETION_RUNTIMES or not isinstance(receipt, dict)
+                or set(receipt) != {'schemaVersion', 'sessionId', 'turnId', 'runtime',
+                                    'eventSeq', 'eventBytes', 'sha256'}
+                or type(receipt.get('schemaVersion')) is not int or receipt['schemaVersion'] != 1
+                or marker.get('session_id') != session or marker.get('turn_id') != turn
+                or marker.get('status') != 'done' or marker.get('clean_end') is not True
+                or marker.get('stopped') is not False or marker.get('error') is not None
+                or ledger.get('sessionId') != session or ledger.get('turnId') != turn
+                or ledger.get('engine') != runtime or ledger.get('transport') != 'harness_' + runtime
+                or ledger.get('status') in ('failed', 'stopped', 'unknown')
+                or (ledger.get('completionReceipt') is not None and ledger['completionReceipt'] != receipt)
+                or any(receipt.get(key) != value for key, value in (
+                    ('sessionId', session), ('turnId', turn), ('runtime', runtime)))
+                or type(receipt.get('eventSeq')) is not int or receipt['eventSeq'] < 1
+                or type(receipt.get('eventBytes')) is not int or not 0 < receipt['eventBytes'] <= MAX_COMPLETION_BYTES):
+            return False
+        terminal = (json.dumps({'id': receipt['eventSeq'] + 1, 'event': 'done',
+            'data': {'sessionKey': session, 'stopped': False}}, ensure_ascii=False) + '\n').encode('utf-8')
+        data = _completion_bytes(web._job_event_file(turn), extra_bytes=len(terminal))
+        base = data[:receipt['eventBytes']]
+        if (len(base) != receipt['eventBytes'] or hashlib.sha256(base).hexdigest() != receipt.get('sha256')
+                or _completion_content(base, receipt['eventSeq']) != (marker.get('text'), marker.get('thinking'))):
+            return False
+        tail = data[receipt['eventBytes']:]
+        if tail and tail != terminal:
+            return False
+        return True
+    except (OSError, ValueError, TypeError, UnicodeError, KeyError):
+        return False
 
 
 def model_capability(web, session=None, model_ref=None):
@@ -73,13 +160,20 @@ class Lifecycle:
 
     def save(self, key, status, text, extra):
         self.saved = False
-        self.saved = self.web._save_turn(key, status, text, {
+        details = {
             **extra, 'runtime': self.runtime, 'thinking': ''.join(self.thinking),
             'thinkingStatus': ('available' if extra.get('clean_end') else 'partial') if self.thinking else 'unavailable',
             'startedAt': self.started_at, 'elapsedMs': int((time.monotonic() - self.started_clock) * 1000),
             'error': self.errors[-1] if self.errors else None,
             'stopped': extra.get('stop_reason') in ('stopped', 'user_stopped'),
-        }, expected_latest=None if status == 'running' and self.claimed else self.req.turnId) is not False
+        }
+        if status == 'done' and details.get('clean_end') is True and not self.errors and not details['stopped']:
+            receipt = completion_receipt(self.web, self.req.sessionId, self.req.turnId,
+                self.runtime, self.sequence, text, details['thinking'])
+            if receipt is not None:
+                details['completionReceipt'] = receipt
+        self.saved = self.web._save_turn(key, status, text, details,
+            expected_latest=None if status == 'running' and self.claimed else self.req.turnId) is not False
         if not self.saved:
             raise OSError('运行快照保存失败')
 
@@ -173,6 +267,7 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
                 complete = marker.get('status') == 'done' and marker.get('clean_end') is True and not state.errors
                 web.run_ledger.mark(web._run_ledger_root(), req.turnId, event='terminal',
                     status='stopped' if stopped else 'completed' if complete else 'failed', settled=True,
+                    completion_receipt=marker.get('completionReceipt'),
                     stop_reason=marker.get('stop_reason', 'snapshot_unconfirmed'))
                 settled = state.saved and all(facts.values())
                 web.run_ledger.mark(web._run_ledger_root(), req.turnId,

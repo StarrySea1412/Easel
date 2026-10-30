@@ -151,6 +151,14 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         observing = more_observations = False
         if not final and not (ledger or {}).get('settled'):
             observing, more_observations = _observe(web, session_id, turn_id, marker, ledger, run_id)
+        if (ledger or {}).get('transport') not in (None, 'native') and (
+                not provider_settled or marker.get('completionReceipt') is not None
+                or (ledger or {}).get('completionReceipt') is not None):
+            from alternate_chat import saved_completion
+            if not saved_completion(web, session_id, turn_id, marker, ledger):
+                return result('unavailable')
+            provider_settled = True
+            outcome = {'complete': True, 'text': marker['text'], 'stopReason': marker.get('stop_reason')}
         if not provider_settled:
             if (ledger or {}).get('transport') not in (None, 'native'):
                 return result('unavailable')
@@ -243,6 +251,8 @@ def reconcile_orphan(web, session_id, turn_id, *, stop=False):
         if ledger:
             ledger = web.run_ledger.mark(web._run_ledger_root(), turn_id, event='provider_reconciled', status=status,
                 expected_revision=ledger['eventSeq'], settled=True, resource_facts={'provider': True},
+                completion_receipt=marker.get('completionReceipt') if isinstance(ledger.get('transport'), str)
+                    and ledger['transport'].startswith('harness_') else None,
                 stop_reason=marker['stop_reason'], error=error)
         if latest_matches:
             facts = settle_resources(web, session_id, provider_settled=True)

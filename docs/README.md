@@ -3,6 +3,7 @@
 更新：2026-10-30。本目录只保留**当前使用、当前状态和进行中方案**。已完成的功能记录、逐版本回执、一次性调研与排障记录移入 [历史归档](archive/README.md)，不再作为当前实现或线上状态依据。
 
 - [当前全量回归核查与发布门槛](regression-audit-2026-10-27.md)
+- [0.41.0 已完成回复的本地恢复与升级限制](alternate-completion-recovery-0.41.0.md)
 - [0.40.3 实际产物审查、CLI诊断与升级限制](review-artifact-contract-0.40.3.md)
 - [agency-agents固定提交研究与Easel取舍](agency-agents-assessment-2026-10-30.md)
 - [0.40.2 小红书采集失败保护](note-collection-integrity-0.40.2.md)

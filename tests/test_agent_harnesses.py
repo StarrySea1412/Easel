@@ -945,6 +945,252 @@ def test_alternate_task_admission_cannot_bypass_goal_budget(sandbox):
         web._task_service.validate_goal({'engine':'openclaw'}, None)
 
 
+def _completed_before_ledger(client, monkeypatch, runtime, *, crash=False):
+    store.write_json(web.OUTPUTS_DIR / '_harness/config.json', {
+        'runtime': runtime, 'models': {runtime: 'test-model'} if runtime != 'api' else {}, 'sandbox': 'read-only'})
+    calls = []
+    def record():
+        calls.append(runtime)
+        with (web.OUTPUTS_DIR / 'fixture-dispatches').open('a', encoding='utf-8') as stream:
+            stream.write(runtime + '\n')
+    class Fake:
+        async def run(self, request, emit, ask, bind):
+            record()
+            bind('original-native')
+            emit('thinking', 'saved reasoning')
+            emit('token', 'saved completed reply')
+    async def api_stream(*args, **kwargs):
+        record()
+        yield 'thinking', 'saved reasoning'
+        yield 'token', 'saved completed reply'
+        yield 'finish', 'stop'
+    monkeypatch.setattr(web, 'stream_chat', api_stream)
+    monkeypatch.setattr(web, 'api_config', lambda _: ('https://fixture.invalid', 'test-model', 'fixture-only-key'))
+    monkeypatch.setattr(web.harnesses, 'adapter', lambda _: Fake())
+    monkeypatch.setattr(web, '_native_agent_client', lambda *_: pytest.fail('no gateway recovery'))
+    original = web.run_ledger.mark
+    def fail_terminal(*args, **kwargs):
+        if kwargs.get('event') == 'terminal':
+            if crash:
+                os._exit(73)
+            raise OSError('isolated terminal-ledger interruption')
+        return original(*args, **kwargs)
+    monkeypatch.setattr(web.run_ledger, 'mark', fail_terminal)
+    session, turn = 'completed-' + runtime, 'completed-turn-' + runtime
+    assert client.post('/api/chat/stream', json={
+        'message': 'isolated recovery fixture', 'sessionId': session, 'turnId': turn}).status_code == 200
+    snapshot = json.loads(web._run_snapshot_file(turn).read_text(encoding='utf-8'))
+    assert snapshot['status'] == 'done' and snapshot['clean_end'] is True
+    assert web.run_ledger.read(web._run_ledger_root(), turn)['status'] == 'running'
+    monkeypatch.setattr(web.run_ledger, 'mark', original)
+    return session, turn, calls
+
+
+@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode', 'acp'])
+def test_completed_alternate_recovers_after_terminal_ledger_write_fails(sandbox, monkeypatch, runtime):
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, runtime)
+    tasks = TaskStore(web.OUTPUTS_DIR)
+    assert tasks.pending_chat(session) == turn
+    response = sandbox.post(f'/api/chat/runs/{turn}/reconcile', params={'sessionId': session})
+    assert response.status_code == 200 and response.headers['cache-control'] == 'no-store'
+    assert response.json() == {'status': 'already_finished', 'stopped': True}
+    record = web.run_ledger.read(web._run_ledger_root(), turn)
+    assert record['status'] == 'completed' and record['resourceSettled']
+    assert tasks.pending_chat(session) is None
+    events = web._read_job_events(turn)
+    assert len(calls) == 1 and [e['data'] for e in events if e['event'] == 'token'] == ['saved completed reply']
+    assert sum(e['event'] == 'done' for e in events) == 1
+    assert reconcile_orphan(web, session, turn)['stopped']
+    assert web._read_job_events(turn) == events and len(calls) == 1
+
+
+@pytest.mark.parametrize('change', [
+    'missing-proof', 'foreign-session', 'foreign-turn', 'foreign-engine', 'changed-text',
+    'changed-thinking', 'damaged-event', 'partial-tail', 'unexpected-tail', 'changed-sequence',
+    'bad-schema', 'extra-proof-field', 'nonboolean-tail', 'noninteger-tail',
+    'missing-events', 'failed-marker', 'stopped-marker', 'running-marker'])
+def test_alternate_completion_requires_unchanged_exact_terminal_evidence(sandbox, monkeypatch, change):
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    archive = web._run_snapshot_file(turn)
+    marker = json.loads(archive.read_text(encoding='utf-8'))
+    receipt = marker['completionReceipt']
+    path = web._job_event_file(turn)
+    if change == 'missing-proof': marker.pop('completionReceipt')
+    elif change == 'foreign-session': receipt['sessionId'] = 'other-session'
+    elif change == 'foreign-turn': receipt['turnId'] = 'other-turn'
+    elif change == 'foreign-engine': marker['runtime'] = receipt['runtime'] = 'api'
+    elif change == 'changed-text': marker['text'] = 'different saved reply'
+    elif change == 'changed-thinking': marker['thinking'] = 'different reasoning'
+    elif change == 'damaged-event': path.write_bytes(path.read_bytes().replace(b'saved completed', b'other completed'))
+    elif change == 'partial-tail': path.write_bytes(path.read_bytes() + b'{"id":99')
+    elif change == 'unexpected-tail': path.write_bytes(path.read_bytes() + b'{"id":99,"event":"token","data":"late"}\n')
+    elif change == 'changed-sequence': receipt['eventSeq'] += 1
+    elif change == 'bad-schema': receipt['schemaVersion'] = True
+    elif change == 'extra-proof-field': receipt['body'] = 'not permitted in the receipt'
+    elif change in ('nonboolean-tail', 'noninteger-tail'):
+        tail = {'id': receipt['eventSeq'] + 1, 'event': 'done',
+                'data': {'sessionKey': session, 'stopped': False}}
+        if change == 'nonboolean-tail': tail['data']['stopped'] = 0
+        else: tail['id'] = float(tail['id'])
+        path.write_bytes(path.read_bytes() + (json.dumps(tail) + '\n').encode())
+    elif change == 'missing-events': path.unlink()
+    elif change == 'failed-marker': marker['error'] = {'code': 'fixture-failure'}
+    elif change == 'stopped-marker': marker['stopped'] = True
+    elif change == 'running-marker': marker['status'] = 'running'
+    archive.write_text(json.dumps(marker), encoding='utf-8')
+    before = archive.read_bytes(), path.read_bytes() if path.exists() else None
+    assert reconcile_orphan(web, session, turn)['stopped'] is False
+    assert (archive.read_bytes(), path.read_bytes() if path.exists() else None) == before
+    assert web.run_ledger.read(web._run_ledger_root(), turn)['status'] == 'running'
+    assert TaskStore(web.OUTPUTS_DIR).pending_chat(session) == turn and len(calls) == 1
+
+
+def test_alternate_completion_retries_browser_cleanup_without_dispatch(sandbox, monkeypatch):
+    from types import SimpleNamespace
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    def unavailable(*args): raise TimeoutError('fixture cleanup unavailable')
+    with monkeypatch.context() as patch:
+        patch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: True, call=unavailable))
+        assert reconcile_orphan(web, session, turn) == {'stopped': False, 'status': 'unconfirmed'}
+        record = web.run_ledger.read(web._run_ledger_root(), turn)
+        assert record['status'] == 'completed' and record['resourceFacts']['provider'] is True
+        assert record['resourceSettled'] is False and TaskStore(web.OUTPUTS_DIR).pending_chat(session) == turn
+        assert not any(event['event'] == 'done' for event in web._read_job_events(turn))
+        patch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
+        assert reconcile_orphan(web, session, turn)['stopped']
+    assert len(calls) == 1 and TaskStore(web.OUTPUTS_DIR).pending_chat(session) is None
+
+
+def _completed_alternate_process(root, runtime):
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(web, 'DATA_DIR', Path(root) / 'child-data')
+    fixture = sandbox.__wrapped__(Path(root), monkeypatch)
+    client = next(fixture)
+    _completed_before_ledger(client, monkeypatch, runtime, crash=True)
+    os._exit(74)
+
+
+@pytest.mark.parametrize('change', ['remove-proof', 'replace-proof', 'changed-events'])
+def test_alternate_cleanup_retry_keeps_the_bound_completion_evidence(sandbox, monkeypatch, change):
+    from types import SimpleNamespace
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    with monkeypatch.context() as patch:
+        def unavailable(*args): raise TimeoutError('fixture cleanup unavailable')
+        patch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: True, call=unavailable))
+        assert reconcile_orphan(web, session, turn)['stopped'] is False
+        record = web.run_ledger.read(web._run_ledger_root(), turn)
+        assert record['completionReceipt'] and record['resourceSettled'] is False
+        archive = web._run_snapshot_file(turn)
+        marker = json.loads(archive.read_text(encoding='utf-8'))
+        if change == 'remove-proof': marker.pop('completionReceipt')
+        elif change == 'replace-proof': marker['completionReceipt']['sha256'] = '0' * 64
+        else:
+            path = web._job_event_file(turn)
+            path.write_bytes(path.read_bytes().replace(b'saved reasoning', b'other reasoning'))
+        archive.write_text(json.dumps(marker), encoding='utf-8')
+        patch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
+        assert reconcile_orphan(web, session, turn)['stopped'] is False
+        assert TaskStore(web.OUTPUTS_DIR).pending_chat(session) == turn
+        assert not any(event['event'] == 'done' for event in web._read_job_events(turn))
+        altered = {**record['completionReceipt'], 'sha256': '1' * 64}
+        with pytest.raises(web.run_ledger.LedgerError):
+            web.run_ledger.mark(web._run_ledger_root(), turn, completion_receipt=altered)
+        assert web.run_ledger.read(web._run_ledger_root(), turn)['completionReceipt'] == record['completionReceipt']
+    assert len(calls) == 1
+
+
+def test_alternate_completion_never_overwrites_a_newer_turn(sandbox, monkeypatch):
+    from chat_recovery import reconcile_orphan
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    web._save_turn('web:' + session, 'running', 'newer reply', {'turn_id': 'newer-turn'})
+    latest = web._turn_file('web:' + session)
+    before = latest.read_bytes()
+    assert reconcile_orphan(web, session, turn)['stopped']
+    assert latest.read_bytes() == before and len(calls) == 1
+
+
+def test_alternate_completion_respects_the_original_owner_lock(sandbox, monkeypatch):
+    from chat_recovery import reconcile_orphan
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    lock = web._CrossProcLock(session)
+    assert lock.acquire(timeout=0)
+    try:
+        before = web._run_snapshot_file(turn).read_bytes(), web._job_event_file(turn).read_bytes()
+        assert reconcile_orphan(web, session, turn) == {'status': 'owned', 'stopped': False}
+        assert (web._run_snapshot_file(turn).read_bytes(), web._job_event_file(turn).read_bytes()) == before
+    finally:
+        lock.release()
+    assert len(calls) == 1
+
+
+def test_alternate_completion_at_byte_limit_accepts_its_own_recovered_tail(sandbox, monkeypatch):
+    import alternate_chat
+    from chat_recovery import reconcile_orphan
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'api')
+    path = web._job_event_file(turn)
+    monkeypatch.setattr(alternate_chat, 'MAX_COMPLETION_BYTES', path.stat().st_size)
+    assert reconcile_orphan(web, session, turn)['stopped']
+    marker = json.loads(web._run_snapshot_file(turn).read_text(encoding='utf-8'))
+    record = web.run_ledger.read(web._run_ledger_root(), turn)
+    assert alternate_chat.saved_completion(web, session, turn, marker, record)
+    assert len(calls) == 1
+
+
+def test_alternate_old_completion_cannot_cancel_newer_browser_pages(sandbox, monkeypatch):
+    from types import SimpleNamespace
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    session, turn, calls = _completed_before_ledger(sandbox, monkeypatch, 'opencode')
+    web._save_turn('web:' + session, 'running', 'newer reply', {'turn_id': 'newer-turn'})
+    latest = web._turn_file('web:' + session)
+    before = latest.read_bytes()
+    with monkeypatch.context() as patch:
+        patch.setattr(web, '_browser_service', SimpleNamespace(
+            has_pages=lambda _: True, call=lambda *_: pytest.fail('cannot cancel newer pages')))
+        assert reconcile_orphan(web, session, turn) == {'status': 'unconfirmed', 'stopped': False}
+    assert latest.read_bytes() == before and len(calls) == 1
+    assert TaskStore(web.OUTPUTS_DIR).pending_chat(session) == turn
+    assert not any(event['event'] == 'done' for event in web._read_job_events(turn))
+
+
+@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode', 'acp'])
+def test_real_alternate_owner_death_recovers_saved_completion(sandbox, tmp_path, monkeypatch, runtime):
+    import multiprocessing
+    from types import SimpleNamespace
+    from chat_recovery import reconcile_orphan
+    from easel.task_store import TaskStore
+    child = multiprocessing.get_context('spawn').Process(
+        target=_completed_alternate_process, args=(str(tmp_path), runtime))
+    child.start()
+    try:
+        child.join(40)
+        assert child.exitcode == 73, f'completion fixture exit={child.exitcode}'
+        session, turn = 'completed-' + runtime, 'completed-turn-' + runtime
+        monkeypatch.setattr(web, '_native_agent_client', lambda *_: pytest.fail('no replacement RPC'))
+        with monkeypatch.context() as patch:
+            patch.setattr(web, '_browser_service', SimpleNamespace(has_pages=lambda _: False))
+            assert TaskStore(web.OUTPUTS_DIR).pending_chat(session) == turn
+            assert reconcile_orphan(web, session, turn)['stopped']
+            assert reconcile_orphan(web, session, turn)['stopped']
+        record = web.run_ledger.read(web._run_ledger_root(), turn)
+        assert record['status'] == 'completed' and record['resourceSettled']
+        assert sum(event['event'] == 'done' for event in web._read_job_events(turn)) == 1
+        assert (web.OUTPUTS_DIR / 'fixture-dispatches').read_text().splitlines() == [runtime]
+        assert TaskStore(web.OUTPUTS_DIR).pending_chat(session) is None
+    finally:
+        if child.is_alive():
+            child.terminate()
+            child.join(5)
+
+
 @pytest.mark.parametrize('runtime', ['acp', 'opencode'])
 def test_http_route_runs_actual_acp_process_and_reuses_original_session(sandbox, monkeypatch, tmp_path, runtime):
     import easel.harnesses.acp as protocol
