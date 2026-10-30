@@ -1,4 +1,4 @@
-**完整迭代进行中 · 产品0.41.0源码候选。** API直连及Codex兼容harness、OpenCode、ACP可恢复已保存完整回复但终态账本未写完的轮次，核对原事件与完成证明后结算，不重复派发模型或工具。补充块展开修复继续保留，真实浏览器鼠标、键盘及390px复验通过。后端专项330通过/6跳过，前端消息/恢复29项与版本6项、构建/lint及隔离认证HTTP/服务重启通过；完整后端正在运行。[变化与升级限制](docs/alternate-completion-recovery-0.41.0.md)、[回归门槛](docs/regression-audit-2026-10-27.md)。模型/平台为合成替身，全引擎活跃接管及真实质量/成本/业务验收继续；未部署138或发布安装器。[agency-agents研究与取舍](docs/agency-agents-assessment-2026-10-30.md)。
+**完整迭代进行中 · 产品0.41.0源码候选。** API直连及Codex兼容harness、OpenCode、ACP可恢复已保存完整回复但终态账本未写完的轮次，核对原事件与完成证明后结算，不重复派发模型或工具。补充块展开修复继续保留，真实浏览器鼠标、键盘及390px复验通过。后端专项330通过/6跳过，前端消息/恢复29项与版本6项、构建/lint及隔离认证HTTP/服务重启通过；后端tests目录4901通过/83跳过，内置技能另82/82，分批运行均无失败。[变化与升级限制](docs/alternate-completion-recovery-0.41.0.md)、[回归门槛](docs/regression-audit-2026-10-27.md)。模型/平台为合成替身，全引擎活跃接管及真实质量/成本/业务验收继续；未部署138或发布安装器。[agency-agents研究与取舍](docs/agency-agents-assessment-2026-10-30.md)。
 
 > **138另分支部署回执 · 0.14.6（2026-10-28）**：该分支文档记录多模态、视觉路由和自动思考修复；本轮仅核对其Git文档、未现场复验138，不等于本分支0.40.4已部署。main原有0.14.5回执保留，两份记录分开。[另分支部署与验证回执](https://github.com/StarrySea1412/Easel/blob/codex/chat-auto-continue-0.14.6/docs/chat-auto-continue-0.14.6-2026-10-28.md)。
 
