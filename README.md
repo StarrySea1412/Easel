@@ -1,8 +1,14 @@
-**138稳定性优先（2026-10-30）。** 正式保持0.43.3 / `de1f388d0042`。已查明后台配置变动触发强制重启，并先隔离校验、再在正式关闭被动配置自动重启；未切换候选功能代码，配置与回滚边界见[稳定性回执](https://github.com/StarrySea1412/Easel/blob/codex/notifications-ui-0.43.4/docs/138-stability-2026-10-30.md)。
+**0.44.0源码候选：原轮次接回与跨设备正文同步（2026-11-01）。** Codex在Web执行进程退出后按同实例、线程和轮次接回；待审批仍由用户决定，已存工具回执不重做副作用。普通对话在本地仍匹配已采用版本时接收等长更新的回答，保留本地分叉及读取期间的新编辑。已整合0.43.9问答/等待修复，验证与限制见[候选记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/codex-live-recovery-0.44.0.md)。
+
+**138已运行0.43.9。** 最近现场实核为2026-10-31 22:11北京时间，源码`fcc39a344308`；认证、匿名隔离、74个发布资源和1,734个源码文件核对，正式问答卡片提交至最终回复已有真实页面证据。停写备份、网关认证与等待状态修复见[发布记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/release-138-0.43.9-2026-10-31.md)，后续现场事实见[候选记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/codex-live-recovery-0.44.0.md)。
+
+**运行与交付边界。** OpenClaw仍为默认引擎；Codex App Server及WebSocket属官方实验能力，0.44仅为可选本机候选，尚未部署138或发布安装器。独立接收浏览器、原生恢复控件及窄屏验证仍待补，工具格式、读图复验、真实排期/第三方发布和完整大版本最终验收继续。
+
+以下日期条目保留各自的历史状态；当前正式版本与候选边界以上述记录为准。
 
 > **138会话恢复修复已上线 · 0.14.5（2026-10-28）**：修复后台原轮次已结束、会话仍被残留租约占用而返回409的问题；核对明确终态后释放对应轮次，未确认运行仍保持并发保护，原请求不会自动重发。内核确认2 GiB预算导致Gateway OOM及重启期间502，Compose持久化为可覆盖的3 GiB，监管日志补服务身份/退出码。运行源码`2c68e18c3b02`；后端164项、前端构建/lint、隔离重启恢复及正式登录/资源/原会话解锁核对通过。保留原回复与回滚点，安装器未发布。详见[实际部署与验证回执](https://github.com/StarrySea1412/Easel/blob/codex/chat-lease-recovery-0.14.5/docs/chat-lease-recovery-0.14.5-2026-10-28.md)。
 
-**完整迭代进行中 · 产品0.40.3源码候选。** 审查绑定总目标实际文件及本地依赖版本，产物变化不能沿用旧pass；CLI主模型诊断不再误要求API Key，登录仍须核对。补齐agency-agents固定提交研究，保留采集、恢复与补充展开修复，界面保持紧凑。版本/消息26项、构建/lint及正式认证HTTP通过；目标和模型回执为合成数据，后端合并回归详见[修复与升级说明](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/review-artifact-contract-0.40.3.md)。[完整回归门槛](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/regression-audit-2026-10-27.md)、全引擎恢复及真实质量/成本/业务验收继续；未部署138或发布安装器。[agency-agents研究与取舍](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/agency-agents-assessment-2026-10-30.md)。
+**历史源码迭代 · 0.40.3（已由0.44.0候选承接）。** 审查绑定总目标实际文件及本地依赖版本，产物变化不能沿用旧pass；CLI主模型诊断不再误要求API Key，登录仍须核对。补齐agency-agents固定提交研究，保留采集、恢复与补充展开修复，界面保持紧凑。版本/消息26项、构建/lint及正式认证HTTP通过；目标和模型回执为合成数据，后端合并回归详见[修复与升级说明](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/review-artifact-contract-0.40.3.md)。[完整回归门槛](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/regression-audit-2026-10-27.md)、全引擎恢复及真实质量/成本/业务验收继续；未部署138或发布安装器。[agency-agents研究与取舍](https://github.com/StarrySea1412/Easel/blob/codex/regression-audit-2026-10-27/docs/agency-agents-assessment-2026-10-30.md)。
 
 > **138已更新 · 0.14.2（2026-10-22）**：DeepSeek用量图标已按实际模型显示；顶部创作导航自动换行，修复横向滚动条和菜单截断。已完成隔离与正式登录、资源/运行SHA、真实HTTP附件下载及正式浏览器桌面/窄屏验收。运行提交`15c763550657`，保留模型、认证、对话和作品。GPT/Gemini全自动仍暂缓，安装器未发布。[完整部署回执](https://github.com/StarrySea1412/Easel/blob/codex/deploy-138-0.14.0/docs/release-138-0.14.2-2026-10-22.md)。
 
