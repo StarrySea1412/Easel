@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Window} from 'happy-dom';
-import {loadTsModule} from './load-ts.mjs';
+import {loadTsModule,tsModuleUrl} from './load-ts.mjs';
 
 globalThis.window=new Window({url:'https://workbench.test/'});
 const sync=await loadTsModule('../src/lib/conversationSync.ts',import.meta.url);
@@ -67,4 +67,58 @@ test('another computer discovers paged original conversations without a notifica
   const loaded=await sync.readServerConversations([]);
   assert.deepEqual(loaded.map(s=>s.id).sort(),[a.id,b.id]);
   assert.ok(calls.some(path=>path.includes('?after=index-a')));
+});
+
+test('an adopted unchanged copy receives an equal-length updated answer without another write',async t=>{
+  let remote=session('same-length-update'),revision=1;const writes=[];
+  t.mock.method(globalThis,'fetch',async(path,init)=>{
+    if(init.method==='POST'){writes.push(JSON.parse(init.body));return {ok:true,json:async()=>({id:remote.id,saved:true,revision})};}
+    return {ok:true,json:async()=>path.endsWith('/conversations')?{conversations:[{id:remote.id,revision}],next:null}:{conversation:remote,revision}};
+  });
+  let local=sync.mergeServerConversation([],await sync.readServerConversation(remote.id));
+  remote={...remote,messages:[remote.messages[0],{...remote.messages[1],content:'同轮更新的完整答案'}]};revision++;
+  local=sync.mergeServerConversation(local,(await sync.readServerConversations(local))[0]);
+  assert.equal(local[0].messages[1].content,'同轮更新的完整答案');
+  await sync.syncConversations(local);
+  assert.equal(writes.length,0,'adopting a server snapshot must not echo it back');
+});
+
+test('equal-length refresh preserves a locally edited branch and edits made while the read was in flight',async t=>{
+  let remote=session('same-length-conflict'),revision=1;
+  t.mock.method(globalThis,'fetch',async(path)=>({ok:true,json:async()=>path.endsWith('/conversations')?{conversations:[{id:remote.id,revision}],next:null}:{conversation:remote,revision}}));
+  const local=sync.mergeServerConversation([],await sync.readServerConversation(remote.id));
+  remote={...remote,messages:[remote.messages[0],{...remote.messages[1],content:'远端新答案'}]};revision++;
+  const pending=(await sync.readServerConversations(local))[0];
+  const edited=structuredClone(local);edited[0].messages[1].content='本地编辑不能丢';
+  assert.equal(sync.mergeServerConversation(edited,pending),edited);
+  const later=(await sync.readServerConversations(edited))[0];
+  assert.equal(sync.mergeServerConversation(edited,later),edited);
+});
+
+test('accepted revision and content baseline survive a browser module restart',async t=>{
+  let remote=session('same-length-after-reload'),revision=4;
+  t.mock.method(globalThis,'fetch',async(path)=>({ok:true,json:async()=>path.endsWith('/conversations')?{conversations:[{id:remote.id,revision}],next:null}:{conversation:remote,revision}}));
+  const local=sync.mergeServerConversation([],await sync.readServerConversation(remote.id));
+  const restored=await import((await tsModuleUrl(new URL('../src/lib/conversationSync.ts',import.meta.url)))+'#isolated-reload');
+  remote={...remote,messages:[remote.messages[0],{...remote.messages[1],content:'刷新后仍能取回同轮完整答案'}]};revision++;
+  const next=restored.mergeServerConversation(local,(await restored.readServerConversations(local))[0]);
+  assert.equal(next[0].messages[1].content,'刷新后仍能取回同轮完整答案');
+});
+
+test('adopting server history cancels a queued old mirror without granting it the new revision',async t=>{
+  const blocker=session('sync-blocker'),old=session('sync-queued-old');let release;
+  const gate=new Promise(resolve=>{release=resolve;});const writes=[];
+  const remote={...old,messages:[...old.messages,{role:'user',content:'服务器新增的一轮'}]};
+  t.mock.method(globalThis,'fetch',async(path,init)=>{
+    if(init.method==='GET')return {ok:true,json:async()=>({conversation:remote,revision:10})};
+    const body=JSON.parse(init.body);writes.push(body);
+    if(body.conversation.id===blocker.id)await gate;
+    return {ok:true,json:async()=>({id:body.conversation.id,saved:true,revision:1})};
+  });
+  const first=sync.syncConversations([blocker]);
+  const queued=sync.syncConversations([old]);
+  const adopted=sync.mergeServerConversation([old],await sync.readServerConversation(old.id));
+  release();await Promise.all([first,queued]);
+  assert.equal(adopted[0].messages.length,3);
+  assert.deepEqual(writes.map(body=>body.conversation.id),[blocker.id]);
 });

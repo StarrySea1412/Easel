@@ -125,6 +125,57 @@ def _qbridge_warn_once(key: str, message: str) -> None:
     _QBRIDGE_WARNED.add(key)
     print(message, file=sys.stderr, flush=True)
 
+
+def _question_gateway_client(credentials=None):
+    """Build a question RPC client with the configured gateway auth only."""
+    credentials = credentials or gateway_credentials()
+    mode = (credentials.mode or '').strip().lower()
+    error_type = GatewayQuestionError or RuntimeError
+    if mode == 'token':
+        if not credentials.token:
+            raise error_type('configured gateway token is unavailable')
+        auth = {'token': credentials.token}
+    elif mode == 'password':
+        if not credentials.password:
+            raise error_type('configured gateway password is unavailable')
+        auth = {'password': credentials.password}
+    elif mode == 'trusted-proxy':
+        raise error_type('trusted-proxy auth cannot be used by direct question RPC')
+    elif mode == 'none':
+        auth = {'token': ''}
+    elif mode:
+        raise error_type('configured gateway auth mode is unsupported for question RPC')
+    elif credentials.token:
+        auth = {'token': credentials.token}
+    elif credentials.password:
+        auth = {'password': credentials.password}
+    else:
+        auth = None
+    return GatewayClient(auth=auth) if auth is not None else GatewayClient()
+
+
+def _publish_pending_questions(items, pushed, *, execution_store, proc, emit, publish_execution):
+    """Publish pending Gateway questions as SSE events and mark ask_user as waiting."""
+    pending = [item for item in items if isinstance(item, dict)
+               and isinstance(item.get('id'), str) and item.get('id')
+               and isinstance(item.get('questions'), list) and item['questions']]
+    waiting_snapshot = execution_store.waiting_for_user(bool(pending))
+    if waiting_snapshot is not None:
+        publish_execution(waiting_snapshot)
+    for item in pending:
+        question_id = item['id']
+        if question_id in pushed:
+            continue
+        if hasattr(proc, '_pending_question'):
+            proc._pending_question = True
+        pushed.add(question_id)
+        emit('question', json.dumps({
+            'id': question_id,
+            'questions': item['questions'],
+            'expiresAtMs': item.get('expiresAtMs'),
+        }, ensure_ascii=False))
+    return bool(pending)
+
 DATA_DIR = data_root(PROJECT_ROOT)
 PROFILES_DIR = DATA_DIR / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
@@ -5918,11 +5969,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 outputs=OUTPUTS_DIR, limit=100).get('operations') or []
 
         async def _tail_transcript_operations(active_proc):
-            """Record operations a transport cannot stream itself.
+            """Reconcile live tool frames with this turn's own transcript.
 
-            HTTP chat completions and the plain CLI run the agent without any
-            per-tool lifecycle frame, so the journal would hold progress only and
-            the panel would fall back to unordered receipts. Reading the same
+            HTTP chat completions and the plain CLI have no tool frames. Native
+            connections can also omit frames for dispatched tools; registering
+            a callback does not prove delivery. Reading the same
             bounded, turn-scoped transcript the post-turn view already trusts
             keeps live and historical receipts in one shape.
             """
@@ -6323,10 +6374,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 await asyncio.to_thread(proc.terminate)
             # 这里仅记录已进入运行器；模型是否开始思考要以实际事件流为准。
             to_client("activity", "已进入运行器，等待模型事件")
-            # 原生 WS 路径自带 tool 流（on_tool）；HTTP 与纯 CLI 没有逐工具帧，
-            # 改为按轮次读 transcript，把操作与顺序补进同一份执行日志。
-            if getattr(proc, 'on_tool', None) is None:
-                execution_tail = loop.create_task(_tail_transcript_operations(proc))
+            # Reconcile every transport, including native connections that have
+            # an on_tool callback but did not receive the corresponding frame.
+            # ingest merges by call identity and never revives a finished tool.
+            execution_tail = loop.create_task(_tail_transcript_operations(proc))
 
             q = asyncio.Queue()
             SENTINEL = object()
@@ -6383,8 +6434,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         return
                     client = None
                     pushed: set[str] = set()
+                    credentials = gateway_credentials()
                     try:
-                        client = GatewayClient()
+                        client = _question_gateway_client(credentials)
                         client.connect()
                     except Exception as e:
                         # connect 失败（如 NOT_PAIRED/scope-upgrade，或网关不可达）：熔断整个桥接，
@@ -6393,7 +6445,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         _qbridge_warn_once(
                             "connect",
                             f"[question-bridge] connect gateway failed，已停用桥接（本进程），"
-                            f"ask_user 改用文字问答: {e}")
+                            f"ask_user 改用文字问答: {redact_gateway_text(e, credentials)}")
                         return
                     try:
                         while proc.poll() is None:
@@ -6411,17 +6463,14 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                             except Exception:
                                 time.sleep(2)
                                 continue
-                            for it in items:
-                                qid = it.get("id")
-                                if qid and qid not in pushed:
-                                    if hasattr(proc, '_pending_question'):
-                                        proc._pending_question = True
-                                    pushed.add(qid)
-                                    _emit("question", json.dumps({
-                                        "id": qid,
-                                        "questions": it.get("questions", []),
-                                        "expiresAtMs": it.get("expiresAtMs"),
-                                    }, ensure_ascii=False))
+                            _publish_pending_questions(
+                                items, pushed,
+                                execution_store=execution_store,
+                                proc=proc,
+                                emit=_emit,
+                                publish_execution=lambda snapshot: loop.call_soon_threadsafe(
+                                    to_client, 'execution', snapshot),
+                            )
                             time.sleep(2)
                     finally:
                         try:
@@ -6961,15 +7010,18 @@ async def api_question_answer(req: QuestionAnswerRequest):
         raise HTTPException(409, "此问题属于旧 OpenClaw 会话，请使用当前底座的新对话")
     if GatewayClient is None:
         return {"ok": False, "error": "gateway question bridge unavailable"}
-    client = GatewayClient()
+    credentials = gateway_credentials()
+    client = None
     try:
+        client = _question_gateway_client(credentials)
         client.connect()
         result = client.resolve(req.questionId, req.answers or {}, req.resolvedBy)
         return {"ok": True, "result": result}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": redact_gateway_text(e, credentials)}
     finally:
-        client.close()
+        if client is not None:
+            client.close()
 
 
 class QuestionStatusRequest(BaseModel):
@@ -6989,8 +7041,10 @@ async def api_question_status(req: QuestionStatusRequest):
         return {"ok": False, "questions": {}}
     if GatewayClient is None:
         return {"ok": False, "questions": {}}
-    client = GatewayClient()
+    credentials = gateway_credentials()
+    client = None
     try:
+        client = _question_gateway_client(credentials)
         client.connect()
         out = {}
         for qid in req.questionIds:
@@ -6999,15 +7053,18 @@ async def api_question_status(req: QuestionStatusRequest):
                 # QUESTION_NOT_FOUND 抛异常捕获后报 not_found；正常返回则按 status
                 out[qid] = {"status": q.get("status") if q else "not_found"}
             except GatewayQuestionError as e:
-                # gateway 明确错：问题已清理/不存在 = 已答或已过期，一律 not_found
-                out[qid] = {"status": "not_found"}
+                # Only the explicit not-found RPC error is terminal; transient RPC
+                # failures must not make the frontend silently discard a question.
+                out[qid] = {"status": "not_found" if getattr(e, 'error_code', None) == 'QUESTION_NOT_FOUND'
+                            else "unknown"}
             except Exception:
                 out[qid] = {"status": "unknown"}   # 网络/连接异常：保持 unknown（前端保留显示，宁不缺题）
         return {"ok": True, "questions": out}
     except Exception as e:
-        return {"ok": False, "error": str(e), "questions": {}}
+        return {"ok": False, "error": redact_gateway_text(e, credentials), "questions": {}}
     finally:
-        client.close()
+        if client is not None:
+            client.close()
 
 
 class StopRequest(BaseModel):

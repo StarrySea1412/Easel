@@ -45,7 +45,12 @@ def adopt(existing, incoming):
     """Merge one transcript receipt into a journal row without regressing it."""
     merged = dict(existing)
     for key, value in incoming.items():
-        if key in ('id', 'order', 'source', 'status', 'truncated') or not _adds_detail(value):
+        if key in ('id', 'order', 'source', 'status', 'truncated'):
+            continue
+        if key == 'waitingForUser' and isinstance(value, bool):
+            merged[key] = value
+            continue
+        if not _adds_detail(value):
             continue
         merged[key] = value
     status = incoming.get('status')
@@ -65,6 +70,8 @@ class ExecutionStore:
         self.root, self.session, self.turn, self.credentials = root, session, turn, credentials
         saved = read_snapshot(root, session, turn)
         self.rows = {row['id']: row for row in saved.get('operations', [])}
+        self.pending_question = any(row.get('status') == 'running' and row.get('waitingForUser') is True
+                                    for row in self.rows.values())
         self.timeline = saved.get('timeline', [])
         self.plan = saved.get('plan', [])
         self.runtime = saved.get('runtime', {})
@@ -100,6 +107,22 @@ class ExecutionStore:
                             'subagentReason': public_text(value.get('reason') or ('启动深度设为0，当前不允许委派。' if value.get('maxSpawnDepth') == 0 else ''), self.credentials, 500)}
             self.persist()
 
+    def waiting_for_user(self, waiting):
+        """Mark live ask_user calls while a matching pending question exists."""
+        changed = False
+        with self.lock:
+            self.pending_question = waiting is True
+            for row in self.rows.values():
+                if row.get('name') == 'ask_user' and row.get('status') == 'running':
+                    value = waiting is True
+                    if row.get('waitingForUser') is not value:
+                        row['waitingForUser'] = value
+                        changed = True
+            if changed:
+                self.persist()
+                return self.snapshot()
+        return None
+
     def consume(self, payload):
         data = payload.get('data')
         if payload.get('stream') != 'tool' or not isinstance(data, dict):
@@ -123,6 +146,8 @@ class ExecutionStore:
                     return None
                 row = begin(self.session, self.turn, call, data.get('name', 'tool'), data.get('args'),
                             time.time(), self.credentials, 'gateway')
+                if row['name'] == 'ask_user':
+                    row['waitingForUser'] = self.pending_question
                 if row['name'] == 'process' and isinstance(data.get('args'), dict):
                     row['processSessionId'] = data['args'].get('sessionId', '')
                 self.rows[row_id] = row
@@ -145,6 +170,8 @@ class ExecutionStore:
                     if isinstance(data.get('output'), str):
                         result['content'] = data['output']
                 result = {**result, **({'isError': data['isError']} if 'isError' in data else {})}
+                if row.get('name') == 'ask_user':
+                    row['waitingForUser'] = False
                 returned(row, result, time.time(), self.credentials, partial=phase == 'update')
                 if phase != 'update':
                     from .plan_progress import receipt_plan
@@ -177,6 +204,8 @@ class ExecutionStore:
                 existing = self.rows.get(row_id)
                 if existing is None:
                     adopted = dict(row)
+                    if adopted.get('name') == 'ask_user':
+                        adopted['waitingForUser'] = self.pending_question and adopted.get('status') == 'running'
                     self.order += 1
                     adopted['order'] = self.order
                     self.rows[row_id] = adopted
@@ -186,6 +215,8 @@ class ExecutionStore:
                     changed = True
                     continue
                 merged = adopt(existing, row)
+                if merged.get('name') == 'ask_user':
+                    merged['waitingForUser'] = self.pending_question and merged.get('status') == 'running'
                 if merged != existing:
                     self.rows[row_id] = merged
                     changed = True
@@ -195,9 +226,12 @@ class ExecutionStore:
 
     def finish(self):
         with self.lock:
+            self.pending_question = False
             for row in self.rows.values():
                 if row['status'] == 'running':
                     row['status'] = 'unconfirmed'
+                    if row.get('name') == 'ask_user':
+                        row['waitingForUser'] = False
             self.persist()
 
     def persist(self):

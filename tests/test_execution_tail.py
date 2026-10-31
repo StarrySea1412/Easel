@@ -6,6 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'web'))
 import app as web
@@ -13,7 +14,8 @@ import skill_audit
 from easel.execution_store import read_snapshot
 
 
-def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monkeypatch):
+@pytest.mark.parametrize('native', [False, True], ids=['cli', 'native-without-tool-frames'])
+def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monkeypatch, native):
     outputs, transcripts = tmp_path / 'outputs', tmp_path / 'transcripts'
     transcripts.mkdir(parents=True)
     session, turn = 'tail-session', 'turn-tail'
@@ -58,12 +60,25 @@ def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monke
         def release(self):
             self.acquired = False
 
+    processes = []
+
     class Process:
         def __init__(self, *args, **kwargs):
-            self.stdout = io.StringIO('isolated answer\n')
+            self.finished = not native
+            self.observed_while_running = False
+            self.stdout = self.native_stdout() if native else io.StringIO('isolated answer\n')
+            if native:
+                self.on_tool = kwargs['on_tool']
+            processes.append(self)
+
+        def native_stdout(self):
+            time.sleep(0.3)
+            self.observed_while_running = bool(read_snapshot(outputs, session, turn).get('operations'))
+            self.finished = True
+            yield 'isolated answer\n'
 
         def poll(self):
-            return 0
+            return 0 if self.finished else None
 
         def wait(self, timeout=None):
             return 0
@@ -89,6 +104,8 @@ def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monke
     monkeypatch.setattr(web, 'GatewayClient', None)
     monkeypatch.setattr(web, '_notify_email_web_turn', None)
     monkeypatch.setattr(web.subprocess, 'Popen', Process)
+    monkeypatch.setattr(web, '_native_agent_client', lambda credentials: object() if native else None)
+    monkeypatch.setattr('easel.gateway_agent.GatewayAgentProc', Process)
     monkeypatch.setattr(web, '_channel_labels', lambda: {})
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'absent-raw.jsonl')
     monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
@@ -115,6 +132,8 @@ def test_transcript_only_turn_adopts_operations_into_the_journal(tmp_path, monke
         assert [event['event'] for event in events if event['event'] == 'done']
         published = [json.loads(event['data']) for event in events if event['event'] == 'execution']
         assert any(value['operations'] for value in published)
+        if native:
+            assert processes[0].observed_while_running
 
     asyncio.run(scenario())
     saved = read_snapshot(outputs, session, turn)

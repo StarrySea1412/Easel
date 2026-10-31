@@ -17,7 +17,7 @@ export interface CodexTurn {
   items: {id: string; type: string; status?: string; command?: string; cwd?: string; aggregatedOutput?: string;
     changes?: unknown; query?: string; action?: {type?: string; url?: string; pattern?: string}; server?: string; tool?: string; result?: unknown; error?: unknown}[];
   pending: CodexPending[];
-  recovery?: {status: 'adopted'|'unconfirmed'; message?: string; checkedAt: number};
+  recovery?: {status: 'adopted'|'unconfirmed'|'observing'; message?: string; checkedAt: number};
 }
 const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
 export async function codexRequest<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {

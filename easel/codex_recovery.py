@@ -6,7 +6,7 @@ from pathlib import Path
 from .codex_client import CodexError
 
 
-def read_turn(client, state):
+def read_turn(client, state, *, allow_active=False):
     thread_id, turn_id = state.get('threadId'), state.get('codexTurnId')
     if not thread_id or not turn_id:
         raise CodexError('原生线程或轮次标识缺失，无法确认结果。')
@@ -26,7 +26,7 @@ def read_turn(client, state):
                 raise CodexError('原生轮次历史不完整。')
             matches = [turn for turn in turns if isinstance(turn, dict) and turn.get('id') == turn_id]
             if len(matches) == 1:
-                return validated_turn(matches[0])
+                return validated_turn(matches[0], allow_active=allow_active)
             if matches:
                 raise CodexError('原生轮次身份重复，未收取结果。')
             cursor = batch.get('nextCursor')
@@ -41,12 +41,13 @@ def read_turn(client, state):
             raise CodexError('原生历史身份变化，未收取结果。')
         matches = [turn for turn in full.get('turns', []) if isinstance(turn, dict) and turn.get('id') == turn_id]
         if len(matches) == 1:
-            return validated_turn(matches[0])
+            return validated_turn(matches[0], allow_active=allow_active)
     raise CodexError('未找到原轮次的完整记录，完成状态仍未确认。')
 
 
-def validated_turn(turn):
-    if turn.get('status') not in ('completed', 'interrupted', 'failed'):
+def validated_turn(turn, *, allow_active=False):
+    if turn.get('status') not in (('completed', 'interrupted', 'failed', 'inProgress')
+                                  if allow_active else ('completed', 'interrupted', 'failed')):
         raise CodexError('原轮次没有明确终态；尚不能接管活跃运行。')
     items = turn.get('items')
     if turn.get('itemsView', 'full') != 'full' or not isinstance(items, list):

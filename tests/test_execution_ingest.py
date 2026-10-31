@@ -34,6 +34,34 @@ def test_ingest_keeps_progress_between_operations(tmp_path):
     assert orders == sorted(orders)
 
 
+def test_ask_user_waiting_state_is_persisted_and_cleared(tmp_path):
+    store = ExecutionStore(tmp_path, 's', 't')
+    store.ingest([receipt('ask-call', 'ask_user')])
+
+    waiting = store.waiting_for_user(True)
+    assert waiting['operations'][0]['waitingForUser'] is True
+    assert read_snapshot(tmp_path, 's', 't')['operations'][0]['waitingForUser'] is True
+
+    resumed = store.waiting_for_user(False)
+    assert resumed['operations'][0]['waitingForUser'] is False
+    assert store.waiting_for_user(False) is None
+
+
+def test_pending_question_precedes_its_transcript_call(tmp_path):
+    store = ExecutionStore(tmp_path, 's', 't')
+    store.waiting_for_user(True)
+    store.ingest([receipt('ask-call', 'ask_user'), receipt('other', 'exec')])
+    rows = store.snapshot()['operations']
+    assert rows[0]['waitingForUser'] is True
+    assert 'waitingForUser' not in rows[1]
+    assert read_snapshot(tmp_path, 's', 't')['operations'][0]['waitingForUser'] is True
+
+    store.ingest([receipt('ask-call', 'ask_user', status='returned', output='answered')])
+    row = store.snapshot()['operations'][0]
+    assert row['status'] == 'returned'
+    assert row['waitingForUser'] is False
+
+
 def test_ingest_never_regresses_a_finished_receipt(tmp_path):
     store = ExecutionStore(tmp_path, 's', 't')
     store.ingest([receipt('a', 'web_search')])

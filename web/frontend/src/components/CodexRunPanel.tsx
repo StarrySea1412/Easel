@@ -34,6 +34,8 @@ export default function CodexRunPanel({sessionId,turnId,streaming,onProgressOwne
   const [turn,setTurn]=useState<CodexTurn|null>(null), [error,setError]=useState(''), [revision,setRevision]=useState(0);
   const [checking,setChecking]=useState(false);
   const notifiedRecovery=useRef('');
+  const observing=turn?.sessionId===sessionId&&turn.turn_id===turnId&&turn.status==='running'&&turn.recovery?.status==='observing';
+  const watching=streaming||observing;
   useEffect(()=>{
     const controller=new AbortController(); let reading=false;
     const read=async()=>{if(reading || controller.signal.aborted)return; reading=true;
@@ -48,9 +50,9 @@ export default function CodexRunPanel({sessionId,turnId,streaming,onProgressOwne
         } }
       catch(cause){if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'记录读取失败。');}
       finally{reading=false;}
-    }; void read(); const timer=streaming?setInterval(()=>void read(),1500):undefined;
+    }; void read(); const timer=watching?setInterval(()=>void read(),1500):undefined;
     return()=>{controller.abort();clearInterval(timer);};
-  },[sessionId,turnId,streaming,revision]);
+  },[sessionId,turnId,watching,revision]);
   const current=turn?.sessionId===sessionId&&turn.turn_id===turnId?turn:null;
   const reconcile=async()=>{
     setChecking(true);setError('');
@@ -61,15 +63,25 @@ export default function CodexRunPanel({sessionId,turnId,streaming,onProgressOwne
     }catch(cause){setError(cause instanceof Error?cause.message:'核对失败。');}
     finally{setChecking(false);}
   };
+  const stop=async()=>{
+    setChecking(true);setError('');
+    try {
+      const result=await codexRequest<{stopped:boolean}>('stop',{sessionId,turnId});
+      if(!result.stopped)throw new Error('原轮次尚未确认停止，请继续核对。');
+      setRevision(v=>v+1);
+    }catch(cause){setError(cause instanceof Error?cause.message:'停止尚未确认。');}
+    finally{setChecking(false);}
+  };
   const reasoning=current?.thinkingStatus==='available'?'服务已返回思考摘要':current?.thinkingStatus==='partial'?'思考摘要不完整（本轮中断或失败）':current?.thinkingStatus==='unavailable'?'本轮服务未返回思考摘要':'等待服务返回思考摘要';
   return <div className="codex-run-panel">
     <p className="codex-reasoning-state" role="status">Codex · {current?.outcome==='unconfirmed'?'结果未确认':reasoning}{current?.outcome==='interrupted'?' · 已停止':''}
       {current?.outcome==='unconfirmed'&&<button type="button" className="btn btn-sm" disabled={checking} onClick={()=>void reconcile()}>{checking?'核对中…':'核对结果'}</button>}
       {current?.recovery?.status==='adopted'&&' · 已收回原轮次结果'}
+      {observing&&<> · 已接回原轮次 <button type="button" className="btn btn-sm" disabled={checking} onClick={()=>void stop()}>停止原轮次</button></>}
     </p>
     {current?.outcome==='unconfirmed'&&current.recovery?.message&&<p role="status">{current.recovery.message}</p>}
     {current?.pending.map(request=><RequestCard key={request.requestId} request={request} sessionId={sessionId} turnId={turnId} refresh={()=>setRevision(v=>v+1)}/>)}
-    <ChatExecutionPanel key={revision} sessionId={sessionId} turnId={turnId} streaming={streaming} onProgressOwnership={onProgressOwnership}/>
+    <ChatExecutionPanel key={revision} sessionId={sessionId} turnId={turnId} streaming={watching} onProgressOwnership={onProgressOwnership}/>
     <details className="execution-runtime"><summary>本轮引擎与用量</summary><p>请求模型：{current?.requestedModelRef || '等待回执'} · 运行模型：{current?.actualModel || '未返回'}。网页检索：{current?.webSearch==='cached'?'缓存检索':'未上报'}。</p>{Boolean(current?.tokenUsage)&&<pre>{print(current?.tokenUsage)}</pre>}</details>
     {error && <p role="alert">{error}<button type="button" onClick={()=>setRevision(v=>v+1)}>重新读取</button></p>}
   </div>;

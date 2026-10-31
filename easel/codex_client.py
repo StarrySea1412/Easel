@@ -57,12 +57,7 @@ class CodexClient:
     """A reader thread always drains events while a user approval is pending."""
     def __init__(self, cwd: Path):
         info = runtime_info()
-        self.version = info['version']
-        self._lock = threading.RLock()
-        self._pending: dict[str, queue.Queue] = {}
-        self._threads: dict[str, queue.Queue] = {}
-        self._stderr = deque(maxlen=20)
-        self._closed = threading.Event()
+        self._setup(info['version'])
         flags = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         env = os.environ.copy()
         # Explicit optional home is scoped to this child; never changes the host environment.
@@ -73,8 +68,20 @@ class CodexClient:
             text=True, encoding='utf-8', errors='replace', bufsize=1, env=env, **flags)
         threading.Thread(target=self._read, daemon=True, name='easel-codex-rpc').start()
         threading.Thread(target=self._read_stderr, daemon=True, name='easel-codex-log').start()
+        self._initialize()
+
+    def _setup(self, version):
+        self.version = version
+        self._lock = threading.RLock()
+        self._pending: dict[str, queue.Queue] = {}
+        self._threads: dict[str, queue.Queue] = {}
+        self._stderr = deque(maxlen=20)
+        self._closed = threading.Event()
+
+    def _initialize(self):
         try:
-            self.rpc('initialize', {'clientInfo': {'name': 'easel', 'title': 'Easel', 'version': '0.2.6'},
+            from .version import application_version
+            self.rpc('initialize', {'clientInfo': {'name': 'easel', 'title': 'Easel', 'version': application_version()},
                                    'capabilities': {'experimentalApi': True}}, timeout=30)
             self.send({'method': 'initialized', 'params': {}})
         except Exception:
@@ -135,38 +142,44 @@ class CodexClient:
                 if len(line) > 8_000_000:
                     raise CodexError('Codex 单条事件超过接收上限。')
                 message = json.loads(line)
-                if not isinstance(message, dict):
-                    continue
-                if 'method' not in message:
-                    with self._lock:
-                        target = self._pending.get(str(message.get('id')))
-                    if target:
-                        target.put_nowait(message)
-                    continue
-                params = message.get('params') or {}
-                with self._lock:
-                    target = self._threads.get(params.get('threadId'))
-                if target is not None:
-                    target.put_nowait(message)
-                elif 'id' in message:
-                    self.send({'id': message['id'], 'error': {'code': -32601,
-                              'message': 'Easel has no active handler for this request'}})
+                self._dispatch(message)
         except (OSError, ValueError, queue.Full, CodexError):
             pass
         finally:
-            self._closed.set()
-            failure = {'error': {'message': 'Codex 进程或事件连接已结束，任务未确认完成。'}}
+            self._transport_ended()
+
+    def _dispatch(self, message):
+        if not isinstance(message, dict):
+            return
+        if 'method' not in message:
             with self._lock:
-                for target in self._pending.values():
-                    try:
-                        target.put_nowait(failure)
-                    except queue.Full:
-                        pass
-                for target in self._threads.values():
-                    try:
-                        target.put_nowait({'method': 'easel/transportClosed', 'params': {}})
-                    except queue.Full:
-                        pass
+                target = self._pending.get(str(message.get('id')))
+            if target:
+                target.put_nowait(message)
+            return
+        params = message.get('params') or {}
+        with self._lock:
+            target = self._threads.get(params.get('threadId'))
+        if target is not None:
+            target.put_nowait(message)
+        elif 'id' in message:
+            self.send({'id': message['id'], 'error': {'code': -32601,
+                      'message': 'Easel has no active handler for this request'}})
+
+    def _transport_ended(self):
+        self._closed.set()
+        failure = {'error': {'message': 'Codex 进程或事件连接已结束，任务未确认完成。'}}
+        with self._lock:
+            for target in self._pending.values():
+                try:
+                    target.put_nowait(failure)
+                except queue.Full:
+                    pass
+            for target in self._threads.values():
+                try:
+                    target.put_nowait({'method': 'easel/transportClosed', 'params': {}})
+                except queue.Full:
+                    pass
 
     def close(self):
         if self.proc.poll() is None:

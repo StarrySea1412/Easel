@@ -123,6 +123,148 @@ def test_image_reuse_allows_only_verified_release_metadata_change(monkeypatch):
         assert not builder.compatible(candidate, baseline, changed, old)
 
 
+def test_image_reuse_falls_back_to_matching_running_production_image(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    receipt = tmp_path / 'Easel' / 'deployment-receipt.json'
+    receipt.parent.mkdir()
+    secrets = tmp_path / 'easel-secrets'; secrets.mkdir()
+    (secrets / 'deployment.env').write_text('EASEL_IMAGE=easel:active\n')
+    original_is_file = Path.is_file
+    def guarded_is_file(self):
+        if self == receipt:
+            raise PermissionError('protected release')
+        return original_is_file(self)
+    monkeypatch.setattr(Path, 'is_file', guarded_is_file)
+    image_id = 'sha256:' + 'a' * 64
+    manifest = {'commit': 'b' * 40, 'files': {}}
+    def output(command, **kwargs):
+        if command[:2] == ['docker', 'ps']:
+            return 'container-1\n'
+        if command[:2] == ['docker', 'inspect']:
+            return json.dumps([{'Image': image_id}])
+        if command[:3] == ['docker', 'image', 'inspect']:
+            return json.dumps([{'Id': image_id, 'Config': {'Labels': {
+                'org.opencontainers.image.revision': 'b' * 40}}}])
+        if command[:3] == ['docker', 'run', '--rm'] and command[-1] == '/app/release-manifest.json':
+            return json.dumps(manifest)
+        if command[:3] == ['docker', 'run', '--rm'] and command[-1] == '/app/pyproject.toml':
+            return (ROOT / 'pyproject.toml').read_bytes()
+        raise AssertionError(command)
+    monkeypatch.setattr(subprocess, 'check_output', output)
+    monkeypatch.setattr(builder, 'compatible', lambda candidate, baseline, new, old:
+                        baseline.get('commit') == 'b' * 40 and new == (ROOT / 'pyproject.toml').read_bytes())
+    assert builder.reusable(tmp_path, {'files': {}}, ROOT) == (image_id, manifest)
+
+
+def test_active_receipt_is_reconstructed_from_verified_running_image(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    manager = load('manage')
+    secrets = tmp_path / 'easel-secrets-test'; secrets.mkdir()
+    image_id = 'sha256:' + 'a' * 64
+    image_ref = 'easel:active-test'
+    nginx = 'nginx:1.29.2-alpine@sha256:' + 'c' * 64
+    (secrets / 'deployment.env').write_text(f'EASEL_IMAGE={image_ref}\nEASEL_NGINX_IMAGE={nginx}\n')
+    def output(command, **kwargs):
+        if command[:2] == ['docker', 'ps']:
+            assert 'easel-test' in command[4]
+            return 'container-1\n'
+        if command[:2] == ['docker', 'inspect']:
+            return json.dumps([{'Image': image_id}])
+        if command[:3] == ['docker', 'image', 'inspect']:
+            return json.dumps([{'Id': image_id, 'Config': {'Labels': {
+                'org.opencontainers.image.revision': 'b' * 40}}}])
+        raise AssertionError(command)
+    monkeypatch.setattr(subprocess, 'check_output', output)
+    result = manager.active_receipt(tmp_path, True, tmp_path / 'old-release')
+    assert result == {'commit': 'b' * 40, 'image': image_id, 'nginx': nginx,
+                      'source': str(tmp_path / 'old-release')}
+
+
+def test_active_receipt_rejects_container_image_mismatch(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    manager = load('manage')
+    secrets = tmp_path / 'easel-secrets'; secrets.mkdir()
+    (secrets / 'deployment.env').write_text('EASEL_IMAGE=easel:active\nEASEL_NGINX_IMAGE=nginx:fixed\n')
+    def output(command, **kwargs):
+        if command[:2] == ['docker', 'ps']:
+            return 'container-1\n'
+        if command[:2] == ['docker', 'inspect']:
+            return json.dumps([{'Image': 'sha256:' + 'd' * 64}])
+        if command[:3] == ['docker', 'image', 'inspect']:
+            return json.dumps([{'Id': 'sha256:' + 'a' * 64, 'Config': {'Labels': {
+                'org.opencontainers.image.revision': 'b' * 40}}}])
+        raise AssertionError(command)
+    monkeypatch.setattr(subprocess, 'check_output', output)
+    with pytest.raises(ValueError, match='does not match'):
+        manager.active_receipt(tmp_path, False, tmp_path / 'old-release')
+
+
+def test_previous_release_receipt_is_captured_before_candidate_config_write(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    manager = load('manage')
+    old_release = tmp_path / 'protected-old-release'; old_release.mkdir()
+    current = tmp_path / 'Easel-test'
+    original_is_symlink = Path.is_symlink
+    original_resolve = Path.resolve
+    monkeypatch.setattr(Path, 'is_symlink', lambda self: True if self == current else original_is_symlink(self))
+    monkeypatch.setattr(Path, 'resolve', lambda self, *args, **kwargs:
+                        old_release if self == current else original_resolve(self, *args, **kwargs))
+    secrets = tmp_path / 'easel-secrets-test'; secrets.mkdir()
+    image_id = 'sha256:' + 'a' * 64
+    old_ref = 'easel:old'
+    new_ref = 'easel:new'
+    nginx = 'nginx:fixed'
+    config = secrets / 'deployment.env'
+    config.write_text(f'EASEL_IMAGE={old_ref}\nEASEL_NGINX_IMAGE={nginx}\n')
+    def output(command, **kwargs):
+        if command[:2] == ['docker', 'ps']:
+            return 'container-1\n'
+        if command[:2] == ['docker', 'inspect']:
+            return json.dumps([{'Image': image_id}])
+        if command[:3] == ['docker', 'image', 'inspect']:
+            assert command[-1] == old_ref
+            return json.dumps([{'Id': image_id, 'Config': {'Labels': {
+                'org.opencontainers.image.revision': 'b' * 40}}}])
+        raise AssertionError(command)
+    monkeypatch.setattr(subprocess, 'check_output', output)
+    captured = manager.previous_release_receipt(tmp_path, True)
+    config.write_text(f'EASEL_IMAGE={new_ref}\nEASEL_NGINX_IMAGE={nginx}\n')
+    assert captured['image'] == image_id
+    assert captured['commit'] == 'b' * 40
+    assert captured['source'] == str(old_release)
+
+
+def test_backup_uses_candidate_compose_when_previous_release_is_protected(tmp_path, monkeypatch):
+    manager = load('manage')
+    base = tmp_path / 'host'; base.mkdir()
+    old_release = tmp_path / 'protected-old-release'; old_release.mkdir()
+    current = base / 'Easel'
+    current.mkdir()
+    candidate = tmp_path / 'candidate-release'; candidate.mkdir()
+    for path in manager.layout(base).values():
+        path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(manager, 'RELEASE', candidate)
+    original_resolve = Path.resolve
+    monkeypatch.setattr(Path, 'resolve', lambda self, *args, **kwargs:
+                        old_release if self == current else original_resolve(self, *args, **kwargs))
+    seen = []
+
+    def stop_app(root, isolated, source, arguments):
+        if source != candidate:
+            raise PermissionError('protected previous compose file')
+        seen.append((source, arguments))
+
+    monkeypatch.setattr(manager, 'compose', stop_app)
+    snapshot = manager.backup(base, False)
+
+    assert seen == [(candidate, ['stop', 'app'])]
+    assert snapshot.is_file()
+
+
 @pytest.mark.parametrize('name,code', [('Gateway', -9), ('Web', 1)])
 def test_supervisor_identifies_failed_child_without_logging_arguments(monkeypatch, name, code):
     from types import SimpleNamespace

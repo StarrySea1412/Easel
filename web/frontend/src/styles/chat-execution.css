@@ -24,6 +24,7 @@
 .chat-execution-state,.chat-execution-row small {flex-shrink:0;color:var(--text-secondary,#777);font-size:12px;}
 .chat-execution-state.is-failed {color:var(--red,#ba4242);}
 .chat-execution-state.is-running {color:var(--accent,#507bb7);}
+.chat-execution-state.is-waiting {color:var(--amber,#ad7511);}
 .chat-execution-detail {padding:8px 10px;margin:5px 0 8px 20px;border:1px solid var(--border,#ddd);border-radius:var(--radius-sm);min-width:0;}
 .execution-metadata {display:grid;gap:3px;font-size:12px;color:var(--text-secondary,#777);overflow-wrap:anywhere;margin-bottom:8px;}
 .execution-detail-heading {display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;}

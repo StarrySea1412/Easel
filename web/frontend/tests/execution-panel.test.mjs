@@ -74,6 +74,23 @@ const operation = (id, status = 'running', output = '') => ({id,name:'exec',kind
 const emit = async data => act(async () => window.dispatchEvent(new window.CustomEvent('easel:execution', {detail:data})));
 const expand = async view => act(async () => {const detail=view.container.querySelector('details.chat-execution-row');detail.open=true;detail.dispatchEvent(new window.Event('toggle'));});
 
+test('ask_user transitions between running, waiting and answered using confirmed execution evidence', async t => {
+  const view = await setup(t);
+  const ask = {...operation('ask'), name:'ask_user', kind:'tool', command:''};
+  await view.respond(0, payload('a',[ask]));
+  assert.match(view.container.textContent,/执行中/);
+  await emit(payload('a',[{...ask,waitingForUser:true}]));
+  assert.match(view.container.textContent,/等待回答/);
+  assert.doesNotMatch(view.container.textContent,/执行中/);
+  await expand(view);
+  assert.match(view.container.textContent,/等待你提交回答/);
+  await emit(payload('a',[{...ask,status:'returned',waitingForUser:false,output:'answered'}]));
+  assert.match(view.container.textContent,/answered/);
+  assert.doesNotMatch(view.container.textContent,/等待回答|等待你提交回答/);
+  await emit(payload('a',[{...ask,waitingForUser:true}]));
+  assert.doesNotMatch(view.container.textContent,/等待回答/);
+});
+
 test('live evidence wins over an earlier HTTP response and keeps expanded details', async t => {
   const view = await setup(t);
   await emit(payload('a',[operation('live','running','first')]));

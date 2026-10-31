@@ -1,3 +1,35 @@
+## 0.44.0 · 2026-11-01 · Original-turn reconnect and answer sync / 原轮次接回与正文同步
+
+- Keep the audited optional native runtime alive independently of Web observers; rejoin the exact instance, thread and turn, retain explicit approvals and persist tool receipts before replying. / 可选原生执行器独立于Web观察端，核对同实例/线程/轮次接回；审批显式处理，工具回执先持久化再回复。
+- Continue observing recovered turns in the existing status area and stop the original turn precisely. Ambiguous side effects remain unconfirmed rather than being replayed. / 原状态区持续观察恢复轮次并精确停止；不明确的副作用不重放。
+- Track accepted conversation revisions with content digests so equal-length answer updates reach unchanged clients after refresh. Preserve local edits and cancel queued stale mirrors when server history is adopted. / 摘要基线让等长回答更新及刷新后同步生效，保留本地编辑并撤销已排队旧镜像。
+- Integrate 0.43.9 question authentication, waiting-state and release-management fixes. Candidate checks and missing browser coverage are recorded separately; host 138 remains on 0.43.9, with no installer release. / 整合0.43.9问答认证、等待状态与发布管理修复；候选验证及页面缺项另记，138仍为0.43.9，安装器未发布。[Evidence / 验证与升级边界](docs/codex-live-recovery-0.44.0.md)。
+
+## 0.43.9 · 2026-10-31 · Question waiting and release backup / 问答等待与发布备份
+
+- Use verified candidate Compose control files for stopped-write backups when the previous release is protected. / 旧发行目录受保护时，停写备份使用已校验候选控制文件。
+- Reconcile native tool callbacks with the exact turn transcript, including transports that register callbacks but omit tool frames. Pending questions also mark calls that arrive later; terminal receipts clear the wait. / 原生连接也按本轮日志补齐遗漏工具事件，问题先到时后到工具记录仍显示等待，终态清除等待。
+- Preserve configured Gateway authentication, question replay and completed tool evidence. No model call or side effect is replayed. / 保留网关认证、问题回放与已完成工具事实，不重放模型或工具副作用。[Release receipt / 发布回执](docs/release-138-0.43.9-2026-10-31.md).
+
+## 0.43.8 · 2026-10-30 · Root-owned release compatibility / 发布恢复兼容
+
+- Reuse only the image confirmed by the active app container when the migrated release receipt is unreadable; reconstruct a verified rollback receipt and allow rollback to use the active release's Compose control files. / 迁移后旧release回执不可读时，只复用与活动app容器一致的镜像；校验后重建回滚收据，并用当前可读发行的Compose控制文件执行回退。
+- Preserve the 0.43.6 ask_user Gateway authentication and question-card fix. / 保留0.43.6 ask_user网关认证与提问卡片修复。[Release receipt / 发布回执](docs/release-138-0.43.8-2026-10-30.md).
+
+## 0.43.7 · 2026-10-30 · 138 release build fallback / 发布构建兼容修复
+
+- Fall back to a full locked image build when a migrated root-owned active release receipt cannot be read; do not change data or runtime permissions. / 闲置盘迁移后正式 release 回执不可读时安全回退到完整锁定构建，不修改数据或运行权限。
+- Retain the 0.43.6 ask_user Gateway-authenticated question bridge and pending-card behavior. / 保留 0.43.6 的 ask_user 网关认证、待答状态和问题卡片修复。[Release receipt / 发布回执](docs/release-138-0.43.7-2026-10-30.md).
+
+## 0.43.6 · 2026-10-30 · Ask-user bridge / 提问卡片修复
+
+- Pass configured Gateway token/password to ask_user question listing, status and answer RPCs; explicit missing credentials fail closed without falling back to a paired-device token. / 问答列表、状态与回答RPC统一使用已配置网关凭据；显式凭据缺失时安全失败，不回退到设备配对token。
+- Keep question cards when status lookup is missing or unknown, and label confirmed pending ask_user operations as waiting for an answer. / 状态查询缺失或未知时保留问题卡片；确认有待答问题后，执行记录明确显示等待回答。[Release receipt / 发布回执](docs/release-138-0.43.6-2026-10-30.md).
+
+## 0.43.5 · 2026-10-30 · Compact continuation controls / 紧凑续接控件
+
+- Use the shared switch and lightweight continuation action while retaining keyboard behavior, disabled state and continuation limits. / 复用共享开关和轻量继续操作，保留键盘、禁用态及续接次数语义。[Release receipt / 发布记录](docs/release-138-0.43.5-2026-10-30.md)。
+
 ## 0.43.4 · 2026-10-30 · Cross-browser conversation navigation / 跨浏览器通知定位
 
 - Persist visible normal conversations and retrieve them by original session ID; keep task authority and runtime ownership separate. / 普通对话可见正文持久保存，按原会话ID读取，不改变任务与运行归属。
