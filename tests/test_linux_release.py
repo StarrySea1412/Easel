@@ -238,6 +238,33 @@ def test_previous_release_receipt_is_captured_before_candidate_config_write(tmp_
     assert captured['source'] == str(old_release)
 
 
+def test_backup_uses_candidate_compose_when_previous_release_is_protected(tmp_path, monkeypatch):
+    manager = load('manage')
+    base = tmp_path / 'host'; base.mkdir()
+    old_release = tmp_path / 'protected-old-release'; old_release.mkdir()
+    current = base / 'Easel'
+    current.mkdir()
+    candidate = tmp_path / 'candidate-release'; candidate.mkdir()
+    for path in manager.layout(base).values():
+        path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(manager, 'RELEASE', candidate)
+    original_resolve = Path.resolve
+    monkeypatch.setattr(Path, 'resolve', lambda self, *args, **kwargs:
+                        old_release if self == current else original_resolve(self, *args, **kwargs))
+    seen = []
+
+    def stop_app(root, isolated, source, arguments):
+        if source != candidate:
+            raise PermissionError('protected previous compose file')
+        seen.append((source, arguments))
+
+    monkeypatch.setattr(manager, 'compose', stop_app)
+    snapshot = manager.backup(base, False)
+
+    assert seen == [(candidate, ['stop', 'app'])]
+    assert snapshot.is_file()
+
+
 @pytest.mark.parametrize('name,code', [('Gateway', -9), ('Web', 1)])
 def test_supervisor_identifies_failed_child_without_logging_arguments(monkeypatch, name, code):
     from types import SimpleNamespace

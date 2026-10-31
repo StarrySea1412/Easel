@@ -5969,11 +5969,11 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 outputs=OUTPUTS_DIR, limit=100).get('operations') or []
 
         async def _tail_transcript_operations(active_proc):
-            """Record operations a transport cannot stream itself.
+            """Reconcile live tool frames with this turn's own transcript.
 
-            HTTP chat completions and the plain CLI run the agent without any
-            per-tool lifecycle frame, so the journal would hold progress only and
-            the panel would fall back to unordered receipts. Reading the same
+            HTTP chat completions and the plain CLI have no tool frames. Native
+            connections can also omit frames for dispatched tools; registering
+            a callback does not prove delivery. Reading the same
             bounded, turn-scoped transcript the post-turn view already trusts
             keeps live and historical receipts in one shape.
             """
@@ -6374,10 +6374,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 await asyncio.to_thread(proc.terminate)
             # 这里仅记录已进入运行器；模型是否开始思考要以实际事件流为准。
             to_client("activity", "已进入运行器，等待模型事件")
-            # 原生 WS 路径自带 tool 流（on_tool）；HTTP 与纯 CLI 没有逐工具帧，
-            # 改为按轮次读 transcript，把操作与顺序补进同一份执行日志。
-            if getattr(proc, 'on_tool', None) is None:
-                execution_tail = loop.create_task(_tail_transcript_operations(proc))
+            # Reconcile every transport, including native connections that have
+            # an on_tool callback but did not receive the corresponding frame.
+            # ingest merges by call identity and never revives a finished tool.
+            execution_tail = loop.create_task(_tail_transcript_operations(proc))
 
             q = asyncio.Queue()
             SENTINEL = object()

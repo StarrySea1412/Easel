@@ -16,6 +16,11 @@
 ## 验证与剩余门槛
 
 - 本地发布专项：`tests/test_linux_release.py` 22 项通过；`deployment/138` Python 编译和 `git diff --check` 通过。
-- 0.43.8 尚待固定提交构建、隔离激活、认证HTTP和真实浏览器问答卡片/回答验收。
-- 隔离通过后再切正式 8444，保留停写备份和回滚入口；源码、远端SHA、镜像、运行版本及真实页面分别留证。
+- 固定提交 `2928ab7a75d8d9150885c72e33648cf84205dc82` 已构建并激活到隔离 8445；app/browser/proxy 均 healthy，HTTPS 登录探测通过，停写快照为 `/home/ubuntu/easel-backups-test/20261030T131108Z.tar.gz`。
+- 隔离认证 HTTP 登录成功，版本接口返回 `0.43.8` / revision `2928ab7a75d8d9150885c72e33648cf84205dc82`。使用合成提示和 `happycoding/deepseek-v4.1-flash` 的隔离问答实测收到完整 `question` SSE，`/api/chat/question/answer` 成功提交选项，随后收到 `done`；未重放用户原任务。
+- 初次本机浏览器通过 SSH 隧道访问隔离站点报告 `ERR_CERT_AUTHORITY_INVALID`，未点击绕过警告。随后重新绑定现有标签时登录页已可用，完成隔离测试账号真实登录与问答：页面出现 A/B 卡片，点击 A 并提交后显示 `status: answered` 与“问答卡片验收通过”，运行中计数归零（会话 `mvv0ns99snkls1`，轮次 `1793367565341-4ro62gcx2oa`）。因此卡片显示及回答闭环已通过；期间工具行仍写“执行中”，等待状态遗漏转入0.43.9修复。截图仅有工具返回，未保存独立文件。
+- 正式 8444 尚未切换。切换前备份被旧 root-owned 0.43.3 release 的 `compose.yaml` 读取权限阻断；Compose 在停止 app 前即失败，8444 保持健康且未中断。0.43.8 已解决构建基线、隔离激活与回滚的旧目录读取问题，但停写备份仍漏用候选控制文件；先补回归并修正此路径，再重验隔离和正式切换。
+- 已修正：停写备份改用当前已校验发行的 Compose 控制文件，并增加旧发行受保护场景回归。`tests/test_linux_release.py` 24 项通过，发布脚本 Python 编译及 `git diff --check` 通过；该补丁尚未提交，也尚未在 138 新 SHA 隔离复验。
+- 当前运行状态：隔离仍是 `2928ab7a75d8d9150885c72e33648cf84205dc82`，正式仍是历史 `de1f388d0042` / 0.43.3。正式首次尝试在 app 停止前失败，健康、历史重启计数及 `gateway.reload.mode=off` 未变。
+- 正式切换成功后，保留停写备份和回滚入口；源码、远端SHA、镜像、运行版本及正式页面分别留证。
 - malformed tool-call、视觉输入、跨设备对话同步和完整 0.44 大版本继续单独推进。

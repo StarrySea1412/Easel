@@ -126,7 +126,9 @@ def backup(base: Path, isolated: bool):
     paths = layout(base, isolated)
     current = base / ('Easel-test' if isolated else 'Easel')
     if current.exists():
-        compose(base, isolated, current.resolve(), ['stop', 'app'])
+        # The previous release may be root-owned after a storage migration.
+        # This manager runs from the verified candidate and has readable control files.
+        compose(base, isolated, RELEASE, ['stop', 'app'])
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     output = paths['backups'] / (stamp + '.tar.gz')
     os.umask(0o077)

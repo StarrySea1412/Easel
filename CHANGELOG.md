@@ -1,3 +1,9 @@
+## 0.43.9 · 2026-10-31 · Question waiting and release backup / 问答等待与发布备份
+
+- Use verified candidate Compose control files for stopped-write backups when the previous release is protected. / 旧发行目录受保护时，停写备份使用已校验候选控制文件。
+- Reconcile native tool callbacks with the exact turn transcript, including transports that register callbacks but omit tool frames. Pending questions also mark calls that arrive later; terminal receipts clear the wait. / 原生连接也按本轮日志补齐遗漏工具事件，问题先到时后到工具记录仍显示等待，终态清除等待。
+- Preserve configured Gateway authentication, question replay and completed tool evidence. No model call or side effect is replayed. / 保留网关认证、问题回放与已完成工具事实，不重放模型或工具副作用。[Release receipt / 发布回执](docs/release-138-0.43.9-2026-10-31.md).
+
 ## 0.43.8 · 2026-10-30 · Root-owned release compatibility / 发布恢复兼容
 
 - Reuse only the image confirmed by the active app container when the migrated release receipt is unreadable; reconstruct a verified rollback receipt and allow rollback to use the active release's Compose control files. / 迁移后旧release回执不可读时，只复用与活动app容器一致的镜像；校验后重建回滚收据，并用当前可读发行的Compose控制文件执行回退。
