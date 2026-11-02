@@ -130,3 +130,21 @@ test('failure receipt survives normalization and rejects untrusted IDs',()=>{
  assert.equal(chatErrorDetail(makeChatError(detail)).failureEventId,id);
  assert.equal(chatErrorDetail({...detail,failureEventId:'PRIVATE'}).failureEventId,undefined);
 });
+
+test('stored adapter tool-format failures show a safe specific cause and preserve their receipt',()=>{
+ const diagnostic='Provider returned an incomplete or malformed tool call';
+ const original={code:'agent_execution_failed',category:'execution',retryable:true,message:'本轮执行失败。',
+  detail:diagnostic+'\napi_key=PRIVATE_TOOL_VALUE',failureEventId:'b'.repeat(32)};
+ const detail=chatErrorDetail(original);
+ assert.equal(detail.code,'model_tool_call_invalid');
+ assert.equal(chatErrorTitle(detail),'工具调用格式错误');
+ assert.equal(detail.retryable,false);
+ assert.match(detail.message,/未派发该调用/);assert.match(detail.message,/不会自动重发/);
+ assert.equal(detail.failureEventId,original.failureEventId);
+ assert.ok(!JSON.stringify(detail).includes('PRIVATE'));
+ assert.ok(original.detail.includes('PRIVATE_TOOL_VALUE'));
+ assert.equal(chatErrorTitle({code:'model_tool_call_invalid',message:'failed'}),'工具调用格式错误');
+ for(const raw of ['例如：'+diagnostic,'> '+diagnostic,'```\n'+diagnostic+'\n```',diagnostic+' is quoted']){
+  assert.equal(chatErrorDetail({...original,detail:raw}).code,'agent_execution_failed');
+ }
+});

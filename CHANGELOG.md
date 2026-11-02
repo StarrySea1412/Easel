@@ -1,3 +1,9 @@
+## 0.44.1 · 2026-11-02 · 生图路由与工具格式错误
+
+- 生图请求优先实际图片能力，明确HTML排版仍保留；每轮策略和海报/卡片技能不再将HTML作为AI生图首步。
+- 明确分类工具格式拒绝，不重放、不泄露参数、不猜测截断，保留前序回执。
+- 更新happy-dom、vite和undici开发依赖修复；仅源码候选，138仍为0.43.9，安装器未发布。[验证与升级边界](docs/image-routing-and-protocol-0.44.1.md)。
+
 ## 0.44.0 · 2026-11-01 · Original-turn reconnect and answer sync / 原轮次接回与正文同步
 
 - Keep the audited optional native runtime alive independently of Web observers; rejoin the exact instance, thread and turn, retain explicit approvals and persist tool receipts before replying. / 可选原生执行器独立于Web观察端，核对同实例/线程/轮次接回；审批显式处理，工具回执先持久化再回复。

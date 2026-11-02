@@ -136,6 +136,10 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         code = 'gateway_pairing_required'
     elif status in (401, 403) or any(s in message for s in ('unauthorized', 'token mismatch', 'auth_token_mismatch', 'password mismatch', 'authentication failed')):
         code = 'gateway_auth_rejected'
+    elif re.match(r'^(?:Error:[ \t]*)?Provider returned an incomplete or malformed tool call\.?(?:\r?\n|$)', str(raw), re.I):
+        # This is the adapter's explicit rejection, not a guess from model text
+        # or usage counts. Do not promote quoted diagnostics or JSON failures.
+        code = 'model_tool_call_invalid'
     elif status in (408, 504) or any(s in message for s in ('timed out', 'timeout', 'timeouterror')):
         code = 'gateway_timeout'
     elif any(s in message for s in ('econnrefused', 'connection refused', 'connecterror', 'connection reset', 'ehostunreach', '[winerror 10054]', '[winerror 10061]', 'connectionreseterror', 'connectionabortederror')):
@@ -160,6 +164,7 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         'gateway_request_failed': ('execution', True, '网关请求失败，请检查网关服务及接口配置后重试。'),
         'gateway_stream_interrupted': ('connection', True, '网关响应流未正常结束，已保留收到的内容，请检查连接后重试。'),
         'model_stream_interrupted': ('connection', True, '模型服务的响应流在结束事件到达前中断，本轮没有正常完成。已保留收到的内容；可手动重试，若重复出现请检查此渠道的流式接口兼容性或改用其他渠道。'),
+        'model_tool_call_invalid': ('execution', False, '模型服务返回的工具调用不完整或格式无效，网关未派发该调用。此前已完成的工具结果保留，本轮不会自动重发；请核对执行记录后手动重试，重复出现时检查渠道的工具格式兼容性。'),
         'agent_request_aborted': ('execution', True, '网关报告本轮请求被中断（aborted），但没有说明由谁取消或中断原因。已保留收到的内容；请查看本轮失败详情，确认后手动重试。'),
         'model_rate_limited': ('execution', True, '模型服务限制了本次请求。请稍后重试，或检查当前渠道的额度与并发限制。'),
         'model_service_unavailable': ('connection', True, '模型服务暂不可用。请稍后手动重试，若持续失败请检查渠道状态。'),
@@ -168,7 +173,8 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
     category, retryable, public_message = messages.get(code, messages['agent_execution_failed'])
     result = {'code': code, 'category': category, 'retryable': retryable, 'message': public_message}
     if include_detail and str(raw).strip():
-        detail = redact_gateway_text(raw)
+        detail = ('Provider returned an incomplete or malformed tool call'
+                  if code == 'model_tool_call_invalid' else redact_gateway_text(raw))
         detail = re.sub(r'https?://[^\s"\']+', '[服务地址]', detail)
         detail = re.sub(r'\bsk-[A-Za-z0-9_-]+', '[REDACTED]', detail)
         result['detail'] = detail[:600]

@@ -27,6 +27,20 @@ test('recommendations use installed skills, exclude picks, rank explicit names a
   assert.equal(rows.length, 3); assert.equal(rows[0].name, 'copywriting');
 });
 
+test('image requests rank the generator ahead of HTML poster rendering', () => {
+  const catalog = ['poster-hero', 'ai-image-gen', 'card-xiaohongshu'].map(name => skill(name));
+  for (const text of ['帮我做一张海报', '生成一张产品封面', '用AI生图做海报，不要HTML', '生成一张图片作为主视觉']) {
+    assert.equal(recommendSkills(text, catalog)[0]?.name, 'ai-image-gen', text);
+  }
+  assert.equal(recommendSkills('请用HTML排版一张海报', catalog)[0]?.name, 'poster-hero');
+  assert.equal(recommendSkills('不要AI生图，用HTML做封面', catalog)[0]?.name, 'poster-hero');
+  assert.equal(recommendSkills('不要HTML，用AI生成一张封面', catalog)[0]?.name, 'ai-image-gen');
+  assert.deepEqual(recommendSkills('用AI生图做竖版海报，不要HTML', catalog).map(s => s.name), ['ai-image-gen']);
+  assert.deepEqual(recommendSkills('用AI生成封面，不要先生成HTML', catalog).map(s => s.name), ['ai-image-gen']);
+  assert.deepEqual(recommendSkills('用AI生成背景，再用HTML排版海报', catalog).map(s => s.name), ['ai-image-gen', 'poster-hero']);
+  assert.deepEqual(recommendSkills('生成封面', [skill('copywriting')]), []);
+});
+
 test('missing setup uses confirmed required state, ignores optional keys and never infers absence from unknown data', () => {
   assert.equal(missingSkillSetup(detail(true)), null);
   assert.equal(missingSkillSetup(undefined), null);

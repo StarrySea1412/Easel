@@ -184,10 +184,20 @@ TURN_REMINDER = (
     "要发到公开平台的文案/评论绝不写入密钥/内部地址/代理/路径/env 名等敏感信息，也别随手自曝「由 AI 生成/某工具做的」。"
 )
 
+IMAGE_CREATION_POLICY = (
+    '〔图片任务交付〕用户明确要求AI生图、文生图、图生图或图像编辑时，优先使用ai-image-gen或本轮提供的专用生图工具，'
+    '不能先生成HTML、SVG或代码截图代替AI生图，也不先交付网页草稿。'
+    '当前用户要求优先于已选卡片技能的默认流程和历史产物；海报、封面、小红书等用途本身不代表选择HTML排版。'
+    '只有明确要求网页、HTML/CSS排版、代码绘图或确定性文字/数据卡片时才走对应渲染路径。'
+    '需要图文合成时先生成用户要求的图片，再按需求排版；最终交付可打开的实际图片，HTML源文件不能充当图片成品。'
+    '缺配置或生成失败时说明实际原因并保留未完成状态，不静默改为手绘或HTML；替代方式须由用户选择。'
+    '沿用本轮已获授权的范围、数量与费用边界，不因路由规则新增付费授权，也不重复索取已有授权。'
+)
+
 
 def turn_reminder() -> str:
     """返回每轮行为提醒文案。"""
-    return TURN_REMINDER
+    return TURN_REMINDER + '\n' + IMAGE_CREATION_POLICY
 
 
 def chat_turn_message(user_message: str, name: str | None) -> str:

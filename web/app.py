@@ -4751,7 +4751,7 @@ def _chat_delivery_instructions(artifact_ticket):
                 f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
                 f'多个文件重复 --file 参数。若有easel_present工具可直接调用：ticket={artifact_ticket}，files为真实路径列表。'
                 f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
-                f'HTML预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
+                f'仅当本轮需要HTML产物时：预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
                 f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
                 f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
                 f'该调用可能产生图片费用，只用已配置图片通道；返回job后等待自动交付，勿换requestId重复提交。')
@@ -4814,8 +4814,8 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
             configured = all(_is_set(image_env.get(key)) for key in ('IMG_BASE_URL', 'IMG_MODEL', 'IMG_API_KEY'))
             state = '已填写配置，尚未证明本轮可调用' if configured else '配置不完整，需要在设置 → 生图通道补充地址、模型和 API Key'
             message += ('\n\n〔本轮视觉创作协作〕\n'
-                '主动根据任务说明出图方式，不只询问素材：文字、参数和对比表优先确定性排版；'
-                '需要插画、场景或商品背景时，主动建议 ai-image-gen 配合排版。用户已明确要求生成配图时，'
+                '主动根据本轮用户指定的方式出图，不只询问素材；只有未指定AI生图且只要求文字、参数或对比表排版时才优先确定性排版。'
+                '需要插画、场景或商品背景时，主动建议 ai-image-gen 配合排版。用户已明确要求AI生图或生成配图时，'
                 '按生图技能执行，不重复询问是否要生图；未选择 AI 配图时说明可选方案，不擅自调用付费工具。'
                 'ai-image-gen 调用联网供应商，可能计费，绝不是本地免费生成；本地 SVG 手绘是另一种确定性方案，不能混称 AI 生图。'
                 f'本轮必须使用准确源码脚本离线核验："{sys.executable}" "{PROJECT_ROOT / "skills/shared/scripts/ai_image.py"}" check --dedicated-channel --env-file "{DATA_DIR / ".env"}"；'
@@ -4897,6 +4897,8 @@ def _direct_chat_content(req: ChatRequest, *, prompt_builder=None) -> tuple[str 
     if not req.message.strip() and not req.attachments:
         raise HTTPException(400, '消息不能为空')
     system = SYSTEM_PROMPT
+    system += ('\n当前为API直连，不提供生图或本机文件工具。用户要求实际生成图片时，'
+               '说明需要使用生图工坊或支持工具的执行引擎；不能用HTML/SVG代码或虚构图片链接冒充生图结果。')
     if req.persona:
         if not _valid_persona_name(req.persona) or not profile_exists(req.persona):
             raise HTTPException(400, '画像不存在或名称无效')

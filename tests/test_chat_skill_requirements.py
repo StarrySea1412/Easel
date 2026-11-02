@@ -74,6 +74,21 @@ def test_server_commands_use_writable_output_scripts(skills, monkeypatch, tmp_pa
     assert f'{tmp_path / "outputs"}/具体主题/' in message
 
 
+@pytest.mark.parametrize('entry', ['_chat_message', '_codex_message'])
+def test_image_output_rule_survives_no_picker_and_conflicting_card_skill(skills, monkeypatch, entry):
+    monkeypatch.setattr(web, '_read_env', lambda: {})
+    for names in ([], ['card-quote']):
+        req = request(message='用AI生成一张图片，不要先做HTML', selectedSkills=names,
+                      skillRequirements={}, history=[{'role': 'user', 'content': '之前做过HTML卡片'}])
+        message = getattr(web, entry)(req)
+        policy = message.rsplit('〔本轮策略提醒〕\n', 1)[1]
+        assert '图片任务交付' in policy
+        assert '不能先生成HTML' in policy
+        assert '缺配置或生成失败' in policy
+        assert '明确要求网页、HTML/CSS排版' in policy
+        assert '〔当前用户原文〕\n用AI生成一张图片，不要先做HTML' in message
+
+
 def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, monkeypatch):
     monkeypatch.setattr(web, '_read_env', lambda: {'IMG_API_KEY': 'PRIVATE_KEY', 'IMG_BASE_URL': 'https://PRIVATE_URL', 'IMG_MODEL': 'fixture'})
     visual = web._chat_message(request())
@@ -85,6 +100,14 @@ def test_visual_guidance_is_scoped_and_does_not_expose_configuration(skills, mon
     assert '设置 → 生图通道' in web._chat_message(request())
     monkeypatch.setattr(web, '_read_env', lambda: {'OPENAI_API_KEY': 'PRIVATE_CHAT_KEY', 'IMG_BASE_URL': 'https://fixture', 'IMG_MODEL': 'image'})
     assert '配置不完整' in web._chat_message(request())
+
+
+def test_direct_chat_cannot_substitute_code_for_unavailable_image_tools(skills):
+    req = request(message='生成一张猫咪图片', selectedSkills=[], skillRequirements={})
+    content, system = web._direct_chat_content(req)
+    assert content == req.message
+    assert '不提供生图或本机文件工具' in system
+    assert '不能用HTML/SVG代码或虚构图片链接冒充生图结果' in system
 
 
 def test_configuration_status_covers_nonvisual_and_automatically_chosen_skills(skills, monkeypatch):

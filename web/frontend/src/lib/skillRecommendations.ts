@@ -4,7 +4,7 @@ import { displayName } from './skillDisplayNames';
 // Local intent matching uses installed skills and never calls a model.
 const intents: [RegExp, string[]][] = [
   [/生图|生成.{0,6}(图片|图像)|画一|绘制|ai.{0,2}(图片|绘图)/i, ['ai-image-gen']],
-  [/海报|封面|主视觉/, ['poster-hero','ai-image-gen']],
+  [/海报|封面|主视觉/, ['ai-image-gen','poster-hero']],
   [/电商|商品详情|详情图/, ['ecom-details-image','copywriting']],
   [/生成.{0,6}视频|ai.{0,2}视频/i, ['ai-video-gen','video-script']],
   [/短剧/, ['short-drama','video-script']],
@@ -33,9 +33,21 @@ export function recommendSkills(text: string, installed: SkillItem[], selected: 
   if (input.length < 2) return [];
   const scores = new Map<string, number>();
   for (const [pattern, names] of intents) if (pattern.test(input)) names.forEach((name, index) => scores.set(name, Math.max(scores.get(name) || 0, 10 - index)));
+  // A media use (cover/poster) does not select HTML. Respect an explicit
+  // rendering request, including "do not generate with AI, use HTML".
+  const positive = input.replace(/(?:不要|不用|无需|别|禁止)\s*(?:(?:先|用|使用|生成|写|做)\s*){0,3}(?:ai\s*)?(?:生图|生成图片|html|css|svg)/gi, '');
+  const wantsGeneration = /生图|(?:ai|模型).{0,8}(?:生成|绘图|画图)|生成.{0,6}(?:图片|图像)/i.test(positive);
+  const wantsRendering = /html|css|svg/i.test(positive);
+  if (!wantsGeneration && wantsRendering && /海报|封面|主视觉/.test(positive)) {
+    scores.set('poster-hero', 11);
+    scores.delete('ai-image-gen');
+  }
   for (const skill of installed) {
     const label = displayName(skill.name).toLowerCase();
     if (input.includes(skill.name.toLowerCase()) || (label.length >= 3 && input.includes(label))) scores.set(skill.name, 20);
+  }
+  if (wantsGeneration && !wantsRendering) {
+    for (const name of scores.keys()) if (name.startsWith('card-') || name.startsWith('poster-')) scores.delete(name);
   }
   return installed.filter(skill => !selected.includes(skill.name) && scores.has(skill.name))
     .sort((a, b) => scores.get(b.name)! - scores.get(a.name)! || a.name.localeCompare(b.name)).slice(0, 3);

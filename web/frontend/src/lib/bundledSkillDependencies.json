@@ -19,6 +19,12 @@
   "auto-subtitle": [
     "transcribe"
   ],
+  "card-quote": [
+    "image"
+  ],
+  "card-xiaohongshu": [
+    "image"
+  ],
   "comparison-card": [
     "image"
   ],
@@ -38,6 +44,9 @@
   "paper-explainer": [
     "speech",
     "document"
+  ],
+  "poster-hero": [
+    "image"
   ],
   "short-drama": [
     "image",
@@ -66,6 +75,9 @@
   "voice-clone": [
     "speech",
     "music"
+  ],
+  "xhs-note-creator": [
+    "image"
   ],
   "skill-email-notify": [
     "notify"

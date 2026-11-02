@@ -40,6 +40,8 @@ def test_new_thread_registers_browser_and_images_resume_uses_cli_fallback(tmp_pa
     assert sid not in service.active
     started=next(params for method,params in calls if method=='thread/start')
     assert any(tool['name']=='easel_browser' for tool in started['dynamicTools'])
+    assert '不能先生成HTML' in started['developerInstructions']
+    assert '缺配置或生成失败' in started['developerInstructions']
     inputs=next(params['input'] for method,params in calls if method=='turn/start')
     image=next(item for item in inputs if item['type']=='localImage')
     assert Path(image['path']).read_bytes()==b'\x89PNG-test'
@@ -51,6 +53,7 @@ def test_new_thread_registers_browser_and_images_resume_uses_cli_fallback(tmp_pa
     resumed=next(params for method,params in calls if method=='thread/resume')
     assert 'dynamicTools' not in resumed
     assert 'browser_page.py' in resumed['developerInstructions'] and sid in resumed['developerInstructions']
+    assert '不能先生成HTML' in resumed['developerInstructions']
     assert browser.browser is None, 'thread setup must not launch Chromium'
     browser.close()
 

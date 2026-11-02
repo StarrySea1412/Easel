@@ -20,9 +20,9 @@ layer: produce
 
 ### 爆款 5 大原则
 
-1. **真实素材优先**：截图、对比图 > 纯 AI 生图
+1. **尊重出图要求**：未指定AI生图时可优先真实素材、截图和对比图；明确要求AI生图时按要求执行，不用素材或HTML替换。
 2. **聚焦核心卖点**：用公式判断优先级（稀缺性 × 实用性 × 可感知）
-3. **高级感视觉（走 card-design，别做糙卡）**：卡片视觉**统一走 [card-design](../card-design/SKILL.md) 设计系统**（选风格锁 spec、字大字细、填满画幅、禁大 emoji 廉价感）。文案要口语化、真实感，但**视觉不能糙**——想要「素人 / 手账」质感就选 card-design 的**手账贴纸 / 奶油温柔**风格（仍是高质量 HTML 渲染，不是糙 t2i 大 emoji）。
+3. **高级感视觉**：需要确定性卡片排版时使用 [card-design](../card-design/SKILL.md) 设计系统（选风格锁 spec、字大字细、填满画幅、禁大 emoji 廉价感）。用户要求AI生成图片时把审美要求用于生图提示词，不强制改为HTML。文案保持口语化和真实感。
 4. **痛点导向**："能解决什么问题" > 堆砌功能列表
 5. **快速迭代**：V1(60 分) → 用户反馈 → V2(70 分)
 
@@ -89,15 +89,17 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py <path>... \
 - 一张卡只讲一个论点
 - 全套配色/字体/风格保持一致（由 card-design 选中的那一套贯穿整组）
 
-**卡片视觉一律走 card-design 高质量管线，别用糙 t2i / 大 emoji 素人卡。** 按有无真实照片分两条渲染路径（策略写入 `meta.json`，枚举与 `references/meta-schema.md` 一致）：
+**先尊重本轮出图要求**：用户要求AI生成/编辑图片时先使用ai-image-gen取得真实图片，不先写HTML，也不以卡片截图替代；缺配置或失败须如实反馈，不能静默换方式。用户只要AI图片时直接交图；需要图文合成时再进入下方排版流程。以下默认只适用于未指定AI生图的文字/知识卡片任务。
+
+**文字卡片排版走 card-design 管线。** 按有无真实照片选择渲染路径（策略写入 `meta.json`，枚举与 `references/meta-schema.md` 一致）：
 
 | 策略 | 适用 | 渲染路径 |
 |------|------|----------|
-| `html_card` | 纯文字卡 / 概念卡 / 数据卡（**默认、最常用**） | **走 [card-xiaohongshu](../card-xiaohongshu/SKILL.md)**：读 [card-design](../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 出图 → `card_audit.py` 硬门禁 |
+| `html_card` | 未指定AI生图的纯文字卡 / 知识卡 / 数据卡 | **走 [card-xiaohongshu](../card-xiaohongshu/SKILL.md)**：读 [card-design](../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 出图 → `card_audit.py` 硬门禁 |
 | `text_on_photo` | 有真实照片 + 钩子文字（真实素材最佳） | Pillow `scripts/text_on_image.py`（小红书真实素材路径，保留） |
 | `collage` | 有 2-4 张互补照片 | Pillow `scripts/collage_3x4.py` |
 
-> 纯文字/概念/数据卡**不再走用户自备 t2i**——统一由 card-xiaohongshu 渲染，保证视觉质量；只有「真实照片卡」才走 Pillow 路径。
+> 未指定生图方式的文字/知识/数据卡可由 card-xiaohongshu 渲染；这条默认不覆盖用户明确的AI生图请求。真实照片卡按需使用Pillow，所有路径均交付图片文件。
 
 #### 5B. 视频帖：写分镜脚本
 
