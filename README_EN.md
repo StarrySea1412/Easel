@@ -1,4 +1,4 @@
-**Host 138 production and isolated test now run 0.45.3 / `1001448c8982`.** Plugin script resolution, image intent routing, source/asset hashes and isolated tool delivery are verified. [Release evidence](docs/release-138-0.45.2-2026-11-02.md).
+**0.45.4: provider 524 recovery and bounded retries (deployment verification pending).** A production failure on 0.45.3 exposed stacked native retries. The affected provider now has one pre-dispatch request retry, a shared 90-second request deadline, cancellation and completed-tool protection. Persistent failures remain errors. [Fault injection, validation and host 138 status](docs/provider-timeout-recovery-0.45.4.md).
 
 **0.45.3 compatibility patch deployed.** Native Codex request retry notifications are progress rather than terminal failures. Final receipts retain actual failures, cancellation and unconfirmed disconnects without resubmitting turns or tools. [Loop research and validation](docs/agent-loop-reliability-0.45.3.md).
 

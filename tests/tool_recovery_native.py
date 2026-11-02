@@ -19,6 +19,8 @@ from easel.image_jobs import ImageJobs
 def main():
     requests = []
     exhausted = os.environ.get('EASEL_NATIVE_FAILURE_MODE') == 'exhausted'
+    timeout_mode = os.environ.get('EASEL_NATIVE_FAILURE_MODE', '')
+    http_fixture = timeout_mode in ('524', '524-once', '524-after-image')
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -27,6 +29,11 @@ def main():
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             requests.append(request)
             step = len(requests)
+            if http_fixture and (timeout_mode == '524' or step == (2 if timeout_mode == '524-after-image' else 1)):
+                self.send_response(524)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
             values = {
                 1: {'operation': 'begin', 'requestId': 'native-fixture', 'filename': 'fixture.md'},
                 2: None,
@@ -37,6 +44,9 @@ def main():
                 6: {'ticket': ticket, 'requestId': 'native-image-fixture', 'prompt': 'Synthetic cover fixture'},
                 7: {'ticket': ticket, 'requestId': 'native-image-fixture', 'prompt': 'Synthetic cover fixture'},
             }
+            if http_fixture:
+                image_step = 2 if timeout_mode == '524-once' else 1
+                values = {image_step: {'ticket': ticket, 'requestId': 'native-image-fixture', 'prompt': 'Synthetic cover fixture'}} if timeout_mode != '524' else {}
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
             self.end_headers()
@@ -44,9 +54,9 @@ def main():
                 self.wfile.write(('data: ' + json.dumps({'id': 'fixture', 'object': 'chat.completion.chunk',
                     'model': 'deepseek-v4.1-flash', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}) + '\n\n').encode())
             if step in values:
-                arguments = '{"operation":"append"' if step == 2 or exhausted and step == 3 else json.dumps(values[step])
+                arguments = '{"operation":"append"' if not http_fixture and (step == 2 or exhausted and step == 3) else json.dumps(values[step])
                 send({'role': 'assistant', 'tool_calls': [{'index': 0, 'id': f'fixture-{step}', 'type': 'function',
-                    'function': {'name': 'easel_generate_image' if step in (6, 7) else
+                    'function': {'name': 'easel_generate_image' if step in (6, 7) or http_fixture else
                         'easel_present' if step == 5 else 'easel_write_artifact', 'arguments': arguments}}]})
                 send({}, 'tool_calls')
             else:
@@ -75,6 +85,11 @@ def main():
             'tools': {'toolSearch': False},
             'plugins': {'allow': ['easel-agent-safety'], 'load': {'paths': [os.environ.get('EASEL_RECOVERY_PLUGIN_PATH', '/app/openclaw/easel-agent-safety')]}},
         }
+        if http_fixture:
+            config['agents']['defaults']['model']['fallbacks'] = ['happycoding/forbidden-fallback']
+            config['models']['providers']['happycoding']['models'].append({
+                'id': 'forbidden-fallback', 'name': 'Must not be selected', 'maxTokens': 16384,
+                'reasoning': False, 'contextWindow': 128000, 'input': ['text']})
         path = state / 'openclaw.json'
         path.write_text(json.dumps(config))
         env = dict(os.environ, OPENCLAW_STATE_DIR=str(state), OPENCLAW_CONFIG_PATH=str(path),
@@ -102,9 +117,20 @@ def main():
         if files:
             result['sha256'] = hashlib.sha256(files[0].read_bytes()).hexdigest()
             result['bytes'] = len(files[0].read_bytes())
-        if process.returncode and not exhausted:
+        if process.returncode and not exhausted and not http_fixture:
             result['diagnostic'] = re.sub(r'(?i)(token|password|api[_-]?key|authorization)([^\n]{0,200})', '[REDACTED]', (process.stderr + process.stdout)[-2200:])
         print(json.dumps(result))
+        if http_fixture:
+            count = int(os.environ.get('EASEL_EXPECT_MODEL_REQUESTS', '2' if timeout_mode == '524' else '3'))
+            assert len(requests) == count and result['pluginImportError'] is False, result
+            assert {r['model'] for r in requests} == {'deepseek-v4.1-flash'}, result
+            assert process.returncode != 0 if timeout_mode == '524' else process.returncode == 0, result
+            assert not files and result['delivered'] == 0, result
+            assert len(image_jobs) == (0 if timeout_mode == '524' else 1), result
+            if timeout_mode != '524':
+                assert result['toolReceipts'] == ([0, 1, 1] if timeout_mode == '524-after-image' else [0, 0, 1]), result
+                assert image_jobs[0]['phase'] == 'queued', result
+            return
         if exhausted:
             assert process.returncode != 0 and len(requests) == 3 and len(files) == 0, result
             assert result['toolReceipts'] == [0, 1, 1], result

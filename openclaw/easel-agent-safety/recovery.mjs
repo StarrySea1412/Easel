@@ -86,24 +86,43 @@ function emitValidated(stream, message) {
   stream.end(message);
 }
 
+function providerTimeout(message) {
+  if (message.stopReason !== 'error') return null;
+  const match = /^(?:Error:\s*)?(504|524) status code(?: \(no body\)|:.*)?$/.exec(message.errorMessage || '');
+  return match ? Number(match[1]) : null;
+}
+
+function terminalFailure(model, reason, usage, errorCode = 'easel_request_recovery_exhausted') {
+  return { ...failed(model, reason), ...(usage ? { usage } : {}), errorCode,
+    // An error diagnostic, never a successful answer. OpenClaw independently
+    // retries unclassified errors with empty content; do not multiply budgets.
+    content: [{ type: 'text', text: '模型请求未完成，已停止自动恢复；保留此前工具回执，请核对原任务后继续。' }] };
+}
+
 /** Request-level recovery. The rejected response never reaches a tool dispatcher. */
-export function createToolRecoveryStream(baseStream, { createStream, validateToolCall, record = audit, repairTimeoutMs = 120000 }) {
-  // One repair shared by every model step owned by this prepared runtime.
-  let repairs = 0;
+export function createToolRecoveryStream(baseStream, { createStream, validateToolCall, record = audit,
+  repairTimeoutMs = 120000, requestTimeoutMs = 90000 }) {
+  // Independent budgets shared by all model steps in this prepared runtime.
+  let repairs = 0, requestRetries = 0;
   return (model, context, options = {}) => {
-    if (!Array.isArray(context.tools) || !context.tools.length) return baseStream(model, context, options);
     const output = createStream(), requestId = randomUUID();
     void (async () => {
-      let firstUsage, message, activeSignal = options.signal;
+      let priorUsage, message, repair = false;
+      const started = performance.now(), deadline = started + requestTimeoutMs;
       try {
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < 3; attempt++) {
           if (options.signal?.aborted) { message = failed(model, 'aborted', true); break; }
-          const repair = attempt > 0;
-          const controller = repair ? new AbortController() : null;
-          const timer = repair ? setTimeout(() => controller.abort(), repairTimeoutMs) : null;
-          const signal = repair ? options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal : options.signal;
-          activeSignal = signal;
-          let observedTool = false, argumentBytes = 0;
+          const controller = new AbortController();
+          const remaining = Math.max(0, Math.min(deadline - performance.now(), repair ? repairTimeoutMs : Infinity));
+          if (remaining <= 0) {
+            message = terminalFailure(model, 'Easel request recovery exhausted');
+            record({ requestId, attempt, provider: model.provider, model: model.id,
+              outcome: 'provider_response_deadline', elapsedMs: Math.round(performance.now() - started) });
+            break;
+          }
+          const timer = setTimeout(() => controller.abort(), remaining);
+          const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+          let observedTool = false, observedOutput = false, argumentBytes = 0;
           try {
             const nextContext = repair ? { ...context, messages: [...(context.messages || []),
               { role: 'user', content: REPAIR_INSTRUCTION, timestamp: Date.now() }] } : context;
@@ -114,15 +133,48 @@ export function createToolRecoveryStream(baseStream, { createStream, validateToo
               if (next.done) break;
               const event = next.value;
               if (event.type.startsWith('toolcall_')) observedTool = true;
+              if ((event.type === 'text_delta' || event.type === 'thinking_delta') && event.delta?.trim()) observedOutput = true;
               if (event.partial?.content) for (const block of event.partial.content) {
-                if (block.type === 'toolCall') argumentBytes = Math.max(argumentBytes,
-                  Buffer.byteLength(typeof block.partialArgs === 'string' ? block.partialArgs : JSON.stringify(block.arguments || {})));
+                if ((block.type === 'text' && block.text?.trim()) || (block.type === 'thinking' && block.thinking?.trim())) observedOutput = true;
+                if (block.type === 'toolCall') {
+                  observedTool = true;
+                  argumentBytes = Math.max(argumentBytes,
+                    Buffer.byteLength(typeof block.partialArgs === 'string' ? block.partialArgs : JSON.stringify(block.arguments || {})));
+                }
               }
               // Consume privately. Never publish a provisional toolcall_end.
             }
             message = await abortable(source.result(), signal);
-          } finally { if (timer) clearTimeout(timer); }
-          if (signal?.aborted) { message = failed(model, 'aborted', true); break; }
+          } catch (error) {
+            const raw = error instanceof Error ? error.message : '';
+            message = failed(model, /^(?:504|524) status code(?: \(no body\)|:.*)?$/.test(raw)
+              ? raw : 'Easel model response recovery failed');
+          } finally { clearTimeout(timer); }
+          if (options.signal?.aborted) { message = failed(model, 'aborted', true); break; }
+          if (signal.aborted) {
+            record({ requestId, attempt, provider: model.provider, model: model.id,
+              outcome: 'provider_response_deadline', elapsedMs: Math.round(performance.now() - started) });
+            message = terminalFailure(model, 'Easel request recovery exhausted', message?.usage);
+            break;
+          }
+          if (message.stopReason === 'aborted') break;
+          const httpStatus = providerTimeout(message);
+          if (httpStatus) {
+            const empty = !observedOutput && !observedTool && !(message.content || []).some(block =>
+              block.type === 'toolCall' || block.type === 'text' && block.text?.trim() || block.type === 'thinking' && block.thinking?.trim());
+            const retry = empty && requestRetries < 1 && performance.now() < deadline;
+            record({ requestId, attempt, provider: model.provider, model: model.id, httpStatus,
+              outputTokens: message.usage?.output ?? null, elapsedMs: Math.round(performance.now() - started),
+              outcome: retry ? 'provider_request_retry' : 'provider_request_exhausted' });
+            if (!retry) {
+              message = terminalFailure(model, 'Easel request recovery exhausted', message.usage);
+              break;
+            }
+            requestRetries++;
+            priorUsage = combinedUsage(priorUsage, message.usage);
+            // Same context, tools, model and auth. No tool was dispatched.
+            continue;
+          }
           let reason = null;
           if (message.stopReason === 'error' && REJECTIONS.has(message.errorMessage)) reason = 'malformed_tool_call';
           if (message.stopReason === 'error' && observedTool && message.errorMessage === 'Stream ended without finish_reason') reason = 'tool_stream_incomplete';
@@ -143,29 +195,30 @@ export function createToolRecoveryStream(baseStream, { createStream, validateToo
               }
             } catch { reason = 'tool_schema_invalid'; }
           }
-          if (repair && calls.some(call => completedCalls(context).has(fingerprint(call)))) reason = 'completed_tool_replay_blocked';
+          if ((repair || attempt > 0) && calls.some(call => completedCalls(context).has(fingerprint(call)))) reason = 'completed_tool_replay_blocked';
           if (repair && calls.some(call => !REPAIR_SAFE_TOOLS.has(call.name))) reason = 'unsafe_repaired_tool_blocked';
           record({ requestId, attempt, provider: model.provider, model: model.id,
             maxTokens: options.maxTokens ?? model.maxTokens ?? null, stopReason: message.stopReason,
             outputTokens: message.usage?.output ?? null, argumentBytes,
             outcome: reason || (message.stopReason === 'error' ? 'error' : 'validated') });
-          if (!reason) break;
+          if (!reason) {
+            if (message.stopReason === 'error') message = terminalFailure(model, message.errorMessage, message.usage, message.errorCode);
+            break;
+          }
           if (reason === 'completed_tool_replay_blocked' || reason === 'unsafe_repaired_tool_blocked' || repairs >= 1 || repair) {
-            const usage = message.usage;
-            message = { ...failed(model, 'Easel tool call recovery exhausted'), usage,
-              errorCode: 'easel_tool_recovery_exhausted',
-              // A nonempty diagnostic prevents OpenClaw's separate silent-turn retry.
-              content: [{ type: 'text', text: '工具参数恢复未通过安全校验，请核对原任务记录后继续。' }] };
+            message = terminalFailure(model, 'Easel tool call recovery exhausted', message.usage, 'easel_tool_recovery_exhausted');
             break;
           }
           repairs++;
-          firstUsage = message.usage;
+          repair = true;
+          priorUsage = combinedUsage(priorUsage, message.usage);
           // Same model, auth, tool schemas and prior receipts. No tool is rerun.
         }
       } catch {
-        message = failed(model, activeSignal?.aborted ? 'aborted' : 'Easel model response recovery failed', activeSignal?.aborted);
+        message = options.signal?.aborted ? failed(model, 'aborted', true)
+          : terminalFailure(model, 'Easel model response recovery failed', message?.usage);
       }
-      if (firstUsage) message = { ...message, usage: combinedUsage(firstUsage, message.usage) };
+      if (priorUsage) message = { ...message, usage: combinedUsage(priorUsage, message.usage) };
       emitValidated(output, message);
     })();
     return output;

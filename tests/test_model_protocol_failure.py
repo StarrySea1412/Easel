@@ -15,6 +15,24 @@ from web.failure_events import FailureEvents
 DIAGNOSTIC = 'Provider returned an incomplete or malformed tool call'
 
 
+@pytest.mark.parametrize('raw,status', [('524 status code (no body)', None),
+    ('Error: 524 status code (no body)', None), ('', 524), ('Easel request recovery exhausted', None)])
+def test_provider_timeout_has_its_own_safe_classification(raw, status):
+    result = gateway_error(raw, status=status)
+    assert result['code'] == 'model_provider_timeout' and result['category'] == 'timeout'
+    assert '未完成' in result['message'] and '保留' in result['message']
+    event = {'message': {'role': 'assistant', 'stopReason': 'error',
+                        'errorMessage': raw, 'usage': {'output': 0}}}
+    if raw:
+        assert observed_failure([event])['code'] == 'model_provider_timeout'
+
+
+@pytest.mark.parametrize('raw', ['用户问：524 status code (no body)', '524 is quoted',
+    '示例 Easel request recovery exhausted'])
+def test_quoted_timeout_is_not_promoted(raw):
+    assert gateway_error(raw)['code'] == 'agent_execution_failed'
+
+
 @pytest.mark.parametrize('raw', [DIAGNOSTIC, 'Easel tool call recovery exhausted', 'Error: ' + DIAGNOSTIC + '.',
     DIAGNOSTIC + '\napi_key=PRIVATE_PRIVATE_VALUE tool_arguments=PRIVATE_PROMPT'])
 def test_explicit_adapter_rejection_is_specific_and_safe(raw):

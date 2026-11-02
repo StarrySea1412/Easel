@@ -7,11 +7,14 @@ import { createToolRecoveryStream } from '../openclaw/easel-agent-safety/recover
 test('real OpenClaw transport: malformed/length/schema/closed stream recovery never dispatches rejected calls',
   { skip: !process.env.EASEL_LLM_SDK }, async () => {
     const sdk = await import(process.env.EASEL_LLM_SDK);
-    for (const fault of ['malformed', 'length', 'schema', 'closed', 'twice']) {
+    for (const fault of ['malformed', 'length', 'schema', 'closed', 'twice', '524-once', '524-persistent']) {
       let requests = 0; const payloads = [], audit = [];
       const server = createServer(async (req, res) => {
         let body = ''; for await (const b of req) body += b;
         payloads.push(JSON.parse(body)); requests++;
+        if (fault.startsWith('524') && (requests === 1 || fault === '524-persistent')) {
+          res.writeHead(524, { 'Content-Length': '0' }); res.end(); return;
+        }
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         const send = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({
           id: 'fixture', object: 'chat.completion.chunk', model: 'fixture',
@@ -42,9 +45,11 @@ test('real OpenClaw transport: malformed/length/schema/closed stream recovery ne
         const events = []; for await (const event of stream) events.push(event);
         const result = await stream.result();
         assert.equal(requests, 2, fault + ': ' + result.errorMessage);
-        assert.equal(events.filter(e => e.type === 'toolcall_end').length, fault === 'twice' ? 0 : 1, fault);
-        assert.equal(result.stopReason, fault === 'twice' ? 'error' : 'toolUse', fault);
-        assert.equal(result.usage.output, fault === 'closed' ? 20 : 40);
+        const exhausted = fault === 'twice' || fault === '524-persistent';
+        assert.equal(events.filter(e => e.type === 'toolcall_end').length, exhausted ? 0 : 1, fault);
+        assert.equal(result.stopReason, exhausted ? 'error' : 'toolUse', fault);
+        assert.equal(result.usage.output, fault === '524-persistent' ? 0 : fault === 'closed' || fault === '524-once' ? 20 : 40);
+        if (fault.startsWith('524')) assert.deepEqual(payloads[1].messages, payloads[0].messages, fault);
         assert.equal(payloads[1].messages.at(-1).role, 'user');
         assert(audit[0].outcome !== 'validated', fault);
       } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

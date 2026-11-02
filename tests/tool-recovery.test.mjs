@@ -108,7 +108,7 @@ test('repair has a cancellation deadline and never dispatches a late response', 
     return { async *[Symbol.asyncIterator]() {}, result: async () => message() };
   }], { repairTimeoutMs: 5 });
   const { result, events } = await consume(h.wrapped(model, context));
-  assert.equal(result.stopReason, 'aborted'); assert.equal(h.calls.length, 2);
+  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted'); assert.equal(h.calls.length, 2);
   assert(!events.some(e => e.type === 'toolcall_end'));
 });
 
@@ -131,13 +131,90 @@ test('repair cannot resubmit a paid image under a new request identity or run ar
 test('repair deadline settles even when a provider ignores AbortSignal', async () => {
   const h = harness([rejected(), () => new Promise(() => {})], { repairTimeoutMs: 5 });
   const { result } = await consume(h.wrapped(model, context));
-  assert.equal(result.stopReason, 'aborted');
+  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted');
 });
 
-test('provider registration applies only to the affected model and normal text callers bypass buffering', async () => {
+test('provider registration applies only to the affected model and text-only requests remain valid', async () => {
   let provider; registerToolRecovery({ registerProvider(value) { provider = value; } });
   assert.equal(provider.id, 'happycoding'); assert.equal(provider.wrapStreamFn({ modelId: 'other', streamFn() {} }), undefined);
   const h = harness([message('stop', [{ type: 'text', text: 'normal' }])]);
   const { result } = await consume(h.wrapped(model, { messages: [], tools: [] }));
   assert.equal(result.stopReason, 'stop'); assert.equal(h.calls.length, 1);
+});
+
+const timeout = () => ({ ...message('error', []), errorMessage: '524 status code (no body)' });
+const timeoutStream = (value = timeout(), events = []) => async () => ({
+  async *[Symbol.asyncIterator]() { yield* events; yield { type: 'error', error: value }; },
+  result: async () => value,
+});
+
+test('524 recovers the exact request once, including text-only callers, without a repair instruction', async () => {
+  for (const c of [context, { ...context, tools: [] }]) {
+    const h = harness([timeoutStream(), message('stop', [{ type: 'text', text: 'recovered' }])]);
+    const { result } = await consume(h.wrapped(model, c, { apiKey: 'PRIVATE_KEY' }));
+    assert.equal(result.stopReason, 'stop'); assert.equal(h.calls.length, 2);
+    assert.equal(h.calls[0].context, h.calls[1].context);
+    assert.equal(h.calls[1].options.apiKey, 'PRIVATE_KEY');
+    assert.equal(result.usage.output, 40);
+    assert.deepEqual(h.records.map(r => r.outcome), ['provider_request_retry', 'validated']);
+    assert(!JSON.stringify(h.records).includes('PRIVATE'));
+  }
+});
+
+test('persistent 524 stops after two attempts; request retry budget is shared across steps', async () => {
+  const h = harness([timeoutStream(), timeoutStream(), timeoutStream()]);
+  const { result, events } = await consume(h.wrapped(model, context));
+  assert.equal(h.calls.length, 2); assert.equal(result.stopReason, 'error');
+  assert.equal(result.errorMessage, 'Easel request recovery exhausted');
+  assert(result.content.length > 0); assert(!events.some(e => e.type === 'toolcall_end'));
+  await consume(h.wrapped(model, context)); assert.equal(h.calls.length, 3);
+  assert.deepEqual(h.records.map(r => r.outcome), ['provider_request_retry', 'provider_request_exhausted', 'provider_request_exhausted']);
+});
+
+test('a deadline bounds initial response, recovery and non-cooperative providers without becoming a user abort', async () => {
+  for (const values of [[() => new Promise(() => {})], [timeoutStream(), () => new Promise(() => {})]]) {
+    const h = harness(values, { requestTimeoutMs: 10 });
+    const { result, events } = await consume(h.wrapped(model, context));
+    assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted');
+    assert.equal(h.records.at(-1).outcome, 'provider_response_deadline');
+    assert(!events.some(e => e.type === 'toolcall_end'));
+  }
+});
+
+test('cancellation during the recovery remains cancelled and dispatches no late response', async () => {
+  const controller = new AbortController();
+  const h = harness([timeoutStream(), async () => { controller.abort(); return new Promise(() => {}); }]);
+  const { result } = await consume(h.wrapped(model, context, { signal: controller.signal }));
+  assert.equal(result.stopReason, 'aborted'); assert.equal(h.calls.length, 2);
+});
+
+test('HTTP recovery is forbidden after provisional text, reasoning or tool output', async () => {
+  for (const event of [{ type: 'text_delta', delta: 'partial' }, { type: 'thinking_delta', delta: 'partial' },
+    { type: 'toolcall_start', partial: message() }]) {
+    const h = harness([timeoutStream(timeout(), [event])]);
+    const { result, events } = await consume(h.wrapped(model, context));
+    assert.equal(h.calls.length, 1); assert.equal(result.stopReason, 'error');
+    assert(!events.some(e => e.type === 'toolcall_end'));
+  }
+});
+
+test('transport retry preserves receipts, permits a new image but blocks an already completed identical call', async () => {
+  const prior = { ...call('image-prior'), name: 'easel_generate_image' };
+  const c = { ...context, messages: [...context.messages, { role: 'assistant', content: [prior] },
+    { role: 'toolResult', toolCallId: prior.id, isError: false, content: [] }] };
+  const h = harness([timeoutStream(), message('toolUse', [{ ...prior, id: 'new-id' }])], { validateToolCall() {} });
+  const { result, events } = await consume(h.wrapped(model, c));
+  assert.equal(result.stopReason, 'error'); assert.equal(h.records.at(-1).outcome, 'completed_tool_replay_blocked');
+  assert.equal(h.calls[1].context, c); assert(!events.some(e => e.type === 'toolcall_end'));
+  const fresh = harness([timeoutStream(), message('toolUse', [{ ...prior, arguments: { content: 'new image' } }])], { validateToolCall() {} });
+  assert.equal((await consume(fresh.wrapped(model, c))).result.stopReason, 'toolUse');
+});
+
+test('request recovery and parameter repair have independent limits with cumulative usage', async () => {
+  const h = harness([timeoutStream(), rejected(), message()]);
+  const { result } = await consume(h.wrapped(model, context));
+  assert.equal(result.stopReason, 'toolUse'); assert.equal(h.calls.length, 3);
+  assert.equal(h.calls[1].context, context);
+  assert.equal(h.calls[2].context.messages.at(-1).content, REPAIR_INSTRUCTION);
+  assert.equal(result.usage.totalTokens, 90);
 });
