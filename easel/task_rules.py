@@ -49,14 +49,20 @@ class GoalSpec(BaseModel):
     maxSeconds: int = Field(default=1200, ge=60, le=7200, strict=True)
     maxTools: int = Field(default=40, ge=1, le=200, strict=True)
     maxImages: int = Field(default=0, ge=0, le=16, strict=True)
-    workflow: Literal['research-delivery'] | None = None
+    workflow: Literal['research-delivery', 'content-pipeline'] | None = None
     stages: list[GoalStage] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode='after')
     def stage_contract(self):
         if self.workflow and self.stages:
             raise ValueError('选择内置协作流程或自定义阶段之一')
-        count = 4 if self.workflow else len(self.stages)
+        if self.workflow:
+            # Built-in templates define their own stage count; a Literal entry
+            # without a template is a programming error, so index directly.
+            from easel.task_stages import WORKFLOW_STAGE_COUNT
+            count = WORKFLOW_STAGE_COUNT[self.workflow]
+        else:
+            count = len(self.stages)
         if count > self.maxIterations:
             raise ValueError('执行轮次上限不能少于协作阶段数')
         if len({s.id for s in self.stages}) != len(self.stages):

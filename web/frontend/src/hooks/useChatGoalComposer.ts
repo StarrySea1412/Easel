@@ -1,8 +1,14 @@
 import {useEffect,useRef,useState} from 'react';
 import {fetchOfficeTaskModels} from '../lib/officeControls';
-import {taskRequest,type TaskGoal,type GoalSpec} from '../lib/tasks';
+import {taskRequest,type TaskGoal,type GoalSpec,type TaskWorkflow,FALLBACK_WORKFLOWS} from '../lib/tasks';
 
 function invalidateGeneration(ref:{current:number}){ref.current++;}
+
+/** Workflow options are shared across composers; one successful response serves
+ *  the whole page lifetime and a failed read keeps the built-in fallback list. */
+let workflowsCache:TaskWorkflow[]|null=null;
+
+export function resetWorkflowCache(){workflowsCache=null;}
 
 /** Codex-style goal mode: the composer text is the objective, completion defaults
  *  to delivered evidence + explicit user confirmation, and limits keep product
@@ -18,7 +24,8 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
 }) {
   const goal=editor?.goal;
   const [objective,setObjective]=useState('');
-  const [workflow,setWorkflow]=useState<''|'research-delivery'>('');
+  const [workflow,setWorkflow]=useState<''|string>('');
+  const [workflows,setWorkflows]=useState<TaskWorkflow[]>(workflowsCache??FALLBACK_WORKFLOWS);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[savedId,setSavedId]=useState('');
   const [loading,setLoading]=useState(false),[verifiedModel,setVerifiedModel]=useState(''),[revision,setRevision]=useState(0),[savedModel,setSavedModel]=useState('');
   const submitting=useRef(false),saved=useRef(''),generation=useRef(0);
@@ -44,6 +51,17 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
       .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
   },[enabled,sessionId,executionModel,unsupported,goal,revision,savedId]);
+  useEffect(()=>{
+    if(!enabled||unsupported||workflowsCache)return;
+    const controller=new AbortController();
+    void taskRequest<{workflows:TaskWorkflow[]}>('/workflows',undefined,undefined,controller.signal)
+      .then(result=>{
+        if(controller.signal.aborted)return;
+        const list=Array.isArray(result?.workflows)&&result.workflows.length?result.workflows:FALLBACK_WORKFLOWS;
+        workflowsCache=list;setWorkflows(list);
+      }).catch(()=>{/* keep the fallback list; the picker must stay usable offline */});
+    return()=>controller.abort();
+  },[enabled,unsupported]);
   const locked=Boolean(goal&&['active','completed','cancelled'].includes(goal.status));
   const disabled=busy||blocked||locked||unsupported;
   const canSubmit=enabled&&!disabled&&!loading&&Boolean(executionModel)&&verifiedModel===executionModel&&objective.trim().length>=3&&objective.trim().length<=6000;
@@ -68,7 +86,7 @@ export function useChatGoalComposer({editor,sessionId,engine,modelRef,blocked,on
     }catch(e){if(current())setError((key?'已保存，启动失败：':'')+(e instanceof Error?e.message:'保存失败'));}
     finally{if(current()){submitting.current=false;setBusy(false);}}
   }
-  return{objective,setObjective,workflow,setWorkflow,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
+  return{objective,setObjective,workflow,setWorkflow,workflows,busy,error,savedId,loading,unsupported,locked,canSubmit,executionModel,
     modelLocked:Boolean(goal||savedId||busy),fieldsLocked:busy||locked||Boolean(savedId)||unsupported,
     label:busy?'正在设置目标':savedId?'重试启动目标':goal?'保存并继续目标':'开始目标',
     refreshModel:()=>setRevision(value=>value+1),save};

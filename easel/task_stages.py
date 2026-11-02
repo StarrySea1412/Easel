@@ -11,26 +11,44 @@ from easel.agent_roles import role_snapshot
 from easel.task_rules import check_goal
 
 
-WORKFLOWS = [{
-    'id': 'research-delivery', 'name': '研究 → 制作 → 审查 → 交付',
-    'description': '按阶段生成文件并核验交接，最终由你确认质量；不会自动发布。',
-    'roles': ['researcher', 'builder', 'reviewer', 'publisher'],
-}]
+# (key, title, roleId, objective) per built-in stage. Stage artifacts live under
+# workflows/<goalId>/ so every goal gets its own handoff paths.
+WORKFLOW_TEMPLATES = {
+    'research-delivery': [
+        ('research', '研究依据', 'researcher', '围绕总目标核对材料与来源，写出事实、约束及未知项。'),
+        ('build', '制作结果', 'builder', '根据已核验研究材料完成总目标要求的实际产物；交接文件记录产物路径和验证方式。'),
+        ('review', '审查结果', 'reviewer', '独立检查上游实际文件，记录通过项、缺陷与未核验项，不以文件存在冒充质量通过。'),
+        ('deliver', '整理交付', 'publisher', '汇总真实产物、审查意见和未完成项，写出可验收交付清单；不执行外部发布。'),
+    ],
+    'content-pipeline': [
+        ('analyze', '分析选题', 'researcher', '核对选题、受众与素材来源，写出事实、平台约束及未知项；引用必须带来源。'),
+        ('draft', '撰写稿件', 'copywriter', '依据已核验分析撰写目标平台稿件，含标题、正文与标签；不改动事实，不夸大结论。'),
+        ('visuals', '图片规格', 'visual-creator', '依据稿件列出图片清单与规格（构图、文案位、尺寸、生成参数）；只写规格文件，不冒充已生成图片。'),
+        ('prepare', '发布准备', 'publisher', '汇总稿件、图片规格与发布边界，写出可验收发布准备清单；不执行外部发布。'),
+    ],
+}
+
+_WORKFLOW_META = [
+    ('research-delivery', '研究 → 制作 → 审查 → 交付', '分工协作',
+     '按阶段生成文件并核验交接，最终由你确认质量；不会自动发布。'),
+    ('content-pipeline', '分析 → 稿件 → 图片 → 发布准备', '内容业务链',
+     '面向社媒内容：先核验选题与素材，再写稿件，再产出图片规格清单，最后整理发布准备；不会自动发布，也不冒充已生成图片。'),
+]
+
+WORKFLOWS = [{'id': wid, 'name': name, 'shortName': short, 'description': desc,
+              'roles': [t[2] for t in WORKFLOW_TEMPLATES[wid]]} for wid, name, short, desc in _WORKFLOW_META]
+WORKFLOW_STAGE_COUNT = {wid: len(WORKFLOW_TEMPLATES[wid]) for wid, *_ in _WORKFLOW_META}
 
 
 def prepare_stages(spec, goal_id):
     stages = deepcopy(spec.get('stages', []))
-    if spec.get('workflow') == 'research-delivery':
+    template = WORKFLOW_TEMPLATES.get(spec.get('workflow') or '')
+    if template:
         folder = f'workflows/{goal_id}'
         stages = [
             {'id': key, 'title': title, 'roleId': role, 'objective': objective,
              'criteria': [{'type': 'file', 'label': title + '文件', 'value': f'{folder}/{key}.md'}]}
-            for key, title, role, objective in [
-                ('research', '研究依据', 'researcher', '围绕总目标核对材料与来源，写出事实、约束及未知项。'),
-                ('build', '制作结果', 'builder', '根据已核验研究材料完成总目标要求的实际产物；交接文件记录产物路径和验证方式。'),
-                ('review', '审查结果', 'reviewer', '独立检查上游实际文件，记录通过项、缺陷与未核验项，不以文件存在冒充质量通过。'),
-                ('deliver', '整理交付', 'publisher', '汇总真实产物、审查意见和未完成项，写出可验收交付清单；不执行外部发布。'),
-            ]
+            for key, title, role, objective in template
         ]
     return [{**s, 'status': 'pending', 'attempts': 0, 'checks': [], 'role': role_snapshot(s['roleId'])}
             for s in stages]

@@ -11,7 +11,7 @@ const {createRoot}=await import('react-dom/client');
 const {default:Board}=await loadTsModule('../src/components/TaskStageBoard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
 const {default:Options,ChatGoalNotice}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
-const {useChatGoalComposer}=await loadTsModule('../src/hooks/useChatGoalComposer.ts',import.meta.url);
+const {useChatGoalComposer,resetWorkflowCache}=await loadTsModule('../src/hooks/useChatGoalComposer.ts',import.meta.url);
 
 const stage={id:'research',title:'研究依据',objective:'核对实际来源',roleId:'researcher',role:{shortName:'研究'},status:'completed',attempts:1,
   criteria:[{type:'file',label:'依据文件',value:'workflows/one/research.md'}],checks:[{state:'passed',detail:'文件已核验'}],handoff:'来源已写入文件'};
@@ -70,4 +70,44 @@ test('workflow is sent with its budget, saved-start retry does not create anothe
   await act(async()=>host.querySelector('[aria-label="目标推进方式"]').click());
   assert.equal(document.querySelector('[role=option][aria-selected=true]').textContent,'直接推进');
   await act(async()=>root.unmount());host.remove();
+});
+test('workflow picker serves the task-service list, falls back offline, and sends the content pipeline',async t=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host),requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url).endsWith('/workflows'))return new Response(JSON.stringify({workflows:[
+      {id:'research-delivery',name:'研究 → 制作 → 审查 → 交付',shortName:'分工协作',description:'',roles:['researcher','builder','reviewer','publisher']},
+      {id:'content-pipeline',name:'分析 → 稿件 → 图片 → 发布准备',shortName:'内容业务链',description:'',roles:['researcher','copywriter','visual-creator','publisher']}]}));
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true,label:'隔离模型'}]}));
+    const body=JSON.parse(options.body);requests.push({url:String(url),body});
+    return new Response(JSON.stringify({id:'created'}));
+  });
+  const props={sessionId:'one',engine:'openclaw',modelRef:'fixture/model',editor:{seed:'产出小红书发帖准备包'},blocked:false};
+  resetWorkflowCache();
+  await act(async()=>root.render(createElement(Composer,props)));
+  await act(async()=>{});
+  await act(async()=>host.querySelector('[aria-label="目标推进方式"]').click());
+  const labels=[...document.querySelectorAll('[role=option]')].map(o=>o.textContent);
+  assert.ok(labels.includes('内容业务链')&&labels.includes('分工协作'),labels.join('|'));
+  await act(async()=>[...document.querySelectorAll('[role=option]')].find(o=>o.textContent.includes('内容业务链')).click());
+  assert.match(host.querySelector('[aria-label="目标推进方式"]').textContent,/协作/);
+  assert.equal(host.querySelector('[data-start]').disabled,false,host.textContent);
+  await act(async()=>host.querySelector('[data-start]').click());
+  assert.equal(requests[0].body.goal.workflow,'content-pipeline');
+  assert.equal(requests[0].body.goal.maxIterations,8);
+  // A failed workflows read keeps the built-in options so the picker stays usable.
+  resetWorkflowCache();
+  const failing={...props,editor:{seed:'直接推进也可以'}};
+  t.mock.method(globalThis,'fetch',async(url,options={})=>{
+    if(String(url).endsWith('/workflows'))return new Response(JSON.stringify({detail:'任务请求失败，请重试'}),{status:503});
+    if(String(url).includes('/agent-office/models'))return new Response(JSON.stringify({available:true,scope:'next_turn',options:[{id:'fixture/model',provider:'fixture',model:'model',configured:true,label:'隔离模型'}]}));
+    return new Response(JSON.stringify({id:'created'}));
+  });
+  await act(async()=>root.unmount());host.remove();
+  const host2=document.createElement('div');document.body.append(host2);const root2=createRoot(host2);
+  await act(async()=>root2.render(createElement(Composer,failing)));
+  await act(async()=>{});
+  await act(async()=>host2.querySelector('[aria-label="目标推进方式"]').click());
+  const fallback=[...document.querySelectorAll('[role=option]')].map(o=>o.textContent);
+  assert.ok(fallback.includes('分工协作'),fallback.join('|'));
+  await act(async()=>root2.unmount());host2.remove();
 });

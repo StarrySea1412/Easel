@@ -23,9 +23,11 @@ import run_ledger
 
 
 def spec(**patch):
-    return GoalSpec(objective='核对研究依据并交付实际方案文件', modelRef='fixture/model',
+    patch.setdefault('workflow', 'research-delivery')
+    patch.setdefault('objective', '核对研究依据并交付实际方案文件')
+    return GoalSpec(modelRef='fixture/model',
                     criteria=[{'type': 'review', 'label': '检查实际质量'}],
-                    workflow='research-delivery', **patch).model_dump()
+                    **patch).model_dump()
 
 
 def finish_stage(store, g, r, content='本阶段实际产物'):
@@ -178,3 +180,35 @@ def test_historical_handoff_recheck_cannot_replace_a_later_goal(tmp_path):
         store.invalidate_handoff(g['id'], '旧文件被修改')
     assert store.get('goals', new_goal['id'])['status'] == 'draft'
     assert store.get('goals', g['id'])['status'] == 'completed'
+
+
+def test_content_pipeline_registry_templates_and_budget():
+    from easel.agent_roles import role_snapshot
+    from easel.task_stages import WORKFLOW_TEMPLATES, WORKFLOWS, WORKFLOW_STAGE_COUNT, prepare_stages
+    assert {w['id'] for w in WORKFLOWS} == {'research-delivery', 'content-pipeline'}
+    assert WORKFLOW_STAGE_COUNT == {'research-delivery': 4, 'content-pipeline': 4}
+    assert {w['id']: w['roles'] for w in WORKFLOWS} == {wid: [t[2] for t in tpl] for wid, tpl in WORKFLOW_TEMPLATES.items()}
+    stages = prepare_stages({'workflow': 'content-pipeline', 'stages': []}, 'g42')
+    assert [s['id'] for s in stages] == ['analyze', 'draft', 'visuals', 'prepare']
+    assert [s['roleId'] for s in stages] == ['researcher', 'copywriter', 'visual-creator', 'publisher']
+    assert all(s['criteria'][0]['value'].startswith('workflows/g42/') for s in stages)
+    assert all(role_snapshot(s['roleId'])['schemaVersion'] == 1 for s in stages)
+    GoalSpec.model_validate({**spec(workflow='content-pipeline', objective='产出小红书发帖准备包')})
+    with pytest.raises(ValidationError):
+        GoalSpec.model_validate({**spec(workflow='content-pipeline'), 'maxIterations': 3})
+
+
+def test_content_pipeline_four_roles_settle_and_wait_for_human_review(tmp_path):
+    store = TaskStore(tmp_path)
+    g = store.create_goal(spec(workflow='content-pipeline', objective='产出小红书发帖准备包', maxIterations=8), session='one')
+    store.change_goal(g['id'], 'start')
+    for expected in ('researcher', 'copywriter', 'visual-creator', 'publisher'):
+        g, r = store.claim('worker')
+        assert r['roleId'] == expected and r['role']['stopConditions']
+        g = finish_stage(store, g, r, content='阶段实际产物 ' + expected)
+    assert g['status'] == 'blocked' and g['phase'] == 'review'
+    assert [s['status'] for s in g['stages']] == ['completed'] * 4
+    assert all(s['checks'][0]['state'] == 'passed' and s['handoff'] for s in g['stages'])
+    assert store.claim('worker') is None
+    checks, _ = check_goal(tmp_path, g, '', reviewed=True)
+    assert store.apply_checks(g['id'], checks, review=g['stages'][-1]['turnId'])['status'] == 'completed'

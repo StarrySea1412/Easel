@@ -93,7 +93,9 @@ test('inline goal never silently substitutes an unavailable explicit model and d
   assert.match(host.querySelector('[role=alert]').textContent,/所选模型不可用/);
   assert.equal(host.querySelector('button[type=submit]')?.disabled??host.querySelector('.btn-primary').disabled,true);
   await act(async()=>host.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));
-  assert.equal(requests.length,1);
+  // The model probe and the one-shot workflow read may appear, but no goal is created or started.
+  assert.ok(requests.some(r=>String(r.url).includes('/agent-office/models')),requests.map(r=>r.url).join('|'));
+  assert.equal(requests.filter(r=>String(r.url).endsWith('/goals')||String(r.url).includes('/action')).length,0);
   await act(async()=>root.render(createElement(GoalComposer,{...props,blocked:true})));
   assert.match(host.textContent,/请先暂停/);assert.equal(host.querySelector('.btn-primary').disabled,true);
   await act(async()=>root.unmount());host.remove();

@@ -2,7 +2,8 @@ import type { ChatSession } from './store';
 
 export interface TaskCriterion { type:'file'|'text'|'review'; label:string; value:string }
 export interface TaskCheck extends TaskCriterion { state:'pending'|'passed'|'failed'|'error'; detail?:string; evidence?:string }
-export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:'research-delivery'|null }
+export interface TaskWorkflow { id:string; name:string; shortName?:string; description:string; roles:string[] }
+export interface GoalSpec { objective:string; modelRef:string; criteria:TaskCriterion[]; maxIterations:number; maxSeconds:number; maxTools:number; maxImages:number; workflow?:string|null }
 export interface TaskStage { id:string; title:string; objective:string; roleId:string; role?:{name:string;shortName:string}; status:'pending'|'running'|'completed'|'blocked'|'unconfirmed'; attempts:number; criteria:TaskCriterion[]; checks:TaskCheck[]; turnId?:string; completedAt?:number; handoff?:string }
 export interface GoalStep { id:string; title:string; status:'pending'|'in_progress'|'completed'|'blocked'; detail?:string }
 export interface TaskGoal extends GoalSpec { id:string; sessionId:string; title:string; status:string; phase:string; iterations:number; activeSeconds:number; toolsUsed:number; imagesUsed:number; reason:string; checks:TaskCheck[]; currentTurnId?:string; steps?:GoalStep[]; stages?:TaskStage[]; currentStageId?:string; progressUpdatedAt?:number; createdAt?:number; updatedAt?:number }
@@ -17,6 +18,16 @@ export async function taskRequest<T>(path='', body?:unknown, method='POST', sign
   const result=await response.json();
   if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:Array.isArray(result.detail)?result.detail.map((r:{msg:string})=>r.msg).join('；'):'任务请求失败，请重试');
   return result as T;
+}
+/** Built-in collaboration workflows are served by the task service; these two
+ *  cover the window before the first response (and offline fallback). */
+export const FALLBACK_WORKFLOWS:TaskWorkflow[]=[
+  {id:'research-delivery',name:'研究 → 制作 → 审查 → 交付',shortName:'分工协作',description:'按阶段生成文件并核验交接，最终由你确认质量；不会自动发布。',roles:['researcher','builder','reviewer','publisher']},
+  {id:'content-pipeline',name:'分析 → 稿件 → 图片 → 发布准备',shortName:'内容业务链',description:'面向社媒内容：先核验选题与素材，再写稿件，再产出图片规格清单，最后整理发布准备；不会自动发布，也不冒充已生成图片。',roles:['researcher','copywriter','visual-creator','publisher']},
+];
+export async function fetchTaskWorkflows(signal?:AbortSignal):Promise<TaskWorkflow[]> {
+  const result=await taskRequest<{workflows:TaskWorkflow[]}>('/workflows',undefined,undefined,signal);
+  return Array.isArray(result.workflows)&&result.workflows.length?result.workflows:FALLBACK_WORKFLOWS;
 }
 export const taskStatus:Record<string,string>={draft:'待启动',active:'进行中',paused:'已暂停',blocked:'需要处理',completed:'已完成',cancelled:'已取消',running:'运行中',unconfirmed:'等待核实',failed:'失败',stopped:'已停止',queued:'排队中',skipped:'已跳过'};
 export function goalElapsed(goal:TaskGoal, runs:TaskRun[], now=Date.now()/1000):number {

@@ -6,12 +6,13 @@ import '../styles/chat-goal.css';
 
 /** Inline goal mode: the composer text itself is the goal (Codex-style, no settings form). */
 export default function ChatGoalComposer({state,goal,onExit}:{state:ChatGoalComposerState;goal?:TaskGoal;onExit:()=>void}){
+  const selected=state.workflows.find(item=>item.id===state.workflow);
   return <span className="composer-goal-control" onKeyDown={event=>{if(event.key==='Escape'&&!event.nativeEvent.isComposing){event.preventDefault();event.stopPropagation();onExit();}}}>
     <Select className="composer-goal-workflow" aria-label="目标推进方式" value={state.workflow||''}
       triggerIcon={<IconTarget size={16}/>} triggerLabel={state.workflow?'协作':'目标'} menuMinWidth={132}
-      title={`目标推进方式：${state.workflow?'分工协作':'直接推进'}`}
-      disabled={state.fieldsLocked||Boolean(goal)} onChange={value=>state.setWorkflow(value as ''|'research-delivery')}
-      options={[{value:'',label:'直接推进'},{value:'research-delivery',label:'分工协作'}]}/>
+      title={`目标推进方式：${selected?selected.name:'直接推进'}`}
+      disabled={state.fieldsLocked||Boolean(goal)} onChange={value=>state.setWorkflow(value as ''|string)}
+      options={[{value:'',label:'直接推进'},...state.workflows.map(item=>({value:item.id,label:item.shortName||item.name}))]}/>
     <button type="button" className="composer-goal-close" aria-label="退出目标设置" title="退出目标模式（Esc）" disabled={state.busy} onClick={onExit}>×</button>
   </span>;
 }
