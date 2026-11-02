@@ -1,3 +1,5 @@
+**138正式/隔离已更新0.45.4 / `2d6507a2e54e`。** 修复目标渠道524与重试叠加，最多一次派发前请求恢复、90秒请求截止并保留已完成工具。真实检查中Happycoding的DeepSeek接口仍524；已配置Minimax M3在隔离工作台23秒完成短对话，不能将本补丁称为供应商可用性已恢复。[故障注入、实际调用和138回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/provider-timeout-recovery-0.45.4.md)。
+
 **138正式/隔离已更新0.45.3（2026-11-02）。** 运行构建`1001448c8982`。保留0.45.1派发前有界恢复、0.45.2插件目录与主动生图修复；新增Codex过程重试与最终状态一致性修复，恢复成功不再被旧错误污染。固定源码对照Harness、Codex、PydanticAI、Vercel及实际OpenClaw循环，[依据、故障回归和部署回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/agent-loop-reliability-0.45.3.md)。
 
 长期真实业务成功率、数据完整性、图片质量/费用及历史未完项继续，安装器未发布；只同步双语首页，功能未合并main。以下保留各版本当时的验证范围。
