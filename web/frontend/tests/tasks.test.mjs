@@ -5,7 +5,7 @@ import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'https://easel.test/'});globalThis.document=window.document;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
-const {mergeTaskSessions,planNeedsAttention}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
+const {mergeTaskSessions,planNeedsAttention,taskRequest}=await loadTsModule('../src/lib/tasks.ts',import.meta.url);
 const {default:GoalCard}=await loadTsModule('../src/components/GoalCard.tsx',import.meta.url);
 const {default:GoalPanel}=await loadTsModule('../src/components/ChatGoalPanel.tsx',import.meta.url);
 const {default:GoalOptions,ChatGoalNotice}=await loadTsModule('../src/components/ChatGoalComposer.tsx',import.meta.url);
@@ -125,4 +125,15 @@ test('plan attention follows the latest triggered run without inventing unread s
   assert.equal(planNeedsAttention(plan,[{...goal,id:'g1',status:'blocked'}]),true);
   assert.equal(planNeedsAttention(plan,[]),false);
   assert.equal(planNeedsAttention({...plan,history:[]},[{...goal,id:'g1',status:'blocked'}]),false);
+});
+
+test('task requests surface structured backend errors instead of a generic message',async t=>{
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+    detail:{code:'chat_model_not_configured',category:'configuration',retryable:false,message:'只能选择已配置的完整渠道模型，请刷新模型设置。'}}),{status:400,headers:{'Content-Type':'application/json'}}));
+  await assert.rejects(()=>taskRequest('/goals/x/action',{action:'resume'}),
+    /只能选择已配置的完整渠道模型/);
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({detail:[{msg:'阶段数不能为空'}]}),{status:422,headers:{'Content-Type':'application/json'}}));
+  await assert.rejects(()=>taskRequest('/goals',{goal:{}}),/阶段数不能为空/);
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({detail:42}),{status:400,headers:{'Content-Type':'application/json'}}));
+  await assert.rejects(()=>taskRequest('/goals/x/action',{action:'resume'}),/任务请求失败，请重试/);
 });

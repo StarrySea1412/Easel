@@ -111,3 +111,16 @@ test('workflow picker serves the task-service list, falls back offline, and send
   assert.ok(fallback.includes('分工协作'),fallback.join('|'));
   await act(async()=>root2.unmount());host2.remove();
 });
+
+test('blocked current stage keeps the step marker for assistive technology',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  const stages=[stage,{...stage,id:'draft',title:'撰写稿件',status:'blocked',checks:[],handoff:undefined},
+    {...stage,id:'visuals',title:'图片规格',status:'pending',checks:[],handoff:undefined}];
+  await act(async()=>root.render(createElement(Board,{stages})));
+  const current=host.querySelector('[aria-current=step]');
+  assert.ok(current,'current stage keeps aria-current');
+  assert.match(current.querySelector('h4').textContent,/撰写稿件/);
+  const pendings=[...host.querySelectorAll('[aria-current=step]')];
+  assert.equal(pendings.length,1,'only the first unfinished stage is current');
+  await act(async()=>root.unmount());host.remove();
+});

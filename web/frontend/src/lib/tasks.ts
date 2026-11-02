@@ -16,7 +16,15 @@ const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$
 export async function taskRequest<T>(path='', body?:unknown, method='POST', signal?:AbortSignal):Promise<T> {
   const response=await fetch(`${base}/api/tasks${path}`,{method:body===undefined?'GET':method,cache:'no-store',signal,...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
   const result=await response.json();
-  if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:Array.isArray(result.detail)?result.detail.map((r:{msg:string})=>r.msg).join('；'):'任务请求失败，请重试');
+  if(!response.ok){
+    // detail 可能是字符串、FastAPI 校验数组，或结构化错误对象（如 chat_model_not_configured）。
+    const raw=result?.detail;
+    const message=typeof raw==='string'?raw
+      :Array.isArray(raw)?raw.map((r:{msg:string})=>r.msg).join('；')
+      :(raw&&typeof raw==='object'&&typeof (raw as {message?:unknown}).message==='string')?(raw as {message:string}).message
+      :'任务请求失败，请重试';
+    throw new Error(message);
+  }
   return result as T;
 }
 /** Built-in collaboration workflows are served by the task service; these two

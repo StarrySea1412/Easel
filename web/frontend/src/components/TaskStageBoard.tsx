@@ -8,9 +8,11 @@ const labels: Record<TaskStage['status'], string> = {
 
 export default function TaskStageBoard({ stages, compact=false }: { stages: TaskStage[]; compact?:boolean }) {
   const finished = stages.filter(stage => stage.status === 'completed').length;
+  // 当前阶段是首个未交接的阶段：running、blocked 或 unconfirmed 都要保留 step 语义。
+  const currentId = stages.find(stage => stage.status !== 'completed')?.id;
   return <section className={`task-stage-board${compact?' is-compact':''}`} aria-label="分工协作阶段">
     <div className="task-stage-heading"><strong>分工协作</strong><span>{finished}/{stages.length} 阶段已交接</span></div>
-    <ol>{stages.map((stage, index) => <li key={stage.id} className={`task-stage ${stage.status}`} aria-current={stage.status === 'running' ? 'step' : undefined}>
+    <ol>{stages.map((stage, index) => <li key={stage.id} className={`task-stage ${stage.status}`} aria-current={stage.id === currentId ? 'step' : undefined}>
       <span className="task-stage-number" aria-hidden="true">{stage.status === 'completed' ? '✓' : index + 1}</span>
       <div className="task-stage-content"><div className="task-stage-title"><h4>{stage.title}</h4><span>{stage.role?.shortName || stage.role?.name || stage.roleId}</span></div>
         <p className="task-stage-status">{labels[stage.status]}{stage.attempts > 1 ? ` · 第 ${stage.attempts} 次执行` : ''}</p>
