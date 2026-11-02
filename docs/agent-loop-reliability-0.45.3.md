@@ -72,3 +72,17 @@ Grok Bot和ZCode公开资料的证据边界继续沿用[前次研究](tool-call-
 `tests/test_codex_retry_events.py`通过完整service启动/结算路径，注入已完成文件交付、异轮错误、原轮次可重试错误及后续四种终态。验证每例仅一次`thread/start`/`turn/start`、交付一次、保留回答和工具回执；成功/中断不产生失败通知，真正失败保留最终原因，断线保持unconfirmed。另验证原生终态清除旧通知、真实失败不被泛化消息覆盖。
 
 使用项目已有虚拟环境，5项新增与原有接回/持久结算组合共57项通过。首次误用系统Python导致缺少声明依赖websocket-client，已改用完整项目环境重跑；不通过跳过测试掩盖。最终前端构建及lint退出0（既有warning），版本同步为0.45.3。安装器和收费图片质量验收不在本补丁验证中，138实际激活与源码/镜像SHA在完成后追加。
+
+## 138实际发布与Git交付
+
+0.45.3源码`1001448c8982a6d4790be42c280955f135e867f6`已提交推送并核对starry远端；正式8444和隔离8445均已运行该构建。固定镜像`sha256:fcc90e643e9bdf589fb6d0a8f43625d1cb3139c1415accfcc4320a0edde26eca`，复用已核依赖的0.45.2镜像。仅四个运行源码文件变化：codex_service、pyproject及前端package/lock；另替换完整干净前端构建及Git导出manifest。构建前校验依赖兼容和变化集合，构建后1748运行源码逐文件SHA一致、安装包metadata0.45.3一致。
+
+干净前端由已提交源码在本机构建，打包76文件共6554207字节，ZIP SHA256 `9090bc2672130d05c58eb7280cd06a752abe25317d7d3a9ef509ebbae81a88e1`；构建来源和各文件哈希记录在发布目录frontend-build-receipt.json。两环境通过HTTPS核对73个assets共6535162字节及首页；未公开挂载的两份public源文件不冒充HTTP入口。首次验证误取/index.html返回404，按实际首页/路由修正验证器后通过，不修改产品路由。
+
+app/browser同固定镜像、healthy、当前重启0，Gateway正常，匿名version/readiness/failures均401。生产默认minimax-m3和原fallback保留，目标DeepSeek预算16384，reload off；readiness.modelInference仍not_probed，不等于真实任务成功。切正式前agent/browser/media active/waiting全0，图片队列仅1条既有done，无queued/running。
+
+停写备份：正式`/home/ubuntu/easel-backups/20261102T111020Z.tar.gz`，隔离`/home/ubuntu/easel-backups-test/20261102T110606Z.tar.gz`。上一0.45.2镜像和代码保留，manager rollback仅回滚代码/镜像并保留当前数据；状态快照恢复另行处理。本次两环境启动未复现0.45.2隔离租约拒绝，停机预算缺口仍保留。
+
+隔离入口https://127.0.0.1:8445/login（仅服务器loopback，经既有本机隧道访问），gaojitest/gaoji登录HTTP实际通过；真实浏览器前后端0.45.3、build1001448c8982、网关连接均核对，刷新默认双栏折叠。0.45.2已实际打开生图工坊和设置，点击对话展开会话栏；0.45.3页面版本通过不冒充所有菜单、真实图片质量或完整运营流程验收。正式登录后浏览器未验收，不植入测试弱密码。安装器未发布。
+
+组合57项与版本校验另1项均通过（版本专项与5项新测试重跑6通过，不重复累计）；构建/lint退出0，既有warning保留。0.45.2完整原生CLI合成模型/真实文件工具的验收结果沿用原回执，此次不重放用户收费业务。全部已推送研究及发布文档链接HTTP200，main仅同步双语首页，功能不合main。
