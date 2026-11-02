@@ -75,6 +75,16 @@ def test_server_commands_use_writable_output_scripts(skills, monkeypatch, tmp_pa
 
 
 @pytest.mark.parametrize('entry', ['_chat_message', '_codex_message'])
+def test_card_image_request_proactively_uses_image_tool_without_ai_keyword(skills, entry):
+    req = request(message='帮我做「小红书卡组」关于问界的', selectedSkills=['card-xiaohongshu'], skillRequirements={})
+    message = getattr(web, entry)(req)
+    policy = message.rsplit('〔本轮策略提醒〕\n', 1)[1]
+    assert '在本轮图片制作授权内主动调用easel_generate_image' in policy
+    assert '不能只写生图提示词' in policy
+    assert '确定性文字/数据卡片' in policy and '真实素材' in policy
+
+
+@pytest.mark.parametrize('entry', ['_chat_message', '_codex_message'])
 def test_image_output_rule_survives_no_picker_and_conflicting_card_skill(skills, monkeypatch, entry):
     monkeypatch.setattr(web, '_read_env', lambda: {})
     for names in ([], ['card-quote']):

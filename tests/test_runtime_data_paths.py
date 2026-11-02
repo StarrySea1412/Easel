@@ -28,6 +28,7 @@ def test_data_root_keeps_source_default_and_passes_explicit_data(tmp_path, monke
     assert data_root(PROJECT_ROOT) == data
     env = child_env(PROJECT_ROOT)
     assert env["EASEL_ROOT"] == str(PROJECT_ROOT)
+    assert env["EASEL_CODE_ROOT"] == str(PROJECT_ROOT.resolve())
     assert env["EASEL_DATA_DIR"] == str(data)
     assert Path(env["EASEL_PYTHON"]).is_file()
 

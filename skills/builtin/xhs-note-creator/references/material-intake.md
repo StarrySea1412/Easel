@@ -2,6 +2,8 @@
 
 当用户提供了已有素材(文字 / 图片 / 视频 / 音频)，笔记的写法要从"找参考 → 写原稿 → 拆卡"切换到"清点素材 → 从素材里提炼观点 → 反推卡片/分镜"。本文档给出素材处理的完整流程和三条卡片渲染路径。
 
+出图方式先遵从本轮要求：制作卡组、封面或配图等图片成品时主动使用专用生图工具，保留已授权数量/费用；真实商品和车型事实使用可核实素材。以下三种合成方式用于明确的排版/真实素材约束或生图后的精确合成，不能替代应执行的AI生图。
+
 ## 一、素材清点流程
 
 ### 1. 跑脚本生成 `materials.json`
@@ -44,11 +46,11 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py input.jpg \
 
 每张卡片在 `meta.json.cards[i].synthesis_strategy` 里必须标明走哪条路径。
 
-### 策略 A：`html_card` — card-design HTML 卡（默认、最常用）
+### 策略 A：`html_card` — 明确的文字/数据排版或图片后期合成
 
-**适用**：纯文字卡 / 金句 / 数据卡 / 概念图 / 流程示意——凡是没有真实照片、要靠排版承载的卡，都走这条。
+**适用**：用户明确要求纯文字卡、金句、精确数据/流程排版，或需要为已取得图片叠加文字。没有真实照片本身不能作为跳过生图的理由。
 
-**做法**：交给 [card-xiaohongshu](../../card-xiaohongshu/SKILL.md)——读 [card-design](../../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 渲染 → `card_audit.py` 硬门禁。**不再用糙 t2i / 大 emoji 素人卡**；数据卡/概念卡也走 card-design 的对应骨架，视觉质量有保证。
+**做法**：确定需要排版后，交给 [card-xiaohongshu](../../card-xiaohongshu/SKILL.md)——读 [card-design](../../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 渲染 → `card_audit.py` 硬门禁。生图和排版都须避免低质量视觉，不能因为质量偏好直接取消用户的出图方式。
 
 ### 策略 B：`text_on_photo` — 照片 + 文字叠加
 
@@ -96,7 +98,7 @@ python3 skills/builtin/xhs-note-creator/scripts/collage_3x4.py output.jpg \
 
 拼贴出来的卡若还要叠一句标题，再串一次 `text_on_image.py`。
 
-> 概念图 / 流程图 / 数据图 / 抽象示意（实拍拿不到的）**不再走 t2i**，一律用策略 A `html_card`（card-design 有数据卡/管线/矩阵等骨架，排版渲染质量远好于糙生图）。
+> 概念插画或场景配图使用专用生图；精确流程、数值、表格按明确的排版需求使用html_card。选择由任务要求决定，不能用“一律HTML”覆盖图片制作。
 
 ## 三、图文 vs 视频的分流判断
 

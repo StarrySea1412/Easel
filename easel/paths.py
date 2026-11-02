@@ -23,6 +23,7 @@ def child_env(project_root: Path) -> dict[str, str]:
     """Pass code/data locations to CLI, gateway, and skill child processes."""
     env = os.environ.copy()
     env.setdefault("EASEL_ROOT", str(project_root))
+    env["EASEL_CODE_ROOT"] = str(project_root.resolve())
     env["EASEL_DATA_DIR"] = str(data_root(project_root))
     configured_python = env.get("EASEL_PYTHON", "")
     if not configured_python or not Path(configured_python).is_file():

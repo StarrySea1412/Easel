@@ -89,7 +89,7 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py <path>... \
 - 一张卡只讲一个论点
 - 全套配色/字体/风格保持一致（由 card-design 选中的那一套贯穿整组）
 
-**先尊重本轮出图要求**：用户要求AI生成/编辑图片时先使用ai-image-gen取得真实图片，不先写HTML，也不以卡片截图替代；缺配置或失败须如实反馈，不能静默换方式。用户只要AI图片时直接交图；需要图文合成时再进入下方排版流程。以下默认只适用于未指定AI生图的文字/知识卡片任务。
+**先尊重本轮出图要求**：制作卡组、封面、配图等图片成品时，在本轮数量和费用授权内主动调用easel_generate_image或ai-image-gen，不必等用户补说“AI”；不能只交提示词。明确限定纯文字/参数排版或真实素材时遵从约束。AI图片先取得实际产物，必要时再精确排版；缺配置或失败如实反馈，不静默换成HTML截图。以下html_card只用于明确的排版需求或图片取得后的文字合成。
 
 **文字卡片排版走 card-design 管线。** 按有无真实照片选择渲染路径（策略写入 `meta.json`，枚举与 `references/meta-schema.md` 一致）：
 
@@ -99,7 +99,7 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py <path>... \
 | `text_on_photo` | 有真实照片 + 钩子文字（真实素材最佳） | Pillow `scripts/text_on_image.py`（小红书真实素材路径，保留） |
 | `collage` | 有 2-4 张互补照片 | Pillow `scripts/collage_3x4.py` |
 
-> 未指定生图方式的文字/知识/数据卡可由 card-xiaohongshu 渲染；这条默认不覆盖用户明确的AI生图请求。真实照片卡按需使用Pillow，所有路径均交付图片文件。
+> 图片成品任务先按card-xiaohongshu的出图路由执行，不能因“知识卡”用途直接跳到HTML。明确的文字/数据排版可渲染；真实照片卡按需使用Pillow，所有路径均交付图片文件并准确说明来源。
 
 #### 5B. 视频帖：写分镜脚本
 

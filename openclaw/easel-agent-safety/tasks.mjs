@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { resolveCodeRoot } from './code-root.mjs';
 
 export const TASK_GUARD_VERSION = 2;
 // Cold Python startup and the SQLite lock can exceed five seconds on Windows.
@@ -9,7 +9,7 @@ export const TASK_GUARD_VERSION = 2;
 const GUARD_TIMEOUT_MS = 20000;
 
 export function registerTasks(api) {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const root = resolveCodeRoot(import.meta.url);
   const dataRoot = path.resolve(process.env.EASEL_DATA_DIR || root);
   api.registerTool({
     name: 'easel_task_guard', label: '目标执行保护状态',

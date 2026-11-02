@@ -4815,9 +4815,10 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
             configured = all(_is_set(image_env.get(key)) for key in ('IMG_BASE_URL', 'IMG_MODEL', 'IMG_API_KEY'))
             state = '已填写配置，尚未证明本轮可调用' if configured else '配置不完整，需要在设置 → 生图通道补充地址、模型和 API Key'
             message += ('\n\n〔本轮视觉创作协作〕\n'
-                '主动根据本轮用户指定的方式出图，不只询问素材；只有未指定AI生图且只要求文字、参数或对比表排版时才优先确定性排版。'
-                '需要插画、场景或商品背景时，主动建议 ai-image-gen 配合排版。用户已明确要求AI生图或生成配图时，'
-                '按生图技能执行，不重复询问是否要生图；未选择 AI 配图时说明可选方案，不擅自调用付费工具。'
+                '用户要求制作小红书卡组、海报、封面或配图等图片成品时，在本轮图片制作授权内主动调用easel_generate_image，'
+                '没有该工具时执行ai-image-gen；不要因选择卡片技能就先写HTML，也不要只建议生图或交付提示词。'
+                '明确要求纯文字、参数、对比表排版或真实素材时遵从该约束；所需文字可在图片取得后精确排版。'
+                '不重复询问是否要生图；超出原数量或费用范围时不擅自调用付费工具。'
                 'ai-image-gen 调用联网供应商，可能计费，绝不是本地免费生成；本地 SVG 手绘是另一种确定性方案，不能混称 AI 生图。'
                 f'本轮必须使用准确源码脚本离线核验："{sys.executable}" "{PROJECT_ROOT / "skills/shared/scripts/ai_image.py"}" check --dedicated-channel --env-file "{DATA_DIR / ".env"}"；'
                 '不得改用workspace/shared的旧脚本，也不得删除--dedicated-channel。这是离线核验，不是出图，也不证明联网可用；不读取或打印.env原文。'

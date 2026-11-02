@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { resolveCodeRoot } from './code-root.mjs';
 
 export function registerArtifactWriter(api) {
   if (typeof api.registerTool !== 'function') return;
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const root = resolveCodeRoot(import.meta.url);
   api.registerTool(ctx => {
     const session = ctx.sessionKey?.replace(/^agent:main:/, '');
     if (!session || !/^[A-Za-z0-9_.-]{1,200}$/.test(session)) return null;

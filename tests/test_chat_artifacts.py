@@ -155,13 +155,19 @@ def test_codex_host_executes_registered_present_tool_with_exact_scope(delivery):
     assert not client.value['success']
 
 
-def test_openclaw_tool_factory_executes_present_and_rejects_foreign_ticket(delivery):
+@pytest.mark.parametrize('relocated', [False, True])
+def test_openclaw_tool_factory_executes_present_and_rejects_foreign_ticket(delivery, tmp_path, relocated):
     root, _, store, ticket, _, _ = delivery
     import shutil
     node = shutil.which('node')
     if not node:
         pytest.skip('Node runtime unavailable')
     module = Path(__file__).resolve().parents[1] / 'openclaw/easel-agent-safety/present.mjs'
+    code_root = module.parents[2]
+    if relocated:
+        capture = tmp_path / 'captured-plugin'
+        shutil.copytree(module.parent, capture)
+        module = capture / module.name
     program = '''import {registerPresent} from MODULE;
 let factory; registerPresent({registerTool:(value)=>{factory=value}});
 const tool=factory({sessionKey:'agent:main:chat1'});
@@ -171,7 +177,7 @@ let rejected=false;try {await factory({sessionKey:'agent:main:other'}).execute('
 if(!rejected)throw new Error('Cross-session ticket accepted');
 console.log(JSON.stringify({ok:true,name:tool.name}));'''.replace('MODULE', json.dumps(module.as_uri())).replace('TICKET', json.dumps(ticket)).replace('FILE', json.dumps(str(root/'真实主题/a.png')))
     result = subprocess.run([node, '--input-type=module'], input=program, capture_output=True, text=True, encoding='utf-8',
-                            env={**os.environ, 'EASEL_DATA_DIR': str(root.parent), 'EASEL_PYTHON': sys.executable}, timeout=35)
+                            env={**os.environ, 'EASEL_DATA_DIR': str(root.parent), 'EASEL_CODE_ROOT': str(code_root), 'EASEL_PYTHON': sys.executable}, timeout=35)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['ok']
     # Existing delivery is idempotent; it does not create another event or job.

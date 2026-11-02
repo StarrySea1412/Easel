@@ -118,13 +118,19 @@ def test_timeout_keeps_receipt_and_slot_without_automatic_retry(tmp_path):
     assert not ArtifactStore(root).snapshot('chat')['artifacts']
 
 
-def test_real_openclaw_generation_tool_enqueues_with_trusted_session_without_network(tmp_path):
+@pytest.mark.parametrize('relocated', [False, True])
+def test_real_openclaw_generation_tool_enqueues_with_trusted_session_without_network(tmp_path, relocated):
     node = shutil.which('node')
     if not node:
         pytest.skip('Node runtime unavailable')
     (tmp_path / '.env').write_text('\n'.join(f'{k}={v}' for k, v in CONFIG.items()), encoding='utf-8')
     root = tmp_path / 'outputs'; store = ArtifactStore(root); ticket = store.bind('chat', 'turn')
     module = Path(__file__).resolve().parents[1] / 'openclaw/easel-agent-safety/image.mjs'
+    code_root = module.parents[2]
+    if relocated:
+        capture = tmp_path / 'captured-plugin'
+        shutil.copytree(module.parent, capture)
+        module = capture / module.name
     program = '''import {registerImage} from MODULE;
 let factory;registerImage({registerTool:value=>{factory=value}});
 const args={ticket:TICKET,requestId:'fixed-image-one',prompt:'画一只猫'};
@@ -135,7 +141,7 @@ let rejected=false;try{await factory({sessionKey:'agent:main:foreign'}).execute(
 if(!rejected)throw new Error('Wrong session accepted');
 console.log(JSON.stringify(first.details));'''.replace('MODULE', json.dumps(module.as_uri())).replace('TICKET', json.dumps(ticket))
     result = subprocess.run([node, '--input-type=module'], input=program, text=True, encoding='utf-8', capture_output=True,
-        env={**os.environ, 'EASEL_DATA_DIR': str(tmp_path), 'EASEL_PYTHON': sys.executable}, timeout=35)
+        env={**os.environ, 'EASEL_DATA_DIR': str(tmp_path), 'EASEL_CODE_ROOT': str(code_root), 'EASEL_PYTHON': sys.executable}, timeout=35)
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)
     assert receipt['job']['phase'] == 'queued'

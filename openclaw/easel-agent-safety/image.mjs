@@ -1,16 +1,16 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { resolveCodeRoot } from './code-root.mjs';
 
 export function registerImage(api) {
   if (typeof api.registerTool !== 'function') return;
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const root = resolveCodeRoot(import.meta.url);
   api.registerTool(ctx => {
     const session = ctx.sessionKey?.replace(/^agent:main:/, '');
     if (!session || !/^[A-Za-z0-9_.-]{1,200}$/.test(session)) return null;
     return {
       name: 'easel_generate_image', label: '生成图片并交付到当前对话',
-      description: '仅当用户明确要求生图时调用，可能产生图片费用。使用已配置专用图片模型，不回退聊天模型。固定requestId重复调用只取原任务；图片完成后自动展示在当前对话。排队时等待，不改requestId重试。Easel网页服务负责执行队列。',
+      description: '用户要求制作卡组、海报、封面、配图等图片成品时，在本轮数量和费用授权内主动调用；纯文字/数据排版或限定真实素材时遵从约束。可能产生图片费用。使用已配置专用图片模型，不回退聊天模型。固定requestId重复调用只取原任务；图片完成后自动展示在当前对话。排队时等待，不改requestId重试。Easel网页服务负责执行队列。',
       parameters: { type: 'object', additionalProperties: false, required: ['ticket', 'requestId', 'prompt'], properties: {
         ticket: { type: 'string', pattern: '^[a-f0-9]{48}$' },
         requestId: { type: 'string', pattern: '^[A-Za-z0-9_.-]{1,120}$' },
