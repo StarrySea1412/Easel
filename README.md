@@ -1,3 +1,5 @@
+**运营可靠性优先（2026-11-02）。** 当前可监督试用，尚未证明无人值守运营稳定。最近现场回执确认应用内发生过内存不足杀死记忆子进程，容器在线/重启0不能替代任务成功；自动作品载入仍限第一页，异步图片还缺统一持久对账。下一阶段先处理资源故障、数据完整性与生成恢复，验收「可信数据→分析→文案→图片→待确认草稿」。这是整改计划，尚未实施或部署：[证据、追赶顺序与验收门槛](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/operations-reliability-roadmap-2026-11-02.md)。
+
 **0.44.1源码候选：生图方式与工具错误提示（2026-11-02）。** 明确要求AI生成图片时优先生图，不再因海报/封面用途默认先做HTML；明确的HTML排版仍保留。补工具格式失败分类与开发依赖修复，继承0.44.0原轮次接回及跨设备正文同步。仅源码/隔离候选，尚未部署138或发布安装器；实际验证与缺项见[本批记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/image-routing-and-protocol-0.44.1.md)，既有恢复与同步见[0.44.0记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/codex-live-recovery-0.44.0.md)。
 
 **138已运行0.43.9。** 最近现场实核为2026-10-31 22:11北京时间，源码`fcc39a344308`；认证、匿名隔离、74个发布资源和1,734个源码文件核对，正式问答卡片提交至最终回复已有真实页面证据。停写备份、网关认证与等待状态修复见[发布记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/release-138-0.43.9-2026-10-31.md)，后续现场事实见[候选记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/codex-live-recovery-0.44.0.md)。
