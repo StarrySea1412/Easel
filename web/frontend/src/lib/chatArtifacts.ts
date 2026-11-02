@@ -44,6 +44,8 @@ export interface ChatArtifact {
 export interface ChatImageJob {
   jobId: string; sessionId: string; turnId: string; prompt: string;
   phase: 'queued' | 'running' | 'done' | 'error' | 'unconfirmed'; error?: string;
+  stage?: string; recoveryAvailable?: boolean;
+  queueReason?: 'memory_pressure' | 'channel';
 }
 export interface ExternalChatMessage {
   id: string; turnId: string; role: 'assistant'; content: string; source: 'gateway-injected'; timestamp: number;

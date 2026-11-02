@@ -138,6 +138,23 @@ def sandbox(tmp_path, monkeypatch):
     return fixture
 
 
+def test_memory_pressure_preserves_structured_sse_error_without_dispatch(sandbox, monkeypatch):
+    from easel.runtime_limits import Pool
+    from easel import resource_health
+    monkeypatch.setattr(resource_health, 'memory_snapshot', lambda: {'state': 'pressure'})
+    pool = Pool('agent', 1, resource_health.require_memory_capacity)
+    monkeypatch.setattr(web.app.state, 'server_pools', {'agent': pool}, raising=False)
+    async def exercise():
+        events, last = await collect_turn(turn='memory-pressure', session='memory-session')
+        errors = [json.loads(event['data']) for event in events if event.get('event') == 'error']
+        assert len(errors) == 1
+        assert errors[0]['code'] == 'server_memory_pressure'
+        assert errors[0]['stage'] == 'resource_admission' and errors[0]['retryable']
+        assert not sandbox.requests and pool.active == 0 and not pool.waiters
+        assert last['error']['code'] == 'server_memory_pressure'
+    asyncio.run(exercise())
+
+
 async def collect_turn(model_ref='relay/model-b', turn='model-turn', session='model-session'):
     response = await web.api_chat_stream(web.ChatRequest(message='synthetic request', sessionId=session,
                                                         turnId=turn, modelRef=model_ref))

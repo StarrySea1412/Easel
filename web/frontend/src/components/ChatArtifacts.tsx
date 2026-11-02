@@ -48,18 +48,21 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
-  const acknowledge = async () => {
+  const update = async (action: 'acknowledge' | 'reconcile') => {
     if (busy) return;
     setBusy(true); setError(''); const request = new AbortController(); controller.current = request;
     try {
       const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
-      const response = await fetch(`${base}/api/chat/artifacts/${encodeURIComponent(job.sessionId)}/jobs/${job.jobId}/acknowledge`, { method: 'POST', signal: request.signal });
-      if (!response.ok) throw new Error();
+      const response = await fetch(`${base}/api/chat/artifacts/${encodeURIComponent(job.sessionId)}/jobs/${job.jobId}/${action}`, { method: 'POST', signal: request.signal });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : '原任务状态更新失败，请稍后重试。');
+      }
       if (!request.signal.aborted) onChanged?.();
-    } catch { if (!request.signal.aborted) setError('未能解除占位，请重新读取任务状态。'); }
+    } catch (e) { if (!request.signal.aborted) setError(e instanceof Error ? e.message : '原任务状态更新失败，请稍后重试。'); }
     finally { if (!request.signal.aborted) setBusy(false); }
   };
-  return <article className="chat-image-job" aria-label="生图任务"><strong>{job.phase === 'queued' ? '等待图片通道' : job.phase === 'running' ? '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</strong><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}{job.phase === 'unconfirmed' && <button type="button" disabled={busy} onClick={() => void acknowledge()}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button>}{error && <p role="alert">{error}</p>}</article>;
+  return <article className="chat-image-job" aria-label="生图任务"><strong>{job.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中' : '等待图片通道' : job.phase === 'running' ? job.stage === 'recovering' ? '正在接回原图片任务' : job.stage === 'downloading' ? '图片已生成，正在保存' : '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</strong><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}{job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" disabled={busy} onClick={() => void update('reconcile')}>接回原任务</button>}<button type="button" disabled={busy} onClick={() => void update('acknowledge')}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button></>}{error && <p role="alert">{error}</p>}</article>;
 }
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;

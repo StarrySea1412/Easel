@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from .artifacts import ArtifactStore, scope, file_path, inspect_file
+from .image_checkpoint import ImageCheckpoint, CheckpointBusy
 
 SIZES = {'auto', '1024x1024', '768x1024', '1024x768', '864x1536', '1536x864',
          '1024x1280', '1280x1024', '1024x1536', '1536x1024'}
@@ -128,10 +129,25 @@ class ImageJobs:
                        (ident, owner_scope, request_id, fingerprint, host, config_id, 'queued', None, 0, time.time(), json.dumps(data, ensure_ascii=False)))
         return self.get(ident, session=session)
 
-    @staticmethod
-    def public(row):
+    def checkpoint(self, row):
+        return ImageCheckpoint.for_job(self.outputs, row)
+
+    def public(self, row):
         data = json.loads(row['data'])
         data.pop('limit', None)
+        data['recoveryAvailable'] = False
+        if row['status'] == 'queued':
+            from .resource_health import memory_snapshot
+            data['queueReason'] = 'memory_pressure' if memory_snapshot()['state'] == 'pressure' else 'channel'
+        try:
+            checkpoint = self.checkpoint(row).read()
+            if checkpoint:
+                data['recoveryAvailable'] = (checkpoint['stage'] in ('saved', 'failed')
+                    or checkpoint['stage'] in ('accepted', 'downloading') and checkpoint.get('protocol') == 'apimart-v1' and bool(checkpoint.get('taskId')))
+                if row['status'] == 'running' and checkpoint['stage'] == 'downloading':
+                    data['stage'] = 'downloading'
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
         return {**data, 'phase': row['status'],
                 'state': 'running' if row['status'] in ('queued', 'running') else 'done' if row['status'] == 'done' else 'error'}
 
@@ -230,9 +246,34 @@ class ImageJobs:
             for row in db.execute("SELECT * FROM jobs WHERE status='running' AND lease<?", (now,)).fetchall():
                 data = json.loads(row['data']); data['error'] = '执行端连接已丢失，供应商状态未确认；未自动重发。请核对渠道任务后解除占位。'
                 db.execute("UPDATE jobs SET status='unconfirmed', data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), row['id']))
+            # Reconcile accepted requests before admitting new ones. Their slot
+            # is already reserved; resuming here never authorizes another POST.
+            running = db.execute("SELECT COUNT(*) FROM jobs WHERE channel=? AND status='running'", (host,)).fetchone()[0]
+            if running >= limit:
+                return None
+            for row in db.execute("SELECT * FROM jobs WHERE status='unconfirmed' AND config=? ORDER BY created", (config_id,)).fetchall():
+                data = json.loads(row['data'])
+                if data.get('recoveryAttempts', 0) >= 3 or data.get('recoveryNextAt', 0) > now:
+                    continue
+                try:
+                    receipt = self.checkpoint(row).read()
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                if not receipt or not (receipt['stage'] in ('saved', 'failed') or
+                        receipt['stage'] in ('accepted', 'downloading') and receipt.get('protocol') == 'apimart-v1' and receipt.get('taskId')):
+                    continue
+                data.update(stage='recovering', recoveryAttempts=data.get('recoveryAttempts', 0) + 1,
+                            recoveryStartedAt=data.get('recoveryStartedAt') or now, error=None)
+                data.pop('finished', None)
+                db.execute("UPDATE jobs SET status='running',owner=?,lease=?,data=? WHERE id=?",
+                           (owner, now + 45, json.dumps(data, ensure_ascii=False), row['id']))
+                return {**data, '_resume': True}
             # Unknown requests reserve a slot until a human reconciles them.
             active = db.execute("SELECT COUNT(*) FROM jobs WHERE channel=? AND status IN ('running','unconfirmed')", (host,)).fetchone()[0]
             if active >= limit:
+                return None
+            from .resource_health import memory_snapshot
+            if memory_snapshot()['state'] == 'pressure':
                 return None
             for row in db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created").fetchall():
                 data = json.loads(row['data'])
@@ -346,8 +387,37 @@ class ImageJobs:
                 raise FileNotFoundError('任务不存在')
             if row['status'] != 'unconfirmed':
                 raise ValueError('仅可解除状态未确认任务的占位')
+            try:
+                checkpoint = self.checkpoint(row)
+                with checkpoint.lock():
+                    receipt = checkpoint.read()
+                    if receipt and receipt['stage'] == 'saved':
+                        raise ValueError('原图片已保存，请先接回已有结果。')
+                    # Fence a child that was spawned but has not acquired its
+                    # OS lock yet. A later start must see a terminal checkpoint.
+                    checkpoint.write(stage='abandoned')
+            except CheckpointBusy as exc:
+                raise ValueError('原图片执行进程仍在运行，请继续观察或接回，暂不能解除占位。') from exc
             data = json.loads(row['data']); data['error'] = '已人工核对并解除占位；原任务未重发，实际扣费以供应商为准。'
             db.execute("UPDATE jobs SET status='error',data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), ident))
+        return self.get(ident)
+
+    def reconcile(self, ident, config):
+        """Schedule read-only recovery of the original provider request."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM jobs WHERE id=?', (ident,)).fetchone()
+            if row is None:
+                raise FileNotFoundError('任务不存在')
+            if row['status'] in ('running', 'done'):
+                return self.public(row)
+            if row['status'] != 'unconfirmed' or not self.public(row)['recoveryAvailable']:
+                raise ValueError('原任务缺少可查询记录，请先核对供应商；未重新生成。')
+            if row['config'] != channel(config)[1]:
+                raise ValueError('生图渠道身份已变化，请恢复原渠道后接回；未重新生成。')
+            data = json.loads(row['data'])
+            data.update(recoveryAttempts=0, recoveryNextAt=0, recoveryStartedAt=time.time())
+            db.execute('UPDATE jobs SET data=? WHERE id=?', (json.dumps(data, ensure_ascii=False), ident))
         return self.get(ident)
 
 
@@ -410,10 +480,14 @@ class ImageWorker:
         ident = job['jobId']
         output = jobs.outputs / 'AI生图' / f'{ident}.png'
         output.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [sys.executable, str(self.code / 'skills/shared/scripts/ai_image.py'), job['mode'],
-               '--prompt', job['prompt'], '--output', str(output), '--size', job['size'], '--n', str(job['n'])]
+        recovering = job.get('_resume', False)
+        cmd = [sys.executable, str(self.code / 'skills/shared/scripts/ai_image.py'),
+               'resume' if recovering else job['mode'],
+               '--output', str(output), '--size', job['size'], '--n', str(job['n'])]
+        if not recovering:
+            cmd += ['--prompt', job['prompt']]
         try:
-            if job['mode'] == 'img2img':
+            if not recovering and job['mode'] == 'img2img':
                 # Revalidate references just before invoking the provider.
                 from web.image_inputs import reference_path, validate_mask
                 reference = reference_path(jobs.outputs / '_image_references', job.get('referenceId'))
@@ -425,24 +499,41 @@ class ImageWorker:
             env.update({k: str(config.get(k, '')).strip() for k in ('IMG_BASE_URL', 'IMG_API_KEY', 'IMG_MODEL')})
             env['IMG_MODEL'] = job['model']
             env['EASEL_DATA_DIR'] = str(jobs.outputs.parent)
-            if not jobs.dispatch(ident, self.owner):
+            env['EASEL_IMAGE_DEDICATED_CHANNEL'] = '1'
+            with jobs.db() as db:
+                row = db.execute('SELECT * FROM jobs WHERE id=?', (ident,)).fetchone()
+                checkpoint = jobs.checkpoint(row)
+            env['EASEL_IMAGE_CONTEXT'] = json.dumps(checkpoint.identity)
+            if not recovering and not jobs.dispatch(ident, self.owner):
                 return
             result = self.runner(cmd, cwd=str(self.code), env=env, capture_output=True, text=True, timeout=900)
-            if result.returncode != 0:
-                # A failed local process may already have submitted remotely.
-                jobs.finish(ident, self.owner, 'unconfirmed', {'error': '生图执行未正常完成，供应商结果或扣费未确认；未自动重试。请核对渠道任务后解除占位。'})
+            saved = checkpoint.read()
+            if saved and saved['stage'] == 'failed':
+                jobs.finish(ident, self.owner, 'error', {'stage': 'failed',
+                    'error': '供应商已确认原图片任务失败；未重新生成，实际扣费以供应商为准。'})
                 return
-            files = sorted(p for p in output.parent.glob(output.stem + '*') if p.is_file() and p.suffix.lower() in EXTENSIONS)
+            if (result.returncode != 0 or saved and saved['stage'] != 'saved') and not (saved and saved['stage'] == 'saved'):
+                # A failed local process may already have submitted remotely.
+                self.unconfirmed(jobs, job, busy=result.returncode == 75)
+                return
+            files = checkpoint.saved_files(saved) if saved and saved['stage'] == 'saved' else sorted(
+                p for p in output.parent.glob(output.stem + '*') if p.is_file() and p.suffix.lower() in EXTENSIONS)
             from PIL import Image
             dimensions = {}
             image_hashes = {}
-            if not files:
-                raise ValueError('生成端未返回实际图片')
+            if len(files) != job['n']:
+                raise ValueError('实际图片数量与请求不符，未标记完成；请核对已有图片与供应商任务。')
             for image_path in files:
+                if image_path.is_symlink():
+                    raise ValueError('图片文件路径无效')
                 with Image.open(image_path) as image:
+                    if image.width * image.height > 64 * 1024 * 1024:
+                        raise ValueError('图片像素超过当前保存预算；请核对供应商产物，未重新生成。')
                     if not dimensions:
                         dimensions = {'width': image.width, 'height': image.height}
                     image.verify()
+                with Image.open(image_path) as image:
+                    image.load()
                 metadata = {k: job.get(k) for k in ('prompt','size','model','mode','referenceId','maskId','jobId','started')}
                 from .creation_drafts import media_hash
                 image_hashes[image_path.relative_to(jobs.outputs).as_posix()] = media_hash(image_path)['sha256']
@@ -451,7 +542,8 @@ class ImageWorker:
                 metadata['created'] = job['started']
                 image_path.with_name(f'.{image_path.name}.easel-image.json').write_text(json.dumps(metadata, ensure_ascii=False), encoding='utf-8')
             values = {'url': '/api/media/AI生图/' + files[0].name,
-                      'paths': [str(p.relative_to(jobs.outputs).as_posix()) for p in files], **dimensions, 'error': None}
+                       'paths': [str(p.relative_to(jobs.outputs).as_posix()) for p in files], **dimensions,
+                       'stage': 'saved', 'error': None}
             values['imageHashes'] = image_hashes
             receipt = jobs.path.parent / 'image-receipts' / f'{ident}.json'
             receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -464,7 +556,16 @@ class ImageWorker:
         except (ValueError, FileNotFoundError) as exc:
             jobs.finish(ident, self.owner, 'error', {'error': str(exc)[:200]})
         except Exception:
-            jobs.finish(ident, self.owner, 'unconfirmed', {'error': '执行连接中断或超时，供应商状态未确认；未自动重发，请先核对渠道任务。'})
+            self.unconfirmed(jobs, job)
         finally:
             with self.lock:
                 self.active.discard(ident)
+
+    def unconfirmed(self, jobs, job, *, busy=False):
+        attempts = job.get('recoveryAttempts', 0)
+        if busy and time.time() - job.get('recoveryStartedAt', time.time()) < 1800:
+            attempts = max(0, attempts - 1)
+        jobs.finish(job['jobId'], self.owner, 'unconfirmed', {
+            'stage': 'awaiting_verification', 'recoveryAttempts': attempts,
+            'recoveryNextAt': time.time() + (15 if busy else (15, 60, 180)[min(attempts, 2)]),
+            'error': '图片执行结果或扣费未确认；未自动重试生成。支持查询的原任务会有界接回，其他情况请核对供应商后处理。'})

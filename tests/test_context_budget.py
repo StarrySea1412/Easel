@@ -92,7 +92,15 @@ def test_persona_uses_dispatch_serializer_before_selecting_experience(store, mon
     monkeypatch.setenv('EASEL_CHAT_PROMPT_RESERVE_TOKENS', '0')
     plain = persona.model_turn_message('摄影教程', 'one')
     assert 'profile-experience' in plain
-    result = persona.model_turn_message('摄影教程', 'one', prompt_builder=lambda text: 'x' * 55000 + text)
+    with monkeypatch.context() as without_memory:
+        without_memory.setattr(persona, 'model_memory_context', lambda *args, **kwargs: None)
+        mandatory = persona.model_turn_message('摄影教程', 'one')
+    # Keep the mandatory envelope inside the budget as turn policy evolves;
+    # only the optional experience should cross this test's boundary.
+    padding = 'x' * (4 * (16000 - 256 - estimate_tokens(mandatory)))
+    assert admit(padding + mandatory).admitted
+    assert not admit(padding + plain).admitted
+    result = persona.model_turn_message('摄影教程', 'one', prompt_builder=lambda text: padding + text)
     assert 'profile-experience' not in result and '摄影教程' in result
     assert 'recall' not in result
 

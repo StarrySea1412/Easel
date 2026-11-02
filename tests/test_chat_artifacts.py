@@ -50,6 +50,28 @@ def test_delivery_survives_new_store_without_final_message_and_is_idempotent(del
         store.present_ticket('invalid', [{'path': '真实主题/a.png'}])
 
 
+def test_image_reconcile_is_scoped_and_only_schedules_the_original_task(delivery):
+    from easel.image_jobs import ImageJobs
+    root, _, _, _, _, client = delivery
+    config = {'IMG_BASE_URL': 'https://fixture.invalid/v1', 'IMG_MODEL': 'fixture', 'IMG_API_KEY': 'fixture'}
+    (root.parent / '.env').write_text('\n'.join(f'{k}={v}' for k, v in config.items()))
+    jobs = ImageJobs(root)
+    job = jobs.submit({'prompt': '原图片'}, config, session='chat1', turn='turn1')
+    with jobs.db() as db:
+        row = db.execute('SELECT * FROM jobs WHERE id=?', (job['jobId'],)).fetchone()
+        jobs.checkpoint(row).write(stage='accepted', protocol='apimart-v1', taskId='original-task')
+        data = json.loads(row['data']); data.update(recoveryAttempts=3, recoveryNextAt=123)
+        db.execute("UPDATE jobs SET status='unconfirmed',data=? WHERE id=?", (json.dumps(data), job['jobId']))
+    assert client.post(f"/api/chat/artifacts/chat2/jobs/{job['jobId']}/reconcile").status_code == 404
+    assert jobs.get(job['jobId'])['recoveryAttempts'] == 3
+    response = client.post(f"/api/chat/artifacts/chat1/jobs/{job['jobId']}/reconcile")
+    assert response.status_code == 200
+    assert response.json()['jobId'] == job['jobId'] and response.json()['phase'] == 'unconfirmed'
+    assert jobs.get(job['jobId'])['recoveryAttempts'] == 0
+    with jobs.db() as db:
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 1
+
+
 def test_same_size_same_mtime_overwrite_and_html_dependency_refresh(delivery):
     _, topic, store, _, values, client = delivery
     image, html = values

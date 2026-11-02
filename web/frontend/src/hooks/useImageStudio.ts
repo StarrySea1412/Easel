@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference, saveImagegenModel, acknowledgeImagegenJob } from '../lib/api';
+import { startImagegen, fetchImagegenJob, fetchImagegenGallery, uploadImagegenReference, saveImagegenModel, acknowledgeImagegenJob, reconcileImagegenJob } from '../lib/api';
 import type { ImagegenJob, ImagegenGalleryItem, ImagegenChannel, ImagegenReference } from '../lib/api';
 import { restoreReference, validateReferenceFile, validateMaskFile } from '../lib/imageReferences';
 import { useImageReverse } from './useImageReverse';
@@ -28,7 +28,7 @@ function claimImageWorkspace(owner: string): boolean {
       const key = sessionStorage.key(index);
       if (key && key !== owner && (key === IMAGE_JOB_KEY || key.startsWith(IMAGE_JOB_KEY + ':'))) {
         const job = JSON.parse(sessionStorage.getItem(key) || 'null');
-        if (job?.state === 'running') return false;
+        if (job?.state === 'running' || job?.phase === 'unconfirmed') return false;
       }
     }
   } catch { /* Server concurrency limits still apply if storage is unavailable. */ }
@@ -130,17 +130,20 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
   }, [jobKey, imgJob]);
 
   // 上一轮请求结束后再计时，避免慢接口导致重复轮询。
+  const observedJobId = imgJob?.jobId;
+  const observingJob = imgJob?.state === 'running' || imgJob?.phase === 'unconfirmed';
   useEffect(() => {
-    if (imgJob?.state !== 'running') return undefined;
+    if (!observedJobId || !observingJob) return undefined;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      let delay = 3000;
       try {
-        const job = await fetchImagegenJob(imgJob.jobId);
+        const job = await fetchImagegenJob(observedJobId);
         if (!alive) return;
         setImgErr('');
-        if (job.state !== 'running') {
-          setImgJob({ ...job, size: imageSize(job.size || imgJob.size) });
+        setImgJob(current => current?.jobId === observedJobId ? { ...job, size: imageSize(job.size || current.size) } : current);
+        if (job.state !== 'running' && job.phase !== 'unconfirmed') {
           if (workspaceId?.startsWith('image:') && workspaceId !== 'image:standalone') {
             const sessionId=workspaceId.slice('image:'.length);
             recordEvent(job.state==='done'?'对话生图已完成':'对话生图失败',job.state==='done'?'success':'error',undefined,'creation-image:'+job.jobId+':'+job.state,{page:'chat',sessionId,tool:'image'});
@@ -149,20 +152,22 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
           if (job.state === 'done' && activePage.current) void refreshGallery();
           return;
         }
-        if (job.phase && job.phase !== imgJob.phase) setImgJob({ ...job, size: imageSize(job.size || imgJob.size) });
+        if (job.phase === 'unconfirmed') delay = 10000;
       } catch (e) {
         if (!alive) return;
         if (e instanceof Error && 'status' in e && e.status === 404) {
-          setImgJob({ ...imgJob, state: 'error', error: '任务已过期或服务已重启，请查看历史图片后重新生成。' });
-          return;
+          setImgJob(current => current?.jobId === observedJobId ? { ...current, state: 'error', phase: 'unconfirmed', recoveryAvailable: false,
+            error: '暂未找到原任务记录，请核对内容库和原通道任务；为避免重复扣费，未重新生成。' } : current);
+          delay = 10000;
+        } else {
+          setImgErr(`暂时无法读取任务进度，将自动重试：${e instanceof Error ? e.message : '连接失败'}`);
         }
-        setImgErr(`暂时无法读取任务进度，将自动重试：${e instanceof Error ? e.message : '连接失败'}`);
       }
-      timer = setTimeout(() => void poll(), 3000);
+      timer = setTimeout(() => void poll(), delay);
     };
     void poll();
     return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [imgJob, refreshGallery, workspaceId]);
+  }, [observedJobId, observingJob, refreshGallery, workspaceId]);
 
   // 生成等待计时：SkeletonImage 上显示已等待秒数（聚合站慢，明确告知比无限转圈安心）
   useEffect(() => {
@@ -175,10 +180,10 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
 
   const fireImagegen = useCallback(async () => {
     const p = imgPrompt.trim();
-    if (!p || p.length > 2000 || loading || galleryError || !imgChannel?.configured || !imgChannel.model?.trim() || imgJob?.state === 'running' || imgSubmitPending.current || modelPending.current) return;
+    if (!p || p.length > 2000 || loading || galleryError || !imgChannel?.configured || !imgChannel.model?.trim() || imgJob?.state === 'running' || imgJob?.phase === 'unconfirmed' || imgSubmitPending.current || modelPending.current) return;
     if(referencePending.current)return;
     if(mode==='img2img'&&!reference){setImgErr('请先上传参考图。');return;}
-    if (!claimImageWorkspace(jobKey)) { setImgErr('另一个工作区已有生图任务，请等待完成后再生成。'); return; }
+    if (!claimImageWorkspace(jobKey)) { setImgErr('另一个工作区的图片任务正在执行或等待核验，请先处理原任务。'); return; }
     imgSubmitPending.current = true;
     setImgSubmitting(true);
     setImgErr('');
@@ -258,8 +263,19 @@ export function useImageStudio(active: boolean, workspaceId?: string) {
     } catch { if (mounted.current) setImgErr('未能解除占位，请重新读取任务状态。'); }
     finally { imgSubmitPending.current = false; if (mounted.current) setImgSubmitting(false); }
   };
+  const recoverJob = async () => {
+    if (imgJob?.phase !== 'unconfirmed' || !imgJob.recoveryAvailable || imgSubmitPending.current) return;
+    imgSubmitPending.current = true;
+    setImgSubmitting(true); setImgErr('');
+    try {
+      const job = await reconcileImagegenJob(imgJob.jobId);
+      if (mounted.current) setImgJob({ ...job, size: imageSize(job.size) });
+    } catch (e) {
+      if (mounted.current) setImgErr(e instanceof Error ? e.message : '暂时无法接回原任务，请稍后重试。');
+    } finally { imgSubmitPending.current = false; if (mounted.current) setImgSubmitting(false); }
+  };
   return { reference,mask,referenceBusy,uploadReference,useGalleryReference,clearReference,clearMask,imgPrompt, setImgPrompt, imgSize, setImgSize, imgJob, imgSubmitting, imgErr,
-    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode, saveModel, modelSaving, modelError, acknowledgeJob };
+    imgTick, gallery, imgChannel, loading, galleryError, refreshGallery, fireImagegen, reverse, mode, setMode, saveModel, modelSaving, modelError, acknowledgeJob, recoverJob };
 }
 
 export type ImageStudioController = ReturnType<typeof useImageStudio>;

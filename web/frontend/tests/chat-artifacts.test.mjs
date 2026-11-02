@@ -21,6 +21,28 @@ test('manual studio receipts and old misregistered files never become assistant 
   assert.deepEqual(decodeArtifacts([ordinary,artifact({id:'d'.repeat(32),turnId:manual.turnId})], 'chat'), [ordinary]);
 });
 
+test('image recovery queries the original job and surfaces server refusal', async t => {
+  const requests = []; let changed = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({url, options});
+    return new Response(JSON.stringify({detail:'原图片执行进程仍在运行'}), {status:409});
+  });
+  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
+  t.after(async () => { await act(async () => root.unmount()); container.remove(); });
+  const job = {jobId:'e'.repeat(32), sessionId:'chat', turnId:'original', prompt:'原图片',
+    phase:'unconfirmed', recoveryAvailable:true, error:'等待核验'};
+  await act(async () => root.render(createElement(Artifacts, {artifacts:[], onUpdated:()=>{},
+    jobs:[job], onJobsChanged:()=>{changed++;}})));
+  const button = [...container.querySelectorAll('button')].find(b=>b.textContent==='接回原任务');
+  assert.ok(button);
+  await act(async () => button.click());
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].url, `/api/chat/artifacts/chat/jobs/${job.jobId}/reconcile`);
+  assert.equal(requests[0].options.method,'POST');
+  assert.match(container.querySelector('[role="alert"]').textContent,/仍在运行/);
+  assert.equal(changed,0);
+});
+
 async function setup(t, initial) {
   let items = initial; const requests = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })));

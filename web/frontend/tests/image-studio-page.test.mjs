@@ -88,6 +88,20 @@ test('compact ratio control preserves all sizes and optional masks stay availabl
   assert.deepEqual(view.calls.uploads, [[mask, true]]);
 });
 
+test('unknown generation offers recovery and blocks creating another charge', async t => {
+  let recovered = 0;
+  const view = await fixture(t, {imgPrompt:'运营封面', imgJob:resultJob({state:'error',phase:'unconfirmed',
+    recoveryAvailable:true,error:'原任务状态待核验',mode:'text2img'}), recoverJob:async()=>{recovered++;}});
+  const submit = view.container.querySelector('button[type="submit"]');
+  assert.ok(submit.disabled);
+  assert.match(view.container.textContent,/原任务状态待核验/);
+  await view.click(view.button('接回原任务'));
+  assert.equal(recovered,1);
+  assert.equal(view.calls.generated,0);
+  await view.render({imgJob:resultJob({state:'running',phase:'running',stage:'downloading',url:null})});
+  assert.match(view.container.textContent,/图片已生成，正在保存/);
+});
+
 test('upload, drop and clipboard image all reach the reference upload controller', async t => {
   const view = await fixture(t);
   const file = new File(['image'], 'reference.png', { type: 'image/png' });

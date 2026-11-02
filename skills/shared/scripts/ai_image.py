@@ -34,6 +34,7 @@ import http.client
 import json
 import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -42,6 +43,8 @@ from pathlib import Path
 from typing import Any
 
 from output_paths import validate_output_path
+
+_QUEUE_CHECKPOINT = None
 
 
 ENV_BASE_URL = "IMG_BASE_URL"
@@ -411,13 +414,28 @@ def _download_to(image_url: str, out_path: Path) -> None:
     if parsed.scheme not in ("http", "https"):
         fail(f"拒绝下载非 http(s) 协议的 URL：{parsed.scheme}")
     dl_req = urllib.request.Request(image_url, headers={"User-Agent": UA})
+    temporary = None
     try:
         with _open(dl_req, 120) as resp:
-            out_path.write_bytes(resp.read())
+            descriptor, name = tempfile.mkstemp(prefix=out_path.stem + '-', suffix='.part', dir=out_path.parent)
+            temporary = Path(name)
+            with os.fdopen(descriptor, 'wb') as stream:
+                total = 0
+                while block := resp.read(64 * 1024):
+                    total += len(block)
+                    if total > 64 * 1024 * 1024:
+                        fail('单张图片超过64MiB，已停止下载；原生成任务保持，不重新生图。')
+                    stream.write(block)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, out_path)
     except urllib.error.URLError as exc:
         fail(f"无法下载图片：{getattr(exc, 'reason', exc)}")
     except TimeoutError:
         fail("下载图片超时。")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _out_paths(output: str, count: int, fmt: str) -> list[Path]:
@@ -491,6 +509,11 @@ def run_async(base_url: str, api_key: str, payload: dict[str, Any],
     if not task_id:
         fail(f"提交响应缺少 task_id：{json.dumps(data[0])[:300]}")
 
+    if _QUEUE_CHECKPOINT:
+        # Persist acceptance before polling or downloading. A resumed child must
+        # never enter the creation endpoint, even if its first observer died.
+        _QUEUE_CHECKPOINT.write(stage='accepted', protocol='apimart-v1', taskId=task_id)
+
     print(f"[async] 任务已提交: {task_id}，等待 15s 后开始轮询...", file=sys.stderr)
     time.sleep(15)
 
@@ -504,7 +527,7 @@ def run_async(base_url: str, api_key: str, payload: dict[str, Any],
 
 def _poll_task(base_url: str, api_key: str, task_id: str,
                poll_interval: int, timeout: int) -> dict[str, Any]:
-    url = _api_url(base_url, f"tasks/{task_id}")
+    url = _api_url(base_url, f"tasks/{urllib.parse.quote(task_id, safe='')}")
     start = time.time()
     while True:
         elapsed = time.time() - start
@@ -514,8 +537,12 @@ def _poll_task(base_url: str, api_key: str, task_id: str,
         task_data = result.get("data", {})
         status = task_data.get("status", "")
         if status == "completed":
+            if _QUEUE_CHECKPOINT:
+                _QUEUE_CHECKPOINT.write(stage='downloading')
             return task_data
         if status == "failed":
+            if _QUEUE_CHECKPOINT:
+                _QUEUE_CHECKPOINT.write(stage='failed')
             error = task_data.get("error", {})
             fail(f"任务 {task_id} 失败：{error.get('message', json.dumps(task_data)[:300])}")
         progress = task_data.get("progress", 0)
@@ -796,6 +823,8 @@ def _mask(value: str) -> str:
 # ── 公共 ──────────────────────────────────────────────────
 
 def _print_results(paths: list[Path]) -> None:
+    if _QUEUE_CHECKPOINT:
+        _QUEUE_CHECKPOINT.saved(paths)
     print("生成完成：")
     for path in paths:
         print(path)
@@ -851,16 +880,71 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_chk.add_argument('--dedicated-channel', action='store_true', help='只检查生图工坊IMG_*，不借用聊天Key，不输出配置值')
     p_chk.set_defaults(func=cmd_check)
 
+    p_resume = sub.add_parser('resume', help='仅查询原图片任务及接回下载，不提交生成请求')
+    _add_common_output(p_resume)
+    p_resume.set_defaults(func=cmd_resume)
+
     return parser.parse_args(argv)
 
 
+def cmd_resume(args: argparse.Namespace) -> None:
+    if _QUEUE_CHECKPOINT is None:
+        fail('接回图片需要原任务的持久记录，未提交生成请求。')
+    data = _QUEUE_CHECKPOINT.read()
+    if not data:
+        fail('原图片任务记录缺失，未提交生成请求。')
+    if data['stage'] == 'saved':
+        _print_results(_QUEUE_CHECKPOINT.saved_files(data))
+        return
+    if data['stage'] == 'failed':
+        fail('供应商已确认原图片任务失败，未重新生成。', 20)
+    if data['stage'] == 'abandoned':
+        fail('原图片任务已人工结束核验，未提交或查询生成请求。')
+    if data.get('protocol') != 'apimart-v1' or not data.get('taskId'):
+        fail('当前通道缺少可查询的原任务身份，未提交生成请求。')
+    base_url, _, api_key, _ = load_and_require()
+    task = _poll_task(base_url, api_key, data['taskId'], args.poll_interval, args.timeout)
+    _print_results(_save_async_images(task, args.output, args.format))
+
+
 def main(argv: list[str] | None = None) -> None:
+    global _QUEUE_CHECKPOINT
     args = parse_args(argv)
     if getattr(args, "output", None):
         args.output = str(validate_output_path(args.output))
     env_file = Path(args.env_file) if getattr(args, "env_file", None) else find_default_env_file()
     load_env_file(env_file)
-    args.func(args)
+    context = os.environ.get('EASEL_IMAGE_CONTEXT')
+    if not context:
+        args.func(args)
+        return
+    # Standalone use retains its stdlib-only contract. Queue execution uses
+    # the exact host package and shares its cross-process checkpoint lock.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from easel.image_checkpoint import ImageCheckpoint, CheckpointBusy, channel_digest
+    try:
+        checkpoint = ImageCheckpoint(json.loads(context))
+        base = require_config(ENV_BASE_URL)
+        model = require_config(ENV_MODEL)
+        key = require_config(ENV_API_KEY)
+        if (checkpoint.output != Path(args.output)
+                or checkpoint.identity['channel'] != channel_digest(base, key)
+                or checkpoint.identity['model'] != model or checkpoint.identity['n'] != args.n):
+            raise ValueError('原图片任务身份已变化')
+        with checkpoint.lock():
+            if args.command != 'resume':
+                if checkpoint.read() is not None:
+                    fail('原图片请求已有提交记录，未重复生成。')
+                checkpoint.write(stage='submitting')
+            _QUEUE_CHECKPOINT = checkpoint
+            try:
+                args.func(args)
+            finally:
+                _QUEUE_CHECKPOINT = None
+    except CheckpointBusy:
+        fail('原图片执行进程仍在处理，将继续读取其结果。', 75)
+    except (OSError, ValueError, KeyError, TypeError):
+        fail('图片任务记录或文件暂不可用；未重新提交生成请求。')
 
 
 if __name__ == "__main__":

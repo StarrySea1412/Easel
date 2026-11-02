@@ -1764,6 +1764,9 @@ export interface ImagegenJob {
   jobId: string;
   state: 'running' | 'done' | 'error';
   phase?: 'queued' | 'running' | 'done' | 'error' | 'unconfirmed';
+  stage?: 'recovering' | 'downloading' | 'saved' | 'failed' | 'awaiting_verification';
+  recoveryAvailable?: boolean;
+    queueReason?: 'memory_pressure' | 'channel';
   prompt: string;
   url: string | null;
   error: string | null;
@@ -1819,6 +1822,9 @@ export function fetchImagegenJob(jobId: string): Promise<ImagegenJob> {
 }
 export function acknowledgeImagegenJob(jobId: string): Promise<ImagegenJob> {
   return request(`/api/imagegen/${encodeURIComponent(jobId)}/acknowledge`, { method: 'POST' });
+}
+export function reconcileImagegenJob(jobId: string): Promise<ImagegenJob> {
+  return request(`/api/imagegen/${encodeURIComponent(jobId)}/reconcile`, { method: 'POST' });
 }
 
 export function fetchImagegenGallery(): Promise<{ images: ImagegenGalleryItem[]; channel: ImagegenChannel }> {

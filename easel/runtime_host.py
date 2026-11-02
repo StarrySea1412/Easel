@@ -198,7 +198,8 @@ class RuntimeManager:
                 json.dump(state, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
-            temporary.replace(self.state_file)
+            from .atomic_files import replace
+            replace(temporary, self.state_file)
         finally:
             temporary.unlink(missing_ok=True)
 

@@ -11,11 +11,13 @@ import uuid
 from collections import deque
 
 from fastapi import HTTPException
+from .resource_health import memory_snapshot, require_memory_capacity
 
 
 class Pool:
-    def __init__(self, name: str, capacity: int):
+    def __init__(self, name: str, capacity: int, admission=None):
         self.name, self.capacity, self.active = name, capacity, 0
+        self.admission = admission
         self.lock = threading.Lock()
         self.waiters = deque()
 
@@ -23,6 +25,8 @@ class Pool:
         with self.lock:
             if self.active >= self.capacity or self.waiters:
                 raise HTTPException(429, {'code': 'server_busy', 'message': '服务器已有任务运行，请稍后重试。', 'resource': self.name}, headers={'Retry-After': '5'})
+            if self.admission:
+                self.admission()
             self.active += 1
         return Lease(self)
 
@@ -33,6 +37,8 @@ class Pool:
             if cancelled.is_set():
                 return None
             if self.active < self.capacity and not self.waiters:
+                if self.admission:
+                    self.admission()
                 self.active += 1
                 return Lease(self)
             if len(self.waiters) >= max_waiters:
@@ -49,6 +55,8 @@ class Pool:
                     if cancelled.is_set():
                         return None
                     if self.waiters[0] is ticket and self.active < self.capacity:
+                        if self.admission:
+                            self.admission()
                         self.waiters.popleft()
                         self.active += 1
                         return Lease(self)
@@ -133,7 +141,7 @@ def release_login_admission(process):
 
 
 def install_limits(workspace):
-    pools = {name: Pool(name, max(1, int(os.environ.get('EASEL_' + name.upper() + '_LIMIT', '1'))))
+    pools = {name: Pool(name, max(1, int(os.environ.get('EASEL_' + name.upper() + '_LIMIT', '1'))), require_memory_capacity)
              for name in ('agent', 'browser', 'media')}
     workspace.app.state.server_pools = pools
     running_calls = set()
@@ -237,6 +245,7 @@ def install_limits(workspace):
     async def readiness():
         status = await asyncio.to_thread(workspace.check_gateway)
         return {'web': True, 'gateway': bool(status), 'modelInference': 'not_probed',
+                'memory': memory_snapshot(),
                 'deployment': {'mode': 'server', 'readOnlyRoot': True,
                                'environmentInstall': False, 'storageMigration': False},
                 'codex': os.environ.get('EASEL_CODEX_ENABLED', '0') == '1',

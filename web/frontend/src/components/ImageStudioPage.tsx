@@ -58,7 +58,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
   const size = IMAGE_SIZES.find(item => item.id === sizeId) || IMAGE_SIZES[0];
   const [width, height] = size.id.split('x').map(Number);
   const ratioMismatch = size.id !== 'auto' && actual && Math.abs(actual.width / actual.height - width / height) > .01;
-  const canGenerate = !locked && !studio.loading && !studio.galleryError && studio.imgChannel?.configured
+  const canGenerate = !locked && job?.phase !== 'unconfirmed' && !studio.loading && !studio.galleryError && studio.imgChannel?.configured
     && typeof studio.imgChannel.model === 'string' && studio.imgChannel.model.trim() && (!editing || reference)
     && studio.imgPrompt.trim().length > 0 && studio.imgPrompt.trim().length <= 2000;
   const receiveFile = (file?: File) => { if (file && !locked) void media.receiveFile(file); };
@@ -125,7 +125,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           </div></details>
           {studio.mask && reference && <p className="image-field-hint">已使用局部编辑蒙版，可在更多选项中移除。</p>}
           {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
-          {belongsToDraft && job?.state === 'error' && <div className="image-error" role="alert"><p>{job.phase === 'unconfirmed' ? '生成结果未确认：' : '图片任务已结束：'}{job.error || '请核对任务状态'}</p>{job.phase === 'unconfirmed' && <button type="button" className="btn btn-sm" disabled={studio.imgSubmitting} onClick={() => void studio.acknowledgeJob()}>已核对供应商，解除占位</button>}</div>}
+          {(belongsToDraft || job?.phase === 'unconfirmed') && job?.state === 'error' && <div className="image-error" role="alert"><p>{job.phase === 'unconfirmed' ? '生成结果未确认：' : '图片任务已结束：'}{job.error || '请核对任务状态'}</p>{job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" className="btn btn-sm" disabled={studio.imgSubmitting} onClick={() => void studio.recoverJob()}>接回原任务</button>}<button type="button" className="link-btn" disabled={studio.imgSubmitting} onClick={() => void studio.acknowledgeJob()}>已核对供应商，解除占位</button></>}</div>}
         </form>
         {(previewUrl || busy) && <div className="image-preview">
         <div className="image-canvas-toolbar">
@@ -148,7 +148,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
         <div className={`image-canvas${busy ? ' is-busy' : ''}`} aria-label="图片画布">
           {previewUrl ? <img className="image-canvas-picture" src={previewUrl} alt={original ? `原图：${reference!.name}` : job?.prompt || '生成结果'} />
             : null}
-          {busy && <div className="image-progress" role="status"><span className="image-progress-spinner" aria-hidden="true" /><strong>{studio.imgSubmitting ? '正在提交…' : job?.phase === 'queued' ? `等待图片通道 · ${studio.imgTick} 秒` : `图片任务处理中 · 已等待 ${studio.imgTick} 秒`}</strong><p>可以离开此页，回来继续查看。不会因刷新重新生成。</p></div>}
+          {busy && <div className="image-progress" role="status"><span className="image-progress-spinner" aria-hidden="true" /><strong>{studio.imgSubmitting ? job?.phase === 'unconfirmed' ? '正在核对原任务…' : '正在提交…' : job?.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中…' : `等待图片通道 · ${studio.imgTick} 秒` : job?.stage === 'recovering' ? '正在接回原图片任务…' : job?.stage === 'downloading' ? '图片已生成，正在保存…' : `图片任务处理中 · 已等待 ${studio.imgTick} 秒`}</strong><p>可以离开此页，回来继续查看。不会因刷新重新生成。</p></div>}
           {dragging && <div className="image-drop-overlay">松开放入图片</div>}
         </div>
         </div>}

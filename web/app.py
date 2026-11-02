@@ -6840,7 +6840,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             raise
         except Exception as e:
             error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
-                     and str(e.detail.get('code', '')).startswith(('chat_model_', 'chat_server_queue_'))
+                     and (str(e.detail.get('code', '')).startswith(('chat_model_', 'chat_server_queue_'))
+                          or e.detail.get('code') == 'server_memory_pressure')
                      else gateway_error(type(e).__name__ + ': ' + str(e)))
             to_client('error', error)
             save_turn(pk, 'done', ''.join(full_text), {
@@ -9928,6 +9929,19 @@ async def api_imagegen_acknowledge(job_id: str):
     """Human explicitly confirms provider reconciliation; never restarts a job."""
     try:
         return ImageJobs(OUTPUTS_DIR).acknowledge(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post('/api/imagegen/{job_id}/reconcile')
+async def api_imagegen_reconcile(job_id: str):
+    """Only query/download the original provider task; never generate again."""
+    try:
+        await asyncio.to_thread(ImageJobs(OUTPUTS_DIR).reconcile, job_id, _read_env())
+        await asyncio.to_thread(_image_worker().tick)
+        return ImageJobs(OUTPUTS_DIR).get(job_id)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:

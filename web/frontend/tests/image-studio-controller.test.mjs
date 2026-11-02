@@ -79,6 +79,54 @@ test('standalone image workspace does not claim a writing session', async t => {
   await f.reply(f.starts()[0], json({jobId:'standalone-job'}));
 });
 
+test('unconfirmed generation remains observed and cannot become another paid submission', async t => {
+  const f = await fixture(t, {prompt: '生成运营封面'});
+  t.mock.timers.enable({apis:['setTimeout']});
+  await f.run(s => s.fireImagegen());
+  await f.reply(f.starts()[0], json({jobId:'original-job'}));
+  const original = f.state().imgJob;
+  const first = f.requests.find(r => r.url === '/api/imagegen/original-job');
+  await f.reply(first, json({...original, state:'error', phase:'unconfirmed', recoveryAvailable:true, error:'执行端失联'}));
+  await f.run(s => s.fireImagegen());
+  assert.equal(f.starts().length, 1);
+  await act(async () => t.mock.timers.tick(10000));
+  const polls = f.requests.filter(r => r.url === '/api/imagegen/original-job');
+  assert.equal(polls.length, 2, 'unknown results keep observing the original job');
+  await f.reply(polls[1], json({...original, phase:'running', stage:'recovering'}));
+  assert.equal(f.state().imgJob.stage, 'recovering');
+  await act(async () => t.mock.timers.tick(3000));
+  const last = f.requests.filter(r => r.url === '/api/imagegen/original-job').at(-1);
+  await f.reply(last, json({...original, state:'done', phase:'done', url:'/api/media/original.png'}));
+  assert.equal(f.state().imgJob.state, 'done');
+  assert.equal(f.starts().length, 1);
+});
+
+test('manual recovery calls only the original reconciliation endpoint', async t => {
+  const f = await fixture(t, {prompt: '生成运营封面'});
+  await f.run(s => s.fireImagegen());
+  await f.reply(f.starts()[0], json({jobId:'recoverable-job'}));
+  const original = f.state().imgJob;
+  await f.reply(f.requests.find(r => r.url === '/api/imagegen/recoverable-job'),
+    json({...original,state:'error',phase:'unconfirmed',recoveryAvailable:true}));
+  await f.run(s => s.recoverJob());
+  const recovery = f.requests.find(r => r.url === '/api/imagegen/recoverable-job/reconcile');
+  assert.equal(recovery.method, 'POST');
+  await f.reply(recovery,json({...original,phase:'running',stage:'recovering'}));
+  assert.equal(f.state().imgJob.stage, 'recovering');
+  assert.equal(f.starts().length, 1);
+});
+
+test('a missing job record preserves uncertainty and blocks a fresh charge', async t => {
+  const f = await fixture(t, {prompt: '生成运营封面'});
+  await f.run(s => s.fireImagegen());
+  await f.reply(f.starts()[0], json({jobId:'missing-job'}));
+  await f.reply(f.requests.find(r => r.url === '/api/imagegen/missing-job'), json({detail:'not found'},404));
+  assert.equal(f.state().imgJob.phase, 'unconfirmed');
+  assert.match(f.state().imgJob.error,/避免重复扣费/);
+  await f.run(s => s.fireImagegen());
+  assert.equal(f.starts().length, 1);
+});
+
 test('uploading a reference selects its closest supported ratio and sends a real img2img payload', async t => {
   const f = await fixture(t, { prompt: '  把背景改成黄昏  ', size: '1024x1024', mode: 'generate' });
   await f.run(s => s.uploadReference(file()));

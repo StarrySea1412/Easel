@@ -96,6 +96,23 @@ def manager(tmp_path):
         pass
 
 
+def test_identity_publication_retries_local_sharing_without_launching_a_backend(tmp_path, monkeypatch):
+    manager = RuntimeManager(tmp_path, {})
+    state = {'schema':1, 'token':'a'*64, 'instance':'fixture', 'data':str(tmp_path.resolve()), 'port':None}
+    manager.write(state)
+    original = os.replace; attempts = []
+    def busy_reader(source, destination):
+        attempts.append(destination)
+        if len(attempts) <= 2:
+            assert manager.read() == state
+            raise PermissionError('simulated Windows sharing conflict')
+        return original(source, destination)
+    monkeypatch.setattr(os, 'replace', busy_reader)
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: pytest.fail('local publication must not restart a backend'))
+    manager.write({**state, 'port':12345})
+    assert len(attempts) == 3 and manager.read()['port'] == 12345
+
+
 def test_private_auth_scope_and_control_are_not_business_credentials():
     app = FastAPI()
     @app.get('/context')

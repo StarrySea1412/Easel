@@ -77,6 +77,18 @@ def router(outputs, history=None):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @routes.post('/{session}/jobs/{ident}/reconcile')
+    def reconcile_image(session: str, ident: str):
+        from .image_jobs import ImageJobs, read_config
+        try:
+            jobs = ImageJobs(outputs())
+            jobs.get(ident, session=session)
+            return jobs.reconcile(ident, read_config(jobs.outputs.parent))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @routes.post('/{session}/{ident}/refresh')
     def refresh(session: str, ident: str):
         repository, _ = get(session, ident)
