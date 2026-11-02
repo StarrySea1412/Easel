@@ -1,3 +1,5 @@
+**0.16.0候选第二批：内容业务链协作流程（2026-11-03，源码交付）。** 目标协作新增可选"分析选题 → 撰写稿件 → 图片规格 → 发布准备"业务链，配内容撰稿人与视觉设计师角色契约；每阶段产出独立文件并按既有规则核验交接，图片阶段只产出规格清单，不自动生成图片或发布。推进方式菜单改由任务服务提供并保留离线回退。后端15项、前端定向与全量1271项（等效全绿）、构建/lint通过；隔离实例7893实测桌面与390 CSS像素菜单、键盘与fail-closed边界，未调用模型。仅源码/隔离验证，138与安装器未更新。[实现、验证与剩余范围](https://github.com/StarrySea1412/Easel/blob/codex/agent-workspace-0.16.0/docs/agent-workspace-0.16.0.md)。
+
 **138正式/隔离已更新0.45.4 / `2d6507a2e54e`。** 修复目标渠道524与重试叠加，最多一次派发前请求恢复、90秒请求截止并保留已完成工具。真实检查中Happycoding的DeepSeek接口仍524；已配置Minimax M3在隔离工作台23秒完成短对话，不能将本补丁称为供应商可用性已恢复。[故障注入、实际调用和138回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/provider-timeout-recovery-0.45.4.md)。
 
 **138正式/隔离已更新0.45.3（2026-11-02）。** 运行构建`1001448c8982`。保留0.45.1派发前有界恢复、0.45.2插件目录与主动生图修复；新增Codex过程重试与最终状态一致性修复，恢复成功不再被旧错误污染。固定源码对照Harness、Codex、PydanticAI、Vercel及实际OpenClaw循环，[依据、故障回归和部署回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/agent-loop-reliability-0.45.3.md)。
