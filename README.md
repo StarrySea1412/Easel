@@ -1,3 +1,7 @@
+**138正式/隔离已更新0.45.3（2026-11-02）。** 运行构建`1001448c8982`。保留0.45.1派发前有界恢复、0.45.2插件目录与主动生图修复；新增Codex过程重试与最终状态一致性修复，恢复成功不再被旧错误污染。固定源码对照Harness、Codex、PydanticAI、Vercel及实际OpenClaw循环，[依据、故障回归和部署回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/agent-loop-reliability-0.45.3.md)。
+
+长期真实业务成功率、数据完整性、图片质量/费用及历史未完项继续，安装器未发布；只同步双语首页，功能未合并main。以下保留各版本当时的验证范围。
+
 **反复工具参数失败仍未关闭（2026-11-02）。** 对照DeepSeek Harness、Codex、PydanticAI和Vercel AI SDK，补证现场模型未配置输出上限时归一化为8192，与4次失败输出量一致；同版本适配器3项纯内存复现确认畸形调用被拒绝、预算终态单独保留。缺少原始终止原因时不能断言截断；此前错误分类不等于根因修复。本次仅研究与诊断，预算观测、长产物分块及有界参数修复尚待实现，未更新138。[源码依据、差距与验收条件](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/tool-call-recovery-research-2026-11-02.md)。
 
 **0.45.0源码候选：先补图片恢复与资源保护（2026-11-02）。** 图片供应商任务号持久保存；支持查询的原任务可接回下载，刷新、断线和手动接回不重新创建。待核验阻止重复提交；服务器内存紧张时不派发新任务，图片保留排队并显示原因。仅源码/隔离验证，尚未部署138或发布安装器；协议、验证和升级边界见[0.45.0记录](https://github.com/StarrySea1412/Easel/blob/codex/codex-live-0.44.0/docs/image-recovery-and-resource-admission-0.45.0.md)。
