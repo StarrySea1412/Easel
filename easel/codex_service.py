@@ -771,11 +771,21 @@ class CodexService:
             if turn.get('error'):
                 state['error'] = {'message': safe(turn['error'].get('message', 'Codex 任务失败。'))}
             elif state['outcome'] == 'failed':
-                state['error'] = {'message': 'Codex 上报本轮执行失败。'}
+                state['error'] = state.get('error') or {'message': 'Codex 上报本轮执行失败。'}
+            elif state['outcome'] in ('completed', 'interrupted'):
+                # The native terminal receipt supersedes intermediate errors.
+                # A recovered model request must not make this turn fail locally.
+                state.pop('error', None)
             return True
         elif method == 'error':
             error = params.get('error') or {}
-            state['error'] = {'message': public_text(error.get('message', 'Codex 返回错误。'), limit=1500)}
+            message = public_text(error.get('message', 'Codex 返回错误。'), limit=1500)
+            if params.get('willRetry') is True:
+                # App Server owns this retry within the original turn. Record
+                # progress without resubmitting it or persisting a final failure.
+                self._event(state, 'activity', '模型请求暂时失败，原轮次正在自动重试：' + message)
+            else:
+                state['error'] = {'message': message}
         return False
 
     def _reply(self, run, ident, result):
