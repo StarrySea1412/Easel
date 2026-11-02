@@ -19,22 +19,63 @@ stopping = False
 def stop(_signal=None, _frame=None):
     global stopping
     stopping = True
+    # Signal handlers never do network I/O, wait, or signal children twice.
+
+
+def terminate(child, timeout, name):
+    if child.poll() is not None:
+        return True
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+        code = child.wait(timeout=timeout)
+        if code not in (0, -signal.SIGTERM):
+            print(f'{name} shutdown exited with code={code}.', file=sys.stderr, flush=True)
+            return False
+        return True
+    except ProcessLookupError:
+        return True
+    except subprocess.TimeoutExpired:
+        print(f'{name} shutdown deadline reached; forcing container exit.', file=sys.stderr, flush=True)
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait(timeout=3)
+        return False
+
+
+def shutdown_children():
     # A full container stop explicitly closes the durable owner. Ordinary web
     # crashes never reach this path and therefore do not interrupt its runs.
     from easel.runtime_host import RuntimeManager, RuntimeUnavailable
+    from easel.runtime_host import locked
+    from easel.runtime_shutdown import (DRAIN_SECONDS, RUNTIME_EXIT_SECONDS,
+        GATEWAY_EXIT_SECONDS, OBSERVER_EXIT_SECONDS)
     manager = RuntimeManager()
+    clean = True
     try:
         state = manager.read()
+        if locked(manager.directory / 'runtime.lock') and (not state or not state.get('port')):
+            raise RuntimeUnavailable('Execution owner identity unavailable')
         if state and state.get('port'):
             manager.control(state, 'shutdown')
+            deadline = time.monotonic() + DRAIN_SECONDS + RUNTIME_EXIT_SECONDS
+            while locked(manager.directory / 'runtime.lock') and time.monotonic() < deadline:
+                time.sleep(.1)
+            if locked(manager.directory / 'runtime.lock'):
+                clean = False
+                print('Execution owner exit unconfirmed; preserving durable receipts.', file=sys.stderr, flush=True)
     except RuntimeUnavailable:
-        pass  # Do not substitute an unverified PID kill for the private handshake.
-    for child in reversed(children):
-        if child.poll() is None:
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+        # An exited owner can leave its old identity. A live owner with a
+        # failed handshake must not be mistaken for a successful drain.
+        clean = not locked(manager.directory / 'runtime.lock')
+        if not clean:
+            print('Execution owner handshake failed; drain unconfirmed.', file=sys.stderr, flush=True)
+    if len(children) > 1:
+        clean = terminate(children[1], OBSERVER_EXIT_SECONDS, 'Web observer') and clean
+    if children:
+        clean = terminate(children[0], GATEWAY_EXIT_SECONDS, 'Gateway') and clean
+    return clean
 
 
 def ready(url):
@@ -135,14 +176,6 @@ if __name__ == '__main__':
         code = 1
     finally:
         stop()
-        deadline = time.monotonic() + 30
-        for child in reversed(children):
-            try:
-                child.wait(timeout=max(0.1, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                child.wait(timeout=3)
+        if not shutdown_children():
+            code = 1
     raise SystemExit(code)

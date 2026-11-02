@@ -255,6 +255,52 @@ def test_execution_owner_death_never_replays_a_paid_request(manager):
     assert not (manager.data / 'result').exists()
 
 
+def test_shutdown_fences_new_admission_and_joins_original_detached_run(manager):
+    state = manager.ensure()
+    headers = {TOKEN_HEADER.decode(): state['token'], CONTEXT_HEADER.decode():
+        base64.urlsafe_b64encode(json.dumps({'scheme': 'http', 'client': ['127.0.0.1', 1],
+            'server': ['localhost', 80], 'root_path': ''}).encode()).decode()}
+    with httpx.Client(trust_env=False, timeout=10) as client:
+        url = f"http://127.0.0.1:{state['port']}"
+        assert client.post(url + '/run', json={'id': 'accepted-once'}, headers=headers).status_code == 200
+        assert manager.control(state, 'shutdown')['draining']
+        assert manager.control(state, 'shutdown')['draining']  # no second cancellation/deadline
+        assert manager.control(state)['busy']
+        assert locked(manager.directory / 'runtime.lock')
+        assert client.post(url + '/run', json={'id': 'rejected'}, headers=headers).status_code == 503
+        (manager.data / 'release').touch()
+        wait_for(lambda: not locked(manager.directory / 'runtime.lock'))
+    assert (manager.data / 'result').read_text() == 'completed:accepted-once'
+    assert (manager.data / 'dispatches').read_text().splitlines() == ['accepted-once']
+
+
+def test_shutdown_deadline_does_not_report_a_busy_producer_completed():
+    async def scenario():
+        wrapped = PrivateApplication(FastAPI(), {'token': 'a'*64, 'instance': 'one', 'code': 'code'},
+            busy=lambda: True, drain_seconds=.04)
+        wrapped.server = SimpleNamespace(should_exit=False)
+        task = asyncio.create_task(wrapped.drain())
+        await asyncio.sleep(.01)
+        assert not wrapped.server.should_exit
+        await task
+        assert wrapped.server.should_exit and wrapped.busy()
+    asyncio.run(scenario())
+
+
+def test_draining_retains_response_lifetime_even_when_background_work_is_idle():
+    async def scenario():
+        wrapped = PrivateApplication(FastAPI(), {}, drain_seconds=1)
+        wrapped.server = SimpleNamespace(should_exit=False)
+        wrapped.requests = 1
+        task = asyncio.create_task(wrapped.drain())
+        await asyncio.sleep(.02)
+        assert not wrapped.server.should_exit
+        wrapped.requests = 0
+        await task
+        assert wrapped.server.should_exit
+    asyncio.run(scenario())
+
+
 def test_server_supervisor_replaces_only_web_observer(monkeypatch):
     import importlib.util
     spec = importlib.util.spec_from_file_location('isolated_supervisor_test', ROOT / 'deployment/138/supervisor.py')

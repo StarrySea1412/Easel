@@ -644,7 +644,8 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 @asynccontextmanager
 async def _owned_lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
-    global _HARNESS_LOOP
+    global _HARNESS_LOOP, _SERVICE_SHUTTING_DOWN
+    _SERVICE_SHUTTING_DOWN = False
     _HARNESS_LOOP = asyncio.get_running_loop()
     from easel.storage_location import apply_pending
     await asyncio.to_thread(apply_pending, DATA_DIR)
@@ -663,11 +664,10 @@ async def _owned_lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        from easel.runtime_shutdown import begin, close_chat_tasks
+        begin(sys.modules[__name__])
         await _task_service.close()
-        alternate = list(_DIRECT_CHAT_TASKS | _HARNESS_TASKS)
-        for task in alternate:
-            task.cancel()
-        await asyncio.gather(*alternate, return_exceptions=True)
+        await close_chat_tasks(sys.modules[__name__])
         from easel.harnesses.rpc import close_sessions
         await close_sessions()
         _HARNESS_LOOP = None
@@ -6112,6 +6112,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         xlock.cancel_event = cancel_job
         lock_acquired = False
         user_stopped = False
+        shutdown_lost = False
         async def acquire_process_lock(target, timeout):
             def claim():
                 acquired = target.acquire(timeout)
@@ -6833,12 +6834,26 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         pass
         except asyncio.CancelledError:
             cancel_job.set()
-            user_stopped = True
-            save_turn(pk, 'done', ''.join(full_text), {
-                'turn_id': turn_id, 'thinking': ''.join(full_thinking),
-                'requestedModelRef': requested_model_ref, 'clean_end': False,
-                'stop_reason': 'cancelled', 'stopped': True,
-            })
+            saved_terminal = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
+            shutting_down = globals().get('_SERVICE_SHUTTING_DOWN', False)
+            user_stopped = user_stopped or sk in _STOPPED_CHAT or not shutting_down
+            if (saved_terminal and saved_terminal.get('settled')
+                    and saved_terminal.get('status') in ('completed', 'failed', 'stopped')):
+                # Cancellation during post-result auditing must not replace an
+                # already committed original terminal snapshot with an error.
+                user_stopped = saved_terminal['status'] == 'stopped'
+                turn_error = saved_terminal.get('error')
+            else:
+                shutdown_lost = shutting_down and not user_stopped
+                if shutdown_lost:
+                    from easel.runtime_shutdown import interruption
+                    turn_error = interruption()
+                save_turn(pk, 'done', ''.join(full_text), {
+                    'turn_id': turn_id, 'thinking': ''.join(full_thinking),
+                    'requestedModelRef': requested_model_ref, 'clean_end': False,
+                    'stop_reason': 'service_shutdown' if shutdown_lost else 'cancelled',
+                    'stopped': user_stopped, **({'error': turn_error} if shutdown_lost else {}),
+                })
             raise
         except Exception as e:
             error = (e.detail if isinstance(e, HTTPException) and isinstance(e.detail, dict)
@@ -6868,12 +6883,15 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 record = await asyncio.to_thread(run_ledger.read, _run_ledger_root(), turn_id)
                 if record and not record.get('settled'):
                     await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
-                        event='terminal', status='stopped' if user_stopped else 'failed', settled=True,
-                        error=turn_error, stop_reason='user_stopped' if user_stopped else 'supervisor_failed')
+                        event='observer_lost' if shutdown_lost else 'terminal',
+                        status='unknown' if shutdown_lost else 'stopped' if user_stopped else 'failed',
+                        settled=not shutdown_lost, error=turn_error,
+                        stop_reason='service_shutdown' if shutdown_lost else 'user_stopped' if user_stopped else 'supervisor_failed')
+                confirmed = all(facts.values()) and snapshot_confirmed and not shutdown_lost
                 await asyncio.to_thread(run_ledger.mark, _run_ledger_root(), turn_id,
-                    event='resources_settled' if all(facts.values()) and snapshot_confirmed else 'resources_pending',
-                    resource_settled=all(facts.values()) and snapshot_confirmed, resource_facts=facts)
-                resources_settled = all(facts.values()) and snapshot_confirmed
+                    event='resources_settled' if confirmed else 'resources_pending',
+                    resource_settled=confirmed, resource_facts=facts)
+                resources_settled = confirmed
             except Exception:
                 log.warning('运行收尾尚未持久确认：%s', turn_id, exc_info=True)
             if not resources_settled:
@@ -6901,7 +6919,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 lock.release()
                 _RUNNING_CHAT.pop(sk, None)
                 _ACTIVE_SKILL_TURNS.pop(sk, None)
-            if on_done is not None:
+            if on_done is not None and resources_settled:
                 try:
                     await on_done()
                 except Exception:

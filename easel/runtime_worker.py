@@ -8,19 +8,36 @@ import importlib
 import json
 import os
 import socket
+import time
 
 from easel.runtime_host import (RuntimeManager, RuntimeUnavailable, ownership,
                                 PREFIX, TOKEN_HEADER, CONTEXT_HEADER, code_digest)
 
 
 class PrivateApplication:
-    def __init__(self, app, state, busy=lambda: False, quiesce=lambda: True, shutdown=lambda: None):
+    def __init__(self, app, state, busy=lambda: False, quiesce=lambda: True, shutdown=lambda: None,
+                 drain_busy=None, drain_seconds=None):
         self.app, self.state, self.busy = app, state, busy
         self.requests = 0
         self.draining = False
         self.server = None
         self.quiesce = quiesce
         self.shutdown = shutdown
+        from easel.runtime_shutdown import DRAIN_SECONDS
+        self.drain_busy = drain_busy or busy
+        self.drain_seconds = DRAIN_SECONDS if drain_seconds is None else drain_seconds
+        self.drain_task = None
+
+    async def drain(self):
+        deadline = time.monotonic() + self.drain_seconds
+        while self.requests or self.drain_busy():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                import logging
+                logging.getLogger(__name__).warning('Execution drain deadline reached; unresolved results retained.')
+                break
+            await asyncio.sleep(min(.1, remaining))
+        self.server.should_exit = True
 
     async def __call__(self, scope, receive, send):
         from starlette.responses import JSONResponse
@@ -33,7 +50,8 @@ class PrivateApplication:
             return await JSONResponse({'detail': 'Not found'}, status_code=404)(scope, receive, send)
         if scope['path'].startswith(PREFIX):
             value = {'instance': self.state['instance'], 'code': self.state['code'],
-                     'pid': os.getpid(), 'running': True, 'busy': bool(self.requests or self.busy())}
+                     'pid': os.getpid(), 'running': True, 'busy': bool(self.requests or self.busy()),
+                     'draining': self.draining}
             if scope['path'] == PREFIX + 'stop' and scope['method'] == 'POST':
                 if value['busy']:
                     return await JSONResponse({'detail': 'busy'}, status_code=409)(scope, receive, send)
@@ -45,9 +63,11 @@ class PrivateApplication:
             elif scope['path'] == PREFIX + 'shutdown' and scope['method'] == 'POST':
                 # Used only by the enclosing server's explicit SIGTERM. A full
                 # installation shutdown is distinct from idle upgrade/stop.
-                self.draining = True
-                self.shutdown()
-                self.server.should_exit = True
+                if not self.draining:
+                    self.draining = True
+                    self.shutdown()
+                    self.drain_task = asyncio.create_task(self.drain())
+                value['draining'] = True
             elif scope['path'] != PREFIX + 'health' or scope['method'] != 'GET':
                 return await JSONResponse({'detail': 'Not found'}, status_code=404)(scope, receive, send)
             return await JSONResponse(value, headers={'Cache-Control': 'no-store'})(scope, receive, send)
@@ -109,14 +129,16 @@ def main():
 
         def shutdown():
             if hasattr(web, '_task_service'):
-                web._task_service.closing = True
-                web._image_worker().stop_event.set()
-                if web._task_service.loop:
-                    web._task_service.loop.cancel()
+                from easel.runtime_shutdown import begin
+                begin(web)
+
+        from easel.runtime_shutdown import active
 
         private = PrivateApplication(app, state, busy=(lambda: application_busy(web))
             if hasattr(web, '_task_service') else getattr(module, 'runtime_busy', lambda: False),
-            quiesce=quiesce, shutdown=shutdown)
+            quiesce=quiesce, shutdown=shutdown,
+            drain_busy=(lambda: active(web))
+                if hasattr(web, '_task_service') else None)
         server = uvicorn.Server(uvicorn.Config(private, host='127.0.0.1', port=0,
             proxy_headers=False, log_level='warning', timeout_graceful_shutdown=30))
         private.server = server

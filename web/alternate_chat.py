@@ -244,32 +244,43 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
             except OSError:
                 pass
         finally:
-            stopped = state.cancel.is_set() or req.sessionId in web._STOPPED_CHAT
+            shutdown_lost = (getattr(web, '_SERVICE_SHUTTING_DOWN', False)
+                and state.cancel.is_set() and req.sessionId not in web._STOPPED_CHAT)
+            stopped = not shutdown_lost and (state.cancel.is_set() or req.sessionId in web._STOPPED_CHAT)
             try:
                 marker = json.loads(web._run_snapshot_file(req.turnId).read_text(encoding='utf-8'))
             except (OSError, ValueError):
                 marker = {}
-            if not state.claimed or marker.get('status') != 'done':
+            shutdown_lost = shutdown_lost and marker.get('clean_end') is not True
+            if shutdown_lost:
+                from easel.runtime_shutdown import interruption
+                error = interruption()
+                state.errors.append(error)
+            if shutdown_lost or not state.claimed or marker.get('status') != 'done':
                 # Save only this independent archive; never replace a prior
                 # session result when admission/ownership failed before dispatch.
                 try:
                     state.save('web:' + req.sessionId, 'done', ''.join(state.text), {
                         'turn_id': req.turnId, 'clean_end': False,
-                        'stop_reason': 'user_stopped' if stopped else 'admission_failed'})
+                        'stop_reason': 'service_shutdown' if shutdown_lost else 'user_stopped' if stopped else 'admission_failed',
+                        **({'error': error, 'stopped': False} if shutdown_lost else {})})
                     marker = json.loads(web._run_snapshot_file(req.turnId).read_text(encoding='utf-8'))
                 except (OSError, ValueError):
                     pass
-            stopped = stopped or marker.get('stopped') is True
+            stopped = not shutdown_lost and (stopped or marker.get('stopped') is True)
             try:
                 from chat_recovery import settle_resources
                 facts = await asyncio.to_thread(settle_resources, web, req.sessionId,
-                    provider_settled=True) if state.claimed else {'provider': True, 'browser': True}
+                    provider_settled=not shutdown_lost) if state.claimed else {'provider': True, 'browser': True}
                 complete = marker.get('status') == 'done' and marker.get('clean_end') is True and not state.errors
-                web.run_ledger.mark(web._run_ledger_root(), req.turnId, event='terminal',
-                    status='stopped' if stopped else 'completed' if complete else 'failed', settled=True,
+                web.run_ledger.mark(web._run_ledger_root(), req.turnId,
+                    event='observer_lost' if shutdown_lost else 'terminal',
+                    status='unknown' if shutdown_lost else 'stopped' if stopped else 'completed' if complete else 'failed',
+                    settled=not shutdown_lost,
+                    **({'error': error} if shutdown_lost else {}),
                     completion_receipt=marker.get('completionReceipt'),
                     stop_reason=marker.get('stop_reason', 'snapshot_unconfirmed'))
-                settled = state.saved and all(facts.values())
+                settled = not shutdown_lost and state.saved and all(facts.values())
                 web.run_ledger.mark(web._run_ledger_root(), req.turnId,
                     event='resources_settled' if settled else 'resources_pending',
                     resource_settled=settled, resource_facts=facts)

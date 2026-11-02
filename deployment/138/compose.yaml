@@ -58,7 +58,9 @@ services:
     pids_limit: 256
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    stop_grace_period: 40s
+    # Execution drain 300s + cleanup 60s, observer 10s, native Gateway 330s,
+    # with 20s reserved for process joins. Idle stops still finish promptly.
+    stop_grace_period: 720s
     healthcheck:
       test: [CMD, python, /app/deployment/138/healthcheck.py]
       interval: 20s
