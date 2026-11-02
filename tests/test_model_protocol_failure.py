@@ -88,8 +88,9 @@ def test_protocol_failure_keeps_only_bounded_provider_finish_metadata():
     assert result['outputTokens'] == 16384
 
 
-def test_native_adapter_failure_does_not_dispatch_an_automatic_continuation():
-    error = GatewayQuestionError(DIAGNOSTIC)
+@pytest.mark.parametrize('diagnostic', [DIAGNOSTIC, 'Easel request recovery exhausted'])
+def test_native_adapter_failure_does_not_dispatch_an_automatic_continuation(diagnostic):
+    error = GatewayQuestionError(diagnostic)
     error.rpc_response = True
     calls = []
     client_type = make_client([error], calls)

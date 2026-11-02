@@ -20,4 +20,17 @@
 
 已通过19项JS恢复检查，后端分类/失败账本/认证/版本/Codex既有回归组合95项通过。真实SDK的七类故障通过，覆盖原有五类参数/流协议以及524一次/持续失败。完整CLI持续524验证2次请求后失败、零工具/零生图；生图已入队后524验证保留同一回执、仅1个queued任务并完成模型续步；先524再首次生图的场景也只有1个queued任务。持续错误和先524场景显式配置了可用fallback，核对全部HTTP模型身份仍为原钉选模型。无图片worker，queued只证明受理与幂等，不宣称图片生成质量或收费验收。前端lint退出0，保留既有warning。
 
-源码提交、Git远端、镜像、隔离/正式运行版本和浏览器入口将在实际完成后记录。供应商持续超时仍会失败，本补丁不能使不可用渠道产出结果；长期真实运营成功率、数据完整性、图片质量与费用、历史OOM/停机排空项继续开放。未发布安装器。
+原生CLI的既有分块文件/交付夹具同样通过：8个模型请求、一次参数修复、25字节真实文件只交付一次、SHA256 `c339ead0d3d3f4f848d103292b08dd79e2263843f3b25bf3df9a1ba2ad98c187`，相同requestId两次生图调用仅1个queued任务。追加22项分类专项通过，其中新增耗尽标记不会触发Easel外层接续；不与之前95项组合重复累计。
+
+## 138发布与真实渠道检查
+
+- 已推送并核对运行源码`2d6507a2e54e9d26e35832cc877587dd3ebeff7b`。固定镜像`sha256:145861ce8354149fb037072034c458f4740c631deaa3988adc4d6cabd1b4c318`，仅五个运行源文件变化（recovery、gateway_auth、pyproject、前端package/lock），复用已验证0.45.3依赖。Git导出ZIP SHA256 `dc5fe9606fca62b016fc20d04c01e9b97cab89ebbd72dfb7a3b725c6c431f78b`，2280源码文件；镜像内1748运行文件逐一核验一致、metadata为0.45.4。
+- 干净前端76文件6554207字节，ZIP SHA256 `a1a370fbbffba0ceda91d4636241af06bd342b279da22dbebab35471e55a5eb6`。正式8444/隔离8445均运行该构建，逐一HTTPS核对73个assets共6535162字节及首页；匿名version/readiness/failures均401，app/browser同镜像healthy、重启0、Gateway正常。readiness的modelInference仍为not_probed，不据此宣称推理成功。
+- 停写备份：正式`/home/ubuntu/easel-backups/20261102T135621Z.tar.gz`，隔离`/home/ubuntu/easel-backups-test/20261102T134137Z.tar.gz`。切正式前agent/browser/media active/waiting全0，图片库2条既有done、无排队或运行。旧0.45.3镜像/发布目录保留；manager rollback保留当前业务数据。本次未复现历史owner租约拒绝，停机排空预算问题仍开放。
+- 隔离入口`https://127.0.0.1:8445/login`仅服务器loopback，通过既有本机隧道访问；测试账号`gaojitest`/`gaoji`登录HTTP通过。真实浏览器前后端0.45.4/build `2d6507a2e54e`、网关连接、刷新双栏折叠、版本弹窗、新建对话与模型选择/提交/结算通过。正式入口`https://192.168.0.138:8444/`完成认证HTTP及哈希验证，未冒称正式登录浏览器或全部菜单已验收。测试密码未植入正式环境。
+
+真实检查发现供应商问题仍在：隔离UI原生DeepSeek自检（turn `1793627164416-dxuq36a3nwn`）连续两次524、outputTokens0，审计同requestId的attempt0/1分别32.6秒/64.8秒，最终model_provider_timeout，整轮79秒、无工具、failed/settled/resourceSettled。页面实际显示“模型渠道响应超时，本轮未完成，已停止自动恢复”。再直接使用同一配置的最小Chat Completions API，仅一句固定测试消息、max_tokens64、无system/无tools、非流式，也在35.3秒返回HTTP524空body。这证明当前失败在模型渠道接口发生，不能归咎图片、系统提示词或工具参数，更不能宣称供应商已恢复。
+
+同一隔离UI新建独立会话、手动选择已配置的`happycoding/minimax-m3`，23秒返回固定标记`EASEL_0454_MINIMAX_OK`；turn `1793628321587-ai4hulezfm`的持久账本completed、settled/resourceSettled均true、无error。仅证明该时刻这条真实短对话完成；不独立验证中转底层模型品牌，也不证明复杂图片/运营任务成功率。正式默认模型及fallback保持原配置，原“奶龙”任务未重放。本次两次UI自检和一次最小API请求可能消耗模型调用额度；没有请求收费图片、发布或支付。
+
+供应商DeepSeek可用性、长期真实运营成功率、数据完整性、图片质量与费用、全模型统一预算、历史OOM/停机排空项继续开放。安装器未发布。运行构建身份固定为上述源码commit；后续文档/测试回执提交不冒充新的运行构建。
