@@ -29,6 +29,15 @@ def observed_failure(events, native_error='', channels=None):
             result['channelEndpoint'] = snapshot['channelEndpoint']
     if isinstance(model, str) and LABEL.fullmatch(model):
         result['modelRef'] = f'{provider}/{model}' if result.get('channel') else model
+    usage = message.get('usage')
+    if isinstance(usage, dict):
+        output_tokens = next((usage.get(key) for key in ('output', 'output_tokens', 'completion_tokens')
+                              if type(usage.get(key)) is int and 0 <= usage[key] <= 10_000_000), None)
+        if output_tokens is not None:
+            result['outputTokens'] = output_tokens
+    finish_reason = message.get('finishReason', message.get('finish_reason'))
+    if isinstance(finish_reason, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,64}', finish_reason):
+        result['providerFinishReason'] = finish_reason
     result['stage'] = 'model_response' if failed else 'agent_execution'
     return result
 

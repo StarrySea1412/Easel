@@ -134,13 +134,15 @@ test('failure receipt survives normalization and rejects untrusted IDs',()=>{
 test('stored adapter tool-format failures show a safe specific cause and preserve their receipt',()=>{
  const diagnostic='Provider returned an incomplete or malformed tool call';
  const original={code:'agent_execution_failed',category:'execution',retryable:true,message:'本轮执行失败。',
-  detail:diagnostic+'\napi_key=PRIVATE_TOOL_VALUE',failureEventId:'b'.repeat(32)};
+  detail:diagnostic+'\napi_key=PRIVATE_TOOL_VALUE',failureEventId:'b'.repeat(32),outputTokens:8192,providerFinishReason:'length'};
  const detail=chatErrorDetail(original);
  assert.equal(detail.code,'model_tool_call_invalid');
  assert.equal(chatErrorTitle(detail),'工具调用格式错误');
  assert.equal(detail.retryable,false);
  assert.match(detail.message,/未派发该调用/);assert.match(detail.message,/不会自动重发/);
  assert.equal(detail.failureEventId,original.failureEventId);
+ assert.equal(detail.outputTokens,8192);assert.equal(detail.providerFinishReason,'length');
+ assert.equal(chatErrorDetail({...original,detail:'Easel tool call recovery exhausted'}).code,'model_tool_call_invalid');
  assert.ok(!JSON.stringify(detail).includes('PRIVATE'));
  assert.ok(original.detail.includes('PRIVATE_TOOL_VALUE'));
  assert.equal(chatErrorTitle({code:'model_tool_call_invalid',message:'failed'}),'工具调用格式错误');

@@ -15,7 +15,7 @@ from web.failure_events import FailureEvents
 DIAGNOSTIC = 'Provider returned an incomplete or malformed tool call'
 
 
-@pytest.mark.parametrize('raw', [DIAGNOSTIC, 'Error: ' + DIAGNOSTIC + '.',
+@pytest.mark.parametrize('raw', [DIAGNOSTIC, 'Easel tool call recovery exhausted', 'Error: ' + DIAGNOSTIC + '.',
     DIAGNOSTIC + '\napi_key=PRIVATE_PRIVATE_VALUE tool_arguments=PRIVATE_PROMPT'])
 def test_explicit_adapter_rejection_is_specific_and_safe(raw):
     error = gateway_error(raw, include_detail=True)
@@ -46,17 +46,28 @@ def test_failed_assistant_metadata_and_history_share_the_safe_classification(tmp
     error = observed_failure(events)
     assert error['code'] == 'model_tool_call_invalid' and error['stage'] == 'model_response'
     assert error['modelRef'] == 'fixture/deepseek-fixture'
+    assert error['outputTokens'] == 8192 and 'providerFinishReason' not in error
     assert '8192' not in error['message'] and 'PRIVATE' not in json.dumps(error)
     journal = FailureEvents(tmp_path)
     journal.record_chat(turn_id='old-turn', error={'code': 'agent_execution_failed',
-        'detail': DIAGNOSTIC + '\napi_key=PRIVATE'})
+        'detail': DIAGNOSTIC + '\napi_key=PRIVATE', 'outputTokens': error['outputTokens']})
     row, = journal.recent()
     assert row['code'] == error['code'] and row['stage'] == 'model_response'
+    assert row['outputTokens'] == 8192
     assert 'PRIVATE' not in journal.path.read_text()
     assert json.dumps(events) == original, 'classification must preserve the original tool receipt'
     successful = observed_failure([{'message': {'role': 'assistant', 'stopReason': 'stop',
         'content': [{'type': 'text', 'text': DIAGNOSTIC}]}}])
     assert successful['code'] == 'agent_execution_failed'
+
+
+def test_protocol_failure_keeps_only_bounded_provider_finish_metadata():
+    event = {'message': {'role': 'assistant', 'stopReason': 'error',
+        'errorMessage': DIAGNOSTIC, 'finish_reason': 'length',
+        'usage': {'output_tokens': 16384}}}
+    result = observed_failure([event])
+    assert result['providerFinishReason'] == 'length'
+    assert result['outputTokens'] == 16384
 
 
 def test_native_adapter_failure_does_not_dispatch_an_automatic_continuation():

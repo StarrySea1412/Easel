@@ -3,6 +3,8 @@ import { registerImage } from './image.mjs';
 import { registerTasks } from './tasks.mjs';
 import { registerPlan } from './plan.mjs';
 import { runtimeToolParams } from './runtime.mjs';
+import { registerToolRecovery } from './recovery.mjs';
+import { registerArtifactWriter } from './artifact.mjs';
 
 function readModel(config) {
   const value = config?.agents?.defaults?.subagents?.model;
@@ -21,6 +23,8 @@ export default {
   name: 'Easel Agent Safety',
   description: 'Require the configured Agent startup model and bound delegation limits.',
   register(api) {
+    registerToolRecovery(api);
+    registerArtifactWriter(api);
     registerPresent(api);
     registerImage(api);
     registerTasks(api);

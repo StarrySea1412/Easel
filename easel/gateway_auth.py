@@ -136,7 +136,7 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         code = 'gateway_pairing_required'
     elif status in (401, 403) or any(s in message for s in ('unauthorized', 'token mismatch', 'auth_token_mismatch', 'password mismatch', 'authentication failed')):
         code = 'gateway_auth_rejected'
-    elif re.match(r'^(?:Error:[ \t]*)?Provider returned an incomplete or malformed tool call\.?(?:\r?\n|$)', str(raw), re.I):
+    elif re.match(r'^(?:Error:[ \t]*)?(?:Provider returned an incomplete or malformed tool call|Easel tool call recovery exhausted)\.?(?:\r?\n|$)', str(raw), re.I):
         # This is the adapter's explicit rejection, not a guess from model text
         # or usage counts. Do not promote quoted diagnostics or JSON failures.
         code = 'model_tool_call_invalid'

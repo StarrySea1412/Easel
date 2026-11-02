@@ -27,7 +27,8 @@ _context: ContextVar[dict | None] = ContextVar('easel_failure_context', default=
 _TOKEN = re.compile(r'[A-Za-z0-9_.+-]{1,128}\Z')
 _FIELDS = {'operation', 'stage', 'code', 'owner', 'slug', 'skillVersion',
            'upstreamStatus', 'upstreamType', 'exceptionType', 'relatedEventId', 'locations', 'platform', 'receiptId',
-           'page', 'asset', 'uiVersion', 'sessionId', 'turnId', 'channel', 'modelRef'}
+           'page', 'asset', 'uiVersion', 'sessionId', 'turnId', 'channel', 'modelRef',
+           'outputTokens', 'providerFinishReason'}
 
 
 def annotate(**values):
@@ -45,6 +46,12 @@ def _safe(values):
                            and re.fullmatch(r'(?:web|easel|deployment)/[A-Za-z0-9_./-]+:[0-9]{1,7}', entry)]
         elif key == 'upstreamStatus':
             if type(value) is int and 100 <= value <= 599:
+                result[key] = value
+        elif key == 'outputTokens':
+            if type(value) is int and 0 <= value <= 10_000_000:
+                result[key] = value
+        elif key == 'providerFinishReason':
+            if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,64}', value):
                 result[key] = value
         elif key in {'channel', 'modelRef', 'sessionId', 'turnId'}:
             if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.:/+-]{1,300}', value):
@@ -131,7 +138,9 @@ class FailureEvents:
         context = {'operation': 'chat', 'stage': error.get('stage') or ('model_response' if str(error.get('code', '')).startswith('model_') else 'agent_execution'),
                    'code': error.get('code') or 'agent_execution_failed',
                    'turnId': turn_id, 'sessionId': session_id, 'modelRef': model,
-                   'channel': error.get('channel') or (model.split('/', 1)[0] if isinstance(model, str) and '/' in model else None)}
+                   'channel': error.get('channel') or (model.split('/', 1)[0] if isinstance(model, str) and '/' in model else None),
+                   'outputTokens': error.get('outputTokens'),
+                   'providerFinishReason': error.get('providerFinishReason')}
         return self.record(source='history' if at else 'server', route='/api/chat/stream', method='POST', status=200,
                            duration=duration, context=context, at=at,
                            event_id=uuid5(NAMESPACE_URL, 'easel:chat-failure:' + turn_id).hex)

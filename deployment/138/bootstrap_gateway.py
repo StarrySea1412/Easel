@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import stat
+import tempfile
+from datetime import datetime, timezone
 
 from easel.web_runtime_config import (configure_web_runtime, configure_browser_runtime,
                                       configure_free_search, configure_agent_safety_plugins)
@@ -12,6 +15,58 @@ ROOT = Path(os.environ.get('EASEL_ROOT', '/app'))
 DATA = Path(os.environ.get('EASEL_DATA_DIR', '/data'))
 STATE = Path(os.environ.get('EASEL_OPENCLAW_STATE_DIR', '/state/openclaw'))
 WORKSPACE = Path(os.environ.get('EASEL_OPENCLAW_WORKSPACE', str(STATE / 'workspace')))
+
+MODEL_OUTPUT_BUDGET_DEFAULTS = {
+    ('happycoding', 'deepseek-v4.1-flash'): 16384,
+}
+
+
+def _write_model_budget_config(config_path, value):
+    original = config_path.read_bytes()
+    backups = STATE / 'stability-backups'
+    backups.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(backups, 0o700)
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    backup = backups / f'openclaw-before-model-budget-{stamp}-{secrets.token_hex(3)}.json'
+    descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, 'wb') as output:
+        output.write(original)
+        output.flush()
+        os.fsync(output.fileno())
+
+    descriptor, temporary = tempfile.mkstemp(prefix='.openclaw-model-budget-', dir=config_path.parent)
+    try:
+        os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+            json.dump(value, output, ensure_ascii=False, indent=2)
+            output.write('\n')
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, config_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def configure_model_output_budgets(config, config_path):
+    """Give the affected custom model a bounded explicit output budget once."""
+    providers = config.get('models', {}).get('providers', {})
+    changed = False
+    if not isinstance(providers, dict):
+        return False
+    for (provider_id, model_id), budget in MODEL_OUTPUT_BUDGET_DEFAULTS.items():
+        provider = providers.get(provider_id)
+        models = provider.get('models') if isinstance(provider, dict) else None
+        if not isinstance(models, list):
+            continue
+        for model in models:
+            if (isinstance(model, dict) and model.get('id') == model_id
+                    and 'maxTokens' not in model):
+                model['maxTokens'] = budget
+                changed = True
+    if changed:
+        _write_model_budget_config(config_path, config)
+    return changed
 
 
 def bootstrap():
@@ -47,6 +102,8 @@ def bootstrap():
             value['models'] = {'mode': 'merge', 'providers': model['providers']}
             value['agents']['defaults']['model'] = {'primary': model['primary']}
             config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    value = json.loads(config.read_text(encoding='utf-8'))
+    configure_model_output_budgets(value, config)
     browser_auth = os.environ.get('EASEL_BROWSER_AUTH_FILE')
     if browser_auth:
         value = json.loads(config.read_text(encoding='utf-8'))

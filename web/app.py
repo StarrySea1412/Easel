@@ -4751,6 +4751,7 @@ def _chat_delivery_instructions(artifact_ticket):
                 f'python "{present_script}" --ticket {artifact_ticket} --file "<实际产物绝对路径>"\n'
                 f'多个文件重复 --file 参数。若有easel_present工具可直接调用：ticket={artifact_ticket}，files为真实路径列表。'
                 f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
+                f'长文本产物优先使用easel_write_artifact：固定requestId，begin指定filename；append按sequence从0有序写入，每块最多3000字符；status查询断点；commit指定expectedChunks后取得真实路径再交付。不要将整个长文件放入单次exec/write参数。'
                 f'仅当本轮需要HTML产物时：预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
                 f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
                 f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
