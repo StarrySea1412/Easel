@@ -53,7 +53,11 @@
 - [`parseToolCall`](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/packages/ai/src/generate-text/parse-tool-call.ts#L59)：对工具不存在/参数无效，只有调用方配置了`repairToolCall`才尝试修复；修复后再次经过解析与校验。修复回调返回空或失败不会当作有效调用执行。
 - [重新询问模型的例子](https://github.com/vercel/ai/blob/ad09bc1c55e9c2ad224d17008013a32e79b8ea82/examples/ai-functions/src/generate-text/mock/tool-call-repair-reask.ts)：保留原调用ID，把校验错误作为工具反馈，让模型重新生成参数，再返回修复调用。这个例子会新增模型请求，费用与重试边界需调用方控制，不能把“框架支持回调”写成“自动免费修好”。
 
-### Codex与OpenAI：公开API能证明的范围
+### Codex源码：参数解析错误反馈给模型
+
+本次固定Codex提交为`a09812981de703f18f38015cd5d500ab373f616c`。公开Rust源码中的[`parse_arguments`](https://github.com/openai/codex/blob/a09812981de703f18f38015cd5d500ab373f616c/codex-rs/core/src/tools/handlers/mod.rs#L90)用serde解析工具参数；解析失败转成`FunctionCallError::RespondToModel`，错误信息含“failed to parse function arguments”。同文件将顶层非对象参数也转成同类反馈。也就是说它将格式错误交回Agent执行协议处理；这段源码本身不证明会自动修复成功、重试次数、预算变化或原请求是否重发。
+
+### OpenAI官方API与Codex App Server
 
 [Codex App Server官方文档](https://learn.chatgpt.com/docs/app-server)将thread、turn及工具item分开标识；对入口队列满明确返回JSON-RPC `-32001`，建议指数退避加抖动。这是入口过载重试，不能推导为畸形工具参数也应重播整轮。
 
@@ -61,7 +65,7 @@
 
 [OpenAI官方Reasoning文档](https://developers.openai.com/api/docs/guides/reasoning)明确输出上限包含推理等生成tokens，预算耗尽返回`incomplete`及`max_output_tokens`；可能在产生可见输出前就耗尽。**这描述OpenAI协议，不证明第三方渠道相同字段完全同义，也不能将OpenAI建议的预算数值直接套到本次DeepSeek渠道。**
 
-本次这些官方资料没有建立Codex桌面内部对本例畸形调用的精确修复算法，不能声称它自动补JSON、一定自动重试几次，或使用某一私有恢复策略。
+Codex公开工具handler证明解析错误可以形成给模型的协议反馈，但其完整调用循环/持久策略不是这段源码所能证明；不能声称它自动补JSON、必然成功，或固定自动重试几次。
 
 ### Grok Bot与ZCode：公开资料没有披露同类错误算法
 

@@ -1,6 +1,6 @@
 ## 2026-11-02 · 反复工具参数失败调查（仅文档与诊断）
 
-- 读取DeepSeek Harness、PydanticAI、Vercel AI SDK固定版本源码及OpenAI官方资料，区分预算截断、协议错误、参数修复和业务重试。
+- 读取DeepSeek Harness、Codex、PydanticAI、Vercel AI SDK固定版本源码及OpenAI官方资料，区分预算截断、协议错误、参数修复和业务重试。
 - 同版本纯配置归一化确认未填模型输出上限时默认8192，补3项适配器纯函数复现；没有原始终止原因时仍不将历史失败断言为length。
 - 此前分类不代表根因已修；记录可实施的恢复边界与故障验收。本次未改产品行为、未调用收费模型、未部署138，保留0.46未提交候选。[完整依据](docs/tool-call-recovery-research-2026-11-02.md)。
 
