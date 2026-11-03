@@ -16,6 +16,7 @@ const { createRoot } = await import('react-dom/client');
 const { default: Sidebar } = await loadTsModule('../src/components/Sidebar.tsx', import.meta.url);
 const CONVERSATIONS = 'easel:sidebar-conversations-open-v2';
 const TOOLBAR = 'easel:sidebar-toolbar-expanded-v2';
+const SECTION_COLLAPSED = 'easel:sidebar-section-collapsed:v1';
 const session = (id, title, patch = {}) => ({ id, title, messages: [{ role: 'user', content: '已有实际会话文字' }], created: 1, ...patch });
 
 async function fixture(t, props = {}, preferences = {}) {
@@ -51,6 +52,16 @@ async function fixture(t, props = {}, preferences = {}) {
   };
 }
 
+function sectionToggle(view, section) {
+  return [...view.container.querySelectorAll('.sidebar-section-toggle')]
+    .find(button => button.getAttribute('aria-controls').endsWith(`-${section}-list`));
+}
+
+function sectionContent(view, section) {
+  const toggle = sectionToggle(view, section);
+  return [...view.container.querySelectorAll('[id]')].find(element => element.id === toggle.getAttribute('aria-controls'));
+}
+
 test('recent conversations show shaped skeleton rows during the first remote read', async t => {
   const view = await fixture(t, { sessions: [], activeSessionId: null, sessionsLoading: true });
   await view.clickLabel('对话');
@@ -59,10 +70,48 @@ test('recent conversations show shaped skeleton rows during the first remote rea
   assert.equal(skeleton.getAttribute('aria-busy'), 'true');
   assert.equal(skeleton.querySelectorAll('.sidebar-session-skeleton-row').length, 5);
   assert.equal(view.container.querySelector('.sidebar-empty'), null);
-  assert.equal(view.byLabel('最近对话').querySelector('.sidebar-session-count'), null);
+  assert.equal(view.byLabel('最近对话').querySelector('.sidebar-session-count').textContent, '0');
   await view.update({ sessions: [session('loaded', '已读取的对话')], activeSessionId: 'loaded', sessionsLoading: false });
   assert.equal(view.container.querySelector('[aria-label="正在读取最近对话"]'), null);
   assert.match(view.container.textContent, /已读取的对话/);
+});
+
+test('pinned and recent sections fold independently and restore their own browser preferences', async t => {
+  const view = await fixture(t, { sessions: [
+    session('recent', '当前最近对话'),
+    session('pinned', '固定对话', { pinnedAt: 5 }),
+  ], activeSessionId: 'recent' });
+  await view.clickLabel('对话');
+  const pinned = sectionToggle(view, 'pinned');
+  const recent = sectionToggle(view, 'recent');
+  assert.equal(pinned.tagName, 'BUTTON');
+  assert.equal(recent.tagName, 'BUTTON');
+  assert.equal(pinned.getAttribute('aria-expanded'), 'true');
+  assert.equal(recent.getAttribute('aria-expanded'), 'true');
+  assert.equal(sectionContent(view, 'pinned').hidden, false);
+  assert.equal(sectionContent(view, 'recent').hidden, false);
+
+  await act(async () => recent.click());
+  assert.equal(recent.getAttribute('aria-expanded'), 'false');
+  assert.equal(sectionContent(view, 'recent').hidden, true);
+  assert.equal(pinned.getAttribute('aria-expanded'), 'true', 'folding recent must not fold pinned');
+  assert.equal(view.byLabel('最近对话').querySelector('.sidebar-session-count').textContent, '1');
+  assert.equal(sectionContent(view, 'recent').querySelector('.session-item.active .session-select').textContent, '当前最近对话', 'folding must preserve the selected session');
+
+  await act(async () => pinned.click());
+  assert.equal(pinned.getAttribute('aria-expanded'), 'false');
+  assert.equal(sectionContent(view, 'pinned').hidden, true);
+  assert.equal(sectionContent(view, 'recent').hidden, true, 'folding pinned must preserve recent state');
+  assert.equal(localStorage.getItem(`${SECTION_COLLAPSED}:pinned`), 'true');
+  assert.equal(localStorage.getItem(`${SECTION_COLLAPSED}:recent`), 'true');
+
+  await view.remount();
+  await view.clickLabel('对话');
+  assert.equal(sectionToggle(view, 'pinned').getAttribute('aria-expanded'), 'false');
+  assert.equal(sectionToggle(view, 'recent').getAttribute('aria-expanded'), 'false');
+  await act(async () => sectionToggle(view, 'recent').click());
+  assert.equal(sectionToggle(view, 'recent').getAttribute('aria-expanded'), 'true');
+  assert.equal(sectionToggle(view, 'pinned').getAttribute('aria-expanded'), 'false');
 });
 
 test('conversation purpose icons distinguish analysis, generation and ordinary chat independently of titles and status', async t => {
@@ -100,6 +149,10 @@ test('an initial empty chat stays behind the skeleton and an empty response ends
   await view.update({sessions:[], activeSessionId:null, sessionsLoading:false});
   assert.equal(view.byLabel('正在读取最近对话'), null);
   assert.match(view.container.querySelector('.sidebar-empty').textContent, /还没有最近对话/);
+  assert.equal(view.byLabel('最近对话').querySelector('.sidebar-session-count').textContent, '0');
+  await act(async () => sectionToggle(view, 'recent').click());
+  assert.equal(sectionToggle(view, 'recent').getAttribute('aria-expanded'), 'false');
+  assert.equal(sectionContent(view, 'recent').hidden, true);
 });
 
 test('new installations start with both columns collapsed and reveal real conversations on request', async t => {

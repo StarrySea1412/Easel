@@ -1,5 +1,5 @@
 import { NativeSelect as Select } from './ui/Select';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import {
@@ -21,6 +21,7 @@ import { Sk } from './Skeleton';
 import {sessionStatuses} from '../lib/sessionStatus';
 import type {SessionStatusKind} from '../lib/sessionStatus';
 import {readSeenStatuses, subscribeSeenStatuses} from '../lib/seenStatus';
+import {readLocalValue, writeLocalValue} from '../lib/localPersistence';
 import type {TaskSnapshot} from '../lib/tasks';
 import '../styles/sidebar-shell.css';
 
@@ -53,6 +54,17 @@ interface SidebarProps {
   taskState?: TaskSnapshot;
   /** First remote session snapshot is still being read; local rows remain visible when present. */
   sessionsLoading?: boolean;
+}
+
+type SidebarSessionSection = 'pinned' | 'recent';
+const SECTION_COLLAPSED_KEY = 'easel:sidebar-section-collapsed:v1';
+
+function readSectionCollapsed(section: SidebarSessionSection): boolean {
+  return readLocalValue(`${SECTION_COLLAPSED_KEY}:${section}`).value === 'true';
+}
+
+function persistSectionCollapsed(section: SidebarSessionSection, collapsed: boolean): void {
+  writeLocalValue(`${SECTION_COLLAPSED_KEY}:${section}`, String(collapsed));
 }
 
 export default function Sidebar({
@@ -111,6 +123,11 @@ export default function Sidebar({
   const renameEditRevision = useRef(0);
   renameContext.current = { id: renamingId, value: renameValue };
   const [showArchived, setShowArchived] = useState(false);
+  const sidebarSectionId = useId();
+  const pinnedContentId = `${sidebarSectionId}-pinned-list`;
+  const recentContentId = `${sidebarSectionId}-recent-list`;
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(() => readSectionCollapsed('pinned'));
+  const [recentCollapsed, setRecentCollapsed] = useState(() => readSectionCollapsed('recent'));
   const [hoveredSession, setHoveredSession] = useState<{ session: ChatSession; anchor: HTMLElement } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previewEditing = useRef(false);
@@ -357,12 +374,22 @@ export default function Sidebar({
             <div className="sidebar-run-summary" role="status" aria-label={`正在运行的对话：${runningCount}`} title="按对话去重，包含尚未停止确认及已归档的执行；排队和待核实不计入"><span className={runningCount?'is-running':''}/><strong>{runningCount}</strong> 个运行中</div>
           </header>
           <div className="sidebar-scroll" ref={recentRef}><div className="sidebar-section">
-            {pinned.length > 0 && <section className="sidebar-pinned" aria-label="置顶对话"><div className="sidebar-section-header"><span className="sidebar-section-title">置顶</span><span className="sidebar-session-count">{pinned.length}</span></div>{pinned.map(s=>renderItem(s,false))}</section>}
-            <section className="sidebar-recent" aria-label="最近对话"><div className="sidebar-section-header"><span className="sidebar-section-title">最近对话</span>{!showSessionSkeleton && <span className="sidebar-session-count">{recent.length}</span>}</div>
-            {showSessionSkeleton ? <div className="sidebar-session-skeleton" role="status" aria-label="正在读取最近对话" aria-busy="true">
-              {Array.from({length: 5}, (_, index) => <div className="sidebar-session-skeleton-row" key={index} aria-hidden="true"><Sk w={7} h={7} r="50%" /><Sk w={index === 4 ? '54%' : index === 1 ? '78%' : '66%'} h={11} /></div>)}
-            </div> : <>{recent.map(s=>renderItem(s,false))}
-            {!active.length&&<p className="sidebar-empty">还没有最近对话。<br/>新建对话，开始今天的创作。</p>}</>}
+            {pinned.length > 0 && <section className={`sidebar-pinned${pinnedCollapsed?' is-collapsed':''}`} aria-label="置顶对话">
+              <button type="button" className="sidebar-section-header sidebar-section-toggle" aria-expanded={!pinnedCollapsed} aria-controls={pinnedContentId} title={`${pinnedCollapsed?'展开':'收起'}置顶对话`} onClick={()=>{const next=!pinnedCollapsed;setPinnedCollapsed(next);persistSectionCollapsed('pinned',next);}}>
+                <span className={`sidebar-section-chevron${pinnedCollapsed?'':' is-open'}`} aria-hidden="true"><IconChevron size={12}/></span><span className="sidebar-section-title">置顶</span><span className="sidebar-session-count">{pinned.length}</span>
+              </button>
+              <div id={pinnedContentId} hidden={pinnedCollapsed}>{pinned.map(s=>renderItem(s,false))}</div>
+            </section>}
+            <section className="sidebar-recent" aria-label="最近对话">
+              <button type="button" className="sidebar-section-header sidebar-section-toggle" aria-expanded={!recentCollapsed} aria-controls={recentContentId} title={`${recentCollapsed?'展开':'收起'}最近对话`} onClick={()=>{const next=!recentCollapsed;setRecentCollapsed(next);persistSectionCollapsed('recent',next);}}>
+                <span className={`sidebar-section-chevron${recentCollapsed?'':' is-open'}`} aria-hidden="true"><IconChevron size={12}/></span><span className="sidebar-section-title">最近对话</span><span className="sidebar-session-count">{recent.length}</span>
+              </button>
+              <div id={recentContentId} hidden={recentCollapsed}>
+                {showSessionSkeleton ? <div className="sidebar-session-skeleton" role="status" aria-label="正在读取最近对话" aria-busy="true">
+                  {Array.from({length: 5}, (_, index) => <div className="sidebar-session-skeleton-row" key={index} aria-hidden="true"><Sk w={7} h={7} r="50%" /><Sk w={index === 4 ? '54%' : index === 1 ? '78%' : '66%'} h={11} /></div>)}
+                </div> : <>{recent.map(s=>renderItem(s,false))}
+                {!active.length&&<p className="sidebar-empty">还没有最近对话。<br/>新建对话，开始今天的创作。</p>}</>}
+              </div>
             </section>
             {archived.length>0&&<><button className="archived-header" aria-expanded={showArchived} onClick={()=>setShowArchived(value=>!value)}><span className={`archived-chevron ${showArchived?'open':''}`}><IconChevron size={12}/></span>已归档 · {archived.length}</button>{showArchived&&archived.map(s=>renderItem(s,true))}</>}
           </div></div>
