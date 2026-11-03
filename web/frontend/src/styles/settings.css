@@ -59,6 +59,16 @@
 }
 .settings-page .settings-main { min-width: 0; padding: 24px; }
 .settings-more-cards { display: grid; gap: 16px; }
+.chat-continuation-settings { min-width:0; max-width:780px; padding:clamp(18px,3vw,30px); border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); }
+.chat-continuation-settings h3 { margin:0 0 6px; font-size:18px; font-weight:650; }
+.chat-continuation-settings p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
+.chat-continuation-settings header strong { font-weight:500; color:var(--text); }
+.chat-continuation-setting-row { display:flex; align-items:center; flex-wrap:wrap; gap:12px 24px; margin-top:20px; padding-block:16px; border-block:1px solid var(--border); }
+.chat-continuation-setting-row > div:first-child { flex:1 1 220px; min-width:0; }
+.chat-continuation-setting-row label { font-size:14px; font-weight:600; cursor:pointer; }
+.chat-continuation-setting-row p { margin-top:5px; }
+.chat-continuation-setting-control { display:flex; align-items:center; gap:10px; margin-left:auto; color:var(--text-secondary); font-size:12px; }
+.chat-continuation-settings .chat-continuation-setting-status { margin-top:12px; }
 .settings-more-cards > details { min-width:0; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); padding:16px 18px; }
 .settings-more-cards > details > summary { font-size:14px; font-weight:600; cursor:pointer; }
 .settings-more-cards > details[open] > summary { margin-bottom:16px; }

@@ -11,6 +11,7 @@ import { selectOption, optionValues } from './select-helpers.mjs';
 // cards and APIs are stubs. This verifies React behavior, not browser/backend.
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.localStorage = window.localStorage;
 globalThis.Event = window.Event;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
@@ -37,6 +38,7 @@ for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
   else if (specifier === '../hooks/useModelAvailability') target = await tsModuleUrl(new URL('../src/hooks/useModelAvailability.ts', import.meta.url));
   else if (specifier === './ui/Select') target = await tsModuleUrl(new URL('../src/components/ui/Select.tsx', import.meta.url));
   else if (specifier === './settings/AppearanceSettings') target = await tsModuleUrl(new URL('../src/components/settings/AppearanceSettings.tsx', import.meta.url));
+  else if (specifier === './settings/ChatContinuationSettings') target = await tsModuleUrl(new URL('../src/components/settings/ChatContinuationSettings.tsx', import.meta.url));
   else if (specifier === './icons' || specifier === './settingsIcons') target = await tsModuleUrl(new URL(`../src/components/${specifier.slice(2)}.tsx`, import.meta.url));
   else if (specifier === '../lib/modelImports') target = await tsModuleUrl(new URL('../src/lib/modelImports.ts', import.meta.url));
   else if (specifier === './settings/ConversationBackupCard') {
@@ -106,7 +108,7 @@ async function fixture(t, responseOverrides = {}) {
     delete globalThis.__settingsBackupNavigation;
   });
   const demoDataPreference = { enabled: false, saved: true, error: '', onChange() {} };
-  const render = async (navigationKey, conversationBackup = props, initialSection = 'backup') => act(async () => root.render(createElement(SettingsPanel, { initialSection: initialSection === 'default' ? undefined : initialSection, navigationKey, conversationBackup, demoDataPreference, onOpenOffice: () => { harness.officeOpens++; } })));
+  const render = async (navigationKey, conversationBackup = props, initialSection = 'backup', chatContinuation) => act(async () => root.render(createElement(SettingsPanel, { initialSection: initialSection === 'default' ? undefined : initialSection, navigationKey, conversationBackup, demoDataPreference, chatContinuation, onOpenOffice: () => { harness.officeOpens++; } })));
   await render(0);
   return {
     container, harness, props, render, demoDataPreference,
@@ -144,6 +146,23 @@ test('legacy appearance opens preferences while backups live in system settings'
   assert.ok(view.container.querySelector('.appearance-card [role=combobox]'));
   assert.equal(view.container.querySelector('[data-testid=backup-card]'), null);
   assert.equal(view.harness.calls.length, before);
+});
+
+test('preferences exposes current conversation continuation, persists across navigation and isolates sessions', async t => {
+  const view = await fixture(t);
+  const session = {id:'current',title:'当前任务',busy:false};
+  await view.render(1,view.props,'model',session);
+  await view.click(view.nav('通用偏好'));
+  const toggle=()=>view.container.querySelector('.chat-continuation-settings [role=switch]');
+  assert.match(view.container.querySelector('.chat-continuation-settings').textContent,/当前任务 · 仅对当前对话生效/);
+  await view.click(toggle());assert.equal(localStorage.getItem('easel_chat_auto_continue:current'),'off');
+  await view.click(view.nav('模型与渠道'));await view.click(view.nav('通用偏好'));
+  assert.equal(toggle().getAttribute('aria-checked'),'false');
+  await view.render(1,view.props,'model',{id:'other',title:'另一个任务',busy:false});
+  assert.equal(toggle().getAttribute('aria-checked'),'true');
+  assert.match(view.container.querySelector('.chat-continuation-settings').textContent,/另一个任务/);
+  await view.render(1,view.props,'model',{...session,busy:true});assert.ok(toggle().disabled);
+  await view.render(1,view.props,'model');assert.equal(toggle(),null);
 });
 
 test('agent deep links open collaboration without replacing model configuration state', async t => {

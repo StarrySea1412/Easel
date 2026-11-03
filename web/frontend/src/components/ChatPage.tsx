@@ -515,7 +515,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
 
       {!isImported && <div className="chat-input-area">
         {!isImported && <div className="chat-input-inner">
-          {session.engine !== 'codex' && <ChatContinuationControls key={session.id} sessionId={session.id}
+          {session.engine !== 'codex' && <ChatContinuationControls
             busy={isStreaming || stopping || taskBusy || Boolean(session.pendingTurnId)}
             canContinue={session.messages.at(-1)?.role === 'assistant' && !taskBusy}
             onContinue={() => {

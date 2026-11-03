@@ -1709,13 +1709,23 @@ export default function App() {
         return <AgentOfficePage key={officeTarget?.key || "default"} initialSessionId={officeTarget?.sessionId} demoEnabled={demoDataPreference.enabled} onOpenModels={() => { setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} onOpenOutputs={() => { setOutputFilter('all'); setCurrentPage('outputs'); }} onOpenSettings={() => { setSettingsSection('employees'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} sessions={inspectionSessions} activeSessionId={activeSessionId} streams={streams} onStartTask={handleOfficeTask} onStopTask={handleStopStream} stoppingSessions={stoppingSessions} stopErrors={stopErrors} onOpenChat={id=>void openTaskConversation(inspectionSessions.find(item=>item.id===id&&item.taskWorker)?.parentSessionId||id)} onOpenActivity={(sessionId, turnId = '') => { setActivityTarget({sessionId, turnId, key: Date.now()}); setCurrentPage('activity'); }} />;
       case 'profile':
         return <ProfilePage key={selectedPersona} persona={selectedPersona} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} onSource={id=>{const source=sessionsRef.current.find(item=>item.id===id);if(!source||source.importedFromBackup||outputSessionDeleted(id)){showToast('原对话已删除或不在当前记录中','info');return;}handleSessionSelect(id);}} />;
-      case 'settings':
-        return <SettingsPanel onAssessUpdate={handleQuickPrompt} demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
+      case 'settings': {
+        const sessionGoals = tasks.goals.filter(goal => goal.sessionId === activeSession?.id);
+        const goal = sessionGoals.find(goal => !['completed', 'cancelled'].includes(goal.status)) || sessionGoals[0];
+        const taskBusy = goal?.status === 'active' || tasks.runs.some(run => run.goalId === goal?.id && ['queued', 'running', 'unconfirmed'].includes(run.state));
+        const chatContinuation = activeSession ? {
+          id: activeSession.id, title: activeSession.title,
+          busy: Boolean(streams[activeSession.id] || stoppingSessions[activeSession.id] || activeSession.pendingTurnId || taskBusy),
+          unavailableReason: activeSession.importedFromBackup ? '导入的备份为只读记录，无法设置自动继续。'
+            : activeSession.engine === 'codex' ? 'Codex 对话由原生执行器控制，不使用此自动继续设置。' : undefined,
+        } : undefined;
+        return <SettingsPanel chatContinuation={chatContinuation} onAssessUpdate={handleQuickPrompt} demoDataPreference={demoDataPreference} initialSection={settingsSection} targetModelRef={settingsModelRef} navigationKey={settingsNavigationKey} onOpenOffice={() => { setOfficeTarget(null); setCurrentPage('agent-office'); }} conversationBackup={{
           onExport: handleExportConversations,
           onExportRaw: exportRawConversationStorage,
           onImport: handleImportConversations,
           onOpenSession: handleSessionSelect,
         }} />;
+      }
       default:
         return null;
     }

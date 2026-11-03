@@ -1,6 +1,7 @@
 import '../styles/settings.css';
 import StorageSettingsCard from './settings/StorageSettingsCard';
 import AppearanceSettings from './settings/AppearanceSettings';
+import ChatContinuationSettings from './settings/ChatContinuationSettings';
 import AgentRuntimeSettings from './settings/AgentRuntimeSettings';
 import ConversationBackupCard from './settings/ConversationBackupCard';
 import EmployeeAppearanceSettings from './settings/EmployeeAppearanceSettings';
@@ -80,12 +81,13 @@ function modelConfigLabel(row?: ModelRow) {
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 设置（独立页面，非弹窗）：配置导入（CC Switch 一键迁移）· 模型配置 · 环境安装 · 生图工坊通道 · 更多。 */
-export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, targetModelRef, conversationBackup, demoDataPreference, onOpenOffice, onAssessUpdate }: {
+export default function SettingsPanel({ initialSection = 'model', navigationKey = 0, targetModelRef, conversationBackup, demoDataPreference, chatContinuation, onOpenOffice, onAssessUpdate }: {
   initialSection?: SettingsSection;
   navigationKey?: number;
   targetModelRef?: string;
   conversationBackup: ComponentProps<typeof ConversationBackupCard>;
   demoDataPreference: ComponentProps<typeof DemoDataSettingsCard>;
+  chatContinuation?: ComponentProps<typeof ChatContinuationSettings>['session'];
   onOpenOffice?: () => void;
   onAssessUpdate?: (prompt: string) => boolean;
 }) {
@@ -782,7 +784,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             {([
               { id: 'model', label: '模型与渠道', hint: '选择 AI，连接服务', icon: IconSlidersHorizontal, active: sec === 'model' },
               { id: 'agent-runtime', label: 'Agent 与办公室', hint: '协作方式与角色形象', icon: IconAgentOffice, active: sec === 'agent-runtime' || sec === 'employees' },
-              { id: 'more', label: '通用偏好', hint: '界面外观与邮件通知', icon: IconMonitor, active: sec === 'more' || sec === 'notify' },
+              { id: 'more', label: '通用偏好', hint: '对话、外观与邮件通知', icon: IconMonitor, active: sec === 'more' || sec === 'notify' },
               { id: 'system', label: '系统与数据', hint: '环境、保存位置与备份', icon: IconDatabase, active: sec === 'system' || sec === 'env' },
             ] as const).map(item => <button key={item.id} type="button" aria-current={item.active ? 'page' : undefined}
               className={`snav${item.active ? ' active' : ''}`} onClick={() => setSec(item.id)}>
@@ -1226,7 +1228,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
             )}
 
           {sec === 'more' && <section className="st-sec active settings-more-cards">
-            <div className="settings-section-heading"><h2>通用偏好</h2><p>调整外观，选择接收任务结果的方式。</p></div>
+            <div className="settings-section-heading"><h2>通用偏好</h2><p>设置对话行为、界面外观与任务通知。</p></div>
+            <ChatContinuationSettings key={chatContinuation?.id} session={chatContinuation} />
             <AppearanceSettings />
             <button type="button" className="settings-link-row" onClick={() => setSec('notify')}>
               <span className="settings-entry-icon" aria-hidden="true"><IconBell size={20} /></span><span>邮件通知<small>{ntfLoading ? '正在读取配置…' : ntfSaved.startsWith('读取通知配置失败') ? '配置读取失败，点击查看' : ntf.email && ntf.host ? '已配置 · 可修改或发送测试邮件' : '配置完成后，可接收任务结果'}</small></span><IconChevron size={16} />
@@ -1245,7 +1248,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
         </div>
 
         <div className="settings-foot">
-          {sec === 'model' ? '选择模型后请保存；已有配置不代表已通过连接验证。' : sec === 'more' ? '外观偏好即时应用，保存在当前浏览器。' : sec === 'agent-runtime' ? '协作设置需要保存并同步；以保存回执说明的生效时机为准。' : sec === 'notify' ? '修改后先保存。测试邮件将发送到已保存的收件人。' : '展开需要的项目，查看详情或进行修改。'}
+          {sec === 'model' ? '选择模型后请保存；已有配置不代表已通过连接验证。' : sec === 'more' ? '自动继续按当前对话保存，下次发送时生效；外观即时应用。偏好保存在当前浏览器。' : sec === 'agent-runtime' ? '协作设置需要保存并同步；以保存回执说明的生效时机为准。' : sec === 'notify' ? '修改后先保存。测试邮件将发送到已保存的收件人。' : '展开需要的项目，查看详情或进行修改。'}
         </div>
       </div>
     </div>
