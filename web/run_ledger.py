@@ -38,24 +38,32 @@ class RunExists(LedgerError):
         self.record = record
 
 
+class _ReadRequiresWrite(Exception):
+    """The ledger needs schema initialization or legacy import before reading."""
+
+
 def _database(root):
     return Path(root) / 'ledger.sqlite3'
 
 
 @contextmanager
-def _db(root):
+def _db(root, *, read_only=False):
     Path(root).mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(_database(root), timeout=15)
     try:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
         version = db.execute('PRAGMA user_version').fetchone()[0]
         if version not in (0, STORAGE_VERSION):
             raise LedgerError('Unsupported run ledger storage version')
-        db.execute('CREATE TABLE IF NOT EXISTS runs(turn TEXT PRIMARY KEY, data TEXT NOT NULL)')
-        db.execute('CREATE TABLE IF NOT EXISTS events(turn TEXT, seq INTEGER, data TEXT NOT NULL, PRIMARY KEY(turn,seq))')
-        db.execute('CREATE TABLE IF NOT EXISTS legacy_snapshots(turn TEXT PRIMARY KEY, source BLOB NOT NULL, sha256 TEXT NOT NULL, imported_at TEXT NOT NULL)')
-        if not version:
-            db.execute(f'PRAGMA user_version={STORAGE_VERSION}')
+        if read_only:
+            if version != STORAGE_VERSION:
+                raise _ReadRequiresWrite()
+        else:
+            db.execute('CREATE TABLE IF NOT EXISTS runs(turn TEXT PRIMARY KEY, data TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS events(turn TEXT, seq INTEGER, data TEXT NOT NULL, PRIMARY KEY(turn,seq))')
+            db.execute('CREATE TABLE IF NOT EXISTS legacy_snapshots(turn TEXT PRIMARY KEY, source BLOB NOT NULL, sha256 TEXT NOT NULL, imported_at TEXT NOT NULL)')
+            if not version:
+                db.execute(f'PRAGMA user_version={STORAGE_VERSION}')
         yield db
         db.commit()
     except sqlite3.Error as exc:
@@ -81,13 +89,7 @@ def _load(db, path):
     turn = path.stem
     found = db.execute('SELECT data FROM runs WHERE turn=?', (turn,)).fetchone()
     if found:
-        try:
-            value = json.loads(found[0])
-        except (ValueError, TypeError):
-            raise LedgerError('Unreadable run ledger snapshot') from None
-        if not isinstance(value, dict) or value.get('turnId') != turn:
-            raise LedgerError('Mismatched run ledger snapshot')
-        return value
+        return _decode_snapshot(found[0], turn)
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -109,6 +111,27 @@ def _load(db, path):
     db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?)',
                   [(turn, event['seq'], json.dumps(event, ensure_ascii=False)) for event in value['events']])
     return value
+
+
+def _decode_snapshot(raw, turn):
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        raise LedgerError('Unreadable run ledger snapshot') from None
+    if not isinstance(value, dict) or value.get('turnId') != turn:
+        raise LedgerError('Mismatched run ledger snapshot')
+    return value
+
+
+def _event_page(db, turn_id, record, after, limit):
+    first = db.execute('SELECT MIN(seq) FROM events WHERE turn=?', (turn_id,)).fetchone()[0]
+    rows = db.execute('SELECT data FROM events WHERE turn=? AND seq>? ORDER BY seq LIMIT ?',
+                      (turn_id, after, limit+1)).fetchall()
+    events = [json.loads(row[0]) for row in rows[:limit]]
+    return {'turnId': turn_id, 'events': events, 'after': after,
+            'next': events[-1]['seq'] if events else after, 'revision': record['eventSeq'],
+            'hasMore': len(rows) > limit, 'firstAvailableSeq': first,
+            'historyTruncated': first is not None and after < first-1}
 
 
 def _project(root, turn):
@@ -140,6 +163,16 @@ def read(root: Path, turn_id: str) -> dict[str, Any] | None:
         path = _path(root, turn_id)
         if not _database(root).exists() and not path.exists():
             return None
+        try:
+            with _db(root, read_only=True) as db:
+                snapshot = db.execute('SELECT data FROM runs WHERE turn=?', (turn_id,)).fetchone()
+                value = _decode_snapshot(snapshot[0], turn_id) if snapshot else None
+                if value is not None:
+                    return copy.deepcopy(value)
+                if not path.exists():
+                    return None
+        except _ReadRequiresWrite:
+            pass
         with _db(root) as db:
             value = _load(db, path)
             return copy.deepcopy(value) if value is not None else None
@@ -159,18 +192,21 @@ def event_page(root, turn_id, *, after=0, limit=100):
         return None
     if not _database(root).exists() and not path.exists():
         return None
+    try:
+        with _db(root, read_only=True) as db:
+            snapshot = db.execute('SELECT data FROM runs WHERE turn=?', (turn_id,)).fetchone()
+            if snapshot:
+                record = _decode_snapshot(snapshot[0], turn_id)
+                return _event_page(db, turn_id, record, after, limit)
+            if not path.exists():
+                return None
+    except _ReadRequiresWrite:
+        pass
     with _db(root) as db:
         record = _load(db, path)
         if record is None:
             return None
-        first = db.execute('SELECT MIN(seq) FROM events WHERE turn=?', (turn_id,)).fetchone()[0]
-        rows = db.execute('SELECT data FROM events WHERE turn=? AND seq>? ORDER BY seq LIMIT ?',
-                          (turn_id, after, limit+1)).fetchall()
-        events = [json.loads(row[0]) for row in rows[:limit]]
-        return {'turnId': turn_id, 'events': events, 'after': after,
-                'next': events[-1]['seq'] if events else after, 'revision': record['eventSeq'],
-                'hasMore': len(rows) > limit, 'firstAvailableSeq': first,
-                'historyTruncated': first is not None and after < first-1}
+        return _event_page(db, turn_id, record, after, limit)
 
 
 def backup(root, target):

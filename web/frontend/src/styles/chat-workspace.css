@@ -30,6 +30,14 @@
 .chat-page .msg-col.user { max-width:min(640px,86%); }
 .chat-page .message-bubble { font-size:15px; line-height:1.85; }
 .chat-page .message-bubble.user { padding:10px 17px; border:0; border-radius:var(--radius-lg); background:var(--accent-soft); color:var(--text); box-shadow:none; white-space:pre-wrap; }
+.chat-page .message-user-content { white-space:pre-wrap; overflow-wrap:anywhere; }
+.chat-page .message-attachments { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.chat-page .message-attachment { display:flex; min-width:0; max-width:240px; color:var(--text); text-decoration:none; }
+.chat-page .message-attachment-image { flex-direction:column; gap:4px; }
+.chat-page .message-attachment-image img { display:block; width:min(240px,100%); max-height:320px; object-fit:contain; border-radius:6px; background:var(--surface-2); }
+.chat-page .message-attachment-name { min-width:0; overflow-wrap:anywhere; font-size:11px; line-height:1.4; color:var(--text-secondary); }
+.chat-page .message-attachment-file { align-items:center; gap:6px; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); }
+.chat-page .message-attachment-unavailable { display:flex; align-items:center; gap:6px; min-height:40px; color:var(--text-secondary); font-size:12px; }
 .chat-page .message-bubble.assistant p { margin-bottom:14px; }
 .chat-page .message-bubble.assistant pre { border:1px solid var(--border); background:var(--code-bg); border-radius:var(--radius-md); }
 .chat-page .message-bubble.assistant table { display:block; max-width:100%; overflow-x:auto; }

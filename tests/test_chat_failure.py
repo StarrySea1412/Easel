@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'web'))
 from chat_failure import observed_failure
 from easel.gateway_auth import gateway_error
+from failure_events import FailureEvents
 
 
 def event(error, provider='anthropic', model='kimi-k3'):
@@ -49,3 +50,33 @@ def test_observed_provider_concurrency_limit_is_classified_for_the_chat_ui():
     assert result['code']=='model_rate_limited'
     assert result['channel']=='anthropic' and result['modelRef']=='anthropic/kimi-k3'
     assert '并发限制' in result['message']
+
+
+def test_native_length_terminal_without_error_message_is_saved_as_output_limit(tmp_path):
+    event = {'message': {'role': 'assistant', 'provider': 'happycoding', 'model': 'minimax-m3',
+        'stopReason': 'length', 'content': [],
+        'usage': {'input': 3984, 'output': 8192, 'totalTokens': 89764}}}
+    result = observed_failure([event], 'failed')
+    assert result['code'] == 'model_output_limit'
+    assert result['stage'] == 'model_response' and result['retryable'] is False
+    assert '自动继续' in result['message'] and '不要重发原操作' in result['message']
+    assert result['channel'] == 'happycoding' and result['modelRef'] == 'happycoding/minimax-m3'
+    assert result['outputTokens'] == 8192 and result['providerFinishReason'] == 'length'
+
+    events = FailureEvents(tmp_path)
+    events.record_chat(turn_id='1793676651294-3j6uz47n6ia', session_id='mw03md4hwoydwx',
+                       error=result, model_ref='happycoding/minimax-m3')
+    record, = events.recent()
+    assert record['code'] == 'model_output_limit' and record['stage'] == 'model_response'
+    assert record['outputTokens'] == 8192 and record['providerFinishReason'] == 'length'
+
+
+def test_length_finish_reason_aliases_are_explicit_and_non_assistant_metadata_is_ignored():
+    for field, reason in (('stop_reason', 'max_tokens'), ('finishReason', 'max_output_tokens'),
+                          ('finish_reason', 'model_length')):
+        result = observed_failure([{'message': {'role': 'assistant', field: reason, 'content': []}}], 'failed')
+        assert result['code'] == 'model_output_limit'
+        assert result['providerFinishReason'] == reason
+
+    user = {'message': {'role': 'user', 'stopReason': 'length', 'usage': {'output': 8192}}}
+    assert observed_failure([user], 'failed')['code'] == 'agent_execution_failed'

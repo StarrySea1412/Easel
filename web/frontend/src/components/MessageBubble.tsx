@@ -4,9 +4,10 @@ import { chatErrorDetail, chatErrorTitle, historicalGatewayAuthError } from '../
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../lib/store';
+import { mediaUrl, type UploadedFile } from '../lib/api';
 import OutputMessageContent from './OutputMessageContent';
 import BreakdownReport from './BreakdownReport';
-import { IconCopy, IconCheck, IconRetry, IconEdit } from './icons';
+import { IconCopy, IconCheck, IconRetry, IconEdit, IconFile, IconImage } from './icons';
 import ChatMessageEditor from './ChatMessageEditor';
 import ChatMessageSettings, { type MessageSettingsActions } from './ChatMessageSettings';
 import '../styles/chat-editing.css';
@@ -57,6 +58,20 @@ function TurnElapsed({ startedAt, elapsedMs, running }: { startedAt?: number; el
   if (elapsed === undefined || !Number.isFinite(elapsed) || elapsed < 0) return null;
   return <span className="message-turn-elapsed" aria-label={`本轮${running ? '已用时' : '耗时'}：${formatChatElapsed(elapsed)}`}
     title="从本轮开始到返回结果、失败或停止，包含等待与执行时间。">{running ? '已用时' : '耗时'} {formatChatElapsed(elapsed)}</span>;
+}
+
+function MessageAttachment({ file }: { file: UploadedFile }) {
+  const [failed, setFailed] = useState(false);
+  const url = mediaUrl(file.path);
+  const isImage = /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name);
+  if (isImage) return <a className="message-attachment message-attachment-image" href={url} target="_blank" rel="noreferrer" aria-label={`打开图片 ${file.name}`}>
+    {failed ? <span className="message-attachment-unavailable"><IconImage size={20} />图片暂时无法预览</span>
+      : <img src={url} alt={file.name} loading="lazy" onError={() => setFailed(true)} />}
+    <span className="message-attachment-name">{file.name}</span>
+  </a>;
+  return <a className="message-attachment message-attachment-file" href={url} download={file.name}>
+    <IconFile size={18} /><span className="message-attachment-name">{file.name}</span>
+  </a>;
 }
 
 function ThinkingPanel({ text, streaming, backupSnapshot, partial }: { text: string; streaming: boolean; backupSnapshot?: boolean; partial?: boolean }) {
@@ -210,13 +225,15 @@ export default function MessageBubble({ message, reportMaterial, reportIncomplet
 
   // ---- 用户消息 ----
   if (message.role === 'user') {
-    // Attachment-only turns are intentionally invisible; the structured refs
-    // remain in session state for retry but never leak paths into the chat UI.
-    if (!message.content.trim()) return null;
+    const attachments = message.attachments || [];
+    if (!message.content.trim() && !attachments.length) return null;
     return (
       <div className={`message-row user${editing ? ' is-editing' : ''}`} ref={userRow}>
         <div className="msg-col user">
-          {editing && actions?.onEdit ? <ChatMessageEditor key={`${sessionId}:${message.content}`} text={message.content} disabled={!actions.canModify} onCancel={cancelEdit} onSend={actions.onEdit} /> : <div className="message-bubble user">{message.content}</div>}
+          {editing && actions?.onEdit ? <ChatMessageEditor key={`${sessionId}:${message.content}`} text={message.content} disabled={!actions.canModify} onCancel={cancelEdit} onSend={actions.onEdit} /> : <div className="message-bubble user">
+            {message.content.trim() && <div className="message-user-content">{message.content}</div>}
+            {!!attachments.length && <div className="message-attachments" aria-label="本条消息的附件">{attachments.map((file, index) => <MessageAttachment key={`${file.id}:${index}`} file={file} />)}</div>}
+          </div>}
           {!editing && !backupSnapshot && message.requestedModelRef && <p className="message-model-selection">本轮指定：{message.requestedModelRef}</p>}
           {actions && !editing && <ActionBar actions={actions} onEdit={() => setEditing(true)} />}
         </div>

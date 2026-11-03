@@ -5970,7 +5970,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             return chat_execution.snapshot(
                 sk, turn_id, OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR,
                 live=True, credentials=execution_store.credentials,
-                outputs=OUTPUTS_DIR, limit=100).get('operations') or []
+                outputs=OUTPUTS_DIR, limit=100)
 
         async def _tail_transcript_operations(active_proc):
             """Reconcile live tool frames with this turn's own transcript.
@@ -5984,7 +5984,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             while active_proc.poll() is None:
                 await asyncio.sleep(EXECUTION_TAIL_SECONDS)
                 try:
-                    rows = await asyncio.to_thread(_transcript_receipt)
+                    receipt = await asyncio.to_thread(_transcript_receipt)
+                    rows = receipt.get('operations') if isinstance(receipt, dict) else None
                     if execution_store.ingest(rows):
                         to_client('execution', execution_store.snapshot())
                 except asyncio.CancelledError:
@@ -6311,12 +6312,31 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         return
                     if native_client is not None:
                         from easel.gateway_agent import GatewayAgentProc
-                        from easel.chat_continuation import continuation_reason
+                        from easel.chat_continuation import continuation_reason, confirmed_terminal_operations
                         def _continuation(**values):
-                            if cancel_job.is_set() or sk in _STOPPED_CHAT:
+                            if cancel_job.is_set() or sk in _STOPPED_CHAT or audit_context is None:
                                 return None
+                            try:
+                                receipt = _transcript_receipt()
+                            except Exception:
+                                return None
+                            operations = confirmed_terminal_operations(receipt)
+                            if operations is None:
+                                return None
+                            execution_store.ingest(operations)
                             snapshot = execution_store.snapshot()
-                            return continuation_reason(**values, plan=snapshot.get('plan', []),
+                            candidate = dict(values)
+                            if values.get('continuation_index', 0) == 0 and candidate.get('stop_reason') not in {
+                                    'length', 'max_tokens', 'max_output_tokens', 'model_length'}:
+                                try:
+                                    from chat_failure import turn_failure
+                                    failure = turn_failure(OPENCLAW_SESSIONS_DIR, audit_context,
+                                                           candidate.get('error', ''))
+                                except Exception:
+                                    failure = {}
+                                if failure.get('code') == 'model_output_limit':
+                                    candidate['stop_reason'] = failure.get('providerFinishReason') or 'max_tokens'
+                            return continuation_reason(**candidate, plan=snapshot.get('plan', []),
                                                        operations=snapshot.get('operations', []))
                         def _continued(count, reason):
                             loop.call_soon_threadsafe(to_client, 'activity', f'原轮次已结束，自动继续 {count}/2（保留已有进度）')
@@ -6901,7 +6921,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 execution_tail.cancel()
                 try:
                     await asyncio.gather(execution_tail, return_exceptions=True)
-                    execution_store.ingest(await asyncio.to_thread(_transcript_receipt))
+                    receipt = await asyncio.to_thread(_transcript_receipt)
+                    rows = receipt.get('operations') if isinstance(receipt, dict) else None
+                    execution_store.ingest(rows)
                 except asyncio.CancelledError:
                     pass
                 except Exception:  # noqa: BLE001 — 本轮已有自身回执

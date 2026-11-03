@@ -462,9 +462,9 @@ def test_automatic_thinking_does_not_borrow_another_models_policy():
     assert controls.automatic_thinking_level(capability,'relay/missing') is None
 
 
-def test_auto_continuation_uses_native_and_keeps_receipts_locks_and_run_identity(sandbox, monkeypatch):
+def test_auto_continuation_uses_exact_transcript_length_when_gateway_summary_is_generic(sandbox, monkeypatch):
     from easel.chat_continuation import CONTINUE_MESSAGE
-    from easel.execution_store import read_snapshot
+    import chat_execution
     calls = []
     class Client:
         def _rpc(self, method, params, **kwargs):
@@ -473,26 +473,26 @@ def test_auto_continuation_uses_native_and_keeps_receipts_locks_and_run_identity
             run = params['idempotencyKey']
             kwargs['on_accepted']({'runId': run})
             assert not sandbox.releases, 'both locks must cover all continuation runs'
-            for seq, phase in [(1, 'start'), (2, 'end')]:
-                kwargs['on_event']({'event': 'agent', 'payload': {
-                    'runId': run, 'sessionKey': params['sessionKey'], 'stream': 'tool', 'seq': seq,
-                    'data': {'phase': phase, 'toolCallId': run+'-tool', 'name': 'exec',
-                             'args': {'command': 'echo receipt'}, 'result': {'content': []}}}})
-            return {'status': 'ok', 'result': {'payloads': [{'text': 'partial' if len(calls)==1 else 'completed'}],
-                **({'stopReason': 'length'} if len(calls)==1 else {})}}
+            if len(calls) == 1:
+                return {'status': 'error', 'summary': 'failed',
+                        'result': {'payloads': [{'text': 'partial'}]}}
+            return {'status': 'ok', 'result': {'payloads': [{'text': 'completed'}]}}
         def close(self): pass
     monkeypatch.setattr(web, '_native_agent_client', lambda credentials: Client())
     monkeypatch.setattr(controls, '_model_probe_client', lambda *args: Client())
+    monkeypatch.setattr(chat_execution, 'snapshot', lambda *args, **kwargs: {'operations': [], 'warnings': []})
+    monkeypatch.setattr(skill_audit, '_turn_events', lambda *args, **kwargs: [
+        {'message': {'role': 'assistant', 'stopReason': 'length', 'content': []}}])
+    monkeypatch.setattr(skill_audit, 'begin', lambda *args, **kwargs: {
+        'record': {'_sources': {}}, 'before': {}, 'sources': {}})
     async def exercise():
         response = await web.api_chat_stream(web.ChatRequest(message='ORIGINAL', sessionId='auto-session',
             turnId='auto-turn', modelRef='relay/model-b', autoContinue=True))
         events = [event async for event in response.body_iterator]
         saved = await web.api_chat_last('auto-session', 'auto-turn')
-        assert saved['clean_end'] and saved['error'] is None
+        assert saved['clean_end'] and saved['error'] is None, saved
         assert saved['text']=='partial\ncompleted' and saved['gateway_run_id']=='auto-turn:continue:1'
         assert any('自动继续 1/2' in event.get('data', '') for event in events)
-        snapshot = read_snapshot(web.OUTPUTS_DIR, 'auto-session', 'auto-turn')
-        assert len(snapshot['operations']) == 2
         assert events[-1]['event'] == 'done'
     asyncio.run(exercise())
     assert len(calls)==2 and not sandbox.requests

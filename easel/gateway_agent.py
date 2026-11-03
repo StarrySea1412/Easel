@@ -10,35 +10,39 @@ import subprocess
 import threading
 import time
 
+OUTPUT_LIMIT_REASONS = frozenset({'length', 'max_tokens', 'max_output_tokens', 'model_length'})
+
 
 def _normalized_stop_reason(value, depth=0):
-    """Extract a bounded provider terminal reason from a Gateway result."""
-    if depth > 4:
-        return None
-    if isinstance(value, dict):
-        for key in ('stopReason', 'stop_reason', 'finishReason', 'finish_reason'):
-            candidate = value.get(key)
-            if isinstance(candidate, str) and candidate:
-                return 'max_tokens' if candidate == 'max_output_tokens' else candidate
-        incomplete = value.get('incomplete_details')
-        if isinstance(incomplete, dict) and incomplete.get('reason') == 'max_output_tokens':
-            return 'max_tokens'
-        for key in ('result', 'meta', 'completion', 'message', 'response', 'payload', 'data'):
-            found = _normalized_stop_reason(value.get(key), depth + 1)
-            if found:
-                return found
-        payloads = value.get('payloads')
-        if isinstance(payloads, list):
-            for payload in payloads[:32]:
-                found = _normalized_stop_reason(payload, depth + 1)
-                if found:
-                    return found
-    elif isinstance(value, list):
-        for item in value[:32]:
-            found = _normalized_stop_reason(item, depth + 1)
-            if found:
-                return found
-    return None
+    """Extract a bounded provider terminal reason, preferring output limits."""
+    reasons = []
+
+    def collect(item, level):
+        if level > 4:
+            return
+        if isinstance(item, dict):
+            for key in ('stopReason', 'stop_reason', 'finishReason', 'finish_reason'):
+                candidate = item.get(key)
+                if isinstance(candidate, str) and candidate:
+                    reasons.append(candidate)
+            incomplete = item.get('incomplete_details')
+            if isinstance(incomplete, dict) and incomplete.get('reason') == 'max_output_tokens':
+                reasons.append('max_tokens')
+            for key in ('result', 'meta', 'completion', 'message', 'response', 'payload', 'data'):
+                collect(item.get(key), level + 1)
+            payloads = item.get('payloads')
+            if isinstance(payloads, list):
+                for payload in payloads[:32]:
+                    collect(payload, level + 1)
+        elif isinstance(item, list):
+            for row in item[:32]:
+                collect(row, level + 1)
+
+    collect(value, depth)
+    limit = next((reason for reason in reasons if reason in OUTPUT_LIMIT_REASONS), None)
+    if limit is not None:
+        return 'max_tokens' if limit == 'max_output_tokens' else limit
+    return reasons[0] if reasons else None
 
 
 class GatewayAgentProc:
@@ -161,14 +165,14 @@ class GatewayAgentProc:
 
     def _terminal_confirmed(self):
         if not self._accepted_run.is_set():
-            return False
+            return None
         client = self.client_factory()
         try:
             result = client._rpc('agent.wait', {'runId': self._office_run_id, 'timeoutMs': 1000}, timeout=5)
-            return (isinstance(result, dict) and result.get('runId') == self._office_run_id
-                    and result.get('status') in ('ok', 'error'))
+            from easel.gateway_reconciliation import wait_outcome
+            return wait_outcome(result, self._office_run_id, self.params.get('sessionId'))
         except Exception:
-            return False
+            return None
         finally:
             client.close()
 
@@ -182,6 +186,13 @@ class GatewayAgentProc:
         self.clean_end = outcome['complete']
         self.error_text = None if self.clean_end else outcome['error']['message']
         self.returncode = 0 if self.clean_end else 1
+
+    @staticmethod
+    def _result_from_outcome(outcome, summary):
+        payloads = [{'text': outcome['text']}] if isinstance(outcome.get('text'), str) else []
+        return {'status': 'ok' if outcome.get('complete') else 'error',
+                'summary': summary, 'stopReason': outcome.get('stopReason'),
+                'result': {'payloads': payloads}}
 
     def _run(self):
         from .chat_continuation import CONTINUE_MESSAGE, MAX_CONTINUATIONS
@@ -198,17 +209,18 @@ class GatewayAgentProc:
                     if isinstance(self.result, dict) and self.result.get('status') != 'ok':
                         attempt_error = str(self.result.get('summary', 'Gateway returned no final agent result'))
                 except Exception as exc:
-                    # A response error is not by itself evidence the accepted run ended.
-                    if not getattr(exc, 'rpc_response', False):
-                        raise
                     attempt_error = str(exc)
-                    terminal = self._terminal_confirmed()
-                    if not terminal:
+                    outcome = self._terminal_confirmed() if getattr(exc, 'rpc_response', False) else None
+                    if outcome is None:
                         outcome = self._settle_disconnected_run()
-                        if outcome is not None and not self._stop.is_set():
+                    if outcome is not None and not self._stop.is_set():
+                        if outcome.get('complete'):
                             self._recover_outcome(outcome)
                             return
-                    self.result = {'status': 'error', 'summary': attempt_error}
+                        self.result = self._result_from_outcome(outcome, attempt_error)
+                        terminal = True
+                    else:
+                        self.result = {'status': 'error', 'summary': attempt_error}
                 result = self.result.get('result') if isinstance(self.result, dict) else None
                 payloads = result.get('payloads', []) if isinstance(result, dict) else []
                 if not isinstance(payloads, list):
@@ -221,7 +233,8 @@ class GatewayAgentProc:
                 if (terminal and self.continuation is not None and not self._stop.is_set()
                         and not self._pending_question and self.continuations < MAX_CONTINUATIONS
                         and time.monotonic() - started < self.timeout):
-                    reason = self.continuation(error=attempt_error, text=text, stop_reason=_normalized_stop_reason(self.result))
+                    reason = self.continuation(error=attempt_error, text=text,
+                        stop_reason=_normalized_stop_reason(self.result), continuation_index=self.continuations)
                 if not reason:
                     all_payloads.extend(payloads)
                     break
@@ -243,10 +256,17 @@ class GatewayAgentProc:
                 self._abort_confirmed.clear()
                 self._office_run_id = self.params['idempotencyKey']
             self.stop_reason = _normalized_stop_reason(self.result)
-            if isinstance(self.result, dict) and self.result.get('status') == 'ok' and isinstance(self.result.get('result'), dict):
+            if isinstance(self.result, dict) and isinstance(self.result.get('result'), dict):
                 self.result = {**self.result, 'result': {**self.result['result'], 'payloads': all_payloads}}
             if not isinstance(self.result, dict) or self.result.get('status') != 'ok':
                 self.error_text = str((self.result or {}).get('summary', 'Gateway returned no final agent result')) if isinstance(self.result, dict) else 'Gateway returned no final agent result'
+                result = self.result.get('result') or {} if isinstance(self.result, dict) else {}
+                payloads = result.get('payloads') or [] if isinstance(result, dict) else []
+                text = '\n'.join(row['text'] for row in payloads
+                                 if isinstance(row, dict) and not row.get('isError')
+                                 and isinstance(row.get('text'), str))
+                if text:
+                    self._lines.put(text + '\n')
                 self.returncode = 1
             else:
                 result = self.result.get('result') or {}

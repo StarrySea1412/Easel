@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from easel.gateway_agent import GatewayAgentProc
+from easel.gateway_agent import _normalized_stop_reason
 from easel.gateway_questions import GatewayClient, GatewayQuestionError
 
 
@@ -55,6 +56,11 @@ def test_native_preserves_structured_output_limit_reason():
     proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'length-turn',
         'agentId': 'main', 'sessionKey': 'agent:main:chat'}, 10)
     assert proc.wait(1) == 0 and proc.stop_reason == 'max_tokens'
+
+
+def test_output_limit_reason_wins_over_generic_outer_stop_reason():
+    assert _normalized_stop_reason({'stopReason': 'error',
+        'result': {'meta': {'finish_reason': 'length'}}}) == 'length'
 
 
 def test_stop_targets_accepted_run_and_waits_for_terminal():

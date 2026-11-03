@@ -4,8 +4,8 @@ import { JSDOM } from 'jsdom';
 import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 
-// MessageBubble: markdown stays sanitized, attachment-only user turns render
-// nothing, streaming states show live panels, and copy/retry actions report.
+// MessageBubble: markdown stays sanitized, sent attachments stay visible,
+// streaming states show live panels, and copy/retry actions report.
 // jsdom (not happy-dom) hosts DOMPurify, matching backup-chat-page conventions.
 globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/' }).window;
 globalThis.document = window.document;
@@ -23,10 +23,36 @@ async function mount(t, props) {
   return container;
 }
 
-test('attachment-only user turn renders nothing; text turns show content', async t => {
-  const empty = await mount(t, { message: { role: 'user', content: '  ', attachments: [{ id: 'x', name: 'f.txt', path: '_inbox/f.txt' }] } });
-  assert.equal(empty.querySelector('.message-bubble'), null, 'no bubble for attachment-only turn');
+test('image attachments remain visible in text and attachment-only user turns', async t => {
+  const file = { id: 'x', name: 'photo.png', path: '_inbox/session/batch/photo.png' };
+  const imageOnly = await mount(t, { message: { role: 'user', content: '  ', attachments: [file] } });
+  assert.ok(imageOnly.querySelector('.message-bubble.user'), 'attachment-only turn keeps a visible bubble');
+  assert.equal(imageOnly.querySelector('.message-attachment-image img')?.alt, 'photo.png');
+  assert.equal(imageOnly.querySelector('.message-attachment-image img')?.getAttribute('src'), '/api/media/_inbox/session/batch/photo.png');
+  assert.doesNotMatch(imageOnly.querySelector('.message-bubble.user').textContent, /_inbox|session\/batch/);
 
+  const withText = await mount(t, { message: { role: 'user', content: '看一下这张图', attachments: [file] } });
+  assert.match(withText.textContent, /看一下这张图/);
+  assert.ok(withText.querySelector('.message-attachment-image img'));
+});
+
+test('messages without text or attachments stay hidden', async t => {
+  const empty = await mount(t, { message: { role: 'user', content: '  ' } });
+  assert.equal(empty.querySelector('.message-bubble'), null);
+});
+
+test('non-image attachments are visible as named download links', async t => {
+  const container = await mount(t, { message: { role: 'user', content: '', attachments: [{
+    id: 'doc', name: 'brief.pdf', path: '_inbox/session/batch/brief.pdf',
+  }] } });
+  const link = container.querySelector('.message-attachment-file');
+  assert.ok(link);
+  assert.equal(link.textContent.trim(), 'brief.pdf');
+  assert.equal(link.getAttribute('href'), '/api/media/_inbox/session/batch/brief.pdf');
+  assert.equal(link.getAttribute('download'), 'brief.pdf');
+});
+
+test('text-only user turns continue to show content', async t => {
   const visible = await mount(t, { message: { role: 'user', content: '你好' } });
   assert.match(visible.textContent, /你好/);
 });

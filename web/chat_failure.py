@@ -6,6 +6,8 @@ import time
 from easel.gateway_auth import gateway_error
 
 LABEL = re.compile(r'^[A-Za-z0-9_.:/+-]{1,300}$')
+OUTPUT_LIMIT_REASONS = frozenset({'length', 'max_tokens', 'max_output_tokens', 'model_length'})
+FAILED_REASONS = frozenset({'error', 'aborted'})
 
 
 def observed_failure(events, native_error='', channels=None):
@@ -14,13 +16,30 @@ def observed_failure(events, native_error='', channels=None):
         message = event.get('message') if isinstance(event, dict) else None
         if not isinstance(message, dict) or message.get('role') != 'assistant':
             continue
-        if message.get('stopReason') not in ('error', 'aborted'):
+        stop_reason = message.get('stopReason', message.get('stop_reason'))
+        finish_reason = message.get('finishReason', message.get('finish_reason'))
+        limit_reason = next((value for value in (stop_reason, finish_reason)
+                             if isinstance(value, str) and value in OUTPUT_LIMIT_REASONS), None)
+        if limit_reason is not None:
+            failed.append((limit_reason, message))
+            continue
+        if stop_reason not in FAILED_REASONS:
             continue
         raw = message.get('errorMessage')
         if isinstance(raw, str) and raw.strip():
             failed.append((raw, message))
     raw, message = failed[-1] if failed else (native_error, {})
-    result = gateway_error(raw, include_detail=True)
+    stop_reason = message.get('stopReason', message.get('stop_reason'))
+    finish_reason = message.get('finishReason', message.get('finish_reason'))
+    if raw in OUTPUT_LIMIT_REASONS:
+        result = {
+            'code': 'model_output_limit',
+            'category': 'execution',
+            'retryable': False,
+            'message': '模型回复达到单轮输出上限。本轮未完整完成，已保留收到的内容；启用自动继续时会在确认安全后有限接续。若仍未完成，请从当前进度手动继续，不要重发原操作。',
+        }
+    else:
+        result = gateway_error(raw, include_detail=True)
     provider, model = message.get('provider'), message.get('model')
     if isinstance(provider, str) and LABEL.fullmatch(provider):
         result['channel'] = provider
@@ -35,9 +54,9 @@ def observed_failure(events, native_error='', channels=None):
                               if type(usage.get(key)) is int and 0 <= usage[key] <= 10_000_000), None)
         if output_tokens is not None:
             result['outputTokens'] = output_tokens
-    finish_reason = message.get('finishReason', message.get('finish_reason'))
-    if isinstance(finish_reason, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,64}', finish_reason):
-        result['providerFinishReason'] = finish_reason
+    provider_finish = raw if raw in OUTPUT_LIMIT_REASONS else finish_reason
+    if isinstance(provider_finish, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,64}', provider_finish):
+        result['providerFinishReason'] = provider_finish
     result['stage'] = 'model_response' if failed else 'agent_execution'
     return result
 

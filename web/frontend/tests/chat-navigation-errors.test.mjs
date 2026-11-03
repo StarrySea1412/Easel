@@ -33,6 +33,11 @@ test('unsupported effort has a specific title and retains the runtime explanatio
  assert.deepEqual(chatErrorDetail(makeChatError(detail)),detail);
  assert.equal(chatErrorTitle(detail),'思考档位不支持');
 });
+test('output-limit failures name the exhausted model budget',()=>{
+ const detail={message:'模型回复达到单轮输出上限。本轮未完整完成。',code:'model_output_limit',category:'execution',retryable:false};
+ assert.deepEqual(chatErrorDetail(makeChatError(detail)),detail);
+ assert.equal(chatErrorTitle(detail),'回复达到输出上限');
+});
 globalThis.window={location:{pathname:'/'}};
 const {streamChat}=await loadTsModule('../src/lib/api.ts',import.meta.url);
 test('SSE structured authentication failure is terminal with preserved fields',async()=>{

@@ -218,3 +218,20 @@ def test_snapshot_wait_keeps_event_loop_responsive(tmp_path, monkeypatch):
             await asyncio.gather(request, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('reader', [
+    lambda root: ledger.read(root, 'fixture-turn'),
+    lambda root: ledger.event_page(root, 'fixture-turn'),
+])
+def test_readers_do_not_wait_for_writer_transaction(tmp_path, reader):
+    root = tmp_path / 'ledger'
+    ledger.accept(root, 'fixture-turn', session_id='fixture-session', session_key='fixture-session')
+    writer = sqlite3.connect(root / 'ledger.sqlite3', timeout=1)
+    try:
+        writer.execute('BEGIN IMMEDIATE')
+        writer.execute('UPDATE runs SET data=data WHERE turn=?', ('fixture-turn',))
+        assert reader(root) is not None
+    finally:
+        writer.rollback()
+        writer.close()
