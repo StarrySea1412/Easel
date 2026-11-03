@@ -1,5 +1,7 @@
 **0.45.7源码：自动继续设置已移至「设置 → 通用偏好 → 对话」。** 保留按会话生效、每轮最多2次及手动继续；旧偏好兼容。定向测试89项通过，桌面浏览器键盘与入口已检查；窄屏未实测。本次未部署138、未发布安装包。[验证与边界](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/chat-continuation-settings-0.45.7.md)。
 
+**0.45.7隔离稳定性检查：** 64会话/64,000次偏好读写一致；后端故障/并发组合300通过/4跳过，账本/队列/RPC/资源子集重复3轮129通过。仅证明受控测试路径，不代表真实供应商、平台运营或138生产稳定；无持续HTTP吞吐或真实任务样本。[测试范围与剩余门槛](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/stability-stress-0.45.7.md)。
+
 **0.45.6源码：置顶与最近对话可独立折叠。** 两组数量常显，折叠偏好按浏览器分别保存，当前会话状态不受影响。[实现、验证与部署边界](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/sidebar-section-collapse-0.45.6.md)。本次未更新138或安装包；模型渠道和真实运营稳定率仍是独立未完成项。
 
 **138正式/隔离已更新0.45.4 / `2d6507a2e54e`。** 修复目标渠道524与重试叠加，最多一次派发前请求恢复、90秒请求截止并保留已完成工具。真实检查中Happycoding的DeepSeek接口仍524；已配置Minimax M3在隔离工作台23秒完成短对话，不能将本补丁称为供应商可用性已恢复。[故障注入、实际调用和138回执](docs/provider-timeout-recovery-0.45.4.md)。

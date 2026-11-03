@@ -15,7 +15,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {createRoot}=await import('react-dom/client');
 const {default:Controls}=await loadTsModule('../src/components/ChatContinuationControls.tsx',import.meta.url);
 const {default:Settings}=await loadTsModule('../src/components/settings/ChatContinuationSettings.tsx',import.meta.url);
-const {readChatAutoContinue}=await loadTsModule('../src/lib/chatContinuation.ts',import.meta.url);
+const {readChatAutoContinue,saveChatAutoContinue}=await loadTsModule('../src/lib/chatContinuation.ts',import.meta.url);
 const {retryPendingLocalWrites}=await loadTsModule('../src/lib/localPersistence.ts',import.meta.url);
 
 test('settings preserve existing per-conversation choices and block edits while running',async()=>{
@@ -53,6 +53,25 @@ test('failed settings writes stay visible and never apply later as a queued pref
     await act(async()=>toggle.click());assert.equal(readChatAutoContinue('failure'),false);
     assert.equal(container.querySelector('[role=alert]'),null);
   } finally {await act(async()=>root.unmount());container.remove();}
+});
+
+test('high-volume interleaved preference writes stay isolated across 64 conversations',async()=>{
+  localStorage.clear();
+  const sessions=64,iterations=500;
+  try {
+    await Promise.all(Array.from({length:sessions},async(_,session)=>{
+      for(let iteration=0;iteration<iterations;iteration++){
+        const expected=(session+iteration)%2===0;
+        assert.equal(saveChatAutoContinue(`stress-${session}`,expected),true);
+        assert.equal(readChatAutoContinue(`stress-${session}`),expected);
+        if(iteration%25===0)await new Promise(resolve=>setImmediate(resolve));
+      }
+    }));
+    for(let session=0;session<sessions;session++)
+      assert.equal(readChatAutoContinue(`stress-${session}`),(session+iterations-1)%2===0);
+    assert.equal(Array.from({length:localStorage.length},(_,index)=>localStorage.key(index))
+      .filter(key=>key?.startsWith('easel_chat_auto_continue:stress-')).length,sessions);
+  } finally { localStorage.clear(); }
 });
 
 test('composer retains only manual continuation, blocks it while running and leaves no empty row',async()=>{
