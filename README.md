@@ -1,3 +1,5 @@
+**138正式已部署0.45.9（2026-11-03）：** 修复输出触及8192-token上限后Gateway只返回泛化`failed`、自动继续未触发的问题。仅在当前轮原生轨迹明确为输出触顶、已启用自动继续、本轮无工具操作且审计完整、无待确认或停止时，同一会话最多安全接续2次；不重发原请求。发生工具操作或状态不完整时停止接续并保留已有内容，避免重复生图、发布等副作用。内部核对了正式版本/镜像、运行源码及70个JS/CSS资源哈希、登录、Gateway和健康状态；相关后端231项、错误展示前端41项通过。全量前端测试运行至378项后中止，不计全量通过。未调用真实模型或重放问题`63eafc65`，因此实时续接质量和长期业务稳定率仍未验证；安装器未发布。[发布回执](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/release-138-0.45.9-2026-11-03.md) · [修复与验证边界](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/output-limit-continuation-0.45.9.md)。
+
 **0.45.7隔离稳定性检查：** 64会话/64,000次偏好读写一致；后端故障/并发组合300通过/4跳过，核心竞争子集重复3轮129通过。账本事件端点本机16并发、4800个回执读取0失败，约93–100 RPS；但最大延迟3.2–4.0秒，存在长尾。该单端点结果不代表真实供应商、运营或138生产稳定。[测试范围与剩余门槛](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/stability-stress-0.45.7.md)。
 
 **0.45.7源码：自动继续设置已移至「设置 → 通用偏好 → 对话」。** 保留按会话生效、每轮最多2次及手动继续；旧偏好兼容。定向测试89项通过，桌面浏览器键盘与入口已检查；窄屏未实测。本次未部署138、未发布安装包。[验证与边界](https://github.com/StarrySea1412/Easel/blob/codex/tool-call-recovery-0.45.1/docs/chat-continuation-settings-0.45.7.md)。
