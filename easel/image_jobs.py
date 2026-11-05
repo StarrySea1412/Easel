@@ -83,7 +83,7 @@ class ImageJobs:
         finally:
             db.close()
 
-    def submit(self, payload, config, *, session=None, turn=None, request_id=None):
+    def _normalize(self, payload, config, session, turn, request_id, card=None):
         raw_prompt = payload.get('prompt', '')
         if not isinstance(raw_prompt, str):
             raise ValueError('提示词必须是文字')
@@ -102,16 +102,33 @@ class ImageJobs:
         normalized = {k: payload.get(k) for k in ('referenceId', 'maskId') if payload.get(k)}
         normalized.update(prompt=prompt, size=size, mode=mode, n=count,
                           model=str(config.get('IMG_MODEL', '')).strip(), sessionId=session, turnId=turn)
+        if card is not None:
+            normalized.update(card)
         fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
-        # Lookup precedes channel validation: retrieving a prior receipt must work
-        # even after credentials are removed or changed.
+        return request_id, owner_scope, normalized, fingerprint, count
+
+    def submit(self, payload, config, *, session=None, turn=None, request_id=None):
+        return self.submit_batch([(payload, request_id, None)], config, session=session, turn=turn)[0]
+
+    def submit_batch(self, entries, config, *, session, turn):
+        """Register all planned images atomically, preserving existing receipts."""
+        plans = [self._normalize(p, config, session, turn, request, card) for p, request, card in entries]
+        if not plans or len({p[0] for p in plans}) != len(plans):
+            raise ValueError('图片请求标识重复或为空')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT * FROM jobs WHERE scope=? AND request=?', (owner_scope, request_id)).fetchone()
-            if row:
-                if row['fingerprint'] != fingerprint:
-                    raise ValueError('该请求标识已用于不同参数；未重复生成')
-                return self.public(row)
+            existing, pending = [], []
+            for request, owner_scope, normalized, fingerprint, count in plans:
+                row = db.execute('SELECT * FROM jobs WHERE scope=? AND request=?', (owner_scope, request)).fetchone()
+                if row:
+                    if row['fingerprint'] != fingerprint:
+                        raise ValueError('该请求标识已用于不同参数；未重复生成')
+                    existing.append(row)
+                else:
+                    pending.append((request, owner_scope, normalized, fingerprint, count))
+            if not pending:
+                return [self.public(row) for row in existing]
+            owner_scope = plans[0][1]
             if db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (owner_scope,)).fetchone():
                 raise ValueError('所属轮次已停止；未创建新的图片任务。')
             from .writing_handoffs import WritingHandoffs
@@ -119,15 +136,17 @@ class ImageJobs:
             host, config_id, limit = channel(config)
             if session:
                 from easel.task_store import TaskStore
-                TaskStore(self.outputs).reserve_image(session, turn, request_id, count)
-            ident = uuid.uuid4().hex
-            data = {**normalized, 'jobId': ident, 'requestId': request_id, 'started': time.time(),
-                    'url': None, 'error': None, 'limit': limit}
-            if creation_source is not None:
-                data['creationSource'] = creation_source
-            db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (ident, owner_scope, request_id, fingerprint, host, config_id, 'queued', None, 0, time.time(), json.dumps(data, ensure_ascii=False)))
-        return self.get(ident, session=session)
+                TaskStore(self.outputs).reserve_images(session, turn, [(p[0], p[4]) for p in pending])
+            for request, owner_scope, normalized, fingerprint, count in pending:
+                ident = uuid.uuid4().hex
+                data = {**normalized, 'jobId': ident, 'requestId': request, 'started': time.time(),
+                        'url': None, 'error': None, 'limit': limit}
+                if creation_source is not None:
+                    data['creationSource'] = creation_source
+                db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                    (ident, owner_scope, request, fingerprint, host, config_id, 'queued', None, 0, time.time(), json.dumps(data, ensure_ascii=False)))
+            rows = [db.execute('SELECT * FROM jobs WHERE scope=? AND request=?', (p[1], p[0])).fetchone() for p in plans]
+        return [self.public(row) for row in rows]
 
     def checkpoint(self, row):
         return ImageCheckpoint.for_job(self.outputs, row)
@@ -183,8 +202,15 @@ class ImageJobs:
     def list(self, session):
         scope(session)
         with self.db() as db:
-            return [self.public(row) for row in db.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 1000')
-                    if json.loads(row['data']).get('sessionId') == session][:100]
+            rows = db.execute('SELECT * FROM jobs WHERE scope>=? AND scope<? ORDER BY created DESC LIMIT 100',
+                              (session+':', session+';')).fetchall()
+        from .xhs_cards import XhsCards
+        summaries = XhsCards(self.outputs).summaries(session) if any(json.loads(r['data']).get('cardSetId') for r in rows) else {}
+        values = [self.public(row) for row in rows]
+        for value in values:
+            if value.get('cardSetId') in summaries:
+                value['cardSet'] = summaries[value['cardSetId']]
+        return values
 
     def pending_turns(self, session):
         """Lifecycle queries must not use the truncated presentation list."""

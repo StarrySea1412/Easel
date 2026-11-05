@@ -1,5 +1,6 @@
 import { registerPresent } from './present.mjs';
 import { registerAihub } from './aihub.mjs';
+import { registerXhsCards } from './xhs-cards.mjs';
 import { registerImage } from './image.mjs';
 import { registerTasks } from './tasks.mjs';
 import { registerPlan } from './plan.mjs';
@@ -29,6 +30,7 @@ export default {
     registerArtifactWriter(api);
     registerPresent(api);
     registerImage(api);
+    registerXhsCards(api);
     registerTasks(api);
     registerPlan(api);
     api.on('before_tool_call', (event, ctx) => runtimeToolParams(event, ctx, api.config),

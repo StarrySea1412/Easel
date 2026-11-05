@@ -665,7 +665,7 @@ class TaskStore:
                     self._goal(db, g)
             return {'stop': g['status'] != 'active' or g['stopEpoch'] != r['stopEpoch'], 'observed': g['toolsUsed']}
 
-    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True, stage_checks=None, message_metadata=None):
+    def finish(self, run, *, owner, text='', state='completed', checks=None, fingerprint=None, reason='', resource_settled=True, stage_checks=None, message_metadata=None, quality_pending=''):
         with self.db() as db:
             r = self._get(db, 'runs', run)
             if r.get('owner') != owner:
@@ -729,6 +729,8 @@ class TaskStore:
             elif any(s['status'] == 'blocked' for s in g.get('steps', [])):
                 blocked = next(s for s in g['steps'] if s['status'] == 'blocked')
                 g.update(status='blocked', phase='waiting_input', reason=blocked.get('detail') or blocked['title'])
+            elif quality_pending:
+                g.update(status='blocked', phase='review', reason=quality_pending + '；未完成三图质量验收，不自动重生。')
             elif checks and all(c['state'] == 'passed' for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
                 g.update(status='completed', phase='idle', reason='所有验收项通过。')
             elif checks and all(c['state'] == 'passed' or (c['type'] == 'review' and c['state'] == 'pending') for c in checks) and not any(s['status'] != 'completed' for s in g.get('steps', [])):
@@ -882,18 +884,23 @@ class TaskStore:
             return p
 
     def reserve_image(self, session, turn, request, count=1):
-        request = turn + ':' + request
+        return self.reserve_images(session, turn, [(request, count)])
+
+    def reserve_images(self, session, turn, entries):
+        """Reserve an entire card plan or none of it; retries consume no budget."""
         with self.db() as db:
             row = db.execute('SELECT goal FROM runs WHERE session=? AND turn=?', (session, turn)).fetchone()
             if not row:
                 return
             g = self._get(db, 'goals', row[0])
-            if db.execute('SELECT 1 FROM image_reservations WHERE goal=? AND request=?', (g['id'], request)).fetchone():
+            pending = [(turn + ':' + request, count) for request, count in entries
+                if not db.execute('SELECT 1 FROM image_reservations WHERE goal=? AND request=?', (g['id'], turn + ':' + request)).fetchone()]
+            if not pending:
                 return
-            if g['status'] != 'active' or g['imagesUsed'] + count > g['maxImages']:
+            if g['status'] != 'active' or g['imagesUsed'] + sum(c for _, c in pending) > g['maxImages']:
                 raise TaskConflict('目标已暂停或达到图片数量上限；未提交新的生图请求。')
-            db.execute('INSERT INTO image_reservations VALUES(?,?)', (g['id'], request))
-            g['imagesUsed'] += count
+            db.executemany('INSERT INTO image_reservations VALUES(?,?)', [(g['id'], r) for r, _ in pending])
+            g['imagesUsed'] += sum(c for _, c in pending)
             self._goal(db, g)
 
     def image_allowed(self, session, turn):

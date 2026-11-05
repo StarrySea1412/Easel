@@ -360,6 +360,9 @@ class TaskService:
             text = self.read_run_text(r)
         if await asyncio.to_thread(ImageJobs(web.OUTPUTS_DIR).pending, r['sessionId'], r['turnId']):
             return False
+        from easel.xhs_cards import XhsCards
+        card_sets = await asyncio.to_thread(XhsCards(web.OUTPUTS_DIR).for_turn, r['sessionId'], r['turnId'])
+        quality_pending = '；'.join(c['label'] for c in card_sets if not c['complete'])
         checks, fingerprint = await asyncio.to_thread(check_goal, web.OUTPUTS_DIR, g, text)
         from easel.task_stages import stage_for_run, check_stage
         stage = stage_for_run(g, r)
@@ -367,7 +370,7 @@ class TaskService:
         state = 'completed' if ledger['status'] == 'completed' else 'stopped' if ledger['status'] == 'stopped' else 'failed'
         await asyncio.to_thread(store.finish, r['id'], owner=r['owner'], text=text, state=state,
             checks=checks, fingerprint=fingerprint, stage_checks=stage_checks,
-            message_metadata=message_metadata,
+            message_metadata=message_metadata, quality_pending=quality_pending,
             reason=(ledger.get('error') or {}).get('message', ''))
         return True
 

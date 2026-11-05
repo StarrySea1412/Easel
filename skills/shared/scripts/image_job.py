@@ -14,18 +14,22 @@ from output_paths import OUTPUTS_DIR
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['submit', 'status'])
+    parser.add_argument('action', choices=['submit', 'status', 'cards'])
     parser.add_argument('--ticket', required=True)
     parser.add_argument('--session')
     parser.add_argument('--request-id')
     parser.add_argument('--prompt')
     parser.add_argument('--size', default='1024x1024')
     parser.add_argument('--job-id')
+    parser.add_argument('--payload')
     args = parser.parse_args()
     try:
         session, turn = ArtifactStore(OUTPUTS_DIR).ticket_scope(args.ticket, session=args.session)
         jobs = ImageJobs(OUTPUTS_DIR)
-        if args.action == 'status':
+        if args.action == 'cards':
+            from easel.xhs_cards import XhsCards
+            result = XhsCards(OUTPUTS_DIR).execute(json.loads(args.payload), read_config(OUTPUTS_DIR.parent), session=session, turn=turn)
+        elif args.action == 'status':
             result = jobs.get(args.job_id, session=session)
         else:
             if not args.request_id or not args.prompt:
@@ -34,7 +38,7 @@ def main():
                                  session=session, turn=turn, request_id=args.request_id)
         print(json.dumps({'ok': True, 'job': result}, ensure_ascii=False))
         return 0
-    except (ValueError, OSError):
+    except (ValueError, OSError, TypeError, KeyError):
         print(json.dumps({'ok': False, 'error': '任务未提交，请检查当前会话凭据、请求标识、参数和专用生图设置'}, ensure_ascii=False))
         return 1
 

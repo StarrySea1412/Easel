@@ -4753,6 +4753,7 @@ def _chat_delivery_instructions(artifact_ticket):
                 f'仅使用本轮凭据；文件不存在时修正路径，不编造成功。'
                 f'长文本产物优先使用easel_write_artifact：固定requestId，begin指定filename；append按sequence从0有序写入，每块最多3000字符；status查询断点；commit指定expectedChunks后取得真实路径再交付。不要将整个长文件放入单次exec/write参数。'
                 f'仅当本轮需要HTML产物时：预览隔离运行，使用自包含CSS/脚本或本地关联资源，不依赖外部CDN、联网接口或嵌套网页。'
+                f'\n小红书三图卡组使用easel_xhs_cards：submit一次提交统一style和封面/卖点/场景收尾三个不同prompts，固定requestId；status只读。三张实际图片保存后必须逐张读取查看，再review提交当前sha256、逐图审图依据及全部质量检查；未审图不能称质量通过，缺图不能称整组完成，不换标识重生，不自动发布。ticket相同。'
                 f'\n用户明确要求AI生图时可调用easel_generate_image，ticket相同、requestId为每张图固定且唯一的标识、prompt为生图提示词。'
                 f'若没有该工具，执行 python "{image_script}" submit --ticket {artifact_ticket} --request-id "<固定请求标识>" --prompt "<生图提示词>"。'
                 f'该调用可能产生图片费用，只用已配置图片通道；返回job后等待自动交付，勿换requestId重复提交。')

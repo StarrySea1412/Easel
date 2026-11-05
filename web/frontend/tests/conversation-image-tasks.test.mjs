@@ -61,3 +61,18 @@ test('task state and complete prompt remain distinct from saved file count',asyn
   assert.equal(view.container.querySelector('details p').textContent,'完整提示词'.repeat(40));
   assert.equal(view.container.querySelectorAll('article').length,0);
 });
+
+
+test('three-image status separates saved files from assistant visual review',async t=>{
+  const cardSet={cardSetId:'f'.repeat(32),sessionId:'chat',turnId:'t',expected:3,ready:2,complete:false,qualityState:'pending',
+    cards:[{cardIndex:1,cardRole:'cover',ready:true,phase:'done'},{cardIndex:2,cardRole:'content',ready:true,phase:'done'},{cardIndex:3,cardRole:'ending',ready:false,phase:'error',error:'测试缺图'}]};
+  const job={jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'三图分镜',phase:'done',cardSet};
+  const view=await setup(t,{jobs:[job,{...job,jobId:'c'.repeat(32)}]});
+  assert.equal(view.container.querySelectorAll('[aria-label="小红书三图卡组状态"]').length,1);
+  assert.match(view.container.textContent,/已保存 2\/3/);assert.match(view.container.textContent,/待质量验收/);
+  assert.match(view.container.textContent,/封面/);assert.match(view.container.textContent,/核心卖点/);assert.match(view.container.textContent,/场景与收尾/);
+  await view.render({jobs:[{...job,cardSet:{...cardSet,ready:3}}]});
+  assert.match(view.container.textContent,/已保存 3\/3/);assert.doesNotMatch(view.container.textContent,/助手审图通过/);
+  await view.render({jobs:[{...job,cardSet:{...cardSet,ready:3,complete:true,qualityState:'assistant_reviewed'}}]});
+  assert.match(view.container.textContent,/助手审图通过/);
+});

@@ -26,6 +26,7 @@ from .gateway_auth import redact_gateway_text
 from .execution import codex_rows, page, iso, public_text
 from .artifacts import ArtifactStore, PRESENT_TOOL
 from .image_jobs import ImageJobs, read_config, GENERATE_TOOL
+from .xhs_cards import XhsCards, XHS_TOOL
 from .creation_drafts import CreationDrafts, PREPARE_TOOL
 from .browser_tools import BROWSER_TOOL
 from .browser_runtime import BrowserError
@@ -440,13 +441,14 @@ class CodexService:
         params['developerInstructions'] += (f'用户要求准备发布内容时，调用easel_prepare_publish登记可编辑草稿，必须提供固定requestId和body。'
             f'旧会话缺此工具时，将正文保存为UTF-8文件，执行 python "{publish_script}" --ticket {ticket} --request-id "<固定标识>" --body-file "<正文文件>"。'
             '草稿自动关联当前对话，可在辅助面板查看。该工具不发布；账号预检和最终提交由用户在发布中心确认。')
-        params['developerInstructions'] += (f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
+        params['developerInstructions'] += ('小红书三图卡组使用easel_xhs_cards：submit一次提交统一style和封面/卖点/场景收尾三个不同prompts，固定requestId；status只读。三张实际图片保存后必须逐张读取查看，再review提交当前sha256、逐图审图依据及全部质量检查；未审图不能称质量通过，缺图不能称整组完成，不换标识重生，不自动发布。'
+            f'用户明确要求AI生图时使用easel_generate_image，requestId为每张图固定标识，prompt为提示词。'
             f'旧会话缺此工具时可执行 python "{script}" submit --ticket {ticket} --request-id "<固定标识>" --prompt "<提示词>"。'
             '可能产生图片费用，只用专用生图通道，不改请求标识重试，不隐式换模型；任务完成后文件自动展示。')
         if state['threadId']:
             params['threadId'] = state['threadId']
         else:
-            params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, PREPARE_TOOL, MEMORY_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
+            params['dynamicTools'] = [PRESENT_TOOL, GENERATE_TOOL, XHS_TOOL, PREPARE_TOOL, MEMORY_TOOL] + ([BROWSER_TOOL] if self.browser_service else [])
             if state.get('taskGoal'):
                 params['dynamicTools'].append(DELIVER_TOOL)
         if state.get('taskGoal'):
@@ -855,6 +857,19 @@ class CodexService:
             args = {**args, 'requestId':request_id}
             run.setdefault('browserJobs',set()).add(request_id)
             threading.Thread(target=self._browser_tool_worker,args=(run,event,args),daemon=True,name='easel-codex-browser').start()
+            return False
+        if method == 'item/tool/call' and params.get('tool') == 'easel_xhs_cards' and not params.get('namespace'):
+            try:
+                args = params.get('arguments')
+                if not isinstance(args, dict):
+                    raise ValueError('Invalid arguments')
+                state = run['state']
+                receipt = XhsCards(self.outputs).execute(args, read_config(self.outputs.parent), session=state['sessionId'], turn=state['turn_id'])
+                result = {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps({'cardSet': receipt}, ensure_ascii=False)}]}
+                self._event(state, 'activity', receipt['label'])
+            except (ValueError, OSError, TypeError, KeyError):
+                result = {'success': False, 'contentItems': [{'type': 'inputText', 'text': '卡组未通过登记或质量验收；保留原图，查看原任务状态，不更换请求标识重生。'}]}
+            self._reply(run, event['id'], result)
             return False
         if method == 'item/tool/call' and params.get('tool') == 'easel_generate_image' and not params.get('namespace'):
             try:

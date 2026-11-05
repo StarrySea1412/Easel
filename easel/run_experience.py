@@ -117,6 +117,9 @@ def source(outputs, session, turn, engine, ledger=None):
     from easel.image_jobs import ImageJobs
     if (outputs / '_artifacts/image-jobs.sqlite3').is_file() and ImageJobs(outputs).pending(session, turn):
         raise UnsettledSource('原轮次图片资源尚未结算')
+    from easel.xhs_cards import XhsCards
+    if any(not c['complete'] for c in XhsCards(outputs).for_turn(session, turn)):
+        raise UnsettledSource('原轮次小红书三图质量尚未验收')
     text = snapshot.get('text')
     if not isinstance(text, str) or not text.strip():
         raise UnsettledSource('原轮次缺少最终正文')

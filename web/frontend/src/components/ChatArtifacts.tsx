@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { artifactUrl } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import '../styles/chat-artifacts.css';
+import XhsCardSetStatus from './XhsCardSetStatus';
 
 function ArtifactCard({ artifact, onUpdated }: { artifact: ChatArtifact; onUpdated: (value: ChatArtifact) => void }) {
   const [busy, setBusy] = useState(false), [note, setNote] = useState(''), [attempt, setAttempt] = useState(0), [failed, setFailed] = useState(false);
@@ -67,5 +68,5 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;
   const singleVisual = artifacts.filter(item => item.mimeType.startsWith('image/') || item.mimeType.startsWith('video/')).length <= 1;
-  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}`} aria-label="本轮生成文件">{jobs.filter(job => job.phase !== 'done' || job.error).map(job => <ImageJob key={job.jobId} job={job} onChanged={onJobsChanged} />)}{artifacts.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
+  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}`} aria-label="本轮生成文件"><XhsCardSetStatus jobs={jobs}/>{jobs.filter(job => job.phase !== 'done' || job.error).map(job => <ImageJob key={job.jobId} job={job} onChanged={onJobsChanged} />)}{artifacts.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { artifactUrl, uniqueImageArtifacts } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import { IconImage, IconCheck, IconExpand, IconDownload, IconPlus, IconPublish, IconRefresh } from './icons';
+import XhsCardSetStatus from './XhsCardSetStatus';
 import PublishSpinner from './PublishSpinner';
 import '../styles/conversation-image-tasks.css';
 
@@ -74,6 +75,7 @@ export default function ConversationImageTasks(props: Props) {
   const legacy=new Set(images.filter(({artifact})=>artifact.status==='ready'&&!/^[a-f0-9]{64}$/.test(artifact.contentSha256||'')).slice(0,16).map(({artifact})=>artifact.id));
   return <section className="conversation-image-tasks" aria-label="对话中的图片任务">
     <header className="conversation-image-heading"><span className="conversation-image-symbol"><IconImage size={18}/></span><div><h3>对话中的图片任务</h3><p>生成记录与已保存图片 · 添加到草稿后继续创作</p></div><span className={'conversation-image-summary'+(active?' is-active':attention?' is-attention':'')}>{active?<PublishSpinner/>:attention?<span aria-hidden="true">!</span>:<IconCheck size={13}/>} {active?active+' 个进行中':attention?attention+' 个需核对':ready+' 张已保存'}</span></header>
+    <XhsCardSetStatus jobs={jobs}/>
     {!!jobs.length&&<div className="conversation-image-job-list">{jobs.map(job=><details key={job.jobId} className={'conversation-image-job is-'+job.phase}><summary><span className="conversation-image-job-name">{job.prompt||'图片生成任务'}</span><span className="conversation-image-phase">{['queued','running'].includes(job.phase)&&<PublishSpinner/>}{jobLabel(job)}</span></summary><p className="conversation-image-prompt">{job.prompt}</p><small>任务 {job.jobId.slice(0,12)}</small>{job.error&&<p className="conversation-image-error">{job.error}</p>}{job.phase==='unconfirmed'&&<p>任务结果尚未确认，请在对话任务记录中核对或接回原任务。</p>}</details>)}</div>}
     {!!images.length&&<div className="conversation-image-grid">{images.map(({artifact,copies})=><ImageCard key={artifact.sessionId+':'+artifact.turnId+':'+artifact.id+':'+artifact.version+':'+props.targetId} {...props} item={artifact} copies={copies} hydrate={legacy.has(artifact.id)}/>)}</div>}
     {!images.length&&!!jobs.length&&<p className="conversation-image-empty">{active?'图片保存后会出现在这里':'暂无可展示的已保存图片，请查看任务记录'}</p>}

@@ -56,11 +56,17 @@ export function uniqueImageArtifacts(items: ChatArtifact[]): {artifact: ChatArti
   }
   return [...groups.values()];
 }
+export interface XhsCardSet {
+  cardSetId: string; sessionId: string; turnId: string; expected: 3; ready: number;
+  complete: boolean; qualityState: 'pending' | 'assistant_reviewed'; label: string;
+  cards: {cardIndex: number; cardRole: string; ready: boolean; error?: string; phase: string}[];
+}
 export interface ChatImageJob {
   jobId: string; sessionId: string; turnId: string; prompt: string;
   phase: 'queued' | 'running' | 'done' | 'error' | 'unconfirmed'; error?: string;
   stage?: string; recoveryAvailable?: boolean;
   queueReason?: 'memory_pressure' | 'channel';
+  cardSet?: XhsCardSet;
 }
 export interface ExternalChatMessage {
   id: string; turnId: string; role: 'assistant'; content: string; source: 'gateway-injected'; timestamp: number;
