@@ -1,5 +1,6 @@
 """Offline preparation and adapter tests. Never calls a provider or platform."""
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -84,3 +85,54 @@ def test_publish_receipt_keeps_immutable_origin(tmp_path):
     result = store.update(first['receiptId'], {'sourceSessionId': 'other', 'outcome': 'draft'})
     assert result['sourceSessionId'] == 'chat-a'
     assert ReceiptStore(tmp_path / 'receipts.json').get(first['receiptId'])['sourceSessionId'] == 'chat-a'
+
+
+def legacy_text_fixture(store):
+    item = store.prepare('chat', 'turn', {'requestId': 'legacy', 'title': '旧文字稿',
+                                        'body': '必须保留的原文', 'platforms': ['zhihu']})
+    for field in ('schemaVersion', 'mediaVersions', 'analysis'):
+        item.pop(field)
+    with store.db() as db:
+        db.execute('UPDATE drafts SET data=? WHERE id=?', (json.dumps(item), item['id']))
+    return item
+
+
+def test_legacy_text_load_is_scoped_read_only_and_still_requires_sealed_acceptance(tmp_path):
+    store = CreationDrafts(tmp_path)
+    original = legacy_text_fixture(store)
+    checked = store.checked('chat', original['id'])
+    assert checked['legacyTextOnly'] is True and checked['schemaVersion'] == 2
+    assert checked['id'] == original['id'] and checked['draft'] == original['draft']
+    assert store.list('chat') == [original], 'Reading must not rewrite the old record'
+    with pytest.raises(LookupError):
+        store.checked('other', original['id'])
+    payload = {'title': original['draft']['title'], 'body': original['draft']['body'],
+               'tags': '', 'media': [], 'persona': ''}
+    acceptance = store.accept('chat', original['id'], 'confirm', 'zhihu', payload, 'account-a')
+    provenance, sealed = store.verify_acceptance('chat', acceptance['id'], 'zhihu', payload, 'account-a')
+    assert sealed == [] and provenance['preparationId'] == original['id']
+    with pytest.raises(ValueError, match='账号'):
+        store.verify_acceptance('chat', acceptance['id'], 'zhihu', payload, 'account-b')
+    assert store.list('chat') == [original]
+
+
+@pytest.mark.parametrize('changes', [
+    {'schemaVersion': 3}, {'schemaVersion': True}, {'sessionId': 'other'}, {'turnId': '../outside'},
+    {'analysis': {'bindingId': 'old'}}, {'mediaVersions': [{'sha256': 'unknown'}]},
+    {'draft': {'media': ['cover.png']}}, {'draft': {'body': 1}},
+    {'draft': {'platforms': ['unknown']}}, {'draft': {'overrides': {'zhihu': 'unversioned'}}},
+])
+def test_legacy_media_analysis_and_invalid_records_still_refuse_load(tmp_path, changes):
+    store = CreationDrafts(tmp_path)
+    original = legacy_text_fixture(store)
+    value = deepcopy(original)
+    for key, change in changes.items():
+        if key == 'draft':
+            value[key].update(change)
+        else:
+            value[key] = change
+    with store.db() as db:
+        db.execute('UPDATE drafts SET data=? WHERE id=?', (json.dumps(value), original['id']))
+    with pytest.raises(ValueError, match='旧草稿'):
+        store.checked('chat', original['id'])
+    assert store.list('chat') == [value]

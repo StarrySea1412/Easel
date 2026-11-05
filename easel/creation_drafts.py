@@ -47,6 +47,31 @@ PREPARE_TOOL = {
         }}}
 
 
+def legacy_text_draft(item, session, ident):
+    """Read old owned text only; never invent missing media/analysis versions."""
+    version = item.get('schemaVersion')
+    if version is not None and (type(version) is not int or version != 1):
+        return False
+    if (item.get('sessionId') != session or item.get('id') != ident
+            or item.get('state') != 'prepared' or item.get('analysis') is not None
+            or item.get('mediaVersions', []) != []):
+        return False
+    try:
+        scope(item.get('turnId'))
+    except (TypeError, ValueError):
+        return False
+    draft = item.get('draft')
+    if not isinstance(draft, dict) or draft.get('media') != [] or draft.get('overrides') != {}:
+        return False
+    for field, limit in [('title', 200), ('body', 30000), ('tags', 1000)]:
+        value = draft.get(field)
+        if not isinstance(value, str) or len(value) > limit:
+            return False
+    platforms = draft.get('platforms')
+    return (bool(draft['body'].strip()) and isinstance(platforms, list) and len(platforms) <= 7
+            and all(isinstance(value, str) and value in PLATFORMS for value in platforms))
+
+
 class CreationDrafts:
     def __init__(self, outputs):
         self.root = Path(outputs).resolve()
@@ -165,7 +190,10 @@ class CreationDrafts:
             raise LookupError('准备草稿不存在')
         item = json.loads(row['data'])
         if item.get('schemaVersion') != 2:
-            raise ValueError('旧草稿未固定素材版本，请重新准备')
+            if not legacy_text_draft(item, session, ident):
+                raise ValueError('旧草稿未固定素材或分析来源，请重新准备')
+            item = {**item, 'schemaVersion': 2, 'mediaVersions': [], 'analysis': None,
+                    'legacyTextOnly': True}
         if item['mediaVersions'] != self.media_versions(item['draft']['media']):
             raise ValueError('草稿素材已变化，请重新准备')
         if item.get('analysis') and self.analysis(session, item['analysis']['bindingId']) != item['analysis']:
