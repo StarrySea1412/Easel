@@ -1,4 +1,5 @@
 import { registerPresent } from './present.mjs';
+import { registerAihub } from './aihub.mjs';
 import { registerImage } from './image.mjs';
 import { registerTasks } from './tasks.mjs';
 import { registerPlan } from './plan.mjs';
@@ -24,6 +25,7 @@ export default {
   description: 'Require the configured Agent startup model and bound delegation limits.',
   register(api) {
     registerToolRecovery(api);
+    registerAihub(api);
     registerArtifactWriter(api);
     registerPresent(api);
     registerImage(api);

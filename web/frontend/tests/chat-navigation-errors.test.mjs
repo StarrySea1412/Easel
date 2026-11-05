@@ -161,3 +161,15 @@ test('stored adapter tool-format failures show a safe specific cause and preserv
   assert.equal(chatErrorDetail({...original,detail:raw}).code,'agent_execution_failed');
  }
 });
+
+
+test('AI Hub historical connection failures have a provider title and require manual continuation',()=>{
+ for (const raw of ['Connection error.','Easel AI Hub connection interrupted']) {
+  const error=chatErrorDetail({code:'agent_execution_failed',category:'execution',retryable:true,detail:raw,channel:'aihub',modelRef:'aihub/kimi-k3.1-pro',message:'旧版失败'});
+  assert.equal(error.code,'model_provider_connection_failed');
+  assert.equal(error.category,'connection'); assert.equal(error.retryable,false);
+  assert.equal(chatErrorTitle(error),'模型渠道连接中断');
+  assert.equal(error.modelRef,'aihub/kimi-k3.1-pro');
+ }
+ assert.equal(chatErrorDetail({code:'agent_execution_failed',detail:'用户引用 Connection error.'}).code,'agent_execution_failed');
+});

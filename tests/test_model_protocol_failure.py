@@ -113,3 +113,31 @@ def test_native_adapter_failure_does_not_dispatch_an_automatic_continuation(diag
     assert proc.wait(5) == 1
     assert proc.continuations == 0
     assert len([value for method, value in calls if method == 'agent']) == 1
+
+
+@pytest.mark.parametrize('raw', ['Connection error.', 'Connection error',
+    'LLM request failed: network connection was interrupted.', 'Easel AI Hub connection interrupted'])
+def test_provider_connection_failure_is_not_a_gateway_outage(raw, tmp_path):
+    result = gateway_error(raw, include_detail=True)
+    assert result['code'] == 'model_provider_connection_failed'
+    assert result['category'] == 'connection' and result['retryable'] is False
+    event = {'message': {'role': 'assistant', 'stopReason': 'error', 'errorMessage': raw,
+        'provider': 'aihub', 'model': 'kimi-k3.1-pro'}}
+    assert observed_failure([event])['code'] == result['code']
+    journal = FailureEvents(tmp_path)
+    journal.record_chat(turn_id='aihub-failure', error={'code': 'agent_execution_failed', 'detail': raw})
+    assert journal.recent()[0]['code'] == result['code']
+    assert gateway_error('用户引用：' + raw)['code'] == 'agent_execution_failed'
+
+
+def test_provider_connection_failure_never_dispatches_continuation():
+    error = GatewayQuestionError('Easel AI Hub connection interrupted')
+    error.rpc_response = True
+    calls = []
+    client_type = make_client([error], calls)
+    proc = GatewayAgentProc(client_type(), client_type,
+        {'idempotencyKey': 'aihub-turn', 'agentId': 'main',
+         'sessionKey': 'fixture-session', 'message': 'SYNTHETIC TASK'},
+        30, continuation=continuation_reason)
+    assert proc.wait(5) == 1 and proc.continuations == 0
+    assert len([value for method, value in calls if method == 'agent']) == 1

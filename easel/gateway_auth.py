@@ -136,6 +136,10 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         code = 'gateway_pairing_required'
     elif status in (401, 403) or any(s in message for s in ('unauthorized', 'token mismatch', 'auth_token_mismatch', 'password mismatch', 'authentication failed')):
         code = 'gateway_auth_rejected'
+    elif re.fullmatch(r'(?:Error:[ \t]*)?(?:Connection error\.?|LLM request failed: network connection was interrupted\.?|Easel AI Hub connection interrupted)', str(raw)):
+        code = 'model_provider_connection_failed'
+    elif str(raw) == 'Easel AI Hub upstream rejected request':
+        code = 'model_service_unavailable'
     elif re.match(r'^(?:Error:[ \t]*)?(?:Provider returned an incomplete or malformed tool call|Easel tool call recovery exhausted)\.?(?:\r?\n|$)', str(raw), re.I):
         # This is the adapter's explicit rejection, not a guess from model text
         # or usage counts. Do not promote quoted diagnostics or JSON failures.
@@ -169,6 +173,7 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         'model_stream_idle_timeout': ('timeout', False, '本地等待模型流事件超时，Easel 已停止本轮等待；这不是模型总运行时限，也不能据此确定供应商是否仍在处理。此前工具结果保留，未自动重发原请求；请核对运行记录后继续。'),
         'model_recovery_stopped': ('execution', False, '旧版 Easel 已停止模型请求恢复。此诊断不能单独区分本地截止或渠道错误，也不代表已经重试；请结合当时的恢复审计确认原因。此前工具结果保留，未重放原任务。'),
         'model_provider_timeout': ('timeout', True, '模型渠道响应超时，本轮未完成，已停止自动恢复。此前已完成的工具结果保留；请核对原任务记录后再重试，持续出现时检查渠道状态或手动切换模型。'),
+        'model_provider_connection_failed': ('connection', False, '模型渠道连接中断，本轮未完成。已保留收到的内容和此前工具结果；请核对运行记录后手动继续，反复出现时检查渠道状态或手动切换模型。'),
         'gateway_connection_failed': ('connection', True, '无法连接当前网关，请检查网关是否启动，以及主机和端口是否匹配。'),
         'gateway_request_failed': ('execution', True, '网关请求失败，请检查网关服务及接口配置后重试。'),
         'gateway_stream_interrupted': ('connection', True, '网关响应流未正常结束，已保留收到的内容，请检查连接后重试。'),
