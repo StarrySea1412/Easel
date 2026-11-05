@@ -1,0 +1,5 @@
+.composer-role-picker{display:flex;align-items:center;gap:6px;min-width:0;max-width:310px;color:var(--muted,#737984);font-size:12px}
+.composer-role-label{font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.composer-role-picker .easel-select{min-width:86px;min-height:28px;padding:3px 8px;font-size:12px;border-radius:8px}
+.composer-role-description{max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted-strong,#5d6470)}
+@media (max-width:900px){.composer-role-description{display:none}.composer-role-picker{max-width:140px}}

@@ -58,15 +58,18 @@ def sandbox(tmp_path, monkeypatch):
 
     class Lock:
         def __init__(self, key):
-            pass
+            self.acquired = False
 
         def acquire(self, timeout):
             if fixture.before_lock:
                 fixture.before_lock()
+            self.acquired = True
             return True
 
         def release(self):
-            releases.append(True)
+            if self.acquired:
+                releases.append(True)
+                self.acquired = False
 
     monkeypatch.setattr(web, 'openclaw_state_dir', lambda: state)
     monkeypatch.setattr(web, 'gateway_credentials', lambda: GatewayCredentials('token', token='PRIVATE_TOKEN'))
@@ -77,6 +80,9 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', tmp_path / 'absent-raw.jsonl')
     monkeypatch.setattr(web, '_CrossProcLock', Lock)
     monkeypatch.setattr(web, '_session_lock', lambda key: asyncio.Lock())
+    provider_locks = {}
+    fixture.provider_locks = provider_locks
+    monkeypatch.setattr(web, '_provider_lock', lambda key: provider_locks.setdefault(key, asyncio.Lock()))
     monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
     monkeypatch.setattr(web, '_selected_skill_specs', lambda req: {})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda key: None)
@@ -132,13 +138,13 @@ def sandbox(tmp_path, monkeypatch):
     return fixture
 
 
-async def collect_turn(model_ref='relay/model-b', turn='model-turn'):
-    response = await web.api_chat_stream(web.ChatRequest(message='synthetic request', sessionId='model-session',
+async def collect_turn(model_ref='relay/model-b', turn='model-turn', session='model-session'):
+    response = await web.api_chat_stream(web.ChatRequest(message='synthetic request', sessionId=session,
                                                         turnId=turn, modelRef=model_ref))
     async def collect():
         return [event async for event in response.body_iterator]
     events = await asyncio.wait_for(collect(), 5)
-    return events, await web.api_chat_last('model-session', turn)
+    return events, await web.api_chat_last(session, turn)
 
 
 def test_stop_while_waiting_for_session_lock_cancels_only_queued_job(sandbox, monkeypatch):
@@ -166,7 +172,7 @@ def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks
     response = client.get('/api/agent-office/models')
     result = response.json()
     assert response.status_code == 200 and result['available'] and result['scope'] == 'next_turn'
-    assert result['currentModelRef'] is None and result['gatewayVersion'] == '2026.9.2'
+    assert result['currentModelRef'] is None and result['gatewayVersion'] is None
     assert [option['id'] for option in result['options']] == ['relay/model-a', 'relay/model-b']
     assert sandbox.probes == [None] and not sandbox.requests and not sandbox.client.calls
     assert not list(sandbox.path.rglob('*.transport')) and 'PRIVATE_' not in json.dumps(result)
@@ -178,8 +184,9 @@ def test_model_listing_works_before_first_turn_without_execution_or_secret_leaks
 def test_unverified_running_gateway_cannot_inherit_installed_version_or_probe_http(sandbox, version):
     sandbox.client.server_version = version
     result = controls.turn_model_capability(web)
-    assert not result['available'] and result['scope'] == 'unavailable'
-    assert result['options'] and not sandbox.probes and sandbox.client.closed
+    assert result['available'] and result['scope'] == 'next_turn'
+    assert result['verificationState'] == 'verified'
+    assert result['options'] and sandbox.probes == [None] and not sandbox.client.closed
     assert 'PRIVATE_' not in json.dumps(result)
 
 
@@ -190,24 +197,28 @@ def test_audited_2026_9_6_still_requires_exact_transport_permission(sandbox, mon
     monkeypatch.setattr(controls, '_cli_override_version', lambda app: '2026.9.6')
     result = controls.turn_model_capability(web)
     assert result['available'] and result['scope'] == 'next_turn'
-    assert result['gatewayVersion'] == '2026.9.6' and result['transport'] == transport
+    assert result['gatewayVersion'] == ('2026.9.6' if transport == 'cli' else None) and result['transport'] == transport
     assert sandbox.probes == ([None] if transport == 'http' else [])
-    assert not sandbox.requests and not sandbox.client.calls and sandbox.client.closed
+    assert not sandbox.requests and not sandbox.client.calls
+    assert sandbox.client.closed is (transport == 'cli')
     monkeypatch.setattr(controls, '_model_probe_client',
                         lambda *_args: (_ for _ in ()).throw(HTTPException(503, 'approval missing')))
-    assert not controls.turn_model_capability(web)['available']
-    assert not sandbox.requests
+    if transport == 'cli':
+        assert not controls.turn_model_capability(web, transport='cli')['available']
+    else:
+        assert controls.turn_model_capability(web, transport='http')['available']
+        assert sandbox.probes == [None, None]
 
 
 def test_listing_uses_only_verified_session_override_not_last_runtime_model(sandbox):
     row = {'key': 'agent:main:model-session', 'sessionId': web._openclaw_session_id('model-session'),
            'modelProvider': 'relay', 'model': 'model-b'}
     sandbox.client.rows = [row]
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] is None
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] is None
     row.update(providerOverride='relay', modelOverride='model-a')
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] == 'relay/model-a'
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] == 'relay/model-a'
     row['sessionId'] = 'replaced-session'
-    assert controls.turn_model_capability(web, 'model-session')['currentModelRef'] is None
+    assert controls.turn_model_capability(web, 'model-session', transport='cli')['currentModelRef'] is None
 
 
 @pytest.mark.parametrize('ref', ['model-b', 'foreign/model-b', 'relay/model-b\r\nInjected: yes', ' relay/model-b'])
@@ -216,6 +227,21 @@ def test_invalid_model_rejected_before_supervisor_or_transport(sandbox, ref):
         asyncio.run(collect_turn(ref))
     assert exc.value.status_code == 400 and exc.value.detail['code'] == 'chat_model_not_configured'
     assert not sandbox.requests and not sandbox.probes and not sandbox.releases
+
+
+def test_unknown_capability_does_not_block_a_configured_explicit_model(sandbox, monkeypatch):
+    monkeypatch.setattr(controls, 'turn_model_capability', lambda *args, **kwargs: {
+        'available': False, 'scope': 'unavailable', 'options': [], 'reason': 'device approval missing'})
+    result = controls.require_model_override(web, 'model-session', 'relay/model-b', transport='http')
+    assert result['available'] is False
+
+
+def test_explicitly_disabled_model_remains_rejected(sandbox):
+    from model_preferences import path_for
+    path_for(sandbox.config).write_text(json.dumps(['relay']))
+    with pytest.raises(HTTPException) as exc:
+        controls.require_model_override(web, 'model-session', 'relay/model-b', transport='http')
+    assert exc.value.status_code == 400
 
 
 def test_nonstream_rejects_explicit_model_instead_of_ignoring_it(sandbox, monkeypatch):
@@ -324,7 +350,7 @@ def test_native_agent_delivers_selected_model_and_thinking_without_cli(sandbox, 
     assert calls[0][1]['idempotencyKey'] == 'native-turn'
 
 
-@pytest.mark.parametrize('change', ['configuration', 'gateway-version', 'approval'])
+@pytest.mark.parametrize('change', ['configuration'])
 def test_revalidation_after_lock_prevents_execution_and_retains_request(sandbox, monkeypatch, change):
     def revoke():
         if change == 'configuration':
@@ -338,16 +364,115 @@ def test_revalidation_after_lock_prevents_execution_and_retains_request(sandbox,
     events, saved = asyncio.run(collect_turn())
     assert not sandbox.requests and saved['requestedModelRef'] == 'relay/model-b'
     assert not saved['clean_end'] and saved['error']['code'].startswith('chat_model_')
-    assert events[-1]['event'] == 'done' and sandbox.releases == [True]
+    assert events[-1]['event'] == 'done' and sandbox.releases == [True, True]
     assert [json.loads(e['data']) for e in events if e['event'] == 'error'] == [saved['error']]
 
 
-def test_gateway_rejection_never_reposts_without_model_or_switches_transport(sandbox):
-    sandbox.status = 403
+@pytest.mark.parametrize('probe_error', ['approval missing', 'temporary probe failure'])
+def test_unknown_probe_still_submits_selected_model_once(sandbox, monkeypatch, probe_error):
+    monkeypatch.setattr(controls, '_probe_http_override',
+                        lambda *a: (_ for _ in ()).throw(HTTPException(503, probe_error)))
     events, saved = asyncio.run(collect_turn())
-    assert len(sandbox.requests) == 1 and sandbox.requests[0]['headers']['x-openclaw-model'] == 'relay/model-b'
+    assert len(sandbox.requests) == 1
+    assert sandbox.requests[0]['headers']['x-openclaw-model'] == 'relay/model-b'
+    assert saved['requestedModelRef'] == 'relay/model-b' and saved['clean_end']
+    assert events[-1]['event'] == 'done'
+
+
+def test_gateway_rejection_never_reposts_without_model_or_switches_transport(sandbox):
+    async def exercise():
+        sandbox.status = 403
+        events, saved = await collect_turn()
+        assert not sandbox.provider_locks['relay'].locked()
+        sandbox.status = 200
+        _, next_saved = await collect_turn('relay/model-a', 'after-rejection', 'other-session')
+        return events, saved, next_saved
+    events, saved, next_saved = asyncio.run(exercise())
+    assert len(sandbox.requests) == 2
+    assert sandbox.requests[0]['headers']['x-openclaw-model'] == 'relay/model-b'
+    assert sandbox.requests[1]['headers']['x-openclaw-model'] == 'relay/model-a'
     assert saved['requestedModelRef'] == 'relay/model-b' and saved['error']['code'] == 'gateway_auth_rejected'
     assert not saved['clean_end'] and 'PRIVATE_' not in json.dumps(events)
+    assert next_saved['status'] == 'done' and next_saved['clean_end']
+    assert len(sandbox.requests) == 2 and not sandbox.provider_locks['relay'].locked()
+
+
+def test_same_provider_queues_other_sessions_and_queued_turn_can_be_cancelled(sandbox):
+    async def drain(stream):
+        return [event async for event in stream]
+
+    async def exercise():
+        sandbox.connected, sandbox.response_release = asyncio.Event(), asyncio.Event()
+        first_response = await web.api_chat_stream(web.ChatRequest(message='first', sessionId='session-one',
+            turnId='first-provider-turn', modelRef='relay/model-a'))
+        first_task = asyncio.create_task(drain(first_response.body_iterator))
+        await asyncio.wait_for(sandbox.connected.wait(), 5)
+
+        second_response = await web.api_chat_stream(web.ChatRequest(message='second', sessionId='session-two',
+            turnId='queued-provider-turn', modelRef='relay/model-b'))
+        second_task = asyncio.create_task(drain(second_response.body_iterator))
+        try:
+            deadline = asyncio.get_running_loop().time() + 5
+            while not any('渠道 relay 正在处理其他会话' in json.dumps(event['data'], ensure_ascii=False)
+                          for event in web._read_job_events('queued-provider-turn')):
+                if asyncio.get_running_loop().time() >= deadline:
+                    pytest.fail('second turn never reported that it was queued')
+                await asyncio.sleep(0.02)
+            assert len(sandbox.requests) == 1
+            stopped = await web.api_chat_stop(web.StopRequest(sessionId='session-two', turnId='queued-provider-turn'))
+            assert stopped['stopped']
+            second_events = await asyncio.wait_for(second_task, 5)
+            sandbox.response_release.set()
+            first_events = await asyncio.wait_for(first_task, 5)
+        finally:
+            sandbox.response_release.set()
+            for task in (first_task, second_task):
+                if not task.done():
+                    await asyncio.gather(task, return_exceptions=True)
+
+        saved = await web.api_chat_last('session-two', 'queued-provider-turn')
+        assert len(sandbox.requests) == 1
+        assert saved['stop_reason'] == 'user_stopped'
+        assert second_events[-1]['event'] == first_events[-1]['event'] == 'done'
+        assert not sandbox.provider_locks['relay'].locked()
+
+    asyncio.run(exercise())
+
+
+def test_different_providers_can_reach_model_at_the_same_time(sandbox):
+    async def drain(stream):
+        return [event async for event in stream]
+
+    async def exercise():
+        config = json.loads(sandbox.config.read_text(encoding='utf-8'))
+        config['models']['providers']['other'] = {
+            'apiKey': 'OTHER_PRIVATE_KEY', 'baseUrl': 'https://other.invalid',
+            'models': [{'id': 'model-c'}],
+        }
+        sandbox.config.write_text(json.dumps(config), encoding='utf-8')
+        sandbox.connected, sandbox.response_release = asyncio.Event(), asyncio.Event()
+        first = await web.api_chat_stream(web.ChatRequest(message='first', sessionId='session-one',
+            turnId='relay-turn', modelRef='relay/model-a'))
+        first_task = asyncio.create_task(drain(first.body_iterator))
+        await asyncio.wait_for(sandbox.connected.wait(), 5)
+        second = await web.api_chat_stream(web.ChatRequest(message='second', sessionId='session-two',
+            turnId='other-turn', modelRef='other/model-c'))
+        second_task = asyncio.create_task(drain(second.body_iterator))
+        try:
+            deadline = asyncio.get_running_loop().time() + 5
+            while len(sandbox.requests) < 2:
+                if asyncio.get_running_loop().time() >= deadline:
+                    pytest.fail('different provider was blocked by the relay provider lock')
+                await asyncio.sleep(0.02)
+            assert set(sandbox.provider_locks) == {'relay', 'other'}
+            assert all(lock.locked() for lock in sandbox.provider_locks.values())
+        finally:
+            sandbox.response_release.set()
+            await asyncio.gather(first_task, second_task, return_exceptions=True)
+        assert len(sandbox.requests) == 2
+        assert all(not lock.locked() for lock in sandbox.provider_locks.values())
+
+    asyncio.run(exercise())
 
 
 def test_disconnected_client_keeps_selection_and_next_turn_gets_new_run(sandbox):

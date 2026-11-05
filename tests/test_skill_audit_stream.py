@@ -18,6 +18,7 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
 
     class CrossLock:
         def __init__(self, key):
+            self.key = key
             self.acquired = False
             self.releases = 0
             cross_locks.append(self)
@@ -92,9 +93,10 @@ def test_audit_and_transport_failures_close_stream_and_release_locks(tmp_path, m
         # Let the supervisor completion callback retrieve unexpected exceptions.
         await asyncio.sleep(0)
         assert not lock.locked()
-        assert len(cross_locks) == 1
-        assert not cross_locks[0].acquired
-        assert cross_locks[0].releases == 1
+        assert len(cross_locks) == 2
+        assert 'audit-stream' in {item.key for item in cross_locks}
+        assert sum(item.key.startswith('provider-') for item in cross_locks) == 1
+        assert all(not item.acquired and item.releases == 1 for item in cross_locks)
         assert 'audit-stream' not in web._RUNNING_CHAT
         assert not web._BG_TASKS
         done = [event for event in events if event['event'] == 'done']

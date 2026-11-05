@@ -128,7 +128,7 @@ export async function stopOfficeAgent(expected: OfficeControlIdentity, signal: A
 }
 
 /** This catalog never proves that a configured model has completed an inference. */
-export async function fetchOfficeTaskModels(sessionId: string | null, signal: AbortSignal): Promise<OfficeModelCapability> {
+export async function fetchOfficeTaskModels(sessionId: string | null, signal: AbortSignal, modelRef?: string): Promise<OfficeModelCapability> {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
   const controller = new AbortController();
@@ -137,7 +137,8 @@ export async function fetchOfficeTaskModels(sessionId: string | null, signal: Ab
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   try {
-    const response = await fetch(`${base}/api/agent-office/models${sessionId ? `?${new URLSearchParams({ sessionId })}` : ''}`, { signal: controller.signal, cache: 'no-store' });
+    const query = new URLSearchParams({ ...(sessionId ? { sessionId } : {}), ...(modelRef ? { modelRef } : {}) });
+    const response = await fetch(`${base}/api/agent-office/models${query.size ? `?${query}` : ''}`, { signal: controller.signal, cache: 'no-store' });
     const data: unknown = await response.json();
     if (timedOut) throw new Error('模型能力核验超时，请刷新模型选项后重试。');
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');

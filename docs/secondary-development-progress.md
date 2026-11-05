@@ -1,3 +1,18 @@
+## 2026-11-05 · 0.9.0 工具修复 Agent 与小红书组别优化
+
+- 已实现 web/repair_agent.py：按会话/轮次/工具调用幂等记录失败；只处理 view_image 的 allowed-directory 已知错误，只从配置的 outputs 根目录复制安全图片到 OpenClaw 实际 workspace 的 _inspect/easel-repair/，每轮最多一次修复。
+- 已扩展 easel/execution_store.py 失败回调，执行证据保留 repair 状态；修复回执落盘在 outputs/_repairs/<session>/<turn>/，下一轮同会话由 _chat_message 注入。模型 provider timeout、浏览器/认证/发布失败不自动重试。
+- 已新增 repair-agent 角色契约，并给小红书技能组加入创作、卡片、分析、评论、发布的分流和 card_audit/素材归属/串行研究/readback 约束。
+- 已通过本轮 repair-agent、角色和执行证据后端测试 36/36；既有模型选择 45/45、浏览器运行时 20/20、对话失败 6/6、技能审计 3/3，前端定向回归 54/54；生产前端 build 通过，lint 无错误但保留既有 warning。分组有重叠，不相加为单一总数。源码版本同步 pyproject.toml、前端 package/package-lock 为 0.9.0。
+- 未完成：真实浏览器业务路径、138 隔离/正式构建与部署、用户最终验收；本轮没有重发截图对应的原始模型请求，也未发布小红书内容。
+
+## 2026-10-24 · 0.8.0 候选：角色契约与138聊天首个请求修复
+
+- 修复 `easel/browser_bridge.py` 在 Linux 下把 `Path` 直接交给 `shlex.quote()` 的首个请求崩溃；后续恢复 404 已明确为任务未建立的表象。新增 `web/agent_roles.py` 和 `/api/agent-roles`，角色契约只描述职责、交付、工具边界、回退和暂停条件，不授予权限。
+- 前端角色选择复用共享 `Select`，按会话保存；`roleId` 已贯穿普通发送、队列、重试、编辑分支、Codex 插话与刷新续接，后端请求、运行账本和轮次快照均保留。角色接口缺失时前端降级为空列表，不阻断旧网关的普通聊天。
+- 定向后端/浏览器 76 项通过，前端生产构建通过，lint 0 error（既有 warning 保留）。版本源已同步为 `pyproject.toml=0.8.0`、前端 package/package-lock `0.8.0`；对标记录见 [agency-agents 与产品对标](agency-agents-comparison-2026-10-24.md)。
+- 138 未部署，上一份运行回执仍为 0.14.2 / `15c763550657bee6cee43d1caae0baa7644b147c`；未调用付费模型、未发布安装器。真实138网页角色入口、恢复/停止和窄屏验收待单独复核。
+
 ## 2026-10-20 · 0.7.3 登录状态与对话续接修复
 
 账号缓存过期保留旧身份，自动检测/网络失败与平台明确失效分开；补骨架屏、真实扫码确认中间态、成功SVG及退出失败身份保留。对话正常断流与刷新恢复共用同轮快照回退，未知时保留输出、暂停队列、不重发。隔离分支交付，保留原工作区其他未提交任务。正式/隔离已运行0.7.3 / 8e836509e4f1，HTTPS登录、Gateway、资源与运行文件哈希通过，原账号与渠道配置保持；手机扫码/原会话恢复/最终视觉与业务交用户。[部署回执](release-138-0.7.3-2026-10-20.md)。[实现范围](account-login-recovery-2026-10-20.md)。

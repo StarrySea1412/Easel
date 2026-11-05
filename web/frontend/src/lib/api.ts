@@ -68,6 +68,23 @@ export interface PersonaDetail {
   content: string;
 }
 
+export interface AgentRole {
+  id: string;
+  name: string;
+  shortName: string;
+  description: string;
+  icon: string;
+  inputs: string[];
+  outputs: string[];
+  toolPolicy: string;
+  fallback: string[];
+  stopConditions: string[];
+}
+
+export function fetchAgentRoles(): Promise<{ schemaVersion: number; roles: AgentRole[] }> {
+  return request('/api/agent-roles');
+}
+
 export interface SkillItem {
   name: string;
   displayName?: string;
@@ -1034,6 +1051,7 @@ export function streamChat(
   onTiming?: (timing: import('./chatTiming').ChatTiming) => void,
   engine: 'openclaw'|'codex' = 'openclaw',
   history?: { role: 'user' | 'assistant'; content: string }[],
+  roleId?: string,
 ): AbortController {
   // Accept both the current `(model, thinking, selection)` order and the
   // legacy `(model, selection)` call shape while callers migrate.
@@ -1159,7 +1177,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(history?.length ? { history } : {}), ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }),
+              body: JSON.stringify({ message, ...(engine === 'codex' ? { engine } : {}), persona: persona || undefined, sessionId, turnId, attachments, selectedSkills, skillRequirements, ...(history?.length ? { history } : {}), ...(modelRef !== undefined ? { modelRef } : {}), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}), ...(roleId ? { roleId } : {}) }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {

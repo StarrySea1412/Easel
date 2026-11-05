@@ -12,6 +12,7 @@ export interface QueuedMessage {
   skillRequirements: SkillRequirements;
   thinkingLevel?: ThinkingLevel;
   modelRef?: string;
+  roleId?: string;
 }
 export interface ChatQueue { items: QueuedMessage[]; paused: boolean; error: string }
 const queues = new Map<string, ChatQueue>();
@@ -39,11 +40,13 @@ export function getChatQueue(session: string): ChatQueue {
           || !row.skillRequirements || typeof row.skillRequirements !== 'object' || Array.isArray(row.skillRequirements)
           || !Object.values(row.skillRequirements).every(value => typeof value === 'string' && value.length <= 2000)
           || (row.modelRef !== undefined && (typeof row.modelRef !== 'string' || row.modelRef.length > 500 || !/^[^\s/]+\/[^\s]+$/.test(row.modelRef)))
+          || (row.roleId !== undefined && (typeof row.roleId !== 'string' || !/^[a-z][a-z-]{1,50}$/.test(row.roleId)))
           || (row.thinkingLevel !== undefined && !levels.has(String(row.thinkingLevel)))) throw new Error('invalid');
         ids.add(row.id);
         return { id: row.id, text: row.text, attachments: [], missingAttachments: row.attachmentNames as string[],
           selectedSkills: row.selectedSkills as string[], skillRequirements: requirementsForSelection(row.skillRequirements as SkillRequirements, row.selectedSkills as string[]),
-          thinkingLevel: row.thinkingLevel as ThinkingLevel | undefined, modelRef: row.modelRef as string | undefined };
+          thinkingLevel: row.thinkingLevel as ThinkingLevel | undefined, modelRef: row.modelRef as string | undefined,
+          roleId: row.roleId as string | undefined };
       });
       // Restored items stay paused. Their row state and missing-media action
       // communicate this without treating an ordinary restore as an error.
@@ -64,7 +67,7 @@ function publish(session: string, next: ChatQueue, persist = true): boolean {
     if (protectedSessions.has(session)) return false;
     const saved = { version: 1, items: next.items.map(item => ({ id: item.id, text: item.text,
       attachmentNames: [...item.missingAttachments, ...item.attachments.map(file => file.name)],
-      selectedSkills: item.selectedSkills, skillRequirements: item.skillRequirements, modelRef: item.modelRef, thinkingLevel: item.thinkingLevel })) };
+      selectedSkills: item.selectedSkills, skillRequirements: item.skillRequirements, modelRef: item.modelRef, thinkingLevel: item.thinkingLevel, roleId: item.roleId })) };
     if (!writeLocalValue(keyFor(session), JSON.stringify(saved), { queueOnFailure: false })) return false;
   }
   queues.set(session, next); revision++;

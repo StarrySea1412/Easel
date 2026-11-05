@@ -198,6 +198,15 @@
 .browser-status-dot { width:5px; height:5px; border-radius:50%; flex:none; background:var(--text-tertiary); }
 .browser-status-dot.is-busy { background:var(--text); }
 .browser-status-dot.is-stale { background:var(--warning,#b68731); }
+.browser-status-dot.is-live { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.18); }
+.browser-live-toggle.is-on { color:#22c55e; background:color-mix(in srgb,#22c55e 12%,var(--surface)); }
+.browser-notice { display:flex; align-items:flex-start; flex:none; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); background:color-mix(in srgb,#22c55e 7%,var(--surface)); color:var(--text-secondary); font-size:11px; line-height:1.7; }
+.browser-notice > span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.browser-notice button { flex:none; border:0; padding:0 2px; background:transparent; color:var(--text-secondary); font-size:14px; line-height:1.2; }
+.browser-live-stage { position:relative; flex:1; min-height:0; display:flex; background:#0b0d10; overflow:hidden; }
+.browser-live-stage > img { display:block; width:100%; height:100%; object-fit:fill; user-select:none; pointer-events:none; }
+.browser-live-surface { position:absolute; inset:0; outline:none; cursor:default; touch-action:none; }
+.browser-live-surface:focus-visible { outline:2px solid #22c55e; outline-offset:-2px; }
 .browser-control-status { margin-left:auto; white-space:nowrap; }
 .browser-scroll-actions { display:flex; gap:3px; margin-left:auto; }
 .browser-scroll-actions button { display:flex; align-items:center; justify-content:center; border:0; width:20px; height:20px; padding:0; border-radius:4px; background:transparent; color:var(--text-tertiary); }

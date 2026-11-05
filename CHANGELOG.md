@@ -1,3 +1,17 @@
+## 0.9.0 · 2026-11-05 · Deterministic tool repair and Xiaohongshu workflow / 工具修复与小红书组别
+
+- Add a bounded repair-agent contract and deterministic repair controller. It repairs only allowed-directory image failures by copying an image from the configured outputs root into the runtime OpenClaw inspection workspace, with one repair per tool call and one repair per turn.
+- Persist redacted repair receipts under outputs/_repairs/, attach repair status to execution evidence, and inject the latest same-session receipts into the next chat request so a user can continue without replaying the failed model or tool call.
+- Classify provider timeouts, browser/auth failures, publish failures and unknown states as manual handoff; the repair agent never resends a submitted provider request.
+- Add explicit Xiaohongshu routing for creation, card design, analysis, comments and publishing, including card_audit, serial research, asset copying and creator-console readback boundaries.
+- Validation: the new repair/role backend set passes 36/36; existing model-selection 45/45, browser-runtime 20/20, chat-failure 6/6, skill-audit 3/3, and focused frontend regression 54/54 also pass. Production frontend build passes; lint has no errors with existing warnings retained. Overlapping groups are reported separately and are not summed. Host 138 is unchanged; real-browser business acceptance and deployment remain separate gates.
+
+## 0.8.0 · 2026-10-24 · Role contracts and Linux chat recovery / 角色契约与 Linux 对话恢复
+
+- Fix the Linux browser bridge failure where a `Path` reached `shlex.quote()` before a chat task was admitted; the later recovery 404 was only the missing-task symptom. / 修复 Linux 浏览器桥接把 `Path` 直接传给 `shlex.quote()` 导致首个聊天任务 HTTP 500 的问题；随后恢复 404 只是任务未建立的表象。
+- Add a versioned local Agent role registry and `/api/agent-roles`; role selection records a bounded contract with inputs, deliverables, tool boundary, fallback and stop conditions. / 新增版本化本地 Agent 角色注册表和 `/api/agent-roles`，角色选择保存输入、交付、工具边界、回退和暂停条件的有限契约。
+- Carry `roleId` through normal sends, queues, retries, edit branches, Codex steer messages and refresh recovery into the run ledger and turn receipts. / `roleId` 贯穿普通发送、队列、重试、编辑分支、Codex 插话和刷新续接，并进入运行账本与轮次回执。
+- Validation: 76 focused backend/browser checks and the production frontend build pass; lint has no errors with existing warnings retained. Host 138 remains on its separately verified 0.14.2 runtime; this candidate was not deployed and no installer or paid inference was run. / 验证：后端/浏览器定向76项及前端生产构建通过，lint无错误但保留既有warning。138仍是独立核对过的0.14.2，本候选未部署、未发布安装器、未调用付费推理。[Comparison and evidence / 对标与证据](docs/agency-agents-comparison-2026-10-24.md)。
 ## 0.7.3 · 2026-10-20 · Login and stream recovery / 登录与对话恢复
 
 - Retain stale account identity while checking; distinguish unknown from platform-confirmed expiry. Automatically check on entry, focus, network recovery and every minute, with skeleton placeholders. / 自动检测、骨架屏，缓存过期和网络失败不再冒充退出。

@@ -19,6 +19,13 @@ def service_url():
     return value.rstrip('/')
 
 
+def _shell_quote(value, platform=None) -> str:
+    """Quote a command argument after converting Path-like values to text."""
+    value = str(value)
+    platform = platform or os.name
+    return ("'" + value.replace("'", "''") + "'") if platform == 'nt' else shlex.quote(value)
+
+
 def request(session_id, args):
     identity(session_id)
     body = json.dumps(args, ensure_ascii=False).encode('utf-8')
@@ -40,8 +47,11 @@ def request(session_id, args):
 def instructions(session_id):
     identity(session_id)
     script = Path(__file__).resolve().parents[1] / 'skills/shared/scripts/browser_page.py'
-    quote_arg = (lambda value: "'" + str(value).replace("'", "''") + "'") if os.name == 'nt' else shlex.quote
-    command = ('& ' if os.name == 'nt' else '') + f'{quote_arg(sys.executable)} {quote_arg(script)} --session {quote_arg(session_id)}'
+    # ``script`` is a Path.  Windows happened to stringify it in the custom
+    # quoting branch, while POSIX passed it directly to ``shlex.quote`` and
+    # crashed before the model request was even admitted.  Keep quoting
+    # platform-specific but normalize every value at the boundary.
+    command = ('& ' if os.name == 'nt' else '') + f'{_shell_quote(sys.executable)} {_shell_quote(script)} --session {_shell_quote(session_id)}'
     return ('\n\n〔当前对话共享浏览器〕优先用easel_browser工具；旧Codex线程或OpenClaw没有该工具时，'
         f'通过exec运行 {command} --args-json \'{{"action":"state"}}\'。'
         '同一脚本的--args-file接受UTF-8 JSON文件，可避免复杂参数的shell转义。'

@@ -25,6 +25,7 @@ export interface ChatMessage extends ChatTiming {
   skillRequirements?: SkillRequirements; // Immutable requirements attached to this sent message, used on retry.
   requestedModelRef?: string; // This turn's explicit request, never evidence of the model that actually ran.
   requestedThinkingLevel?: ThinkingLevel; // Per-turn request snapshot; not proof the provider exposed reasoning.
+  roleId?: string; // Immutable local role-contract selection for this turn.
   turnId?: string;
   thinking?: string;   // 模型服务实际返回的思考内容或摘要，流式结束后持久保留
   activity?: string;   // 工具/执行活动步骤（换行分隔），持久保留
@@ -160,6 +161,7 @@ function normalizeMessage(value: unknown, migrateAttachmentText = true): ChatMes
   }
   if (Array.isArray(value.selectedSkills)) message.selectedSkills = value.selectedSkills.filter((skill): skill is string => typeof skill === 'string');
   if (value.skillRequirements !== undefined) message.skillRequirements = requirementsForSelection(value.skillRequirements, message.selectedSkills || []);
+  if (typeof value.roleId === 'string' && /^[a-z][a-z-]{1,50}$/.test(value.roleId)) message.roleId = value.roleId;
   if (typeof value.requestedModelRef === 'string' && value.requestedModelRef.length <= 500
     && /^[^\s/]+\/[^\s]+$/.test(value.requestedModelRef)) message.requestedModelRef = value.requestedModelRef;
   const thinkingLevels: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'];

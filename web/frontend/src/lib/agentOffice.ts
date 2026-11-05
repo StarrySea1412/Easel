@@ -114,9 +114,9 @@ export function decodeOfficeSnapshot(value: unknown, sessionId: string): OfficeS
   };
 }
 
-export async function fetchAgentOffice(sessionId: string, signal: AbortSignal): Promise<OfficeSnapshot> {
+export async function fetchAgentOffice(sessionId: string, signal: AbortSignal, turnId?: string): Promise<OfficeSnapshot> {
   const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
-  const response = await fetch(`${base}/api/agent-office?${new URLSearchParams({ sessionId })}`, { signal, cache: 'no-store' });
+  const response = await fetch(`${base}/api/agent-office?${new URLSearchParams({ sessionId, ...(turnId ? {turnId} : {}) })}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error(`Agent 观测暂不可用（HTTP ${response.status}），请稍后重试。`);
   return decodeOfficeSnapshot(await response.json(), sessionId);
 }

@@ -231,7 +231,8 @@ def _identities(value: dict, tool: str = '') -> list[str]:
     return [value[key] for key in keys if isinstance(value.get(key), str) and IDENTITY.fullmatch(value[key])]
 
 
-def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycle: list[dict] | None = None) -> list[dict]:
+def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycle: list[dict] | None = None,
+                  bindings: dict | None = None) -> list[dict]:
     calls, children, identities, created_at = {}, {}, {}, {}
     transitions = {}
 
@@ -251,7 +252,7 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycl
         if message.get('role') == 'assistant':
             for ident, tool, args in _tool_calls(message):
                 if tool in ('sessions_spawn', 'spawn_agent', 'subagents', 'sessions_list'):
-                    calls[ident] = (tool, args)
+                    calls[ident] = (tool, args, _timestamp(event.get('timestamp') or message.get('timestamp')))
             continue
         if message.get('role') not in ('toolResult', 'tool', 'tool_result'):
             continue
@@ -259,7 +260,7 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycl
         call = calls.get(call_id) if isinstance(call_id, str) else None
         if call is None or message.get('isError') is True:
             continue
-        tool, args = call
+        tool, args, called_at = call
         for payload in _payloads(message):
             if tool in ('sessions_spawn', 'spawn_agent'):
                 raw_ids = _identities(payload, tool)
@@ -283,6 +284,12 @@ def _child_agents(events: list[dict], root_id: str, warnings: set[str], lifecycl
                     created_at[ident] = _timestamp(event.get('timestamp') or message.get('timestamp'))
                 for key in raw_ids:
                     identities[key] = ident
+                if bindings is not None:
+                    binding = bindings.setdefault(ident, {'keys': set(), 'runs': set(), 'sessions': set(), 'started': called_at})
+                    for field, group in (('childSessionKey', 'keys'), ('runId', 'runs'), ('childSessionId', 'sessions')):
+                        value = payload.get(field)
+                        if isinstance(value, str) and IDENTITY.fullmatch(value):
+                            binding[group].add(value)
                 record_transition(ident, call_id, 'spawn', '委派已接受；完成状态等待后续回执。', event, message)
             elif tool in ('subagents', 'sessions_list'):
                 # Only update already-confirmed children; a list can contain
@@ -424,7 +431,7 @@ def updating_snapshot(session_id: str, turn_id: str = '') -> dict:
 
 
 def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Path,
-             *, live: bool = False, active_turn_id: str = '') -> dict:
+             *, live: bool = False, active_turn_id: str = '', requested_turn_id: str = '') -> dict:
     if not SAFE_ID.fullmatch(session_id):
         raise HTTPException(400, '无效的会话标识')
     warnings: set[str] = set()
@@ -433,18 +440,30 @@ def snapshot(session_id: str, web_sessions: Path, audits: Path, transcripts: Pat
     marker_path = web_sessions / f'web_{session_id}.json'
     revision = _marker_revision(marker_path)
     marker = _read_json(marker_path, web_sessions, warnings) or {}
-    turn_id = active_turn_id if SAFE_ID.fullmatch(active_turn_id) else marker.get('turn_id')
+    if requested_turn_id and not SAFE_ID.fullmatch(requested_turn_id):
+        raise HTTPException(400, '无效的轮次标识')
+    turn_id = requested_turn_id or (active_turn_id if SAFE_ID.fullmatch(active_turn_id) else marker.get('turn_id'))
     turn_id = turn_id if isinstance(turn_id, str) and SAFE_ID.fullmatch(turn_id) else ''
+    historical = bool(requested_turn_id and requested_turn_id != marker.get('turn_id'))
     # A queued turn claims the marker before acquiring the execution lock. Keep
     # the active execution's identity, but do not combine its audit prefix with
     # another turn's marker or use an mtime from a replacement file as its end.
     if (marker and revision is None or _marker_revision(marker_path) != revision
-            or turn_id and marker.get('turn_id') != turn_id):
+            or not historical and turn_id and marker.get('turn_id') != turn_id):
         return updating_snapshot(session_id, turn_id)
     audit = _audit_record(audits, session_id, turn_id, warnings)
+    if historical:
+        if not audit:
+            raise HTTPException(404, '没有该对话轮次的执行记录')
+        live = False
     turn_id = turn_id or (audit['turnId'] if audit else '')
     terminal_marker = bool(turn_id) and marker.get('turn_id') == turn_id and marker.get('status') == 'done'
     finished_at = revision[3] / 1e9 if revision and terminal_marker else None
+    if historical and audit:
+        finished_at = _timestamp(audit.get('finished'))
+        if finished_at is None and audit.get('status') in ('completed', 'stopped', 'interrupted', 'failed'):
+            audit_revision = _marker_revision(audits / hashlib.sha256(session_id.encode()).hexdigest()[:24] / f'{turn_id}.json')
+            finished_at = audit_revision[3] / 1e9 if audit_revision else None
     # A terminal marker already supplies an end boundary, even when the
     # supervisor's process registration has not been cleared yet.
     events = _events(transcripts, session_id, audit, live and not terminal_marker, finished_at, warnings)

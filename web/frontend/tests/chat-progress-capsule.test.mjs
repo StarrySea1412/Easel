@@ -49,7 +49,8 @@ test('observed root and child actions use exact office turn; config and foreign 
   const v=await setup(t);await v.respond(0,snapshot());
   const index=v.requests.findIndex(r=>String(r.url).includes('/agent-office?'));
   await v.respond(index,{sessionId:'a',turnId:'t1',agents:[{id:'root:a',name:'主Agent',role:'root',status:'thinking',task:'qa',observedModel:identity},{id:'child',parentId:'root:a',name:'校验者',role:'subagent',status:'running',task:'核验',observedModel:{...identity,source:'configured'}}],events:[]});
-  assert.match(v.container.textContent,/主 Agent.*正在思考/);assert.match(v.container.textContent,/test-record-model/);assert.match(v.container.textContent,/qa-channel/);assert.match(v.container.textContent,/子 Agent.*校验者/);assert.match(v.container.textContent,/模型未上报/);
+  assert.match(v.container.textContent,/主 Agent.*正在思考/);assert.match(v.container.textContent,/test-record-model/);assert.match(v.container.textContent,/qa-channel/);assert.match(v.container.textContent,/子智能体.*校验者/);
+  assert.equal(v.container.querySelector('.chat-subagent-trigger').getAttribute('aria-expanded'),'false');
   assert.equal(v.container.querySelector('[data-agent-id="child"] [data-provider-brand]'),null);
 });
 test('stopped and failed runs preserve unchecked steps and expose interrupted progress reads',async t=>{

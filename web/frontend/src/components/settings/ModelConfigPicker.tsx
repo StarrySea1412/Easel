@@ -34,7 +34,7 @@ export function ModelConfigPicker({ rows, savedPrimary, disabled, saving, dirty,
           options={rows.flatMap((row, index) => row.slot ? [{ value: String(index),
             label: labelFor(row),
             description: row.keyMasked && row.keyMasked !== '—' ? row.baseUrl : '尚未配置密钥',
-            disabled: (!row.keyMasked || row.keyMasked === '—') && !row.keyNew,
+            disabled: ((!row.keyMasked || row.keyMasked === '—') && !row.keyNew) || !row.model,
           }] : [])}
           onChange={(index) => onPrimary(Number(index))} />
       </SettingsField>

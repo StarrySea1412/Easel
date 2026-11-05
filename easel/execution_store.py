@@ -28,8 +28,9 @@ def read(root, session, turn):
 
 
 class ExecutionStore:
-    def __init__(self, root, session, turn, credentials=None):
+    def __init__(self, root, session, turn, credentials=None, on_failure=None):
         self.root, self.session, self.turn, self.credentials = root, session, turn, credentials
+        self.on_failure = on_failure
         saved = read_snapshot(root, session, turn)
         self.rows = {row['id']: row for row in saved.get('operations', [])}
         self.timeline = saved.get('timeline', [])
@@ -104,6 +105,15 @@ class ExecutionStore:
                         result['content'] = data['output']
                 result = {**result, **({'isError': data['isError']} if 'isError' in data else {})}
                 returned(row, result, time.time(), self.credentials, partial=phase == 'update')
+                if phase != 'update' and row['status'] in {'failed', 'denied'} and self.on_failure is not None:
+                    try:
+                        repair = self.on_failure(dict(row), dict(result))
+                    except Exception as exc:  # repair is best effort and never breaks evidence persistence
+                        repair = {'status': 'unavailable', 'agent': 'repair-agent',
+                                  'reason': type(exc).__name__}
+                    if isinstance(repair, dict):
+                        row['repair'] = {key: value for key, value in repair.items()
+                                         if key not in {'sourcePath'} }
                 if phase != 'update':
                     from .plan_progress import receipt_plan
                     plan = receipt_plan(row['name'], self.plan_inputs.pop(row_id, None), result, self.credentials)

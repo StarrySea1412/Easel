@@ -3592,6 +3592,7 @@ class ChatRequest(BaseModel):
     turnId: Annotated[str, Field(pattern=r'^[A-Za-z0-9_.-]{1,120}$')] | None = None
     modelRef: Annotated[str, Field(strict=True, min_length=1, max_length=300)] | None = None
     thinkingLevel: Literal['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max', 'ultra'] | None = None
+    roleId: Annotated[str, Field(pattern=r'^[a-z][a-z-]{1,50}$')] | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
     selectedSkills: list[str] = Field(default_factory=list, max_length=20)
     skillRequirements: dict[str, Annotated[str, Field(strict=True, max_length=2000)]] = Field(default_factory=dict, max_length=20)
@@ -3637,6 +3638,28 @@ def _skill_requirements_context(req: ChatRequest, specs: dict[str, dict]) -> str
             '仅适用于本消息；未列出或已清除的要求不沿用历史值。'
             '保持已安装 SKILL.md 原文和全局配置不变；不因这些要求写入或覆盖任何技能文件。\n'
             + json.dumps(requirements, ensure_ascii=False))
+
+
+def _xiaohongshu_execution_context(specs: dict[str, dict]) -> str:
+    """Keep XHS workflows separated by effect and make image repair explicit."""
+    names = set(specs)
+    xhs = {
+        'xhs-note-creator', 'card-xiaohongshu', 'card-design', 'skill-xhs-analyzer',
+        'skill-xhs-comment-reply', 'skill-xhs-publisher', 'xhs-note-creator',
+    }
+    if not names.intersection(xhs):
+        return ''
+    return (
+        '〔小红书组别执行契约〕\n'
+        '按能力分流：笔记/卡片创作走 xhs-note-creator；纯卡片走 card-design → card-xiaohongshu → card_audit；'
+        '爆款规律与限流检测走 skill-xhs-analyzer；评论抓取/回复走 skill-xhs-comment-reply；发布只走 '
+        'skill-xhs-publisher。不要把读取、分析、评论和发布混成一次副作用任务。\n'
+        '纯文字/概念卡默认走 HTML+CSS 渲染、实际保存到 outputs/<主题>/，并执行 card_audit；真实照片卡才用 '
+        'text_on_image 路径。所有需要视觉读取的图片先复制到当前 outputs 项目 assets，再调用允许目录内的读取工具；'
+        '若收到 allowed-directory 错误，等待修复 Agent 回执后在下一轮同会话继续，不凭文件名猜图。\n'
+        '小红书账号读取默认只读且串行；429、登录失效、网络风险、安全验证和浏览器权限分别记录，不能包装成模型错误。'
+        '发布完成必须用创作者后台 readback 核对，只有平台回执才可称为已发布。'
+    )
 
 
 def _attachment_scope(session_id: str) -> str:
@@ -3696,6 +3719,7 @@ def _attachment_context(req: ChatRequest) -> str:
 
 def _chat_message(req: ChatRequest) -> str:
     from chat_branch import history_context
+    from repair_agent import context_for_session
     context = _attachment_context(req)
     message = req.message.strip()
     if context:
@@ -3705,10 +3729,23 @@ def _chat_message(req: ChatRequest) -> str:
     message = history_context(req.history) + message
     from easel.plan_progress import instructions as planning_instructions
     message += planning_instructions()
+    if req.roleId:
+        from agent_roles import role_context
+        contract = role_context(req.roleId)
+        if not contract:
+            raise HTTPException(400, '角色不存在或已被移除，请刷新角色列表后重试')
+        message += '\n\n' + contract
     if req.sessionId and _browser_service.has_pages(req.sessionId):
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
+    if req.sessionId:
+        repair_context = context_for_session(OUTPUTS_DIR, req.sessionId)
+        if repair_context:
+            message += "\\n\\n" + repair_context
     specs = _selected_skill_specs(req)
+    xhs_context = _xiaohongshu_execution_context(specs)
+    if xhs_context:
+        message += '\n\n' + xhs_context
     message += (f'\n\n〔本轮文件交付规则〕持久产物目录是 {OUTPUTS_DIR}。'
                 '生成文件、从网站下载的文件或网页快照，都必须实际保存到该目录下的具体主题子目录，'
                 '不得留在临时目录、远端 sandbox 或技能源码目录；便携版使用当前数据目录，不能硬编码开发机盘符。'
@@ -3799,6 +3836,7 @@ def _skill_configuration_context(specs: dict[str, dict]) -> str:
 # 表现为「答一半停在冒号」），以及会话串味（一个会话读到另一个的 session 文件内容）。
 # 不同会话 key 不同锁 → 不同对话仍可并行；只序列化「同一会话」的重叠请求。
 _session_locks: dict[str, asyncio.Lock] = {}
+_provider_locks: dict[str, asyncio.Lock] = {}
 
 
 def _session_lock(sk: str) -> asyncio.Lock:
@@ -3807,6 +3845,26 @@ def _session_lock(sk: str) -> asyncio.Lock:
         lk = asyncio.Lock()
         _session_locks[sk] = lk
     return lk
+
+
+def _provider_lock(provider: str) -> asyncio.Lock:
+    lk = _provider_locks.get(provider)
+    if lk is None:
+        lk = asyncio.Lock()
+        _provider_locks[provider] = lk
+    return lk
+
+
+def _chat_provider_key(model_ref: str | None) -> str:
+    provider = model_ref.split('/', 1)[0] if isinstance(model_ref, str) and '/' in model_ref else ''
+    if not provider:
+        try:
+            config = json.loads((openclaw_state_dir() / 'openclaw.json').read_text(encoding='utf-8'))
+            primary = config.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
+            provider = primary.split('/', 1)[0] if isinstance(primary, str) else ''
+        except (OSError, ValueError, AttributeError):
+            provider = ''
+    return provider if re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', provider) else 'default'
 
 
 # 会话续接：把 web 的 sessionId 确定性映射成一个稳定的 OpenClaw --session-id（transcript 文件名）。
@@ -4178,6 +4236,12 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     if req.engine == 'codex':
         _attachment_context(req)
         from chat_branch import history_context
+        if req.roleId:
+            from agent_roles import role_context
+            contract = role_context(req.roleId)
+            if not contract:
+                raise HTTPException(400, '角色不存在或已被移除，请刷新角色列表后重试')
+            req = req.model_copy(update={'message': contract + '\n\n' + req.message})
         if req.history:
             if not req.message.strip() and not req.attachments:
                 raise HTTPException(400, '消息不能为空')
@@ -4237,7 +4301,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             'message': '该轮已有终态，请新建轮次继续，避免重复提交。', 'turnId': turn_id,
         })
     run_ledger.create(_run_ledger_root(), turn_id, session_id=sk, session_key=f'agent:main:{sk}',
-                      model_ref=requested_model_ref, engine=req.engine)
+                      model_ref=requested_model_ref, engine=req.engine, role_id=req.roleId)
     artifact_ticket = ArtifactStore(OUTPUTS_DIR).bind(sk, turn_id)
     present_script = PROJECT_ROOT / 'skills' / 'shared' / 'scripts' / 'present_artifact.py'
     image_script = PROJECT_ROOT / 'skills/shared/scripts/image_job.py'
@@ -4257,8 +4321,17 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
 
     async def supervisor():
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
+        provider_key = _chat_provider_key(requested_model_ref)
+        provider_lock = _provider_lock(provider_key)
+        provider_xlock = _CrossProcLock(
+            'provider-' + hashlib.sha256(provider_key.encode('utf-8')).hexdigest())
+        provider_xlock.cancel_event = cancel_job
+        provider_lock_acquired = False
         from easel.execution_store import ExecutionStore
-        execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        from repair_agent import RepairAgent
+        repair_agent = RepairAgent(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials(),
+                                         on_failure=repair_agent.on_failure)
         started_at_ms = int(time.time() * 1000)
         started_monotonic = time.monotonic()
         terminal_timing = None
@@ -4271,7 +4344,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             return terminal_timing or {'startedAt': started_at_ms}
 
         def save_turn(key, status, text, extra=None):
-            _save_turn(key, status, text, {**(extra or {}), **timing(status == 'done')})
+            _save_turn(key, status, text, {**(extra or {}), 'roleId': req.roleId, **timing(status == 'done')})
         event_seq = 0
         full_text: list[str] = []        # 累积完整回答，供断线取回
         full_thinking: list[str] = []
@@ -4282,10 +4355,12 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         timed_out = False                # 只有真·超时才 terminate 进程；断线绝不杀
         last_progress_at = time.monotonic()
         stall_warning_sent = False
+        repair_announced: set[str] = set()
 
         # Claim this turn before waiting for locks, so recovery cannot return the previous turn.
         save_turn(pk, "running", "", {"turn_id": turn_id, "requestedModelRef": requested_model_ref,
-                                         "requestedThinkingLevel": requested_thinking_level})
+                                         "requestedThinkingLevel": requested_thinking_level,
+                                         "roleId": req.roleId})
         run_ledger.mark(_run_ledger_root(), turn_id, event='supervisor_started', status='running',
                         transport='pending')
 
@@ -4338,6 +4413,21 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 loop.call_soon_threadsafe(to_client, 'activity', '执行记录保存失败；请检查数据目录。')
                 return
             if value:
+                for operation in value.get('operations', []):
+                    repair = operation.get('repair') if isinstance(operation, dict) else None
+                    operation_id = operation.get('id') if isinstance(operation, dict) else None
+                    if (not isinstance(repair, dict) or repair.get('status') in (None, 'ignored')
+                            or operation_id in repair_announced):
+                        continue
+                    repair_announced.add(operation_id)
+                    event = 'repair_planned' if repair.get('status') == 'repaired' else 'repair_unavailable'
+                    run_ledger.mark(_run_ledger_root(), turn_id, event=event, status='running',
+                                    tool=operation.get('name'), repairStatus=repair.get('status'),
+                                    repairReason=repair.get('reason'))
+                    if repair.get('status') == 'repaired':
+                        loop.call_soon_threadsafe(to_client, 'activity', '工具环境已修复；下一轮同会话可继续读取。')
+                    elif repair.get('status') == 'manual':
+                        loop.call_soon_threadsafe(to_client, 'activity', '工具失败已记录，等待人工驱动下一轮继续。')
                 loop.call_soon_threadsafe(to_client, 'execution', value)
         if requested_model_ref is not None:
             to_client('model_selection', {'requestedModelRef': requested_model_ref})
@@ -4460,6 +4550,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
             save_turn(pk, 'done', '', {'turn_id': turn_id, 'clean_end': False, 'stop_reason': 'user_stopped',
                                       'requestedModelRef': requested_model_ref,
                                       'requestedThinkingLevel': requested_thinking_level})
+            run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='stopped',
+                            stop_reason='user_stopped', settled=True, resource_settled=True)
         if lock.locked():
             to_client("activity", "⏳ 这个会话上一条还在跑，排队等它结束再开始…")
         try:
@@ -4484,6 +4576,60 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                     "requestedThinkingLevel": requested_thinking_level,
                 })
                 to_client("activity", "⏳ 这个会话正在另一个窗口运行，请稍候再试")
+                return
+
+            provider_wait_started = time.monotonic()
+            provider_wait_timeout = min(TIMEOUT_CHAT, 300)
+            if provider_lock.locked():
+                to_client('activity', f'⏳ 渠道 {provider_key} 正在处理其他会话，本轮已排队；上一轮结束后才会发送。')
+            while not provider_lock_acquired:
+                if cancel_job.is_set():
+                    user_stopped = True
+                    cancelled_before_start()
+                    return
+                remaining = provider_wait_timeout - (time.monotonic() - provider_wait_started)
+                if remaining <= 0:
+                    error = {
+                        'code': 'chat_channel_busy', 'category': 'execution', 'retryable': True,
+                        'message': f'渠道 {provider_key} 连续繁忙超过5分钟；本轮未发送到模型。请等待其他任务结束后再重试。',
+                        'channel': provider_key, 'stage': 'provider_queue',
+                    }
+                    save_turn(pk, 'done', '', {'turn_id': turn_id, 'requestedModelRef': requested_model_ref,
+                                               'requestedThinkingLevel': requested_thinking_level,
+                                               'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
+                    to_client('error', error)
+                    run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                                    error=error, stop_reason='provider_queue_timeout',
+                                    settled=True, resource_settled=True)
+                    return
+                try:
+                    await asyncio.wait_for(provider_lock.acquire(), timeout=min(0.2, remaining))
+                    provider_lock_acquired = True
+                except asyncio.TimeoutError:
+                    continue
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
+            remaining = max(0.0, provider_wait_timeout - (time.monotonic() - provider_wait_started))
+            got_provider = await loop.run_in_executor(None, provider_xlock.acquire, remaining)
+            if cancel_job.is_set():
+                user_stopped = True
+                cancelled_before_start()
+                return
+            if not got_provider:
+                error = {
+                    'code': 'chat_channel_busy', 'category': 'execution', 'retryable': True,
+                    'message': f'渠道 {provider_key} 连续繁忙超过5分钟；本轮未发送到模型。请等待其他任务结束后再重试。',
+                    'channel': provider_key, 'stage': 'provider_queue',
+                }
+                save_turn(pk, 'done', '', {'turn_id': turn_id, 'requestedModelRef': requested_model_ref,
+                                           'requestedThinkingLevel': requested_thinking_level,
+                                           'error': error, 'clean_end': False, 'stop_reason': 'provider_queue_timeout'})
+                to_client('error', error)
+                run_ledger.mark(_run_ledger_root(), turn_id, event='terminal', status='failed',
+                                error=error, stop_reason='provider_queue_timeout',
+                                settled=True, resource_settled=True)
                 return
 
             # Resolve credentials after queueing, so a rotation while the prior
@@ -4656,12 +4802,13 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         _qbridge_warn_once(
                             "unsupported",
                             "[question-bridge] 当前 OpenClaw 版本无 question RPC（需 2026.9.x+），"
-                            "已跳过 ask_user 选项卡片桥接，改用文字问答。")
+                            "ask_user 选项卡片不可用。")
+                        _emit('activity', '当前运行器不支持问答选项卡；若任务等待选择，请停止后改用文字继续。')
                         return
                     client = None
                     pushed: set[str] = set()
                     try:
-                        client = GatewayClient()
+                        client = GatewayClient(scopes=['operator.admin'])
                         client.connect()
                     except Exception as e:
                         # connect 失败（如 NOT_PAIRED/scope-upgrade，或网关不可达）：熔断整个桥接，
@@ -4670,7 +4817,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         _qbridge_warn_once(
                             "connect",
                             f"[question-bridge] connect gateway failed，已停用桥接（本进程），"
-                            f"ask_user 改用文字问答: {e}")
+                            f"ask_user 卡片不可用: {redact_gateway_text(str(e), credentials)}")
+                        _emit('activity', '问答卡连接失败；若任务正在等待选择，选项可能未显示。可停止后重试，当前任务不会自动重发。')
                         return
                     try:
                         while proc.poll() is None:
@@ -4697,6 +4845,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                         "questions": it.get("questions", []),
                                         "expiresAtMs": it.get("expiresAtMs"),
                                     }, ensure_ascii=False))
+                                    _emit('activity', '等待你回答问题，请查看输入框上方的选项卡。')
                             time.sleep(2)
                     finally:
                         try:
@@ -4705,6 +4854,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                         except Exception:
                             pass
                 loop.run_in_executor(None, _question_poll)
+            elif _QBRIDGE_DISABLED or GatewayClient is None:
+                _emit('activity', '问答选项卡连接不可用；若任务等待选择，问题可能未显示。请勿重复发送任务。')
 
             def _handle(line: str):
                 nonlocal raw_text_stream
@@ -4856,7 +5007,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                                 last_event_id=event_seq, idleSeconds=idle_seconds,
                             )
                             to_client('activity',
-                                      f'运行已 {idle_seconds} 秒没有新事件，仍在等待 provider；未自动重发或终止。')
+                                      f'已 {idle_seconds} 秒未收到新事件；当前阶段尚未确认，可能正在等待输入、工具或模型响应。请查看本轮状态与操作记录；任务未自动重发或终止。')
                         continue
                     if item is SENTINEL:
                         finished_producers += 1
@@ -5067,6 +5218,9 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 to_client('execution', execution_store.snapshot())
             except OSError:
                 to_client('activity', '执行记录保存失败；本轮结束回执仍保留。')
+            provider_xlock.release()
+            if provider_lock_acquired:
+                provider_lock.release()
             xlock.release()
             if lock_acquired:
                 lock.release()
@@ -5158,13 +5312,13 @@ async def api_question_answer(req: QuestionAnswerRequest):
     """前端点击 ask_user 选项后调用：转发 gateway question.resolve，让等待的 agent 拿到答案。"""
     if GatewayClient is None:
         return {"ok": False, "error": "gateway question bridge unavailable"}
-    client = GatewayClient()
+    client = GatewayClient(scopes=['operator.admin'])
     try:
         client.connect()
         result = client.resolve(req.questionId, req.answers or {}, req.resolvedBy)
         return {"ok": True, "result": result}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": redact_gateway_text(str(e))}
     finally:
         client.close()
 
@@ -5178,7 +5332,7 @@ async def api_question_status(req: QuestionStatusRequest):
     """批量查 question 状态（重放旧事件时过滤已解决的题）。"""
     if GatewayClient is None:
         return {"ok": False, "questions": {}}
-    client = GatewayClient()
+    client = GatewayClient(scopes=['operator.admin'])
     try:
         client.connect()
         out = {}
@@ -5194,7 +5348,7 @@ async def api_question_status(req: QuestionStatusRequest):
                 out[qid] = {"status": "unknown"}   # 网络/连接异常：保持 unknown（前端保留显示，宁不缺题）
         return {"ok": True, "questions": out}
     except Exception as e:
-        return {"ok": False, "error": str(e), "questions": {}}
+        return {"ok": False, "error": redact_gateway_text(str(e)), "questions": {}}
     finally:
         client.close()
 
@@ -5265,13 +5419,13 @@ async def api_chat(req: ChatRequest):
     if req.modelRef is not None:
         raise HTTPException(400, {'code': 'chat_model_requires_stream', 'category': 'configuration',
                                  'retryable': False, 'message': '指定渠道模型请使用流式任务入口。'})
+    import office_controls
+    await asyncio.to_thread(office_controls.require_enabled_inherited_model, sys.modules[__name__], req.sessionId)
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
     # chat 可能中途触发制作层长任务 → 用 TIMEOUT_CHAT，与流式 /api/chat/stream 一致（勿用 300s）
     from easel.task_store import TaskStore, TaskConflict
-    import office_controls
-    await asyncio.to_thread(office_controls.require_enabled_inherited_model, sys.modules[__name__], req.sessionId)
     store, turn = TaskStore(OUTPUTS_DIR), uuid.uuid4().hex
     if req.sessionId:
         try:
@@ -7849,7 +8003,7 @@ async def api_chat_execution(session_id: str, turn_id: str, before: int | None =
 
 
 @app.get('/api/agent-office')
-async def api_agent_office(sessionId: str):
+async def api_agent_office(sessionId: str, turnId: str = ''):
     import agent_office
     def execution_state():
         process = _RUNNING_CHAT.get(sessionId)
@@ -7863,7 +8017,7 @@ async def api_agent_office(sessionId: str):
     process, turn_id, live = execution_state()
     result = await asyncio.to_thread(agent_office.snapshot, sessionId, SESSIONS_DIR,
                                      OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR,
-                                     live=live, active_turn_id=turn_id)
+                                     live=live, active_turn_id=turn_id, requested_turn_id=turnId)
     current_process, current_turn_id, current_live = execution_state()
     # to_thread may wait behind other work or read while the supervisor moves
     # on. A boolean alone cannot distinguish two successive live processes.
@@ -7874,6 +8028,25 @@ async def api_agent_office(sessionId: str):
     current_process, current_turn_id, current_live = execution_state()
     if current_process is not process or current_turn_id != turn_id or current_live != live:
         return agent_office.updating_snapshot(sessionId)
+    return result
+
+
+@app.get('/api/agent-office/child-activity')
+async def api_child_activity(sessionId: str, turnId: str, agentId: str):
+    import child_activity
+    def state():
+        process = _RUNNING_CHAT.get(sessionId)
+        try:
+            live = process is not None and process.poll() is None
+        except OSError:
+            live = False
+        return process, _ACTIVE_SKILL_TURNS.get(sessionId, ''), live
+    process, turn, live = state()
+    result = await asyncio.to_thread(child_activity.snapshot, sessionId, turnId, agentId,
+        SESSIONS_DIR, OUTPUTS_DIR / '_skill_audits', OPENCLAW_SESSIONS_DIR,
+        live=live, active_turn_id=turn, credentials=gateway_credentials())
+    if state() != (process, turn, live):
+        raise HTTPException(409, '执行轮次正在变化，请重新读取子任务')
     return result
 
 
@@ -7892,11 +8065,18 @@ class OfficeStopRequest(OfficeControlRequest):
 
 
 @app.get('/api/agent-office/models')
-async def api_office_models(sessionId: str | None = None):
+async def api_office_models(sessionId: str | None = None, modelRef: str | None = None):
     import office_controls
-    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId)
+    capability = await asyncio.to_thread(office_controls.turn_model_capability, sys.modules[__name__], sessionId, modelRef)
     capability['agentRuntime'] = await asyncio.to_thread(_agent_runtime_config)
     return capability
+
+
+@app.get('/api/agent-roles')
+async def api_agent_roles():
+    """Return the local, versioned role contracts used by the composer."""
+    from agent_roles import ROLE_SCHEMA_VERSION, list_roles
+    return {'schemaVersion': ROLE_SCHEMA_VERSION, 'roles': list_roles()}
 
 
 @app.get('/api/agent-office/controls')

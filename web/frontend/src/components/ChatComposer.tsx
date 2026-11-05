@@ -8,6 +8,7 @@ import { getChatDraft, subscribeChatDraft, setChatDraftText, removeChatDraftAtta
 import { useComposerSkills } from '../hooks/useComposerSkills';
 import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
 import ComposerModelPicker from './ComposerModelPicker';
+import ComposerRolePicker from './ComposerRolePicker';
 import ComposerSkillSuggestions from './ComposerSkillSuggestions';
 import { createPortal } from 'react-dom';
 import { useComposerModels } from '../hooks/useComposerModels';
@@ -56,7 +57,7 @@ interface ChatComposerProps {
   hero?: boolean;
   isStreaming: boolean;
   stopping?: boolean;
-  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string) => boolean;
+  onSend: (displayText: string, attachments?: UploadedFile[], selectedSkills?: string[], skillRequirements?: SkillRequirements, thinkingLevel?: ThinkingLevel, modelRef?: string, roleId?: string) => boolean;
   onStop: () => void;
   onSteer?: (id: string) => Promise<boolean>;
   onOpenModels?: (modelRef?: string) => void;
@@ -94,6 +95,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
   useEffect(() => { if (editingQueue) textareaRef.current?.focus(); }, [editingQueue, queueEdit?.id]);
   const [dragOver, setDragOver] = useState(false);
   const [preferredThinking, setThinkingLevel] = useState<ThinkingPreference>(() => loadThinkingLevel());
+  const [roleId, setRoleId] = useState<string | undefined>();
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId, engine);
@@ -278,9 +280,9 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
       const snapshot = engine === 'codex' ? {selectedSkills: [], skillRequirements: {}} : skills.getSnapshot();
       if (!snapshot) return;
       const model = models.getSnapshot();
-      if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。请刷新模型选项或改用会话配置。'); return; }
-      const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef)
-        : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel);
+      if (!model) { setChatDraftError(sessionId, '所选模型当前无法用于本轮，草稿已保留。改用「自动沿用」可继续发送。'); return; }
+      const accepted = model.modelRef ? onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, model.modelRef, roleId)
+        : onSend(trimmed, submitted.attachments, snapshot.selectedSkills, snapshot.skillRequirements, thinkingLevel, undefined, roleId);
       if (accepted === true) clearChatDraft(sessionId, submitted);
       else setChatDraftError(sessionId, '当前消息未被接收，草稿已保留，请稍后重试。');
     } catch {
@@ -377,6 +379,7 @@ function SessionChatComposer({ sessionId, usageRefreshKey = 0, engine = 'opencla
             title={`对话引擎：${engine === 'codex' ? 'Codex' : 'OpenClaw'}`}
             options={[{value:'openclaw',label:'OpenClaw',icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex'} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          {engine !== 'codex' && <ComposerRolePicker sessionId={sessionId} value={roleId} onChange={setRoleId} disabled={stopping || isStreaming || Boolean(goalEditor)} />}
           {onGoal && (goalEditor || Boolean(goalStatus)) && <button type="button" className={`composer-goal-btn${goalEditor?' is-active':''}`} aria-pressed={Boolean(goalEditor)} aria-label={goalEditor?'退出目标设置':'设置或查看目标'} title={goalEditor?'退出目标模式（Esc）':'设置或查看当前对话目标'} disabled={Boolean(goalEditor&&goalState.busy)||editingQueue} onClick={()=>goalEditor?closeGoal():openGoal()}><IconTarget size={16}/><span>目标</span>{goalEditor&&<span aria-hidden="true" className="composer-goal-exit">×</span>}</button>}
           {engine !== 'codex' && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
           <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />

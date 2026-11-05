@@ -17,9 +17,9 @@ const option = { id: REF, provider: 'relay', model: 'vendor/model:v2', label: '�
 async function fixture(t, saved) {
   const values = new Map(saved ? [[KEY, saved]] : []), writes = [], calls = [], sent = [];
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); }, removeItem: key => values.delete(key) } });
-  const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success' };
+  const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success', reason: '' };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options }
+    calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', options: h.options, ...(h.reason ? { reason: h.reason } : {}) }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
         : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
         : url === '/api/upload/limits' ? { max_mb: 50 } : [];
@@ -40,14 +40,14 @@ async function fixture(t, saved) {
   };
 }
 
-test('configured complete models are keyboard selectable, stored explicitly and sent as sixth argument', async t => {
+test('configured complete models are keyboard selectable, stored explicitly and sent with the role slot', async t => {
   const view = await fixture(t); await view.render(); assert.deepEqual(view.writes.filter(([key]) => key === KEY), []);
   view.trigger().focus(); await view.key('ArrowDown');
   assert.equal(document.querySelectorAll('.easel-select-option').length, 2, 'default and configured only');
   await view.key('ArrowDown'); await view.key('Enter');
   assert.equal(view.values.get(KEY), REF); assert.match(view.container.textContent, /渠道已连通/);
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
-  assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF]);
+  assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF, undefined]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
 });
 
@@ -55,7 +55,7 @@ test('removed saved model preserves draft until user explicitly restores session
   const view = await fixture(t, 'old/missing'); await view.render(); await view.type('不应被自动换模型'); await view.send();
   assert.deepEqual(view.sent, []); assert.match(view.container.querySelector('[role=alert]').textContent, /草稿已保留/); assert.equal(view.values.get(KEY), 'old/missing');
   await view.key('Home'); await view.key('Enter'); await view.send();
-  assert.equal(view.sent[0].length, 5); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.values.get(KEY), '');
+  assert.equal(view.sent[0].length, 7); assert.equal(view.sent[0][0], '不应被自动换模型'); assert.equal(view.sent[0][6], undefined); assert.equal(view.values.get(KEY), '');
 });
 
 test('streaming allows next-message model selection; stopping locks selector without changing preference', async t => {
@@ -136,6 +136,26 @@ test('model menu renames the default to 自动沿用 and pins 模型设置 as a 
   assert.deepEqual(opened, [REF]);
   assert.equal(document.querySelector('.easel-select-popup'), null);
   assert.ok(view.calls.every(([, init]) => !init?.body));
+});
+
+test('an unverified configured model remains selectable and the menu explains automatic verification', async t => {
+  const view = await fixture(t, REF);
+  view.h.capability = false; view.h.healthState = 'success';
+  view.h.reason = '现有设备尚未批准；本页面不会创建配对或扩大权限。';
+  await view.render({ onOpenModels() {} });
+  assert.ok(view.trigger().querySelector('.composer-model-health.success'), 'a passed inference is success, not unverified');
+  const info = view.container.querySelector('[aria-label="模型状态详情"]');
+  assert.ok(info); assert.match(info.getAttribute('title'), /设备尚未批准/);
+  await act(async () => view.trigger().click());
+  const popup = document.querySelector('.easel-select-popup'); assert.ok(popup);
+  assert.doesNotMatch(popup.textContent, /请在模型设置中检查连接/);
+  assert.match(popup.querySelector('.easel-select-footer').textContent, /仍可选择并尝试/);
+  const modelOption = [...popup.querySelectorAll('[role=option]')].find(item => item.textContent.includes('vendor/model:v2'));
+  assert.notEqual(modelOption.getAttribute('aria-disabled'), 'true', 'capability unknown does not disable a configured model');
+  await act(async () => modelOption.click());
+  await view.type('使用选定模型'); await view.send();
+  assert.equal(view.sent[0][5], REF, 'unverified model selection reaches send unchanged');
+  assert.ok(view.calls.every(([, init]) => !init?.body), 'guidance never probes a model');
 });
 
 test('running composer keeps stop beside queue-send when a draft is present', async t => {

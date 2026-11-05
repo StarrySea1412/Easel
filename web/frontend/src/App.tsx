@@ -462,6 +462,7 @@ export default function App() {
     thinkingLevel?: ThinkingLevel,
     history?: { role: 'user' | 'assistant'; content: string }[],
     preparedTurnId?: string,
+    roleId?: string,
   ) => {
     const startedAt = Date.now();
     const turnId = preparedTurnId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -586,6 +587,7 @@ export default function App() {
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
       history,
+      roleId,
     );
   }, [appendAssistant, clearStream, recoverMissingTurn]);
 
@@ -707,6 +709,8 @@ export default function App() {
         setStreams(p => p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], ...timing } } : p);
       },
       sessionsRef.current.find(s=>s.id===sessionId)?.engine || 'openclaw',
+      undefined,
+      last.roleId,
     );
   }, [appendAssistant, clearStream, recoverMissingTurn]);
 
@@ -730,6 +734,7 @@ export default function App() {
     modelRef?: string,
     thinkingLevel?: ThinkingLevel,
     kind?: 'breakdown',
+    roleId?: string,
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -752,6 +757,7 @@ export default function App() {
             skillRequirements: requirementSnapshot,
             ...(modelRef !== undefined ? { requestedModelRef: modelRef } : {}),
             ...(thinkingLevel !== undefined ? { requestedThinkingLevel: thinkingLevel } : {}),
+            ...(roleId ? { roleId } : {}),
             ...(attachments.length ? { attachments } : {}),
             ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
           } as ChatMessage],
@@ -763,17 +769,17 @@ export default function App() {
       return next;
     });
     const seed = cur ? editBranchSeed(cur, truncateAt ?? cur.messages.length) : undefined;
-    startStream(sessionId, agentMessage, persona, seed ? [...new Map([...seed.attachments, ...attachments].map(file => [file.path, file])).values()] : attachments, selectedSkills, requirementSnapshot, modelRef, thinkingLevel, seed?.history);
+    startStream(sessionId, agentMessage, persona, seed ? [...new Map([...seed.attachments, ...attachments].map(file => [file.path, file])).values()] : attachments, selectedSkills, requirementSnapshot, modelRef, thinkingLevel, seed?.history, undefined, roleId);
     return true;
   }, [selectedPersona, startStream]);
 
-  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string) => {
+  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], selectedSkills: string[] = [], skillRequirements: SkillRequirements = {}, thinkingLevel?: ThinkingLevel, modelRef?: string, roleId?: string) => {
     const session = sessionsRef.current.find(session => session.id === sessionId);
     if (!session || session.importedFromBackup || stopRequests.current[sessionId]) return false;
     if (streamAcc.current[sessionId] || streamCtl.current[sessionId] || getChatQueue(sessionId).items.length) {
-      return enqueueChat(sessionId, { text: displayText.trim(), attachments: attachments || [], selectedSkills, skillRequirements, thinkingLevel, modelRef });
+      return enqueueChat(sessionId, { text: displayText.trim(), attachments: attachments || [], selectedSkills, skillRequirements, thinkingLevel, modelRef, roleId });
     }
-    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel);
+    return sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, selectedSkills, skillRequirements, modelRef, thinkingLevel, undefined, roleId);
   }, [sendUserAndStream]);
 
   const editRequests = useRef(new Set<string>());
@@ -796,7 +802,8 @@ export default function App() {
         title: `${source.title} · 编辑分支`, messages: [...plan.prefix.map(message => remapEditedMessage(message, result.attachments)),
           { role: 'user', content: plan.text, attachments: original.attachments, selectedSkills: original.selectedSkills,
             ...(original.kind === 'breakdown' ? { kind: 'breakdown' as const, agentContent: buildBreakdownReportPrompt(plan.text, source.persona) } : {}),
-            skillRequirements: original.skillRequirements, requestedModelRef: original.requestedModelRef, requestedThinkingLevel: original.requestedThinkingLevel }],
+            skillRequirements: original.skillRequirements, requestedModelRef: original.requestedModelRef,
+            requestedThinkingLevel: original.requestedThinkingLevel, roleId: original.roleId }],
         editBranch: { sourceSessionId: sessionId, prefixLength: plan.prefix.length } };
       if (!writeSelectedSkills(branch.id, original.selectedSkills || [])
         || !writeSkillRequirements(branch.id, original.skillRequirements || {})) throw new Error('无法保存分支技能配置，未发送。');
@@ -808,7 +815,7 @@ export default function App() {
       setActiveSessionId(branch.id);
       const seed = editBranchSeed(branch, plan.prefix.length)!;
       startStream(branch.id, branch.messages.at(-1)?.agentContent || plan.text, branch.persona, seed.attachments, original.selectedSkills,
-        original.skillRequirements, original.requestedModelRef, original.requestedThinkingLevel, seed.history);
+        original.skillRequirements, original.requestedModelRef, original.requestedThinkingLevel, seed.history, undefined, original.roleId);
       return true;
     } finally { editRequests.current.delete(sessionId); }
   }, [startStream]);
@@ -817,7 +824,7 @@ export default function App() {
     for (const session of sessionsRef.current) {
       if (session.importedFromBackup || session.archived || streamAcc.current[session.id] || streamCtl.current[session.id] || stopRequests.current[session.id]) continue;
       dispatchQueuedMessage(session.id, item => sendUserAndStream(session.id, item.text, item.attachments,
-        undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel));
+        undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel, undefined, item.roleId));
     }
   }, [streams, queueRevision, sendUserAndStream]);
 
@@ -833,8 +840,9 @@ export default function App() {
     const skillRequirements = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.skillRequirements || {};
     const modelRef = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedModelRef;
     const thinkingLevel = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.requestedThinkingLevel;
+    const roleId = sessionsRef.current.find((session) => session.id === sessionId)?.messages[userIndex]?.roleId;
     const kind = sessionsRef.current.find(session => session.id === sessionId)?.messages[userIndex]?.kind;
-    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel, kind);
+    sendUserAndStream(sessionId, displayText, attachments, legacyAgentText, userIndex, selectedSkills, skillRequirements, modelRef, thinkingLevel, kind, roleId);
   }, [sendUserAndStream]);
 
   // 对话分享（完整快照）与接管回传（外部模型追加 → 加载回原对话，去重并标注来源）。
@@ -1156,7 +1164,7 @@ export default function App() {
       try {
         await codexRequest('steer',{sessionId,turnId:run.turnId,requestId:item.id,message:item.text,modelRef:item.modelRef,thinkingLevel:item.thinkingLevel});
         dispatchSelectedQueuedMessage(sessionId,id,()=>{
-          setSessions(prev=>{const next=prev.map(s=>s.id===sessionId?{...s,messages:[...s.messages,{role:'user',content:item.text,requestedModelRef:item.modelRef,requestedThinkingLevel:item.thinkingLevel} as ChatMessage]}:s);saveSessions(next);return next;});
+           setSessions(prev=>{const next=prev.map(s=>s.id===sessionId?{...s,messages:[...s.messages,{role:'user',content:item.text,requestedModelRef:item.modelRef,requestedThinkingLevel:item.thinkingLevel,roleId:item.roleId} as ChatMessage]}:s);saveSessions(next);return next;});
           return true;
         });
         return true;
@@ -1164,7 +1172,7 @@ export default function App() {
     }
     return steerQueuedMessage(sessionId, id,
     () => handleStopStream(sessionId, false), item => sendUserAndStream(sessionId, item.text, item.attachments,
-      undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel),
+      undefined, undefined, item.selectedSkills, item.skillRequirements, item.modelRef, item.thinkingLevel, undefined, item.roleId),
     () => Boolean(streamAcc.current[sessionId] || streamCtl.current[sessionId] || stopRequests.current[sessionId]
       || sessionsRef.current.find(session => session.id === sessionId)?.pendingTurnId));
   }, [handleStopStream, sendUserAndStream]);

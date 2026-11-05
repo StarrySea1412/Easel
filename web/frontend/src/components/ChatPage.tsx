@@ -18,6 +18,7 @@ import { useChatArtifacts } from '../hooks/useChatArtifacts';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
+import ChatRunStatus from './ChatRunStatus';
 import ChatComposer from './ChatComposer';
 import ChatQuoteToolbar from './ChatQuoteToolbar';
 import '../styles/chat-workspace.css';
@@ -433,14 +434,12 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
               /></Fragment>
             );
           })}
-          {isStreaming && (stream!.questions?.length ?? 0) > 0 && (
-            <QuestionCards questions={stream!.questions || []} onDone={(qid) => onQuestionAnswered?.(qid)} />
-          )}
           <div ref={messagesEndRef} />
         </div>
       </div>{nodes.length>3&&<ChatTurnNavigation key={session.id} nodes={nodes} current={currentTurn} following={following} onJump={jumpTo} onLatest={goLatest}/>}</div>
 
       {(!isImported || !following) && <div className="chat-input-area">{!following&&<button type="button" className={`chat-return-latest${isStreaming ? ' is-running' : ''}`} aria-label={isStreaming?'返回最新进度':'回到最新一轮'} onClick={goLatest}>{isStreaming && <span className="chat-latest-dots" aria-hidden="true"><i/><i/><i/></span>}<svg className="chat-latest-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>}
+        {isStreaming && <div className="chat-run-dock"><ChatRunStatus questions={stream?.questions?.length || 0}/>{!!stream?.questions?.length && <div className="chat-question-dock" aria-label="等待回答的问题"><QuestionCards questions={stream.questions} onDone={qid => onQuestionAnswered?.(qid)}/></div>}</div>}
         {!isImported && <div className="chat-input-inner">
           {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
             <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>

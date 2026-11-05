@@ -290,7 +290,17 @@ class GatewayClient:
             raise
 
         scopes = self.scopes
-        auth = self._auth if self._auth is not None else {"token": dev["token"]}
+        if self._auth is not None:
+            auth = self._auth
+        else:
+            # The device file intentionally has no gateway secret. Use the
+            # same existing credentials as the chat transport and answer API.
+            from .gateway_auth import resolve_credentials
+            credentials = resolve_credentials()
+            auth = ({'password': credentials.password} if credentials.mode == 'password' and credentials.password
+                    else {'token': credentials.token} if credentials.token
+                    else {'password': credentials.password} if credentials.password
+                    else {'token': dev['token']})
         payload = "|".join([
             "v2", dev["device_id"], self.client_id, self.client_mode, "operator",
             ",".join(scopes), str(ts), auth.get("token", ""), nonce,
