@@ -100,7 +100,7 @@ class RepairAgent:
 
     def __init__(self, outputs_root: Path, session: str, turn: str, credentials: Any = None,
                  workspace: Path | None = None, max_repairs: int = 1,
-                 max_session_repairs: int = 3):
+                 max_session_repairs: int = 3, stop_event: Any = None):
         self.outputs_root = Path(outputs_root).expanduser().resolve()
         self.session = _safe_id(session)
         self.turn = _safe_id(turn)
@@ -108,6 +108,7 @@ class RepairAgent:
         self.workspace = Path(workspace).expanduser() if workspace else None
         self.max_repairs = max(0, int(max_repairs))
         self.max_session_repairs = max(0, int(max_session_repairs))
+        self.stop_event = stop_event
         self._seen: set[str] = set()
         self._repairs = 0
         self._session_repairs = 0
@@ -142,6 +143,9 @@ class RepairAgent:
             return self.workspace
         from easel.openclaw_workspace import workspace_dir
         return Path(workspace_dir()).expanduser()
+
+    def _stopped(self) -> bool:
+        return bool(self.stop_event is not None and self.stop_event.is_set())
 
     def _write_receipt(self, call: str, receipt: dict[str, Any]) -> dict[str, Any]:
         path = _receipt_path(self.outputs_root, self.session, self.turn, call)
@@ -178,6 +182,9 @@ class RepairAgent:
         if self._session_repairs >= self.max_session_repairs:
             return self._write_receipt(call, {**common, "status": "manual",
                                                "reason": "session repair limit reached"})
+        if self._stopped():
+            return self._write_receipt(call, {**common, "status": "manual",
+                                               "reason": "repair stopped by user"})
         if not any(marker in message.lower() for marker in ALLOWED_DIRECTORY_MARKERS):
             return self._write_receipt(call, {**common, "status": "manual",
                                                "reason": "image failure is outside the known allowed-directory repair"})
@@ -186,6 +193,9 @@ class RepairAgent:
             return self._write_receipt(call, {**common, "status": "manual", "reason": reason,
                                                "failure": message[:1000]})
         try:
+            if self._stopped():
+                return self._write_receipt(call, {**common, "status": "manual",
+                                                   "reason": "repair stopped by user"})
             target_dir = self._workspace() / "_inspect" / "easel-repair"
             target_dir.mkdir(parents=True, exist_ok=True)
             digest = hashlib.sha256(f"{self.session}\0{self.turn}\0{call}".encode()).hexdigest()[:24]

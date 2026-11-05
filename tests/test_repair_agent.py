@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import pytest
+import threading
 
 
 def _failure(path: str, message: str = "Local media path is not under an allowed directory"):
@@ -140,6 +141,23 @@ def test_repair_budget_survives_supervisor_restart(tmp_path: Path):
     receipt = restarted.on_failure(row2, result2)
     assert receipt["status"] == "manual"
     assert receipt["reason"] == "session repair limit reached"
+
+
+def test_repair_stop_gate_writes_manual_without_copying(tmp_path: Path):
+    from web.repair_agent import RepairAgent
+
+    outputs = tmp_path / "outputs"
+    image = outputs / "topic" / "card.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"png")
+    stopped = threading.Event()
+    stopped.set()
+    agent = RepairAgent(outputs, "session", "turn", workspace=tmp_path / "workspace",
+                        stop_event=stopped)
+    receipt = agent.on_failure(*_failure(str(image)))
+    assert receipt["status"] == "manual"
+    assert receipt["reason"] == "repair stopped by user"
+    assert not (tmp_path / "workspace" / "_inspect").exists()
 
 
 def test_execution_lifecycle_distinguishes_repairable_and_unknown(tmp_path: Path):

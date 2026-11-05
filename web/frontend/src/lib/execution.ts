@@ -16,6 +16,24 @@ export interface ExecutionSnapshot {
   total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[]; timeline?:ExecutionEntry[];
 }
 const statuses = new Set(['running','returned','completed','failed','unconfirmed','stopped','denied']);
+const lifecycleStates = new Set<LifecycleState>(['admitted','running','succeeded','repairable','manual','stopped','unknown']);
+function sanitizeLifecycle(row: Operation): Operation {
+  const hasState = Object.prototype.hasOwnProperty.call(row, 'lifecycleState');
+  const allowed = row.status === 'running' ? new Set<LifecycleState>(['admitted','running'])
+    : row.status === 'returned' || row.status === 'completed' ? new Set<LifecycleState>(['succeeded'])
+    : row.status === 'failed' ? new Set<LifecycleState>(['repairable','manual','unknown'])
+    : row.status === 'stopped' ? new Set<LifecycleState>(['stopped'])
+    : new Set<LifecycleState>(['unknown']);
+  const lifecycleState = hasState
+    ? (lifecycleStates.has(row.lifecycleState as LifecycleState) && allowed.has(row.lifecycleState as LifecycleState)
+      ? row.lifecycleState : 'unknown')
+    : undefined;
+  const lifecycleHistory = Array.isArray(row.lifecycleHistory)
+    ? row.lifecycleHistory.filter(item => item && lifecycleStates.has(item.state)
+      && (item.at === undefined || item.at === null || typeof item.at === 'string')).slice(-8)
+    : undefined;
+  return {...row, ...(hasState ? {lifecycleState} : {}), ...(lifecycleHistory ? {lifecycleHistory} : {})};
+}
 export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   if(!value || typeof value!=='object')return null;
   const data=value as ExecutionSnapshot;
@@ -24,7 +42,7 @@ export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   const plan=Array.isArray(data.plan)?data.plan.filter(x=>x&&typeof x.step==='string'&&['pending','inProgress','completed','blocked','failed'].includes(x.status)).slice(0,100):[];
   const progress=Array.isArray(data.progress)?data.progress.filter(x=>typeof x==='string').slice(-50):[];
   const timeline=Array.isArray(data.timeline)?data.timeline.filter(entry=>entry&&typeof entry.id==='string'&&Number.isSafeInteger(entry.order)&&entry.order>=0&&(entry.type==='progress'?typeof entry.text==='string':entry.type==='operation'&&typeof entry.operationId==='string')).slice(-500):undefined;
-  return {...data,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
+  return {...data,operations:data.operations.map(sanitizeLifecycle),plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
 }
 export function publishExecution(value: unknown) {
   const data=decodeExecution(value);

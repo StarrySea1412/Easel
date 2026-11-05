@@ -142,6 +142,13 @@ test('repairable lifecycle is visible without replacing the legacy failure statu
   assert.match(view.container.textContent, /已修复，可继续/);
 });
 
+test('invalid lifecycle values cannot fabricate a successful or repairable receipt', async t => {
+  const view = await setup(t);
+  await view.respond(0, payload('a', [{...operation('bad', 'failed', 'unknown state'), lifecycleState:'succeeded', lifecycleHistory:[{state:'repairable'}]}]));
+  assert.match(view.container.textContent, /失败/);
+  assert.doesNotMatch(view.container.textContent, /已成功|已修复，可继续/);
+});
+
 test('progress interleaves by recorded order; partial events preserve earlier entries and reject malformed ones', async t => {
   const view=await setup(t);
   const rows=[{...operation('one','completed'),order:2},{...operation('two','failed'),order:4}];

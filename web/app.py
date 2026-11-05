@@ -4342,7 +4342,7 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         provider_lock_acquired = False
         from easel.execution_store import ExecutionStore
         from repair_agent import RepairAgent
-        repair_agent = RepairAgent(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        repair_agent = RepairAgent(OUTPUTS_DIR, sk, turn_id, gateway_credentials(), stop_event=cancel_job)
         execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials(),
                                          on_failure=repair_agent.on_failure)
         started_at_ms = int(time.time() * 1000)
