@@ -36,8 +36,14 @@ export async function fetchShareAppends(token: string, signal?: AbortSignal): Pr
   return { appends: Array.isArray(value.appends) ? value.appends : [], appendCount: value.appendCount || 0, title: value.title || '' };
 }
 
-export function pendingShareAppends(session: Pick<ChatSession, 'loadedShareAppends'>, appends: ShareAppend[]): ShareAppend[] {
+export function pendingShareAppends(session: Pick<ChatSession, 'loadedShareAppends'> & Partial<Pick<ChatSession, 'share' | 'messages'>>, appends: ShareAppend[]): ShareAppend[] {
   const loaded = new Set(session.loadedShareAppends || []);
+  // Server copies omit browser capabilities/loaded IDs, but retain message provenance.
+  // A restored conversation must not import those messages a second time.
+  const token = session.share?.token;
+  if (token) for (const message of session.messages || []) {
+    if (message.shareAppend?.token === token && message.shareAppend.appendId) loaded.add(message.shareAppend.appendId);
+  }
   const seen = new Set<string>();
   return appends.filter(append => {
     if (!append?.appendId || loaded.has(append.appendId) || seen.has(append.appendId)

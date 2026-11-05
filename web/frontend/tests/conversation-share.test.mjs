@@ -6,7 +6,7 @@ import { loadTsModule } from './load-ts.mjs';
 // 分享载荷、回传合并（去重与来源标注）以及两个接口的错误透出。
 globalThis.window = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://easel.test/' }).window;
 globalThis.document = window.document;
-const { sharePayloadFor, mergeShareAppends, createConversationShare, fetchShareAppends } = await loadTsModule('../src/lib/conversationShare.ts', import.meta.url);
+const { sharePayloadFor, pendingShareAppends, mergeShareAppends, createConversationShare, fetchShareAppends } = await loadTsModule('../src/lib/conversationShare.ts', import.meta.url);
 
 const session = {
   id: 's1', title: '拆解对话', created: 1, engine: 'openclaw',
@@ -57,4 +57,22 @@ test('share endpoints surface backend failures with honest messages', async t =>
   assert.equal(loaded.appends[0].appendId, 'ap-1');
   await assert.rejects(() => fetchShareAppends('missing'), /分享不存在/);
   await assert.rejects(() => createConversationShare({ ...session, messages: [] }), /还没有可分享的内容/);
+});
+
+test('server-restored provenance prevents reimport without browser loaded IDs', () => {
+  const shared = { ...session, share: { token: 'original-share' } };
+  const first = mergeShareAppends(shared, [append]).session;
+  // Mirrors conversation synchronization: browser-only metadata is omitted.
+  const restored = JSON.parse(JSON.stringify(first));
+  delete restored.share; delete restored.loadedShareAppends;
+  restored.share = shared.share;
+  assert.deepEqual(pendingShareAppends(restored, [append]), []);
+  const repeat = mergeShareAppends(restored, [append]);
+  assert.equal(repeat.added, 0);
+  assert.equal(repeat.session, restored);
+  assert.equal(repeat.session.messages.length, first.messages.length);
+  const fresh = { ...append, appendId: 'next' };
+  assert.equal(mergeShareAppends(restored, [append, fresh]).added, 1);
+  // Provenance from another share cannot suppress a current share's append.
+  assert.equal(mergeShareAppends({ ...restored, share: { token: 'another-share' } }, [append]).added, 1);
 });
