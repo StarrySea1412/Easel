@@ -44,6 +44,39 @@ def _env_proxy() -> str | None:
     return None
 
 
+async def _validate_page(page, args) -> list[str]:
+    """Reject broken media/overflow before saving any card in the batch."""
+    return await page.evaluate("""({selector}) => {
+      const roots = selector ? [...document.querySelectorAll(selector)] : [document.body];
+      const issues = [];
+      roots.forEach((root,index) => {
+        const images = [...root.querySelectorAll('img')];
+        if (root.tagName === 'IMG') images.unshift(root);
+        for (const image of images) {
+          const style = getComputedStyle(image), box=image.getBoundingClientRect();
+          if (style.display==='none'||style.visibility==='hidden'||!box.width||!box.height) continue;
+          if (!image.complete || image.naturalWidth===0 || image.naturalHeight===0)
+            issues.push(`第${index+1}张含未加载的图片；核对相对于HTML所在目录的素材路径`);
+        }
+        if (selector) {
+          const box=root.getBoundingClientRect();
+          if (!box.width || !box.height) issues.push(`第${index+1}张画幅为空`);
+          for (const element of [root,...root.querySelectorAll('*')]) {
+            const style=getComputedStyle(element);
+            if (style.display==='none'||style.visibility==='hidden'||!element.clientWidth||!element.clientHeight) continue;
+            const clipsX = element===root || ['hidden','clip','scroll','auto'].includes(style.overflowX);
+            const clipsY = element===root || ['hidden','clip','scroll','auto'].includes(style.overflowY);
+            if ((clipsX && element.scrollWidth > element.clientWidth+2) ||
+                (clipsY && element.scrollHeight > element.clientHeight+2)) {
+              issues.push(`第${index+1}张存在内容溢出或裁切，请调整字号/行距/容器`);break;
+            }
+          }
+        }
+      });
+      return [...new Set(issues)];
+    }""", {'selector': args.all or (None if args.full_page else args.selector)})
+
+
 async def _render(args) -> int:
     try:
         from playwright.async_api import async_playwright
@@ -80,12 +113,22 @@ async def _render(args) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"WARN: 页面加载未在 {args.nav_timeout}ms 内完成（外部资源慢），继续渲染: {e}",
                   file=sys.stderr)
+        # Page scrollbars are browser chrome, not part of an exported card.
+        # Keep inner scrollable containers visible to the clipping checks.
+        await page.add_style_tag(content="html{scrollbar-width:none!important}html::-webkit-scrollbar{display:none!important}")
         # 等 web 字体 / 布局稳定
         try:
-            await page.evaluate("document.fonts && document.fonts.ready")
+            await page.evaluate("Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(resolve => setTimeout(resolve, 5000))])")
         except Exception:  # noqa: BLE001
             pass
         await page.wait_for_timeout(args.wait)
+
+        issues = await _validate_page(page, args)
+        if issues:
+            for issue in issues:
+                print('ERROR: 渲染校验失败：' + issue, file=sys.stderr)
+            await browser.close()
+            return 4
 
         saved: list[str] = []
 
