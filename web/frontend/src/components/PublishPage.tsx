@@ -58,6 +58,13 @@ function parseSections(text: string): Record<string, string> {
   return map;
 }
 
+function preparedDraftTime(timestamp: number) {
+  const date = new Date(timestamp * 1000);
+  return Number.isFinite(date.getTime())
+    ? { dateTime: date.toISOString(), label: date.toLocaleString('zh-CN') }
+    : { dateTime: undefined, label: '准备时间未知' };
+}
+
 export default function PublishPage({ persona, publishReceipts, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, onOpenAccounts, onOpenOutputs, active = true }: PublishPageProps) {
   const fieldPrefix = useId();
   const workspace = ensureCreation('publish', sourceSessionId);
@@ -452,7 +459,7 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
           <button className="btn btn-sm publish-receipt-entry" onClick={publishReceipts.open}>查看全部发布回执</button>
         </div>
       </header>
-      <div className="creation-actionbar">
+      <div className="creation-actionbar publish-draft-workbench" role="region" aria-label="发布草稿操作">
       {sourceSessionId && <div className="creation-return-actions">
         <button className="btn btn-sm" disabled={publishing || checking || adapting} onClick={async()=>{
           const text = getSourceText?.().trim();
@@ -466,7 +473,13 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
         }}><IconImport size={14}/>带入对话内容</button>
         {Boolean(previousCreationDraft(workspace)) && <button className="link-btn" disabled={publishing || checking || adapting || loadingPreparation} onClick={async()=>{const draft=previousCreationDraft(workspace) as import('../lib/store').PublishDraft;if(typeof draft?.body!=='string'||!(await confirmModal('恢复上一份发布草稿？当前版本将保留。')))return;backupCreationDraft(workspace,currentDraftRef.current);setTitle(draft.title);setBody(draft.body);setPlatforms(draft.platforms);setOverrides(draft.overrides);setTags(draft.tags);setSelectedMedia(draft.media||[]);setLoadedPreparation(draft.preparationId||'');}}>恢复上一稿</button>}
       </div>}
-      {deliveries.creationDrafts.length > 0 && <section className="creation-agent-jobs" aria-label="助手准备的发布草稿"><strong>助手准备的草稿</strong>{deliveries.creationDrafts.map((item:PreparedCreationDraft)=><div className="creation-return-actions" key={item.id}><span>{item.draft.title || item.draft.body.slice(0,30)}</span><button type="button" className="btn btn-sm" disabled={publishing || checking || adapting || loadingPreparation || loadedPreparation===item.id} onClick={async()=>{
+      {deliveries.creationDrafts.length > 0 && <section className="publish-prepared-drafts" aria-label="助手准备的发布草稿">
+        <div className="publish-prepared-heading"><strong>助手准备的草稿</strong><span>{deliveries.creationDrafts.length} 份草稿</span></div>
+        <div className="publish-prepared-list">{deliveries.creationDrafts.map((item:PreparedCreationDraft)=>{const prepared=preparedDraftTime(item.createdAt);return <article className={'publish-prepared-draft'+(loadedPreparation===item.id?' is-loaded':'')} key={item.id}>
+          <div className="publish-prepared-copy"><span className="publish-prepared-title">{item.draft.title || item.draft.body.slice(0,30)}</span>
+            <div className="publish-prepared-meta"><time dateTime={prepared.dateTime}>{prepared.label}</time><span>{item.draft.body.length} 字</span>{item.draft.platforms.length>0 && <span>{item.draft.platforms.map(publishPlatformLabel).join('、')}</span>}</div>
+          </div>
+          <button type="button" className="btn btn-sm" aria-label={`载入助手草稿：${item.draft.title || item.draft.body.slice(0,30)}，${item.draft.body.length}字，${prepared.label}`} disabled={publishing || checking || adapting || loadingPreparation || loadedPreparation===item.id} onClick={async()=>{
         if((title.trim() || body.trim()) && !(await confirmModal('保存当前版本后，载入这份助手草稿？',{confirmLabel:'保存并载入'})))return;
         const before=JSON.stringify(currentDraftRef.current); setLoadingPreparation(true);
         try {
@@ -477,7 +490,8 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
           setTitle(checked.draft.title);setBody(checked.draft.body);setPlatforms(checked.draft.platforms);setOverrides(checked.draft.overrides);setTags(checked.draft.tags);setSelectedMedia(checked.draft.media||[]);setLoadedPreparation(checked.id);
         } catch(reason) { globalToast(reason instanceof Error?reason.message:'载入失败，当前草稿已保留','error'); }
         finally { if(mounted.current)setLoadingPreparation(false); }
-      }}>{loadedPreparation===item.id?'已载入':'载入编辑'}</button></div>)}</section>}
+      }}>{loadedPreparation===item.id?'已载入':'载入编辑'}</button></article>;})}</div>
+      </section>}
       {targetSessionId && <div className="creation-return-actions">
         <button className="btn btn-sm" disabled={empty || !canReturnToSession(targetSessionId)} onClick={()=>{
           try { returnCreationQuote(targetSessionId, '## 发布草稿\n' + title + '\n\n' + body + (tags ? '\n话题：'+tags : '') + (platforms.length ? '\n平台：'+platforms.map(publishPlatformLabel).join('、') : '') + (Object.keys(overrides).length ? '\n平台文案：\n'+Object.entries(overrides).map(([key,value])=>publishPlatformLabel(key)+'：'+value).join('\n') : '') + (selectedMedia.length ? '\n\n素材：' + selectedMedia.join('、') : '')); globalToast('发布草稿已加入目标对话', 'success'); }

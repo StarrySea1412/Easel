@@ -7,6 +7,20 @@
 .publish-studio .publish-save-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); }
 .publish-studio .publish-receipt-entry { background: transparent; }
 .publish-studio .publish-workspace { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(340px, 1fr); align-items: start; gap: 24px; max-width: 1280px; margin: 0 auto; }
+.publish-studio > .creation-actionbar.publish-draft-workbench { max-width: 1280px; min-width: 0; margin: 0 auto 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); gap: 12px; }
+.publish-studio .publish-draft-workbench > .creation-return-actions { display: flex; flex: 1 1 100%; min-width: 0; margin: 0; }
+.publish-studio .publish-prepared-drafts { flex: 1 1 100%; min-width: 0; padding: 12px 0; border-block: 1px solid var(--border); }
+.publish-studio .publish-prepared-drafts:first-child { padding-top: 0; border-top: 0; }
+.publish-studio .publish-prepared-drafts:last-child { padding-bottom: 0; border-bottom: 0; }
+.publish-studio .publish-prepared-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; }
+.publish-studio .publish-prepared-heading > span { color: var(--text-tertiary); font-size: 11px; }
+.publish-studio .publish-prepared-list { display: grid; gap: 8px; }
+.publish-studio .publish-prepared-draft { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.publish-studio .publish-prepared-draft.is-loaded { border-color: color-mix(in srgb, var(--accent-start) 40%, var(--border)); background: var(--accent-soft); }
+.publish-studio .publish-prepared-copy { flex: 1; min-width: 0; }
+.publish-studio .publish-prepared-title { display: block; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.publish-studio .publish-prepared-meta { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 5px; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.publish-studio .publish-prepared-draft > button { flex-shrink: 0; }
 .publish-studio .publish-editor { min-width: 0; max-width: none; width: auto; padding: 0; border: 0; overflow: visible; }
 .publish-studio .publish-side { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .publish-studio .publish-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 22px; margin-bottom: 16px; }
@@ -103,7 +117,7 @@
 .publish-studio button:focus-visible, .publish-studio .field:focus-visible, .publish-studio summary:focus-visible, .publish-studio [role="tabpanel"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 @media (max-width: 900px) {
   .publish-studio .publish-workspace { grid-template-columns: minmax(0, 1fr); max-width: 680px; gap: 20px; }
-  .publish-studio .publish-heading { max-width: 680px; }
+  .publish-studio .publish-heading, .publish-studio > .creation-actionbar.publish-draft-workbench, .publish-studio .publish-load-error { max-width: 680px; }
   .publish-studio .publish-master-body { min-height: 240px; }
   .publish-studio .publish-platform-list { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
@@ -111,6 +125,8 @@
   .publish-page.publish-studio { padding: 20px 14px 32px; }
   .publish-studio .publish-heading { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 18px; }
   .publish-studio .publish-heading-actions { width: 100%; justify-content: space-between; gap: 8px; }
+  .publish-studio > .creation-actionbar.publish-draft-workbench { padding: 12px; }
+  .publish-studio .publish-prepared-draft { gap: 10px; padding: 10px; }
   .publish-studio .page-title { font-size: 22px; }
   .publish-studio .publish-section, .publish-studio .publish-side .publish-section { padding: 17px 14px; }
   .publish-studio .publish-platform-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
