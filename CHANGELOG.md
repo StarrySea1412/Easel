@@ -1,3 +1,11 @@
+## 0.46.0 · 2026-11-05 · Deterministic tool repair and deployment guards
+
+- Port bounded image-read repair onto the deployed 0.45.9 baseline, preserving current continuation and publishing behavior.
+- Serialize repair decisions with a session file lock; reserve attempts durably before copying; retain budgets across interruption, failed copies and restarts.
+- Enforce stop, ownership, age, path and size checks; keep provider/browser/auth/publishing failures manual. Put repair receipts into the existing reference-data prompt envelope.
+- Surface bounded, status-compatible lifecycle evidence and separate Xiaohongshu analysis/comment phases from publishing.
+- Check Docker/containerd storage as well as release storage; reject accidental candidate version downgrades. See docs/super-agent-0.46.0.md for measured validation and deployment status.
+
 ## 0.45.9 · 2026-11-03 · 输出触顶的有界安全接续
 
 - 138问题`63eafc65`的输出触顶修复已于11月3日正式激活：Gateway只回泛化`failed`时，从当前对话/轮次边界读取原生`stopReason=length`，不会把此前轮次终态套用到后续接续轮。运行版本0.45.9，源码`7688c07db8f5cc88fc7452a31014cc7aa2011a3a`，镜像`sha256:68d062a55d2466dc33733b22ab6ec5ee7fd273968695010bcd0d60a811f5f59a`。

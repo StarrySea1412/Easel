@@ -87,6 +87,18 @@ _ROLES: tuple[dict[str, Any], ...] = (
         "fallback": ["产出本地回执", "保留候选包", "等待人工发布"],
         "stopConditions": ["缺少授权", "运行构建与源码不匹配", "产物来源或哈希无法确认"],
     },
+    {
+        'id': 'repair-agent',
+        'name': '工具修复 Agent',
+        'shortName': '修复',
+        'description': '只修复已知且可验证的本地工具环境故障，把不可安全修复的失败交给下一轮人工驱动的连续对话。',
+        'icon': 'wrench',
+        'inputs': ['工具失败回执', '会话与轮次身份', '允许的本地目录'],
+        'outputs': ['修复回执', '可继续读取的路径', '人工处理边界'],
+        'toolPolicy': '每个工具调用最多修复一次；只允许 outputs 内图片复制；不重试模型、浏览器、认证、发布或未知副作用。',
+        'fallback': ['写入人工处理回执', '下一轮同会话继续', '暂停并交给人工确认'],
+        'stopConditions': ['源路径不在 outputs 内', '状态或归属无法确认', '修复可能重复外部副作用'],
+    },
 )
 
 _BY_ID = {role["id"]: role for role in _ROLES}

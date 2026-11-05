@@ -4759,6 +4759,39 @@ def _chat_delivery_instructions(artifact_ticket):
     return message
 
 
+def _validate_xhs_skill_selection(specs: dict[str, dict]) -> None:
+    """Keep read/analysis and external publishing in separate request phases."""
+    names = set(specs)
+    publisher = 'skill-xhs-publisher' in names
+    readers = names.intersection({'skill-xhs-analyzer', 'skill-xhs-comment-reply'})
+    if publisher and readers:
+        raise HTTPException(
+            400,
+            '小红书发布必须与分析/评论分开提交；请先完成只读阶段，再单独确认发布。',
+        )
+
+def _xiaohongshu_execution_context(specs: dict[str, dict]) -> str:
+    """Keep XHS workflows separated by effect and make image repair explicit."""
+    names = set(specs)
+    xhs = {
+        'xhs-note-creator', 'card-xiaohongshu', 'card-design', 'skill-xhs-analyzer',
+        'skill-xhs-comment-reply', 'skill-xhs-publisher', 'xhs-note-creator',
+    }
+    if not names.intersection(xhs):
+        return ''
+    return (
+        '〔小红书组别执行契约〕\n'
+        '按能力分流：笔记/卡片创作走 xhs-note-creator；纯卡片走 card-design → card-xiaohongshu → card_audit；'
+        '爆款规律与限流检测走 skill-xhs-analyzer；评论抓取/回复走 skill-xhs-comment-reply；发布只走 '
+        'skill-xhs-publisher。不要把读取、分析、评论和发布混成一次副作用任务。\n'
+        '明确要求纯文字排版时用 HTML+CSS 渲染并执行 card_audit；其他视觉创作沿用已授权的生图通道；真实照片卡可用 '
+        'text_on_image 路径。所有需要视觉读取的图片先复制到当前 outputs 项目 assets，再调用允许目录内的读取工具；'
+        '若收到 allowed-directory 错误，等待修复 Agent 回执后在下一轮同会话继续，不凭文件名猜图。\n'
+        '小红书账号读取默认只读且串行；429、登录失效、网络风险、安全验证和浏览器权限分别记录，不能包装成模型错误。'
+        '发布完成必须用创作者后台 readback 核对，只有平台回执才可称为已发布。'
+    )
+
+
 def _chat_message(req: ChatRequest, *, suffix='') -> str:
     from chat_branch import history_context
     context = _attachment_context(req)
@@ -4768,6 +4801,11 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
     references = ([{'source': 'attachments', 'text': context}] if context else [])
     if req.history:
         references.append({'source': 'history-snapshot', 'messages': [{'role': item.role, 'content': item.content} for item in req.history]})
+    if req.sessionId:
+        from repair_agent import context_for_session
+        repair_context = context_for_session(OUTPUTS_DIR, req.sessionId)
+        if repair_context:
+            references.append({'source': 'repair-receipts', 'text': repair_context})
     writing = _writing_context(req)
     if writing:
         references.append({'source': 'analysis-writing', 'handoffId': writing['id'], **writing['analysis']})
@@ -4782,6 +4820,10 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
         from easel.browser_bridge import instructions as browser_instructions
         message += browser_instructions(req.sessionId)
     specs = _selected_skill_specs(req)
+    _validate_xhs_skill_selection(specs)
+    xhs_context = _xiaohongshu_execution_context(specs)
+    if xhs_context:
+        message += '\n\n' + xhs_context
     message += (f'\n\n〔本轮文件交付规则〕持久产物目录是 {OUTPUTS_DIR}。'
                 '生成文件、从网站下载的文件或网页快照，都必须实际保存到该目录下的具体主题子目录，'
                 '不得留在临时目录、远端 sandbox 或技能源码目录；便携版使用当前数据目录，不能硬编码开发机盘符。'
@@ -5856,7 +5898,10 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         provider_xlock.cancel_event = cancel_job
         provider_lock_acquired = False
         from easel.execution_store import ExecutionStore
-        execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials())
+        from repair_agent import RepairAgent
+        repair_agent = RepairAgent(OUTPUTS_DIR, sk, turn_id, gateway_credentials(), stop_event=cancel_job)
+        execution_store = ExecutionStore(OUTPUTS_DIR, sk, turn_id, gateway_credentials(),
+                                         on_failure=repair_agent.on_failure)
         execution_store.configure_runtime(_chat_agent_runtime(req))
         execution_tail = None            # 只对没有逐工具事件流的传输启动
         started_at_ms = int(time.time() * 1000)
@@ -5955,6 +6000,8 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
         to_client('timing', timing())
         to_client("activity", "请求已收到，等待运行器确认")
 
+        repair_announced = set()
+
         def tool_update(payload):
             try:
                 value = execution_store.consume(payload)
@@ -5962,6 +6009,16 @@ async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
                 loop.call_soon_threadsafe(to_client, 'activity', '执行记录保存失败；请检查数据目录。')
                 return
             if value:
+                for operation in value.get('operations', []):
+                    repair = operation.get('repair', {})
+                    if repair.get('status') not in {'repaired', 'manual', 'unavailable'} or operation['id'] in repair_announced:
+                        continue
+                    repair_announced.add(operation['id'])
+                    run_ledger.mark(_run_ledger_root(), turn_id, event='tool_repair_receipt', status='running',
+                                    tool=operation.get('name'), repairStatus=repair.get('status'))
+                    notice = ('工具环境已修复；下一轮同会话可继续读取。' if repair.get('status') == 'repaired'
+                              else '工具失败已记录，等待人工驱动下一轮继续。')
+                    loop.call_soon_threadsafe(to_client, 'activity', notice)
                 loop.call_soon_threadsafe(to_client, 'execution', value)
 
         def _transcript_receipt():

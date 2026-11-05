@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 import time
 
-from .execution import begin, returned, ident, public_text
+from .execution import begin, returned, ident, public_text, set_lifecycle
 
 
 def location(root, session, turn):
@@ -66,8 +66,9 @@ def adopt(existing, incoming):
 
 
 class ExecutionStore:
-    def __init__(self, root, session, turn, credentials=None):
+    def __init__(self, root, session, turn, credentials=None, on_failure=None):
         self.root, self.session, self.turn, self.credentials = root, session, turn, credentials
+        self.on_failure = on_failure
         saved = read_snapshot(root, session, turn)
         self.rows = {row['id']: row for row in saved.get('operations', [])}
         self.pending_question = any(row.get('status') == 'running' and row.get('waitingForUser') is True
@@ -79,6 +80,17 @@ class ExecutionStore:
         self.order = max((entry['order'] for entry in self.timeline), default=0)
         self.seen = set()
         self.lock = threading.RLock()
+
+    def _repair_failure(self, row, result):
+        if row.get('status') != 'failed' or row.get('repair') or not callable(self.on_failure):
+            return
+        try:
+            repair = self.on_failure(dict(row), result)
+        except Exception:
+            repair = {'status': 'unavailable', 'reason': 'repair controller unavailable'}
+        if isinstance(repair, dict):
+            row['repair'] = {key: value for key, value in repair.items() if key != 'sourcePath'}
+            set_lifecycle(row, 'repairable' if repair.get('status') == 'repaired' else 'manual', time.time())
 
     def snapshot(self):
         with self.lock:
@@ -174,6 +186,7 @@ class ExecutionStore:
                     row['waitingForUser'] = False
                 returned(row, result, time.time(), self.credentials, partial=phase == 'update')
                 if phase != 'update':
+                    self._repair_failure(row, result)
                     from .plan_progress import receipt_plan
                     plan = receipt_plan(row['name'], self.plan_inputs.pop(row_id, None), result, self.credentials)
                     if plan is not None and row['status'] in {'returned', 'completed'}:
@@ -208,6 +221,7 @@ class ExecutionStore:
                         adopted['waitingForUser'] = self.pending_question and adopted.get('status') == 'running'
                     self.order += 1
                     adopted['order'] = self.order
+                    self._repair_failure(adopted, {'isError': True, 'content': adopted.get('output', '')})
                     self.rows[row_id] = adopted
                     self.timeline.append({'id': row_id, 'type': 'operation',
                                           'operationId': row_id, 'order': self.order})
@@ -217,6 +231,11 @@ class ExecutionStore:
                 merged = adopt(existing, row)
                 if merged.get('name') == 'ask_user':
                     merged['waitingForUser'] = self.pending_question and merged.get('status') == 'running'
+                if existing.get('repair'):
+                    for key in ('repair', 'lifecycleState', 'lifecycleHistory'):
+                        if key in existing:
+                            merged[key] = existing[key]
+                self._repair_failure(merged, {'isError': True, 'content': merged.get('output', '')})
                 if merged != existing:
                     self.rows[row_id] = merged
                     changed = True
@@ -230,6 +249,7 @@ class ExecutionStore:
             for row in self.rows.values():
                 if row['status'] == 'running':
                     row['status'] = 'unconfirmed'
+                    set_lifecycle(row, 'unknown', time.time())
                     if row.get('name') == 'ask_user':
                         row['waitingForUser'] = False
             self.persist()

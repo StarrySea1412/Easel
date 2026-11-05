@@ -167,3 +167,28 @@ test('progress interleaves by recorded order; partial events preserve earlier en
   assert.equal(list().length,4);assert.match(list()[2].textContent,/更新/);
   assert.match(list()[3].textContent,/失败/);assert.doesNotMatch(view.container.textContent,/INVALID ENTRY/);
 });
+
+test('repairable lifecycle is visible without replacing the legacy failure status', async t => {
+  const view = await setup(t);
+  await view.respond(0, payload('a', [{...operation('repair', 'failed', 'allowed directory'), lifecycleState:'repairable'}]));
+  assert.match(view.container.textContent, /失败/);
+  assert.match(view.container.textContent, /已修复，可继续/);
+});
+
+test('invalid lifecycle values cannot fabricate a successful or repairable receipt', async t => {
+  const view = await setup(t);
+  await view.respond(0, payload('a', [{...operation('bad', 'failed', 'unknown state'), lifecycleState:'succeeded', lifecycleHistory:[{state:'repairable'}]}]));
+  assert.match(view.container.textContent, /失败/);
+  assert.doesNotMatch(view.container.textContent, /已成功|已修复，可继续/);
+});
+
+test('lifecycle histories are bounded and invalid history containers are removed', async () => {
+  const {decodeExecution}=await loadTsModule('../src/lib/execution.ts',import.meta.url);
+  const row={...operation('history','failed'),lifecycleState:'manual',lifecycleHistory:[
+    ...Array.from({length:20},()=>({state:'running',at:'2026-11-05T00:00:00Z'})),
+    {state:'succeeded',at:'x'.repeat(1000)},{state:'forged'}]};
+  const parsed=decodeExecution(payload('a',[row]));
+  assert.equal(parsed.operations[0].lifecycleHistory.length,8);
+  assert.ok(parsed.operations[0].lifecycleHistory.every(item=>item.state==='running'));
+  assert.equal(decodeExecution(payload('a',[{...row,lifecycleHistory:'forged'}])).operations[0].lifecycleHistory,undefined);
+});

@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.45.9",
+  "version": "0.46.0",
   "type": "module",
   "scripts": {
     "prebuild": "node scripts/generate-skill-dependencies.mjs",

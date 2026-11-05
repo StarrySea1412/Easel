@@ -80,6 +80,14 @@ def set_text(row, field, value, credentials=None):
     row.setdefault('truncated', {})[field] = len(text) > limit
 
 
+def set_lifecycle(row, state, at=None):
+    row['lifecycleState'] = state
+    history = row.setdefault('lifecycleHistory', [])
+    if not history or history[-1].get('state') != state:
+        history.append({'state': state, 'at': iso(at)})
+    row['lifecycleHistory'] = history[-8:]
+
+
 def begin(session, turn, call, name, args, at=None, credentials=None, source='transcript'):
     args = args if isinstance(args, dict) else {}
     # Some gateways wrap the real function in a generic tool_call event.
@@ -99,6 +107,8 @@ def begin(session, turn, call, name, args, at=None, credentials=None, source='tr
     row = {'id': ident(session, turn, call), 'name': name, 'kind': kind(name, args),
            'status': 'running', 'command': '', 'path': '', 'cwd': '', 'output': '', 'diff': '',
            'truncated': {}, 'source': source}
+    set_lifecycle(row, 'admitted', at)
+    set_lifecycle(row, 'running', at)
     for field, value in {
         'command': args.get('command', args.get('cmd', '')),
         'path': args.get('path', args.get('file_path', args.get('file', ''))),
@@ -154,6 +164,8 @@ def returned(row, result, at=None, credentials=None, partial=False):
         row['elapsedSeconds'] = round(at - start, 3)
     if row['status'] != 'running' and iso(at):
         row['finishedAt'] = iso(at)
+    set_lifecycle(row, {'running': 'running', 'returned': 'succeeded', 'completed': 'succeeded',
+                        'failed': 'manual', 'denied': 'manual', 'stopped': 'stopped'}.get(row['status'], 'unknown'), at)
     if SENSITIVE.search(row.get('path', '')):
         row['output'] = row['diff'] = ''
         row['contentHidden'] = True
@@ -222,6 +234,9 @@ def codex_rows(state):
         row['order'] = order
         row['status'] = {'inProgress': 'running', 'completed': 'completed', 'failed': 'failed',
                          'declined': 'denied', 'interrupted': 'stopped'}.get(item.get('status'), 'unconfirmed')
+        set_lifecycle(row, {'running': 'running', 'completed': 'succeeded', 'failed': 'manual',
+                            'denied': 'manual', 'stopped': 'stopped'}.get(row['status'], 'unknown'),
+                      stamp(item.get('_finishedAt')))
         if item.get('_startedAt'):
             row['startedAt'] = item['_startedAt']
         if item.get('_finishedAt'):

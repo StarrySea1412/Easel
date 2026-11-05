@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import tomllib
 
 RELEASE = Path(__file__).resolve().parents[2]
 
@@ -40,6 +41,35 @@ def verify(root: Path):
             raise ValueError('Release checksum mismatch: ' + name)
     print('Verified source commit:', manifest['commit'], 'files:', len(manifest['files']))
     return manifest
+
+
+def check_storage(base: Path, docker_root: Path, containerd_root=Path('/var/lib/containerd'),
+                  minimum=5 * 1024 ** 3):
+    """Check each actual build/data filesystem, including containerd snapshots."""
+    paths = [('release/data', Path(base)), ('Docker', Path(docker_root))]
+    if containerd_root.exists():
+        paths.append(('containerd', containerd_root))
+    checks = []
+    for label, path in paths:
+        free = shutil.disk_usage(path).free
+        checks.append({'kind': label, 'path': str(path), 'freeBytes': free})
+        if free < minimum:
+            raise RuntimeError(f'{label} storage {path}: less than {minimum} bytes free '
+                               f'({free} available); stop before building or switching.')
+    return checks
+
+
+def check_release_version(candidate_text, baseline_text):
+    """Reject an accidental older product branch before touching services."""
+    import re
+    versions = []
+    for text in (candidate_text, baseline_text):
+        version = tomllib.loads(text)['project']['version']
+        if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+            raise ValueError('Deployment requires a stable semantic version.')
+        versions.append(tuple(map(int, version.split('.'))))
+    if versions[0] < versions[1]:
+        raise ValueError('Candidate version is older than the active release; use recorded rollback explicitly.')
 
 
 def layout(base: Path, isolated=False):
@@ -243,11 +273,25 @@ if __name__ == '__main__':
         verify(RELEASE)
     elif args.operation == 'preflight':
         verify(RELEASE)
-        free = shutil.disk_usage(args.base).free
-        if free < 5 * 1024 ** 3:
-            raise RuntimeError('Less than 5GiB free; stop before deploying.')
-        run(['docker', 'info', '--format', '{{.ServerVersion}}'])
-        print('Free disk bytes:', free)
+        current = args.base / ('Easel-test' if args.isolated_test else 'Easel')
+        if current.exists():
+            try:
+                baseline_text = (current / 'pyproject.toml').read_text()
+            except OSError:
+                project = 'easel-test' if args.isolated_test else 'easel'
+                containers = subprocess.check_output(['docker', 'ps', '-q', '--filter',
+                    'label=com.docker.compose.project=' + project, '--filter',
+                    'label=com.docker.compose.service=app'], text=True).split()
+                if len(containers) != 1:
+                    raise RuntimeError('Cannot verify active version before deployment.')
+                baseline_text = subprocess.check_output(['docker', 'exec', containers[0],
+                    'cat', '/app/pyproject.toml'], text=True)
+            check_release_version((RELEASE / 'pyproject.toml').read_text(), baseline_text)
+        info = json.loads(subprocess.check_output(['docker', 'info', '--format', '{{json .}}'], text=True))
+        docker_root = info.get('DockerRootDir')
+        if not isinstance(docker_root, str) or not Path(docker_root).is_absolute():
+            raise RuntimeError('Docker storage root is not an absolute host path.')
+        print('Storage preflight:', json.dumps(check_storage(args.base, Path(docker_root))), flush=True)
         if env_file(args.base, args.isolated_test).exists():
             compose(args.base, args.isolated_test, RELEASE, ['config', '--quiet'])
     elif args.operation == 'prepare':

@@ -210,6 +210,17 @@ checks. Stop/remove the test containers after testing; retain reports as needed.
 
 ## Acceptance gates
 
+Before building, preflight checks the release/data filesystem, DockerRootDir
+and /var/lib/containerd (when present), each with at least 5GiB free. Full builds
+can need substantially more space; this floor is not a capacity guarantee.
+An older stable product version is rejected before activation. Use the recorded
+rollback operation for a deliberate rollback. Release-number-only changes still
+reuse the verified runtime when all dependency inputs otherwise match.
+
+For 0.46.0, use the branch based on the live 0.45.9 release. The abandoned 0.10.0
+candidate is from an older branch and must not replace the deployed product.
+See ../../docs/super-agent-0.46.0.md for the disk failure and repair boundaries.
+
 Record separately: source/unit tests, HTTP with explicit CA, real browser with
 installed trust, actual model/tool/file behavior, resource observation and
 AI-skills regression. Test authentication across API, media, uploads, downloads

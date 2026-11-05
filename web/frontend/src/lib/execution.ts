@@ -1,5 +1,6 @@
 import { explainCommand } from './commandExplanation';
 export type OperationStatus = 'running'|'returned'|'completed'|'failed'|'unconfirmed'|'stopped'|'denied';
+export type LifecycleState = 'admitted'|'running'|'succeeded'|'repairable'|'manual'|'stopped'|'unknown';
 export interface Operation {
   id: string; name: string; kind?: 'command'|'read'|'file_change'|'search'|'browser'|'tool'; status: OperationStatus;
   command: string; path: string; output: string; diff: string; cwd?: string; query?: string; url?: string; action?: string;
@@ -8,6 +9,8 @@ export interface Operation {
   contentHidden?: boolean; source?: string; truncated?: Record<string, boolean>; order?: number;
   waitingForUser?: boolean;
   webSources?: {url:string;title:string}[];
+  lifecycleState?: LifecycleState;
+  lifecycleHistory?: {state:LifecycleState;at?:string|null}[];
 }
 export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {
@@ -17,6 +20,25 @@ export interface ExecutionSnapshot {
   total?: number; nextBefore?: number|null; source?: string; plan?: {step:string;status:string}[]; progress?: string[]; timeline?:ExecutionEntry[];
 }
 const statuses = new Set(['running','returned','completed','failed','unconfirmed','stopped','denied']);
+const lifecycleStates = new Set<LifecycleState>(['admitted','running','succeeded','repairable','manual','stopped','unknown']);
+function sanitizeLifecycle(row: Operation): Operation {
+  const hasState = Object.prototype.hasOwnProperty.call(row, 'lifecycleState');
+  const allowed = row.status === 'running' ? new Set<LifecycleState>(['admitted','running'])
+    : row.status === 'returned' || row.status === 'completed' ? new Set<LifecycleState>(['succeeded'])
+    : row.status === 'failed' ? new Set<LifecycleState>(['repairable','manual','unknown'])
+    : row.status === 'denied' ? new Set<LifecycleState>(['manual','unknown'])
+    : row.status === 'stopped' ? new Set<LifecycleState>(['stopped'])
+    : new Set<LifecycleState>(['unknown']);
+  const lifecycleState = hasState
+    ? (lifecycleStates.has(row.lifecycleState as LifecycleState) && allowed.has(row.lifecycleState as LifecycleState)
+      ? row.lifecycleState : 'unknown')
+    : undefined;
+  const lifecycleHistory = Array.isArray(row.lifecycleHistory)
+    ? row.lifecycleHistory.filter(item => item && lifecycleStates.has(item.state)
+      && (item.at === undefined || item.at === null || typeof item.at === 'string' && item.at.length <= 64)).slice(-8)
+    : undefined;
+  return {...row, lifecycleState, lifecycleHistory};
+}
 export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   if(!value || typeof value!=='object')return null;
   const data=value as ExecutionSnapshot;
@@ -27,7 +49,7 @@ export function decodeExecution(value: unknown): ExecutionSnapshot|null {
   const timeline=Array.isArray(data.timeline)?data.timeline.filter(entry=>entry&&typeof entry.id==='string'&&Number.isSafeInteger(entry.order)&&entry.order>=0&&(entry.type==='progress'?typeof entry.text==='string':entry.type==='operation'&&typeof entry.operationId==='string')).slice(-500):undefined;
   const rawRuntime=data.runtime;
   const runtime=rawRuntime&&typeof rawRuntime.subagentsConfigured==='boolean'?{subagentsConfigured:rawRuntime.subagentsConfigured,subagentReason:typeof rawRuntime.subagentReason==='string'?rawRuntime.subagentReason.slice(0,500):undefined}:undefined;
-  return {...data,runtime,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
+  return {...data,operations:data.operations.map(sanitizeLifecycle),runtime,plan,progress,timeline,warnings:Array.isArray(data.warnings)?data.warnings.filter(x=>typeof x==='string'):[]};
 }
 export function publishExecution(value: unknown) {
   const data=decodeExecution(value);
