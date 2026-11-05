@@ -1034,13 +1034,17 @@ export default function App() {
       showToast(cause instanceof Error ? cause.message : '分享创建失败', 'error');
     }
   }, [activeSessionId]);
+  const shareLoads = useRef(new Set<string>());
   const handleLoadShareAppends = useCallback(async () => {
     const active = sessionsRef.current.find(item => item.id === activeSessionId);
     const share = active?.share;
-    if (!active || !share) return;
+    if (!active || !share || shareLoads.current.has(active.id)) return;
+    shareLoads.current.add(active.id);
     try {
       const { appends } = await fetchShareAppends(share.token);
-      const merged = mergeShareAppends(active, appends);
+      const current = sessionsRef.current.find(item => item.id === active.id);
+      if (!current || current.share?.token !== share.token) return;
+      const merged = mergeShareAppends(current, appends);
       if (!merged.added) { showToast('没有新的接管内容', 'info'); return; }
       const next = sessionsRef.current.map(item => item.id === active.id ? merged.session : item);
       if (!saveSessions(next)) { showToast('接管内容未能保存到本机；请保留当前页面。', 'error'); return; }
@@ -1049,7 +1053,7 @@ export default function App() {
       showToast(`已加载 ${merged.added} 条接管内容`, 'success');
     } catch (cause) {
       showToast(cause instanceof Error ? cause.message : '接管内容读取失败', 'error');
-    }
+    } finally { shareLoads.current.delete(active.id); }
   }, [activeSessionId]);
 
   // 非显式入口（看热点一键做成内容、技能开聊、爆款拆解）并入当前选中的对话；

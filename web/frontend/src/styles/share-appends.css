@@ -1,0 +1,5 @@
+.chat-share-load.has-pending { color:var(--text); background:var(--surface-2); font-weight:600; }
+.share-append-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:8px 18px; padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); font-size:13px; }
+.share-append-notice p { margin:4px 0 0; color:var(--text-secondary); font-size:12px; }
+.share-append-notice button { flex-shrink:0; }
+@media(max-width:600px) { .share-append-notice { flex-wrap:wrap; margin:8px 12px; gap:8px; } }

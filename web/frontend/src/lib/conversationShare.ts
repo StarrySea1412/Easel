@@ -29,17 +29,28 @@ export async function createConversationShare(session: ChatSession): Promise<Con
   return value as ConversationShare;
 }
 
-export async function fetchShareAppends(token: string): Promise<{ appends: ShareAppend[]; appendCount: number; title: string }> {
-  const response = await fetch(`${base()}/api/conversation-shares/${encodeURIComponent(token)}`, { cache: 'no-store' });
+export async function fetchShareAppends(token: string, signal?: AbortSignal): Promise<{ appends: ShareAppend[]; appendCount: number; title: string }> {
+  const response = await fetch(`${base()}/api/conversation-shares/${encodeURIComponent(token)}`, { cache: 'no-store', signal });
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : '接管内容读取失败');
   return { appends: Array.isArray(value.appends) ? value.appends : [], appendCount: value.appendCount || 0, title: value.title || '' };
 }
 
+export function pendingShareAppends(session: Pick<ChatSession, 'loadedShareAppends'>, appends: ShareAppend[]): ShareAppend[] {
+  const loaded = new Set(session.loadedShareAppends || []);
+  const seen = new Set<string>();
+  return appends.filter(append => {
+    if (!append?.appendId || loaded.has(append.appendId) || seen.has(append.appendId)
+      || !Array.isArray(append.messages) || !append.messages.some(message => typeof message.content === 'string' && message.content.trim())) return false;
+    seen.add(append.appendId);
+    return true;
+  });
+}
+
 /** 把接管追加合并进本地会话：按 appendId 去重，逐条标注来源与时间，绝不静默改写历史。 */
 export function mergeShareAppends(session: ChatSession, appends: ShareAppend[]): { session: ChatSession; added: number } {
   const loaded = new Set(session.loadedShareAppends || []);
-  const fresh = appends.filter(append => append && append.appendId && !loaded.has(append.appendId));
+  const fresh = pendingShareAppends(session, appends);
   if (!fresh.length) return { session, added: 0 };
   const token = session.share?.token || '';
   const messages: ChatMessage[] = fresh.flatMap(append => append.messages

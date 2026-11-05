@@ -15,6 +15,8 @@ import { type TaskSnapshot, type TaskGoal } from '../lib/tasks';
 import { taskRequest, taskMessageSession } from '../lib/tasks';
 import { showToast } from '../lib/toast';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
+import { useShareAppends } from '../hooks/useShareAppends';
+import '../styles/share-appends.css';
 import ChatExecutionPanel from './ChatExecutionPanel';
 import CodexRunPanel from './CodexRunPanel';
 import QuestionCards from './QuestionCards';
@@ -113,6 +115,11 @@ function greeting(): string {
 }
 
 function ChatPageContent({ session, stream, stopping = false, stopError, onEngineChange, onSend, onStop, onEdit, onOpenSource, onOpenAnalysis, onWriteFromAnalysis, onSteer, onResend, onQuestionAnswered, onOpenAudit, onNewChat, onOpenModels, taskState,onTaskChange,onOpenTask,onScheduleDraft, sideSessions = [], closedSideSessions = [], onSideReopen, sideStreams = {}, sideStoppingSessions = {}, sideStopErrors = {}, onSideQuestionAnswered, onSideSteer, onSideChat, onSideSend, onSideStop, onQuoteFromMain, onQuoteToMain, onSideClose, onSideRename, onSideReorder, onShare, onLoadShare }: ChatPageProps) {
+  const pendingShareCount = useShareAppends(session);
+  const shareNotice = pendingShareCount > 0 && onLoadShare && <section className="share-append-notice" role="status" aria-label="接管内容待加载">
+    <div><strong>有 {pendingShareCount} 条新的接管内容可加载</strong><p>点击「加载接管内容」查看追加的文字和图片。</p></div>
+    <button type="button" className="btn btn-sm" onClick={onLoadShare}>立即加载接管内容</button>
+  </section>;
   const sessionGoals=taskState?.goals.filter(g=>g.sessionId===session.id)||[];
   const goal=sessionGoals.find(g=>!['completed','cancelled'].includes(g.status))||sessionGoals[0];
   const taskRuns=taskState?.runs.filter(r=>r.goalId===goal?.id)||[];
@@ -363,7 +370,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     <div className="chat-header-actions">
       {session.writingContext && !isImported && onOpenSource && <button type="button" className="chat-new-button" title={`${session.writingContext.platform} · ${session.writingContext.accountId}`} onClick={() => onOpenSource(session.writingContext!.sourceSessionId)}>原分析</button>}
       {!isImported&&onShare&&<button type="button" className="chat-new-button chat-share-trigger" onClick={onShare} title="把完整对话分享给外部模型接管（本地 token）">分享</button>}
-      {!isImported&&session.share&&onLoadShare&&<button type="button" className="chat-new-button chat-share-load" onClick={onLoadShare} title={`分享 token：${session.share.token}`}>加载接管内容</button>}
+      {!isImported&&session.share&&onLoadShare&&<button type="button" className={`chat-new-button chat-share-load${pendingShareCount ? ' has-pending' : ''}`} onClick={onLoadShare} title="读取外部追加的文字和图片，不会发送模型请求">加载接管内容{pendingShareCount > 0 && `（${pendingShareCount} 条新内容）`}</button>}
       {!isImported&&!goalEditor&&<button type="button" className="chat-new-button chat-side-trigger" onClick={openNewPanel} aria-expanded={panelVisible} aria-label="新增面板"><IconLayout size={16}/> 新增面板</button>}
       {!isImported&&!goalEditor&&<ChatProgressCapsule goal={goal} activity={stream?.activity||session.messages.at(-1)?.activity} startedAt={stream?.startedAt||session.messages.at(-1)?.startedAt} elapsedMs={!isStreaming?session.messages.at(-1)?.elapsedMs:undefined} failed={Boolean(session.messages.at(-1)?.error)&&!isStreaming} stopped={session.messages.at(-1)?.stopped&&!isStreaming} onGoal={viewGoal}/>}
       {isImported ? <span className="chat-header-status">只读备份</span> : isStreaming && <span className="chat-header-status" role="status">{stopping ? '正在停止' : '进行中'}</span>}
@@ -392,6 +399,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
     return withGoal(
       <div className="chat-page chat-welcome-page">
         {header}
+        {shareNotice}
         <div className="chat-hero">
           <h1 className="chat-hero-title">{session.analysisContext ? session.analysisContext.kind === 'content-analysis' ? '从作品中，找到下一步' : '看清账号的内容方向' : greeting()}</h1>
           <p className="chat-hero-sub">{session.analysisContext ? '材料已就绪，选择分析重点或补充你的问题。' : '从一个想法开始，一起把内容做好。'}</p>
@@ -430,6 +438,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
   return withGoal(
     <div className="chat-page chat-conversation-page">
       {header}
+      {shareNotice}
       {session.editBranch && !isImported && <div className="chat-edit-branch-notice"><span>编辑分支 · 已带入此前可见消息，原对话保留</span>{onOpenSource && <button type="button" className="btn btn-sm" onClick={() => onOpenSource(session.editBranch!.sourceSessionId)}>查看原对话</button>}</div>}
       {isImported && <section className="chat-backup-notice" aria-label="导入记录说明">
         <div>
