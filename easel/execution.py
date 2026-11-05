@@ -81,6 +81,11 @@ def begin(session, turn, call, name, args, at=None, credentials=None, source='tr
     row = {'id': ident(session, turn, call), 'name': name, 'kind': kind(name, args),
            'status': 'running', 'command': '', 'path': '', 'cwd': '', 'output': '', 'diff': '',
            'truncated': {}, 'source': source}
+    # ``status`` is retained for existing clients.  ``lifecycleState`` is the
+    # stable orchestration vocabulary used by the Super Agent harness.
+    row['lifecycleState'] = 'running'
+    row['lifecycleHistory'] = [{'state': 'admitted', 'at': iso(at)}]
+    row['lifecycleHistory'].append({'state': 'running', 'at': iso(at)})
     for field, value in {
         'command': args.get('command', args.get('cmd', '')),
         'path': args.get('path', args.get('file_path', args.get('file', ''))),
@@ -136,6 +141,21 @@ def returned(row, result, at=None, credentials=None, partial=False):
         row['elapsedSeconds'] = round(at - start, 3)
     if row['status'] != 'running' and iso(at):
         row['finishedAt'] = iso(at)
+    lifecycle = {
+        'running': 'running',
+        'returned': 'succeeded',
+        'completed': 'succeeded',
+        'failed': 'manual',
+        'denied': 'manual',
+        'stopped': 'stopped',
+        'unconfirmed': 'unknown',
+    }.get(row['status'], 'unknown')
+    if partial:
+        lifecycle = 'running'
+    row['lifecycleState'] = lifecycle
+    history = row.setdefault('lifecycleHistory', [])
+    if not history or history[-1].get('state') != lifecycle:
+        history.append({'state': lifecycle, 'at': iso(at)})
     if SENSITIVE.search(row.get('path', '')):
         row['output'] = row['diff'] = ''
         row['contentHidden'] = True
@@ -204,10 +224,16 @@ def codex_rows(state):
         row['order'] = order
         row['status'] = {'inProgress': 'running', 'completed': 'completed', 'failed': 'failed',
                          'declined': 'denied', 'interrupted': 'stopped'}.get(item.get('status'), 'unconfirmed')
+        row['lifecycleState'] = {
+            'running': 'running', 'completed': 'succeeded', 'failed': 'manual',
+            'denied': 'manual', 'stopped': 'stopped', 'unconfirmed': 'unknown',
+        }.get(row['status'], 'unknown')
         if item.get('_startedAt'):
             row['startedAt'] = item['_startedAt']
         if item.get('_finishedAt'):
             row['finishedAt'] = item['_finishedAt']
+        row['lifecycleHistory'] = [{'state': 'admitted', 'at': row.get('startedAt')},
+                                   {'state': row['lifecycleState'], 'at': row.get('finishedAt')}]
         duration = item.get('durationMs')
         if isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration >= 0:
             row['elapsedSeconds'] = duration / 1000

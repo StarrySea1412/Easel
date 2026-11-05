@@ -3613,6 +3613,18 @@ def _selected_skill_specs(req: ChatRequest) -> dict[str, dict]:
     return specs
 
 
+def _validate_xhs_skill_selection(specs: dict[str, dict]) -> None:
+    """Keep read/analysis and external publishing in separate request phases."""
+    names = set(specs)
+    publisher = 'skill-xhs-publisher' in names
+    readers = names.intersection({'skill-xhs-analyzer', 'skill-xhs-comment-reply'})
+    if publisher and readers:
+        raise HTTPException(
+            400,
+            '小红书发布必须与分析/评论分开提交；请先完成只读阶段，再单独确认发布。',
+        )
+
+
 def _skill_requirements_context(req: ChatRequest, specs: dict[str, dict]) -> str:
     """Build request-local user instructions; never edit or persist installed skills."""
     if not specs and not req.skillRequirements:
@@ -3741,8 +3753,9 @@ def _chat_message(req: ChatRequest) -> str:
     if req.sessionId:
         repair_context = context_for_session(OUTPUTS_DIR, req.sessionId)
         if repair_context:
-            message += "\\n\\n" + repair_context
+            message += '\n\n' + repair_context
     specs = _selected_skill_specs(req)
+    _validate_xhs_skill_selection(specs)
     xhs_context = _xiaohongshu_execution_context(specs)
     if xhs_context:
         message += '\n\n' + xhs_context

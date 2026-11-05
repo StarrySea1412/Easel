@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pytest
 
 
 def _failure(path: str, message: str = "Local media path is not under an allowed directory"):
@@ -92,6 +93,7 @@ def test_repair_context_is_injected_into_next_chat_message(monkeypatch, tmp_path
     message = app._chat_message(app.ChatRequest(message="继续", sessionId="session"))
     assert "修复 Agent 回执" in message
     assert "targetPath" in message
+    assert "\n\n〔修复 Agent 回执" in message
 
 
 def test_repair_agent_accepts_outputs_relative_path(tmp_path: Path):
@@ -117,3 +119,77 @@ def test_xiaohongshu_skill_context_routes_card_workflow():
     assert "〔小红书组别执行契约〕" in message
     assert "card-design → card-xiaohongshu → card_audit" in message
     assert "不凭文件名猜图" in message
+
+
+def test_repair_budget_survives_supervisor_restart(tmp_path: Path):
+    from web.repair_agent import RepairAgent
+
+    outputs = tmp_path / "outputs"
+    image = outputs / "topic" / "card.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"png")
+    first = RepairAgent(outputs, "session", "turn-a", workspace=tmp_path / "workspace",
+                        max_session_repairs=1)
+    row, result = _failure(str(image))
+    assert first.on_failure(row, result)["status"] == "repaired"
+
+    restarted = RepairAgent(outputs, "session", "turn-b", workspace=tmp_path / "workspace",
+                            max_session_repairs=1)
+    row2, result2 = _failure(str(image))
+    row2["id"] = "operation-2"
+    receipt = restarted.on_failure(row2, result2)
+    assert receipt["status"] == "manual"
+    assert receipt["reason"] == "session repair limit reached"
+
+
+def test_execution_lifecycle_distinguishes_repairable_and_unknown(tmp_path: Path):
+    from easel.execution_store import ExecutionStore
+
+    store = ExecutionStore(tmp_path, "session", "turn", on_failure=lambda row, result: {
+        "status": "repaired", "action": "copy_image_for_inspection"
+    })
+    store.consume({"stream": "tool", "seq": 1, "data": {
+        "phase": "start", "toolCallId": "call", "name": "view_image", "args": {"path": "outputs/a.png"}
+    }})
+    snapshot = store.consume({"stream": "tool", "seq": 2, "data": {
+        "phase": "result", "toolCallId": "call", "isError": True,
+        "result": {"content": "Local media path is not under an allowed directory"}
+    }})
+    assert snapshot["operations"][0]["lifecycleState"] == "repairable"
+    assert [item["state"] for item in snapshot["operations"][0]["lifecycleHistory"]] == [
+        "admitted", "running", "manual", "repairable"
+    ]
+    store.finish()
+    assert store.snapshot()["operations"][0]["lifecycleState"] == "repairable"
+
+
+def test_execution_lifecycle_marks_success_and_unconfirmed(tmp_path: Path):
+    from easel.execution_store import ExecutionStore
+
+    success = ExecutionStore(tmp_path / "success", "session", "turn")
+    success.consume({"stream": "tool", "seq": 1, "data": {
+        "phase": "start", "toolCallId": "call", "name": "read", "args": {"path": "outputs/a.txt"}
+    }})
+    snapshot = success.consume({"stream": "tool", "seq": 2, "data": {
+        "phase": "result", "toolCallId": "call", "isError": False,
+        "result": {"content": "ok"}
+    }})
+    assert snapshot["operations"][0]["lifecycleState"] == "succeeded"
+
+    pending = ExecutionStore(tmp_path / "pending", "session", "turn")
+    pending.consume({"stream": "tool", "seq": 1, "data": {
+        "phase": "start", "toolCallId": "call", "name": "read", "args": {"path": "outputs/a.txt"}
+    }})
+    pending.finish()
+    assert pending.snapshot()["operations"][0]["lifecycleState"] == "unknown"
+
+
+def test_xiaohongshu_publish_cannot_share_read_only_phase():
+    from web import app
+
+    with pytest.raises(app.HTTPException) as exc:
+        app._validate_xhs_skill_selection({
+            "skill-xhs-publisher": {},
+            "skill-xhs-analyzer": {},
+        })
+    assert exc.value.status_code == 400

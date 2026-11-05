@@ -114,6 +114,15 @@ class ExecutionStore:
                     if isinstance(repair, dict):
                         row['repair'] = {key: value for key, value in repair.items()
                                          if key not in {'sourcePath'} }
+                        repair_status = repair.get('status')
+                        if repair_status == 'repaired':
+                            row['lifecycleState'] = 'repairable'
+                        elif repair_status in {'manual', 'unavailable'}:
+                            row['lifecycleState'] = 'manual'
+                        history = row.setdefault('lifecycleHistory', [])
+                        state = row['lifecycleState']
+                        if not history or history[-1].get('state') != state:
+                            history.append({'state': state, 'at': row.get('finishedAt')})
                 if phase != 'update':
                     from .plan_progress import receipt_plan
                     plan = receipt_plan(row['name'], self.plan_inputs.pop(row_id, None), result, self.credentials)
@@ -132,6 +141,10 @@ class ExecutionStore:
             for row in self.rows.values():
                 if row['status'] == 'running':
                     row['status'] = 'unconfirmed'
+                    row['lifecycleState'] = 'unknown'
+                    history = row.setdefault('lifecycleHistory', [])
+                    if not history or history[-1].get('state') != 'unknown':
+                        history.append({'state': 'unknown', 'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
             self.persist()
 
     def persist(self):

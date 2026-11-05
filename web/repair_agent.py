@@ -99,15 +99,43 @@ class RepairAgent:
     """One bounded repair decision per tool call."""
 
     def __init__(self, outputs_root: Path, session: str, turn: str, credentials: Any = None,
-                 workspace: Path | None = None, max_repairs: int = 1):
+                 workspace: Path | None = None, max_repairs: int = 1,
+                 max_session_repairs: int = 3):
         self.outputs_root = Path(outputs_root).expanduser().resolve()
         self.session = _safe_id(session)
         self.turn = _safe_id(turn)
         self.credentials = credentials
         self.workspace = Path(workspace).expanduser() if workspace else None
         self.max_repairs = max(0, int(max_repairs))
+        self.max_session_repairs = max(0, int(max_session_repairs))
         self._seen: set[str] = set()
         self._repairs = 0
+        self._session_repairs = 0
+        self._receipt_paths: dict[str, Path] = {}
+        self._restore_budget()
+
+    def _restore_budget(self) -> None:
+        """Restore idempotency and repair budgets after a supervisor restart."""
+        root = self.outputs_root / "_repairs" / self.session
+        try:
+            paths = list(root.glob("*/*.json"))
+        except OSError:
+            return
+        for path in paths:
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(value, dict):
+                continue
+            call = value.get("callId")
+            if isinstance(call, str) and value.get("turnId") == self.turn:
+                self._seen.add(call)
+                self._receipt_paths[call] = path
+                if value.get("status") == "repaired":
+                    self._repairs += 1
+            if value.get("status") == "repaired":
+                self._session_repairs += 1
 
     def _workspace(self) -> Path:
         if self.workspace is not None:
@@ -121,6 +149,8 @@ class RepairAgent:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, path)
+        if call:
+            self._receipt_paths[call] = path
         public = {key: value for key, value in receipt.items() if key not in {"sourcePath"}}
         public["receiptPath"] = str(path)
         return public
@@ -128,7 +158,9 @@ class RepairAgent:
     def on_failure(self, row: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         call = str(row.get("id") or "")
         if call in self._seen:
-            return {"status": "ignored", "reason": "duplicate tool failure", "agent": "repair-agent"}
+            return {"status": "ignored", "reason": "duplicate tool failure", "agent": "repair-agent",
+                    "callId": call, "receiptPath": str(self._receipt_paths[call])
+                    if call in self._receipt_paths else ""}
         self._seen.add(call)
         name = str(row.get("name") or "").split(".")[-1].lower()
         message = _text(result, self.credentials)
@@ -143,6 +175,9 @@ class RepairAgent:
                                                "failure": message[:1000]})
         if self._repairs >= self.max_repairs:
             return self._write_receipt(call, {**common, "status": "manual", "reason": "repair limit reached"})
+        if self._session_repairs >= self.max_session_repairs:
+            return self._write_receipt(call, {**common, "status": "manual",
+                                               "reason": "session repair limit reached"})
         if not any(marker in message.lower() for marker in ALLOWED_DIRECTORY_MARKERS):
             return self._write_receipt(call, {**common, "status": "manual",
                                                "reason": "image failure is outside the known allowed-directory repair"})
@@ -162,22 +197,31 @@ class RepairAgent:
                                                "reason": f"repair copy failed: {type(exc).__name__}",
                                                "failure": message[:1000]})
         self._repairs += 1
+        self._session_repairs += 1
         return self._write_receipt(call, {**common, "status": "repaired", "action": "copy_image_for_inspection",
                                            "sourcePath": str(source), "targetPath": str(target),
                                            "failure": message[:1000]})
 
 
-def read_recent_receipts(outputs_root: Path, session: str, limit: int = 4) -> list[dict[str, Any]]:
+def read_recent_receipts(outputs_root: Path, session: str, limit: int = 4,
+                         max_age_seconds: int = 24 * 60 * 60) -> list[dict[str, Any]]:
     root = Path(outputs_root).expanduser().resolve() / "_repairs" / _safe_id(session)
     rows: list[tuple[float, dict[str, Any]]] = []
     try:
         paths = list(root.glob("*/*.json"))
     except OSError:
         return []
+    now = time.time()
     for path in paths:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict):
+                if value.get("sessionId") != _safe_id(session):
+                    continue
+                if value.get("status") not in {"repaired", "manual"}:
+                    continue
+                if max_age_seconds >= 0 and now - path.stat().st_mtime > max_age_seconds:
+                    continue
                 rows.append((path.stat().st_mtime, value))
         except (OSError, ValueError, TypeError):
             continue

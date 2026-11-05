@@ -1,3 +1,10 @@
+## 2026-11-05 · 0.10.0 Super Agent 生命周期加固
+
+- 工具执行证据新增 `lifecycleState` 与有界 `lifecycleHistory`：`admitted → running → succeeded / repairable / manual / stopped / unknown`；保留旧 `status` 兼容前端。
+- repair-agent 从 `outputs/_repairs/` 恢复同轮幂等和会话级修复预算，supervisor 重启后仍不会突破上限；连续对话只注入当前会话、未过期且脱敏的 `repaired/manual` 回执。
+- 修复回执换行注入错误；小红书分析/评论与发布不能合并到同一请求阶段，发布必须独立确认。
+- 新增生命周期/修复/路由检查 30/30，既有相关后端回归 74/74，Python compileall 和生产 frontend build 通过；lint 保留既有 warning。138、真实浏览器业务验收和用户验收未完成。
+
 ## 2026-11-05 · 0.9.0 工具修复 Agent 与小红书组别优化
 
 - 已实现 web/repair_agent.py：按会话/轮次/工具调用幂等记录失败；只处理 view_image 的 allowed-directory 已知错误，只从配置的 outputs 根目录复制安全图片到 OpenClaw 实际 workspace 的 _inspect/easel-repair/，每轮最多一次修复。

@@ -1,3 +1,10 @@
+## 0.10.0 · 2026-11-05 · Super Agent lifecycle hardening / 编排生命周期加固
+
+- Add a persisted lifecycle vocabulary for tool evidence: admitted, running, succeeded, repairable, manual, stopped and unknown. Keep the existing `status` field for compatibility and append bounded lifecycle history for audit and recovery decisions.
+- Restore repair-agent budgets and per-call idempotency from durable receipts after supervisor restart; cap repairs across a session and expire stale continuation receipts before injecting them into a new request.
+- Fix same-session continuation context formatting and reject mixed Xiaohongshu read-only analysis/comment skills with publishing in one request. Publishing remains a separate explicitly confirmed phase.
+- Validation: new lifecycle/repair/routing checks pass 30/30; existing related backend checks pass 74/74; Python compileall and production frontend build pass. Host 138 and real-browser business acceptance remain separate gates.
+
 ## 0.9.0 · 2026-11-05 · Deterministic tool repair and Xiaohongshu workflow / 工具修复与小红书组别
 
 - Add a bounded repair-agent contract and deterministic repair controller. It repairs only allowed-directory image failures by copying an image from the configured outputs root into the runtime OpenClaw inspection workspace, with one repair per tool call and one repair per turn.
