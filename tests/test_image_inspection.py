@@ -57,3 +57,17 @@ console.log(JSON.stringify(result));""".replace('MODULE',json.dumps(module))
     value=json.loads(result.stdout)
     assert not value.get('block') and value['params']['model']=='visual/test'
     assert Path(value['params']['path']).read_bytes()==source.read_bytes()
+
+
+def test_staging_rejects_symlinked_source_directory_inside_outputs(tmp_path):
+    outputs,source,state=prepared(tmp_path)
+    original=source.parent
+    moved=outputs/'moved'
+    original.rename(moved)
+    try:
+        original.symlink_to(moved,target_is_directory=True)
+    except OSError:
+        pytest.skip('symlink creation unavailable')
+    with pytest.raises(ValueError,match='Untrusted'):
+        stage_owned_image(outputs,state,'chat',str(source))
+    assert not state.exists()

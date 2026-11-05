@@ -18,6 +18,8 @@ def stage_owned_image(outputs: Path, state: Path, session: str, source: str) -> 
     scope(session)
     outputs = Path(outputs).resolve()
     source_path, relative = file_path(outputs, source)
+    if source_path.resolve() != source_path.absolute():
+        raise ValueError('Untrusted inspection source')
     if source_path.suffix.lower() not in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}:
         raise ValueError('Unsupported image type')
     registry = outputs / '_artifacts' / 'registry.sqlite3'
