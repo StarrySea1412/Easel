@@ -3,6 +3,16 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export const MAX_TOOL_ARGUMENT_BYTES = 12000;
+// No whole-response deadline here. The caller owns the task lifetime/cancel.
+// Match Easel's existing provider wait default, but reset on model stream data.
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600000;
+export function streamIdleTimeout(env = process.env) {
+  const raw = env.EASEL_MODEL_STREAM_IDLE_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+  const value = Number(raw);
+  return /^\d+$/.test(raw) && Number.isSafeInteger(value) && value <= 7200000
+    ? value : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+}
 export const REPAIR_INSTRUCTION = '上一次模型响应在工具派发前被拒绝，没有执行其中任何调用。仅重新生成尚未执行的下一步，保留此前工具结果，不重复已成功的工具或已受理的生图、发布、支付任务。工具参数必须是符合所给schema的完整JSON对象，每个参数对象不超过12000 UTF-8字节。长文本使用easel_write_artifact的begin/append/status/commit，每块最多3000字符，固定requestId、序号从0递增；完成后easel_present交付。此次修复仅可使用已提供的read/read_file/web_search/web_fetch/view_image/easel_write_artifact/easel_present/easel_plan_update/easel_goal_update/easel_task_guard工具，禁止exec、浏览器操作、启动Agent或提交生图/发布/支付；必要时用文字说明需核对后继续。生图不能改为HTML。不要重复原来的超长响应。';
 const REPAIR_SAFE_TOOLS = new Set(['read', 'read_file', 'web_search', 'web_fetch', 'view_image',
   'easel_write_artifact', 'easel_present', 'easel_plan_update', 'easel_goal_update', 'easel_task_guard']);
@@ -101,26 +111,28 @@ function terminalFailure(model, reason, usage, errorCode = 'easel_request_recove
 
 /** Request-level recovery. The rejected response never reaches a tool dispatcher. */
 export function createToolRecoveryStream(baseStream, { createStream, validateToolCall, record = audit,
-  repairTimeoutMs = 120000, requestTimeoutMs = 90000 }) {
+  streamIdleTimeoutMs = streamIdleTimeout() }) {
   // Independent budgets shared by all model steps in this prepared runtime.
   let repairs = 0, requestRetries = 0;
   return (model, context, options = {}) => {
     const output = createStream(), requestId = randomUUID();
     void (async () => {
       let priorUsage, message, repair = false;
-      const started = performance.now(), deadline = started + requestTimeoutMs;
+      const started = performance.now();
       try {
         for (let attempt = 0; attempt < 3; attempt++) {
           if (options.signal?.aborted) { message = failed(model, 'aborted', true); break; }
           const controller = new AbortController();
-          const remaining = Math.max(0, Math.min(deadline - performance.now(), repair ? repairTimeoutMs : Infinity));
-          if (remaining <= 0) {
-            message = terminalFailure(model, 'Easel request recovery exhausted');
-            record({ requestId, attempt, provider: model.provider, model: model.id,
-              outcome: 'provider_response_deadline', elapsedMs: Math.round(performance.now() - started) });
-            break;
-          }
-          const timer = setTimeout(() => controller.abort(), remaining);
+          let timer, lastActivity = performance.now(), idleExpired = false;
+          const touch = () => {
+            lastActivity = performance.now();
+            clearTimeout(timer);
+            if (streamIdleTimeoutMs > 0) timer = setTimeout(() => {
+              idleExpired = true;
+              controller.abort();
+            }, streamIdleTimeoutMs);
+          };
+          touch();
           const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
           let observedTool = false, observedOutput = false, argumentBytes = 0;
           try {
@@ -132,6 +144,9 @@ export function createToolRecoveryStream(baseStream, { createStream, validateToo
               const next = await abortable(iterator.next(), signal);
               if (next.done) break;
               const event = next.value;
+              // The adapter's synthetic start is not provider activity. Actual
+              // text/reasoning/tool deltas and terminal data keep long work alive.
+              if (event.type !== 'start') touch();
               if (event.type.startsWith('toolcall_')) observedTool = true;
               if ((event.type === 'text_delta' || event.type === 'thinking_delta') && event.delta?.trim()) observedOutput = true;
               if (event.partial?.content) for (const block of event.partial.content) {
@@ -151,10 +166,12 @@ export function createToolRecoveryStream(baseStream, { createStream, validateToo
               ? raw : 'Easel model response recovery failed');
           } finally { clearTimeout(timer); }
           if (options.signal?.aborted) { message = failed(model, 'aborted', true); break; }
-          if (signal.aborted) {
+          if (idleExpired) {
             record({ requestId, attempt, provider: model.provider, model: model.id,
-              outcome: 'provider_response_deadline', elapsedMs: Math.round(performance.now() - started) });
-            message = terminalFailure(model, 'Easel request recovery exhausted', message?.usage);
+              outcome: 'model_stream_idle_timeout', timeoutSource: 'easel_stream_idle',
+              idleTimeoutMs: streamIdleTimeoutMs, idleMs: Math.round(performance.now() - lastActivity),
+              elapsedMs: Math.round(performance.now() - started), observedOutput, observedTool });
+            message = terminalFailure(model, 'Easel model stream idle timeout', message?.usage, 'model_stream_idle_timeout');
             break;
           }
           if (message.stopReason === 'aborted') break;
@@ -162,12 +179,12 @@ export function createToolRecoveryStream(baseStream, { createStream, validateToo
           if (httpStatus) {
             const empty = !observedOutput && !observedTool && !(message.content || []).some(block =>
               block.type === 'toolCall' || block.type === 'text' && block.text?.trim() || block.type === 'thinking' && block.thinking?.trim());
-            const retry = empty && requestRetries < 1 && performance.now() < deadline;
+            const retry = empty && requestRetries < 1;
             record({ requestId, attempt, provider: model.provider, model: model.id, httpStatus,
               outputTokens: message.usage?.output ?? null, elapsedMs: Math.round(performance.now() - started),
               outcome: retry ? 'provider_request_retry' : 'provider_request_exhausted' });
             if (!retry) {
-              message = terminalFailure(model, 'Easel request recovery exhausted', message.usage);
+              message = terminalFailure(model, 'Easel provider request recovery stopped', message.usage, 'model_provider_timeout');
               break;
             }
             requestRetries++;

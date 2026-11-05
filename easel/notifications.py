@@ -56,8 +56,39 @@ def session_from_chat_notice(ident):
     return session_id if re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', session_id) else None
 
 
+def chat_notice_titles(outputs: Path, sessions):
+    """Read existing title metadata only; never load conversation messages."""
+    path = Path(outputs).resolve() / '_automation' / 'tasks.sqlite3'
+    if not path.is_file():
+        return {}
+    titles = {}
+    try:
+        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=1) as db:
+            db.execute('PRAGMA query_only=ON')
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            wanted = list(dict.fromkeys(sessions))[:1000]
+            for start in range(0, len(wanted), 200):
+                batch = wanted[start:start + 200]
+                marks = ','.join('?' for _ in batch)
+                deleted = f' AND id NOT IN (SELECT id FROM deleted_sessions)' if 'deleted_sessions' in tables else ''
+                for table in ('conversation_snapshots', 'sessions'):
+                    if table not in tables:
+                        continue
+                    rows = db.execute(f"SELECT id,json_extract(data,'$.title') FROM {table} WHERE id IN ({marks})" + deleted, batch)
+                    for ident, title in rows:
+                        if ident in titles or not isinstance(title, str):
+                            continue
+                        title = re.sub(r'\s+', ' ', title).strip()
+                        if title and title not in {'对话', '新对话'}:
+                            titles[ident] = title[:80]
+    except (OSError, sqlite3.Error, ValueError):
+        pass
+    return titles
+
+
 class NotificationStore:
     def __init__(self, outputs: Path):
+        self.outputs = Path(outputs)
         self.path = outputs / '_notifications' / 'history.sqlite3'
 
     @contextmanager
@@ -77,7 +108,21 @@ class NotificationStore:
     def list(self):
         with self.database() as db:
             rows = [json.loads(row[0]) for row in db.execute('SELECT payload FROM notices ORDER BY at DESC, id DESC LIMIT ?', (LIMIT,))]
-            return dict(notices=rows, seen=[r[0] for r in db.execute('SELECT id FROM seen ORDER BY at DESC LIMIT 10000')], limit=LIMIT)
+            seen = [r[0] for r in db.execute('SELECT id FROM seen ORDER BY at DESC LIMIT 10000')]
+        identities = {row['id']: session_from_chat_notice(row['id']) for row in rows}
+        titles = chat_notice_titles(self.outputs, [sid for sid in identities.values() if sid])
+        for row in rows:
+            sid = identities[row['id']]
+            # Keep customized non-completion notices untouched. Projection also
+            # repairs old generic notices without changing ids, read state or time.
+            outcome = row['id'].rsplit(':', 1)[-1]
+            if sid and outcome in {'已完成', '失败', '已停止'}:
+                subject = titles.get(sid)
+                if subject:
+                    row['message'] = f'{subject} · {outcome}'
+                elif row['message'] == f'对话 · {outcome}':
+                    row['message'] = f'对话 {sid[-6:]} · {outcome}'
+        return dict(notices=rows, seen=seen, limit=LIMIT)
 
     def add(self, values):
         rows = [notice(value) for value in values]
@@ -138,6 +183,7 @@ class NotificationStore:
 
 def chat_finished(outputs: Path, sid: str, tid: str, *, failed=False, stopped=False):
     outcome = '失败' if failed else '已停止' if stopped else '已完成'
-    NotificationStore(outputs).add([dict(id=f'chat:{sid}:{tid}:{outcome}', message=f'对话 · {outcome}',
+    title = chat_notice_titles(outputs, [sid]).get(sid, f'对话 {sid[-6:]}')
+    NotificationStore(outputs).add([dict(id=f'chat:{sid}:{tid}:{outcome}', message=f'{title} · {outcome}',
         tone='error' if failed else 'info' if stopped else 'success', at=int(time.time() * 1000),
         target=dict(page='chat', sessionId=sid))])

@@ -1,3 +1,10 @@
+## 0.46.1 · 2026-11-05 · 长任务等待、图片与通知修复
+
+- 移除恢复层90秒整次响应与120秒修复截止，改用可配置模型流事件空闲检测，持续活动续期；外层任务/取消保留。
+- 区分本地空闲、供应商504/524与旧版模糊恢复诊断，保留完整工具校验、防重放和有限恢复。
+- 已交付outputs图片按会话归属安全暂存；图片任务整图预览、状态及草稿动作分离，仅按已验证内容哈希去重。
+- 新通知和历史投影恢复真实对话标题，保留已读、原时间及删除状态。[研究、验证和138状态](docs/agent-wait-image-notices-0.46.1.md)。
+
 ## 0.46.0 · 2026-11-05 · Deterministic tool repair and deployment guards
 
 - Port bounded image-read repair onto the deployed 0.45.9 baseline, preserving current continuation and publishing behavior.

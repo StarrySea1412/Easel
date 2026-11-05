@@ -40,6 +40,21 @@ export interface ChatArtifact {
   mimeType: string; version: string; size: number; status: 'ready' | 'missing' | 'failed';
   description?: string; error?: string;
   revision: number;
+  contentSha256?: string;
+}
+// Only verified byte hashes merge copies. Similar names, prompts, sizes and
+// path-dependent resource versions are not evidence that images are identical.
+export function uniqueImageArtifacts(items: ChatArtifact[]): {artifact: ChatArtifact; copies: number}[] {
+  const groups = new Map<string, {artifact: ChatArtifact; copies: number}>();
+  for (const item of items) {
+    if (!item.mimeType.startsWith('image/') || item.mimeType === 'image/svg+xml') continue;
+    const hash = item.status === 'ready' && /^[a-f0-9]{64}$/.test(item.contentSha256 || '') ? item.contentSha256 : null;
+    const key = JSON.stringify([item.sessionId, item.turnId, item.status, hash || item.id]);
+    const existing = groups.get(key);
+    if (existing) existing.copies++;
+    else groups.set(key, {artifact: item, copies: 1});
+  }
+  return [...groups.values()];
 }
 export interface ChatImageJob {
   jobId: string; sessionId: string; turnId: string; prompt: string;

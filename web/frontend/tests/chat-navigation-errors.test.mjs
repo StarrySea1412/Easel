@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import {loadTsModule} from './load-ts.mjs';
 const {chatTurnNodes,activeTurnFromOffsets,isChatAtBottom,shouldFollowChatScroll}=await loadTsModule('../src/lib/chatNavigation.ts',import.meta.url);
 const {chatErrorDetail,makeChatError,chatErrorTitle,historicalGatewayAuthError}=await loadTsModule('../src/lib/chatErrors.ts',import.meta.url);
+
+test('local idle, old ambiguous recovery and provider timeout have separate titles',()=>{
+ assert.equal(chatErrorTitle({code:'model_stream_idle_timeout',message:'本地等待中断',category:'timeout'}),'模型流等待中断');
+ assert.equal(chatErrorTitle({code:'model_recovery_stopped',message:'旧记录',category:'execution'}),'旧版请求恢复已停止');
+ assert.equal(chatErrorTitle({code:'model_provider_timeout',message:'504',category:'timeout'}),'渠道响应超时');
+});
 test('turn nodes count user requests only and preserve anchors through assistant updates',()=>{
  const messages=[{role:'user',content:'第一轮\n问题'},{role:'assistant',content:'answer'},{role:'user',content:'',attachments:[{}]},{role:'assistant',content:'partial'}];
  assert.deepEqual(chatTurnNodes(messages),[{messageIndex:0,number:1,label:'第一轮 问题',reply:'answer'},{messageIndex:2,number:2,label:'附件创作（1 个附件）',reply:'partial'}]);

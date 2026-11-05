@@ -315,3 +315,13 @@ def test_failure_path_parser_preserves_linux_paths_and_size_limit(tmp_path):
     receipt = repair.RepairAgent(image.parent, 's', 't', workspace=tmp_path/'workspace').on_failure(*_failure(str(image)))
     assert receipt['status'] == 'manual'
     assert 'size limit' in receipt['reason']
+
+
+def test_image_description_timeout_never_copies_or_regenerates(tmp_path):
+    from web.repair_agent import RepairAgent
+    agent = RepairAgent(tmp_path/'outputs', 'session', 'turn', workspace=tmp_path/'workspace')
+    row, result = _failure('/data/outputs/card.png', 'image description request timed out after 60000ms (setup took 12ms before provider request started)')
+    receipt = agent.on_failure(row, result)
+    assert receipt['status'] == 'manual'
+    assert 'provider timed out' in receipt['reason']
+    assert not (tmp_path/'workspace').exists()

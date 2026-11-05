@@ -6,9 +6,8 @@ import { useImageStudio, type ImageStudioController } from '../hooks/useImageStu
 import type { VideoStudioController } from '../hooks/useVideoStudio';
 import { creationRevision, subscribeCreation, creationWorkspaces, creationSlot, selectCreation, ensureCreation, backupCreationDraft, previousCreationDraft, canReturnToSession, returnImageToChat, addImageToPublish, type CreationWorkspace } from '../lib/creationWorkspace';
 import { useChatArtifacts } from '../hooks/useChatArtifacts';
-import { artifactUrl } from '../lib/chatArtifacts';
+import ConversationImageTasks from './ConversationImageTasks';
 import { mediaUrl } from '../lib/api';
-import PublishSpinner from './PublishSpinner';
 import ImageStudioPage from './ImageStudioPage';
 import PublishPage from './PublishPage';
 import Select from './ui/Select';
@@ -95,12 +94,7 @@ function WorkspaceInstance(props: Props & {workspace:CreationWorkspace}) {
     {typeof backup?.prompt === 'string' && <button type="button" className="btn btn-sm" disabled={busy} onClick={async()=>{if(await confirmModal('恢复上一份提示词？当前提示词将保留为可恢复版本。')) {backupCreationDraft(workspace,{prompt:studio.imgPrompt,size:studio.imgSize});studio.setImgPrompt(backup.prompt as string);changedBackup(value=>value+1);}}}><IconHistory size={14}/>恢复上一稿</button>}</div>}
     {showTarget && <div className="creation-target"><Select aria-label="回填目标对话" value={targetId || ''} options={targetOptions} onChange={setTarget}/><button type="button" className="btn btn-sm" onClick={()=>setTarget(onNewChat())}><IconPlus size={14}/>新建目标对话</button></div>}
   </div>;
-  return createPortal(<div className="creation-workspace-mount">{toolbar}{workspace.kind === 'image' && (deliveries.jobs.length > 0 || deliveries.items.some(item=>item.mimeType.startsWith('image/'))) && <section className="creation-agent-jobs" aria-label="对话助手生图任务">
-    <strong>对话中的图片任务</strong>
-    {deliveries.jobs.map(job=><p key={job.jobId}>{['queued','running'].includes(job.phase)&&<PublishSpinner/>} {job.prompt.slice(0,80)} · {({queued:'排队中',running:'生成中',done:'已完成',error:'失败',unconfirmed:'结果待核实'})[job.phase]}{job.error&&<span role="alert"> · {job.error}</span>}</p>)}
-    <div className="creation-agent-images">{deliveries.items.filter(item=>item.status==='ready'&&item.mimeType.startsWith('image/')).map(item=><article key={item.id}><a href={artifactUrl(item,'file')} target="_blank" rel="noreferrer"><img src={artifactUrl(item,'file')} alt={item.description || item.name}/></a>{targetId&&<button className="link-btn" onClick={async()=>{try{await returnImageToChat(targetId,mediaUrl(item.path));showToast('图片已加入目标对话','success');}catch(reason){showToast(reason instanceof Error?reason.message:'引用失败','error');}}}>添加到对话</button>}<button className="link-btn" onClick={()=>{try{addImageToPublish(workspace.sessionId,mediaUrl(item.path));onExpand('publish');}catch(reason){showToast(reason instanceof Error?reason.message:'添加失败','error');}}}>用于发布</button></article>)}</div>
-    {deliveries.note && <p role="status">{deliveries.note}</p>}
-  </section>}{workspace.kind === 'image'
+  return createPortal(<div className="creation-workspace-mount">{toolbar}{workspace.kind === 'image' && <ConversationImageTasks key={workspace.sessionId || workspace.id} sessionId={workspace.sessionId} items={deliveries.items} jobs={deliveries.jobs} note={deliveries.note} targetId={targetId} onUpdated={deliveries.updated} onRefresh={deliveries.retry} onAddToChat={async item=>{if(!targetId)throw new Error('请先选择目标对话');await returnImageToChat(targetId,mediaUrl(item.path));}} onPublish={item=>{addImageToPublish(workspace.sessionId,mediaUrl(item.path));onExpand('publish');}}/>}{workspace.kind === 'image'
     ? <ImageStudioPage active={active} onPromptSkill={props.onPromptSkill} studio={studio} video={workspace.sessionId ? undefined : props.video} sessionId={targetId} sourceSessionId={workspace.sessionId} onOpenPublish={()=>{selectCreation('publish',workspace.sessionId);onExpand('publish');}} onOpenSettings={props.onOpenSettings} onOpenVideoSettings={props.onOpenVideoSettings} onOpenModels={props.onOpenSettings} onOpenOutputs={props.onOpenOutputs}/>
     : <PublishPage workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={source ? source.persona || '' : props.persona} publishReceipts={props.receipts} onOpenAccounts={props.onOpenAccounts} onOpenOutputs={props.onOpenPublishOutputs || props.onOpenOutputs}/>
   }</div>,container);

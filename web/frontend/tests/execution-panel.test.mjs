@@ -71,6 +71,13 @@ test('an old session response cannot become current execution evidence', async t
 });
 
 const operation = (id, status = 'running', output = '') => ({id,name:'exec',kind:'command',status,command:'python task.py',path:'',output,diff:''});
+test('image inspection failure explains access and provider timeout separately',async t=>{
+  const view=await setup(t);
+  await view.respond(0,payload('a',[{...operation('access','failed','Local media path is not under an allowed directory: /data/outputs/a.png'),name:'view_image',kind:'read'}]));
+  assert.match(view.container.textContent,/未获准访问该文件目录/);
+  await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:execution',{detail:payload('a',[{...operation('timeout','failed',JSON.stringify({error:'image description request timed out after 60000ms (setup took 12ms before provider request started)'})),name:'view_image',kind:'read'}])})));
+  assert.match(view.container.textContent,/识图服务超过 60 秒未响应/);
+});
 const emit = async data => act(async () => window.dispatchEvent(new window.CustomEvent('easel:execution', {detail:data})));
 const expand = async view => act(async () => {const detail=view.container.querySelector('details.chat-execution-row');detail.open=true;detail.dispatchEvent(new window.Event('toggle'));});
 

@@ -47,5 +47,5 @@ sha256:68d062a55d2466dc33733b22ab6ec5ee7fd273968695010bcd0d60a811f5f59a。
 
 - 后端156/156通过：修复、角色、执行轨迹、prompt envelope、聊天接续、模型选择、失败与预算。
 - 前端定向44/44通过（执行面板/错误/聊天接续）；生产build通过，lint无错误、26项既有warning。
-- Python compileall、git diff --check通过。全量前端套件仍在运行，不能计为全量通过。
+- Python compileall、git diff --check通过。全量前端套件执行至318项后主动中断，不能计为全量通过。
 - 当前基线包含138生产提交；Docker依赖输入未改变，仅产品版本变化，依赖复用由现行manifest哈希规则判断。

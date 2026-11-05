@@ -196,6 +196,10 @@ class RepairAgent:
                 reason = "provider timeout is recorded but never retried by repair-agent"
             return self._write_receipt(call, {**common, "status": "manual", "reason": reason,
                                                "failure": message[:1000]})
+        if "image description request timed out" in message.lower():
+            return self._write_receipt(call, {**common, "status": "manual",
+                "reason": "image inspection provider timed out; file delivery and visual review are separate; do not regenerate or repeat inspection automatically",
+                "failure": message[:1000]})
         if self._repairs >= self.max_repairs:
             return self._write_receipt(call, {**common, "status": "manual", "reason": "repair limit reached"})
         if self._session_repairs >= self.max_session_repairs:

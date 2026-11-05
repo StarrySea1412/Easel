@@ -55,3 +55,52 @@ test('real OpenClaw transport: malformed/length/schema/closed stream recovery ne
       } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     }
   });
+
+test('real SDK keeps active SSE reasoning/tool responses alive and never dispatches a stalled provisional call',
+  { skip: !process.env.EASEL_LLM_SDK }, async () => {
+    const sdk = await import(process.env.EASEL_LLM_SDK);
+    for (const mode of ['reasoning', 'text', 'tool', 'stalled']) {
+      const stalled = mode === 'stalled';
+      let requests = 0;
+      const server = createServer(async (_req, res) => {
+        requests++;
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const send = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({
+          id: 'active', object: 'chat.completion.chunk', model: 'fixture',
+          choices: [{ index: 0, delta, finish_reason }],
+        }) + '\n\n');
+        const startTool = () => send({ role: 'assistant', tool_calls: [{ index: 0, id: 'private-call', type: 'function',
+          function: { name: 'easel_write_artifact', arguments: '{' } }] });
+        if (stalled || mode === 'tool') startTool();
+        if (stalled) return;
+        for (let i = 0; i < 12; i++) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          if (res.destroyed) return;
+          send(mode === 'reasoning' ? { reasoning_content: 'thinking' } : mode === 'text' ? { content: 'text' }
+            : { tool_calls: [{ index: 0, function: { arguments: ' ' } }] });
+        }
+        if (mode !== 'tool') startTool();
+        send({ tool_calls: [{ index: 0, function: { arguments: '"operation":"begin"}' } }] });
+        send({}, 'tool_calls');
+        res.end('data: [DONE]\n\n');
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const model = { id: 'fixture', provider: 'happycoding', api: 'openai-completions',
+          baseUrl: 'http://127.0.0.1:' + server.address().port + '/v1', reasoning: true, input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 64000, maxTokens: 16384 };
+        const tool = { name: 'easel_write_artifact', description: 'fixture', parameters: {
+          type: 'object', required: ['operation'], properties: { operation: { type: 'string' } } } };
+        const wrapped = createToolRecoveryStream(sdk.streamSimple, { createStream: sdk.createAssistantMessageEventStream,
+          validateToolCall: sdk.validateToolCall, record() {}, streamIdleTimeoutMs: 150 });
+        const stream = await wrapped(model, { messages: [{ role: 'user', content: 'SYNTHETIC', timestamp: 1 }], tools: [tool] },
+          { apiKey: 'synthetic-not-a-secret', reasoning: 'high' });
+        const events = []; for await (const event of stream) events.push(event);
+        const result = await stream.result();
+        assert.equal(requests, 1);
+        assert.equal(result.stopReason, stalled ? 'error' : 'toolUse', result.errorMessage);
+        assert.equal(events.filter(event => event.type === 'toolcall_end').length, stalled ? 0 : 1);
+        if (stalled) assert.equal(result.errorCode, 'model_stream_idle_timeout');
+      } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    }
+  });

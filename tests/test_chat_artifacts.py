@@ -50,6 +50,22 @@ def test_delivery_survives_new_store_without_final_message_and_is_idempotent(del
         store.present_ticket('invalid', [{'path': '真实主题/a.png'}])
 
 
+def test_image_byte_hash_groups_copies_without_changing_resource_identity(delivery):
+    import hashlib
+    root, topic, store, ticket, values, client = delivery
+    (topic / 'copy.png').write_bytes((topic / 'a.png').read_bytes())
+    copy = store.present_ticket(ticket, [{'path': '真实主题/copy.png'}])[0]
+    original = values[0]
+    assert copy['contentSha256'] == original['contentSha256'] == hashlib.sha256(png('red')).hexdigest()
+    assert copy['id'] != original['id'] and copy['version'] != original['version']
+    with store.db() as db:
+        legacy = {k:v for k,v in original.items() if k != 'contentSha256'}
+        db.execute('UPDATE artifacts SET data=? WHERE id=?', (json.dumps(legacy), original['id']))
+    refreshed = client.post('/api/chat/artifacts/chat1/'+original['id']+'/refresh').json()
+    assert refreshed['contentSha256'] == copy['contentSha256']
+    assert refreshed['version'] == original['version']
+
+
 def test_image_reconcile_is_scoped_and_only_schedules_the_original_task(delivery):
     from easel.image_jobs import ImageJobs
     root, _, _, _, _, client = delivery

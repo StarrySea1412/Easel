@@ -40,6 +40,11 @@ export function operationFailureReason(row: Operation): string {
   const candidate = lines.find(line => known.test(line)) || (!external ? lines[0] : '') || '';
   const text = candidate.replace(/https?:\/\/[^\s<>"']+/gi, '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').replace(/[:：;,，\s]+$/, '').trim();
   if (!text || text.includes('<') || /UNTRUSTED|SECURITY NOTICE/i.test(text) || /^[\[{]/.test(text)) return missingFailureReason;
+  if (['view_image','imageView','read_image'].includes(row.name)) {
+    if (/Local media path is not under an allowed directory/i.test(text)) return '看图工具未获准访问该文件目录；不代表图片生成失败';
+    const timeout = /image description request timed out after (\d+)ms/i.exec(text);
+    if (timeout) return '识图服务超过 '+Math.ceil(Number(timeout[1])/1000)+' 秒未响应；图片是否保存请查看产物';
+  }
   if (row.name === 'web_search' && /(?:is disabled|no provider is available|no search provider)/i.test(text)) return '搜索服务未配置';
   const http = /^web[_ ]?fetch failed\s*\((\d{3})\)/i.exec(text);
   if (http) return http[1] === '404' ? '网页不存在（HTTP 404）' : '网页读取失败（HTTP ' + http[1] + '）';

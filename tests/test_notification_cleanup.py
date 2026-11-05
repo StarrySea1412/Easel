@@ -89,3 +89,33 @@ def test_receipt_notice_target_survives_persistence_without_unknown_fields(tmp_p
     row['target'] = {'page': 'publish-receipts', 'receiptId': 'a' * 32, 'secret': 'never-persist'}
     store.add([row])
     assert store.list()['notices'][0]['target'] == {'page': 'publish-receipts', 'receiptId': 'a' * 32}
+
+
+def test_chat_notice_projects_current_title_and_keeps_identity_read_time(tmp_path):
+    import sqlite3
+    import json
+    from easel.notifications import chat_finished
+    dbpath=tmp_path/'_automation/tasks.sqlite3';dbpath.parent.mkdir()
+    with sqlite3.connect(dbpath) as db:
+        db.execute('CREATE TABLE conversation_snapshots(id TEXT,data TEXT,revision INTEGER)')
+        db.execute('INSERT INTO conversation_snapshots VALUES(?,?,1)',('chat-a',json.dumps({'title':'奶蛙产品设计','messages':['private content']})))
+    store=NotificationStore(tmp_path)
+    old={**value('chat:chat-a:turn:已完成'),'target':{'page':'chat','sessionId':'chat-a'},'read':True}
+    store.add([old]);row=store.list()['notices'][0]
+    assert row['message']=='奶蛙产品设计 · 已完成'
+    assert row['id']==old['id'] and row['read'] is True and row['at']==old['at']
+    assert 'private content' not in str(row)
+    with sqlite3.connect(dbpath) as db:
+        db.execute('UPDATE conversation_snapshots SET data=?',(json.dumps({'title':'用户新标题'}),))
+    assert store.list()['notices'][0]['message']=='用户新标题 · 已完成'
+    chat_finished(tmp_path,'chat-a','new-turn',failed=True)
+    assert any(row['message']=='用户新标题 · 失败' for row in store.list()['notices'])
+    store.clear();assert store.list()['notices']==[]
+
+
+def test_chat_notice_missing_metadata_uses_traceable_identity_and_preserves_custom_copy(tmp_path):
+    store=NotificationStore(tmp_path)
+    store.add([value('chat:abcdef123456:turn:已完成'),value('chat:legacy:turn:失败','旧标题 · 失败')])
+    rows={r['id']:r for r in store.list()['notices']}
+    assert rows['chat:abcdef123456:turn:已完成']['message']=='对话 123456 · 已完成'
+    assert rows['chat:legacy:turn:失败']['message']=='旧标题 · 失败'

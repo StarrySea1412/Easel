@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createToolRecoveryStream, REPAIR_INSTRUCTION, registerToolRecovery } from '../openclaw/easel-agent-safety/recovery.mjs';
+import { createToolRecoveryStream, REPAIR_INSTRUCTION, registerToolRecovery, streamIdleTimeout, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../openclaw/easel-agent-safety/recovery.mjs';
 
 class Stream {
   queue = []; waiters = []; done = false;
@@ -102,13 +102,13 @@ test('abort before start performs no model request', async () => {
   assert.equal(result.stopReason, 'aborted'); assert.equal(h.calls.length, 0);
 });
 
-test('repair has a cancellation deadline and never dispatches a late response', async () => {
+test('an idle repair stops locally and never dispatches a late response', async () => {
   const h = harness([rejected(), async (_m, _c, o) => {
     await new Promise(resolve => o.signal.addEventListener('abort', resolve, { once: true }));
     return { async *[Symbol.asyncIterator]() {}, result: async () => message() };
-  }], { repairTimeoutMs: 5 });
+  }], { streamIdleTimeoutMs: 5 });
   const { result, events } = await consume(h.wrapped(model, context));
-  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted'); assert.equal(h.calls.length, 2);
+  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'model_stream_idle_timeout'); assert.equal(h.calls.length, 2);
   assert(!events.some(e => e.type === 'toolcall_end'));
 });
 
@@ -128,10 +128,10 @@ test('repair cannot resubmit a paid image under a new request identity or run ar
   }
 });
 
-test('repair deadline settles even when a provider ignores AbortSignal', async () => {
-  const h = harness([rejected(), () => new Promise(() => {})], { repairTimeoutMs: 5 });
+test('idle detection settles even when a provider ignores AbortSignal', async () => {
+  const h = harness([rejected(), () => new Promise(() => {})], { streamIdleTimeoutMs: 5 });
   const { result } = await consume(h.wrapped(model, context));
-  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted');
+  assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'model_stream_idle_timeout');
 });
 
 test('provider registration applies only to the affected model and text-only requests remain valid', async () => {
@@ -165,20 +165,88 @@ test('persistent 524 stops after two attempts; request retry budget is shared ac
   const h = harness([timeoutStream(), timeoutStream(), timeoutStream()]);
   const { result, events } = await consume(h.wrapped(model, context));
   assert.equal(h.calls.length, 2); assert.equal(result.stopReason, 'error');
-  assert.equal(result.errorMessage, 'Easel request recovery exhausted');
+  assert.equal(result.errorMessage, 'Easel provider request recovery stopped');
   assert(result.content.length > 0); assert(!events.some(e => e.type === 'toolcall_end'));
   await consume(h.wrapped(model, context)); assert.equal(h.calls.length, 3);
   assert.deepEqual(h.records.map(r => r.outcome), ['provider_request_retry', 'provider_request_exhausted', 'provider_request_exhausted']);
 });
 
-test('a deadline bounds initial response, recovery and non-cooperative providers without becoming a user abort', async () => {
+test('idle detection bounds a silent initial response and retry without claiming a provider error or user abort', async () => {
   for (const values of [[() => new Promise(() => {})], [timeoutStream(), () => new Promise(() => {})]]) {
-    const h = harness(values, { requestTimeoutMs: 10 });
+    const h = harness(values, { streamIdleTimeoutMs: 10 });
     const { result, events } = await consume(h.wrapped(model, context));
-    assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'easel_request_recovery_exhausted');
-    assert.equal(h.records.at(-1).outcome, 'provider_response_deadline');
+    assert.equal(result.stopReason, 'error'); assert.equal(result.errorCode, 'model_stream_idle_timeout');
+    assert.equal(h.records.at(-1).outcome, 'model_stream_idle_timeout');
+    assert.equal(h.records.at(-1).timeoutSource, 'easel_stream_idle');
+    assert.equal(h.records.at(-1).idleTimeoutMs, 10);
     assert(!events.some(e => e.type === 'toolcall_end'));
   }
+});
+
+test('idle policy is explicit, configurable and can defer all waiting to the caller', () => {
+  assert.equal(DEFAULT_STREAM_IDLE_TIMEOUT_MS, 600000);
+  assert.equal(streamIdleTimeout({}), 600000);
+  assert.equal(streamIdleTimeout({ EASEL_MODEL_STREAM_IDLE_TIMEOUT_MS: '0' }), 0);
+  assert.equal(streamIdleTimeout({ EASEL_MODEL_STREAM_IDLE_TIMEOUT_MS: '1800000' }), 1800000);
+  for (const value of ['', '-1', 'NaN', 'Infinity', '1e6', '7200001'])
+    assert.equal(streamIdleTimeout({ EASEL_MODEL_STREAM_IDLE_TIMEOUT_MS: value }), 600000);
+});
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+test('first model response can remain silent beyond the former 90-second total cutoff', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ready;
+  const h = harness([() => new Promise(resolve => { ready = resolve; })]);
+  const pending = consume(h.wrapped(model, context));
+  t.mock.timers.tick(95000);
+  assert.equal(h.calls[0].options.signal.aborted, false);
+  const value = message('stop', [{ type: 'text', text: 'long reasoning completed' }]);
+  ready({ async *[Symbol.asyncIterator]() { yield { type: 'done', message: value }; }, result: async () => value });
+  assert.equal((await pending).result.stopReason, 'stop');
+  assert.equal(h.calls.length, 1);
+});
+function activeStream(kind, final = message('stop', [{ type: 'text', text: 'done' }])) {
+  return async () => ({ async *[Symbol.asyncIterator]() {
+    yield { type: 'start', partial: message('stop', []) };
+    for (let index = 0; index < 12; index++) {
+      await delay(10);
+      yield kind === 'toolcall_delta' ? { type: kind, partial: message() } : { type: kind, delta: 'progress' };
+    }
+    yield { type: 'done', message: final };
+  }, result: async () => final });
+}
+test('reasoning, text and tool streams outlive idle windows while calls remain private until validation', async () => {
+  for (const kind of ['thinking_delta', 'text_delta', 'toolcall_delta']) {
+    const h = harness([activeStream(kind)], { streamIdleTimeoutMs: 60 });
+    const { result, events } = await consume(h.wrapped(model, context));
+    assert.equal(result.stopReason, 'stop'); assert.equal(h.calls.length, 1);
+    assert(!events.some(event => event.type === 'toolcall_end'));
+    assert.equal(h.records.at(-1).outcome, 'validated');
+  }
+  const repair = harness([rejected(), activeStream('thinking_delta', message())], { streamIdleTimeoutMs: 60 });
+  assert.equal((await consume(repair.wrapped(model, context))).result.stopReason, 'toolUse');
+  assert.equal(repair.calls.length, 2);
+});
+test('a stream that stalls after provisional tool data stops without dispatch or retry', async () => {
+  const h = harness([async () => ({ async *[Symbol.asyncIterator]() {
+    yield { type: 'toolcall_end', toolCall: call(), partial: message() };
+    await new Promise(() => {});
+  }, result: () => new Promise(() => {}) })], { streamIdleTimeoutMs: 10 });
+  const { result, events } = await consume(h.wrapped(model, context));
+  assert.equal(result.errorCode, 'model_stream_idle_timeout'); assert.equal(h.calls.length, 1);
+  assert.equal(h.records.at(-1).observedTool, true);
+  assert(!events.some(event => event.type === 'toolcall_end'));
+});
+test('synthetic start does not extend silent wait and disabled idle still obeys user cancellation', async () => {
+  const h = harness([async () => ({ async *[Symbol.asyncIterator]() {
+    for (let i = 0; i < 8; i++) { await delay(2); yield { type: 'start' }; }
+    await new Promise(() => {});
+  }, result: () => new Promise(() => {}) })], { streamIdleTimeoutMs: 10 });
+  assert.equal((await consume(h.wrapped(model, context))).result.errorCode, 'model_stream_idle_timeout');
+  const controller = new AbortController();
+  const cancelled = harness([async () => { setTimeout(() => controller.abort(), 15); return new Promise(() => {}); }], { streamIdleTimeoutMs: 0 });
+  const { result } = await consume(cancelled.wrapped(model, context, { signal: controller.signal }));
+  assert.equal(result.stopReason, 'aborted'); assert.equal(cancelled.calls.length, 1);
 });
 
 test('cancellation during the recovery remains cancelled and dispatches no late response', async () => {

@@ -124,7 +124,8 @@ def inspect_file(root, relative):
             with Image.open(path) as image:
                 mime = Image.MIME.get(image.format, mime)
                 image.verify()
-        visited[rel] = {'size': before.st_size, 'mtime': before.st_mtime, 'mime': mime}
+        visited[rel] = {'size': before.st_size, 'mtime': before.st_mtime, 'mime': mime,
+                        'contentSha256': digest.hexdigest()}
         hashes.append((rel, digest.hexdigest()))
         if is_text:
             text = text_bytes.decode('utf-8', errors='replace')
@@ -137,6 +138,7 @@ def inspect_file(root, relative):
                     pending.append(related)
     main = visited[relative]
     return {'status': 'ready', 'size': main['size'], 'updatedAt': main['mtime'], 'mimeType': main['mime'],
+            'contentSha256': main['contentSha256'],
             'version': hashlib.sha256(json.dumps(sorted(hashes)).encode()).hexdigest(),
             'dependencies': sorted(key for key in visited if key != relative)}
 

@@ -16,7 +16,8 @@ DIAGNOSTIC = 'Provider returned an incomplete or malformed tool call'
 
 
 @pytest.mark.parametrize('raw,status', [('524 status code (no body)', None),
-    ('Error: 524 status code (no body)', None), ('', 524), ('Easel request recovery exhausted', None)])
+    ('Error: 524 status code (no body)', None), ('', 524), ('504 status code (no body)', None),
+    ('Easel provider request recovery stopped', None)])
 def test_provider_timeout_has_its_own_safe_classification(raw, status):
     result = gateway_error(raw, status=status)
     assert result['code'] == 'model_provider_timeout' and result['category'] == 'timeout'
@@ -31,6 +32,16 @@ def test_provider_timeout_has_its_own_safe_classification(raw, status):
     '示例 Easel request recovery exhausted'])
 def test_quoted_timeout_is_not_promoted(raw):
     assert gateway_error(raw)['code'] == 'agent_execution_failed'
+
+
+@pytest.mark.parametrize('raw,code', [('Easel model stream idle timeout', 'model_stream_idle_timeout'),
+    ('Easel request recovery exhausted', 'model_recovery_stopped')])
+def test_local_idle_and_ambiguous_legacy_failure_are_not_provider_timeouts(raw, code):
+    result = gateway_error(raw)
+    assert result['code'] == code and result['retryable'] is False
+    event = {'message': {'role': 'assistant', 'stopReason': 'error', 'errorMessage': raw}}
+    assert observed_failure([event])['code'] == code
+    assert gateway_error('用户引用：' + raw)['code'] not in {code, 'model_provider_timeout'}
 
 
 @pytest.mark.parametrize('raw', [DIAGNOSTIC, 'Easel tool call recovery exhausted', 'Error: ' + DIAGNOSTIC + '.',
@@ -88,7 +99,8 @@ def test_protocol_failure_keeps_only_bounded_provider_finish_metadata():
     assert result['outputTokens'] == 16384
 
 
-@pytest.mark.parametrize('diagnostic', [DIAGNOSTIC, 'Easel request recovery exhausted'])
+@pytest.mark.parametrize('diagnostic', [DIAGNOSTIC, 'Easel request recovery exhausted',
+    'Easel model stream idle timeout', 'Easel provider request recovery stopped'])
 def test_native_adapter_failure_does_not_dispatch_an_automatic_continuation(diagnostic):
     error = GatewayQuestionError(diagnostic)
     error.rpc_response = True

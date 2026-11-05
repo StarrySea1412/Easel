@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { stageDeliveredImage } from './inspection.mjs';
 
 const inside = (root, file) => { const rel = path.relative(root, file); return rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
 
@@ -24,12 +25,16 @@ export async function runtimeToolParams(event, ctx, config, env = process.env, p
   const data = env.EASEL_DATA_DIR;
   if (!state || !data || !session || !/^[A-Za-z0-9_.-]{1,200}$/.test(session)) return { params };
   const scope = createHash('sha256').update(session).digest('hex').slice(0, 20);
+  const outputs = path.resolve(data, 'outputs');
   const inbox = path.resolve(data, 'outputs', '_inbox');
   const own = path.join(inbox, scope);
   async function stage(value) {
     if (typeof value !== 'string' || !path.isAbsolute(value)) return value;
     const target = path.resolve(value);
-    if (!inside(inbox, target)) return value;
+    if (!inside(inbox, target)) {
+      if (inside(outputs, target)) return await stageDeliveredImage(session, target, env);
+      return value;
+    }
     const real = await fs.realpath(target);
     if (!inside(own, target) || !inside(own, real)) throw new Error('图片附件不属于当前会话');
     const stat = await fs.stat(real);
@@ -46,6 +51,6 @@ export async function runtimeToolParams(event, ctx, config, env = process.env, p
   try {
     if (params.path) params.path = await stage(params.path);
     if (Array.isArray(params.paths)) params.paths = await Promise.all(params.paths.map(stage));
-  } catch { return { block: true, blockReason: '图片附件路径未通过当前会话安全校验，请重新上传；不要扩大目录权限。' }; }
+  } catch { return { block: true, blockReason: '图片路径未通过当前会话归属或文件校验；附件请重新上传，生成图片须先交付到当前对话；不要扩大目录权限或重新生成。' }; }
   return { params };
 }
