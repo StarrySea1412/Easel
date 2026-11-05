@@ -139,6 +139,8 @@ outputs/主题名/{YYYY-MM-DD}/{短标题}_{时间戳}/
 
 目录名走脚本标准化：`python3 skills/builtin/xhs-note-creator/scripts/normalize_slug.py "标题" --with-ts`
 
+> **审图顺序：** 自行渲染或保存的图片必须先easel_present登记到当前会话，再view_image审图；登记仅代表预览和归属，不代表质量通过。遇到EASEL_IMAGE_NOT_DELIVERED先登记现有文件，不能原样重复读取或重新生图；识图服务超时与文件归属错误分开，未经实际看图不得说审核通过。
+
 ### Step 8 — 校验（强制，两道门）
 
 **① 文本/结构门**（标题/caption/hashtag/卡片字数与结构）：

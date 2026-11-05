@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, os.environ.get('EASEL_CODE_ROOT', str(Path(__file__).resolve().parents[3])))
-from easel.image_inspection import stage_owned_image
+from easel.image_inspection import stage_owned_image, ImageNotDelivered
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -24,6 +24,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except ImageNotDelivered:
+        print(json.dumps({'error': 'image_not_delivered'}))
+        raise SystemExit(1)
     except Exception:
         print(json.dumps({'error': 'Image ownership, file or staging validation failed'}))
         raise SystemExit(1)

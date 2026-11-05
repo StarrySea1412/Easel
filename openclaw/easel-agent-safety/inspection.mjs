@@ -15,6 +15,9 @@ export function stageDeliveredImage(session, source, env=process.env) {
     child.on('error',()=>{clearTimeout(timer);reject(new Error('Image inspection staging unavailable'));});
     child.on('close',code=>{
       clearTimeout(timer);
+      if (code !== 0 && !overflow) {
+        try {if(JSON.parse(output).error === 'image_not_delivered') return reject(Object.assign(new Error('Image not delivered'), {code:'EASEL_IMAGE_NOT_DELIVERED'}));} catch {}
+      }
       if(code!==0||overflow)return reject(new Error('Image inspection ownership validation failed'));
       try{const value=JSON.parse(output);if(typeof value.path!=='string'||!path.isAbsolute(value.path))throw new Error();resolve(value.path);}
       catch{reject(new Error('Image inspection staging receipt invalid'));}

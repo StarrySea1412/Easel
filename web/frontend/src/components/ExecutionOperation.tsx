@@ -41,6 +41,8 @@ export function operationFailureReason(row: Operation): string {
   const text = candidate.replace(/https?:\/\/[^\s<>"']+/gi, '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').replace(/[:：;,，\s]+$/, '').trim();
   if (!text || text.includes('<') || /UNTRUSTED|SECURITY NOTICE/i.test(text) || /^[\[{]/.test(text)) return missingFailureReason;
   if (['view_image','imageView','read_image'].includes(row.name)) {
+    if (/EASEL_IMAGE_NOT_DELIVERED/.test(text)) return '图片尚未登记到当前对话；助手需先登记现有文件再审图，无需重新生成';
+    if (/图片路径未通过当前会话归属或文件校验/.test(text)) return '旧版看图归属或文件校验未通过；核对现有文件和登记记录，无需重新生成';
     if (/Local media path is not under an allowed directory/i.test(text)) return '看图工具未获准访问该文件目录；不代表图片生成失败';
     const timeout = /image description request timed out after (\d+)ms/i.exec(text);
     if (timeout) return '识图服务超过 '+Math.ceil(Number(timeout[1])/1000)+' 秒未响应；图片是否保存请查看产物';
@@ -79,7 +81,8 @@ export default function ExecutionOperation({row,running}:{row:Operation;running:
   const normal=row.status==='returned'||row.status==='completed';
   const waitingForUser=row.name==='ask_user'&&row.status==='running'&&row.waitingForUser===true;
   const statusLabel=waitingForUser?'等待回答':labels[row.status];
-  const lifecycleLabel=({repairable:'已修复，可继续',manual:'需人工接管',unknown:'状态未知'} as Record<string,string>)[row.lifecycleState||''];
+  const registrationNeeded=row.name==='view_image'&&row.status==='failed'&&/EASEL_IMAGE_NOT_DELIVERED/.test(row.output);
+  const lifecycleLabel=registrationNeeded?'待登记图片':({repairable:'已修复，可继续',manual:'需人工接管',unknown:'状态未知'} as Record<string,string>)[row.lifecycleState||''];
   const failureReason=operationFailureReason(row);
   return <details className={`chat-execution-row is-${row.status}`} open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}>
     <summary><span className="execution-summary-heading"><span className="execution-kind" title={operationKind(row)}><Icon size={14}/></span><span className="chat-execution-title" title={row.path||row.command||row.name}>{operationTitle(row)}</span>{!normal&&<span className={`chat-execution-state is-${waitingForUser?'waiting':row.status}`}>{statusLabel}{lifecycleLabel ? ' · ' + lifecycleLabel : ''}</span>}{row.status==='running'&&duration!==undefined&&Number.isFinite(duration)&&<small>{formatChatElapsed(duration)}</small>}<span className="execution-chevron" aria-hidden="true"><IconChevron size={12}/></span></span>{failureReason&&<span className="execution-failure-reason" title={failureReason}>{failureReason}</span>}</summary>

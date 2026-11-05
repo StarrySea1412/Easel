@@ -71,3 +71,30 @@ def test_staging_rejects_symlinked_source_directory_inside_outputs(tmp_path):
     with pytest.raises(ValueError,match='Untrusted'):
         stage_owned_image(outputs,state,'chat',str(source))
     assert not state.exists()
+
+
+def test_runtime_explains_registration_before_review_and_accepts_same_file_after_present(tmp_path):
+    import shutil
+    node=shutil.which('node')
+    if not node:pytest.skip('node unavailable')
+    outputs=tmp_path/'outputs';source=outputs/'topic/card.png';source.parent.mkdir(parents=True)
+    Image.new('RGB',(16,24),'green').save(source)
+    # Initialize registry without claiming this file for any session.
+    with ArtifactStore(outputs).db():pass
+    root=Path(__file__).resolve().parents[1];state=tmp_path/'state'
+    module=(root/'openclaw/easel-agent-safety/runtime.mjs').as_uri()
+    code="""import {runtimeToolParams} from MODULE;
+const result=await runtimeToolParams({toolName:'view_image',params:{path:process.argv[1]}},
+ {sessionKey:'agent:main:chat'},{agents:{defaults:{imageModel:'visual/test'}}});
+console.log(JSON.stringify(result));""".replace('MODULE',json.dumps(module))
+    env={**os.environ,'EASEL_CODE_ROOT':str(root),'EASEL_DATA_DIR':str(outputs.parent),'EASEL_OPENCLAW_STATE_DIR':str(state),'EASEL_PYTHON':sys.executable}
+    def read():
+        r=subprocess.run([node,'--input-type=module','-e',code,str(source)],capture_output=True,text=True,encoding='utf-8',env=env,timeout=20)
+        assert r.returncode==0,r.stderr
+        return json.loads(r.stdout)
+    blocked=read()
+    assert blocked['block'] and 'EASEL_IMAGE_NOT_DELIVERED' in blocked['blockReason']
+    assert 'easel_present' in blocked['blockReason'] and not state.exists()
+    ArtifactStore(outputs).present('chat','turn',[{'path':str(source)}],source='test')
+    accepted=read()
+    assert not accepted.get('block') and Path(accepted['params']['path']).read_bytes()==source.read_bytes()

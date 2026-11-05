@@ -199,3 +199,11 @@ test('lifecycle histories are bounded and invalid history containers are removed
   assert.ok(parsed.operations[0].lifecycleHistory.every(item=>item.state==='running'));
   assert.equal(decodeExecution(payload('a',[{...row,lifecycleHistory:'forged'}])).operations[0].lifecycleHistory,undefined);
 });
+
+
+test('unregistered image gives an agent action instead of demanding human takeover',async t=>{
+ const view=await setup(t);
+ await view.respond(0,payload('a',[{...operation('register','failed','EASEL_IMAGE_NOT_DELIVERED: 图片尚未登记到当前对话'),name:'view_image',kind:'read',lifecycleState:'manual'}]));
+ assert.match(view.container.textContent,/待登记图片/);assert.match(view.container.textContent,/先登记现有文件再审图/);
+ assert.doesNotMatch(view.container.textContent,/需人工接管/);
+});

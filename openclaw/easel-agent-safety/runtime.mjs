@@ -51,6 +51,8 @@ export async function runtimeToolParams(event, ctx, config, env = process.env, p
   try {
     if (params.path) params.path = await stage(params.path);
     if (Array.isArray(params.paths)) params.paths = await Promise.all(params.paths.map(stage));
-  } catch { return { block: true, blockReason: '图片路径未通过当前会话归属或文件校验；附件请重新上传，生成图片须先交付到当前对话；不要扩大目录权限或重新生成。' }; }
+  } catch (error) {
+    if (error.code === 'EASEL_IMAGE_NOT_DELIVERED') return {block:true,blockReason:'EASEL_IMAGE_NOT_DELIVERED: 图片尚未登记到当前对话。请先调用 easel_present 登记这张现有图片，成功后再调用 view_image 审图；登记只提供预览和归属，不代表质量通过。不要原样重复读取、扩大目录权限或重新生图。'};
+    return { block: true, blockReason: '图片路径未通过当前会话归属或文件校验；附件请重新上传，生成图片须先交付到当前对话；不要扩大目录权限或重新生成。' }; }
   return { params };
 }

@@ -11,6 +11,10 @@ import sqlite3
 from .artifacts import file_path, scope
 from .artifact_writer import _atomic, _directory
 
+class ImageNotDelivered(ValueError):
+    """File ownership must be registered before the native tool can inspect it."""
+
+
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
@@ -23,6 +27,8 @@ def stage_owned_image(outputs: Path, state: Path, session: str, source: str) -> 
     if source_path.suffix.lower() not in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}:
         raise ValueError('Unsupported image type')
     registry = outputs / '_artifacts' / 'registry.sqlite3'
+    if not registry.exists() and not registry.is_symlink():
+        raise ImageNotDelivered('Image is not delivered to this session')
     if not registry.is_file() or registry.is_symlink() or registry.parent.is_symlink():
         raise ValueError('Image delivery registry unavailable')
     db = sqlite3.connect(registry.as_uri() + '?mode=ro', uri=True, timeout=1)
@@ -32,7 +38,7 @@ def stage_owned_image(outputs: Path, state: Path, session: str, source: str) -> 
                            'WHERE a.session=? AND d.session=? AND a.path=? LIMIT 1',
                            (session, session, relative)).fetchone()
         if not owned:
-            raise ValueError('Image is not delivered to this session')
+            raise ImageNotDelivered('Image is not delivered to this session')
     finally:
         db.close()
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)

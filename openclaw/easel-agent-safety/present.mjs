@@ -11,7 +11,7 @@ export function registerPresent(api) {
     if (!session || !/^[A-Za-z0-9_.-]{1,200}$/.test(session)) return null;
     return {
       name: 'easel_present', label: '交付文件到当前对话',
-      description: '将已保存文件交付到当前Easel对话，普通文档可下载，图片和HTML等支持预览。使用本轮Easel提供的ticket；不生成文件，不调用模型。',
+      description: '将已保存文件交付到当前Easel对话，普通文档可下载，图片和HTML等支持预览。自行渲染/保存的图片须先用本工具登记，再调用view_image审图；登记代表可预览和会话归属，不代表质量通过。使用本轮Easel提供的ticket；不生成文件，不调用模型。',
       parameters: { type: 'object', additionalProperties: false, required: ['ticket', 'files'], properties: {
         ticket: { type: 'string', pattern: '^[a-f0-9]{48}$' },
         files: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string' } },
