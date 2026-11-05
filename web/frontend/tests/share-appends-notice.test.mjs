@@ -66,3 +66,27 @@ test('switching chats aborts the old request and excludes its late response', as
   await act(async () => requests[1].resolve({ ok: true, json: async () => ({ appends: [] }) }));
   await flush(); assert.equal(element.textContent, '0');
 });
+
+test('30 page remounts keep pending visible without repeating the toast; focus bursts never overlap requests', async t => {
+  let pendingResolve, inFlight = 0, maximum = 0;
+  t.mock.method(globalThis, 'fetch', () => {
+    inFlight++; maximum = Math.max(maximum, inFlight);
+    return new Promise(resolve => { pendingResolve = () => { inFlight--; resolve({ ok: true, json: async () => ({ appends: [append] }) }); }; });
+  });
+  const current = { ...session, share: { token: 'stress-remount' } };
+  const notices = [];
+  const listen = event => notices.push(event.detail.message);
+  window.addEventListener('easel:toast', listen);
+  t.after(() => window.removeEventListener('easel:toast', listen));
+  for (let round = 0; round < 30; round++) {
+    const element = document.createElement('div'); document.body.append(element);
+    const root = createRoot(element);
+    await act(async () => root.render(createElement(Harness, { session: current })));
+    await act(async () => { for (let i = 0; i < 30; i++) window.dispatchEvent(new window.Event('focus')); });
+    assert.equal(inFlight, 1);
+    await act(async () => pendingResolve()); await flush();
+    assert.equal(element.textContent, '1');
+    await act(async () => root.unmount()); element.remove();
+  }
+  assert.equal(maximum, 1); assert.equal(notices.length, 1);
+});
