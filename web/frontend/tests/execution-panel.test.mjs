@@ -135,6 +135,13 @@ test('returned receipts cannot be revived by delayed running or unconfirmed snap
   assert.doesNotMatch(view.container.textContent,/late running|late unknown/);
 });
 
+test('repairable lifecycle is visible without replacing the legacy failure status', async t => {
+  const view = await setup(t);
+  await view.respond(0, payload('a', [{...operation('repair', 'failed', 'allowed directory'), lifecycleState:'repairable'}]));
+  assert.match(view.container.textContent, /失败/);
+  assert.match(view.container.textContent, /已修复，可继续/);
+});
+
 test('progress interleaves by recorded order; partial events preserve earlier entries and reject malformed ones', async t => {
   const view=await setup(t);
   const rows=[{...operation('one','completed'),order:2},{...operation('two','failed'),order:4}];

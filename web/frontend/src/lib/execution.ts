@@ -1,4 +1,5 @@
 export type OperationStatus = 'running'|'returned'|'completed'|'failed'|'unconfirmed'|'stopped'|'denied';
+export type LifecycleState = 'admitted'|'running'|'succeeded'|'repairable'|'manual'|'stopped'|'unknown';
 export interface Operation {
   id: string; name: string; kind?: 'command'|'read'|'file_change'|'search'|'browser'|'tool'; status: OperationStatus;
   command: string; path: string; output: string; diff: string; cwd?: string; query?: string; url?: string; action?: string;
@@ -6,6 +7,8 @@ export interface Operation {
   processSessionId?: string; added?: number; removed?: number; changeKind?: string; artifactPath?: string;
   contentHidden?: boolean; source?: string; truncated?: Record<string, boolean>; order?: number;
   webSources?: {url:string;title:string}[];
+  lifecycleState?: LifecycleState;
+  lifecycleHistory?: {state: LifecycleState;at?: string|null}[];
 }
 export interface ExecutionEntry { id:string; type:'progress'|'operation'; order:number; text?:string; operationId?:string; }
 export interface ExecutionSnapshot {

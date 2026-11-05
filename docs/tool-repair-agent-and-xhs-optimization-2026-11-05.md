@@ -31,6 +31,7 @@ RepairAgent 以 session + turn + tool call 为幂等键。当前唯一自动动�
 ## 第二轮 Super Agent 加固（0.10.0）
 
 - 工具行在保留旧 `status` 的同时写入 `lifecycleState` 和有界历史：`admitted`、`running`、`succeeded`、`repairable`、`manual`、`stopped`、`unknown`。修复成功后进入 `repairable`，不能安全自动处理的失败进入 `manual`，监督进程结束但没有终态的工具进入 `unknown`。
+- 前端执行面板保留旧的“失败/未确认”状态，同时显示“已修复，可继续”“需人工接管”“状态未知”等生命周期事实，避免用户把可继续的工具故障误判成模型失败。
 - repair-agent 初始化时从持久回执恢复当前轮的调用幂等和整个会话的修复次数；会话默认最多三次修复、单轮最多一次。重复调用只返回已有回执，不再次复制文件。
 - 连续对话只读取归属当前 session、状态为 `repaired/manual` 且 24 小时内的回执；修复了回执上下文的换行拼接，避免把转义字符送进模型。
 - 小红书发布与分析/评论技能组合在请求入口拒绝，要求先结束只读阶段再单独确认发布。
