@@ -1,3 +1,5 @@
+**Host 138 production updated to 0.47.0 · 2026-11-06.** Build `b5b13878` is healthy; AIHub image-input metadata is loaded and Qizhi is configured under Settings → Model → Agent runtime. The OpenClaw default is retained. Live vision/Qizhi acceptance is delegated to the user as requested. [Receipt](docs/vision-qizhi-0.47.0.md).
+
 **0.47.0: Qizhi remote Agent and AIHub vision metadata.** Configure Qizhi under Settings → Model → Agent runtime. Existing OpenClaw selection is retained. Missing image-input metadata is repaired for the AIHub gpt-6.1-sol Responses route; explicit restrictions and image ownership checks remain. [Release notes](docs/vision-qizhi-0.47.0.md).
 
 **Host 138 production updated to 0.46.13 · 2026-11-06.** Runtime source `25560370`; services are healthy. GPT Responses configuration is loaded and card tasks require actual image generation. Post-upgrade model/browser acceptance is delegated to the user as requested; isolation remains on 0.46.11.

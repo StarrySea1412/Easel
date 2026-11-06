@@ -9,3 +9,13 @@ Qizhi合入556528fd与653d8cf2已经完成的适配器、配置UI、远程会话
 部署身份与必要检查完成后追加。未执行本轮真实视觉/生图/Qizhi业务调用，最终业务由用户验收。
 
 定向检查：Python 134 passed / 2 skipped，Linux发布工具24 passed，前端相关97 passed；生产build和lint通过（原有警告）。当前发布工具支持BuildKit本地内容寻址别名，避免把sha256裸ID误当远端镜像名。
+
+## 发布身份
+
+发布源码b5b138780bacad87740ef69e5b50eff1a6ae8ad5已推送starry并核对远端SHA；ZIP SHA256为22d264718267e078f060e045d21f1db7994c6002e098b8d30d8eeaf1eaf28a57，2337项源文件。
+138构建镜像sha256:0fb0d6469f9c2e2cc00db26168082f64d585e12d376f3efd23a18edfb2cd5e90，固定复用前版运行依赖；前端0.47.0于138重新构建。
+Qizhi配置安全写入服务端.env（0600，保留原属主），旧配置备份/home/ubuntu/easel-secrets/config-backups/qizhi-20261106T092209Z/env-before-qizhi。保留OpenClaw默认底座和AIHub模型，不会把原会话迁到Qizhi。用户授权停止当前轮后，查得该轮已自行completed/resourceSettled=true，因此未再发stop或重放请求。
+
+正式切换后持久配置已读回：imageModel仍为aihub/gpt-6.1-sol，模型input为[text,image]。容器revision b5b13878与镜像0fb0d646一致。停写备份/home/ubuntu/easel-backups/20261106T092622Z.tar.gz（约889MiB，0600）；前版25560370保留。未发起视觉或Qizhi业务复测。
+
+激活时间2026-11-06T09:28:24.872344+00:00，app/browser/proxy全部healthy。容器安装版本0.47.0；使用产品read_settings读取后Qizhi configured=true、keyStored=true、model=gpt-6-sol（没有输出Key，没有请求远程Agent）。该结果仅是配置与启动证据，不是视觉/Qizhi上游业务通过。
