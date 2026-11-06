@@ -44,6 +44,29 @@ for (const diagnostic of ['Connection error.', '502 status code (no body)', '524
     assert.equal(h.records.at(-1).automaticRetries, 0);
   });
 }
+
+test('AI Hub group model rejection survives terminal and thrown errors without replay or private diagnostics', async () => {
+  const raw = '404 Model "gpt-6.1-sol" is not available for this group';
+  for (const value of [{stopReason:'error',errorMessage:raw,content:[call]},new Error(raw)]) {
+    const h=harness(value);
+    const {result,events}=await consume(h.wrapped({...model,id:'gpt-6.1-sol'},context));
+    assert.equal(h.requests.length,1);
+    assert.equal(result.easelErrorCode,'model_group_unavailable');
+    assert.equal(result.errorMessage,'Easel AI Hub model unavailable for group');
+    assert.equal(result.errorCode,'PROVIDER_POST_DISPATCH_AMBIGUITY');
+    assert(!events.some(e=>e.type==='toolcall_end'));
+    const receipt=h.records.at(-1);
+    assert.equal(receipt.code,'model_group_unavailable');
+    assert.equal(receipt.upstreamStatus,404);
+    assert.equal(receipt.upstreamReason,'model_not_available_for_group');
+    assert.equal(receipt.automaticRetries,0);
+    assert(!JSON.stringify(h.records).includes('PRIVATE'));
+  }
+  assert.equal(aihubFailure('User quoted '+raw),null);
+  assert.equal(aihubFailure('404 missing page'),null);
+  assert.equal(aihubFailure(raw+'\n'),null);
+  assert.equal(aihubFailure(raw+'\nPRIVATE'),null);
+});
 test('AI Hub keeps the original context, settings and live text, then releases valid tools once', async () => {
   const h = harness({ ...model, stopReason: 'toolUse', content: [call] });
   const options = { apiKey: 'PRIVATE_KEY', reasoning: 'high', maxTokens: 8192, onPayload: p => ({ ...p, metadata: 'PRIVATE_METADATA' }) };

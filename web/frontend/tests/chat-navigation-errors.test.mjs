@@ -173,3 +173,19 @@ test('AI Hub historical connection failures have a provider title and require ma
  }
  assert.equal(chatErrorDetail({code:'agent_execution_failed',detail:'用户引用 Connection error.'}).code,'agent_execution_failed');
 });
+test('model group rejection explains legacy failures without requiring expanded service details', () => {
+ const raw='404 Model "gpt-6.1-sol" is not available for this group';
+ const error=chatErrorDetail({code:'agent_execution_failed',category:'execution',retryable:true,
+   detail:raw,modelRef:'aihub/gpt-6.1-sol',failureEventId:'a'.repeat(32)});
+ assert.equal(error.code,'model_group_unavailable');
+ assert.equal(error.category,'configuration');
+ assert.equal(error.retryable,false);
+ assert.equal(error.upstreamStatus,404);
+ assert.equal(error.upstreamReason,'model_not_available_for_group');
+ assert.equal(error.failureEventId,'a'.repeat(32));
+ assert.equal(error.modelRef,'aihub/gpt-6.1-sol');
+ assert.match(error.message,/分组无法使用该模型/);
+ assert.equal(error.detail,'HTTP 404: model_not_available_for_group');
+ for(const detail of ['User quoted '+raw,raw+'\nPRIVATE','404 missing page'])
+   assert.equal(chatErrorDetail({code:'agent_execution_failed',detail}).code,'agent_execution_failed');
+});

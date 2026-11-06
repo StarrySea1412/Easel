@@ -14,8 +14,8 @@ export default function ChatAgentActivity({sessionId,turnId}:{sessionId:string;t
   return <section className="chat-agent-activity" aria-label="本轮 Agent 行为">
     <div className="chat-agent-engine"><OpenClawIcon/><strong>OpenClaw</strong><span>{office.error?'观测中断 · 上次快照':office.loading&&!current?'正在读取行为':current?'本轮行为':'等待本轮行为回执'}</span></div>
     {current&&office.agents.map(agent=>{const action=describeOfficeAction(agent,office.events);return <div className="chat-agent-row" key={agent.id} data-agent-id={agent.id}>
-      <div className="chat-agent-action"><AgentActionIcon kind={action.kind}/><strong>{agent.parentId?'子 Agent':'主 Agent'}{agent.parentId?` · ${agent.name}`:''}</strong><span>{action.label}</span></div>
-      <ModelIdentityLabel identity={agent.observedModel} requestedModelRef={run.requestedModelRef}/>
+      <div className="chat-agent-action"><AgentActionIcon kind={action.kind}/><strong>{agent.parentId?'子 Agent':'主 Agent'}{agent.parentId?` · ${agent.name}`:''}</strong><span>{agent.state==='working'&&action.kind==='unreported'?'正在处理 · 暂无工具调用记录':action.label}</span></div>
+      <ModelIdentityLabel identity={agent.observedModel} requestedModelRef={agent.parentId?undefined:run.requestedModelRef}/>
       {agent.parentId&&<small className="chat-agent-coverage">任务：{agent.task} · 状态来自父会话回执</small>}
     </div>;})}
     {office.error&&<button type="button" className="btn btn-sm btn-ghost chat-agent-refresh" disabled={office.loading} onClick={office.refresh}>

@@ -119,6 +119,16 @@ def redact_gateway_text(value, credentials=None):
 
 def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', include_detail=False):
     message = str(raw).lower()
+    # Exact provider diagnostic, not a quoted model reply or a generic HTTP 404.
+    unavailable = re.fullmatch(r'(?:Error:[ \t]*)?404 Model "[A-Za-z0-9_.:/+-]{1,300}" is not available for this group', str(raw))
+    if unavailable or str(raw) == 'Easel AI Hub model unavailable for group':
+        result = {'code': 'model_group_unavailable', 'category': 'configuration',
+                  'retryable': False, 'stage': 'model_response', 'upstreamStatus': 404,
+                  'upstreamReason': 'model_not_available_for_group',
+                  'message': '渠道拒绝当前模型：此 API Key 所属分组无法使用该模型（HTTP 404）。请核对渠道分组权限及可调用模型；原请求未自动重发。'}
+        if include_detail:
+            result['detail'] = 'HTTP 404: model_not_available_for_group'
+        return result
     # Preserve the actionable runtime rejection without echoing arbitrary CLI
     # output (which can contain credentials or private request contents).
     thinking = re.search(r'Thinking level "([a-z]+)" is not supported for ([A-Za-z0-9_.:/+-]{1,300})\. Use one of: ([a-z, ]+)\.', str(raw))

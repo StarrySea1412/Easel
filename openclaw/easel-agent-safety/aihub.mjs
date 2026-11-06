@@ -4,10 +4,14 @@ import { randomUUID } from 'node:crypto';
 
 export const AIHUB_CONNECTION_ERROR = 'Easel AI Hub connection interrupted';
 export const AIHUB_SERVICE_ERROR = 'Easel AI Hub upstream rejected request';
+export const AIHUB_MODEL_GROUP_ERROR = 'Easel AI Hub model unavailable for group';
 const NOTICE = 'AI Hub 请求未完成，已停止自动重发；已完成的工具结果保留，请核对后继续。';
 
 export function aihubFailure(raw) {
   const text = typeof raw === 'string' ? raw : '';
+  if (/^(?:Error:[ \t]*)?404 Model "[A-Za-z0-9_.:/+-]{1,300}" is not available for this group$(?![\s\S])/.test(text) || text === AIHUB_MODEL_GROUP_ERROR)
+    return { code: 'model_group_unavailable', message: AIHUB_MODEL_GROUP_ERROR,
+      upstreamStatus: 404, upstreamReason: 'model_not_available_for_group' };
   if (/^(?:Error:[ \t]*)?(?:Connection error\.?|fetch failed|socket hang up|LLM request failed: network connection was interrupted\.?|Easel AI Hub connection interrupted)$/.test(text))
     return { code: 'model_provider_connection_failed', message: AIHUB_CONNECTION_ERROR };
   if (/^(?:Error:[ \t]*)?(?:50[234]|524)(?: status code|\b)/.test(text) || text === AIHUB_SERVICE_ERROR)
@@ -87,7 +91,8 @@ export function createAihubStream(baseStream, { createStream, validateToolCall, 
         const classified = aihubFailure(error instanceof Error ? error.message : '');
         message = { role: 'assistant', provider: model.provider, model: model.id, api: model.api,
           timestamp: Date.now(), content: [], stopReason: options.signal?.aborted ? 'aborted' : 'error',
-          errorMessage: classified?.message || 'Easel AI Hub request failed' };
+          errorMessage: classified?.message || 'Easel AI Hub request failed',
+          ...(classified ? { easelErrorCode: classified.code } : {}) };
       }
       const cancelled = options.signal?.aborted || message.stopReason === 'aborted';
       if (cancelled) message = { ...message, stopReason: 'aborted' };
@@ -101,8 +106,9 @@ export function createAihubStream(baseStream, { createStream, validateToolCall, 
           content: [...(message.content || []).filter(b => b.type === 'text' || b.type === 'thinking'), { type: 'text', text: NOTICE }] };
       }
       write({ outcome: cancelled ? 'aborted' : message.stopReason === 'error' ? 'request_failed_no_replay' : 'completed',
-        ...(['model_provider_connection_failed', 'model_service_unavailable', 'model_tool_call_invalid'].includes(message.easelErrorCode)
+        ...(['model_provider_connection_failed', 'model_service_unavailable', 'model_tool_call_invalid', 'model_group_unavailable'].includes(message.easelErrorCode)
           ? { code: message.easelErrorCode } : {}), firstEventMs, events,
+        ...(message.easelErrorCode === 'model_group_unavailable' ? { upstreamStatus: 404, upstreamReason: 'model_not_available_for_group' } : {}),
         elapsedMs: Math.round(performance.now() - started), automaticRetries: 0 });
       if (message.stopReason === 'toolUse') message.content.forEach((call, contentIndex) => {
         if (call.type !== 'toolCall') return;

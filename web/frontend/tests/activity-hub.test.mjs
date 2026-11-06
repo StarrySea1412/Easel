@@ -60,3 +60,20 @@ test('a recorded background LLM failure refreshes the open problem list',async t
  await v.respond(1,{events:[{id,at:failure.at,operation:'chat',code:'gateway_timeout'}]});
  assert.match(v.container.textContent,/LLM 执行/);
 });
+test('problem detail and copied receipt distinguish upstream rejection from the SSE HTTP 200',async t=>{
+ let copied='';t.mock.method(navigator.clipboard,'writeText',async value=>{copied=value;});
+ const v=await setup(t,Failures,{eventId:id});
+ await v.respond(0,{events:[{id,at:failure.at,operation:'chat',stage:'model_response',
+   code:'model_group_unavailable',status:200,upstreamStatus:404,upstreamReason:'model_not_available_for_group',
+   channel:'aihub',modelRef:'aihub/gpt-6.1-sol',detail:'PRIVATE_BODY',token:'PRIVATE_TOKEN'}]});
+ assert.match(v.container.textContent,/当前API Key分组无法使用该模型/);
+ assert.match(v.container.textContent,/上游 HTTP 404/);
+ assert.match(v.container.textContent,/Easel接口HTTP状态/);
+ assert.match(v.container.textContent,/上游HTTP状态/);
+ assert.doesNotMatch(v.container.textContent,/PRIVATE/);
+ await v.click('复制诊断摘要');
+ const summary=JSON.parse(copied);
+ assert.equal(summary.status,200);assert.equal(summary.upstreamStatus,404);
+ assert.equal(summary.upstreamReason,'model_not_available_for_group');
+ assert.doesNotMatch(copied,/PRIVATE/);
+});

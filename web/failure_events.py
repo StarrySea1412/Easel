@@ -28,7 +28,7 @@ _TOKEN = re.compile(r'[A-Za-z0-9_.+-]{1,128}\Z')
 _FIELDS = {'operation', 'stage', 'code', 'owner', 'slug', 'skillVersion',
            'upstreamStatus', 'upstreamType', 'exceptionType', 'relatedEventId', 'locations', 'platform', 'receiptId',
            'page', 'asset', 'uiVersion', 'sessionId', 'turnId', 'channel', 'modelRef',
-           'outputTokens', 'providerFinishReason'}
+           'outputTokens', 'providerFinishReason', 'upstreamReason'}
 
 
 def annotate(**values):
@@ -41,7 +41,10 @@ def _safe(values):
     result = {}
     for key in _FIELDS:
         value = values.get(key)
-        if key == 'locations' and isinstance(value, list):
+        if key == 'upstreamReason':
+            if value == 'model_not_available_for_group':
+                result[key] = value
+        elif key == 'locations' and isinstance(value, list):
             result[key] = [entry for entry in value[:5] if isinstance(entry, str)
                            and re.fullmatch(r'(?:web|easel|deployment)/[A-Za-z0-9_./-]+:[0-9]{1,7}', entry)]
         elif key == 'upstreamStatus':
@@ -75,18 +78,26 @@ class FailureEvents:
         self.lock = threading.RLock()
         self.client_window = (0.0, 0)
 
-    def record(self, *, source, route, method, status, duration, context, event_id=None, at=None):
+    def record(self, *, source, route, method, status, duration, context, event_id=None, at=None, enrich_chat=False):
         deduplicate = event_id is not None
         event_id = event_id or uuid4().hex
         event = {'id': event_id, 'at': at or datetime.now(timezone.utc).isoformat(),
                  'source': source, 'route': route, 'method': method, 'status': status,
                  'durationMs': max(0, min(round(duration), 86_400_000)),
                  **(self.runtime if at is None else {}), **_safe(context)}
-        line = json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
         try:
             with self.lock:
-                if deduplicate and self.recent(1, event_id):
-                    return event_id
+                previous = self.recent(1, event_id) if deduplicate else []
+                if previous:
+                    old = previous[0]
+                    if not (enrich_chat and old.get('operation') == 'chat'
+                            and old.get('code') == 'agent_execution_failed'
+                            and event.get('code') == 'model_group_unavailable'):
+                        return event_id
+                    # Append a corrected safe classification, preserving the
+                    # original runtime, timestamp, duration and event identity.
+                    event = {**old, **_safe(context)}
+                line = json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
                 self.directory.mkdir(parents=True, exist_ok=True)
                 if self.path.exists() and self.path.stat().st_size + len(line) > MAX_BYTES:
                     for index in range(BACKUPS, 0, -1):
@@ -104,6 +115,7 @@ class FailureEvents:
 
     def recent(self, limit=50, event_id=None):
         result = []
+        seen = set()
         with self.lock:
             for path in [self.path] + [self.path.with_suffix(f'.jsonl.{i}') for i in range(1, BACKUPS + 1)]:
                 try:
@@ -115,7 +127,8 @@ class FailureEvents:
                         item = json.loads(line)
                     except ValueError:
                         continue
-                    if isinstance(item, dict) and (event_id is None or item.get('id') == event_id):
+                    if isinstance(item, dict) and item.get('id') not in seen and (event_id is None or item.get('id') == event_id):
+                        seen.add(item.get('id'))
                         result.append(item)
         return sorted(result, key=lambda item: str(item.get('at', '')), reverse=True)[:limit]
 
@@ -133,17 +146,19 @@ class FailureEvents:
             from easel.gateway_auth import gateway_error
             classified = gateway_error(error['detail'])
             if classified['code'] != 'agent_execution_failed':
-                error = {**error, 'code': classified['code']}
+                error = {**error, **classified}
         model = error.get('modelRef') or model_ref
         context = {'operation': 'chat', 'stage': error.get('stage') or ('model_response' if str(error.get('code', '')).startswith('model_') else 'agent_execution'),
                    'code': error.get('code') or 'agent_execution_failed',
                    'turnId': turn_id, 'sessionId': session_id, 'modelRef': model,
                    'channel': error.get('channel') or (model.split('/', 1)[0] if isinstance(model, str) and '/' in model else None),
                    'outputTokens': error.get('outputTokens'),
+                   'upstreamStatus': error.get('upstreamStatus'),
+                   'upstreamReason': error.get('upstreamReason'),
                    'providerFinishReason': error.get('providerFinishReason')}
         return self.record(source='history' if at else 'server', route='/api/chat/stream', method='POST', status=200,
                            duration=duration, context=context, at=at,
-                           event_id=uuid5(NAMESPACE_URL, 'easel:chat-failure:' + turn_id).hex)
+                           event_id=uuid5(NAMESPACE_URL, 'easel:chat-failure:' + turn_id).hex, enrich_chat=True)
 
     def reconcile_chat_history(self, root):
         """Recover bounded, explicitly failed durable runs; do not infer from text."""

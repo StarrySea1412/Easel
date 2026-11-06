@@ -263,6 +263,54 @@ def test_historical_classification_does_not_store_provider_response(tmp_path):
     assert 'PRIVATE' not in events.path.read_text()
 
 
+def test_group_failure_enriches_existing_generic_receipt_without_losing_original_identity(tmp_path):
+    events = FailureEvents(tmp_path)
+    event_id = events.record_chat(turn_id='group-turn', session_id='chat', duration=19743,
+        model_ref='aihub/gpt-6.1-sol', error={'code':'agent_execution_failed'})
+    original, = events.recent()
+    events.record_chat(turn_id='group-turn', session_id='chat', at='2026-11-06T04:02:30+00:00',
+        error={'code':'agent_execution_failed', 'detail':'404 Model "gpt-6.1-sol" is not available for this group'})
+    row, = events.recent()
+    assert row['id'] == event_id and row['at'] == original['at']
+    assert row['version'] == original['version'] and row['source'] == original['source']
+    assert row['durationMs'] == 19743 and row['modelRef'] == 'aihub/gpt-6.1-sol'
+    assert row['code'] == 'model_group_unavailable' and row['upstreamStatus'] == 404
+    assert row['upstreamReason'] == 'model_not_available_for_group'
+    assert 'detail' not in row and 'message' not in row
+    before = events.path.read_bytes()
+    events.record_chat(turn_id='group-turn', error={'code':'agent_execution_failed'})
+    assert events.path.read_bytes() == before
+    assert events.recent(1, event_id) == [row]
+
+
+def test_arbitrary_upstream_reason_text_is_not_recorded(tmp_path):
+    events = FailureEvents(tmp_path)
+    events.record_chat(turn_id='unknown', error={'code':'agent_execution_failed',
+        'upstreamStatus':404, 'upstreamReason':'PRIVATE_CREDENTIAL'})
+    row, = events.recent()
+    assert row['upstreamStatus'] == 404 and 'upstreamReason' not in row
+    assert 'PRIVATE' not in events.path.read_text()
+
+
+def test_diagnostic_api_reconciles_legacy_group_error_and_keeps_one_original_event(tmp_path):
+    events = FailureEvents(tmp_path)
+    original_id = events.record_chat(turn_id='legacy-group', session_id='session', duration=19743,
+        model_ref='aihub/gpt-6.1-sol', error={'code':'agent_execution_failed'})
+    original, = events.recent()
+    root=tmp_path/'sessions'; (root/'runs').mkdir(parents=True)
+    (root/'runs'/'legacy-group.json').write_text(json.dumps({'status':'failed',
+        'turnId':'legacy-group','sessionId':'session','terminalAt':original['at'],
+        'error':{'code':'agent_execution_failed','detail':'404 Model "gpt-6.1-sol" is not available for this group'}}))
+    app=FastAPI(); app.include_router(create_router(events,lambda:root))
+    client=TestClient(app)
+    rows=client.get('/api/diagnostics/failures').json()['events']
+    assert len(rows)==1 and rows[0]['id']==original_id
+    assert rows[0]['code']=='model_group_unavailable' and rows[0]['upstreamStatus']==404
+    assert rows[0]['at']==original['at'] and rows[0]['durationMs']==19743
+    assert rows[0]['version']==original['version']
+    assert client.get('/api/diagnostics/failures',params={'eventId':original_id}).json()['events']==rows
+
+
 def test_restored_prompt_wrapper_preserves_existing_publish_policy(monkeypatch):
     import web.app as web
     monkeypatch.setattr(web, 'read_settings', lambda path: {})

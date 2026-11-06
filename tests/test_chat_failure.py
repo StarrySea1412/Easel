@@ -45,6 +45,31 @@ def test_rate_limits_and_unavailability_are_actionable():
     assert gateway_error('timeout')['code']=='gateway_timeout'
 
 
+def test_model_group_rejection_preserves_safe_status_and_actionable_reason(tmp_path):
+    raw = '404 Model "gpt-6.1-sol" is not available for this group'
+    result = observed_failure([event(raw, provider='aihub', model='gpt-6.1-sol')])
+    assert result['code'] == 'model_group_unavailable'
+    assert result['category'] == 'configuration' and result['retryable'] is False
+    assert result['upstreamStatus'] == 404
+    assert result['upstreamReason'] == 'model_not_available_for_group'
+    assert result['modelRef'] == 'aihub/gpt-6.1-sol'
+    assert result['stage'] == 'model_response'
+    assert result['detail'] == 'HTTP 404: model_not_available_for_group'
+    events = FailureEvents(tmp_path)
+    events.record_chat(turn_id='group-rejected', error=result)
+    row, = events.recent()
+    assert row['upstreamStatus'] == 404 and row['upstreamReason'] == 'model_not_available_for_group'
+    assert row['code'] == result['code']
+
+
+def test_group_rejection_classifier_does_not_infer_from_quoted_or_arbitrary_404():
+    for raw in ('404 missing page', 'User quoted 404 Model "gpt-6.1-sol" is not available for this group',
+                '404 Model "gpt-6.1-sol" is not available for this group\nPRIVATE',
+                '404 Model "sk-PRIVATE secret" is not available for this group'):
+        assert gateway_error(raw)['code'] == 'agent_execution_failed'
+    assert gateway_error('Easel AI Hub model unavailable for group')['code'] == 'model_group_unavailable'
+
+
 def test_observed_provider_concurrency_limit_is_classified_for_the_chat_ui():
     result=observed_failure([event('429: {"error":{"message":"您已达到并发请求数限制：最多同时处理1个请求"}}')])
     assert result['code']=='model_rate_limited'

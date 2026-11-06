@@ -19,7 +19,7 @@ test('ordinary chat omits empty plan and collaboration advice for every configur
   const value={sessionId:'session-1',turnId:'turn-1',engine:'openclaw',execution:{current:{sessionId:'session-1',turnId:'turn-1',operations:[],plan:[],runtime}},office};
   await act(async()=>root.render(createElement(ChatRunContext.Provider,{value},createElement(Activity,{sessionId:'session-1',turnId:'turn-1'}))));
   assert.match(host.textContent,/主 Agent/);
-  assert.match(host.textContent,/模型处理中 · 暂无工具调用记录/);
+  assert.match(host.textContent,/正在处理 · 暂无工具调用记录/);
   assert.equal(host.querySelector('.chat-agent-capabilities'),null);
   assert.doesNotMatch(host.textContent,/计划|未开放|启动模型|复杂任务|未收到回执不代表|尚未收到委派/);
  }
@@ -57,4 +57,7 @@ test('requested model is labeled as selected while observed runtime identity rem
  assert.match(host.textContent,/aihub\/gpt-6\.1-sol/);
  assert.match(host.textContent,/本轮指定；实际身份未核验/);
  assert.doesNotMatch(host.textContent,/模型未上报/);
+ const child={...agent,id:'child',parentId:agent.id,name:'Child'};
+ await act(async()=>root.render(createElement(ChatRunContext.Provider,{value:{...value,office:{...value.office,agents:[child]}}},createElement(Activity,{sessionId:'session-1',turnId:'turn-1'}))));
+ assert.doesNotMatch(host.textContent,/aihub\/gpt-6\.1-sol/,'a child cannot borrow the requested root model');
 });
