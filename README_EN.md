@@ -1,3 +1,5 @@
+**Host 138 production updated to 0.47.1 · 2026-11-06.** Runtime `6d4b2ecd` is healthy. Failed images can be retried individually while successful images are retained. Read-only checks confirmed the original 2/3 card set and retry availability; the user will perform live retry acceptance. [Receipt](docs/image-retry-0.47.1.md).
+
 A [same-platform multi-account publishing design](docs/multi-account-publishing-design-2026-11-06.md) is available: isolated logins, account-bound jobs, queues and recovery. This capability is not implemented yet.
 
 **0.47.1: Retry one failed image.** Open the failed task and choose Retry; successful images and the three-card grouping are preserved. Duplicate requests share one attempt; unknown outcomes require recovery first. A retry may incur new image fees. [Validation and deployment](docs/image-retry-0.47.1.md).
