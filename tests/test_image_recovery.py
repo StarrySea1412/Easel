@@ -435,13 +435,14 @@ def test_tampered_sync_response_is_refused_without_another_post(tmp_path):
         assert calls.count(('POST', '/v1/images/generations')) == 1
 
 
-def test_partial_sync_result_is_terminal_without_automatic_regeneration(tmp_path):
-    with sync_provider(items=1) as (config, calls, _):
-        jobs, job = submit(tmp_path / 'outputs', config, count=2)
+@pytest.mark.parametrize('items,count,reason', [(1, 2, '部分'), (3, 1, '超过请求')])
+def test_partial_sync_result_is_terminal_without_automatic_regeneration(tmp_path, items, count, reason):
+    with sync_provider(items=items) as (config, calls, _):
+        jobs, job = submit(tmp_path / 'outputs', config, count=count)
         worker = ImageWorker(ROOT, lambda: jobs.outputs, lambda: config, lambda: dict(os.environ))
         worker.run(jobs, jobs.claim(config, worker.owner), config)
         result = jobs.get(job['jobId'])
-        assert result['phase'] == 'error' and '部分' in (result['error'] or '')
+        assert result['phase'] == 'error' and reason in (result['error'] or '')
         assert not result['recoveryAvailable']
         assert jobs.claim(config, 'later', now=time.time() + 301) is None
         assert calls.count(('POST', '/v1/images/generations')) == 1

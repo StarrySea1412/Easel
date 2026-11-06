@@ -171,11 +171,13 @@ class ImageJobs:
         data = json.loads(row['data'])
         data.pop('limit', None)
         data['recoveryAvailable'] = False
+        data['retryAvailable'] = False
         if row['status'] == 'queued':
             from .resource_health import memory_snapshot
             data['queueReason'] = 'memory_pressure' if memory_snapshot()['state'] == 'pressure' else 'channel'
         try:
             checkpoint = self.checkpoint(row).read()
+            data['retryAvailable'] = self._retryable(row, data, checkpoint)
             if checkpoint:
                 data['recoveryAvailable'] = self._recoverable(checkpoint)
                 if row['status'] == 'running' and checkpoint['stage'] in ('downloading', 'responded'):
@@ -184,6 +186,62 @@ class ImageJobs:
             pass
         return {**data, 'phase': row['status'],
                 'state': 'running' if row['status'] in ('queued', 'running') else 'done' if row['status'] == 'done' else 'error'}
+
+    @staticmethod
+    def _retryable(row, data, receipt):
+        # Unknown submissions, delivered bytes and manual abandonment are not
+        # evidence of provider failure. Never turn them into a new paid call.
+        return (row['status'] == 'error' and not data.get('retryJobId')
+                and not data.get('cancelRequestedAt') and not data.get('paths')
+                and ((receipt is None and not data.get('dispatchAt'))
+                     or bool(receipt and receipt['stage'] in ('failed', 'incomplete'))))
+
+    def retry(self, ident, config, *, session):
+        """Explicit paid retry of one terminal failure, idempotent per parent."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM jobs WHERE id=?', (ident,)).fetchone()
+            if row is None or json.loads(row['data']).get('sessionId') != session:
+                raise FileNotFoundError('任务不存在')
+            data = json.loads(row['data'])
+            if data.get('retryJobId'):
+                return self.public(db.execute('SELECT * FROM jobs WHERE id=?', (data['retryJobId'],)).fetchone())
+            checkpoint = self.checkpoint(row)
+            try:
+                with checkpoint.lock():
+                    if not self._retryable(row, data, checkpoint.read()):
+                        raise ValueError('仅可重试已确认失败的图片；已有结果或状态未确认时请先接回原任务。')
+                    if db.execute('SELECT 1 FROM cancelled_turns WHERE scope=?', (row['scope'],)).fetchone():
+                        raise ValueError('所属轮次已停止；未重试图片。')
+                    from .task_store import TaskStore
+                    tasks = TaskStore(self.outputs)
+                    if not tasks.image_allowed(session, data['turnId']):
+                        raise ValueError('所属目标已停止或运行未确认；未重试图片。')
+                    error = self.source_error(data)
+                    if error:
+                        raise ValueError(error)
+                    host, config_id, limit = channel(config)
+                    if config_id != row['config']:
+                        raise ValueError('生图渠道身份已变化，请恢复原渠道后重试。')
+                    child = uuid.uuid4().hex
+                    request = 'retry.' + ident
+                    # Preserve the original model, reference, card slot and
+                    # provenance, but give the attempt its own checkpoint/files.
+                    values = {k: data[k] for k in ('prompt', 'size', 'mode', 'n', 'model',
+                        'sessionId', 'turnId', 'referenceId', 'maskId', 'cardSetId',
+                        'cardIndex', 'cardRole', 'creationSource') if k in data}
+                    values.update(jobId=child, requestId=request, started=time.time(),
+                        url=None, error=None, limit=limit, retryOf=ident,
+                        attempt=data.get('attempt', 1) + 1)
+                    tasks.reserve_images(session, data['turnId'], [(request, data['n'])])
+                    db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                        (child, row['scope'], request, row['fingerprint'], host, config_id,
+                         'queued', None, 0, time.time(), json.dumps(values, ensure_ascii=False)))
+                    data['retryJobId'] = child
+                    db.execute('UPDATE jobs SET data=? WHERE id=?', (json.dumps(data, ensure_ascii=False), ident))
+            except CheckpointBusy as exc:
+                raise ValueError('原图片进程仍在运行，请稍后核对原任务。') from exc
+        return self.get(child, session=session)
 
     def get(self, ident, *, session=None):
         with self.db() as db:
@@ -221,7 +279,7 @@ class ImageJobs:
                               (session+':', session+';')).fetchall()
         from .xhs_cards import XhsCards
         summaries = XhsCards(self.outputs).summaries(session) if any(json.loads(r['data']).get('cardSetId') for r in rows) else {}
-        values = [self.public(row) for row in rows]
+        values = [self.public(row) for row in rows if not json.loads(row['data']).get('retryJobId')]
         for value in values:
             if value.get('cardSetId') in summaries:
                 value['cardSet'] = summaries[value['cardSetId']]

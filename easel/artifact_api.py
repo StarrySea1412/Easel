@@ -89,6 +89,17 @@ def router(outputs, history=None):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @routes.post('/{session}/jobs/{ident}/retry')
+    def retry_image(session: str, ident: str):
+        from .image_jobs import ImageJobs, read_config
+        try:
+            jobs = ImageJobs(outputs())
+            return jobs.retry(ident, read_config(jobs.outputs.parent), session=session)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else '图片任务暂不可重试，请稍后核对。') from exc
+
     @routes.post('/{session}/{ident}/refresh')
     def refresh(session: str, ident: str):
         repository, _ = get(session, ident)

@@ -83,6 +83,7 @@ class XhsCards:
         with self.jobs.db() as db:
             rows = db.execute('SELECT * FROM jobs WHERE scope=? ORDER BY created', (session+':'+turn,)).fetchall()
             rows = [r for r in rows if json.loads(r['data']).get('cardSetId') == ident]
+            rows = [r for r in rows if not json.loads(r['data']).get('retryJobId')]
             table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='xhs_reviews'").fetchone()
             review = db.execute('SELECT data FROM xhs_reviews WHERE id=?', (ident,)).fetchone() if table else None
         if not rows:

@@ -556,7 +556,8 @@ def save_sync_data(result: dict[str, Any], output: str, fmt: str) -> list[Path]:
             fail("图片结果既没有 b64_json，也没有 url。")
     if _QUEUE_CHECKPOINT is not None and len(paths) != _QUEUE_CHECKPOINT.identity['n']:
         expected = _QUEUE_CHECKPOINT.identity['n']
-        message = (f'已接回 {len(paths)}/{expected} 张图片；供应商本次只返回部分结果，'
+        reason = '供应商本次只返回部分结果' if len(paths) < expected else '供应商返回数量超过请求'
+        message = (f'已接回 {len(paths)}/{expected} 张图片；{reason}，'
                    '未自动重新生成。请核对供应商任务后处理。')
         _QUEUE_CHECKPOINT.write(stage='incomplete', error=message)
         fail(message, 21)

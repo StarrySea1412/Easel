@@ -3,6 +3,7 @@ import { artifactUrl } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import '../styles/chat-artifacts.css';
 import XhsCardSetStatus from './XhsCardSetStatus';
+import RetryImageJob from './RetryImageJob';
 
 function ArtifactCard({ artifact, onUpdated }: { artifact: ChatArtifact; onUpdated: (value: ChatArtifact) => void }) {
   const [busy, setBusy] = useState(false), [note, setNote] = useState(''), [attempt, setAttempt] = useState(0), [failed, setFailed] = useState(false);
@@ -63,7 +64,7 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
     } catch (e) { if (!request.signal.aborted) setError(e instanceof Error ? e.message : '原任务状态更新失败，请稍后重试。'); }
     finally { if (!request.signal.aborted) setBusy(false); }
   };
-  return <article className="chat-image-job" aria-label="生图任务"><strong>{job.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中' : '等待图片通道' : job.phase === 'running' ? job.stage === 'recovering' ? '正在接回原图片任务' : job.stage === 'downloading' ? '图片已生成，正在保存' : '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</strong><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}{job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" disabled={busy} onClick={() => void update('reconcile')}>接回原任务</button>}<button type="button" disabled={busy} onClick={() => void update('acknowledge')}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button></>}{error && <p role="alert">{error}</p>}</article>;
+  return <article className="chat-image-job" aria-label="生图任务"><strong>{job.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中' : '等待图片通道' : job.phase === 'running' ? job.stage === 'recovering' ? '正在接回原图片任务' : job.stage === 'downloading' ? '图片已生成，正在保存' : '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</strong><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}<RetryImageJob job={job} onChanged={onChanged}/>{job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" disabled={busy} onClick={() => void update('reconcile')}>接回原任务</button>}<button type="button" disabled={busy} onClick={() => void update('acknowledge')}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button></>}{error && <p role="alert">{error}</p>}</article>;
 }
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;

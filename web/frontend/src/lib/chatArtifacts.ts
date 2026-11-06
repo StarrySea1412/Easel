@@ -64,7 +64,7 @@ export interface XhsCardSet {
 export interface ChatImageJob {
   jobId: string; sessionId: string; turnId: string; prompt: string;
   phase: 'queued' | 'running' | 'done' | 'error' | 'unconfirmed'; error?: string;
-  stage?: string; recoveryAvailable?: boolean;
+  stage?: string; recoveryAvailable?: boolean; retryAvailable?: boolean;
   queueReason?: 'memory_pressure' | 'channel';
   cardSet?: XhsCardSet;
 }

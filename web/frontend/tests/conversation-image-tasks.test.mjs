@@ -76,3 +76,33 @@ test('three-image status separates saved files from assistant visual review',asy
   await view.render({jobs:[{...job,cardSet:{...cardSet,ready:3,complete:true,qualityState:'assistant_reviewed'}}]});
   assert.match(view.container.textContent,/助手审图通过/);
 });
+
+test('failed single-image retry deduplicates clicks and keeps saved images',async t=>{
+  let resolve, calls=0;
+  const pending=new Promise(yes=>{resolve=yes;});
+  const job={jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'第2张',phase:'error',retryAvailable:true};
+  t.mock.method(globalThis,'fetch',(url,options)=>{calls++;assert.equal(String(url),'/api/chat/artifacts/chat/jobs/'+job.jobId+'/retry');assert.equal(options.method,'POST');return pending;});
+  const view=await setup(t,{items:[image(),image('c',{contentSha256:'d'.repeat(64)})],jobs:[job]});
+  assert.ok(view.container.querySelector('details').open);
+  assert.match(view.container.textContent,/可能产生新的生图费用/);
+  await act(async()=>{view.button('重试失败图片').click();view.button('重试失败图片').click();});
+  assert.equal(calls,1);assert.ok(view.button('正在提交重试…').disabled);
+  await act(async()=>resolve(new Response(JSON.stringify({...job,jobId:'e'.repeat(32),phase:'queued'}))));
+  assert.equal(view.reads(),1);assert.ok(view.button('已提交重试').disabled);
+  assert.equal(view.container.querySelectorAll('.conversation-image-card').length,2);
+});
+
+test('retry rejection preserves failed job and allows later correction',async t=>{
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({detail:'所属目标已停止；未重试图片。'}),{status:409}));
+  const view=await setup(t,{jobs:[{jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'失败图',phase:'error',retryAvailable:true}]});
+  await act(async()=>view.button('重试失败图片').click());
+  assert.match(view.container.textContent,/所属目标已停止/);
+  assert.ok(!view.button('重试失败图片').disabled);assert.equal(view.reads(),0);
+});
+
+test('unknown or already saved jobs never offer generation retry',async t=>{
+  const view=await setup(t,{jobs:[{jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'未知结果',phase:'unconfirmed',retryAvailable:false}]});
+  assert.equal(view.button('重试失败图片'),undefined);
+  await view.render({jobs:[{jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'已经保存',phase:'done',retryAvailable:false}]});
+  assert.equal(view.button('重试失败图片'),undefined);
+});

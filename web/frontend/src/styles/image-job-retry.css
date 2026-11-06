@@ -1,0 +1,6 @@
+.image-job-retry { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0; }
+.image-job-retry button { min-height:32px; padding:5px 12px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--accent,#507bb7); font:inherit; cursor:pointer; }
+.image-job-retry button:disabled { opacity:.5; cursor:default; }
+.image-job-retry button:focus-visible { outline:2px solid var(--accent,#507bb7); outline-offset:2px; }
+.image-job-retry small { color:var(--text-secondary); }
+.image-job-retry p { flex-basis:100%; margin:0; overflow-wrap:anywhere; }
