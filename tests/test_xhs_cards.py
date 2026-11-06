@@ -24,6 +24,15 @@ def submit(root, args=None, turn='turn'):
     return XhsCards(root).execute(args or ARGS, CONFIG, session='chat',turn=turn)
 
 
+@pytest.mark.parametrize('missing', ['IMG_BASE_URL', 'IMG_MODEL', 'IMG_API_KEY'])
+def test_missing_dedicated_channel_never_creates_card_jobs(tmp_path, missing):
+    # Isolated synthetic configuration only: no model or image provider is called.
+    config = {key: value for key, value in CONFIG.items() if key != missing}
+    with pytest.raises(ValueError, match='生图专用通道未配置完整'):
+        XhsCards(tmp_path).execute(ARGS, config, session='chat', turn='turn')
+    assert not ImageJobs(tmp_path).list('chat')
+
+
 def render(root, colors=('red','green','blue'), size=(768,1024)):
     calls=[]
     def provider(cmd, **kwargs):

@@ -37,6 +37,7 @@ import urllib.request
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
+from functools import wraps
 import ipaddress
 from pathlib import Path
 from typing import Annotated, Literal
@@ -1945,6 +1946,28 @@ async def api_gateway_ensure():
     return _gateway_recovery.request(check_gateway, _start_offline_gateway)
 
 
+_GATEWAY_RESTARTING = False
+_GATEWAY_CHAT_STARTS = 0
+
+
+def _gateway_chat_admission(handler):
+    """Fence new OpenClaw requests while an explicit restart is in progress."""
+    @wraps(handler)
+    async def admitted(req, *args, **kwargs):
+        global _GATEWAY_CHAT_STARTS
+        if req.engine == 'codex' or _chat_backend(req.sessionId) != 'openclaw':
+            return await handler(req, *args, **kwargs)
+        if _GATEWAY_RESTARTING:
+            raise HTTPException(409, 'OpenClaw 正在应用配置，请等待网关就绪后再发送。')
+        # Claim before the handler's first await; restart also checks this claim.
+        _GATEWAY_CHAT_STARTS += 1
+        try:
+            return await handler(req, *args, **kwargs)
+        finally:
+            _GATEWAY_CHAT_STARTS -= 1
+    return admitted
+
+
 @app.post("/api/gateway/restart")
 async def api_gateway_restart():
     """重启本机 gateway，让刚保存的模型配置立刻生效。
@@ -1956,33 +1979,42 @@ async def api_gateway_restart():
     安全性：web/app.py 绑 0.0.0.0 且无鉴权，所以这个端点刻意做成**无参数**，argv
     完全固定（复用 easel.commands.gateway 的同一条分发），不接受任何外部输入拼进命令。
     """
+    global _GATEWAY_RESTARTING
     if _direct_api_enabled():
         return {'ok': True, 'note': 'API 直连配置下一轮生效，无需重启 OpenClaw'}
     if _harness_settings()["runtime"] != "openclaw":
         raise HTTPException(409, "当前 Agent 使用独立按轮启动的进程，不需要重启 OpenClaw 网关")
     if _gateway_recovery.snapshot()['state'] == 'starting':
         return {'ok': False, 'note': 'OpenClaw 正在自动启动，请稍候。'}
+    if (_GATEWAY_RESTARTING or _GATEWAY_CHAT_STARTS or _CHAT_JOBS or _RUNNING_CHAT
+            or any(lock.locked() for lock in (*_session_locks.values(), *_provider_locks.values()))):
+        raise HTTPException(409, '仍有对话正在启动、排队或运行；配置已保存，请等待任务结束后再应用配置。')
+    if os.environ.get('EASEL_DURABLE_RUNTIME') == '1':
+        raise HTTPException(409, '配置已保存；当前网关由服务管理，需通过部署或服务重启加载配置，此入口不会重启受管服务。')
     script = PROJECT_ROOT / 'scripts' / ('gateway.ps1' if os.name == 'nt' else 'gateway.sh')
     if not script.is_file():
         raise HTTPException(500, '找不到 gateway 启动脚本')
     cmd = (['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), 'restart']
            if os.name == 'nt' else ['bash', str(script), 'restart'])
+    _GATEWAY_RESTARTING = True
     try:
-        r = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True,
-                                   text=True, timeout=120, env=_proxy_env()),
-        )
-    except subprocess.TimeoutExpired:
-        # 超时返回提示而不是 500：网关可能只是起得慢，用户刷新一下就好。
-        return {'ok': False, 'note': '重启超时；可稍后刷新，或手动运行 bash scripts/gateway.sh restart'}
-    except Exception as e:  # noqa: BLE001
-        return {'ok': False, 'note': f'重启失败：{e}'}
-    # check_gateway 里有阻塞的 urllib 探针（最多 3s）：丢线程，别卡事件循环
-    up = await asyncio.to_thread(check_gateway)
-    tail = clean_agent_output(r.stdout or '')[-200:]
-    return {'ok': bool(up), 'gatewayUp': bool(up),
-            'note': tail or ('网关已重启' if up else '网关未就绪，请查看 /tmp/easel-gateway.log')}
+        try:
+            r = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True,
+                                       text=True, timeout=120, env=_proxy_env()),
+            )
+        except subprocess.TimeoutExpired:
+            return {'ok': False, 'note': '重启超时；可稍后刷新，或手动运行 bash scripts/gateway.sh restart'}
+        except Exception as e:  # noqa: BLE001
+            return {'ok': False, 'note': f'重启失败：{e}'}
+        up = await asyncio.to_thread(check_gateway)
+        ready = r.returncode == 0 and bool(up)
+        return {'ok': ready, 'gatewayUp': bool(up),
+                'note': ('网关已重启并就绪；配置已重新加载，模型连接仍需单独检测。' if ready
+                         else '网关重启未确认，请查看运行日志后重试应用配置。')}
+    finally:
+        _GATEWAY_RESTARTING = False
 
 
 @app.get("/api/personas")
@@ -3030,7 +3062,7 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
         if not changed:
             return ''
         _atomic_model_bytes(oc, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
-        return 'openclaw 已同步（下一条消息生效）'
+        return 'OpenClaw 配置已保存；请在任务结束后点击“应用配置 / 重启网关”加载，尚未确认运行中的网关已使用新配置。'
     except Exception as e:  # noqa: BLE001
         raise RuntimeError('OpenClaw 配置同步失败') from e
 
@@ -3195,7 +3227,7 @@ def _sync_anthropic_provider(base: str, key: str) -> str:
         tmp = oc.parent / (oc.name + '.tmp')
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         tmp.replace(oc)
-        return 'anthropic provider 已同步到 openclaw（下一条消息生效）'
+        return 'Anthropic 配置已保存到 OpenClaw；请在任务结束后重启网关加载。'
     except Exception as e:  # noqa: BLE001
         return f'anthropic provider 同步失败：{e}'
 
@@ -3247,7 +3279,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             except DirectAPIError as exc:
                 raise HTTPException(400, str(exc)) from None
             _commit_model_configuration(updates)
-            return {'ok': True, 'transport': 'api', **_model_channels()}
+            return {'ok': True, 'transport': 'api', 'requiresGatewayRestart': False,
+                    'note': 'API 直连配置已保存，下一轮使用，无需重启网关。', **_model_channels()}
     if ch0 != 'chat' and req.deletedProviders:
         raise HTTPException(400, '供应商删除仅适用于对话渠道')
     if ch0 not in ('chat', 'transcribe', 'speech', 'image', 'video', 'music'):
@@ -3462,7 +3495,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
         raise HTTPException(400, '没有可保存的改动（key 留空表示不改）')
     note = _commit_model_configuration(updates, provider_updates if is_chat else None, keep_custom, primary_ref,
                                        deleted=deleted if is_chat else None, provider_order=req.providerOrder if is_chat else None)
-    resp = {"ok": True, "note": note}
+    resp = {"ok": True, "note": note, "requiresGatewayRestart": is_chat}
     resp.update(_model_channels())
     return resp
 
@@ -4573,7 +4606,7 @@ async def api_import_apply(req: ImportApplyRequest):
         note = _commit_model_configuration(updates, {slot: {
             'model': chosen_model, 'base': base, 'key': key, 'protocol': hit['protocol'], 'replaceAuth': True}}, keep, channel_label=(slot, hit['name']))
         _IMPORT_PREVIEWS.pop(req.previewToken, None)
-    resp = {"ok": True, "note": note,
+    resp = {"ok": True, "note": note, "requiresGatewayRestart": True,
             "applied": {"name": hit["name"], "slot": slot, "source": req.source,
                         "fields": sorted(updates.keys())}}
     resp.update(_model_channels())
@@ -4793,11 +4826,13 @@ def _xiaohongshu_execution_context(specs: dict[str, dict]) -> str:
         return ''
     return (
         '〔小红书组别执行契约〕\n'
-        '按能力分流：笔记/卡片创作走 xhs-note-creator；纯卡片走 card-design → card-xiaohongshu → card_audit；'
+        '按能力分流：笔记策划走 xhs-note-creator；小红书卡片组走 card-xiaohongshu，'
+        '必须调用 easel_xhs_cards 或 easel_generate_image 专用生图工具，card-design 只指导视觉风格；'
         '爆款规律与限流检测走 skill-xhs-analyzer；评论抓取/回复走 skill-xhs-comment-reply；发布只走 '
         'skill-xhs-publisher。不要把读取、分析、评论和发布混成一次副作用任务。\n'
-        '明确要求纯文字排版时用 HTML+CSS 渲染并执行 card_audit；其他视觉创作沿用已授权的生图通道；真实照片卡可用 '
-        'text_on_image 路径。外部素材先归档到当前 outputs 项目 assets；生成产物须先交付到当前对话，'
+        '卡片组、封面和配图必须取得真实生图成功回执并交付图片，不能用 HTML、浏览器截图或原图叠字替代生图。'
+        '有商品参考图时复用同一 referenceId 保持主体；缺生图配置、排队中或调用失败只能报告未完成，不得降级为 HTML。'
+        '外部素材先归档到当前 outputs 项目 assets；生成产物须先交付到当前对话，'
         '自行渲染的图片先easel_present登记当前会话（不代表质量通过），再用 view_image 读取原路径，由运行时核对会话归属并安全暂存，不要手动扩大目录权限。'
         '识图服务超时不代表生图失败：保留已保存图片并明确视觉审核未完成，不要自动重复识图或重新生图；'
         '若收到 allowed-directory 错误，等待修复 Agent 回执后在下一轮同会话继续，不凭文件名猜图。\n'
@@ -5822,6 +5857,7 @@ async def api_chat_stream(req: ChatRequest):
         raise
 
 
+@_gateway_chat_admission
 async def start_chat_run(req: ChatRequest, *, observe=True, on_done=None):
     """SSE 真流式对话。
 
@@ -7262,6 +7298,7 @@ async def _stop_chat_producer(req: StopRequest):
 
 
 @app.post("/api/chat")
+@_gateway_chat_admission
 async def api_chat(req: ChatRequest):
     """非流式对话（备选）。"""
     if req.modelRef is not None:

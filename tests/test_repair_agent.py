@@ -118,7 +118,8 @@ def test_xiaohongshu_skill_context_routes_card_workflow():
         selectedSkills=["card-xiaohongshu"],
     ))
     assert "〔小红书组别执行契约〕" in message
-    assert "card-design → card-xiaohongshu → card_audit" in message
+    assert "必须调用 easel_xhs_cards 或 easel_generate_image 专用生图工具" in message
+    assert "不得降级为 HTML" in message
     assert "不凭文件名猜图" in message
 
 

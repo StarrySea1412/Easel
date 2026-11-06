@@ -1688,6 +1688,8 @@ export interface ModelChannelRows { rows: ModelRow[] }
 
 export interface ModelChannelsResponse {
   transport?: 'api' | 'openclaw';
+  /** Saved configuration is not evidence that the running gateway loaded it. */
+  requiresGatewayRestart?: boolean;
   channels: {
     chat: ModelChannelRows;
     transcribe: ModelChannelRows;
@@ -1701,6 +1703,10 @@ export interface ModelChannelsResponse {
 
 export function fetchModelChannels(runtime?: string): Promise<ModelChannelsResponse> {
   return request(`/api/settings/models${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ''}`);
+}
+
+export function restartGateway(): Promise<{ ok: boolean; gatewayUp?: boolean; note: string }> {
+  return request('/api/gateway/restart', { method: 'POST' });
 }
 
 export function saveChatTransport(transport: 'api' | 'openclaw'): Promise<ModelChannelsResponse> {

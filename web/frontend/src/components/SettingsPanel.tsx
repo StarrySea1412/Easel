@@ -23,7 +23,7 @@ import EnvBoard from './EnvBoard';
 import { Sk as Skeleton, SkeletonCard } from './Skeleton';
 import {
   fetchEnvTools, fetchHarnessSettings,
-  fetchModelChannels, runChannelSelftest, saveModelConfig,
+  fetchModelChannels, runChannelSelftest, saveModelConfig, restartGateway,
   fetchModelPresets, discoverModels,
   fetchImportSources, previewImport, applyImport, discoverImportModels,
   saveImagegenChannel, fetchImagegenGallery, fetchSkillDetail, saveEnv, testNotifyEmail,
@@ -188,6 +188,11 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const [saving, setSaving] = useState(false);
   const modelSavePending = useRef(false);
   const [savedNote, setSavedNote] = useState('');
+  const [gatewayRestartRequired, setGatewayRestartRequired] = useState(false);
+  const [gatewayApplying, setGatewayApplying] = useState(false);
+  const gatewayApplyPending = useRef(false);
+  const [gatewayApplyNote, setGatewayApplyNote] = useState('');
+  const [gatewayApplyError, setGatewayApplyError] = useState(false);
   const [savedRowIndex, setSavedRowIndex] = useState<number | undefined>();
   const [presets, setPresets] = useState<Record<string, ModelPreset[]>>({});
   const [discover, setDiscover] = useState<Record<string, DiscoverResult | 'loading'>>({});
@@ -333,7 +338,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   }, [impPreview, impBusy, impSource, saving]);
 
   const applyImportCandidate = useCallback(async (candidate: ImportCandidate) => {
-    if (!candidate.compatible || !candidate.previewToken || impBusy || impApplying.current || modelSavePending.current) return;
+    if (!candidate.compatible || !candidate.previewToken || impBusy || impApplying.current || modelSavePending.current || gatewayApplyPending.current) return;
     impApplying.current = true;
     setImpBusy('apply');
     setImpApplyingId(candidate.id);
@@ -349,6 +354,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       const actualDefault = r.channels.chat.rows.find((row) => row.role === '主');
       const identity = (row?: ModelRow) => row ? `${row.slot}:${row.name}:${row.model}:${row.baseUrl}` : '';
       setSavedChatRows(r.channels.chat.rows);
+      setGatewayRestartRequired(r.requiresGatewayRestart === true);
+      setGatewayApplyNote('');
       setImpMsg(`已导入并保存「${r.applied.name}」→ ${modelImportSlotLabel(targetSlot)}${model ? ` · ${model}` : ''}。${identity(previousDefault) === identity(actualDefault)
         ? `默认模型未改变：${modelConfigLabel(actualDefault)}` : `已保存默认现为：${modelConfigLabel(actualDefault)}`}。尚未进行真实调用测活。${r.note ? ` ${r.note}` : ''}`);
       setImpPreview(null);
@@ -424,7 +431,7 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
   const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
 
   const saveCurrent = useCallback(async (channel: Chan = chan, rowIndex?: number, makePrimary = false) => {
-    if (modelSavePending.current || impApplying.current || modelLoading) return;
+    if (modelSavePending.current || impApplying.current || gatewayApplyPending.current || modelLoading) return;
     setSavedRowIndex(rowIndex);
     const allRows = channel === 'chat' ? chatRows : channel === 'transcribe' ? transRows : (mediaRows[channel] || []);
     const rows = rowIndex === undefined ? allRows : allRows.filter((_, index) => index === rowIndex).map(row => makePrimary ? { ...row, role: '主', enabled: true } : row);
@@ -463,6 +470,8 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       if (!mounted.current) return;
       clearModelDiscovery(channel);
       if (channel === 'chat') {
+        setGatewayRestartRequired(d.requiresGatewayRestart === true);
+        setGatewayApplyNote('');
         const fresh = d.channels.chat.rows || [];
         setChatRows(current => rowIndex === undefined ? fresh : current.map((row, index) => {
           const saved = fresh.find(item => providerIdentity(item) === providerIdentity(row));
@@ -489,6 +498,29 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
       }
     }
   }, [chan, harness, chatRows, transRows, mediaRows, refreshEnv, clearImportPreview, deletedProviders, modelLoading, clearModelDiscovery]);
+
+  const applyGatewayConfiguration = async () => {
+    if (gatewayApplyPending.current || modelSavePending.current || impApplying.current) return;
+    gatewayApplyPending.current = true;
+    setGatewayApplying(true);
+    setGatewayApplyNote('');
+    setGatewayApplyError(false);
+    try {
+      const result = await restartGateway();
+      if (!mounted.current) return;
+      setGatewayApplyNote(result.note);
+      setGatewayApplyError(!result.ok);
+      if (result.ok) setGatewayRestartRequired(false);
+    } catch (error) {
+      if (mounted.current) {
+        setGatewayApplyError(true);
+        setGatewayApplyNote(error instanceof Error ? error.message : '应用配置失败，请稍后重试。');
+      }
+    } finally {
+      gatewayApplyPending.current = false;
+      if (mounted.current) setGatewayApplying(false);
+    }
+  };
 
   const checkModel = async (index: number) => {
     const row = chatRows[index], target = modelCheckTarget(row);
@@ -832,12 +864,12 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                     <details className="model-settings-details" open={providerDetailsOpen}
                       onToggle={(event) => setProviderDetailsOpen(event.currentTarget.open)}>
                       <summary><span aria-hidden="true"><IconSlidersHorizontal size={16} /></span>管理供应商 <small>连接配置与对话可选模型</small></summary>
-                    <fieldset className="model-provider-editors" disabled={saving || Boolean(impBusy)}>
+                    <fieldset className="model-provider-editors" disabled={saving || gatewayApplying || Boolean(impBusy)}>
                     <div className="panel-top">
                       <button type="button" className="adv-btn model-add-provider" disabled={harness !== 'openclaw' || modelLoading || saving || Boolean(impBusy)} onClick={addProvider}><IconPlus size={15} /> 添加供应商</button>
                       <button type="button" className="adv-btn" disabled={harness !== 'openclaw'} onClick={() => setImportOpen(true)}><IconUpload size={15}/> 导入已有配置</button>
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已有保存配置' : '未配置'}</span>
-                      {harness === 'openclaw' && <span className="desc">拖动调整顺序，保存后生效；测试无需额外设置。</span>}
+                      {harness === 'openclaw' && <span className="desc">保存后需应用配置；模型检测单独执行。</span>}
                       <span className="spacer" />
                     </div>
                     {renderBoard(chatRows, {
@@ -875,6 +907,11 @@ export default function SettingsPanel({ initialSection = 'model', navigationKey 
                     {savedRowIndex === undefined && savedNote && <p className="provider-save-message" role={savedNote.startsWith('保存失败') ? 'alert' : 'status'}>{savedNote}</p>}
                     <div className="foot-note">保存过的模型会自动出现在对话列表。停用后仍然列出并标注“已停用”，启用后可选择；不会删除配置或停止正在执行的任务。</div>
                     </fieldset>
+                    {harness === 'openclaw' && (gatewayRestartRequired || gatewayApplyNote) && <div className="provider-save-message">
+                      {gatewayRestartRequired && <p>配置已保存，运行中的网关尚未确认加载。应用配置会重启网关；有对话运行或排队时服务会拒绝重启。仅应用已保存的配置。</p>}
+                      {gatewayRestartRequired && <button type="button" className="btn btn-sm btn-primary" disabled={gatewayApplying || saving || Boolean(impBusy)} onClick={() => void applyGatewayConfiguration()}>{gatewayApplying ? '正在应用配置…' : '应用配置 / 重启网关'}</button>}
+                      {gatewayApplyNote && <p role={gatewayApplyError ? 'alert' : 'status'}>{gatewayApplyNote}</p>}
+                    </div>}
                     </details>
                     <details className="model-settings-details"><summary><span aria-hidden="true"><IconTerminal size={16} /></span>本机 Codex <small>使用本机已登录的编程助手</small></summary><CodexSettings /></details>
                     <details className="model-settings-details model-inline-import" hidden={!importOpen} open={importOpen}

@@ -3,7 +3,7 @@ name: xhs-note-creator
 description: >
   小红书内容总入口：生成标题、正文、caption、hashtags，以及 默认 3 张图文卡片或短视频分镜，覆盖素材分析、卖点评估、去 AI 味和质检。
   当用户说“写/做小红书笔记、小红书图文/种草/文案、出一套卡片、小红书视频”时使用。
-  整套笔记用本 SKILL；仅渲染卡片用 card-xiaohongshu；其他平台的通用文案用 social-content。
+  图片卡组必须调用专用AI生图通道，不用HTML截图替代。整套笔记用本 SKILL；仅制作卡片用 card-xiaohongshu；其他平台的通用文案用 social-content。
 layer: produce
 ---
 
@@ -20,9 +20,9 @@ layer: produce
 
 ### 爆款 5 大原则
 
-1. **尊重出图要求**：未指定AI生图时可优先真实素材、截图和对比图；明确要求AI生图时按要求执行，不用素材或HTML替换。
+1. **必须真实生图**：小红书卡组、封面和配图必须调用已配置的专用AI生图通道，取得成功回执与实际图片；参考图用于保持商品和主体，不能只交HTML截图、拼贴或提示词。
 2. **聚焦核心卖点**：用公式判断优先级（稀缺性 × 实用性 × 可感知）
-3. **高级感视觉**：需要确定性卡片排版时使用 [card-design](../card-design/SKILL.md) 设计系统（选风格锁 spec、字大字细、填满画幅、禁大 emoji 廉价感）。用户要求AI生成图片时把审美要求用于生图提示词，不强制改为HTML。文案保持口语化和真实感。
+3. **高级感视觉**：使用 [card-design](../card-design/SKILL.md) 的风格与构图指导，把主体、配色、光线、字体层级和安全边距写入生图提示词；设计系统不改变专用生图路线。文案保持口语化和真实感。
 4. **痛点导向**："能解决什么问题" > 堆砌功能列表
 5. **先自检再交付**：发现缺图、乱码、主体失真或虚构事实先明确问题并处理，不把低质量初稿直接作为成品；用户反馈用于审美迭代。
 
@@ -39,7 +39,7 @@ layer: produce
 - 工具回执queued不等于完成；后台逐张预览。登记后等待队列完成，用同requestId的status查看，不能以“已登记”结束成品任务。三张保存后使用图像读取工具逐张实际查看（不能只看文件名或提示词），检查：中文清楚无乱码/拼写错，主体和色彩一致，三张内容有递进差异，构图完整无裁切，手机尺寸文字可读，卖点真实。
 - 只有全部通过才调用同requestId的 `review`：按顺序提交每张当前 `sha256`、具体看到的画面/文案与审图依据 `evidence`，以及 `readableText/consistentSubject/consistentStyle/distinctContent/truthfulClaims/safeMargins=true`。不会看图、任一项不通过或少图时保持“待质量验收”，明确问题；不能编写全true凑通过。修图/重生可能另收费，失败不自动改requestId重生。
 - 文件门还会核对真实可读图片、至少720×960、3:4画幅、当前会话交付和像素去重；该门只保证文件要求，不能证明审美和文案质量。显示“助手审图通过”也不等于用户最终验收。
-- 没有该工具时按专用图片流程做恰好3张，逐图审看后交付，准确说明来源及验收边界；不得以HTML、重复图片或占位图冒充AI生图。用户明确限定排版/真实素材时仍尊重要求，但也要交付3个可读取的独立图片文件。
+- 没有该工具时使用 `easel_generate_image` 或 [ai-image-gen](../ai-image-gen/SKILL.md) 的专用图片流程做恰好3张，逐图审看后交付，准确说明来源及验收边界。缺少专用生图配置、工具不可用或生成失败时明确未完成，不得以HTML截图、纯排版、重复图片或占位图兜底；不能把聊天模型当生图通道。用户只要求文案或另行要求网页时尊重该范围，不宣称卡组生图已完成。
 - 最终交付三张预览/下载、caption与标签，并说明实际审图结果；准备发布和实际发布继续分别授权。
 
 ## 工作流
@@ -103,17 +103,9 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py <path>... \
 - 一张卡只讲一个论点
 - 全套配色/字体/风格保持一致（由 card-design 选中的那一套贯穿整组）
 
-**先尊重本轮出图要求**：制作卡组、封面、配图等图片成品时，在本轮数量和费用授权内主动调用easel_generate_image或ai-image-gen，不必等用户补说“AI”；不能只交提示词。明确限定纯文字/参数排版或真实素材时遵从约束。AI图片先取得实际产物，必要时再精确排版；缺配置或失败如实反馈，不静默换成HTML截图。以下html_card只用于明确的排版需求或图片取得后的文字合成。
+**必须调用专用生图通道**：优先使用 `easel_xhs_cards`，按三图协议取得真实成功回执与图片；没有三图工具时使用 `easel_generate_image` 或 [ai-image-gen](../ai-image-gen/SKILL.md)。参考商品图通过同一 `referenceId` 传给三张图，保留主体的形状、颜色、数量和关键细节。
 
-**文字卡片排版走 card-design 管线。** 按有无真实照片选择渲染路径（策略写入 `meta.json`，枚举与 `references/meta-schema.md` 一致）：
-
-| 策略 | 适用 | 渲染路径 |
-|------|------|----------|
-| `html_card` | 未指定AI生图的纯文字卡 / 知识卡 / 数据卡 | **走 [card-xiaohongshu](../card-xiaohongshu/SKILL.md)**：读 [card-design](../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 出图 → `card_audit.py` 硬门禁 |
-| `text_on_photo` | 有真实照片 + 钩子文字（真实素材最佳） | Pillow `scripts/text_on_image.py`（小红书真实素材路径，保留） |
-| `collage` | 有 2-4 张互补照片 | Pillow `scripts/collage_3x4.py` |
-
-> 图片成品任务先按card-xiaohongshu的出图路由执行，不能因“知识卡”用途直接跳到HTML。明确的文字/数据排版可渲染；真实照片卡按需使用Pillow，所有路径均交付图片文件并准确说明来源。
+图片取得后才可做局部文字修正，`meta.json.cards[].synthesis_strategy` 记录 `ai_generated` 或 `ai_generated_composite`，并记录原始jobId与生成图片路径。不能先生成HTML或把 `html_card`、真实素材拼贴、截图作为无需生图的捷径。缺配置、失败或结果未知时说明实际状态并查询原任务，不能自动重发。
 
 #### 5B. 视频帖：写分镜脚本
 
@@ -141,7 +133,7 @@ outputs/主题名/{YYYY-MM-DD}/{短标题}_{时间戳}/
 
 目录名走脚本标准化：`python3 skills/builtin/xhs-note-creator/scripts/normalize_slug.py "标题" --with-ts`
 
-> **审图顺序：** 自行渲染或保存的图片必须先easel_present登记到当前会话，再view_image审图；登记仅代表预览和归属，不代表质量通过。遇到EASEL_IMAGE_NOT_DELIVERED先登记现有文件，不能原样重复读取或重新生图；识图服务超时与文件归属错误分开，未经实际看图不得说审核通过。
+> **审图顺序：** 自行保存的真实生成图片必须先easel_present登记到当前会话，再view_image审图；登记仅代表预览和归属，不代表质量通过。遇到EASEL_IMAGE_NOT_DELIVERED先登记现有文件，不能原样重复读取或重新生图；识图服务超时与文件归属错误分开，未经实际看图不得说审核通过。
 
 ### Step 8 — 校验（强制，两道门）
 
@@ -151,13 +143,9 @@ outputs/主题名/{YYYY-MM-DD}/{短标题}_{时间戳}/
 python3 skills/builtin/xhs-note-creator/scripts/validate_meta.py outputs/主题名/meta.json
 ```
 
-**② 视觉门**（仅 `html_card` 路径，渲染后跑；死空白/密度硬门禁）：
+**② 生成与视觉门**：核对专用生图任务已成功、真实图片已交付当前会话，并逐张实际看图。三图使用同一requestId的 `status/review` 按上方协议检查文件哈希、主体/风格一致、文案可读、内容差异、真实卖点和边距。`validate_meta.py` 只校验文本结构，不证明已调用生图或图片质量合格。
 
-```bash
-python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题名/card_*.png"
-```
-
-任一非 0 退出 → 修改后重跑，直到通过。不交付未校验的产物。
+缺图、生成失败、识图不可用或任一质量项失败时保留“未完成/待质量验收”，说明具体问题；不编造成功回执，不用HTML截图补图，也不自动变更requestId重生。
 
 ## 不要做的事
 
@@ -174,12 +162,12 @@ python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题
 
 ## 工具依赖
 
-- Python 3.8+、Pillow（必需，真实照片卡路径）
-- playwright + chromium（`html_card` 路径渲染卡片，走 card-xiaohongshu；首次 `pip install playwright && playwright install chromium`）
+- 专用AI生图通道（`IMG_BASE_URL`、`IMG_MODEL`、`IMG_API_KEY`）及 `easel_xhs_cards` / `easel_generate_image` 工具；生图任务使用运行时配置，不从聊天通道借用凭据。
+- Python 3.8+；Pillow仅用于已有真实生成图片的局部文字修正和预览，不代替生图。
 
 ## 参考资料
 
-- **卡片视觉** → [card-design](../card-design/SKILL.md)（设计系统/风格库，出图前必读）+ [card-xiaohongshu](../card-xiaohongshu/SKILL.md)（HTML→截图渲染管线）
+- **卡片视觉** → [card-design](../card-design/SKILL.md)（设计系统/风格库，出图前必读）+ [card-xiaohongshu](../card-xiaohongshu/SKILL.md)（专用生图与真实图片交付协议）
 - `references/xiaohongshu-viral-methodology.md` — 文案/卖点/标题/情绪方法论（视觉部分已交 card-design）
 - 去 AI 化 → `../text-polisher/references/zh-ai-markers.md`（权威源，含小红书特化）
 - 钩子/标题公式 → `skills/shared/references/hook-title-formulas.md`（公共源）

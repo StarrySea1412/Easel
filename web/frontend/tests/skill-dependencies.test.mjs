@@ -10,6 +10,21 @@ test('short drama requires image generation but video and ordinary speech stay o
   assert.equal(dependencies.find(row => row.id === 'video').required, false);
   assert.equal(dependencies.find(row => row.id === 'speech').required, false);
 });
+
+test('XHS card skills require the dedicated image channel and reflect its own readiness', () => {
+  for (const name of ['card-xiaohongshu', 'xhs-note-creator']) {
+    const missing = skillDependencies(skill(name)).find(row => row.id === 'image');
+    assert.equal(missing?.required, true);
+    assert.equal(missing.configured, null);
+    const emptyChannel = { channels: { image: { rows: [{ result: '未配置', keyMasked: '' }] } } };
+    assert.equal(skillDependencies({ ...skill(name), apiConfigured: true }, null, emptyChannel)
+      .find(row => row.id === 'image').configured, false);
+    const channels = { channels: { image: { rows: [{ result: '已配置', keyMasked: 'fixture…' }] } } };
+    const ready = skillDependencies(skill(name), null, channels).find(row => row.id === 'image');
+    assert.equal(ready.required, true);
+    assert.equal(ready.configured, true);
+  }
+});
 test('local ASR and local image rendering do not require a generation key', () => {
   const asr = skillDependencies(skill('custom'), { body: '运行 asr.py 本地转写' });
   assert.equal(asr[0].id, 'transcribe'); assert.equal(asr[0].required, false);

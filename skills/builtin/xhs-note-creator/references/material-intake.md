@@ -1,8 +1,8 @@
 # 素材驱动流程与卡片合成策略
 
-当用户提供了已有素材(文字 / 图片 / 视频 / 音频)，笔记的写法要从"找参考 → 写原稿 → 拆卡"切换到"清点素材 → 从素材里提炼观点 → 反推卡片/分镜"。本文档给出素材处理的完整流程和三条卡片渲染路径。
+当用户提供了已有素材(文字 / 图片 / 视频 / 音频)，笔记的写法要从"找参考 → 写原稿 → 拆卡"切换到"清点素材 → 从素材里提炼观点 → 反推卡片/分镜"。本文档给出素材处理流程、专用生图与取得图片后的局部合成方式。
 
-出图方式先遵从本轮要求：制作卡组、封面或配图等图片成品时主动使用专用生图工具，保留已授权数量/费用；真实商品和车型事实使用可核实素材。以下三种合成方式用于明确的排版/真实素材约束或生图后的精确合成，不能替代应执行的AI生图。
+制作小红书卡组、封面或配图时必须调用专用生图工具，保留已授权数量/费用。用户素材是商品与主体的事实参考，共用referenceId走图生图；素材处理和文字叠加不能替代生图。缺配置或失败明确未完成，不使用HTML截图兜底。
 
 ## 一、素材清点流程
 
@@ -40,21 +40,19 @@ python3 skills/builtin/xhs-note-creator/scripts/analyze_material.py input.jpg \
 
 1. 素材里最强的 1-2 张/段 → 决定 `cover` 钩子
 2. 其余素材按 `usage` 串成叙事线 → 决定 content 卡顺序
-3. 缺口(没有素材支撑的论点) → 由 `html_card`(card-design 渲染)卡补
+3. 缺口（没有素材支撑的论点）→ 不编造事实；必要时收窄论点或补充核实。视觉场景可用专用生图制作，但生成示意不作事实证据。
 
-## 二、卡片渲染路径(3 条)
+## 二、先生成图片，再按需局部合成
 
-每张卡片在 `meta.json.cards[i].synthesis_strategy` 里必须标明走哪条路径。
+每张卡片在 `meta.json.cards[i].synthesis_strategy` 记录 `ai_generated` 或 `ai_generated_composite`，保留原始生图jobId与图片路径。旧 `html_card` 只可识别为历史渲染来源，不能用于新卡组的出图计划或完成证明。
 
-### 策略 A：`html_card` — 明确的文字/数据排版或图片后期合成
+### 必经步骤：专用AI生图
 
-**适用**：用户明确要求纯文字卡、金句、精确数据/流程排版，或需要为已取得图片叠加文字。没有真实照片本身不能作为跳过生图的理由。
+三图优先使用 `easel_xhs_cards`，同一referenceId保持商品主体；否则使用 `easel_generate_image` 或 [ai-image-gen](../../ai-image-gen/SKILL.md)。必须取得成功回执和真实图片后才进入以下局部合成。没有真实照片、中文较多、知识卡用途或风格要求都不能作为跳过生图的理由。
 
-**做法**：确定需要排版后，交给 [card-xiaohongshu](../../card-xiaohongshu/SKILL.md)——读 [card-design](../../card-design/SKILL.md) 选风格锁 spec → 写 HTML → `render_card.py` 渲染 → `card_audit.py` 硬门禁。生图和排版都须避免低质量视觉，不能因为质量偏好直接取消用户的出图方式。
+### 可选后期：文字叠加
 
-### 策略 B：`text_on_photo` — 照片 + 文字叠加
-
-**适用**：有一张构图干净的真实照片 + 一句强钩子(cover / ending 常用)。
+**适用**：已取得真实生成图片，需要准确叠加一句短标题；记录 `ai_generated_composite`。不得只在原照片上叠字便宣称本轮生图完成。
 
 **做法**：
 
@@ -75,9 +73,9 @@ python3 skills/builtin/xhs-note-creator/scripts/text_on_image.py input.jpg outpu
 - 照片有水印先走 `crop_watermark.py`
 - 字体优先使用本 SKILL 的 assets/fonts 下用户另行提供的 CJK 字体，也会尝试系统字体；该字体目录不是必备仓库资源，可用 `--font <字体绝对路径>` 显式指定。缺字体脚本会警告并用 PIL 默认字体(不推荐上线)
 
-### 策略 C：`collage` — 多图拼贴
+### 可选后期：局部拼贴
 
-**适用**：2-4 张素材互为补充(前后对比 / 多角度 / 步骤图)。
+**适用**：已取得真实生成图片后，组合经过核实的细节素材；保留生成来源并记录 `ai_generated_composite`。不以纯素材拼贴替代专用生图。
 
 **做法**：
 
@@ -98,7 +96,7 @@ python3 skills/builtin/xhs-note-creator/scripts/collage_3x4.py output.jpg \
 
 拼贴出来的卡若还要叠一句标题，再串一次 `text_on_image.py`。
 
-> 概念插画或场景配图使用专用生图；精确流程、数值、表格按明确的排版需求使用html_card。选择由任务要求决定，不能用“一律HTML”覆盖图片制作。
+> 上述脚本只处理已经取得的真实生成图片，不是替代生图的出图路线；精确文字与数字可局部修正，不能先写HTML截图冒充卡组。
 
 ## 三、图文 vs 视频的分流判断
 
@@ -123,7 +121,7 @@ Step 0 问完后按如下判断：
       "width": 4032, "height": 3024, "aspect": 1.333,
       "caption": "阳光下的樱花树近景，粉白色花瓣",
       "usage": "cover",
-      "strategy": "text_on_photo"
+      "strategy": "reference-only"
     },
     {
       "id": "m002",
@@ -143,4 +141,4 @@ Step 0 问完后按如下判断：
 }
 ```
 
-注：视频素材如果要原样用在视频帖分镜里，`strategy` 填 `use_original`；在图文帖里只作为 `reference-only` 或从某一帧派生 `text_on_photo`。
+注：视频素材如果要原样用在视频帖分镜里，`strategy` 填 `use_original`；在图文帖里只作为 `reference-only`；最终卡组仍须专用生图，随后才可局部叠字。

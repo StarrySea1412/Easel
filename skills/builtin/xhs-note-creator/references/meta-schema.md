@@ -48,14 +48,14 @@
   "hashtags": ["#话题1", "#话题2"],
   "poster_style": "card-design 风格名（如 瑞士极简 / 杂志编辑 / 手账贴纸 / 奶油温柔 …见 card-design/references/styles.md）",
 
-  "card_count": 7,
+  "card_count": 3,
   "cards": [
     {
       "page": 1,
       "type": "cover | content | ending",
       "title": "卡片小标题（cover/content）",
       "content": "卡片正文（≤80 字中文）",
-      "synthesis_strategy": "html_card | text_on_photo | collage",
+      "synthesis_strategy": "ai_generated | ai_generated_composite",
       "material_refs": ["m001", "m002"],
       "image_prompt": "图片生成 prompt（可选）",
       "image_url": "卡片图片 URL（可选）"
@@ -80,7 +80,7 @@
       "kind": "text | image | video | audio",
       "caption": "画面描述",
       "usage": "cover | content-N | ending | reference-only | discard",
-      "strategy": "html_card | text_on_photo | collage | use_original"
+      "strategy": "reference-only | use_original"
     }
   ]
 }
@@ -91,7 +91,8 @@
 - `post_format` = `image` 时，`cards[]` 必填、`shots[]` 省略
 - `post_format` = `video` 时，`shots[]` 必填；`cards[]` 只需一张 `cover` 作为封面
 - `materials[]` 仅在用户提供了素材时出现；详细工作流见 `material-intake.md`
-- `synthesis_strategy` 为每张卡选择合成路径；`material_refs` 指向 `materials[].id`
+- `synthesis_strategy` 标明专用生图或取得真实生成图片后的局部合成；卡组不能记录纯HTML作为出图来源。原始jobId和图片路径按实际成功回执记录，不能虚构。`material_refs` 指向 `materials[].id`。
+- 默认3张；其他数量须来自用户明确要求。`html_card/text_on_photo/collage` 只用于识别历史来源，不能作为新卡组已调用生图的证明。
 
 ## 字段规则
 
@@ -137,7 +138,7 @@
   "caption": "媒体说危机，数据说增长。Anthropic 调研 5000 人，83% 说 AI 提高效率而非取代……",
   "hashtags": ["#AI对工作的影响", "#失业危机是假的"],
   "poster_style": "杂志编辑",
-  "card_count": 7,
+  "card_count": 3,
   "cards": [
     {
       "page": 1,

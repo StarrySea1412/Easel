@@ -1,3 +1,10 @@
+## 0.46.13 · 2026-11-06 · GPT Responses 配置应用与小红书真实生图
+
+- 修复已保存协议与常驻网关实际协议不一致：保存回执不再承诺下一轮生效，设置页提供显式“应用配置 / 重启网关”。
+- 应用配置时拒绝启动中、排队或运行中的对话；重启期间阻止新 OpenClaw 请求，直连 API 无需重启；138受管服务明确要求部署/服务重启，不错误调用本机脚本。
+- 小红书卡片组/封面必须专用生图工具的真实成功回执和图片交付，禁止 HTML、截图或原图叠字替代；保留参考商品主体和逐图质量门。
+- 138 正式新会话由旧协议 252 秒超时恢复到 Responses 19.8 秒返回 OK；源码与部署验证边界见[本轮记录](docs/gpt-responses-xhs-0.46.13.md)。
+
 > **2026-11-06 rollout:** 0.46.11 is deployed to production and isolation on host 138 (d42c471b). Authenticated API/source/assets and original failure enrichment passed; vendor access remains unresolved. [Receipt](docs/release-138-0.46.11-2026-11-06.md).
 
 ## 0.46.12 · 2026-11-06 · AIHub优化端点模型目录探测

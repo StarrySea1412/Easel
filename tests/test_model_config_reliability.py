@@ -5,7 +5,9 @@ import asyncio
 import copy
 import json
 import sys
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,6 +70,119 @@ def test_authoritative_env_pair_repairs_stale_mirror_on_model_save(sandbox, base
     provider = json.loads(oc.read_text())['models']['providers']['openai']
     assert (provider['baseUrl'], provider['apiKey']) == ('https://old.example/v1', 'sk-old-test')
     assert provider['models'][0] == {'id': 'new-model', 'name': 'new-model'}
+
+
+def test_model_save_requires_explicit_gateway_apply_without_changing_reload_mode(sandbox, monkeypatch):
+    _, oc = sandbox
+    config = json.loads(oc.read_text())
+    config['gateway'] = {'reload': {'mode': 'off'}}
+    oc.write_text(json.dumps(config))
+    monkeypatch.setenv('EASEL_AGENT_RUNTIME', 'openclaw')
+    monkeypatch.setattr(web.subprocess, 'run', lambda *args, **kwargs: pytest.fail('Saving must not restart or call a model'))
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+        web.ModelSaveRow(slot='openai', model='new-model', protocol='openai-responses'),
+    ])))
+    assert result['ok'] and result['requiresGatewayRestart'] is True
+    assert '已保存' in result['note'] and '重启网关' in result['note']
+    assert '下一条消息生效' not in result['note']
+    updated = json.loads(oc.read_text())
+    assert updated['gateway']['reload']['mode'] == 'off'
+    assert updated['models']['providers']['openai']['api'] == 'openai-responses'
+
+
+@pytest.fixture
+def restart_sandbox(monkeypatch):
+    monkeypatch.delenv('EASEL_DURABLE_RUNTIME', raising=False)
+    monkeypatch.setattr(web, '_direct_api_enabled', lambda: False)
+    monkeypatch.setattr(web, '_harness_settings', lambda: {'runtime': 'openclaw'})
+    monkeypatch.setattr(web, '_gateway_recovery', SimpleNamespace(snapshot=lambda: {'state': 'idle'}))
+    monkeypatch.setattr(web, '_CHAT_JOBS', {})
+    monkeypatch.setattr(web, '_RUNNING_CHAT', {})
+    monkeypatch.setattr(web, '_session_locks', {})
+    monkeypatch.setattr(web, '_provider_locks', {})
+    monkeypatch.setattr(web, '_GATEWAY_RESTARTING', False)
+    monkeypatch.setattr(web, '_GATEWAY_CHAT_STARTS', 0)
+    monkeypatch.setattr(web, '_proxy_env', lambda: {})
+
+
+@pytest.mark.parametrize('busy', ['job', 'process', 'session', 'provider', 'admission', 'restart'])
+def test_gateway_apply_rejects_inflight_chat_before_running_restart(restart_sandbox, monkeypatch, busy):
+    if busy == 'job':
+        web._CHAT_JOBS['test-turn'] = ('test-session', threading.Event())
+    elif busy == 'process':
+        web._RUNNING_CHAT['test-session'] = object()
+    elif busy in ('session', 'provider'):
+        lock = asyncio.Lock()
+        asyncio.run(lock.acquire())
+        (web._session_locks if busy == 'session' else web._provider_locks)['test'] = lock
+    elif busy == 'admission':
+        monkeypatch.setattr(web, '_GATEWAY_CHAT_STARTS', 1)
+    else:
+        monkeypatch.setattr(web, '_GATEWAY_RESTARTING', True)
+    monkeypatch.setattr(web.subprocess, 'run', lambda *args, **kwargs: pytest.fail('Busy gateway must not restart'))
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_gateway_restart())
+    assert caught.value.status_code == 409
+
+
+def test_gateway_apply_blocks_new_chat_until_restart_finishes(restart_sandbox, monkeypatch):
+    started, finish = threading.Event(), threading.Event()
+    def restart(*args, **kwargs):
+        started.set()
+        assert finish.wait(5)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(web.subprocess, 'run', restart)
+    monkeypatch.setattr(web, 'check_gateway', lambda: True)
+    monkeypatch.setattr(web, '_chat_backend', lambda session: 'openclaw')
+    async def handler(req):
+        pytest.fail('Chat must not begin while the gateway is restarting')
+    async def scenario():
+        task = asyncio.create_task(web.api_gateway_restart())
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            with pytest.raises(web.HTTPException) as caught:
+                await web._gateway_chat_admission(handler)(SimpleNamespace(engine='openclaw', sessionId='test'))
+            assert caught.value.status_code == 409
+        finally:
+            finish.set()
+        return await task
+    result = asyncio.run(scenario())
+    assert result['ok'] and result['gatewayUp']
+    assert '单独检测' in result['note']
+    assert web._GATEWAY_RESTARTING is False
+
+
+def test_gateway_apply_does_not_treat_old_healthy_process_as_success(restart_sandbox, monkeypatch):
+    monkeypatch.setattr(web.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(returncode=1))
+    monkeypatch.setattr(web, 'check_gateway', lambda: True)
+    result = asyncio.run(web.api_gateway_restart())
+    assert result['ok'] is False and result['gatewayUp'] is True
+    assert web._GATEWAY_RESTARTING is False
+
+
+def test_managed_gateway_apply_requires_service_restart_and_preserves_busy_guard(restart_sandbox, monkeypatch):
+    monkeypatch.setenv('EASEL_DURABLE_RUNTIME', '1')
+    monkeypatch.setattr(web.subprocess, 'run', lambda *args, **kwargs: pytest.fail('Managed gateway must not run restart script'))
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_gateway_restart())
+    assert caught.value.status_code == 409
+    assert '配置已保存' in caught.value.detail and '部署或服务重启' in caught.value.detail
+    assert web._GATEWAY_RESTARTING is False
+    web._CHAT_JOBS['active-turn'] = ('test-session', threading.Event())
+    with pytest.raises(web.HTTPException) as busy:
+        asyncio.run(web.api_gateway_restart())
+    assert busy.value.status_code == 409 and '仍有对话' in busy.value.detail
+
+
+def test_direct_api_save_needs_no_gateway_apply(sandbox, monkeypatch):
+    monkeypatch.setenv('EASEL_AGENT_RUNTIME', 'api')
+    for key in ('EASEL_DIRECT_API_BASE_URL', 'EASEL_DIRECT_API_MODEL', 'EASEL_DIRECT_API_KEY'):
+        monkeypatch.delenv(key, raising=False)
+    result = asyncio.run(web.api_settings_models_save(web.ModelSaveRequest(rows=[
+        web.ModelSaveRow(slot='direct-api', baseUrl='https://direct.example/v1', model='test-model', key='isolated-test-key'),
+    ])))
+    assert result['ok'] and result['requiresGatewayRestart'] is False
+    assert '无需重启' in result['note']
 
 
 def test_stale_mirror_repair_still_rejects_real_base_change(sandbox):

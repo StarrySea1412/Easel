@@ -322,6 +322,45 @@ const configuredRows = () => [
 const modelChannels = rows => ({ channels: Object.fromEntries(['chat', 'transcribe', 'speech', 'image', 'video', 'music'].map(key => [key, { rows: key === 'chat' ? rows : [] }])) });
 const findButton = (view, text) => [...view.container.querySelectorAll('button')].find(button => button.textContent.trim() === text || (button.classList.contains('tab') && button.textContent.startsWith(text)));
 
+test('saving OpenClaw configuration requires an explicit apply and preserves the action after a busy refusal', async t => {
+  const rows = configuredRows();
+  let attempts = 0;
+  const view = await fixture(t, {
+    fetchModelChannels: modelChannels(rows),
+    saveModelConfig: { ...modelChannels(rows), ok: true, requiresGatewayRestart: true, note: '配置已保存，尚未加载。' },
+    restartGateway: () => {
+      if (++attempts === 1) throw new Error('仍有对话排队，配置已保存，请等待任务结束。');
+      return { ok: true, note: '网关已重启并就绪，模型连接仍需单独检测。' };
+    },
+  });
+  await view.render(1, view.props, 'model');
+  await view.click(view.container.querySelectorAll('.provider-default-action')[1]);
+  assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').length, 1);
+  assert.equal(view.harness.calls.some(call => call.name === 'restartGateway'), false, 'saving never restarts automatically');
+  assert.match(view.container.textContent, /运行中的网关尚未确认加载/);
+  assert.ok(findButton(view, '应用配置 / 重启网关'));
+  await view.click(findButton(view, '应用配置 / 重启网关'));
+  assert.match(view.container.querySelector('[role="alert"]').textContent, /仍有对话排队/);
+  assert.ok(findButton(view, '应用配置 / 重启网关'), 'busy refusal keeps the explicit retry action');
+  await view.click(findButton(view, '应用配置 / 重启网关'));
+  assert.equal(findButton(view, '应用配置 / 重启网关'), undefined);
+  assert.match(view.container.textContent, /模型连接仍需单独检测/);
+  assert.equal(view.harness.calls.some(call => ['probeModel', 'runChannelSelftest'].includes(call.name)), false);
+});
+
+test('direct API saves never show a gateway restart action', async t => {
+  const rows = [{ ...configuredRows()[0], slot: 'direct-api', providerId: 'direct-api' }];
+  const view = await fixture(t, {
+    fetchHarnessSettings: { runtime: 'api' }, fetchModelChannels: modelChannels(rows),
+    saveModelConfig: { ...modelChannels(rows), ok: true, requiresGatewayRestart: false, note: '下一轮使用，无需重启网关。' },
+  });
+  await view.render(1, view.props, 'model');
+  await view.click(findButton(view, '保存配置'));
+  assert.equal(view.harness.calls.filter(call => call.name === 'saveModelConfig').length, 1);
+  assert.equal(findButton(view, '应用配置 / 重启网关'), undefined);
+  assert.equal(view.harness.calls.some(call => call.name === 'restartGateway'), false);
+});
+
 async function removeProvider(view, index) {
   await view.click(view.container.querySelectorAll('.provider-more-trigger')[index]);
   const action = document.querySelector('.provider-actions-menu [role=menuitem]');
