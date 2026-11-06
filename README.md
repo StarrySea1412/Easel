@@ -1,3 +1,5 @@
+**0.48.0源码候选：记忆排序与Super Agent续跑收敛。** 经验新增NFKC/BM25词法排序与匹配说明；自动接续遇到重复输出或总时限耗尽会停止并保留进度。保持画像/账号隔离、用户确认和工具不重放。代码在独立分支，未部署138。[实现与验证](https://github.com/StarrySea1412/Easel/blob/codex/super-agent-memory-0480/docs/memory-super-agent-0.48.0.md)。
+
 **138正式已更新0.47.0 · 2026-11-06。** 运行`b5b13878`，服务健康；AIHub图片输入声明已加载，Qizhi配置就绪，入口为设置→模型→Agent底座。保留原OpenClaw默认，实际视觉/Qizhi业务按用户要求自行验收。[发布记录](https://github.com/StarrySea1412/Easel/blob/codex/gpt-responses-xhs-0.46.13/docs/vision-qizhi-0.47.0.md)。
 
 **0.47.0：Qizhi远程Agent与AIHub视觉适配。** 设置→模型→Agent底座可配置Qizhi；保留现有OpenClaw选择。为AIHub gpt-6.1-sol Responses补齐缺失的图片输入声明，保留显式能力限制与会话图片归属校验。[本轮记录](https://github.com/StarrySea1412/Easel/blob/codex/gpt-responses-xhs-0.46.13/docs/vision-qizhi-0.47.0.md)。
