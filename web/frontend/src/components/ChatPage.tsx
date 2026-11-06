@@ -590,5 +590,5 @@ export default function ChatPage(props:ChatPageProps) {
   const latest=[...session.messages].reverse().find(message=>message.role==='assistant'&&!message.externalSource&&!message.taskGoalId&&message.turnId);
   const turnId=session.pendingTurnId||latest?.turnId||'';
   const executionSession=session.pendingTurnId?session.id:latest?taskMessageSession(session.id,latest,props.taskState?.runs):session.id;
-  return <ChatRunProvider sessionId={executionSession} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} enabled={!session.importedFromBackup}><ChatPageContent key={session.id} {...props}/></ChatRunProvider>;
+  return <ChatRunProvider sessionId={executionSession} turnId={turnId} engine={session.engine||'openclaw'} streaming={Boolean(stream)} requestedModelRef={stream?.requestedModelRef||latest?.requestedModelRef} enabled={!session.importedFromBackup}><ChatPageContent key={session.id} {...props}/></ChatRunProvider>;
 }

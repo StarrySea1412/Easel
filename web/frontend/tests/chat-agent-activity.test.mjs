@@ -19,6 +19,7 @@ test('ordinary chat omits empty plan and collaboration advice for every configur
   const value={sessionId:'session-1',turnId:'turn-1',engine:'openclaw',execution:{current:{sessionId:'session-1',turnId:'turn-1',operations:[],plan:[],runtime}},office};
   await act(async()=>root.render(createElement(ChatRunContext.Provider,{value},createElement(Activity,{sessionId:'session-1',turnId:'turn-1'}))));
   assert.match(host.textContent,/主 Agent/);
+  assert.match(host.textContent,/模型处理中 · 暂无工具调用记录/);
   assert.equal(host.querySelector('.chat-agent-capabilities'),null);
   assert.doesNotMatch(host.textContent,/计划|未开放|启动模型|复杂任务|未收到回执不代表|尚未收到委派/);
  }
@@ -45,4 +46,15 @@ test('Agent behavior retry uses Easel button styling and disables during refresh
   assert.equal(host.querySelector('.chat-agent-activity'),null,'another runtime never borrows OpenClaw behavior');
  }
  await render({...run,execution:{}});assert.equal(host.querySelector('.chat-agent-activity'),null,'unknown runtime waits for exact-turn evidence');
+});
+
+test('requested model is labeled as selected while observed runtime identity remains unverified',async t=>{
+ const agent={id:'root:main',name:'Main',role:'任务协调',task:'',state:'working',source:'live'};
+ const value={sessionId:'session-1',turnId:'turn-1',engine:'openclaw',streaming:true,requestedModelRef:'aihub/gpt-6.1-sol',execution:{current:{sessionId:'session-1',turnId:'turn-1',engine:'openclaw',operations:[]}},office:{turnId:'turn-1',agents:[agent],events:[],error:null,loading:false,refresh(){}}};
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ t.after(async()=>{await act(async()=>root.unmount());host.remove();});
+ await act(async()=>root.render(createElement(ChatRunContext.Provider,{value},createElement(Activity,{sessionId:'session-1',turnId:'turn-1'}))));
+ assert.match(host.textContent,/aihub\/gpt-6\.1-sol/);
+ assert.match(host.textContent,/本轮指定；实际身份未核验/);
+ assert.doesNotMatch(host.textContent,/模型未上报/);
 });

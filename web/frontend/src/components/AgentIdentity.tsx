@@ -13,8 +13,9 @@ export function AgentActionIcon({kind,size=15}:{kind:OfficeActionKind;size?:numb
   const Icon=kind==='reading'?IconFile:kind==='writing'?IconEdit:kind==='designing'?IconImage:kind==='executing'?IconTerminal:kind==='delegating'?IconChat:kind==='completed'?IconCheck:kind==='stopped'?IconStop:IconSkills;
   return <Icon size={size}/>;
 }
-export function ModelIdentityLabel({identity,showChannel=true}:{identity?:OfficeObservedModel;showChannel?:boolean}) {
+export function ModelIdentityLabel({identity,showChannel=true,requestedModelRef}:{identity?:OfficeObservedModel;showChannel?:boolean;requestedModelRef?:string}) {
   const observed=identity?.source==='observed'&&identity.model;
+  const requested=!observed&&typeof requestedModelRef==='string'&&/^[^\s/]+\/[^\s]+$/.test(requestedModelRef)?requestedModelRef:undefined;
   const provider=modelProvider(observed?identity.provider:undefined);
-  return <span className="agent-model-label" title={observed?identity.evidence:'等待运行服务上报模型身份'}><span className="agent-provider-mark" style={{color:provider.color}} aria-hidden="true"><ObservedProviderIcon provider={provider.id}/></span><span>{observed?identity.model:'模型未上报'}</span>{showChannel&&<small>渠道：{observed&&identity.channel?identity.channel:'未上报'}</small>}</span>;
+  return <span className="agent-model-label" title={observed?identity.evidence:requested?'本轮指定模型；运行时实际身份尚未核验':'等待运行服务上报模型身份'}><span className="agent-provider-mark" style={{color:provider.color}} aria-hidden="true"><ObservedProviderIcon provider={provider.id}/></span><span>{observed?identity.model:requested||'模型未上报'}</span>{showChannel&&<small>{observed?`渠道：${identity.channel||'未上报'}`:requested?'本轮指定；实际身份未核验':'渠道：未上报'}</small>}</span>;
 }

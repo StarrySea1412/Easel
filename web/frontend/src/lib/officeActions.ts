@@ -39,5 +39,8 @@ export function describeOfficeAction(agent: OfficeAgent, events: OfficeEvent[]):
     const [kind, label] = toolAction(pending.toolName);
     return { kind, label: `${label} · ${pending.toolName}`, evidence: 'observed', toolName: pending.toolName };
   }
-  return { kind: 'unreported', label: agent.state === 'working' ? '执行中 · 具体操作未上报' : '尚未上报执行状态', evidence: 'unreported' };
+  if (agent.state === 'working') {
+    return { kind: 'thinking', label: '模型处理中 · 暂无工具调用记录', evidence: 'observed' };
+  }
+  return { kind: 'unreported', label: '尚未上报执行状态', evidence: 'unreported' };
 }

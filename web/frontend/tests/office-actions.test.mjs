@@ -5,15 +5,18 @@ const { describeOfficeAction } = await loadTsModule('../src/lib/officeActions.ts
 const worker = { id: 'child', state: 'working', source: 'live' };
 const call = { id: 'one', agentId: 'child', source: 'live', kind: 'call', operationId: 'op-one', toolName: 'read' };
 test('specific live gestures require the employee own unmatched operation', () => {
-  assert.equal(describeOfficeAction(worker, []).kind, 'unreported');
-  assert.equal(describeOfficeAction(worker, [{ ...call, agentId: 'parent' }]).kind, 'unreported');
+  const waiting = describeOfficeAction(worker, []);
+  assert.equal(waiting.kind, 'thinking');
+  assert.equal(waiting.label, '模型处理中 · 暂无工具调用记录');
+  assert.equal(waiting.evidence, 'observed');
+  assert.equal(describeOfficeAction(worker, [{ ...call, agentId: 'parent' }]).kind, 'thinking');
   assert.equal(describeOfficeAction(worker, [call]).kind, 'reading');
-  assert.equal(describeOfficeAction(worker, [call, { ...call, id: 'two', kind: 'result' }]).kind, 'unreported');
+  assert.equal(describeOfficeAction(worker, [call, { ...call, id: 'two', kind: 'result' }]).kind, 'thinking');
   assert.equal(describeOfficeAction(worker, [call, { ...call, id: 'two', kind: 'result', operationId: 'other' }]).kind, 'reading');
 });
 test('returned failures end tool gestures without promoting the whole run to failure', () => {
   const result = { ...call, id: 'two', kind: 'result', status: 'failed' };
-  assert.equal(describeOfficeAction(worker, [call, result]).kind, 'unreported');
+  assert.equal(describeOfficeAction(worker, [call, result]).kind, 'thinking');
   for (const [state, kind] of [['done','completed'],['error','error'],['stopped','stopped']]) {
     assert.equal(describeOfficeAction({ ...worker, state }, [call]).kind, kind);
   }
@@ -26,7 +29,7 @@ test('native turn completion does not claim the whole goal was accepted', () => 
 });
 test('demo actions are explicitly synthetic and live prose never selects a gesture', () => {
   assert.equal(describeOfficeAction({ ...worker, id: 'designer', source: 'demo' }, []).kind, 'designing');
-  assert.equal(describeOfficeAction({ ...worker, task: 'design image', role: 'designer' }, []).kind, 'unreported');
+  assert.equal(describeOfficeAction({ ...worker, task: 'design image', role: 'designer' }, []).kind, 'thinking');
 });
 test('member queries and generic collaboration tools never imply a task was assigned', () => {
   for (const [toolName, kind] of [['sessions_list', 'reading'], ['subagents', 'executing']]) {
