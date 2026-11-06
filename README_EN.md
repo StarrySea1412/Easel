@@ -1,3 +1,5 @@
+A [same-platform multi-account publishing design](docs/multi-account-publishing-design-2026-11-06.md) is available: isolated logins, account-bound jobs, queues and recovery. This capability is not implemented yet.
+
 **0.47.1: Retry one failed image.** Open the failed task and choose Retry; successful images and the three-card grouping are preserved. Duplicate requests share one attempt; unknown outcomes require recovery first. A retry may incur new image fees. [Validation and deployment](docs/image-retry-0.47.1.md).
 
 **Host 138 production updated to 0.47.0 · 2026-11-06.** Build `b5b13878` is healthy; AIHub image-input metadata is loaded and Qizhi is configured under Settings → Model → Agent runtime. The OpenClaw default is retained. Live vision/Qizhi acceptance is delegated to the user as requested. [Receipt](docs/vision-qizhi-0.47.0.md).
