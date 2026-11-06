@@ -1,3 +1,5 @@
+> **2026-11-06 rollout:** 0.46.11 is deployed to production and isolation on host 138 (d42c471b). Authenticated API/source/assets and original failure enrichment passed; vendor access remains unresolved. [Receipt](docs/release-138-0.46.11-2026-11-06.md).
+
 ## 0.46.11 · 2026-11-06 · AIHub上游拒绝诊断闭环
 
 - 将精确的模型分组拒绝分类为`model_group_unavailable`，传输审计、失败事件与前端保留安全的上游HTTP 404/原因枚举；区分Easel SSE 200与上游404，不保存供应商原始正文。
