@@ -4507,8 +4507,20 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - 2026-11-06 用户再次要求“OK了就赶紧更新138”。当前已验证138新会话19.780秒回复OK，SQLite实际openai-responses，账本completed/resourceSettled；已修初始化模板协议。优先执行0.46.13验证、提交推送和138更新，小红书既有修改一起验证，不额外发付费生图。
 
 
+## 2026-11-06 Qizhi-Agent integration (side conversation)
+
+- User requested actual Qizhi-Agent integration and provided the public contract plus an API key. Prior AIHub recovery remains a separate task.
+- Scope: inspect existing execution adapters, add a narrowly scoped Qizhi-Agent adapter with secure server-side credentials, and verify authenticated conversation/session/file/artifact behavior against the actual contract.
+- Acceptance: real assistant content and session continuation, accurate error handling, focused tests, bilingual docs and delivery evidence. Do not claim production deployment without separate verification.
+- Priority: this integration only; preserve all parent-thread dirty changes and do not resume its release/deployment. API key must never enter tracked files or logs.
+- Status: contract and architecture inspection in progress; implementation and authenticated acceptance pending.
+
 - 2026-11-06 当前主任务再次确认：用户要求‘OK了就赶紧更新138’。主线继续完成0.46.13发布与真实GPT对话复验；其他对话追加的Qizhi工作不纳入本轮提交或发布。
 
 - 2026-11-06 用户发布前核对“小红书组别，有一定要自动调用生图吗”：当前卡片组/封面/配图任务必须实际调用专用生图，无需用户再次补充AI字样；仅进入组别或文案/分析/评论/发布不自动发起图片任务。继续保持GPT修复优先，发布后核对规则。
 
 - 2026-11-06 用户明确“不用你复测，我自己会去”：取消切换后的真实模型调用和浏览器复测；只完成正式138服务切换、部署身份和启动状态确认，业务验收交用户。隔离实例暂不切换，缩短正式交付路径。
+
+- 2026-11-06 用户截图报view_image被判‘仅支持文本’，要求适配视觉。优先查明保存/启动模板模型input能力元数据和imageModel实际选择；修复配置生成与已存状态迁移，保留会话图片归属保护，不以移除错误提示冒充视觉支持。延续快速更新138授权；不主动发送真实模型复测。
+
+- 2026-11-06 用户追加‘Qizhi 服务你也加进去，然后快速更新一下’：将既有Qizhi接入工作并入本轮，优先复用现有协议/实现和服务端凭据，不提交Key；与视觉能力声明修复一起快速发布138。保留不主动复测真实模型的用户约束。

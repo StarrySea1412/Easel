@@ -76,6 +76,16 @@ export function fetchHarnessSettings(): Promise<HarnessSettingsResponse> {
   return request('/api/settings/harness');
 }
 
+export interface QizhiSettingsData {
+  baseUrl: string; projectPath: string; model: string; configured: boolean; keyStored: boolean;
+}
+export function fetchQizhiSettings(): Promise<QizhiSettingsData> {
+  return request('/api/settings/qizhi');
+}
+export function saveQizhiSettings(value: Pick<QizhiSettingsData, 'baseUrl'|'projectPath'|'model'> & { apiKey?: string }): Promise<QizhiSettingsData> {
+  return request('/api/settings/qizhi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+}
+
 export interface HarnessModel {
   id: string;
   label: string;

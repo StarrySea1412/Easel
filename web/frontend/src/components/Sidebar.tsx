@@ -94,9 +94,9 @@ export default function Sidebar({
   taskState,
   sessionsLoading = false,
 }: SidebarProps) {
-  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）'} as Record<string,string>)[runtime] || 'OpenClaw';
+  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）',qizhi:'Qizhi 远程 Agent'} as Record<string,string>)[runtime] || 'OpenClaw';
   const runtimeStatus = runtime === 'openclaw' ? (gatewayStatus==='connected'?'网关已连接':gatewayStatus==='disconnected'?'网关离线，点击重试':'网关正在连接')
-    : gatewayStatus==='connected' ? (runtime==='api'?'已配置':'CLI 已安装') : gatewayStatus==='connecting'?'正在读取':'配置未就绪';
+    : gatewayStatus==='connected' ? (runtime==='qizhi'?'远程配置已保存':runtime==='api'?'已配置':'CLI 已安装') : gatewayStatus==='connecting'?'正在读取':'配置未就绪';
   // 辅助对话（子会话）只在侧边面板里出现，不进主列表。
   const listedSessions = sessions.filter((s) => !s.parentSessionId);
   // 已读状态（lib/seenStatus）是外部存储：终态点“看过即清除”，变化时重算角标。

@@ -7,6 +7,7 @@ import shutil
 import stat
 import tempfile
 from datetime import datetime, timezone
+from easel.model_capabilities import configure_model_inputs
 
 from easel.web_runtime_config import (configure_web_runtime, configure_browser_runtime,
                                       configure_free_search, configure_agent_safety_plugins)
@@ -104,6 +105,8 @@ def bootstrap():
             config.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     value = json.loads(config.read_text(encoding='utf-8'))
     configure_model_output_budgets(value, config)
+    if configure_model_inputs(value):
+        _write_model_budget_config(config, value)
     browser_auth = os.environ.get('EASEL_BROWSER_AUTH_FILE')
     if browser_auth:
         value = json.loads(config.read_text(encoding='utf-8'))

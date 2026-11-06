@@ -42,7 +42,7 @@ def test_ledger_event_history_is_bounded_and_atomic_file_is_valid(tmp_path: Path
     assert json.loads((tmp_path / "runs" / "turn-3.json").read_text(encoding="utf-8"))["turnId"] == "turn-3"
 
 
-@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode', 'acp'])
+@pytest.mark.parametrize('runtime', ['api', 'codex', 'opencode', 'acp', 'qizhi'])
 def test_completion_receipt_is_small_identity_bound_and_immutable(tmp_path, runtime):
     create(tmp_path, 'turn', session_id='chat', session_key='chat', engine=runtime)
     mark(tmp_path, 'turn', transport='harness_' + runtime)

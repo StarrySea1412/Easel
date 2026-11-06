@@ -130,8 +130,14 @@ def build(root, base, image):
             if '..' in Path(name).parts or Path(name).is_absolute():
                 raise ValueError('Invalid deleted source path')
         remove = 'import pathlib; names=' + repr(deleted) + '; [(pathlib.Path("/app")/n).unlink(missing_ok=True) for n in names]'
-        dockerfile = f'''FROM {frontend_id} AS frontend
-FROM {baseline_image}
+        # BuildKit parses a bare sha256 ID as docker.io/library/sha256.
+        # Give the already verified local images content-derived aliases.
+        frontend_alias = 'easel-build-frontend:' + frontend_id.split(':', 1)[1]
+        baseline_alias = 'easel-build-runtime:' + baseline_image.split(':', 1)[1]
+        for source_image, local_alias in ((frontend_id, frontend_alias), (baseline_image, baseline_alias)):
+            subprocess.run(['docker', 'tag', source_image, local_alias], check=True)
+        dockerfile = f'''FROM {frontend_alias} AS frontend
+FROM {baseline_alias}
 USER root
 WORKDIR /app
 RUN python -c {shlex.quote(remove)}

@@ -364,7 +364,7 @@ def mark(
             if (not isinstance(receipt, dict) or set(receipt) != {
                     'schemaVersion', 'sessionId', 'turnId', 'runtime', 'eventSeq', 'eventBytes', 'sha256'}
                     or type(receipt.get('schemaVersion')) is not int or receipt['schemaVersion'] != 1
-                    or receipt.get('runtime') not in ('api', 'codex', 'opencode', 'acp')
+                    or receipt.get('runtime') not in ('api', 'codex', 'opencode', 'acp', 'qizhi')
                     or receipt.get('sessionId') != record['sessionId'] or receipt.get('turnId') != turn_id
                     or receipt.get('runtime') != record.get('engine')
                     or record.get('transport') != 'harness_' + str(receipt.get('runtime'))

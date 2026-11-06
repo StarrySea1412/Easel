@@ -62,13 +62,14 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   const effectiveDisabled = options.find(option => option.id === effectiveRef)?.enabled === false;
   useEffect(() => {
     if (!enabled) return;
+    if (alternate) { setConnection(null); return; }
     const controller = new AbortController();
     setConnection(effectiveRef && !effectiveDisabled ? { modelRef: effectiveRef, state: 'running', channelName: '正在读取渠道', detail: '正在读取已保存渠道的模型列表…' } : null);
     if (effectiveRef && !effectiveDisabled) fetchChannelConnection(effectiveRef, controller.signal)
       .then(value => { if (!controller.signal.aborted) setConnection(value); })
       .catch(cause => { if (!controller.signal.aborted) setConnection({ modelRef: effectiveRef, state: 'failed', channelName: '渠道状态未知', detail: cause instanceof Error ? cause.message : '模型列表读取失败。' }); });
     return () => controller.abort();
-  }, [effectiveRef, effectiveDisabled, revision, enabled]);
+  }, [effectiveRef, effectiveDisabled, revision, enabled, alternate]);
   const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
   const ready = !loading && !error && (alternate ? capability?.available === true : modelRef ? Boolean(selected) : !automaticDisabled);
   const choose = (value: string) => {
