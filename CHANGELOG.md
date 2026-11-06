@@ -1642,3 +1642,10 @@ Easel's first public release, jointly developed by REAL Lab and OpenDCAI Lab.
 
 - Persist OpenClaw compaction start/end and reported outcomes alongside the logical run while preserving the existing SSE display. / 将 OpenClaw 压缩 start/end 及 outcome 与逻辑轮次一起持久保存，保留现有 SSE 展示。
 - This is observability only; cross-process compaction transactions and provider-exact token accounting remain pending. / 当前是可观测性记录，跨进程压缩事务和供应商精确 Token 账本仍待完成。
+## 0.46.9 · 2026-11-06 · AIHub思考强度元数据
+
+- 自定义模型通道可以按显式兼容元数据声明可用思考强度；未声明能力的模型不显示强度选项。AIHub的`gpt-6.1-sol`候选声明为low、medium、high、xhigh、max，默认自适应最高选择max。
+- 同步文生图、图生图和变体统一使用请求等待预算，默认600秒；图像响应先写入校验回执再下载，下载中断后仅接回原结果，不重放生成POST。AIHub用户错误信息仅保留脱敏诊断。
+- 小红书三图技能统一事实与逐图/整组质量闸门；继续任务入口移入输入框底部图标工具栏。
+- 138已直接切换到`aihub/gpt-6.1-sol`，备用端点`aihub-opt/gpt-6.1-sol`，Polo生图保持原配置。此运行配置仍是0.46.6代码；本版本只是本地源码候选，尚未部署。
+- [AIHub配置、强度探测和验收边界](docs/aihub-reasoning-0.46.9.md)。HTTP接受reasoning_effort仅证明参数被接口接受，不代表供应商公开推理token或思考正文。

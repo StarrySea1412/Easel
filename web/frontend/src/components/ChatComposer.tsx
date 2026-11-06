@@ -1,4 +1,5 @@
 import { ThinkingLevelPicker } from './ThinkingLevelPicker';
+import type { ReactNode } from 'react';
 import ChatCompactionIndicator from './ChatCompactionIndicator';
 import ChatContextUsage from './ChatContextUsage';
 import type { SkillRequirements } from '../lib/selectedSkills';
@@ -41,6 +42,7 @@ import {useChatGoalComposer,type GoalEditor} from '../hooks/useChatGoalComposer'
 import '../styles/chat-goal.css';
 
 interface ChatComposerProps {
+  continuationControl?: ReactNode;
   analysisContext?: AnalysisBinding;
   onOpenAnalysisMaterial?: () => void;
   goalBusy?:boolean;
@@ -75,7 +77,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMaterial, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, continuationControl, analysisContext, onOpenAnalysisMaterial, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -404,6 +406,7 @@ function SessionChatComposer({ sessionId, analysisContext, onOpenAnalysisMateria
             title={`对话引擎：${engine === 'codex' ? 'Codex' : runtimeLabel}`}
             options={[{value:'openclaw',label:runtimeLabel,icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
           <ComposerAddMenu skillsDisabled={engine === 'codex' || chatOnly} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          {continuationControl}
           {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
           {goalEditor?<ChatGoalComposer state={goalState} goal={goalEditor.goal} onExit={closeGoal}/>:onGoal&&Boolean(goalStatus)&&<button type="button" className="composer-goal-btn" aria-pressed={false} aria-label="设置或查看目标" title="设置或查看当前对话目标" disabled={editingQueue} onClick={()=>openGoal()}><IconTarget size={16}/><span>目标</span></button>}
           {engine !== 'codex' && !chatOnly && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}

@@ -42,6 +42,7 @@ class ImageCheckpoint:
             raise ValueError('图片任务输出无效')
         self.directory = self.output.parent.parent / '_artifacts' / 'image-provider-receipts'
         self.path = self.directory / (identity['jobId'] + '.json')
+        self.response_path = self.directory / (identity['jobId'] + '.response.json')
 
     @classmethod
     def for_job(cls, outputs, row):
@@ -51,14 +52,17 @@ class ImageCheckpoint:
                     'model': data['model'], 'n': data['n'],
                     'output': str(Path(outputs) / 'AI生图' / (row['id'] + '.png'))})
 
-    def _directory(self):
-        if any(p.is_symlink() for p in (self.path, self.directory, self.directory.parent, self.output.parent)):
+    def _validate_paths(self):
+        if any(p.is_symlink() for p in (self.path, self.response_path, self.directory,
+                                        self.directory.parent, self.output.parent)):
             raise ValueError('图片任务记录路径无效')
+
+    def _directory(self):
+        self._validate_paths()
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def read(self):
-        if any(p.is_symlink() for p in (self.path, self.directory, self.directory.parent, self.output.parent)):
-            raise ValueError('图片任务记录路径无效')
+        self._validate_paths()
         if not self.path.exists():
             return None
         if self.path.stat().st_size > 128 * 1024:
@@ -66,11 +70,20 @@ class ImageCheckpoint:
         data = json.loads(self.path.read_text(encoding='utf-8'))
         if not isinstance(data, dict) or any(data.get(k) != v for k, v in self.identity.items()):
             raise ValueError('图片任务记录与原请求不符')
-        if data.get('stage') not in ('submitting', 'accepted', 'downloading', 'saved', 'failed', 'abandoned'):
+        if data.get('stage') not in ('submitting', 'accepted', 'responded', 'downloading',
+                                     'saved', 'failed', 'abandoned', 'incomplete'):
             raise ValueError('图片任务记录状态无效')
         task = data.get('taskId')
         if task is not None and (not isinstance(task, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}', task)):
             raise ValueError('供应商任务标识无效')
+        response = data.get('response')
+        if response is not None:
+            if not isinstance(response, dict) or not isinstance(response.get('name'), str) \
+                    or Path(response['name']).name != response['name'] \
+                    or not isinstance(response.get('sha256'), str) \
+                    or not re.fullmatch(r'[a-f0-9]{64}', response['sha256']) \
+                    or type(response.get('bytes')) is not int or not 0 < response['bytes'] <= 128 * 1024 * 1024:
+                raise ValueError('同步响应记录无效')
         return data
 
     def write(self, **values):
@@ -87,6 +100,56 @@ class ImageCheckpoint:
         finally:
             Path(name).unlink(missing_ok=True)
 
+    def write_response(self, payload):
+        """Persist the provider's complete sync answer before any image download.
+
+        The response may carry base64 image bytes, so it lives in its own file
+        next to the small checkpoint. Only its identity and checksum enter the
+        checkpoint; the response itself never contains channel credentials.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError('同步响应格式无效')
+        try:
+            raw = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        except (TypeError, ValueError) as exc:
+            raise ValueError('同步响应无法保存') from exc
+        if not 0 < len(raw) <= 128 * 1024 * 1024:
+            raise ValueError('同步响应过大或为空，未下载图片')
+        self._directory()
+        descriptor, name = tempfile.mkstemp(prefix=self.response_path.stem + '-', suffix='.tmp', dir=self.directory)
+        try:
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            replace(name, self.response_path)
+        finally:
+            Path(name).unlink(missing_ok=True)
+        digest = hashlib.sha256(raw).hexdigest()
+        self.write(stage='responded', protocol='sync-v1',
+                   response={'name': self.response_path.name, 'sha256': digest,
+                             'bytes': len(raw), 'count': len(payload.get('data') or [])})
+        return digest
+
+    def read_response(self, data):
+        """Load the persisted sync answer after verifying its exact bytes."""
+        record = data.get('response')
+        if not isinstance(record, dict) or record.get('name') != self.response_path.name:
+            raise ValueError('同步响应记录缺失')
+        path = self.directory / record['name']
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('同步响应文件缺失')
+        size = path.stat().st_size
+        if size != record.get('bytes') or size > 128 * 1024 * 1024:
+            raise ValueError('同步响应文件已变化')
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != record.get('sha256'):
+            raise ValueError('同步响应文件校验失败')
+        payload = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(payload, dict):
+            raise ValueError('同步响应格式无效')
+        return payload
+
     def saved(self, paths):
         if len(paths) != self.identity['n']:
             raise ValueError('供应商返回图片数量与请求不符，未标记交付完成')
@@ -97,6 +160,12 @@ class ImageCheckpoint:
                 raise ValueError('图片文件与原任务不符')
             files.append({'name': path.name, 'sha256': file_digest(path)})
         self.write(stage='saved', files=files)
+        # Delivered bytes no longer need the provider response (which may carry
+        # large base64 payloads). Delivery retries read the checksummed files.
+        try:
+            self.response_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def saved_files(self, data):
         files = data.get('files')

@@ -50,6 +50,8 @@ _QUEUE_CHECKPOINT = None
 ENV_BASE_URL = "IMG_BASE_URL"
 ENV_MODEL = "IMG_MODEL"
 ENV_API_KEY = "IMG_API_KEY"
+ENV_SYNC_TIMEOUT = "IMG_SYNC_TIMEOUT"
+DEFAULT_SYNC_TIMEOUT = 600
 ENV_ALIASES = {
     ENV_BASE_URL: ("OPENAI_BASE_URL", "OPENAI_API_BASE", "BASE_URL"),
     ENV_MODEL: ("OPENAI_IMAGE_MODEL", "IMAGE_MODEL", "OPENAI_MODEL"),
@@ -270,14 +272,21 @@ def _agnes_generate(base_url: str, api_key: str, model: str, prompt: str,
     }
     endpoint = _api_url(base_url, "images/generations")
     count = max(1, args.n)
+    deadline = time.monotonic() + sync_budget(args)
     print(f"[sync/agnes] 提交生成请求到 {endpoint}"
-          f"（size={tier} ratio={ratio}，共 {count} 张，逐张请求）...", file=sys.stderr)
+          f"（size={tier} ratio={ratio}，共 {count} 张，逐张请求，"
+          f"等待预算 {sync_budget(args)}s）...", file=sys.stderr)
     merged: list[Any] = []
     for _ in range(count):
-        result = http_post(endpoint, api_key, payload, timeout=180)
+        remaining = _remaining(deadline)
+        result = http_post(endpoint, api_key, payload, timeout=remaining)
         data = result.get("data")
         if isinstance(data, list) and data:
             merged.extend(data)
+            # Persist every accepted image before asking for the next one; a later
+            # timeout must not discard images the provider already generated.
+            if _QUEUE_CHECKPOINT is not None:
+                _QUEUE_CHECKPOINT.write_response({"data": merged})
         else:
             fail(f"Agnes 接口返回缺少 data 图片数组：{json.dumps(result)[:300]}")
     return {"data": merged}
@@ -349,6 +358,23 @@ def _api_url(base_url: str, path: str) -> str:
     if ver:
         url += ("&" if "?" in url else "?") + f"api-version={ver}"
     return url
+
+
+def sync_budget(args: argparse.Namespace) -> int:
+    """统一同步等待预算：显式参数 > IMG_SYNC_TIMEOUT > 600 秒。
+
+    供应商实测存在超过 3 分钟的图生图；旧的固定 180 秒会在服务端已成功、
+    开始计费之后丢弃结果。每次同步 POST 使用同一预算，多图循环共享截止时间。
+    """
+    value = getattr(args, "request_timeout", None)
+    if value is None:
+        raw = os.environ.get(ENV_SYNC_TIMEOUT, "").strip()
+        value = int(raw) if raw.isdigit() and int(raw) > 0 else DEFAULT_SYNC_TIMEOUT
+    return max(1, min(int(value), 3600))
+
+
+def _remaining(deadline: float) -> int:
+    return max(1, int(deadline - time.monotonic()))
 
 
 def http_post(url: str, api_key: str, payload: dict[str, Any], timeout: int = 120) -> dict[str, Any]:
@@ -442,6 +468,8 @@ def _out_paths(output: str, count: int, fmt: str) -> list[Path]:
     """根据 --output 与数量生成输出路径列表。
 
     output 视为目录（不含扩展名）或单文件（含扩展名）。多张时以序号命名。
+    队列执行使用确定性的序号名（无时间戳），重试只覆盖同一任务的文件，
+    不会留下可能被误认的半成品。
     """
     out = Path(output)
     is_file = out.suffix.lower().lstrip(".") in MIME_MAP or out.suffix != ""
@@ -456,15 +484,53 @@ def _out_paths(output: str, count: int, fmt: str) -> list[Path]:
     stem = out.stem if is_file else "image"
     ext = out.suffix.lstrip(".") if is_file else fmt
     for i in range(count):
-        paths.append(base_dir / f"{stem}-{ts}-{i + 1:02d}.{ext}")
+        middle = f"-{i + 1:02d}" if _QUEUE_CHECKPOINT is not None else f"-{ts}-{i + 1:02d}"
+        paths.append(base_dir / f"{stem}{middle}.{ext}")
     return paths
 
 
+def _write_bytes_atomic(target: Path, payload: bytes) -> None:
+    descriptor, name = tempfile.mkstemp(prefix=target.stem + '-', suffix='.part', dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _persist_sync_result(result: dict[str, Any]) -> None:
+    """Persist the provider's sync answer before any download attempt.
+
+    A resumed child may only read this answer; it must never POST again.
+    """
+    if _QUEUE_CHECKPOINT is None:
+        return
+    current = _QUEUE_CHECKPOINT.read() or {}
+    if (current.get('stage') in ('responded', 'downloading')
+            and current.get('protocol') == 'sync-v1' and current.get('response')):
+        return
+    try:
+        _QUEUE_CHECKPOINT.write_response(result)
+    except (OSError, ValueError, TypeError) as exc:
+        fail(f"已收到供应商图片结果，但保存回执失败，未下载图片、不会自动重新生成：{exc}")
+
+
 def save_sync_data(result: dict[str, Any], output: str, fmt: str) -> list[Path]:
-    """保存 OpenAI 同步风格返回（data: [{b64_json | url}]）。"""
+    """保存 OpenAI 同步风格返回（data: [{b64_json | url}]）。
+
+    队列执行时先把完整响应原子落盘，再下载；下载失败或进程中断时，
+    恢复流程只读取该响应接回原图，不产生第二次生成 POST。
+    """
     data = result.get("data")
     if not isinstance(data, list) or not data:
         fail(f"接口返回中没有 data 图片数组：{json.dumps(result)[:300]}")
+    _persist_sync_result(result)
+    if _QUEUE_CHECKPOINT is not None:
+        _QUEUE_CHECKPOINT.write(stage='downloading')
     paths = _out_paths(output, len(data), fmt)
     for index, item in enumerate(data):
         if not isinstance(item, dict):
@@ -476,7 +542,9 @@ def save_sync_data(result: dict[str, Any], output: str, fmt: str) -> list[Path]:
             except (binascii.Error, ValueError) as exc:
                 fail(f"无法解码 b64_json 图片：{exc}")
                 return []
-            target.write_bytes(image_bytes)
+            if len(image_bytes) > 64 * 1024 * 1024:
+                fail('单张图片超过64MiB，已停止保存；原生成任务保持，不重新生图。')
+            _write_bytes_atomic(target, image_bytes)
         elif item.get("url"):
             image_url = item["url"]
             # 用 URL 后缀修正扩展名
@@ -486,6 +554,12 @@ def save_sync_data(result: dict[str, Any], output: str, fmt: str) -> list[Path]:
             _download_to(image_url, target)
         else:
             fail("图片结果既没有 b64_json，也没有 url。")
+    if _QUEUE_CHECKPOINT is not None and len(paths) != _QUEUE_CHECKPOINT.identity['n']:
+        expected = _QUEUE_CHECKPOINT.identity['n']
+        message = (f'已接回 {len(paths)}/{expected} 张图片；供应商本次只返回部分结果，'
+                   '未自动重新生成。请核对供应商任务后处理。')
+        _QUEUE_CHECKPOINT.write(stage='incomplete', error=message)
+        fail(message, 21)
     return paths
 
 
@@ -594,8 +668,9 @@ def cmd_text2img(args: argparse.Namespace) -> None:
         if args.quality:
             payload["quality"] = args.quality
         endpoint = _api_url(base_url, "images/generations")
-        print(f"[sync] 提交生成请求到 {endpoint}...", file=sys.stderr)
-        result = http_post(endpoint, api_key, payload, timeout=180)
+        budget = sync_budget(args)
+        print(f"[sync] 提交生成请求到 {endpoint}（等待预算 {budget}s）...", file=sys.stderr)
+        result = http_post(endpoint, api_key, payload, timeout=budget)
         paths = save_sync_data(result, args.output, args.format)
 
     _print_results(paths)
@@ -631,14 +706,15 @@ def cmd_img2img(args: argparse.Namespace) -> None:
         paths = save_sync_data(result, args.output, args.format)
     else:
         # OpenAI 兼容 /images/edits：优先 multipart，失败时回退 JSON data-uri
-        result = _post_edits_multipart(base_url, api_key, model, prompt, args)
+        result = _post_edits_multipart(base_url, api_key, model, prompt, args,
+                                       timeout=sync_budget(args))
         paths = save_sync_data(result, args.output, args.format)
 
     _print_results(paths)
 
 
 def _post_edits_multipart(base_url: str, api_key: str, model: str,
-                          prompt: str, args: argparse.Namespace) -> dict[str, Any]:
+                          prompt: str, args: argparse.Namespace, *, timeout: int) -> dict[str, Any]:
     """OpenAI /images/edits multipart 上传。纯标准库手工拼 multipart body。"""
     path, mime = _check_image(args.image)
     try:
@@ -656,7 +732,7 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
             fail(f"无法读取 mask 图片：{exc}")
     body, content_type = _encode_multipart(fields, files)
     endpoint = _api_url(base_url, "images/edits")
-    print(f"[sync] 提交图生图请求到 {endpoint}（multipart）...", file=sys.stderr)
+    print(f"[sync] 提交图生图请求到 {endpoint}（multipart，等待预算 {timeout}s）...", file=sys.stderr)
     request = urllib.request.Request(
         endpoint, data=body,
         headers={**_auth_header(api_key),
@@ -664,7 +740,7 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
         method="POST",
     )
     try:
-        with _open(request, 180) as response:
+        with _open(request, timeout) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -736,7 +812,8 @@ def cmd_variations(args: argparse.Namespace) -> None:
         fields = {"model": model, "n": str(args.n), "size": args.size}
         body, content_type = _encode_multipart(fields, [("image", path.name, mime, img_bytes)])
         endpoint = _api_url(base_url, "images/variations")
-        print(f"[sync] 提交变体请求到 {endpoint}（multipart）...", file=sys.stderr)
+        budget = sync_budget(args)
+        print(f"[sync] 提交变体请求到 {endpoint}（multipart，等待预算 {budget}s）...", file=sys.stderr)
         request = urllib.request.Request(
             endpoint, data=body,
             headers={**_auth_header(api_key),
@@ -744,7 +821,7 @@ def cmd_variations(args: argparse.Namespace) -> None:
             method="POST",
         )
         try:
-            with _open(request, 180) as response:
+            with _open(request, budget) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -846,6 +923,9 @@ def _add_common_output(sp: argparse.ArgumentParser) -> None:
                     help="保存格式（无 URL 后缀时的兜底），默认 png。")
     sp.add_argument("--poll-interval", type=int, default=5, help="异步轮询间隔秒，默认 5。")
     sp.add_argument("--timeout", type=int, default=180, help="异步轮询超时秒，默认 180。")
+    sp.add_argument("--request-timeout", type=int, default=None,
+                    help="同步响应等待预算秒；默认读 IMG_SYNC_TIMEOUT，未配置为 600。"
+                         "文生图、图生图、变体共用，多图循环共享同一截止时间。")
     sp.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")
 
 
@@ -900,6 +980,13 @@ def cmd_resume(args: argparse.Namespace) -> None:
         fail('供应商已确认原图片任务失败，未重新生成。', 20)
     if data['stage'] == 'abandoned':
         fail('原图片任务已人工结束核验，未提交或查询生成请求。')
+    if data['stage'] == 'incomplete':
+        fail(data.get('error') or '原图片任务只返回部分结果，未重新生成。', 21)
+    if data.get('protocol') == 'sync-v1':
+        # Download only the persisted provider answer; never POST again.
+        response = _QUEUE_CHECKPOINT.read_response(data)
+        _print_results(save_sync_data(response, args.output, args.format))
+        return
     if data.get('protocol') != 'apimart-v1' or not data.get('taskId'):
         fail('当前通道缺少可查询的原任务身份，未提交生成请求。')
     base_url, _, api_key, _ = load_and_require()

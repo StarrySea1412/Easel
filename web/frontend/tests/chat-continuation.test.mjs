@@ -81,6 +81,9 @@ test('composer retains only manual continuation, blocks it while running and lea
     const manual=()=>container.querySelector('[aria-label="继续未完成任务"]');
     await render();assert.equal(container.querySelector('[role=switch]'),null);
     assert.equal(manual().classList.contains('btn'),false);
+    assert.equal(manual().textContent,'');
+    assert.equal(manual().title,'继续未完成任务');
+    assert.ok(manual().querySelector('svg'));
     await act(async()=>manual().click());assert.equal(count,1);
     await render(true);assert.ok(manual().disabled);
     await act(async()=>manual().click());assert.equal(count,1);

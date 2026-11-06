@@ -74,9 +74,16 @@ def configured_models(config_path: Path, *, include_disabled: bool = False) -> l
             if ref in seen:
                 continue
             seen.add(ref)
-            result.append({'id': ref, 'provider': provider, 'model': model,
-                           'label': f'{provider} · {model}', 'configured': True,
-                           **({'enabled': False} if include_disabled and provider in disabled else {})})
+            option = {'id': ref, 'provider': provider, 'model': model,
+                      'label': f'{provider} · {model}', 'configured': True,
+                      **({'enabled': False} if include_disabled and provider in disabled else {})}
+            compat = row.get('compat') if isinstance(row, dict) else None
+            declared = compat.get('supportedReasoningEfforts') if isinstance(compat, dict) else None
+            if isinstance(declared, list):
+                levels = [level for level in declared if isinstance(level, str) and level in THINKING_LEVELS]
+                if levels:
+                    option['thinkingLevels'] = list(dict.fromkeys(levels))
+            result.append(option)
             if len(result) >= 256:
                 return result
     return result

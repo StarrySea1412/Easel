@@ -163,9 +163,8 @@
 .composer-add-menu button span { display:grid; gap:3px; }
 .composer-add-menu button small { color:var(--text-tertiary); font-size:10px; }
 .composer-add-menu hr { margin:5px; border:0; border-top:1px solid var(--border); }
-.chat-continuation-controls { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:0 2px 4px; font-size:12px; color:var(--text-secondary); }
-.chat-continuation-action { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:30px; padding:3px 6px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; white-space:nowrap; cursor:pointer; }
+.chat-continuation-action { display:inline-flex; align-items:center; justify-content:center; flex:0 0 34px; width:34px; height:34px; padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
 .chat-continuation-action:hover:not(:disabled) { color:var(--text); background:var(--surface-hover); }
 .chat-continuation-action:focus-visible { outline:2px solid var(--accent-start); outline-offset:2px; }
 .chat-continuation-action:disabled { opacity:.45; cursor:not-allowed; }
-@media (pointer:coarse) { .chat-continuation-action { min-height:44px; } }
+@media (pointer:coarse) { .chat-continuation-action { flex-basis:44px; width:44px; height:44px; } }

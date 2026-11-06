@@ -533,6 +533,24 @@ def test_chat_catalog_uses_saved_runtime_models_and_supports_disabled_channels(s
     assert {row['model'] for row in office_controls.configured_models(oc) if row['provider'] == 'relay'} == {'relay-model', 'another-model'}
 
 
+def test_chat_catalog_exposes_only_explicitly_declared_reasoning_efforts(sandbox):
+    _, oc = sandbox
+    before = json.loads(oc.read_text())
+    provider = before['models']['providers']['relay']
+    provider['models'].append({'id': 'relay-plain'})
+    provider['models'][0]['compat'] = {
+        'supportsReasoningEffort': True,
+        'supportedReasoningEfforts': ['low', 'medium', 'high', 'xhigh', 'max', 'unknown', 3],
+    }
+    oc.write_text(json.dumps(before))
+
+    options = office_controls.configured_models(oc)
+    relay = next(row for row in options if row['id'] == 'relay/relay-model')
+    assert relay['thinkingLevels'] == ['low', 'medium', 'high', 'xhigh', 'max']
+    untouched = next(row for row in options if row['id'] == 'relay/relay-plain')
+    assert 'thinkingLevels' not in untouched
+
+
 def test_default_cannot_be_disabled_without_a_replacement_and_no_files_change(sandbox):
     before = web._model_file_snapshot()
     with pytest.raises(web.HTTPException) as caught:

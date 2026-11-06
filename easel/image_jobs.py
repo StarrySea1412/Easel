@@ -151,6 +151,22 @@ class ImageJobs:
     def checkpoint(self, row):
         return ImageCheckpoint.for_job(self.outputs, row)
 
+    @staticmethod
+    def _recoverable(receipt):
+        """A receipt may be read back without a second generation POST."""
+        if not isinstance(receipt, dict):
+            return False
+        stage = receipt.get('stage')
+        if stage in ('saved', 'failed'):
+            return True
+        if stage not in ('accepted', 'responded', 'downloading'):
+            return False
+        if receipt.get('protocol') == 'apimart-v1':
+            return bool(receipt.get('taskId'))
+        if receipt.get('protocol') == 'sync-v1':
+            return isinstance(receipt.get('response'), dict) and bool(receipt['response'].get('name'))
+        return False
+
     def public(self, row):
         data = json.loads(row['data'])
         data.pop('limit', None)
@@ -161,10 +177,9 @@ class ImageJobs:
         try:
             checkpoint = self.checkpoint(row).read()
             if checkpoint:
-                data['recoveryAvailable'] = (checkpoint['stage'] in ('saved', 'failed')
-                    or checkpoint['stage'] in ('accepted', 'downloading') and checkpoint.get('protocol') == 'apimart-v1' and bool(checkpoint.get('taskId')))
-                if row['status'] == 'running' and checkpoint['stage'] == 'downloading':
-                    data['stage'] = 'downloading'
+                data['recoveryAvailable'] = self._recoverable(checkpoint)
+                if row['status'] == 'running' and checkpoint['stage'] in ('downloading', 'responded'):
+                    data['stage'] = checkpoint['stage']
         except (OSError, ValueError, KeyError, TypeError):
             pass
         return {**data, 'phase': row['status'],
@@ -285,8 +300,7 @@ class ImageJobs:
                     receipt = self.checkpoint(row).read()
                 except (OSError, ValueError, KeyError, TypeError):
                     continue
-                if not receipt or not (receipt['stage'] in ('saved', 'failed') or
-                        receipt['stage'] in ('accepted', 'downloading') and receipt.get('protocol') == 'apimart-v1' and receipt.get('taskId')):
+                if not self._recoverable(receipt):
                     continue
                 data.update(stage='recovering', recoveryAttempts=data.get('recoveryAttempts', 0) + 1,
                             recoveryStartedAt=data.get('recoveryStartedAt') or now, error=None)
@@ -524,6 +538,8 @@ class ImageWorker:
             env = self.process_env()
             env.update({k: str(config.get(k, '')).strip() for k in ('IMG_BASE_URL', 'IMG_API_KEY', 'IMG_MODEL')})
             env['IMG_MODEL'] = job['model']
+            if str(config.get('IMG_SYNC_TIMEOUT', '')).strip().isdigit():
+                env['IMG_SYNC_TIMEOUT'] = str(config['IMG_SYNC_TIMEOUT']).strip()
             env['EASEL_DATA_DIR'] = str(jobs.outputs.parent)
             env['EASEL_IMAGE_DEDICATED_CHANNEL'] = '1'
             with jobs.db() as db:
@@ -532,11 +548,22 @@ class ImageWorker:
             env['EASEL_IMAGE_CONTEXT'] = json.dumps(checkpoint.identity)
             if not recovering and not jobs.dispatch(ident, self.owner):
                 return
-            result = self.runner(cmd, cwd=str(self.code), env=env, capture_output=True, text=True, timeout=900)
+            # The child's sync wait budget must finish before this process bound.
+            try:
+                sync_budget = max(1, min(int(str(config.get('IMG_SYNC_TIMEOUT') or 600)), 3600))
+            except (TypeError, ValueError):
+                sync_budget = 600
+            process_timeout = max(900, sync_budget + 300)
+            result = self.runner(cmd, cwd=str(self.code), env=env, capture_output=True,
+                                 text=True, timeout=process_timeout)
             saved = checkpoint.read()
             if saved and saved['stage'] == 'failed':
                 jobs.finish(ident, self.owner, 'error', {'stage': 'failed',
                     'error': '供应商已确认原图片任务失败；未重新生成，实际扣费以供应商为准。'})
+                return
+            if saved and saved['stage'] == 'incomplete':
+                jobs.finish(ident, self.owner, 'error', {'stage': 'incomplete',
+                    'error': saved.get('error') or '供应商只返回部分图片；未自动重新生成。'})
                 return
             if (result.returncode != 0 or saved and saved['stage'] != 'saved') and not (saved and saved['stage'] == 'saved'):
                 # A failed local process may already have submitted remotely.

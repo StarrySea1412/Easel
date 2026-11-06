@@ -524,7 +524,12 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
 
       {!isImported && <div className="chat-input-area">
         {!isImported && <div className="chat-input-inner">
-          {session.engine !== 'codex' && <ChatContinuationControls
+          {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
+            <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>
+            <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
+              {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
+          </div>}
+          <ChatComposer continuationControl={session.engine !== 'codex' && <ChatContinuationControls
             busy={isStreaming || stopping || taskBusy || Boolean(session.pendingTurnId)}
             canContinue={session.messages.at(-1)?.role === 'assistant' && !taskBusy}
             onContinue={() => {
@@ -532,12 +537,7 @@ function ChatPageContent({ session, stream, stopping = false, stopError, onEngin
               onSend('继续完成尚未完成的任务。先核对上轮工具回执和已有产物，从断点继续；不要重发原任务或重复已提交的生成、发布等操作。需要我确认或补材料时明确说明。',
                 undefined, previous?.selectedSkills, previous?.skillRequirements, previous?.requestedThinkingLevel, previous?.requestedModelRef);
             }}/>}
-          {(stopping || stopError) && <div className="chat-stop-notice" role={stopError ? 'alert' : 'status'}>
-            <p>{stopping ? '正在请求停止，等待后端确认…' : stopError}</p>
-            <div>{stopError && isStreaming && <button type="button" className="btn btn-sm" disabled={stopping} onClick={onStop}>重试停止</button>}
-              {onNewChat && <button type="button" className="btn btn-sm" onClick={onNewChat}>保留记录并新建对话</button>}</div>
-          </div>}
-          <ChatComposer key={session.id} analysisContext={session.analysisContext} onOpenAnalysisMaterial={()=>{setPanelOpen(true);setPanelTab('analysis');}} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.writingContext || session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} />
+            key={session.id} analysisContext={session.analysisContext} onOpenAnalysisMaterial={()=>{setPanelOpen(true);setPanelTab('analysis');}} usageRefreshKey={session.messages.length} sessionId={session.id} engine={session.engine} engineLocked={Boolean(session.writingContext || session.messages.length || session.pendingTurnId || deliveries.items.length || deliveries.messages.length || deliveries.jobs.length)} onEngineChange={onEngineChange} compaction={session.importedFromBackup ? undefined : stream?.compaction} isStreaming={isStreaming} stopping={stopping} onSend={onSend} onStop={onStop} onSteer={onSteer} onOpenModels={onOpenModels} onGoal={openGoal} goalEditor={goalEditor} onGoalClose={closeGoalEditor} onGoalChanged={()=>onTaskChange?.()} goalBusy={taskLive} goalActive={goalActive} goalStatus={goal?.status} onGoalAction={runGoalAction} onGoalView={viewGoal} onScheduleDraft={onScheduleDraft} onSideChat={openSidePanel} />
         </div>}
       </div>}
     </div>

@@ -1388,3 +1388,8 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 已实现：`skills/shared/scripts/pptx_build.py`（Markdown 大纲 → `deck.pptx`（python-pptx，16:9 深色封面＋浅色内容页，三色主题，CJK latin/ea/cs 字体名）＋ `deck.html`＋逐页 `slide-NN.png`＋`deck.pdf`；`--skip-render` 无 Chromium 降级）；`skills/openclaw/pptx-slides/SKILL.md`（自研：触发词/大纲格式/设计规范/失败路径）＋ `EASEL-META.md`；依赖仅新增 `python-pptx`（pyproject 已声明）。
 - 已验证：`selftest` 全链路（含 pptx 读回与真实 Chromium 渲染）；`tests/test_pptx_build.py` **12 项**；样例 5 页逐页目检（修复封面备注归属、署名合并、引用页引号重复 3 处）；7880 `/api/skills` 识别新技能、`/api/media` 对 png/pdf/pptx 全 **200**；后端全量 **2946 passed（+12）/ 6 failed / 9 errors**（既有红灯不变）。
 - 交付边界：离线零付费模型；不做模板市场/转场动画/pptx 反向渲染；未改 138/安装包；示例产物在 `outputs/_pptx-slides-qa-2026-10-18/`（本机 QA，不入库）。调研与方案见[生成 PPT 的调研与方案](archive/2026/pptx-generation-research-2026-10-18.md)。
+## 2026-11-06 · 0.46.9 AIHub思考强度候选
+
+- 138对话渠道已读回仅保留aihub主端点及优化端点；默认`gpt-6.1-sol`，备用端点用于OpenClaw模型fallback。旧渠道删除前的运行配置和模型启动模板已备份；Polo生图配置保持不变。
+- 两个端点均成功列出`gpt-6.1-sol`并接受`reasoning_effort` low/medium/high/xhigh/max；minimal返回400。小额度请求未返回reasoning token统计，因此只证明参数被接受，不证明供应商实际推理预算或内容。
+- 本地代码补充兼容元数据到模型选择能力列表的映射，严格过滤已知强度；定向后端测试69项通过。候选0.46.9未部署，138当前代码仍为0.46.6。正式浏览器验收与渠道故障回退仍待单独核实。[配置和验证](aihub-reasoning-0.46.9.md)。
