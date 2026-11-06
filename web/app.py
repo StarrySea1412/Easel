@@ -4107,6 +4107,15 @@ def _saved_base_for(channel: str, slot: str) -> str:
     return ''
 
 
+def _approved_saved_key_endpoint_change(channel: str, slot: str, saved_base: str, requested_base: str) -> bool:
+    """Allow the explicitly selected AIHub optimized endpoint while retaining the saved key."""
+    if channel != 'chat' or slot != 'aihub':
+        return False
+    normalize = lambda value: value.strip().rstrip('/').lower()
+    approved = {'https://aihub.top/v1', 'https://aihub.dog', 'https://aihub.dog/v1'}
+    return normalize(saved_base) in approved and normalize(requested_base) in approved
+
+
 def _redact(text: object, secret: str) -> str:
     """异常/响应体里可能回显 Key，统一抹掉再回给前端（也避免写进日志）。"""
     t = str(text or "")
@@ -4244,7 +4253,9 @@ async def api_models_discover(req: ModelDiscoverRequest):
     proto = proto or expected or 'openai'
     if proto not in _CHAT_APIS:
         raise HTTPException(400, '已保存协议不支持模型列表查询，请明确选择支持的请求协议')
-    if key and not typed and base != _saved_base_for(channel, slot).strip().rstrip('/'):
+    saved_base = _saved_base_for(channel, slot).strip().rstrip('/')
+    if (key and not typed and base != saved_base
+            and not _approved_saved_key_endpoint_change(channel, slot, saved_base, base)):
         raise HTTPException(400, '更换 Base URL 时必须重新填写 API Key，未向新地址发送已保存的密钥')
     result = await asyncio.to_thread(_discover_models, base, key, proto,
                                     **({'saved_direct': True} if direct else {}))

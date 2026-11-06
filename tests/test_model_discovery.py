@@ -249,6 +249,39 @@ def test_endpoint_does_not_send_saved_key_to_changed_address(monkeypatch):
     assert 'sk-saved' not in caught.value.detail
 
 
+@pytest.mark.parametrize('requested', ['https://aihub.dog', 'https://aihub.dog/v1'])
+def test_aihub_optimized_endpoint_can_reuse_saved_key(monkeypatch, requested):
+    monkeypatch.setattr(web, '_saved_key_for', lambda ch, slot: 'sk-saved')
+    monkeypatch.setattr(web, '_saved_base_for', lambda ch, slot: 'https://aihub.top/v1')
+    captured = {}
+    monkeypatch.setattr(web, '_discover_models', lambda base, key, *args: captured.update(base=base, key=key) or {
+        'ok': True, 'kind': 'ok', 'models': ['gpt-6.1-sol'], 'message': 'ok'})
+    result = asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+        channel='chat', slot='aihub', baseUrl=requested)))
+    assert captured == {'base': requested, 'key': 'sk-saved'}
+    assert result['keySource'] == 'saved'
+
+
+def test_other_provider_cannot_reuse_saved_key_at_aihub_endpoint(monkeypatch):
+    monkeypatch.setattr(web, '_saved_key_for', lambda ch, slot: 'sk-saved')
+    monkeypatch.setattr(web, '_saved_base_for', lambda ch, slot: 'https://trusted.example/v1')
+    monkeypatch.setattr(web, '_discover_models', lambda *args: pytest.fail('must not send request'))
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+            channel='chat', slot='openai', baseUrl='https://aihub.dog/v1')))
+    assert caught.value.status_code == 400
+
+
+def test_aihub_provider_does_not_allow_arbitrary_saved_key_retarget(monkeypatch):
+    monkeypatch.setattr(web, '_saved_key_for', lambda ch, slot: 'sk-saved')
+    monkeypatch.setattr(web, '_saved_base_for', lambda ch, slot: 'https://aihub.top/v1')
+    monkeypatch.setattr(web, '_discover_models', lambda *args: pytest.fail('must not send request'))
+    with pytest.raises(web.HTTPException) as caught:
+        asyncio.run(web.api_models_discover(web.ModelDiscoverRequest(
+            channel='chat', slot='aihub', baseUrl='https://attacker.example/v1')))
+    assert caught.value.status_code == 400
+
+
 @pytest.mark.parametrize('slot,protocol', [('relay', 'openai'), ('anthropic', 'openai'), ('openai', 'anthropic')])
 def test_discovery_uses_explicit_protocol_instead_of_slot_name(monkeypatch, slot, protocol):
     seen = []

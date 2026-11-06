@@ -1,5 +1,11 @@
 > **2026-11-06 rollout:** 0.46.11 is deployed to production and isolation on host 138 (d42c471b). Authenticated API/source/assets and original failure enrichment passed; vendor access remains unresolved. [Receipt](docs/release-138-0.46.11-2026-11-06.md).
 
+## 0.46.12 · 2026-11-06 · AIHub优化端点模型目录探测
+
+- 允许唯一`aihub`渠道在已保存的AIHub地址与用户指定的`https://aihub.dog` / `/v1`等价地址间复用已保存Key，供只读模型目录探测使用；其他供应商和未批准地址仍拒绝发送。
+- 将138恢复启动模板同步至`https://aihub.dog/v1`；保持单模型`gpt-6.1-sol`、现有Key和独立Polo图像配置。
+- 仅验证认证GET `/models` 与应用模型发现路径，不发送模型生成请求。线上发布结果以专项回执为准。
+
 ## 0.46.11 · 2026-11-06 · AIHub上游拒绝诊断闭环
 
 - 将精确的模型分组拒绝分类为`model_group_unavailable`，传输审计、失败事件与前端保留安全的上游HTTP 404/原因枚举；区分Easel SSE 200与上游404，不保存供应商原始正文。

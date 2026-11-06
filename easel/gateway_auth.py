@@ -154,7 +154,8 @@ def gateway_error(raw='', *, status=None, fallback='agent_execution_failed', inc
         # This is the adapter's explicit rejection, not a guess from model text
         # or usage counts. Do not promote quoted diagnostics or JSON failures.
         code = 'model_tool_call_invalid'
-    elif re.match(r'^(?:Error:[ \t]*)?Easel model stream idle timeout\.?(?:\r?\n|$)', str(raw), re.I):
+    elif (re.fullmatch(r'LLM idle timeout \([1-9][0-9]{0,4}s\): no response from model', str(raw), re.I)
+          or re.fullmatch(r'(?:Error:[ \t]*)?Easel model stream idle timeout\.?(?:\r?\n|$)', str(raw), re.I)):
         code = 'model_stream_idle_timeout'
     elif re.match(r'^(?:Error:[ \t]*)?Easel request recovery exhausted\.?(?:\r?\n|$)', str(raw), re.I):
         code = 'model_recovery_stopped'
