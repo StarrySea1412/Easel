@@ -4496,3 +4496,17 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - 用户原话：「你试试看吧，为什么我的138上还是不能测试通啊」。最高优先转为闭环诊断138模型目录测试：核对错误编号`740b7fa6614f4288aff4f77ab769ec84`、实际请求Base URL与Key来源、运行配置/启动模板、容器加载版本及供应商响应状态。
 - 验收：以138实际日志与脱敏回执确定阻断层；修复明确配置不一致（包括启动模板仍为top的情况）和已发现的aihub.dog Key复用误拦截；验证应用容器对dog的认证GET `/models`、实际后台模型发现路径和运行健康。不得发送模型生成POST，不重复暴露Key，不新增provider，不改变Polo。
 - 当前状态：错误日志证明HTTP400由0.46.11 `/api/models/discover` 本地拦截，5ms内结束且没有AIHub传输记录。宿主启动模板已经是dog，但应用容器因原子替换后仍持有旧inode，容器内挂载值曾读作top；无在途轮次、无启用自动计划。0.46.12源码补丁及38项模型发现测试已通过，另增加任意第三方地址拒绝用例；运行时刷新/发布与线上探测待完成。
+
+## 2026-11-06 侧聊追加：Qizhi 远程 Agent 接入
+
+- 用户原话要点：读取公网 Qizhi 接口文档，使用提供的 API Key 接入；经说明 Agent 与裸 LLM 的协议区别后，用户确认“开始接入”。
+- 范围：隔离工作区实现独立 Qizhi 远程 Agent 底座，保留既有 OpenClaw/Codex；工具运行在公网项目，不能把本机技能、凭证或文件路径自动传出。本侧聊不修改138运行配置，不承接主聊的部署任务。
+- 已验证：公网 POST /api/agent 使用 gpt-6-sol、X-API-Key、stream=false，5.95秒返回 success=true 与 QIZHI_AGENT_OK；该结果不等于 Easel 已完成集成。
+- 验收条件：安全保存后端密钥、配置界面脱敏、独立会话绑定、响应与终态校验、超时后不盲目重发、拒绝本地附件/技能误用；聚焦测试和构建后提交推送，分别报告代码、实际调用与138边界。
+- 当前进度：新工作区基于 aa60e12a，正在实现；未修改主聊工作区、未更新138。
+
+- Current side-chat continuation: independently validate a snapshot of the existing Qizhi candidate in codex/qizhi-agent; add verified file API support and actual authenticated acceptance. Parent workspaces remain untouched.
+
+- Acceptance update: live adapter text 5.938s, continuation 6.765s, task-scoped artifact generation/list/download and exact binary verification passed. Upload returned HTTP507 from Qizhi public host, not138; remote cleanup is outside this integration. Frontend build/lint and 99 frontend regression checks passed; backend focused checks passed. Browser acceptance and Git delivery in progress.
+
+- Browser acceptance completed: real Chromium settings save200, masked key, keyboard engine selector,390px render and real Easel chat success in5.828s. User question clarified:507 originated at Qizhi43.153.92.169, not138. Deliver0.47.0 on codex/qizhi-agent with remote SHA verification; production activation remains outside this side-chat integration.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchHarnessModels, fetchHarnessSettings, saveHarnessSettings } from '../lib/api';
 import type { HarnessModel, HarnessSettingsResponse } from '../lib/api';
 import SettingsSelect from './SettingsSelect';
+import QizhiSettings from './QizhiSettings';
 
 export default function HarnessSettings({ onChange, onSelect }: {
   onChange: (runtime: string) => void;
@@ -121,14 +122,19 @@ export default function HarnessSettings({ onChange, onSelect }: {
             : runtime === 'openclaw' ? 'OpenClaw 的模型、API 地址和 Key 在下方配置，保存后同步到 gateway'
             : `${selected?.protocol || ''} · 连接由适配器管理，无需另选连接方式`}</p>
           <p className="desc">安装时可选择 OpenClaw，也可先跳过，进入这里选择已安装的其它引擎。选择引擎可查看对应配置，只有「保存底座」才切换；认证沿用各引擎自身配置。</p>
-          {selected && !selected.installed && (
+          {selected && !selected.installed && runtime !== 'qizhi' && (
             <p className="desc" role="status">未检测到 {selected.label}。请确认 CLI 已安装在运行 Web 的服务器账户下，并检查启动 PATH；
               安装或调整路径后重启 Web。原有配置未删除，安装前不能保存为执行引擎。</p>
           )}
           {runtime !== settings?.runtime && <p className="desc">当前为配置预览；请先「保存底座」，再保存下方 API 配置。旧对话不迁移。</p>}
         </div>
       </div>
-      {runtime !== 'openclaw' && runtime !== 'api' && (
+      {runtime === 'qizhi' && <QizhiSettings onConfigured={() => {
+        void fetchHarnessSettings().then(value => {
+          setSettings(value); setModel('');
+        }).catch(() => setNote('Qizhi 已保存，底座状态读取失败，请重新读取。'));
+      }} />}
+      {runtime !== 'openclaw' && runtime !== 'api' && runtime !== 'qizhi' && (
         <>
           <div className="settings-field">
             <label className="settings-field-label" htmlFor="harness-model">模型覆盖</label>

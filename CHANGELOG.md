@@ -1,3 +1,10 @@
+## 0.47.0 — 2026-11-06
+
+- Add Qizhi HTTP Agent runtime, backend-only configuration and remote application-session continuity.
+- Reject local skill/file assumptions; retain unknown remote outcomes without automatic replay.
+- Add explicit backend binary file transport and task-scoped artifact filtering; live text/continuation/artifact download passed. File upload remains blocked by upstream HTTP 507.
+- Source candidate only; no host-138 deployment or installer release.
+
 > **2026-11-06 rollout:** 0.46.11 is deployed to production and isolation on host 138 (d42c471b). Authenticated API/source/assets and original failure enrichment passed; vendor access remains unresolved. [Receipt](docs/release-138-0.46.11-2026-11-06.md).
 
 ## 0.46.12 · 2026-11-06 · AIHub优化端点模型目录探测

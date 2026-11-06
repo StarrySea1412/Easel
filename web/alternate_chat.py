@@ -15,7 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 
 
 MAX_COMPLETION_BYTES = 64 * 1024 * 1024
-COMPLETION_RUNTIMES = frozenset({'api', 'codex', 'opencode', 'acp'})
+COMPLETION_RUNTIMES = frozenset({'api', 'codex', 'opencode', 'acp', 'qizhi'})
 
 
 def _completion_bytes(path, *, extra_bytes=0):
@@ -119,7 +119,10 @@ def model_capability(web, session=None, model_ref=None):
         provider, label = 'direct-api', 'API 直连'
     else:
         model = config['models'].get(runtime, '')
-        provider, label = runtime, {'codex': 'Codex（兼容）', 'opencode': 'OpenCode', 'acp': 'ACP'}[runtime]
+        provider, label = runtime, {'codex': 'Codex（兼容）', 'opencode': 'OpenCode', 'acp': 'ACP', 'qizhi': 'Qizhi 远程 Agent'}[runtime]
+        if runtime == 'qizhi' and not web._qizhi_status()['configured']:
+            result['reason'] = '请先配置 Qizhi 远程服务和 API Key。'
+            return result
         if not web.harnesses.describe(runtime)['installed']:
             result['reason'] = '当前底座 CLI 尚未安装。'
             return result
@@ -206,6 +209,14 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
         raise HTTPException(409, '当前底座使用设置中确认的模型；本轮模型与思考档位覆盖仅支持原生执行入口。')
     if runtime == 'api':
         content, system = web._direct_chat_content(req)
+    elif runtime == 'qizhi':
+        if req.attachments or req.selectedSkills or req.persona or req.roleId:
+            raise HTTPException(409, 'Qizhi 在远程执行；本地附件、技能、画像与角色不能直接传入，请使用独立新会话。')
+        try:
+            web._qizhi_config(web.read_settings(web.ENV_FILE))
+        except web.HarnessError as exc:
+            raise HTTPException(409, str(exc)) from None
+        content, system = req.message, ''
     else:
         content, system = web._chat_message(req), ''
     state = Lifecycle(web, req, runtime, config, observe)
@@ -267,20 +278,21 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
                     marker = json.loads(web._run_snapshot_file(req.turnId).read_text(encoding='utf-8'))
                 except (OSError, ValueError):
                     pass
-            stopped = not shutdown_lost and (stopped or marker.get('stopped') is True)
+            remote_pending = runtime == 'qizhi' and web._qizhi_pending(web.OUTPUTS_DIR, req.sessionId)
+            stopped = not shutdown_lost and not remote_pending and (stopped or marker.get('stopped') is True)
             try:
                 from chat_recovery import settle_resources
                 facts = await asyncio.to_thread(settle_resources, web, req.sessionId,
-                    provider_settled=not shutdown_lost) if state.claimed else {'provider': True, 'browser': True}
+                    provider_settled=not shutdown_lost and not remote_pending) if state.claimed else {'provider': True, 'browser': True}
                 complete = marker.get('status') == 'done' and marker.get('clean_end') is True and not state.errors
                 web.run_ledger.mark(web._run_ledger_root(), req.turnId,
                     event='observer_lost' if shutdown_lost else 'terminal',
-                    status='unknown' if shutdown_lost else 'stopped' if stopped else 'completed' if complete else 'failed',
-                    settled=not shutdown_lost,
+                    status='unknown' if shutdown_lost or remote_pending else 'stopped' if stopped else 'completed' if complete else 'failed',
+                    settled=not shutdown_lost and not remote_pending,
                     **({'error': error} if shutdown_lost else {}),
                     completion_receipt=marker.get('completionReceipt'),
                     stop_reason=marker.get('stop_reason', 'snapshot_unconfirmed'))
-                settled = not shutdown_lost and state.saved and all(facts.values())
+                settled = not shutdown_lost and not remote_pending and state.saved and all(facts.values())
                 web.run_ledger.mark(web._run_ledger_root(), req.turnId,
                     event='resources_settled' if settled else 'resources_pending',
                     resource_settled=settled, resource_facts=facts)

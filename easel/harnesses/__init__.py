@@ -7,12 +7,13 @@ from pathlib import Path
 from .acp import ACPAdapter, OpenCodeAdapter
 from .base import Descriptor, HarnessError, RunRequest
 from .codex import CodexAdapter
+from .qizhi import QizhiAdapter
 from .commands import acp_command, base_command
 from .store import settings
 
 OPENCLAW = Descriptor("openclaw", "OpenClaw", "gateway / CLI", "运行原有安装流程")
 CHAT_ONLY = Descriptor("api", "仅聊天模式", "模型 API 直连", "在模型配置中填写地址、模型与 Key")
-ADAPTERS = {adapter.descriptor.id: adapter for adapter in (OpenCodeAdapter(), CodexAdapter(), ACPAdapter())}
+ADAPTERS = {adapter.descriptor.id: adapter for adapter in (OpenCodeAdapter(), CodexAdapter(), ACPAdapter(), QizhiAdapter())}
 
 
 def adapter(runtime: str):
@@ -26,7 +27,7 @@ def describe(runtime: str) -> dict:
     from dataclasses import asdict
     result = asdict(descriptor)
     try:
-        if runtime == "api":
+        if runtime in ("api", "qizhi"):
             pass
         elif runtime == "openclaw":
             from easel.openclaw_cmd import openclaw_base_cmd

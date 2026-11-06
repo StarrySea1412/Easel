@@ -108,8 +108,8 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
   const models = useComposerModels(sessionId, engine);
   const runtime = engine === 'codex' ? 'codex' : models.capability?.runtime || 'openclaw';
   const alternate = engine !== 'codex' && runtime !== 'openclaw';
-  const chatOnly = runtime === 'api';
-  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）'} as Record<string,string>)[runtime] || 'OpenClaw';
+  const chatOnly = runtime === 'api' || runtime === 'qizhi';
+  const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）',qizhi:'Qizhi 远程 Agent'} as Record<string,string>)[runtime] || 'OpenClaw';
   const [modelGuardShown, setModelGuardShown] = useState(false);
   const legacyModelError = isLegacyComposerModelIssue(uploadError);
   useEffect(() => {
@@ -357,6 +357,7 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
       {!editingQueue && <ChatQuoteDraft sessionId={sessionId} quotes={draft.quotes || []} comment={input}/>}
       {!editingQueue && !goalEditor && analysisContext && <AnalysisComposerMaterial context={analysisContext} onOpen={onOpenAnalysisMaterial}/>}
       {!editingQueue && engine !== 'codex' && !chatOnly && <ComposerSkillChips skills={skills} />}
+      {runtime === 'qizhi' && <p className="composer-skills-note" role="note">Qizhi 远程执行；当前仅发送文字，本地技能和文件不会自动上传。</p>}
       <textarea
         ref={textareaRef}
         id={inputId}
@@ -405,7 +406,7 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
           <Select className="composer-engine composer-engine-icon" aria-label="对话引擎" value={engine} disabled={engineLocked || isStreaming || stopping || Boolean(goalEditor)}
             title={`对话引擎：${engine === 'codex' ? 'Codex' : runtimeLabel}`}
             options={[{value:'openclaw',label:runtimeLabel,icon:<IconOpenClaw size={18}/>},{value:'codex',label:'Codex',icon:<IconTerminal size={16}/>}]} onChange={value=>onEngineChange?.(value as 'openclaw'|'codex')} />
-          <ComposerAddMenu skillsDisabled={engine === 'codex' || chatOnly} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>
+          {runtime !== 'qizhi' && <ComposerAddMenu skillsDisabled={engine === 'codex' || chatOnly} disabled={stopping || uploading} uploading={uploading} onUpload={openUpload} onOutputs={()=>setOutputsOpen(true)} onSkills={() => setSkillPickerRequest(value => value + 1)}/>}
           {continuationControl}
           {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
           {goalEditor?<ChatGoalComposer state={goalState} goal={goalEditor.goal} onExit={closeGoal}/>:onGoal&&Boolean(goalStatus)&&<button type="button" className="composer-goal-btn" aria-pressed={false} aria-label="设置或查看目标" title="设置或查看当前对话目标" disabled={editingQueue} onClick={()=>openGoal()}><IconTarget size={16}/><span>目标</span></button>}

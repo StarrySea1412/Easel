@@ -47,7 +47,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Que
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, Field, StrictBool, SecretStr
 import math
 from sse_starlette.sse import EventSourceResponse
 
@@ -622,6 +622,7 @@ SKILL_API_REQUIREMENTS: dict[str, dict] = {
 }
 
 _ENV_ALLOWLIST: set[str] = {
+    "CLOUDCLI_BASE_URL", "CLOUDCLI_PROJECT_PATH", "CLOUDCLI_MODEL", "CLOUDCLI_API_KEY",
     "EASEL_DIRECT_API_BASE_URL", "EASEL_DIRECT_API_KEY", "EASEL_DIRECT_API_MODEL",
 }
 for _spec in SKILL_API_REQUIREMENTS.values():
@@ -1459,6 +1460,48 @@ def _harness_settings() -> dict:
         raise HTTPException(409, str(error)) from error
 
 
+from easel.harnesses.qizhi import config as _qizhi_config, public_config as _qizhi_public, pending as _qizhi_pending
+
+
+def _qizhi_status():
+    return _qizhi_public(read_settings(ENV_FILE))
+
+
+class QizhiSettingsRequest(BaseModel):
+    baseUrl: str = Field(max_length=2000)
+    projectPath: str = Field(max_length=2000)
+    model: str = Field(default='gpt-6-sol', max_length=240)
+    apiKey: SecretStr | None = Field(default=None, repr=False)
+
+
+@app.get('/api/settings/qizhi')
+async def api_qizhi_settings():
+    return _qizhi_status()
+
+
+@app.post('/api/settings/qizhi')
+async def api_qizhi_settings_save(req: QizhiSettingsRequest):
+    if _RUNNING_CHAT or _BG_TASKS or _HARNESS_TASKS or _DIRECT_CHAT_TASKS:
+        raise HTTPException(409, '请等待当前任务结束后修改 Qizhi 配置。')
+    updates = {'CLOUDCLI_BASE_URL': req.baseUrl.strip(), 'CLOUDCLI_PROJECT_PATH': req.projectPath.strip(),
+               'CLOUDCLI_MODEL': req.model.strip()}
+    if req.apiKey is not None:
+        updates['CLOUDCLI_API_KEY'] = req.apiKey.get_secret_value().strip()
+    env = read_settings(ENV_FILE)
+    if (req.apiKey is None and env.get('CLOUDCLI_API_KEY')
+            and updates['CLOUDCLI_BASE_URL'].rstrip('/') !=
+            env.get('CLOUDCLI_BASE_URL', 'http://43.153.92.169:3001').rstrip('/')):
+        raise HTTPException(400, 'Qizhi 服务地址已更换，请为新地址填写 API Key。')
+    if any(key in os.environ and os.environ[key] != value for key, value in updates.items()):
+        raise HTTPException(409, '启动环境固定了 Qizhi 配置，请修改启动环境后重启。')
+    try:
+        _qizhi_config({**env, **updates})
+    except HarnessError as exc:
+        raise HTTPException(400, str(exc)) from None
+    _write_env(updates)
+    return _qizhi_status()
+
+
 def _chat_backend(session_id: str | None) -> str:
     selected = "api" if _direct_api_enabled() else _harness_settings()["runtime"]
     if not session_id:
@@ -1595,6 +1638,8 @@ def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | No
         _chat_failure_events().record_chat(turn_id=failure_turn_id, session_id=sk, error=error)
         return error['message']
     runtime = _chat_backend(session_id)
+    if runtime == 'qizhi':
+        raise HTTPException(409, '此操作需要本地工具，不能派发给 Qizhi 远程项目；请使用独立远程对话。')
     if runtime not in ('api', 'openclaw'):
         async def execute():
             errors = []
@@ -1842,7 +1887,7 @@ async def api_status():
     elif runtime == "openclaw":
         ready = await asyncio.to_thread(check_gateway)
     else:
-        ready = harnesses.describe(runtime)["installed"]
+        ready = _qizhi_status()['configured'] if runtime == 'qizhi' else harnesses.describe(runtime)["installed"]
     return {"gateway": ready, "transport": "api" if direct else (
                 CHAT_TRANSPORT if runtime == "openclaw" else runtime), "runtime": runtime,
             "skills": get_skills(), "personas": list_personas()}
@@ -1862,9 +1907,10 @@ async def api_settings_bootstrap():
     direct = _direct_api_enabled()
     runtime = _harness_settings()["runtime"]
     if runtime not in ("api", "openclaw"):
-        installed = harnesses.describe(runtime)["installed"]
+        installed = _qizhi_status()['configured'] if runtime == 'qizhi' else harnesses.describe(runtime)["installed"]
         return {"modelConfigured": installed, "envKeyOk": installed, "routeOk": installed,
-                "routeDetail": "CLI 已安装；请在终端完成原生登录，并发送消息验证模型可用性",
+                "routeDetail": ("Qizhi 后端配置已保存；需实际调用核验。" if runtime == 'qizhi' else
+                                "CLI 已安装；请在终端完成原生登录，并发送消息验证模型可用性"),
                 "gatewayUp": installed, "openclawConfigExists": False, "installWarnings": [],
                 "runtime": runtime, "authVerified": False}
     env_ok = False
@@ -2564,6 +2610,9 @@ class HarnessSettingsRequest(BaseModel):
 async def api_harness_settings():
     config = _harness_settings()
     agents = await asyncio.to_thread(lambda: [harnesses.describe(runtime) for runtime in harness_store.IDS])
+    for agent in agents:
+        if agent.get('id') == 'qizhi':
+            agent['installed'] = _qizhi_status()['configured']
     return {**config, "agents": agents,
             "locked": "EASEL_AGENT_RUNTIME" in read_settings(ENV_FILE)}
 
@@ -2576,6 +2625,14 @@ async def api_harness_settings_save(req: HarnessSettingsRequest):
         raise HTTPException(400, "请选择只读或工作区写入权限")
     if any(ord(character) < 32 for character in req.model):
         raise HTTPException(400, "模型名称不能包含控制字符")
+    if req.runtime == 'qizhi':
+        try:
+            _, _, remote_model, _ = _qizhi_config(read_settings(ENV_FILE))
+        except HarnessError as exc:
+            raise HTTPException(409, str(exc)) from None
+        if req.model and req.model != remote_model:
+            raise HTTPException(409, '请先保存 Qizhi 配置中的模型，再保存底座。')
+        req = req.model_copy(update={'model': remote_model})
     if "EASEL_AGENT_RUNTIME" in read_settings(ENV_FILE):
         raise HTTPException(409, "启动环境固定了底座，请修改 EASEL_AGENT_RUNTIME 后重启")
     if _RUNNING_CHAT or _BG_TASKS or _DIRECT_CHAT_TASKS or _HARNESS_TASKS:
@@ -5480,6 +5537,9 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         claimed = True
         env = {**read_settings(ENV_FILE), **_proxy_env(), "EASEL_AGENT_RUNTIME": runtime,
                "EASEL_ROOT": str(PROJECT_ROOT)}
+        if runtime == 'qizhi':
+            env['EASEL_DATA_DIR'] = str(OUTPUTS_DIR.parent)
+            env['EASEL_OUTPUTS_DIR'] = str(OUTPUTS_DIR)
         request = RunRequest(message, PROJECT_ROOT, env, native_id,
                              config["models"].get(runtime, ""), config["sandbox"], timeout,
                              session_key=sk, codex_auto_approve=config.get("codex_auto_approve", False))
@@ -5490,7 +5550,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         reason = "completed"
     except asyncio.CancelledError:
         reason = "stopped" if sk in _STOPPED_CHAT else "shutdown"
-        emit("activity", "已停止" if reason == "stopped" else "服务关闭，本轮已取消")
+        emit("activity", "连接已取消，Qizhi 远端是否停止待核实。" if runtime == 'qizhi' else
+             "已停止" if reason == "stopped" else "服务关闭，本轮已取消")
     except asyncio.TimeoutError:
         reason = "timeout"
         error_message = "Agent 执行超时，已终止本轮进程"
@@ -5504,6 +5565,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
     finally:
         try:
             if claimed:
+                if runtime == 'qizhi' and _qizhi_pending(OUTPUTS_DIR, sk):
+                    reason = 'remote_unconfirmed'
                 snapshot = "".join(full_text) + (f"\n\n❌ {error_message}" if error_message else "")
                 (lifecycle.save if lifecycle else _save_turn)(pk, "done", snapshot, {
                     "turn_id": turn_id, "runtime": runtime,
