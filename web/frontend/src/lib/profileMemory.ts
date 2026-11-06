@@ -21,7 +21,12 @@ export function sameConditions(a?:MemoryConditions,b?:MemoryConditions):boolean 
   return (['taskTypes','allKeywords','excludeKeywords'] as const).every(key=>JSON.stringify([...(a?.[key]||[])].sort())===JSON.stringify([...(b?.[key]||[])].sort()));
 }
 export type MemoryPolicy = {readEnabled:boolean;candidatesEnabled:boolean};
-export type MemoryRecall = {version:number;estimator?:string;budgetTokens?:number;usedTokens?:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
+export type MemoryMatch = {id:string;revision:number;score:number;matchedTermCount:number;matchKind:'lexical'|'unfiltered'};
+export type MemoryRecall = {version:number;estimator?:string;algorithm?:string;selectedMatches?:MemoryMatch[];budgetTokens?:number;usedTokens?:number;budgetChars:number;usedChars:number;maxEntries:number;matchedCount:number;selectedCount:number;skippedBudgetCount:number;reason:string};
+export function memoryMatchLabel(recall:MemoryRecall|undefined, entry:{id:string;revision:number}):string {
+  const match=recall?.selectedMatches?.find(row=>row.id===entry.id&&row.revision===entry.revision);
+  return match ? match.matchKind==='lexical' ? `关键词匹配 ${match.matchedTermCount} 项 · 词法排序` : '未按任务关键词筛选' : '';
+}
 export type MemoryContext = {entries:MemoryEntry[];recall?:MemoryRecall};
 export type MemoryState = {name:string;profileId:string;revision:number;managed:boolean;entries:MemoryEntry[];legacy:{text:string;hash:string}|null;projectionReady:boolean;warning:string|null;policy?:MemoryPolicy};
 export function memoryRecallSummary(recall?:MemoryRecall):string {

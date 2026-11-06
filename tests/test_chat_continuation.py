@@ -59,6 +59,50 @@ def error_response():
     return error
 
 
+@pytest.mark.parametrize('reason', ['length', 'plan'])
+def test_duplicate_continuation_stops_without_claiming_completion(reason):
+    from easel.chat_continuation import NO_PROGRESS_ERROR
+    calls = []
+    results = [{'status': 'ok', 'stopReason': 'length' if reason == 'length' else None,
+                'result': {'payloads': [{'text': text}]}}
+               for text in ['我会继续执行', '我会 继续执行\n']]
+    Client = make_client(results, calls)
+    proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'turn', 'sessionKey': 'own', 'message': 'original'}, 30,
+        continuation=lambda **kw: continuation_reason(**kw, plan=[{'status': 'pending'}]))
+    assert proc.wait(5) == 1 and not proc.clean_end
+    assert proc.error_text == NO_PROGRESS_ERROR and proc.stop_reason == 'continuation_no_progress'
+    assert proc.continuations == 1 and len([x for x in calls if x[0] == 'agent']) == 2
+    assert '我会继续执行' in ''.join(proc.stdout)
+
+
+def test_same_text_with_normal_final_receipt_is_not_a_loop():
+    calls = []
+    Client = make_client([{'status': 'ok', 'stopReason': reason, 'result': {'payloads': [{'text': '已收到'}]}}
+                          for reason in ['length', 'stop']], calls)
+    proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'turn', 'sessionKey': 'own', 'message': 'original'}, 30,
+                            continuation=continuation_reason)
+    assert proc.wait(5) == 0 and proc.clean_end and proc.continuation_stop_reason is None
+
+
+def test_deadline_exhausted_during_backoff_never_dispatches(monkeypatch):
+    import easel.gateway_agent as gateway
+    from easel.chat_continuation import DEADLINE_ERROR
+    clock = [0]
+    monkeypatch.setattr(gateway.time, 'monotonic', lambda: clock[0])
+    calls = []
+    Client = make_client([{'status': 'ok', 'stopReason': 'length', 'result': {'payloads': [{'text': 'partial'}]}}], calls)
+    proc = GatewayAgentProc(Client(), Client, {'idempotencyKey': 'turn', 'sessionKey': 'own', 'message': 'original'}, 30,
+                            continuation=continuation_reason, on_continue=lambda *_: clock.__setitem__(0, 31))
+    assert proc.wait(5) == 1 and proc.error_text == DEADLINE_ERROR
+    assert proc.stop_reason == 'continuation_deadline' and not proc.clean_end
+    assert len([x for x in calls if x[0] == 'agent']) == 1
+    assert ''.join(proc.stdout) == 'partial\n'
+
+
+def test_decision_itself_obeys_continuation_budget():
+    assert continuation_reason(stop_reason='length', continuation_index=2) is None
+
+
 @pytest.mark.parametrize('mode', ['idle', 'limit', 'meta', 'error_limit', 'error_limit_empty', 'plan'])
 def test_continues_in_same_session_without_replaying_original(mode):
     calls, continued = [], []

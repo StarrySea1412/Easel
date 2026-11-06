@@ -591,11 +591,13 @@ class MemoryStore:
         state = self.state(name)
         limit = min(max(budget, 0), 12000)
         from easel.context_budget import ESTIMATOR, admit, estimate_tokens, experience_reference, memory_budget, serialized
+        from easel.memory_retrieval import ALGORITHM, rank
         tokens = memory_budget() if token_budget is None else min(max(int(token_budget), 0), 100_000)
         receipt = {'version': 2, 'estimator': ESTIMATOR, 'budgetTokens': tokens, 'usedTokens': 0,
                    'skippedCharBudgetCount': 0, 'skippedTokenBudgetCount': 0, 'skippedPromptBudgetCount': 0,
                    'budgetChars': limit, 'usedChars': 0, 'maxEntries': 8,
-                   'matchedCount': 0, 'selectedCount': 0, 'skippedBudgetCount': 0, 'reason': 'empty'}
+                   'matchedCount': 0, 'selectedCount': 0, 'skippedBudgetCount': 0, 'reason': 'empty',
+                   'algorithm': ALGORITHM, 'selectedMatches': []}
         if task_type:
             receipt['taskType'] = task_type
         result = {'entries': [], 'profileId': state['profileId'], 'revision': state['revision'],
@@ -611,8 +613,7 @@ class MemoryStore:
             receipt['reason'] = ('read-disabled' if not state['policy']['readEnabled'] else
                                  'unmanaged' if not state['managed'] else 'projection-unavailable')
             return finish()
-        words = terms(query)
-        rows = []
+        eligible = []
         for entry in state['entries']:
             selected = entry['scope']
             if entry['status'] != 'active' or entry['sourceStatus'] != 'available':
@@ -621,14 +622,11 @@ class MemoryStore:
                 continue
             if not applicable(entry['conditions'], query, task_type):
                 continue
-            score = len(words & terms(entry['text']))
-            if query.strip() and not score:
-                continue
-            rows.append((score, entry))
-        rows.sort(key=lambda item: (-item[0], item[1]['id']))
+            eligible.append(entry)
+        rows = rank(eligible, query)
         selected, remaining = [], limit
         receipt['matchedCount'] = len(rows)
-        for _, entry in rows:
+        for entry, score, matched_terms in rows:
             if len(selected) == receipt['maxEntries']:
                 break
             if len(entry['text']) > remaining:
@@ -642,6 +640,9 @@ class MemoryStore:
                 receipt['skippedPromptBudgetCount'] += 1
                 continue
             selected.append(entry)
+            receipt['selectedMatches'].append({'id': entry['id'], 'revision': entry['revision'],
+                'score': round(score, 6), 'matchedTermCount': matched_terms,
+                'matchKind': 'lexical' if query.strip() else 'unfiltered'})
             remaining -= len(entry['text'])
         receipt['skippedBudgetCount'] = sum(receipt[key] for key in (
             'skippedCharBudgetCount', 'skippedTokenBudgetCount', 'skippedPromptBudgetCount'))

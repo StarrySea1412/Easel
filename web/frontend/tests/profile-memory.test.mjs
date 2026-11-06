@@ -132,6 +132,20 @@ test('recall preview explains disabled reading inside the existing disclosure',a
  assert.match(v.container.querySelector('[role="status"]').textContent,/已关闭读取经验/);
  assert.equal(lib.memoryRecallSummary({reason:'selected',selectedCount:2,usedChars:42,budgetChars:5000}),'2条 · 42/5000字');
 });
+
+test('recall preview explains lexical matches and only labels the pinned revision',async t=>{
+ const row={...entry('ranked'),text:'GPT responses streaming',status:'active'};
+ const recall={version:2,reason:'selected',selectedCount:1,budgetChars:5000,usedChars:12,algorithm:'bm25-nfkc-v1',selectedMatches:[{id:row.id,revision:row.revision,score:0.8,matchedTermCount:3,matchKind:'lexical'}]};
+ t.mock.method(globalThis,'fetch',async url=>String(url).includes('/context?')?response({entries:[row],recall}):response(state('rank-preview',1,[row])));
+ const v=await mount(t,'rank-preview');
+ await fill(v.container.querySelector('[aria-label="搜索经验"]'),'ＧＰＴ ＲＥＳＰＯＮＳＥＳ');
+ assert.equal(v.container.querySelectorAll('.memory-entry').length,1);
+ await act(async()=>v.button('查看可用经验').click());
+ assert.match(v.container.querySelector('[role="status"]').textContent,/关键词匹配 3 项 · 词法排序/);
+ assert.equal(lib.memoryMatchLabel(recall,{id:row.id,revision:2}),'');
+ assert.equal(lib.memoryMatchLabel(undefined,row),'');
+ assert.equal(lib.memoryMatchLabel({...recall,selectedMatches:[{...recall.selectedMatches[0],matchKind:'unfiltered'}]},row),'未按任务关键词筛选');
+});
 async function fill(field,value){await act(async()=>{const proto=field.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(field,value);field.dispatchEvent(new window.Event('input',{bubbles:true}));});}
 async function choose(container,label,text){await act(async()=>container.querySelector(`[aria-label="${label}"]`).click());await act(async()=>[...document.querySelectorAll('[role="option"]')].find(option=>option.textContent.includes(text)).click());}
 

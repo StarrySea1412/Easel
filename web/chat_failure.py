@@ -11,6 +11,16 @@ FAILED_REASONS = frozenset({'error', 'aborted'})
 
 
 def observed_failure(events, native_error='', channels=None):
+    from easel.chat_continuation import NO_PROGRESS_ERROR, DEADLINE_ERROR
+    # Host decisions describe the whole continuation chain. An older provider
+    # length receipt must not hide why the host actually stopped that chain.
+    if native_error in (NO_PROGRESS_ERROR, DEADLINE_ERROR):
+        no_progress = native_error == NO_PROGRESS_ERROR
+        return {'code': 'continuation_no_progress' if no_progress else 'continuation_deadline',
+                'category': 'execution', 'retryable': False, 'stage': 'agent_execution',
+                'message': ('自动接续重复了已有内容，未观察到新的文本进展，已停止继续请求并保留输出。请核对未完成项后调整任务。'
+                            if no_progress else
+                            '自动接续已用完本轮总等待时间，未再发送下一次请求，已有输出已保留。请核对当前进度后再继续。')}
     failed = []
     for event in events:
         message = event.get('message') if isinstance(event, dict) else None

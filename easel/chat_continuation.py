@@ -1,7 +1,11 @@
 """Bounded continuation decisions; never replay an uncertain request."""
 import re
+import hashlib
+import unicodedata
 
 MAX_CONTINUATIONS = 2
+NO_PROGRESS_ERROR = 'Easel continuation stopped: repeated output without progress.'
+DEADLINE_ERROR = 'Easel continuation stopped: total deadline exhausted.'
 OUTPUT_LIMIT_REASONS = frozenset({'length', 'max_tokens', 'max_output_tokens', 'model_length'})
 SAFE_TERMINAL_OPERATION_STATUSES = frozenset({'completed', 'returned'})
 CONTINUE_MESSAGE = (
@@ -14,8 +18,16 @@ CONTINUE_MESSAGE = (
 )
 
 
+def progress_fingerprint(text):
+    """Only detect identical visible content, not claimed task completion."""
+    normalized = re.sub(r'\s+', '', unicodedata.normalize('NFKC', text)).casefold()
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest() if normalized else None
+
+
 def continuation_reason(*, error='', stop_reason=None, text='', plan=(), operations=(), pending_question=False,
                         continuation_index=0):
+    if continuation_index >= MAX_CONTINUATIONS:
+        return None
     if pending_question:
         return None
     # A model continuation can repeat a completed external action. Keep the

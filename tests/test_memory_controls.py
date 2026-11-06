@@ -31,6 +31,40 @@ def active(store, text='摄影教程先展示成品', selected=None, source=None
                         'contentHash': entry['contentHash'], 'scopeHash': entry['scopeHash']})
 
 
+def test_rank_receipt_explains_selected_versions_without_storing_query_or_body(store):
+    entry = active(store, 'Use GPT responses streaming for coding')
+    context = store.context('one', 'ＧＰＴ ＲＥＳＰＯＮＳＥＳ private-query')
+    receipt = context['recall']
+    assert receipt['algorithm'] == 'bm25-nfkc-v1'
+    assert len(receipt['selectedMatches']) == 1
+    match = receipt['selectedMatches'][0]
+    assert match['id'] == entry['id'] and match['revision'] == entry['revision']
+    assert match['score'] > 0 and match['matchedTermCount'] == 2 and match['matchKind'] == 'lexical'
+    assert store.record_use('one', 'rank-session', 'rank-turn', context)
+    saved = json.dumps(store.usage('one', 'rank-session'), ensure_ascii=False)
+    assert 'private-query' not in saved and entry['text'] not in saved
+    assert store.context('one', token_budget=0)['recall']['selectedMatches'] == []
+
+
+def test_other_account_cannot_change_visible_ranking_or_scores(store):
+    active(store, '摄影教程 灯光配置')
+    active(store, '摄影教程 逆光')
+    first = store.context('one', '摄影教程 逆光', 'douyin', 'A')['recall']['selectedMatches']
+    active(store, '摄影教程 逆光 外部账号', {'kind': 'account', 'platform': 'douyin', 'accountId': 'B'})
+    second = store.context('one', '摄影教程 逆光', 'douyin', 'A')['recall']['selectedMatches']
+    assert first == second
+
+
+def test_ranking_normalization_never_expands_literal_conditions(store):
+    entry = store.propose('one', {'text': 'GPT responses streaming', 'scope': {'kind': 'profile'},
+                                 'conditions': {'allKeywords': ['GPT']}})
+    store.change('one', entry['id'], 'accept', {'revision': entry['revision'],
+        'profileRevision': store.state('one')['revision'], 'contentHash': entry['contentHash'],
+        'scopeHash': entry['scopeHash'], 'conditionsHash': entry['conditionsHash']})
+    assert store.context('one', 'ＧＰＴ responses')['entries'] == []
+    assert store.context('one', 'GPT responses')['entries'][0]['id'] == entry['id']
+
+
 def test_independent_controls_persist_without_removing_entries_or_drafts(store):
     entry = active(store)
     policy(store, readEnabled=False)

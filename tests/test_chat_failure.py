@@ -11,6 +11,15 @@ def event(error, provider='anthropic', model='kimi-k3'):
     return {'message':{'role':'assistant','provider':provider,'model':model,'stopReason':'error','errorMessage':error}}
 
 
+def test_host_continuation_stop_supersedes_old_provider_failure():
+    from easel.chat_continuation import NO_PROGRESS_ERROR, DEADLINE_ERROR
+    old = {'message': {'role': 'assistant', 'stopReason': 'length'}}
+    for error, code in [(NO_PROGRESS_ERROR, 'continuation_no_progress'), (DEADLINE_ERROR, 'continuation_deadline')]:
+        result = observed_failure([old], error)
+        assert result['code'] == code and result['retryable'] is False
+        assert result['stage'] == 'agent_execution' and 'providerFinishReason' not in result
+
+
 def test_real_terminal_event_error_supersedes_generic_aborted():
     result=observed_failure([event('Anthropic stream ended before a terminal event')],'aborted',{'anthropic':{'channelEndpoint':'fixture.example'}})
     assert result['code']=='model_stream_interrupted'
