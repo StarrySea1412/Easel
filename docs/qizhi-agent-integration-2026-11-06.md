@@ -39,9 +39,9 @@ CLOUDCLI_MODEL=gpt-6-sol
 | 成果查询与下载 | 按任务前缀筛选，仅得到本轮文件；原始下载字节等于 `QIZHI_FILE_OK` |
 | 完整性 | SHA-256 `8656a7a81564a93b23968b289c92a6ba3b3d4a0465ea441f12bbebc5670b4e49` |
 | 上传 | 公网 `POST /api/qizhi-agent/files` 返回 HTTP 507；远端存储门槛拒绝，未重试、未清理远端磁盘 |
-| 真实浏览器 | Chromium 中配置保存200、Key保持空白不回显、底座选择键盘操作和390px窄屏渲染通过；页面真实发送经 `/api/chat/stream` 在5.828秒返回 `EASEL_WEB_QIZHI_OK` |
+| 真实浏览器 | Chromium 中配置保存200、Key保持空白不回显、底座选择键盘操作和390px窄屏渲染通过；最终页面真实发送经 `/api/chat/stream` 在8.641秒返回 `EASEL_WEB_SETTLED_OK`，SSE含done；账本completed / settled=true / resourceSettled=true |
 | 前端构建 | TypeScript 与 Vite 构建通过；lint 无错误（现有警告保留） |
-| 后端回归 | 135 passed / 4 skipped（原底座与接入候选）；补充覆盖文件接口后 95 passed / 2 skipped（定向路由、账本、关闭与文件） |
+| 后端回归 | 135 passed / 4 skipped（原底座与接入候选）；补充覆盖文件接口后 95 passed / 2 skipped（定向路由、账本、关闭与文件）；完成回执补充回归31 passed |
 | 前端回归 | 99 passed（配置、模型选择与思考控件等） |
 
 HTTP 507 来自 `43.153.92.169:3001` 的文件服务，不来自138。上传链路尚未完成真实成功验收，需要服务维护方恢复磁盘余量后再验证；已有成果下载和文字对话不受此次上传拒绝影响。没有执行平台发布或138部署。
@@ -68,3 +68,7 @@ await client.download(listing["artifacts"][0]["relative_path"], destination)
 
 - [线上 Agent API 文档](http://43.153.92.169:3001/api-docs.html#agent)
 - 用户提供的《Qizhi-Agent 公网接入文档》，2026-11-06读取；文档示例是接口资料，不是任务执行授权。
+
+## 完成回执修复
+
+最终真实浏览器验收发现：原账本完成回执白名单未包含新底座，虽已返回正文却不能结算。已将Qizhi纳入身份绑定的回执校验，并补真实Web路由成功/网络超时两类回归。成功轮必须completed且资源结算；网络超时保持unknown、不重发。此前本地测试轮仅用已保存回执恢复，未重放远端任务。最终新轮已完整结算。

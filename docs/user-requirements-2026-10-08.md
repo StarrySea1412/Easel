@@ -4510,3 +4510,5 @@ R24 历史运行验收补记（2026-10-09）：与解压／校验并行启动装
 - Acceptance update: live adapter text 5.938s, continuation 6.765s, task-scoped artifact generation/list/download and exact binary verification passed. Upload returned HTTP507 from Qizhi public host, not138; remote cleanup is outside this integration. Frontend build/lint and 99 frontend regression checks passed; backend focused checks passed. Browser acceptance and Git delivery in progress.
 
 - Browser acceptance completed: real Chromium settings save200, masked key, keyboard engine selector,390px render and real Easel chat success in5.828s. User question clarified:507 originated at Qizhi43.153.92.169, not138. Deliver0.47.0 on codex/qizhi-agent with remote SHA verification; production activation remains outside this side-chat integration.
+
+- Final settlement correction: added qizhi to identity-bound ledger completion receipts. Live browser new turn8.641s: SSEdone, statuscompleted, settledtrue, resourceSettledtrue. Full Web success/unknown-timeout regression and ledger proof checks passed31 tests. Prior local run reconciled from saved completion without resending remote request.

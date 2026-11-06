@@ -156,3 +156,29 @@ def test_remote_endpoint_change_requires_explicit_new_key(site):
     values.pop('apiKey')
     values['baseUrl'] = 'https://different.example'
     assert site.post('/api/settings/qizhi', json=values).status_code == 400
+
+
+@pytest.mark.parametrize('timeout', [False, True])
+def test_web_chat_terminal_receipt_and_remote_unknown(site, monkeypatch, timeout):
+    def handler(request):
+        if timeout:
+            raise httpx.ReadTimeout('ck_test_secret')
+        return success(content='QIZHI_WEB_TEST_OK')
+    mock_remote(monkeypatch, handler)
+    assert site.post('/api/settings/qizhi', json={
+        'baseUrl': qizhi.DEFAULT_BASE, 'projectPath': qizhi.DEFAULT_PROJECT,
+        'model': qizhi.DEFAULT_MODEL, 'apiKey': 'ck_test_secret'}).status_code == 200
+    assert site.post('/api/settings/harness', json={'runtime': 'qizhi'}).status_code == 200
+    result = site.post('/api/chat/stream', json={
+        'message': 'reply OK', 'sessionId': 'qizhi-web-session', 'turnId': 'qizhi-web-turn'})
+    assert result.status_code == 200
+    record = web.run_ledger.read(web._run_ledger_root(), 'qizhi-web-turn')
+    assert 'ck_test_secret' not in result.text
+    if timeout:
+        assert record['status'] == 'unknown'
+        assert not record['settled'] and not record['resourceSettled']
+        assert 'event: recovery_required' in result.text
+    else:
+        assert 'QIZHI_WEB_TEST_OK' in result.text and 'event: done' in result.text
+        assert record['status'] == 'completed' and record['settled'] and record['resourceSettled']
+        assert record['completionReceipt']['runtime'] == 'qizhi'
