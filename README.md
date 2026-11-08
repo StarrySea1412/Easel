@@ -1,3 +1,5 @@
+**0.11.0源码候选：同账号多平台批量发布（2026-11-08）。** 发布中心一次确认即可把同一篇内容提交到多个已登录平台；新批次由服务端持有并按单一浏览器写通道逐平台串行执行，关闭页面不再丢失剩余平台，每平台独立回执并绑定批次号，服务重启只标记中断绝不重发，失败平台可按原确认稿一键重试（已成功/待核实平台不重发）。隔离验证：批次套件10/10、发布/账号回归427/427、发布前端71/71、后端全量3159过（仅文档既有红灯）；未做真实平台投稿，未部署138，功能未合入main。[变更与验证](https://github.com/StarrySea1412/Easel/blob/codex/upstream-compat-2026-10-10/CHANGELOG.md)。
+
 **0.48.0源码候选：记忆排序与Super Agent续跑收敛。** 经验新增NFKC/BM25词法排序与匹配说明；自动接续遇到重复输出或总时限耗尽会停止并保留进度。保持画像/账号隔离、用户确认和工具不重放。代码在独立分支，未部署138。[实现与验证](https://github.com/StarrySea1412/Easel/blob/codex/super-agent-memory-0480/docs/memory-super-agent-0.48.0.md)。
 
 **138正式已更新0.47.0 · 2026-11-06。** 运行`b5b13878`，服务健康；AIHub图片输入声明已加载，Qizhi配置就绪，入口为设置→模型→Agent底座。保留原OpenClaw默认，实际视觉/Qizhi业务按用户要求自行验收。[发布记录](https://github.com/StarrySea1412/Easel/blob/codex/gpt-responses-xhs-0.46.13/docs/vision-qizhi-0.47.0.md)。
