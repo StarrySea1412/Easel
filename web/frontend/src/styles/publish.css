@@ -92,6 +92,18 @@
 .publish-studio .publish-submit { width: 100%; min-height: 42px; font-size: 12px; }
 .publish-studio .publish-submit:disabled { opacity: .45; }
 .publish-studio .publish-saved-note { font-size: 10px; line-height: 1.75; margin: 9px 0 0; color: var(--text-tertiary); text-align: center; }
+.publish-studio .publish-batch { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.publish-studio .publish-batch-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+.publish-studio .publish-batch-head strong { font-size: 11px; }
+.publish-studio .publish-batch-head span { font-size: 10px; color: var(--text-tertiary); text-align: right; }
+.publish-studio .publish-batch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.publish-studio .publish-batch-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; }
+.publish-studio .publish-batch-row > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.publish-studio .publish-batch-platform { color: var(--text-secondary); flex-shrink: 0; }
+.publish-studio .publish-batch-state { color: var(--text-tertiary); text-align: right; }
+.publish-studio .publish-batch-row.is-published .publish-batch-state { color: var(--green); }
+.publish-studio .publish-batch-row.is-failed .publish-batch-state, .publish-studio .publish-batch-row.is-rejected .publish-batch-state { color: var(--red); }
+.publish-studio .publish-batch-retry { margin: 8px auto 0; display: flex; }
 .publish-studio .publish-load-error { max-width: 1280px; margin: 0 auto 16px; }
 .publish-studio button:focus-visible, .publish-studio .field:focus-visible, .publish-studio summary:focus-visible, .publish-studio [role="tabpanel"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 @media (max-width: 900px) {

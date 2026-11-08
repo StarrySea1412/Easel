@@ -49,6 +49,18 @@ function parseSections(text: string): Record<string, string> {
   return map;
 }
 
+function batchEntryText(entry: { state: string; outcome: string | null; message: string }): string {
+  if (entry.state === 'rejected') return `未受理：${entry.message || '原因未知'}`;
+  if (entry.state !== 'finished') return entry.state === 'running' ? '执行中…' : '排队中…';
+  switch (entry.outcome) {
+    case 'published': return '已发布';
+    case 'submitted': return '已提交，待平台确认';
+    case 'draft': return '已保存草稿';
+    case 'failed': return `失败：${entry.message || '请查看回执'}`;
+    default: return '结果待核实，请先核对避免重复发布';
+  }
+}
+
 export default function PublishPage({ persona, publishReceipts }: PublishPageProps) {
   const draft0 = loadPublishDraft();
   const [title, setTitle] = useState(draft0.title);
@@ -564,6 +576,28 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
             </button>
             <p className="publish-saved-note">{publishing ? '任务会在后台继续，每个平台单独保存结果。' : selectedPlatforms.length && readyCount < selectedPlatforms.length
               ? `${readyCount} 个平台就绪，请点击上方平台查看待处理项。` : '先预检，再确认提交。公众号保存到草稿箱。'}</p>
+            {publishReceipts.batch && <div className="publish-batch" role="status" aria-label="多平台发布批次进度">
+              <div className="publish-batch-head">
+                <strong>多平台批次</strong>
+                <span>{publishReceipts.batch.state === 'running'
+                  ? '服务端逐平台执行中，关闭页面不会中断'
+                  : publishReceipts.batch.state === 'interrupted'
+                    ? (publishReceipts.batch.message || '服务已重启，批次未继续；请先核对各平台结果')
+                    : '批次已结束'}</span>
+              </div>
+              <ul className="publish-batch-list">
+                {publishReceipts.batch.platforms.map(entry => {
+                  const label = PLATFORMS.find(p => p.key === entry.platform)?.label || entry.platform;
+                  return <li key={entry.platform} className={`publish-batch-row is-${entry.outcome || entry.state}`}>
+                    <span className="publish-batch-platform"><PlatformIcon platform={entry.platform} name={label} className="publish-platform-icon" />{label}</span>
+                    <span className="publish-batch-state">{batchEntryText(entry)}</span>
+                  </li>;
+                })}
+              </ul>
+              {publishReceipts.batch.state !== 'running' && publishReceipts.batch.platforms.some(entry => entry.state === 'rejected' || (entry.state === 'finished' && entry.outcome === 'failed'))
+                && <button className="btn btn-sm btn-ghost publish-batch-retry" onClick={publishReceipts.retryFailed}
+                  title="只重试失败或未受理的平台；已成功和待核实的平台不会重发">重试失败的平台</button>}
+            </div>}
           </section>
         </aside>
       </div>

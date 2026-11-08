@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchPublishReceipt, fetchPublishReceipts, publishNow, submitPublishSms, verifyPublishReceipt, setPublishVerification, reportPublishFailure } from '../lib/api';
-import type { PublishReceipt, PublishRequest } from '../lib/api';
+import { fetchPublishBatch, fetchPublishReceipt, fetchPublishReceipts, publishBatch, submitPublishSms, verifyPublishReceipt, setPublishVerification, reportPublishFailure } from '../lib/api';
+import type { PublishBatchStatus, PublishReceipt, PublishRequest } from '../lib/api';
 import { isFinalPublishReceipt, isPublishReceipt, mergePublishReceipts, publishPlatformLabel } from '../lib/publishReceipts';
 import { markWhoamiUnverified } from '../lib/whoami';
 
@@ -9,6 +9,23 @@ export interface PublishSubmissionIssue {
   title: string;
   message: string;
 }
+
+export interface PublishBatchEntryView {
+  platform: string;
+  state: string; // accepted | running | finished | rejected
+  outcome: string | null;
+  message: string;
+}
+
+export interface PublishBatchView {
+  batchId: string;
+  state: string; // running | completed | interrupted
+  message: string;
+  platforms: PublishBatchEntryView[];
+}
+
+const BATCH_POLL_MS = 2500;
+const BATCH_MAX_WAIT_MS = 30 * 60 * 1000;
 
 /** Owned by App: changing pages never restarts a POST or loses a running publish task. */
 export function usePublishReceipts() {
@@ -21,6 +38,7 @@ export function usePublishReceipts() {
   const [submitting, setSubmitting] = useState(false);
   const [submittingPlatforms, setSubmittingPlatforms] = useState<string[]>([]);
   const [submissionIssues, setSubmissionIssues] = useState<PublishSubmissionIssue[]>([]);
+  const [batch, setBatch] = useState<PublishBatchView | null>(null);
   const [verificationBusyIds, setVerificationBusyIds] = useState<string[]>([]);
   const mounted = useRef(false);
   const current = useRef<PublishReceipt[]>([]);
@@ -30,6 +48,9 @@ export function usePublishReceipts() {
   const smsRequests = useRef(new Set<string>());
   const verificationRequests = useRef(new Set<string>());
   const refreshImpl = useRef<() => Promise<void>>(async () => {});
+  // Last submitted batch: immutable payloads plus the latest per-platform states,
+  // used only to offer an explicit retry of clearly failed platforms.
+  const batchRef = useRef<{ batchId: string; requests: PublishRequest[]; platforms: PublishBatchEntryView[] } | null>(null);
 
   const accept = useCallback((incoming: PublishReceipt[], quiet = false) => {
     if (!mounted.current) return;
@@ -143,43 +164,88 @@ export function usePublishReceipts() {
     setIsOpen(true);
     setSubmissionIssues([]);
     setSubmittingPlatforms(batch.map(item => item.platform));
+    setBatch(null);
     const issue = (request: PublishRequest, message: string) => {
       if (mounted.current) setSubmissionIssues(items => [...items, { platform: request.platform, title: request.payload.title, message }]);
     };
     try {
-      for (const request of batch) {
-        if (!mounted.current) break;
-        if (current.current.some(item => item.platform === request.platform && !isFinalPublishReceipt(item))) {
-          issue(request, '该平台已有发布任务，请先查看现有回执。');
-          continue;
-        }
-        try {
-          const result = await publishNow(request.platform, request.payload);
+      let result;
+      try {
+        // One server-held batch: closing the page can no longer drop the
+        // remaining confirmed platforms the way the old client loop could.
+        result = await publishBatch(batch);
+      } catch (cause) {
+        // 受理请求整体失败：批次未创建，内容保留；逐平台登记原因便于排查。
+        for (const request of batch) {
           if (!mounted.current) break;
-          if (isPublishReceipt(result)) accept([result]);
-          else if (typeof result.receiptId === 'string' && /^[0-9a-f]{32}$/.test(result.receiptId)) {
-            const receipt = await fetchPublishReceipt(result.receiptId);
-            if (!isPublishReceipt(receipt)) throw new Error('服务返回的回执不完整。');
-            accept([receipt]);
-          } else {
-            throw new Error('服务未返回可恢复的发布回执，请先到平台核对结果，避免重复发布。');
-          }
-        } catch (cause) {
           const id = await reportPublishFailure(request.platform, 'submit', 'receipt_missing', cause);
           const message = cause instanceof Error ? cause.message : '发布请求中断';
-          issue(request, `${message}${id && !message.includes(id) ? `（错误编号：${id}）` : ''} 请先查看回执或到平台核对，避免重复发布。`);
-        } finally {
-          if (mounted.current) {
-            setSubmittingPlatforms(items => items.filter(platform => platform !== request.platform));
-            void refresh();
-          }
+          issue(request, `${message}${id && !message.includes(id) ? `（错误编号：${id}）` : ''} 内容已保留，请检查后重试。`);
         }
+        return;
+      }
+      if (!mounted.current) return;
+      const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+      for (const item of rejected) {
+        const request = batch.find(candidate => candidate.platform === item.platform);
+        if (request) issue(request, `${item.reason || '该平台未受理。'} 内容已保留，处理后再试。`);
+      }
+      const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
+      if (!accepted.length || !/^[0-9a-f]{32}$/.test(result.batchId || '')) {
+        if (rejected.length >= batch.length) return; // 每个平台都已明确拒绝并登记
+        // 服务返回不可用：绝不当作成功，也不自动重试。
+        for (const request of batch.filter(item => !rejected.some(entry => entry.platform === item.platform))) {
+          issue(request, '服务未返回可恢复的发布回执，请先到平台核对结果，避免重复发布。');
+        }
+        return;
+      }
+      const platforms: PublishBatchEntryView[] = (result.accepted).map(item => ({
+        platform: item.platform, state: 'accepted', outcome: null, message: '',
+      }));
+      batchRef.current = { batchId: result.batchId, requests: batch, platforms };
+      setBatch({ batchId: result.batchId, state: 'running', message: '', platforms });
+      void refresh(); // 受理阶段已为每个平台创建回执，先拉一次列表
+      const deadline = Date.now() + BATCH_MAX_WAIT_MS;
+      while (mounted.current && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_POLL_MS));
+        if (!mounted.current) return;
+        let status: PublishBatchStatus;
+        try {
+          status = await fetchPublishBatch(result.batchId);
+        } catch {
+          continue; // 单次查询失败保留当前进度，下一轮继续；批次在服务端继续执行
+        }
+        if (!status || typeof status.batchId !== 'string' || !Array.isArray(status.platforms)) continue;
+        const entries: PublishBatchEntryView[] = status.platforms.map(entry => ({
+          platform: entry.platform, state: String(entry.state),
+          outcome: entry.outcome ?? null, message: entry.message || '',
+        }));
+        batchRef.current = { batchId: result.batchId, requests: batch, platforms: entries };
+        if (mounted.current) {
+          setBatch({ batchId: result.batchId, state: String(status.state), message: status.message || '', platforms: entries });
+          setSubmittingPlatforms(entries
+            .filter(entry => entry.state === 'accepted' || entry.state === 'running')
+            .map(entry => entry.platform));
+        }
+        if (status.state !== 'running') return;
       }
     } finally {
       submittingRef.current = false;
       if (mounted.current) { setSubmitting(false); setSubmittingPlatforms([]); void refresh(); }
     }
-  }, [accept, refresh]);
+  }, [refresh]);
+
+  /** 只重试明确失败/未受理的平台；绝不重发已成功或结果未核实的平台。 */
+  const retryFailed = useCallback(() => {
+    const last = batchRef.current;
+    if (!last || submittingRef.current || !mounted.current) return;
+    const failed = new Set(last.platforms
+      .filter(entry => entry.state === 'rejected' || (entry.state === 'finished' && entry.outcome === 'failed'))
+      .map(entry => entry.platform));
+    const requests = last.requests.filter(item => failed.has(item.platform));
+    if (!requests.length) return;
+    void submit(requests);
+  }, [submit]);
 
   const submitSms = useCallback(async (receiptId: string, code: string) => {
     const receipt = current.current.find(item => item.receiptId === receiptId);
@@ -222,7 +288,7 @@ export function usePublishReceipts() {
 
   return {
     receipts, notices, active, verification, checking, loaded, refreshing, error, isOpen,
-    submitting, submittingPlatforms, submissionIssues, verificationBusyIds, refresh, submit, submitSms, verify,
+    submitting, submittingPlatforms, submissionIssues, verificationBusyIds, batch, refresh, submit, retryFailed, submitSms, verify,
     open, close, dismissNotices, dismissIssues,
     submittingLabel: submittingPlatforms.map(publishPlatformLabel).join('、'),
   };

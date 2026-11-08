@@ -159,6 +159,7 @@ def api(tmp_path):
         '_get_publish_receipt', '_recent_publish_receipts', 'api_publish_receipts', 'api_publish_receipt', '_read_publish_status',
         '_finish_publish', '_run_publish_job', '_run_publish_bg', '_start_async_publish',
         'api_publish_status', 'api_publish_sms', 'api_publish', '_record_published_schedule',
+        '_check_publish_request', '_build_publish_command',
         '_read_schedule', '_write_schedule',
         '_awaiting_publish_verification', '_acquire_publish_verification', '_run_publish_verification', '_account_browser_busy',
         '_publish_verification_service', 'api_verify_publish_receipt', 'api_set_publish_verification',

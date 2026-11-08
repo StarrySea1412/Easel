@@ -1058,3 +1058,11 @@ main README 已单独推送用户 fork，提交 `b67b435d461c8e45c6364ea40bcd407
 - 已实现：`skills/shared/scripts/pptx_build.py`（Markdown 大纲 → `deck.pptx`（python-pptx，16:9 深色封面＋浅色内容页，三色主题，CJK latin/ea/cs 字体名）＋ `deck.html`＋逐页 `slide-NN.png`＋`deck.pdf`；`--skip-render` 无 Chromium 降级）；`skills/openclaw/pptx-slides/SKILL.md`（自研：触发词/大纲格式/设计规范/失败路径）＋ `EASEL-META.md`；依赖仅新增 `python-pptx`（pyproject 已声明）。
 - 已验证：`selftest` 全链路（含 pptx 读回与真实 Chromium 渲染）；`tests/test_pptx_build.py` **12 项**；样例 5 页逐页目检（修复封面备注归属、署名合并、引用页引号重复 3 处）；7880 `/api/skills` 识别新技能、`/api/media` 对 png/pdf/pptx 全 **200**；后端全量 **2946 passed（+12）/ 6 failed / 9 errors**（既有红灯不变）。
 - 交付边界：离线零付费模型；不做模板市场/转场动画/pptx 反向渲染；未改 138/安装包；示例产物在 `outputs/_pptx-slides-qa-2026-10-18/`（本机 QA，不入库）。调研与方案见[生成 PPT 的调研与方案](pptx-generation-research-2026-10-18.md)。
+
+## 2026-11-08 · 同账号多平台批量发布（0.11.0）
+
+- 用户指令："同账号，多平台发布，看看如何实现"；"继续实现啊"。与 2026-11-06"同平台多账号"设计稿（在 0.47.x 运营线）互补：本轮在 0.10.x 线落地同账号（每平台一个已登录账号）多平台一次发布，不实现多账号矩阵。
+- 已实现：`POST /api/publish/batch` 一次受理多平台（逐平台登录快检/媒体规则/平台锁，拒绝不影响其他平台），服务端 daemon 线程按单一浏览器写通道串行执行，每平台独立回执并绑定 `batchId`；批次持久化 `outputs/_publish/batches.json`（上限 50 条，只清理已完成）；`GET /api/publish/batch/{id}` 只读合并最新回执；启动恢复把未完成批次标记中断，绝不重发。单平台端点重构为共享 `_check_publish_request`/`_build_publish_command`，行为与状态码不变。
+- 前端：`usePublishReceipts.submit` 改为单次批次提交 + 2.5s 批次状态轮询（关页不中断；服务返回无批次号时明确报错不当作成功）；发布中心新增批次进度条（逐平台状态/汇总）与"重试失败的平台"——仅以确认稿不可变载荷重发明确失败或未受理平台，成功/待核实平台不重发；回执类型新增可选 `batchId`。
+- 验证：新增 `tests/test_publish_batches.py` 10/10；既有发布/账号回归 427/427；后端全量 3159 passed，失败/错误均为基线既有（pptx 2 项经 stash 基线复跑确认为环境性既有、pytest-collection 1、web-security 2、image-library 9 errors）；前端发布套件 71/71、全量 1247 项 1239 过（8 项失败经 stash 基线复跑确认与基线完全一致：聊天草稿/需求/选择器/思考强度域既有红灯）、生产 build 与 lint（21 既有 warning）通过。测试全部为隔离模拟，无真实平台登录/投稿。
+- 边界：未部署 138、未发布安装器、未调用付费模型；真实多平台发布需用户另行授权并逐平台验收。
