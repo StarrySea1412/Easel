@@ -734,8 +734,8 @@ export interface LoginStatus {
   visibleBrowser?: boolean;
 }
 
-export function fetchAccounts(): Promise<AccountItem[]> {
-  return request<AccountItem[]>('/api/accounts');
+export function fetchAccounts(signal?: AbortSignal): Promise<AccountItem[]> {
+  return request<AccountItem[]>('/api/accounts', { signal });
 }
 
 export interface AccountWhoami {

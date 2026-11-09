@@ -142,8 +142,9 @@ async function loadPage() {
   for (const statement of parsed.statements.filter(ts.isImportDeclaration)) {
     const specifier = statement.moduleSpecifier.text;
     if (specifier.endsWith('.css')) { replacements.push({ start: statement.getStart(parsed), end: statement.end, text: '' }); continue; }
-    const target = specifier === '../lib/api' ? moduleUrl('export const restoreAccountAnalytics=async()=>{};export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);return [];}')
-      : specifier === '../lib/whoami' ? moduleUrl('export const hydrateAccountIdentities=()=>{};export const useAccountIdentities=()=>({});export const accountConnection=()=>"unknown";export const verifyStale=async()=>{};export const watchAccountFreshness=()=>()=>{};')
+    const target = specifier === '../lib/api' ? moduleUrl('export const restoreAccountAnalytics=async()=>{};export async function fetchAccounts(){globalThis.__demoAccountReads++;if(globalThis.__demoAccountError)throw new Error(globalThis.__demoAccountError);if(globalThis.__demoAccountFetch)return await globalThis.__demoAccountFetch();return globalThis.__demoAccountRows||[];}')
+      : specifier === '../lib/whoami' ? moduleUrl('export const hydrateAccountIdentities=()=>{};export const useAccountIdentities=()=>({});export const useAccountChecks=()=>new Set();export const accountConnection=()=>"unknown";export const verifyStale=async(platforms,options)=>{globalThis.__demoVerify?.push({platforms,force:options.force});};export const watchAccountFreshness=()=>()=>{};')
+      : specifier === '../lib/requestTimeout' ? await tsModuleUrl(new URL('../src/lib/requestTimeout.ts', import.meta.url))
       : specifier === '../lib/analyticsCache' ? moduleUrl('export const selectedAnalyticsPlatform=()=>"";export const selectAnalyticsPlatform=()=>{};export const readAnalyticsCache=()=>null;export const analyticsPending=()=>false;export const analyticsRevision=()=>0;export const subscribeAnalytics=()=>()=>{};')
       : specifier === './ContentAnalysisDemo' ? await tsModuleUrl(new URL('../src/components/ContentAnalysisDemo.tsx', import.meta.url))
       : specifier === './icons' ? await tsModuleUrl(new URL('../src/components/icons.tsx', import.meta.url))
@@ -259,3 +260,31 @@ test('view transitions respect reduced motion and repeated clicks do not restart
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
+
+
+test('analysis platform statuses stop spinning after unknown results and manual retry checks only the selected platform',async t=>{
+ globalThis.__demoAccountReads=0;globalThis.__demoVerify=[];
+ globalThis.__demoAccountRows=['zhihu','douyin'].map(platform=>({platform,supported:true,loggedIn:true,hasLocalSession:true}));
+ t.after(()=>{delete globalThis.__demoVerify;delete globalThis.__demoAccountRows;});
+ const Page=await loadPage();const v=await fixture(t,'review',Page,{demoEnabled:false,initialPlatform:'zhihu'});
+ assert.equal(v.container.querySelectorAll('.ca-platform-status.is-pending').length,0);
+ assert.equal(v.container.querySelectorAll('.ca-platform-status.is-unknown').length,7);
+ assert.deepEqual(globalThis.__demoVerify,[{platforms:['zhihu'],force:false}]);
+ await v.click(v.button('刷新状态'));
+ assert.deepEqual(globalThis.__demoVerify.at(-1),{platforms:['zhihu'],force:true});
+ await v.click(v.container.querySelector('[aria-label="抖音 · 待确认"]'));
+ assert.deepEqual(globalThis.__demoVerify.at(-1),{platforms:['douyin'],force:false});
+ assert.equal(v.container.querySelectorAll('.ca-platform-status.is-pending').length,0);
+});
+
+test('a stalled analysis account list ends with a retry instead of perpetual loading',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ globalThis.__demoAccountReads=0;globalThis.__demoAccountFetch=()=>new Promise(()=>{});
+ t.after(()=>{delete globalThis.__demoAccountFetch;});
+ const Page=await loadPage();const v=await fixture(t,'review',Page,{demoEnabled:false});
+ assert.equal(v.container.querySelectorAll('.ca-platform-status.is-pending').length,7);
+ await act(async()=>t.mock.timers.tick(10000));
+ assert.equal(v.container.querySelectorAll('.ca-platform-status.is-pending').length,0);
+ assert.match(v.container.textContent,/账号状态读取超时/);
+ assert.ok(v.button('重试'));assert.equal(v.button('刷新状态').disabled,false);
+});

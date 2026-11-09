@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchAccounts, restoreAccountAnalytics, type AccountItem } from '../lib/api';
-import { accountConnection, hydrateAccountIdentities, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
+import { accountConnection, hydrateAccountIdentities, useAccountChecks, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 import PlatformIcon from './PlatformIcon';
+import { requestWithTimeout } from '../lib/requestTimeout';
 import AccountAnalyticsDetails from './AccountAnalyticsDetails';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
 import { selectedAnalyticsPlatform, selectAnalyticsPlatform, readAnalyticsCache, analyticsPending, analyticsRevision, subscribeAnalytics } from '../lib/analyticsCache';
@@ -59,22 +60,24 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
   }, [section]);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const identities = useAccountIdentities();
+  const accountChecks = useAccountChecks();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const request = useRef(0);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     const sequence = ++request.current;
     setLoading(true); setError('');
     try {
-      const result = await fetchAccounts();
+      const result = await requestWithTimeout(signal => fetchAccounts(signal), 10000, '账号状态读取超时，请重试。');
       if (sequence !== request.current) return;
       hydrateAccountIdentities(result);
       setAccounts(result);
-      void verifyStale(result.filter(row => row.supported && (row.loggedIn || row.hasLocalSession)).map(row => row.platform), { alive: () => sequence === request.current });
+      if (result.some(row => row.platform === platform && row.supported && (row.loggedIn || row.hasLocalSession)))
+        void verifyStale([platform], { force, alive: () => sequence === request.current });
     } catch (reason) {
       if (sequence === request.current) setError(reason instanceof Error ? reason.message : '暂时无法读取账号状态');
     } finally { if (sequence === request.current) setLoading(false); }
-  }, []);
+  }, [platform]);
 
   useEffect(() => { if (dataSource === 'mine') void refresh(); return () => { request.current += 1; }; }, [refresh, dataSource]);
   useEffect(() => watchAccountFreshness(() => { if (dataSource === 'mine') void refresh(); }), [refresh, dataSource]);
@@ -102,18 +105,19 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => {
           const state = accountConnection(accounts.find(row => row.platform === item.id), identities[item.id]);
-          const status = loading || error || state === 'unknown' ? '确认中' : state === 'online' ? '可分析' : '未登录';
+          const checking = loading || accountChecks.has(item.id);
+          const status = checking ? '确认中' : error || state === 'unknown' ? '待确认' : state === 'online' ? '可分析' : '未登录';
           return <button type="button" key={item.id} className={`ca-platform${platform === item.id ? ' is-selected' : ''}${state === 'online' ? ' is-connected' : ''}`} title={`${item.name} · ${status}`} aria-label={`${item.name} · ${status}`} aria-pressed={platform === item.id} onClick={() => setPlatform(item.id)}>
           <PlatformIcon platform={item.id} name={item.name} /><span>{item.name}</span>
-          <span className={`ca-platform-status${status === '确认中' ? ' is-pending' : state === 'online' ? ' is-online' : ' is-offline'}`} aria-hidden="true">{status === '确认中' ? <PublishSpinner /> : <span className="ca-platform-dot" />}</span>
+          <span className={`ca-platform-status${checking ? ' is-pending' : status === '待确认' ? ' is-unknown' : state === 'online' ? ' is-online' : ' is-offline'}`} aria-hidden="true">{checking ? <PublishSpinner /> : <span className="ca-platform-dot" />}</span>
         </button>; })}
       </section>
 
       <div className="ca-context">
         <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已连接' : connection === 'unknown' ? '登录状态待确认' : connection === 'login_required' ? '未登录' : '需要连接账号'}</span></div>
-        <button type="button" className="ca-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '读取中…' : '刷新状态'}</button>
+        <button type="button" className="ca-text-button" disabled={loading || accountChecks.has(platform)} onClick={() => void refresh(true)}>{loading || accountChecks.has(platform) ? '读取中…' : '刷新状态'}</button>
       </div>
-      {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh()}>重试</button></div>}</>}
+      {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => void refresh(true)}>重试</button></div>}</>}
 
       <div className="ca-view-nav" role="tablist" aria-label="分析视图" onKeyDown={event => {
         const index = ANALYSIS_VIEWS.findIndex(view => viewTabs.current.get(view.id) === event.target);
