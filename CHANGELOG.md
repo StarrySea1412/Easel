@@ -1,3 +1,11 @@
+## 0.14.0 · 2026-11-09 · Guided publishing and creation cards / 分步发布与创作卡片
+
+- Organize publishing into prepare, account selection, review and results. Reusable numbered Steps uses explicit completion and keyboard navigation. Align header actions by removing the legacy receipt button margin. / 发布流程按内容、账号、确认、结果分步显示；步骤使用普通数字与细连接线，页头状态和按钮统一对齐。
+- Preserve independent account drafts, frozen requests, retry boundaries and the explicit legacy default-account entry. Successful admission opens results; visiting results alone never marks confirmation complete. / 保留各账号草稿、未知结果幂等查询与仅失败重试；旧默认账号入口独立保留。
+- Group prompt/image cards by explicit artifact IDs or exact recorded paths within the same session and turn. Preserve unmatched files independently and keep file refresh beside each image. / 以明确归属配对提示词和图片，跨会话、跨轮次及冲突归属不猜图；刷新不重新生图。
+- Make studio creation tools and the new-panel tool list collapsible without unmounting their content. / 生图创作工具与新增面板工具可折叠，保留草稿与画布。
+- Verification and upgrade limits: see docs/publish-creation-workflow-0.14.0-2026-11-09.md. No real login, model generation, platform publication, host138 deployment or installer release. / 验证与升级边界见交付文档；未真实登录、生图、发帖、部署138或发布安装器。
+
 ## 0.13.0 · 2026-11-09 · Independent platform accounts / 七平台独立账号
 
 - Add account registration, isolated browser profiles/Bilibili cookies, stable platform identity binding and bounded login audit for all seven current publishing platforms. / 新增七平台同平台多账号、隔离资料、稳定平台身份绑定与登录审计，兼容原默认账号。

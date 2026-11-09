@@ -1,5 +1,7 @@
 # Easel Studio 前端
 
+当前分支0.14.0：发布流程采用四步导航，提示词图片同卡，生图创作工具与新增面板工具可折叠。交付边界与验证见[0.14.0记录](../../docs/publish-creation-workflow-0.14.0-2026-11-09.md)。
+
 这是 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 的创作者工作台前端，当前定制开发分支为 [`codex/creator-workflow`](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow)。项目采用 React 19、TypeScript、Vite 8 和 Three.js，提供创作对话、生图工坊、内容库、Agent 办公室、发布与数据页面。
 
 完整安装、模型配置与 Windows 启动方式见[项目说明](../../README.md)和 [Windows 使用说明](../../WINDOWS-START-HERE.md)。本项目基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)；第三方来源见[致谢](../../docs/ACKNOWLEDGMENTS.md)，许可证见 [LICENSE](../../LICENSE)。

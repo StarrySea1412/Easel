@@ -12,11 +12,11 @@ const { default: Artifacts } = await loadTsModule('../src/components/ChatArtifac
 const artifact = (patch = {}) => ({ id: 'a'.repeat(32), sessionId: 'chat', turnId: 'turn', name: '页面.html', path: 'topic/page.html',
   mimeType: 'text/html', version: 'first', revision: 1, size: 500, status: 'ready', ...patch });
 
-async function setup(t, initial) {
+async function setup(t, initial, jobs = []) {
   let items = initial; const requests = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })));
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
-  const render = async (next = items) => { items = next; await act(async () => root.render(createElement(Artifacts, { artifacts: items, onUpdated: value => { items = items.map(item => item.id === value.id ? value : item); void render(); } }))); };
+  const render = async (next = items) => { items = next; await act(async () => root.render(createElement(Artifacts, { artifacts: items, jobs, onUpdated: value => { items = items.map(item => item.id === value.id ? value : item); void render(); } }))); };
   await render(); t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   return { container, requests, render,
     refresh: async () => act(async () => container.querySelector('button').click()),
@@ -89,4 +89,35 @@ test('snapshot polling preserves a newer manual refresh and isolates late result
   assert.deepEqual(current.items, []);
   await respond(requests[3], 'other', [artifact({sessionId:'other',version:'other-file'})]);
   assert.equal(current.items[0].version, 'other-file');
+});
+
+
+test('each prompt stays with explicitly attributed images even when artifacts arrive out of order', async t => {
+  const one = artifact({id:'1'.repeat(32),name:'one.png',mimeType:'image/png'});
+  const two = artifact({id:'2'.repeat(32),name:'two.png',mimeType:'image/png'});
+  const jobs = [{jobId:'3'.repeat(32),sessionId:'chat',turnId:'turn',prompt:'咖啡封面',phase:'done',artifactIds:[one.id]},
+    {jobId:'4'.repeat(32),sessionId:'chat',turnId:'turn',prompt:'产品细节',phase:'error',error:'已有部分结果',artifactIds:[two.id]}];
+  const view = await setup(t, [two, one], jobs);
+  const cards = view.container.querySelectorAll('.chat-prompt-image-card');
+  assert.equal(cards.length, 2);
+  assert.match(cards[0].textContent, /咖啡封面/);
+  assert.equal(cards[0].querySelector('img').alt, 'one.png');
+  assert.match(cards[1].textContent, /产品细节/);
+  assert.equal(cards[1].querySelector('img').alt, 'two.png');
+  await act(async () => cards[0].querySelector('.chat-artifact button').click());
+  assert.ok(view.requests[0].url.includes(`/${one.id}/refresh`));
+  assert.equal(view.requests[0].options.method, 'POST');
+  assert.ok(!view.requests[0].url.includes('imagegen'));
+});
+
+test('cross-session, cross-turn and ambiguous claims never invent prompt-image ownership', async () => {
+  const { groupImageArtifacts } = await loadTsModule('../src/lib/chatArtifacts.ts', import.meta.url);
+  const picture=artifact({mimeType:'image/png'});
+  const base={jobId:'b'.repeat(32),sessionId:'chat',turnId:'turn',prompt:'a',phase:'done',artifactIds:[picture.id]};
+  for(const jobs of [[{...base,sessionId:'other'}],[{...base,turnId:'other'}],[base,{...base,jobId:'c'.repeat(32)}]]) {
+    const grouped=groupImageArtifacts([picture],jobs);
+    assert.equal(grouped.other.length,1);
+    assert.ok(grouped.groups.every(group=>group.artifacts.length===0));
+  }
+  assert.equal(groupImageArtifacts([picture],[{...base,artifactIds:[],paths:[picture.path]}]).groups[0].artifacts.length,1);
 });

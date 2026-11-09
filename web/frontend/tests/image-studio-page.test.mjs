@@ -241,3 +241,17 @@ test('clipboard button requests media only on click and uploads the actual clipb
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
+
+
+test('collapsing creation tools keeps prompt, job and canvas mounted without calling the model', async t => {
+  const view = await fixture(t, { imgPrompt:'咖啡封面',imgJob:resultJob({mode:'generate',referenceId:undefined}) });
+  const panel=view.container.querySelector('.image-tool-panel');
+  assert.equal(panel.open,true);
+  panel.open=false;
+  await view.render({imgTick:10});
+  assert.equal(panel.open,false);
+  assert.equal(view.container.querySelector('#image-prompt').value,'咖啡封面');
+  assert.ok(view.container.querySelector('[aria-label="图片画布"] img'));
+  panel.open=true;
+  assert.equal(view.calls.generated,0);
+});

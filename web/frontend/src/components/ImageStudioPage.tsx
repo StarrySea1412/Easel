@@ -84,6 +84,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
         onDrop={event => { event.preventDefault(); setDragging(false); receiveFile(event.dataTransfer.files[0]); }}
         onPaste={event => { const file = firstStudioMedia(event.clipboardData.files); if (file) { event.preventDefault(); receiveFile(file); } }}>
+      <details className="image-tool-panel" open><summary>创作工具 <span>提示词、模型与参考图</span></summary>
       <StudioModelControl model={(busy && job?.model) || studio.imgChannel?.model || ''} baseUrl={studio.imgChannel?.baseUrl} service="当前图片模型" disabled={locked || studio.loading} saving={studio.modelSaving} error={studio.modelError} onSave={studio.saveModel} onSettings={onOpenSettings} />
         <form className="image-composer" onSubmit={event => { event.preventDefault(); if (canGenerate) void studio.fireImagegen(); }}>
           <label className="image-prompt-label" htmlFor="image-prompt">{reference ? '这张图，你想怎么改？' : '你想生成什么？'}</label>
@@ -112,6 +113,7 @@ export default function ImageStudioPage({ studio, video, onOpenSettings, onOpenO
           {studio.imgErr && <p className="image-error" role="alert">{studio.imgErr}</p>}
           {belongsToDraft && job?.state === 'error' && <div className="image-error" role="alert"><p>{job.phase === 'unconfirmed' ? '生成结果未确认：' : '图片任务已结束：'}{job.error || '请核对任务状态'}</p>{job.phase === 'unconfirmed' && <button type="button" className="btn btn-sm" disabled={studio.imgSubmitting} onClick={() => void studio.acknowledgeJob()}>已核对供应商，解除占位</button>}</div>}
         </form>
+      </details>
         {(previewUrl || busy) && <div className="image-preview">
         <div className="image-canvas-toolbar">
           <span>{reference ? original ? '原图' : '生成结果' : result ? '生成结果' : '画布'}{original && reference ? <small>{reference.width} × {reference.height}</small> : actual ? <small>{actual.width} × {actual.height}</small> : null}</span>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { artifactUrl } from '../lib/chatArtifacts';
+import { artifactUrl, groupImageArtifacts } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import '../styles/chat-artifacts.css';
 
@@ -59,10 +59,11 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
     } catch { if (!request.signal.aborted) setError('未能解除占位，请重新读取任务状态。'); }
     finally { if (!request.signal.aborted) setBusy(false); }
   };
-  return <article className="chat-image-job" aria-label="生图任务"><strong>{job.phase === 'queued' ? '等待图片通道' : job.phase === 'running' ? '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</strong><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}{job.phase === 'unconfirmed' && <button type="button" disabled={busy} onClick={() => void acknowledge()}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button>}{error && <p role="alert">{error}</p>}</article>;
+  return <section className={`chat-image-job is-${job.phase}`} aria-label="生图任务"><div className="chat-image-job-heading"><strong>提示词</strong><span>{job.phase === 'queued' ? '等待图片通道' : job.phase === 'running' ? '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '生成失败'}</span></div>{job.prompt.length > 220 ? <><p className="chat-image-prompt-excerpt">{job.prompt.slice(0, 220)}…</p><details><summary>查看完整提示词</summary><p>{job.prompt}</p></details></> : <p>{job.prompt}</p>}<small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p className="chat-image-job-error" role="status">{job.error}</p>}{job.phase === 'unconfirmed' && <button type="button" disabled={busy} onClick={() => void acknowledge()}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button>}{error && <p role="alert">{error}</p>}</section>;
 }
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;
+  const { groups, other } = groupImageArtifacts(artifacts, jobs);
   const singleVisual = artifacts.filter(item => item.mimeType.startsWith('image/') || item.mimeType.startsWith('video/')).length <= 1;
-  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}`} aria-label="本轮生成文件">{jobs.filter(job => job.phase !== 'done' || job.error).map(job => <ImageJob key={job.jobId} job={job} onChanged={onJobsChanged} />)}{artifacts.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
+  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}${groups.length ? ' chat-artifacts-with-prompts' : ''}`} aria-label="本轮生成文件">{groups.map(({job, artifacts: images}) => <article key={`${job.sessionId}:${job.jobId}`} className="chat-prompt-image-card" aria-label="提示词与对应图片"><ImageJob job={job} onChanged={onJobsChanged}/><div className="chat-prompt-results"><div className="chat-prompt-results-heading"><strong>对应图片{images.length > 1 ? ` · ${images.length} 张` : ''}</strong>{onJobsChanged && <button type="button" onClick={onJobsChanged} title="重新读取任务与已有文件，不会重新生图">刷新任务状态</button>}</div>{images.length ? <div className="chat-prompt-image-grid">{images.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated}/>)}</div> : <div className="chat-prompt-image-empty"><span>{job.phase === 'queued' || job.phase === 'running' ? '图片完成后会显示在这里' : job.phase === 'error' ? '这份提示词暂未生成可用图片' : '暂未找到明确关联的图片'}</span><small>刷新只读取已有结果，不会调用生图模型。</small></div>}</div></article>)}{other.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
 }

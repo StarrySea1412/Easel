@@ -11,6 +11,12 @@ const DRAFT = 'easel_social_distribution_v1';
 const PENDING = 'easel_social_distribution_pending_v1';
 const CONTENT_CACHE = 'easel_social_distribution_content_v1';
 type Pending = { requestKey: string; requests: AccountTarget[] };
+export type PublishStep = 'content' | 'targets' | 'review' | 'results';
+interface DistributionProps {
+  seed: AccountPayload; files: OutputFile[]; step?: PublishStep;
+  onStepChange?: (step: PublishStep) => void;
+  onSelectionChange?: (count: number, locked: boolean) => void;
+}
 function read<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) || 'null') || fallback; } catch { return fallback; }
 }
@@ -21,7 +27,7 @@ const describe = (job: DistributionJob) => job.state === 'finished'
   ? job.outcome ? PUBLISH_OUTCOMES[job.outcome]?.label || '待核实' : '待核实'
   : job.state === 'running' ? '执行中' : '排队中';
 
-export function DistributionEditor({ seed, files }: { seed: AccountPayload; files: OutputFile[] }) {
+export function DistributionEditor({ seed, files, step, onStepChange, onSelectionChange }: DistributionProps) {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [drafts, setDrafts] = useState<Record<string, AccountPayload>>(() => read(DRAFT, {}));
   const [batches, setBatches] = useState<DistributionBatch[]>([]);
@@ -107,6 +113,7 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
         setPending(null);
         setNotice('已开始处理所选账号。你可以切换页面，稍后在发布记录中查看结果。');
         setBatches(old => [result, ...old.filter(row => row.batchId !== result.batchId)]);
+        onStepChange?.('results');
       }
       await refresh();
     } catch (cause) {
@@ -124,7 +131,9 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
   const activeEditor = drafts[editorId] ? editorId : selected[0]?.[0];
   const targetPlatforms = new Set(selected.map(([id]) => accounts.find(a => a.accountId === id)?.platform));
   const locked = busy || !!pending;
+  useEffect(() => { onSelectionChange?.(selected.length, locked); }, [selected.length, locked, onSelectionChange]);
   return <div className="distribution-workspace">
+    <div hidden={!!step && step !== 'targets'}>
     <div className="distribution-intro"><p>先选平台，再选择这些平台下要发布的账号。每个账号的内容都可以单独调整。</p><button className="account-text-button" disabled={busy} onClick={() => { setError(''); void refresh().catch(cause => setError(String(cause.message || cause))); }}><IconRefresh size={13}/>刷新账号与批次</button></div>
     <div className="distribution-section-heading"><h3>选择发布平台</h3><p>可以同时选择多个平台。</p></div>
     <div className="distribution-platforms" role="group" aria-label="选择发布平台">
@@ -157,6 +166,8 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
         </section>;
       })}
     </div> : <div className="distribution-start-hint"><IconChevron size={15}/><span>点选上方平台，就能看到该平台下的账号。</span></div>}
+    </div>
+    <div hidden={!!step && step !== 'review'}>
     {selected.length > 0 && <section className="distribution-content" aria-label="各账号发布内容">
       <div className="distribution-section-heading"><h3>确认发布内容</h3><p>点选账号切换编辑，修改只影响当前账号。</p></div>
       <div className="distribution-editor-tabs" role="tablist" aria-label="选择要编辑的账号">
@@ -174,7 +185,7 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
       const choices = [...new Set([...draft.media, ...files.slice(0, 40).map(f => f.path)])];
       return <div id={`distribution-editor-${id}`} key={id} role="tabpanel" aria-labelledby={`distribution-tab-${id}`} hidden={activeEditor !== id}><fieldset className="social-editor distribution-editor" disabled={locked}>
         <legend>{publishPlatformLabel(account?.platform || '')} / {account?.label || id} · 发布内容</legend>
-        <div className="distribution-editor-heading"><p>{account?.platform === 'wechat-oa' ? '准备封面和正文，保存到公众号草稿箱。' : account?.platform === 'zhihu' ? '支持纯文字文章，请将内容写入正文。' : account?.platform === 'kuaishou' ? '选择一张图片或一个视频。' : ['bilibili', 'douyin', 'weixin-channels'].includes(account?.platform || '') ? '请选择一个视频。' : '可选择多张图片，或一个视频。'}</p><button className="account-text-button" onClick={() => update(id, { ...seed, media: [...seed.media] })}>复制下方通用稿</button></div>
+        <div className="distribution-editor-heading"><p>{account?.platform === 'wechat-oa' ? '准备封面和正文，保存到公众号草稿箱。' : account?.platform === 'zhihu' ? '支持纯文字文章，请将内容写入正文。' : account?.platform === 'kuaishou' ? '选择一张图片或一个视频。' : ['bilibili', 'douyin', 'weixin-channels'].includes(account?.platform || '') ? '请选择一个视频。' : '可选择多张图片，或一个视频。'}</p><button className="account-text-button" onClick={() => update(id, { ...seed, media: [...seed.media] })}>使用准备好的通用稿</button></div>
         <label>标题<input className="field" value={draft.title} onChange={e => update(id, { title: e.target.value })} /></label>
         <label>正文<textarea className="field" value={draft.body} onChange={e => update(id, { body: e.target.value })} /></label>
         <label>话题<input className="field" value={draft.tags || ''} onChange={e => update(id, { tags: e.target.value })} /></label>
@@ -183,14 +194,20 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
           <input type="checkbox" checked={draft.media.includes(path)} onChange={() => update(id, { media: draft.media.includes(path) ? draft.media.filter(p => p !== path) : [...draft.media, path] })} />
           {' '}{files.find(f => f.path === path)?.name || path}
         </label>)}</div>
-        {!choices.length && <p>请先在下方通用稿中选择素材，再复制到此账号。</p>}
+        {!choices.length && <p>请返回“准备内容”选择素材，再将通用稿用于此账号。</p>}
       </fieldset></div>;
     })}
     </section>}
+    {step && selected.length > 0 && <section className="distribution-confirmation" aria-label="本次发布清单"><h3>本次发布清单</h3><p>请逐个核对目标账号。公众号仅存草稿，其余账号将公开发布。</p>{selected.map(([id, draft]) => {
+      const account = accounts.find(a => a.accountId === id);
+      return <article key={id}><div><PlatformIcon platform={account?.platform || ''} name={publishPlatformLabel(account?.platform || '')}/><strong>{publishPlatformLabel(account?.platform || '')} / {account?.label || '账号待加载'}</strong><span>{account?.platform === 'wechat-oa' ? '保存到草稿箱' : '公开发布'}</span></div><p>{draft.title || '尚未填写标题'}</p><small>平台身份：{account?.name || '待核验'} · {draft.media.length} 个素材 · {draft.body.length} 字正文</small><button type="button" className="account-text-button" onClick={() => { setEditorId(id); document.getElementById(`distribution-tab-${id}`)?.focus(); }}>检查这份内容</button></article>;
+    })}</section>}
     {pending && <p className="distribution-pending" role="status">上次提交的结果还未确认。内容已暂时锁定，请先查询结果，避免重复发布。</p>}
     <div className="distribution-submit"><div><strong>{selected.length ? `已选择 ${targetPlatforms.size} 个平台 · ${selected.length} 个账号` : '还未选择发布账号'}</strong><p>{selected.length ? selected.map(([id]) => {const a=accounts.find(a=>a.accountId===id);return `${publishPlatformLabel(a?.platform || '')} / ${a?.label || '账号待加载'}`;}).join('、') : '选好平台和账号后，在这里确认发布。'}</p></div><button className="btn btn-primary" disabled={busy || (!pending && !selected.length)} onClick={() => void submit()}>{busy ? '正在提交…' : pending ? '查询本次受理结果' : `确认发布到 ${selected.length} 个账号`}</button></div>
+    </div>
+    {pending && step && step !== 'review' && <p className="distribution-pending" role="status">上次受理结果待确认，请返回“确认发布”查询同一请求。<button className="account-text-button" onClick={() => onStepChange?.('review')}>查询受理结果</button></p>}
     {error && <p className="notice-error" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <section className="distribution-history" aria-label="多账号分发批次"><div className="distribution-history-heading"><h3>发布记录</h3><span>逐个账号查看结果</span></div>
+    <section hidden={!!step && step !== 'results'} className="distribution-history" aria-label="多账号分发批次"><div className="distribution-history-heading"><h3>发布记录</h3><button className="account-text-button" disabled={busy} onClick={() => { void refresh().catch(cause => setError(cause.message || '读取结果失败')); }}><IconRefresh size={13}/>刷新发布结果</button></div>
       {batches.map(batch => <article key={batch.batchId} className="social-batch">
         <div className="distribution-batch-heading"><h3>{batch.state === 'finished' ? '本次发布已结束' : '正在发布'}</h3><small>{new Date(batch.createdAt).toLocaleString('zh-CN')}</small></div>
         {batch.jobs.map(job => <div key={job.jobId} className="social-job">
@@ -205,8 +222,9 @@ export function DistributionEditor({ seed, files }: { seed: AccountPayload; file
   </div>;
 }
 
-export default function SocialDistributionPanel(props: { seed: AccountPayload; files: OutputFile[] }) {
+export default function SocialDistributionPanel(props: DistributionProps) {
   const [open, setOpen] = useState(true);
+  if (props.step) return <section className="social-panel distribution-panel distribution-wizard" aria-label="按账号发布"><DistributionEditor {...props}/></section>;
   return <section className="social-panel distribution-panel" aria-label="同平台多账号分发">
     <button className="social-panel-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
       <strong>选择平台与发布账号</strong><span>{open ? '收起' : '按平台选择账号'}</span>

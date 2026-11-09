@@ -77,6 +77,7 @@ async function fixture(t, initial = [], page = 'other') {
       result = await h.publish(path.split('/')[3], request.body, request);
     } else if (/^\/api\/accounts\/[^/]+\/whoami/.test(path)) result = h.whoami ? await h.whoami(request) : { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟账号', avatar: '' };
     else if (path === '/api/accounts') result = h.accounts;
+    else if (path === '/api/social-accounts' || path === '/api/social-accounts/batches') result = [];
     else if (path === '/api/outputs') result = h.outputs;
     else if (path === '/api/schedule') result = h.schedule;
     else if (path.startsWith('/api/schedule/context?')) result = {};
@@ -96,7 +97,8 @@ async function fixture(t, initial = [], page = 'other') {
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
   let unmounted = false;
-  const render = async nextPage => { await act(async () => root.render(createElement(Shell, { page: nextPage }))); };
+  // These receipts regressions exercise the explicitly preserved default-account flow.
+  const render = async nextPage => { await act(async () => root.render(createElement(Shell, { page: nextPage }))); if (nextPage === 'publish') { const legacy = [...container.querySelectorAll('button')].find(el => el.textContent === '使用平台默认账号'); if (legacy) await act(async () => legacy.click()); } };
   const dispose = async () => { if (!unmounted) { unmounted = true; await act(async () => root.unmount()); container.remove(); } };
   t.after(dispose);
   await render(page);

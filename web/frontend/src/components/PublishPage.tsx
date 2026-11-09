@@ -16,6 +16,8 @@ import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
 import SocialDistributionPanel from './SocialDistributionPanel';
+import type { PublishStep } from './SocialDistributionPanel';
+import Steps from './ui/Steps';
 import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
@@ -73,6 +75,20 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const [previewPlatform, setPreviewPlatform] = useState(draft0.platforms[0] || '');
   const [copied, setCopied] = useState('');
   const [toast, setToast] = useState('');
+  const [draftSaved, setDraftSaved] = useState(true);
+  const [step, setStep] = useState<PublishStep>('content');
+  const [legacy, setLegacy] = useState(false);
+  const [targetCount, setTargetCount] = useState(0);
+  const [distributionLocked, setDistributionLocked] = useState(false);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const selectionChanged = useCallback((count: number, locked: boolean) => { setTargetCount(count); setDistributionLocked(locked); }, []);
+  const steps: { key: PublishStep; label: string; hint: string }[] = [
+    { key: 'content', label: '准备内容', hint: '写好通用稿，添加图片或视频。' },
+    { key: 'targets', label: '选择账号', hint: '先选平台，再选择对应的发布账号。' },
+    { key: 'review', label: '确认发布', hint: '核对每份账号内容与提交方式，然后确认发布。' },
+    { key: 'results', label: '查看结果', hint: '逐个账号查看进度与回执，结果待核实时先核对。' },
+  ];
+  const changeStep = (next: PublishStep) => { setStep(next); window.requestAnimationFrame(() => { stepHeading.current?.focus({ preventScroll: true }); stepHeading.current?.closest<HTMLElement>('.publish-page')?.scrollTo?.({ top: 0 }); }); };
   const [adapting, setAdapting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkStage, setCheckStage] = useState('');
@@ -99,7 +115,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
-    savePublishDraft({ title, body, platforms, overrides, tags, media: selectedMedia });
+    setDraftSaved(savePublishDraft({ title, body, platforms, overrides, tags, media: selectedMedia }));
   }, [title, body, platforms, overrides, tags, selectedMedia]);
 
   useEffect(() => {
@@ -404,19 +420,24 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   return (
     <div className="publish-page publish-studio">
       <header className="publish-heading">
-        <div><h1 className="page-title">发布中心</h1><p className="page-subtitle">让好内容，抵达每个平台</p></div>
+        <div><h1 className="page-title">发布中心</h1><p className="page-subtitle">准备一份内容，按平台选择账号，逐份确认发布。</p></div>
         <div className="publish-heading-actions">
-          <span className="publish-save-status"><IconCheck size={14} /> 草稿自动保存</span>
+          <span className="publish-save-status" role="status">{draftSaved && <IconCheck size={14} />} {draftSaved ? '草稿自动保存' : '草稿未保存，请保留内容'}</span>
           <button className="btn btn-sm publish-receipt-entry" onClick={publishReceipts.open}>查看全部发布回执</button>
+          <button className="account-text-button" disabled={distributionLocked || publishing || checking || adapting} onClick={() => setLegacy(value => !value)}>{legacy ? '返回按账号发布' : '使用平台默认账号'}</button>
         </div>
       </header>
       {(accountsError || mediaError) && <div className="notice-error publish-load-error" role="alert">
         {[accountsError, mediaError].filter(Boolean).join(' ')}
         <button className="btn btn-sm" onClick={loadAssets} disabled={accountsLoading || mediaLoading}>重试</button>
       </div>}
-      <SocialDistributionPanel seed={{ title, body, media: selectedMedia, tags }} files={mediaFiles} />
-      <div className="publish-workspace">
-        <div className="publish-editor">
+      {!legacy && <>
+        <div className="publish-progress"><Steps label="发布流程" current={step} onChange={key => changeStep(key as PublishStep)} items={steps.map(item => ({...item, description: item.key === 'content' ? '标题、正文与素材' : item.key === 'targets' ? '平台与对应账号' : item.key === 'review' ? '逐份核对后提交' : '进度与平台回执', completed: item.key === 'content' ? !!title.trim() : item.key === 'targets' ? targetCount > 0 : false, disabled: item.key === 'review' && !targetCount && !distributionLocked}))}/></div>
+        <div className="publish-step-heading"><h2 ref={stepHeading} tabIndex={-1}>{steps.find(item => item.key === step)?.label}</h2><p>{steps.find(item => item.key === step)?.hint}</p></div>
+      </>}
+      <div hidden={legacy || step === 'content'}><SocialDistributionPanel seed={{ title, body, media: selectedMedia, tags }} files={mediaFiles} step={step} onStepChange={changeStep} onSelectionChange={selectionChanged}/></div>
+      <div hidden={!legacy && step !== 'content'} className={`publish-workspace${legacy ? '' : ' publish-content-workspace'}`}>
+        <fieldset className="publish-editor publish-content-fields" disabled={distributionLocked}>
           <section className="publish-section publish-content-section">
             <div className="publish-section-heading"><h2>内容</h2><span>通用正文 · 各平台可单独调整</span></div>
             <label className="field-label" htmlFor="publish-title">标题</label>
@@ -427,7 +448,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
               placeholder="写下内容，再为不同平台调整表达…" onChange={e => setBody(e.target.value)} />
             <div className="publish-editor-tools">
               {adapting ? <button className="btn btn-sm" onClick={stopAdapt}><IconStop size={13} /> 停止生成</button>
-                : <button className="btn btn-sm" disabled={empty || platforms.length === 0 || checking || publishing} onClick={adapt}>
+                : legacy && <button className="btn btn-sm" disabled={empty || platforms.length === 0 || checking || publishing} onClick={adapt}>
                   <IconSkills size={14} /> 一键适配各平台
                 </button>}
               <button className="btn btn-sm btn-ghost" disabled={empty || checking || adapting || publishing} onClick={check}>
@@ -481,9 +502,9 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
               <IconTrash size={13} />清空内容
             </button>
           </div>
-        </div>
+        </fieldset>
 
-        <aside className="publish-side" aria-label="平台预览与发布">
+        <aside hidden={!legacy} className="publish-side" aria-label="平台预览与发布">
           <section className="publish-section publish-platform-section">
             <div className="publish-section-heading"><h2>发布到</h2><span>可多选 · 已选 {platforms.length} 个</span></div>
             <div className="publish-platform-list" aria-label="发布平台">
@@ -603,6 +624,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
           </section>
         </aside>
       </div>
+      {!legacy && <footer className="publish-step-actions"><div>{step === 'content' ? <span>通用稿会用于新选中的账号；各账号可单独修改。</span> : step === 'targets' ? <span>已选 {targetCount} 个账号</span> : step === 'review' ? <span>返回修改会保留各账号草稿。</span> : <span>发布结果以平台回执为准。</span>}</div><div>{step !== 'content' && <button type="button" className="btn" onClick={() => changeStep(steps[Math.max(0, steps.findIndex(item => item.key === step) - 1)].key)}>返回{steps[Math.max(0, steps.findIndex(item => item.key === step) - 1)].label}</button>}{step === 'content' && <button type="button" className="btn btn-primary" disabled={!title.trim() || distributionLocked} onClick={() => changeStep('targets')}>下一步：选择账号 →</button>}{step === 'targets' && <button type="button" className="btn btn-primary" disabled={!targetCount && !distributionLocked} onClick={() => changeStep('review')}>下一步：确认发布 →</button>}{step === 'results' && <button type="button" className="btn" disabled={distributionLocked} onClick={() => changeStep('content')}>继续准备内容</button>}</div></footer>}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   );

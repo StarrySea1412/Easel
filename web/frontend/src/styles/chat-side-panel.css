@@ -53,6 +53,10 @@
 }
 
 /* 新增面板首页：工具并列，推荐来自当前对话的真实文件。 */
+.chat-panel-tools > summary { display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:550;cursor:pointer;padding:8px 0 12px;list-style:none; }
+.chat-panel-tools > summary::-webkit-details-marker { display:none; }
+.chat-panel-tools[open] > summary svg { transform:rotate(90deg); }
+.chat-panel-tools > summary:focus-visible { outline:2px solid var(--focus-ring);outline-offset:3px; }
 .chat-panel-launcher-tab { border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); padding: 5px 10px; white-space: nowrap; font: inherit; font-size: 12px; cursor: pointer; }
 .chat-panel-content { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: auto; }
 .chat-panel-content[hidden] { display: none; }

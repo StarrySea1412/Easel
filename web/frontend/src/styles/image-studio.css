@@ -1,7 +1,10 @@
 .image-page { max-width:1240px; margin:0 auto; width:100%; box-sizing:border-box; }
-.image-creation > .studio-model-control { border:0; border-radius:0; margin:0; padding:12px 20px; border-bottom:1px solid var(--border); }
-.image-creation > .studio-model-control .studio-model-current > div { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
-.image-creation > .studio-model-control .studio-model-symbol { border:0; width:20px; height:20px; }
+.image-creation .image-tool-panel > .studio-model-control { border:0; border-radius:0; margin:0; padding:12px 20px; border-bottom:1px solid var(--border); }
+.image-tool-panel > summary { cursor:pointer; display:list-item; margin:0; padding:14px 20px; font-size:13px; font-weight:550; border-bottom:1px solid var(--border); }
+.image-tool-panel > summary > span { margin-left:10px; font-size:11px; color:var(--text-secondary); font-weight:400; }
+.image-tool-panel > summary:focus-visible { outline:2px solid var(--focus-ring); outline-offset:-3px; }
+.image-creation .image-tool-panel > .studio-model-control .studio-model-current > div { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.image-creation .image-tool-panel > .studio-model-control .studio-model-symbol { border:0; width:20px; height:20px; }
 .image-creation .image-composer { border-top:0; padding-top:18px; }
 .image-preview { border-top:1px solid var(--border); }
 .image-prompt-examples { margin:8px 0; color:var(--text-secondary); font-size:12px; }
