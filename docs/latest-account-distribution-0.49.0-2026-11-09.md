@@ -29,6 +29,12 @@
 
 ## 运行与部署边界
 
-源码单一版本来源为pyproject.toml，前端package及lock同步0.49.0。本地服务已由整合源码及本轮构建启动；数据使用`.artifacts/runtime-0490-preview`隔离目录，不读取真实平台登录态。最终Git交付同时更新整合分支与维护分支`codex/gpt-responses-xhs-0.46.13`；main仅同步双语首页，不合入功能代码。
+源码单一版本来源为pyproject.toml，前端package及lock同步0.49.0。本地服务已由整合源码及本轮构建启动；数据使用`.artifacts/runtime-0490-preview`隔离目录，不读取真实平台登录态。
+
+## Git交付
+
+- 功能与验证文档提交`d6c9d7dd9a0abc244f874cc10382d6746df21b14`已推送`starry/codex/latest-account-distribution-0.49.0`及维护分支`starry/codex/gpt-responses-xhs-0.46.13`，两条远端SHA均已核对。维护线由`448bd339`正常快进，未强推。
+- main双语首页公告提交`7e943231`已推送并核对远端；该提交只修改README.md与README_EN.md，没有合入功能代码。
+- 本记录随后的交付回执提交只更新文档，不更改已验证功能；整合分支与维护分支保持同一交付HEAD。其他工作区的既有未提交文件保持原样。
 
 用户本条授权源码整合、Git交付与本地预览，未自动授权138停服切换或安装器发布。真实平台登录/发布及付费生图继续按原暂停边界处理。当前本地工作台没有管理员认证，不额外植入默认管理员；138认证配置及测试账号保持不变。
