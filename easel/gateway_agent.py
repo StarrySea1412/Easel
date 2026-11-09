@@ -58,6 +58,7 @@ class GatewayAgentProc:
         self.continuation = continuation
         self.on_continue = on_continue
         self.continuations = 0
+        self.continuation_stop_reason = None
         self._pending_question = False
         self._office_run_id = params['idempotencyKey']
         self._done = threading.Event()
@@ -195,9 +196,11 @@ class GatewayAgentProc:
                 'result': {'payloads': payloads}}
 
     def _run(self):
-        from .chat_continuation import CONTINUE_MESSAGE, MAX_CONTINUATIONS
+        from .chat_continuation import (CONTINUE_MESSAGE, MAX_CONTINUATIONS, NO_PROGRESS_ERROR,
+                                       DEADLINE_ERROR, progress_fingerprint)
         started = time.monotonic()
         all_payloads = []
+        seen_text = set()
         try:
             while True:
                 terminal = False
@@ -235,6 +238,14 @@ class GatewayAgentProc:
                         and time.monotonic() - started < self.timeout):
                     reason = self.continuation(error=attempt_error, text=text,
                         stop_reason=_normalized_stop_reason(self.result), continuation_index=self.continuations)
+                fingerprint = progress_fingerprint('\n'.join(row['text'] for row in payloads
+                    if isinstance(row, dict) and isinstance(row.get('text'), str) and not row.get('isError')))
+                if reason and fingerprint and fingerprint in seen_text:
+                    self.continuation_stop_reason = 'continuation_no_progress'
+                    self.result = {**self.result, 'status': 'error', 'summary': NO_PROGRESS_ERROR}
+                    reason = None
+                if fingerprint:
+                    seen_text.add(fingerprint)
                 if not reason:
                     all_payloads.extend(payloads)
                     break
@@ -246,6 +257,10 @@ class GatewayAgentProc:
                 # Backoff is interruptible. Original prompt is never replayed.
                 if self._stop.wait(min(2 * self.continuations, 4)):
                     break
+                if time.monotonic() - started >= self.timeout:
+                    self.continuation_stop_reason = 'continuation_deadline'
+                    self.result = {**self.result, 'status': 'error', 'summary': DEADLINE_ERROR}
+                    break
                 self.client = self.client_factory()
                 if self._stop.is_set():
                     break
@@ -255,7 +270,7 @@ class GatewayAgentProc:
                 self._accepted_run.clear()
                 self._abort_confirmed.clear()
                 self._office_run_id = self.params['idempotencyKey']
-            self.stop_reason = _normalized_stop_reason(self.result)
+            self.stop_reason = self.continuation_stop_reason or _normalized_stop_reason(self.result)
             if isinstance(self.result, dict) and isinstance(self.result.get('result'), dict):
                 self.result = {**self.result, 'result': {**self.result['result'], 'payloads': all_payloads}}
             if not isinstance(self.result, dict) or self.result.get('status') != 'ok':

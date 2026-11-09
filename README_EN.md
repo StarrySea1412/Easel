@@ -1,3 +1,5 @@
+**0.48.0 source candidate: memory ranking and bounded Super Agent continuation.** Scoped memories use NFKC/BM25 lexical ranking with per-entry match explanations. Repeated output and an exhausted deadline stop continuation without claiming completion. User confirmation and account isolation remain. Informed by pinned DeepSeek Harness source; not deployed to host 138. [Implementation and validation](docs/memory-super-agent-0.48.0.md).
+
 **Host 138 production updated to 0.47.1 · 2026-11-06.** Runtime `6d4b2ecd` is healthy. Failed images can be retried individually while successful images are retained. Read-only checks confirmed the original 2/3 card set and retry availability; the user will perform live retry acceptance. [Receipt](docs/image-retry-0.47.1.md).
 
 A [same-platform multi-account publishing design](docs/multi-account-publishing-design-2026-11-06.md) is available: isolated logins, account-bound jobs, queues and recovery. This capability is not implemented yet.
