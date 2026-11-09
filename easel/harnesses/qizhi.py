@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import time
+import uuid
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -87,9 +89,13 @@ class QizhiAdapter:
                        Path(request.env.get("EASEL_DATA_DIR") or request.cwd) / "outputs")
         fence = pending_path(outputs, request.session_key or session or "console")
         fence.parent.mkdir(parents=True, exist_ok=True)
+        request_id = uuid.uuid4().hex
         try:
             with fence.open("x", encoding="utf-8") as stream:
-                json.dump({"state": "unconfirmed", "sessionId": session, "target": target}, stream)
+                # Local diagnostic identity only; never invent an upstream task ID.
+                json.dump({"state": "unconfirmed", "sessionId": session, "target": target,
+                           "localRequestId": request_id, "startedAt": time.time(),
+                           "timeoutSeconds": request.timeout}, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
         except FileExistsError:
@@ -102,7 +108,10 @@ class QizhiAdapter:
         confirmed = False
         emit("activity", "Qizhi 远程执行中；本机技能与文件未自动上传。")
         try:
-            timeout = httpx.Timeout(min(request.timeout, 180), connect=10, write=30, pool=10)
+            # /api/agent returns one JSON result after the remote task finishes.
+            # A 180-second read cap cut valid long-running tasks off prematurely.
+            # The caller already bounds the whole turn with asyncio.wait_for.
+            timeout = httpx.Timeout(request.timeout, connect=10, write=30, pool=10)
             async with httpx.AsyncClient(timeout=timeout, trust_env=False, follow_redirects=False) as client:
                 async with client.stream("POST", base + "/api/agent", json=body,
                                          headers={"X-API-Key": key}) as response:
@@ -142,7 +151,17 @@ class QizhiAdapter:
             emit("activity", "Qizhi 连接已结束，远端是否停止尚未确认；本轮不会自动重发。")
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            raise HarnessError("Qizhi 网络或等待超时，远端任务状态未知；请核查原任务，不要重复提交。") from None
+            if isinstance(exc, httpx.ReadTimeout):
+                detail = f"Qizhi 等待远端响应超过本轮 {request.timeout} 秒上限"
+            elif isinstance(exc, httpx.ConnectTimeout):
+                detail = "连接 Qizhi 服务超时"
+            elif isinstance(exc, httpx.WriteTimeout):
+                detail = "向 Qizhi 发送请求超时"
+            elif isinstance(exc, httpx.PoolTimeout):
+                detail = "等待 Qizhi 可用连接超时"
+            else:
+                detail = "Qizhi 网络连接中断或响应传输失败"
+            raise HarnessError(detail + "，远端任务状态未知；请核查原任务，不要重复提交。") from None
         finally:
             if confirmed:
                 fence.unlink(missing_ok=True)

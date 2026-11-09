@@ -68,7 +68,7 @@ from easel.openclaw_workspace import config_path as _oc_config_path, state_dir a
 from easel.paths import child_env, data_root
 from easel.version import runtime_version, application_version
 from easel.collection_errors import collection_failure
-from easel import local_records, publish_receipts, publish_followup
+from easel import local_records, publish_batches, publish_receipts, publish_followup
 from easel.reasoning_stream import ReasoningStream, ThinkingTextStream, provider_reasoning, visible_text
 from easel.artifacts import ArtifactStore, private_output
 from easel.runtime_limits import queued_chat
@@ -657,6 +657,11 @@ async def _owned_lifespan(_app: FastAPI):
         await asyncio.to_thread(_publish_receipt_store().recover_interrupted)
     except local_records.RecordError as exc:
         print(str(exc), file=sys.stderr)
+    try:
+        await asyncio.to_thread(_publish_batch_store().recover_interrupted)
+    except local_records.RecordError as exc:
+        print(str(exc), file=sys.stderr)
+    await asyncio.to_thread(_social_accounts.startup)
     verification = _publish_verification_service()
     verification.start()
     health = _model_health_service()
@@ -668,6 +673,7 @@ async def _owned_lifespan(_app: FastAPI):
     finally:
         from easel.runtime_shutdown import begin, close_chat_tasks
         begin(sys.modules[__name__])
+        await asyncio.to_thread(_social_accounts.shutdown)
         await _task_service.close()
         await close_chat_tasks(sys.modules[__name__])
         from easel.harnesses.rpc import close_sessions
@@ -5591,7 +5597,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
              "已停止" if reason == "stopped" else "服务关闭，本轮已取消")
     except asyncio.TimeoutError:
         reason = "timeout"
-        error_message = "Agent 执行超时，已终止本轮进程"
+        error_message = (f"Qizhi 等待超过本轮 {timeout} 秒上限，远端任务状态未知；请核查原任务，不要重复提交。"
+                         if runtime == 'qizhi' else "Agent 执行超时，已终止本轮进程")
         emit("error", error_message)
     except (HarnessError, HTTPException) as error:
         error_message = _scrub_secrets(str(error.detail if isinstance(error, HTTPException) else error))
@@ -9149,6 +9156,7 @@ def api_manual_publish_export(platform: str, req: ManualPublishRequest):
 
 
 _PUBLISH_LOCK = threading.RLock()
+_PUBLISH_WRITER_LOCK = threading.RLock()
 _PUBLISH_ACTIVE: dict[str, str] = {}
 # Preserve a known result in the running process if a disk fails after the
 # platform has accepted it. Starting a new operation still requires durable IO.
@@ -9158,6 +9166,10 @@ _PUBLISH_VERIFIER: publish_followup.VerificationService | None = None
 
 def _publish_receipt_store() -> publish_receipts.ReceiptStore:
     return publish_receipts.ReceiptStore(PUBLISH_DIR / 'receipts.json')
+
+
+def _publish_batch_store() -> publish_batches.BatchStore:
+    return publish_batches.BatchStore(PUBLISH_DIR / 'batches.json')
 
 
 def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
@@ -9191,7 +9203,7 @@ def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
         return dict(result)
 
 
-def _begin_publish(platform: str, title: str, source_session: str = '', preparation: dict | None = None) -> dict:
+def _begin_publish(platform: str, title: str, source_session: str = '', preparation: dict | None = None, *, batch_id: str | None = None) -> dict:
     with _PUBLISH_LOCK:
         if platform in _PUBLISH_ACTIVE:
             raise HTTPException(409, '该平台已有发布任务，请先查看现有任务。')
@@ -9209,6 +9221,12 @@ def _begin_publish(platform: str, title: str, source_session: str = '', preparat
             raise HTTPException(exc.status_code, str(exc)) from None
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
+        if batch_id:
+            # Grouping only: a failure to record it must not block the publish.
+            try:
+                receipt = _publish_receipt_store().update(receipt['receiptId'], {'batchId': batch_id})
+            except (KeyError, local_records.RecordError):
+                pass
         _PUBLISH_ACTIVE[platform] = receipt['receiptId']
         _PUBLISH_VOLATILE[receipt['receiptId']] = receipt
         return receipt
@@ -9362,6 +9380,13 @@ class PublishVerificationRequest(BaseModel):
 
 @app.post("/api/publish/receipts/{receipt_id}/verify")
 async def api_verify_publish_receipt(receipt_id: str):
+    receipt = _get_publish_receipt(receipt_id)
+    if receipt.get('accountId'):
+        from easel.social_accounts import AccountError
+        try:
+            return await asyncio.to_thread(_social_accounts.verify, receipt)
+        except AccountError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from None
     try:
         return _publish_verification_service().request(receipt_id)
     except publish_followup.VerificationError as exc:
@@ -9370,6 +9395,8 @@ async def api_verify_publish_receipt(receipt_id: str):
 
 @app.post("/api/publish/receipts/{receipt_id}/verification")
 async def api_set_publish_verification(receipt_id: str, req: PublishVerificationRequest):
+    if _get_publish_receipt(receipt_id).get('accountId'):
+        raise HTTPException(409, '独立账号回执目前仅支持手动核实，请使用核实发布结果入口。')
     try:
         return _publish_verification_service().request(receipt_id, automatic=req.automatic)
     except publish_followup.VerificationError as exc:
@@ -9379,7 +9406,7 @@ async def api_set_publish_verification(receipt_id: str, req: PublishVerification
 def _read_publish_status(platform: str) -> dict:
     """Legacy platform polling reads the newest durable receipt, not stale JSON."""
     receipt = next((item for item in _recent_publish_receipts(200)
-                    if item['platform'] == platform), None)
+                    if item['platform'] == platform and not item.get('accountId')), None)
     return _refresh_publish_receipt(receipt) if receipt else {'state': 'unknown', 'message': ''}
 
 
@@ -9446,6 +9473,13 @@ def _complete_publish_receipt(receipt: dict) -> dict:
 
 
 def _run_publish_job(platform: str, cmd: list, title: str, body: str, cfg: dict,
+                     status_file: Path, code_file: Path, receipt_id: str,
+                     timeout: int = 600) -> dict:
+    with _PUBLISH_WRITER_LOCK:
+        return _run_publish_job_locked(platform, cmd, title, body, cfg, status_file, code_file, receipt_id, timeout)
+
+
+def _run_publish_job_locked(platform: str, cmd: list, title: str, body: str, cfg: dict,
                      status_file: Path, code_file: Path, receipt_id: str,
                      timeout: int = 600) -> dict:
     out = err = ''
@@ -9543,6 +9577,21 @@ async def api_publish_sms(platform: str, req: PublishSmsRequest):
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
     _require_automated_publishing()
+    if req.receiptId:
+        try:
+            receipt = _get_publish_receipt(req.receiptId)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(409, '对应发布任务已结束或已变化，请刷新任务状态。') from None
+            raise
+        if receipt.get('accountId'):
+            from easel.social_accounts import AccountError
+            if receipt['platform'] != platform:
+                raise HTTPException(409, '回执平台与本次验证不一致。')
+            try:
+                return _social_accounts.publish_sms(receipt, req.code)
+            except AccountError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from None
     with _PUBLISH_LOCK:
         receipt_id = _PUBLISH_ACTIVE.get(platform)
         if not receipt_id or (req.receiptId and req.receiptId != receipt_id):
@@ -9562,29 +9611,33 @@ async def api_publish_sms(platform: str, req: PublishSmsRequest):
     return {'ok': True, 'receiptId': receipt_id}
 
 
-@app.post("/api/publish/{platform}")
-async def api_publish(platform: str, req: PublishRequest):
-    """Run an explicitly requested publication and retain its platform receipt."""
-    if req.sourceSessionId and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', req.sourceSessionId):
+class PublishBatchItem(PublishRequest):
+    platform: str
+
+
+class PublishBatchRequest(BaseModel):
+    requests: list[PublishBatchItem] = []
+
+
+def _check_publish_request(platform: str, cfg: dict, req: PublishRequest, *, account_scoped: bool = False) -> tuple[list[str], list[str], dict | None]:
+    """Shared preflight for the single-platform and batch entry points."""
+    if getattr(req, 'sourceSessionId', '') and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', getattr(req, 'sourceSessionId', '')):
         raise HTTPException(400, '来源对话标识无效')
-    cfg = LOGIN_RUNNERS.get(platform)
-    if not cfg:
-        raise HTTPException(404, '未知平台')
     if cfg['backend'] == 'unsupported':
         raise HTTPException(400, f"{cfg['name']} 暂不支持一键发布")
     _require_automated_publishing()
-    profile = (req.persona or '').strip()
+    profile = (getattr(req, 'persona', '') or '').strip()
     if profile and (not valid_persona_name(profile) or not profile_exists(profile)):
         raise HTTPException(400, '选择的画像不存在或名称非法')
     if not req.title.strip() and not req.body.strip():
         raise HTTPException(400, '标题/正文不能为空')
     preparation, sealed_media = None, None
-    if req.acceptanceId:
+    if getattr(req, 'acceptanceId', ''):
         from easel.creation_drafts import CreationDrafts
         try:
             preparation, sealed_media = CreationDrafts(OUTPUTS_DIR).verify_acceptance(
-                req.sourceSessionId, req.acceptanceId, platform,
-                {'title': req.title, 'body': req.body, 'tags': req.tags, 'media': req.media, 'persona': req.persona},
+                getattr(req, 'sourceSessionId', ''), getattr(req, 'acceptanceId', ''), platform,
+                {'title': req.title, 'body': req.body, 'tags': req.tags, 'media': req.media, 'persona': getattr(req, 'persona', '')},
                 _account_identity_key(platform))
         except (ValueError, LookupError, OSError) as exc:
             raise HTTPException(409, str(exc) if isinstance(exc, (ValueError, LookupError)) else '确认稿素材不可用，请重新确认') from exc
@@ -9602,64 +9655,227 @@ async def api_publish(platform: str, req: PublishRequest):
     if platform in VIDEO_ONLY_PUBLISH and not vids:
         raise HTTPException(400, f"{cfg['name']} 只能发视频，请附带一个视频文件")
     if platform == 'wechat-oa':
-        if _mp_login_status().get('state') != 'success':
+        if not account_scoped and _mp_login_status().get('state') != 'success':
             raise HTTPException(400, '公众号后台未登录：请先在账号页点「登录公众号后台」扫码')
         if not imgs or vids:
             raise HTTPException(400, '公众号文章需要封面图，请附带图片而非视频')
-    title = req.title.strip() or req.body.strip()[:20]
-    tags = req.tags or ''
-    publish_type = '视频' if vids else ('文章' if platform == 'wechat-oa' else '图文')
+    return imgs, vids, preparation
+
+
+def _build_publish_command(platform: str, cfg: dict, title: str, body: str, tags: str,
+                           imgs: list[str], vids: list[str],
+                           receipt_id: str, status_file: Path, code_file: Path) -> list:
+    """Shared command assembly for the single-platform and batch entry points."""
     py = sys.executable
+    if platform == 'xiaohongshu':
+        base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'xhs_publish.py')]
+        cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
+        cmd += ['--title', title, '--content', body, '--tags', tags, '--exec']
+    elif platform == 'bilibili':
+        bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
+        cmd = [py, '-X', 'utf8', str(_skill_md_path('skill-bilibili-upload').parent / 'scripts' / 'bili_upload.py'), 'upload', '--video', vids[0],
+               '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag,
+               '--cookie', str(DATA_DIR / 'cookies.json'), '--exec']
+        if body.strip():
+            cmd += ['--desc', body[:2000]]
+    elif platform == 'douyin':
+        base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'douyin_publish.py')]
+        cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
+        cmd += ['--title', title, '--content', body, '--tags', tags, '--exec',
+                '--status-file', str(status_file), '--sms-code-file', str(code_file)]
+    elif platform == 'wechat-oa':
+        # This platform endpoint creates a draft. The resulting receipt
+        # must retain that outcome instead of calling it a publication.
+        md_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.md'
+        html_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.html'
+        body_md = body or ''
+        if imgs[1:]:
+            body_md += "\n\n" + "\n\n".join(f'![]({path})' for path in imgs[1:])
+        md_path.write_text(f"# {title}\n\n{body_md}\n", encoding='utf-8')
+        conv = subprocess.run([py, '-X', 'utf8', str(WECHAT_SKILL_SCRIPTS / 'html_converter.py'),
+                               str(md_path), '-o', str(html_path)],
+                              cwd=str(PROJECT_ROOT), env=_proxy_env(), capture_output=True,
+                              text=True, encoding='utf-8', errors='replace', timeout=60)
+        if conv.returncode != 0 or not html_path.is_file():
+            raise HTTPException(500, '公众号排版失败，请检查正文、图片和本地日志。')
+        wx_proxy = os.environ.get('EASEL_PROXY') or os.environ.get('https_proxy') or ''
+        cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'publish', '--proxy', wx_proxy,
+               '--html', str(html_path), '--cover', imgs[0], '--title', title,
+               '--digest', (body or '').strip()[:100], '--author', '']
+    else:
+        cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'web_publisher.py'), 'publish',
+               '--platform', cfg['wp'], '--title', title, '--desc', body,
+               '--tags', tags, '--exec']
+        media = vids[0] if vids else (imgs[0] if imgs else None)
+        if media:
+            cmd += ['--media', media]
+    return cmd
+
+
+@app.get("/api/publish/batch/{batch_id}")
+async def api_publish_batch_status(batch_id: str):
+    """批次状态查询：逐平台合并最新回执；只读，不重发任何内容。"""
+    batch = _publish_batch_store().get(batch_id)
+    if not batch:
+        raise HTTPException(404, '发布批次不存在')
+    platforms = []
+    for entry in batch.get('platforms', []):
+        info = {'platform': entry['platform'], 'receiptId': entry.get('receiptId') or '',
+                'state': entry['state'], 'outcome': entry.get('outcome'),
+                'message': entry.get('message') or '', 'url': ''}
+        receipt_id = entry.get('receiptId')
+        if receipt_id:
+            try:
+                receipt = _refresh_publish_receipt(_get_publish_receipt(receipt_id))
+            except HTTPException:
+                receipt = None
+            if receipt:
+                info['outcome'] = receipt.get('outcome')
+                info['url'] = receipt.get('url') or ''
+                if receipt.get('outcome') in publish_receipts.OUTCOMES:
+                    info['state'] = publish_batches.ENTRY_FINISHED
+                    info['message'] = str(receipt.get('message') or info['message'])[:600]
+                elif entry['state'] == publish_batches.ENTRY_ACCEPTED:
+                    info['state'] = publish_batches.ENTRY_RUNNING
+        platforms.append(info)
+    return {'batchId': batch['batchId'], 'state': batch['state'],
+            'createdAt': batch.get('createdAt'), 'updatedAt': batch.get('updatedAt'),
+            'message': batch.get('message') or '', 'platforms': platforms,
+            'requests': batch.get('requests') or {}}
+
+
+def _run_publish_batch(batch_id: str, jobs: list[dict]) -> None:
+    """Run confirmed platforms serially in one browser-writer lane.
+
+    Each platform keeps its own receipt; one platform's failure never
+    resubmits or blocks the others, and nothing is retried automatically.
+    """
+    store = _publish_batch_store()
+    for job in jobs:
+        platform = job['platform']
+        try:
+            store.set_entry(batch_id, platform, state=publish_batches.ENTRY_RUNNING)
+        except (KeyError, local_records.RecordError):
+            pass
+        try:
+            receipt = _run_publish_job(platform, job['cmd'], job['title'], job['body'], job['cfg'],
+                                       job['status_file'], job['code_file'], job['receipt_id'],
+                                       timeout=900)
+            outcome = receipt.get('outcome') if isinstance(receipt, dict) else None
+            message = receipt.get('message') if isinstance(receipt, dict) else ''
+        except Exception as exc:  # noqa: BLE001 — 其余平台必须继续，绝不重复提交本平台
+            outcome, message = 'unverified', (
+                f'批次执行异常，结果未知；请先到平台核对，避免重复发布。（{type(exc).__name__}）')
+        try:
+            store.set_entry(batch_id, platform, state=publish_batches.ENTRY_FINISHED,
+                            outcome=outcome, message=message)
+        except (KeyError, local_records.RecordError):
+            pass
+
+
+@app.post("/api/publish/batch")
+async def api_publish_batch(batch_req: PublishBatchRequest):
+    """受理一次已确认的多平台发布：服务端持有批次并逐平台串行执行。
+
+    每个平台独立受理与回执；被拒平台明确返回原因且不阻塞其他平台。
+    服务端从不自动重试；浏览器关闭不影响已受理批次。
+    """
+    _require_automated_publishing()
+    items = batch_req.requests or []
+    if not items:
+        raise HTTPException(400, '请至少选择一个发布平台')
+    seen: set[str] = set()
+    checked: list[dict] = []
+    rejected: list[dict] = []
+    for item in items:
+        platform = (item.platform or '').strip()
+        if not platform:
+            rejected.append({'platform': '', 'reason': '缺少平台标识。'})
+            continue
+        if platform in seen:
+            rejected.append({'platform': platform, 'reason': '同一平台在批次中重复出现，只受理一次。'})
+            continue
+        seen.add(platform)
+        cfg = LOGIN_RUNNERS.get(platform)
+        if not cfg:
+            rejected.append({'platform': platform, 'reason': '未知平台。'})
+            continue
+        try:
+            imgs, vids, preparation = _check_publish_request(platform, cfg, item)
+        except HTTPException as exc:
+            rejected.append({'platform': platform, 'reason': str(exc.detail)})
+            continue
+        if not _account_logged_in(platform, cfg):
+            rejected.append({'platform': platform, 'reason': '账号未登录或登录状态未知，请先在账号页连接并核验。'})
+            continue
+        checked.append({'platform': platform, 'cfg': cfg, 'item': item,
+                        'imgs': imgs, 'vids': vids, 'preparation': preparation,
+                        'title': item.title.strip() or item.body.strip()[:20]})
+    if not checked:
+        return {'batchId': '', 'accepted': [], 'rejected': rejected}
+    batch_id = uuid.uuid4().hex
+    _publish_batch_store().create(batch_id, {
+        item['platform']: {'title': item['item'].title, 'body': item['item'].body,
+                           'media': item['item'].media, 'tags': item['item'].tags}
+        for item in checked})
+    jobs: list[dict] = []
+    for item in checked:
+        platform = item['platform']
+        req: PublishRequest = item['item']
+        try:
+            receipt = _begin_publish(platform, item['title'], req.sourceSessionId, item['preparation'], batch_id=batch_id)
+        except HTTPException as exc:
+            _publish_batch_store().add_platform(batch_id, platform, '',
+                                                state=publish_batches.ENTRY_REJECTED,
+                                                message=str(exc.detail))
+            rejected.append({'platform': platform, 'reason': str(exc.detail)})
+            continue
+        receipt_id = receipt['receiptId']
+        status_file = PUBLISH_DIR / (receipt_id + '.status.json')
+        code_file = PUBLISH_DIR / (receipt_id + '.code')
+        try:
+            cmd = await asyncio.to_thread(
+                _build_publish_command, platform, item['cfg'], item['title'], req.body,
+                req.tags or '', item['imgs'], item['vids'], receipt_id, status_file, code_file)
+        except BaseException:
+            _finish_publish(platform, receipt_id, item['title'], req.body, item['cfg'], '', -1,
+                            '发布准备未完成，内容尚未交给平台发布。')
+            _release_publish(platform, receipt_id)
+            _publish_batch_store().add_platform(batch_id, platform, receipt_id,
+                                                state=publish_batches.ENTRY_FINISHED,
+                                                outcome='failed',
+                                                message='发布准备未完成，内容尚未交给平台发布。')
+            rejected.append({'platform': platform, 'reason': '发布准备未完成，内容尚未提交。'})
+            continue
+        _publish_batch_store().add_platform(batch_id, platform, receipt_id)
+        jobs.append({'platform': platform, 'cmd': cmd, 'title': item['title'], 'body': req.body,
+                     'cfg': item['cfg'], 'status_file': status_file, 'code_file': code_file,
+                     'receipt_id': receipt_id})
+    if jobs:
+        threading.Thread(target=_run_publish_batch, args=(batch_id, jobs), daemon=True,
+                         name='easel-publish-batch').start()
+    return {'batchId': batch_id, 'accepted': [{'platform': job['platform'],
+                                               'receiptId': job['receipt_id']} for job in jobs],
+            'rejected': rejected}
+
+
+@app.post("/api/publish/{platform}")
+async def api_publish(platform: str, req: PublishRequest):
+    """Run an explicitly requested publication and retain its platform receipt."""
+    cfg = LOGIN_RUNNERS.get(platform)
+    if not cfg:
+        raise HTTPException(404, '未知平台')
+    imgs, vids, preparation = _check_publish_request(platform, cfg, req)
+    title = req.title.strip() or req.body.strip()[:20]
     receipt = (_begin_publish(platform, title, req.sourceSessionId, preparation) if preparation else
                _begin_publish(platform, title, req.sourceSessionId) if req.sourceSessionId else _begin_publish(platform, title))
     receipt_id = receipt['receiptId']
     status_file = PUBLISH_DIR / (receipt_id + '.status.json')
     code_file = PUBLISH_DIR / (receipt_id + '.code')
     try:
-        if platform == 'xiaohongshu':
-            base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'xhs_publish.py')]
-            cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
-            cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec']
-        elif platform == 'bilibili':
-            bili_tag = tags.replace('#', '').replace('，', ',').strip().strip(',') or '日常'
-            cmd = [py, '-X', 'utf8', str(_skill_md_path('skill-bilibili-upload').parent
-                           / 'scripts' / 'bili_upload.py'), 'upload', '--video', vids[0],
-                   '--title', title[:80], '--tid', '36', '--copyright', '1', '--tag', bili_tag,
-                   '--cookie', str(DATA_DIR / 'cookies.json'), '--exec']
-            if req.body.strip():
-                cmd += ['--desc', req.body[:2000]]
-        elif platform == 'douyin':
-            base = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'douyin_publish.py')]
-            cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
-            cmd += ['--title', title, '--content', req.body, '--tags', tags, '--exec',
-                    '--status-file', str(status_file), '--sms-code-file', str(code_file)]
-        elif platform == 'wechat-oa':
-            # This platform endpoint creates a draft. The resulting receipt
-            # must retain that outcome instead of calling it a publication.
-            md_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.md'
-            html_path = PUBLISH_DIR / f'wechat-oa-{receipt_id}.html'
-            body_md = req.body or ''
-            if imgs[1:]:
-                body_md += "\n\n" + "\n\n".join(f'![]({path})' for path in imgs[1:])
-            md_path.write_text(f"# {title}\n\n{body_md}\n", encoding='utf-8')
-            conv = await asyncio.to_thread(
-                subprocess.run, [py, '-X', 'utf8', str(WECHAT_SKILL_SCRIPTS / 'html_converter.py'),
-                                 str(md_path), '-o', str(html_path)],
-                cwd=str(PROJECT_ROOT), env=_proxy_env(), capture_output=True,
-                text=True, encoding='utf-8', errors='replace', timeout=60)
-            if conv.returncode != 0 or not html_path.is_file():
-                raise HTTPException(500, '公众号排版失败，请检查正文、图片和本地日志。')
-            wx_proxy = os.environ.get('EASEL_PROXY') or os.environ.get('https_proxy') or ''
-            cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'publish', '--proxy', wx_proxy,
-                   '--html', str(html_path), '--cover', imgs[0], '--title', title,
-                   '--digest', (req.body or '').strip()[:100], '--author', '']
-        else:
-            cmd = [py, '-X', 'utf8', str(SHARED_SCRIPTS / 'web_publisher.py'), 'publish',
-                   '--platform', cfg['wp'], '--title', title, '--desc', req.body,
-                   '--tags', tags, '--exec']
-            media = vids[0] if vids else (imgs[0] if imgs else None)
-            if media:
-                cmd += ['--media', media]
+        cmd = await asyncio.to_thread(
+            _build_publish_command, platform, cfg, title, req.body, req.tags or '',
+            imgs, vids, receipt_id, status_file, code_file)
         if platform == 'douyin':
             return _start_async_publish(platform, cmd, title, req.body, cfg,
                                          status_file, code_file, receipt_id)
@@ -10530,6 +10746,11 @@ async def api_usage_save_price(req: UsagePriceRequest):
 from task_service import TaskService
 _task_service = TaskService(sys.modules[__name__])
 app.include_router(_task_service.router())
+from social_accounts_api import SocialAccountService
+_social_accounts = SocialAccountService(sys.modules[__name__])
+app.include_router(_social_accounts.router())
+from login_audit import install_default_audit
+install_default_audit(sys.modules[__name__])
 
 
 if __name__ == "__main__":

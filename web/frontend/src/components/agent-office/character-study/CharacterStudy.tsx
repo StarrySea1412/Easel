@@ -61,7 +61,7 @@ export function CharacterStudy({ preset: controlledPreset, onPresetChange, onClo
 
   return <section className="character-study" aria-label="角色与岗位工位样板">
     <header className="character-study__header">
-      <div><span className="character-study__eyebrow">STUDIO / CHARACTER STUDY 01</span><h2>每一份工作，都有自己的位置。</h2><p>从一个角色、一张桌子开始，把工作室做得更真实。</p></div>
+      <div><span className="character-study__eyebrow">角色工位预览</span><h2>每一份工作，都有自己的位置。</h2><p>从一个角色、一张桌子开始，把工作室做得更真实。</p></div>
       {onClose && <button type="button" className="character-study__close" onClick={onClose} aria-label="返回 Agent 工作室">返回工作室 <span aria-hidden="true">↗</span></button>}
     </header>
     <div className="character-study__layout">
@@ -71,7 +71,7 @@ export function CharacterStudy({ preset: controlledPreset, onPresetChange, onClo
         </div>
         <div className="character-study__stage-wrap">
           <div className="character-study__stage" ref={host} />
-          <div className="character-study__stage-label"><span className="character-study__dot" /> {current.title}工位 <span>01 / 猫角色样板</span></div>
+          <div className="character-study__stage-label"><span className="character-study__dot" /> {current.title}工位 <span>猫角色样板</span></div>
           <div className="character-study__demo-label">动作演示 · 非后台运行</div>
           {(!ready || error) && <div className="character-study__fallback" role="status"><span>{error || '正在打开角色样板…'}</span></div>}
           <div className="character-study__viewbar" aria-label="检查角色视角">

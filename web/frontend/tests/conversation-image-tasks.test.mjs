@@ -25,6 +25,21 @@ test('only byte-identical copies in the same session and turn are grouped',()=>{
   assert.equal(uniqueImageArtifacts([image(),image('b',{sessionId:'other'})]).length,2);
   assert.equal(uniqueImageArtifacts([image('a',{contentSha256:undefined}),image('b',{contentSha256:undefined})]).length,2);
 });
+test('prompt cards keep explicit image attribution and refresh without regenerating',async t=>{
+  const first=image('a'),second=image('b',{contentSha256:'d'.repeat(64)});
+  const job={jobId:'e'.repeat(32),sessionId:'chat',turnId:'t',prompt:'第一份提示词',phase:'done',artifactIds:[first.id]};
+  const other={...job,jobId:'f'.repeat(32),prompt:'第二份提示词',artifactIds:[second.id]};
+  const view=await setup(t,{items:[second,first],jobs:[job,other]});
+  const cards=[...view.container.querySelectorAll('.conversation-prompt-card')];
+  assert.equal(cards.length,2);
+  assert.match(cards[0].textContent,/第一份提示词/);
+  assert.equal(cards[0].querySelector('img').alt,'a.png');
+  assert.equal(cards[1].querySelector('img').alt,'b.png');
+  const refresh=[...cards[0].querySelectorAll('button')].find(button=>button.textContent.includes('刷新任务状态'));
+  await act(async()=>refresh.click());
+  assert.equal(view.reads(),1);
+  assert.equal(view.publishes(),0);
+});
 test('gallery groups copies and exposes separate accessible draft actions',async t=>{
   const view=await setup(t,{items:[image(),image('b'),image('c',{sessionId:'foreign'})]});
   assert.equal(view.container.querySelectorAll('article').length,1);

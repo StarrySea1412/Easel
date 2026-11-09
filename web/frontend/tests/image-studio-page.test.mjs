@@ -258,9 +258,14 @@ test('clipboard button requests media only on click and uploads the actual clipb
   t.after(() => { if (previous) Object.defineProperty(navigator, 'clipboard', previous); else delete navigator.clipboard; });
   const view = await fixture(t);
   assert.equal(reads, 0);
-  assert.equal(view.button('从剪贴板粘贴').closest('details'), null, 'clipboard action is directly visible');
-  assert.equal(view.button('提示词反推').closest('details'), null, 'reverse action is directly visible');
-  assert.equal(view.button('产品摄影').closest('details'), null, 'inspiration is directly visible');
+  const tools = view.button('从剪贴板粘贴').closest('details');
+  assert.ok(tools, 'creation tools can be collapsed');
+  assert.equal(tools.open, true, 'existing tools remain expanded on first use');
+  assert.equal(view.button('提示词反推').closest('details'), tools);
+  assert.equal(view.button('产品摄影').closest('details'), tools);
+  tools.open = false;
+  assert.ok(view.button('从剪贴板粘贴'), 'collapse preserves mounted tools');
+  tools.open = true;
   await view.click(view.button('从剪贴板粘贴'));
   assert.equal(reads, 1);
   assert.equal(view.calls.uploads.length, 1);
@@ -306,3 +311,17 @@ test('Skill inspiration uses installed prompt skills, preserves suggestions on f
 });
 
 test.after(async () => { await window.happyDOM.abort(); window.close(); });
+
+
+test('collapsing creation tools keeps prompt, job and canvas mounted without calling the model', async t => {
+  const view = await fixture(t, { imgPrompt:'咖啡封面',imgJob:resultJob({mode:'generate',referenceId:undefined}) });
+  const panel=view.container.querySelector('.image-tool-panel');
+  assert.equal(panel.open,true);
+  panel.open=false;
+  await view.render({imgTick:10});
+  assert.equal(panel.open,false);
+  assert.equal(view.container.querySelector('#image-prompt').value,'咖啡封面');
+  assert.ok(view.container.querySelector('[aria-label="图片画布"] img'));
+  panel.open=true;
+  assert.equal(view.calls.generated,0);
+});

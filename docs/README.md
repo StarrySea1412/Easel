@@ -1,3 +1,6 @@
+- [0.49.0 最新源码整合与多平台多账号发布](latest-account-distribution-0.49.0-2026-11-09.md)
+- [Qizhi 三分钟超时诊断与修复边界](qizhi-timeout-2026-11-09.md)
+
 # Easel 文档索引
 
 - [0.48.0记忆排序与Super Agent续跑收敛](memory-super-agent-0.48.0.md)（源码候选，未部署138）

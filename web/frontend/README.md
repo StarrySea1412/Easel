@@ -1,3 +1,5 @@
+0.49.0整合了最新创作工作区与七平台多账号四步发布，保留单张图片重试、卡组和确认稿校验。实现与本地/正式版本边界见[整合记录](../../docs/latest-account-distribution-0.49.0-2026-11-09.md)。
+
 # Easel Studio 前端
 
 这是 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel) 的创作者工作台前端，当前定制开发分支为 [`codex/creator-workflow`](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow)。项目采用 React 19、TypeScript、Vite 8 和 Three.js，提供创作对话、生图工坊、内容库、Agent 办公室、发布与数据页面。

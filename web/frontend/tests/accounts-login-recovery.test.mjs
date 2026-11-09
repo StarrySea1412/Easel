@@ -406,7 +406,7 @@ test('visible account page periodically detects expiry and does not count an unv
   now += 601000;
   await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
   assert.equal(view.state.whoamiCalls, 1);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
+  assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   const card = view.container.querySelector('article');
   assert.match(card.querySelector('.account-connection-dot button').title, /^未登录；/);
   assert.equal(card.querySelector('.account-check-result.is-expired'), null);
@@ -434,7 +434,7 @@ test('account checking remains unknown on transport failure and periodic checks 
   Object.defineProperty(document, 'visibilityState', {configurable:true,value:'visible'});
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
   assert.match(view.container.querySelector('article .account-connection-dot button').title, /正在确认连接/);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
+  assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
   await view.start('知乎');
   const calls = view.state.requests.length;

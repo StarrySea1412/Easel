@@ -67,6 +67,20 @@ export interface ChatImageJob {
   stage?: string; recoveryAvailable?: boolean; retryAvailable?: boolean;
   queueReason?: 'memory_pressure' | 'channel';
   cardSet?: XhsCardSet;
+  artifactIds?: string[];
+  paths?: string[];
+}
+/** Only explicit job attribution is evidence; never pair by arrival order or similar names. */
+export function groupImageArtifacts(artifacts: ChatArtifact[], jobs: ChatImageJob[]) {
+  const groups = jobs.map(job => ({ job, artifacts: [] as ChatArtifact[] }));
+  const other: ChatArtifact[] = [];
+  for (const artifact of artifacts) {
+    const owners = groups.filter(({ job }) => artifact.mimeType.startsWith('image/') && job.sessionId === artifact.sessionId && job.turnId === artifact.turnId
+      && (Array.isArray(job.artifactIds) && job.artifactIds.length ? job.artifactIds.includes(artifact.id) : Array.isArray(job.paths) && job.paths.includes(artifact.path)));
+    if (owners.length === 1) owners[0].artifacts.push(artifact);
+    else other.push(artifact);
+  }
+  return { groups, other };
 }
 export interface ExternalChatMessage {
   id: string; turnId: string; role: 'assistant'; content: string; source: 'gateway-injected'; timestamp: number;

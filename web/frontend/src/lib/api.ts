@@ -27,7 +27,7 @@ function accountBrowserRequest<T>(run: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // 全部是动态应用接口（登录态/数据等），禁止浏览器 HTTP 缓存——否则 /api/accounts 等可能被启发式
   // 缓存住旧响应（曾表现为“扫码登录后卡片仍显示未登录”）。调用方可用 options.cache 覆盖。
   const res = await fetch(`${BASE}${url}`, { cache: 'no-store', ...options });
@@ -806,6 +806,10 @@ export interface PublishReceipt {
   receiptId: string;
   platform: string;
   title: string;
+  batchId?: string;
+  accountId?: string;
+  accountLabel?: string;
+  externalAccountId?: string;
   createdAt: string;
   updatedAt: string;
   state: string;
@@ -865,6 +869,45 @@ export function publishNow(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+export interface PublishBatchEntry {
+  platform: string;
+  receiptId?: string;
+  state: string; // accepted | running | finished | rejected
+  outcome?: PublishOutcome | null;
+  message: string;
+  url?: string;
+}
+
+export interface PublishBatchResult {
+  batchId: string;
+  accepted: { platform: string; receiptId: string }[];
+  rejected: { platform: string; reason: string }[];
+}
+
+export interface PublishBatchStatus {
+  batchId: string;
+  state: string; // running | completed | interrupted
+  createdAt?: string;
+  updatedAt?: string;
+  message: string;
+  platforms: PublishBatchEntry[];
+  requests: Record<string, { title: string; body: string; media: string[]; tags?: string }>;
+}
+
+/** 一次提交整批多平台发布；服务端持有批次并逐平台串行执行，关闭页面不中断。 */
+export function publishBatch(requests: PublishRequest[]): Promise<PublishBatchResult> {
+  return request<PublishBatchResult>('/api/publish/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: requests.map(item => ({ platform: item.platform, ...item.payload })) }),
+  });
+}
+
+/** 只读批次状态；不重发内容，也不重试任何平台。 */
+export function fetchPublishBatch(batchId: string, signal?: AbortSignal): Promise<PublishBatchStatus> {
+  return request(`/api/publish/batch/${encodeURIComponent(batchId)}`, { signal });
 }
 
 /** 恢复最近回执；只读，不重发内容，也不重发通知。 */

@@ -70,6 +70,53 @@ def test_timeout_remains_unknown_and_prevents_resubmit(tmp_path, monkeypatch):
     with pytest.raises(HarnessError, match='不要重复提交'):
         invoke(request)
     assert len(attempts) == 1
+    marker = json.loads(qizhi.pending_path(tmp_path / 'outputs', 'local-session').read_text())
+    assert marker['timeoutSeconds'] == request.timeout
+    assert marker['startedAt'] > 0 and len(marker['localRequestId']) == 32
+    assert 'ck_test_secret' not in json.dumps(marker)
+
+
+@pytest.mark.parametrize('budget', [60, 1800, 7200])
+def test_sync_response_wait_uses_turn_budget_without_three_minute_cap(tmp_path, monkeypatch, budget):
+    def handler(request):
+        timeout = request.extensions['timeout']
+        assert timeout == {'connect': 10, 'read': budget, 'write': 30, 'pool': 10}
+        return success()
+    mock_remote(monkeypatch, handler)
+    events, _ = invoke(replace(make_request(tmp_path), timeout=budget))
+    assert events[-1] == ('token', 'OK')
+
+
+@pytest.mark.parametrize('exception,label', [
+    (httpx.ReadTimeout, '等待远端响应'),
+    (httpx.ConnectTimeout, '连接 Qizhi 服务超时'),
+    (httpx.WriteTimeout, '发送请求超时'),
+    (httpx.PoolTimeout, '可用连接超时'),
+    (httpx.ConnectError, '网络连接中断'),
+])
+def test_network_failures_explain_phase_without_leaking_secrets_or_retrying(tmp_path, monkeypatch, exception, label):
+    attempts = []
+    def handler(request):
+        attempts.append(request)
+        raise exception('ck_test_secret')
+    mock_remote(monkeypatch, handler)
+    request = make_request(tmp_path)
+    with pytest.raises(HarnessError, match=label) as error:
+        invoke(request)
+    assert '状态未知' in str(error.value) and 'ck_test_secret' not in str(error.value)
+    assert qizhi.pending(tmp_path / 'outputs', 'local-session')
+    with pytest.raises(HarnessError, match='不要重复提交'):
+        invoke(request)
+    assert len(attempts) == 1
+
+
+def test_cancelled_remote_request_keeps_unknown_fence(tmp_path, monkeypatch):
+    async def handler(request):
+        raise asyncio.CancelledError
+    mock_remote(monkeypatch, handler)
+    with pytest.raises(asyncio.CancelledError):
+        invoke(make_request(tmp_path))
+    assert qizhi.pending(tmp_path / 'outputs', 'local-session')
 
 
 def test_reject_does_not_echo_upstream_secret_and_does_not_follow_redirect(tmp_path, monkeypatch):
@@ -114,6 +161,7 @@ def site(tmp_path, monkeypatch):
     env = tmp_path / '.env'
     env.write_text('')
     monkeypatch.setattr(web, 'ENV_FILE', env)
+    monkeypatch.setattr(web, 'DATA_DIR', tmp_path)
     monkeypatch.setattr(web, 'OUTPUTS_DIR', tmp_path / 'outputs')
     monkeypatch.setattr(web, 'PROJECT_ROOT', tmp_path)
     monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'outputs' / '_sessions')
@@ -158,13 +206,20 @@ def test_remote_endpoint_change_requires_explicit_new_key(site):
     assert site.post('/api/settings/qizhi', json=values).status_code == 400
 
 
-@pytest.mark.parametrize('timeout', [False, True])
+@pytest.mark.parametrize('timeout', [False, True, 'deadline'])
 def test_web_chat_terminal_receipt_and_remote_unknown(site, monkeypatch, timeout):
-    def handler(request):
+    async def handler(request):
+        if timeout == 'deadline':
+            await asyncio.sleep(1)
         if timeout:
             raise httpx.ReadTimeout('ck_test_secret')
         return success(content='QIZHI_WEB_TEST_OK')
     mock_remote(monkeypatch, handler)
+    if timeout == 'deadline':
+        original = web._run_harness_chat
+        async def timed(*args, **kwargs):
+            return await original(*args, **kwargs, timeout=0.01)
+        monkeypatch.setattr(web, '_run_harness_chat', timed)
     assert site.post('/api/settings/qizhi', json={
         'baseUrl': qizhi.DEFAULT_BASE, 'projectPath': qizhi.DEFAULT_PROJECT,
         'model': qizhi.DEFAULT_MODEL, 'apiKey': 'ck_test_secret'}).status_code == 200
@@ -178,6 +233,9 @@ def test_web_chat_terminal_receipt_and_remote_unknown(site, monkeypatch, timeout
         assert record['status'] == 'unknown'
         assert not record['settled'] and not record['resourceSettled']
         assert 'event: recovery_required' in result.text
+        if timeout == 'deadline':
+            assert 'Qizhi 等待超过本轮 0.01 秒上限' in result.text
+            assert '已终止本轮进程' not in result.text
     else:
         assert 'QIZHI_WEB_TEST_OK' in result.text and 'event: done' in result.text
         assert record['status'] == 'completed' and record['settled'] and record['resourceSettled']

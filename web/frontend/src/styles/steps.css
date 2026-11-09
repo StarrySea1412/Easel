@@ -1,0 +1,29 @@
+/* Small Steps reference: Ant Design's numbered step, label and thin connector. */
+.workflow-steps { container-type: inline-size; }
+.workflow-steps ol { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-start; }
+.workflow-steps li { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+.workflow-steps li:last-child { flex: 0 0 auto; }
+.workflow-steps button { display: flex; align-items: flex-start; gap: 10px; padding: 4px; margin: -4px; color: var(--text-secondary); border: 0; border-radius: 6px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.workflow-step-icon { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); font-size: 13px; line-height: 1; border-radius: 50%; font-variant-numeric: tabular-nums; }
+.workflow-step-copy { display: grid; gap: 5px; padding-top: 4px; }
+.workflow-step-title { font-size: 13px; line-height: 20px; white-space: nowrap; }
+.workflow-step-description { font-size: 11px; line-height: 1.6; color: var(--text-tertiary); white-space: nowrap; }
+.workflow-step-connector { flex: 1; min-width: 12px; height: 1px; margin: 14px 20px 0; background: var(--border); }
+.workflow-steps button[aria-current="step"] { color: var(--text); }
+.workflow-steps [aria-current="step"] .workflow-step-icon { background: var(--text); border-color: var(--text); color: var(--surface); }
+.workflow-steps [aria-current="step"] .workflow-step-title { font-weight: 600; }
+.workflow-steps .is-complete .workflow-step-icon { background: var(--surface); border-color: var(--text-secondary); color: var(--text); }
+.workflow-steps .is-complete [aria-current="step"] .workflow-step-icon { background: var(--text); color: var(--surface); }
+.workflow-steps .is-complete .workflow-step-connector { background: var(--text-secondary); }
+.workflow-steps button:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+.workflow-steps button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+@container (max-width: 700px) {
+  .workflow-steps li { position: relative; justify-content: center; flex: 1; }
+  .workflow-steps li:last-child { flex: 1; }
+  .workflow-steps button { position: relative; z-index: 1; flex-direction: column; align-items: center; gap: 7px; }
+  .workflow-step-icon { outline: 7px solid var(--bg); }
+  .workflow-step-copy { padding-top: 0; }
+  .workflow-step-title { font-size: 11px; }
+  .workflow-step-description { display: none; }
+  .workflow-step-connector { position: absolute; left: calc(50% + 21px); top: 14px; width: calc(100% - 42px); min-width: 0; margin: 0; }
+}

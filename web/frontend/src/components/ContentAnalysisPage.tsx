@@ -137,7 +137,7 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
         onNavigateAccounts={onNavigateAccounts} onSyncHandled={autoCollectSignal>0?onAutoCollectHandled:undefined} />
 
       {section === 'method' && <section className="ca-method" aria-labelledby="ca-method-title">
-        <div className="ca-section-intro"><p className="ca-kicker">02 / DATA NOTES</p><h2 id="ca-method-title">看懂数据，也看懂它的边界</h2><p>数值、来源和观察时间一起，才构成可靠的复盘依据。</p></div>
+        <div className="ca-section-intro"><p className="ca-kicker">数据说明</p><h2 id="ca-method-title">看懂数据，也看懂它的边界</h2><p>数值、来源和观察时间一起，才构成可靠的复盘依据。</p></div>
         <dl className="ca-source-list"><div><dt>所选平台</dt><dd><PlatformIcon platform={platform} name={selected.name} />{selected.name}</dd></div><div><dt>读取来源</dt><dd>{selected.source}</dd></div><div><dt>当前能力</dt><dd>{selected.scope}</dd></div><div><dt>使用范围</dt><dd>{selected.limit}</dd></div></dl>
         <details className="ca-method-sources">
           <summary>分析方法与来源 <span>产品参考、官方指标与本地检查的区别</span></summary>
@@ -150,12 +150,12 @@ export default function ContentAnalysisPage({ initialPlatform, onNavigateAccount
           <p>AI 深度解释是可选的模型解读，原文引用校验只确认引用来自已有材料，不证明解释正确或能提升表现。实验回收保存真实观测，结论仍需结合样本、统计窗口与其他影响因素判断。</p>
         </details>
         <div className="ca-method-grid">
-          <article><span>01</span><h3>缺失与 0 分开</h3><p>未返回、解析失败或没有权限的指标显示为缺失。只有平台明确返回 0，才代表没有观测到该项活动。</p></article>
-          <article><span>02</span><h3>先对齐时间，再比较</h3><p>发布一小时与发布一个月的累计点赞不能直接评优劣。没有可靠的发布时间和快照时，保留原始数值，不推算增长趋势。</p></article>
-          <article><span>03</span><h3>每个平台各用各的口径</h3><p>播放次数、阅读人数、曝光和触达不是同一个指标。赞、藏、评也不能混为互动率；缺少分母时不计算比率。</p></article>
-          <article><span>04</span><h3>返回作品不等于全部作品</h3><p>采集可能只覆盖最近一页。结论适用于实际返回的样本，不能扩展成账号全历史或整个行业的表现。</p></article>
-          <article><span>05</span><h3>内容诊断需要内容材料</h3><p>只有标题和标签时只讨论这些材料。没有正文、封面或音视频证据时，不评价文章结构、配色或视频开场。</p></article>
-          <article><span>06</span><h3>建议是一项待验证假设</h3><p>高表现作品提供线索，不证明某种写法必然有效。保留作品依据与反例，在下一次创作中验证具体改动。</p></article>
+          <article><h3>缺失与 0 分开</h3><p>未返回、解析失败或没有权限的指标显示为缺失。只有平台明确返回 0，才代表没有观测到该项活动。</p></article>
+          <article><h3>先对齐时间，再比较</h3><p>发布一小时与发布一个月的累计点赞不能直接评优劣。没有可靠的发布时间和快照时，保留原始数值，不推算增长趋势。</p></article>
+          <article><h3>每个平台各用各的口径</h3><p>播放次数、阅读人数、曝光和触达不是同一个指标。赞、藏、评也不能混为互动率；缺少分母时不计算比率。</p></article>
+          <article><h3>返回作品不等于全部作品</h3><p>采集可能只覆盖最近一页。结论适用于实际返回的样本，不能扩展成账号全历史或整个行业的表现。</p></article>
+          <article><h3>内容诊断需要内容材料</h3><p>只有标题和标签时只讨论这些材料。没有正文、封面或音视频证据时，不评价文章结构、配色或视频开场。</p></article>
+          <article><h3>建议是一项待验证假设</h3><p>高表现作品提供线索，不证明某种写法必然有效。保留作品依据与反例，在下一次创作中验证具体改动。</p></article>
         </div>
         <div className="ca-method-footer"><p>上方工作台保存作品材料与观测记录，支持主题复盘、实验基线和手动回收。跨平台排名、因果归因和没有材料的视觉判断不作为结论。</p><button type="button" className="btn btn-sm" onClick={() => setSection('review')}>回到内容复盘</button></div>
       </section>}

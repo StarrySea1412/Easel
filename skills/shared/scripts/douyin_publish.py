@@ -1212,6 +1212,8 @@ def _publish(a, kind: str) -> int:
             _wait_ready(page)
             if not _logged_in(page):
                 _die("未登录，请先 `login` 扫码")
+            import publish_account_identity as account_identity
+            account_identity.require_context(ctx, 'douyin', getattr(a, 'expected_account_id', ''))
             # 发前快照：记录当前作品 id 集，读回时用于排除旧作品
             snapshot_ids = platform_readback.capture_douyin_snapshot(page)
             _go_upload(page)
@@ -1223,6 +1225,7 @@ def _publish(a, kind: str) -> int:
                 _wait_video_processed(page)
                 _select_ai_cover(page)
             _fill_title_desc(page, a.title, a.content or "", tags)
+            account_identity.require_context(ctx, 'douyin', getattr(a, 'expected_account_id', ''))
             publish_receipt.mark_submitted()
             _click_publish(page, len(a.title) + len(a.content or ""))
             # 点击后轮询等风控墙浮现（2026-09-12 真机发现：墙的渲染晚于 2.5s，
@@ -1383,6 +1386,9 @@ def cmd_whoami(a) -> int:
                             }""")
                         result["name"] = (na.get("name") or "")[:40]
                         result["avatar"] = na.get("avatar") or ""
+                        import publish_account_identity as account_identity
+                        own = account_identity.page_identity('douyin', page)
+                        result['externalAccountId'] = own['externalAccountId']
                     except Exception:
                         pass
             finally:
@@ -1496,6 +1502,7 @@ def main() -> int:
 
     def add_common(p):
         p.add_argument("--profile-base", help="登录态根目录（默认 ~/.easel-browser-profiles）")
+        p.add_argument('--expected-account-id', default='', help='提交前核对指定平台身份')
         p.add_argument("--proxy", help="外网代理（默认取 env）")
         p.add_argument("--no-proxy", action="store_true", help="禁用代理")
 

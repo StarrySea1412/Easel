@@ -39,5 +39,12 @@
 .conversation-image-notice { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-top:10px; color:var(--text-secondary); line-height:1.6; }
 .conversation-image-notice button { border:0; background:transparent; color:var(--accent,#507bb7); padding:3px; cursor:pointer; font:inherit; }
 .conversation-image-empty { padding:14px 0 2px; margin:0; color:var(--text-secondary); text-align:center; }
+.conversation-prompt-card { min-width:0; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+.conversation-prompt-card .conversation-image-job { border:0; border-radius:0; padding:12px; }
+.conversation-prompt-card .conversation-image-job-name strong { margin-right:8px; color:var(--text); font-size:11px; }
+.conversation-prompt-results { padding:12px; }
+.conversation-prompt-results>header { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.conversation-prompt-results>header>strong { font-size:12px; font-weight:500; }
+.conversation-prompt-results>header>button { display:inline-flex; gap:5px; align-items:center; padding:5px 0; border:0; background:transparent; color:var(--text-secondary); font:inherit; font-size:11px; cursor:pointer; }
 @container (max-width:360px) { .conversation-image-heading { gap:8px; } .conversation-image-heading>div { min-width:100px; } .conversation-image-summary { margin-left:44px; } .conversation-image-preview { height:236px; } }
 @media(max-width:520px) { .conversation-image-tasks { margin:10px; padding:12px; } }

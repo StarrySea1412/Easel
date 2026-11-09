@@ -1,8 +1,12 @@
+**Qizhi three-minute timeout diagnosed.** The original turn became unknown after 181 seconds; the adapter imposed a 180-second read cap. The 0.49.0 source uses the full turn budget and distinguishes network phases without resubmitting unknown work. Host 138 is unchanged and the original remote outcome remains unconfirmed. [Evidence](docs/qizhi-timeout-2026-11-09.md).
+
+**0.49.0 source integration: multi-account distribution and guided publishing.** Combines 0.47.1 image retries and 0.48.0 memory/continuation improvements with isolated accounts across seven platforms, a four-stage publishing flow, linked prompt/image cards and collapsible tools. Host 138 remains on 0.47.1. [Integration and validation](docs/latest-account-distribution-0.49.0-2026-11-09.md).
+
 **0.48.0 source candidate: memory ranking and bounded Super Agent continuation.** Scoped memories use NFKC/BM25 lexical ranking with per-entry match explanations. Repeated output and an exhausted deadline stop continuation without claiming completion. User confirmation and account isolation remain. Informed by pinned DeepSeek Harness source; not deployed to host 138. [Implementation and validation](docs/memory-super-agent-0.48.0.md).
 
 **Host 138 production updated to 0.47.1 · 2026-11-06.** Runtime `6d4b2ecd` is healthy. Failed images can be retried individually while successful images are retained. Read-only checks confirmed the original 2/3 card set and retry availability; the user will perform live retry acceptance. [Receipt](docs/image-retry-0.47.1.md).
 
-A [same-platform multi-account publishing design](docs/multi-account-publishing-design-2026-11-06.md) is available: isolated logins, account-bound jobs, queues and recovery. This capability is not implemented yet.
+A [same-platform multi-account publishing design](docs/multi-account-publishing-design-2026-11-06.md) is available: isolated logins, account-bound jobs, queues and recovery. The 0.49.0 integration candidate implements this design; live platform acceptance remains pending.
 
 **0.47.1: Retry one failed image.** Open the failed task and choose Retry; successful images and the three-card grouping are preserved. Duplicate requests share one attempt; unknown outcomes require recovery first. A retry may incur new image fees. [Validation and deployment](docs/image-retry-0.47.1.md).
 

@@ -1,4 +1,18 @@
 .accounts-center { --accounts-paper: var(--surface); max-width: 100%; background: var(--bg); }
+.accounts-center.accounts-page { padding-top: 36px; }
+.accounts-eyebrow { display: flex; align-items: center; gap: 7px; }
+.accounts-title-period { color: var(--green); }
+.accounts-default-channels { margin-top: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.accounts-default-channels > summary { display: flex; align-items: center; gap: 12px; padding: 18px 20px; cursor: pointer; list-style: none; }
+.accounts-default-channels > summary::-webkit-details-marker { display: none; }
+.accounts-default-channels > summary::after { content: '+'; color: var(--text-secondary); font-size: 21px; font-weight: 300; }
+.accounts-default-channels[open] > summary::after { content: '−'; }
+.account-default-icon { display: grid; place-items: center; width: 36px; height: 36px; background: var(--bg-secondary); border-radius: 10px; }
+.accounts-default-channels > summary > :nth-child(2) { flex: 1; min-width: 0; }
+.accounts-default-channels strong { font-size: 13px; font-weight: 600; }
+.accounts-default-channels small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.account-default-count { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.accounts-default-channels > section { padding: 0 20px 20px; border-top: 1px solid var(--border); }
 .accounts-center > * { max-width: 1160px; margin-left: auto; margin-right: auto; }
 .accounts-center > .overlay { max-width: none; }
 .account-login-modal { width: min(520px, 100%); max-width: 100%; text-align: center; overflow-wrap: anywhere; }

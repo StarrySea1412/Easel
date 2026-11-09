@@ -1,11 +1,12 @@
 /* Publishing workspace: one shared draft, one visible platform preview. */
 .publish-page.publish-studio { display: block; height: 100%; overflow: auto; padding: 24px clamp(18px, 3vw, 44px) 40px; background: var(--bg); color: var(--text); }
-.publish-studio .publish-heading { max-width: 1280px; margin: 0 auto 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.publish-studio .publish-heading { max-width: 1080px; margin: 0 auto 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .publish-studio .page-title { margin: 0 0 5px; font-size: 24px; font-weight: 600; letter-spacing: -.5px; }
 .publish-studio .page-subtitle { margin: 0; font-size: 12px; color: var(--text-tertiary); line-height: 1.7; }
-.publish-studio .publish-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.publish-studio .publish-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.publish-studio .publish-heading-actions > * { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; min-height: 36px; margin: 0; line-height: 20px; font-size: 11px; white-space: nowrap; }
 .publish-studio .publish-save-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); }
-.publish-studio .publish-receipt-entry { background: transparent; }
+.publish-studio .publish-heading-actions .publish-receipt-entry { background: transparent; margin: 0; }
 .publish-studio .publish-workspace { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(340px, 1fr); align-items: start; gap: 24px; max-width: 1280px; margin: 0 auto; }
 .publish-studio > .creation-actionbar.publish-draft-workbench { max-width: 1280px; min-width: 0; margin: 0 auto 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); gap: 12px; }
 .publish-studio .publish-draft-workbench > .creation-return-actions { display: flex; flex: 1 1 100%; min-width: 0; margin: 0; }
@@ -113,6 +114,18 @@
 .publish-studio .publish-submit { width: 100%; min-height: 42px; font-size: 12px; }
 .publish-studio .publish-submit:disabled { opacity: .45; }
 .publish-studio .publish-saved-note { font-size: 10px; line-height: 1.75; margin: 9px 0 0; color: var(--text-tertiary); text-align: center; }
+.publish-studio .publish-batch { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.publish-studio .publish-batch-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+.publish-studio .publish-batch-head strong { font-size: 11px; }
+.publish-studio .publish-batch-head span { font-size: 10px; color: var(--text-tertiary); text-align: right; }
+.publish-studio .publish-batch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.publish-studio .publish-batch-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; }
+.publish-studio .publish-batch-row > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.publish-studio .publish-batch-platform { color: var(--text-secondary); flex-shrink: 0; }
+.publish-studio .publish-batch-state { color: var(--text-tertiary); text-align: right; }
+.publish-studio .publish-batch-row.is-published .publish-batch-state { color: var(--green); }
+.publish-studio .publish-batch-row.is-failed .publish-batch-state, .publish-studio .publish-batch-row.is-rejected .publish-batch-state { color: var(--red); }
+.publish-studio .publish-batch-retry { margin: 8px auto 0; display: flex; }
 .publish-studio .publish-load-error { max-width: 1280px; margin: 0 auto 16px; }
 .publish-studio button:focus-visible, .publish-studio .field:focus-visible, .publish-studio summary:focus-visible, .publish-studio [role="tabpanel"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 @media (max-width: 900px) {
@@ -143,3 +156,38 @@
 .publish-studio .publish-preparation-action { display: block; color: var(--accent-start); text-decoration: underline; text-underline-offset: 3px; }
 .publish-studio .publish-preparation-help { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text); line-height: 1.7; }
 .publish-studio .publish-media-section:focus { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+/* Only the active stage is shown; mounted editors retain their drafts. */
+.publish-studio [hidden], .distribution-workspace [hidden] { display: none !important; }
+.publish-studio .publish-content-fields { margin: 0; padding: 0; min-width: 0; border: 0; }
+.publish-studio .publish-content-workspace { display: block; max-width: 1080px; }
+.publish-progress, .publish-step-heading, .publish-step-actions { max-width: 1080px; margin: 0 auto; }
+.publish-progress { padding: 6px 0 28px; margin-bottom: 26px; border-bottom: 1px solid var(--border); }
+.publish-step-heading { margin-bottom: 20px; }
+.publish-step-heading h2 { font-size: 19px; margin: 0 0 6px; font-weight: 600; }
+.publish-step-heading h2:focus { outline: none; }
+.publish-step-heading p { font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.8; }
+.publish-step-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 20px; margin-top: 24px; border-top: 1px solid var(--border); }
+.publish-step-actions > div:first-child { font-size: 11px; color: var(--text-secondary); line-height: 1.8; }
+.publish-step-actions > div:last-child { display: flex; gap: 10px; flex-shrink: 0; }
+.publish-step-actions .btn { min-height: 40px; padding-inline: 16px; font-size: 12px; }
+.publish-studio .distribution-wizard { max-width: 1080px; margin: 0 auto; padding: 0; border: 0; }
+.distribution-wizard .distribution-workspace { padding: 0; }
+.distribution-wizard .distribution-history { border-top: 0; margin-top: 0; padding-top: 0; }
+.distribution-confirmation { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+.distribution-confirmation h3 { font-size: 14px; margin: 0; }
+.distribution-confirmation > p { font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.distribution-confirmation article { border: 1px solid var(--border); border-radius: 10px; padding: 15px; margin-top: 10px; overflow-wrap: anywhere; }
+.distribution-confirmation article > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.distribution-confirmation img { width: 20px; height: 20px; object-fit: contain; }
+.distribution-confirmation article span { margin-left: auto; color: var(--text-secondary); }
+.distribution-confirmation article p { font-size: 13px; margin: 12px 0 6px; }
+.distribution-confirmation article small { font-size: 11px; color: var(--text-secondary); }
+.distribution-confirmation .account-text-button { margin-left: 12px; }
+@media (max-width: 600px) {
+  .publish-progress { padding-top: 4px; padding-bottom: 22px; margin-bottom: 22px; }
+  .publish-step-actions { flex-direction: column; align-items: stretch; }
+  .publish-step-actions > div:last-child { flex-wrap: wrap; }
+  .publish-step-actions .btn { flex: 1; }
+  .distribution-confirmation article span { margin-left: 0; }
+}

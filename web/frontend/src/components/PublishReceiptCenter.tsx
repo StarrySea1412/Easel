@@ -35,6 +35,8 @@ export function PublishReceiptCard({ receipt, onConfigure, onVerify, onCheck, on
       <span className="publish-receipt-status">{(!final && receipt.state !== 'sms_required' || receipt.verification?.state === 'checking') && <PublishSpinner />}{status.label}</span>
     </div>
     <h3>{receipt.title || '未命名内容'}</h3>
+    {receipt.accountId && <p className="publish-receipt-message">目标账号：{receipt.accountLabel || receipt.accountId} · {receipt.externalAccountId || '身份待核对'}</p>}
+    {receipt.accountId && <p className="publish-receipt-message">外部作品链接使用当前浏览器会话，打开后请核对平台账号身份。</p>}
     <time dateTime={receipt.createdAt}>{new Date(receipt.createdAt).toLocaleString('zh-CN')}</time>
     <p>{status.description}</p>
     {receipt.message && receipt.message !== status.description && <p className="publish-receipt-message">{receipt.message}</p>}
@@ -84,7 +86,7 @@ function PublishVerificationControls({ receipt, onCheck, busy }: {
         {(checking || busy) && <PublishSpinner />}
         {checking ? '正在核实…' : busy ? '处理中…' : '核实发布结果'}
       </button>
-      {verification?.automatic
+      {receipt.accountId ? null : verification?.automatic
         ? <button className="publish-receipt-text-button" disabled={busy} onClick={() => { void check(false); }}>暂停自动核实</button>
         : verification && !['exhausted', 'unsupported'].includes(verification.state)
           && <button className="publish-receipt-text-button" disabled={busy || checking} onClick={() => { void check(true); }}>开启自动核实</button>}

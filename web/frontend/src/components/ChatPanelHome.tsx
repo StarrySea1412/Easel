@@ -29,13 +29,14 @@ const tools = [
 export default function ChatPanelHome(props: Props) {
   return <section className="chat-panel-home" aria-label="新增面板">
     <h2>新增面板</h2><p className="chat-panel-home-intro">把需要的工具放在对话旁边。</p>
-    <h3>工具</h3>
+    <details className="chat-panel-tools" open><summary>工具 <IconChevron size={12}/></summary>
     <div className="chat-panel-tool-grid">
       {tools.map(({id,title,hint,Icon})=><button type="button" className="chat-panel-tool" key={id} onClick={()=>id==='side'?props.onSideChat():props.onTool(id)}>
         <span className="chat-panel-tool-icon" aria-hidden="true"><Icon size={20}/></span>
         <span className="chat-panel-tool-text"><strong>{title}</strong><small>{hint}</small></span><span className="chat-panel-tool-open">打开</span>
       </button>)}
     </div>
+    </details>
     <details className="chat-panel-more"><summary>更多工具 <IconChevron size={12}/></summary>
       <button type="button" className="chat-panel-tool" onClick={props.onGoal}><span className="chat-panel-tool-icon" aria-hidden="true"><IconTarget size={20}/></span><span className="chat-panel-tool-text"><strong>目标</strong><small>{props.hasGoal?'查看当前目标与真实进度':'设置一个持续目标'}</small></span><span className="chat-panel-tool-open">打开</span></button>
     </details>

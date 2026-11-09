@@ -46,7 +46,7 @@ async function fixture(t, initial = [], page = 'other') {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = {
     model: null, items: structuredClone(initial), requests: [], configured: 0, publishPageOpened: 0, accountsOpened: 0, outputsOpened: 0,
-    list: null, detail: null, publish: null, sms: null, verify: null, precheck: null, reports: [], report: null,
+    list: null, detail: null, publish: null, batch: null, batchStatus: null, sms: null, verify: null, precheck: null, reports: [], report: null,
     whoami: null, accounts: [{ platform: 'zhihu', loggedIn: true }], outputs: [], schedule: [], confirm: true, confirmations: [],
   };
 
@@ -68,11 +68,18 @@ async function fixture(t, initial = [], page = 'other') {
     } else if (/^\/api\/publish\/[^/]+\/sms$/.test(path)) {
       if (!h.sms) throw new Error('No simulated SMS handler configured');
       result = await h.sms(path.split('/')[3], request.body, request);
+    } else if (path === '/api/publish/batch' && options.method === 'POST') {
+      if (!h.batch) throw new Error('No simulated batch publisher configured');
+      result = await h.batch(request.body, request);
+    } else if (/^\/api\/publish\/batch\/[^/]+$/.test(path)) {
+      if (!h.batchStatus) throw new Error('No simulated batch status handler configured');
+      result = await h.batchStatus(path.split('/').at(-1), request);
     } else if (/^\/api\/publish\/[^/]+$/.test(path) && options.method === 'POST') {
       if (!h.publish) throw new Error('No simulated publisher configured');
       result = await h.publish(path.split('/')[3], request.body, request);
     } else if (/^\/api\/accounts\/[^/]+\/whoami/.test(path)) result = h.whoami ? await h.whoami(request) : { loggedIn: true, verified: true, checkedAt: Date.now(), name: '模拟账号', avatar: '' };
     else if (path === '/api/accounts') result = h.accounts;
+    else if (path === '/api/social-accounts' || path === '/api/social-accounts/batches') result = [];
     else if (path === '/api/outputs') result = h.outputs;
     else if (path === '/api/schedule') result = h.schedule;
     else if (path.startsWith('/api/schedule/context?')) result = {};
@@ -93,7 +100,8 @@ async function fixture(t, initial = [], page = 'other') {
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
   let unmounted = false;
-  const render = async nextPage => { await act(async () => root.render(createElement(Shell, { page: nextPage }))); };
+  // These receipts regressions exercise the explicitly preserved default-account flow.
+  const render = async nextPage => { await act(async () => root.render(createElement(Shell, { page: nextPage }))); if (nextPage === 'publish') { const legacy = [...container.querySelectorAll('button')].find(el => el.textContent === '使用平台默认账号'); if (legacy) await act(async () => legacy.click()); } };
   const dispose = async () => { if (!unmounted) { unmounted = true; await act(async () => root.unmount()); container.remove(); } };
   t.after(dispose);
   await render(page);
@@ -122,6 +130,7 @@ async function fixture(t, initial = [], page = 'other') {
       });
     },
     posts: () => h.requests.filter(request => request.options.method === 'POST' && /^\/api\/publish\/[^/]+$/.test(request.path)),
+    batchPosts: () => h.requests.filter(request => request.options.method === 'POST' && request.path === '/api/publish/batch'),
   };
 }
 
@@ -314,10 +323,9 @@ test('a timed out read gives a recoverable error and never marks a task failed',
 test('confirmed batches survive editor unmount, keep immutable payloads and reject double submission', async t => {
   const view = await fixture(t, [], 'publish');
   const wait = deferred();
-  view.h.publish = async (platform, payload) => {
-    if (platform === 'douyin') return wait.promise;
-    const result = completed({ receiptId: 'b'.repeat(32), platform, title: payload.title, outcome: 'submitted', url: '' });
-    view.h.items.push(result); return result;
+  view.h.batch = async body => {
+    assert.equal(body.requests.length, 2);
+    return wait.promise;
   };
   const requests = [
     { platform: 'douyin', payload: { title: '确认过的标题', body: '确认过的正文', media: ['video.mp4'], tags: '' } },
@@ -328,30 +336,86 @@ test('confirmed batches survive editor unmount, keep immutable payloads and reje
   assert.ok(view.container.querySelector('.publish-receipts-progress .publish-spinner'));
   requests[1].payload.title = '后来编辑的标题'; requests[0].payload.media.push('later.mp4');
   await view.render('other');
-  const active = makeReceipt({ platform: 'douyin', title: '确认过的标题' });
-  view.h.items.push(active);
+  const douyin = makeReceipt({ platform: 'douyin', title: '确认过的标题', receiptId: 'c'.repeat(32) });
+  const zhihu = completed({ receiptId: 'b'.repeat(32), platform: 'zhihu', title: '第二个平台', outcome: 'submitted', url: '' });
+  view.h.items = [douyin, zhihu];
+  view.h.batchStatus = async id => {
+    assert.equal(id, 'e'.repeat(32));
+    return { batchId: id, state: 'completed', message: '', requests: {}, platforms: [
+      { platform: 'douyin', receiptId: douyin.receiptId, state: 'finished', outcome: 'unverified', message: '结果待核实' },
+      { platform: 'zhihu', receiptId: zhihu.receiptId, state: 'finished', outcome: 'submitted', message: '已提交' },
+    ] };
+  };
   await act(async () => {
-    wait.resolve({ async: true, pending: true, receiptId: active.receiptId, state: 'starting', outcome: null, message: '处理中' });
-    await pending;
+    wait.resolve({ batchId: 'e'.repeat(32), accepted: [
+      { platform: 'douyin', receiptId: douyin.receiptId }, { platform: 'zhihu', receiptId: zhihu.receiptId }], rejected: [] });
+    // Flush the acceptance chain first so the batch poller schedules its mocked timer.
+    await new Promise(resolve => setImmediate(resolve));
   });
-  assert.equal(view.posts().length, 2);
-  assert.equal(view.posts()[1].body.title, '第二个平台');
-  assert.deepEqual(view.posts()[0].body.media, ['video.mp4']);
-  assert.equal(view.model().active[0].receiptId, active.receiptId);
-  assert.equal(view.model().notices[0].outcome, 'submitted');
+  await view.tick(2500);
+  await act(async () => { await pending; });
+  assert.equal(view.batchPosts().length, 1, 'double submission while a batch is in flight is rejected');
+  const body = view.batchPosts()[0].body;
+  assert.deepEqual(body.requests.map(row => row.platform), ['douyin', 'zhihu']);
+  assert.equal(body.requests[1].title, '第二个平台', 'the confirmed batch owns an immutable payload');
+  assert.deepEqual(body.requests[0].media, ['video.mp4']);
+  await view.refresh();
+  assert.equal(view.model().active[0].receiptId, douyin.receiptId);
+  assert.ok(view.model().notices.some(item => item.outcome === 'submitted' && item.platform === 'zhihu'));
   assert.match(view.container.textContent, /已提交/);
   assert.equal(view.container.querySelector('.publish-receipts-summary a'), null);
 });
 
-test('a legacy ok response without receipt cannot be presented as success or automatically retried', async t => {
+test('a legacy response without a usable batch cannot be presented as success or automatically retried', async t => {
   const view = await fixture(t);
-  view.h.publish = () => ({ ok: true, message: 'success' });
+  view.h.batch = () => ({ ok: true, message: 'success' });
   await act(async () => view.model().submit([{ platform: 'zhihu', payload: { title: '需要核对', body: '正文', media: [] } }]));
   assert.equal(view.model().notices.length, 0);
   assert.match(view.model().submissionIssues[0].message, /未返回可恢复的发布回执/);
-  assert.equal(view.posts().length, 1);
+  assert.equal(view.batchPosts().length, 1);
   await view.refresh(); await view.render('publish');
-  assert.equal(view.posts().length, 1);
+  assert.equal(view.batchPosts().length, 1);
+});
+
+test('the batch strip tracks progress and retry resubmits only clearly failed platforms', async t => {
+  const view = await fixture(t, [], 'publish');
+  view.h.accounts = ['zhihu', 'xiaohongshu'].map(platform => ({ platform, loggedIn: true }));
+  view.h.outputs = [{ type: 'file', kind: 'image', name: '01.png', path: 'outputs/01.png' }];
+  savePublishDraft({ title: '本次要发布的标题', body: '本次内容正文。', platforms: ['zhihu', 'xiaohongshu'], overrides: {}, tags: '', media: ['outputs/01.png'] });
+  await view.render('other'); await view.render('publish');
+  let batchCount = 0;
+  view.h.batch = async body => {
+    batchCount += 1;
+    const zhihu = completed({ platform: 'zhihu', outcome: 'failed', url: '', message: '发布未完成' });
+    const xhs = completed({ platform: 'xiaohongshu', receiptId: 'c'.repeat(32) });
+    const receipts = batchCount === 1 ? [zhihu, xhs] : [{ ...zhihu, receiptId: 'd'.repeat(32) }];
+    view.h.items = receipts;
+    view.h.batchStatus = async id => ({ batchId: id, state: 'completed', message: '', requests: {},
+      platforms: body.requests.map(row => {
+        const receipt = receipts.find(item => item.platform === row.platform);
+        return { platform: row.platform, receiptId: receipt.receiptId, state: 'finished',
+          outcome: row.platform === 'zhihu' ? 'failed' : 'published', message: '模拟回执' };
+      }) });
+    return { batchId: `${batchCount}`.padEnd(32, 'e'), accepted: body.requests.map(row => {
+      const receipt = receipts.find(item => item.platform === row.platform);
+      return { platform: row.platform, receiptId: receipt.receiptId };
+    }), rejected: [] };
+  };
+  await view.click(view.button('发布到 2 个平台'));
+  await view.tick(2500);
+  assert.equal(view.batchPosts().length, 1);
+  const strip = view.container.querySelector('.publish-batch');
+  assert.ok(strip, 'the batch strip is visible after submission');
+  assert.match(strip.textContent, /已发布/);
+  assert.match(strip.textContent, /失败/);
+  const retry = [...strip.querySelectorAll('button')].find(button => button.textContent.includes('重试失败的平台'));
+  assert.ok(retry, 'failed platforms offer an explicit retry');
+  await view.click(retry);
+  await view.tick(2500);
+  assert.equal(view.batchPosts().length, 2);
+  const retryBody = view.batchPosts()[1].body;
+  assert.deepEqual(retryBody.requests.map(row => row.platform), ['zhihu'], 'retry never resubmits the published platform');
+  assert.equal(retryBody.requests[0].title, '本次要发布的标题', 'retry reuses the immutable confirmed payload');
 });
 
 test('restored SMS verification is bound to its receipt and cannot fall through to another task', async t => {
@@ -437,26 +501,37 @@ test('mixed platform readiness explicitly excludes video targets and restores im
   assert.match(view.h.confirmations[0], /本次不会提交：抖音（需要视频/);
   assert.equal(view.posts().length, 0);
   view.h.confirm = true;
-  view.h.publish = (platform, payload) => {
-    assert.deepEqual(payload.media, ['outputs/02.png', 'outputs/01.png']);
-    const receipt = completed({ platform, receiptId: (platform === 'zhihu' ? 'a' : 'b').repeat(32), title: payload.title });
-    view.h.items.push(receipt); return receipt;
+  view.h.batch = async body => {
+    assert.deepEqual(body.requests.map(row => row.platform), ['xiaohongshu', 'zhihu']);
+    assert.deepEqual(body.requests.find(row => row.platform === 'xiaohongshu').media, ['outputs/02.png', 'outputs/01.png']);
+    const receipts = body.requests.map((row, index) =>
+      completed({ platform: row.platform, receiptId: (index ? 'b' : 'a').repeat(32), title: row.title }));
+    view.h.items = receipts;
+    view.h.batchStatus = async id => ({ batchId: id, state: 'completed', message: '', requests: {}, platforms:
+      body.requests.map((row, index) => ({ platform: row.platform, receiptId: receipts[index].receiptId, state: 'finished', outcome: 'published', message: '平台已确认发布。' })) });
+    return { batchId: 'e'.repeat(32), accepted: body.requests.map((row, index) => ({ platform: row.platform, receiptId: receipts[index].receiptId })), rejected: [] };
   };
   await view.click(view.button('发布到 3 个平台'));
-  assert.deepEqual(view.posts().map(r => r.path), ['/api/publish/xiaohongshu', '/api/publish/zhihu']);
+  await view.tick(2500);
+  assert.deepEqual(view.batchPosts().map(row => row.path), ['/api/publish/batch']);
   assert.equal(view.model().receipts.length, 2);
   await view.render('other'); await view.render('publish');
-  assert.equal(view.posts().length, 2, 'restoring draft and per-platform results never repeats submission');
+  assert.equal(view.batchPosts().length, 1, 'restoring draft and per-platform results never repeats submission');
 });
 
 test('editor uses the durable outcome, preserves receipts when clearing its draft, and opens notification settings', async t => {
   const view = await fixture(t, [], 'publish');
-  view.h.publish = (_platform, payload) => {
-    const receipt = completed({ title: payload.title, outcome: 'unverified', message: '需要人工核实', url: '' });
-    view.h.items = [receipt]; return receipt;
+  view.h.batch = async body => {
+    const receipt = completed({ title: body.requests[0].title, outcome: 'unverified', message: '需要人工核实', url: '' });
+    view.h.items = [receipt];
+    view.h.batchStatus = async id => ({ batchId: id, state: 'completed', message: '', requests: {},
+      platforms: [{ platform: 'zhihu', receiptId: receipt.receiptId, state: 'finished', outcome: 'unverified', message: '需要人工核实' }] });
+    return { batchId: 'e'.repeat(32), accepted: [{ platform: 'zhihu', receiptId: receipt.receiptId }], rejected: [] };
   };
   await view.click(view.button('发布到 1 个平台'));
-  assert.equal(view.posts().length, 1);
+  await view.tick(2500);
+  await view.refresh();
+  assert.equal(view.batchPosts().length, 1);
   assert.equal(view.model().receipts[0].outcome, 'unverified');
   assert.match(view.container.querySelector('[role="dialog"]').textContent, /结果待核实/);
   await view.click(view.container.querySelector('[aria-label="关闭发布回执"]'));
@@ -550,10 +625,22 @@ test('a new failed receipt is reported once and initial failed history stays qui
   const old = completed({outcome:'failed',url:''});
   const view = await fixture(t, [old]);
   assert.equal(view.h.reports.length, 0);
-  view.h.publish = () => completed({receiptId:'b'.repeat(32),outcome:'failed',url:''});
-  await act(async () => view.model().submit([{platform:'zhihu',payload:{title:'private',body:'private',media:[],tags:''}}]));
+  view.h.batch = async body => {
+    const receipt = completed({receiptId:'b'.repeat(32),outcome:'failed',url:''});
+    view.h.items = [receipt];
+    view.h.batchStatus = async id => ({ batchId: id, state: 'completed', message: '', requests: {},
+      platforms: [{ platform: 'zhihu', receiptId: receipt.receiptId, state: 'finished', outcome: 'failed', message: '发布未完成' }] });
+    return { batchId: 'e'.repeat(32), accepted: [{ platform: 'zhihu', receiptId: receipt.receiptId }], rejected: [] };
+  };
+  let pending;
+  await act(async () => {
+    pending = view.model().submit([{platform:'zhihu',payload:{title:'private',body:'private',media:[],tags:''}}]);
+    await new Promise(resolve => setImmediate(resolve));
+  });
+  await view.tick(2500);
+  await act(async () => { await pending; });
   await view.refresh(); await view.refresh();
-  assert.equal(view.posts().length, 1);
+  assert.equal(view.batchPosts().length, 1);
   assert.equal(view.h.reports.length, 1);
   assert.equal(view.h.reports[0].receiptId, 'b'.repeat(32));
   assert.equal(view.h.reports[0].code, 'publish_failed');
@@ -562,12 +649,12 @@ test('a new failed receipt is reported once and initial failed history stays qui
 
 for (const callbackFails of [false, true]) test(`submission error keeps the original result and never retries with callback unavailable=${callbackFails}`, async t => {
   const view = await fixture(t);
-  view.h.publish = () => new Response(JSON.stringify({detail:'模拟服务忙'}), {
+  view.h.batch = () => new Response(JSON.stringify({detail:'模拟服务忙'}), {
     status:429, headers:{'X-Easel-Failure-Id':'a'.repeat(32),'Content-Type':'application/json'},
   });
   if (callbackFails) view.h.report = () => {throw new Error('callback offline');};
   await act(async () => view.model().submit([{platform:'zhihu',payload:{title:'private',body:'private',media:[],tags:''}}]));
-  assert.equal(view.posts().length, 1);
+  assert.equal(view.batchPosts().length, 1);
   assert.match(view.model().submissionIssues[0].message, /模拟服务忙/);
   assert.equal(view.model().submissionIssues[0].message.split('a'.repeat(32)).length, 2);
   assert.equal(view.h.reports[0].code, 'server_busy');

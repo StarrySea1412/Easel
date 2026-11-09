@@ -111,6 +111,7 @@ gui-test-screenshots/
 /image-reverse-config.json
 /channel-names.json
 /memory/
+/social-accounts/
 
 # Isolated browser acceptance data, local credentials and screenshots
 /.artifacts/

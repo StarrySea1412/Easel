@@ -183,7 +183,7 @@ def test_whoami_enriches_incomplete_identity_without_losing_verified_login(monke
     args = SimpleNamespace(profile_base=None, proxy=None, no_proxy=True)
     assert xhs_publish.cmd_whoami(args) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "loggedIn": True, "name": "Me", "avatar": "https://self.test/avatar",
+        "loggedIn": True, "name": "Me", "avatar": "https://self.test/avatar", "externalAccountId": "self",
     }
     assert profile.call_count == (0 if complete else 1)
     assert dom.call_count == (0 if complete else 1)

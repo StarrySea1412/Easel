@@ -3,8 +3,8 @@ import { OFFICE_STATE_LABELS, type OfficeAgent, type OfficeEvent, type OfficeRel
 import { deriveOfficeWorkflow, type WorkflowLane } from '../../lib/officeWorkflow';
 import './office-workflow.css';
 
-const LANES: [WorkflowLane, string, string][] = [
-  ['active', '正在推进', '01'], ['waiting', '等待协作', '02'], ['attention', '需要关注', '03'], ['finished', '已经完成', '04'],
+const LANES: [WorkflowLane, string][] = [
+  ['active', '正在推进'], ['waiting', '等待协作'], ['attention', '需要关注'], ['finished', '已经完成'],
 ];
 const EVENT_LABELS = { call: '调用', result: '回执', spawn: '分派记录', status: '状态记录' };
 const ATTENTION_STATES = [
@@ -39,8 +39,8 @@ export default function OfficeWorkflowPanel({ agents, events, relations, mode, e
       {!attentionCount && <p className="workflow-empty">{mode === 'demo' ? '当前模拟阶段' : stale ? '这份历史快照' : '已观测成员中'}暂无上述状态；未观测到的成员不在统计范围内。</p>}
       <details className="workflow-waiting-summary"><summary>等待中的成员 · {flow.lanes.waiting.length}</summary><p className="workflow-note">等待单独列出，不计入需要处理。等待原因未由状态说明，不能据此判断正在等待审批或出现阻塞；请查看过程。</p><ul>{flow.lanes.waiting.map(agent => <li key={agent.id}><button type="button" onClick={() => onOpenProcess(agent.id)}>{name(agent.id)} · {mode === 'demo' ? '模拟等待' : stale ? '历史等待状态' : '已观测等待'} · 查看过程 ↗</button></li>)}</ul>{!flow.lanes.waiting.length && <p className="workflow-empty">没有已记录为等待的成员。</p>}</details>
     </section>
-    <div className="workflow-lanes">{LANES.map(([key, title, number]) => <section key={key} className={`workflow-lane workflow-lane-${key}`} aria-label={`${title}任务`}>
-      <h3><span>{number}</span>{title}<b>{flow.lanes[key].length}</b></h3>
+    <div className="workflow-lanes">{LANES.map(([key, title]) => <section key={key} className={`workflow-lane workflow-lane-${key}`} aria-label={`${title}任务`}>
+      <h3>{title}<b>{flow.lanes[key].length}</b></h3>
       <div className="workflow-cards">{flow.lanes[key].map(agent => <button type="button" key={agent.id} className="workflow-task" aria-pressed={selectedId === agent.id} onClick={() => onSelect(agent.id)}>
         <span className="workflow-task-top"><strong>{name(agent.id)}</strong><small>{OFFICE_STATE_LABELS[agent.state]}</small></span>
         <span className="workflow-role">{agent.role}</span><span className="workflow-task-copy">{agent.task || '尚未上报任务'}</span>
