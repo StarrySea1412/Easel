@@ -1,3 +1,5 @@
+**0.49.1 quote preview fix and host 138 deployment preparation.** The preview renders outside the scrolling composer, stays within the viewport and scrolls its own content. Comments, keyboard dismissal and per-session drafts remain intact. Production is still 0.47.1; see the [release evidence](docs/release-138-0.49.1-2026-11-09.md).
+
 **Qizhi three-minute timeout diagnosed.** The original turn became unknown after 181 seconds; the adapter imposed a 180-second read cap. The 0.49.0 source uses the full turn budget and distinguishes network phases without resubmitting unknown work. Host 138 is unchanged and the original remote outcome remains unconfirmed. [Evidence](docs/qizhi-timeout-2026-11-09.md).
 
 **0.49.0 source integration: multi-account distribution and guided publishing.** Combines 0.47.1 image retries and 0.48.0 memory/continuation improvements with isolated accounts across seven platforms, a four-stage publishing flow, linked prompt/image cards and collapsible tools. Host 138 remains on 0.47.1. [Integration and validation](docs/latest-account-distribution-0.49.0-2026-11-09.md).

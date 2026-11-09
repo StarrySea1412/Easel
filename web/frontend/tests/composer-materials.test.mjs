@@ -28,8 +28,9 @@ test('attachments expose real media URL and document name, preview closes with E
  await act(async()=>c.querySelector('[aria-label="移除 QA.png"]').click());assert.deepEqual(removed,['_inbox/QA.png']);assert.equal(document.querySelector('[role=dialog]'),null);
 });
 test('quote info is a transient hover/focus tooltip and excludes expanded quote content',async t=>{
- const c=await mount(t,Quotes,{sessionId:'qa-quote',quotes:['引用原文'],comment:'评论'});const details=c.querySelector('details'),info=c.querySelector('[aria-label="引用使用说明"]');assert.equal(document.querySelector('[role=tooltip]'),null);
- await act(async()=>{details.open=true;info.dispatchEvent(new window.PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));});assert.equal(details.open,false);assert.match(document.querySelector('[role=tooltip]').textContent,/添加引用不会自动发送/);
+ const c=await mount(t,Quotes,{sessionId:'qa-quote',quotes:['引用原文'],comment:'评论'});const trigger=c.querySelector('.composer-quote-trigger'),info=c.querySelector('[aria-label="引用使用说明"]');assert.equal(document.querySelector('[role=tooltip]'),null);
+ await act(async()=>trigger.click());assert.equal(trigger.getAttribute('aria-expanded'),'true');assert.ok(document.querySelector('.composer-quote-panel'));
+ await act(async()=>info.dispatchEvent(new window.PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'})));assert.equal(trigger.getAttribute('aria-expanded'),'false');assert.equal(document.querySelector('.composer-quote-panel'),null);assert.match(document.querySelector('[role=tooltip]').textContent,/添加引用不会自动发送/);
  await act(async()=>info.dispatchEvent(new window.PointerEvent('pointerout',{bubbles:true,pointerType:'mouse'})));assert.equal(document.querySelector('[role=tooltip]'),null);
  await act(async()=>info.focus());assert.ok(document.querySelector('[role=tooltip]'));await key(info,'Escape');assert.equal(document.querySelector('[role=tooltip]'),null);
  await act(async()=>{info.blur();info.click();});assert.equal(document.querySelector('[role=tooltip]'),null,'click must not lock tooltip open');

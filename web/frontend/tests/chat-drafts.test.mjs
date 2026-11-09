@@ -234,13 +234,14 @@ test('quotes retain comments, survive refresh, isolate sessions and clear only o
   const view = await fixture(t); await view.render('one'); await view.type('评论草稿');
   await act(async () => window.dispatchEvent(new window.CustomEvent('easel:quote', {detail:{sessionId:'one',text:'原文第一段\n第二段'}})));
   assert.match(view.container.textContent, /1 条引用/); assert.equal(view.container.querySelector('textarea').value,'评论草稿'); assert.equal(view.h.sent.length,0);
-  await view.reload(); assert.match(view.container.textContent,/原文第一段/);
+  await view.reload(); await view.click(view.container.querySelector('.composer-quote-trigger')); assert.match(document.querySelector('.composer-quote-panel').textContent,/原文第一段/);
   await view.render('two'); assert.equal(view.container.querySelector('.composer-quote-details'),null);
   await view.render('one'); view.h.accepted=false;
   await view.click(view.container.querySelector('[aria-label="发送消息"]'));
   assert.match(view.h.sent.at(-1)[0],/> 原文第一段\n> 第二段/); assert.match(view.h.sent.at(-1)[0],/评论草稿/);
   assert.ok(view.container.querySelector('.composer-quote-details'));
-  await view.click(view.container.querySelector('[aria-label="移除引用 1"]')); assert.equal(view.container.querySelector('.composer-quote-details'),null);
+  await view.click(view.container.querySelector('.composer-quote-trigger'));
+  await view.click(document.querySelector('[aria-label="移除引用 1"]')); assert.equal(view.container.querySelector('.composer-quote-details'),null);
   await view.type(''); await act(async () => view.modules().draft.addChatDraftQuote('one','仅引用'));
   assert.equal(view.container.querySelector('[aria-label="发送消息"]').disabled,false);
   view.h.accepted=true; await view.click(view.container.querySelector('[aria-label="发送消息"]'));
