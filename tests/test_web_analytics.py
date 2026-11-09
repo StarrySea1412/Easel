@@ -117,12 +117,13 @@ def test_fetch_propagates_actionable_script_error(monkeypatch):
 
 
 def test_fetch_reports_bounded_timeout(monkeypatch):
-    runner = Mock(side_effect=subprocess.TimeoutExpired("fetch", 180))
+    runner = Mock(side_effect=subprocess.TimeoutExpired("fetch", 90))
     monkeypatch.setattr(web, "_run_analytics_command", runner)
     with pytest.raises(HTTPException) as error:
         asyncio.run(web._capture_account_analytics("xiaohongshu"))
     assert error.value.status_code == 504
-    assert runner.call_args.args[2] == 180
+    assert runner.call_args.args[2] == 90
+    assert '90秒' in error.value.detail and '保留上次结果' in error.value.detail
     assert runner.call_args.args[1]["PYTHONIOENCODING"] == "utf-8"
     assert runner.call_args.args[1]["PYTHONUTF8"] == "1"
 

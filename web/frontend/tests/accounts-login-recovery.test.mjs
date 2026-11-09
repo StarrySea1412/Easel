@@ -234,7 +234,7 @@ test('expired positive cache keeps identity during automatic checks and transien
   assert.ok(![...card.querySelectorAll('button')].some(button => button.textContent === '检查登录状态'));
   await act(async () => pending.reject(new Error('synthetic offline')));
   assert.match(card.querySelector('.account-nick').textContent, /上次确认账号/);
-  assert.match(card.querySelector('.account-connection-dot button').title, /正在确认连接/);
+  assert.match(card.querySelector('.account-connection-dot button').title, /连接状态待确认/);
   assert.doesNotMatch(card.querySelector('.account-connection-dot button').title, /未连接|失效/);
   assert.doesNotMatch(card.textContent, /上次在线确认|登录状态有效/); assert.match(card.querySelector('.account-connection-dot button').title, /上次核验/);
 });
@@ -433,7 +433,7 @@ test('account checking remains unknown on transport failure and periodic checks 
   assert.equal(view.state.requests.length, before);
   Object.defineProperty(document, 'visibilityState', {configurable:true,value:'visible'});
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
-  assert.match(view.container.querySelector('article .account-connection-dot button').title, /正在确认连接/);
+  assert.match(view.container.querySelector('article .account-connection-dot button').title, /连接状态待确认/);
   assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
   await view.start('知乎');

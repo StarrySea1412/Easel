@@ -6,7 +6,7 @@ import '../styles/account-connection-dot.css';
 type Props = { connection: AccountConnection; checking?: boolean; checkedAt?: number; message?: string };
 
 export default function AccountConnectionDot({ connection, checking, checkedAt, message }: Props) {
-  const pending = checking || connection === 'unknown';
+  const pending = Boolean(checking);
   const state = pending ? 'checking' : connection;
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -22,7 +22,7 @@ export default function AccountConnectionDot({ connection, checking, checkedAt, 
     return () => document.removeEventListener('pointerdown', close);
   }, [visible]);
   const label = checking ? '正在检测' : connection === 'online' ? '已连接'
-    : connection === 'login_required' || connection === 'not_connected' ? '未登录' : '正在确认连接';
+    : connection === 'login_required' || connection === 'not_connected' ? '未登录' : '连接状态待确认';
   const time = checkedAt ? `上次核验：${new Date(checkedAt).toLocaleString()}` : '尚未在线核验';
   const explanation = connection === 'unknown' && !checking ? '尚未确认当前是否在线，不代表未登录' : '';
   const reason = message && !['未登录', '登录状态有效'].includes(message) ? message : checkedAt ? '上次结果已过期，等待重新确认' : '';

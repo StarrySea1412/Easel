@@ -1,6 +1,7 @@
 import type { AccountAnalytics } from "./api";
 import { publishWorkbenchChange } from "./workbenchEvents";
 import { sanitizeAccountMetrics } from './accountMetricEvidence';
+import { requestWithTimeout } from './requestTimeout';
 
 const storageKey = "easel:analytics-cache:v1";
 type Entry = { scope: string; at: number; data: AccountAnalytics };
@@ -57,14 +58,14 @@ export function restoreAnalyticsSnapshot(platform: string, data: AccountAnalytic
   try { sessionStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(entries))); } catch { /* In-memory fallback. */ }
   changed(platform);
 }
-export async function collectAnalytics(platform: string, capture: () => Promise<AccountAnalytics>, force = false): Promise<AccountAnalytics> {
+export async function collectAnalytics(platform: string, capture: (signal: AbortSignal) => Promise<AccountAnalytics>, force = false): Promise<AccountAnalytics> {
   restore();
   const scope = analyticsScope(platform), key = platform + ":" + scope;
   const active = pending.get(key);
   if (active) return active;
   const entry = entries.get(platform);
   if (!force && entry?.scope === scope) return entry.data;
-  const task = capture().then(data => {
+  const task = requestWithTimeout(capture, 105000, '账号数据读取超时，上次结果已保留。请检查平台连接后重试。').then(data => {
     data = sanitizeAccountMetrics(data);
     if (analyticsScope(platform) !== scope) throw new Error("账号已切换，已丢弃旧采集结果");
     if (data.loggedIn && scope !== '["",""]') {

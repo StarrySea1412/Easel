@@ -129,7 +129,8 @@ async function fixture(t, initial = {}) {
     else if (initial.analytics && path.startsWith('/api/analytics/') && !path.endsWith('/platforms')) data = await initial.analytics(path);
     else if (path === '/api/accounts') data = initial.accounts || [];
     else if (path === '/api/analytics/platforms') data = initial.analyticsPlatforms || [];
-    else if (path.startsWith('/api/accounts/') && path.includes('/whoami')) data = {loggedIn:false,name:'',avatar:'',verified:false};
+    else if (path.startsWith('/api/accounts/') && path.includes('/whoami')) data = initial.whoami ? await initial.whoami(path) : {loggedIn:false,name:'',avatar:'',verified:false};
+    else if (path === '/api/ideas' && initial.ideas) data = await initial.ideas();
     else if (['/api/schedule', '/api/outputs', '/api/ideas'].includes(path)) data = [];
     else throw new Error(`Unexpected request: ${path}`);
     return { ok: true, json: async () => data };
@@ -824,5 +825,54 @@ test('account analysis retains previous data and loading across page unmount the
   await act(async()=>finish({...data,nickname:'新的分析结果',followers:28,fetched_at:2}));
   assert.match(card().textContent,/@新的分析结果/);
   assert.equal(card().querySelector('.ana-refresh-status .publish-spinner'),null);
+  sessionStorage.clear();
+});
+
+test('unconfirmed account ends loading with a retry action and checks only the selected platform',async t=>{
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});sessionStorage.clear();
+  sessionStorage.setItem('easel:analytics-platform','zhihu');
+  let finish;const view=await fixture(t,{
+    accounts:[{platform:'zhihu',name:'知乎',supported:true,loggedIn:true,hasLocalSession:true}],
+    analyticsPlatforms:[{platform:'xiaohongshu',name:'小红书',loggedIn:false},{platform:'zhihu',name:'知乎',loggedIn:true}],
+    whoami:()=>new Promise(resolve=>{finish=resolve;}),
+  });
+  await view.render();
+  const card=()=>view.container.querySelector('[aria-label=账号分析]');
+  assert.ok(card().querySelector('[aria-label=正在读取账号分析]'));
+  assert.deepEqual(view.h.requests.filter(([path])=>path.includes('/whoami')).map(([path])=>path),['/api/accounts/zhihu/whoami']);
+  await act(async()=>finish({loggedIn:true,name:'待确认账号',avatar:'',verified:false,verificationMessage:'平台响应未完成，请重试。'}));
+  assert.equal(card().querySelector('[aria-label=正在读取账号分析]'),null);
+  assert.match(card().textContent,/连接状态待确认/);assert.match(card().textContent,/平台响应未完成/);
+  const retry=()=>card().querySelector('.ana-account-empty-action');
+  assert.equal(retry().textContent,'重新检查');await view.focus(retry());assert.equal(document.activeElement,retry());
+  await view.click(retry());
+  assert.ok(card().querySelector('[aria-label=正在读取账号分析]'));
+  await act(async()=>finish({loggedIn:false,name:'',avatar:'',verified:true,authState:'login_required',checkedAt:Date.now()}));
+  assert.equal(card().querySelector('[aria-label=正在读取账号分析]'),null);
+  assert.match(card().textContent,/账号未登录/);
+  sessionStorage.clear();
+});
+
+test('refreshing dashboard lists during account collection cannot strand loading or prevent the next collection',async t=>{
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:window.sessionStorage});sessionStorage.clear();
+  const identity={loggedIn:true,name:'刷新账号',avatar:'',identityKey:'refresh-scope',accountId:'owner',verified:true,authState:'online',checkedAt:Date.now(),ts:Date.now()};
+  const data={platform:'zhihu',name:'知乎',nickname:identity.name,loggedIn:true,followers:17,notes:[],metrics:[],growth:{},growthSchema:'account-history-v1',fetched_at:1};
+  sessionStorage.setItem('easel:analytics-platform','zhihu');
+  sessionStorage.setItem('easel:analytics-cache:v1',JSON.stringify({zhihu:{scope:JSON.stringify([identity.identityKey,identity.accountId]),at:Date.now(),data}}));
+  let finish,ideaReads=0;
+  const view=await fixture(t,{accounts:[{platform:'zhihu',name:'知乎',supported:true,loggedIn:true,identityKey:identity.identityKey}],analyticsPlatforms:[{platform:'zhihu',name:'知乎',loggedIn:true}],extra:{easel_whoami:JSON.stringify({zhihu:identity})},analytics:()=>new Promise(resolve=>{finish=resolve;}),ideas:async()=>{if(++ideaReads===1)throw new Error('transient list failure');return [];}});
+  await view.render();const card=()=>view.container.querySelector('[aria-label=账号分析]');
+  const refresh=()=>[...card().querySelectorAll('button')].find(b=>b.textContent==='主动分析');
+  await view.click(refresh());assert.ok(card().querySelector('.ana-refresh-status'));
+  // The explicit page reload action reruns the list-loading effect without unmounting.
+  const reload=[...view.container.querySelectorAll('button')].find(b=>b.textContent==='重新加载');
+  await view.click(reload);assert.equal(ideaReads,2);
+  await act(async()=>finish({...data,followers:28,fetched_at:2}));
+  assert.equal(card().querySelector('.ana-refresh-status'),null);assert.equal(refresh().disabled,false);
+  await view.click(refresh());
+  assert.ok(card().querySelector('.ana-refresh-status'));
+  await act(async()=>finish({...data,followers:29,fetched_at:3}));
+  assert.equal(card().querySelector('.ana-refresh-status'),null);
+  assert.equal(view.h.requests.filter(([path])=>path==='/api/analytics/zhihu?refresh=true').length,2);
   sessionStorage.clear();
 });

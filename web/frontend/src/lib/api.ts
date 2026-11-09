@@ -1,6 +1,7 @@
 import { registerImportedSkillNames } from './skillDisplayNames';
 import { readChatAutoContinue } from './chatContinuation';
 import { collectAnalytics, analyticsScope, restoreAnalyticsSnapshot } from './analyticsCache';
+import { requestWithTimeout } from './requestTimeout';
 import { publishWorkbenchChange } from './workbenchEvents';
 import { decodeChatCompaction } from './chatCompaction';
 import { decodeChatTiming } from './chatTiming';
@@ -1006,13 +1007,14 @@ export function fetchAnalyticsPlatforms(): Promise<AnalyticsPlatform[]> {
 
 /** 抓某平台已登录账号的创作数据，客户端等待时限略长于后端。 */
 export function fetchAccountAnalytics(platform: string, force = false): Promise<AccountAnalytics> {
-  return collectAnalytics(platform, () => request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}${force ? '?refresh=true' : ''}`,
-    { signal: AbortSignal.timeout(195000) }), force);
+  return collectAnalytics(platform, signal => request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}${force ? '?refresh=true' : ''}`,
+    { signal }), force);
 }
 
 export async function restoreAccountAnalytics(platform: string): Promise<void> {
   const scope = analyticsScope(platform);
-  const result = await request<{data:AccountAnalytics|null;running:boolean}>(`/api/analytics/${encodeURIComponent(platform)}/snapshot`);
+  const result = await requestWithTimeout(signal => request<{data:AccountAnalytics|null;running:boolean}>(`/api/analytics/${encodeURIComponent(platform)}/snapshot`, { signal }),
+    10000, '上次账号结果暂未读取成功，请重试。');
   if (scope !== analyticsScope(platform)) return;
   if (result.data) restoreAnalyticsSnapshot(platform, result.data, scope);
   if (result.running) await fetchAccountAnalytics(platform, true);

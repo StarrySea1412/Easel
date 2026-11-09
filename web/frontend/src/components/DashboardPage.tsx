@@ -75,7 +75,6 @@ const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', 
 
 export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNavigateAnalysis, onUseTopic, onQuickPrompt, onOpenModels }: DashboardProps) {
   const mounted = useRef(false);
-  const dataVersion = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -96,14 +95,17 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
   // Account identity can change between visits. Never restore a platform-only cache.
   const [anaData, setAnaData] = useState<Record<string, AccountAnalytics | 'loading' | 'error'>>({});
   const [anaErrors, setAnaErrors] = useState<Record<string, string>>({});
-  const [anaBusy, setAnaBusy] = useState<Set<string>>(new Set());
-  const anaPending = useRef(new Set<string>());
   const [anaWin, setAnaWin] = useState<'last' | 'day' | 'week' | 'month' | 'year'>('week');
   // whoami 自愈：登录态以真实 profile 为准（与账号页共享 localStorage 缓存）
   const whoamiMap = useAccountIdentities();
   const accountChecks = useAccountChecks();
   const identitySignature = JSON.stringify(Object.entries(whoamiMap).map(([p, e]) => [p, e.identityKey, e.accountId]));
   useEffect(() => { if (anaSel && readAnalyticsCache(anaSel)?.growthSchema !== 'account-history-v1' && !analyticsPending(anaSel)) void restoreAccountAnalytics(anaSel).catch(() => {}); }, [anaSel, identitySignature]);
+  useEffect(() => {
+    let alive = true;
+    if (anaSel) void verifyStale([anaSel], { alive: () => alive });
+    return () => { alive = false; };
+  }, [anaSel, identitySignature]);
   useEffect(() => {
     const restore = () => {
       const restored: Record<string, AccountAnalytics> = {};
@@ -116,10 +118,10 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
   useEffect(() => {
     const refresh = () => {
       void fetchAccounts().then(list => { if (mounted.current) { hydrateAccountIdentities(list); setAccounts(list); } }).catch(() => {});
-      void verifyStale(anaPlats.map(p => p.platform), { alive: () => mounted.current });
+      if (anaSel) void verifyStale([anaSel], { alive: () => mounted.current });
     };
     return watchAccountFreshness(refresh);
-  }, [anaPlats]);
+  }, [anaSel]);
 
   // ── 直达创作 ──
   const quickDraft = useSyncExternalStore(
@@ -145,7 +147,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
 
   useEffect(() => {
     let alive = true;
-    dataVersion.current += 1;
     setLoadErrors({});
     setLoaded({});
     setTrends(null);
@@ -168,15 +169,8 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
       setAnaPlats(ps);
       const first = ps.find((p) => readAnalyticsCache(p.platform) || analyticsPending(p.platform)) || ps.find((p) => p.loggedIn);
       if (first) setAnaSel((s) => ps.some(p => p.platform === s) ? s : first.platform);
-      // 开页后台自愈：对非 API 式的归因平台真校验（whoami），刷新登录态；
-      // B 站走 cookie、公众号走凭证/官方 API 判定，都不起浏览器。
-      const API_BASED = new Set(['bilibili', 'wechat-oa']);
-      verifyStale(ps.filter((p) => !API_BASED.has(p.platform)).map((p) => p.platform), {
-        alive: () => alive,
-        onUpdate: (platform, r) => {
-          if (r.loggedIn) setAnaSel((s) => s || platform);
-        },
-      });
+      // Verify the selected platform in its own effect; unrelated accounts
+      // must not queue browser launches ahead of the account being viewed.
     }).catch((e: unknown) => { if (alive) setLoadErrors((old) => ({ ...old, '分析': e instanceof Error ? e.message : '请求失败' })); })
       .finally(() => { if (alive) setLoaded((old) => ({ ...old, '分析': true })); });
     return () => { alive = false; };
@@ -191,12 +185,9 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
     if (connection === 'login_required' || connection === 'not_connected' || accountChecks.has(platform)) return;
     if (saved && !force) return;
     if (connection !== 'online') return;
-    if (anaPending.current.has(platform)) return;
-    const version = dataVersion.current;
+    if (analyticsPending(platform)) return;
     const scope = analyticsScope(platform);
-    const isCurrent = () => mounted.current && version === dataVersion.current && scope === analyticsScope(platform);
-    anaPending.current.add(platform);
-    setAnaBusy(old => new Set(old).add(platform));
+    const isCurrent = () => mounted.current && scope === analyticsScope(platform);
     if (!saved) setAnaData((d) => ({ ...d, [platform]: 'loading' }));
     fetchAccountAnalytics(platform, force)
       .then((r) => { if (isCurrent()) setAnaData((d) => ({ ...d, [platform]: r })); })
@@ -205,11 +196,6 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
         setAnaErrors((old) => ({ ...old, [platform]: e instanceof Error ? e.message : '请求失败' }));
         showToast(`抓取失败：${e instanceof Error ? e.message : '请求失败，请重试。'}`, 'error');
         if (!saved) setAnaData((d) => ({ ...d, [platform]: 'error' as const }));
-      }).finally(() => {
-        if (mounted.current && version === dataVersion.current) {
-          anaPending.current.delete(platform);
-          setAnaBusy(old => { const next = new Set(old); next.delete(platform); return next; });
-        }
       });
   };
 
@@ -361,9 +347,9 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
         {/* 创作数据（归因层）：选平台自动拉取登录账号的粉丝/获赞/关注 + 多窗口增长 + 近7日环比 + 最新笔记 */}
         <DashboardCard variant="wide" Icon={IconAccounts} title="账号分析"
           actions={<div className="dash-card-actions">
-            {anaSel && (analyticsPending(anaSel) || anaBusy.has(anaSel)) && <span className="ana-refresh-status" role="status" aria-label="正在更新账号数据" title="正在更新账号数据"><PublishSpinner /></span>}
+            {anaSel && analyticsPending(anaSel) && <span className="ana-refresh-status" role="status" aria-label="正在更新账号数据" title="正在读取平台数据，完成后自动更新"><PublishSpinner /></span>}
             <button className="dash-more" onClick={openAnalysis}>内容分析 →</button>
-            {anaSel && <button className="dash-more" disabled={analyticsPending(anaSel) || anaBusy.has(anaSel) || accountChecks.has(anaSel) || accountConnection(accounts.find(a => a.platform === anaSel), whoamiMap[anaSel]) !== 'online'} onClick={() => runAna(anaSel, true)}>主动分析</button>}
+            {anaSel && <button className="dash-more" disabled={analyticsPending(anaSel) || accountChecks.has(anaSel) || accountConnection(accounts.find(a => a.platform === anaSel), whoamiMap[anaSel]) !== 'online'} onClick={() => runAna(anaSel, true)}>主动分析</button>}
             </div>}>
           {(() => {
             // Availability and online proof are separate: rechecking never removes a platform.
@@ -393,15 +379,15 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
                   {logged.map((p) => (
                     <button key={p.platform} className={`chip ${anaSel === p.platform ? 'active' : ''}`}
                       onClick={() => runAna(p.platform)}><PlatformIcon platform={p.platform} name={p.name} className="ana-platform-icon" />{p.name}
-                        <span className={'ana-platform-state is-' + (accountChecks.has(p.platform) ? 'unknown' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]))} aria-label={accountChecks.has(p.platform) ? '正在核验' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]) === 'online' ? '已连接' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]) === 'unknown' ? '正在确认连接' : '未登录'} />
+                        <span className={'ana-platform-state is-' + (accountChecks.has(p.platform) ? 'checking' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]))} aria-label={accountChecks.has(p.platform) ? '正在核验' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]) === 'online' ? '已连接' : accountConnection(accounts.find(a => a.platform === p.platform), whoamiMap[p.platform]) === 'unknown' ? '连接状态待确认' : '未登录'} />
                       </button>
                   ))}
                 </div>
-                {anaSel && (!d || d === 'loading') && (connection === 'unknown' || accountChecks.has(anaSel) || d === 'loading' || analyticsPending(anaSel) || anaBusy.has(anaSel) ? <AccountAnalysisSkeleton /> : (
+                {anaSel && (!d || d === 'loading') && (accountChecks.has(anaSel) || analyticsPending(anaSel) ? <AccountAnalysisSkeleton /> : (
                   <div className="ana-account-empty">
                     <span className="ana-account-empty-icon" aria-hidden="true"><PlatformIcon platform={anaSel} name={logged.find(p => p.platform === anaSel)?.name || anaSel} /></span>
-                    <div className="ana-account-empty-copy"><strong>{logged.find(p => p.platform === anaSel)?.name || anaSel}{connection !== 'online' ? '账号未登录' : '账号已连接'}</strong><span>{connection !== 'online' ? '连接后查看账号与作品表现' : '读取账号与作品表现'}</span></div>
-                    <button type="button" className="btn btn-sm ana-account-empty-action" onClick={() => connection !== 'online' ? onNavigate('accounts') : runAna(anaSel)}>{connection !== 'online' && <IconAccounts size={14} />}{connection !== 'online' ? '连接账号' : '获取账号数据'}</button>
+                    <div className="ana-account-empty-copy"><strong>{logged.find(p => p.platform === anaSel)?.name || anaSel}{connection === 'unknown' ? '连接状态待确认' : connection !== 'online' ? '账号未登录' : '账号已连接'}</strong><span>{connection === 'unknown' ? whoamiMap[anaSel]?.verificationMessage || '尚未确认平台连接，请重新检查。' : connection !== 'online' ? '连接后查看账号与作品表现' : '读取账号与作品表现'}</span></div>
+                    <button type="button" className="btn btn-sm ana-account-empty-action" onClick={() => connection === 'unknown' ? void verifyStale([anaSel], { force: true, alive: () => mounted.current }) : connection !== 'online' ? onNavigate('accounts') : runAna(anaSel)}>{connection !== 'online' && <IconAccounts size={14} />}{connection === 'unknown' ? '重新检查' : connection !== 'online' ? '连接账号' : '获取账号数据'}</button>
                   </div>
                 ))}
                 {!anaSel && <div className="dash-empty">选择平台查看账号数据</div>}

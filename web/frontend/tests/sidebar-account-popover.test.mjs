@@ -53,7 +53,7 @@ test('reopening clears old success while a fresh snapshot is pending, and failur
   const view = await fixture(t);
   view.state.read = async () => response(accounts('xiaohongshu'));
   await view.open();
-  assert.match(view.panel().querySelector('.account-connection-dot button').title, /正在确认连接/);
+  assert.match(view.panel().querySelector('.account-connection-dot button').title, /连接状态待确认/);
   await view.escape();
   assert.equal(document.activeElement, view.trigger);
   let fail;
@@ -109,7 +109,7 @@ test('missing platform statuses stay unknown instead of claiming all platforms a
   await view.open();
   assert.match(view.panel().textContent, /尚无可确认的已登录平台/);
   assert.doesNotMatch(view.panel().textContent, /7 个平台均未登录/);
-  assert.equal(view.panel().querySelectorAll('.account-connection-dot.is-checking').length, 7);
+  assert.equal(view.panel().querySelectorAll('.account-connection-dot.is-unknown').length, 7);
 });
 
 test('open preview shares online and unknown transitions without treating the local snapshot as proof', async t => {
@@ -124,7 +124,7 @@ test('open preview shares online and unknown transitions without treating the lo
   assert.doesNotMatch(view.panel().textContent, /登录状态有效|上次核验/);
   await act(async () => markWhoamiUnverified('xiaohongshu','检查超时'));
   assert.equal(view.panel().querySelector('.sidebar-account-name').textContent, 'shared');
-  assert.ok(view.panel().querySelector('.account-connection-dot.is-checking'));
+  assert.ok(view.panel().querySelector('.account-connection-dot.is-unknown'));
   assert.doesNotMatch(view.panel().textContent,/已退出|均未登录/);
 });
 

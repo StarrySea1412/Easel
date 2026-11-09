@@ -1150,7 +1150,8 @@ textarea.field { resize: vertical; min-height: 90px; }
 .ana-platform-icon { width: 18px; height: 18px; object-fit: contain; flex: none; }
 .ana-platform-state { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--red); }
 .ana-platform-state.is-online { background: var(--green); }
-.ana-platform-state.is-unknown { width: 10px; height: 10px; border: 1.5px solid var(--border-strong); border-top-color: var(--text-secondary); background: transparent; animation: ana-state-spin .8s linear infinite; }
+.ana-platform-state.is-unknown { background: var(--text-tertiary); }
+.ana-platform-state.is-checking { width: 10px; height: 10px; border: 1.5px solid var(--border-strong); border-top-color: var(--text-secondary); background: transparent; animation: ana-state-spin .8s linear infinite; }
 .ana-result-connection { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; color: var(--text-tertiary); font-size: 11px; }
 .ana-refresh-status { display: inline-flex; align-items: center; color: var(--text-secondary); }
 .ana-account-empty { display: flex; align-items: center; gap: 12px; padding: 18px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); }
@@ -1168,11 +1169,12 @@ textarea.field { resize: vertical; min-height: 90px; }
 .ana-skeleton-works > div:last-child { border-bottom: 0; }
 @media (max-width: 480px) {
   .ana-account-empty { flex-wrap: wrap; padding: 14px; gap: 10px; }
+  .ana-account-empty-copy { flex-basis: calc(100% - 50px); }
   .ana-account-empty-action { margin-left: 50px; }
 }
 @media (prefers-reduced-motion: reduce) { .ana-skeleton .sk::after { animation: none; } }
 @keyframes ana-state-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .ana-platform-state.is-unknown { animation-duration: 2s; } }
+@media (prefers-reduced-motion: reduce) { .ana-platform-state.is-checking { animation-duration: 2s; } }
 .ana-plats .chip:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .ana-plats .chip.active {
   background: var(--surface-hover);

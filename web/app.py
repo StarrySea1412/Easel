@@ -377,6 +377,7 @@ _LOGIN_CANCEL_TASKS: set[asyncio.Task] = set()
 
 # whoami 真校验（起 headless 浏览器，数秒）的进程内缓存：避免账号页 + 工作台重复起浏览器。
 WHOAMI_TTL = 600  # 秒；与前端 whoami.ts 对齐，发布前 force 核验
+WHOAMI_TIMEOUT = 45  # Leave time for process-tree cleanup before the 60s client deadline.
 _WHOAMI_CACHE: dict[str, tuple[float, dict, str | None]] = {}
 _WHOAMI_LOCK = threading.Lock()
 _ACCOUNT_GENERATIONS: dict[str, str] = {}
@@ -8056,7 +8057,7 @@ def _run_owned_whoami(platform: str, command: list[str], expected_generation: st
                 _WHOAMI_PROCESSES.setdefault(platform, []).append(process)
         try:
             try:
-                process.wait(timeout=150)
+                process.wait(timeout=WHOAMI_TIMEOUT)
             except subprocess.TimeoutExpired:
                 terminate_phase_tree(process)
                 process.wait(timeout=5)
@@ -8578,6 +8579,7 @@ def _clear_account_files(platform: str, cfg: dict) -> dict:
 # 归因层：可抓创作数据的平台（多数走 Playwright 登录态；bilibili 用 biliup cookies 不起浏览器、
 # wechat-oa 走 mp 后台会话 Playwright 拦截数据 XHR）
 ANALYTICS_PLATFORMS = {"xiaohongshu", "douyin", "kuaishou", "zhihu", "weixin-channels", "bilibili", "wechat-oa"}
+ANALYTICS_TIMEOUT = 90
 _analytics_inflight: dict[str, asyncio.Task] = {}
 
 
@@ -8980,9 +8982,9 @@ async def _capture_account_analytics(platform: str):
         # Keep persistence in this process so a pending scrape cannot restore cleared/switched data.
         ana_env["EASEL_ANALYTICS_MANAGED"] = "1"
     try:
-        proc = await asyncio.to_thread(_run_analytics_command, cmd, ana_env, 180)
+        proc = await asyncio.to_thread(_run_analytics_command, cmd, ana_env, ANALYTICS_TIMEOUT)
     except subprocess.TimeoutExpired:
-        raise HTTPException(504, "抓取超时（浏览器起不来或网络慢）")
+        raise HTTPException(504, "账号数据采集超过90秒，已停止本次浏览器采集并保留上次结果；请检查平台连接后重试")
     data = None
     for line in reversed((proc.stdout or "").strip().splitlines()):
         line = line.strip()

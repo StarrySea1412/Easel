@@ -144,6 +144,24 @@ def test_changed_account_generation_rejects_late_identity(account_state, monkeyp
     assert marker.read_bytes() == initial and not web._WHOAMI_CACHE
 
 
+def test_stalled_whoami_stops_its_process_and_releases_profile_before_client_timeout(account_state, monkeypatch):
+    from unittest.mock import Mock
+    import easel.install_runner as runner
+    process = Mock()
+    process.wait.side_effect = [web.subprocess.TimeoutExpired('whoami', 45), 0]
+    terminate = Mock()
+    monkeypatch.setattr(web.subprocess, 'Popen', lambda *args, **kwargs: process)
+    monkeypatch.setattr(runner, 'terminate_phase_tree', terminate)
+    marker = account_state / 'outputs/_login/xiaohongshu.json'
+    before = marker.read_bytes()
+    with pytest.raises(web.subprocess.TimeoutExpired):
+        web._run_owned_whoami('xiaohongshu', ['python', 'whoami'], '')
+    assert process.wait.call_args_list[0].kwargs['timeout'] == 45
+    terminate.assert_called_once_with(process)
+    assert web._WHOAMI_PROCESSES == {}
+    assert marker.read_bytes() == before and not web._WHOAMI_CACHE
+
+
 def test_concurrent_checks_never_launch_two_profile_writers(account_state, monkeypatch):
     started, release = threading.Event(), threading.Event()
 

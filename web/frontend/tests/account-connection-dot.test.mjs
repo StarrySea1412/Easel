@@ -15,12 +15,12 @@ async function fixture(t, props) {
   t.after(async () => { await act(async () => root.unmount()); host.remove(); });
   return { host, render, button: () => host.querySelector('button'), tip: () => host.querySelector('[role=tooltip]') };
 }
-test('unknown uses animated checking state, with evidence and time available on click only', async t => {
+test('unknown uses a terminal state, with evidence and time available on click only', async t => {
   t.mock.method(globalThis, 'fetch', () => assert.fail('a visual status must not start network checks'));
   const v = await fixture(t, { connection: 'unknown', message: '网络超时', checkedAt: 1000 });
-  assert.ok(v.host.querySelector('.is-checking')); assert.equal(v.host.querySelector('.is-unknown'), null); assert.equal(v.tip(), null);
+  assert.ok(v.host.querySelector('.is-unknown')); assert.equal(v.host.querySelector('.publish-spinner'), null); assert.equal(v.tip(), null);
   await act(async () => v.button().click());
-  assert.match(v.tip().textContent, /正在确认连接.*不代表未登录.*上次核验.*网络超时/);
+  assert.match(v.tip().textContent, /连接状态待确认.*不代表未登录.*上次核验.*网络超时/);
   await act(async () => v.button().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   assert.equal(v.tip(), null); assert.equal(v.button().getAttribute('aria-expanded'), 'false');
 });
