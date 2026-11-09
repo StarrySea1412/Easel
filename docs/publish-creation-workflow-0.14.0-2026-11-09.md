@@ -27,7 +27,7 @@ npm.cmd run build
 npm.cmd run lint
 ```
 
-本次没有后端修改；未将前轮后端583项重复记作本次执行。构建版本来自`pyproject.toml`的0.14.0；前端package与lock同步更新。生产dist不包含本地模拟fixture图片。当前入口为`assets/index-MdP2ycU5.js`，SHA-256为`7086055b457084642a5bd7fec090705ecf487e536ebfa6c984041ac22536a9fd`。Vite按既有配置保留旧预览chunk，本轮未制作部署包。
+本次没有后端修改；未将前轮后端583项重复记作本次执行。构建版本来自`pyproject.toml`的0.14.0；前端package与lock同步更新。生产dist不包含本地模拟fixture图片。当前入口为`assets/index-Cx0nlnuR.js`，SHA-256为`51eb15ba7857bcaa9f2561642827a794b90ad3863837420ab4c0a59a6f645916`。Vite按既有配置保留旧预览chunk，本轮未制作部署包。
 
 ### 真实浏览器、模拟接口
 
@@ -51,4 +51,7 @@ npm.cmd run lint
 
 ## Git交付
 
-必要检查已通过；本节将在提交推送后补充精确SHA及远端回读结果。源码SHA、Vite构建产物与138部署分别核对，不互相替代。
+- 功能源码：`3f003b211306ce328f60ff4e0b7d8714a84b6b1e`，已推送到`starry/codex/multi-account-distribution-0.13.0`，`git ls-remote`完全一致。
+- main首页公告：`bb346b6a11570f95a848745df27d03db09d27f23`，仅改中英文README；已推送main并回读一致，未合并功能。
+- 最终构建在上述功能源码内容上通过，入口和SHA-256见验证段；保留21项既有lint warning。Vite内嵌产品版本和构建时间，没有内嵌Git SHA。
+- 本文件后续更新仅为验证回执；源码提交、构建产物和138部署分别记录。本地模拟验收不代表138或较新gpt源码线已经更新。
