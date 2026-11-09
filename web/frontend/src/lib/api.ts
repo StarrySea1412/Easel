@@ -24,7 +24,7 @@ function accountBrowserRequest<T>(run: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // 全部是动态应用接口（登录态/数据等），禁止浏览器 HTTP 缓存——否则 /api/accounts 等可能被启发式
   // 缓存住旧响应（曾表现为“扫码登录后卡片仍显示未登录”）。调用方可用 options.cache 覆盖。
   const res = await fetch(`${BASE}${url}`, { cache: 'no-store', ...options });
@@ -741,6 +741,9 @@ export interface PublishReceipt {
   platform: string;
   title: string;
   batchId?: string;
+  accountId?: string;
+  accountLabel?: string;
+  externalAccountId?: string;
   createdAt: string;
   updatedAt: string;
   state: string;

@@ -31,6 +31,8 @@ def read_current_works(args):
     if args.platform == 'bilibili':
         if not Path(args.cookie).is_file():
             raise readback.LoginRequiredError('Missing Bilibili login')
+        import account_identity
+        account_identity.require_bilibili(args.cookie, getattr(args, 'expected_account_id', ''))
         return readback.read_bilibili_works(args.cookie, limit=50)
     from playwright.sync_api import sync_playwright
     if args.platform == 'douyin':
@@ -51,6 +53,8 @@ def read_current_works(args):
                 args=publisher.LAUNCH_ARGS + ['--no-proxy-server'],
                 viewport={'width': 1440, 'height': 900})
         try:
+            import account_identity
+            account_identity.require_context(browser, args.platform, getattr(args, 'expected_account_id', ''))
             page = browser.pages[0] if browser.pages else browser.new_page()
             page.set_default_timeout(20000)
             page.set_default_navigation_timeout(30000)
@@ -84,6 +88,7 @@ def main(argv=None) -> int:
     parser.add_argument('--content-id', default='')
     parser.add_argument('--cookie', default='cookies.json')
     parser.add_argument('--profile-base')
+    parser.add_argument('--expected-account-id', default='')
     parser.add_argument('--headed', action='store_true')
     proxy = parser.add_mutually_exclusive_group()
     proxy.add_argument('--proxy')

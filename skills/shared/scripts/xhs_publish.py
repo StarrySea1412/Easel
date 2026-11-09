@@ -771,6 +771,38 @@ def cmd_plan(a) -> int:
     return 0
 
 
+def own_account_id(href: str, page_url: str = EXPLORE_URL) -> str:
+    """Parse only the official signed-in sidebar's own profile link."""
+    from urllib.parse import urljoin
+    origin = urlsplit(page_url)
+    if origin.scheme != 'https' or origin.hostname not in {'www.xiaohongshu.com', 'xiaohongshu.com'}:
+        return ''
+    parsed = urlsplit(urljoin(page_url, href or ''))
+    if parsed.scheme != 'https' or parsed.hostname not in {'www.xiaohongshu.com', 'xiaohongshu.com'} or parsed.username or parsed.password:
+        return ''
+    matched = re.fullmatch(r'/user/profile/([0-9a-f]{24})/?', parsed.path)
+    return matched.group(1) if matched else ''
+
+
+def require_expected_identity(ctx, expected: str) -> None:
+    """Use another page in this exact browser context, preserving the form."""
+    if not expected:
+        return  # Legacy default-account callers retain their existing behavior.
+    if not re.fullmatch(r'[0-9a-f]{24}', expected):
+        raise RuntimeError('目标平台身份编号无效，内容未提交。')
+    identity_page = ctx.new_page()
+    try:
+        identity_page.goto(EXPLORE_URL, wait_until='domcontentloaded')
+        identity_page.wait_for_selector(SELECTORS['login_ok'], timeout=10000)
+        link = identity_page.query_selector('.main-container .user a[href^="/user/profile/"]')
+        visible = _query_safe(identity_page, SELECTORS['login_ok'])
+        actual = own_account_id(link.get_attribute('href') if link else '', identity_page.url)
+        if not visible or not visible.is_visible() or actual != expected:
+            raise RuntimeError('平台身份与已确认的目标账号不一致，内容未提交。')
+    finally:
+        identity_page.close()
+
+
 def _publish(a, kind: str) -> int:
     if not a.title:
         _die("--title 必填")
@@ -812,9 +844,11 @@ def _publish(a, kind: str) -> int:
 
         def before_submit():
             nonlocal since_ms
+            require_expected_identity(ctx, getattr(a, 'expected_account_id', ''))
             since_ms = int(time.time() * 1000)
 
         try:
+            require_expected_identity(ctx, getattr(a, 'expected_account_id', ''))
             snapshot_ids = xhs_readback.capture_xhs_snapshot(page)
             page.goto(PUBLISH_URL, wait_until="domcontentloaded")
             page.wait_for_timeout(1500)
@@ -877,6 +911,7 @@ def cmd_verify_publish(a) -> int:
             ctx = _launch(p, headed=a.headed, base=a.profile_base, proxy=_proxy(a.proxy, a.no_proxy))
             try:
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                require_expected_identity(ctx, getattr(a, 'expected_account_id', ''))
                 result = xhs_readback.verify_xhs_publish(page, title=a.title, since_ms=a.since_ms,
                                                         content_id=a.content_id or "",
                                                         until_ms=getattr(a, "until_ms", None))
@@ -931,6 +966,7 @@ def cmd_whoami(a) -> int:
                         result["avatar"] = img.get_attribute("src") or ""
                     a_el = page.query_selector('.main-container .user a[href^="/user/profile/"]')
                     href = a_el.get_attribute("href") if a_el else None
+                    result['externalAccountId'] = own_account_id(href, page.url)
                     if href:  # 昵称在个人主页，explore 页只有头像
                         try:
                             page.goto("https://www.xiaohongshu.com" + href,
@@ -1000,6 +1036,7 @@ def main() -> int:
         p.add_argument("--profile-base", help="登录态根目录（默认 ~/.easel-browser-profiles）")
         p.add_argument("--proxy", help="外网代理（默认取 env，小红书是外网需代理）")
         p.add_argument("--no-proxy", action="store_true", help="禁用代理")
+        p.add_argument("--expected-account-id", default='', help="可选：目标平台身份，上传和提交前必须一致")
 
     def add_content(p):
         p.add_argument("--title", help="标题（≤20 全角）")

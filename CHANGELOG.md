@@ -1,3 +1,13 @@
+## 0.13.0 · 2026-11-09 · Independent platform accounts / 七平台独立账号
+
+- Add account registration, isolated browser profiles/Bilibili cookies, stable platform identity binding and bounded login audit for all seven current publishing platforms. / 新增七平台同平台多账号、隔离资料、稳定平台身份绑定与登录审计，兼容原默认账号。
+- Redesign account management with platform filters, search, compact account rows and a login activity inspector; platform buttons wrap completely on narrow screens. / 重设计平台筛选、搜索、紧凑账号列表与登录活动面板，窄屏完整分排。
+- Publishing now selects platforms before their accounts, switches one visible account editor at a time, and explicitly confirms target accounts; WeChat Official Accounts remains draft-only. / 发布先选平台再选对应账号，按账号切换内容，明确确认目标，公众号仅存草稿。
+- Add an SQLite distribution ledger, idempotent request keys, pre-submit identity checks, media SHA256 checks, failed-account-only retries and restart settlement without resubmission. / 新增分发账本、请求幂等、发布前身份/素材摘要检查、仅失败账号重试与重启不重发保护。
+- Remove decorative leading-zero labels from distribution, analysis, workflow and character previews. Correct the local mock preview shell so bottom media/actions remain reachable. / 去掉界面装饰编号，修复本地模拟预览壳造成的底部裁切。
+- Validation: 583 focused backend and 99 related frontend checks, build/lint and desktop/390px/320px browser checks with mocked APIs. No real platform login, upload, publication, 138 deployment or installer release. / 后端583项、前端相关99项与构建/lint通过；桌面/390px/320px真实浏览器使用模拟API验收，无真实扫码、上传、投稿、138部署或安装器发布。
+- [Scope, limitations and upgrade notes / 范围、限制与升级说明](docs/multi-account-distribution-0.13.0-2026-11-09.md).
+
 ## 0.11.0 · 2026-11-08 · Same-account multi-platform publish batches / 同账号多平台批量发布
 
 - Add a server-held publish batch: the publishing center submits one confirmed multi-platform batch to `POST /api/publish/batch`; the server accepts each platform independently (login quick-check, media rules, platform locks) and runs the accepted platforms serially in one browser-writer lane, so closing the page can no longer drop the remaining confirmed platforms. / 新增服务端持有的发布批次：发布中心一次提交已确认的多平台批次到 `POST /api/publish/batch`；服务端逐平台独立受理（登录快检、媒体规则、平台锁），已受理平台在单一浏览器写通道内串行执行，关闭页面不再丢失剩余平台。

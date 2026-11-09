@@ -200,12 +200,15 @@ class ReceiptStore:
                     raise
                 time.sleep(0.01 * (attempt + 1))
 
-    def create(self, receipt_id: str, platform: str, title: str) -> dict:
+    def create(self, receipt_id: str, platform: str, title: str, *, account_id: str = '') -> dict:
         if not RECEIPT_ID.fullmatch(receipt_id):
             raise ValueError('Invalid receipt ID')
+        if account_id and not RECEIPT_ID.fullmatch(account_id):
+            raise ValueError('Invalid local account ID')
         def operation(items):
             for item in items:
-                if item['platform'] == platform and item.get('outcome') not in OUTCOMES:
+                if (item['platform'] == platform and item.get('accountId', '') == account_id
+                        and item.get('outcome') not in OUTCOMES):
                     raise ActivePublishError(item['receiptId'])
                 if item['receiptId'] == receipt_id:
                     raise ValueError('Duplicate receipt ID')
@@ -217,6 +220,8 @@ class ReceiptStore:
                     'createdAt': now, 'updatedAt': now,
                     'notification': {'state': 'skipped', 'message': '待平台确认发布后再提醒。'}}
             items.append(item)
+            if account_id:
+                item['accountId'] = account_id
             return dict(item)
         return self._change(operation)
 
@@ -235,16 +240,17 @@ class ReceiptStore:
 
     def awaiting_verification(self) -> list[dict]:
         """Do not hide pending checks behind the UI's recent-history limit."""
-        return [dict(item) for item in self._read() if item.get('outcome') in {'submitted', 'unverified'}
-                or (item.get('outcome') == 'published' and item.get('completionPending') is True
-                    and not item.get('completionHandled'))]
+        return [dict(item) for item in self._read() if not item.get('accountId')
+                and (item.get('outcome') in {'submitted', 'unverified'}
+                     or (item.get('outcome') == 'published' and item.get('completionPending') is True
+                         and not item.get('completionHandled')))]
 
     def update(self, receipt_id: str, changes: dict) -> dict:
         def operation(items):
             for item in items:
                 if item['receiptId'] == receipt_id:
                     update = {key: value for key, value in changes.items()
-                              if key not in {'receiptId', 'platform', 'createdAt', 'contentClaimedAt'}}
+                              if key not in {'receiptId', 'platform', 'accountId', 'createdAt', 'contentClaimedAt'}}
                     # File-level optimistic retries make this claim atomic
                     # even when two readers identify the same creator work.
                     content_id = update.get('contentId') or item.get('contentId')
@@ -255,6 +261,7 @@ class ReceiptStore:
                         candidate = {**item, **update}
                         owners = [other for other in items if other['receiptId'] != receipt_id
                                   and other['platform'] == item['platform']
+                                  and other.get('accountId', '') == item.get('accountId', '')
                                   and other.get('contentId') == content_id]
                         owners.append(candidate)
                         first = min(owners, key=lambda other: (

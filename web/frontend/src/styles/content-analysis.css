@@ -70,9 +70,8 @@
 .ca-connect-callout button { flex-shrink: 0; }
 .ca-guide-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 23px 20px; }
 .ca-guide-card h2 { font-size: 17px; font-weight: 550; margin: 0 0 22px; }
-.ca-guide-card ol { padding: 0; margin: 0; list-style: none; }
+.ca-guide-card ul { padding: 0; margin: 0; list-style: none; }
 .ca-guide-card li { display: flex; gap: 12px; margin-top: 22px; }
-.ca-guide-card li > span { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--accent-start); padding-top: 3px; }
 .ca-guide-card li strong { font-size: 13px; font-weight: 600; }
 .ca-guide-card li p, .ca-scope-card p { font-size: 12px; color: var(--text-secondary); line-height: 1.85; margin: 7px 0 0; }
 .ca-scope-card { padding: 23px 5px; }
@@ -115,14 +114,13 @@
 .ca-source-list .platform-icon { width: 22px; height: 22px; object-fit: contain; }
 .ca-method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 18px; }
 .ca-method-grid article { padding: 22px 20px; border: 1px solid var(--border); border-radius: var(--radius-md); }
-.ca-method-grid article > span { font-size: 11px; color: var(--accent-start); }
-.ca-method-grid h3 { font-size: 15px; font-weight: 550; margin: 13px 0 9px; }
+.ca-method-grid h3 { font-size: 15px; font-weight: 550; margin: 0 0 9px; }
 .ca-method-grid p, .ca-method-footer p { margin: 0; font-size: 12px; line-height: 1.9; color: var(--text-secondary); }
 .ca-method-footer { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-top: 26px; padding-top: 23px; border-top: 1px solid var(--border); }
 .ca-method-footer button { flex-shrink: 0; }
-@media (max-width: 1200px) { .ca-workspace { padding: 28px 28px 60px; } .ca-review-layout { grid-template-columns: minmax(0, 1fr); } .ca-guide { display: grid; grid-template-columns: 2fr 1fr; gap: 22px; } .ca-guide-card ol { display: flex; gap: 20px; } .ca-guide-card li { flex: 1; margin-top: 0; } .ca-guide-card h2 { margin-bottom: 18px; } }
+@media (max-width: 1200px) { .ca-workspace { padding: 28px 28px 60px; } .ca-review-layout { grid-template-columns: minmax(0, 1fr); } .ca-guide { display: grid; grid-template-columns: 2fr 1fr; gap: 22px; } .ca-guide-card ul { display: flex; gap: 20px; } .ca-guide-card li { flex: 1; margin-top: 0; } .ca-guide-card h2 { margin-bottom: 18px; } }
 @media (max-width: 800px) { .ca-heading { align-items: flex-start; flex-direction: column; gap: 18px; } .ca-platform { padding: 8px 10px; } .ca-guide { grid-template-columns: minmax(0, 1fr); gap: 0; } .ca-connect-callout { align-items: flex-start; flex-direction: column; } .ca-context { align-items: flex-start; } .ca-context > button { flex-shrink: 0; } .content-analysis-page .platform-analysis-columns { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
-@media (max-width: 520px) { .ca-workspace { padding: 24px 16px 48px; } .ca-heading { margin-bottom: 22px; } .ca-platform-picker { gap: 3px; } .ca-platform { gap: 6px; font-size: 12px; padding: 8px; } .ca-platform .platform-icon { width: 21px; height: 21px; } .ca-context { flex-direction: column; gap: 6px; } .ca-view-nav { gap: 24px; } .ca-view-nav > span { display: none; } .ca-method-grid { grid-template-columns: minmax(0, 1fr); } .ca-source-list { padding: 5px 16px; } .ca-source-list > div { grid-template-columns: minmax(0, 1fr); gap: 5px; } .ca-guide-card ol { display: block; } .ca-guide-card li { margin-top: 20px; } .ca-method-footer { flex-direction: column; align-items: flex-start; gap: 12px; } .content-analysis-page .platform-analysis { padding: 16px; } .content-analysis-page .xhs-panel { padding: 18px 0; } }
+@media (max-width: 520px) { .ca-workspace { padding: 24px 16px 48px; } .ca-heading { margin-bottom: 22px; } .ca-platform-picker { gap: 3px; } .ca-platform { gap: 6px; font-size: 12px; padding: 8px; } .ca-platform .platform-icon { width: 21px; height: 21px; } .ca-context { flex-direction: column; gap: 6px; } .ca-view-nav { gap: 24px; } .ca-view-nav > span { display: none; } .ca-method-grid { grid-template-columns: minmax(0, 1fr); } .ca-source-list { padding: 5px 16px; } .ca-source-list > div { grid-template-columns: minmax(0, 1fr); gap: 5px; } .ca-guide-card ul { display: block; } .ca-guide-card li { margin-top: 20px; } .ca-method-footer { flex-direction: column; align-items: flex-start; gap: 12px; } .content-analysis-page .platform-analysis { padding: 16px; } .content-analysis-page .xhs-panel { padding: 18px 0; } }
 @media (max-width: 520px) { .content-analysis-page .platform-analysis-search { align-items: stretch; flex-direction: column; gap: 8px; } .content-analysis-page .platform-analysis-search input[type="search"] { flex: auto; width: 100%; max-width: none; } .content-analysis-page .platform-analysis > section[aria-label="作品数据质量"] { padding: 12px; } }
 
 /* Persistent evidence workbench */

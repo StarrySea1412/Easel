@@ -562,6 +562,7 @@ async def _lifespan(_app: FastAPI):
         await asyncio.to_thread(_publish_batch_store().recover_interrupted)
     except local_records.RecordError as exc:
         print(str(exc), file=sys.stderr)
+    await asyncio.to_thread(_social_accounts.startup)
     verification = _publish_verification_service()
     verification.start()
     health = _model_health_service()
@@ -571,6 +572,7 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await asyncio.to_thread(_social_accounts.shutdown)
         await _task_service.close()
         await asyncio.to_thread(_image_worker().stop)
         await asyncio.to_thread(_codex_service.close)
@@ -6913,6 +6915,7 @@ class PublishRequest(BaseModel):
 
 
 _PUBLISH_LOCK = threading.RLock()
+_PUBLISH_WRITER_LOCK = threading.RLock()
 _PUBLISH_ACTIVE: dict[str, str] = {}
 # Preserve a known result in the running process if a disk fails after the
 # platform has accepted it. Starting a new operation still requires durable IO.
@@ -7132,6 +7135,13 @@ class PublishVerificationRequest(BaseModel):
 
 @app.post("/api/publish/receipts/{receipt_id}/verify")
 async def api_verify_publish_receipt(receipt_id: str):
+    receipt = _get_publish_receipt(receipt_id)
+    if receipt.get('accountId'):
+        from easel.social_accounts import AccountError
+        try:
+            return await asyncio.to_thread(_social_accounts.verify, receipt)
+        except AccountError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from None
     try:
         return _publish_verification_service().request(receipt_id)
     except publish_followup.VerificationError as exc:
@@ -7140,6 +7150,8 @@ async def api_verify_publish_receipt(receipt_id: str):
 
 @app.post("/api/publish/receipts/{receipt_id}/verification")
 async def api_set_publish_verification(receipt_id: str, req: PublishVerificationRequest):
+    if _get_publish_receipt(receipt_id).get('accountId'):
+        raise HTTPException(409, '独立账号回执目前仅支持手动核实，请使用核实发布结果入口。')
     try:
         return _publish_verification_service().request(receipt_id, automatic=req.automatic)
     except publish_followup.VerificationError as exc:
@@ -7149,7 +7161,7 @@ async def api_set_publish_verification(receipt_id: str, req: PublishVerification
 def _read_publish_status(platform: str) -> dict:
     """Legacy platform polling reads the newest durable receipt, not stale JSON."""
     receipt = next((item for item in _recent_publish_receipts(200)
-                    if item['platform'] == platform), None)
+                    if item['platform'] == platform and not item.get('accountId')), None)
     return _refresh_publish_receipt(receipt) if receipt else {'state': 'unknown', 'message': ''}
 
 
@@ -7216,6 +7228,13 @@ def _complete_publish_receipt(receipt: dict) -> dict:
 
 
 def _run_publish_job(platform: str, cmd: list, title: str, body: str, cfg: dict,
+                     status_file: Path, code_file: Path, receipt_id: str,
+                     timeout: int = 600) -> dict:
+    with _PUBLISH_WRITER_LOCK:
+        return _run_publish_job_locked(platform, cmd, title, body, cfg, status_file, code_file, receipt_id, timeout)
+
+
+def _run_publish_job_locked(platform: str, cmd: list, title: str, body: str, cfg: dict,
                      status_file: Path, code_file: Path, receipt_id: str,
                      timeout: int = 600) -> dict:
     out = err = ''
@@ -7296,6 +7315,21 @@ class PublishSmsRequest(BaseModel):
 async def api_publish_sms(platform: str, req: PublishSmsRequest):
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
+    if req.receiptId:
+        try:
+            receipt = _get_publish_receipt(req.receiptId)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(409, '对应发布任务已结束或已变化，请刷新任务状态。') from None
+            raise
+        if receipt.get('accountId'):
+            from easel.social_accounts import AccountError
+            if receipt['platform'] != platform:
+                raise HTTPException(409, '回执平台与本次验证不一致。')
+            try:
+                return _social_accounts.publish_sms(receipt, req.code)
+            except AccountError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from None
     with _PUBLISH_LOCK:
         receipt_id = _PUBLISH_ACTIVE.get(platform)
         if not receipt_id or (req.receiptId and req.receiptId != receipt_id):
@@ -7323,7 +7357,7 @@ class PublishBatchRequest(BaseModel):
     requests: list[PublishBatchItem] = []
 
 
-def _check_publish_request(platform: str, cfg: dict, req: PublishRequest) -> tuple[list[str], list[str]]:
+def _check_publish_request(platform: str, cfg: dict, req: PublishRequest, *, account_scoped: bool = False) -> tuple[list[str], list[str]]:
     """Shared preflight for the single-platform and batch entry points."""
     if cfg['backend'] == 'unsupported':
         raise HTTPException(400, f"{cfg['name']} 暂不支持一键发布")
@@ -7343,7 +7377,7 @@ def _check_publish_request(platform: str, cfg: dict, req: PublishRequest) -> tup
     if platform in VIDEO_ONLY_PUBLISH and not vids:
         raise HTTPException(400, f"{cfg['name']} 只能发视频，请附带一个视频文件")
     if platform == 'wechat-oa':
-        if _mp_login_status().get('state') != 'success':
+        if not account_scoped and _mp_login_status().get('state') != 'success':
             raise HTTPException(400, '公众号后台未登录：请先在账号页点「登录公众号后台」扫码')
         if not imgs or vids:
             raise HTTPException(400, '公众号文章需要封面图，请附带图片而非视频')
@@ -8414,6 +8448,11 @@ async def api_usage_save_price(req: UsagePriceRequest):
 from task_service import TaskService
 _task_service = TaskService(sys.modules[__name__])
 app.include_router(_task_service.router())
+from social_accounts_api import SocialAccountService
+_social_accounts = SocialAccountService(sys.modules[__name__])
+app.include_router(_social_accounts.router())
+from login_audit import install_default_audit
+install_default_audit(sys.modules[__name__])
 
 
 if __name__ == "__main__":

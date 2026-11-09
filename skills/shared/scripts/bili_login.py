@@ -202,7 +202,7 @@ def cmd_whoami(a) -> int:
                 raise RuntimeError('B站未返回可信登录状态，请稍后重试。')
             if nav.get("isLogin"):
                 result = {"loggedIn": True, "name": (nav.get("uname") or "")[:40],
-                          "avatar": nav.get("face") or ""}
+                          "avatar": nav.get("face") or "", 'externalAccountId': str(nav.get('mid') or '')}
         except Exception as e:  # noqa: BLE001 — whoami 永远输出 JSON
             result["error"] = str(e)
     print(json.dumps(result, ensure_ascii=False))

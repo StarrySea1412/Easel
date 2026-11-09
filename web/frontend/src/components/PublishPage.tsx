@@ -15,6 +15,7 @@ import '../styles/publish.css';
 import PlatformIcon from './PlatformIcon';
 import { PublishReceiptCard } from './PublishReceiptCenter';
 import PublishSpinner from './PublishSpinner';
+import SocialDistributionPanel from './SocialDistributionPanel';
 import { ACCOUNT_STATE_EVENT, getWhoamiCache, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
@@ -94,7 +95,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   const [selectedMedia, setSelectedMedia] = useState<string[]>(draft0.media || []);
   const [showPicker, setShowPicker] = useState(false);
   const [blocked, setBlocked] = useState<Record<string, string>>({});
-  const publishing = publishReceipts.submitting || publishReceipts.active.some(item => platforms.includes(item.platform));
+  const publishing = publishReceipts.submitting || publishReceipts.active.some(item => !item.accountId && platforms.includes(item.platform));
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
@@ -194,7 +195,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
   });
   const selectedPlatforms = PLATFORMS.filter(p => platforms.includes(p.key));
   const activePreview = platforms.includes(previewPlatform) ? previewPlatform : selectedPlatforms[0]?.key;
-  const platformBusy = (key: string) => publishReceipts.submittingPlatforms.includes(key) || publishReceipts.active.some(item => item.platform === key);
+  const platformBusy = (key: string) => publishReceipts.submittingPlatforms.includes(key) || publishReceipts.active.some(item => !item.accountId && item.platform === key);
   const preparationIssue = (key: string) => {
     if (accountsLoading) return '正在读取账号';
     if (accountsError) return '账号状态未知';
@@ -413,6 +414,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
         {[accountsError, mediaError].filter(Boolean).join(' ')}
         <button className="btn btn-sm" onClick={loadAssets} disabled={accountsLoading || mediaLoading}>重试</button>
       </div>}
+      <SocialDistributionPanel seed={{ title, body, media: selectedMedia, tags }} files={mediaFiles} />
       <div className="publish-workspace">
         <div className="publish-editor">
           <section className="publish-section publish-content-section">
@@ -519,7 +521,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
                 const over = text.length > p.bodyLimit;
                 const titleOver = p.titleLimit != null && title.length > p.titleLimit;
                 const isEdit = editing === p.key;
-                const receipt = publishReceipts.receipts.find(item => item.platform === p.key);
+                const receipt = publishReceipts.receipts.find(item => !item.accountId && item.platform === p.key);
                 const issue = preparationIssue(p.key);
                 return <div key={p.key} id={`publish-preview-${p.key}`} role="tabpanel" aria-labelledby={`publish-tab-${p.key}`}
                   hidden={activePreview !== p.key} className={`pv-card pv-${p.key}`} tabIndex={0}>
@@ -559,7 +561,7 @@ export default function PublishPage({ persona, publishReceipts }: PublishPagePro
           <section className="publish-action-panel" aria-label="发布操作">
             {selectedPlatforms.length > 0 && <div className="publish-readiness" aria-label="各平台发布准备">
               {selectedPlatforms.map(p => {
-                const receipt = publishReceipts.receipts.find(item => item.platform === p.key);
+                const receipt = publishReceipts.receipts.find(item => !item.accountId && item.platform === p.key);
                 const busy = platformBusy(p.key);
                 return <button key={p.key} className="publish-readiness-row" onClick={() => setPreviewPlatform(p.key)}>
                   <span><PlatformIcon platform={p.key} name={p.label} className="publish-platform-icon" />{p.label}</span>

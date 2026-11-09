@@ -44,6 +44,7 @@ async function fixture(t, { rawCache } = {}) {
     state.requests.push({ url, method: options?.method || 'GET' });
     assert.equal(options.cache, 'no-store');
     if (url === '/api/accounts') return response(state.accountRows);
+    if (url === '/api/social-accounts') return response([]);
     if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response(await state.whoami()); }
     if (url.endsWith('/sms')) return response(await state.sms());
     if (url.includes('/cancel?')) return response(await state.cancel(url));
@@ -466,7 +467,7 @@ test('visible account page periodically detects expiry and does not count an unv
   now += 121000;
   await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
   assert.equal(view.state.whoamiCalls, 1);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
+  assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   assert.match(view.container.querySelector('article').textContent, /登录已失效/);
   assert.ok([...view.container.querySelectorAll('article button')].some(button => button.textContent === '连接账号'));
   // A stale quick endpoint cannot erase the fresh confirmed offline result.
@@ -491,7 +492,7 @@ test('account checking remains unknown on transport failure and periodic checks 
   Object.defineProperty(document, 'visibilityState', {configurable:true,value:'visible'});
   await act(async () => document.dispatchEvent(new window.Event('visibilitychange')));
   assert.match(view.container.querySelector('article .badge').textContent, /状态待确认/);
-  assert.match(view.container.querySelector('.accounts-summary').textContent, /0 \/ 1 个平台已确认在线/);
+  assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
   await view.start('知乎');
   const calls = view.state.requests.length;

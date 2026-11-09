@@ -729,6 +729,8 @@ def cmd_publish(a):
             if not token:
                 out["error"] = "未登录 mp 后台，请先 login 扫码"
                 return finish("failed", "login_required", "未登录公众号后台，尚未创建草稿。")
+            import account_identity
+            account_identity.require_context(ctx, 'wechat-oa', getattr(a, 'expected_account_id', ''))
             info = _editor_ctx(page, token)
             if not info.get("ticket"):
                 out["error"] = "未取到上传 ticket（编辑器页结构可能变化）"
@@ -810,6 +812,7 @@ def cmd_publish(a):
                     "cdn_url0": cover_cdn_url, "cdn_235_1_url0": cover_cdn_url,
                     "cdn_1_1_url0": cover_cdn_url, "cdn_16_9_url0": cover_cdn_url,
                 })
+            account_identity.require_context(ctx, 'wechat-oa', getattr(a, 'expected_account_id', ''))
             publish_receipt.mark_submitted()
             r2 = page.request.post(op_url, form=form,
                                    headers={"Referer": page.url, "X-Requested-With": "XMLHttpRequest"})
@@ -874,6 +877,10 @@ def cmd_whoami(a):
                 page.wait_for_timeout(1200)
                 host = urlsplit(page.url).hostname
                 out["loggedIn"] = host == 'mp.weixin.qq.com' and bool(_extract_token(page.url))
+                if out['loggedIn']:
+                    import account_identity
+                    own = account_identity.page_identity('wechat-oa', page)
+                    out.update(externalAccountId=own['externalAccountId'], name=own.get('name', ''))
                 if not out['loggedIn']:
                     qr = page.query_selector("img[src*='qrcode'], .login__type__container__scan")
                     if host != 'mp.weixin.qq.com' or not qr or not qr.is_visible():
@@ -892,6 +899,7 @@ def main():
 
     def common(x):
         x.add_argument("--profile-base")
+        x.add_argument('--expected-account-id', default='', help='提交前核对指定公众号身份')
         x.add_argument("--proxy")
         x.add_argument("--no-proxy", action="store_true")
         x.add_argument("--headed", action="store_true")

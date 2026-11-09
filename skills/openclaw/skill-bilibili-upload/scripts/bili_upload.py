@@ -164,6 +164,8 @@ def cmd_upload(a) -> int:
     print("投稿中 ...", file=sys.stderr)
     # 发前快照 + 时间窗基准（读回对账用；快照失败自动退化为标题+时间窗）
     snapshot = platform_readback.capture_bilibili_snapshot(cookie)
+    import account_identity
+    account_identity.require_bilibili(cookie, getattr(a, 'expected_account_id', ''))
     started_ms = int(time.time() * 1000)
     publish_receipt.mark_submitted()
     rc = subprocess.call(cmd, env=_direct_env())
@@ -263,6 +265,7 @@ def main() -> int:
     pu.add_argument("--source", help="转载来源（copyright=2 时）")
     pu.add_argument("--dtime", type=int, help="定时发布 10 位时间戳（距今>4h）")
     pu.add_argument("--cookie", help="cookie 文件（默认 cookies.json）")
+    pu.add_argument('--expected-account-id', default='', help='投稿前核对指定B站身份')
     pu.add_argument("--proxy", help="代理")
     pu.add_argument("--exec", action="store_true", help="真正投稿（默认 dry-run 预览）")
     pu.set_defaults(func=cmd_upload)

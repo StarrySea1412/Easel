@@ -11,6 +11,7 @@ import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts, IconCheck, IconEye, IconEyeOff, IconInfo, IconRefresh } from './icons';
 import '../styles/accounts.css';
+import SocialAccountsPanel from './SocialAccountsPanel';
 
 type QRState = {
   platform: string;
@@ -495,22 +496,19 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
   return (
     <div className="accounts-page accounts-center">
       <div className="accounts-heading">
-        <div><p className="accounts-eyebrow">创作渠道</p><h1><IconAccounts size={24} aria-hidden={true} style={{ verticalAlign: '-4px', marginRight: 8, color: 'var(--accent-start)' }} />账号中心</h1>
-          <p className="accounts-intro">连接发布平台，管理登录状态，了解自己的内容表现。</p></div>
+        <div><p className="accounts-eyebrow"><IconAccounts size={13}/> CHANNELS & ACCOUNTS</p><h1>账号中心<span className="accounts-title-period">.</span></h1>
+          <p className="accounts-intro">统一管理你的创作身份与发布渠道。</p></div>
         <div className="account-heading-actions"><span className="account-auto-status"><IconRefresh size={14} />自动检测已开启</span><button className="btn btn-sm" aria-pressed={hideIdentity} onClick={togglePrivacy}>{hideIdentity ? <IconEye size={15} /> : <IconEyeOff size={15} />}{hideIdentity ? '显示账号身份' : '隐藏账号身份'}</button></div>
-      </div>
-      <div className="accounts-summary" aria-live="polite">
-        <span className="accounts-summary-dot" aria-hidden={true} />
-        <strong>{loaded ? `${connectedCount} / ${supportedCount} 个平台已确认在线` : err ? '连接状态暂不可用' : '正在读取连接状态…'}</strong>
-        <span>每个平台使用一个当前登录账号</span>
       </div>
       {err && <div className="notice-error" role="alert">{err}</div>}
       {logoutMessage && <div className="accounts-message" role="status">{logoutMessage}</div>}
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
       {cancelling && <div className="accounts-message" role="status">正在结束登录流程…完成后可连接其他平台。</div>}
       {cancelError && <div className="accounts-message" role="alert">{cancelError} <button className="btn btn-sm" onClick={() => void closeQr()}>重试结束登录</button></div>}
-      <div className="accounts-protection"><div><strong>登录凭据留在本机</strong><p>连接状态用于创作与发布；Cookie 和授权码不会在账号卡片中显示。共享屏幕时可隐藏昵称与头像。</p></div><span>可单独管理与退出</span></div>
+      <SocialAccountsPanel hideIdentity={hideIdentity} />
 
+      <details className="accounts-default-channels">
+        <summary><span className="account-default-icon"><IconAccounts size={18}/></span><span><strong>默认发布通道</strong><small>保留原有的每平台单账号入口，与上方独立账号分别管理。</small></span><span className="account-default-count" aria-live="polite">{loaded ? `${connectedCount} / ${supportedCount} 在线` : '状态读取中'}</span></summary>
       <section id="accounts-connections" aria-label="账号连接">
         <div className="accounts-section-heading"><div><h2>连接你的平台</h2><p>选择平台完成登录，之后可直接用于创作发布。</p></div>
           <div className="accounts-filters" role="group" aria-label="连接状态筛选">
@@ -568,6 +566,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
           {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
         </details>
       </section>
+      </details>
 
       <dialog ref={accountDialog} className="account-management-dialog" aria-labelledby="account-management-title"
         onCancel={(event) => { if (logoutBusy) event.preventDefault(); else { setManagedPlatform(null); setConfirmLogout(false); } }}>

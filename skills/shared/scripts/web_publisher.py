@@ -489,6 +489,10 @@ def _publish_weixin_channels(page, ctx: dict) -> int:
                 page.wait_for_timeout(3000)
                 continue
             submitted_at_ms = int(time.time() * 1000)
+            if ctx.get('expected_account_id'):
+                import account_identity
+                account_identity.require_context(page.context, 'weixin-channels', ctx['expected_account_id'])
+                page.bring_to_front()
             publish_receipt.mark_submitted()
             page.keyboard.press("Enter")   # 可信提交
             # 等提交后的导航反馈（真机 ~6s 跳 /post/list）；后续还要检查目标页面。
@@ -587,6 +591,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
     cfg = PLATFORMS[a.platform]
     ctx = {"media": a.media or "", "title": a.title or "", "desc": a.desc or "",
            "tags": a.tags or "", "cover": a.cover or ""}
+    ctx['expected_account_id'] = getattr(a, 'expected_account_id', '')
     with sync_playwright() as p:
         browser = p.chromium.launch_persistent_context(
             str(profile), headless=not headed, args=LAUNCH_ARGS + ["--no-proxy-server"],
@@ -628,6 +633,8 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 break
         if not logged:
             _die(f"{cfg['name']}未登录：发布页被重定向到登录/落地页。请先在账号页扫码登录后重试。", 6)
+        import account_identity
+        account_identity.require_context(browser, a.platform, ctx['expected_account_id'])
         # 外壳已登录但发布子系统鉴权可能已失效（快手 onvideo token 短命）→ 提前明确报错，
         # 避免后续 upload 因发布态失效而晦涩超时。仅明确失效才拦，瞬时错误放行。
         if cfg.get("login_probe") and _probe_publish_auth(page, cfg) == "expired":
@@ -650,6 +657,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 opt = s.get("optional", False)  # 可选步骤失败不中断（如清理旧草稿弹窗）
                 print(f"  步骤 {i}/{len(steps)}: {act} {sel}", file=sys.stderr)
                 if s.get("commit") and submitted_at_ms is None:
+                    account_identity.require_context(browser, a.platform, ctx['expected_account_id'])
                     submitted_at_ms = int(time.time() * 1000)
                     publish_receipt.mark_submitted()
                     print("  ⏱ 提交步（读回时间窗基准已记录）", file=sys.stderr)
@@ -1323,6 +1331,8 @@ def cmd_verify_publish(a) -> int:
                         options["proxy"] = {"server": proxy}
                     browser = p.chromium.launch_persistent_context(str(profile), **options)
                     try:
+                        import account_identity
+                        account_identity.require_context(browser, a.platform, getattr(a, 'expected_account_id', ''))
                         page = browser.pages[0] if browser.pages else browser.new_page()
                         result = channels_readback.verify_channels_publish(
                             page, title=a.title, since_ms=a.since_ms, content_id=a.content_id,
@@ -1411,6 +1421,14 @@ def cmd_whoami(a) -> int:
                             if src:
                                 result["avatar"] = src
                                 break
+                    try:
+                        import account_identity
+                        own = account_identity.page_identity(a.platform, page)
+                        result['externalAccountId'] = own['externalAccountId']
+                        if own.get('name'):
+                            result['name'] = own['name'][:80]
+                    except Exception:
+                        pass
             finally:
                 browser.close()
     except Exception as e:  # noqa: BLE001 — whoami 永远输出 JSON
@@ -1555,6 +1573,7 @@ def main() -> int:
         p.add_argument("--tags", help="话题标签（如 '#AI #教程'）")
         p.add_argument("--cover", help="封面")
         p.add_argument("--profile-base", help="登录态根目录（默认 ~/.easel-browser-profiles）")
+        p.add_argument('--expected-account-id', default='', help='提交前核对指定平台身份')
 
     sub.add_parser("platforms", help="列出平台").set_defaults(func=cmd_platforms)
     sub.add_parser("check", help="检查 playwright/内核").set_defaults(func=cmd_check)
@@ -1604,6 +1623,7 @@ def main() -> int:
     p.add_argument("--until-ms", type=timestamp_ms_arg, help="原投稿结束的毫秒时间戳，避免匹配后来同标题重发的作品")
     p.add_argument("--content-id", default="", type=content_id_arg, help="已知作品编号；填写后仅核实该作品")
     p.add_argument("--profile-base", help="已有登录态根目录（默认 ~/.easel-browser-profiles）")
+    p.add_argument('--expected-account-id', default='', help='核实前核对回执所属身份')
     p.add_argument("--headed", action="store_true", help="有头模式")
     proxy_group = p.add_mutually_exclusive_group()
     proxy_group.add_argument("--proxy", help="核实时使用的代理服务器")
