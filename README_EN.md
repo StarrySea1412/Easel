@@ -1,3 +1,5 @@
+**0.49.2 fix candidate: runtime switching and Qizhi file delivery.** Bound conversations retain their engine and drafts, with an action to start a chat on the selected runtime. Declared remote outputs become local links only after downloading, hashing and registering their actual files. The original Xiaomi ZIP, preview and copy have been recovered to the original turn. [Source and release evidence](docs/release-138-0.49.2-2026-11-09.md).
+
 **0.49.1 deployed to host 138: quote previews escape composer clipping.** The preview stays within the viewport and scrolls long content while retaining its close action, comments and per-session drafts. Production build 490712b2 passed login, all-resource and desktop/390px browser checks. [Release evidence](docs/release-138-0.49.1-2026-11-09.md).
 
 **Qizhi three-minute timeout diagnosed.** The original turn became unknown after 181 seconds; the adapter imposed a 180-second read cap. The 0.49.0 source uses the full turn budget and distinguishes network phases without resubmitting unknown work. The fix is deployed in 0.49.1; the original remote outcome remains unconfirmed. [Evidence](docs/qizhi-timeout-2026-11-09.md).

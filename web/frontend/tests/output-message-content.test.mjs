@@ -104,3 +104,53 @@ test('static and inert transcripts include sanitized disclosure bodies before ef
   assert.match(html, /<details>/);
   assert.doesNotMatch(html, /<script|<img/);
 });
+
+test('Qizhi recheck imports only the stored turn and enables the link after local verification', async t => {
+  const calls = [];
+  const href = '/home/cloudcli/projects/qizhi-agent/outputs/task/file.md';
+  let synced = false;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push([url, init]);
+    if (String(url).includes('/remote-outputs/')) {
+      if (init?.method === 'POST') synced = true;
+      return {ok: true, json: async () => ({sessionId:'qizhi-session',turnId:'turn-1',runtime:'qizhi',links:[{href,status:synced?'ready':'pending',message:synced?'':'远端文件尚未同步到当前内容库',...(synced?{localPath:'Qizhi/turn-1/file.md'}:{})}]})};
+    }
+    assert.ok(String(url).startsWith('/api/output-status?'));
+    return {ok: true,json:async()=>({exists:synced})};
+  });
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container);
+  t.after(async()=>{await act(async()=>root.unmount());container.remove();});
+  const props = {content:'[原文件]('+href+')',sessionId:'qizhi-session',turnId:'turn-1'};
+  await act(async()=>root.render(createElement(OutputMessageContent,props)));
+  assert.equal(container.querySelector('a[href]'),null);
+  assert.match(container.textContent,/远端文件尚未同步/);
+  assert.doesNotMatch(container.textContent,/请让 Agent 实际保存/);
+  await act(async()=>container.querySelector('button').click());
+  assert.equal(container.querySelector('a').getAttribute('href'),'#/outputs/Qizhi/turn-1/file.md');
+  assert.equal(container.querySelector('[role=status]'),null);
+  const writes=calls.filter(([,init])=>init?.method==='POST');
+  assert.equal(writes.length,1);
+  assert.equal(writes[0][0],'/api/chat/remote-outputs/qizhi-session/turn-1/recheck');
+  assert.equal(writes[0][1].body,undefined,'the browser cannot supply arbitrary paths');
+  assert.ok(calls.every(([url])=>!String(url).includes('/api/agent')));
+});
+
+test('unsupported remote roots explain export recovery without calling them nonexistent', async t => {
+  const href='/home/cloudcli/projects/qizhi-agent/original/cards.zip';
+  const calls=[];
+  t.mock.method(globalThis,'fetch',async(url,init)=>{
+    calls.push([url,init]);
+    return {ok:true,json:async()=>({sessionId:'s',turnId:'t',runtime:'qizhi',links:[{href,status:'unsupported',message:'远端路径不在可下载目录内，请导出已有文件，无需重新生成。'}]})};
+  });
+  const container=document.createElement('div');document.body.append(container);
+  const root=createRoot(container);
+  t.after(async()=>{await act(async()=>root.unmount());container.remove();});
+  await act(async()=>root.render(createElement(OutputMessageContent,{content:'[卡组]('+href+')',sessionId:'s',turnId:'t'})));
+  assert.equal(container.querySelector('a[href]'),null);
+  assert.match(container.textContent,/导出已有文件/);
+  assert.doesNotMatch(container.textContent,/不存在|请让 Agent 实际保存/);
+  assert.equal(calls.length,1);
+  await act(async()=>root.render(createElement(OutputMessageContent,{content:'[卡组]('+href+')',sessionId:'s',turnId:'t',inert:true})));
+  assert.equal(calls.length,1,'read-only backups never fetch or sync remote files');
+});

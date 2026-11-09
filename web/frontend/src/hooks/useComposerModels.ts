@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { fetchOfficeTaskModels, type OfficeModelCapability } from '../lib/officeControls';
+import { fetchOfficeTaskModels, OfficeSessionConflictError, type OfficeSessionConflict, type OfficeModelCapability } from '../lib/officeControls';
 import { isCompleteModelRef, loadComposerModel, saveComposerModel, subscribeComposerModel } from '../lib/composerModel';
 import { fetchModelHealth, type ModelHealthSnapshot } from '../lib/modelHealth';
 import { fetchChannelConnection, type ChannelConnection } from '../lib/channelStatus';
@@ -18,26 +18,33 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
   const [health, setHealth] = useState<ModelHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sessionConflict, setSessionConflict] = useState<OfficeSessionConflict | null>(null);
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const [connection, setConnection] = useState<ChannelConnection | null>(null);
   useEffect(() => {
     const changed = () => setRevision(value => value + 1);
     window.addEventListener('easel:channel-names-changed', changed);
-    return () => window.removeEventListener('easel:channel-names-changed', changed);
+    window.addEventListener('easel:harness-saved', changed);
+    return () => { window.removeEventListener('easel:channel-names-changed', changed); window.removeEventListener('easel:harness-saved', changed); };
   }, []);
   useEffect(() => {
     if (!enabled) return;
-    const controller = new AbortController(); setLoading(true); setError('');
+    const controller = new AbortController(); setLoading(true); setError(''); setCapability(null); setSessionConflict(null);
     let readingCapability = false;
+    let runtimeChanged = false;
     const readCapability = async () => {
-      if (controller.signal.aborted || readingCapability) return;
+      if (controller.signal.aborted || readingCapability || runtimeChanged) return;
       readingCapability = true;
       try {
         const value = await fetchOfficeTaskModels(sessionId, controller.signal, storedModelRef || undefined);
         if (!controller.signal.aborted) { setCapability(value); setError(''); }
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '模型选项暂未读取。');
+        if (!controller.signal.aborted) {
+          if (cause instanceof OfficeSessionConflictError) {
+            runtimeChanged = true; setCapability(null); setSessionConflict(cause.conflict); setError('');
+          } else setError(cause instanceof Error ? cause.message : '模型选项暂未读取。');
+        }
       } finally {
         readingCapability = false;
         if (!controller.signal.aborted) setLoading(false);
@@ -53,7 +60,7 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
         .finally(() => { readingHealth = false; });
     };
     readHealth();
-    const timer = setInterval(() => { readHealth(); void readCapability(); }, 60000);
+    const timer = setInterval(() => { if (!runtimeChanged) { readHealth(); void readCapability(); } }, 60000);
     return () => { clearInterval(timer); controller.abort(); };
   }, [sessionId, revision, enabled, storedModelRef]);
   const options = capability?.options.filter(option => option.configured && isCompleteModelRef(option.id)) || [];
@@ -71,12 +78,12 @@ function useOpenclawComposerModels(sessionId: string | null, enabled: boolean) {
     return () => controller.abort();
   }, [effectiveRef, effectiveDisabled, revision, enabled, alternate]);
   const automaticDisabled = options.find(option => option.id === (capability?.currentModelRef || capability?.defaultModelRef))?.enabled === false;
-  const ready = !loading && !error && (alternate ? capability?.available === true : modelRef ? Boolean(selected) : !automaticDisabled);
+  const ready = !loading && !error && !sessionConflict && (alternate ? capability?.available === true : modelRef ? Boolean(selected) : !automaticDisabled);
   const choose = (value: string) => {
     if (alternate) return;
     if (value && !options.some(option => option.id === value && option.enabled !== false)) return;
     setNotice(saveComposerModel(value) ? '' : '浏览器未能保存模型选择，刷新后请重新选择。');
   };
-  return { modelRef, options, selected, ready, loading, capability, health, connection: connection?.modelRef === effectiveRef ? connection : null, error, notice, choose, refresh: () => setRevision(value => value + 1),
+  return { modelRef, options, selected, ready, loading, capability, sessionConflict, health, connection: connection?.modelRef === effectiveRef ? connection : null, error, notice, choose, refresh: () => setRevision(value => value + 1),
     getSnapshot: () => ready ? { modelRef: modelRef || undefined } : null };
 }

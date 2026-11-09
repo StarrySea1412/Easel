@@ -1529,7 +1529,11 @@ def _chat_backend(session_id: str | None) -> str:
     if selected == "api" and owner == "openclaw":
         return selected
     if owner and owner != selected:
-        raise HTTPException(409, f"此会话属于 {owner}，当前选择 {selected}；请新建会话，原历史不变")
+        raise HTTPException(409, {
+            "code": "session_runtime_changed", "sessionId": session_id,
+            "sessionRuntime": owner, "selectedRuntime": selected,
+            "message": f"此会话属于 {owner}，当前选择 {selected}；请新建会话，原历史不变",
+        })
     return selected
 
 
@@ -7548,6 +7552,54 @@ def api_output_status(path: str):
         raise
     exists = full.is_dir() or (full.is_file() and full.stat().st_size > 0)
     return {'exists': exists, 'isDirectory': full.is_dir()}
+
+
+def _qizhi_delivery_context(session: str, turn: str):
+    from easel.artifacts import scope
+    from easel.qizhi_delivery import target_identity
+    try:
+        scope(session); scope(turn)
+        snapshot = json.loads(_run_snapshot_file(turn).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        raise HTTPException(404, '未找到此轮的原始文件记录。') from None
+    if not isinstance(snapshot, dict) or snapshot.get('session_id') != session or snapshot.get('turn_id') != turn:
+        raise HTTPException(404, '未找到此轮的原始文件记录。')
+    if snapshot.get('runtime') != 'qizhi':
+        return None
+    if snapshot.get('status') != 'done' or snapshot.get('clean_end') is not True:
+        raise HTTPException(409, '原轮尚未确认完成；仅核对原任务，不会重复提交。')
+    try:
+        binding = harness_store.binding(SESSIONS_DIR, session)
+        identity = json.loads(binding.get('native_id', '{}'))
+        env = read_settings(ENV_FILE)
+        if binding.get('runtime') != 'qizhi' or identity.get('target') != target_identity(env):
+            raise HarnessError('Qizhi 渠道已变化，请恢复原渠道配置后同步，不迁移旧文件。')
+    except (HarnessError, ValueError, TypeError):
+        raise HTTPException(409, '原 Qizhi 渠道不可用或已变化；请恢复原配置后重新检查文件。') from None
+    return snapshot.get('text', ''), env
+
+
+@app.get('/api/chat/remote-outputs/{session}/{turn}')
+def api_remote_output_status(session: str, turn: str):
+    from easel.qizhi_delivery import public, status
+    context = _qizhi_delivery_context(session, turn)
+    if context is None:
+        return {'sessionId': session, 'turnId': turn, 'runtime': None, 'links': []}
+    text, env = context
+    return public(status(OUTPUTS_DIR, session, turn, text, env))
+
+
+@app.post('/api/chat/remote-outputs/{session}/{turn}/recheck')
+async def api_remote_output_recheck(session: str, turn: str):
+    from easel.qizhi_delivery import public, sync
+    context = _qizhi_delivery_context(session, turn)
+    if context is None:
+        raise HTTPException(409, '此轮不属于 Qizhi 远端文件，不会发起同步。')
+    text, env = context
+    try:
+        return public(await asyncio.wait_for(sync(OUTPUTS_DIR, session, turn, text, env), timeout=45))
+    except (HarnessError, OSError, ValueError, asyncio.TimeoutError):
+        raise HTTPException(409, '远端原文件尚未完整同步，请稍后重新检查；不会重跑 Agent。') from None
 
 
 @app.get("/api/media/{path:path}")

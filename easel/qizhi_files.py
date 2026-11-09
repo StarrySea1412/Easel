@@ -95,7 +95,7 @@ class QizhiFiles:
         except (ValueError, TypeError, AttributeError):
             raise HarnessError("Qizhi 成果列表格式不正确。") from None
 
-    async def download(self, relative: str, destination: Path, *, uploaded=False) -> Path:
+    async def download(self, relative: str, destination: Path, *, uploaded=False, max_bytes=MAX_FILE_BYTES) -> Path:
         if uploaded:
             if not re.fullmatch(r"file_[A-Za-z0-9-]+", relative):
                 raise HarnessError("Qizhi 上传文件 ID 无效。")
@@ -120,8 +120,8 @@ class QizhiFiles:
                         created = True
                         async for chunk in response.aiter_bytes():
                             size += len(chunk)
-                            if size > MAX_FILE_BYTES:
-                                raise HarnessError("Qizhi 下载超过当前 200 MiB 上限。")
+                            if size > min(max_bytes, MAX_FILE_BYTES):
+                                raise HarnessError("Qizhi 下载超过当前文件大小上限。")
                             handle.write(chunk)
                     length = response.headers.get("content-length")
                     if length is not None and size != int(length):

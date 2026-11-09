@@ -21,6 +21,19 @@ from easel.harnesses import models as native_models
 FIXTURE = Path(__file__).parent / "fixtures" / "harness_rpc.py"
 
 
+def test_model_catalog_reports_bound_runtime_conflict_without_migrating_history(sandbox, monkeypatch):
+    monkeypatch.setattr(web, "_direct_api_enabled", lambda: False)
+    monkeypatch.setattr(web, "_harness_settings", lambda: {"runtime": "openclaw"})
+    monkeypatch.setattr(store, "binding", lambda path, session: {"runtime": "qizhi", "native_id": "unchanged"})
+    response = sandbox.get("/api/agent-office/models?sessionId=old-qizhi")
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "session_runtime_changed", "sessionId": "old-qizhi",
+        "sessionRuntime": "qizhi", "selectedRuntime": "openclaw",
+        "message": "此会话属于 qizhi，当前选择 openclaw；请新建会话，原历史不变",
+    }
+
+
 def test_codex_model_catalog_paginates_without_creating_a_session(tmp_path, monkeypatch):
     request = request_for(tmp_path, "codex")
     monkeypatch.setattr(native_models, "base_command", lambda runtime: [

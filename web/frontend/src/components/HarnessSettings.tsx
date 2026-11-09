@@ -70,6 +70,7 @@ export default function HarnessSettings({ onChange, onSelect }: {
       const value = await saveHarnessSettings(runtime, model, sandbox, runtime === 'codex' ? autoApprove : undefined);
       setSettings(value);
       onChange(value.runtime);
+      window.dispatchEvent(new CustomEvent('easel:harness-saved', {detail: {runtime: value.runtime}}));
       setNote('已保存，请新建对话；旧对话仍保留在原底座，不迁移历史。');
     } catch (error) {
       setNote(`保存失败：${error instanceof Error ? error.message : String(error)}`);

@@ -1,11 +1,12 @@
-import type { OfficeModelCapability, OfficeModelOption } from './officeControls';
+import { runtimeLabel, type OfficeSessionConflict, type OfficeModelCapability, type OfficeModelOption } from './officeControls';
 
 /** Explains a local send guard; it does not claim an inference has failed. */
-export function composerModelIssue(models: { loading: boolean; error: string; modelRef: string; options: OfficeModelOption[]; capability: OfficeModelCapability | null }): string {
+export function composerModelIssue(models: { loading: boolean; error: string; modelRef: string; options: OfficeModelOption[]; capability: OfficeModelCapability | null; sessionConflict?: OfficeSessionConflict | null }): string {
   let reason: string;
   const option = models.options.find(item => item.id === (models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef));
   const label = option ? `${option.channelName || option.provider} · ${option.model}` : models.modelRef;
-  if (models.loading) reason = '正在读取模型配置，请稍候再发送。';
+  if (models.sessionConflict) reason = `此对话仍使用 ${runtimeLabel(models.sessionConflict.sessionRuntime)}，请新建 ${runtimeLabel(models.sessionConflict.selectedRuntime)} 对话。`;
+  else if (models.loading) reason = '正在读取模型配置，请稍候再发送。';
   else if (models.error) reason = `模型配置读取失败：${models.error}`;
   else if (option?.enabled === false) reason = `“${label}”已停用，请在模型设置启用或选择其他模型。`;
   else if (models.modelRef && !option) reason = `已选模型“${label}”已移除或尚未配置，请重新选择模型。`;

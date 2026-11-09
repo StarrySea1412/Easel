@@ -8,6 +8,12 @@ export const OFFICE_MODEL_SCOPE_LABELS: Record<OfficeModelScope, string> = {
 };
 export type OfficeStopScope = 'agent' | 'session' | 'unavailable';
 export interface OfficeModelOption { id: string; provider: string; model: string; label: string; configured: boolean; enabled?: boolean; thinkingLevels?: string[]; channelName?: string }
+export interface OfficeSessionConflict { sessionId: string; sessionRuntime: string; selectedRuntime: string }
+export const runtimeLabel = (runtime: string) => ({openclaw: 'OpenClaw', qizhi: 'Qizhi', api: '仅聊天模式', codex: 'Codex', opencode: 'OpenCode', acp: 'ACP'} as Record<string, string>)[runtime] || runtime;
+export class OfficeSessionConflictError extends Error {
+  conflict: OfficeSessionConflict;
+  constructor(conflict: OfficeSessionConflict, message: string) { super(message); this.conflict = conflict; }
+}
 export interface OfficeModelCapability {
   runtime?: string;
   available: boolean;
@@ -146,6 +152,11 @@ export async function fetchOfficeTaskModels(sessionId: string | null, signal: Ab
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     if (!response.ok) {
       const detail = record(data) ? data.detail : undefined;
+      if (response.status === 409 && record(detail) && detail.code === 'session_runtime_changed'
+          && sessionId && detail.sessionId === sessionId
+          && typeof detail.sessionRuntime === 'string' && typeof detail.selectedRuntime === 'string') {
+        throw new OfficeSessionConflictError({sessionId, sessionRuntime: text(detail.sessionRuntime), selectedRuntime: text(detail.selectedRuntime)}, text(detail.message));
+      }
       throw new Error(typeof detail === 'string' ? text(detail) : record(detail) && typeof detail.message === 'string' ? text(detail.message) : `模型选项读取失败（HTTP ${response.status}）。`);
     }
     const decoded = decodeOfficeModelCapability(data);

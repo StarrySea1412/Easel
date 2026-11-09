@@ -1,4 +1,5 @@
 import Select from './ui/Select';
+import { runtimeLabel } from '../lib/officeControls';
 import type { useComposerModels } from '../hooks/useComposerModels';
 import { modelHealthLabel } from '../lib/modelHealth';
 import { IconChevron, IconCube } from './icons';
@@ -37,6 +38,7 @@ export default function ComposerModelPicker({ models, disabled = false, onOpenMo
   const currentOptions = channels.get(effective?.provider || '') || [];
   const enabledChannels = [...channels].filter(([, options]) => options.some(option => option.enabled !== false));
   const icon = <span className={`composer-model-health ${dotState}`} role="img" aria-label={statusTitle} title={statusTitle}><span className="composer-model-status-dot" /></span>;
+  if (models.sessionConflict) return <div className="composer-model-picker"><span className="composer-model-health-label">请新建对话使用所选引擎</span><button type="button" className="easel-select composer-model-select" disabled>原对话 · {runtimeLabel(models.sessionConflict.sessionRuntime)}</button></div>;
   return <div className="composer-model-picker">
     <span className="composer-model-health-label">{statusTitle}</span>
     {!models.loading && !models.options.length && onOpenModels ? <button type="button" className="easel-select composer-model-select" aria-label="模型设置" disabled={disabled} onClick={() => onOpenModels(targetRef)}>{icon}<span className="easel-select-value">{models.capability?.runtime && models.capability.available ? '原生默认模型' : '选择模型'}</span><IconChevron size={12}/></button> : <Select aria-label="选择模型" title={effective ? `${channelName} · ${effective.model}` : '选择模型'} value={models.modelRef} placeholder={effective?.model || '选择模型'} disabled={disabled}

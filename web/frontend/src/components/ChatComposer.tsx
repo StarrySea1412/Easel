@@ -12,6 +12,7 @@ import { ComposerSkillChips, ComposerSkillPicker } from './ComposerSkills';
 import ComposerModelPicker from './ComposerModelPicker';
 import ComposerSkillSuggestions from './ComposerSkillSuggestions';
 import { useComposerModels } from '../hooks/useComposerModels';
+import { runtimeLabel as harnessLabel } from '../lib/officeControls';
 import { composerModelIssue, isLegacyComposerModelIssue } from '../lib/composerModelIssue';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
@@ -42,6 +43,7 @@ import {useChatGoalComposer,type GoalEditor} from '../hooks/useChatGoalComposer'
 import '../styles/chat-goal.css';
 
 interface ChatComposerProps {
+  onNewChat?: () => void;
   continuationControl?: ReactNode;
   analysisContext?: AnalysisBinding;
   onOpenAnalysisMaterial?: () => void;
@@ -77,7 +79,7 @@ export default function ChatComposer(props: ChatComposerProps) {
   return <SessionChatComposer key={props.sessionId} {...props} />;
 }
 
-function SessionChatComposer({ sessionId, continuationControl, analysisContext, onOpenAnalysisMaterial, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
+function SessionChatComposer({ sessionId, onNewChat, continuationControl, analysisContext, onOpenAnalysisMaterial, usageRefreshKey = 0, engine = 'openclaw', engineLocked = false, onEngineChange, compaction, hero = false, isStreaming, stopping = false, onSend, onStop, onSteer, onOpenModels, goalBusy=false, goalActive=false, goalStatus, onGoal, onGoalAction, onGoalView, onScheduleDraft, onSideChat, goalEditor, onGoalClose, onGoalChanged }: ChatComposerProps) {
   const draft = useSyncExternalStore(
     useCallback(listener => subscribeChatDraft(sessionId, listener), [sessionId]),
     useCallback(() => getChatDraft(sessionId), [sessionId]),
@@ -106,7 +108,7 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
   const [maxMb, setMaxMb] = useState(50);
   const skills = useComposerSkills(sessionId);
   const models = useComposerModels(sessionId, engine);
-  const runtime = engine === 'codex' ? 'codex' : models.capability?.runtime || 'openclaw';
+  const runtime = engine === 'codex' ? 'codex' : models.sessionConflict?.sessionRuntime || models.capability?.runtime || 'openclaw';
   const alternate = engine !== 'codex' && runtime !== 'openclaw';
   const chatOnly = runtime === 'api' || runtime === 'qizhi';
   const runtimeLabel = ({api:'API 直连',acp:'ACP',opencode:'OpenCode',codex:'Codex（兼容）',qizhi:'Qizhi 远程 Agent'} as Record<string,string>)[runtime] || 'OpenClaw';
@@ -382,7 +384,14 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
       {goalEditor&&<ChatGoalNotice state={goalState} goal={goalEditor.goal} blocked={goalBlocked}/>}
       {!editingQueue && attachments.length > 0 && <ComposerAttachments files={attachments} onRemove={removeAttachment}/>}
       {!editingQueue && engine !== 'codex' && !chatOnly && <ComposerSkillSuggestions text={input} skills={skills} disabled={stopping}/>}
-      {(modelGuardShown || legacyModelError) && !models.ready && <div className="composer-connection-notice" role={models.loading ? 'status' : 'alert'} aria-busy={models.loading}>
+      {models.sessionConflict && <div className="composer-connection-notice" role="status">
+        <span className="composer-connection-icon" aria-hidden="true"><IconOpenClaw size={17}/></span>
+        <div className="composer-connection-content">
+          <p>此对话使用 {harnessLabel(models.sessionConflict.sessionRuntime)}。新对话将使用 {harnessLabel(models.sessionConflict.selectedRuntime)}，原记录和草稿会保留。</p>
+          {onNewChat && <button type="button" className="link-btn" onClick={onNewChat}>新建 {harnessLabel(models.sessionConflict.selectedRuntime)} 对话</button>}
+        </div>
+      </div>}
+      {!models.sessionConflict && (modelGuardShown || legacyModelError) && !models.ready && <div className="composer-connection-notice" role={models.loading ? 'status' : 'alert'} aria-busy={models.loading}>
         <span className="composer-connection-icon" aria-hidden="true">{models.loading ? <IconLoader className="composer-connection-spinner" size={17}/> : <IconOpenClaw size={17}/>}</span>
         <div className="composer-connection-content"><p>{models.loading ? '正在检查连接…' : composerModelIssue(models).replace(' 草稿已保留，消息尚未发送。', '')}</p>
         </div>
@@ -411,7 +420,7 @@ function SessionChatComposer({ sessionId, continuationControl, analysisContext, 
           {outputsOpen && <GeneratedFilePicker sessionId={sessionId} onClose={()=>setOutputsOpen(false)}/>}
           {goalEditor?<ChatGoalComposer state={goalState} goal={goalEditor.goal} onExit={closeGoal}/>:onGoal&&Boolean(goalStatus)&&<button type="button" className="composer-goal-btn" aria-pressed={false} aria-label="设置或查看目标" title="设置或查看当前对话目标" disabled={editingQueue} onClick={()=>openGoal()}><IconTarget size={16}/><span>目标</span></button>}
           {engine !== 'codex' && !chatOnly && <ComposerSkillPicker skills={skills} setInput={setInput} openRequest={skillPickerRequest}/>}
-          <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />
+          {!models.sessionConflict && <ChatContextUsage sessionId={sessionId} modelRef={models.modelRef || models.capability?.currentModelRef || models.capability?.defaultModelRef || ''} engine={engine} streaming={isStreaming} refreshKey={usageRefreshKey} onOpenModels={onOpenModels} />}
           {goalEditor&&goalState.modelLocked?<Select className="composer-goal-locked-model" aria-label="目标执行模型" value={goalState.executionModel} disabled onChange={()=>{}} options={[{value:goalState.executionModel,label:goalState.executionModel}]}/>:engine === 'codex' ? <Select aria-label="选择模型" value={models.modelRef} disabled={stopping || models.loading}
             options={[{value:'',label:'Codex 默认模型'},...models.options.map(option=>({value:option.id,label:option.label}))]} onChange={models.choose}/>
             : <ComposerModelPicker models={models} disabled={stopping} onOpenModels={onOpenModels} />}

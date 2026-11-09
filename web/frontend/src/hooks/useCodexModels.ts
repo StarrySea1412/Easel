@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchCodexRuntime, type CodexRuntime } from '../lib/codex';
-import type { OfficeModelCapability } from '../lib/officeControls';
+import type { OfficeModelCapability, OfficeSessionConflict } from '../lib/officeControls';
 import type { ModelHealthSnapshot } from '../lib/modelHealth';
 import type { ChannelConnection } from '../lib/channelStatus';
 import { readLocalValue, writeLocalValue } from '../lib/localPersistence';
@@ -22,7 +22,7 @@ export function useCodexModels(enabled: boolean) {
   const capability: OfficeModelCapability = {available, scope: available ? 'next_turn' : 'unavailable', currentModelRef: null,
     defaultModelRef: runtime?.defaultModelRef, options, reason: runtime?.error || (runtime?.auth === 'login_required' ? '请登录本机 Codex。' : '本机 Codex 模型能力。')};
   const ready = !loading && available && (!modelRef || Boolean(selected));
-  return {modelRef, options, selected, ready, loading, capability, health: null as ModelHealthSnapshot | null,
+  return {modelRef, options, selected, ready, loading, capability, sessionConflict: null as OfficeSessionConflict | null, health: null as ModelHealthSnapshot | null,
     connection: null as ChannelConnection | null, error: error || runtime?.error || '', notice: '',
     choose: (value: string) => { if (!value || options.some(option => option.id === value)) { setModelRef(value); writeLocalValue('easel:codex-model', value); } },
     refresh: () => setRevision(value => value + 1), getSnapshot: () => ready ? {modelRef: modelRef || runtime?.defaultModelRef} : null,

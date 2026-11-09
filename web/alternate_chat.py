@@ -216,7 +216,8 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
             web._qizhi_config(web.read_settings(web.ENV_FILE))
         except web.HarnessError as exc:
             raise HTTPException(409, str(exc)) from None
-        content, system = req.message, ''
+        from easel.qizhi_delivery import instructions
+        content, system = req.message + instructions(req.turnId), ''
     else:
         content, system = web._chat_message(req), ''
     state = Lifecycle(web, req, runtime, config, observe)
@@ -246,6 +247,13 @@ async def start(web, req, runtime, config, *, observe=True, on_done=None, intera
             else:
                 await web._run_harness_chat(req, req.sessionId, content, runtime, config,
                     state.emit, interactive=interactive, lifecycle=state)
+                if runtime == 'qizhi' and not state.errors and not state.cancel.is_set():
+                    from easel.qizhi_delivery import sync
+                    try:
+                        await asyncio.wait_for(sync(web.OUTPUTS_DIR, req.sessionId, req.turnId,
+                            ''.join(state.text), state.settings), timeout=45)
+                    except (web.HarnessError, OSError, ValueError, asyncio.TimeoutError):
+                        state.emit('activity', '远端回复已保留；文件同步尚未完成，可重新检查原文件，不会重跑 Agent。')
         except asyncio.CancelledError:
             state.cancel.set()
         except Exception:

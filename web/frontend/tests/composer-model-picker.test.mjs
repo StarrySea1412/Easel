@@ -19,6 +19,10 @@ async function fixture(t, saved) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); writes.push([key, value]); }, removeItem: key => values.delete(key) } });
   const h = { options: [option, { ...option, id: 'relay/unconfigured', model: 'unconfigured', configured: false }], capability: true, healthState: 'success', reason: '' };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (h.conflict && String(url).includes('/agent-office/models')) {
+      calls.push([url, init]);
+      return { ok: false, status: 409, json: async () => ({ detail: {code: 'session_runtime_changed', sessionId: new URL(url, window.location.href).searchParams.get('sessionId'), sessionRuntime: 'qizhi', selectedRuntime: 'openclaw', message: '请新建对话，原历史不变'} }) };
+    }
     calls.push([url, init]); const data = String(url).includes('/agent-office/models') ? { available: h.capability, scope: 'next_turn', defaultModelRef: REF, options: h.options, ...(h.runtime ? {runtime:h.runtime,currentModelRef:h.options[0]?.id} : {}), ...(h.reason ? { reason: h.reason } : {}) }
       : String(url).endsWith('/models/health') ? { results: [{ modelRef: REF, mode: 'text', state: h.healthState }], schedules: [] }
         : String(url).includes('/models/connection?') ? { modelRef: REF, state: h.healthState, channelName: '测试渠道', detail: '仅获取模型列表，推理未测。' }
@@ -49,6 +53,46 @@ test('configured complete models are keyboard selectable, stored explicitly and 
   await view.navigate(); await view.reload(); await view.type('完整路由任务'); await view.send();
   assert.deepEqual(view.sent[0], ['完整路由任务', [], [], {}, undefined, REF]);
   assert.ok(view.calls.every(([, init]) => !init?.body), 'mount and selection only read backend state');
+});
+
+test('runtime changes show one actionable notice, stop futile polling and retain the old draft', async t => {
+  const timers = [];
+  t.mock.method(globalThis, 'setInterval', (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; });
+  t.mock.method(globalThis, 'clearInterval', () => {});
+  const view = await fixture(t, REF);
+  let newChats = 0;
+  view.h.conflict = true;
+  await view.render({ onNewChat: () => { newChats++; } });
+  await view.type('保留原 Qizhi 草稿');
+  assert.match(view.container.textContent, /此对话使用 Qizhi/);
+  assert.match(view.container.textContent, /原记录和草稿会保留/);
+  assert.doesNotMatch(view.container.textContent, /模型配置读取失败|选择模型/);
+  assert.equal(view.container.querySelector('.context-usage-trigger'), null, 'the old engine does not show a misleading OpenClaw usage gauge');
+  assert.equal(view.container.querySelectorAll('.composer-connection-notice').length, 1);
+  const before = view.calls.length;
+  for (const timer of timers) await act(async () => timer.callback());
+  assert.equal(view.calls.length, before, 'a known engine conflict does not poll again');
+  await view.send();
+  assert.deepEqual(view.sent, []);
+  assert.equal(view.container.querySelector('textarea').value, '保留原 Qizhi 草稿');
+  await act(async () => [...view.container.querySelectorAll('button')].find(x => x.textContent === '新建 OpenClaw 对话').click());
+  assert.equal(newChats, 1);
+  assert.equal(view.container.querySelector('textarea').value, '保留原 Qizhi 草稿');
+  view.h.conflict = false;
+  await view.navigate();
+  assert.ok(view.trigger(), 'the new conversation reads the current OpenClaw model catalog');
+  assert.equal(view.values.get(KEY), REF);
+});
+
+test('saving the original runtime clears a conflict without migrating or resending the conversation', async t => {
+  const view = await fixture(t, REF);
+  view.h.conflict = true;
+  await view.render(); await view.type('留在原会话');
+  view.h.conflict = false; view.h.runtime = 'qizhi';
+  await act(async () => window.dispatchEvent(new window.CustomEvent('easel:harness-saved', {detail: {runtime:'qizhi'}})));
+  assert.equal(view.container.querySelector('.composer-connection-notice'), null);
+  assert.equal(view.container.querySelector('textarea').value, '留在原会话');
+  assert.deepEqual(view.sent, []);
 });
 
 test('API composer uses the saved route despite an old channel preference and omits unsupported effort and skills', async t => {

@@ -45,6 +45,7 @@ function setup({ runtime = 'openclaw', locked = false, installed = true, saveErr
   const saves = [];
   const selections = [];
   const modelRequests = [];
+  const events = [];
   const settings = {
     runtime,
     models: { codex: 'codex-model', opencode: 'provider/model' },
@@ -56,6 +57,8 @@ function setup({ runtime = 'openclaw', locked = false, installed = true, saveErr
     })),
   };
   const component = runInNewContext(outputText, {
+    window: { dispatchEvent: event => events.push(event) },
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     React: {
       Fragment: 'fragment',
       createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
@@ -105,6 +108,7 @@ function setup({ runtime = 'openclaw', locked = false, installed = true, saveErr
     selections,
     modelRequests,
     settingsRequests,
+    events,
     render() {
       cursor = 0;
       effectCursor = 0;
@@ -139,6 +143,7 @@ test('changing harness is local until save and retains its model override', asyn
   assert.equal(nodes(tree, 'input')[0].props.value, 'codex-model');
   assert.deepEqual(view.changes, ['openclaw']);
   assert.equal(view.saves.length, 0);
+  assert.equal(view.events.length, 0, 'previewing a runtime does not notify other views');
   nodes(tree, 'settings-select').find(node => node.props.label === 'Codex 沙箱').props.onChange('read-only');
   nodes(tree, 'input')[0].props.onChange({ target: { value: 'custom-model' } });
   tree = view.render();
@@ -147,6 +152,9 @@ test('changing harness is local until save and retains its model override', asyn
   await settle();
   assert.deepEqual(view.saves, [{ runtime: 'codex', model: 'custom-model', sandbox: 'read-only', codexAutoApprove: false }]);
   assert.deepEqual(view.changes, ['openclaw', 'codex']);
+  assert.equal(view.events.length, 1);
+  assert.equal(view.events[0].type, 'easel:harness-saved');
+  assert.equal(view.events[0].detail.runtime, 'codex');
   assert.match(text(view.render()), /已保存，请新建对话/);
 });
 
