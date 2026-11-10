@@ -24,4 +24,16 @@
 
 沿用已授权138维护，固定提交打包构建，正式切换前核对运行器和采集空闲并备份，保留旧镜像与回滚点。不重放Qizhi或图片旧任务。测试管理员gaojitest / gaoji仅适用于138本机8445隔离环境，生产沿用现有独立凭据。
 
-当前状态：源码和本地验证完成，Git与138维护回执待追加。未发布安装器。
+### 138实际部署回执（2026-11-10）
+
+- 正式入口：`https://192.168.0.138:8444/`。实际版本为`0.49.5`，运行提交`a24ae663750ee860f00d55a9ea596e6e2fd417a6`，非development构建。固定镜像为`easel:a24ae663750e`，镜像ID为`sha256:c5a7de9e4e5ddb753d0853c204dd6484477c9097e4080a0eea7a3c4e9f733bcd`。
+- 构建前磁盘检查拦截空间不足；清理未使用的可重建frontend构建阶段及构建缓存后，正式切换前Docker/containerd可用5434650624字节，通过既有5GiB门槛。未删除业务数据、运行镜像、带标签回滚镜像或卷。
+- 切换前运行器空闲、非draining，七平台采集均未运行；完整停写备份后才切换。app/browser使用同一固定镜像，连同proxy均Healthy，app/browser重启计数均0。正式前版`easel:a0ff708150a5`及回滚记录保留。
+- 生产凭据实际登录通过，匿名API为专用401，版本接口禁止缓存。账号、七平台注册表、批次、默认账号历史、发布回执、通知、角色、发布策略与网关状态接口均HTTP200。这是登录及HTTP/后端验证，不等于各菜单、真实平台采集或投稿逐项验收。
+- 全部1801项运行源码核验通过；线上index.html及70个JS/CSS资源逐一与容器哈希一致。已安装小红书卡组Skill详情GET具有正文revision，默认专用生图规则可读；未修改生产Skill正文。编辑保存/取消的真实浏览器与持久化验证使用前述本地隔离环境，138未另做交互验收。
+- 12份关键配置、原任务及交付文件切换前后哈希一致。三份原Qizhi产物仍可实际下载，下载SHA-256通过；当前OpenClaw模型可读，旧Qizhi会话返回结构化引擎冲突，没有重发任务或改动引擎设置。
+- 完整备份`20261110T030011Z.tar.gz`为1076770519字节，SHA-256为`424012d7a8769ef771ec0b0850ca4e0120cbd3d7d0317a96c41eb9254201dff3`；gzip CRC、15417项tar成员读取及12份关键文件哈希通过。实际存储为`/data/easel-release-0.43.0/easel-backups/`，`/home/ubuntu/easel-backups/`保留原入口。
+- 隔离入口仍仅监听138本机`https://127.0.0.1:8445/`，保留`0.49.1 / 490712b2a619`；管理员`gaojitest / gaoji`实际登录通过。该账号仅适用于隔离环境，生产沿用原独立凭据。
+- 服务端回执：`/home/ubuntu/easel-releases/0495-production-verification.json`、`0495-production-backup-verification.json`、`0495-preserved-files.json`及`0495-isolated-login.json`。本轮没有真实模型、生图、平台投稿或安装器发布。
+
+功能提交已推送至`starry/codex/latest-account-distribution-0.49.0`和`starry/codex/gpt-responses-xhs-0.46.13`，两远端均核对为上述运行提交；部署回执另以文档提交同步。默认分支仅同步双语首页说明，未合入功能代码。线上图片交互的最终用户验收仍保留。
