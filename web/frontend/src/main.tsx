@@ -5,7 +5,10 @@ import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
 import { initializeTheme } from './lib/theme'
 import { initializeFontSize } from './lib/fontSize'
+import { installWorkbenchAccess } from './lib/workbenchAccess'
+import WorkbenchLoginNotice from './components/WorkbenchLoginNotice'
 
+installWorkbenchAccess();
 initializeTheme();
 initializeFontSize();
 
@@ -15,6 +18,7 @@ console.log(`%cEasel build: ${BUILD_ID}`, 'color:#8b5cf6;font-weight:bold');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <WorkbenchLoginNotice />
     <ErrorBoundary>
       <App />
     </ErrorBoundary>

@@ -15,4 +15,6 @@
 .sidebar-account-popover li small.is-connected { color:color-mix(in srgb,var(--green) 70%,var(--text)); }
 .sidebar-account-open { display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:13px;padding:10px 11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font:inherit;font-size:12px;cursor:pointer; }
 .sidebar-account-open:hover { background:var(--surface-hover);border-color:var(--border-strong); }
+.sidebar-account-open[href] { box-sizing:border-box;text-decoration:none; }
 .sidebar-account-popover button:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }
+.sidebar-account-popover a:focus-visible { outline:2px solid var(--focus-ring);outline-offset:2px; }

@@ -1,3 +1,4 @@
+- [0.49.4 工作台登录过期恢复](workbench-login-expiry-0.49.4-2026-11-10.md)
 - [0.49.0 最新源码整合与多平台多账号发布](latest-account-distribution-0.49.0-2026-11-09.md)
 - [Qizhi 三分钟超时诊断与修复边界](qizhi-timeout-2026-11-09.md)
 

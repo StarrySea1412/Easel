@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchAccounts } from '../lib/api';
+import { requestWithTimeout } from '../lib/requestTimeout';
 import { ACCOUNT_STATE_EVENT, accountConnection, hydrateAccountIdentities, useAccountIdentities, useAccountChecks, type AccountConnection } from '../lib/whoami';
 import AccountConnectionDot from './AccountConnectionDot';
 import PlatformIcon from './PlatformIcon';
@@ -17,7 +18,7 @@ type Snapshot = { platform: string; name: string; loggedIn: boolean | null; hasL
 export default function SidebarAccountPopover({ active, onNavigate }: { active: boolean; onNavigate: () => void }) {
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<Snapshot>();
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<'login' | 'unavailable' | null>(null);
   const [revision, setRevision] = useState(0);
   const identities = useAccountIdentities();
   const checks = useAccountChecks();
@@ -32,7 +33,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
     clearHide();
     if (!suppressFocus.current) {
       openSidebarPanel(panelId);
-      if (!open) { setSnapshot(undefined); setError(false); }
+      if (!open) { setSnapshot(undefined); setError(null); }
       setOpen(true);
     }
   };
@@ -71,18 +72,19 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
     if (!open) return;
     let stale = false;
     setSnapshot(undefined);
-    setError(false);
+    setError(null);
+    const cancellation = new AbortController();
     // This endpoint reads local state only. Never run browser-based whoami as a
     // side effect of hovering a navigation item, and never render credentials.
-    fetchAccounts().then(accounts => {
+    requestWithTimeout(signal => fetchAccounts(AbortSignal.any([signal, cancellation.signal])), 10000, '账号信息读取超时，请重试。').then(accounts => {
       if (stale) return;
       hydrateAccountIdentities(accounts);
       setSnapshot(PLATFORMS.map(([platform, name]) => {
         const account = accounts.find(item => item.platform === platform);
         return { platform, name, loggedIn: account?.loggedIn ?? null, hasLocalSession: account?.hasLocalSession };
       }));
-    }).catch(() => { if (!stale) setError(true); });
-    return () => { stale = true; };
+    }).catch(cause => { if (!stale) setError(cause?.code === 'workbench_login_required' ? 'login' : 'unavailable'); });
+    return () => { stale = true; cancellation.abort(); };
   }, [open, revision]);
 
   useLayoutEffect(() => {
@@ -144,7 +146,8 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
       }}>
       <div className="sidebar-account-heading"><strong>平台账号</strong><button type="button" aria-label="关闭账号预览" onClick={() => close(true)}>×</button></div>
       {!snapshot && !error && <p className="sidebar-account-state" role="status">正在读取本次账号快照…</p>}
-      {error && <p className="sidebar-account-state" role="alert">本次快照读取失败，暂不能确认登录状态。</p>}
+      {error && <p className="sidebar-account-state" role="alert">{error === 'login' ? '工作台登录已过期，请重新登录后查看账号。' : '账号信息暂时无法读取，请重试。'}</p>}
+      {error === 'unavailable' && <button type="button" className="sidebar-account-open" onClick={() => setRevision(value => value + 1)}>重新读取 <span aria-hidden="true">↻</span></button>}
       {snapshot && <>
         <p className="sidebar-account-summary">{connected?.length ? `${connected.length} 个平台已确认在线` : '尚无可确认的已登录平台'}</p>
         <ul>{snapshot.map(account => <li key={account.platform}>
@@ -153,7 +156,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
           <AccountConnectionDot connection={connectionOf(account.platform)} checking={checks.has(account.platform)} checkedAt={identities[account.platform]?.checkedAt} message={identities[account.platform]?.verificationMessage} />
         </li>)}</ul>
       </>}
-      <button type="button" className="sidebar-account-open" onClick={() => { close(); onNavigate(); }}>查看账号 <span aria-hidden="true">→</span></button>
+      {error === 'login' ? <a className="sidebar-account-open" href="/login">重新登录工作台 <span aria-hidden="true">→</span></a> : <button type="button" className="sidebar-account-open" onClick={() => { close(); onNavigate(); }}>查看账号 <span aria-hidden="true">→</span></button>}
     </div>, document.body)}
   </>;
 }

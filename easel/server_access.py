@@ -180,7 +180,8 @@ class ServerAccessMiddleware:
             return await response(scope, receive, send)
         identity = self.store.identity(request.cookies.get(COOKIE))
         if not identity:
-            response = JSONResponse({'detail': '请先登录工作台。'}, status_code=401) if path.startswith('/api/') else RedirectResponse('/login', status_code=303)
+            response = JSONResponse({'detail': '请先登录工作台。', 'code': 'workbench_login_required'}, status_code=401,
+                headers={'X-Easel-Auth': 'required', 'Cache-Control': 'no-store'}) if path.startswith('/api/') else RedirectResponse('/login', status_code=303)
             return await response(scope, receive, send)
         if request.method not in {'GET', 'HEAD', 'OPTIONS'} and request.headers.get('origin') not in self.origins:
             return await JSONResponse({'detail': '请求来源无效。'}, status_code=403)(scope, receive, send)

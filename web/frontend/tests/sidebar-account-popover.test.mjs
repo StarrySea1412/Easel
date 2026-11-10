@@ -62,7 +62,7 @@ test('reopening clears old success while a fresh snapshot is pending, and failur
   assert.match(view.panel().textContent, /正在读取本次账号快照/);
   assert.doesNotMatch(view.panel().textContent, /1 个平台记录为已登录/);
   await act(async () => fail(new Error('PRIVATE_BACKEND_DETAIL')));
-  assert.match(view.panel().textContent, /本次快照读取失败/);
+  assert.match(view.panel().textContent, /账号信息暂时无法读取/);
   assert.doesNotMatch(view.panel().textContent, /已登录 · 待校验|PRIVATE_BACKEND_DETAIL/);
   assert.deepEqual(view.requests.map(item => item.url), ['/api/accounts', '/api/accounts']);
 });
@@ -134,4 +134,37 @@ test('opening another sidebar panel closes account hover preview without refocus
   await act(async()=>window.dispatchEvent(new window.CustomEvent('easel:sidebar-panel',{detail:'notification-center'})));
   assert.equal(view.panel(),null);
   assert.equal(view.trigger.getAttribute('aria-expanded'),'false');
+});
+
+test('workbench login expiry offers login without mislabeling platform sessions or exposing backend details',async t=>{
+ const view=await fixture(t);view.state.read=async()=>{throw Object.assign(new Error('PRIVATE_AUTH_DETAIL'),{status:401,code:'workbench_login_required'});};
+ await view.open();
+ assert.match(view.panel().textContent,/工作台登录已过期/);
+ assert.doesNotMatch(view.panel().textContent,/PRIVATE_AUTH_DETAIL|快照读取失败|均未登录/);
+ assert.equal(view.panel().querySelector('a').getAttribute('href'),'/login');
+ assert.equal(view.panel().querySelector('.sidebar-account-open').textContent.trim(),'重新登录工作台 →');
+ assert.equal(view.state.visits,0);
+});
+
+test('an ordinary business 401 remains a retryable read failure',async t=>{
+ const view=await fixture(t);view.state.read=async()=>({ok:false,status:401,json:async()=>({detail:'PRIVATE_PLATFORM_DETAIL'})});
+ await view.open();
+ assert.match(view.panel().textContent,/账号信息暂时无法读取，请重试/);
+ assert.doesNotMatch(view.panel().textContent,/工作台登录已过期|PRIVATE_PLATFORM_DETAIL/);
+ assert.equal(view.panel().querySelector('a'),null);
+});
+
+test('a hanging snapshot settles, aborts, and retries successfully without closing the preview',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const view=await fixture(t);let finish;
+ view.state.read=()=>new Promise(resolve=>{finish=resolve;});
+ await view.open();assert.match(view.panel().textContent,/正在读取本次账号快照/);
+ await act(async()=>t.mock.timers.tick(10000));
+ assert.match(view.panel().textContent,/账号信息暂时无法读取/);
+ assert.equal(view.requests[0].options.signal.aborted,true);
+ view.state.read=async()=>response(accounts());
+ await act(async()=>[...view.panel().querySelectorAll('button')].find(b=>b.textContent.includes('重新读取')).click());
+ assert.equal(view.panel().querySelectorAll('li').length,7);
+ await act(async()=>finish(response([])));
+ assert.equal(view.panel().querySelectorAll('li').length,7);
+ assert.equal(view.requests.length,2);
 });

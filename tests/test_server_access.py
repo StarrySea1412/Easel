@@ -66,6 +66,28 @@ def test_forged_expired_or_removed_user_cookies_are_not_authorized(server):
     assert store.identity(valid) is None
 
 
+def test_expired_workbench_session_has_a_distinct_recovery_signal_and_can_log_in_again(server, monkeypatch):
+    import easel.server_access as access
+    client, _ = server
+    origin = {'Origin': 'https://easel.test'}
+    credentials = {'username': 'operator', 'password': 'test-strong-password'}
+    assert client.post('/login', headers=origin, data=credentials).status_code == 303
+    assert client.get('/api/files').status_code == 200
+    now = time.time()
+    with monkeypatch.context() as expired:
+        expired.setattr(access.time, 'time', lambda: now + access.LIFETIME + 1)
+        result = client.get('/api/files')
+        assert result.status_code == 401
+        assert result.headers['X-Easel-Auth'] == 'required'
+        assert result.headers['Cache-Control'] == 'no-store'
+        assert result.json()['code'] == 'workbench_login_required'
+        assert client.post('/api/config', headers=origin).status_code == 401
+    assert client.post('/login', headers=origin, data=credentials).status_code == 303
+    assert client.get('/api/files').status_code == 200
+    forbidden = client.post('/api/config')
+    assert forbidden.status_code == 403 and 'X-Easel-Auth' not in forbidden.headers
+
+
 def test_bad_login_is_throttled_and_payload_is_bounded(server):
     client, store = server
     for _ in range(8):

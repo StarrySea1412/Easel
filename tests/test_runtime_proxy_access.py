@@ -54,6 +54,8 @@ def test_proxy_preserves_caller_auth_without_sharing_login_cookies(tmp_path, mon
         anonymous = caller.get('/api/identity')
         assert 'cookie' not in anonymous.request.headers
         assert anonymous.status_code == 401
+        assert anonymous.headers['X-Easel-Auth'] == 'required'
+        assert anonymous.json()['code'] == 'workbench_login_required'
         assert caller.get('/api/identity', headers={'Cookie': 'easel_access=forged'}).status_code == 401
         assert caller.post('/api/write', headers={'Origin': origin}).status_code == 401
 
