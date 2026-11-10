@@ -1,3 +1,5 @@
+> **0.49.6 candidate · 2026-11-10:** Vertical questions, direct free-text replies and original-deadline countdown; no automatic approval on expiry. XHS defaults to the supplied three-page lifestyle product photography brief. Preserve existing account/runtime state and tasks; back up before switching. [Validation and actual deployment receipt](../../docs/question-cards-product-skill-0.49.6-2026-11-10.md).
+
 > **Production 0.47.0 · 2026-11-06:** b5b138780bacad87740ef69e5b50eff1a6ae8ad5, image sha256:0fb0d6469f9c2e2cc00db26168082f64d585e12d376f3efd23a18edfb2cd5e90. Services healthy; snapshot /home/ubuntu/easel-backups/20261106T092622Z.tar.gz. Prior25560370 retained. Qizhi configured; native image metadata loaded. No new live model/image test by user request. [Receipt](../../docs/vision-qizhi-0.47.0.md).
 
 > **Production updated · 2026-11-06:** 0.46.13 / 25560370fb28069f6eef301a1b223116ac298062, healthy services. Snapshot /home/ubuntu/easel-backups/20261106T090228Z.tar.gz; prior d42c471bedae retained. Post-upgrade model/browser acceptance delegated to user; isolation remains 0.46.11. [Receipt](../../docs/gpt-responses-xhs-0.46.13.md).

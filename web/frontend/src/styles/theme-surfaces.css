@@ -26,4 +26,4 @@
 :root[data-theme="dark"] .office-detail-tabs > button[aria-selected=true],
 :root[data-theme="dark"] .office-button[aria-pressed=true],
 :root[data-theme="dark"] .office-button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); border-color: var(--border-strong); }
-:root[data-theme="dark"] .question-card__custom input { background: var(--bg); color: var(--text); }
+:root[data-theme="dark"] .question-card__custom textarea { background: var(--bg); color: var(--text); }

@@ -56,6 +56,6 @@ test('approval card grids can shrink and wrap commands without clipping their co
   }
   assert.match(rule('.question-card'), /overflow-wrap:\s*anywhere/);
   assert.match(rule('.question-card__title'), /white-space:\s*pre-wrap/);
-  assert.match(rule('.question-card__options'), /minmax\(min\(150px,\s*100%\),\s*1fr\)/);
-  assert.match(rule('.question-card__custom input'), /min-width:\s*0/);
+  assert.match(rule('.question-card__options'), /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(rule('.question-card__custom textarea'), /min-width:\s*0/);
 });

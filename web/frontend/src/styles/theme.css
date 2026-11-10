@@ -69,8 +69,8 @@
 :root[data-theme='dark'] .thinking-block { background: var(--accent-soft); }
 :root[data-theme='dark'] .question-card__option--selected { background: var(--accent-soft); }
 :root[data-theme='dark'] .question-card__multi { background: var(--accent-soft); border-color: var(--border-strong); }
-:root[data-theme='dark'] .question-card__custom input { background: var(--bg-elev); color: var(--text); }
-:root[data-theme='dark'] :is(.question-card__chip, .question-card__custom button, .question-card__submit, .media-check) { color: var(--bg); }
+:root[data-theme='dark'] .question-card__custom textarea { background: var(--bg-elev); color: var(--text); }
+:root[data-theme='dark'] :is(.question-card__chip, .question-card__submit, .media-check) { color: var(--bg); }
 :root[data-theme='dark'] .question-card__error { color: var(--red); }
 :root[data-theme='dark'] .ana-plats .chip { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
 :root[data-theme='dark'] .ana-plats .chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }

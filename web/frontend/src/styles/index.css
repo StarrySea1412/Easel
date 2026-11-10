@@ -593,6 +593,7 @@ textarea.field { resize: vertical; min-height: 90px; }
 .message-row.assistant { justify-content: flex-start; }
 
 /* ---- ask_user 问答题卡片（OpenClaw question RPC 桥接） ---- */
+.msg-col.assistant.question-card__column { width: min(100%, 680px); }
 .question-card {
   background: var(--bg-elevated, #fff); border: 1px solid var(--border, rgba(0,0,0,.08));
   border-radius: var(--radius-lg); padding: 14px 16px;
@@ -607,7 +608,10 @@ textarea.field { resize: vertical; min-height: 90px; }
   font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
 }
 .question-card__title { color: var(--text-strong, #20242c); font-size: 15px; font-weight: 650; line-height: 1.4; white-space: pre-wrap; }
-.question-card__options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px; }
+.question-card__options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.question-card__status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.question-card__timer { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: var(--radius-pill); background: var(--bg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.question-card__timer--urgent { color: var(--red, #b54e2c); }
 .question-card__option {
   display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 3px;
   text-align: left; white-space: normal; padding: 11px 12px; cursor: pointer;
@@ -619,27 +623,18 @@ textarea.field { resize: vertical; min-height: 90px; }
 .question-card__option:disabled { opacity: .55; cursor: default; }
 .question-card__option strong { color: var(--text-strong, #20242c); font-size: 14px; }
 .question-card__option span { color: var(--text-secondary, #666); font-size: 12px; line-height: 1.45; }
-.question-card__other {
-  justify-self: start; background: none; border: 0; padding: 4px 2px; cursor: pointer;
-  color: var(--accent-start, #4361ee); font-size: 12px; text-decoration: underline;
+.question-card__custom { display: grid; min-width: 0; gap: 6px; margin-top: 2px; }
+.question-card__custom label { color: var(--text-secondary); font-size: 12px; }
+.question-card__custom textarea {
+  width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border, rgba(0,0,0,.12)); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5;
 }
-.question-card__other:disabled { opacity: .55; cursor: default; }
-.question-card__custom { display: flex; gap: 8px; }
-.question-card__custom input {
-  flex: 1; min-width: 0; padding: 9px 12px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border, rgba(0,0,0,.12)); font: inherit; font-size: 13px;
-}
-.question-card__custom input:focus { outline: 2px solid var(--accent-start, #4361ee); outline-offset: 1px; }
-.question-card__custom button {
-  padding: 9px 16px; border-radius: var(--radius-sm); border: 0; cursor: pointer;
-  background: var(--accent-start, #4361ee); color: var(--on-accent); font-weight: 600;
-}
-.question-card__custom button:disabled { opacity: .5; cursor: default; }
+.question-card__custom textarea:focus-visible, .question-card__option:focus-visible, .question-card__submit:focus-visible { outline: 2px solid var(--accent-start, #4361ee); outline-offset: 2px; }
 .question-card__hint { color: var(--text-secondary, #666); font-size: 12px; }
 .question-card__error { color: #c0392b; }
 .question-card__item { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
 .question-card__divider { height: 1px; background: var(--border, rgba(0,0,0,.08)); margin: 10px 0; }
-.question-card__actions { display: flex; justify-content: flex-end; }
+.question-card__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .question-card__submit {
   padding: 9px 20px; border-radius: var(--radius-sm); border: 0; cursor: pointer;
   background: var(--accent-start, #4361ee); color: var(--on-accent); font-weight: 600;

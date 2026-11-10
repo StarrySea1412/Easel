@@ -5553,11 +5553,13 @@ class _HarnessProc(_GatewayHttpProc):
 async def _harness_ask(sk: str, questions: list[dict], emit) -> dict:
     identifier = "harness_" + uuid.uuid4().hex
     future = asyncio.get_running_loop().create_future()
-    record = {"session": sk, "future": future, "status": "pending", "questions": questions}
+    expires = int((time.time() + TIMEOUT_CHAT) * 1000)
+    record = {"session": sk, "future": future, "status": "pending", "questions": questions,
+              "expiresAtMs": expires}
     _HARNESS_QUESTIONS[identifier] = record
     try:
         emit("question", _scrub_secrets(json.dumps(
-            {"id": identifier, "questions": questions}, ensure_ascii=False)))
+            {"id": identifier, "questions": questions, "expiresAtMs": expires}, ensure_ascii=False)))
         answers = await asyncio.wait_for(future, TIMEOUT_CHAT)
         record["status"] = "resolved"
         return answers
@@ -7265,6 +7267,8 @@ async def api_question_answer(req: QuestionAnswerRequest):
         record = _HARNESS_QUESTIONS.get(req.questionId)
         if record is None:
             return {"ok": False, "error": "权限或问答请求已过期，请重试"}
+        if record.get("expiresAtMs", float('inf')) <= time.time() * 1000:
+            return {"ok": False, "error": "权限或问答请求已过期，请在对话中继续回复"}
         required = {question["questionId"] for question in record["questions"]}
         if set(req.answers or {}) != required:
             raise HTTPException(400, "回答与当前问题不匹配")
