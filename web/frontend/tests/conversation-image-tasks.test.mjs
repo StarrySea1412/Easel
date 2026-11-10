@@ -5,6 +5,7 @@ import { act, createElement } from 'react';
 import { loadTsModule } from './load-ts.mjs';
 globalThis.window=new Window({url:'https://easel.test/'});
 globalThis.document=window.document;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+globalThis.HTMLElement=window.HTMLElement;
 const {createRoot}=await import('react-dom/client');
 const {default:Panel}=await loadTsModule('../src/components/ConversationImageTasks.tsx');
 const {uniqueImageArtifacts}=await loadTsModule('../src/lib/chatArtifacts.ts');
@@ -44,7 +45,7 @@ test('gallery groups copies and exposes separate accessible draft actions',async
   const view=await setup(t,{items:[image(),image('b'),image('c',{sessionId:'foreign'})]});
   assert.equal(view.container.querySelectorAll('article').length,1);
   assert.match(view.container.textContent,/合并 2 份相同文件/);
-  assert.equal(view.container.querySelector('a').getAttribute('aria-label'),'查看原图：a.png');
+  assert.equal(view.container.querySelector('.conversation-image-preview').getAttribute('aria-label'),'查看原图：a.png');
   await act(async()=>view.button('添加到对话').click());assert.equal(view.adds(),1);
   assert.match(view.container.textContent,/已加入目标对话草稿/);
   await act(async()=>view.button('用于发布').click());assert.equal(view.publishes(),1);
@@ -98,7 +99,7 @@ test('failed single-image retry deduplicates clicks and keeps saved images',asyn
   const job={jobId:'b'.repeat(32),sessionId:'chat',turnId:'t',prompt:'第2张',phase:'error',retryAvailable:true};
   t.mock.method(globalThis,'fetch',(url,options)=>{calls++;assert.equal(String(url),'/api/chat/artifacts/chat/jobs/'+job.jobId+'/retry');assert.equal(options.method,'POST');return pending;});
   const view=await setup(t,{items:[image(),image('c',{contentSha256:'d'.repeat(64)})],jobs:[job]});
-  assert.ok(view.container.querySelector('details').open);
+  assert.equal(view.container.querySelector('details').open,false);
   assert.match(view.container.textContent,/可能产生新的生图费用/);
   await act(async()=>{view.button('重试失败图片').click();view.button('重试失败图片').click();});
   assert.equal(calls,1);assert.ok(view.button('正在提交重试…').disabled);

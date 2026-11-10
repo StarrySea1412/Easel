@@ -2,13 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useChatRun } from '../hooks/useChatRun';
 import type { TaskGoal } from '../lib/tasks';
 import { taskStatus } from '../lib/tasks';
+import type { ChatImageJob } from '../lib/chatArtifacts';
 import { formatChatElapsed } from '../lib/chatTiming';
 import { progressEntries, progressText } from '../lib/chatProgress';
 import { IconCheck, IconChevron, IconClock, IconInfo, IconLoader, IconStop } from './icons';
 import '../styles/chat-run-progress.css';
 
 const labels:Record<string,string>={pending:'待执行',inProgress:'进行中',completed:'已完成',blocked:'受阻',failed:'失败'};
-export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,failed,stopped,onGoal}:{goal?:TaskGoal;activity?:string|string[];startedAt?:number;elapsedMs?:number;failed?:boolean;stopped?:boolean;onGoal:()=>void}) {
+export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,failed,stopped,onGoal,imageJobs=[]}:{goal?:TaskGoal;activity?:string|string[];startedAt?:number;elapsedMs?:number;failed?:boolean;stopped?:boolean;onGoal:()=>void;imageJobs?:ChatImageJob[]}) {
   const run=useChatRun(),id=useId(),root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
   const [expanded,setExpanded]=useState(false),[showAll,setShowAll]=useState(false),[now,setNow]=useState(Date.now);
   const [showCompleted,setShowCompleted]=useState(false),[showPending,setShowPending]=useState(false);
@@ -20,16 +21,18 @@ export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,f
   const snapshot=run.execution.current;
   const plan=snapshot?.plan?.length?snapshot.plan:(!run.turnId||goal?.currentTurnId===run.turnId?goal?.steps?.map(step=>({step:step.title,status:step.status==='in_progress'?'inProgress':step.status})):undefined)||[];
   const completed=plan.filter(step=>step.status==='completed').length;
+  const cardSet=imageJobs.find(job=>job.sessionId===run.sessionId&&job.turnId===run.turnId&&job.cardSet?.sessionId===run.sessionId&&job.cardSet.turnId===run.turnId)?.cardSet;
+  const imageProgress=cardSet?`卡组已保存 ${cardSet.ready}/3${cardSet.complete&&cardSet.qualityState==='assistant_reviewed'?' · 审图通过':''}`:'';
   const current=plan.find(step=>step.status==='inProgress')||plan.find(step=>step.status==='blocked'||step.status==='failed')||plan.find(step=>step.status==='pending');
   const timelineProgress=snapshot?.timeline?.filter(entry=>entry.type==='progress').map(entry=>entry.text||'');
   const rawProgress=timelineProgress?.length?timelineProgress:snapshot?.progress||[];
   const progress=progressEntries(rawProgress);
   const activityLabel=typeof activity==='string'?activity.split('\n').at(-1):Array.isArray(activity)?activity.filter(item=>typeof item==='string').at(-1):'';
   const latest=progressText(rawProgress.at(-1)||activityLabel||'');
-  const label=run.execution.error?'进度更新中断':failed?'本轮失败':stopped?'本轮已停止':!run.streaming&&snapshot?.engine&&snapshot.engine!=='openclaw'?'本轮记录':latest==='等待你回答'?latest:current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':latest||progress.at(-1)||goal?.title||(run.streaming?'正在执行':'本轮记录'));
-  if(!plan.length&&!goal&&!run.streaming&&!progress.length&&!latest&&!failed&&!stopped&&!run.execution.error)return null;
+  const label=failed?'本轮失败':stopped?'本轮已停止':!run.streaming&&snapshot?.engine&&snapshot.engine!=='openclaw'?'本轮记录':latest==='等待你回答'?latest:current?.step||(!run.streaming&&plan.length&&completed===plan.length?'清单已完成':imageProgress||latest||progress.at(-1)||goal?.title||(run.execution.error?'进度暂不可用':run.streaming?'正在执行':'本轮记录'));
+  if(!plan.length&&!goal&&!run.streaming&&!progress.length&&!latest&&!failed&&!stopped&&!run.execution.error&&!imageProgress)return null;
   const elapsed=elapsedMs??(run.streaming&&startedAt!==undefined?Math.max(0,now-startedAt):undefined);
-  const state=failed||run.execution.error?'error':stopped?'stopped':run.streaming?'running':plan.length&&completed===plan.length?'done':'idle';
+  const state=failed||run.execution.error&&!snapshot&&!cardSet?'error':stopped?'stopped':run.streaming?'running':plan.length&&completed===plan.length?'done':'idle';
   const StatusIcon=state==='error'?IconInfo:state==='stopped'?IconStop:state==='running'?IconLoader:state==='done'?IconCheck:IconClock;
   const history=progress.filter(text=>text!==label&&text!==goal?.title&&!plan.some(step=>step.step===text));
   const finishedSteps=plan.filter(step=>step.status==='completed');
@@ -41,6 +44,7 @@ export default function ChatProgressCapsule({goal,activity,startedAt,elapsedMs,f
     {expanded&&<section id={id} className="chat-progress-popover" aria-label="工作进度清单">
       <header><strong>{goal?'目标进度':'工作进度'}</strong>{elapsed!==undefined&&<small>用时 {formatChatElapsed(elapsed)}</small>}<button type="button" className="chat-progress-collapse" aria-label="收起工作进度" onClick={close}><IconChevron size={14}/></button></header>
       {goal&&<p className="chat-progress-objective">{goal.title} <small>{taskStatus[goal.status]||goal.status}</small></p>}
+      {cardSet&&<p className="chat-progress-note">{imageProgress}{cardSet.qualityState!=='assistant_reviewed'?' · 待质量验收':''}。图片进度按本轮保存回执更新。</p>}
       {plan.length>0&&<><div className="chat-progress-count"><span>任务清单</span><span>{completed}/{plan.length}</span></div><div className="chat-progress-track" aria-hidden="true"><span style={{width:`${completed/plan.length*100}%`}}/></div>
         {finishedSteps.length>0&&<><button type="button" className="chat-progress-group" aria-expanded={showCompleted} aria-controls={`${id}-completed`} onClick={()=>setShowCompleted(value=>!value)}><IconChevron size={12}/>已完成 {finishedSteps.length} 项</button><ol id={`${id}-completed`} hidden={!showCompleted}>{finishedSteps.map(renderStep)}</ol></>}
         <ol>{openSteps.slice(0,3).map(renderStep)}</ol>

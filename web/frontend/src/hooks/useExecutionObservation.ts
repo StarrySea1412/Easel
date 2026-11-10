@@ -9,7 +9,7 @@ export function useExecutionObservation(sessionId:string, turnId:string, streami
   const [revision,setRevision]=useState(0),[loading,setLoading]=useState(false);
   useEffect(()=>{
     if(!enabled||!turnId)return;
-    let disposed=false,version=0,reading=false;
+    let disposed=false,version=0,reading=false,failures=0;
     let timer:ReturnType<typeof setTimeout>|undefined;
     let request:AbortController|undefined;
     const update=(value:ChatExecution)=>setSnapshot(old=>old?.sessionId===sessionId&&old.turnId===turnId?{...old,...value,nextBefore:old.nextBefore===null?null:old.nextBefore===undefined?value.nextBefore:value.nextBefore===undefined?old.nextBefore:Math.min(old.nextBefore,value.nextBefore??0),operations:mergeOperations(old.operations,value.operations),timeline:mergeTimeline(old.timeline,value.timeline)}:value);
@@ -18,13 +18,13 @@ export function useExecutionObservation(sessionId:string, turnId:string, streami
       if(disposed||reading||document.hidden)return;
       reading=true;request=new AbortController();const controller=request,began=version;
       const deadline=setTimeout(()=>controller.abort(),12000);
-      try{const value=await fetchChatExecution(sessionId,turnId,controller.signal);if(!disposed&&!controller.signal.aborted&&began===version){update(value);setReadError(null);}}
-      catch{if(!disposed&&began===version)setReadError({sessionId,turnId,message:'执行记录暂不可读，已有回执保留。'});}
-      finally{clearTimeout(deadline);reading=false;if(!disposed&&streaming&&!document.hidden)timer=setTimeout(()=>void read(),3000);}
+      try{const value=await fetchChatExecution(sessionId,turnId,controller.signal);if(!disposed&&!controller.signal.aborted&&began===version){update(value);failures=0;setReadError(null);}}
+      catch(reason){if(!disposed&&began===version){failures++;setReadError({sessionId,turnId,message:controller.signal.aborted?'进度读取超时，已有回执保留。':reason instanceof Error?reason.message:'执行记录暂不可读，已有回执保留。'});}}
+      finally{clearTimeout(deadline);reading=false;if(!disposed&&!document.hidden&&(streaming||failures>0&&failures<=3))timer=setTimeout(()=>void read(),streaming?3000:Math.min(1500*2**(failures-1),6000));}
     };
     const visibility=()=>{clearTimeout(timer);if(!document.hidden)void read();};
-    window.addEventListener('easel:execution',listen);document.addEventListener('visibilitychange',visibility);
-    void read();return()=>{disposed=true;request?.abort();clearTimeout(timer);window.removeEventListener('easel:execution',listen);document.removeEventListener('visibilitychange',visibility);};
+    window.addEventListener('easel:execution',listen);window.addEventListener('focus',visibility);document.addEventListener('visibilitychange',visibility);
+    void read();return()=>{disposed=true;request?.abort();clearTimeout(timer);window.removeEventListener('easel:execution',listen);window.removeEventListener('focus',visibility);document.removeEventListener('visibilitychange',visibility);};
   },[sessionId,turnId,streaming,revision,enabled]);
   const current=enabled&&snapshot?.sessionId===sessionId&&snapshot.turnId===turnId?snapshot:null;
   const error=enabled&&readError?.sessionId===sessionId&&readError.turnId===turnId?readError.message:'';

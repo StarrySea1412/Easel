@@ -6,6 +6,7 @@ import { loadTsModule } from './load-ts.mjs';
 
 globalThis.window = new Window({ url: 'https://easel.test/' });
 globalThis.document = window.document;
+globalThis.HTMLElement = window.HTMLElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = await import('react-dom/client');
 const { default: Artifacts } = await loadTsModule('../src/components/ChatArtifacts.tsx', import.meta.url);
@@ -50,7 +51,7 @@ async function setup(t, initial, jobs = []) {
   const render = async (next = items) => { items = next; await act(async () => root.render(createElement(Artifacts, { artifacts: items, jobs, onUpdated: value => { items = items.map(item => item.id === value.id ? value : item); void render(); } }))); };
   await render(); t.after(async () => { await act(async () => root.unmount()); container.remove(); });
   return { container, requests, render,
-    refresh: async () => act(async () => container.querySelector('button').click()),
+    refresh: async () => act(async () => container.querySelector('.chat-artifact header button').click()),
     respond: async value => act(async () => requests.at(-1).resolve(new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } }))) };
 }
 
@@ -135,10 +136,25 @@ test('each prompt stays with explicitly attributed images even when artifacts ar
   assert.equal(cards[0].querySelector('img').alt, 'one.png');
   assert.match(cards[1].textContent, /产品细节/);
   assert.equal(cards[1].querySelector('img').alt, 'two.png');
-  await act(async () => cards[0].querySelector('.chat-artifact button').click());
+  assert.equal(cards[0].firstElementChild.className, 'chat-prompt-results');
+  assert.equal(cards[0].querySelector('details').open, false);
+  await act(async () => cards[0].querySelector('.chat-artifact header button').click());
   assert.ok(view.requests[0].url.includes(`/${one.id}/refresh`));
   assert.equal(view.requests[0].options.method, 'POST');
   assert.ok(!view.requests[0].url.includes('imagegen'));
+});
+
+test('image opens in a modal with keyboard focus and no new tab, then restores the thumbnail', async t => {
+  const view = await setup(t, [artifact({name:'image.png',mimeType:'image/png'})]);
+  const trigger=view.container.querySelector('[aria-label="查看原图：image.png"]');
+  trigger.focus(); await act(async()=>trigger.click());
+  const dialog=document.querySelector('[role=dialog]');
+  assert.ok(dialog); assert.equal(dialog.querySelector('img').src,view.container.querySelector('img').src);
+  assert.equal(document.activeElement.getAttribute('aria-label'),'关闭原图');
+  assert.equal(dialog.querySelector('a').target,'');
+  await act(async()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('[role=dialog]'),null);assert.equal(document.activeElement,trigger);
+  assert.equal(view.requests.length,0);
 });
 
 test('cross-session, cross-turn and ambiguous claims never invent prompt-image ownership', async () => {

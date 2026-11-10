@@ -27,6 +27,7 @@ import re
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -2206,6 +2207,12 @@ async def api_skill_detail(name: str):
         raise HTTPException(404, f"SKILL '{name}' 不存在")
     md_path = _skill_md_path(full)
     desc, layer, body = _parse_skill_md(md_path)
+    from easel.skill_prompts import SkillPrompts
+    try:
+        prompt = SkillPrompts(DATA_DIR).read(full, md_path)
+    except (OSError, ValueError, sqlite3.Error):
+        raise HTTPException(503, '技能提示词暂不可读，请重新读取。') from None
+    body = prompt['body']
     needs_api = full in SKILL_API_REQUIREMENTS
     env = _read_env()
     from easel.imported_skills import installed
@@ -2217,11 +2224,32 @@ async def api_skill_detail(name: str):
         "layer": layer,
         "description": desc,
         "body": body,
+        **{key: value for key, value in prompt.items() if key != 'body'},
         "needsApi": needs_api,
         "apiConfigured": _skill_api_configured(full, env) if needs_api else True,
         "apiSpec": _api_spec_status(full, env) if needs_api else None,
         "guide": _skill_guide(full, desc, body, md_path, env),
     }
+
+
+class SkillPromptRequest(BaseModel):
+    body: Annotated[str, Field(strict=True, min_length=1, max_length=100000)]
+    promptRevision: Annotated[str, Field(strict=True, pattern=r'^[a-f0-9]{64}$')]
+
+
+@app.put('/api/skill/{name}/prompt')
+async def api_skill_prompt_save(name: str, req: SkillPromptRequest):
+    full = find_skill(name)
+    if full is None:
+        raise HTTPException(404, '技能不存在或名称无效。')
+    from easel.skill_prompts import SkillPrompts
+    try:
+        await asyncio.to_thread(SkillPrompts(DATA_DIR).save, full, _skill_md_path(full), req.body, req.promptRevision)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    except (OSError, sqlite3.Error):
+        raise HTTPException(503, '保存失败，输入已保留，请稍后重试。') from None
+    return await api_skill_detail(full)
 
 
 class EnvUpdateRequest(BaseModel):
@@ -4730,6 +4758,11 @@ def _selected_skill_specs(req: ChatRequest) -> dict[str, dict]:
             raise HTTPException(400, f'技能不存在或名称无效：{name[:120]}')
         path = _skill_md_path(full)
         description, _layer, body = _parse_skill_md(path)
+        from easel.skill_prompts import SkillPrompts
+        try:
+            body = SkillPrompts(DATA_DIR).read(full, path)['body']
+        except (OSError, ValueError, sqlite3.Error):
+            raise HTTPException(503, '已保存的技能提示词暂不可读，请稍后重试。') from None
         guide = _skill_guide(full, description, body, path, {})
         scripts = sorted(set(re.findall(r'scripts/[A-Za-z0-9_./-]+\.(?:py|js|ts|sh|ps1)', body)))
         specs[full] = {'requirements': guide['whatYouGet'], 'scripts': scripts,
@@ -4898,6 +4931,7 @@ def _xiaohongshu_execution_context(specs: dict[str, dict]) -> str:
         '〔小红书组别执行契约〕\n'
         '按能力分流：笔记策划走 xhs-note-creator；小红书卡片组走 card-xiaohongshu，'
         '必须调用 easel_xhs_cards 或 easel_generate_image 专用生图工具，card-design 只指导视觉风格；'
+        '仅当用户当前明确要求HTML/网页时按其指定格式交付，不沿用历史HTML做法，也不将HTML交付称为专用生图成功。'
         '爆款规律与限流检测走 skill-xhs-analyzer；评论抓取/回复走 skill-xhs-comment-reply；发布只走 '
         'skill-xhs-publisher。不要把读取、分析、评论和发布混成一次副作用任务。\n'
         '卡片组、封面和配图必须取得真实生图成功回执并交付图片，不能用 HTML、浏览器截图或原图叠字替代生图。'
@@ -4970,6 +5004,11 @@ def _chat_message(req: ChatRequest, *, suffix='') -> str:
             '每次exec是独立命令，上一调用的cd不保持；每次脚本使用准确绝对路径或在同一命令内cd项目根。'
             '复杂多行Python先写脚本再执行，保留stderr和真实退出码。')
         message += '\n先读取对应 SKILL.md，按原文要求执行；无法执行时说明缺少什么，不要把读取说明当成执行成功。'
+        from easel.skill_prompts import SkillPrompts
+        for name in specs:
+            saved = SkillPrompts(DATA_DIR).context(name, _skill_md_path(name))
+            if saved:
+                message += '\n\n〔已保存的技能正文〕\n' + saved + '\n此版本替代安装目录中同名技能的原始正文；脚本和参考路径仍相对原安装目录解析。'
         visual = {'comparison-card', 'ai-image-gen', 'ecom-details-image', 'card-design'}
         if any(name in visual or name.startswith(('card-', 'poster-')) for name in specs):
             image_env = _read_env()

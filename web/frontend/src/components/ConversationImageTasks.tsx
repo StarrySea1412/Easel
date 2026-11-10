@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { artifactUrl, uniqueImageArtifacts, groupImageArtifacts } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import { IconImage, IconCheck, IconExpand, IconDownload, IconPlus, IconPublish, IconRefresh } from './icons';
 import XhsCardSetStatus from './XhsCardSetStatus';
 import PublishSpinner from './PublishSpinner';
 import RetryImageJob from './RetryImageJob';
+import ImagePreviewModal from './ImagePreviewModal';
 import '../styles/conversation-image-tasks.css';
 
 type Props = {
@@ -22,6 +23,8 @@ function jobLabel(job: ChatImageJob) {
 function ImageCard({item, copies, hydrate, ...props}: Props & {item: ChatArtifact; copies: number; hydrate: boolean}) {
   const [busy, setBusy] = useState<'chat'|'refresh'|null>(null), [note, setNote] = useState('');
   const [broken, setBroken] = useState(false), [attempt, setAttempt] = useState(0);
+  const [preview, setPreview] = useState(false);
+  const closePreview = useCallback(() => setPreview(false), []);
   const pending = useRef(false), alive = useRef(true), controller = useRef<AbortController|null>(null);
   useEffect(() => { alive.current=true; return () => {alive.current=false;controller.current?.abort();}; }, []);
   useEffect(() => {setBroken(false);setNote('');}, [item.version, props.targetId]);
@@ -54,10 +57,10 @@ function ImageCard({item, copies, hydrate, ...props}: Props & {item: ChatArtifac
   };
   const ready=item.status==='ready', url=artifactUrl(item,'file',attempt);
   return <article className="conversation-image-card" aria-label={'图片：'+item.name}>
-    <a className="conversation-image-preview" href={ready?url:undefined} target="_blank" rel="noreferrer" aria-label={'查看原图：'+item.name}>
+    <button type="button" className="conversation-image-preview" disabled={!ready||broken} onClick={() => setPreview(true)} aria-label={'查看原图：'+item.name}>
       {ready&&!broken?<img src={url} alt={item.description||item.name} loading="lazy" onError={()=>setBroken(true)}/>:<span className="conversation-image-placeholder"><IconImage size={28}/>{item.status==='missing'?'文件已移动或删除':broken?'预览暂不可用':'文件暂不可读'}</span>}
       {ready&&!broken&&<span className="conversation-image-zoom"><IconExpand size={13}/>查看原图</span>}
-    </a>
+    </button>
     <div className="conversation-image-info"><strong title={item.name}>{item.name}</strong><span>{ready?'已保存':'需核对'} · {(item.size/1024/1024).toFixed(1)} MB{copies>1?' · 合并 '+copies+' 份相同文件':''}</span></div>
     <div className="conversation-image-actions">
       <button type="button" disabled={!ready||!props.targetId||!!busy} title={props.targetId?'加入所选对话的草稿，不会发送':'先在上方选择目标对话'} onClick={()=>void add()}>{busy==='chat'?<PublishSpinner/>:<IconPlus size={14}/>}<span>{busy==='chat'?'正在添加':'添加到对话'}</span></button>
@@ -65,6 +68,7 @@ function ImageCard({item, copies, hydrate, ...props}: Props & {item: ChatArtifac
     </div>
     <footer className="conversation-image-footer">{ready&&<a href={url+'&download=true'}><IconDownload size={13}/>下载原图</a>}<button type="button" disabled={!!busy} onClick={()=>void refresh()} aria-label={'刷新图片：'+item.name}><IconRefresh size={13}/>{busy==='refresh'?'正在核对':'刷新'}</button></footer>
     {note&&<p className="conversation-image-feedback" role="status">{note}</p>}
+    {preview&&ready&&<ImagePreviewModal src={url} name={item.name} onClose={closePreview}/>}
   </article>;
 }
 export default function ConversationImageTasks(props: Props) {
@@ -79,7 +83,18 @@ export default function ConversationImageTasks(props: Props) {
   return <section className="conversation-image-tasks" aria-label="对话中的图片任务">
     <header className="conversation-image-heading"><span className="conversation-image-symbol"><IconImage size={18}/></span><div><h3>对话中的图片任务</h3><p>生成记录与已保存图片 · 添加到草稿后继续创作</p></div><span className={'conversation-image-summary'+(active?' is-active':attention?' is-attention':'')}>{active?<PublishSpinner/>:attention?<span aria-hidden="true">!</span>:<IconCheck size={13}/>} {active?active+' 个进行中':attention?attention+' 个需核对':ready+' 张已保存'}</span></header>
     <XhsCardSetStatus jobs={jobs}/>
-    {!!groups.length&&<div className="conversation-image-job-list">{groups.map(({job,artifacts})=><section key={job.jobId} className="conversation-prompt-card" aria-label="提示词与对应图片"><details open={job.phase==='error'} className={'conversation-image-job is-'+job.phase}><summary><span className="conversation-image-job-name"><strong>提示词</strong>{job.prompt||'图片生成任务'}</span><span className="conversation-image-phase">{['queued','running'].includes(job.phase)&&<PublishSpinner/>}{jobLabel(job)}</span></summary><p className="conversation-image-prompt">{job.prompt}</p><small>任务 {job.jobId.slice(0,12)}</small>{job.error&&<p className="conversation-image-error">{job.error}</p>}<RetryImageJob job={job} onChanged={props.onRefresh}/>{job.phase==='unconfirmed'&&<p>任务结果尚未确认，请在对话任务记录中核对或接回原任务。</p>}</details><div className="conversation-prompt-results"><header><strong>对应图片{artifacts.length>1?' · '+artifacts.length+' 张':''}</strong><button type="button" onClick={props.onRefresh} title="重新读取已有任务与图片，不会重新生图"><IconRefresh size={13}/>刷新任务状态</button></header>{artifacts.length?<div className="conversation-image-grid">{artifacts.map(artifact=><ImageCard key={artifact.id+':'+artifact.version+':'+props.targetId} {...props} item={artifact} copies={copies.get(artifact.id)||1} hydrate={legacy.has(artifact.id)}/>)}</div>:<p className="conversation-image-empty">{['queued','running'].includes(job.phase)?'图片完成后会显示在这里':'暂未找到明确关联的图片'} · 刷新不会重新生图</p>}</div></section>)}</div>}
+    {!!groups.length&&<div className="conversation-image-job-list">{groups.map(({job,artifacts})=><section key={job.jobId} className="conversation-prompt-card" aria-label="图片与对应提示词">
+      <div className="conversation-prompt-results">
+        {artifacts.length?<div className="conversation-image-grid">{artifacts.map(artifact=><ImageCard key={artifact.id+':'+artifact.version+':'+props.targetId} {...props} item={artifact} copies={copies.get(artifact.id)||1} hydrate={legacy.has(artifact.id)}/>)}</div>
+          :<div className="conversation-image-empty"><p>{['queued','running'].includes(job.phase)?'图片完成后会显示在这里':'暂未找到明确关联的图片'}</p><button type="button" onClick={props.onRefresh}>刷新任务状态</button></div>}
+      </div>
+      <div className={'conversation-image-job is-'+job.phase}>
+        <details><summary><strong>提示词</strong><span className="conversation-image-phase">{['queued','running'].includes(job.phase)&&<PublishSpinner/>}{jobLabel(job)}</span></summary><p className="conversation-image-prompt">{job.prompt}</p><small>任务 {job.jobId.slice(0,12)}</small></details>
+        {job.error&&<p className="conversation-image-error">{job.error}</p>}<RetryImageJob job={job} onChanged={props.onRefresh}/>
+        {job.phase==='unconfirmed'&&<p>任务结果尚未确认，请在对话任务记录中核对或接回原任务。</p>}
+        <button type="button" className="conversation-job-refresh" onClick={props.onRefresh} title="重新读取已有任务与图片，不会重新生图"><IconRefresh size={13}/>刷新任务状态</button>
+      </div>
+    </section>)}</div>}
     {!!other.length&&<div className="conversation-image-grid">{other.map(artifact=><ImageCard key={artifact.sessionId+':'+artifact.turnId+':'+artifact.id+':'+artifact.version+':'+props.targetId} {...props} item={artifact} copies={copies.get(artifact.id)||1} hydrate={legacy.has(artifact.id)}/>)}</div>}
     {!images.length&&!!jobs.length&&<p className="conversation-image-empty">{active?'图片保存后会出现在这里':'暂无可展示的已保存图片，请查看任务记录'}</p>}
     {props.note&&<div className="conversation-image-notice" role="status"><span>{props.note}</span><button type="button" onClick={props.onRefresh}>重新读取</button></div>}

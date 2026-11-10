@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { artifactUrl, groupImageArtifacts } from '../lib/chatArtifacts';
 import type { ChatArtifact, ChatImageJob } from '../lib/chatArtifacts';
 import '../styles/chat-artifacts.css';
 import XhsCardSetStatus from './XhsCardSetStatus';
 import RetryImageJob from './RetryImageJob';
+import ImagePreviewModal from './ImagePreviewModal';
 
 function ArtifactCard({ artifact, onUpdated }: { artifact: ChatArtifact; onUpdated: (value: ChatArtifact) => void }) {
   const [busy, setBusy] = useState(false), [note, setNote] = useState(''), [attempt, setAttempt] = useState(0), [failed, setFailed] = useState(false);
   const controller = useRef<AbortController | null>(null), generation = useRef(0);
   const pending = useRef(false);
+  const [preview, setPreview] = useState(false);
+  const closePreview = useCallback(() => setPreview(false), []);
   const element = useRef<HTMLElement>(null);
-  useEffect(() => { setFailed(false); setNote(''); }, [artifact.id, artifact.version]);
+  useEffect(() => { setFailed(false); setNote(''); setPreview(false); }, [artifact.sessionId, artifact.id, artifact.version, artifact.status]);
   useEffect(() => () => { generation.current++; controller.current?.abort(); }, [artifact.sessionId, artifact.id]);
   const refresh = async (automatic = false) => {
     if (pending.current) return;
@@ -37,13 +40,14 @@ function ArtifactCard({ artifact, onUpdated }: { artifact: ChatArtifact; onUpdat
   }, [artifact.id, artifact.sessionId, busy]);
   const image = artifact.mimeType.startsWith('image/') && artifact.mimeType !== 'image/svg+xml', html = artifact.mimeType === 'text/html', video = artifact.mimeType.startsWith('video/');
   const url = artifactUrl(artifact, 'file', attempt);
-  return <article ref={element} className={`chat-artifact${html ? ' is-html' : ''}`} aria-label={`产物：${artifact.name}`}>
+  return <article ref={element} className={`chat-artifact${html ? ' is-html' : image ? ' is-image' : ''}`} aria-label={`产物：${artifact.name}`}>
+    {artifact.status === 'ready' && image && !failed && <button type="button" className="chat-artifact-image-preview" onClick={() => setPreview(true)} aria-label={`查看原图：${artifact.name}`}><img key={`${artifact.version}:${attempt}`} src={url} alt={artifact.name} loading="lazy" onError={() => setFailed(true)} /><span>查看原图</span></button>}
     <header><div><strong title={artifact.name}>{artifact.name}</strong><small>{artifact.description || (html ? 'HTML · 可交互预览' : image ? '图片' : video ? '视频 · 可直接播放' : artifact.mimeType)} · {(artifact.size / 1024).toFixed(1)} KB</small></div><button type="button" onClick={() => void refresh()} aria-disabled={busy} aria-busy={busy} aria-label={`刷新${artifact.name}`} title="重新读取已保存文件，不调用模型">{busy ? '读取中…' : '刷新预览'}</button></header>
-    {artifact.status === 'ready' && image && !failed && <a href={url} target="_blank" rel="noreferrer" aria-label={`打开图片${artifact.name}`}><img key={`${artifact.version}:${attempt}`} src={url} alt={artifact.name} loading="lazy" onError={() => setFailed(true)} /></a>}
     {artifact.status === 'ready' && html && <details open className="chat-artifact-html"><summary>页面预览</summary><iframe key={`${artifact.version}:${attempt}`} src={artifactUrl(artifact, 'preview', attempt)} sandbox="allow-scripts" title={`预览${artifact.name}`} onError={() => setFailed(true)} /><p>独立预览 · 页面内联网请求和嵌套网页不可用</p></details>}
     {artifact.status === 'ready' && video && <video key={`${artifact.version}:${attempt}`} className="chat-artifact-video" src={url} controls playsInline preload="metadata" aria-label={`播放${artifact.name}`} onError={() => setFailed(true)} />}
     {(failed || artifact.status !== 'ready') && <p className="chat-artifact-error" role="status">{artifact.status === 'missing' ? '文件已移动或删除' : artifact.error || '预览加载失败，请刷新重试'}</p>}
     <footer><a href={`${url}&download=true`}>下载{html ? ' HTML' : video ? ' 视频' : '原文件'}</a><span role="status">{note}</span></footer>
+    {preview && artifact.status === 'ready' && image && <ImagePreviewModal src={url} name={artifact.name} onClose={closePreview}/>}
   </article>;
 }
 function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => void }) {
@@ -64,11 +68,29 @@ function ImageJob({ job, onChanged }: { job: ChatImageJob; onChanged?: () => voi
     } catch (e) { if (!request.signal.aborted) setError(e instanceof Error ? e.message : '原任务状态更新失败，请稍后重试。'); }
     finally { if (!request.signal.aborted) setBusy(false); }
   };
-  return <section className={`chat-image-job is-${job.phase}`} aria-label="生图任务"><div className="chat-image-job-heading"><strong>提示词</strong><span>{job.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中' : '等待图片通道' : job.phase === 'running' ? job.stage === 'recovering' ? '正在接回原图片任务' : job.stage === 'downloading' ? '图片已生成，正在保存' : '图片生成中' : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片任务已结束'}</span></div>{job.prompt.length > 220 ? <><p className="chat-image-prompt-excerpt">{job.prompt.slice(0, 220)}…</p><details><summary>查看完整提示词</summary><p>{job.prompt}</p></details></> : <p>{job.prompt}</p>}<small>任务 {job.jobId.slice(0, 12)}</small>{job.error && <p role="status">{job.error}</p>}<RetryImageJob job={job} onChanged={onChanged}/>{job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" disabled={busy} onClick={() => void update('reconcile')}>接回原任务</button>}<button type="button" disabled={busy} onClick={() => void update('acknowledge')}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button></>}{error && <p role="alert">{error}</p>}</section>;
+  const status = job.phase === 'queued' ? job.queueReason === 'memory_pressure' ? '服务器资源紧张，保留排队中' : '等待图片通道'
+    : job.phase === 'running' ? job.stage === 'recovering' ? '正在接回原图片任务' : job.stage === 'downloading' ? '图片已生成，正在保存' : '图片生成中'
+    : job.phase === 'unconfirmed' ? '生成结果未确认' : job.phase === 'done' ? '图片已保存' : '图片生成失败';
+  return <section className={`chat-image-job is-${job.phase}`} aria-label="生图任务">
+    <details className="chat-image-prompt"><summary><strong>提示词</strong><span>{status}</span></summary><p>{job.prompt}</p><small>任务 {job.jobId.slice(0, 12)}</small></details>
+    {job.error && <p role="status">{job.error}</p>}<RetryImageJob job={job} onChanged={onChanged}/>
+    {job.phase === 'unconfirmed' && <>{job.recoveryAvailable && <button type="button" disabled={busy} onClick={() => void update('reconcile')}>接回原任务</button>}<button type="button" disabled={busy} onClick={() => void update('acknowledge')}>{busy ? '更新中…' : '已核对供应商，解除占位'}</button></>}
+    {error && <p role="alert">{error}</p>}
+  </section>;
 }
 export default function ChatArtifacts({ artifacts, onUpdated, jobs = [], onJobsChanged }: { artifacts: ChatArtifact[]; onUpdated: (value: ChatArtifact) => void; jobs?: ChatImageJob[]; onJobsChanged?: () => void }) {
   if (!artifacts.length && !jobs.length) return null;
   const { groups, other } = groupImageArtifacts(artifacts, jobs);
   const singleVisual = artifacts.filter(item => item.mimeType.startsWith('image/') || item.mimeType.startsWith('video/')).length <= 1;
-  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}${groups.length ? ' chat-artifacts-with-prompts' : ''}`} aria-label="本轮生成文件"><XhsCardSetStatus jobs={jobs}/>{groups.map(({job, artifacts: images}) => <article key={`${job.sessionId}:${job.jobId}`} className="chat-prompt-image-card" aria-label="提示词与对应图片"><ImageJob job={job} onChanged={onJobsChanged}/><div className="chat-prompt-results"><div className="chat-prompt-results-heading"><strong>对应图片{images.length > 1 ? ` · ${images.length} 张` : ''}</strong>{onJobsChanged && <button type="button" onClick={onJobsChanged} title="重新读取任务与已有文件，不会重新生图">刷新任务状态</button>}</div>{images.length ? <div className="chat-prompt-image-grid">{images.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated}/>)}</div> : <div className="chat-prompt-image-empty"><span>{job.phase === 'queued' || job.phase === 'running' ? '图片完成后会显示在这里' : job.phase === 'error' ? '这份提示词暂未生成可用图片' : '暂未找到明确关联的图片'}</span><small>刷新只读取已有结果，不会调用生图模型。</small></div>}</div></article>)}{other.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}</section>;
+  return <section className={`chat-artifacts${singleVisual ? ' chat-artifacts-single' : ''}${groups.length ? ' chat-artifacts-with-prompts' : ''}`} aria-label="本轮生成文件">
+    <XhsCardSetStatus jobs={jobs}/>
+    {groups.map(({job, artifacts: images}) => <article key={`${job.sessionId}:${job.jobId}`} className="chat-prompt-image-card" aria-label="图片与对应提示词">
+      <div className="chat-prompt-results">
+        {images.length ? <div className="chat-prompt-image-grid">{images.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated}/>)}</div>
+          : <div className="chat-prompt-image-empty"><span>{job.phase === 'queued' || job.phase === 'running' ? '图片完成后会显示在这里' : job.phase === 'error' ? '暂未生成可用图片' : '暂未找到明确关联的图片'}</span>{onJobsChanged && <button type="button" onClick={onJobsChanged}>刷新任务状态</button>}</div>}
+      </div>
+      <ImageJob job={job} onChanged={onJobsChanged}/>
+    </article>)}
+    {other.map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} onUpdated={onUpdated} />)}
+  </section>;
 }

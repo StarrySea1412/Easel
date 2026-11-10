@@ -46,6 +46,29 @@ test('capsule and inline operations share one reader; only explicit plan updates
   assert.match(v.container.querySelector('.chat-progress-capsule').textContent,/清单已完成.*3\/3/);
   assert.equal(v.container.querySelector('.chat-progress-capsule').getAttribute('aria-expanded'),'true');
 });
+
+test('saved card status reaches the capsule for the same turn while read failure preserves success',async t=>{
+  const v=await setup(t);
+  const cardSet={cardSetId:'cards',sessionId:'a',turnId:'t1',expected:3,ready:3,complete:true,qualityState:'assistant_reviewed',cards:[]};
+  const job={jobId:'job',sessionId:'a',turnId:'t1',phase:'done',prompt:'qa',cardSet};
+  await v.render('a',{imageJobs:[job]});
+  await act(async()=>v.requests[0].reject(new Error('执行记录不可用（HTTP 503）')));
+  assert.match(v.container.querySelector('.chat-progress-capsule').textContent,/卡组已保存 3\/3 · 审图通过/);
+  assert.notEqual(v.container.querySelector('.chat-progress-capsule').dataset.state,'error');
+  await v.click('.chat-progress-capsule');
+  assert.match(v.container.textContent,/HTTP 503/);
+  await v.render('a',{imageJobs:[{...job,turnId:'old-turn'}]});
+  assert.doesNotMatch(v.container.querySelector('.chat-progress-capsule').textContent,/卡组已保存/);
+});
+
+test('background read errors never overwrite an explicit completed checklist',async t=>{
+  const v=await setup(t);await v.respond(0,{...snapshot(),plan:plan.map(row=>({...row,status:'completed'}))});
+  await act(async()=>window.dispatchEvent(new window.Event('focus')));
+  const read=v.requests.findLast(r=>String(r.url).includes('/execution/'));
+  await act(async()=>read.reject(new Error('执行记录不可用（HTTP 502）')));
+  assert.match(v.container.querySelector('.chat-progress-capsule').textContent,/清单已完成.*3\/3/);
+  assert.equal(v.container.querySelector('.chat-progress-capsule').dataset.state,'done');
+});
 test('Escape closes and restores focus, session switch immediately removes former plan and identities',async t=>{
   const v=await setup(t);await v.respond(0,snapshot());await v.click('.chat-progress-capsule');
   await act(async()=>v.container.querySelector('.chat-progress-anchor').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));

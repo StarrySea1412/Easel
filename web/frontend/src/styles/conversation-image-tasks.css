@@ -9,7 +9,8 @@
 .conversation-image-summary.is-attention { color:var(--amber,#a46c13); }
 .conversation-image-job-list { display:grid; gap:7px; margin-bottom:14px; }
 .conversation-image-job { padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:var(--surface-2); min-width:0; }
-.conversation-image-job summary { display:flex; gap:12px; align-items:center; cursor:pointer; list-style:none; }
+.conversation-image-job summary { display:flex; gap:12px; align-items:center; cursor:pointer; list-style:none; font-size:11px; }
+.conversation-image-job summary:before{content:'›';font-size:17px;color:var(--text-secondary)}.conversation-image-job details[open] summary:before{transform:rotate(90deg)}.conversation-image-job summary>strong{flex:1;font-weight:500}
 .conversation-image-job summary::-webkit-details-marker { display:none; }
 .conversation-image-job-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .conversation-image-phase { display:inline-flex; align-items:center; gap:5px; flex:none; font-size:11px; color:var(--text-secondary); }
@@ -20,7 +21,7 @@
 .conversation-image-prompt { white-space:pre-wrap; max-height:180px; overflow:auto; }
 .conversation-image-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr)); gap:12px; align-items:start; }
 .conversation-image-card { min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:11px; background:var(--surface); }
-.conversation-image-preview { display:flex; position:relative; justify-content:center; align-items:center; height:224px; padding:12px; background:var(--surface-2); overflow:hidden; }
+.conversation-image-preview { display:flex; position:relative; justify-content:center; align-items:center; width:100%;height:320px; padding:12px; border:0;font:inherit;background:var(--surface-2); overflow:hidden;cursor:zoom-in;box-sizing:border-box; }
 .conversation-image-preview img { display:block; max-width:100%; width:100%; height:100%; object-fit:contain; border-radius:5px; }
 .conversation-image-zoom { position:absolute; right:8px; bottom:8px; display:flex; align-items:center; gap:4px; padding:5px 7px; border:1px solid var(--border); border-radius:6px; font-size:10px; color:var(--text-primary,var(--text)); background:var(--surface); }
 .conversation-image-placeholder { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--text-secondary); }
@@ -40,9 +41,10 @@
 .conversation-image-notice button { border:0; background:transparent; color:var(--accent,#507bb7); padding:3px; cursor:pointer; font:inherit; }
 .conversation-image-empty { padding:14px 0 2px; margin:0; color:var(--text-secondary); text-align:center; }
 .conversation-prompt-card { min-width:0; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
-.conversation-prompt-card .conversation-image-job { border:0; border-radius:0; padding:12px; }
+.conversation-prompt-card .conversation-image-job { border:0; border-top:1px solid var(--border);border-radius:0; padding:10px 12px; }
 .conversation-prompt-card .conversation-image-job-name strong { margin-right:8px; color:var(--text); font-size:11px; }
-.conversation-prompt-results { padding:12px; }
+.conversation-prompt-results { min-width:0; }.conversation-prompt-results .conversation-image-card{border:0;border-radius:0}
+.conversation-job-refresh{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:2px 0;border:0;background:transparent;font:inherit;font-size:10px;color:var(--text-secondary);cursor:pointer}.conversation-image-empty button{border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface);color:var(--text-secondary);font:inherit;cursor:pointer;margin-bottom:12px}
 .conversation-prompt-results>header { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
 .conversation-prompt-results>header>strong { font-size:12px; font-weight:500; }
 .conversation-prompt-results>header>button { display:inline-flex; gap:5px; align-items:center; padding:5px 0; border:0; background:transparent; color:var(--text-secondary); font:inherit; font-size:11px; cursor:pointer; }

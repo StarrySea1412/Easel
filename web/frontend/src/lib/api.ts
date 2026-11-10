@@ -178,6 +178,9 @@ export interface SkillDetail {
   layer: string;
   description: string;
   body: string;
+  promptRevision?: string;
+  promptCustomized?: boolean;
+  promptSavedAt?: number | null;
   needsApi: boolean;
   apiConfigured: boolean;
   apiSpec: ApiSpec | null;
@@ -465,6 +468,11 @@ export function fetchClawHubSkill(skill: ClawHubSkill, signal?: AbortSignal): Pr
 
 export function fetchSkillDetail(name: string): Promise<SkillDetail> {
   return request<SkillDetail>(`/api/skill/${encodeURIComponent(name)}`);
+}
+
+export function saveSkillPrompt(name: string, body: string, promptRevision: string, signal?: AbortSignal): Promise<SkillDetail> {
+  return request(`/api/skill/${encodeURIComponent(name)}/prompt`, { method: 'PUT', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, promptRevision }) });
 }
 
 /** 保存 API key 到项目根 .env（仅注册表内变量）。返回各需 API 的 skill 是否已就绪。 */

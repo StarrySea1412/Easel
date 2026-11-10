@@ -52,6 +52,7 @@
 .brush-guide code { font-size: 10.5px; color: var(--text-secondary); }
 .brush-guide header p { color: var(--text-tertiary); font-size: 10px; margin-top: 4px; }
 .brush-guide-section { margin-top: 18px; }
+.skill-prompt-editor{padding:12px;margin:12px 0 18px;border:1px solid var(--border);border-radius:9px;background:var(--surface);min-width:0}.skill-prompt-editor>header{display:flex;justify-content:space-between;gap:8px;margin-bottom:10px}.skill-prompt-editor header span{font-size:10px;color:var(--text-secondary)}.skill-prompt-editor label{display:block;margin-bottom:5px;font-size:11px}.skill-prompt-editor textarea{box-sizing:border-box;width:100%;min-height:260px;resize:vertical;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:12px/1.8 var(--font-mono,monospace)}.skill-prompt-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.skill-prompt-editor details{margin-top:10px}.skill-prompt-editor summary{cursor:pointer;font-size:11px}.skill-prompt-editor pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.8 var(--font-mono,monospace);padding-top:8px}.skill-prompt-editor p{font-size:11px;margin:8px 0 0}.skill-prompt-editor [role=alert]{color:var(--red)}
 .brush-guide-section h4 { font-size: 12px; font-weight: 650; margin-bottom: 6px; }
 .brush-guide-section p, .brush-guide-section li { color: var(--text-secondary); }
 .brush-guide-section ol, .brush-guide-section ul { padding-left: 18px; }

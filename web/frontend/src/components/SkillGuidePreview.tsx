@@ -3,6 +3,7 @@ import { fetchSkillDetail } from '../lib/api';
 import type { SkillDetail } from '../lib/api';
 import { displayName } from '../lib/skillDisplayNames';
 import SkillDependencyBadges from './SkillDependencyBadges';
+import SkillPromptEditor from './SkillPromptEditor';
 
 function GuideList({ title, items, ordered = false }: { title: string; items: string[]; ordered?: boolean }) {
   const List = ordered ? 'ol' : 'ul';
@@ -44,6 +45,7 @@ export default function SkillGuidePreview({ skillName, onPick }: { skillName: st
 
   return <aside className="brush-guide" aria-label={`${displayName(skillName)}技能详情`}>
     <header><h3>{displayName(skillName)}</h3><code>{skillName}</code><p>根据本机 SKILL.md 原文整理</p></header>
+    {detail?.name === skillName && <SkillPromptEditor key={skillName} detail={detail} onSaved={setDetail}/>}
     {error ? <div className="brush-guide-error" role="alert">{error}<button type="button" className="link-btn" onClick={() => setRetry((value) => value + 1)}>重新读取</button></div>
       : !detail ? <p className="brush-guide-muted" role="status">正在读取技能详情…</p>
       : guide ? <>
