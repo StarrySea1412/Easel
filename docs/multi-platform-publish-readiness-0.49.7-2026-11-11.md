@@ -17,7 +17,21 @@
 - 发布确认稿交接的旧测试仍抽取旧单路由/逐平台请求。补上真实共享预检并改测服务端批次后，后端 creation_handoff + social_accounts 54 项、前端 creation-handoff 6 项通过；保留素材封存、不可变确认稿、来源和账号身份核对断言。
 - `npm ci --no-audit --no-fund` 使用候选自己的依赖，生产 TypeScript/Vite 构建通过，lint 退出0、保留仓库既有 warning。验收临时页面未进入源码包。
 - 前端完整首轮：1576 项中1569通过、7失败。创建交接的1项已按上述定向复测修复；其余包括执行面板旧错误文案2项、侧栏旧按钮查找1项、问题自动选择协议与旧“永不自动提交”断言2项、dashboard-skills 测试进程内存耗尽1项。四个失败文件单独复跑为40通过/6失败（交接修复前），并非全部都是并发噪声。不把定向通过拼成全量绿色。
-- 后端全量结果以最终回执追加；第一轮 fail-fast 为482通过/4跳过/1子进程超时失败，该恢复测试独立复跑4项通过。
+- 后端完整长跑最终为 **5526通过、9失败、5错误、110跳过**（5650项，4条warning，2769.88秒）。第一轮 fail-fast 为482通过/4跳过/1子进程超时失败，该恢复测试独立复跑4项通过，但在完整长跑中再次失败，不能标记已解决。完整长跑在交接夹具修复前启动；交接修复后的54项定向通过不替代新一轮完整回归。
+
+### 后端完整回归失败清单
+
+| 文件与范围 | 本轮长跑结果 | 处置与验收边界 |
+| --- | --- | --- |
+| `tests/test_agent_harnesses.py` ACP owner death recovery | 1失败：子进程在断言时尚未按预期退出。 | 独立4项曾通过，完整长跑仍失败，继续保留。 |
+| `tests/test_browser_bridge_auth.py`、`tests/test_browser_downloads.py` | 2失败：缺少snapshot、浏览器创建动作failed。 | 不推断已修复或仅是并发噪声；尚需单独定位。 |
+| `tests/test_creation_handoff.py` confirmed media copy | 1失败：旧AST夹具缺少`_check_publish_request`。 | 已补真实共享预检，最终creation_handoff + social_accounts 54项通过。完整长跑未重启。 |
+| `tests/test_gateway_snapshot_ownership.py` local_lock/process_lock/transport | 3失败：`done/recovery_required`及`cancelled/service_shutdown`终态断言不一致。 | 启动取消与资源归属协议需核对，仍阻塞放行。 |
+| `tests/test_imagegen_reference.py` multipart edits wire | 1失败：调用缺少keyword-only `timeout`。 | 调用/测试契约尚待修复和复测，未发真实生图请求。 |
+| `tests/test_web_anthropic_slot.py` provider save | 1失败：返回note与期望提示文案不匹配。 | 仍保留失败，不由HTTP200判断配置全流程通过。 |
+| `tests/test_native_office.py` 5项共享graph夹具 | 5错误：任务执行等待超时。 | 未进入这5项正常断言，不能计为通过。 |
+
+完整前端、后端原始日志分别为本地忽略目录中的`frontend-installed.log`和`backend-complete.log`；对应失败不一概认定为本轮新增，也没有完成基线对照来证明全部是既有问题。本轮只修复与发布检查直接相关的确认稿和测试交接，完整回归与自动选择协议统一仍是下一次构建/激活前的放行条件。
 
 ## 真实浏览器与隔离 HTTP
 
@@ -42,7 +56,9 @@
 - 正式服务只读核对为 0.49.6 / 4e5550e589250a0e4d1e2c6c36bc22d57bad8b99，镜像 sha256:98fc31df460b4ead98ec92550478b23cea79090442dc248b89c51cb12ffdc5c1，app/browser 健康。
 - 原生 manage.py preflight 未通过：/home/ubuntu 可用 3848019968 字节，低于 5368709120 字节（5GiB）。不降低门槛、不停服，不删除业务数据、凭据、当前或回滚镜像。候选构建、隔离激活及正式切换是独立阶段，存储问题解决前不得执行。
 - 续办再次预检为3845926912字节，仍未通过。正式HTTPS8444和隔离HTTPS8445均通过CA验证的表单登录；正式仍0.49.6/4e5550e58925，隔离0.49.1/490712b2a619。只读账号清单中正式仅知乎默认账号显示loggedIn=true，其余六个false，独立账号为0；这不是当前在线核验，更不构成全平台投稿可用证明。未触发平台登录/发布。
-- 本轮准备固定提交的 Git 导出包和校验清单；138 实际构建/切换状态以后续记录为准。源码推送不表示运行版本更新，安装器未发布。
+- 固定源码提交 `28bdfccb01cc68e6e4d9d6010d619def377994da` 已推送并核对远端候选分支；其 Git 导出包和校验清单已暂存 138。`main` 仅同步双语首页，提交 `79734b34acdf6922f3af30b0e6b4a1e1dd3c0677`，没有功能合并。两个正式维护分支仍为 `a1db1cbe23f0541e672595c2e44389af8b047fe7`。独立上游整批合并仍有62个冲突文件，不包含在本候选中。
+- 138候选目录为 `/home/ubuntu/easel-releases/candidate-0.49.7-28bdfccb01cc`，源码位于其 `source/`。包名 `Easel-0.49.7-28bdfccb01cc.zip`，222120798字节，SHA-256为 `3e26595a342263bda0b6c9c9c443d06db35daf9880abee951ac91b86363c441d`；包哈希和2400个源码文件清单均已验证。远端 `stage-receipt.json` 回读确认 `imageBuilt=false`、`activated=false`、`readyForBuild=false`，本轮没有重建、重启或软链接切换。
+- 暂存后再次只读核对：`/home/ubuntu` 可用3176701952字节（约2.96GiB），仍低于原生5GiB门槛；正式软链接仍为 `/home/ubuntu/easel-releases/Easel-138-4e5550e58925`。前两次空间数字是上传前预检，不能作为上传后余额。源码推送和包暂存均不表示运行版本更新，安装器未发布。
 - 回滚准备保留当前 0.49.6 固定镜像、现有上一版回滚记录与完整备份；真正激活前重新核对在途任务，完整停写备份，再使用原生管理器切换。回滚代码不等于恢复平台发布副作用，未知结果不得自动重发。
 - 隔离测试账号只适用于 138 本机测试入口 https://127.0.0.1:8445，用户名 gaojitest，密码 gaoji；正式 8444 保留独立凭据。测试弱密码不写入生产配置或镜像。
 
