@@ -32,6 +32,8 @@ async function setup(t,{editor=true}={}) {
     else if(path.endsWith('/drafts/'+item.id+'/accept')) value=h.accept?await h.accept(body):{id:'b'.repeat(32),sessionId:'handoff-chat',preparationId:item.id,platform:body.platform};
     else if(path==='/api/publish/receipts') value=[];
     else if(path==='/api/publish/zhihu') value={receiptId:'c'.repeat(32),platform:'zhihu',title:body.title,createdAt:'2026-10-26',updatedAt:'2026-10-26',state:'finished',outcome:'draft',message:'合成平台草稿回执'};
+    else if(path==='/api/publish/batch') value={batchId:'d'.repeat(32),accepted:body.requests.map(request=>({platform:request.platform,receiptId:'c'.repeat(32)})),rejected:[]};
+    else if(path==='/api/publish/batch/'+'d'.repeat(32)) value={batchId:'d'.repeat(32),state:'completed',platforms:[{platform:'zhihu',state:'finished',outcome:'draft',message:'隔离批次回执'}]};
     else if(path==='/api/accounts'||path==='/api/outputs') value=[];
     else if(path==='/api/diagnostics/failures') value={eventId:'f'.repeat(32)};
     else throw new Error('Unexpected fixture route: '+path);
@@ -73,7 +75,7 @@ test('source version conflict leaves existing editor and previous version untouc
   await view.click('载入编辑');
   assert.equal(workspace.readCreationDraft(own).body,initial.body);
   assert.equal(workspace.readCreationDraft(own).preparationId,undefined);
-  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/zhihu').length,0);
+  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/batch').length,0);
 });
 
 test('clearing a loaded editor releases its preparation binding and permits another load',async t=>{
@@ -105,9 +107,9 @@ test('confirmed batch seals its immutable edited payload before submission',asyn
   const requests=[{platform:'zhihu',sourceSessionId:'handoff-chat',preparationId:item.id,accountIdentity:'fixed-account',payload:{title:'用户确认',body:'编辑后的正文',media:['cover.png'],tags:'',persona:'原会话画像'}}];
   let pending;await act(async()=>{pending=view.h.model.submit(requests);});
   requests[0].payload.body='后来改动';requests[0].payload.media.push('later.png');
-  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/zhihu').length,0);
+  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/batch').length,0);
   await act(async()=>{gate.resolve({id:'b'.repeat(32),sessionId:'handoff-chat',preparationId:item.id,platform:'zhihu'});await pending;});
-  const submitted=view.h.requests.find(request=>request.path==='/api/publish/zhihu').body;
+  const submitted=view.h.requests.find(request=>request.path==='/api/publish/batch').body.requests[0];
   assert.equal(submitted.body,'编辑后的正文');assert.deepEqual(submitted.media,['cover.png']);
   assert.equal(submitted.acceptanceId,'b'.repeat(32));assert.equal(submitted.sourceSessionId,'handoff-chat');
 });
@@ -116,6 +118,6 @@ test('acceptance conflict never submits the platform payload',async t=>{
   const view=await setup(t,{editor:false});
   view.h.accept=()=>new Response(JSON.stringify({detail:'原分析已变化，请重新准备'}),{status:409});
   await act(async()=>view.h.model.submit([{platform:'zhihu',sourceSessionId:'handoff-chat',preparationId:item.id,payload:{title:'合成稿',body:'合成正文',media:[]}}]));
-  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/zhihu').length,0);
+  assert.equal(view.h.requests.filter(request=>request.path==='/api/publish/batch').length,0);
   assert.match(view.h.model.submissionIssues[0].message,/原分析已变化/);
 });

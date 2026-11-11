@@ -26,7 +26,7 @@ test('a current account check updates the card and identity from the same result
   assert.equal(accountConnection(undefined,cached('zhihu')), 'login_required');
   assert.equal(cached('zhihu').loggedIn, false);
   assert.equal(card(view,'知乎').querySelector('.account-nick'), null);
-  assert.match(view.container.textContent, /0 \/ 3 个平台已确认在线/);
+  assert.equal(view.container.querySelector('.account-default-count').textContent, '0 / 3 在线');
 });
 
 test('failed account verification preserves the last nickname and avatar as unknown', async t => {

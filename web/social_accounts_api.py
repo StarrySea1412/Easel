@@ -260,6 +260,10 @@ class SocialAccountService:
         limits = {'xiaohongshu': 20, 'douyin': 55, 'kuaishou': 30, 'bilibili': 80, 'wechat-oa': 64}
         if not payload.title.strip() or len(payload.title) > limits.get(platform, 300):
             raise AccountError(f"请核对 {account['label']} 的标题长度。", 400)
+        body_limits = {'xiaohongshu': 1000, 'douyin': 55, 'kuaishou': 1000,
+                       'weixin-channels': 1000, 'zhihu': 5000, 'bilibili': 2000, 'wechat-oa': 20000}
+        if len(payload.body) > body_limits[platform]:
+            raise AccountError(f"{account['label']} 的正文最多 {body_limits[platform]} 字，请修改后重新确认。", 400)
         if platform in {'bilibili', 'douyin', 'weixin-channels'} and len(videos) != 1:
             raise AccountError('该平台每次仅接收一个视频。', 400)
         if platform == 'kuaishou' and len(images) + len(videos) != 1:

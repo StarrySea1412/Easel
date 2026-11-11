@@ -149,6 +149,70 @@ def test_commands_cannot_borrow_default_account_paths(service, platform, monkeyp
         monkeypatch.setattr(web, '_build_publish_command', original)
 
 
+@pytest.mark.parametrize('platform,limit', [('xiaohongshu', 1000), ('douyin', 55), ('kuaishou', 1000),
+    ('weixin-channels', 1000), ('zhihu', 5000), ('bilibili', 2000), ('wechat-oa', 20000)])
+def test_account_body_limit_rejects_before_admission_without_truncating(service, platform, limit):
+    account = ready(service.store, '长度检查', platform)
+    media = [] if platform == 'zhihu' else ['video.mp4'] if platform in {'douyin', 'bilibili', 'weixin-channels'} else ['cover.png']
+    item = target(account, media)
+    item['payload']['body'] = '字' * limit
+    from social_accounts_api import TargetPayload
+    service.validate_payload(account, TargetPayload(**item['payload']))
+    item['payload']['body'] += '字'
+    if platform == 'wechat-oa':
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            DistributionRequest(requestKey=uuid.uuid4().hex, confirmed=True, requests=[item])
+    else:
+        with pytest.raises(AccountError, match='正文最多'):
+            service.submit(DistributionRequest(requestKey=uuid.uuid4().hex, confirmed=True, requests=[item]))
+    assert service.store.batches() == []
+    assert not service.store.list()[0]['busy']
+
+
+def test_http_distribution_runs_seven_platforms_and_two_same_platform_accounts(service, monkeypatch):
+    accounts = [ready(service.store, platform, platform) for platform in sorted(PLATFORMS)]
+    accounts.append(ready(service.store, '小红书第二号', 'xiaohongshu', 'b' * 24))
+    requests = [target(account, [] if account['platform'] == 'zhihu' else ['video.mp4']
+        if account['platform'] in {'douyin', 'bilibili', 'weixin-channels'} else ['cover.png']) for account in accounts]
+    expected = {account['accountId']: account for account in accounts}
+    commands = []
+    original_build = web._build_publish_command
+    def build(platform, *args):
+        if platform == 'wechat-oa':
+            return ['python', 'weixin_mp_stats.py', 'publish', '--html', 'isolated.html']
+        return original_build(platform, *args)
+    monkeypatch.setattr(web, '_build_publish_command', build)
+    def execute(command, **kwargs):
+        identifier = next(key for key in expected if key in ' '.join(command))
+        account = expected[identifier]
+        if 'whoami' in command:
+            return SimpleNamespace(returncode=0, stdout=json.dumps({'loggedIn': True, 'externalAccountId': account['externalAccountId']}))
+        assert command[command.index('--expected-account-id') + 1] == account['externalAccountId']
+        commands.append((identifier, command))
+        return SimpleNamespace(returncode=0, stdout='EASEL_PUBLISH_RECEIPT=' + json.dumps({
+            'schemaVersion': 1, 'receiptId': kwargs['receipt_id'], 'platform': account['platform'],
+            'outcome': 'draft' if account['platform'] == 'wechat-oa' else 'submitted', 'message': '隔离执行器回执'}))
+    monkeypatch.setattr(service, 'execute', execute)
+    app = FastAPI(); app.include_router(service.router()); client = TestClient(app)
+    envelope = {'requestKey': uuid.uuid4().hex, 'confirmed': True, 'requests': requests}
+    response = client.post('/api/social-accounts/batches', json=envelope)
+    assert response.status_code == 200
+    batch_id = response.json()['batchId']
+    SocialAccountService.run_batch(service, batch_id)
+    SocialAccountService.run_batch(service, batch_id)
+    current = client.get('/api/social-accounts/batches/' + batch_id).json()
+    assert current['state'] == 'finished' and len(current['jobs']) == len(commands) == 8
+    assert len({identifier for identifier, _ in commands}) == 8
+    for job in current['jobs']:
+        assert job['outcome'] == ('draft' if job['platform'] == 'wechat-oa' else 'submitted')
+        receipt = web._get_publish_receipt(job['receiptId'])
+        assert receipt['accountId'] == job['accountId']
+        assert receipt['externalAccountId'] == expected[job['accountId']]['externalAccountId']
+    assert client.post('/api/social-accounts/batches', json=envelope).json()['batchId'] == batch_id
+    assert len(commands) == 8
+
+
 def test_batch_failure_does_not_block_other_account_and_worker_replay_does_not_publish_twice(service, monkeypatch):
     a = ready(service.store, 'A')
     b = ready(service.store, 'B', 'bilibili', '67890')

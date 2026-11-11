@@ -27,6 +27,7 @@ async function consume(payloads, resumeOnly) {
   const completed = new Promise(resolve => { finish = resolve; });
   const streamChat = runInNewContext(outputText, {
     AbortController, TextDecoder, Date, Error, setTimeout, BASE: '',
+    readChatAutoContinue: () => false,
     fetch: async url => {
       requests.push(url);
       return new Response(new ReadableStream({

@@ -167,7 +167,8 @@ def test_publish_endpoint_uses_confirmed_media_copy_before_receipt_creation(tmp_
     # Compile only this ordinary route; a sentinel stops before any platform code.
     source = Path(__file__).resolve().parents[1] / 'web/app.py'
     tree = ast.parse(source.read_text(encoding='utf-8-sig'))
-    nodes = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) and node.name in {'PublishRequest', 'api_publish'}]
+    nodes = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+             and node.name in {'PublishRequest', '_check_publish_request', 'api_publish'}]
     for node in nodes: node.decorator_list = []
     store, item, payload = prepared(tmp_path)
     accepted = store.accept('chat', item['id'], 'confirm', 'zhihu', payload, 'local-account-version')

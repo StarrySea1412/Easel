@@ -31,9 +31,9 @@ function setup() {
     exports, Error,
     selectAnalyticsPlatform: cache.selectAnalyticsPlatform,
     readAnalyticsCache: cache.readAnalyticsCache, analyticsScope: cache.analyticsScope,
+    analyticsPending: cache.analyticsPending,
     accounts: [], whoamiMap: {}, accountConnection: () => 'online', accountChecks: new Set(),
     mounted: {current: true}, dataVersion: {current: 1}, setAnaBusy() {}, showToast() {},
-    anaPending: { current: new Set() },
     setAnaSel: () => {},
     setAnaErrors: update => { errors = update(errors); },
     setAnaData: update => { data = update(data); },
@@ -48,11 +48,13 @@ test('repeated clicks share one fetch and refresh is possible afterwards', async
   const view = setup();
   view.exports.runAna('xiaohongshu');
   view.exports.runAna('xiaohongshu');
+  await settle();
   assert.equal(view.pending.length, 1);
   view.pending[0].resolve({ platform: 'xiaohongshu', loggedIn: true, followers: 0 });
   await settle();
   assert.equal(view.data.xiaohongshu.loggedIn, true);
   view.exports.runAna('xiaohongshu', true);
+  await settle();
   assert.equal(view.pending.length, 2);
 });
 
@@ -60,6 +62,7 @@ test('a completed request does not persist another platforms loading state', asy
   const view = setup();
   view.exports.runAna('xiaohongshu');
   view.exports.runAna('zhihu');
+  await settle();
   view.pending[0].resolve({ platform: 'xiaohongshu', loggedIn: true });
   await settle();
   const cache = JSON.parse(view.storage.getItem('easel:analytics-cache:v1'));
@@ -71,16 +74,18 @@ test('a completed request does not persist another platforms loading state', asy
 test('failed fetch displays the server reason and can retry', async () => {
   const view = setup();
   view.exports.runAna('xiaohongshu');
+  await settle();
   view.pending[0].reject(new Error('登录目录正被占用'));
   await settle();
   assert.equal(view.data.xiaohongshu, 'error');
   assert.equal(view.errors.xiaohongshu, '登录目录正被占用');
   view.exports.runAna('xiaohongshu');
+  await settle();
   assert.equal(view.pending.length, 2);
   assert.equal(view.cache.analyticsError('xiaohongshu'), '');
 });
 
-test('analytics requests have platform-specific bounded deadlines', async () => {
+test('analytics requests use the shared bounded deadline and forward its abort signal', async () => {
   const api = readFileSync(new URL('../../web/frontend/src/lib/api.ts', import.meta.url), 'utf8');
   const apiParsed = ts.createSourceFile('api.ts', api, ts.ScriptTarget.Latest, true);
   const fetchDeclaration = apiParsed.statements.find(node =>
@@ -88,15 +93,22 @@ test('analytics requests have platform-specific bounded deadlines', async () => 
   const compiled = ts.transpileModule(fetchDeclaration.getText(apiParsed), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
-  const exports = {}, calls = [];
+  const exports = {}, calls = [], deadlines = [];
+  const context = browserModules({
+    setTimeout: (_callback, duration) => { deadlines.push(duration); return deadlines.length; },
+    clearTimeout() {},
+  });
+  const cache = context.load(new URL('../../web/frontend/src/lib/analyticsCache.ts', import.meta.url));
   runInNewContext(compiled, {
     exports, encodeURIComponent,
-    collectAnalytics: (_platform, capture) => capture(),
-    AbortSignal: { timeout: duration => ({ duration }) },
+    collectAnalytics: cache.collectAnalytics,
     request: async (path, options) => { calls.push({ path, options }); return {}; },
   });
   await exports.fetchAccountAnalytics('xiaohongshu');
   await exports.fetchAccountAnalytics('wechat-oa');
-  assert.equal(calls[0].options.signal.duration, 195000);
-  assert.equal(calls[1].options.signal.duration, 195000);
+  assert.deepEqual(deadlines, [105000, 105000]);
+  assert.equal(calls[0].options.signal instanceof AbortSignal, true);
+  assert.equal(calls[1].options.signal instanceof AbortSignal, true);
+  assert.match(calls[0].path, /\/api\/analytics\/xiaohongshu$/);
+  assert.match(calls[1].path, /\/api\/analytics\/wechat-oa$/);
 });
