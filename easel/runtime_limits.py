@@ -187,9 +187,21 @@ def install_limits(workspace):
             if group == 'media' and isinstance(response, dict) and response.get('jobId'):
                 identifier = response['jobId']
                 if path == '/api/imagegen':
+                    # 生图已改为持久化队列（outputs/_artifacts/image-jobs.sqlite3），内存字典
+                    # _IMAGEGEN_JOBS 已被删除。旧代码读它会每次轮询抛 AttributeError，而
+                    # Lease.watch 吞掉异常继续等——media 槽位（容量 1）就此永久泄漏，
+                    # 之后所有生图/视频请求一律 429，只能重启服务。
                     from .image_jobs import ImageJobs
                     jobs = ImageJobs(workspace.OUTPUTS_DIR)
-                    lease.watch(lambda: jobs.get(identifier)['phase'] in {'done', 'error', 'cancelled', 'unconfirmed'})
+
+                    def image_terminal():
+                        try:
+                            return jobs.get(identifier)['phase'] in {'done', 'error', 'cancelled', 'unconfirmed'}
+                        except FileNotFoundError:
+                            return True   # 作业已不存在，没有可等的东西，不能继续占槽。
+                        except Exception:
+                            return False  # 观测失败不等于作业结束。
+                    lease.watch(image_terminal)
                 else:
                     jobs = workspace._VIDEO_SERVICE.jobs
                     lease.watch(lambda: jobs.get(identifier, {}).get('state') in {'done', 'error', 'cancelled', 'unconfirmed'})

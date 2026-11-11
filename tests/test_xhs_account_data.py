@@ -124,6 +124,31 @@ def test_clear_analytics(analytics_tmp):
     assert not st._notes_path("douyin").exists()
 
 
+def test_clear_analytics_removes_account_scoped_and_legacy_files(analytics_tmp):
+    """清除分析历史必须同时清掉：账号目录、账号标记、旧版平台级文件。
+    否则清完还会从 {pf}-accounts/<hash>/ 或 {pf}.jsonl 读回旧基线。"""
+    now = int(time.time())
+    # analytics_tmp 夹具把写入账号固定为 account-one，这里沿用它以免绕过归属约束。
+    st.record_note_snapshot("douyin", [_note(src="dy")], now)
+    st.record_snapshot("douyin", {"ts": now, "followers": 7}, "account-one")
+    assert st.load_note_snapshots("douyin", "account-one")
+    assert st.load_history("douyin", "account-one")
+    assert st.note_account_id("douyin") == "account-one"
+    # 旧版平台级文件（升级前留下的）
+    legacy_notes = st.ANALYTICS_DIR / "douyin-notes.jsonl"
+    legacy_hist = st.ANALYTICS_DIR / "douyin.jsonl"
+    legacy_notes.write_text('{"version": 1, "note_id": "old"}\n', encoding="utf-8")
+    legacy_hist.write_text('{"ts": 1, "followers": 1}\n', encoding="utf-8")
+
+    st.clear_analytics("douyin")
+
+    assert st.load_note_snapshots("douyin", "account-one") == []
+    assert st.load_history("douyin", "account-one") == []
+    assert st.note_account_id("douyin") == ""
+    assert not legacy_notes.exists() and not legacy_hist.exists()
+    assert not (st.ANALYTICS_DIR / "douyin-accounts").exists()
+
+
 # ---- 卡片 DOM 提取（_XHS_NOTES_JS 在 Python 侧无法直接跑，校验其模板内容约定） ----
 
 def test_xhs_notes_js_extracts_new_fields():

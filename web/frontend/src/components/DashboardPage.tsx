@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from '
 import { useCompatibleThinking } from '../hooks/useCompatibleThinking';
 import {
   fetchTrends, fetchSchedule, fetchOutputs, fetchAccounts, fetchIdeas,
-  fetchAnalyticsPlatforms, fetchAccountAnalytics, restoreAccountAnalytics,
+  fetchAnalyticsPlatforms, fetchAccountAnalytics, restoreAccountAnalytics, fetchAnalyticsSnapshotStatus,
 } from '../lib/api';
 import type {
   TrendGroup, ScheduleItem, OutputNode, AccountItem, Idea,
-  AnalyticsPlatform, AccountAnalytics,
+  AnalyticsPlatform, AccountAnalytics, AnalyticsSnapshotStatus,
 } from '../lib/api';
 import type { Page } from './Sidebar';
 import { accountConnection, hydrateAccountIdentities, useAccountChecks, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
@@ -96,6 +96,8 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
   const [anaData, setAnaData] = useState<Record<string, AccountAnalytics | 'loading' | 'error'>>({});
   const [anaErrors, setAnaErrors] = useState<Record<string, string>>({});
   const [anaWin, setAnaWin] = useState<'last' | 'day' | 'week' | 'month' | 'year'>('week');
+  // 每日自动快照进度：基线靠后台按天积累，用户需要看到「已采集到哪天」而不是只看到空增长。
+  const [anaSnap, setAnaSnap] = useState<AnalyticsSnapshotStatus | null>(null);
   // whoami 自愈：登录态以真实 profile 为准（与账号页共享 localStorage 缓存）
   const whoamiMap = useAccountIdentities();
   const accountChecks = useAccountChecks();
@@ -106,6 +108,12 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
     if (anaSel) void verifyStale([anaSel], { alive: () => alive });
     return () => { alive = false; };
   }, [anaSel, identitySignature]);
+  useEffect(() => {
+    // 快照状态只是辅助说明，取不到就保持 null，不影响分析结果本身。
+    let alive = true;
+    fetchAnalyticsSnapshotStatus().then((s) => { if (alive) setAnaSnap(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey]);
   useEffect(() => {
     const restore = () => {
       const restored: Record<string, AccountAnalytics> = {};
@@ -419,7 +427,7 @@ export default function DashboardPage({ persona, gatewayStatus, onNavigate, onNa
                           })}
                         </div>
                         <div className="ana-wins" role="group" aria-label="增长对比时段">{WIN.map(([k, lab]) => <button key={k} type="button" aria-pressed={anaWin === k} className={`ana-win ${anaWin === k ? 'on' : ''}`} onClick={() => setAnaWin(k)}>{lab}</button>)}</div>
-                        <p className="ana-wins-note" role="status" aria-live="polite" aria-atomic="true">{windowLabel} · {windowData?.baseline_at ? `对比 ${new Date(windowData.baseline_at * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : windowData?.since_days != null ? `对比 ${windowData.since_days} 天前` : '暂无该时段对比'}</p>
+                        <p className="ana-wins-note" role="status" aria-live="polite" aria-atomic="true">{windowLabel} · {windowData?.baseline_at ? `对比 ${new Date(windowData.baseline_at * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : windowData?.since_days != null ? `对比 ${windowData.since_days} 天前` : '暂无该时段对比'}{anaSnap?.platforms?.[d.platform]?.day ? ` · 该账号最近自动快照：${anaSnap.platforms[d.platform]!.day}` : ''}</p>
                         {d.metricsNeedsRefresh && <section className="ana-refresh-metrics"><h3 className="ana-sub">平台指标</h3><button type="button" className="link-btn" disabled={analyticsPending(anaSel)} onClick={() => runAna(anaSel, true)} title="旧指标来源无法确认，保留账号资料与作品，重新读取平台账号总览">重新采集指标</button></section>}
                         {!!d.metrics?.length && <div className="ana-statistics">
                         <AnalysisMetricChart title={d.metrics_title || '平台指标'} caption={d.metrics_source?.from && d.metrics_source.to ? d.metrics_source.from + ' — ' + d.metrics_source.to : '平台返回的汇总指标'} data={metricData(d.metrics)} />

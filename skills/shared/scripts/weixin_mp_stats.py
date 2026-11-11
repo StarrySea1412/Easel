@@ -45,7 +45,8 @@ TOKEN_RE = re.compile(r"[?&]token=(\d+)")
 
 EMPTY = {
     "platform": "wechat-oa", "name": "微信公众号", "nickname": "",
-    "loggedIn": False, "followers": None, "likes": None, "following": None, "posts": None,
+    "loggedIn": False, "accountId": "",
+    "followers": None, "likes": None, "following": None, "posts": None,
     "reads": None, "metrics": [], "notes": [], "overview": [],
     "period_metrics": {},
     "period_windows": {},
@@ -217,6 +218,20 @@ def _account_identity(page):
     return identity
 
 
+def _extract_account_id(page):
+    """公众号稳定归属键：mp 后台的 user_name（gh_ 开头，与 token 无关）。
+    页面 HTML 里的 user_name 是服务端渲染的，不依赖 Vue 资源加载；取不到返回空串。"""
+    try:
+        html = page.content() or ""
+    except Exception:
+        return ""
+    found = set()
+    for pattern in (r'user_name["\']?\s*[:=]\s*["\']?(gh_[A-Za-z0-9]+)',
+                    r'["\'](gh_[A-Za-z0-9]{8,})["\']'):
+        found.update(re.findall(pattern, html))
+    return found.pop() if len(found) == 1 else ""
+
+
 def _capture_qr(page, qr_out, attempts=25, fallback=True):
     """等二维码 img 真正渲染(complete && naturalWidth>0)后再截图。"""
     Path(qr_out).parent.mkdir(parents=True, exist_ok=True)
@@ -368,6 +383,9 @@ def cmd_stats(a):
                 print(json.dumps(result, ensure_ascii=False))
                 return 1
             result["loggedIn"] = True
+            # 账号归属键：mp 后台的 user_name（gh_ 开头）是该公众号的稳定标识。
+            # 取不到就留空——宁可没有增长曲线，也不把上一个号的快照当成本号基线。
+            result["accountId"] = _extract_account_id(page)
             # 打开发表记录页，让 Vue 自然发出带正确参数的数据 XHR（我们拦截它，避免自己拼易变参数/fingerprint）
             page.goto(f"https://mp.weixin.qq.com/cgi-bin/appmsgpublish?sub=list&begin=0&count={a.count}"
                       f"&token={token}&lang=zh_CN", wait_until="commit", timeout=60000)
@@ -699,10 +717,12 @@ def _attach_growth(result):
         "posts": result.get("posts"),
         "reads": result.get("reads"),
     }
-    history = account_stats.load_history("wechat-oa")
+    # 快照必须按公众号账号隔离：同一浏览器 profile 换号后，旧号的粉丝数不能当新号基线。
+    account_id = str(result.get("accountId") or "")
+    history = account_stats.load_history("wechat-oa", account_id) if account_id else []
     result["growth"] = account_stats.growth_windows(history, snap)
-    if not result.get("error") and any(snap.get(k) is not None for k in ("followers", "likes", "posts")):
-        account_stats.record_snapshot("wechat-oa", snap)
+    if account_id and not result.get("error") and any(snap.get(k) is not None for k in ("followers", "likes", "posts")):
+        account_stats.record_snapshot("wechat-oa", snap, account_id)
     result["overview"] = [
         {"key": "followers", "label": "粉丝", "value": result.get("followers")},
         {"key": "posts", "label": "已发表", "value": result.get("posts")},

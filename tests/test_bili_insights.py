@@ -134,9 +134,32 @@ def snapshot_env(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _seed_snapshot(root: Path, records: list[dict]):
+def _seed_snapshot(root: Path, records: list[dict], account_id: str = "mid-1001"):
     st.ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
-    st.record_note_snapshot("bilibili", records, int(time.time()))
+    # 逐篇快照必须带账号归属（B站用 mid）：换账号后旧稿件不能算进新账号的选题证据。
+    st.record_note_snapshot("bilibili", records, int(time.time()), account_id)
+
+
+def test_note_snapshot_without_account_is_refused(snapshot_env):
+    """没有账号归属就不落盘。否则换账号后旧稿件会混进新账号的证据，
+    而 bili_insights 里「不能混合多个账号」那道校验因为字段恒为空而永远不触发。"""
+    st.ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    assert st.record_note_snapshot("bilibili", _records(), int(time.time())) == []
+    assert st.load_note_snapshots("bilibili") == []
+
+
+def test_note_snapshot_isolated_between_accounts(snapshot_env):
+    """两个账号各写各的：互不可见，读回时带着自己的 account_id。"""
+    now = int(time.time())
+    st.ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    st.record_note_snapshot("bilibili", [_rec("BV_A", "咖啡", ["咖啡"], 10)], now, "mid-a")
+    st.record_note_snapshot("bilibili", [_rec("BV_B", "茶", ["茶"], 20)], now, "mid-b")
+    a = st.load_note_snapshots("bilibili", "mid-a")
+    b = st.load_note_snapshots("bilibili", "mid-b")
+    assert [r["note_id"] for r in a] == ["BV_A"] and a[0]["account_id"] == "mid-a"
+    assert [r["note_id"] for r in b] == ["BV_B"] and b[0]["account_id"] == "mid-b"
+    # 标记文件记住最近一次核验账号，只读入口据此解析归属
+    assert st.note_account_id("bilibili") == "mid-b"
 
 
 def test_insights_endpoint_returns_suggestions(snapshot_env):

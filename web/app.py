@@ -92,6 +92,7 @@ from image_reverse import (
     FORMATS as IMAGE_REVERSE_FORMATS,
 )
 import model_health
+import analytics_snapshot
 import channel_profiles
 from account_identity import AccountIdentityStore, display_identity, merge_identity
 import run_ledger
@@ -670,6 +671,8 @@ async def _owned_lifespan(_app: FastAPI):
     health.start()
     _image_worker().start()
     _task_service.start()
+    analytics_worker = _analytics_snapshot_service()
+    analytics_worker.start()
     try:
         yield
     finally:
@@ -677,6 +680,7 @@ async def _owned_lifespan(_app: FastAPI):
         begin(sys.modules[__name__])
         await asyncio.to_thread(_social_accounts.shutdown)
         await _task_service.close()
+        await asyncio.to_thread(analytics_worker.stop)
         await close_chat_tasks(sys.modules[__name__])
         from easel.harnesses.rpc import close_sessions
         await close_sessions()
@@ -8656,12 +8660,18 @@ def _run_analytics_command(cmd: list[str], env: dict[str, str], timeout: int):
 
 
 def _notes_snapshot_file(platform: str) -> Path:
+    """逐篇快照文件路径：与采集侧共用同一条账号归属规则（account_stats._notes_path）。
+
+    只读入口（选题建议、笔记流）没有 fetch 结果可用，归属来源是采集成功时写下的
+    {platform}-account.json；解析不到归属就回落到平台级旧路径，绝不猜账号。
+    """
     if platform == "xiaohongshu":
         import account_evidence as ae
         account = ae.active_account(OUTPUTS_DIR / "_analytics")
         if account:
             return ae.account_dir(OUTPUTS_DIR / "_analytics", account["id"]) / "notes.jsonl"
-    return OUTPUTS_DIR / "_analytics" / f"{platform}-notes.jsonl"
+    import account_stats as stats
+    return stats.note_snapshot_path(platform)
 
 
 def invalidate_account_context(platform: str, *, live_only: bool = False) -> None:
@@ -8954,6 +8964,93 @@ async def api_analytics_snapshot(platform: str):
             'running': bool(active and not active.done())}
 
 
+def _analytics_command(platform: str) -> list[str]:
+    """某平台只读采集命令（web 手动采集与每日自动快照共用同一入口）。"""
+    if platform == "bilibili":
+        return [sys.executable, str(SHARED_SCRIPTS / "bili_login.py"), "stats",
+                "--cookie", str(DATA_DIR / "cookies.json")]
+    if platform == "wechat-oa":
+        # 公众号数据走「后台网页端」(mp.weixin.qq.com 管理员会话 + Playwright 拦截数据 XHR)：
+        # 开发者 datacube 接口需认证+群发+接口权限，多数号取不到；后台端有登录态即可看到发表记录/数据。
+        # 需先扫码登录 mp 后台（weixin_mp_stats.py login）；默认直连，受限网络才需 EASEL_PROXY/https_proxy。
+        wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
+        return [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "stats",
+                "--proxy", wx_proxy, "--count", "20"]
+    # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
+    return [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch", "--platform", platform]
+
+
+def _analytics_output(stdout: str) -> dict | None:
+    """采集脚本把结果作为最后一行 JSON 打印；只认最后一条可解析的对象。"""
+    for line in reversed((stdout or "").strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(data, dict):
+                return data
+    return None
+
+
+_ANALYTICS_SNAPSHOT_SERVICE = None
+_ANALYTICS_SNAPSHOT_LOCK = threading.Lock()
+
+
+def _snapshot_collect(platform: str) -> bool:
+    """每日快照：跑一次只读采集并落盘（与手动采集同一命令、同一归属校验）。
+
+    只有「已登录 + 拿到平台账号 ID + 至少一项指标非空」才写入；
+    缺账号 ID 时不写，避免把无法核验归属的数字写成本人基线。"""
+    import account_stats as stats
+    env = _proxy_env()
+    if platform == "xiaohongshu":
+        env["EASEL_ANALYTICS_MANAGED"] = "1"
+    proc = subprocess.run(_analytics_command(platform), cwd=str(PROJECT_ROOT), env=env,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
+    data = _analytics_output(proc.stdout)
+    if not isinstance(data, dict) or data.get("error") or proc.returncode or not data.get("loggedIn"):
+        return False
+    account_id = str(data.get("accountId") or "")
+    if not account_id:
+        return False
+    now = int(time.time())
+    snapshot = {"ts": now, **{key: data.get(key) for key in ("followers", "likes", "posts")}}
+    if not any(snapshot[key] is not None for key in ("followers", "likes", "posts")):
+        return False
+    if platform == "xiaohongshu":
+        import account_evidence as ae
+        try:
+            ae.ingest(OUTPUTS_DIR / "_analytics", data.get("notes") or [], account_id, now,
+                      source="live", name=data.get("nickname") or "")
+        except ValueError:
+            return False
+        stats.record_snapshot(platform, snapshot)
+        return True
+    stats.record_note_snapshot(platform, data.get("notes") or [], now, account_id)
+    stats.record_snapshot(platform, snapshot, account_id)
+    return True
+
+
+def _analytics_snapshot_service():
+    global _ANALYTICS_SNAPSHOT_SERVICE
+    root = DATA_DIR / "analytics-snapshots"
+    with _ANALYTICS_SNAPSHOT_LOCK:
+        if _ANALYTICS_SNAPSHOT_SERVICE is None or _ANALYTICS_SNAPSHOT_SERVICE.root != root:
+            _ANALYTICS_SNAPSHOT_SERVICE = analytics_snapshot.SnapshotService(
+                root, platforms=sorted(ANALYTICS_PLATFORMS),
+                logged_in=lambda pf: _account_logged_in(pf, LOGIN_RUNNERS.get(pf) or {}),
+                collect=_snapshot_collect)
+        return _ANALYTICS_SNAPSHOT_SERVICE
+
+
+@app.get("/api/analytics/snapshots/status")
+async def api_analytics_snapshot_status():
+    """每日自动采集状态：让「较昨日/上周/上月/去年」的基线是否在积累可见。"""
+    return _analytics_snapshot_service().status()
+
+
 @app.get("/api/analytics/{platform}")
 async def api_analytics(platform: str):
     if platform not in ANALYTICS_PLATFORMS:
@@ -9002,22 +9099,8 @@ async def _capture_account_analytics(platform: str):
     import account_evidence as ae
     evidence_root = OUTPUTS_DIR / "_analytics"
     expected_generation = ae.generation(evidence_root) if platform == "xiaohongshu" else None
-    # B站用 cookie 调 API（无浏览器 profile）、公众号走 mp 后台会话（Playwright 拦截数据 XHR，见下），单独分支；其余走 account_stats（Playwright）
-    if platform == "bilibili":
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "bili_login.py"), "stats",
-               "--cookie", str(DATA_DIR / "cookies.json")]
-        # 逐篇快照复用 account_stats 的规范化流（bilibili-notes.jsonl），
-        # bvid 已作为 note_id 落进 notes；与其它非小红书平台同一契约。
-    elif platform == "wechat-oa":
-        # 公众号数据走「后台网页端」(mp.weixin.qq.com 管理员会话 + Playwright 拦截数据 XHR)：
-        # 开发者 datacube 接口需认证+群发+接口权限，多数号取不到；后台端有登录态即可看到发表记录/数据。
-        # 需先扫码登录 mp 后台（weixin_mp_stats.py login）；默认直连，受限网络才需 EASEL_PROXY/https_proxy。
-        wx_proxy = os.environ.get("EASEL_PROXY") or os.environ.get("https_proxy") or ""
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "weixin_mp_stats.py"), "stats",
-               "--proxy", wx_proxy, "--count", "20"]
-    else:
-        # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
-        cmd = [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch", "--platform", platform]
+    # B站用 cookie 调 API（无浏览器 profile）、公众号走 mp 后台会话，单独分支；其余走 account_stats（Playwright）
+    cmd = _analytics_command(platform)
     ana_env = _proxy_env()
     ana_env['PYTHONIOENCODING'] = 'utf-8'
     ana_env['PYTHONUTF8'] = '1'
@@ -9028,15 +9111,7 @@ async def _capture_account_analytics(platform: str):
         proc = await asyncio.to_thread(_run_analytics_command, cmd, ana_env, ANALYTICS_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "账号数据采集超过90秒，已停止本次浏览器采集并保留上次结果；请检查平台连接后重试")
-    data = None
-    for line in reversed((proc.stdout or "").strip().splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                data = json.loads(line)
-                break
-            except Exception:
-                continue
+    data = _analytics_output(proc.stdout)
     if isinstance(data, dict):
         if platform != "xiaohongshu":
             if data.get('error') or getattr(proc, 'returncode', 0):
@@ -9047,13 +9122,20 @@ async def _capture_account_analytics(platform: str):
         if platform == "bilibili":
             if data.get("loggedIn") and not data.get("error"):
                 # 与 account_stats fetch 相同的规范化落盘：bvid 作为 note_id 进
-                # bilibili-notes.jsonl（缺指标保持 None，不造零），insights 只读这个流。
+                # bilibili-accounts/<hash>/notes.jsonl（缺指标保持 None，不造零），insights 只读这个流。
                 import account_stats as stats
-                rows = stats.record_note_snapshot(platform, data.get("notes") or [], int(time.time()))
+                now_ts = int(time.time())
+                mid = str(data.get("accountId") or "")
+                snapshot = {"ts": now_ts, **{key: data.get(key) for key in ("followers", "likes", "posts")}}
+                if mid:
+                    # 先读历史再落盘：否则本轮快照会把自己当成「上次」基线，增长恒为 0。
+                    history = stats.load_history(platform, mid)
+                    data["growth"] = stats.growth_windows(history, snapshot)
+                rows = stats.record_note_snapshot(platform, data.get("notes") or [], now_ts, mid or None)
                 data["noteSnapshotCount"] = len(rows)
-                snapshot = {"ts": int(time.time()), **{key: data.get(key) for key in ("followers", "likes", "posts")}}
-                if any(snapshot[key] is not None for key in ("followers", "likes", "posts")):
-                    stats.record_snapshot(platform, snapshot)
+                if mid and any(snapshot[key] is not None for key in ("followers", "likes", "posts")):
+                    stats.record_snapshot(platform, snapshot, mid)
+                    stats.remember_account(platform, mid, name=str(data.get("name") or ""))
         if platform == "xiaohongshu":
             if expected_generation != ae.generation(evidence_root):
                 raise HTTPException(409, "账号或分析数据已切换，请刷新后重新采集")
@@ -9109,9 +9191,15 @@ async def _capture_account_analytics(platform: str):
             data = sanitize_metrics(platform, data)
             from account_analysis import build_analysis
             data['analysis'] = build_analysis(platform, data)
-            # Legacy platform JSONL cannot prove account ownership. The successful
+            # Legacy platform JSONL cannot prove account ownership, and the successful
             # collection wrapper adds growth from identity-scoped overview history.
-            data['growth'] = {window: None for window in ('last', 'day', 'week', 'month', 'year')}
+            # 增长只在「确认了同一平台账号」时成立：没有账号 ID 就没有基线，
+            # 宁可返回 null 也不拿别人的数字充当本人增长。
+            if not str(data.get('accountId') or ''):
+                data['growth'] = {window: None for window in ('last', 'day', 'week', 'month', 'year')}
+                data['growthNote'] = '未确认当前平台账号 ID，无法把历史快照算作本人增长；重新采集或登录后再试。'
+            elif not isinstance(data.get('growth'), dict):
+                data['growth'] = {window: None for window in ('last', 'day', 'week', 'month', 'year')}
         return data
     code, message = collection_failure(proc.stderr or '')
     raise HTTPException(code, message)
@@ -9300,6 +9388,41 @@ def _save_publish_receipt(receipt_id: str, changes: dict) -> dict:
         return dict(result)
 
 
+def _publish_account_attribution(platform: str) -> dict:
+    """Identify which signed-in platform account a submission belongs to.
+
+    Reads local evidence only (cached whoami, retained login marker, retained
+    analytics account). Starting a browser here would delay or block the
+    publish itself, and a receipt without this cannot distinguish "same
+    account published twice" from "a different account was switched in".
+    """
+    attribution = {'platform': platform,
+                   'generation': _account_check_generation(platform)}
+    with _WHOAMI_LOCK:
+        hit = _WHOAMI_CACHE.get(platform)
+    data = {}
+    if hit and hit[2] == attribution['generation'] and (time.time() - hit[0]) < WHOAMI_TTL:
+        data = hit[1] or {}
+    if data.get('loggedIn') and data.get('name'):
+        attribution['name'] = str(data['name'])
+    else:
+        try:
+            marker = json.loads((LOGIN_DIR / f'{platform}.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError, AttributeError):
+            marker = {}
+        if marker.get('state') == 'success' and marker.get('message'):
+            attribution['name'] = str(marker['message'])
+    if platform == 'xiaohongshu':
+        import account_evidence as ae
+        account = ae.active_account(OUTPUTS_DIR / '_analytics') or {}
+        if account.get('id'):
+            attribution['id'] = str(account['id'])
+        if account.get('name'):
+            attribution['name'] = str(account['name'])
+    attribution['loggedIn'] = _account_logged_in(platform, LOGIN_RUNNERS.get(platform) or {})
+    return attribution
+
+
 def _begin_publish(platform: str, title: str, source_session: str = '', preparation: dict | None = None, *, batch_id: str | None = None) -> dict:
     with _PUBLISH_LOCK:
         if platform in _PUBLISH_ACTIVE:
@@ -9309,9 +9432,11 @@ def _begin_publish(platform: str, title: str, source_session: str = '', preparat
         if _account_browser_busy(platform):
             raise HTTPException(409, '该平台正在登录或核验账号，请等待结束后再发布。')
         try:
-            receipt = _publish_receipt_store().create(uuid.uuid4().hex, platform, title,
+            receipt = _publish_receipt_store().create(
+                uuid.uuid4().hex, platform, title,
                 **({'source_session': source_session} if source_session else {}),
-                **({'preparation': preparation} if preparation else {}))
+                **({'preparation': preparation} if preparation else {}),
+                account=_publish_account_attribution(platform))
         except publish_receipts.ActivePublishError as exc:
             raise HTTPException(409, str(exc)) from None
         except local_records.RecordError as exc:

@@ -70,6 +70,7 @@ profiles/*/
 
 # 临时 / scratch（ad-hoc 运行残留）
 .scratch/
+.artifacts/
 .drama_run/
 .drama_tmp/
 .claude/

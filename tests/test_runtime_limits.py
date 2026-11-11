@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException
@@ -200,3 +201,66 @@ def test_cancelled_http_waiter_keeps_executor_slot_until_backend_finishes():
             await asyncio.sleep(0.01)
         assert app.state.server_pools['agent'].active == 0
     asyncio.run(scenario())
+
+
+def test_imagegen_job_releases_media_slot_after_the_durable_queue_finishes(tmp_path):
+    """生图槽位必须跟着持久化队列走。
+
+    回归：_IMAGEGEN_JOBS 被删除后这里仍读它，Lease.watch 吞掉 AttributeError 继续轮询，
+    media 槽位（容量 1）永不释放，之后所有生图/视频请求一律 429，只能重启服务。
+    """
+    from easel.image_jobs import ImageJobs
+    config = {'IMG_BASE_URL': 'https://images.example.test/v1',
+              'IMG_MODEL': 'test-image', 'IMG_API_KEY': 'secret-test-value'}
+    outputs = tmp_path / 'outputs'
+    outputs.mkdir()
+    jobs = ImageJobs(outputs)
+    job = jobs.submit({'prompt': '画一只猫'}, config)
+
+    app = FastAPI()
+
+    @app.post('/api/imagegen')
+    async def start():
+        return {'jobId': job['jobId']}
+
+    workspace = SimpleNamespace(app=app, _BG_TASKS=set(), LOGIN_PROCESSES={},
+                                check_gateway=lambda: True, OUTPUTS_DIR=outputs)
+    install_limits(workspace)
+    pool = app.state.server_pools['media']
+    with TestClient(app) as client:
+        assert client.post('/api/imagegen').status_code == 200
+        # 作业仍在排队/执行：槽位必须继续占用，不能因为客户端断开就放行。
+        for _ in range(5):
+            assert pool.active == 1
+        jobs.claim(config, 'worker-1')
+        jobs.finish(job['jobId'], 'worker-1', 'done', {'error': None})
+        for _ in range(200):
+            if not pool.active:
+                break
+            time.sleep(0.01)
+        assert pool.active == 0, '作业结束后槽位未释放，media 通道会永久 429'
+        # 释放后下一条生图必须能再次进来。
+        assert client.post('/api/imagegen').status_code == 200
+
+
+def test_imagegen_lease_releases_when_the_job_disappeared(tmp_path):
+    """作业记录已被清理时必须放槽：等一个不存在的作业等于永久泄漏。"""
+    outputs = tmp_path / 'outputs'
+    outputs.mkdir()
+    app = FastAPI()
+
+    @app.post('/api/imagegen')
+    async def start():
+        return {'jobId': 'a' * 32}
+
+    workspace = SimpleNamespace(app=app, _BG_TASKS=set(), LOGIN_PROCESSES={},
+                                check_gateway=lambda: True, OUTPUTS_DIR=outputs)
+    install_limits(workspace)
+    pool = app.state.server_pools['media']
+    with TestClient(app) as client:
+        assert client.post('/api/imagegen').status_code == 200
+        for _ in range(200):
+            if not pool.active:
+                break
+            time.sleep(0.01)
+        assert pool.active == 0, '作业不存在时槽位未释放，media 通道会永久 429'

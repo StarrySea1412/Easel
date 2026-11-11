@@ -133,6 +133,9 @@ def test_endpoint_hrefs_reuse_existing_media_path_guard(tmp_path):
     module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), *nodes], type_ignores=[])
     ast.fix_missing_locations(module)
     app = FastAPI()
+    # _safe_output_path 依赖模块级导入的 private_output；注入真实实现（非桩），
+    # 这样本用例校验的是真实的私有目录防护，而不是一个永远放行的替身。
+    from easel.artifacts import private_output
     namespace = {'app': app, 'OUTPUTS_DIR': tmp_path, 'HTTPException': HTTPException,
                  'FileResponse': FileResponse, 'private_output': private_output}
     exec(compile(module, str(ROOT / 'web/app.py'), 'exec'), namespace)

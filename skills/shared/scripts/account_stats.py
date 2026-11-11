@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import json
 import os
 import re
@@ -25,12 +27,22 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import account_evidence as evidence
 
+# Windows 控制台默认 GBK，打印 ✅/❌ 会抛 UnicodeEncodeError 让自检「失败」，
+# 但那只是编码问题、不是断言问题。统一按 UTF-8 输出，无法编码时降级替换。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 PROJECT_ROOT = Path(os.environ.get("EASEL_DATA_DIR") or os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 ANALYTICS_DIR = PROJECT_ROOT / "outputs" / "_analytics"
 # 分层保留：近 KEEP_FULL_DAYS 天全部变化一条不丢；90~DAILY_DAYS 天每天≤1条；更老每周≤1条。
 # 既留住 日/周/月/年 对比所需的老基线，又让总量恒定在几百条(几十KB)、用多年不膨胀。
 KEEP_FULL_DAYS = 90
 DAILY_DAYS = 400
+# 账号归属标记（{platform}-account.json）的版本号：只读入口据此解析「当前归属哪个账号」。
+ACCOUNT_MARKER_VERSION = 1
 
 # 每平台：登录 profile + 创作中心 URL + 概览标签(及数字方向) + 近7日指标标签 + 笔记链接匹配 + 代理默认。
 # 概览 dir="before"：数字在标签上一行（小红书）；"after"：数字在标签下一行。真机校准见 fetch 的 debug dump。
@@ -49,6 +61,7 @@ PLATFORMS: dict[str, dict] = {
         "overview_dir": "after",
         "overview": {"followers": ["粉丝", "粉丝数"], "likes": ["获赞", "点赞"], "following": ["关注"]},
         "uid_anchor": "抖音号",  # 昵称=「抖音号：」上一行（主页在 抖音号 与 关注 间夹了干扰行）
+        "id_regex": r"抖音号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})",
         # 首页「近7日」块真实标签（旧列表与页面不符导致 metrics 恒空）；环比是「较前7日±X」。
         "metrics": ["播放量", "主页访问量", "作品分享", "作品评论"],
         "metrics_anchor": "近7日",   # 只从「近7日」之后解析，避开「最新作品」卡片里的同名「播放量」
@@ -64,6 +77,7 @@ PLATFORMS: dict[str, dict] = {
         "overview_dir": "after",
         "overview": {"followers": ["粉丝", "粉丝数"], "likes": ["获赞", "点赞"], "following": ["关注"]},
         "metrics": ["播放量", "点赞量", "净增粉丝量", "评论量", "分享量"],
+        "id_regex": r"快手号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})",
         "note_url_re": r"kuaishou\.com/(short-video|profile)/|/photo/",
     },
     "zhihu": {
@@ -76,6 +90,10 @@ PLATFORMS: dict[str, dict] = {
         # 粉丝(关注者)在单独的「关注者分析」页，主页抓完再来这里取「关注者总数」
         "followers_url": "https://www.zhihu.com/creator/followers",
         "followers_labels": ["关注者总数", "关注者"],
+        "id_regex": r"知乎号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})",
+        # 真机 2026-11 校准：创作中心页面**不渲染「知乎号」**，正文抽不到归属键（accountId 恒为空，
+        # 快照永远不落盘）。/api/v4/me 返回当前会话本人的 url_token，是同源、稳定、不可改的账号标识。
+        "id_api": {"url": "/api/v4/me", "field": "url_token"},
         "note_url_re": r"zhihu\.com/(question/\d+/answer|p)/|zhuanlan",
     },
     "weixin-channels": {
@@ -87,6 +105,8 @@ PLATFORMS: dict[str, dict] = {
         "overview": {"followers": ["关注者", "粉丝"], "likes": [], "following": []},
         "posts_labels": ["视频", "作品数", "内容数", "视频数"],
         "nickname_selector": ".finder-nickname",
+        # 视频号主页有「视频号ID: sphXXXX」行，是该号的稳定标识（昵称可改，不能做归属键）
+        "id_regex": r"视频号ID\s*[:：]?\s*(sph[A-Za-z0-9_-]{6,64})",
         "metrics": ["净增关注", "新增播放", "新增评论"],
         "note_url_re": r"channels\.weixin\.qq\.com/platform/post|/finder/",
     },
@@ -284,16 +304,44 @@ def _delta(cur, base):
     return (cur - base) if (type(cur) is int and type(base) is int) else None
 
 
+def _snapshot_ts(row) -> int | None:
+    """快照行的时间戳；缺失/非法返回 None。
+    旧版本写出的文件或外部导入可能没有 ts，直接取 s["ts"] 会让整次写入抛 KeyError。"""
+    if not isinstance(row, dict):
+        return None
+    ts = row.get("ts")
+    # ts != ts 用来排除 NaN（避免为此引入 math）
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts != ts:
+        return None
+    return int(ts)
+
+
+def _window_grace(secs: int) -> int:
+    """多窗口对比的容差。每日采集由定时任务触发，实际时间每天会漂移几秒到几分钟。
+
+    边界若用精确的 now-window 判定，今天比昨天早 5 秒采集，「较昨日」就永远取不到基线——
+    采集明明成功，对比却恒为 null，看起来像没数据。容差取窗口的 5%，下限 1 小时、
+    上限 1 天：足以吸收定时抖动，又不会把相邻窗口的基线吞掉。
+    """
+    return min(max(int(secs * 0.05), 3600), 86400)
+
+
 def growth_windows(history: list[dict], current: dict) -> dict:
-    """多窗口增长：last=对上一条快照；day/week/month/year=对不晚于(now-窗口)的最近快照。无基线→None。"""
+    """多窗口增长：last=对上一条快照；day/week/month/year=对不晚于(now-窗口)的最近快照。无基线→None。
+
+    基线按 ts 排序后再取，不依赖文件里的行序：时钟回拨、旧版本写入或外部导入都会让行序乱掉，
+    那时 history[-1] 取到的是最老的一条，四个窗口一起返回同一个错值——看起来像真数据，最难发现。
+    """
     now = current["ts"]
+    rows = sorted((r for r in history if _snapshot_ts(r) is not None), key=_snapshot_ts)
     specs = {"last": None, "day": 86400, "week": 7 * 86400, "month": 30 * 86400, "year": 365 * 86400}
     out: dict = {}
     for name, secs in specs.items():
         if name == "last":
-            base = history[-1] if history else None
+            base = rows[-1] if rows else None
         else:
-            older = [h for h in history if h.get("ts", 0) <= now - secs]
+            cutoff = now - secs + _window_grace(secs)
+            older = [h for h in rows if h["ts"] <= cutoff]
             base = older[-1] if older else None
         if base:
             out[name] = {
@@ -307,16 +355,37 @@ def growth_windows(history: list[dict], current: dict) -> dict:
     return out
 
 
+def _account_scope_dir(platform: str, account_id: str) -> Path:
+    """按平台账号隔离的目录：{platform}-accounts/<sha256(账号ID)>。
+    同一浏览器 profile 换账号登录时，旧账号的快照绝不能当成新账号的基线。"""
+    digest = hashlib.sha256(f"{platform}:{account_id}".encode()).hexdigest()
+    return ANALYTICS_DIR / f"{platform}-accounts" / digest
+
+
+def _account_marker_path(platform: str) -> Path:
+    """本平台「最近一次确认采集的账号」标记文件（只读入口据此解析归属）。"""
+    return ANALYTICS_DIR / f"{platform}-account.json"
+
+
 def _history_path(platform: str, account_id: str | None = None) -> Path:
     if platform == "xiaohongshu":
         account_id = account_id or (evidence.active_account(ANALYTICS_DIR) or {}).get("id")
         if account_id:
             return evidence.account_dir(ANALYTICS_DIR, account_id) / "overview.jsonl"
+        return ANALYTICS_DIR / f"{platform}.jsonl"
+    # 其它平台：有账号 ID 才读写账号目录；没有账号 ID 时只返回旧路径供 clear 使用，
+    # 采集侧不会把它当作增长基线（见 load_history 的 scoped 约束）。
+    if account_id:
+        return _account_scope_dir(platform, account_id) / "overview.jsonl"
     return ANALYTICS_DIR / f"{platform}.jsonl"
 
 
 def load_history(platform: str, account_id: str | None = None) -> list[dict]:
+    """读快照历史。非小红书平台只有确认了账号 ID 才返回数据——
+    平台级旧文件无法核验归属，混用会把别人的粉丝数当成自己的基线。"""
     if platform == "xiaohongshu" and not account_id and not evidence.active_account(ANALYTICS_DIR):
+        return []
+    if platform != "xiaohongshu" and not account_id:
         return []
     p = _history_path(platform, account_id)
     if not p.is_file():
@@ -332,11 +401,14 @@ def load_history(platform: str, account_id: str | None = None) -> list[dict]:
     return out
 
 
-def append_snapshot(platform: str, snap: dict) -> None:
+def append_snapshot(platform: str, snap: dict, account_id: str | None = None) -> None:
     if platform == "xiaohongshu" and not evidence.active_account(ANALYTICS_DIR):
         return
-    _history_path(platform).parent.mkdir(parents=True, exist_ok=True)
-    with _history_path(platform).open("a", encoding="utf-8") as f:
+    if platform != "xiaohongshu" and not account_id:
+        return
+    p = _history_path(platform, account_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(snap, ensure_ascii=False) + "\n")
 
 
@@ -354,8 +426,10 @@ def compact(history: list[dict], now: int) -> list[dict]:
     """分层保留：近 90 天全保留；90~400 天每天保留该天最新一条；>400 天每周保留最新一条。
     保留 日/周/月/年 对比所需老基线，同时把久远的冗余点合并——总量恒定在几百条。"""
     recent, daily, weekly = [], {}, {}
-    for s in sorted(history, key=lambda x: x.get("ts", 0)):  # 按时间升序，同桶后者覆盖=留最新
-        age = now - s.get("ts", 0)
+    # 缺 ts 的行直接丢弃：它们算不出年龄，混进来只会让 compact 抛 KeyError 把整次采集写废。
+    rows = [s for s in history if _snapshot_ts(s) is not None]
+    for s in sorted(rows, key=_snapshot_ts):  # 按时间升序，同桶后者覆盖=留最新
+        age = now - s["ts"]
         if age <= KEEP_FULL_DAYS * 86400:
             recent.append(s)
         elif age <= DAILY_DAYS * 86400:
@@ -369,11 +443,24 @@ def compact(history: list[dict], now: int) -> list[dict]:
 
 def should_record(history: list[dict], snap: dict) -> bool:
     """当天第一条必记；之后只在粉丝/获赞/作品有变化时再记。
-    以前「全同就跳过」导致跨天没有基线，较昨日/较上周看起来永远一样。"""
+    以前「全同就跳过」导致跨天没有基线，较昨日/较上周看起来永远一样。
+
+    「上一条」优先按 ts 取，不看文件行序：行序乱掉时拿末行当上一条会两头错——
+    与最新读数相同却重复攒行，或真实变化被判成「没变」而**静默丢弃**，基线永久少一天。
+    整份历史都没有 ts（旧版本写出的文件）时退化为按行序比较：缺 ts 不影响比较指标值，
+    此时宁可沿用旧语义，也不要把每一行都当成「无法比较」而变成永远记录。
+    """
     if not history:
         return True
-    last = history[-1]
-    if _local_day(last.get("ts", 0)) != _local_day(snap.get("ts", 0)):
+    rows = [row for row in history if isinstance(row, dict)]
+    if not rows:
+        return True
+    with_ts = [row for row in rows if _snapshot_ts(row) is not None]
+    last = max(with_ts, key=_snapshot_ts) if with_ts else rows[-1]
+    # 跨天必记：但只有两边 ts 都有效时才判「跨天」。缺 ts 的旧行按行序比较指标，
+    # 否则 1970 年的伪日界会让每一行都判成跨天，退化成永远记录。
+    last_ts, snap_ts = _snapshot_ts(last), _snapshot_ts(snap)
+    if last_ts is not None and snap_ts is not None and _local_day(last_ts) != _local_day(snap_ts):
         return True
     return any(last.get(k) != snap.get(k) for k in ("followers", "likes", "posts"))
 
@@ -387,13 +474,51 @@ def _notes_path(platform: str, account_id: str | None = None) -> Path:
         account_id = account_id or (evidence.active_account(ANALYTICS_DIR) or {}).get("id")
         if account_id:
             return evidence.account_dir(ANALYTICS_DIR, account_id) / "notes.jsonl"
+    account_id = account_id or note_account_id(platform)
+    if account_id:
+        # 逐篇快照与 overview 同一条归属规则：换账号后旧账号的稿件不能算进新账号的选题证据。
+        return _account_scope_dir(platform, account_id) / "notes.jsonl"
+    # 无归属键时回落到平台级旧路径：只供 clear 与历史读取，采集侧写入必须带 account_id。
     return ANALYTICS_DIR / f"{platform}-notes.jsonl"
+
+
+def note_snapshot_path(platform: str, account_id: str | None = None) -> Path:
+    """逐篇快照文件路径：只读入口（insights/notes）与采集侧共用同一条归属规则。"""
+    return _notes_path(platform, account_id)
+
+
+def note_account_id(platform: str) -> str:
+    """本平台「最近一次确认采集」的账号 ID（读标记文件，不猜、不扫目录）。
+
+    只读入口（选题建议、笔记流）没有 fetch 结果可用，必须有个持久化的归属来源；
+    标记只由成功写入快照的采集流程写入，所以它永远对应一个真实核验过的账号。"""
+    try:
+        raw = json.loads(_account_marker_path(platform).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    account_id = raw.get("account_id")
+    return account_id.strip() if isinstance(account_id, str) else ""
+
+
+def remember_account(platform: str, account_id: str, *, name: str = "") -> None:
+    """记住本平台最近一次核验通过的账号，供只读入口解析归属。"""
+    if not account_id:
+        return
+    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"version": ACCOUNT_MARKER_VERSION, "platform": platform,
+               "account_id": account_id, "name": name, "at": int(time.time())}
+    p = _account_marker_path(platform)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
 
 
 def load_note_snapshots(platform: str, account_id: str | None = None) -> list[dict]:
     if platform == "xiaohongshu":
         return evidence.load(ANALYTICS_DIR, account_id)
-    p = _notes_path(platform)
+    p = _notes_path(platform, account_id)
     if not p.is_file():
         return []
     out = []
@@ -420,6 +545,11 @@ def record_note_snapshot(platform: str, notes: list[dict], now: int, account_id:
         return evidence.ingest(ANALYTICS_DIR, notes, account_id, now, source=source, name=account_name)
     if not notes:
         return []
+    if not account_id:
+        # 逐篇快照与 overview 同一条归属规则：没有账号 ID 就无法核验这批稿件属于谁。
+        # 写进平台级共用文件会让换账号后的旧稿件混进新账号的选题证据——bili_insights 里
+        # 「不能混合多个账号」那道校验也会因为字段恒为 None 而永远不触发。
+        return []
     ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
     recs: list[dict] = []
     metric_fields = ["likes", "collects", "comments"]
@@ -431,6 +561,7 @@ def record_note_snapshot(platform: str, notes: list[dict], now: int, account_id:
             m = n.get("metrics") or {}
             recs.append({
                 "version": NOTE_SNAPSHOT_VERSION,
+                "account_id": account_id,
                 "note_id": nid,
                 "title": (n.get("title") or "").strip()[:100],
                 "tags": [t for t in (n.get("tags") or []) if str(t).strip()][:8],
@@ -440,27 +571,31 @@ def record_note_snapshot(platform: str, notes: list[dict], now: int, account_id:
                 "source": f"account_stats:{platform}",
             })
     # 与旧快照合并：note_id 分组，各保留最近两条（按 fetched_at）
-    merged: dict[str, list[dict]] = {}
-    for r in load_note_snapshots(platform) + recs:
-        merged.setdefault(r.get("note_id") or r.get("title", ""), []).append(r)
-    cutoff = now - 365 * 86400
-    rows = []
-    for _, group in merged.items():
-        group.sort(key=lambda x: x.get("fetched_at", 0))
-        for r in group[-2:]:
-            if r.get("fetched_at", now) >= cutoff:
-                rows.append(r)
-    rows.sort(key=lambda x: (x.get("fetched_at", 0), x.get("note_id") or ""))
-    p = _notes_path(platform)
-    tmp = p.with_suffix(".jsonl.tmp")
-    tmp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + ("\n" if rows else ""),
-                   encoding="utf-8")
-    tmp.replace(p)
+    # 只合并本账号的历史：换账号后不能把旧账号的同名 note_id 当成本账号的上一次。
+    p = _notes_path(platform, account_id)
+    with _exclusive_lock(p):
+        merged: dict[str, list[dict]] = {}
+        for r in load_note_snapshots(platform, account_id) + recs:
+            merged.setdefault(r.get("note_id") or r.get("title", ""), []).append(r)
+        cutoff = now - 365 * 86400
+        rows = []
+        for _, group in merged.items():
+            group.sort(key=lambda x: x.get("fetched_at", 0))
+            for r in group[-2:]:
+                if r.get("fetched_at", now) >= cutoff:
+                    rows.append(r)
+        rows.sort(key=lambda x: (x.get("fetched_at", 0), x.get("note_id") or ""))
+        _atomic_write_text(p, "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+                           + ("\n" if rows else ""))
+    # 落盘成功才记住归属：只读入口（选题建议/笔记流）据此解析「当前是哪个账号」。
+    remember_account(platform, account_id, name=account_name)
     return recs
 
 
 def clear_analytics(platform: str | None = None) -> None:
-    """「清除分析历史」入口：删掉某平台（缺省=全部）的概览与逐篇快照文件。"""
+    """「清除分析历史」入口：删掉某平台（缺省=全部）的概览与逐篇快照文件。
+    非小红书平台的快照按账号隔离存放，这里连同 {platform}-accounts/ 下的所有账号目录一起清，
+    否则清完历史还会从账号目录里读回旧基线。"""
     targets = [platform] if platform else ["xiaohongshu", "douyin", "kuaishou", "zhihu",
                                             "bilibili", "weixin-channels", "wechat-oa"]
     for pf in targets:
@@ -469,27 +604,120 @@ def clear_analytics(platform: str | None = None) -> None:
         if pf == "xiaohongshu":
             evidence.clear(ANALYTICS_DIR)
             continue
-        for path in (_history_path(pf), _notes_path(pf)):
+        # _notes_path/_history_path 带账号标记时会解析到账号目录，所以旧版平台级文件必须
+        # 显式列出来清，否则「清除分析历史」清完还能从 {pf}.jsonl / {pf}-notes.jsonl 读回旧基线。
+        for path in (_history_path(pf), _notes_path(pf), _account_marker_path(pf),
+                     ANALYTICS_DIR / f"{pf}.jsonl", ANALYTICS_DIR / f"{pf}-notes.jsonl"):
             try:
                 path.unlink()
             except FileNotFoundError:
                 pass
+        account_root = ANALYTICS_DIR / f"{pf}-accounts"
+        if account_root.is_dir():
+            for directory in account_root.iterdir():
+                if not directory.is_dir() or not re.fullmatch(r"[0-9a-f]{64}", directory.name):
+                    continue
+                # 账号目录只由本模块创建，内容全是快照文件；连同 .lock/.tmp 一起清，
+                # 否则残留的锁文件会让 rmdir 失败，账号目录清不掉、旧基线还能读回来。
+                for child in directory.iterdir():
+                    if not child.is_file():
+                        continue
+                    try:
+                        child.unlink()
+                    except FileNotFoundError:
+                        pass
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            try:
+                account_root.rmdir()
+            except OSError:
+                pass
 
 
-def record_snapshot(platform: str, snap: dict) -> None:
-    """数据较上一条有变化才追加；写入前做分层保留 compaction（老数据自动稀疏化，文件永不膨胀）。"""
+@contextlib.contextmanager
+def _exclusive_lock(target: Path):
+    """跨进程互斥锁：每日自动快照 worker 与手动 fetch 是不同进程，会同时写同一账号文件。
+    没有锁的话「读历史→合并→写回」互相覆盖，刚采到的那条会凭空消失。
+
+    注意：Windows 的字节区锁是强制锁，读别人已锁住的字节会抛 PermissionError。
+    所以这里**绝不能在加锁前 read 探测**（曾因此让并发采集直接崩掉，表现成「加了锁反而丢数据」）。
+    """
+    lock_path = target.with_name(target.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            try:
+                # 锁 1 字节即可；该区域允许超出文件末尾，空文件也能锁，无需预写哨兵字节。
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            except OSError:
+                # 少数文件系统不接受对空文件加锁：补一个字节后重试（仅在确实为空时写，
+                # 避免碰别人已锁住的区域）。
+                if fh.seek(0, os.SEEK_END) == 0:
+                    fh.write(b"\0")
+                    fh.flush()
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        fh.close()
+
+
+def _atomic_write_text(p: Path, body: str) -> None:
+    """先写临时文件再替换：中途崩溃不会留下半个 JSON 行，读端也就不会静默丢历史。
+
+    临时文件名带 pid：两个进程若同时写同一目标（锁失效的旧版本、或网络盘上 flock 不可用），
+    固定名会让双方抢同一个 .tmp 而抛 WinError 32，整次采集直接失败。带 pid 后各写各的，
+    最后由 replace 原子地决出胜者。
+    """
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(body, encoding="utf-8")
+        tmp.replace(p)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def record_snapshot(platform: str, snap: dict, account_id: str | None = None) -> None:
+    """数据较上一条有变化才追加；写入前做分层保留 compaction（老数据自动稀疏化，文件永不膨胀）。
+    account_id 必填（小红书除外，走 evidence 账号上下文）——快照只能写进确认了归属的账号目录。"""
     if platform == "xiaohongshu" and not evidence.active_account(ANALYTICS_DIR):
         return
-    h = load_history(platform)
-    if not should_record(h, snap):
+    if platform != "xiaohongshu" and not account_id:
         return
-    h.append(snap)
-    h = compact(h, snap["ts"])
-    if platform == "xiaohongshu":
-        h = [row for row in h if row.get("ts", 0) >= snap["ts"] - evidence.RETENTION_DAYS * 86400]
-    _history_path(platform).parent.mkdir(parents=True, exist_ok=True)
-    body = "\n".join(json.dumps(x, ensure_ascii=False) for x in h)
-    _history_path(platform).write_text(body + ("\n" if body else ""), encoding="utf-8")
+    p = _history_path(platform, account_id)
+    with _exclusive_lock(p):
+        h = load_history(platform, account_id)
+        if not should_record(h, snap):
+            return
+        h.append(snap)
+        h = compact(h, snap["ts"])
+        if platform == "xiaohongshu":
+            h = [row for row in h if row.get("ts", 0) >= snap["ts"] - evidence.RETENTION_DAYS * 86400]
+        body = "\n".join(json.dumps(x, ensure_ascii=False) for x in h)
+        _atomic_write_text(p, body + ("\n" if body else ""))
 
 
 # --------------------------------------------------------------------------- #
@@ -796,6 +1024,7 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             try:
                 if platform == "xiaohongshu":
+                    # 小红书读创作中心接口，account_id 由 _scrape_xhs 内部按 user_id 写入
                     return _scrape_xhs(ctx, page, r)
                 try:
                     page.goto(cfg["url"], wait_until="commit", timeout=12000)
@@ -895,6 +1124,47 @@ def extract_xhs_account_id(lines: list[str]) -> str:
     text = "\n".join(lines)
     found = re.findall(r"(?:^|\n)小红书(?:账号|号)\s*[:：]?\s*([A-Za-z0-9_-]{3,128})(?=\s*(?:\n|$))", text)
     return found[0] if len(set(found)) == 1 else ""
+
+
+def extract_account_id(lines: list[str], pattern: str) -> str:
+    """从「抖音号/快手号/知乎号：xxx」这类平台账号标签抽稳定账号标识，作为快照归属键。
+    抽不到或页面出现多个互相矛盾的账号号 → 返回空串（宁可没有增长，也不把别人的基线当自己的）。
+    昵称不是账号标识，不能用来做归属键。"""
+    if not pattern:
+        return ""
+    text = "\n".join(lines)
+    found = {m.strip() for m in re.findall(pattern, text) if m and m.strip()}
+    return found.pop() if len(found) == 1 else ""
+
+
+def account_id_from_api(page, cfg: dict) -> str:
+    """页面正文里没有账号标签时的后备：从平台自己的「当前登录账号」接口取稳定标识。
+
+    知乎创作中心不显示「知乎号」，页面文本里抽不到任何归属键；但 /api/v4/me 会返回
+    当前会话本人的 url_token（昵称可改，token 不改）。只在页面抽取为空时调用，且必须
+    与页面同源（credentials: include），拿不到或字段不合法一律返回空串——宁可没有增长，
+    也不把别人的基线当自己的。"""
+    spec = cfg.get("id_api") or {}
+    url, field = spec.get("url"), spec.get("field")
+    if not url or not field:
+        return ""
+    try:
+        got = page.evaluate(
+            """async ([url, field]) => {
+              try {
+                const r = await fetch(url, {credentials: 'include'});
+                if (!r.ok) return null;
+                const j = await r.json();
+                return j && j[field] != null ? String(j[field]) : null;
+              } catch (e) { return null; }
+            }""",
+            [url, field],
+        )
+    except Exception:
+        return ""
+    if not isinstance(got, str):
+        return ""
+    return got.strip() if re.fullmatch(r"[A-Za-z0-9_.\-]{2,64}", got.strip()) else ""
 
 
 def _has_body(page) -> bool:
@@ -1347,8 +1617,11 @@ def cmd_fetch(a) -> int:
     snap = {"ts": now, "followers": s["followers"], "likes": s["likes"], "posts": s["posts"]}
     external_id = s.get("account_id") or ""
     managed = a.platform == "xiaohongshu" and os.environ.get("EASEL_ANALYTICS_MANAGED") == "1"
-    key = evidence.account_key(external_id, "live") if external_id else None
-    history = load_history(a.platform, key) if (a.platform != "xiaohongshu" or key) else []
+    key = evidence.account_key(external_id, "live") if (external_id and a.platform == "xiaohongshu") else None
+    # 快照归属键：小红书用 evidence 的 "live:<id>" 目录键；其它平台用平台账号 ID 本身。
+    # 没有确认账号 ID 就没有基线，growth 全为 None——不拿平台级旧文件冒充本人增长。
+    scope_id = key if a.platform == "xiaohongshu" else external_id
+    history = load_history(a.platform, scope_id) if scope_id else []
     growth = growth_windows(history, snap)
     # 逐篇快照：登录有效才落盘（登录失效时不写，防止把空列表当成「笔记都没了」）
     note_recs: list[dict] = []
@@ -1357,7 +1630,7 @@ def cmd_fetch(a) -> int:
             note_recs = record_note_snapshot(a.platform, s["notes"], now, external_id,
                                              account_name=s["nickname"])
             if any(snap[k] is not None for k in ("followers", "likes", "posts")):
-                record_snapshot(a.platform, snap)
+                record_snapshot(a.platform, snap, scope_id)
         else:
             evidence.invalidate(ANALYTICS_DIR)
     elif a.platform == "xiaohongshu" and not managed:
@@ -1480,7 +1753,19 @@ def cmd_selftest(_a) -> int:
     assert is_public_xhs_note({"title": "(无标题)"}) is False
     assert is_public_xhs_note({"title": "还没写完", "text": "草稿 编辑"}) is False
     assert is_public_xhs_note({"title": "有标题草稿", "href": "https://creator.xiaohongshu.com/publish/publish?id=1"}) is False
-    print("✅ selftest 通过（解析 + 概览分方向取数(修获赞bug) + 近7日环比 + 多窗口增长 + 配置/代理 + 接口token提取 + 排除草稿）")
+    # 账号 ID 提取（快照归属键）：稳定账号号，不是昵称
+    assert extract_account_id(lines_of("小鹿\n抖音号：abc_123\n粉丝\n5"), r"抖音号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})") == "abc_123"
+    # 抽不到 → 空串（宁可没有增长，也不拿别人的基线）
+    assert extract_account_id(lines_of("粉丝\n5"), r"抖音号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})") == ""
+    # 页面出现两个互相矛盾的账号号 → 空串，不能猜
+    assert extract_account_id(lines_of("抖音号：aa\n抖音号：bb"), r"抖音号\s*[:：]?\s*([A-Za-z0-9_.\-]{2,64})") == ""
+    # 同一平台两个账号的快照目录必须隔离（换号后旧基线不能算到新账号）
+    assert _account_scope_dir("douyin", "aa") != _account_scope_dir("douyin", "bb")
+    assert _account_scope_dir("douyin", "aa") == _account_scope_dir("douyin", "aa")
+    # 未确认账号 ID 时，非小红书平台既读不到历史，也不允许写快照
+    assert load_history("douyin", None) == []
+    assert _history_path("douyin", "aa") != _history_path("douyin", "bb")
+    print("✅ selftest 通过（解析 + 概览分方向取数(修获赞bug) + 近7日环比 + 多窗口增长 + 配置/代理 + 接口token提取 + 排除草稿 + 账号归属隔离）")
     return 0
 
 

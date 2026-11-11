@@ -1028,6 +1028,16 @@ export async function restoreAccountAnalytics(platform: string): Promise<void> {
   if (result.running) await fetchAccountAnalytics(platform, true);
 }
 
+/** 每日自动快照状态：日/周/月/年对比的基线是否在自动积累。 */
+export interface AnalyticsSnapshotStatus {
+  platforms: Record<string, { day: string | null; at: number | null; attempts: number | null; error: string | null }>;
+  intervalSeconds: number;
+}
+
+export function fetchAnalyticsSnapshotStatus(): Promise<AnalyticsSnapshotStatus> {
+  return request<AnalyticsSnapshotStatus>('/api/analytics/snapshots/status');
+}
+
 export interface XhsAnalysisAccount {
   id: string;
   externalId: string;

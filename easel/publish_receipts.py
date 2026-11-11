@@ -186,6 +186,8 @@ class ReceiptStore:
                 raise local_records.RecordError('发布回执格式不受支持，原文件已保留；请从备份恢复。')
             if 'verification' in item and not isinstance(item['verification'], dict):
                 raise local_records.RecordError('发布核实状态格式不受支持，原文件已保留；请从备份恢复。')
+            if 'account' in item and not isinstance(item['account'], dict):
+                raise local_records.RecordError('发布账号归属格式不受支持，原文件已保留；请从备份恢复。')
         return items
 
     def _change(self, operation):
@@ -200,7 +202,9 @@ class ReceiptStore:
                     raise
                 time.sleep(0.01 * (attempt + 1))
 
-    def create(self, receipt_id: str, platform: str, title: str, *, source_session: str = '', preparation: dict | None = None, account_id: str = '') -> dict:
+    def create(self, receipt_id: str, platform: str, title: str, *, source_session: str = '',
+               preparation: dict | None = None, account_id: str = '',
+               account: dict | None = None) -> dict:
         if not RECEIPT_ID.fullmatch(receipt_id):
             raise ValueError('Invalid receipt ID')
         if source_session and not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', source_session):
@@ -227,6 +231,11 @@ class ReceiptStore:
                 item['sourceSessionId'] = source_session
             if preparation:
                 item['preparation'] = json.loads(json.dumps(preparation))
+            if account:
+                # Which signed-in platform account this submission belonged to.
+                # Without it a later account switch cannot be told apart from
+                # the same account publishing twice.
+                item['account'] = account
             items.append(item)
             if account_id:
                 item['accountId'] = account_id
