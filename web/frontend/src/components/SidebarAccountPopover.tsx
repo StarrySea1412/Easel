@@ -145,6 +145,7 @@ export default function SidebarAccountPopover({ active, onNavigate }: { active: 
         if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node) && event.relatedTarget !== trigger.current) close();
       }}>
       <div className="sidebar-account-heading"><strong>平台账号</strong><button type="button" aria-label="关闭账号预览" onClick={() => close(true)}>×</button></div>
+      <p className="sidebar-account-state">默认发布通道快照；独立账号见账号中心。</p>
       {!snapshot && !error && <p className="sidebar-account-state" role="status">正在读取本次账号快照…</p>}
       {error && <p className="sidebar-account-state" role="alert">{error === 'login' ? '工作台登录已过期，请重新登录后查看账号。' : '账号信息暂时无法读取，请重试。'}</p>}
       {error === 'unavailable' && <button type="button" className="sidebar-account-open" onClick={() => setRevision(value => value + 1)}>重新读取 <span aria-hidden="true">↻</span></button>}

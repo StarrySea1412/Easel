@@ -504,10 +504,10 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
       {cancelling && <div className="accounts-message" role="status">正在结束登录流程…完成后可连接其他平台。</div>}
       {cancelError && <div className="accounts-message" role="alert">{cancelError} <button className="btn btn-sm" onClick={() => void closeQr()}>重试结束登录</button></div>}
-      <SocialAccountsPanel hideIdentity={hideIdentity} />
+      <SocialAccountsPanel hideIdentity={hideIdentity} defaultAccounts={accounts} defaultsLoaded={loaded} defaultLoadError={!loaded ? err : ''} onRefreshDefaults={load} onManageDefault={platform => { setManagedPlatform(platform); setConfirmLogout(false); }} />
 
       <details className="accounts-default-channels">
-        <summary><span className="account-default-icon"><IconAccounts size={18}/></span><span><strong>默认发布通道</strong><small>保留原有的每平台单账号入口，与上方独立账号分别管理。</small></span><span className="account-default-count" aria-live="polite">{loaded ? `${connectedCount} / ${supportedCount} 在线` : '状态读取中'}</span></summary>
+        <summary><span className="account-default-icon"><IconAccounts size={18}/></span><span><strong>默认发布通道</strong><small>原有每平台单账号的连接入口，已知身份也会显示在上方名单。</small></span><span className="account-default-count" aria-live="polite">{loaded ? `${connectedCount} / ${supportedCount} 在线` : '状态读取中'}</span></summary>
       <section id="accounts-connections" aria-label="账号连接">
         <div className="accounts-section-heading"><div><h2>连接你的平台</h2><p>选择平台完成登录，之后可直接用于创作发布。</p></div>
           <div className="accounts-filters" role="group" aria-label="连接状态筛选">

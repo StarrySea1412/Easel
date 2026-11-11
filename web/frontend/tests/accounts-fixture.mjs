@@ -43,6 +43,7 @@ async function fixture(t, { rawCache } = {}) {
     state.requests.push({ url, method: options?.method || 'GET' });
     assert.equal(options.cache, 'no-store');
     if (url === '/api/social-accounts') return response([]);
+    if (url === '/api/social-accounts/default-history') return response([]);
     if (url === '/api/accounts') return response(state.accountRows);
     if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response(await state.whoami()); }
     if (url.endsWith('/sms')) return response(await state.sms());
