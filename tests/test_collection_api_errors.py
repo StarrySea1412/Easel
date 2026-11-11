@@ -44,7 +44,7 @@ def test_analytics_missing_sibling_returns_classified_detail_and_preserves_saved
     assert expected in message and '已保留原有数据' in message
     assert '可能未登录' not in message
     assert previous.read_text(encoding='utf-8') == 'SYNTHETIC_LAST_GOOD_DATA'
-    assert observed['timeout'] == 180
+    assert observed['timeout'] == web.ANALYTICS_TIMEOUT
     assert observed['env']['PYTHONIOENCODING'] == 'utf-8' and observed['env']['PYTHONUTF8'] == '1'
     assert observed['env']['EASEL_ANALYTICS_MANAGED'] == '1'
     if mode:

@@ -598,7 +598,7 @@ export interface UploadedFile { id: string; name: string; path: string; }
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'adaptive' | 'max' | 'ultra';
 
 /** OpenClaw ask_user 问答题（SSE question 事件 payload）。 */
-export interface ChatQuestionOption { label: string; description?: string; }
+export interface ChatQuestionOption { label: string; description?: string; recommended?: boolean; }
 export interface ChatQuestionItem {
   questionId: string;
   header?: string;

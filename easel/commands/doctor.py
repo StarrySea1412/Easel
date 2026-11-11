@@ -42,7 +42,7 @@ def _check(label: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
-def _node_version_ok(strict: bool) -> bool:
+def _node_version_ok(strict: bool, patched: bool = False) -> bool:
     """检查 Node.js 版本。
 
     strict=True 对齐 openclaw@latest（2026.9.x）的引擎：>=24.16.0 <25 || >=26.1.0（25.x/26.0 被排除）。
@@ -50,6 +50,9 @@ def _node_version_ok(strict: bool) -> bool:
     实测 openclaw@2026.6.11 的 package.json engines 就是 `">=22.19.0"`，且其 openclaw.mjs 里还有
     一道硬运行时检查（MIN_NODE_MAJOR=22 / MIN_NODE_MINOR=19，不满足直接 process.exit(1)）。
     写 20.10 的后果是：Node 20.10–22.18 上 doctor 报绿，而每一条 openclaw 命令都起不来。
+
+    patched=True 用于 2026.10.8–2026.11.1 之间的 OpenClaw：那几版的 engines 收紧到补丁级
+    （>=24.22.1 / >=26.12.1）。只比 minor 会把 24.22.0 判绿，而它其实不满足 engines。
     """
     try:
         result = subprocess.run(
@@ -59,11 +62,16 @@ def _node_version_ok(strict: bool) -> bool:
         if result.returncode != 0:
             return False
         # e.g. "v24.21.0"
-        m = re.match(r"v(\d+)\.(\d+)", result.stdout.strip())
+        m = re.match(r"v(\d+)\.(\d+)\.(\d+)", result.stdout.strip())
         if not m:
             return False
         major, minor = int(m.group(1)), int(m.group(2))
         if strict:
+            if patched:
+                patch = int(m.group(3))
+                return ((major == 24 and (minor, patch) >= (22, 1))
+                        or (major == 26 and (minor, patch) >= (12, 1))
+                        or major >= 27)
             return (major == 24 and minor >= 16) or (major == 26 and minor >= 1) or major >= 27
         return (major, minor) >= (22, 19)
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -232,16 +240,41 @@ def _cli_backend(primary: str) -> dict[str, object] | None:
     return None
 
 
+def _primary_model_ref(cfg) -> tuple[str, str]:
+    """从 openclaw.json 取出 agents.defaults.model.primary，并校验模型名。
+
+    该字段形状随 OpenClaw 版本变过：早期是字符串，后来允许 `{"primary": "..."}`。
+    两种都认。返回 (primary, 错误说明)；结构异常或模型名非法时 primary 为空串，
+    错误说明供调用方原样展示——不能静默当成「未设置」，否则用户看不出是自己配错了。
+
+    模型名非法（例如 `glm-5.3[1M]` 这类带上下文标注的写法）会让 openclaw 起不来，
+    这里提前拦下并给出可读原因。
+    """
+    try:
+        model = ((cfg.get("agents") or {}).get("defaults") or {}).get("model")
+        primary = model if isinstance(model, str) else (model or {}).get("primary", "")
+        from easel.model_config import validate_model_ref
+        validate_model_ref(primary)
+    except (AttributeError, TypeError) as error:
+        return "", f"主模型配置结构无效（{error}）"
+    except ValueError as error:
+        return "", str(error)
+    return primary or "", ""
+
+
 def _primary_model_cli_available() -> tuple[bool, str]:
     cfg_path = _openclaw_config_path()
     if not cfg_path.is_file():
         return False, ""
     try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        # utf-8-sig：Windows 上用记事本/部分编辑器保存会带 BOM，纯 utf-8 会解析失败，
+        # 于是整份配置被当成「读不出来」，诊断给出误导性的「未配置」。
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return False, ""
-    primary = (((cfg.get("agents") or {}).get("defaults") or {})
-               .get("model") or {}).get("primary") or ""
+    primary, error = _primary_model_ref(cfg)
+    if error:
+        return False, error
     backend = _cli_backend(primary)
     if not backend:
         return False, ""
@@ -278,12 +311,13 @@ def _primary_model_routable() -> tuple[bool, str]:
     if not cfg_path.is_file():
         return False, f"{cfg_path} 不存在 — 先跑 bash setup.sh（Windows: setup.ps1）"
     try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         return False, f"{cfg_path} 读不出来（{exc}）"
 
-    primary = (((cfg.get("agents") or {}).get("defaults") or {})
-               .get("model") or {}).get("primary") or ""
+    primary, error = _primary_model_ref(cfg)
+    if error:
+        return False, error
     if not primary:
         return False, "未设置 agents.defaults.model.primary — 重新跑 setup 脚本"
     if "/" not in primary:
@@ -303,9 +337,20 @@ def _primary_model_routable() -> tuple[bool, str]:
         return False, (f"primary 是 {primary}，但 models.providers.{provider} 不存在 —— "
                        "在 .env 填好真实 key 后重新跑 setup 脚本")
     # apiKey / 本地适配器 / OAuth 任一即可。字段名随 OpenClaw 版本变过，这里从宽认。
-    has_auth = bool(str(entry.get("apiKey") or "").strip()) or bool(entry.get("localService")) \
+    # 但「非空」不等于「可用」：setup 模板和文档里的示例值（REPLACE_ME、sk-ant-REPLACE_ME、
+    # <your-key>、xxx 之类）会被当成已配置，doctor 报绿而对话照样认证失败。
+    api_key = entry.get("apiKey")
+    key_present = bool(api_key)
+    if isinstance(api_key, str):
+        key_present = bool(api_key.strip()) and not re.search(
+            r"replace_me|your[-_]?api[-_]?key|^<.*>$|^\.{3}$|^xxx+$", api_key.strip(), re.I)
+    has_auth = key_present or bool(entry.get("localService")) \
         or any(k for k, v in entry.items() if "oauth" in k.lower() and v)
     if not has_auth:
+        if isinstance(api_key, str) and api_key.strip():
+            # 不回显 apiKey：诊断输出会被贴进 issue / 日志，占位符也可能被误当真实凭据泄露。
+            return False, (f"models.providers.{provider} 的 apiKey 仍是占位符 —— "
+                           "在 .env 填好真实 key 后重新跑 setup 脚本")
         return False, (f"models.providers.{provider} 没有 apiKey —— "
                        "在 .env 填好真实 key 后重新跑 setup 脚本")
     return True, ""

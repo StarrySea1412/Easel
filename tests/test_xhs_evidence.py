@@ -172,7 +172,9 @@ def test_private_link_query_is_not_persisted(local):
 def test_scrape_reply_cannot_restore_context_after_clear(local, monkeypatch):
     import_notes()
     def response(command, env, timeout):
-        assert env["EASEL_ANALYTICS_MANAGED"] == "1" and timeout == 180
+        # 引用常量而不是写死秒数：采集超时是有意调整过的（180→90，见 CHANGELOG 0.49.3），
+        # 写死会让「超时值变了」和「采集参数丢了」这两类问题混在一起报错。
+        assert env["EASEL_ANALYTICS_MANAGED"] == "1" and timeout == web.ANALYTICS_TIMEOUT
         ae.clear(local, "import:alice")
         return SimpleNamespace(stdout=json.dumps({"loggedIn": True, "accountId": "alice", "notes": [note()]}), stderr="")
     monkeypatch.setattr(web, "_run_analytics_command", response)
