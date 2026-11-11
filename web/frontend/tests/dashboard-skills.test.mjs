@@ -125,6 +125,7 @@ async function fixture(t, initial = {}) {
     else if (path.startsWith('/api/agent-office/models')) data = initial.runtime === 'api' ? {available:true,scope:'next_turn',runtime:'api',currentModelRef:'direct-api/local',options:[{id:'direct-api/local',provider:'direct-api',model:'local',configured:true}]} : { available:true, scope:'next_turn', currentModelRef:initial.thinkingLevels?'fixture/model':null, options:initial.thinkingLevels?[{id:'fixture/model',provider:'fixture',model:'model',configured:true,thinkingLevels:initial.thinkingLevels}]:[] };
     else if (path === '/api/settings/models/health') data = { results:[], schedules:[] };
     else if (path.startsWith('/api/settings/models/connection?')) data = { modelRef:'fixture/model',state:'unverified',channelName:'测试渠道',detail:'仅模拟配置，不发起推理' };
+    else if (path === '/api/analytics/snapshots/status') data = { platforms: {}, intervalSeconds: 86400 };
     else if (path.startsWith('/api/analytics/') && path.endsWith('/snapshot')) data = {data:initial.snapshot || null,running:false};
     else if (initial.analytics && path.startsWith('/api/analytics/') && !path.endsWith('/platforms')) data = await initial.analytics(path);
     else if (path === '/api/accounts') data = initial.accounts || [];
