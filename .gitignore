@@ -114,6 +114,9 @@ gui-test-screenshots/
 /memory/
 /social-accounts/
 
+# 账号归属纪元标记：采集与测试在数据根目录写入的运行时状态，不进版本库
+/.account-identities/
+
 # Isolated browser acceptance data, local credentials and screenshots
 /.artifacts/
 # Private durable execution ownership and control credentials.
