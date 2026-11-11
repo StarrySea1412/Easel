@@ -7,7 +7,7 @@ function formatRemaining(seconds: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-/** 30s 无操作后自动选推荐项，避免 agent 一直等回复把对话挂住。 */
+/** 自动选择仅供显式启用的宿主使用；正式入口默认等待人工回复。 */
 export const AUTO_PICK_MS = 30_000;
 /** 自动提交的来源标记，便于审计区分「人选的」和「超时选的」。 */
 export const AUTO_RESOLVED_BY = 'auto-timeout';
@@ -48,9 +48,9 @@ export function resolveAnswers(
   return items.length > 0 && Object.keys(answers).length === items.length ? answers : null;
 }
 
-/** One explicit submission answers every question; a 30s idle timeout picks the recommended option. */
-function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
-  question: ChatQuestion; onAnswered: () => void; autoPickMs?: number;
+/** Default to explicit answers; hosts may opt in to an idle recommendation timeout. */
+function QuestionCard({ question, onAnswered, autoPickMs = null }: {
+  question: ChatQuestion; onAnswered: () => void; autoPickMs?: number | null;
 }) {
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
@@ -58,7 +58,9 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now);
-  const [autoAt, setAutoAt] = useState(() => Date.now() + autoPickMs);
+  const autoDelay = typeof autoPickMs === 'number' && Number.isFinite(autoPickMs) && autoPickMs > 0 ? autoPickMs : 0;
+  const autoEnabled = autoDelay > 0;
+  const [autoAt, setAutoAt] = useState(() => Date.now() + autoDelay);
   const [autoPicked, setAutoPicked] = useState(false);
   const autoTried = useRef(false);
   const fieldId = useId();
@@ -70,7 +72,8 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
   const autoRemaining = Math.max(0, Math.ceil((autoAt - now) / 1000));
 
   useEffect(() => {
-    // 无条件计时：自动选择也要靠这个时钟推进，不只是到期倒计时。
+    if (expires === undefined && !autoEnabled) return;
+    // 只为真实到期时间或宿主明确启用的自动选择推进时钟。
     const update = () => setNow(Date.now());
     const timer = window.setInterval(update, 1000);
     window.addEventListener('focus', update);
@@ -80,7 +83,7 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
       window.removeEventListener('focus', update);
       document.removeEventListener('visibilitychange', update);
     };
-  }, []);
+  }, [expires, autoEnabled]);
 
   const ready = resolveAnswers(items, selected, custom, false);
   const allAnswered = ready !== null;
@@ -89,10 +92,10 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
     return Boolean(text) || (selected[item.questionId] || []).length > 0;
   }).length;
 
-  /** 用户一动就把 30s 窗口顺延，避免正打字时被自动提交。 */
+  /** 显式启用后，用户操作顺延宿主设定的等待窗口。 */
   const touch = () => {
-    if (autoTried.current) return;
-    setAutoAt(Date.now() + AUTO_PICK_MS);
+    if (!autoEnabled || autoTried.current) return;
+    setAutoAt(Date.now() + autoDelay);
   };
 
   const pick = (item: ChatQuestionItem, label: string) => {
@@ -135,9 +138,9 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
     if (ready) void submitWith(ready);
   };
 
-  // 30s 无操作 → 自动选推荐项并提交，避免对话一直挂着等回复。
+  // 只有宿主明确启用，才允许在等待窗口后补推荐项并提交。
   useEffect(() => {
-    if (autoTried.current || busy || expired) return;
+    if (!autoEnabled || autoTried.current || busy || expired) return;
     if (now < autoAt) return;
     const auto = resolveAnswers(items, selected, custom, true);
     if (!auto) return;  // 既没选项也没填写：只能继续等用户
@@ -146,7 +149,7 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
     void submitWith(auto, true);
     // submitWith 每次渲染都是新引用，故意不列入依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [now, autoAt, busy, expired, items, selected, custom]);
+  }, [autoEnabled, now, autoAt, busy, expired, items, selected, custom]);
 
   const statusText = expired
     ? autoPicked ? '已到期，已按推荐项自动提交' : '本次提问已到期'
@@ -166,7 +169,7 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
               {expired ? '已到期' : `剩余 ${formatRemaining(remaining)}`}
             </span>}
           </div>
-          {!expired && !autoPicked && autoRemaining > 0 && (
+          {autoEnabled && !expired && !autoPicked && autoRemaining > 0 && (
             <div className="question-card__auto" role="note">
               {autoRemaining <= 10 ? `${autoRemaining} 秒后` : '若一直不选，'}将自动选择推荐项并提交
             </div>
@@ -233,8 +236,8 @@ function QuestionCard({ question, onAnswered, autoPickMs = AUTO_PICK_MS }: {
 }
 
 /** Live and replayed questions share the same absolute deadline. */
-export default function QuestionCards({ questions, onDone, autoPickMs = AUTO_PICK_MS }: {
-  questions: ChatQuestion[]; onDone?: (questionId: string) => void; autoPickMs?: number;
+export default function QuestionCards({ questions, onDone, autoPickMs = null }: {
+  questions: ChatQuestion[]; onDone?: (questionId: string) => void; autoPickMs?: number | null;
 }) {
   const [answered, setAnswered] = useState<Record<string, boolean>>({});
   const visible = useMemo(() => questions.filter(question => !answered[question.id]), [questions, answered]);

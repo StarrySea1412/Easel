@@ -43,7 +43,8 @@ test('terminal and changes panels filter the same dated turn without mixing rece
 test('switching sessions hides old errors immediately and aborts pending old requests', async t => {
   const view = await setup(t);
   await act(async () => view.requests[0].reject(new Error('offline')));
-  assert.match(view.container.textContent, /执行记录暂不可读/);
+  assert.match(view.container.textContent, /offline/);
+  assert.match(view.container.textContent, /重新读取/);
   await view.render('b'); assert.equal(view.container.textContent, '');
   assert.equal(view.requests[0].options.signal.aborted, true);
   await view.respond(1, payload('b')); assert.equal(view.container.textContent, '');
@@ -59,7 +60,9 @@ test('a failed refresh preserves real file diff receipts and offers recovery', a
   await view.click('重新读取');
   await act(async () => view.requests[1].reject(new Error('offline')));
   assert.match(view.container.textContent, /\+1 alpha/);
-  assert.match(view.container.textContent, /已有回执保留/);
+  assert.match(view.container.textContent, /\+2 beta/);
+  assert.match(view.container.textContent, /offline/);
+  assert.match(view.container.textContent, /重新读取/);
 });
 test('an old session response cannot become current execution evidence', async t => {
   const view = await setup(t); await view.render('b');

@@ -218,7 +218,9 @@ test('side questions and failed stops remain actionable in their own session',as
   const side=view.container.querySelector('.side-chat');
   assert.match(side.textContent,/停止请求失败/);
   await view.click([...side.querySelectorAll('button')].find(button=>button.textContent==='重试停止'));
-  await view.click([...side.querySelectorAll('button')].find(button=>button.textContent==='用户材料'));
+  const option=[...side.querySelectorAll('.question-card__option')].find(button=>button.querySelector('strong')?.textContent==='用户材料');
+  assert.ok(option,'the child question keeps its actual option available');
+  await view.click(option);
   await view.click(side.querySelector('.question-card__submit'));
   await new Promise(resolve=>setTimeout(resolve,0));
   assert.deepEqual(stopped,[child.id]);assert.deepEqual(answered,[[child.id,'ask-child']]);

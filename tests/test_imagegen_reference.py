@@ -145,7 +145,7 @@ def test_images_edits_wire_contains_reference_and_mask_without_generation_fallba
         return Response()
     monkeypatch.setattr(helper, "_open", open_request)
     helper._post_edits_multipart("https://images.example.test/v1", "fake-test-key", "image-test", "keep subject",
-        SimpleNamespace(image=str(original), mask=str(mask), n=1, size="auto"))
+        SimpleNamespace(image=str(original), mask=str(mask), n=1, size="auto"), timeout=30)
     request = requests[0]
     assert request.full_url == "https://images.example.test/v1/images/edits"
     assert request.get_method() == "POST"

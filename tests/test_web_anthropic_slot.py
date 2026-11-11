@@ -80,8 +80,9 @@ def test_anthropic_save_writes_provider_into_openclaw(sandbox):
     assert prov["models"] == [{"id": "claude-sonnet-4-6", "name": "claude-sonnet-4-6"}]
     # 既有的 openai provider 不能被顺手抹掉
     assert oc["models"]["providers"]["openai"]["apiKey"] == "k"
-    # 提示语要能解释「为什么刚才没生效」
-    assert "已同步" in resp.json().get("note", "")
+    # 保存原生配置后明确要求重启网关，不把文案当作已运行的证据。
+    assert isinstance(resp.json().get("note"), str) and resp.json()["note"]
+    assert resp.json()["requiresGatewayRestart"] is True
 
 
 def test_anthropic_save_updates_existing_provider_in_place(sandbox):
