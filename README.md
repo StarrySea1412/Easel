@@ -1,4 +1,4 @@
-**0.50.0源码已交付：多平台、多账号管理/发布/分析贯通。** 独立账号可从账号中心直达分析和发布，按真实平台身份隔离采集，阻止错配导入及迟到结果；空稿先准备内容，既有稿件和未知发布请求保留。后端251、前端79项专项及桌面/390px隔离浏览器通过，构建/lint通过。源码位于候选分支 `codex/merge-analytics-0496`（`4836a14b`）；main仅同步说明，138未更新、真实平台投稿未验收。[实现、工具/Skill与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/merge-analytics-0496/docs/multi-account-workflows-0.50.0-2026-11-12.md)。
+**0.50.0已部署138：多平台、多账号管理/发布/分析贯通。** 独立账号可从账号中心直达分析和发布，按真实平台身份隔离采集，保留既有稿件和未知发布请求。正式与隔离运行`4836a14bb854`；489项后端、79项前端专项通过，1815项运行源码、74项资源、完整备份及原数据保留核验通过，完整App桌面/390px账号、分析、发布准备与菜单经真实浏览器检查。源码位于 `codex/merge-analytics-0496`，main仅同步双语首页，未合功能；真实平台登录/采集/投稿和全量长跑另验。[部署回执](https://github.com/StarrySea1412/Easel/blob/codex/merge-analytics-0496/docs/release-138-0.50.0-2026-11-12.md) · [实现、工具/Skill与验收边界](https://github.com/StarrySea1412/Easel/blob/codex/merge-analytics-0496/docs/multi-account-workflows-0.50.0-2026-11-12.md)。
 
 **内容分析深化调研 · 2026-11-11。** 已审计现有分析/写作/实验链路，核对8个公开项目的一手资料与许可及2款产品的官方文档，并完成214项专项验证。建议优先补齐数据口径与增量载入，再推进具体改稿、新作品回收及质量评测；现有引用、快照和交接继续复用。本轮纯调研，未实施功能或更新138。[现状、项目借鉴与实施路线](https://github.com/StarrySea1412/Easel/blob/codex/merge-analytics-0496/docs/content-analysis-research-2026-11-11.md)。
 
