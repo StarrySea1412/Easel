@@ -76,6 +76,8 @@ switch ($args[0]) {
             Write-Host '[easel] Gateway already running'
             break
         }
+        $ConfigDir = $env:OPENCLAW_STATE_DIR
+        if (-not $ConfigDir) { $ConfigDir = Join-Path $HOME ".openclaw-$ProfileName" }
         New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
         Write-Host "[easel] Starting Easel gateway (profile: $ProfileName)..."
         $command = "openclaw --profile $ProfileName gateway run --allow-unconfigured --bind loopback --port $Port"

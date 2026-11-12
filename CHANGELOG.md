@@ -1,3 +1,9 @@
+## 0.50.3 · 2026-11-12 · 本地源码主线启动修复
+
+- 修复 `scripts/gateway.ps1` start 分支引用已删除变量 `$ConfigDir` 导致网关启动必败（73181faa 重构遗留）；现取 `OPENCLAW_STATE_DIR`，缺失时回退 `~/.openclaw-easel`。
+- 本地源码主线（main `ab3ac7f7`）启动验证：前端 `npm install` 同步85个新包并全量重建；后端补装 `zstandard`/`python-pptx`/`beautifulsoup4`；网关18789就绪（healthz `{"ok":true}`），工作台7860首页 HTTP 200、`api/status` 返回 gateway/skills 正常。
+- 138运行构建仍为0.50.2/`e609ab3d71a5`；本轮不部署138、不发布安装器。Git代理端口与Clash实际监听7897不一致问题仅在启动时以临时参数绕过，未改全局配置。
+
 ## 2026-11-12 · Git主线统一与上游调查（无产品版本变更）
 
 - 将已交付0.50.2定制代码与原main说明历史收敛至starry/main，默认安装及贡献入口同步；7个文档冲突按当前交付与归属说明解决。整合cfbe345a已推送并核对远端；前端全量长跑未完成，Dashboard测试进程内存退出及分组超时保留待修，不能将专项当全量通过。
