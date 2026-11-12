@@ -13,7 +13,7 @@ import '../styles/social-accounts.css';
 
 export function LoginHistory({ events }: { events: LoginEvent[] }) {
   const actions: Record<string, string> = { create: '建立账号', login: '登录', poll: '登录进度',
-    check: '在线核验', cancel: '取消登录', logout: '退出', interrupted: '操作中断', publish_check: '分发前核验' };
+    analyze: '分析读取', check: '在线核验', cancel: '取消登录', logout: '退出', interrupted: '操作中断', publish_check: '分发前核验' };
   return events.length ? <ol className="social-history" aria-label="登录记录">
     {events.map(event => <li key={event.id}>
       <time dateTime={event.at}>{new Date(event.at).toLocaleString('zh-CN')}</time>
@@ -37,6 +37,7 @@ function ConnectionImage({ login, label }: { login: AccountLogin; label: string 
 }
 
 type Props = {
+  initialAccountId?:string; onNavigateAnalysis?:(platform:string,accountId?:string)=>void; onNavigatePublish?:(account:SocialAccount)=>void;
   hideIdentity?: boolean;
   defaultAccounts?: AccountItem[];
   defaultsLoaded?: boolean;
@@ -45,7 +46,7 @@ type Props = {
   onRefreshDefaults?: () => Promise<void>;
 };
 
-function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = true, defaultLoadError, onManageDefault, onRefreshDefaults }: Props) {
+function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = true, defaultLoadError, onManageDefault, onRefreshDefaults, initialAccountId, onNavigateAnalysis, onNavigatePublish }: Props) {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [label, setLabel] = useState('');
   const [platform, setPlatform] = useState('xiaohongshu');
@@ -54,7 +55,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [logins, setLogins] = useState<Record<string, AccountLogin>>({});
-  const [historyId, setHistoryId] = useState('');
+  const [historyId, setHistoryId] = useState(initialAccountId||'');
   const [events, setEvents] = useState<LoginEvent[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -107,7 +108,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
       inspector.current?.scrollIntoView({ block: 'start' });
     }
   }, [historyId]);
-  const history = async (id: string) => {
+  const history = useCallback(async (id: string) => {
     const seq = ++historySeq.current;
     setHistoryId(id); setEvents([]); setHistoryBusy(true); setError('');
     try {
@@ -117,7 +118,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
       if (alive.current && seq === historySeq.current) setEvents(filtered);
     } catch (cause) { if (alive.current && seq === historySeq.current) setError(cause instanceof Error ? cause.message : '记录读取失败'); }
     finally { if (alive.current && seq === historySeq.current) setHistoryBusy(false); }
-  };
+  }, []);
   const run = async (key: string, call: () => Promise<unknown>) => {
     if (operation.current) return;
     operation.current = true; setBusy(key); setError('');
@@ -127,6 +128,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '操作未完成'); }
     finally { operation.current = false; if (alive.current) setBusy(''); }
   };
+  useEffect(()=>{if(initialAccountId){setPlatformFilter('all');setStatusFilter('all');setSearch('');void history(initialAccountId);}},[initialAccountId,history]);
   const selected = accounts.find(a => a.accountId === historyId);
   const selectedDefault = defaults.find(a => `default:${a.platform}` === historyId);
   const isDefaultHistory = historyId === 'default' || historyId.startsWith('default:');
@@ -204,12 +206,15 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
           <div className="account-selected-identity"><PlatformIcon platform={selectedDefault.platform} name={publishPlatformLabel(selectedDefault.platform)}/><div><h3>{hideIdentity ? '账号身份已隐藏' : selectedDefault.name || '已保存的账号'}</h3><p>{publishPlatformLabel(selectedDefault.platform)} · 默认账号</p></div></div>
           <span className={`account-state-pill is-${selectedDefault.connection === 'online' ? 'ready' : selectedDefault.connection}`}><i/>{defaultState(selectedDefault.platform, selectedDefault.connection)}</span>
           <p className="account-context-note">这是原有默认发布通道的账号，与侧栏平台快照同源。保存的昵称不代表当前在线；默认账号不计入独立账号可分发数量。</p>
+          {onNavigateAnalysis&&<button className="btn" onClick={()=>onNavigateAnalysis(selectedDefault.platform)}>分析默认账号</button>}
           {onManageDefault && <div className="account-inspector-actions"><button className="btn btn-primary" onClick={() => onManageDefault(selectedDefault.platform)}>管理默认账号</button></div>}
         </>}
         {selected && <>
           <div className="account-selected-identity"><PlatformIcon platform={selected.platform} name={publishPlatformLabel(selected.platform)}/><div><h3>{selected.label}</h3><p>{publishPlatformLabel(selected.platform)} · {hideIdentity ? '账号身份已隐藏' : selected.name || '昵称待核验'}</p></div></div>
           <span className={`account-state-pill is-${selected.status}`}><i/>{accountState[selected.status] || selected.status}</span>
           <div className="account-inspector-actions">
+            {onNavigateAnalysis&&<button className="btn" disabled={!selected.externalAccountId} onClick={()=>onNavigateAnalysis(selected.platform,selected.accountId)}>分析此账号</button>}
+            {onNavigatePublish&&<button className="btn" disabled={selected.busy} onClick={()=>onNavigatePublish(selected)}>去发布</button>}
             <button className="btn btn-primary" disabled={!!busy || selected.busy} onClick={() => void run(selected.accountId, async () => { const login = await socialAccounts.login(selected.accountId); if (alive.current) setLogins(old => ({...old,[selected.accountId]:login})); })}>{selected.status === 'logged_out' ? '连接账号' : '重新连接'}</button>
             <button className="btn" disabled={!!busy || selected.busy} onClick={() => void run(selected.accountId, () => socialAccounts.check(selected.accountId))}>在线核验</button>
             {selected.status === 'connecting' && <button className="btn" disabled={!!busy} onClick={() => void run(selected.accountId, () => socialAccounts.cancel(selected.accountId, selected.attemptId))}>取消本次登录</button>}

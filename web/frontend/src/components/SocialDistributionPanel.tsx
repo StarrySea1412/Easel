@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accountState, socialAccounts, socialPlatforms } from '../lib/socialAccounts';
-import type { AccountPayload, AccountTarget, DistributionBatch, DistributionJob, SocialAccount } from '../lib/socialAccounts';
+import type { AccountPayload, AccountTarget, DistributionBatch, DistributionJob, SocialAccount, PublishAccountFocus } from '../lib/socialAccounts';
 import type { OutputFile } from '../lib/api';
 import { PUBLISH_OUTCOMES, publishPlatformLabel } from '../lib/publishReceipts';
 import PlatformIcon from './PlatformIcon';
@@ -13,6 +13,7 @@ const CONTENT_CACHE = 'easel_social_distribution_content_v1';
 type Pending = { requestKey: string; requests: AccountTarget[] };
 export type PublishStep = 'content' | 'targets' | 'review' | 'results';
 interface DistributionProps {
+  accountFocus?:PublishAccountFocus; onOpenAccounts?:(accountId?:string)=>void;
   seed: AccountPayload; files: OutputFile[]; step?: PublishStep;
   onStepChange?: (step: PublishStep) => void;
   onSelectionChange?: (count: number, locked: boolean) => void;
@@ -27,7 +28,7 @@ const describe = (job: DistributionJob) => job.state === 'finished'
   ? job.outcome ? PUBLISH_OUTCOMES[job.outcome]?.label || '待核实' : '待核实'
   : job.state === 'running' ? '执行中' : '排队中';
 
-export function DistributionEditor({ seed, files, step, onStepChange, onSelectionChange }: DistributionProps) {
+export function DistributionEditor({ seed, files, step, onStepChange, onSelectionChange, accountFocus, onOpenAccounts }: DistributionProps) {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [drafts, setDrafts] = useState<Record<string, AccountPayload>>(() => read(DRAFT, {}));
   const [batches, setBatches] = useState<DistributionBatch[]>([]);
@@ -37,9 +38,12 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
   const [notice, setNotice] = useState('');
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [editorId, setEditorId] = useState('');
+  const [deferredAccount, setDeferredAccount] = useState('');
   const cachedDrafts = useRef<Record<string, AccountPayload>>({ ...read<Record<string, AccountPayload>>(CONTENT_CACHE, {}), ...drafts });
   const alive = useRef(true);
   const requestBusy = useRef(false);
+  const focused = useRef(0);
+  const [accountsLoaded,setAccountsLoaded]=useState(false);
   const refreshBusy = useRef(false);
   const refresh = useCallback(async () => {
     if (refreshBusy.current) return;
@@ -47,7 +51,7 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
     try {
       const [rows, history] = await Promise.all([socialAccounts.list(), socialAccounts.batches()]);
       if (!Array.isArray(rows) || !Array.isArray(history)) throw new Error('多账号接口格式不正确，请检查服务版本。');
-      if (alive.current) { setAccounts(rows); setBatches(history); }
+      if (alive.current) { setAccounts(rows); setBatches(history); setAccountsLoaded(true); }
     } finally { refreshBusy.current = false; }
   }, []);
   useEffect(() => {
@@ -68,6 +72,30 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
     const restored = accounts.filter(a => drafts[a.accountId] || pending?.requests.some(r => r.accountId === a.accountId)).map(a => a.platform);
     setPlatforms(old => [...new Set([...old, ...restored])]);
   }, [accounts, drafts, pending]);
+  useEffect(()=>{
+    if(!accountFocus||!accountsLoaded||focused.current===accountFocus.nonce)return;
+    focused.current=accountFocus.nonce;
+    setDeferredAccount('');
+    if(pending||busy){setNotice('有待查询的确认稿，先核对本次受理结果，再选择其他账号。');onStepChange?.('results');return;}
+    const account=accounts.find(row=>row.accountId===accountFocus.accountId&&row.platform===accountFocus.platform);
+    if(!account){setError('指定发布账号不存在或平台不匹配，请回账号中心重新选择。');return;}
+    setPlatforms(old=>[...new Set([...old,account.platform])]);onStepChange?.('targets');
+    if(account.status!=='ready'||account.busy){setNotice('已定位此账号；请先连接并在线核验，现有草稿保留。');return;}
+    if(step&&!drafts[account.accountId]&&!cachedDrafts.current[account.accountId]&&!seed.title.trim()){
+      setDeferredAccount(account.accountId);onStepChange?.('content');
+      setNotice(`已定位 ${account.label}；先准备通用稿，进入选择账号时带入，随后仍需逐账号确认。`);return;
+    }
+    setDrafts(old=>old[account.accountId]?old:{...old,[account.accountId]:structuredClone(cachedDrafts.current[account.accountId]||seed)});
+    setEditorId(account.accountId);setNotice(`已定位 ${account.label}；请检查内容并逐账号确认发布。`);
+  },[accountFocus,accountsLoaded,accounts,pending,busy,onStepChange,seed,step,drafts]);
+  useEffect(()=>{
+    if(!deferredAccount||step!=='targets'||!seed.title.trim()||pending||busy)return;
+    const account=accounts.find(row=>row.accountId===deferredAccount);
+    if(!account||account.status!=='ready'||account.busy){setNotice('目标账号状态已变化，请在线核验后重新选择。');setDeferredAccount('');return;}
+    setDrafts(old=>old[account.accountId]?old:{...old,[account.accountId]:structuredClone(cachedDrafts.current[account.accountId]||seed)});
+    setEditorId(account.accountId);setDeferredAccount('');
+    setNotice(`已带入 ${account.label}；请核对这份账号内容，再确认发布。`);
+  },[deferredAccount,step,seed,pending,busy,accounts]);
   const update = (id: string, value: Partial<AccountPayload>) => setDrafts(old => ({ ...old, [id]: { ...old[id], ...value } }));
   const toggle = (id: string) => setDrafts(old => {
     const next = { ...old };
@@ -156,12 +184,12 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
           <div className="distribution-account-options">{rows.map(account => {
             const chosen = !!drafts[account.accountId];
             const usable = account.status === 'ready' && !account.busy;
-            return <label key={account.accountId} className={`distribution-account-option${chosen ? ' is-selected' : ''}${!usable ? ' is-unavailable' : ''}`}>
+            return <div key={account.accountId}><label className={`distribution-account-option${chosen ? ' is-selected' : ''}${!usable ? ' is-unavailable' : ''}`}>
               <input type="checkbox" data-account-id={account.accountId} aria-label={`${publishPlatformLabel(account.platform)} / ${account.label}`} checked={chosen} disabled={locked || (!usable && !chosen)} onChange={() => {toggle(account.accountId); if(!chosen) setEditorId(account.accountId);}}/>
               <span className="distribution-account-avatar">{(account.name || account.label).slice(0,1)}</span><span className="distribution-account-name"><strong>{account.label}</strong><small>{account.name || '昵称待核验'}</small></span><span className={`distribution-account-status${usable ? ' is-ready' : ''}`}>{usable ? account.platform === 'wechat-oa' ? '可存草稿' : '可发布' : account.busy ? '处理中' : accountState[account.status] || '待核验'}</span>
-            </label>;
+            </label>{onOpenAccounts&&<button className="account-text-button" onClick={()=>onOpenAccounts(account.accountId)}>管理 {account.label}</button>}</div>;
           })}</div>
-          {!rows.length && <p className="distribution-empty">这个平台还没有独立账号，请先在账号中心添加并连接。</p>}
+          {!rows.length && <p className="distribution-empty">这个平台还没有独立账号，请先在账号中心添加并连接。{onOpenAccounts&&<button className="btn btn-sm" onClick={()=>onOpenAccounts()}>添加账号</button>}</p>}
           {item.value === 'wechat-oa' && <p className="distribution-platform-note">公众号内容会保存到草稿箱，不会自动公开。</p>}
         </section>;
       })}

@@ -68,6 +68,42 @@ async function fixture(t, component = DistributionEditor, props = {}) {
   return h;
 }
 
+test('account inspector opens the exact selected analysis and publish identity',async t=>{
+  const analysis=[],publish=[];
+  const h=await fixture(t,Accounts,{initialAccountId:a.accountId,onNavigateAnalysis:(...args)=>analysis.push(args),onNavigatePublish:account=>publish.push(account.accountId)});
+  await h.click('分析此账号');await h.click('去发布');
+  assert.deepEqual(analysis,[[a.platform,a.accountId]]);assert.deepEqual(publish,[a.accountId]);assert.equal(h.posts.length,0);
+});
+
+test('account publish focus preserves existing edited drafts and does not submit',async t=>{
+  const focus={accountId:a.accountId,platform:a.platform,nonce:100,workspaceId:'publish'};
+  const h=await fixture(t,DistributionEditor,{accountFocus:focus});
+  assert.ok(h.container.querySelector(`[data-account-id="${a.accountId}"]`).checked);
+  await h.input(h.container.querySelector('textarea'),'甲账号独立正文');
+  await h.render({accountFocus:{...focus,accountId:b.accountId,platform:b.platform,nonce:101}});
+  await h.render({accountFocus:{...focus,nonce:102}});
+  assert.equal(h.container.querySelector('textarea').value,'甲账号独立正文');assert.equal(h.posts.length,0);
+});
+
+test('empty account deep link waits for content before freezing the target draft',async t=>{
+  const steps=[];const focus={accountId:a.accountId,platform:a.platform,nonce:104,workspaceId:'publish'};
+  const h=await fixture(t,DistributionEditor,{step:'content',seed:{title:'',body:'',media:[],tags:''},accountFocus:focus,onStepChange:step=>steps.push(step)});
+  assert.equal(localStorage.getItem('easel_social_distribution_v1'),'{}');assert.equal(steps.at(-1),'content');
+  await h.render({step:'targets',seed:{...seed,title:'准备后的标题',body:'准备后的正文'}});
+  assert.equal(h.container.querySelector(`[data-account-id="${a.accountId}"]`).checked,true);
+  const drafts=JSON.parse(localStorage.getItem('easel_social_distribution_v1'));
+  assert.equal(drafts[a.accountId].title,'准备后的标题');assert.equal(drafts[a.accountId].body,'准备后的正文');assert.equal(h.posts.length,0);
+});
+
+test('unknown accepted request prevents account deep-link from replacing confirmed targets',async t=>{
+  const h=await fixture(t);await h.choose(a);
+  h.submit=async()=>{throw new Error('network lost');};await h.click('确认发布到 1 个账号');
+  const frozen=localStorage.getItem('easel_social_distribution_pending_v1');
+  await h.render({accountFocus:{accountId:b.accountId,platform:b.platform,nonce:103,workspaceId:'publish'}});
+  assert.equal(localStorage.getItem('easel_social_distribution_pending_v1'),frozen);
+  assert.match(h.text(),/先核对本次受理结果/);assert.equal(h.posts.length,1);
+});
+
 test('account page offers all seven platforms with a shared keyboard selector', async t => {
   const h = await fixture(t, Accounts);
   await h.click('新增独立账号');

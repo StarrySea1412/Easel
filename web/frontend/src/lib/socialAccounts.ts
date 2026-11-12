@@ -4,8 +4,9 @@ import type { PublishOutcome, PublishRequest } from './api';
 export interface SocialAccount {
   accountId: string; platform: string; label: string; name: string;
   externalAccountId: string; status: string; busy: boolean; attemptId: string;
-  checkedAt?: string; updatedAt: string;
+  checkedAt?: string; updatedAt: string; generation?: number;
 }
+export interface PublishAccountFocus { accountId: string; platform: string; nonce: number; workspaceId: string }
 export interface LoginEvent {
   id: number; accountId?: string; platform?: string; attemptId: string;
   action: string; state: string; message: string; at: string;
@@ -43,7 +44,7 @@ export const socialPlatforms = [
   { value: 'zhihu', label: '知乎' }, { value: 'bilibili', label: 'B站' }, { value: 'wechat-oa', label: '公众号（草稿）' },
 ];
 export const accountState: Record<string, string> = {
-  logged_out: '未登录', connecting: '登录中', checking: '核验中', logging_out: '退出中',
+  analyzing: '分析读取中', logged_out: '未登录', connecting: '登录中', checking: '核验中', logging_out: '退出中',
   ready: '身份已核验', unverified: '待在线核验', login_required: '需重新登录', error: '操作未完成',
   identity_changed: '身份不一致', starting: '启动中', qr_ready: '请扫码', scanned: '已扫码，等待确认',
   verifying: '等待平台验证', sms_required: '需在官方页面额外验证',

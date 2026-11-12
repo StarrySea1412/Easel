@@ -90,8 +90,11 @@ class SocialAccountService:
             if lease:
                 lease.release()
 
-    def execute(self, command, *, receipt_id='', timeout=150):
+    def execute(self, command, *, receipt_id='', timeout=150, data_root=None):
         env = self.w._publish_env()
+        if data_root is not None:
+            env['EASEL_DATA_DIR'] = str(data_root)
+            env['EASEL_ANALYTICS_MANAGED'] = '1'
         env['EASEL_CALENDAR_AUTORECORD'] = '0'
         if receipt_id:
             env['EASEL_PUBLISH_RECEIPT_ID'] = receipt_id
@@ -470,6 +473,8 @@ class SocialAccountService:
 
     def router(self):
         router = APIRouter(prefix='/api/social-accounts')
+        from social_account_analysis import AccountAnalysis
+        analysis = AccountAnalysis(self)
 
         def guarded(call, *args):
             try:
@@ -511,6 +516,14 @@ class SocialAccountService:
         @router.get('/{account_id}/history')
         def history(account_id: str):
             return guarded(self.store.history, account_id)
+
+        @router.get('/{account_id}/analysis')
+        def account_analysis(account_id: str):
+            return guarded(analysis.read, account_id)
+
+        @router.post('/{account_id}/analysis')
+        def collect_analysis(account_id: str):
+            return guarded(analysis.collect, account_id)
 
         @router.post('/{account_id}/login')
         def login(account_id: str):

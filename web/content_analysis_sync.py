@@ -53,6 +53,10 @@ def live_contents(live, account_id):
         for key in ('tags', 'body', 'url', 'publishedAt', 'format', 'transcript', 'comments', 'coverText'):
             if note.get(key):
                 item[key] = note[key]
+        # Preserve explicit structured scope; do not infer it from display strings.
+        for key in ('period', 'paid', 'advancedMetrics'):
+            if key in note:
+                item[key] = note[key]
         result.append(item)
     return result, skipped
 

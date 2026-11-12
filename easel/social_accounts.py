@@ -26,7 +26,7 @@ def valid_external(platform: str, value) -> bool:
     if platform == 'xiaohongshu':
         return bool(EXTERNAL_ID.fullmatch(value))
     return bool(re.fullmatch(r'[A-Za-z0-9_.:@-]{1,128}', value))
-BUSY = {'connecting', 'checking', 'logging_out'}
+BUSY = {'connecting', 'checking', 'logging_out', 'analyzing'}
 
 
 class AccountError(Exception):
@@ -112,7 +112,7 @@ class SocialStore:
         pending = con.execute("SELECT 1 FROM distribution_jobs WHERE accountId=? AND state IN ('queued','running')",
                               (account['accountId'],)).fetchone()
         if account['status'] in BUSY or pending:
-            raise AccountError('该账号正在登录、核验或分发，请等待结束后再操作。')
+            raise AccountError('该账号正在登录、核验、分析或分发，请等待结束后再操作。')
 
     def create(self, label: str, platform: str = 'xiaohongshu') -> dict:
         if platform not in PLATFORMS:
@@ -152,7 +152,7 @@ class SocialStore:
                 'SELECT * FROM login_events WHERE accountId=? ORDER BY id DESC LIMIT 200', (identifier,))]
 
     def reserve(self, identifier: str, action: str) -> dict:
-        statuses = {'login': 'connecting', 'check': 'checking', 'logout': 'logging_out'}
+        statuses = {'login': 'connecting', 'check': 'checking', 'logout': 'logging_out', 'analyze': 'analyzing'}
         if action not in statuses:
             raise ValueError('Invalid account action')
         with self.db() as con:
@@ -319,9 +319,9 @@ class SocialStore:
     def recover(self) -> list[dict]:
         with self.db() as con:
             interrupted = [dict(row) for row in con.execute("SELECT * FROM distribution_jobs WHERE state IN ('queued','running')")]
-            for row in con.execute("SELECT * FROM accounts WHERE status IN ('connecting','checking','logging_out')").fetchall():
+            for row in con.execute("SELECT * FROM accounts WHERE status IN ('connecting','checking','logging_out','analyzing')").fetchall():
                 self._event(con, dict(row), 'interrupted', 'unverified', '服务重启，旧操作已中断；请重新核验该账号。')
-            con.execute("UPDATE accounts SET status='unverified',generation=generation+1 WHERE status IN ('connecting','checking','logging_out')")
+            con.execute("UPDATE accounts SET status='unverified',generation=generation+1 WHERE status IN ('connecting','checking','logging_out','analyzing')")
             con.execute("UPDATE distribution_jobs SET state='finished',outcome='unverified',message=?,updatedAt=? WHERE state IN ('queued','running')",
                         ('服务重启，任务未继续提交；请先核对对应账号的作品结果，避免重复发布。', now()))
         return interrupted

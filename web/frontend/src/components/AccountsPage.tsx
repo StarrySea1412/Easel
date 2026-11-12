@@ -12,6 +12,7 @@ import { OTHER_ANALYSIS_PLATFORMS } from './PlatformAnalysisPanel';
 import PlatformIcon from './PlatformIcon';
 import { IconAccounts, IconCheck, IconEye, IconEyeOff, IconInfo, IconRefresh } from './icons';
 import '../styles/accounts.css';
+import type { SocialAccount } from '../lib/socialAccounts';
 import SocialAccountsPanel from './SocialAccountsPanel';
 
 type QRState = {
@@ -114,7 +115,7 @@ function LoginImage({ login, nonce }: { login: QRState; nonce: number }) {
   );
 }
 
-export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { onNavigateAnalysis: (platform: string) => void; onAnalysisLogin: () => void }) {
+export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, initialAccountId, onNavigatePublish }: { initialAccountId?:string; onNavigatePublish?:(account:SocialAccount)=>void; onNavigateAnalysis: (platform: string,accountId?:string) => void; onAnalysisLogin: () => void }) {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
   const [qr, setQr] = useState<QRState | null>(null);
@@ -504,7 +505,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin }: { 
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
       {cancelling && <div className="accounts-message" role="status">正在结束登录流程…完成后可连接其他平台。</div>}
       {cancelError && <div className="accounts-message" role="alert">{cancelError} <button className="btn btn-sm" onClick={() => void closeQr()}>重试结束登录</button></div>}
-      <SocialAccountsPanel hideIdentity={hideIdentity} defaultAccounts={accounts} defaultsLoaded={loaded} defaultLoadError={!loaded ? err : ''} onRefreshDefaults={load} onManageDefault={platform => { setManagedPlatform(platform); setConfirmLogout(false); }} />
+      <SocialAccountsPanel initialAccountId={initialAccountId} onNavigateAnalysis={onNavigateAnalysis} onNavigatePublish={onNavigatePublish} hideIdentity={hideIdentity} defaultAccounts={accounts} defaultsLoaded={loaded} defaultLoadError={!loaded ? err : ''} onRefreshDefaults={load} onManageDefault={platform => { setManagedPlatform(platform); setConfirmLogout(false); }} />
 
       <details className="accounts-default-channels">
         <summary><span className="account-default-icon"><IconAccounts size={18}/></span><span><strong>默认发布通道</strong><small>原有每平台单账号的连接入口，已知身份也会显示在上方名单。</small></span><span className="account-default-count" aria-live="polite">{loaded ? `${connectedCount} / ${supportedCount} 在线` : '状态读取中'}</span></summary>

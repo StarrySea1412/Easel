@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import type { PublishAccountFocus } from '../lib/socialAccounts';
 import type { ChatSession } from '../lib/store';
 import type { PublishReceiptsModel } from '../hooks/usePublishReceipts';
 import { useImageStudio, type ImageStudioController } from '../hooks/useImageStudio';
@@ -19,8 +20,9 @@ import { creationMaterial, consumeCreationMaterial, creationTarget, saveCreation
 import '../styles/creation-workspace.css';
 
 type Props = {
+  publishAccountFocus?:PublishAccountFocus;
   studio: ImageStudioController; video: VideoStudioController; receipts: PublishReceiptsModel; sessions: ChatSession[]; persona: string;
-  onOpenSettings: () => void; onOpenVideoSettings: () => void; onOpenOutputs: () => void; onOpenAccounts?: () => void; onOpenPublishOutputs?: () => void;
+  onOpenSettings: () => void; onOpenVideoSettings: () => void; onOpenOutputs: () => void; onOpenAccounts?: (accountId?:string) => void; onOpenPublishOutputs?: () => void;
   onExpand: (kind:'image'|'publish') => void; onOpenChat: (sessionId: string) => void; onNewChat: () => string;
   onPromptSkill?: (skill: string, input: string) => boolean;
 };
@@ -96,6 +98,6 @@ function WorkspaceInstance(props: Props & {workspace:CreationWorkspace}) {
   </div>;
   return createPortal(<div className="creation-workspace-mount">{toolbar}{workspace.kind === 'image' && <ConversationImageTasks key={workspace.sessionId || workspace.id} sessionId={workspace.sessionId} items={deliveries.items} jobs={deliveries.jobs} note={deliveries.note} targetId={targetId} onUpdated={deliveries.updated} onRefresh={deliveries.retry} onAddToChat={async item=>{if(!targetId)throw new Error('请先选择目标对话');await returnImageToChat(targetId,mediaUrl(item.path));}} onPublish={item=>{addImageToPublish(workspace.sessionId,mediaUrl(item.path));onExpand('publish');}}/>}{workspace.kind === 'image'
     ? <ImageStudioPage active={active} onPromptSkill={props.onPromptSkill} studio={studio} video={workspace.sessionId ? undefined : props.video} sessionId={targetId} sourceSessionId={workspace.sessionId} onOpenPublish={()=>{selectCreation('publish',workspace.sessionId);onExpand('publish');}} onOpenSettings={props.onOpenSettings} onOpenVideoSettings={props.onOpenVideoSettings} onOpenModels={props.onOpenSettings} onOpenOutputs={props.onOpenOutputs}/>
-    : <PublishPage workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={source ? source.persona || '' : props.persona} publishReceipts={props.receipts} onOpenAccounts={props.onOpenAccounts} onOpenOutputs={props.onOpenPublishOutputs || props.onOpenOutputs}/>
+    : <PublishPage accountFocus={active&&props.publishAccountFocus?.workspaceId===workspace.id?props.publishAccountFocus:undefined} workspaceId={workspace.id} sourceSessionId={workspace.sessionId} targetSessionId={targetId} getSourceText={sourceText} active={active} persona={source ? source.persona || '' : props.persona} publishReceipts={props.receipts} onOpenAccounts={props.onOpenAccounts} onOpenOutputs={props.onOpenPublishOutputs || props.onOpenOutputs}/>
   }</div>,container);
 }

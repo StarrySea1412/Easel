@@ -28,6 +28,7 @@ import { checkedCreationDraft } from '../lib/chatArtifacts';
 import { ACCOUNT_STATE_EVENT, accountConnection, getWhoamiCache, hydrateAccountIdentities, isWhoamiFresh, markWhoamiUnverified, setWhoamiCache, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 
 interface PublishPageProps {
+  accountFocus?:import('../lib/socialAccounts').PublishAccountFocus;
   persona: string;
   publishReceipts: PublishReceiptsModel;
   workspaceId?: string;
@@ -35,7 +36,7 @@ interface PublishPageProps {
   targetSessionId?: string | null;
   active?: boolean;
   getSourceText?: () => string;
-  onOpenAccounts?: () => void;
+  onOpenAccounts?: (accountId?:string) => void;
   onOpenOutputs?: () => void;
 }
 
@@ -80,7 +81,7 @@ function preparedDraftTime(timestamp: number) {
     : { dateTime: undefined, label: '准备时间未知' };
 }
 
-export default function PublishPage({ persona, publishReceipts, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, onOpenAccounts, onOpenOutputs, active = true }: PublishPageProps) {
+export default function PublishPage({ persona, publishReceipts, accountFocus, workspaceId, sourceSessionId = null, targetSessionId = sourceSessionId, getSourceText, onOpenAccounts, onOpenOutputs, active = true }: PublishPageProps) {
   const fieldPrefix = useId();
   const workspace = ensureCreation('publish', sourceSessionId);
   const deliveries = useChatArtifacts(sourceSessionId || '', active && Boolean(sourceSessionId), false);
@@ -104,6 +105,7 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
   const [draftSaved, setDraftSaved] = useState(true);
   const [step, setStep] = useState<PublishStep>('content');
   const [legacy, setLegacy] = useState(false);
+  useEffect(()=>{if(accountFocus&&active)setLegacy(false);},[accountFocus,active]);
   const [targetCount, setTargetCount] = useState(0);
   const [distributionLocked, setDistributionLocked] = useState(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
@@ -538,10 +540,11 @@ export default function PublishPage({ persona, publishReceipts, workspaceId, sou
         <button className="btn btn-sm" onClick={loadAssets} disabled={accountsLoading || mediaLoading}>重试</button>
       </div>}
       {!legacy && <>
+      {accountFocus&&step==='content'&&<p className="publish-field-help" role="status">已从账号中心带入目标。先准备内容，进入“选择账号”后核对目标与各账号稿件。</p>}
         <div className="publish-progress"><Steps label="发布流程" current={step} onChange={key => changeStep(key as PublishStep)} items={steps.map(item => ({...item, description: item.key === 'content' ? '标题、正文与素材' : item.key === 'targets' ? '平台与对应账号' : item.key === 'review' ? '逐份核对后提交' : '进度与平台回执', completed: item.key === 'content' ? !!title.trim() : item.key === 'targets' ? targetCount > 0 : false, disabled: item.key === 'review' && !targetCount && !distributionLocked}))}/></div>
         <div className="publish-step-heading"><h2 ref={stepHeading} tabIndex={-1}>{steps.find(item => item.key === step)?.label}</h2><p>{steps.find(item => item.key === step)?.hint}</p></div>
       </>}
-      <div hidden={legacy || step === 'content'}><SocialDistributionPanel seed={{ title, body, media: selectedMedia, tags }} files={mediaFiles} step={step} onStepChange={changeStep} onSelectionChange={selectionChanged}/></div>
+      <div hidden={legacy || step === 'content'}><SocialDistributionPanel accountFocus={accountFocus} onOpenAccounts={onOpenAccounts} seed={{ title, body, media: selectedMedia, tags }} files={mediaFiles} step={step} onStepChange={changeStep} onSelectionChange={selectionChanged}/></div>
       <div hidden={!legacy && step !== 'content'} className={`publish-workspace${legacy ? '' : ' publish-content-workspace'}`}>
         <fieldset className="publish-editor publish-content-fields" disabled={distributionLocked}>
           <section className="publish-section publish-content-section">

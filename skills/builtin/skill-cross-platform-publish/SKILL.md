@@ -10,6 +10,15 @@ layer: publish
 
 # 跨平台一键发布
 
+## 多账号发布门禁（优先于下方默认账号脚本流程）
+
+- 平台不等于账号。先在账号中心选择具体独立账号，记录平台、本地 `accountId`、核验后的 `externalAccountId` 和备注；不能从画像、昵称或上次默认登录推断目标。
+- 多账号执行走发布中心的逐账号确认稿与受控 `/api/social-accounts/batches`，由系统保留 requestKey、素材摘要、身份核验及发布回执。此 Skill 负责适配/计划，不能绕过确认与账号锁裸调用默认 publisher。
+- 每个账号分别确认标题、正文、素材和发布方式；公众号 `wechat-oa` 仅存草稿。下方旧 `wechat` 是脚本别名，不可当作独立账号 API 的平台编号。
+- 网络超时、未知结果或服务重启时，先查询原批次/回执，沿用原确认稿和 requestKey，不创建新请求自动重发；仅明确失败且用户再次确认时准备重试。
+- 没有受控认证工具时，准备草稿与目标清单并引导用户到发布中心确认，不自行读取 Cookie、拼接 profile、调用真实发布或向外发通知。
+- `skill-publish-notify` 和外部消息发送需要用户明确授权，不因完成投稿而默认推送；日历/日志由现有回执链路归集，避免重复登记。
+
 > 一稿多发：按各平台规范适配同一份内容，再逐平台委派发布 SKILL。走
 > `scripts/publish_dispatch.py`（约束检查 + 平台→publisher 路由 + 派发计划）。
 > **内容适配由你（LLM）完成，实际发布委派各平台 publisher SKILL。**
@@ -55,7 +64,7 @@ python skills/builtin/skill-cross-platform-publish/scripts/publish_dispatch.py p
    `python skills/shared/scripts/persona_gate.py check --score 85`——
    低于 80 分时告知分数、偏离点和修改建议，但不阻断发布；用户已明确要发布就继续执行。
 4. **逐平台发布**：调用 `dispatch[i].publisher` 对应的发布 SKILL 执行。
-5. 发布后：**skill-publish-notify** 推送结果；**skill-short-link** 生成带 UTM 追踪短链；
+5. 发布后：仅在用户明确授权通知时使用 **skill-publish-notify** 推送结果；需要追踪链接且已获授权时使用 **skill-short-link**；
    并把本次发布登记进 manifest 供归因层消费：
    ```
    python skills/shared/scripts/manifest.py record --topic 露营攻略 \

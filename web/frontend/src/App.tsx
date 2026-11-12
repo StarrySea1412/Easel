@@ -188,6 +188,9 @@ export default function App() {
     return () => window.removeEventListener('easel:open-skill-configuration', open);
   }, []);
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
+  const [analysisAccountId,setAnalysisAccountId]=useState<string|undefined>();
+  const [managedAccountId,setManagedAccountId]=useState<string|undefined>();
+  const [publishAccountFocus,setPublishAccountFocus]=useState<import('./lib/socialAccounts').PublishAccountFocus>();
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
   const [outputFilter, setOutputFilter] = useState('');
@@ -1614,7 +1617,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             onNavigate={setCurrentPage}
-            onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }}
+            onNavigateAnalysis={(platform) => { setAnalysisAccountId(undefined);setAnalysisPlatform(platform); setCurrentPage('analysis'); }}
             onOpenModels={(modelRef) => { setSettingsModelRef(modelRef); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}
             onUseTopic={handleUseTopic}
             onQuickPrompt={handleQuickPrompt}
@@ -1704,9 +1707,9 @@ export default function App() {
       case 'outputs':
         return <OutputsPage sessions={sessions} sessionsLoading={sessionsLoading} onOpenConversation={handleOutputConversation} initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { selectCreation('image',null); videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { selectCreation('image',null); videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
-        return <AccountsPage onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform) => { setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
+        return <AccountsPage initialAccountId={managedAccountId} onNavigatePublish={account=>{const workspace=selectCreation('publish',null);setPublishAccountFocus({accountId:account.accountId,platform:account.platform,nonce:Date.now(),workspaceId:workspace.id});setCurrentPage('publish');}} onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform,accountId) => { setAnalysisAccountId(accountId);setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':
-        return <ContentAnalysisPage onAnalysisChat={handleAnalysisChat} demoEnabled={demoDataPreference.enabled} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={() => setCurrentPage('accounts')} onNavigateIdeas={() => setCurrentPage('ideas')} />;
+        return <ContentAnalysisPage onAnalysisChat={handleAnalysisChat} demoEnabled={demoDataPreference.enabled} initialAccountId={analysisAccountId} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={accountId=>{setManagedAccountId(accountId);setCurrentPage('accounts');}} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
         return <ActivityPage onOpenChat={id=>void openTaskConversation(inspectionSessions.find(item=>item.id===id&&item.taskWorker)?.parentSessionId||id)} onOpenSchedules={()=>setCurrentPage('automation')} onOpenPublish={()=>setCurrentPage('publish')} key={activityTarget?.key||"default"} sessions={inspectionSessions} activeSessionId={activeSessionId} streams={streams} target={activityTarget||undefined} onOpenOffice={sessionId => { setOfficeTarget({ sessionId, key: Date.now() }); setCurrentPage('agent-office'); }} />;
       case 'agent-office':
@@ -1764,14 +1767,14 @@ export default function App() {
   return (
     <div className={`app-layout${currentPage === 'chat' ? ' app-layout-chat' : ''}`}>
       <ToastHost />
-      <CreationWorkspaceHost studio={imageStudio} video={videoStudio} receipts={publishReceipts} sessions={sessions} persona={selectedPersona}
+      <CreationWorkspaceHost publishAccountFocus={publishAccountFocus} studio={imageStudio} video={videoStudio} receipts={publishReceipts} sessions={sessions} persona={selectedPersona}
         onPromptSkill={handleImagePromptSkill}
         onOpenChat={handleSessionSelect} onNewChat={()=>{const session=createSession(selectedPersona || undefined);session.conversationType='content-generation';setSessions(previous=>{const next=[session,...previous];saveSessions(next);return next;});return session.id;}}
         onOpenSettings={()=>{setSettingsSection('image');setCurrentPage('settings');}}
         onOpenVideoSettings={()=>{setSettingsSection('video');setCurrentPage('settings');}}
         onOpenOutputs={()=>{setOutputFilter('image');setCurrentPage('outputs');}}
         onOpenPublishOutputs={()=>{setOutputFilter('all');setCurrentPage('outputs');}}
-        onOpenAccounts={()=>setCurrentPage('accounts')}
+        onOpenAccounts={accountId=>{setManagedAccountId(accountId);setCurrentPage('accounts');}}
         onExpand={kind=>setCurrentPage(kind)} />
       <Sidebar
         currentPage={currentPage}
