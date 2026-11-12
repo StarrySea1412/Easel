@@ -2,10 +2,10 @@
 
 感谢参与 [StarrySea1412/Easel](https://github.com/StarrySea1412/Easel)。这是我们基于 [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel) 维护的二次开发仓库，沿用 Apache-2.0 许可证；第三方来源见 [ACKNOWLEDGMENTS](docs/ACKNOWLEDGMENTS.md)。
 
-当前定制功能在 [`codex/creator-workflow`](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) 分支。`main` 的代码仍是上游基线；开发、验证和提交本版本的改动时，请使用 `codex/creator-workflow`，并将 PR 的目标分支设为该分支。
+2026-11-12起，当前已交付的定制功能统一维护于 [`main`](https://github.com/StarrySea1412/Easel/tree/main)。从main创建 `codex/` 功能分支，完成验证后将PR目标设为main；历史开发分支保留用于溯源，不再作为默认安装入口。未完成的上游合并工作区和未提交草稿另行核验，不能整仓覆盖当前实现。
 
 ```bash
-git clone --branch codex/creator-workflow https://github.com/StarrySea1412/Easel.git
+git clone --branch main https://github.com/StarrySea1412/Easel.git
 cd Easel
 ```
 

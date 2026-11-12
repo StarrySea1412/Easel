@@ -1,6 +1,6 @@
 # Windows 使用说明
 
-本文适用于 [StarrySea1412/Easel 的 `codex/creator-workflow` 分支](https://github.com/StarrySea1412/Easel/tree/codex/creator-workflow) 的 Windows 安装器。版本与使用范围以[本仓库说明](https://github.com/StarrySea1412/Easel/blob/codex/creator-workflow/README.md)及实际交付包为准；不要把上游版本当作本分支的定制构建。
+本文适用于 [StarrySea1412/Easel 的定制代码](https://github.com/StarrySea1412/Easel/tree/main)。2026-11-12起源码统一维护于main；Windows安装器仍以实际交付包为准，源码合并不会自动发布新安装器。版本与使用范围以[本仓库说明](README.md)及实际交付包为准，不要把上游版本或旧安装包当作当前定制构建。
 
 ## 普通用户：图形压缩包 / EXE
 

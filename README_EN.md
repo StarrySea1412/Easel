@@ -1,3 +1,5 @@
+**2026-11-12: delivered custom code is consolidated on `main`.** Start new `codex/` feature branches from main and merge back after verification. Historical branches and uncommitted drafts are retained. The product remains at 0.50.2; this Git consolidation does not change the host-138 runtime or publish an installer. Upstream was audited at a fixed SHA; some changes are already present and the rest require module-level review. [Consolidation, retained work and upstream audit](docs/mainline-consolidation-upstream-2026-11-12.md).
+
 **0.50.2 deployed to host 138: grouped multi-account sidebar snapshots.** Default and independent accounts share platform groups, individual health states, exact management links, privacy and keyboard controls. Production and isolation run `e609ab3d71a5`; 1821 runtime-source hashes, all 74 frontend assets, complete backups and specified desktop/390px views passed verification. A 339.83-second observation confirmed a scheduled repeat online check for the existing Zhihu account, with zero container restarts. Live same-platform A/B publishing remains separate; storage is still tight and long-term capacity work remains open. [Deployment, backups and evidence boundaries](docs/release-138-0.50.2-2026-11-12.md) · [Implementation](docs/sidebar-multi-account-0.50.2-2026-11-12.md) · [Stable generation and publishing plan](docs/stable-generation-publishing-plan-2026-11-12.md).
 
 **0.50.1 deployed to host 138: background account health and expiry alerts.** Serial checks normally run every five minutes; proof older than ten minutes becomes unconfirmed. Confirmed expiry/identity changes create durable deduplicated notices and recovery events; network failures remain unconfirmed. Production and isolation run `c13a2082e27f`; 1820 source hashes, all 74 frontend assets and complete backups passed verification. A 346-second observation confirmed a scheduled repeat check of the existing Zhihu account, with zero container restarts. Real Chromium checked key account and publishing-preparation views at desktop/390px. Backend 188, frontend 191 and deployment 31 focused tests passed; this is not full-suite or all-platform publishing acceptance. [Mechanism and fault validation](docs/account-health-0.50.1-2026-11-12.md) · [Deployment, backups and capacity boundaries](docs/release-138-0.50.1-2026-11-12.md).
@@ -389,7 +391,7 @@ Users supply their own model API keys. Optional Whisper and rembg model weights 
 ## Run the current source
 
 ```bash
-git clone --branch codex/upstream-compat-2026-10-10 https://github.com/StarrySea1412/Easel.git
+git clone --branch main https://github.com/StarrySea1412/Easel.git
 cd Easel
 ```
 
