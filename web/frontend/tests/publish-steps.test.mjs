@@ -14,7 +14,7 @@ const { createRoot } = await import('react-dom/client');
 const { default: PublishPage } = await loadTsModule('../src/components/PublishPage.tsx');
 const { default: Steps } = await loadTsModule('../src/components/ui/Steps.tsx');
 const { savePublishDraft } = await loadTsModule('../src/lib/store.ts');
-const account = { accountId: 'a'.repeat(32), platform: 'zhihu', label: '品牌号', name: '模拟身份', status: 'ready', busy: false };
+const account = { accountId: 'a'.repeat(32), platform: 'zhihu', label: '品牌号', name: '模拟身份', status: 'ready', checkedAt: new Date().toISOString(), busy: false };
 
 async function fixture(t, component = PublishPage, props = {}) {
   localStorage.clear();

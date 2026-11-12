@@ -13,7 +13,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from easel.social_accounts import AccountError, SocialStore, PLATFORMS
+from easel.social_accounts import AccountError, SocialStore, PLATFORMS, account_view
 from easel import publish_receipts
 
 
@@ -112,7 +112,9 @@ class SocialAccountService:
             except ValueError:
                 continue
             if isinstance(value, dict) and type(value.get('loggedIn')) is bool:
-                if value.get('error'):
+                if (value.get('error') or value.get('verified') is False
+                        or (not value['loggedIn'] and value.get('reason') not in
+                            ('login_required', 'publish_auth_expired', 'auth_expired', 'credentials_missing'))):
                     raise AccountError('在线核验未完成，原身份记录已保留；请检查平台页面或网络后重试。')
                 return value
         raise AccountError('未收到可靠的在线账号核验结果。')
@@ -484,7 +486,7 @@ class SocialAccountService:
 
         @router.get('')
         def accounts():
-            return guarded(self.store.list)
+            return [account_view(row) for row in guarded(self.store.list)]
 
         @router.post('')
         def create(req: NewAccount):

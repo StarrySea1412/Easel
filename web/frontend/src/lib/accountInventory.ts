@@ -18,6 +18,7 @@ export function defaultAccountInventory(accounts: AccountItem[], identities: Rec
     const connection = accountConnection(account, current);
     if (!account.supported || (account.hasLocalSession === false && !account.loggedIn && connection !== 'online')) return [];
     if (!account.loggedIn && !current?.loggedIn && !current?.name && !current?.accountId
+        && current?.authState !== 'login_required'
         && !snapshot?.loggedIn && !snapshot?.name && !snapshot?.accountId) return [];
     return [{ platform: account.platform, name: current?.name || snapshot?.name || '', connection, checkedAt: current?.checkedAt }];
   });

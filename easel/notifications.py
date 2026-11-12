@@ -31,6 +31,12 @@ def notice(value):
                 result['target']['tool'] = target['tool']
             if isinstance(target.get('receiptId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['receiptId']):
                 result['target']['receiptId'] = target['receiptId']
+        elif page == 'accounts':
+            result['target'] = dict(page=page)
+            if isinstance(target.get('accountId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['accountId']):
+                result['target']['accountId'] = target['accountId']
+            if target.get('platform') in ('xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'zhihu', 'bilibili', 'wechat-oa'):
+                result['target']['platform'] = target['platform']
         elif page in ('image', 'outputs', 'publish', 'publish-receipts'):
             result['target'] = dict(page=page)
             if page == 'publish-receipts' and isinstance(target.get('receiptId'), str) and re.fullmatch(r'[a-f0-9]{32}', target['receiptId']):

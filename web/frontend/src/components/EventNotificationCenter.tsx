@@ -10,7 +10,7 @@ import { IconChevron } from './icons';
 import '../styles/event-notifications.css';
 
 const toneLabels = { error: '需要留意', success: '已完成', info: '动态' };
-const sourceLabel = (notice: EventNotice) => notice.target?.page === 'chat' ? '对话' : notice.target?.page === 'image' ? '生成工坊' : notice.target?.page === 'outputs' ? '内容库' : notice.target?.page === 'publish' ? '发布' : '工作台';
+const sourceLabel = (notice: EventNotice) => notice.target?.page === 'accounts' ? '账号' : notice.target?.page === 'chat' ? '对话' : notice.target?.page === 'image' ? '生成工坊' : notice.target?.page === 'outputs' ? '内容库' : notice.target?.page === 'publish' ? '发布' : '工作台';
 const day = (at: number) => new Date(at).toLocaleDateString('zh-CN');
 function dateLabel(at: number) {
   const today = new Date(); const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchAccounts, restoreAccountAnalytics, type AccountItem } from '../lib/api';
 import { accountConnection, hydrateAccountIdentities, useAccountChecks, useAccountIdentities, verifyStale, watchAccountFreshness } from '../lib/whoami';
 import Select from './ui/Select';
-import { socialAccounts, accountState, type SocialAccount } from '../lib/socialAccounts';
+import { socialAccounts, accountState, socialAccountReady, socialAccountStatus, type SocialAccount } from '../lib/socialAccounts';
 import PlatformIcon from './PlatformIcon';
 import { requestWithTimeout } from '../lib/requestTimeout';
+import { ACCOUNT_HEALTH_EVENT } from '../lib/accountHealth';
 import AccountAnalyticsDetails from './AccountAnalyticsDetails';
 import PlatformAnalysisPanel from './PlatformAnalysisPanel';
 import { selectedAnalyticsPlatform, selectAnalyticsPlatform, readAnalyticsCache, analyticsPending, analyticsRevision, subscribeAnalytics } from '../lib/analyticsCache';
@@ -46,8 +47,15 @@ export default function ContentAnalysisPage({ initialPlatform, initialAccountId,
   const [independentAccounts,setIndependentAccounts]=useState<SocialAccount[]>([]);
   const [sourceError,setSourceError]=useState('');
   const [sourceLoaded,setSourceLoaded]=useState(false);
-  const loadSources=useCallback(async()=>{setSourceError('');try{const rows=await socialAccounts.list();if(!Array.isArray(rows))throw new Error('独立账号名单格式不正确');setIndependentAccounts(rows);setSourceLoaded(true);}catch(reason){setSourceError(reason instanceof Error?reason.message:'独立账号读取失败');}},[]);
-  useEffect(()=>{void loadSources();},[loadSources]);
+  const loadSources=useCallback(async()=>{try{const rows=await socialAccounts.list();if(!Array.isArray(rows))throw new Error('独立账号名单格式不正确');setIndependentAccounts(rows);setSourceLoaded(true);setSourceError('');}catch(reason){setSourceError(reason instanceof Error?reason.message:'独立账号读取失败');}},[]);
+  useEffect(()=>{
+    let alive=true,busy=false;
+    const refresh=async()=>{if(!alive||busy||document.visibilityState==='hidden')return;busy=true;try{await loadSources();}finally{busy=false;}};
+    void refresh();
+    const timer=window.setInterval(()=>{void refresh();},15_000);
+    window.addEventListener(ACCOUNT_HEALTH_EVENT,refresh);
+    return()=>{alive=false;window.clearInterval(timer);window.removeEventListener(ACCOUNT_HEALTH_EVENT,refresh);};
+  },[loadSources]);
   useEffect(()=>{setSourceAccountId(initialAccountId||'');},[initialAccountId]);
   const [platform, setPlatform] = useState(() => validPlatform(initialPlatform || selectedAnalyticsPlatform()));
   useSyncExternalStore(subscribeAnalytics, analyticsRevision);
@@ -98,7 +106,7 @@ export default function ContentAnalysisPage({ initialPlatform, initialAccountId,
   const account = accounts.find((item) => item.platform === platform);
   const connection = accountConnection(account, identities[platform]);
   const independent=sourceAccountId?independentAccounts.find(row=>row.accountId===sourceAccountId&&row.platform===platform):undefined;
-  const available = sourceAccountId?Boolean(independent?.status==='ready'&&!independent.busy):Boolean(account?.supported && connection === 'online');
+  const available = sourceAccountId?Boolean(!sourceError&&independent&&socialAccountReady(independent)):Boolean(account?.supported && connection === 'online');
   const liveIdentity = identities[platform];
   const identityScope = sourceAccountId?`independent:${sourceAccountId}:${independent?.externalAccountId||''}`:(account?.identityKey || liveIdentity?.identityKey || '') + ':' + (liveIdentity?.accountId || '');
   useEffect(() => { if (!sourceAccountId && !readAnalyticsCache(platform) && !analyticsPending(platform)) void restoreAccountAnalytics(platform).catch(() => {}); }, [platform, identityScope,sourceAccountId]);
@@ -114,7 +122,7 @@ export default function ContentAnalysisPage({ initialPlatform, initialAccountId,
 
       {dataSource === 'mine' && <><section className="ca-platform-picker" aria-label="选择分析平台">
         {PLATFORMS.map((item) => {
-          const state = sourceAccountId&&item.id===platform ? independent?.status==='ready'?'online':'unknown' : accountConnection(accounts.find(row => row.platform === item.id), identities[item.id]);
+          const state = sourceAccountId&&item.id===platform ? !sourceError&&independent&&socialAccountReady(independent)?'online':'unknown' : accountConnection(accounts.find(row => row.platform === item.id), identities[item.id]);
           const checking = loading || accountChecks.has(item.id);
           const status = checking ? '确认中' : error || state === 'unknown' ? '待确认' : state === 'online' ? '可分析' : '未登录';
           return <button type="button" key={item.id} className={`ca-platform${platform === item.id ? ' is-selected' : ''}${state === 'online' ? ' is-connected' : ''}`} title={`${item.name} · ${status}`} aria-label={`${item.name} · ${status}`} aria-pressed={platform === item.id} onClick={() => {if(item.id!==platform)setSourceAccountId('');setPlatform(item.id);}}>
@@ -123,11 +131,11 @@ export default function ContentAnalysisPage({ initialPlatform, initialAccountId,
         </button>; })}
       </section>
 
-      <div className="ca-account-source"><label>分析哪个账号<Select aria-label="选择分析账号" value={sourceAccountId} options={[{value:'',label:'默认账号',description:'原有平台默认登录资料'},...independentAccounts.filter(row=>row.platform===platform).map(row=>({value:row.accountId,label:row.label,description:`独立账号 · ${accountState[row.status]||row.status}`})),...(sourceAccountId&&!independent?[{value:sourceAccountId,label:'所选独立账号不可用',disabled:true}]:[])]} onChange={setSourceAccountId}/></label><p>{sourceAccountId?'此账号的登录资料、采集结果和作品归属独立核验。':'使用此平台默认账号；可切换到同平台的独立账号。'}</p></div>
+      <div className="ca-account-source"><label>分析哪个账号<Select aria-label="选择分析账号" value={sourceAccountId} options={[{value:'',label:'默认账号',description:'原有平台默认登录资料'},...independentAccounts.filter(row=>row.platform===platform).map(row=>({value:row.accountId,label:row.label,description:`独立账号 · ${accountState[socialAccountStatus(row)]||row.status}`})),...(sourceAccountId&&!independent?[{value:sourceAccountId,label:'所选独立账号不可用',disabled:true}]:[])]} onChange={setSourceAccountId}/></label><p>{sourceAccountId?'此账号的登录资料、采集结果和作品归属独立核验。':'使用此平台默认账号；可切换到同平台的独立账号。'}</p></div>
       {sourceError&&<p className="ca-error" role="alert">{sourceError}<button className="btn btn-sm" onClick={()=>void loadSources()}>重读账号名单</button></p>}
       {sourceAccountId&&sourceLoaded&&!independent&&<p className="ca-error" role="alert">所选独立账号不存在或平台不匹配，请重新选择。没有切换到默认账号。</p>}
       <div className="ca-context">
-        <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{sourceAccountId?(independent?accountState[independent.status]||independent.status:'读取独立账号…'):loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已连接' : connection === 'unknown' ? '登录状态待确认' : connection === 'login_required' ? '未登录' : '需要连接账号'}</span></div>
+        <div className="ca-context-main"><span className={`ca-session ${available ? 'is-connected' : ''}`} title="登录状态与作品归属在采集时分别核验">{sourceAccountId?(sourceError?'账号状态读取失败':independent?accountState[socialAccountStatus(independent)]||independent.status:'读取独立账号…'):loading ? '读取账号状态…' : error ? '账号状态读取失败' : available ? '已连接' : connection === 'unknown' ? '登录状态待确认' : connection === 'login_required' ? '未登录' : '需要连接账号'}</span></div>
         <button type="button" className="ca-text-button" disabled={loading || accountChecks.has(platform)} onClick={() => {void loadSources();if(!sourceAccountId)void refresh(true);}}>{loading || accountChecks.has(platform) ? '读取中…' : '刷新状态'}</button>
       </div>
       {error && <div className="ca-error" role="alert">{error}。请重试读取账号状态，或前往账号中心检查连接。<button type="button" className="ca-text-button" onClick={() => {void loadSources();if(!sourceAccountId)void refresh(true);}}>重试</button></div>}</>}

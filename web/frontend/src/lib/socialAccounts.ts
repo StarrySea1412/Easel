@@ -7,6 +7,12 @@ export interface SocialAccount {
   checkedAt?: string; updatedAt: string; generation?: number;
 }
 export interface PublishAccountFocus { accountId: string; platform: string; nonce: number; workspaceId: string }
+export function socialAccountStatus(account: SocialAccount, now = Date.now()): string {
+  if (account.status !== 'ready') return account.status;
+  const checked = account.checkedAt ? Date.parse(account.checkedAt) : NaN;
+  return Number.isFinite(checked) && checked <= now && now - checked < 600_000 ? 'ready' : 'unverified';
+}
+export const socialAccountReady = (account: SocialAccount) => socialAccountStatus(account) === 'ready' && !account.busy;
 export interface LoginEvent {
   id: number; accountId?: string; platform?: string; attemptId: string;
   action: string; state: string; message: string; at: string;
@@ -25,7 +31,11 @@ const post = <T>(path: string, body = {}) => request<T>(root + path, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 export const socialAccounts = {
-  list: () => request<SocialAccount[]>(root),
+  list: async () => {
+    const rows = await request<SocialAccount[]>(root);
+    if (!Array.isArray(rows)) throw Error('账号列表格式不正确');
+    return rows.map(row => ({ ...row, status: socialAccountStatus(row) }));
+  },
   create: (label: string, platform: string) => post<SocialAccount>('', { label, platform }),
   history: (id: string) => request<LoginEvent[]>(`${root}/${id}/history`),
   defaults: () => request<LoginEvent[]>(root + '/default-history'),

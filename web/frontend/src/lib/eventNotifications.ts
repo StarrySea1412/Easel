@@ -5,6 +5,7 @@ export type NoticeTarget =
   | { page: 'image'; medium?: 'image' | 'video' }
   | { page: 'outputs'; filter?: 'all' | 'image' | 'video'; path?: string }
   | { page: 'publish' }
+  | { page: 'accounts'; accountId?: string; platform?: string }
   | { page: 'publish-receipts'; receiptId?: string };
 export type EventNotice = {
   id: string; message: string; tone: ToastTone; at: number; read: boolean;
@@ -57,6 +58,9 @@ function targetFrom(value: unknown): NoticeTarget | undefined {
     ...(outputPath(value.path) ? { path: outputPath(value.path) } : {}),
   };
   if (value.page === 'publish') return { page: 'publish' };
+  if (value.page === 'accounts') return { page: 'accounts',
+    ...(typeof value.accountId === 'string' && /^[a-f0-9]{32}$/.test(value.accountId) ? { accountId: value.accountId } : {}),
+    ...(typeof value.platform === 'string' && ['xiaohongshu','douyin','kuaishou','weixin-channels','zhihu','bilibili','wechat-oa'].includes(value.platform) ? { platform: value.platform } : {}) };
   if (value.page === 'publish-receipts') return { page: 'publish-receipts',
     ...(typeof value.receiptId === 'string' && /^[a-f0-9]{32}$/.test(value.receiptId) ? { receiptId: value.receiptId } : {}) };
   return undefined;

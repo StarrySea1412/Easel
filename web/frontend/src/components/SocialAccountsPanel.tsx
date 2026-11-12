@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mediaUrl } from '../lib/api';
-import { accountState, socialAccounts, socialPlatforms } from '../lib/socialAccounts';
+import { accountState, socialAccounts, socialPlatforms, socialAccountReady, socialAccountStatus } from '../lib/socialAccounts';
+import { ACCOUNT_HEALTH_EVENT } from '../lib/accountHealth';
 import Select from './ui/Select';
 import PlatformIcon from './PlatformIcon';
 import { IconChevron, IconClock, IconPlus, IconRefresh, IconSearch, IconUserPlus } from './icons';
@@ -83,6 +84,18 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
     return () => { alive.current = false; };
   }, [refresh]);
   useEffect(() => {
+    let running = false;
+    const tick = async () => {
+      if (running || document.visibilityState === 'hidden') return;
+      running = true;
+      try { await refresh(); } catch { if (alive.current) setError('账号状态同步失败，旧核验结果不能证明当前在线。'); }
+      finally { running = false; }
+    };
+    const timer = window.setInterval(() => { void tick(); }, 15_000);
+    window.addEventListener(ACCOUNT_HEALTH_EVENT, tick);
+    return () => { window.clearInterval(timer); window.removeEventListener(ACCOUNT_HEALTH_EVENT, tick); };
+  }, [refresh]);
+  useEffect(() => {
     if (!accounts.some(a => a.status === 'connecting')) return;
     let stopped = false;
     let running = false;
@@ -134,9 +147,9 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
   const isDefaultHistory = historyId === 'default' || historyId.startsWith('default:');
   const selectedLogin = selected ? logins[selected.accountId] : undefined;
   const visible = accounts.filter(a => (platformFilter === 'all' || a.platform === platformFilter)
-    && (statusFilter === 'all' || (statusFilter === 'ready' ? a.status === 'ready' && !a.busy : a.status !== 'ready' || a.busy))
+    && (statusFilter === 'all' || (statusFilter === 'ready' ? socialAccountReady(a) : !socialAccountReady(a)))
     && `${a.label} ${hideIdentity ? '' : a.name} ${publishPlatformLabel(a.platform)}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const readyCount = accounts.filter(a => a.status === 'ready' && !a.busy).length;
+  const readyCount = accounts.filter(socialAccountReady).length;
   const visibleDefaults = defaults.filter(a => (platformFilter === 'all' || a.platform === platformFilter)
     && statusFilter !== 'ready' && (statusFilter !== 'attention' || a.connection !== 'online')
     && `${hideIdentity ? '' : a.name} 默认账号 ${publishPlatformLabel(a.platform)}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
@@ -189,7 +202,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
           {visible.map(account => <div className={`account-roster-item${historyId === account.accountId ? ' is-selected' : ''}`} role="listitem" key={account.accountId}>
             <button className="account-roster-button" aria-label={`管理 ${publishPlatformLabel(account.platform)} / ${account.label}`} aria-pressed={historyId === account.accountId} onClick={event => { lastAccountButton.current = event.currentTarget; void history(account.accountId); }}>
               <span className="account-roster-identity"><span className={`account-monogram platform-${account.platform}`}>{(hideIdentity ? account.label : account.name || account.label).slice(0,1)}<PlatformIcon platform={account.platform} name={publishPlatformLabel(account.platform)}/></span><span><strong>{account.label}</strong><small>{publishPlatformLabel(account.platform)} · 独立账号{!hideIdentity && account.name ? ` · ${account.name}` : ''}</small></span></span>
-              <span className={`account-state-pill is-${account.status}`}><i/>{account.busy && account.status === 'ready' ? '任务执行中' : accountState[account.status] || account.status}</span>
+              <span className={`account-state-pill is-${socialAccountStatus(account)}`}><i/>{account.busy && account.status === 'ready' ? '任务执行中' : accountState[socialAccountStatus(account)] || account.status}</span>
               <span className="account-roster-date">{account.checkedAt ? new Date(account.checkedAt).toLocaleDateString('zh-CN', {month:'2-digit',day:'2-digit'}) : '尚未核验'}<small>{account.checkedAt ? new Date(account.checkedAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) : '连接后核验身份'}</small></span>
               <IconChevron size={15}/>
             </button>
@@ -211,7 +224,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
         </>}
         {selected && <>
           <div className="account-selected-identity"><PlatformIcon platform={selected.platform} name={publishPlatformLabel(selected.platform)}/><div><h3>{selected.label}</h3><p>{publishPlatformLabel(selected.platform)} · {hideIdentity ? '账号身份已隐藏' : selected.name || '昵称待核验'}</p></div></div>
-          <span className={`account-state-pill is-${selected.status}`}><i/>{accountState[selected.status] || selected.status}</span>
+          <span className={`account-state-pill is-${socialAccountStatus(selected)}`}><i/>{accountState[socialAccountStatus(selected)] || selected.status}</span>
           <div className="account-inspector-actions">
             {onNavigateAnalysis&&<button className="btn" disabled={!selected.externalAccountId} onClick={()=>onNavigateAnalysis(selected.platform,selected.accountId)}>分析此账号</button>}
             {onNavigatePublish&&<button className="btn" disabled={selected.busy} onClick={()=>onNavigatePublish(selected)}>去发布</button>}
@@ -228,7 +241,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
         <div className="account-inspector-foot"><button className="account-text-button" onClick={() => void history('default')}>默认账号登录记录 <IconChevron size={12}/></button><p>记录操作时间和结果，不记录密码、Cookie 或验证码。默认账号的早期记录无法补录。</p></div>
       </aside>
     </div>
-    <div className="account-workspace-foot"><span><i className="account-status-dot"/> 登录凭据留在本机</span><p>扫码完成后在线核验身份，即可在发布中心按账号分发。</p></div>
+    <div className="account-workspace-foot"><span><i className="account-status-dot"/> 登录凭据留在本机</span><p>后端按账号串行巡检，正常间隔5分钟；排队或网络异常会延后，10分钟旧证据不再计为在线。失效会写入事件通知，发布前仍重新核验。</p></div>
   </div>;
 }
 

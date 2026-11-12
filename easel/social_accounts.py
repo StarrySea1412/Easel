@@ -39,6 +39,20 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='milliseconds')
 
 
+def fresh_account(account, at=None):
+    try:
+        checked = datetime.fromisoformat(account['checkedAt'].replace('Z', '+00:00'))
+        age = ((at or datetime.now(timezone.utc)) - checked).total_seconds()
+        return account['status'] == 'ready' and 0 <= age < 600
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
+def account_view(account):
+    """Expired proof never remains ready in a read-only API projection."""
+    return {**account, 'status': 'unverified'} if account['status'] == 'ready' and not fresh_account(account) else account
+
+
 class SocialStore:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -235,7 +249,7 @@ class SocialStore:
                 accounts = [self._account(con, identifier) for identifier in identifiers]
                 for account in accounts:
                     self._ensure_idle(con, account)
-                    if account['status'] != 'ready' or not account['externalAccountId']:
+                    if not fresh_account(account) or not account['externalAccountId']:
                         raise AccountError('所有目标账号都需先在线核验；已保留内容。')
                 batch_id, stamp, created = uuid.uuid4().hex, now(), True
                 con.execute('INSERT INTO distribution_batches VALUES(?,?,?,?)', (batch_id, request_key, digest, stamp))

@@ -437,9 +437,9 @@ test('account checking remains unknown on transport failure and periodic checks 
   assert.match(view.container.querySelector('.account-default-count').textContent, /0 \/ 1 在线/);
   assert.equal(JSON.parse(localStorage.getItem('easel_whoami')).zhihu.name, 'retained');
   await view.start('知乎');
-  const calls = view.state.requests.length;
+  const calls = view.state.requests.filter(row => row.url.includes('/whoami')).length;
   await act(async () => { for (const refresh of view.refreshTimers.values()) refresh(); });
-  assert.equal(view.state.requests.length, calls);
+  assert.equal(view.state.requests.filter(row => row.url.includes('/whoami')).length, calls);
 });
 
 test('blank identity refresh keeps the nickname and retries the same failed avatar on a new verification', async t => {

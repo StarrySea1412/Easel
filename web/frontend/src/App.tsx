@@ -35,6 +35,7 @@ import CreationWorkspaceSlot from './components/CreationWorkspaceSlot';
 import { creationSessionDeleted, currentCreation, creationRevision, subscribeCreation, selectCreation, requestCreationPanel } from './lib/creationWorkspace';
 import ToastHost from './components/ToastHost';
 import EventNotificationCenter from './components/EventNotificationCenter';
+import AccountHealthNotice from './components/AccountHealthNotice';
 import { notificationOutputPath, removeSessionEvents, startEventSync } from './lib/eventNotifications';
 import { noticeSubject } from './lib/noticeFormat';
 import { markSessionSeenById } from './lib/seenStatus';
@@ -1818,11 +1819,13 @@ export default function App() {
             setOutputJumpPath(target.path || '');
           }
           if (target.page === 'publish-receipts') { publishReceipts.open(target.receiptId); return true; }
+          if (target.page === 'accounts') setManagedAccountId(target.accountId || (target.platform ? 'default:' + target.platform : undefined));
           setCurrentPage(target.page);
           return true;
         }} />}
       />
       <main className="main-content">
+        <AccountHealthNotice onOpen={(accountId, platform) => { setManagedAccountId(accountId || (platform ? 'default:' + platform : undefined)); setCurrentPage('accounts'); }} />
         <StorageNotice onOpenBackup={() => { setSettingsSection('backup'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }} />
         <PublishReceiptCenter model={publishReceipts} showEntry={false} mode="notices"
           onConfigure={() => { setSettingsSection('notify'); setSettingsNavigationKey(key => key + 1); setCurrentPage('settings'); }}

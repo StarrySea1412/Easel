@@ -1,0 +1,5 @@
+.account-health-notice {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 20px;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);color:var(--text-primary);}
+.account-health-notice strong {font-size:13px;}
+.account-health-notice p {margin:4px 0 0;font-size:12px;color:var(--text-secondary);line-height:1.5;}
+.account-health-notice .btn {flex-shrink:0;}
+@media(max-width:600px){.account-health-notice{margin:8px;gap:10px;align-items:flex-start;}.account-health-notice .btn{white-space:normal;max-width:90px;}}

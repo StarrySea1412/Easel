@@ -673,12 +673,16 @@ async def _owned_lifespan(_app: FastAPI):
     _task_service.start()
     analytics_worker = _analytics_snapshot_service()
     analytics_worker.start()
+    _account_health.start()
     try:
         yield
     finally:
         from easel.runtime_shutdown import begin, close_chat_tasks
         begin(sys.modules[__name__])
+        if _account_health.stopping:
+            _account_health.stopping.set()
         await asyncio.to_thread(_social_accounts.shutdown)
+        await _account_health.stop()
         await _task_service.close()
         await asyncio.to_thread(analytics_worker.stop)
         await close_chat_tasks(sys.modules[__name__])
@@ -10971,6 +10975,9 @@ app.include_router(_task_service.router())
 from social_accounts_api import SocialAccountService
 _social_accounts = SocialAccountService(sys.modules[__name__])
 app.include_router(_social_accounts.router())
+from account_health import AccountHealthService
+_account_health = AccountHealthService(sys.modules[__name__])
+app.include_router(_account_health.router())
 from login_audit import install_default_audit
 install_default_audit(sys.modules[__name__])
 

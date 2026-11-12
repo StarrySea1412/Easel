@@ -561,7 +561,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, init
         <details className="accounts-help"><summary>连接遇到问题？</summary>
           <p>二维码未出现或已过期时，请关闭登录窗口后重试。平台可能要求短信验证，请按登录窗口中的提示完成。</p>
           <p>更换网络、代理或服务器环境可能触发平台验证。优先在稳定的正常网络中重新连接；具体失败原因以平台返回结果为准。</p>
-          <p>在线检测结果保留10分钟；检测未确认也会等待10分钟后再自动重试。切页、聚焦和刷新不会重复检测。发布前会重新核验；悬停状态点可查看上次核验时间。</p>
+          <p>后端在页面关闭后仍按账号串行巡检，正常间隔5分钟，繁忙时延后；在线证据10分钟过期，不会一直保持绿色。明确失效进入事件通知；网络检查失败显示待确认并退避重试。发布前仍重新核验；服务停机或休眠时无法巡检。</p>
           {accounts.some((account) => account.backend === 'wechat-oa') && <p>公众号默认通过扫码连接。需要使用官方接口发布时，可单独<button type="button" className="account-help-link" onClick={() => { const account = accounts.find((item) => item.backend === 'wechat-oa'); if (account) openCred(account); }}>配置公众号发布凭证</button>。</p>}
         </details>
       </section>

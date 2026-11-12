@@ -17,7 +17,7 @@ const { setWhoamiCache, WHOAMI_TTL_MS } = await loadTsModule('../src/lib/whoami.
 const { DistributionEditor } = await loadTsModule('../src/components/SocialDistributionPanel.tsx');
 const { PublishReceiptCard } = await loadTsModule('../src/components/PublishReceiptCenter.tsx');
 
-const a = { accountId: 'a'.repeat(32), platform: 'xiaohongshu', label: '品牌号', name: '甲', externalAccountId: 'a'.repeat(24), status: 'ready', busy: false, attemptId: 'e'.repeat(32), updatedAt: '2026-11-09T00:00:00Z' };
+const a = { accountId: 'a'.repeat(32), platform: 'xiaohongshu', label: '品牌号', name: '甲', externalAccountId: 'a'.repeat(24), status: 'ready', checkedAt: new Date().toISOString(), busy: false, attemptId: 'e'.repeat(32), updatedAt: '2026-11-09T00:00:00Z' };
 const b = { ...a, accountId: 'b'.repeat(32), platform: 'douyin', label: '视频号乙', externalAccountId: '12345' };
 const seed = { title: '通用稿', body: '原正文', media: ['cover.png'], tags: '测试' };
 const job = (account, outcome, changes = {}) => ({ jobId: account.accountId, platform: account.platform, accountId: account.accountId, accountLabel: account.label,

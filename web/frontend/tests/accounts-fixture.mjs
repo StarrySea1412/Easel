@@ -31,7 +31,7 @@ async function fixture(t, { rawCache } = {}) {
   t.mock.method(globalThis, 'setTimeout', (callback, delay) => { assert.equal(delay, 2000); const id = ++timerId; timers.set(id, callback); return id; });
   t.mock.method(globalThis, 'clearTimeout', id => timers.delete(id));
   const refreshTimers = new Map();
-  t.mock.method(window, 'setInterval', (callback, delay) => { assert.ok([60000, 600000].includes(delay)); const id = ++timerId; refreshTimers.set(id, callback); return id; });
+  t.mock.method(window, 'setInterval', (callback, delay) => { assert.ok([15000, 60000, 600000].includes(delay)); const id = ++timerId; refreshTimers.set(id, callback); return id; });
   t.mock.method(window, 'clearInterval', id => refreshTimers.delete(id));
   const state = {
     requests: [], start: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),

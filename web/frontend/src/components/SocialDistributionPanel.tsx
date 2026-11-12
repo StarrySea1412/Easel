@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { accountState, socialAccounts, socialPlatforms } from '../lib/socialAccounts';
+import { accountState, socialAccounts, socialPlatforms, socialAccountReady, socialAccountStatus } from '../lib/socialAccounts';
 import type { AccountPayload, AccountTarget, DistributionBatch, DistributionJob, SocialAccount, PublishAccountFocus } from '../lib/socialAccounts';
 import type { OutputFile } from '../lib/api';
 import { PUBLISH_OUTCOMES, publishPlatformLabel } from '../lib/publishReceipts';
@@ -80,7 +80,7 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
     const account=accounts.find(row=>row.accountId===accountFocus.accountId&&row.platform===accountFocus.platform);
     if(!account){setError('指定发布账号不存在或平台不匹配，请回账号中心重新选择。');return;}
     setPlatforms(old=>[...new Set([...old,account.platform])]);onStepChange?.('targets');
-    if(account.status!=='ready'||account.busy){setNotice('已定位此账号；请先连接并在线核验，现有草稿保留。');return;}
+    if(!socialAccountReady(account)){setNotice('已定位此账号；请先连接并在线核验，现有草稿保留。');return;}
     if(step&&!drafts[account.accountId]&&!cachedDrafts.current[account.accountId]&&!seed.title.trim()){
       setDeferredAccount(account.accountId);onStepChange?.('content');
       setNotice(`已定位 ${account.label}；先准备通用稿，进入选择账号时带入，随后仍需逐账号确认。`);return;
@@ -91,7 +91,7 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
   useEffect(()=>{
     if(!deferredAccount||step!=='targets'||!seed.title.trim()||pending||busy)return;
     const account=accounts.find(row=>row.accountId===deferredAccount);
-    if(!account||account.status!=='ready'||account.busy){setNotice('目标账号状态已变化，请在线核验后重新选择。');setDeferredAccount('');return;}
+    if(!account||!socialAccountReady(account)){setNotice('目标账号状态已变化，请在线核验后重新选择。');setDeferredAccount('');return;}
     setDrafts(old=>old[account.accountId]?old:{...old,[account.accountId]:structuredClone(cachedDrafts.current[account.accountId]||seed)});
     setEditorId(account.accountId);setDeferredAccount('');
     setNotice(`已带入 ${account.label}；请核对这份账号内容，再确认发布。`);
@@ -117,7 +117,7 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
         : Object.entries(drafts).map(([accountId, payload]) => ({ accountId, payload: structuredClone(payload) }));
       if (!requests.length) { setError('请选择目标账号并检查每份内容。'); return; }
       if (requests.some(row => !row.payload.title.trim() || (!row.payload.media.length && accounts.find(a => a.accountId === row.accountId)?.platform !== 'zhihu'))) { setError('请补齐各账号标题和平台要求的图片或视频。知乎支持纯文字。'); return; }
-      if (requests.some(row => !accounts.some(a => a.accountId === row.accountId && a.status === 'ready' && !a.busy))) {
+      if (requests.some(row => !accounts.some(a => a.accountId === row.accountId && socialAccountReady(a)))) {
         setError('目标账号需先在账号中心完成在线核验，且不能被其他任务占用。'); return;
       }
       const description = requests.map(row => {
@@ -177,16 +177,16 @@ export function DistributionEditor({ seed, files, step, onStepChange, onSelectio
       <div className="distribution-section-heading"><h3>选择对应账号</h3><p>一个平台可以选多个账号；未登录的账号需要先连接。</p></div>
       {socialPlatforms.filter(item => platforms.includes(item.value)).map(item => {
         const rows = accounts.filter(a => a.platform === item.value);
-        const usable = rows.filter(a => a.status === 'ready' && !a.busy);
+        const usable = rows.filter(a => socialAccountReady(a));
         const allSelected = usable.length > 0 && usable.every(a => drafts[a.accountId]);
         return <section key={item.value} className="distribution-account-group" aria-label={`${publishPlatformLabel(item.value)}的发布账号`}>
           <div className="distribution-group-heading"><span><PlatformIcon platform={item.value} name={publishPlatformLabel(item.value)}/><strong>{publishPlatformLabel(item.value)}</strong><small>已选 {rows.filter(a => drafts[a.accountId]).length} / {rows.length}</small></span><button className="account-text-button" disabled={locked || !usable.length} onClick={() => setDrafts(old => {const next = {...old}; for(const a of usable) { if(allSelected) delete next[a.accountId]; else if(!next[a.accountId]) next[a.accountId] = structuredClone(cachedDrafts.current[a.accountId] || seed); } return next;})}>{allSelected ? '取消全选' : '全选可用账号'}</button></div>
           <div className="distribution-account-options">{rows.map(account => {
             const chosen = !!drafts[account.accountId];
-            const usable = account.status === 'ready' && !account.busy;
+            const usable = socialAccountReady(account);
             return <div key={account.accountId}><label className={`distribution-account-option${chosen ? ' is-selected' : ''}${!usable ? ' is-unavailable' : ''}`}>
               <input type="checkbox" data-account-id={account.accountId} aria-label={`${publishPlatformLabel(account.platform)} / ${account.label}`} checked={chosen} disabled={locked || (!usable && !chosen)} onChange={() => {toggle(account.accountId); if(!chosen) setEditorId(account.accountId);}}/>
-              <span className="distribution-account-avatar">{(account.name || account.label).slice(0,1)}</span><span className="distribution-account-name"><strong>{account.label}</strong><small>{account.name || '昵称待核验'}</small></span><span className={`distribution-account-status${usable ? ' is-ready' : ''}`}>{usable ? account.platform === 'wechat-oa' ? '可存草稿' : '可发布' : account.busy ? '处理中' : accountState[account.status] || '待核验'}</span>
+              <span className="distribution-account-avatar">{(account.name || account.label).slice(0,1)}</span><span className="distribution-account-name"><strong>{account.label}</strong><small>{account.name || '昵称待核验'}</small></span><span className={`distribution-account-status${usable ? ' is-ready' : ''}`}>{usable ? account.platform === 'wechat-oa' ? '可存草稿' : '可发布' : account.busy ? '处理中' : accountState[socialAccountStatus(account)] || '待核验'}</span>
             </label>{onOpenAccounts&&<button className="account-text-button" onClick={()=>onOpenAccounts(account.accountId)}>管理 {account.label}</button>}</div>;
           })}</div>
           {!rows.length && <p className="distribution-empty">这个平台还没有独立账号，请先在账号中心添加并连接。{onOpenAccounts&&<button className="btn btn-sm" onClick={()=>onOpenAccounts()}>添加账号</button>}</p>}

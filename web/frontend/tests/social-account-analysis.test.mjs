@@ -14,7 +14,7 @@ const {createRoot}=await import('react-dom/client');
 const {default:Workbench}=await loadTsModule('../src/components/ContentAnalysisWorkbench.tsx');
 const {default:Page}=await loadTsModule('../src/components/ContentAnalysisPage.tsx');
 const {readAccountAnalysis}=await loadTsModule('../src/lib/socialAccountAnalysis.ts');
-const a={accountId:'a'.repeat(32),platform:'xiaohongshu',externalAccountId:'a'.repeat(24),label:'品牌甲',name:'甲身份',status:'ready',busy:false};
+const a={accountId:'a'.repeat(32),platform:'xiaohongshu',externalAccountId:'a'.repeat(24),label:'品牌甲',name:'甲身份',status:'ready',checkedAt:new Date().toISOString(),busy:false};
 const b={...a,accountId:'b'.repeat(32),externalAccountId:'b'.repeat(24),label:'品牌乙',name:'乙身份'};
 const report=account=>({account:{platform:account.platform,accountId:account.externalAccountId,name:account.label,contentCount:1},
  contents:[{id:'work-'+account.label,title:account.label+'的作品',body:'实际正文',tags:[],format:'图文',metrics:{views:12},period:'unknown',diagnostics:[]}],
@@ -86,4 +86,14 @@ test('missing initial account is an actionable error and never falls back to def
  const h=await fixture(t,Page,{initialPlatform:a.platform,initialAccountId:'c'.repeat(32),demoEnabled:false,onNavigateAccounts:()=>{}});
  assert.match(h.container.textContent,/所选独立账号不存在或平台不匹配/);assert.equal(h.container.querySelector('.ca-bench'),null);
  assert.ok(!h.requests.some(row=>row.url.includes('/content-analysis/')||row.url.includes('/api/analytics/')));
+});
+
+test('analysis page receives background expiry without switching pages or collecting',async t=>{
+ let expired=false;
+ const h=await fixture(t,Page,{initialPlatform:a.platform,initialAccountId:a.accountId,demoEnabled:false,onNavigateAccounts:()=>{}},url=>url.endsWith('/api/social-accounts')?response([{...a,status:expired?'login_required':'ready'}]):null);
+ assert.match(h.container.querySelector('.ca-context').textContent,/身份已核验/);
+ expired=true;
+ await act(async()=>window.dispatchEvent(new window.Event('easel:account-health')));
+ assert.match(h.container.querySelector('.ca-context').textContent,/需重新登录/);
+ assert.ok(h.requests.every(row=>row.method==='GET'));
 });

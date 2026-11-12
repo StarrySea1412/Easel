@@ -68,9 +68,11 @@ def test_seven_platforms_capture_only_selected_profile_and_keep_default_untouche
 
 
 @pytest.mark.parametrize('phase,identity,expected', [
-    ('whoami', {'loggedIn': False}, 'login_required'),
+    ('whoami', {'loggedIn': False, 'reason': 'login_required'}, 'login_required'),
     ('whoami', {'loggedIn': True, 'externalAccountId': 'b' * 24}, 'identity_changed'),
-    ('fetch', {'loggedIn': False}, 'login_required'),
+    ('fetch', {'loggedIn': False, 'reason': 'login_required'}, 'login_required'),
+    ('whoami', {'loggedIn': False}, 'error'),
+    ('fetch', {'loggedIn': False}, 'error'),
     ('fetch', {'loggedIn': True, 'accountId': 'b' * 24, 'notes': []}, 'identity_changed'),
     ('fetch', {'loggedIn': True, 'notes': []}, 'unverified'),
     ('fetch', {'loggedIn': True, 'accountId': 'a' * 24, 'notes': [{'id': 'bad', 'accountId': 'wrong'}]}, 'error'),
