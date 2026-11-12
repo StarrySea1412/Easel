@@ -31,8 +31,8 @@ const post = <T>(path: string, body = {}) => request<T>(root + path, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 export const socialAccounts = {
-  list: async () => {
-    const rows = await request<SocialAccount[]>(root);
+  list: async (signal?: AbortSignal) => {
+    const rows = await request<SocialAccount[]>(root, { signal });
     if (!Array.isArray(rows)) throw Error('账号列表格式不正确');
     return rows.map(row => ({ ...row, status: socialAccountStatus(row) }));
   },

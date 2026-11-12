@@ -39,6 +39,7 @@ function ConnectionImage({ login, label }: { login: AccountLogin; label: string 
 
 type Props = {
   initialAccountId?:string; onNavigateAnalysis?:(platform:string,accountId?:string)=>void; onNavigatePublish?:(account:SocialAccount)=>void;
+  accountNavigationKey?: number;
   hideIdentity?: boolean;
   defaultAccounts?: AccountItem[];
   defaultsLoaded?: boolean;
@@ -47,7 +48,7 @@ type Props = {
   onRefreshDefaults?: () => Promise<void>;
 };
 
-function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = true, defaultLoadError, onManageDefault, onRefreshDefaults, initialAccountId, onNavigateAnalysis, onNavigatePublish }: Props) {
+function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = true, defaultLoadError, onManageDefault, onRefreshDefaults, initialAccountId, accountNavigationKey, onNavigateAnalysis, onNavigatePublish }: Props) {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [label, setLabel] = useState('');
   const [platform, setPlatform] = useState('xiaohongshu');
@@ -56,7 +57,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [logins, setLogins] = useState<Record<string, AccountLogin>>({});
-  const [historyId, setHistoryId] = useState(initialAccountId||'');
+  const [historyId, setHistoryId] = useState(initialAccountId === 'create' ? '' : initialAccountId || '');
   const [events, setEvents] = useState<LoginEvent[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -120,7 +121,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
       inspector.current?.focus({ preventScroll: true });
       inspector.current?.scrollIntoView({ block: 'start' });
     }
-  }, [historyId]);
+  }, [historyId, accountNavigationKey]);
   const history = useCallback(async (id: string) => {
     const seq = ++historySeq.current;
     setHistoryId(id); setEvents([]); setHistoryBusy(true); setError('');
@@ -141,7 +142,16 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '操作未完成'); }
     finally { operation.current = false; if (alive.current) setBusy(''); }
   };
-  useEffect(()=>{if(initialAccountId){setPlatformFilter('all');setStatusFilter('all');setSearch('');void history(initialAccountId);}},[initialAccountId,history]);
+  useEffect(() => {
+    setPlatformFilter('all'); setStatusFilter('all'); setSearch('');
+    setCreating(initialAccountId === 'create');
+    if (initialAccountId && initialAccountId !== 'create') void history(initialAccountId);
+    else {
+      // Invalidate an earlier account read before returning to the list/create form.
+      historySeq.current++; setHistoryId(''); setEvents([]); setHistoryBusy(false);
+      if (initialAccountId === 'create') createInput.current?.focus();
+    }
+  }, [initialAccountId, accountNavigationKey, history]);
   const selected = accounts.find(a => a.accountId === historyId);
   const selectedDefault = defaults.find(a => `default:${a.platform}` === historyId);
   const isDefaultHistory = historyId === 'default' || historyId.startsWith('default:');

@@ -31,6 +31,7 @@ interface SidebarProps {
   eventNotifications?: React.ReactNode;
   currentPage: Page;
   onPageChange: (page: Page, preserveConversations?: boolean) => void;
+  onAccountSelect?: (target?: string) => void;
   personas: PersonaItem[];
   selectedPersona: string;
   onPersonaChange: (persona: string) => void;
@@ -71,6 +72,7 @@ export default function Sidebar({
   eventNotifications,
   currentPage,
   onPageChange,
+  onAccountSelect,
   personas,
   selectedPersona,
   onPersonaChange,
@@ -358,7 +360,7 @@ export default function Sidebar({
             <button type="button" className={`sidebar-gateway-status ${gatewayStatus}`} aria-label={`${runtimeLabel} ${runtimeStatus}`} title={gatewayRecoveryNote || `${runtimeLabel} · ${runtimeStatus}`} onClick={onGatewayRetry} disabled={!onGatewayRetry || gatewayStatus==='connecting'}>
               <span className="sidebar-gateway-icon" aria-hidden="true"><IconOpenClaw size={20}/><span className="status-dot"/></span><span className="nav-item-label">{runtimeLabel} · {runtimeStatus}</span>
             </button>
-            <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={()=>navigate('accounts')}/>
+            <SidebarAccountPopover active={currentPage==='accounts'} onNavigate={target=>{onAccountSelect?.(target);navigate('accounts');}}/>
             {eventNotifications}
             <button type="button" className="nav-item sidebar-theme-toggle" aria-label={`主题：当前${theme.resolved==='dark'?'深色':'浅色'}${theme.preference==='system'?'（跟随系统）':''}，点击切换为${themeNext==='dark'?'深色':'浅色'}`} title={`切换为${themeNext==='dark'?'深色':'浅色'}模式（当前${theme.resolved==='dark'?'深色':'浅色'}${theme.preference==='system'?'，跟随系统':''}；更多外观选项在设置 → 更多设置）`} onClick={toggleTheme}>
               <span className="nav-icon" aria-hidden="true">{theme.resolved==='dark'?<IconSun size={19}/>:<IconMoon size={19}/>}</span><span className="nav-item-label">{themeNext==='dark'?'深色':'浅色'}</span>

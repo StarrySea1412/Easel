@@ -57,6 +57,18 @@ function sectionToggle(view, section) {
     .find(button => button.getAttribute('aria-controls').endsWith(`-${section}-list`));
 }
 
+test('account preview preserves navigation target callbacks and collapses conversations', async t => {
+  const targets = [], view = await fixture(t, { onAccountSelect: target => targets.push(target) });
+  await view.clickLabel('对话');
+  await view.clickLabel('账号');
+  await act(async () => document.querySelector('.sidebar-account-add').click());
+  assert.deepEqual(targets, ['create']); assert.equal(view.visits.at(-1), 'accounts');
+  assert.equal(view.shell().classList.contains('is-expanded'), false);
+  await view.clickLabel('账号');
+  await act(async () => document.querySelector('.sidebar-account-open').click());
+  assert.deepEqual(targets, ['create', undefined]);
+});
+
 function sectionContent(view, section) {
   const toggle = sectionToggle(view, section);
   return [...view.container.querySelectorAll('[id]')].find(element => element.id === toggle.getAttribute('aria-controls'));

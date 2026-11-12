@@ -191,6 +191,7 @@ export default function App() {
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0);
   const [analysisAccountId,setAnalysisAccountId]=useState<string|undefined>();
   const [managedAccountId,setManagedAccountId]=useState<string|undefined>();
+  const [managedAccountNavigationKey,setManagedAccountNavigationKey]=useState(0);
   const [publishAccountFocus,setPublishAccountFocus]=useState<import('./lib/socialAccounts').PublishAccountFocus>();
   const [analysisPlatform, setAnalysisPlatform] = useState('xiaohongshu');
   const [analysisAutoCollect, setAnalysisAutoCollect] = useState(0);
@@ -1708,7 +1709,7 @@ export default function App() {
       case 'outputs':
         return <OutputsPage sessions={sessions} sessionsLoading={sessionsLoading} onOpenConversation={handleOutputConversation} initialFilter={outputFilter} jumpPath={outputJumpPath} onJumpHandled={() => { setOutputJumpPath(''); window.history.replaceState(null, '', window.location.pathname + window.location.search); }} onReferenceImage={(image) => { selectCreation('image',null); videoStudio.setViewMode('image'); setCurrentPage('image'); void imageStudio.useGalleryReference(image); }} onReuseImage={(prompt, size) => { selectCreation('image',null); videoStudio.setViewMode('image'); imageStudio.setImgPrompt(prompt); if (size) imageStudio.setImgSize(size); imageStudio.setMode('generate'); setCurrentPage('image'); }} />;
       case 'accounts':
-        return <AccountsPage initialAccountId={managedAccountId} onNavigatePublish={account=>{const workspace=selectCreation('publish',null);setPublishAccountFocus({accountId:account.accountId,platform:account.platform,nonce:Date.now(),workspaceId:workspace.id});setCurrentPage('publish');}} onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform,accountId) => { setAnalysisAccountId(accountId);setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
+        return <AccountsPage initialAccountId={managedAccountId} accountNavigationKey={managedAccountNavigationKey} onNavigatePublish={account=>{const workspace=selectCreation('publish',null);setPublishAccountFocus({accountId:account.accountId,platform:account.platform,nonce:Date.now(),workspaceId:workspace.id});setCurrentPage('publish');}} onAnalysisLogin={() => setAnalysisAutoCollect((value) => value + 1)} onNavigateAnalysis={(platform,accountId) => { setAnalysisAccountId(accountId);setAnalysisPlatform(platform); setCurrentPage('analysis'); }} />;
       case 'analysis':
         return <ContentAnalysisPage onAnalysisChat={handleAnalysisChat} demoEnabled={demoDataPreference.enabled} initialAccountId={analysisAccountId} initialPlatform={analysisPlatform} autoCollectSignal={analysisAutoCollect} onAutoCollectHandled={() => setAnalysisAutoCollect(0)} onNavigateAccounts={accountId=>{setManagedAccountId(accountId);setCurrentPage('accounts');}} onNavigateIdeas={() => setCurrentPage('ideas')} />;
       case 'activity':
@@ -1778,6 +1779,7 @@ export default function App() {
         onOpenAccounts={accountId=>{setManagedAccountId(accountId);setCurrentPage('accounts');}}
         onExpand={kind=>setCurrentPage(kind)} />
       <Sidebar
+        onAccountSelect={target=>{setManagedAccountId(target);setManagedAccountNavigationKey(key=>key+1);}}
         currentPage={currentPage}
         onPageChange={(page, preserveConversations = false) => { if (page === 'agent-office') setOfficeTarget(null); if (page === 'activity') setActivityTarget(null); if (page === 'settings') { setSettingsModelRef(undefined); setSettingsSection('model'); setSettingsNavigationKey(key => key + 1); } setCurrentPage(page, preserveConversations); }}
         personas={personas}

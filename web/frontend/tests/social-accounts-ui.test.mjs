@@ -75,6 +75,45 @@ test('account inspector opens the exact selected analysis and publish identity',
   assert.deepEqual(analysis,[[a.platform,a.accountId]]);assert.deepEqual(publish,[a.accountId]);assert.equal(h.posts.length,0);
 });
 
+test('sidebar navigation resets filters, reselects the same target, and returns to the full list', async t => {
+  const h = await fixture(t, Accounts, { initialAccountId: a.accountId, accountNavigationKey: 1 });
+  assert.match(h.container.querySelector('.account-selected-identity').textContent, /品牌号/);
+  await h.click('收起记录');
+  await h.input(h.container.querySelector('[aria-label="搜索账号"]'), '不存在的账号');
+  await h.render({ accountNavigationKey: 2 });
+  assert.equal(h.container.querySelector('[aria-label="搜索账号"]').value, '');
+  assert.match(h.container.querySelector('.account-selected-identity').textContent, /品牌号/);
+  await h.render({ initialAccountId: undefined, accountNavigationKey: 3 });
+  assert.equal(h.container.querySelector('.account-selected-identity'), null);
+  assert.equal(h.container.querySelectorAll('.account-inventory .account-roster-button').length, 2);
+  assert.equal(h.posts.length, 0);
+});
+
+test('create deep link opens the form, focuses its input, and never creates or publishes implicitly', async t => {
+  const h = await fixture(t, Accounts, { initialAccountId: 'create', accountNavigationKey: 1 });
+  const input = h.container.querySelector('input[placeholder="例如：品牌号 / 主理人号"]');
+  assert.ok(input); assert.equal(document.activeElement, input);
+  assert.equal(h.requests.some(r => r.path.includes('/create/history')), false);
+  assert.deepEqual(h.creates, []); assert.deepEqual(h.posts, []);
+  await h.render({ initialAccountId: b.accountId, accountNavigationKey: 2 });
+  assert.equal(h.container.querySelector('.account-create-form'), null);
+  assert.match(h.container.querySelector('.account-selected-identity').textContent, /视频号乙/);
+  await h.render({ initialAccountId: 'create', accountNavigationKey: 3 });
+  assert.equal(h.container.querySelector('.account-selected-identity'), null);
+  assert.ok(h.container.querySelector('.account-create-form'));
+});
+
+test('returning to all accounts ignores late history from a former selection', async t => {
+  const h = await fixture(t, Accounts); let finish;
+  t.mock.method(globalThis, 'fetch', async url => url.endsWith('/history')
+    ? new Promise(resolve => { finish = resolve; }) : ({ok:true,json:async()=>h.accounts}));
+  await h.render({ initialAccountId: a.accountId, accountNavigationKey: 1 });
+  await h.render({ initialAccountId: undefined, accountNavigationKey: 2 });
+  await act(async () => finish({ok:true,json:async()=>[{id:1,at:a.updatedAt,action:'check',message:'LATE_PRIVATE_HISTORY'}]}));
+  assert.equal(h.container.querySelector('.account-selected-identity'), null);
+  assert.doesNotMatch(h.text(), /LATE_PRIVATE_HISTORY/);
+});
+
 test('account publish focus preserves existing edited drafts and does not submit',async t=>{
   const focus={accountId:a.accountId,platform:a.platform,nonce:100,workspaceId:'publish'};
   const h=await fixture(t,DistributionEditor,{accountFocus:focus});

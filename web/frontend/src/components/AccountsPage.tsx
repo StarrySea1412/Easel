@@ -115,7 +115,7 @@ function LoginImage({ login, nonce }: { login: QRState; nonce: number }) {
   );
 }
 
-export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, initialAccountId, onNavigatePublish }: { initialAccountId?:string; onNavigatePublish?:(account:SocialAccount)=>void; onNavigateAnalysis: (platform: string,accountId?:string) => void; onAnalysisLogin: () => void }) {
+export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, initialAccountId, accountNavigationKey, onNavigatePublish }: { initialAccountId?:string; accountNavigationKey?:number; onNavigatePublish?:(account:SocialAccount)=>void; onNavigateAnalysis: (platform: string,accountId?:string) => void; onAnalysisLogin: () => void }) {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
   const [qr, setQr] = useState<QRState | null>(null);
@@ -466,10 +466,10 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, init
   }, [managedPlatform]);
 
   const togglePrivacy = () => {
-    setHideIdentity((value) => {
-      try { localStorage.setItem('easel_account_privacy', value ? '0' : '1'); } catch { /* optional */ }
-      return !value;
-    });
+    const next = !hideIdentity;
+    setHideIdentity(next);
+    try { localStorage.setItem('easel_account_privacy', next ? '1' : '0'); } catch { /* optional */ }
+    window.dispatchEvent(new window.Event('easel:account-privacy'));
   };
 
   const identities = useAccountIdentities();
@@ -505,7 +505,7 @@ export default function AccountsPage({ onNavigateAnalysis, onAnalysisLogin, init
       {terminalMsg && <div className="accounts-message" role="status">{terminalMsg}</div>}
       {cancelling && <div className="accounts-message" role="status">正在结束登录流程…完成后可连接其他平台。</div>}
       {cancelError && <div className="accounts-message" role="alert">{cancelError} <button className="btn btn-sm" onClick={() => void closeQr()}>重试结束登录</button></div>}
-      <SocialAccountsPanel initialAccountId={initialAccountId} onNavigateAnalysis={onNavigateAnalysis} onNavigatePublish={onNavigatePublish} hideIdentity={hideIdentity} defaultAccounts={accounts} defaultsLoaded={loaded} defaultLoadError={!loaded ? err : ''} onRefreshDefaults={load} onManageDefault={platform => { setManagedPlatform(platform); setConfirmLogout(false); }} />
+      <SocialAccountsPanel initialAccountId={initialAccountId} accountNavigationKey={accountNavigationKey} onNavigateAnalysis={onNavigateAnalysis} onNavigatePublish={onNavigatePublish} hideIdentity={hideIdentity} defaultAccounts={accounts} defaultsLoaded={loaded} defaultLoadError={!loaded ? err : ''} onRefreshDefaults={load} onManageDefault={platform => { setManagedPlatform(platform); setConfirmLogout(false); }} />
 
       <details className="accounts-default-channels">
         <summary><span className="account-default-icon"><IconAccounts size={18}/></span><span><strong>默认发布通道</strong><small>原有每平台单账号的连接入口，已知身份也会显示在上方名单。</small></span><span className="account-default-count" aria-live="polite">{loaded ? `${connectedCount} / ${supportedCount} 在线` : '状态读取中'}</span></summary>
