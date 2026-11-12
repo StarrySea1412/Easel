@@ -8,3 +8,7 @@ export const MODEL_IMPORT_SLOT_OPTIONS = [
 export function modelImportSlotLabel(slot: string) {
   return MODEL_IMPORT_SLOT_OPTIONS.find(option => option.value === slot)?.label || slot;
 }
+
+export function modelImportField(field: string) {
+  return /(?:_MODEL|^model)$/.test(field) ? 'model' : /(?:_BASE_URL|baseUrl)$/.test(field) ? 'baseUrl' : /(?:_KEY|_TOKEN|^key)$/.test(field) ? 'keyMasked' : null;
+}

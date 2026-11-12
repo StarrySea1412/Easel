@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import random
 import re
+import socket
 import sqlite3
 import threading
 import time
@@ -138,12 +139,29 @@ def dispatch(target, prompt, mode, opener=None):
                 'preview': clean[:300], 'score': score, 'ms': int((time.monotonic() - started) * 1000)}
     except urllib.error.HTTPError as exc:
         try:
-            message = {401: '鉴权失败', 403: '权限不足', 429: '服务限流或额度不足'}.get(exc.code, '接口未接受本次请求')
-            return {'ok': False, 'state': 'failed', 'detail': f'{message}（HTTP {exc.code}）', 'ms': int((time.monotonic() - started) * 1000)}
+            message = {400: '请求参数或协议不兼容，请核对协议和模型 ID',
+                       401: '鉴权失败，请检查此地址对应的 API Key',
+                       403: '权限不足，请确认 Key 有权调用此模型',
+                       404: '接口路径或模型不存在，请核对地址、协议和模型 ID',
+                       429: '供应商限流或额度不足，请稍后重试并检查余额'}.get(exc.code, '供应商接口未接受本次请求，请检查服务状态')
+            result = {'ok': False, 'state': 'failed', 'detail': f'{message}（HTTP {exc.code}）；未自动重试。', 'ms': int((time.monotonic() - started) * 1000)}
+            if exc.code == 429:
+                try:
+                    result['retryAfterSeconds'] = max(1, min(3600, int(exc.headers.get('Retry-After', '60'))))
+                except (ValueError, TypeError, AttributeError):
+                    result['retryAfterSeconds'] = 60
+            return result
         finally:
             exc.close()
-    except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
-        return {'ok': False, 'state': 'failed', 'detail': '连接超时、网络异常或响应格式无效；未自动重试。', 'ms': int((time.monotonic() - started) * 1000)}
+    except (TimeoutError, socket.timeout):
+        detail = '供应商响应超时，请检查服务可用性或网络；未自动重试。'
+    except urllib.error.URLError as exc:
+        detail = ('供应商连接超时' if isinstance(exc.reason, TimeoutError) else '无法连接供应商，请检查地址、网络、代理或证书') + '；未自动重试。'
+    except OSError:
+        detail = '供应商连接中断，请检查网络或代理；未自动重试。'
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        detail = '供应商未返回可读取的非空模型响应，请核对请求协议与模型 ID；未自动重试。'
+    return {'ok': False, 'state': 'failed', 'detail': detail, 'ms': int((time.monotonic() - started) * 1000)}
 
 
 class Service:

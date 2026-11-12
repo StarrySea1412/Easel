@@ -329,3 +329,28 @@ def test_http_error_body_connection_closed_without_exposing_credentials():
     result = health.dispatch(target, "custom", "text", SimpleNamespace(open=open_request))
     assert result["state"] == "failed" and "401" in result["detail"] and body.closed
     assert "synthetic-secret" not in json.dumps(result)
+
+
+@pytest.mark.parametrize('code,expected', [(400, '协议'), (401, 'API Key'), (403, '权限'), (404, '模型 ID'), (429, '余额'), (503, '服务状态')])
+def test_http_failure_guidance_and_retry_delay_are_safe(code, expected):
+    body = io.BytesIO(b'private upstream body synthetic-secret')
+    error = urllib.error.HTTPError('https://fixture.invalid', code, 'synthetic-secret', {'Retry-After': '17'}, body)
+    def send(*_args, **_kwargs):
+        raise error
+    target = health.Target('provider/model', 'provider', 'model', 'openai', 'https://fixture.invalid/v1', 'synthetic-secret')
+    result = health.dispatch(target, 'test', 'text', SimpleNamespace(open=send))
+    assert result['state'] == 'failed' and expected in result['detail'] and body.closed
+    assert result.get('retryAfterSeconds') == (17 if code == 429 else None)
+    assert 'private upstream' not in json.dumps(result) and 'synthetic-secret' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('cause,expected', [(TimeoutError('private'), '响应超时'),
+    (urllib.error.URLError(TimeoutError('private')), '连接超时'),
+    (urllib.error.URLError('private proxy error'), '代理'), (ValueError('private JSON'), '协议')])
+def test_transport_and_format_failures_have_distinct_actionable_messages(cause, expected):
+    def send(*_args, **_kwargs):
+        raise cause
+    target = health.Target('provider/model', 'provider', 'model', 'openai', 'https://fixture.invalid/v1', 'synthetic-secret')
+    result = health.dispatch(target, 'test', 'text', SimpleNamespace(open=send))
+    assert result['state'] == 'failed' and expected in result['detail'] and '未自动重试' in result['detail']
+    assert 'private' not in json.dumps(result)

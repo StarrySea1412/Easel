@@ -532,6 +532,14 @@
 .settings-page .settings-more-cards > .settings-section-heading { margin-bottom:0; }
 .settings-page .settings-more-cards > .settings-link-row { margin:0; }
 .settings-page [hidden] { display:none !important; }
+.import-complete,.import-replace-confirm { min-width:0; padding:14px; margin:12px 0; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.import-complete > strong,.import-replace-confirm > strong { display:block; color:var(--text); }
+.import-replace-confirm dl { display:grid; gap:8px; margin:10px 0; }
+.import-replace-confirm dt { font-weight:600; }
+.import-replace-confirm dd { display:grid; gap:4px; margin:0; color:var(--text-secondary); }
+.import-search { display:grid; gap:6px; margin:12px 0; font-size:12px; }
+.import-complete .model-check-feedback { margin-top:12px; }
+.settings-page .import-list.has-confirmation { max-height:none; overflow:visible; }
 .settings-page .agent-runtime-settings > header > div { flex:1; }
 .settings-page .agent-advanced { margin-block:18px; }
 @container settings-page (max-width:900px) {

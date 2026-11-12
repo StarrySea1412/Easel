@@ -92,7 +92,7 @@ async function fixture(t, responseOverrides = {}) {
       harness.calls.push({name:'probeModel', args:[payload]});
       const response = harness.responses.probeModel;
       const result = typeof response === 'function' ? await response(payload) : response;
-      return {ok:result.httpOk !== false,status:result.httpOk === false?503:200,json:async()=>result};
+      return {ok:result.httpOk !== false,status:result.httpStatus || (result.httpOk === false?503:200),json:async()=>result};
     }
     networkCalls++; throw new Error('No network allowed');
   });
@@ -597,7 +597,7 @@ test('default save failure preserves the draft and retry shows the actual server
   assert.equal(view.harness.calls.filter(call=>call.name==='saveModelConfig').length,2);
 });
 
-test('import writes a channel directly, reports the actual default and preserves other provider drafts', async t => {
+test('import previews replacement, cancellation preserves drafts and confirmation writes only its channel', async t => {
   const rows = configuredRows();
   const importedRows = rows.map((row, index) => index === 0 ? { ...row, model: 'imported-model-a' } : row);
   const candidate = { id: 'source-entry', name: 'Imported source', model: 'imported-model-a', baseUrl: rows[0].baseUrl, protocol: 'openai',
@@ -616,13 +616,20 @@ test('import writes a channel directly, reports the actual default and preserves
   await view.click(findButton(view, '导入已有配置'));
   await view.click(findButton(view, '2. 读取可导入渠道'));
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
-  assert.equal(view.container.querySelector('.ii-ov'), null, 'replacement preview lines are gone');
   assert.equal(view.container.querySelector('.model-inline-import input[type="checkbox"]'), null, 'import applies directly without a separate selection checkbox');
-  await view.click(findButton(view, '导入'));
+  await view.click(findButton(view, '查看并替换'));
+  assert.match(view.container.querySelector('.import-replace-confirm').textContent,/当前：model-a.*导入：imported-model-a/);
+  assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
+  await view.click(findButton(view, '取消替换'));
+  assert.equal(view.container.querySelector('.import-replace-confirm'),null);
+  assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
+  assert.equal(secondModel.value,'unsaved-model-b');
+  await view.click(findButton(view, '查看并替换'));
+  await view.click(findButton(view, '确认替换并保存'));
   const apply = view.harness.calls.find(call => call.name === 'applyImport');
   assert.deepEqual(apply.args, ['cc-switch', 'source-entry', 'openai', 'synthetic-source.db', 'synthetic-preview-token', 'imported-model-a']);
   assert.match(view.container.querySelector('.import-msg').textContent, /已保存默认现为：OpenAI · imported-model-a/);
-  assert.match(view.container.querySelector('.import-msg').textContent, /尚未进行真实调用测活/);
+  assert.match(view.container.querySelector('.import-msg').textContent, /保存不代表检测通过/);
   await view.click(findButton(view, '收起导入'));
   assert.match(view.container.querySelector('.provider-chat-catalog').textContent, /imported-model-a/);
   assert.equal(view.container.querySelectorAll('input[aria-label="模型名称"]')[1].value, 'unsaved-model-b');
@@ -776,8 +783,9 @@ test('testing saves only the selected row, preserves other drafts and does not p
   await change(view.container.querySelectorAll('[aria-label="模型名称"]')[0],'new-model');
   await view.click(findButton(view,'添加供应商'));
   const check=view.container.querySelector('.provider-connection-action');
-  assert.equal(check.textContent,'测试');await view.click(check);
+  assert.equal(check.textContent,'保存并测试');await view.click(check);
   assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,0);
+  assert.match(view.container.querySelector('.provider-check-result').textContent,/保存失败.*blocked save.*尚未发送模型测试/);
   await view.click(check);
   const calls=view.harness.calls.filter(call=>['saveModelConfig','probeModel'].includes(call.name));
   assert.deepEqual(calls.map(call=>call.name),['saveModelConfig','saveModelConfig','probeModel']);
@@ -829,7 +837,7 @@ test('source cards read their own models immediately and reject a late response 
   assert.match(cards()[0].textContent, /正在读取模型/);
   assert.equal(cards()[1].disabled, false);
   await view.click(cards()[1]);
-  assert.match(cards()[1].textContent, /已读取 1 个模型/);
+  assert.match(cards()[1].textContent, /剩余 1 条配置可导入/);
   assert.match(view.container.querySelector('.import-list').textContent, /current-source-model/);
   await act(async () => finishFirst({ ...current, source: 'cc-switch', candidates: [{ ...candidate, name: 'STALE_SOURCE', model: 'STALE_MODEL' }] }));
   assert.doesNotMatch(view.container.querySelector('.import-list').textContent, /STALE/);
@@ -866,7 +874,8 @@ test('import discovery keeps source credentials on the server and requires fresh
   for (const key of ['ArrowDown', 'End', 'Enter']) await act(async () => picker.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   assert.match(picker.textContent, /fetched-model/);
   assert.equal(view.harness.calls.some(call => call.name === 'applyImport'), false);
-  await view.click(findButton(view, '导入'));
+  await view.click(findButton(view, '查看并替换'));
+  await view.click(findButton(view, '确认替换并保存'));
   assert.deepEqual(view.harness.calls.find(call => call.name === 'applyImport').args, [
     'cc-switch', candidate.id, 'openai', 'synthetic-source.db', 'original-token', 'fetched-model',
   ]);
@@ -1076,6 +1085,84 @@ test('provider pointer sorting moves stable cards and stops on pointer release',
   assert.equal(cards()[1].dataset.providerKey,'openai');
   assert.equal(list.querySelector('.is-dragging'),null);
   assert.equal(view.harness.calls.some(call=>call.name==='saveModelConfig'),false);
+});
+
+test('stopping a pending probe ignores a late success and retry shows bounded output and timing', async t => {
+  const finishes=[];
+  const view=await fixture(t,{fetchModelChannels:modelChannels(configuredRows()),probeModel:()=>new Promise(resolve=>finishes.push(resolve))});
+  await view.render(1,view.props,'model');
+  const card=view.container.querySelector('.provider-card');const check=card.querySelector('.provider-connection-action');
+  await view.click(check);
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,1100)));
+  assert.match(card.querySelector('.model-check-feedback').textContent,/已等待 1 秒/);
+  await view.click(findButton(view,'停止等待'));
+  assert.match(card.querySelector('.model-check-feedback').textContent,/已停止等待.*服务端和供应商请求可能仍在完成/);
+  assert.equal(check.disabled,false);
+  await act(async()=>finishes[0]({modelRef:'openai/model-a',mode:'text',state:'success',detail:'LATE_SUCCESS',testedAt:123}));
+  assert.doesNotMatch(card.textContent,/LATE_SUCCESS/);
+  assert.equal(finishes.length,1,'stopping never retries');
+  await view.click(check);
+  await act(async()=>finishes[1]({modelRef:'openai/model-a',mode:'text',state:'success',detail:'已收到响应',preview:'<script>plain model output</script>',ms:1250,testedAt:124}));
+  assert.equal(card.querySelector('.model-check-response pre').textContent,'<script>plain model output</script>');
+  assert.equal(card.querySelector('.model-check-response script'),null);
+  assert.match(card.querySelector('.model-check-feedback').textContent,/1.25 秒/);
+});
+
+test('throttle feedback counts down across all model actions without automatic requests', async t => {
+  const view=await fixture(t,{fetchModelChannels:modelChannels(configuredRows()),probeModel:{httpOk:false,httpStatus:429,detail:{message:'滚动窗口限流',retryAfterSeconds:12}}});
+  await view.render(1,view.props,'model');
+  await view.click(view.container.querySelector('.provider-connection-action'));
+  const checks=[...view.container.querySelectorAll('.provider-connection-action')];
+  assert.equal(checks.every(button=>button.disabled),true);
+  assert.match(view.container.querySelector('.provider-check-result').textContent,/限流.*还需等待 12 秒/);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,1);
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,1100)));
+  assert.match(view.container.querySelector('.provider-check-result').textContent,/还需等待 11 秒/);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,1);
+});
+
+test('upstream throttling pauses only its provider while the local shared throttle pauses all providers', async t => {
+  const view=await fixture(t,{fetchModelChannels:modelChannels(configuredRows()),probeModel:payload=>({...payload,state:'failed',detail:'供应商限流',retryAfterSeconds:12,testedAt:123})});
+  await view.render(1,view.props,'model');const checks=[...view.container.querySelectorAll('.provider-connection-action')];
+  await view.click(checks[0]);assert.equal(checks[0].disabled,true);assert.equal(checks[1].disabled,false);
+  assert.match(view.container.querySelector('.provider-check-result').textContent,/还需等待 12 秒/);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,1);
+});
+
+test('an empty target imports once and hands off the exact saved model to an explicit test', async t => {
+  const rows=configuredRows();
+  const candidate={id:'fresh',name:'Fresh source',model:'model-a',baseUrl:rows[0].baseUrl,protocol:'openai',keyPresent:true,keyMasked:'sk***a',compatible:true,targetSlot:'openai',overwrites:[],previewToken:'fresh-token'};
+  const view=await fixture(t,{fetchModelChannels:modelChannels([]),fetchImportSources:{sources:[{id:'cc-switch',label:'CC Switch',available:true}]},
+    previewImport:{source:'cc-switch',path:'isolated-source.db',candidates:[candidate],errors:[],note:''},
+    applyImport:{...modelChannels(rows),ok:true,applied:{name:candidate.name,slot:'openai'}},
+    probeModel:payload=>({...payload,state:'success',preview:'Connection received',detail:'synthetic local response',ms:10,testedAt:123})});
+  await view.render(1,view.props,'import');
+  await view.click(findButton(view,'2. 读取可导入渠道'));
+  await view.click(findButton(view,'导入并保存'));
+  assert.equal(view.harness.calls.filter(call=>call.name==='applyImport').length,1);
+  assert.equal(view.harness.calls.filter(call=>call.name==='probeModel').length,0);
+  const handoff=view.container.querySelector('.import-complete');assert.match(handoff.textContent,/已保存.*model-a/);
+  await view.click(findButton(view,'测试刚导入的模型'));
+  assert.deepEqual(view.harness.calls.find(call=>call.name==='probeModel').args[0],{modelRef:'openai/model-a',mode:'text',prompt:'请只回复：连接成功'});
+  assert.match(handoff.textContent,/文本检测通过/);
+  const input=view.container.querySelector('input[aria-label="模型名称"]');
+  await act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'changed-draft');input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  assert.equal(findButton(view,'测试刚导入的模型').disabled,true);
+  assert.doesNotMatch(handoff.textContent,/文本检测通过/);
+  assert.match(handoff.textContent,/已有后续修改/);
+});
+
+test('source filtering changes no configuration and preserves the replacement target', async t => {
+  const candidates=['alpha','beta'].map(name=>({id:name,name,model:`${name}-model`,compatible:true,targetSlot:'openai',baseUrl:'https://example.test/v1',keyMasked:'sk***',protocol:'openai',overwrites:[],previewToken:`token-${name}`}));
+  const view=await fixture(t,{fetchModelChannels:modelChannels(configuredRows()),fetchImportSources:{sources:[{id:'cc-switch',label:'CC Switch',available:true}]},previewImport:{path:'source.db',candidates,errors:[],note:''}});
+  await view.render(1,view.props,'import');await view.click(findButton(view,'2. 读取可导入渠道'));
+  const input=view.container.querySelector('[aria-label="筛选来源配置"]');
+  const type=async value=>act(async()=>{Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+  await type('BETA');assert.equal(view.container.querySelectorAll('.import-item').length,1);assert.match(view.container.querySelector('.ii-name').textContent,/beta/);
+  await view.click(findButton(view,'查看并替换'));assert.match(view.container.querySelector('.import-replace-confirm').textContent,/beta-model/);
+  await type('no match');assert.match(view.container.querySelector('.import-list').parentElement.textContent,/没有匹配的来源配置/);
+  await type('');assert.equal(view.container.querySelectorAll('.import-item').length,2);
+  assert.equal(view.harness.calls.some(call=>['applyImport','saveModelConfig','probeModel'].includes(call.name)),false);
 });
 
 test.after(async () => {

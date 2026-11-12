@@ -1687,15 +1687,16 @@ export interface ImportPreview {
 export interface ImportSlot { id: string; env: string[] }
 
 export function fetchImportSources(): Promise<{ sources: ImportSource[]; slots: ImportSlot[] }> {
-  return request('/api/models/import/sources');
+  return requestWithTimeout(signal => request('/api/models/import/sources', { signal }), 15000, '读取配置来源超时，请检查工作台服务后重试；尚未写入配置。');
 }
 
 export function previewImport(source: string, slot: string, path = ''): Promise<ImportPreview> {
-  return request('/api/models/import/preview', {
+  return requestWithTimeout(signal => request('/api/models/import/preview', {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source, slot, path }),
-  });
+  }), 20000, '读取来源配置超时，请检查文件路径或访问权限后重试；尚未写入配置。');
 }
 
 export interface ImportCandidateRequest {
@@ -1707,9 +1708,10 @@ export interface ImportCandidateRequest {
 }
 
 export function discoverImportModels(payload: ImportCandidateRequest): Promise<DiscoverResult> {
-  return request('/api/models/import/discover', {
+  return requestWithTimeout(signal => request('/api/models/import/discover', {
+    signal,
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-  });
+  }), 35000, '获取模型列表超时，请检查来源地址和网络；仍可使用来源中已填写的模型 ID，尚未写入配置。');
 }
 
 export function selectImportModel(payload: ImportCandidateRequest & { model: string }): Promise<ImportCandidate> {

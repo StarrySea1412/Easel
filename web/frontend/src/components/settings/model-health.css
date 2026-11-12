@@ -21,6 +21,9 @@
 .model-check-feedback strong { color:var(--green); }
 .model-check-feedback.bad strong { color:var(--red); }
 .model-check-feedback small { color:var(--text-tertiary); font-size:11px; }
+.model-check-feedback > button { justify-self:start; }
+.model-check-response summary { cursor:pointer; color:var(--text-secondary); }
+.model-check-response pre { margin:6px 0; padding:10px; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; background:var(--surface-2); border-radius:var(--radius-sm); }
 .model-availability-row .model-check-feedback { margin-top:8px; }
 .model-check-defaults, .model-check-advanced { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); font-size:12px; }
 .model-check-defaults > summary, .model-check-advanced > summary { cursor:pointer; margin-bottom:10px; }

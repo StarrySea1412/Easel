@@ -34,3 +34,17 @@ test('an aborted health request never resolves as a successful state', async t =
   t.mock.method(globalThis, 'fetch', async (_url, init) => { init.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))); return pending; });
   const request = fetchModelHealth(controller.signal); controller.abort(); await assert.rejects(request, { name: 'AbortError' });
 });
+
+test('probe receipts retain a bounded response and latency without accepting invalid numbers', () => {
+  const result=decodeModelHealth({results:[{...snapshot.results[0],preview:'x'.repeat(400),ms:1250,retryAfterSeconds:3.2}]}).results[0];
+  assert.equal(result.preview.length,300);assert.equal(result.ms,1250);assert.equal(result.retryAfterSeconds,4);
+  const invalid=decodeModelHealth({results:[{...snapshot.results[0],ms:-1,retryAfterSeconds:Infinity}]}).results[0];
+  assert.equal(invalid.ms,undefined);assert.equal(invalid.retryAfterSeconds,undefined);
+});
+
+test('structured throttle errors preserve retry delay and non-JSON failures identify the service response', async t => {
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({detail:{message:'限流，请稍后重试',retryAfterSeconds:12}}),{status:429}));
+  await assert.rejects(probeModel('relay/model-a','text','test',new AbortController().signal),error=>error.message==='限流，请稍后重试'&&error.status===429&&error.retryAfterSeconds===12);
+  globalThis.fetch=async()=>new Response('<html>private proxy error</html>',{status:502});
+  await assert.rejects(probeModel('relay/model-a','text','test',new AbortController().signal),error=>/HTTP 502.*反向代理/.test(error.message)&&!error.message.includes('private proxy'));
+});
