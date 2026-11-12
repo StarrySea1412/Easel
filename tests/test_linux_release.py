@@ -127,6 +127,8 @@ def test_image_reuse_falls_back_to_matching_running_production_image(tmp_path, m
     from types import SimpleNamespace
     monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
     builder = load('build_image')
+    monkeypatch.setattr(builder, 'runtime_alias', lambda *args: 'easel-runtime-base:test')
+    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=''))
     receipt = tmp_path / 'Easel' / 'deployment-receipt.json'
     receipt.parent.mkdir()
     secrets = tmp_path / 'easel-secrets'; secrets.mkdir()
@@ -156,6 +158,74 @@ def test_image_reuse_falls_back_to_matching_running_production_image(tmp_path, m
     monkeypatch.setattr(builder, 'compatible', lambda candidate, baseline, new, old:
                         baseline.get('commit') == 'b' * 40 and new == (ROOT / 'pyproject.toml').read_bytes())
     assert builder.reusable(tmp_path, {'files': {}}, ROOT) == (image_id, manifest)
+
+
+def test_runtime_anchor_is_stable_only_for_release_number_changes(tmp_path, monkeypatch):
+    import hashlib
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    project = tmp_path / 'pyproject.toml'
+    project.write_text('[project]\nname="easel"\nversion="0.50.0"\ndependencies=["pillow==12.2.0"]\n')
+    candidate = {'files': {name: {'sha256': name} for name in builder.DEPENDENCIES}}
+    alias = builder.runtime_alias(candidate, tmp_path)
+    project.write_text(project.read_text().replace('0.50.0', '0.50.1'))
+    candidate['files']['pyproject.toml']['sha256'] = hashlib.sha256(project.read_bytes()).hexdigest()
+    assert builder.runtime_alias(candidate, tmp_path) == alias
+    candidate['files']['requirements/linux-py312.lock']['sha256'] = 'changed'
+    assert builder.runtime_alias(candidate, tmp_path) != alias
+    candidate['files']['requirements/linux-py312.lock']['sha256'] = 'requirements/linux-py312.lock'
+    project.write_text(project.read_text().replace('12.2.0', '12.3.0'))
+    assert builder.runtime_alias(candidate, tmp_path) != alias
+
+
+def test_runtime_depth_rejects_accumulated_release_layers(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    assert builder.check_runtime_depth({'RootFS': {'Layers': ['layer'] * 216}}) == 216
+    with pytest.raises(ValueError, match='417 layers'):
+        builder.check_runtime_depth({'RootFS': {'Layers': ['layer'] * 417}})
+
+
+@pytest.mark.parametrize('failure', [None, 'label', 'dependency', 'depth'])
+def test_explicit_runtime_base_is_verified_before_reuse(tmp_path, monkeypatch, failure):
+    import hashlib
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    project = b'[project]\nname="easel"\nversion="0.50.1"\n'
+    (tmp_path / 'pyproject.toml').write_bytes(project)
+    candidate = {'files': {name: {'sha256': name} for name in builder.DEPENDENCIES}}
+    candidate['files']['pyproject.toml'] = {'sha256': hashlib.sha256(project).hexdigest()}
+    baseline = json.loads(json.dumps(candidate)); baseline['commit'] = 'b' * 40
+    inspection = {'Id': 'sha256:' + 'a' * 64, 'RootFS': {'Layers': ['layer'] * (417 if failure == 'depth' else 216)},
+                  'Config': {'Labels': {'org.opencontainers.image.revision': 'c' * 40 if failure == 'label' else 'b' * 40}}}
+    if failure == 'dependency':
+        baseline['files']['requirements/linux-py312.lock']['sha256'] = 'other'
+    def output(command, **kwargs):
+        if command[:3] == ['docker', 'image', 'inspect']:
+            return json.dumps([inspection])
+        assert '--network' in command and 'none' in command and '--read-only' in command
+        return json.dumps(baseline) if command[-1] == '/app/release-manifest.json' else project
+    monkeypatch.setattr(subprocess, 'check_output', output)
+    if failure:
+        with pytest.raises(ValueError):
+            builder.reusable(tmp_path, candidate, tmp_path, 'sha256:' + 'a' * 64)
+    else:
+        assert builder.reusable(tmp_path, candidate, tmp_path, 'sha256:' + 'a' * 64) == (inspection['Id'], baseline)
+
+
+def test_existing_dependency_anchor_precedes_active_release(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.syspath_prepend(str(ROOT / 'deployment/138'))
+    builder = load('build_image')
+    monkeypatch.setattr(builder, 'runtime_alias', lambda *args: 'easel-runtime-base:fixed')
+    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout='sha256:fixed\n'))
+    calls = []
+    def verified(ref, *args):
+        calls.append(ref)
+        return ('sha256:fixed', {'commit': 'b' * 40})
+    monkeypatch.setattr(builder, 'verified_runtime', verified)
+    assert builder.reusable(tmp_path, {}, tmp_path)[0] == 'sha256:fixed'
+    assert calls == ['easel-runtime-base:fixed']
 
 
 def test_active_receipt_is_reconstructed_from_verified_running_image(tmp_path, monkeypatch):

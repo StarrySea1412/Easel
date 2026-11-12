@@ -17,6 +17,9 @@ DEPENDENCIES = ('deployment/138/Dockerfile', 'deployment/138/runtime-package.jso
                 'deployment/138/runtime-package-lock.json', 'requirements/linux-py312.lock', 'pyproject.toml')
 RUNTIME_PREFIXES = ('easel/', 'web/', 'scripts/', 'skills/', 'profiles/_template/',
                     'openclaw/workspace/', 'agents/workspace/', 'openclaw/easel-agent-safety/', 'deployment/138/')
+# Operational ceiling, not a claim about every Docker storage driver's limit.
+# Keep a fixed dependency anchor instead of adding source layers to every release.
+MAX_REUSE_BASE_LAYERS = 256
 
 
 def compatible(candidate, baseline, candidate_project=None, baseline_project=None):
@@ -44,7 +47,52 @@ def compatible(candidate, baseline, candidate_project=None, baseline_project=Non
     return True
 
 
-def reusable(base, candidate, root):
+def runtime_alias(candidate, root):
+    project = copy.deepcopy(tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8')))
+    project['project'].pop('version')
+    inputs = {name: candidate['files'][name]['sha256'] for name in DEPENDENCIES
+              if name != 'pyproject.toml'}
+    inputs['project'] = project
+    fingerprint = hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return 'easel-runtime-base:' + fingerprint
+
+
+def verified_runtime(image_ref, candidate, root):
+    inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image_ref], text=True))[0]
+    image = inspection['Id']
+    baseline = json.loads(subprocess.check_output(
+        ['docker', 'run', '--rm', '--network', 'none', '--read-only', '--entrypoint', 'cat',
+         image, '/app/release-manifest.json'], text=True))
+    if baseline.get('commit') != inspection.get('Config', {}).get('Labels', {}).get(
+            'org.opencontainers.image.revision'):
+        raise ValueError('Runtime base label and manifest disagree')
+    baseline_project = subprocess.check_output(
+        ['docker', 'run', '--rm', '--network', 'none', '--read-only', '--entrypoint', 'cat',
+         image, '/app/pyproject.toml'])
+    if not compatible(candidate, baseline, (root / 'pyproject.toml').read_bytes(), baseline_project):
+        raise ValueError('Runtime base dependency inputs do not match the candidate')
+    check_runtime_depth(inspection)
+    return image, baseline
+
+
+def check_runtime_depth(inspection):
+    count = len(inspection['RootFS']['Layers'])
+    if count > MAX_REUSE_BASE_LAYERS:
+        raise ValueError(f'Runtime base has {count} layers; choose a verified compatible '
+                         'shallower --runtime-base or prepare a full locked build with sufficient space')
+    return count
+
+
+def reusable(base, candidate, root, runtime_base=None):
+    if runtime_base:
+        return verified_runtime(runtime_base, candidate, root)
+    anchor = runtime_alias(candidate, root)
+    # An absent anchor is normal on the first release. Other inspection errors
+    # fail closed rather than bypassing validation or overwriting an anchor.
+    lookup = subprocess.run(['docker', 'image', 'ls', '-q', '--no-trunc',
+                             '--filter', 'reference=' + anchor], check=True, capture_output=True, text=True)
+    if lookup.stdout.strip():
+        return verified_runtime(anchor, candidate, root)
     current = base / 'Easel'
     receipt = current / 'deployment-receipt.json'
     recorded = None
@@ -108,9 +156,9 @@ def reusable(base, candidate, root):
         (root / 'pyproject.toml').read_bytes(), baseline_project) else None
 
 
-def build(root, base, image):
+def build(root, base, image, runtime_base=None):
     candidate = verify(root)
-    reuse = reusable(base, candidate, root)
+    reuse = reusable(base, candidate, root, runtime_base)
     revision = candidate['commit']
     if reuse is None:
         print('Dependency change or no recorded base: full locked build', flush=True)
@@ -119,6 +167,11 @@ def build(root, base, image):
         mode, baseline_image = 'full', None
     else:
         baseline_image, baseline = reuse
+        baseline_inspection = json.loads(subprocess.check_output(
+            ['docker', 'image', 'inspect', baseline_image], text=True))[0]
+        check_runtime_depth(baseline_inspection)
+        # Content-derived alias remains fixed across product-only changes.
+        subprocess.run(['docker', 'tag', baseline_image, runtime_alias(candidate, root)], check=True)
         print('Identical dependency inputs: fixed runtime reuse', baseline_image, flush=True)
         frontend = image + '-frontend'
         subprocess.run(['docker', 'build', '--target', 'frontend', '-f', str(root / 'deployment/138/Dockerfile'),
@@ -166,7 +219,8 @@ USER 1000:1000
     inspection = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image], text=True))[0]
     if inspection['Config']['Labels']['org.opencontainers.image.revision'] != revision:
         raise ValueError('Built image revision mismatch')
-    receipt = {'commit': revision, 'image': inspection['Id'], 'mode': mode, 'baselineImage': baseline_image}
+    receipt = {'commit': revision, 'image': inspection['Id'], 'mode': mode, 'baselineImage': baseline_image,
+               'layerCount': len(inspection['RootFS']['Layers'])}
     (root / 'image-build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(json.dumps(receipt), flush=True)
 
@@ -175,5 +229,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path, default=Path('/home/ubuntu'))
     parser.add_argument('--image', required=True)
+    parser.add_argument('--runtime-base', help='Explicit compatible local image; validated and pinned by digest')
     args = parser.parse_args()
-    build(RELEASE, args.base, args.image)
+    build(RELEASE, args.base, args.image, args.runtime_base)
