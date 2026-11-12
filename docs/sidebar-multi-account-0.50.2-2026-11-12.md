@@ -34,7 +34,7 @@
 
 ## 版本、Git与部署边界
 
-产品、前端package及lock均为0.50.2，构建从pyproject读取版本。完成检查后按项目约定提交推送starry/codex/merge-analytics-0496并核对远端SHA；main仅同步双语首页，不合功能代码。安装器和138不在本轮发布范围。
+产品、前端package及lock均为0.50.2，构建从pyproject读取版本。功能提交`44c323a89658eb205de3cf4355b7d0ce387aa7b7`已推送starry/codex/merge-analytics-0496，git ls-remote核对一致；main首页提交`be7a8f38732d5e94c0c8678c1d0ad38c325046d9`同样远端一致，仅修改双语README，不合功能代码。安装器和138不在本轮发布范围。
 
 138上次已验版本为0.50.1 / c13a2082e27f，本轮未更换镜像或服务；此前[部署与回退回执](release-138-0.50.1-2026-11-12.md)继续有效为历史证据，未因本地0.50.2构建声称线上升级。
 
